@@ -137,38 +137,57 @@ class TestLibRoutes:
         assert resp.status_code == 404
 
 
+class _EmptyResult:
+    def scalars(self):
+        return self
+
+    def all(self):
+        return []
+
+    def first(self):
+        return None
+
+
+class _CaptureSession:
+    def __init__(self):
+        self.statements: list = []
+
+    async def execute(self, stmt, params=None):
+        self.statements.append(stmt)
+        return _EmptyResult()
+
+
+def _cm(session):
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _scope():
+        yield session
+
+    return _scope
+
+
 class TestUpsertContract:
     @pytest.mark.asyncio
     async def test_upsert_keys_and_never_clobbers(self, monkeypatch):
-        class _C:
-            def __init__(self):
-                self.args = None
+        import app.repositories.project_lib_entity_repository as repo_mod
 
-            def table(self, *_a):
-                return self
+        session = _CaptureSession()
+        monkeypatch.setattr(repo_mod, "write_scope", _cm(session))
+        monkeypatch.setattr(repo_mod, "read_scope", _cm(_CaptureSession()))
 
-            def upsert(self, rows, **kw):
-                self.args = (rows, kw)
-                return self
+        await ProjectLibEntityRepository().upsert_by_name(
+            "777", "location", ["Booth", " "]
+        )
 
-            def select(self, *_a):
-                return self
-
-            def eq(self, *_a):
-                return self
-
-            def order(self, *_a):
-                return self
-
-            async def execute(self):
-                return SimpleNamespace(data=[])
-
-        repo = ProjectLibEntityRepository()
-        c = _C()
-        monkeypatch.setattr(repo, "_client", AsyncMock(return_value=c))
-        await repo.upsert_by_name("777", "location", ["Booth", " "])
-        rows, kw = c.args
-        assert [r["name"] for r in rows] == ["Booth"]
-        assert rows[0]["entity_type"] == "location"
-        assert kw["on_conflict"] == "project_id,entity_type,name"
-        assert kw["ignore_duplicates"] is True
+        stmt = session.statements[0]
+        sql = str(stmt).lower()
+        assert "insert into public.project_lib_entities" in sql
+        assert "on conflict" in sql and "do nothing" in sql
+        assert "project_id, entity_type, name" in sql
+        params = stmt.compile().params
+        names = [v for k, v in params.items() if k.startswith("name")]
+        assert names == ["Booth"]  # blank dropped
+        assert all(
+            v == "location" for k, v in params.items() if k.startswith("entity_type")
+        )

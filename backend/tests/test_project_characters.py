@@ -46,60 +46,199 @@ class TestSerialize:
     def test_missing_ids_left_alone(self) -> None:
         assert _serialize({"name": "x"}) == {"name": "x"}
 
+    def test_datetime_becomes_iso_string(self) -> None:
+        import datetime
+
+        dt = datetime.datetime(2026, 7, 13, tzinfo=datetime.timezone.utc)
+        out = _serialize({"created_at": dt, "tags": {"a": [1]}})
+        assert out["created_at"] == "2026-07-13T00:00:00+00:00"
+        assert out["tags"] == {"a": [1]}  # jsonb dict passes through
+
 
 # ============================================================
-# upsert_by_name — extract idempotency contract
+# CRUD — ORM boundary (real statement construction, stub session)
 # ============================================================
 
 
-class _UpsertClient:
+class _OrmObj:
+    """Minimal stand-in for a refreshed ProjectCharacters row."""
+
+    def __init__(self, **vals):
+        self._vals = vals
+        from app.models import ProjectCharacters
+
+        self.__table__ = ProjectCharacters.__table__
+
+    def __getattr__(self, name):
+        try:
+            return self._vals[name]
+        except KeyError as exc:  # pragma: no cover
+            raise AttributeError(name) from exc
+
+
+class _Result:
+    def __init__(self, obj):
+        self._obj = obj
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return [self._obj] if self._obj is not None else []
+
+    def first(self):
+        return self._obj
+
+
+class _CrudSession:
+    def __init__(self, found=None):
+        self.statements: list = []
+        self.added: list = []
+        self.deleted: list = []
+        self._found = found
+
+    async def execute(self, stmt, params=None):
+        self.statements.append(stmt)
+        return _Result(self._found)
+
+    def add(self, obj):
+        self.added.append(obj)
+
+    async def flush(self):
+        pass
+
+    async def refresh(self, obj):
+        pass
+
+    async def delete(self, obj):
+        self.deleted.append(obj)
+
+
+class TestCrudOrmBoundary:
+    @pytest.mark.asyncio
+    async def test_list_filters_project_and_orders(self, monkeypatch):
+        import app.repositories.project_character_repository as repo_mod
+
+        session = _CrudSession()
+        monkeypatch.setattr(repo_mod, "read_scope", _cm(session))
+        await ProjectCharacterRepository().list_by_project("777")
+        sql = str(session.statements[0])
+        assert "FROM public.project_characters" in sql
+        assert "ORDER BY" in sql and "sort_order" in sql
+        assert 777 in session.statements[0].compile().params.values()
+
+    @pytest.mark.asyncio
+    async def test_create_builds_row_with_int_project_id(self, monkeypatch):
+        import app.repositories.project_character_repository as repo_mod
+
+        session = _CrudSession()
+        monkeypatch.setattr(repo_mod, "write_scope", _cm(session))
+        await ProjectCharacterRepository().create("777", {"name": "Cole"})
+        assert len(session.added) == 1
+        obj = session.added[0]
+        assert obj.project_id == 777 and obj.name == "Cole"
+
+    @pytest.mark.asyncio
+    async def test_delete_true_when_found(self, monkeypatch):
+        import app.repositories.project_character_repository as repo_mod
+
+        found = _OrmObj(id=1, project_id=777)
+        session = _CrudSession(found=found)
+        monkeypatch.setattr(repo_mod, "write_scope", _cm(session))
+        ok = await ProjectCharacterRepository().delete("777", "1")
+        assert ok is True and session.deleted == [found]
+
+    @pytest.mark.asyncio
+    async def test_delete_false_when_missing(self, monkeypatch):
+        import app.repositories.project_character_repository as repo_mod
+
+        session = _CrudSession(found=None)
+        monkeypatch.setattr(repo_mod, "write_scope", _cm(session))
+        assert await ProjectCharacterRepository().delete("777", "9") is False
+
+    @pytest.mark.asyncio
+    async def test_no_supabase_client_surface(self):
+        import inspect
+
+        import app.repositories.project_character_repository as repo_mod
+        import app.repositories.project_lib_entity_repository as lib_mod
+
+        for mod in (repo_mod, lib_mod):
+            src = inspect.getsource(mod)
+            assert "get_async_supabase_admin" not in src
+            assert "client.table" not in src
+
+
+# ============================================================
+# upsert_by_name — extract idempotency contract (ORM boundary)
+# ============================================================
+
+
+class _EmptyResult:
+    def scalars(self):
+        return self
+
+    def all(self):
+        return []
+
+    def first(self):
+        return None
+
+
+class _CaptureSession:
     def __init__(self):
-        self.upsert_args: list = []
+        self.statements: list = []
 
-    def table(self, *_a):
-        return self
+    async def execute(self, stmt, params=None):
+        self.statements.append(stmt)
+        return _EmptyResult()
 
-    def upsert(self, rows, **kwargs):
-        self.upsert_args.append((rows, kwargs))
-        return self
 
-    def select(self, *_a):
-        return self
+def _cm(session):
+    from contextlib import asynccontextmanager
 
-    def eq(self, *_a):
-        return self
+    @asynccontextmanager
+    async def _scope():
+        yield session
 
-    def order(self, *_a):
-        return self
-
-    async def execute(self):
-        return SimpleNamespace(data=[])
+    return _scope
 
 
 class TestUpsertByName:
     @pytest.mark.asyncio
     async def test_upserts_on_project_name_and_never_clobbers(self, monkeypatch):
-        repo = ProjectCharacterRepository()
-        client = _UpsertClient()
-        monkeypatch.setattr(repo, "_client", AsyncMock(return_value=client))
+        import app.repositories.project_character_repository as repo_mod
 
-        await repo.upsert_by_name("777", ["Cole", "  ", "", "Mara"])
+        session = _CaptureSession()
+        monkeypatch.setattr(repo_mod, "write_scope", _cm(session))
+        # upsert_by_name re-reads via list_by_project (read_scope) at the end.
+        monkeypatch.setattr(repo_mod, "read_scope", _cm(_CaptureSession()))
 
-        rows, kwargs = client.upsert_args[0]
-        assert [r["name"] for r in rows] == ["Cole", "Mara"]  # blanks dropped
-        assert all(r["source"] == "script" for r in rows)
-        assert kwargs["on_conflict"] == "project_id,name"
-        # Curated rows must never be clobbered by a re-run.
-        assert kwargs["ignore_duplicates"] is True
+        await ProjectCharacterRepository().upsert_by_name(
+            "777", ["Cole", "  ", "", "Mara"]
+        )
+
+        stmt = session.statements[0]
+        sql = str(stmt).lower()
+        assert "insert into public.project_characters" in sql
+        # Curated rows must never be clobbered: ON CONFLICT (project_id, name)
+        # DO NOTHING.
+        assert "on conflict" in sql and "do nothing" in sql
+        assert "project_id, name" in sql
+        params = stmt.compile().params
+        names = [v for k, v in params.items() if k.startswith("name")]
+        assert names == ["Cole", "Mara"]  # blanks dropped
+        assert all(v == "script" for k, v in params.items() if k.startswith("source"))
 
     @pytest.mark.asyncio
     async def test_all_blank_names_short_circuit(self, monkeypatch):
-        repo = ProjectCharacterRepository()
-        client = _UpsertClient()
-        monkeypatch.setattr(repo, "_client", AsyncMock(return_value=client))
-        out = await repo.upsert_by_name("777", ["", "   "])
+        import app.repositories.project_character_repository as repo_mod
+
+        session = _CaptureSession()
+        monkeypatch.setattr(repo_mod, "write_scope", _cm(session))
+        out = await ProjectCharacterRepository().upsert_by_name("777", ["", "   "])
         assert out == []
-        assert client.upsert_args == []
+        assert session.statements == []  # no write issued
 
 
 # ============================================================
