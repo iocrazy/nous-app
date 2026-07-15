@@ -23,16 +23,73 @@ import uuid
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKeyConstraint,
     Index,
+    Integer,
     PrimaryKeyConstraint,
+    SmallInteger,
+    Text,
     Uuid,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.orm_base import Base
+
+
+class SignalSources(Base):
+    """A topic-inspiration signal source (mig 304 + 318 tier). ``user_id`` NULL
+    means a global/system source visible to everyone."""
+
+    __tablename__ = "signal_sources"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="signal_sources_pkey"),
+        CheckConstraint(
+            "kind IN ('newsnow', 'rss', 'http_api', 'custom')",
+            name="signal_sources_kind_check",
+        ),
+        CheckConstraint(
+            "health IN ('ok', 'degraded', 'dead')",
+            name="signal_sources_health_check",
+        ),
+        CheckConstraint("tier IN (1, 2, 3)", name="signal_sources_tier_check"),
+        Index("idx_signal_sources_user", "user_id"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_snowflake_id()"),
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    config: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    category: Mapped[str | None] = mapped_column(Text)
+    health: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'ok'::text")
+    )
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    last_error: Mapped[str | None] = mapped_column(Text)
+    last_fetched_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(True))
+    last_ok_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(True))
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    tier: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default=text("2")
+    )
 
 
 class UserHiddenSources(Base):
