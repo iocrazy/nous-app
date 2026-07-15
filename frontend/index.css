@@ -789,11 +789,15 @@ body {
    solid hairline (the dashed affordance lives in the empty drop-zone),
    translucent fill + blur so members read as "inside" it. */
 .mh-group-node {
+  /* IC's .image-node.group-node border: a clearly-visible semi-transparent
+     hairline AT REST (not hover-only) — rgba(148,163,184,.35). */
+  border-color: rgba(148, 163, 184, 0.35);
   background: color-mix(in srgb, var(--canvas-card) 46%, transparent);
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
   backdrop-filter: blur(12px);
 }
 [data-theme="dark"] .mh-group-node {
+  border-color: rgba(148, 163, 184, 0.28);
   background: color-mix(in srgb, var(--canvas-card) 28%, transparent);
 }
 /* Selection ring: a box-shadow spread FOLLOWS border-radius, so the ring
@@ -1127,7 +1131,9 @@ body {
    viewport hint aligned with the island tone. */
 .mh-canvas .react-flow__minimap-mask {
   fill: color-mix(in srgb, var(--canvas-mask) 55%, transparent);
-  stroke: var(--canvas-line-strong);
+  /* IC's smart-minimap-viewport: a crisp 2px strong-tone frame. */
+  stroke: var(--canvas-strong);
+  stroke-width: 2;
   stroke-width: 1;
 }
 

@@ -1780,7 +1780,8 @@
     "groupNode": {
       "title": "分组",
       "dropHint": "拖入图片自动收进分组"
-    }
+    },
+    "arrangeSelected": "整理选中"
   },
   "modelParams": {
     "otherParams": "参数设置",
