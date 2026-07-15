@@ -10,7 +10,7 @@
  */
 import { useRef, useState } from 'react';
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { render, cleanup, waitFor, fireEvent, screen, within } from '@testing-library/react';
+import { render, cleanup, waitFor, fireEvent, screen, within, createEvent } from '@testing-library/react';
 import type { ElementOp, SceneDoc } from '../types';
 
 vi.mock('react-i18next', () => ({
@@ -136,6 +136,16 @@ describe('TipTap M2 — same-scene element drag', () => {
     expect(handles).toHaveLength(3);
     expect(handles[0].querySelectorAll('.mh-el-dot')).toHaveLength(4);
     expect(handles[0]).toHaveAttribute('draggable', 'true');
+  });
+
+  it('the drag grip does NOT preventDefault on mousedown (native drag must start)', async () => {
+    await mountTiptap(threeElements());
+    const handle = rowOf('el_a').querySelector('.mh-el-drag') as HTMLElement;
+    // A mousedown handler that preventDefaults would cancel the browser's drag
+    // gesture, so onDragStart never fires — that regression is exactly this bug.
+    const md = createEvent.mouseDown(handle);
+    fireEvent(handle, md);
+    expect(md.defaultPrevented).toBe(false);
   });
 
   it('right-clicking a row opens a context menu that deletes THAT block', async () => {
