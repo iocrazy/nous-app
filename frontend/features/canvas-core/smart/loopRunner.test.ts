@@ -196,3 +196,41 @@ describe('runLoopCascade — parallel', () => {
     expect(finals).toEqual([['failed', 'round2 boom']]);
   });
 });
+
+describe('loop image-input batch slicing', () => {
+  it('gives each round the next upstream image as source_url', async () => {
+    const media = {
+      id: 'm1', type: 'media', position: { x: 0, y: 0 },
+      data: { items: [
+        { url: '/api/v1/generated-media/a.png', kind: 'image' },
+        { url: '/api/v1/generated-media/b.png', kind: 'image' },
+      ] },
+    };
+    const loop = {
+      id: 'lp', type: 'loop', position: { x: 1, y: 0 },
+      data: { mode: 'serial', rounds: 2, round_start: 1, image_input: true, image_batch_size: 1, prompts: [''] },
+    };
+    const prompt = {
+      id: 'pr', type: 'prompt', position: { x: 2, y: 0 },
+      data: { body: 'x', gen: { kind: 'image', model: 'm', count: 1 } },
+    };
+    const nodes = [media, loop, prompt] as never[];
+    const connections = [
+      { id: 'e1', source: 'm1', target: 'lp', sourceHandle: null, targetHandle: null },
+      { id: 'e2', source: 'lp', target: 'pr', sourceHandle: null, targetHandle: null },
+    ] as never[];
+
+    const seen: (string | null | undefined)[] = [];
+    const caller = async (ctx: RunnerContext) => {
+      seen.push(ctx.source_url);
+      return { ok: true, text: 'ok', urls: ['/api/v1/generated-media/o.png'], media_kind: 'image' };
+    };
+
+    await runLoopCascade({
+      loopId: 'lp', nodes, connections, caller,
+      handlers: { onStatusChange: () => {} },
+    });
+
+    expect(seen).toEqual(['/api/v1/generated-media/a.png', '/api/v1/generated-media/b.png']);
+  });
+});
