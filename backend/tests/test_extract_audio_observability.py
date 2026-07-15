@@ -155,68 +155,66 @@ async def test_extract_raises_named_reasons(monkeypatch: pytest.MonkeyPatch) -> 
 # ============================================================
 
 
-class FakeQuery:
-    def __init__(self, store: dict):
-        self.store = store
-        self._update = None
+class _Result:
+    def __init__(self, value):
+        self._v = value
 
-    def select(self, *_a):
+    def scalar(self):
+        return self._v
+
+    def mappings(self):
         return self
 
-    def update(self, payload):
-        self._update = payload
-        return self
-
-    def eq(self, *_a):
-        return self
-
-    def single(self):
-        return self
-
-    async def execute(self):
-        if self._update is not None:
-            self.store["updates"].append(self._update)
-
-            class R:
-                data = None
-
-            return R()
-
-        class R:
-            data = self.store["task"]
-
-        return R()
+    def first(self):
+        return self._v
 
 
-class FakeClient:
-    def __init__(self, store: dict):
-        self.store = store
+class _Session:
+    def __init__(self, results):
+        self._results = list(results)
+        self.statements = []
 
-    def table(self, _name):
-        return FakeQuery(self.store)
+    async def execute(self, stmt, params=None):
+        self.statements.append(stmt)
+        return _Result(self._results.pop(0) if self._results else None)
+
+
+def _patch_scopes(monkeypatch, results):
+    from contextlib import asynccontextmanager
+
+    session = _Session(results)
+
+    @asynccontextmanager
+    async def _scope():
+        yield session
+
+    import app.db.session as dbs
+
+    monkeypatch.setattr(dbs, "read_scope", _scope)
+    monkeypatch.setattr(dbs, "write_scope", _scope)
+    return session
 
 
 @pytest.mark.asyncio
 async def test_retry_task_accepts_lost_and_rekeys(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from sqlalchemy.dialects import postgresql
+
     from app.services.infra.unified_task_manager import UnifiedTaskManager
 
-    store: dict = {
-        "task": {"status": "lost", "task_type": "extract_audio"},
-        "updates": [],
-    }
     manager = UnifiedTaskManager()
-
-    async def fake_get_client(self):
-        return FakeClient(store)
-
-    monkeypatch.setattr(UnifiedTaskManager, "_get_client", fake_get_client)
+    # retry_task reads the row (mappings().first()), then UPDATEs.
+    session = _patch_scopes(
+        monkeypatch, [{"status": "lost", "task_type": "extract_audio"}]
+    )
 
     task = await manager.retry_task("old-wf", "u1", new_workflow_id="new-wf")
     assert task is not None
-    assert store["updates"][0]["dbos_workflow_id"] == "new-wf"
-    assert store["updates"][0]["status"] == "pending"
+    # statements[0] = read, statements[1] = update
+    params = session.statements[1].compile(dialect=postgresql.dialect()).params
+    assert params["dbos_workflow_id"] == "new-wf"
+    assert params["status"] == "pending"
 
 
 @pytest.mark.asyncio
@@ -225,13 +223,9 @@ async def test_retry_task_still_rejects_running(
 ) -> None:
     from app.services.infra.unified_task_manager import UnifiedTaskManager
 
-    store: dict = {"task": {"status": "processing"}, "updates": []}
     manager = UnifiedTaskManager()
-
-    async def fake_get_client(self):
-        return FakeClient(store)
-
-    monkeypatch.setattr(UnifiedTaskManager, "_get_client", fake_get_client)
+    session = _patch_scopes(monkeypatch, [{"status": "processing"}])
 
     assert await manager.retry_task("wf", "u1") is None
-    assert store["updates"] == []
+    # non-retryable → only the read ran, no UPDATE
+    assert len(session.statements) == 1

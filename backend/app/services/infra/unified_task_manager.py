@@ -70,6 +70,14 @@ def _sanitize_search(term: str) -> str:
     return term.translate(_OR_RESERVED).strip()
 
 
+def _serialize_task_row(row) -> dict:
+    """task_tracking row mapping → PostgREST-shaped dict (datetime → ISO str;
+    JSONB/BIGINT/TEXT stay native — matching the old supabase-py client)."""
+    return {
+        k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in row.items()
+    }
+
+
 # ─── Phase Enum ───────────────────────────────────────────────────────
 
 
@@ -191,12 +199,6 @@ class UnifiedTaskManager:
 
     # ── Internal helpers ──────────────────────────────────────────────
 
-    async def _get_client(self):
-        """Lazy-import async Supabase admin client."""
-        from app.db.supabase_client import get_async_supabase_admin
-
-        return await get_async_supabase_admin()
-
     def _get_redis(self):
         """Get sync Redis connection. PR-D7: was via celery_app.backend;
         now via the dedicated `app.core.redis.get_sync_redis` helper."""
@@ -206,19 +208,23 @@ class UnifiedTaskManager:
 
     async def _get_phase(self, task_id: str) -> TaskPhase:
         """Fetch the current phase of a task."""
-        client = await self._get_client()
-        result = await (
-            client.table("task_tracking")
-            .select("phase")
-            .eq("dbos_workflow_id", task_id)
-            .maybe_single()
-            .execute()
-        )
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import TaskTracking
+
+        async with read_scope() as session:
+            raw = (
+                await session.execute(
+                    select(TaskTracking.phase)
+                    .where(TaskTracking.dbos_workflow_id == task_id)
+                    .limit(1)
+                )
+            ).scalar()
         # A missing task_tracking row (0 rows) must not crash the workflow:
-        # treat it as QUEUED rather than raising PGRST116.
-        if result is None or result.data is None:
+        # treat it as QUEUED rather than raising.
+        if raw is None:
             return TaskPhase.QUEUED
-        raw = result.data.get("phase", "queued")
         try:
             return TaskPhase(raw)
         except ValueError:
@@ -234,11 +240,27 @@ class UnifiedTaskManager:
             )
 
     async def _atomic_update(self, task_id: str, updates: Dict[str, Any]) -> None:
-        """Write updates to a task_tracking row."""
-        client = await self._get_client()
-        await client.table("task_tracking").update(updates).eq(
-            "dbos_workflow_id", task_id
-        ).execute()
+        """Write updates to a task_tracking row.
+
+        Callers build ``updates`` with ``datetime...isoformat()`` strings for
+        timestamptz columns (legacy PostgREST habit); coerce those to native
+        datetimes here since asyncpg rejects ISO strings on timestamptz binds.
+        """
+        from sqlalchemy import update
+
+        from app.db.pg_coerce import coerce_datetime_strings
+        from app.db.session import write_scope
+        from app.models import TaskTracking
+
+        # Core update against the Table so ``updates`` keys bind as DB column
+        # names (callers pass "metadata"/"phase"/… — "metadata" collides with
+        # the ORM's reserved ``metadata`` attribute, hence the Table route).
+        updates = coerce_datetime_strings(TaskTracking, updates)
+        tbl = TaskTracking.__table__
+        async with write_scope() as session:
+            await session.execute(
+                update(tbl).where(tbl.c.dbos_workflow_id == task_id).values(**updates)
+            )
 
     async def patch_metadata(self, task_id: str, patch: Dict[str, Any]) -> None:
         """Merge ``patch`` into task_tracking.metadata.
@@ -246,34 +268,42 @@ class UnifiedTaskManager:
         metadata is a shared business-decorated jsonb column — always
         read-merge-write, never replace wholesale (same rule as
         user_settings.settings_json, see #485)."""
-        client = await self._get_client()
-        existing = (
-            await client.table("task_tracking")
-            .select("metadata")
-            .eq("dbos_workflow_id", task_id)
-            .maybe_single()
-            .execute()
-        )
-        current = ((existing.data if existing else None) or {}).get("metadata") or {}
-        await client.table("task_tracking").update(
-            {"metadata": {**current, **patch}}
-        ).eq("dbos_workflow_id", task_id).execute()
+        from sqlalchemy import select, update
+
+        from app.db.session import read_scope, write_scope
+        from app.models import TaskTracking
+
+        async with read_scope() as session:
+            current = (
+                await session.execute(
+                    select(TaskTracking.metadata_)
+                    .where(TaskTracking.dbos_workflow_id == task_id)
+                    .limit(1)
+                )
+            ).scalar() or {}
+        async with write_scope() as session:
+            await session.execute(
+                update(TaskTracking)
+                .where(TaskTracking.dbos_workflow_id == task_id)
+                .values(metadata_={**current, **patch})
+            )
 
     async def _row_exists(self, task_id: str) -> bool:
-        """Return True if a task_tracking row exists for this workflow id.
+        """Return True if a task_tracking row exists for this workflow id."""
+        from sqlalchemy import select
 
-        Uses ``maybe_single()`` so 0 rows return ``data=None`` rather than
-        raising PGRST116.
-        """
-        client = await self._get_client()
-        result = (
-            await client.table("task_tracking")
-            .select("dbos_workflow_id")
-            .eq("dbos_workflow_id", task_id)
-            .maybe_single()
-            .execute()
-        )
-        return bool(result and result.data)
+        from app.db.session import read_scope
+        from app.models import TaskTracking
+
+        async with read_scope() as session:
+            found = (
+                await session.execute(
+                    select(TaskTracking.dbos_workflow_id)
+                    .where(TaskTracking.dbos_workflow_id == task_id)
+                    .limit(1)
+                )
+            ).scalar()
+        return found is not None
 
     # ── Lifecycle: create ─────────────────────────────────────────────
 
@@ -304,7 +334,11 @@ class UnifiedTaskManager:
         one chain. It is a business decoration field (not phase/status/
         progress) so writing it here is route-C compliant.
         """
-        client = await self._get_client()
+        from sqlalchemy import insert
+
+        from app.db.session import write_scope
+        from app.models import TaskTracking
+
         row = self._build_row(
             user_id=user_id,
             task_type=task_type,
@@ -320,8 +354,15 @@ class UnifiedTaskManager:
             flow_id=flow_id,
         )
 
-        result = await client.table("task_tracking").insert(row).execute()
-        task_id = result.data[0]["dbos_workflow_id"]
+        # Core Table insert so ``row`` binds by DB column name ("metadata"
+        # would collide with the ORM's reserved ``metadata`` attribute).
+        tbl = TaskTracking.__table__
+        async with write_scope() as session:
+            task_id = (
+                await session.execute(
+                    insert(tbl).values(**row).returning(tbl.c.dbos_workflow_id)
+                )
+            ).scalar()
         logger.debug(f"[TaskManager] Created {task_type} task {task_id}: {title[:40]}")
         return task_id
 
@@ -398,18 +439,22 @@ class UnifiedTaskManager:
         """
         if not specs:
             return []
-        client = await self._get_client()
+        from sqlalchemy import insert
+
+        from app.db.session import write_scope
+        from app.models import TaskTracking
+
         rows = [self._build_row(**spec) for spec in specs]
+        tbl = TaskTracking.__table__
         created: List[str] = []
         for i in range(0, len(rows), chunk_size):
             chunk = rows[i : i + chunk_size]
             try:
-                result = await client.table("task_tracking").insert(chunk).execute()
-                created.extend(
-                    r["dbos_workflow_id"]
-                    for r in (result.data or [])
-                    if r.get("dbos_workflow_id")
-                )
+                async with write_scope() as session:
+                    result = await session.execute(
+                        insert(tbl).values(chunk).returning(tbl.c.dbos_workflow_id)
+                    )
+                    created.extend(wid for wid in result.scalars().all() if wid)
             except Exception as bulk_err:
                 logger.warning(
                     f"[TaskManager] bulk create chunk of {len(chunk)} failed "
@@ -418,9 +463,16 @@ class UnifiedTaskManager:
                 for row in chunk:
                     wf_id = row.get("dbos_workflow_id")
                     try:
-                        r = await client.table("task_tracking").insert(row).execute()
-                        if r.data and r.data[0].get("dbos_workflow_id"):
-                            created.append(r.data[0]["dbos_workflow_id"])
+                        async with write_scope() as session:
+                            wid = (
+                                await session.execute(
+                                    insert(tbl)
+                                    .values(**row)
+                                    .returning(tbl.c.dbos_workflow_id)
+                                )
+                            ).scalar()
+                        if wid:
+                            created.append(wid)
                     except Exception as row_err:
                         msg = str(row_err).lower()
                         if "duplicate key" in msg or "23505" in msg:
@@ -454,15 +506,22 @@ class UnifiedTaskManager:
         dispatch the pipeline un-grouped rather than aborting.
         """
         try:
-            client = await self._get_client()
+            from sqlalchemy import insert
+
+            from app.db.session import write_scope
+            from app.models import TaskFlows
+
             row: Dict[str, Any] = {
                 "user_id": user_id,
                 "name": name[:200] if name else "Untitled",
             }
             if metadata:
                 row["metadata"] = metadata
-            result = await client.table("task_flows").insert(row).execute()
-            flow_id = result.data[0]["id"]
+            tbl = TaskFlows.__table__
+            async with write_scope() as session:
+                flow_id = (
+                    await session.execute(insert(tbl).values(**row).returning(tbl.c.id))
+                ).scalar()
             logger.debug(f"[TaskManager] Created flow {flow_id}: {name[:40]}")
             return flow_id
         except Exception as e:
@@ -559,7 +618,11 @@ class UnifiedTaskManager:
             logger.info(f"[TaskManager] Progress: task={task_id}, {progress}%")
         self._last_progress_value[task_id] = progress
 
-        client = await self._get_client()
+        from sqlalchemy import select, update
+
+        from app.db.session import read_scope, write_scope
+        from app.models import TaskTracking
+
         updates: Dict[str, Any] = {
             "progress": min(max(progress, 0), 100),
             "status": "processing",
@@ -571,19 +634,21 @@ class UnifiedTaskManager:
         if title is not None:
             updates["title"] = title
         if metadata_patch:
-            existing = (
-                await client.table("task_tracking")
-                .select("metadata")
-                .eq("dbos_workflow_id", task_id)
-                .single()
-                .execute()
-            )
-            merged = {**(existing.data.get("metadata") or {}), **metadata_patch}
-            updates["metadata"] = merged
+            async with read_scope() as session:
+                current = (
+                    await session.execute(
+                        select(TaskTracking.metadata_)
+                        .where(TaskTracking.dbos_workflow_id == task_id)
+                        .limit(1)
+                    )
+                ).scalar() or {}
+            updates["metadata"] = {**current, **metadata_patch}
 
-        await client.table("task_tracking").update(updates).eq(
-            "dbos_workflow_id", task_id
-        ).execute()
+        tbl = TaskTracking.__table__
+        async with write_scope() as session:
+            await session.execute(
+                update(tbl).where(tbl.c.dbos_workflow_id == task_id).values(**updates)
+            )
 
     # ── Lifecycle: complete ───────────────────────────────────────────
 
@@ -614,16 +679,20 @@ class UnifiedTaskManager:
             "subtitle": subtitle or "",
         }
         if metadata_patch:
-            client = await self._get_client()
-            existing = (
-                await client.table("task_tracking")
-                .select("metadata")
-                .eq("dbos_workflow_id", task_id)
-                .single()
-                .execute()
-            )
-            merged = {**(existing.data.get("metadata") or {}), **metadata_patch}
-            updates["metadata"] = merged
+            from sqlalchemy import select
+
+            from app.db.session import read_scope
+            from app.models import TaskTracking
+
+            async with read_scope() as session:
+                current = (
+                    await session.execute(
+                        select(TaskTracking.metadata_)
+                        .where(TaskTracking.dbos_workflow_id == task_id)
+                        .limit(1)
+                    )
+                ).scalar() or {}
+            updates["metadata"] = {**current, **metadata_patch}
 
         await self._atomic_update(task_id, updates)
         self._last_progress.pop(task_id, None)
@@ -663,16 +732,20 @@ class UnifiedTaskManager:
         if error_code:
             updates["error_code"] = error_code
         if metadata_patch:
-            client = await self._get_client()
-            existing = (
-                await client.table("task_tracking")
-                .select("metadata")
-                .eq("dbos_workflow_id", task_id)
-                .single()
-                .execute()
-            )
-            merged = {**(existing.data.get("metadata") or {}), **metadata_patch}
-            updates["metadata"] = merged
+            from sqlalchemy import select
+
+            from app.db.session import read_scope
+            from app.models import TaskTracking
+
+            async with read_scope() as session:
+                current = (
+                    await session.execute(
+                        select(TaskTracking.metadata_)
+                        .where(TaskTracking.dbos_workflow_id == task_id)
+                        .limit(1)
+                    )
+                ).scalar() or {}
+            updates["metadata"] = {**current, **metadata_patch}
 
         await self._atomic_update(task_id, updates)
         self._last_progress.pop(task_id, None)
@@ -728,22 +801,31 @@ class UnifiedTaskManager:
 
         Idempotent: already-terminal tasks are silently skipped.
         """
-        client = await self._get_client()
-        result = await (
-            client.table("task_tracking")
-            .select("dbos_workflow_id, phase")
-            .eq("dbos_workflow_id", task_id)
-            .eq("user_id", user_id)
-            .single()
-            .execute()
-        )
-        if not result.data:
+        from sqlalchemy import select, update
+
+        from app.db.session import read_scope, write_scope
+        from app.models import TaskTracking
+
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(TaskTracking.dbos_workflow_id, TaskTracking.phase)
+                        .where(TaskTracking.dbos_workflow_id == task_id)
+                        .where(TaskTracking.user_id == user_id)
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        if not row:
             logger.warning(
                 f"[TaskManager] Cancel: task {task_id} not found for user {user_id}"
             )
             return
 
-        current_raw = result.data.get("phase", "queued")
+        current_raw = row.get("phase", "queued")
         try:
             current = TaskPhase(current_raw)
         except ValueError:
@@ -755,20 +837,18 @@ class UnifiedTaskManager:
             )
             return
 
-        celery_id = result.data.get("dbos_workflow_id")
+        celery_id = row.get("dbos_workflow_id")
 
-        await (
-            client.table("task_tracking")
-            .update(
-                {
-                    "phase": TaskPhase.CANCELLED.value,
-                    "status": _PHASE_TO_STATUS[TaskPhase.CANCELLED],
-                }
+        async with write_scope() as session:
+            await session.execute(
+                update(TaskTracking)
+                .where(TaskTracking.dbos_workflow_id == task_id)
+                .where(TaskTracking.user_id == user_id)
+                .values(
+                    phase=TaskPhase.CANCELLED.value,
+                    status=_PHASE_TO_STATUS[TaskPhase.CANCELLED],
+                )
             )
-            .eq("dbos_workflow_id", task_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
         self._last_progress.pop(task_id, None)
         self._last_progress_value.pop(task_id, None)
 
@@ -809,17 +889,26 @@ class UnifiedTaskManager:
 
     async def get_active_tasks(self, user_id: str, limit: int = 20) -> list[dict]:
         """Get active (pending/processing) tasks for a user."""
-        client = await self._get_client()
-        result = await (
-            client.table("task_tracking")
-            .select("*")
-            .eq("user_id", user_id)
-            .in_("status", ["pending", "processing"])
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
-        )
-        return result.data or []
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import TaskTracking
+
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(*TaskTracking.__table__.columns)
+                        .where(TaskTracking.user_id == user_id)
+                        .where(TaskTracking.status.in_(["pending", "processing"]))
+                        .order_by(TaskTracking.created_at.desc())
+                        .limit(limit)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        return [_serialize_task_row(r) for r in rows]
 
     async def get_tasks(
         self,
@@ -839,28 +928,50 @@ class UnifiedTaskManager:
         server-side; `count="exact"` returns the full match total in the same
         round-trip so the UI can render "Page N / M". Returns ``(rows, total)``.
         """
-        client = await self._get_client()
-        query = (
-            client.table("task_tracking")
-            .select("*", count="exact")
-            .eq("user_id", user_id)
-        )
+        from sqlalchemy import func, or_, select
+
+        from app.db.session import read_scope
+        from app.models import TaskTracking
+
+        conds = [TaskTracking.user_id == user_id]
         if types:
-            query = query.in_("task_type", types)
+            conds.append(TaskTracking.task_type.in_(types))
         if statuses:
-            query = query.in_("status", statuses)
+            conds.append(TaskTracking.status.in_(statuses))
         if search:
             term = _sanitize_search(search)
             if term:
-                query = query.or_(
-                    f"title.ilike.*{term}*,"
-                    f"subtitle.ilike.*{term}*,"
-                    f"error_msg.ilike.*{term}*"
+                like = f"%{term}%"
+                conds.append(
+                    or_(
+                        TaskTracking.title.ilike(like),
+                        TaskTracking.subtitle.ilike(like),
+                        TaskTracking.error_msg.ilike(like),
+                    )
                 )
         col, desc = _TASK_SORT_MAP.get(sort, _TASK_SORT_MAP["created_desc"])
-        query = query.order(col, desc=desc).range(offset, offset + limit - 1)
-        result = await query.execute()
-        return result.data or [], (result.count or 0)
+        sort_col = getattr(TaskTracking, col)
+        order = sort_col.desc() if desc else sort_col.asc()
+        async with read_scope() as session:
+            total = (
+                await session.execute(
+                    select(func.count()).select_from(TaskTracking).where(*conds)
+                )
+            ).scalar() or 0
+            rows = (
+                (
+                    await session.execute(
+                        select(*TaskTracking.__table__.columns)
+                        .where(*conds)
+                        .order_by(order)
+                        .offset(offset)
+                        .limit(limit)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        return [_serialize_task_row(r) for r in rows], total
 
     async def get_active_counts(self, user_id: str) -> dict:
         """Active (pending/processing) task counts by type, for the sidebar
@@ -869,17 +980,25 @@ class UnifiedTaskManager:
         active set is inherently bounded (a user has few in-flight tasks) —
         unlike ``get_stats`` which scans the whole history.
         """
-        client = await self._get_client()
-        result = await (
-            client.table("task_tracking")
-            .select("task_type")
-            .eq("user_id", user_id)
-            .in_("status", ["pending", "processing"])
-            .execute()
-        )
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import TaskTracking
+
+        async with read_scope() as session:
+            types_ = (
+                (
+                    await session.execute(
+                        select(TaskTracking.task_type)
+                        .where(TaskTracking.user_id == user_id)
+                        .where(TaskTracking.status.in_(["pending", "processing"]))
+                    )
+                )
+                .scalars()
+                .all()
+            )
         by_type: dict[str, int] = {}
-        for row in result.data or []:
-            t = row.get("task_type")
+        for t in types_:
             if t:
                 by_type[t] = by_type.get(t, 0) + 1
         return {"total": sum(by_type.values()), "by_type": by_type}
@@ -899,19 +1018,36 @@ class UnifiedTaskManager:
         """
         if not task_types:
             return []
-        client = await self._get_client()
-        result = await (
-            client.table("task_tracking")
-            .select("task_type, status, error_msg, created_at")
-            .eq("user_id", user_id)
-            .in_("task_type", task_types)
-            .in_("status", ["completed", "failed"])
-            .gte("created_at", since_iso)
-            .order("created_at", desc=True)
-            .limit(cap)
-            .execute()
-        )
-        return result.data or []
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import TaskTracking
+
+        # ``since_iso`` is an ISO string; bind a native datetime for the
+        # timestamptz comparison (asyncpg rejects ISO strings).
+        since_dt = datetime.fromisoformat(since_iso)
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(
+                            TaskTracking.task_type,
+                            TaskTracking.status,
+                            TaskTracking.error_msg,
+                            TaskTracking.created_at,
+                        )
+                        .where(TaskTracking.user_id == user_id)
+                        .where(TaskTracking.task_type.in_(task_types))
+                        .where(TaskTracking.status.in_(["completed", "failed"]))
+                        .where(TaskTracking.created_at >= since_dt)
+                        .order_by(TaskTracking.created_at.desc())
+                        .limit(cap)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        return [_serialize_task_row(r) for r in rows]
 
     async def get_matching_task_ids(
         self,
@@ -933,39 +1069,61 @@ class UnifiedTaskManager:
         eff = [s for s in statuses if s in terminal] if statuses else list(terminal)
         if not eff:
             return [], False  # filter excludes every terminal status
-        client = await self._get_client()
-        query = (
-            client.table("task_tracking")
-            .select("dbos_workflow_id")
-            .eq("user_id", user_id)
-            .in_("status", eff)
-        )
+        from sqlalchemy import or_, select
+
+        from app.db.session import read_scope
+        from app.models import TaskTracking
+
+        conds = [TaskTracking.user_id == user_id, TaskTracking.status.in_(eff)]
         if types:
-            query = query.in_("task_type", types)
+            conds.append(TaskTracking.task_type.in_(types))
         if search:
             term = _sanitize_search(search)
             if term:
-                query = query.or_(
-                    f"title.ilike.*{term}*,"
-                    f"subtitle.ilike.*{term}*,"
-                    f"error_msg.ilike.*{term}*"
+                like = f"%{term}%"
+                conds.append(
+                    or_(
+                        TaskTracking.title.ilike(like),
+                        TaskTracking.subtitle.ilike(like),
+                        TaskTracking.error_msg.ilike(like),
+                    )
                 )
-        query = query.order("created_at", desc=True).limit(limit + 1)
-        result = await query.execute()
-        rows = result.data or []
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(TaskTracking.dbos_workflow_id)
+                        .where(*conds)
+                        .order_by(TaskTracking.created_at.desc())
+                        .limit(limit + 1)
+                    )
+                )
+                .scalars()
+                .all()
+            )
         capped = len(rows) > limit
-        ids = [r["dbos_workflow_id"] for r in rows[:limit] if r.get("dbos_workflow_id")]
+        ids = [wid for wid in rows[:limit] if wid]
         return ids, capped
 
     async def get_stats(self, user_id: str) -> dict:
         """Get task counts by type and status."""
-        client = await self._get_client()
-        result = await (
-            client.table("task_tracking")
-            .select("task_type, status")
-            .eq("user_id", user_id)
-            .execute()
-        )
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import TaskTracking
+
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(TaskTracking.task_type, TaskTracking.status).where(
+                            TaskTracking.user_id == user_id
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
 
         stats = {
             "by_type": {
@@ -987,7 +1145,7 @@ class UnifiedTaskManager:
             },
             "active_total": 0,
         }
-        for row in result.data or []:
+        for row in rows:
             t = row["task_type"]
             s = row["status"]
             if t in stats["by_type"]:
@@ -1000,41 +1158,52 @@ class UnifiedTaskManager:
 
     async def delete_task(self, task_id: str, user_id: str) -> bool:
         """Delete a task record."""
-        client = await self._get_client()
-        result = await (
-            client.table("task_tracking")
-            .delete()
-            .eq("dbos_workflow_id", task_id)
-            .eq("user_id", user_id)
-            .execute()
-        )
-        return len(result.data or []) > 0
+        from sqlalchemy import delete
+
+        from app.db.session import write_scope
+        from app.models import TaskTracking
+
+        async with write_scope() as session:
+            result = await session.execute(
+                delete(TaskTracking)
+                .where(TaskTracking.dbos_workflow_id == task_id)
+                .where(TaskTracking.user_id == user_id)
+            )
+        return (result.rowcount or 0) > 0
 
     async def clear_completed(self, user_id: str, keep_recent: int = 50) -> int:
         """Delete old completed/failed tasks, keeping the most recent ones."""
-        client = await self._get_client()
-        keep = await (
-            client.table("task_tracking")
-            .select("dbos_workflow_id")
-            .eq("user_id", user_id)
-            .in_("status", ["completed", "failed", "cancelled"])
-            .order("completed_at", desc=True)
-            .limit(keep_recent)
-            .execute()
-        )
-        keep_ids = [r["dbos_workflow_id"] for r in (keep.data or [])]
+        from sqlalchemy import delete, select
 
-        query = (
-            client.table("task_tracking")
-            .delete()
-            .eq("user_id", user_id)
-            .in_("status", ["completed", "failed", "cancelled"])
+        from app.db.session import read_scope, write_scope
+        from app.models import TaskTracking
+
+        _terminal = ["completed", "failed", "cancelled"]
+        async with read_scope() as session:
+            keep_ids = (
+                (
+                    await session.execute(
+                        select(TaskTracking.dbos_workflow_id)
+                        .where(TaskTracking.user_id == user_id)
+                        .where(TaskTracking.status.in_(_terminal))
+                        .order_by(TaskTracking.completed_at.desc())
+                        .limit(keep_recent)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        stmt = (
+            delete(TaskTracking)
+            .where(TaskTracking.user_id == user_id)
+            .where(TaskTracking.status.in_(_terminal))
         )
         if keep_ids:
-            for kid in keep_ids:
-                query = query.neq("dbos_workflow_id", kid)
-        result = await query.execute()
-        return len(result.data or [])
+            stmt = stmt.where(TaskTracking.dbos_workflow_id.notin_(list(keep_ids)))
+        async with write_scope() as session:
+            result = await session.execute(stmt)
+        return result.rowcount or 0
 
     async def retry_task(
         self,
@@ -1054,21 +1223,31 @@ class UnifiedTaskManager:
         marks the row lost once more an hour later — the "Retry doesn't
         actually retry" half of the 3-layer observability bug. Callers
         that re-dispatch MUST pass the id they dispatch with."""
-        client = await self._get_client()
-        result = await (
-            client.table("task_tracking")
-            .select("*")
-            .eq("dbos_workflow_id", task_id)
-            .eq("user_id", user_id)
-            .single()
-            .execute()
-        )
-        task = result.data
+        from sqlalchemy import select, update
+
+        from app.db.pg_coerce import coerce_datetime_strings
+        from app.db.session import read_scope, write_scope
+        from app.models import TaskTracking
+
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(*TaskTracking.__table__.columns)
+                        .where(TaskTracking.dbos_workflow_id == task_id)
+                        .where(TaskTracking.user_id == user_id)
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        task = _serialize_task_row(row) if row else None
         if not task or task["status"] not in ("failed", "cancelled", "lost"):
             return None
 
         now_iso = datetime.now(timezone.utc).isoformat()
-        update: Dict[str, Any] = {
+        update_vals: Dict[str, Any] = {
             "phase": TaskPhase.QUEUED.value,
             "status": "pending",
             "progress": 0,
@@ -1079,10 +1258,15 @@ class UnifiedTaskManager:
             "updated_at": now_iso,
         }
         if new_workflow_id:
-            update["dbos_workflow_id"] = new_workflow_id
-        await client.table("task_tracking").update(update).eq(
-            "dbos_workflow_id", task_id
-        ).execute()
+            update_vals["dbos_workflow_id"] = new_workflow_id
+        update_vals = coerce_datetime_strings(TaskTracking, update_vals)
+        tbl = TaskTracking.__table__
+        async with write_scope() as session:
+            await session.execute(
+                update(tbl)
+                .where(tbl.c.dbos_workflow_id == task_id)
+                .values(**update_vals)
+            )
 
         return task
 
@@ -1119,28 +1303,39 @@ class UnifiedTaskManager:
             logger.debug(f"[TaskManager] Acquired dedup lock: {dedup_key}")
             return {"action": "created", "dedup_key": dedup_key}
 
-        client = await self._get_client()
-        active_result = (
-            await (
-                client.table("task_tracking")
-                # task_tracking's PK is dbos_workflow_id (D8-A rename); there is no
-                # `id` column, so selecting it 42703'd and the WHOLE dedup query
-                # threw → "[Download/Dedup] dedup failed, proceeding" every time =
-                # dedup silently disabled (duplicate downloads never coalesced).
-                # Downstream already reads task["dbos_workflow_id"].
-                .select("dbos_workflow_id, phase, subscribers")
-                .eq("dedup_key", dedup_key)
-                .in_("phase", ["queued", "dedup_check", "processing"])
-                .order("created_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-        )
+        from sqlalchemy import select, update
 
-        if active_result.data:
-            task = active_result.data[0]
-            task_id = task["dbos_workflow_id"]
-            subscribers = task.get("subscribers") or []
+        from app.db.session import read_scope, write_scope
+        from app.models import TaskTracking
+
+        # task_tracking's PK is dbos_workflow_id (D8-A rename); there is no
+        # `id` column. Downstream reads task["dbos_workflow_id"].
+        async with read_scope() as session:
+            active = (
+                (
+                    await session.execute(
+                        select(
+                            TaskTracking.dbos_workflow_id,
+                            TaskTracking.phase,
+                            TaskTracking.subscribers,
+                        )
+                        .where(TaskTracking.dedup_key == dedup_key)
+                        .where(
+                            TaskTracking.phase.in_(
+                                ["queued", "dedup_check", "processing"]
+                            )
+                        )
+                        .order_by(TaskTracking.created_at.desc())
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+
+        if active:
+            task_id = active["dbos_workflow_id"]
+            subscribers = active.get("subscribers") or []
             subscribers.append(
                 {
                     "user_id": user_id,
@@ -1148,12 +1343,12 @@ class UnifiedTaskManager:
                     "subscribed_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
-            await (
-                client.table("task_tracking")
-                .update({"subscribers": subscribers})
-                .eq("dbos_workflow_id", task_id)
-                .execute()
-            )
+            async with write_scope() as session:
+                await session.execute(
+                    update(TaskTracking)
+                    .where(TaskTracking.dbos_workflow_id == task_id)
+                    .values(subscribers=subscribers)
+                )
             logger.info(
                 f"[TaskManager] Subscribed user {user_id} to task {task_id} "
                 f"(dedup_key={dedup_key})"
@@ -1164,17 +1359,18 @@ class UnifiedTaskManager:
                 "dedup_key": dedup_key,
             }
 
-        completed_result = await (
-            client.table("task_tracking")
-            .select("dbos_workflow_id")
-            .eq("dedup_key", dedup_key)
-            .eq("phase", "completed")
-            .order("completed_at", desc=True)
-            .limit(1)
-            .execute()
-        )
+        async with read_scope() as session:
+            completed = (
+                await session.execute(
+                    select(TaskTracking.dbos_workflow_id)
+                    .where(TaskTracking.dedup_key == dedup_key)
+                    .where(TaskTracking.phase == "completed")
+                    .order_by(TaskTracking.completed_at.desc())
+                    .limit(1)
+                )
+            ).scalar()
 
-        if completed_result.data:
+        if completed:
             logger.debug(f"[TaskManager] Dedup key already completed: {dedup_key}")
             return {"action": "completed"}
 
@@ -1192,15 +1388,27 @@ class UnifiedTaskManager:
         error_code: Optional[str] = None,
     ) -> None:
         """Fan-out results to all subscribers of a dedup'd task."""
-        client = await self._get_client()
-        result = await (
-            client.table("task_tracking")
-            .select("task_type, media_id, subscribers")
-            .eq("dbos_workflow_id", task_id)
-            .single()
-            .execute()
-        )
-        task = result.data
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import TaskTracking
+
+        async with read_scope() as session:
+            task = (
+                (
+                    await session.execute(
+                        select(
+                            TaskTracking.task_type,
+                            TaskTracking.media_id,
+                            TaskTracking.subscribers,
+                        )
+                        .where(TaskTracking.dbos_workflow_id == task_id)
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
         if not task:
             logger.warning(
                 f"[TaskManager] notify_subscribers: task {task_id} not found"
