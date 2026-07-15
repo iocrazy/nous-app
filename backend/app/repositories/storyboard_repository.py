@@ -16,11 +16,9 @@ Every DB method goes through ``read_scope()`` / ``write_scope()`` and builds
 SELECT *-shaped dicts via ``_orm_obj_to_dict`` + a precomputed ``_name_to_attr``
 map per model. Call sites go through the six ``get_storyboard_*_repository()``
 factories (bottom of this file), which now unconditionally return these classes.
-The ``_get_client`` supabase-py helper survives ONLY on
-``StoryboardAssetRepository`` — ``StoryboardService.get_asset`` reaches into
-``asset_repo._get_client()`` directly (that surface is not a repo method and
-stays REST); the other five classes' REST client helpers were orphaned by the
-collapse and are deleted.
+This module is 100% ORM: the last supabase-py surface (the ``_get_client``
+helper kept for the ``StoryboardService.get_asset`` reach-in) was retired when
+``StoryboardAssetRepository.get_by_id`` replaced that ad-hoc REST read.
 
 STRATEGY C — VALUE-TYPE PARITY (per-field, exact REST shape)
 ============================================================
@@ -132,7 +130,6 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import read_scope, write_scope
-from app.db.supabase_client import get_async_supabase_admin
 from app.models import (
     StoryboardAssets,
     StoryboardCharacters,
@@ -858,14 +855,22 @@ class StoryboardAssetRepository:
 
     TABLE_NAME = "storyboard_assets"
 
-    async def _get_client(self):
-        """Async Supabase admin client (conscious-keep on the REST path).
-
-        The only surviving supabase-py surface: ``StoryboardService.get_asset``
-        reaches into ``asset_repo._get_client()`` directly (a single ad-hoc read
-        that is NOT a repo method). Every method on this class is ORM-backed;
-        this helper exists solely for that service reach-in."""
-        return await get_async_supabase_admin()
+    async def get_by_id(self, asset_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch one asset row by snowflake id. Returns the SELECT *-shaped
+        dict, or None when not found / on error (matching the error contract
+        of the ``StoryboardService.get_asset`` reach-in this replaces)."""
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(StoryboardAssets)
+                    .where(StoryboardAssets.id == _bigint(asset_id))
+                    .limit(1)
+                )
+                row = result.scalars().first()
+                return _row(row, _ASSETS_N2A) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get asset {asset_id}: {e}")
+            return None
 
     async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Insert a new asset record. Returns the created row dict."""
