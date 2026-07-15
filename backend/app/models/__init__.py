@@ -1,8 +1,9 @@
-"""SQLAlchemy 2.0 ORM model package — 104 mapped classes + 1 junction table = 105 tables.
+"""SQLAlchemy 2.0 ORM model package — 108 mapped classes + 1 junction table = 109 tables.
 
 (Was 106/107 before migration 333 retired the ai_sessions/ai_messages models —
-Phase 3 Wave 2 legacy-chat table drop; conversations/messages are raw-SQL,
-not yet ORM-mapped.)
+Phase 3 Wave 2 legacy-chat table drop; the conversations/messages family is
+now mapped too (style batch 3b), though conversation_repository keeps its
+text() SQL bodies on the session scopes.)
 
 Flat models only: no joined-table inheritance, no relationships, no create_all.
 auth.users (GoTrue) is permanently EXCLUDED; FKs targeting users.id are omitted.
@@ -64,7 +65,11 @@ from app.models.canvas import (  # noqa: F401
     CanvasResourceRefs,
 )
 from app.models.chat import (  # noqa: F401
+    ConversationMembers,
     ConversationMemory,
+    Conversations,
+    MessageAttachments,
+    Messages,
 )
 from app.models.distribution import (  # noqa: F401
     PublishTaskAccounts,
@@ -330,7 +335,11 @@ __all__ = [
     "CanvasResourceRefs",
     "Canvases",
     # chat / conversations
+    "ConversationMembers",
     "ConversationMemory",
+    "Conversations",
+    "MessageAttachments",
+    "Messages",
     # distribution
     "PublishTaskAccounts",
     "PublishTasks",

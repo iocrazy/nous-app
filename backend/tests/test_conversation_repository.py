@@ -1,7 +1,8 @@
 """Unit + integration tests for ConversationRepository (Task 4).
 
-Unit tests (default, no DB): capture SQL via fake engine / mocked module-level
-helpers, following the pattern in test_chat_edit_delete.py.
+Unit tests (default, no DB): stub ONLY the session boundary — monkeypatch the
+repo module's read_scope/write_scope (and its module-level _fetch_*/_execute
+helpers) with capturing fakes; the repository code itself really runs.
 
 Integration tests (skippable): require INTEGRATION_DATABASE_URL env var.
 They run against the real asyncpg / Postgres to prove the name/title bridge,
@@ -60,7 +61,7 @@ class _MappingResult:
         return [self._d]
 
 
-class _FakeConn:
+class _FakeSession:
     """Records every execute() call and returns queued results in FIFO order."""
 
     def __init__(self, *results: Any) -> None:
@@ -75,24 +76,16 @@ class _FakeConn:
         return result
 
 
-class _FakeEngine:
-    """Minimal SQLAlchemy async engine stub that wraps a _FakeConn."""
+def _make_session(*results: Any) -> tuple[Any, _FakeSession]:
+    """Return a (write_scope stand-in, session) pair loaded with the given
+    result sequence — patch it over the repo module's write_scope."""
+    session = _FakeSession(*results)
 
-    def __init__(self, conn: _FakeConn) -> None:
-        self._conn = conn
+    @asynccontextmanager
+    async def _scope() -> Any:
+        yield session
 
-    def begin(self) -> Any:  # noqa: D102
-        @asynccontextmanager
-        async def _ctx() -> Any:
-            yield self._conn
-
-        return _ctx()
-
-
-def _make_engine(*results: Any) -> tuple[_FakeEngine, _FakeConn]:
-    """Return (engine, conn) pair loaded with the given result sequence."""
-    conn = _FakeConn(*results)
-    return _FakeEngine(conn), conn
+    return _scope, session
 
 
 # ── Constants reused across tests ─────────────────────────────────────────────
@@ -123,13 +116,13 @@ async def test_send_message_seq_via_update_conversations() -> None:
     """send_message must UPDATE conversations to allocate seq before INSERTing."""
     from app.repositories.conversation_repository import ConversationRepository
 
-    eng, conn = _make_engine(
+    scope, conn = _make_session(
         _ScalarResult(_SEQ),  # UPDATE conversations RETURNING last_seq
         _MappingResult(_MSG_ROW),  # INSERT INTO messages RETURNING *
         MagicMock(rowcount=1),  # UPDATE conversation_members (read cursor)
     )
     repo = ConversationRepository()
-    with patch("app.db.engine.get_engine", return_value=eng):
+    with patch("app.repositories.conversation_repository.write_scope", scope):
         result = await repo.send_message(
             conversation_id=_CONV_ID,
             sender_id=_SENDER_ID,
@@ -170,13 +163,13 @@ async def test_send_message_advances_sender_read_cursor_for_user() -> None:
     """send_message must advance the sender's read cursor when sender_type='user'."""
     from app.repositories.conversation_repository import ConversationRepository
 
-    eng, conn = _make_engine(
+    scope, conn = _make_session(
         _ScalarResult(_SEQ),
         _MappingResult(_MSG_ROW),
         MagicMock(rowcount=1),
     )
     repo = ConversationRepository()
-    with patch("app.db.engine.get_engine", return_value=eng):
+    with patch("app.repositories.conversation_repository.write_scope", scope):
         await repo.send_message(
             conversation_id=_CONV_ID,
             sender_id=_SENDER_ID,
@@ -200,12 +193,12 @@ async def test_send_message_no_read_cursor_advance_for_agent() -> None:
     from app.repositories.conversation_repository import ConversationRepository
 
     _agent_row = {**_MSG_ROW, "sender_type": "agent", "sender_id": None}
-    eng, conn = _make_engine(
+    scope, conn = _make_session(
         _ScalarResult(_SEQ),
         _MappingResult(_agent_row),
     )
     repo = ConversationRepository()
-    with patch("app.db.engine.get_engine", return_value=eng):
+    with patch("app.repositories.conversation_repository.write_scope", scope):
         await repo.send_message(
             conversation_id=_CONV_ID,
             sender_id=None,
@@ -236,7 +229,7 @@ async def test_is_member_filters_member_type_user() -> None:
         return True
 
     repo = ConversationRepository()
-    with patch("app.db.engine.fetch_val", fake_fetch_val):
+    with patch("app.repositories.conversation_repository._fetch_val", fake_fetch_val):
         result = await repo.is_member(conversation_id=_CONV_ID, user_id=_SENDER_ID)
 
     assert result is True
@@ -266,7 +259,7 @@ async def test_get_my_conversations_excludes_direct_agent() -> None:
         return []
 
     repo = ConversationRepository()
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
+    with patch("app.repositories.conversation_repository._fetch_all", fake_fetch_all):
         result = await repo.get_my_conversations(_SENDER_ID)
 
     assert result == []
@@ -291,7 +284,7 @@ async def test_add_agent_member_inserts_member_type_agent() -> None:
         return 1
 
     repo = ConversationRepository()
-    with patch("app.db.engine.execute", fake_execute):
+    with patch("app.repositories.conversation_repository._execute", fake_execute):
         await repo.add_agent_member(
             conversation_id=_CONV_ID,
             agent_id="agent-uuid-001",
@@ -327,7 +320,7 @@ async def test_list_conversation_agent_ids_filters_member_type_agent() -> None:
         return []
 
     repo = ConversationRepository()
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
+    with patch("app.repositories.conversation_repository._fetch_all", fake_fetch_all):
         result = await repo.list_conversation_agent_ids(conversation_id=_CONV_ID)
 
     assert result == []
@@ -351,13 +344,13 @@ async def test_add_attachments_inserts_one_row_per_id_with_ord() -> None:
     _MSG_ID = 5001
     _GIDS = [1001, 1002, 1003]
 
-    eng, conn = _make_engine(
+    scope, conn = _make_session(
         MagicMock(rowcount=1),
         MagicMock(rowcount=1),
         MagicMock(rowcount=1),
     )
     repo = ConversationRepository()
-    with patch("app.db.engine.get_engine", return_value=eng):
+    with patch("app.repositories.conversation_repository.write_scope", scope):
         await repo.add_attachments(message_id=_MSG_ID, generated_media_ids=_GIDS)
 
     assert len(conn.calls) == 3, f"Expected 3 execute calls, got {len(conn.calls)}"
@@ -379,9 +372,9 @@ async def test_add_attachments_empty_list_is_noop() -> None:
     """add_attachments with an empty list must not touch the DB."""
     from app.repositories.conversation_repository import ConversationRepository
 
-    eng, conn = _make_engine()
+    scope, conn = _make_session()
     repo = ConversationRepository()
-    with patch("app.db.engine.get_engine", return_value=eng):
+    with patch("app.repositories.conversation_repository.write_scope", scope):
         await repo.add_attachments(message_id=5001, generated_media_ids=[])
 
     assert len(conn.calls) == 0
@@ -404,7 +397,7 @@ async def test_messages_in_range_bounds_and_excludes_deleted() -> None:
         return []
 
     repo = ConversationRepository()
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
+    with patch("app.repositories.conversation_repository._fetch_all", fake_fetch_all):
         result = await repo.messages_in_range(conversation_id=1, from_seq=5, to_seq=40)
 
     assert result == []
@@ -435,7 +428,7 @@ async def test_list_messages_no_joined_gate_when_for_user_id_omitted() -> None:
         return [_MSG_ROW]
 
     repo = ConversationRepository()
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
+    with patch("app.repositories.conversation_repository._fetch_all", fake_fetch_all):
         result = await repo.list_messages(
             conversation_id=_CONV_ID, before_seq=None, limit=10
         )
@@ -464,7 +457,7 @@ async def test_list_messages_applies_joined_gate_when_for_user_id_given() -> Non
         return [_MSG_ROW]
 
     repo = ConversationRepository()
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
+    with patch("app.repositories.conversation_repository._fetch_all", fake_fetch_all):
         result = await repo.list_messages(
             conversation_id=_CONV_ID,
             before_seq=None,
@@ -503,12 +496,12 @@ async def test_create_conversation_inserts_title_column_not_name() -> None:
         "created_at": "2026-06-30T00:00:00",
     }
 
-    eng, conn = _make_engine(
+    scope, conn = _make_session(
         _MappingResult(_CONV_ROW),  # INSERT INTO conversations RETURNING
         MagicMock(rowcount=1),  # INSERT INTO conversation_members (creator/owner)
     )
     repo = ConversationRepository()
-    with patch("app.db.engine.get_engine", return_value=eng):
+    with patch("app.repositories.conversation_repository.write_scope", scope):
         result = await repo.create_conversation(
             creator_id=_SENDER_ID,
             scope_id=285274231427073,
@@ -543,7 +536,7 @@ async def test_is_agent_member_filters_member_type_agent() -> None:
         return True
 
     repo = ConversationRepository()
-    with patch("app.db.engine.fetch_val", fake_fetch_val):
+    with patch("app.repositories.conversation_repository._fetch_val", fake_fetch_val):
         result = await repo.is_agent_member(conversation_id=_CONV_ID, agent_id="ag-001")
 
     assert result is True
