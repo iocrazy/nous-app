@@ -4,11 +4,21 @@
  *  - inline: typing `@word` anywhere in a non-character line opens/updates
  *    the SAME `MentionCombobox` legacy uses (query = the run after `@` under
  *    the caret — `detectInlineMentionQuery` in `TipTapSceneEditor.tsx`).
- *  - character-cue: FOCUSING a character-type line opens it with the whole
- *    line as the query, updating live as the writer edits the cue.
+ *  - character-cue: the picker is INVITED, not sprung. It opens on a real click
+ *    on the cue NAME, or on any caret in an EMPTY cue line (nothing to offer
+ *    there but the cast). A caret arriving by keyboard/typing/focusElement()
+ *    only refreshes the query of an ALREADY-open picker — see
+ *    `onSelectionUpdate` in `TipTapSceneEditor.tsx`.
  * Selection replaces text via a transaction (`replaceElementText`), not a
  * raw DOM write — M2 renders mentions as PLAIN TEXT (no chips; chips are a
  * documented M3/M4 follow-up, see the M2 report).
+ *
+ * NOTE: the click-on-the-name trigger cannot be exercised here — jsdom has no
+ * layout and this file stubs `Range.getClientRects()` to [], so the hit test
+ * that distinguishes the name from the blank space after it always misses.
+ * That path is covered in `e2e/script-editor-cue-picker.spec.ts`, which runs
+ * against real geometry. These tests open the picker the other legitimate way
+ * (an empty cue), which needs no geometry.
  */
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { render, cleanup, waitFor, act, fireEvent } from '@testing-library/react';
@@ -190,8 +200,26 @@ describe('TipTap M2 — inline @mention', () => {
   });
 });
 
+/**
+ * Park the caret at the far end of the doc, then move it to `pos`.
+ *
+ * A bare `setTextSelection(pos)` can land on the selection the editor already
+ * has, and ProseMirror fires no selection update for a move that isn't one — the
+ * picker would then never be invited and the test would fail for a reason that
+ * has nothing to do with the contract under test. The round trip guarantees a
+ * real transition into `pos`.
+ */
+function caretInto(editor: Editor, pos: number): void {
+  act(() => {
+    editor.commands.setTextSelection(editor.state.doc.content.size - 1);
+  });
+  act(() => {
+    editor.commands.setTextSelection(pos);
+  });
+}
+
 describe('TipTap M2 — character-cue picker', () => {
-  it('focusing a character line opens the cue picker with the whole line as the query', async () => {
+  it('a caret arriving without a click does NOT open the cue picker', async () => {
     const editor = await mountTiptap(
       [
         { id: 'el_a', type: 'action', text: 'Intro.' },
@@ -202,6 +230,30 @@ describe('TipTap M2 — character-cue picker', () => {
     act(() => {
       editor.commands.setTextSelection(editor.state.doc.content.size - 1); // inside el_c
     });
+    // Give it the same beat the old contract needed to render the popup.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(document.querySelector('[data-testid="mention-combobox"]')).toBeNull();
+  });
+
+  it('an empty cue line opens the picker, and typing then filters it', async () => {
+    const editor = await mountTiptap(
+      [
+        { id: 'el_c', type: 'character', text: '' },
+        { id: 'el_d', type: 'dialogue', text: 'Hello.' },
+      ],
+      ['BOB', 'ALICE'],
+    );
+    caretInto(editor, 1);
+    // Empty cue → the whole cast, unfiltered.
+    await waitFor(() => {
+      const opts = Array.from(document.querySelectorAll('.mh-mention-opt'));
+      expect(opts.map((o) => o.textContent)).toEqual(['BOB', 'ALICE']);
+    });
+
+    act(() => {
+      editor.commands.insertContent('BO');
+    });
+    // Typing rides the query bridge — the invited picker narrows, never reopens.
     await waitFor(() => {
       const opts = Array.from(document.querySelectorAll('.mh-mention-opt'));
       expect(opts.map((o) => o.textContent)).toEqual(['BOB']);
@@ -210,13 +262,17 @@ describe('TipTap M2 — character-cue picker', () => {
 
   it('Tab abandons the cue: retypes the line to action and closes (does not apply a candidate)', async () => {
     const editor = await mountTiptap(
-      [{ id: 'el_c', type: 'character', text: 'BO' }],
+      [
+        { id: 'el_c', type: 'character', text: '' },
+        { id: 'el_d', type: 'dialogue', text: 'Hello.' },
+      ],
       ['BOB'],
     );
-    act(() => {
-      editor.commands.setTextSelection(editor.state.doc.content.size - 1);
-    });
+    caretInto(editor, 1);
     await waitFor(() => expect(document.querySelector('[data-testid="mention-combobox"]')).not.toBeNull());
+    act(() => {
+      editor.commands.insertContent('BO');
+    });
 
     pressKey(editor, 'Tab');
 
@@ -228,11 +284,16 @@ describe('TipTap M2 — character-cue picker', () => {
 
   it('Enter applies the active candidate: the WHOLE line becomes the name', async () => {
     const editor = await mountTiptap(
-      [{ id: 'el_c', type: 'character', text: 'BO' }],
+      [
+        { id: 'el_c', type: 'character', text: '' },
+        { id: 'el_d', type: 'dialogue', text: 'Hello.' },
+      ],
       ['BOB'],
     );
+    caretInto(editor, 1);
+    await waitFor(() => expect(document.querySelector('[data-testid="mention-combobox"]')).not.toBeNull());
     act(() => {
-      editor.commands.setTextSelection(editor.state.doc.content.size - 1);
+      editor.commands.insertContent('BO');
     });
     await waitFor(() => expect(document.querySelectorAll('.mh-mention-opt')).toHaveLength(1));
 
@@ -245,14 +306,12 @@ describe('TipTap M2 — character-cue picker', () => {
   it('moving focus to a different (non-character) line closes the picker', async () => {
     const editor = await mountTiptap(
       [
-        { id: 'el_c', type: 'character', text: 'BOB' },
+        { id: 'el_c', type: 'character', text: '' },
         { id: 'el_d', type: 'dialogue', text: 'Hello.' },
       ],
       ['BOB'],
     );
-    act(() => {
-      editor.commands.setTextSelection(3); // inside el_c
-    });
+    caretInto(editor, 1); // inside the empty cue → invited
     await waitFor(() => expect(document.querySelector('[data-testid="mention-combobox"]')).not.toBeNull());
 
     act(() => {

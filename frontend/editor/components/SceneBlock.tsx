@@ -589,6 +589,17 @@ export function SceneBlock({
   );
   const handleTiptapMentionClose = useCallback(() => setMention(null), []);
 
+  // Typing/keyboard path for a character line: refresh the query of a picker
+  // that is ALREADY open on this element, and do nothing otherwise. Never opens
+  // one — the editor decides that (a click on the name, or an empty cue). The
+  // `prev` bail-outs also mean this can't resurrect a picker the writer just
+  // dismissed with Escape while the caret stayed in the line.
+  const handleTiptapMentionQuery = useCallback((elementId: string, query: string) => {
+    setMention((prev) =>
+      prev && prev.elementId === elementId && prev.query !== query ? { ...prev, query } : prev,
+    );
+  }, []);
+
   const handleTiptapMentionSelect = useCallback(
     (name: string) => {
       const m = mentionRef.current;
@@ -1269,6 +1280,7 @@ export function SceneBlock({
           slashMenu={tiptapSlashMenu}
           onMentionOpen={handleTiptapMentionOpen}
           onMentionClose={handleTiptapMentionClose}
+          onMentionQuery={handleTiptapMentionQuery}
           mentionMenu={tiptapMentionMenu}
           pageSeams={pageSeams}
           mentionCandidates={mentionCandidates}

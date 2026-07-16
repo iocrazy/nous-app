@@ -107,6 +107,36 @@ function hitsSelector(target: EventTarget | null, selector: string): boolean {
   return !!el?.closest?.(selector);
 }
 
+/** Nearest element matching `selector`, climbing out of a text node first. */
+function closestElement(target: EventTarget | null, selector: string): HTMLElement | null {
+  const node = target as Node | null;
+  if (!node) return null;
+  const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as HTMLElement);
+  return el?.closest?.(selector) ?? null;
+}
+
+/**
+ * Did (x, y) land on `root`'s actual glyphs?
+ *
+ * Ranges over the TEXT NODES, never the element: `selectNodeContents` on a block
+ * yields LINE BOXES, which span the block's full width — so the blank space after
+ * a short cue would read as a hit and the check would be true for the whole line.
+ */
+function pointHitsText(root: HTMLElement, x: number, y: number): boolean {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (!node.textContent?.trim()) continue;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    for (const r of Array.from(range.getClientRects())) {
+      if (r.width <= 0 || r.height <= 0) continue;
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
+    }
+  }
+  return false;
+}
+
 /** Text-edit dispatch debounce — matches `SceneBlock`'s `INPUT_DEBOUNCE_MS`. */
 const INPUT_DEBOUNCE_MS = 500;
 
@@ -165,6 +195,12 @@ export interface TipTapSceneEditorProps {
   /** Fires when the open mention/cue picker should close (focus left its
    *  element, or the `@` run was deleted). Safe to call when nothing is open. */
   onMentionClose?: () => void;
+  /** Fires when a character line's text changes under a caret that arrived
+   *  WITHOUT a click on the name — refreshes the query of an already-open cue
+   *  picker. Must never open one: it is the typing/keyboard path, and an
+   *  uninvited picker over the writer's text is the bug this split exists to
+   *  prevent. Implementations no-op unless the picker is open for `elementId`. */
+  onMentionQuery?: (elementId: string, query: string) => void;
   /** The currently-open mention/cue picker's keyboard-nav bridge, or null. */
   mentionMenu?: MenuBridge | null;
   // ── M3: paged-mode seams + mention chips ──────────────────────────────
@@ -531,6 +567,7 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
       slashMenu,
       onMentionOpen,
       onMentionClose,
+      onMentionQuery,
       mentionMenu,
       pageSeams,
       mentionCandidates,
@@ -572,6 +609,12 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
     onElementDragEndRef.current = onElementDragEnd;
     // True only between a drag-grip mousedown and the selection change it causes.
     const gripPressRef = useRef(false);
+    // Set by the mousedown that CAUSES a selection change, consumed by the very
+    // next onSelectionUpdate: it's how that handler tells a real click apart from
+    // a caret arriving by keyboard/typing/focusElement(). Cleared on keydown so a
+    // click that moves no caret (→ no selection update to consume it) can't leak
+    // its intent into a later keystroke.
+    const pointerIntentRef = useRef<{ onName: boolean } | null>(null);
     const onElementContextMenuRef = useRef(onElementContextMenu);
     onElementContextMenuRef.current = onElementContextMenu;
     const onSlashChangeRef = useRef(onSlashChange);
@@ -580,6 +623,8 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
     onMentionOpenRef.current = onMentionOpen;
     const onMentionCloseRef = useRef(onMentionClose);
     onMentionCloseRef.current = onMentionClose;
+    const onMentionQueryRef = useRef(onMentionQuery);
+    onMentionQueryRef.current = onMentionQuery;
     const mentionMenuRef = useRef<MenuBridge | null>(mentionMenu ?? null);
     mentionMenuRef.current = mentionMenu ?? null;
     const slashMenuRef = useRef<MenuBridge | null>(slashMenu ?? null);
@@ -686,6 +731,20 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
         handleDOMEvents: {
           dragstart: (_view, event) => hitsSelector(event.target, '.mh-el-drag'),
           drop: (_view, event) => hitsSelector(event.target, '.mh-el-row'),
+          // Record the click's INTENT for the selection update it's about to
+          // cause (see pointerIntentRef). Never returns true — PM must still run
+          // its own mousedown or the caret would not move at all.
+          mousedown: (_view, event) => {
+            const line = closestElement(event.target, '.mh-el-editable');
+            pointerIntentRef.current = {
+              onName: !!line && pointHitsText(line, event.clientX, event.clientY),
+            };
+            return false;
+          },
+          keydown: () => {
+            pointerIntentRef.current = null;
+            return false;
+          },
         },
       },
       onUpdate: ({ editor: ed, transaction }) => {
@@ -758,25 +817,43 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
         focusedOffsetRef.current = ctx ? ctx.localOffset : 0;
         onFocusCursorRef.current?.(id);
 
-        // M2 — character-cue picker: focusing (or editing) a character-type
-        // line opens/updates the cue picker with the WHOLE line as the
-        // query, mirroring legacy's handleFocus. Moving to a different line
-        // (of any type) closes whatever mention/cue was open — legacy closes
-        // unconditionally on a focus change to a different element, not just
-        // when leaving a character line. `onMentionClose` is safe to call
-        // spuriously (SceneBlock's `setMention(null)` no-ops via React's
-        // same-value state bailout when nothing was open).
+        // M2 — character-cue picker. The picker is INVITED, never sprung: it
+        // used to open on any selection landing in a character line, so placing
+        // a caret to edit the name, arrowing past, or focusElement()'ing the row
+        // all popped the dropdown over the writer's text. It opens only when the
+        // writer clicks the cue NAME itself, or when the line is EMPTY (an empty
+        // cue has nothing to offer but the cast list — that's the affordance a
+        // freshly-inserted character line depends on).
+        //
+        // A caret that arrives any other way (keyboard, typing, focusElement)
+        // carries no intent, so it only refreshes the query — which no-ops
+        // unless the picker is already open for this very line. That's what lets
+        // typing filter an invited picker without an uninvited one ever opening.
+        // `onMentionClose` is safe to call spuriously (SceneBlock's
+        // `setMention(null)` no-ops via React's same-value state bailout).
+        const pointer = pointerIntentRef.current;
+        pointerIntentRef.current = null;
+
         if (gripPressRef.current) {
           // This caret move is the side effect of grabbing the row's drag grip,
           // not the writer clicking into the line — don't pop the cue picker (a
           // character row's grip would otherwise always open the dropdown). The
           // grip can't preventDefault its mousedown to stop the caret move: that
           // cancels the native drag, which is what broke reorder in the first
-          // place. Only a real click on the LINE should open the picker.
+          // place. (The pointer check below would now catch this too — the grip
+          // is not text — but this guard states the intent at the source.)
           gripPressRef.current = false;
           onMentionCloseRef.current?.();
         } else if (ctx && (ctx.node.attrs.elType as ElementType) === 'character') {
-          onMentionOpenRef.current?.(id as string, 'character', ctx.node.textContent);
+          const isEmptyCue = !ctx.node.textContent.trim();
+          if (isEmptyCue || pointer?.onName) {
+            onMentionOpenRef.current?.(id as string, 'character', ctx.node.textContent);
+          } else if (pointer) {
+            // Clicked the blank space after the name: placing a caret to edit.
+            onMentionCloseRef.current?.();
+          } else {
+            onMentionQueryRef.current?.(id as string, ctx.node.textContent);
+          }
         } else if (ctx && (ctx.node.attrs.elType as ElementType) === 'transition') {
           // Transition preset picker (laper parity): a focused transition line
           // offers CUT TO: / FADE TO: / … — same open/filter/replace contract
