@@ -228,6 +228,12 @@ class ScriptProjects(Base):
     __tablename__ = "script_projects"
     __table_args__ = (
         ForeignKeyConstraint(
+            ["episode_id"],
+            ["public.episodes.id"],
+            ondelete="RESTRICT",
+            name="script_projects_episode_id_fkey",
+        ),
+        ForeignKeyConstraint(
             ["project_id"],
             ["public.projects.id"],
             name="script_projects_project_id_fkey",

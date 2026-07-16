@@ -46,6 +46,12 @@ class ConversationMemory(Base):
 
     __tablename__ = "conversation_memory"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["conversation_id"],
+            ["public.conversations.id"],
+            ondelete="CASCADE",
+            name="conversation_memory_conversation_id_fkey",
+        ),
         PrimaryKeyConstraint("conversation_id", name="conversation_memory_pkey"),
         {"schema": "public"},
     )
@@ -69,6 +75,12 @@ class Conversations(Base):
 
     __tablename__ = "conversations"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["scope_id"],
+            ["public.teams.id"],
+            ondelete="CASCADE",
+            name="conversations_scope_id_fkey",
+        ),
         PrimaryKeyConstraint("id", name="conversations_pkey"),
         {"schema": "public"},
     )
@@ -106,7 +118,21 @@ class ConversationMembers(Base):
     """
 
     __tablename__ = "conversation_members"
-    __table_args__ = ({"schema": "public"},)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["agent_id"],
+            ["public.ai_agents.id"],
+            ondelete="CASCADE",
+            name="conversation_members_agent_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["conversation_id"],
+            ["public.conversations.id"],
+            ondelete="CASCADE",
+            name="conversation_members_conversation_id_fkey",
+        ),
+        {"schema": "public"},
+    )
 
     conversation_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     member_type: Mapped[str] = mapped_column(Text, primary_key=True)
@@ -140,6 +166,18 @@ class Messages(Base):
 
     __tablename__ = "messages"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["conversation_id"],
+            ["public.conversations.id"],
+            ondelete="CASCADE",
+            name="messages_conversation_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["parent_id"],
+            ["public.messages.id"],
+            ondelete="SET NULL",
+            name="messages_parent_id_fkey",
+        ),
         PrimaryKeyConstraint("id", name="messages_pkey"),
         UniqueConstraint(
             "conversation_id", "seq", name="messages_conversation_id_seq_key"
@@ -177,6 +215,12 @@ class MessageAttachments(Base):
 
     __tablename__ = "message_attachments"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["message_id"],
+            ["public.messages.id"],
+            ondelete="CASCADE",
+            name="message_attachments_message_id_fkey",
+        ),
         PrimaryKeyConstraint(
             "message_id", "generated_media_id", name="message_attachments_pkey"
         ),
