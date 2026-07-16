@@ -1,9 +1,16 @@
 """Issue Messages REST API — paperclip-style chat thread per issue (A8).
 
-Endpoints (mounted at /api/v1/issues/{issue_id}/messages):
-  GET    /                  — list the thread, oldest first
-  POST   /                  — post a comment; optional agent_id triggers
-                              a dispatch (kind='agent_run' placeholder)
+Endpoints (mounted at /api/v1/issues/{issue_id}):
+  GET    /{id}/messages                 — list the thread, oldest first
+  GET    /{id}/comment-trigger-preview  — what a comment would start (read-only)
+  POST   /{id}/messages                 — post a comment; wakes the issue's
+                                          assigned agent unless suppressed
+
+Whether a comment wakes an agent is driven by the ISSUE's assignee_agent_id —
+NOT by the payload's `agent_id` field, which is vestigial and never read (see
+IssueMessagePost). The decision lives in ONE place, services/issues/
+comment_trigger.py, which both POST and the preview endpoint call, so the
+composer chip can never promise something the send path won't do.
 
 The status-change side of the timeline is auto-emitted by the database
 trigger trg_issue_status_change_message — no explicit endpoint needed.
@@ -39,6 +46,7 @@ from loguru import logger
 from app.core.deps import AuthDep
 from app.repositories.issue_repository import issue_repository
 from app.schemas.issue_message import (
+    CommentTriggerPreview,
     IssueMessage,
     IssueMessageKind,
     IssueMessageList,
@@ -46,6 +54,10 @@ from app.schemas.issue_message import (
     IssueMessagePostResponse,
 )
 from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
+from app.services.issues.comment_trigger import (
+    apply_suppression,
+    compute_comment_trigger,
+)
 from app.services.issues.issue_message_mapper import map_ai_message_to_issue_message
 from app.services.issues.issue_session import get_or_create_issue_session
 from app.workflows.issue_lifecycle import respond_to_issue_reply
@@ -215,76 +227,38 @@ async def list_issue_messages(issue_id: int, auth: AuthDep) -> IssueMessageList:
     return IssueMessageList(messages=messages, total=len(messages))
 
 
-@router.post(
-    "/{issue_id}/messages",
-    response_model=IssueMessagePostResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def post_issue_message(
-    issue_id: int, payload: IssueMessagePost, auth: AuthDep
-) -> IssueMessagePostResponse:
-    """Post a human comment on an issue.
+@router.get("/{issue_id}/comment-trigger-preview", response_model=CommentTriggerPreview)
+async def comment_trigger_preview(
+    issue_id: int, auth: AuthDep
+) -> CommentTriggerPreview:
+    """Predict what POST /{id}/messages would start — without posting.
 
-    Session path (Spec-1b): when the issue has an assigned agent, the comment
-    is treated as a reply that drives another agent turn on the issue's
-    ai_session (respond_to_issue_reply workflow). The human message + the
-    agent reply are persisted as ai_messages by run_session_turn and surface
-    through GET /messages (Spec-1a). The returned comment is a synthesized
-    optimistic row; the canonical thread comes from GET.
+    Read-only. Backs the composer chip ("Will start when sent · X"), which today
+    is the ONLY signal that ⌘↩ spends money.
 
-    Legacy path: issues with no assigned agent keep the issue_messages insert.
+    Deliberately not GET /{id}/dispatch-preview: that mirrors dispatch_issue's
+    guards, and the comment path honours none of them — commenting on a `done`
+    issue, or mid-run, still wakes the agent. It would report `blocked` where
+    this reports `will_wake`.
+
+    Takes no draft body: the predicate reads only the issue row. Adding @agent
+    mentions or a /note prefix MUST turn this into a POST carrying the draft.
     """
     issue_row = await _assert_issue_visible(issue_id, auth)
-    assignee_agent_id = issue_row.get("assignee_agent_id")
+    verdict = compute_comment_trigger(issue_row)
+    return CommentTriggerPreview(will_wake=verdict.will_wake, agent_id=verdict.agent_id)
 
-    # ── Session path (Spec-1b) ────────────────────────────────────────────
-    if assignee_agent_id:
-        session_id = await get_or_create_issue_session(issue_id)
-        if not session_id:
-            raise HTTPException(500, "issue has an agent but no resolvable session")
 
-        # The turn runs as the issue OWNER (BYO-key/adapter context), mirroring
-        # get_or_create_issue_session; the replying human's identity is not
-        # separately threaded (single-owner-issue assumption).
-        owner_id = issue_row.get("created_by_user_id") or issue_row.get(
-            "assignee_user_id"
-        )
-        if not owner_id:
-            raise HTTPException(500, "issue has no owner to run the turn as")
+async def _insert_legacy_comment(
+    issue_id: int, payload: IssueMessagePost, auth: AuthDep
+) -> IssueMessagePostResponse:
+    """Plain comment row for issues with no assigned agent (pre-ai_session).
 
-        attachments_payload = (
-            [a.model_dump() for a in payload.attachments]
-            if payload.attachments
-            else None
-        )
-        wf_id = f"issue-reply-{issue_id}-{uuid.uuid4()}"
-        try:
-            _dispatch_respond_to_issue_reply(
-                issue_id,
-                str(owner_id),
-                payload.body,
-                attachments_payload,
-                wf_id,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                f"dispatch respond_to_issue_reply failed (issue_id={issue_id}): {exc}"
-            )
-            raise HTTPException(500, "failed to dispatch reply turn")
-
-        # Optimistic comment for immediate render; GET (ai_messages) is canonical.
-        comment = IssueMessage(
-            id=uuid.uuid4(),
-            issue_id=issue_id,
-            kind=IssueMessageKind.COMMENT,
-            author_user_id=auth.user_id,
-            body=payload.body,
-            meta={"optimistic": True},
-            created_at=datetime.now(timezone.utc),
-        )
-        return IssueMessagePostResponse(comment=comment, agent_run=None)
-
-    # ── Legacy path (no assigned agent) ───────────────────────────────────
+    Only reachable when nothing can be woken. NEVER use this for an
+    agent-assigned issue: GET takes the session path and never queries
+    issue_messages, so the row would flash in via the Realtime subscription and
+    vanish on the next refetch.
+    """
     from sqlalchemy import insert
 
     from app.db.session import write_scope
@@ -317,8 +291,115 @@ async def post_issue_message(
     if not inserted:
         raise HTTPException(500, "comment insert returned no row")
 
-    comment = IssueMessage.model_validate(dict(inserted))
-    return IssueMessagePostResponse(comment=comment, agent_run=None)
+    return IssueMessagePostResponse(
+        comment=IssueMessage.model_validate(dict(inserted)), agent_run=None
+    )
+
+
+def _optimistic_comment(issue_id: int, body: str, auth: AuthDep) -> IssueMessage:
+    """Synthesised row for immediate render; GET (the session) is canonical."""
+    return IssueMessage(
+        id=uuid.uuid4(),
+        issue_id=issue_id,
+        kind=IssueMessageKind.COMMENT,
+        author_user_id=auth.user_id,
+        body=body,
+        meta={"optimistic": True},
+        created_at=datetime.now(timezone.utc),
+    )
+
+
+def _resolve_owner(issue_row: dict) -> str:
+    """The turn runs as the issue OWNER (BYO-key/adapter context), mirroring
+    get_or_create_issue_session; the replying human's identity is not
+    separately threaded (single-owner-issue assumption)."""
+    owner_id = issue_row.get("created_by_user_id") or issue_row.get("assignee_user_id")
+    if not owner_id:
+        raise HTTPException(500, "issue has no owner to run the turn as")
+    return str(owner_id)
+
+
+@router.post(
+    "/{issue_id}/messages",
+    response_model=IssueMessagePostResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def post_issue_message(
+    issue_id: int, payload: IssueMessagePost, auth: AuthDep
+) -> IssueMessagePostResponse:
+    """Post a human comment on an issue.
+
+    Three paths, chosen by the shared predicate (never by payload.agent_id):
+
+    - Wake (Spec-1b): the issue has an assigned agent and the client did not
+      suppress it. The comment drives another agent turn on the issue's session
+      (respond_to_issue_reply). run_session_turn persists the human message and
+      the agent reply; the returned comment is optimistic.
+    - Note: the client suppressed this agent. The message is appended to the
+      session WITHOUT starting a turn — the agent reads it on its next wake
+      (history loads every message in the conversation, unfiltered by role).
+    - Legacy: no assigned agent → plain issue_messages insert.
+    """
+    issue_row = await _assert_issue_visible(issue_id, auth)
+    verdict = apply_suppression(
+        compute_comment_trigger(issue_row), payload.suppress_agent_ids
+    )
+
+    # ── Legacy path (nothing to wake) ─────────────────────────────────────
+    if verdict.agent_id is None:
+        return await _insert_legacy_comment(issue_id, payload, auth)
+
+    session_id = await get_or_create_issue_session(issue_id)
+    if not session_id:
+        raise HTTPException(500, "issue has an agent but no resolvable session")
+    owner_id = _resolve_owner(issue_row)
+
+    attachments_payload = (
+        [a.model_dump() for a in payload.attachments] if payload.attachments else None
+    )
+
+    # ── Note path (suppressed) ────────────────────────────────────────────
+    if not verdict.will_wake:
+        try:
+            await ConversationsAiStore().append_user_message(
+                session_id=int(session_id),
+                user_id=owner_id,
+                content=payload.body,
+                # Same reducer run_session_turn uses — a note and a real turn
+                # must store identical shapes or history reload renders them
+                # differently.
+                attachments=ConversationsAiStore.display_attachments(
+                    attachments_payload
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                f"append suppressed note failed (issue_id={issue_id}): {exc}"
+            )
+            raise HTTPException(500, "failed to save note")
+        return IssueMessagePostResponse(
+            comment=_optimistic_comment(issue_id, payload.body, auth), agent_run=None
+        )
+
+    # ── Wake path (Spec-1b) ───────────────────────────────────────────────
+    wf_id = f"issue-reply-{issue_id}-{uuid.uuid4()}"
+    try:
+        _dispatch_respond_to_issue_reply(
+            issue_id,
+            owner_id,
+            payload.body,
+            attachments_payload,
+            wf_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception(
+            f"dispatch respond_to_issue_reply failed (issue_id={issue_id}): {exc}"
+        )
+        raise HTTPException(500, "failed to dispatch reply turn")
+
+    return IssueMessagePostResponse(
+        comment=_optimistic_comment(issue_id, payload.body, auth), agent_run=None
+    )
 
 
 @router.post("/{issue_id}/agent-runs/{run_id}/simulate-complete")

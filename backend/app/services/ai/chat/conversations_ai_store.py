@@ -85,6 +85,13 @@ _ROLE_MAP = {"agent": "assistant", "user": "user", "system": "system"}
 # `metadata` dict byte-for-byte (see get_messages / _to_legacy_message_shape).
 _META_DECORATION_KEYS = ("agent_id", "prompt_tokens", "completion_tokens")
 
+# The only attachment keys persisted under body["attachments"] on a user-role
+# message — display metadata for re-rendering the bubble on history reload.
+# Deliberately excludes `data_url`: the vision pipeline resolves bytes from the
+# request separately, and inlining them here would bloat every history read.
+# See ConversationsAiStore.display_attachments for the shared reducer.
+_DISPLAY_ATTACHMENT_KEYS = ("kind", "resource_id", "mime", "alt_text", "name")
+
 
 def _bigint(v: Any) -> int:
     return int(v)
@@ -475,6 +482,29 @@ class ConversationsAiStore:
             {"cid": _bigint(session_id), "limit": limit},
         )
         return [self._to_legacy_message_shape(r) for r in rows]
+
+    @staticmethod
+    def display_attachments(
+        attachments: Optional[List[Dict[str, Any]]],
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Reduce attachment dicts to the display metadata stored on a message.
+
+        The stored shape is a contract, not a convenience: history reloads
+        re-render user bubbles from it, so every writer of a user-role message
+        must produce the SAME keys. Anything not listed here — most importantly
+        `data_url` bytes — must never reach the store.
+
+        Shared by run_session_turn (the agent-turn writer) and the issue
+        note path (the suppressed-comment writer) so the two cannot drift into
+        storing different shapes for the same kind of row.
+        """
+        if not attachments:
+            return None
+        reduced = [
+            {k: a.get(k) for k in _DISPLAY_ATTACHMENT_KEYS if a.get(k) is not None}
+            for a in attachments
+        ]
+        return reduced or None
 
     async def append_user_message(
         self,
