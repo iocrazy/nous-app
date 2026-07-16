@@ -377,7 +377,18 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
                 console.log('[DRAG-DBG] DRAGSTART fired', attrs.id);
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', attrs.id);
-                refs.onElementDragStartRef.current?.(attrs.id);
+                // DEFER the state update by a tick. Calling it synchronously
+                // re-renders this very NodeView (SceneBlock state → the
+                // propsSync no-op transaction → PM rebuilds the row DOM, and the
+                // grip's own `.dragging` class flips), and replacing the element
+                // the browser is mid-drag on makes it ABORT the drag: dragend
+                // fired immediately and every later dragover/drop then saw
+                // draggingElementId=null and bailed. Proven live via [DRAG-DBG]
+                // tracing (mousedown → DRAGSTART → dragend, all before any
+                // dragover). One tick is enough for the browser to take its drag
+                // snapshot first.
+                const id = attrs.id;
+                setTimeout(() => refs.onElementDragStartRef.current?.(id), 0);
               }
             : undefined
         }

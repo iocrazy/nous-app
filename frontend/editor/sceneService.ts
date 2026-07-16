@@ -51,9 +51,24 @@ type SceneRow = Omit<SceneDoc, 'elements'> & {
   content_json?: ScriptElement[] | null;
 };
 
+/**
+ * Snowflake BIGINT ids come back as JSON *numbers*, but SceneDoc types them
+ * (and the backend's move body validates them) as STRINGS. Leaving them numeric
+ * bit twice, live: `moveScene({ before_scene_id | after_scene_id })` 422'd with
+ * "Input should be a valid string", and every `=== someString` comparison
+ * (e.g. activeSceneId, which comes from a `dataset.sceneId` attr and is always a
+ * string) silently never matched. Coerce once, here at the boundary, so no
+ * component ever sees a numeric id.
+ */
 function toSceneDoc(row: SceneRow): SceneDoc {
   const { content_json, elements, ...rest } = row;
-  return { ...rest, elements: elements ?? content_json ?? [] };
+  return {
+    ...rest,
+    id: String(rest.id),
+    script_id: String(rest.script_id),
+    chapter_id: rest.chapter_id == null ? null : String(rest.chapter_id),
+    elements: elements ?? content_json ?? [],
+  };
 }
 
 export async function listScenes(scriptId: string): Promise<SceneDoc[]> {
