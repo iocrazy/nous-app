@@ -13,14 +13,13 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ChevronLeft, MoreHorizontal, AlignLeft, Paperclip, FileText, Plus,
-  MessageSquare, Activity, Link2, Bot,
+  MessageSquare, Link2, Bot,
 } from 'lucide-react';
 import type { UiIssue, AgentRef } from './types';
 import type { IssueMessage } from '../../services/issueMessageService';
 import { IssueStatusIcon, PriorityIcon } from './IssueStatusIcon';
 import { formatElapsed } from './formatElapsed';
 import { IssueChatThread } from './IssueChatThread';
-import { IssueActivityTab } from './IssueActivityTab';
 import { IssueRelatedTab } from './IssueRelatedTab';
 import { IssueReplyBox, type ComposerAttachment } from './IssueReplyBox';
 import { listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
@@ -40,7 +39,12 @@ interface IssueDetailViewProps {
   onIssueDispatched?: () => void;
 }
 
-type DetailTab = 'chat' | 'activity' | 'related';
+// Chat + Activity were separate tabs over the SAME messages array (Activity
+// just filtered kind='system_status'). IssueChatThread already interleaves
+// comments, agent runs and status events in one thread, so they're unified
+// into a single Timeline — the "one thread with your teammates + agents"
+// model. Related stays its own tab (sub-issues / parent).
+type DetailTab = 'timeline' | 'related';
 
 /**
  * Header chip shown while an agent is working the issue. The pulsing amber dot
@@ -70,7 +74,7 @@ const AgentWorkingBadge: React.FC<{ startedAt: string | null; agentName?: string
 
 export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents, agentsById, selfUserId, onCreateSubIssue, onIssueDispatched }) => {
   const { teamId } = useParams<{ teamId: string }>();
-  const [tab, setTab] = useState<DetailTab>('chat');
+  const [tab, setTab] = useState<DetailTab>('timeline');
   const [messages, setMessages] = useState<IssueMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -305,9 +309,9 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           </div>
 
           <div className="flex items-center border-b border-ink-800/80 mt-6">
-            {(['chat', 'activity', 'related'] as DetailTab[]).map((t) => {
-              const label = t === 'chat' ? 'Chat' : t === 'activity' ? 'Activity' : 'Related work';
-              const Icon = t === 'chat' ? MessageSquare : t === 'activity' ? Activity : Link2;
+            {(['timeline', 'related'] as DetailTab[]).map((t) => {
+              const label = t === 'timeline' ? 'Timeline' : 'Related work';
+              const Icon = t === 'timeline' ? MessageSquare : Link2;
               const active = tab === t;
               return (
                 <button
@@ -327,7 +331,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             <span className="ml-auto text-[12px] text-ink-600 pr-2">{messages.length} message{messages.length === 1 ? '' : 's'}</span>
           </div>
 
-          {tab === 'chat' && (
+          {tab === 'timeline' && (
             <>
               {error && (
                 <div className="mt-4 mx-2 px-3 py-2 rounded bg-rose-500/10 text-rose-300 text-[13px] ring-1 ring-rose-500/30">
@@ -347,9 +351,6 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
                 </div>
               )}
             </>
-          )}
-          {tab === 'activity' && (
-            <IssueActivityTab messages={messages} selfUserId={selfUserId} />
           )}
           {tab === 'related' && (
             <IssueRelatedTab issue={issue} />
