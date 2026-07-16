@@ -229,7 +229,9 @@ const IssuePipeline: React.FC<{
     const base = on
       ? 'border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]'
       : blocked
-        ? 'border-rose-500/30 bg-rose-500/5 text-ink-300 hover:border-rose-500/50 hover:text-ink-100'
+        // Blocked hangs off the chain as an incident — it must read as such on
+        // white too, where the old /5 tint vanished entirely.
+        ? 'border-rose-500/40 bg-rose-500/10 text-ink-200 hover:border-rose-500/60 hover:text-ink-50'
         : 'border-line-strong bg-island text-ink-300 hover:border-[var(--accent-border)] hover:text-ink-100';
     return (
       <button
@@ -245,8 +247,11 @@ const IssuePipeline: React.FC<{
       </button>
     );
   };
+  // Sits right next to the Quick chips: pushing it to the far edge (justify-end)
+  // read fine at the mockup's 1280px but strands it across a void on a wide
+  // screen. It stays a compact chain that scrolls if the viewport is narrow.
   return (
-    <div className="flex items-center min-w-0 flex-1 justify-end overflow-x-auto">
+    <div className="flex items-center min-w-0 overflow-x-auto">
       {PIPELINE_ORDER.map((s, i) => (
         <React.Fragment key={s}>
           {capsule(s)}
@@ -436,7 +441,9 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
               onClick={() => { setFilterOpen((v) => !v); setColumnPickerOpen(false); setSortOpen(false); }}
               className={`p-1.5 rounded border transition inline-flex items-center gap-1 ${
                 filterOpen || filterCount > 0
-                  ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-200'
+                  // Theme-flipping accent — a hard-coded indigo-200 here read as
+                  // pale-on-pale in light theme (same defect the btn-tint fix cured).
+                  ? 'bg-[var(--accent-soft)] border-[var(--accent-border)] text-[var(--accent-text)]'
                   : 'bg-ink-900/80 border-ink-800 text-ink-400 hover:text-ink-200'
               }`}
               title="Filters"
@@ -542,7 +549,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
           <button
             type="button"
             onClick={() => setFilters(EMPTY_FILTERS)}
-            className="shrink-0 text-ink-500 hover:text-ink-200"
+            className="ml-auto shrink-0 text-ink-500 hover:text-ink-200"
           >
             Reset ({filterCount})
           </button>
