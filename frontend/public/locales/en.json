@@ -1710,6 +1710,7 @@
       "classic": "Classic",
       "lite": "Smart"
     },
+    "createIssue": "Create issue",
     "moveToTrash": "Move to trash",
     "movedToTrash": "Moved to trash",
     "deleteFailed": "Failed to delete canvas",
