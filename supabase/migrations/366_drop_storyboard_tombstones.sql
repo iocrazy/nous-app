@@ -31,9 +31,35 @@
 -- No SET ROLE (mig 176's lesson, restated in mig 365: self-demoting to a role
 -- that does not own the table yields "permission denied"; run as the connecting
 -- role, which is the owner under CI). Guarded: refuses to drop any tombstone
--- that is not empty (all eight were at 0 rows when mig 348 renamed them —
--- the guard is what makes the DROP safe rather than merely convenient).
--- Idempotent: a second run is a clean no-op.
+-- that is not empty. Idempotent: a second run is a clean no-op.
+--
+-- THE ONE KNOWN TEST ROW (first prod run refused — the guard working)
+-- -------------------------------------------------------------------
+-- mig 348's own header recorded "Data at retirement time: storyboard_projects=
+-- 1 test row, frames=0", and the first prod apply of this migration was
+-- correctly refused by the guard on exactly that row. Inspected read-only on
+-- prod 2026-07-16 before writing the removal below:
+--
+--   id=324214569136407  team_id=310812366953241  name='12312'
+--   created 2026-07-05 (the retirement window), description/cover empty,
+--   viewport at defaults, status=active,
+--   script_storyboard_links references: 0
+--
+-- A keyboard-mash test row, unreachable since #1109's 410s, referenced by
+-- nothing. It is deleted BY EXACT ID below — the guard itself stays at the
+-- strict 0-row discipline so any OTHER unexpected row still refuses the drop.
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+     WHERE table_schema = 'public'
+       AND table_name = 'zzz_deprecated_storyboard_projects'
+  ) THEN
+    DELETE FROM public.zzz_deprecated_storyboard_projects
+     WHERE id = 324214569136407 AND name = '12312';
+  END IF;
+END $$;
 
 DO $$
 DECLARE
