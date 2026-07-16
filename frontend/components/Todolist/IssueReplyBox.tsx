@@ -32,6 +32,8 @@ import { useResourceSearch } from '../../hooks/useResourceSearch';
 import { createResourceMentionExtension } from '../chat/ChatInputResourceMention';
 import { ResourcePickerSuggestion } from '../chat/ResourcePickerSuggestion';
 import type { ResourceRefAttachment, ResourceSearchResult } from '../../types';
+import { IssueCommentTriggerChip } from './IssueCommentTriggerChip';
+import type { CommentTriggerPreview } from '../../services/issueMessageService';
 
 /** Merged attachment payload the parent forwards to the backend: staged file
  *  uploads plus collected resource references from @-mention chips. */
@@ -41,9 +43,22 @@ interface IssueReplyBoxProps {
   agents: AgentRef[];
   defaultAgentId?: string | null;
   /** Parent owns submission, returns rejection on error so we can keep content.
-   *  Third arg carries staged attachments + resource refs (may be empty). */
-  onSubmit: (body: string, agentId: string | null, attachments: ComposerAttachment[]) => Promise<void>;
+   *  Third arg carries staged attachments + resource refs (may be empty).
+   *  Fourth carries the agents this one comment must not wake (subtractive —
+   *  the server only drops from the set it computed itself). */
+  onSubmit: (
+    body: string,
+    agentId: string | null,
+    attachments: ComposerAttachment[],
+    suppressAgentIds?: string[],
+  ) => Promise<void>;
   disabled?: boolean;
+  /** The server's verdict on what a comment here would start. Null while it
+   *  loads, or when the trigger-chip flag is off — the chip stays hidden. */
+  triggerPreview?: CommentTriggerPreview | null;
+  /** Resolved display name for triggerPreview.agent_id (the endpoint is a pure
+   *  predicate and returns only the id). */
+  triggerAgentName?: string;
   /** Scope the @-mention resource picker to this team + personal resources. */
   teamId?: string;
 }
@@ -70,6 +85,8 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
   defaultAgentId,
   onSubmit,
   disabled,
+  triggerPreview,
+  triggerAgentName,
   teamId,
 }) => {
   const { t } = useTranslation();
@@ -77,6 +94,14 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([]);
+  // Store WHICH agent the user skipped, not a bare flag: if the assignee changes
+  // between the preview and the send, `suppressed` below stops matching and the
+  // chip re-arms itself, so a skip aimed at agent A can never silently swallow
+  // agent B's run. Per-comment and one-shot — reset on submit, never persisted.
+  const [suppressedAgentId, setSuppressedAgentId] = useState<string | null>(null);
+  const [draftEmpty, setDraftEmpty] = useState(true);
+  const suppressed =
+    suppressedAgentId != null && suppressedAgentId === triggerPreview?.agent_id;
 
   const selectedAgent = agents.find((a) => a.id === agentId) ?? null;
 
@@ -127,15 +152,30 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     if ((!text && refs.length === 0) || submitting || uploading) return;
     setSubmitting(true);
     try {
-      await onSubmit(text, agentId, [...stagedAttachments, ...refs]);
+      await onSubmit(
+        text,
+        agentId,
+        [...stagedAttachments, ...refs],
+        suppressed && suppressedAgentId ? [suppressedAgentId] : undefined,
+      );
       editor.commands.clearContent(true);
       setStagedAttachments([]);
+      // One-shot: the next comment starts armed again.
+      setSuppressedAgentId(null);
     } catch {
       // parent toasts; keep editor content AND chips so the user can retry
     } finally {
       setSubmitting(false);
     }
-  }, [agentId, onSubmit, stagedAttachments, submitting, uploading]);
+  }, [
+    agentId,
+    onSubmit,
+    stagedAttachments,
+    submitting,
+    suppressed,
+    suppressedAgentId,
+    uploading,
+  ]);
 
   // Keep a stable ref to submit so the editor key-handler closure (created
   // once) always calls the latest version without re-binding the editor.
@@ -196,6 +236,20 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
   // Expose the editor to closures + the submit callback.
   useEffect(() => {
     editorRef.current = editor;
+  }, [editor]);
+
+  // Track whether anything is staged to send — the trigger chip only discloses
+  // a wake that's actually imminent (mirrors multica's
+  // shouldRenderComposerHandoffPreview: empty body → no preview row).
+  useEffect(() => {
+    if (!editor) return;
+    const sync = () =>
+      setDraftEmpty(!editor.getText().trim() && collectRefs(editor).length === 0);
+    sync();
+    editor.on('update', sync);
+    return () => {
+      editor.off('update', sync);
+    };
   }, [editor]);
 
   // Live-query tracking — after "@" is typed, follow subsequent chars and
@@ -292,6 +346,21 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
 
       <div className="flex items-center gap-2 px-2 pb-2 border-t border-ink-800/80 pt-2">
         <span className="text-[12px] text-ink-600 ml-1">⌘↩ to send</span>
+        {/* Sits beside "⌘↩ to send" on purpose: it describes what that keystroke
+            is about to cost. */}
+        {triggerPreview && (
+          <IssueCommentTriggerChip
+            preview={triggerPreview}
+            agentName={triggerAgentName}
+            suppressed={suppressed}
+            draftEmpty={draftEmpty}
+            onToggle={() =>
+              setSuppressedAgentId((cur) =>
+                cur === triggerPreview.agent_id ? null : triggerPreview.agent_id,
+              )
+            }
+          />
+        )}
         <div className="relative ml-auto">
           <button
             type="button"

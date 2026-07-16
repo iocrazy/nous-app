@@ -187,4 +187,129 @@ describe('IssueReplyBox', () => {
       expect(ref).toMatchObject({ kind: 'resource_ref', resource_id: '900', name: 'demo.mp4' });
     });
   });
+
+  // ── Comment trigger disclosure + suppression ────────────────────────────
+  describe('trigger chip', () => {
+    const WAKES = { will_wake: true, agent_id: 'a1' };
+
+    const send = (container: HTMLElement) =>
+      fireEvent.click(
+        container.querySelector('button[type="submit"], button[aria-label*="send" i]')!,
+      );
+
+    it('discloses the wake once there is something to send', () => {
+      editorText = 'change the opening';
+      render(
+        <IssueReplyBox
+          agents={_agents as never}
+          onSubmit={vi.fn()}
+          triggerPreview={WAKES}
+          triggerAgentName="Agent 1"
+        />,
+      );
+      expect(screen.getByTestId('comment-trigger-chip')).toHaveTextContent(
+        /Will start when sent/i,
+      );
+    });
+
+    it('stays quiet when the server says nothing wakes', () => {
+      editorText = 'a note to self';
+      render(
+        <IssueReplyBox
+          agents={_agents as never}
+          onSubmit={vi.fn()}
+          triggerPreview={{ will_wake: false, agent_id: null }}
+        />,
+      );
+      expect(screen.queryByTestId('comment-trigger-chip')).toBeNull();
+    });
+
+    it('sends no suppress key when the chip is untouched', async () => {
+      editorText = 'go ahead';
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      const { container } = render(
+        <IssueReplyBox
+          agents={_agents as never}
+          onSubmit={onSubmit}
+          triggerPreview={WAKES}
+        />,
+      );
+      send(container);
+      await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+      expect(onSubmit.mock.calls[0][3]).toBeUndefined();
+    });
+
+    it('names the skipped agent in the payload once suppressed', async () => {
+      editorText = 'wait for the client';
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      const { container } = render(
+        <IssueReplyBox
+          agents={_agents as never}
+          onSubmit={onSubmit}
+          triggerPreview={WAKES}
+        />,
+      );
+      fireEvent.click(screen.getByTestId('comment-trigger-chip'));
+      send(container);
+      await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+      expect(onSubmit.mock.calls[0][3]).toEqual(['a1']);
+    });
+
+    it('re-arms after sending — suppression is one comment, not a mode', async () => {
+      editorText = 'quiet note';
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      const { container } = render(
+        <IssueReplyBox
+          agents={_agents as never}
+          onSubmit={onSubmit}
+          triggerPreview={WAKES}
+        />,
+      );
+      fireEvent.click(screen.getByTestId('comment-trigger-chip'));
+      send(container);
+      await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+      await waitFor(() =>
+        expect(screen.getByTestId('comment-trigger-chip')).toHaveAttribute(
+          'aria-pressed',
+          'false',
+        ),
+      );
+    });
+
+    it('re-arms when the assignee changes under a pending suppression', async () => {
+      // The user skipped agent a1. If the issue is reassigned to a2 before they
+      // send, that skip must not silently swallow a2's run — a2 is an agent they
+      // never saw the chip for.
+      editorText = 'hold on';
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+      const { container, rerender } = render(
+        <IssueReplyBox
+          agents={_agents as never}
+          onSubmit={onSubmit}
+          triggerPreview={WAKES}
+        />,
+      );
+      fireEvent.click(screen.getByTestId('comment-trigger-chip'));
+      expect(screen.getByTestId('comment-trigger-chip')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+
+      rerender(
+        <IssueReplyBox
+          agents={_agents as never}
+          onSubmit={onSubmit}
+          triggerPreview={{ will_wake: true, agent_id: 'a2' }}
+        />,
+      );
+      expect(screen.getByTestId('comment-trigger-chip')).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      );
+
+      send(container);
+      await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+      expect(onSubmit.mock.calls[0][3]).toBeUndefined();
+    });
+  });
 });
