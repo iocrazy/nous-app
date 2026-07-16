@@ -7,8 +7,6 @@ DB-only (mediahub_models catalog → user BYOK → ProviderNotConfiguredError).
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 
 from app.services.ai.adapters.factory import (
@@ -58,24 +56,3 @@ def test_get_adapter_for_user_byo_base_still_works():
         None,
     )
     assert adapter is not None
-
-
-@pytest.mark.asyncio
-async def test_storyboard_service_fails_fast_when_model_not_in_catalog():
-    from app.services.storyboard.storyboard_ai_service import StoryboardAIService
-
-    svc = StoryboardAIService()
-    repo = MagicMock()
-    repo.get_by_slug = AsyncMock(return_value={"model": "doubao-unlisted"})
-    with (
-        patch(
-            "app.repositories.agent_repository.get_agent_repository",
-            return_value=repo,
-        ),
-        patch(
-            "app.services.ai.providers.ai_provider_helpers.resolve_mediahub_model",
-            AsyncMock(return_value=None),
-        ),
-    ):
-        with pytest.raises(RuntimeError, match="not configured"):
-            await svc._call_llm([{"role": "user", "content": "hi"}])

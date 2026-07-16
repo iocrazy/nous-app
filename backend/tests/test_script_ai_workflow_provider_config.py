@@ -125,52 +125,6 @@ async def test_branches_step_resolves_and_passes_provider_config():
 
 
 # ---------------------------------------------------------------------------
-# convert-to-storyboard
-# ---------------------------------------------------------------------------
-
-
-async def test_scenes_step_resolves_and_passes_provider_config():
-    from app.services.storyboard.script.script_service import ScriptService
-    from app.workflows import script_ai_workflows as m
-
-    scenes = [{"scene_number": 1, "description": "d", "camera_notes": "c"}]
-    svc_cls = _service_mock(split_chapter_to_scenes=scenes)
-
-    chapter_repo = MagicMock()
-    chapter_repo.get_by_id = AsyncMock(
-        return_value={"title": "Act I", "summary": "s", "content": None}
-    )
-    project_repo = MagicMock()
-    project_repo.get_by_id = AsyncMock(return_value=None)
-
-    def _init(self):
-        self.chapter_repo = chapter_repo
-        self.project_repo = project_repo
-
-    with (
-        patch(
-            "app.services.ai.providers.ai_provider_helpers.resolve_script_provider_config",
-            _resolver_mock(),
-        ) as resolver,
-        patch(
-            "app.services.storyboard.script.script_ai_service.ScriptAIService",
-            svc_cls,
-        ),
-        patch.object(ScriptService, "__init__", _init),
-    ):
-        result = await m.script_ai_scenes_step(_SCRIPT, _CHAPTER, _USER)
-
-    assert result == scenes
-    resolver.assert_awaited_once_with(_USER)
-    svc_cls.assert_called_once_with(
-        user_id=_USER,
-        agent_slug="script_ai",
-        provider_key="doubao",
-        provider_config={"api_key": "k", "base_url": "u", "model": "m"},
-    )
-
-
-# ---------------------------------------------------------------------------
 # generate-outline
 # ---------------------------------------------------------------------------
 

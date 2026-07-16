@@ -10,14 +10,12 @@ retired Storyboard Workbench stack (storyboard_service / storyboard_repository /
 the tombstone models). The storyboard-specific code path is being retired
 separately; this class carries only the parts those live callers actually use.
 
-Deliberate deletion vs the storyboard original: the ``character_ids`` argument
-of ``generate_image`` is dropped. Its only implementation reached the retired
-storyboard character store (``StoryboardService.get_character_prompt_fragment``),
-and neither live consumer ever passed it — so no live behaviour changes. What
-IS preserved verbatim is ``build_project_style_fragment``'s ``project_id=""``
-no-op (``int("")`` raises inside a swallow-everything ``try/except`` → returns
-""), which both live callers rely on to skip storyboard style lookup while
-still flowing through the shared prompt-assembly path.
+Deliberate deletions vs the storyboard original: the ``character_ids`` argument
+and the ``build_project_style_fragment`` style-injection step are both dropped.
+Each reached the retired storyboard stack (the character store / the
+storyboard-project → canonical-project style bridge) and neither was ever
+exercised by the two live consumers — they pass ``project_id=""`` and no
+character ids — so no live behaviour changes.
 
 Credentials are DB-only (铁律 2026-07-07): the image/video registries ship
 EMPTY, so every call resolves its provider against the platform
@@ -27,7 +25,7 @@ EMPTY, so every call resolves its provider against the platform
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from loguru import logger
 
@@ -47,54 +45,6 @@ _DEFAULT_IMAGE_MODEL = "dall-e-3"
 class ImageGenerationService:
     """Provider-agnostic image + video generation orchestration."""
 
-    _STYLE_FRAGMENT_MAX_CHARS = 600
-
-    async def build_project_style_fragment(self, storyboard_project_id: str) -> str:
-        """Project style guidance for prompt injection (Phase 4 M9).
-
-        Reads the project's style profile (keyed on the canonical project the
-        storyboard project links to) and renders ``style_md`` plus the
-        structured ``visual_style`` traits into one clipped fragment. Empty
-        string when no profile exists or anything fails — style is seasoning,
-        never a reason for a generation to break.
-
-        The ``project_id=""`` case both live callers pass degrades to "" here:
-        ``int("")`` raises ValueError inside the swallow-everything except, so a
-        shot / agent generation (which is not a storyboard project) flows
-        through prompt assembly with no style lookup. This no-op MUST be
-        preserved byte-for-byte."""
-        try:
-            from app.repositories.project_style_profile_repository import (
-                get_project_style_profile_repository,
-            )
-
-            profile = (
-                await get_project_style_profile_repository().get_for_storyboard_project(
-                    int(storyboard_project_id)
-                )
-            )
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Style profile lookup failed for storyboard project %s",
-                storyboard_project_id,
-            )
-            return ""
-        if not profile:
-            return ""
-
-        parts: List[str] = []
-        style_md = (profile.get("style_md") or "").strip()
-        if style_md:
-            parts.append(style_md)
-        visual_style = profile.get("visual_style")
-        if isinstance(visual_style, dict):
-            traits = ", ".join(
-                f"{key}: {value}" for key, value in visual_style.items() if value
-            )
-            if traits:
-                parts.append(traits)
-        return " — ".join(parts)[: self._STYLE_FRAGMENT_MAX_CHARS]
-
     async def generate_image(
         self,
         project_id: str,
@@ -111,8 +61,8 @@ class ImageGenerationService:
         not directly from request handlers.
 
         Args:
-            project_id: Storyboard-project id for optional style injection;
-                ``""`` (both live callers) means "no style fragment".
+            project_id: Owning-project id, for logging only (both live callers
+                pass "").
             node_id: Canvas/shot id (for logging / provider provenance).
             prompt: Base image generation prompt.
             model: Model identifier understood by the provider.
@@ -132,10 +82,6 @@ class ImageGenerationService:
         """
         try:
             effective_prompt = prompt
-
-            style_fragment = await self.build_project_style_fragment(project_id)
-            if style_fragment:
-                effective_prompt = f"{effective_prompt}. Style: {style_fragment}"
 
             # Provider precedence: the in-process registry wins when it has the
             # named provider (reserved for future in-proc providers). Today the
