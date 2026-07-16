@@ -8,6 +8,7 @@ import uuid
 from sqlalchemy import (
     BigInteger,
     DateTime,
+    ForeignKeyConstraint,
     Index,
     Numeric,
     PrimaryKeyConstraint,
@@ -24,6 +25,12 @@ from app.db.orm_base import Base
 class GeneratedMedia(Base):
     __tablename__ = "generated_media"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["conversation_id"],
+            ["public.conversations.id"],
+            ondelete="SET NULL",
+            name="generated_media_conversation_id_fkey",
+        ),
         PrimaryKeyConstraint("id", name="generated_media_pkey"),
         Index("idx_genmedia_scope_created", "scope_id", "created_at"),
         Index("idx_genmedia_origin_run", "origin_run_id"),

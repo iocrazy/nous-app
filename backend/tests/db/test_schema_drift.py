@@ -10,12 +10,15 @@ checked. In CI the schema under test is built from supabase/schema_baseline.sql
 plus the migrations above its watermark, so this runs on every PR with no secret
 and no live database.
 
-Five hard gates (all run against the 153 mapped public tables):
+Six hard gates (all run against the mapped public tables):
   1. test_no_missing_tables         — every mapped table exists in live public schema
   2. test_column_names_match        — set(model cols) == set(live cols) per table
   3. test_nullability_matches       — model nullable matches live is_nullable per col
   4. test_column_types_match        — model SA type maps to expected udt_name per col
   5. test_no_unmapped_inscope_tables — (live tables) - {3 excluded} - {mapped} == empty
+  6. test_foreign_keys_match        — model FK column-pairs == live FK column-pairs
+                                      (public targets only; auth.users targets are a
+                                      convention-omission, not drift)
 
 Setup: point INTEGRATION_DATABASE_URL at any Postgres built the CI way
 (ci_bootstrap.sql → schema_baseline.sql → migrations above the watermark):
@@ -111,6 +114,35 @@ _ALLOWED_UNMAPPED_TABLES: frozenset[str] = frozenset()
 _MAX_ALLOWED_MISSING_TABLES = 0
 _MAX_ALLOWED_MISSING_COLUMNS = 0
 _MAX_ALLOWED_UNMAPPED_TABLES = 0
+
+# gate 6 — foreign-key drift. Each entry is a documented, pre-existing FK
+# mismatch keyed as "src_table.src_col->tgt_table.tgt_col" (schema is always
+# public on both sides — see below). A pair can only ever drift in ONE direction
+# at a time (either the model declares an FK the live DB lacks, or the live DB
+# has an FK the model does not declare), so a single un-tagged key is unambiguous.
+#
+# Direction of each drift is reported at failure time:
+#   • model-has / live-lacks — the DANGEROUS one. The model points a FK at a
+#     table/column the live DB does not have that relationship for — usually a
+#     target that was renamed or dropped (this is exactly how the two
+#     script_storyboard_links FKs drifted to their pre-mig-348 target names and
+#     escaped the other five gates).
+#   • live-has / model-lacks — the model is reference-only and simply never
+#     declared the FK. Harmless at runtime, but still drift, so it is registered.
+#
+# ⚠️ auth.users targets are NOT in scope here and must never appear: the flat-model
+# convention permanently omits FKs to auth.users (GoTrue owns that table), so the
+# live→model direction is filtered on target schema = 'auth' before comparison.
+# Only public→public FK column-pairs are compared.
+#
+# EMPTY, ceiling 0: #1406 regenerated the models against prod so model FKs match
+# prod exactly. Any migration that renames/drops an FK target (or adds/removes an
+# FK) without regenerating the model turns this gate red on that PR.
+_ALLOWED_FK_DRIFT: frozenset[str] = frozenset()
+
+# Ratchet ceiling for gate 6 — may only ever be LOWERED. See
+# test_allowlists_only_shrink.
+_MAX_ALLOWED_FK_DRIFT = 0
 
 # ── SQLAlchemy type → PG udt_name normalization map ─────────────────────
 # Maps the SQLAlchemy column type class name (from type(col.type).__name__)
@@ -284,6 +316,64 @@ async def live_schema(integration_db_url: str) -> dict[str, dict[str, dict[str, 
     return schema
 
 
+# ── Live foreign-key fixture ────────────────────────────────────────────
+
+
+@pytest.fixture(scope="module")
+async def live_fks(integration_db_url: str) -> list[dict[str, str]]:
+    """Return every foreign key whose SOURCE table is in the public schema.
+
+    One row per (source column, target column) pair — composite FKs are
+    positionally unnested via WITH ORDINALITY so each column pair is its own
+    row. This matches SQLAlchemy's model side, where a multi-column
+    ForeignKeyConstraint yields one ForeignKey object per column.
+
+    Each dict carries the target schema so the caller can filter auth.users
+    targets (a convention-omission, not drift). Read-only; no writes.
+    """
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT
+                src.relname       AS src_table,
+                src_att.attname   AS src_col,
+                tgt_ns.nspname    AS tgt_schema,
+                tgt.relname       AS tgt_table,
+                tgt_att.attname   AS tgt_col
+            FROM pg_constraint con
+            JOIN pg_class     src    ON src.oid = con.conrelid
+            JOIN pg_namespace src_ns ON src_ns.oid = src.relnamespace
+            JOIN pg_class     tgt    ON tgt.oid = con.confrelid
+            JOIN pg_namespace tgt_ns ON tgt_ns.oid = tgt.relnamespace
+            JOIN LATERAL unnest(con.conkey)  WITH ORDINALITY AS sk(attnum, ord)
+              ON true
+            JOIN LATERAL unnest(con.confkey) WITH ORDINALITY AS tk(attnum, ord)
+              ON sk.ord = tk.ord
+            JOIN pg_attribute src_att
+              ON src_att.attrelid = con.conrelid AND src_att.attnum = sk.attnum
+            JOIN pg_attribute tgt_att
+              ON tgt_att.attrelid = con.confrelid AND tgt_att.attnum = tk.attnum
+            WHERE con.contype = 'f'
+              AND src_ns.nspname = 'public'
+            ORDER BY src.relname, src_att.attname
+            """
+        )
+    finally:
+        await conn.close()
+
+    return [
+        {
+            "src_table": r["src_table"],
+            "src_col": r["src_col"],
+            "tgt_schema": r["tgt_schema"],
+            "tgt_table": r["tgt_table"],
+            "tgt_col": r["tgt_col"],
+        }
+        for r in rows
+    ]
+
+
 # ── ORM metadata helper ─────────────────────────────────────────────────
 
 
@@ -303,6 +393,45 @@ def _orm_tables() -> dict[str, Any]:
         bare = full_name.split(".", 1)[-1]
         result[bare] = table
     return result
+
+
+# FK comparison key: schema is public on both sides (models never declare
+# non-public FKs; the live side is filtered to public targets before comparison),
+# so the key omits it for readability. Format matches _ALLOWED_FK_DRIFT entries.
+def _fk_key(src_table: str, src_col: str, tgt_table: str, tgt_col: str) -> str:
+    return f"{src_table}.{src_col}->{tgt_table}.{tgt_col}"
+
+
+def _orm_fks() -> set[str]:
+    """Return every model-declared FK as a set of _fk_key strings.
+
+    Uses ForeignKey.target_fullname (the raw 'schema.table.col' colspec) rather
+    than .column, so a model FK pointing at a table absent from Base.metadata
+    does NOT raise here — that dangling target is exactly the drift this gate
+    must report, not crash on. A composite ForeignKeyConstraint contributes one
+    ForeignKey per column, so keys are column-pair granular like the live side.
+    """
+    keys: set[str] = set()
+    for table in _orm_tables().values():
+        for fk in table.foreign_keys:
+            # target_fullname is "schema.table.col"; models always write public.
+            parts = fk.target_fullname.split(".")
+            if len(parts) == 3:
+                tgt_schema, tgt_table, tgt_col = parts
+            elif len(parts) == 2:
+                # Defensive: an unqualified colspec means the public schema.
+                tgt_schema, (tgt_table, tgt_col) = "public", parts
+            else:  # pragma: no cover — colspec is always 2- or 3-part
+                raise ValueError(
+                    f"{table.name}.{fk.parent.name}: cannot parse FK target "
+                    f"{fk.target_fullname!r}"
+                )
+            # Only public-targeting FKs participate; a model auth FK would be a
+            # convention violation and (correctly) surface as model-only drift,
+            # but in practice none exist.
+            if tgt_schema == "public":
+                keys.add(_fk_key(table.name, fk.parent.name, tgt_table, tgt_col))
+    return keys
 
 
 # ── Tests ───────────────────────────────────────────────────────────────
@@ -468,6 +597,84 @@ async def test_no_unmapped_inscope_tables(
     )
 
 
+def _live_public_fk_keys(live_fks: list[dict[str, str]]) -> set[str]:
+    """The set of live FK column-pairs eligible for comparison with the models.
+
+    Restricted to:
+      • target schema == 'public' — auth.users targets are dropped here (the
+        convention-omission carve-out), and any other schema is handled by
+        _live_nonpublic_nonauth_fks() so it is surfaced rather than silently
+        compared against nothing.
+      • source table is ORM-mapped — an FK on an unmapped table is a symptom of
+        the table itself being unmapped (gate 5), so it is not double-reported
+        here. Gate 5's ceiling is 0, so in practice every public table is mapped.
+    """
+    mapped = frozenset(_orm_tables().keys())
+    return {
+        _fk_key(fk["src_table"], fk["src_col"], fk["tgt_table"], fk["tgt_col"])
+        for fk in live_fks
+        if fk["tgt_schema"] == "public" and fk["src_table"] in mapped
+    }
+
+
+async def test_foreign_keys_match(live_fks: list[dict[str, str]]) -> None:
+    """Model-declared FK column-pairs must match live public FK column-pairs.
+
+    Two drift directions, both reported:
+      • model-has / live-lacks — model declares an FK the live DB does not have.
+        Usually a target renamed/dropped by a migration without regenerating the
+        model (the script_storyboard_links failure mode).
+      • live-has / model-lacks — live DB has an FK the model never declared.
+
+    auth.users targets are filtered out before comparison (flat-model convention
+    omits them). Any live FK targeting a schema OTHER than public or auth is not
+    exemptible and always fails — the models can only ever target public, so such
+    an FK is by definition undeclared drift and must be looked at, never assumed.
+    """
+    orm_keys = _orm_fks()
+    live_keys = _live_public_fk_keys(live_fks)
+
+    # Any non-public, non-auth target is unexpected and never exempt.
+    mapped = frozenset(_orm_tables().keys())
+    unexpected_targets = sorted(
+        f"  {fk['src_table']}.{fk['src_col']} -> "
+        f"{fk['tgt_schema']}.{fk['tgt_table']}.{fk['tgt_col']}"
+        for fk in live_fks
+        if fk["tgt_schema"] not in ("public", "auth") and fk["src_table"] in mapped
+    )
+
+    model_only = sorted(
+        (orm_keys - live_keys) - _ALLOWED_FK_DRIFT
+    )  # model declares, live lacks
+    live_only = sorted(
+        (live_keys - orm_keys) - _ALLOWED_FK_DRIFT
+    )  # live has, model lacks
+
+    parts: list[str] = []
+    if model_only:
+        parts.append(
+            f"  model-has / live-lacks ({len(model_only)}) — model FK points at a "
+            f"target the live DB has no such relationship for (renamed/dropped "
+            f"table?). Fix the model FK target or drop the FK:"
+        )
+        parts += [f"    {k}" for k in model_only]
+    if live_only:
+        parts.append(
+            f"  live-has / model-lacks ({len(live_only)}) — live DB has an FK the "
+            f"model never declared. Add the ForeignKeyConstraint to the model, or "
+            f"register it in _ALLOWED_FK_DRIFT if intentionally reference-only:"
+        )
+        parts += [f"    {k}" for k in live_only]
+    if unexpected_targets:
+        parts.append(
+            f"  live FK targeting a non-public, non-auth schema "
+            f"({len(unexpected_targets)}) — not exemptible; investigate:"
+        )
+        parts += unexpected_targets
+
+    assert not parts, "Foreign-key drift detected:\n" + "\n".join(parts)
+
+
 # ── Ratchet enforcement ─────────────────────────────────────────────────
 
 
@@ -496,10 +703,16 @@ def test_allowlists_only_shrink() -> None:
         f"_ALLOWED_UNMAPPED_TABLES grew to {len(_ALLOWED_UNMAPPED_TABLES)} "
         f"(ceiling {_MAX_ALLOWED_UNMAPPED_TABLES}). Add the model instead."
     )
+    assert len(_ALLOWED_FK_DRIFT) <= _MAX_ALLOWED_FK_DRIFT, (
+        f"_ALLOWED_FK_DRIFT grew to {len(_ALLOWED_FK_DRIFT)} (ceiling "
+        f"{_MAX_ALLOWED_FK_DRIFT}). Fix the model FK target (or declare the "
+        f"missing FK) instead of exempting a new mismatch."
+    )
 
 
 async def test_allowlists_are_still_accurate(
     live_schema: dict[str, dict[str, dict[str, str]]],
+    live_fks: list[dict[str, str]],
 ) -> None:
     """Every allowlist entry must still describe REAL drift.
 
@@ -559,6 +772,18 @@ async def test_allowlists_are_still_accurate(
             stale.append(
                 f"_ALLOWED_UNMAPPED_TABLES: {tname} — model exists now; "
                 f"remove this entry"
+            )
+
+    # gate 6: an FK-drift exemption is stale unless the pair is STILL drifting in
+    # one of the two directions (model-only or live-only, pre-exemption).
+    orm_keys = _orm_fks()
+    live_keys = _live_public_fk_keys(live_fks)
+    still_drifting = (orm_keys - live_keys) | (live_keys - orm_keys)
+    for key in sorted(_ALLOWED_FK_DRIFT):
+        if key not in still_drifting:
+            stale.append(
+                f"_ALLOWED_FK_DRIFT: {key} — no longer drifting (model and live "
+                f"agree now); remove this entry"
             )
 
     assert not stale, (
