@@ -22,7 +22,9 @@ import {
   useState,
   type DragEvent,
   type KeyboardEvent,
-  type MouseEvent,
+  // Aliased: a bare `MouseEvent` import SHADOWS the global DOM MouseEvent, which
+  // silently broke `document.addEventListener('mousedown', ...)` typing below.
+  type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { applyLocal, buildInverse } from '../opBuilder';
@@ -33,7 +35,14 @@ import {
   CopilotDisabledError,
   OpRejectedError,
 } from '../copilotService';
-import type { CursorState, ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
+import {
+  MH_DRAG_MIME,
+  type CursorState,
+  type ElementOp,
+  type ElementType,
+  type ScriptElement,
+  type SceneDoc,
+} from '../types';
 import { useSceneSync, type RemoteOpRow } from '../useSceneSync';
 import { MentionCombobox, filterMentionCandidates } from './MentionCombobox';
 import { SlashMenu, SLASH_ITEMS, filterSlashItems, type SlashItem } from './SlashMenu';
@@ -587,6 +596,17 @@ export function SceneBlock({
   );
   const handleTiptapMentionClose = useCallback(() => setMention(null), []);
 
+  // Typing/keyboard path for a character line: refresh the query of a picker
+  // that is ALREADY open on this element, and do nothing otherwise. Never opens
+  // one — the editor decides that (a click on the name, or an empty cue). The
+  // `prev` bail-outs also mean this can't resurrect a picker the writer just
+  // dismissed with Escape while the caret stayed in the line.
+  const handleTiptapMentionQuery = useCallback((elementId: string, query: string) => {
+    setMention((prev) =>
+      prev && prev.elementId === elementId && prev.query !== query ? { ...prev, query } : prev,
+    );
+  }, []);
+
   const handleTiptapMentionSelect = useCallback(
     (name: string) => {
       const m = mentionRef.current;
@@ -793,7 +813,16 @@ export function SceneBlock({
     onElementDragDone?.();
   }, [onElementDragDone]);
   const handleElementDragOver = useCallback((elementId: string, edge: 'top' | 'bottom') => {
-    setElementDropTarget({ elementId, edge });
+    // Bail out when the target row+edge is UNCHANGED. `dragover` fires ~60×/s and
+    // a fresh object literal every time made this state always-different, so each
+    // one re-rendered the block → propsSync no-op transaction → ProseMirror
+    // repainted every row. That is what made dragging stutter. Returning `prev`
+    // lets React skip the render entirely, so we only repaint when the drop
+    // indicator actually moves. Mirrors the scene-level guard EditorShell's
+    // `reorder.onDragOver` has always had.
+    setElementDropTarget((prev) =>
+      prev && prev.elementId === elementId && prev.edge === edge ? prev : { elementId, edge },
+    );
   }, []);
   /** Build the insert op that lands an external element at the given anchor. */
   const acceptExternalDrop = useCallback(
@@ -855,7 +884,7 @@ export function SceneBlock({
   // ── Right-click context menu (delete block / delete scene / move scene) ─────
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
   // Heading right-click: elementId is null (the row IS the scene heading).
-  const openHeadingContextMenu = useCallback((e: MouseEvent) => {
+  const openHeadingContextMenu = useCallback((e: ReactMouseEvent) => {
     e.preventDefault();
     setContextMenu({ x: e.clientX, y: e.clientY, elementId: null });
   }, []);
@@ -1160,6 +1189,7 @@ export function SceneBlock({
                 ? (e) => {
                     e.dataTransfer.effectAllowed = 'move';
                     e.dataTransfer.setData('text/plain', scene.id);
+                    e.dataTransfer.setData(MH_DRAG_MIME, scene.id);
                     reorder.onDragStart(scene.id);
                   }
                 : undefined
@@ -1251,6 +1281,7 @@ export function SceneBlock({
           slashMenu={tiptapSlashMenu}
           onMentionOpen={handleTiptapMentionOpen}
           onMentionClose={handleTiptapMentionClose}
+          onMentionQuery={handleTiptapMentionQuery}
           mentionMenu={tiptapMentionMenu}
           pageSeams={pageSeams}
           mentionCandidates={mentionCandidates}
@@ -1321,6 +1352,7 @@ export function SceneBlock({
           onDragStart={(e) => {
             e.dataTransfer.effectAllowed = 'move';
             e.dataTransfer.setData('text/plain', scene.id);
+            e.dataTransfer.setData(MH_DRAG_MIME, scene.id);
             reorder.onDragStart(scene.id);
           }}
           onDragEnd={() => {

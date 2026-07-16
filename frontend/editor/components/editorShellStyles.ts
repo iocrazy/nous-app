@@ -334,6 +334,11 @@ export const EDITOR_SHELL_STYLES = `
   box-shadow:var(--shadow-sheet); padding:34px 40px 44px;
   font-family:var(--mono); color:var(--sheet-ink);
   position:relative; min-height:60%; isolation:isolate;
+  /* Column-flex item in .mh-sheet-scroll: the default flex-shrink:1 lets the
+     bounded scroll container squash the paper back to its min-height, turning
+     that floor into a ceiling and painting the rest of the script outside the
+     sheet (which is overflow:visible). The paper must never shrink. */
+  flex-shrink:0;
 }
 .mh-sheet::after{
   content:""; position:absolute; inset:0; border-radius:6px;

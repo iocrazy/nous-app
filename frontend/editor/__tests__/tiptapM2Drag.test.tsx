@@ -10,7 +10,7 @@
  */
 import { useRef, useState } from 'react';
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { render, cleanup, waitFor, fireEvent, screen, within, createEvent } from '@testing-library/react';
+import { render, cleanup, waitFor, fireEvent, screen, within, createEvent, act } from '@testing-library/react';
 import type { ElementOp, SceneDoc } from '../types';
 
 vi.mock('react-i18next', () => ({
@@ -106,6 +106,24 @@ const fireDragAt = (node: HTMLElement, type: 'dragover' | 'drop', clientY: numbe
   node.dispatchEvent(evt);
 };
 
+/**
+ * Start a drag from a grip, then let the NodeView's DEFERRED onElementDragStart
+ * land before any dragover/drop. The grip defers that state update by a tick on
+ * purpose: doing it synchronously re-renders (and replaces) the very element the
+ * browser is dragging, which makes the browser ABORT the drag — dragend fired
+ * immediately and every later dragover/drop saw draggingElementId=null (the live
+ * bug, caught via [DRAG-DBG] console tracing). Real browsers only deliver
+ * dragover/drop well after dragstart, so awaiting a tick here mirrors reality —
+ * firing them synchronously (as this suite used to) is what let the regression
+ * ship green.
+ */
+const startDrag = async (handle: HTMLElement) => {
+  fireEvent.dragStart(handle, { dataTransfer: fakeDataTransfer() });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+};
+
 afterEach(() => {
   cleanup();
   vi.unstubAllEnvs();
@@ -168,7 +186,7 @@ describe('TipTap M2 — same-scene element drag', () => {
     const aRow = rowOf('el_a');
     stubRect(aRow);
 
-    fireEvent.dragStart(cHandle, { dataTransfer: fakeDataTransfer() });
+    await startDrag(cHandle);
     fireDragAt(aRow, 'dragover', 5); // above midpoint → 'top'
     fireDragAt(aRow, 'drop', 5);
 
@@ -185,7 +203,7 @@ describe('TipTap M2 — same-scene element drag', () => {
     const bRow = rowOf('el_b');
     stubRect(bRow);
 
-    fireEvent.dragStart(aHandle, { dataTransfer: fakeDataTransfer() });
+    await startDrag(aHandle);
     fireDragAt(bRow, 'dragover', 30); // below midpoint → 'bottom'
     fireDragAt(bRow, 'drop', 30);
 
@@ -200,7 +218,7 @@ describe('TipTap M2 — same-scene element drag', () => {
     const bRow = rowOf('el_b');
     stubRect(bRow);
 
-    fireEvent.dragStart(bHandle, { dataTransfer: fakeDataTransfer() });
+    await startDrag(bHandle);
     fireDragAt(bRow, 'dragover', 5);
     fireDragAt(bRow, 'drop', 5);
 
@@ -210,7 +228,7 @@ describe('TipTap M2 — same-scene element drag', () => {
   it('the dragged row carries the .dragging class on its handle while in flight', async () => {
     await mountTiptap(threeElements());
     const aHandle = rowOf('el_a').querySelector('.mh-el-drag') as HTMLElement;
-    fireEvent.dragStart(aHandle, { dataTransfer: fakeDataTransfer() });
+    await startDrag(aHandle);
     await waitFor(() => expect(aHandle).toHaveClass('dragging'));
   });
 });
@@ -261,7 +279,7 @@ describe('TipTap M2 — cross-scene element drag', () => {
     const xRow = rowOf('el_x');
     stubRect(xRow);
 
-    fireEvent.dragStart(aHandle, { dataTransfer: fakeDataTransfer() });
+    await startDrag(aHandle);
     fireDragAt(xRow, 'dragover', 5); // above midpoint → before el_x
     fireDragAt(xRow, 'drop', 5);
 
@@ -300,7 +318,7 @@ describe('TipTap M2 — cross-scene element drag', () => {
     const headrows = document.querySelectorAll('.mh-scene-headrow');
     const bHead = headrows[1] as HTMLElement;
 
-    fireEvent.dragStart(aHandle, { dataTransfer: fakeDataTransfer() });
+    await startDrag(aHandle);
     fireEvent.dragOver(bHead, { dataTransfer: fakeDataTransfer() });
     fireEvent.drop(bHead, { dataTransfer: fakeDataTransfer() });
 
