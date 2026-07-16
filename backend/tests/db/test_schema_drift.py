@@ -44,6 +44,114 @@ _EXCLUDED_TABLES: frozenset[str] = frozenset(
     }
 )
 
+# ── RATCHET ALLOWLISTS (known drift — shrink only, never grow) ──────────
+# Same contract as tests/db/test_no_new_run_async_bridges.py: every entry is a
+# DOCUMENTED, pre-existing mismatch. Known drift stays green; any NEW drift goes
+# red immediately.
+#
+# The ratchet is enforced two ways:
+#   1. test_allowlists_are_still_accurate — an entry that is no longer drifting
+#      FAILS, forcing its removal. Exemptions cannot go stale.
+#   2. test_allowlists_only_shrink — the ceilings below are asserted. Lowering
+#      one as drift is fixed locks the gain in; raising one is a deliberate,
+#      reviewable edit rather than a silent slide.
+#
+# These exist because the models were generated from prod at ORM 2.0 Phase 0 and
+# the gate that should have caught subsequent drift was silently no-op'ing (it
+# skipped when PROD_DB_PASSWORD was absent — and that secret never existed). The
+# follow-up (sqlacodegen full regen + deleting the dead storyboard models) empties
+# all three lists; nothing here is intended to be permanent.
+
+# gate 1 — models whose table does not exist live.
+# Migration 348 renamed storyboard_* → zzz_deprecated_storyboard_* as part of
+# retiring the storyboard feature (#1109 turned every /storyboard/* route into
+# 410 Gone). The retirement is intended; only the models were left behind.
+# Remove these entries by DELETING the models in app/models/storyboard*.
+_ALLOWED_MISSING_TABLES: frozenset[str] = frozenset(
+    {
+        "storyboard_assets",
+        "storyboard_characters",
+        "storyboard_edges",
+        "storyboard_frame_characters",
+        "storyboard_frames",
+        "storyboard_nodes",
+        "storyboard_projects",
+        "storyboard_video_assets",
+    }
+)
+
+# gate 2 — columns that exist LIVE but are missing from the model.
+# Direction matters: this list only ever exempts live-has/model-lacks. The
+# reverse (model-has/live-lacks) is NOT exemptible and always fails — that is the
+# direction that makes ORM code raise 42703 at runtime. There are zero such cases
+# today and there must stay zero.
+#
+# Consequence of the drift below is bounded: `select(Model)` silently omits these
+# columns and new code must reach them via column()/text(). Nothing crashes.
+# Each was added by a migration whose feature shipped without regenerating models.
+_ALLOWED_MISSING_COLUMNS: dict[str, frozenset[str]] = {
+    # Full-text search vector added for agent-memory search.
+    "agent_memory": frozenset({"search_tsv"}),
+    # BYOK + cost attribution + run nesting.
+    "agent_run_events": frozenset({"byok_key_id", "cost_snapshot", "parent_run_id"}),
+    # Conversation linkage + outcome classification + task linkage.
+    "agent_runs": frozenset({"conversation_id", "outcome", "task_id"}),
+    # Agent concurrency/timeout governance.
+    "ai_agents": frozenset({"max_concurrent_runs", "timeout_sec"}),
+    # Canvas/stage cursors from the projects-as-workspace epic.
+    "projects": frozenset({"current_canvas_id", "current_stage_id"}),
+    # Canvas mode (Standard/Smart) user preference.
+    "user_settings": frozenset({"canvas_mode_preference"}),
+}
+
+# gate 5 — live tables with no ORM model. Each shipped after the models were
+# generated; the ORM simply never learned about them. Remove an entry by ADDING
+# the model.
+_ALLOWED_UNMAPPED_TABLES: frozenset[str] = frozenset(
+    {
+        # Agent-memory layer (promotion pipeline).
+        "agent_memory_promotions",
+        # Alerting / monitoring.
+        "alert_history",
+        "alert_rules",
+        # Unified-conversations epic.
+        "conversation_ai_meta",
+        "message_refs",
+        # Cost / billing / provider governance (Nous models epic).
+        "cost_audit_log",
+        "fx_rates",
+        "provider_byok_keys",
+        "provider_contracts",
+        "provider_credits",
+        "provider_monthly_spend",
+        "provider_pricing",
+        # Distribution module (OAuth handshake state).
+        "distribution_oauth_states",
+        # Worker foundation.
+        "worker_registry",
+        # NOTE: migration 176 meant to drop project_tasks, but it never succeeded
+        # in prod (permission denied) — the table is still live and thus still
+        # in the baseline. Re-attempt the drop rather than adding a model.
+        "project_tasks",
+        # Migration 348 retirement leftovers: renamed out of the way, not yet
+        # dropped. These disappear when the storyboard tables are finally dropped.
+        "zzz_deprecated_storyboard_assets",
+        "zzz_deprecated_storyboard_characters",
+        "zzz_deprecated_storyboard_edges",
+        "zzz_deprecated_storyboard_frame_characters",
+        "zzz_deprecated_storyboard_frames",
+        "zzz_deprecated_storyboard_nodes",
+        "zzz_deprecated_storyboard_projects",
+        "zzz_deprecated_storyboard_video_assets",
+    }
+)
+
+# Ratchet ceilings — measured against prod 2026-07-15. These may only ever be
+# LOWERED. See test_allowlists_only_shrink.
+_MAX_ALLOWED_MISSING_TABLES = 8
+_MAX_ALLOWED_MISSING_COLUMNS = 12
+_MAX_ALLOWED_UNMAPPED_TABLES = 23
+
 # ── SQLAlchemy type → PG udt_name normalization map ─────────────────────
 # Maps the SQLAlchemy column type class name (from type(col.type).__name__)
 # to the PG information_schema.columns.udt_name token.
@@ -73,6 +181,8 @@ _SA_TYPE_TO_UDT: dict[str, str] = {
     "Numeric": "numeric",
     "Double": "float8",
     "Date": "date",
+    # Float: precision drives float4 vs float8 — handled dynamically in
+    # _expected_udt() (SA renders bare Float as PG "float8"/double precision).
     # DateTime: timezone-aware → "timestamptz"; naive → "timestamp"
     # Handled dynamically in _expected_udt().
     # ARRAY: item type drives the "_<udt>" token.
@@ -120,6 +230,14 @@ def _expected_udt(col: Any) -> str | None:
     # ── Special cases ────────────────────────────────────────────────
     if type_class == "DateTime":
         return "timestamptz" if sa_type.timezone else "timestamp"
+
+    if type_class == "Float":
+        # SQLAlchemy Float renders as PG "double precision" (float8) unless a
+        # precision <= 24 asks for single precision (float4). The only Float
+        # column today is project_file_comments.timestamp_seconds, whose live
+        # udt_name is float8 (verified against prod 2026-07-15).
+        precision = getattr(sa_type, "precision", None)
+        return "float4" if precision is not None and precision <= 24 else "float8"
 
     if type_class == "Enum":
         # PG user-defined enum: udt_name is the enum type name, e.g. "download_status"
@@ -233,7 +351,11 @@ async def test_no_missing_tables(
     Drift: a migration dropped a table without removing the model.
     """
     orm = _orm_tables()
-    missing = sorted(tname for tname in orm if tname not in live_schema)
+    missing = sorted(
+        tname
+        for tname in orm
+        if tname not in live_schema and tname not in _ALLOWED_MISSING_TABLES
+    )
     assert not missing, (
         f"{len(missing)} ORM-mapped table(s) not found in live 'public' schema "
         f"(BASE TABLE only):\n  "
@@ -259,7 +381,11 @@ async def test_column_names_match(
         live_cols = set(live_schema[tname].keys())
         model_cols = {col.name for col in table.columns}
 
-        dropped = sorted(live_cols - model_cols)  # in live, missing from model
+        # Ratchet: exempt only the documented live-has/model-lacks columns.
+        # `extra` is never exempted — see _ALLOWED_MISSING_COLUMNS.
+        dropped = sorted(
+            live_cols - model_cols - _ALLOWED_MISSING_COLUMNS.get(tname, frozenset())
+        )
         extra = sorted(model_cols - live_cols)  # in model, missing from live
 
         if dropped or extra:
@@ -368,10 +494,110 @@ async def test_no_unmapped_inscope_tables(
     live_base_tables = frozenset(live_schema.keys())
     in_scope_live = live_base_tables - _EXCLUDED_TABLES
 
-    unmapped = sorted(in_scope_live - mapped)
+    unmapped = sorted(in_scope_live - mapped - _ALLOWED_UNMAPPED_TABLES)
     assert not unmapped, (
         f"{len(unmapped)} in-scope live public table(s) have no ORM model:\n  "
         + "\n  ".join(unmapped)
         + "\n\nEither add a model in app/models/, or add the table to "
         "_EXCLUDED_TABLES in this file with a justification."
+    )
+
+
+# ── Ratchet enforcement ─────────────────────────────────────────────────
+
+
+def test_allowlists_only_shrink() -> None:
+    """The three allowlists may never grow past their recorded ceilings.
+
+    Lower a ceiling when drift is fixed — that locks the gain in. Raising one
+    means knowingly registering NEW drift, which must be a visible, reviewed
+    edit rather than something that slides in behind a green check.
+
+    Pure static check: no DB needed, so it guards the allowlists even in runs
+    where the integration DSN is absent.
+    """
+    n_cols = sum(len(cols) for cols in _ALLOWED_MISSING_COLUMNS.values())
+
+    assert len(_ALLOWED_MISSING_TABLES) <= _MAX_ALLOWED_MISSING_TABLES, (
+        f"_ALLOWED_MISSING_TABLES grew to {len(_ALLOWED_MISSING_TABLES)} "
+        f"(ceiling {_MAX_ALLOWED_MISSING_TABLES}). Delete the dead model instead "
+        f"of exempting a new one."
+    )
+    assert n_cols <= _MAX_ALLOWED_MISSING_COLUMNS, (
+        f"_ALLOWED_MISSING_COLUMNS grew to {n_cols} columns (ceiling "
+        f"{_MAX_ALLOWED_MISSING_COLUMNS}). Add the column to the model instead."
+    )
+    assert len(_ALLOWED_UNMAPPED_TABLES) <= _MAX_ALLOWED_UNMAPPED_TABLES, (
+        f"_ALLOWED_UNMAPPED_TABLES grew to {len(_ALLOWED_UNMAPPED_TABLES)} "
+        f"(ceiling {_MAX_ALLOWED_UNMAPPED_TABLES}). Add the model instead."
+    )
+
+
+async def test_allowlists_are_still_accurate(
+    live_schema: dict[str, dict[str, dict[str, str]]],
+) -> None:
+    """Every allowlist entry must still describe REAL drift.
+
+    An entry whose drift has been fixed is a stale exemption: it silently
+    re-permits the same drift if it ever comes back. Failing here forces the
+    entry to be removed, which is what makes the ratchet tighten.
+    """
+    orm = _orm_tables()
+    mapped = frozenset(orm.keys())
+    live_base_tables = frozenset(live_schema.keys())
+    stale: list[str] = []
+
+    for tname in sorted(_ALLOWED_MISSING_TABLES):
+        if tname not in orm:
+            stale.append(
+                f"_ALLOWED_MISSING_TABLES: {tname} — model is gone; remove this entry"
+            )
+        elif tname in live_schema:
+            stale.append(
+                f"_ALLOWED_MISSING_TABLES: {tname} — table exists live again; "
+                f"remove this entry"
+            )
+
+    for tname, cols in sorted(_ALLOWED_MISSING_COLUMNS.items()):
+        if tname not in live_schema:
+            stale.append(
+                f"_ALLOWED_MISSING_COLUMNS: {tname} — table no longer live; "
+                f"remove this entry"
+            )
+            continue
+        if tname not in orm:
+            stale.append(
+                f"_ALLOWED_MISSING_COLUMNS: {tname} — no model; remove this entry"
+            )
+            continue
+        model_cols = {col.name for col in orm[tname].columns}
+        live_cols = set(live_schema[tname].keys())
+        for col in sorted(cols):
+            if col not in live_cols:
+                stale.append(
+                    f"_ALLOWED_MISSING_COLUMNS: {tname}.{col} — not live anymore; "
+                    f"remove this entry"
+                )
+            elif col in model_cols:
+                stale.append(
+                    f"_ALLOWED_MISSING_COLUMNS: {tname}.{col} — model has it now; "
+                    f"remove this entry"
+                )
+
+    for tname in sorted(_ALLOWED_UNMAPPED_TABLES):
+        if tname not in live_base_tables:
+            stale.append(
+                f"_ALLOWED_UNMAPPED_TABLES: {tname} — table no longer live; "
+                f"remove this entry"
+            )
+        elif tname in mapped:
+            stale.append(
+                f"_ALLOWED_UNMAPPED_TABLES: {tname} — model exists now; "
+                f"remove this entry"
+            )
+
+    assert not stale, (
+        f"{len(stale)} stale schema-drift allowlist entr(ies) — the drift they "
+        f"exempt is gone, so the exemption must go too (that is how the ratchet "
+        f"tightens):\n  " + "\n  ".join(stale)
     )

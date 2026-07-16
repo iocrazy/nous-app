@@ -13,18 +13,18 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ChevronLeft, MoreHorizontal, AlignLeft, Paperclip, FileText, Plus,
-  MessageSquare, Activity, Link2, Bot,
+  MessageSquare, Link2, Bot,
 } from 'lucide-react';
 import type { UiIssue, AgentRef } from './types';
 import type { IssueMessage } from '../../services/issueMessageService';
 import { IssueStatusIcon, PriorityIcon } from './IssueStatusIcon';
 import { formatElapsed } from './formatElapsed';
 import { IssueChatThread } from './IssueChatThread';
-import { IssueActivityTab } from './IssueActivityTab';
 import { IssueRelatedTab } from './IssueRelatedTab';
 import { IssueReplyBox, type ComposerAttachment } from './IssueReplyBox';
 import { listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
-import { dispatchIssue } from '../../services/issuesService';
+import { dispatchIssue, getDispatchPreview, type DispatchPreview } from '../../services/issuesService';
+import { DispatchConfirmDialog } from './DispatchConfirmDialog';
 import { openIssueChatSocket } from '../../services/issueChatSocket';
 import { getSupabaseClient } from '../../supabaseClient';
 import { useToast } from '../Toast';
@@ -40,7 +40,15 @@ interface IssueDetailViewProps {
   onIssueDispatched?: () => void;
 }
 
-type DetailTab = 'chat' | 'activity' | 'related';
+/** Run-confirm gate — flag-dark until the flow is validated in prod. */
+const RUN_CONFIRM_ENABLED = import.meta.env.VITE_FEATURE_ISSUE_RUN_CONFIRM === 'true';
+
+// Chat + Activity were separate tabs over the SAME messages array (Activity
+// just filtered kind='system_status'). IssueChatThread already interleaves
+// comments, agent runs and status events in one thread, so they're unified
+// into a single Timeline — the "one thread with your teammates + agents"
+// model. Related stays its own tab (sub-issues / parent).
+type DetailTab = 'timeline' | 'related';
 
 /**
  * Header chip shown while an agent is working the issue. The pulsing amber dot
@@ -70,11 +78,15 @@ const AgentWorkingBadge: React.FC<{ startedAt: string | null; agentName?: string
 
 export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents, agentsById, selfUserId, onCreateSubIssue, onIssueDispatched }) => {
   const { teamId } = useParams<{ teamId: string }>();
-  const [tab, setTab] = useState<DetailTab>('chat');
+  const [tab, setTab] = useState<DetailTab>('timeline');
   const [messages, setMessages] = useState<IssueMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dispatching, setDispatching] = useState(false);
+  // Run-confirm gate (flag: VITE_FEATURE_ISSUE_RUN_CONFIRM). When on, dispatch
+  // goes through a confirm dialog that renders the server's dispatch-preview.
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [preview, setPreview] = useState<DispatchPreview | null>(null);
   const [isAgentWorking, setIsAgentWorking] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const { addToast } = useToast();
@@ -219,6 +231,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
       await dispatchIssue(issue.id);
       await refresh();
       onIssueDispatched?.();
+      setConfirmOpen(false);
       addToast('Agent dispatched', 'success');
     } catch (e) {
       console.error('[IssueDetailView] dispatch failed', e);
@@ -226,6 +239,20 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
     } finally {
       setDispatching(false);
     }
+  };
+
+  /** Open the confirm gate and ask the server what a dispatch would start. */
+  const openDispatchConfirm = () => {
+    if (!issue?.id) return;
+    setPreview(null);
+    setConfirmOpen(true);
+    getDispatchPreview(issue.id)
+      .then(setPreview)
+      .catch((e) => {
+        console.error('[IssueDetailView] dispatch preview failed', e);
+        addToast(e instanceof Error ? e.message : 'Could not check dispatch', 'error');
+        setConfirmOpen(false);
+      });
   };
 
   return (
@@ -294,7 +321,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             </button>
             {issue.assignee && ['backlog', 'todo'].includes(issue.status) && (
               <button
-                onClick={handleDispatch}
+                onClick={RUN_CONFIRM_ENABLED ? openDispatchConfirm : handleDispatch}
                 disabled={dispatching}
                 className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] rounded border border-indigo-700/60 bg-indigo-900/30 text-indigo-300 hover:bg-indigo-800/40 disabled:opacity-50 disabled:cursor-not-allowed"
                 title={`Dispatch to ${issue.assignee.name}`}
@@ -305,9 +332,9 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           </div>
 
           <div className="flex items-center border-b border-ink-800/80 mt-6">
-            {(['chat', 'activity', 'related'] as DetailTab[]).map((t) => {
-              const label = t === 'chat' ? 'Chat' : t === 'activity' ? 'Activity' : 'Related work';
-              const Icon = t === 'chat' ? MessageSquare : t === 'activity' ? Activity : Link2;
+            {(['timeline', 'related'] as DetailTab[]).map((t) => {
+              const label = t === 'timeline' ? 'Timeline' : 'Related work';
+              const Icon = t === 'timeline' ? MessageSquare : Link2;
               const active = tab === t;
               return (
                 <button
@@ -327,7 +354,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             <span className="ml-auto text-[12px] text-ink-600 pr-2">{messages.length} message{messages.length === 1 ? '' : 's'}</span>
           </div>
 
-          {tab === 'chat' && (
+          {tab === 'timeline' && (
             <>
               {error && (
                 <div className="mt-4 mx-2 px-3 py-2 rounded bg-rose-500/10 text-rose-300 text-[13px] ring-1 ring-rose-500/30">
@@ -348,9 +375,6 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               )}
             </>
           )}
-          {tab === 'activity' && (
-            <IssueActivityTab messages={messages} selfUserId={selfUserId} />
-          )}
           {tab === 'related' && (
             <IssueRelatedTab issue={issue} />
           )}
@@ -366,6 +390,19 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           teamId={teamId}
         />
       </div>
+
+      {RUN_CONFIRM_ENABLED && confirmOpen && (
+        <DispatchConfirmDialog
+          preview={preview}
+          agentName={
+            (preview?.agent_id ? agentsById[preview.agent_id]?.name : undefined)
+            ?? issue.assignee?.name
+          }
+          confirming={dispatching}
+          onConfirm={handleDispatch}
+          onClose={() => setConfirmOpen(false)}
+        />
+      )}
     </div>
   );
 };

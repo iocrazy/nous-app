@@ -9,7 +9,9 @@ import React, { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import type { UiIssue } from './types';
 import { listSubIssues, getIssue, type Issue } from '../../services/issuesService';
+import { Frame } from 'lucide-react';
 import { IssueStatusIcon, PriorityIcon } from './IssueStatusIcon';
+import { originLabel, originPath, parseOriginId } from './issueOrigin';
 import { relativeTime } from '../../utils/taskDisplay';
 
 interface IssueRelatedTabProps {
@@ -47,12 +49,38 @@ export const IssueRelatedTab: React.FC<IssueRelatedTabProps> = ({ issue }) => {
     return () => { cancelled = true; };
   }, [issue.id, issue.parent_id]);
 
+  // Content-backed origin (e.g. an issue created from a canvas card) → a link
+  // back to that content. Non-content origins (a routine's schedule id) parse
+  // to null and simply render no row.
+  const parsedOrigin = parseOriginId(issue.raw.origin_id);
+  const origin = parsedOrigin
+    ? {
+        to: originPath(parsedOrigin, teamId),
+        label: originLabel(parsedOrigin),
+        Icon: Frame,
+      }
+    : null;
+
   if (loading) {
     return <div className="text-[14px] text-ink-500 italic px-4 py-12 text-center">Loading related work…</div>;
   }
 
   return (
     <div className="px-4 py-4 space-y-5">
+      {origin && (
+        <section>
+          <h3 className="text-[12px] font-semibold uppercase tracking-wider text-ink-500 mb-2">Origin</h3>
+          <Link
+            to={origin.to}
+            className="flex items-center gap-2 px-3 py-2 rounded border border-ink-800 bg-ink-900/50 hover:bg-ink-800/60 transition text-[13px]"
+          >
+            <origin.Icon size={13} className="text-ink-500 shrink-0" />
+            <span className="text-ink-200">{origin.label}</span>
+            <span className="ml-auto text-[12px] text-ink-500">Open</span>
+          </Link>
+        </section>
+      )}
+
       {parent && (
         <section>
           <h3 className="text-[12px] font-semibold uppercase tracking-wider text-ink-500 mb-2">Parent</h3>

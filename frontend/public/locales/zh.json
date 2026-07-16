@@ -1710,6 +1710,7 @@
       "classic": "经典",
       "lite": "智能"
     },
+    "createIssue": "创建待办",
     "moveToTrash": "移入回收站",
     "movedToTrash": "已移入回收站",
     "deleteFailed": "删除画布失败",
