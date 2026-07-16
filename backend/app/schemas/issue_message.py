@@ -61,17 +61,47 @@ class IssueMessageList(BaseModel):
     total: int
 
 
+class CommentTriggerPreview(BaseModel):
+    """What posting a comment on this issue would do — without posting it.
+
+    Read-only. Distinct from DispatchPreview: that one mirrors dispatch_issue's
+    guards (terminal_status / already_running / dbos_disabled), none of which
+    the comment path honours. Reusing it for the composer chip would state the
+    opposite of what a comment actually does on a done or mid-run issue.
+
+    No draft body needed — the predicate reads only the issue row (MediaHub has
+    no @agent mentions or /note parsing). Adding either MUST turn this into a
+    POST that carries the draft, or the chip starts lying again.
+    """
+
+    will_wake: bool
+    agent_id: Optional[str] = None
+
+
 class IssueMessagePost(BaseModel):
-    """User-facing reply payload. UI sends body + optional agent_id; if
-    agent_id is set the backend also dispatches an agent run linked to
-    the same issue (recorded as kind='agent_run' in the same thread)."""
+    """User-facing reply payload.
+
+    Posting a comment on an issue with an assigned agent starts a billed agent
+    turn — that is driven by the ISSUE's assignee_agent_id, not by anything in
+    this payload. `suppress_agent_ids` is the only way to opt a single comment
+    out of it, and it is subtractive: naming an id the server did not itself
+    compute is a no-op.
+    """
 
     body: str = Field(min_length=1, max_length=50000)
+    # DEPRECATED — never read. The handler routes on issue_row.assignee_agent_id;
+    # this field has no effect on dispatch. Kept only so existing clients that
+    # send it don't 422. Removing it is an API contract change (separate PR).
     agent_id: Optional[UUID] = None
     # Optional attachments forwarded to the agent turn (sub-plan 3, Task 5).
     # Serialised as model_dump() dicts before entering the DBOS workflow so
     # they stay JSON-serialisable across the workflow boundary.
     attachments: Optional[List[AttachmentRequest]] = None
+    # Agents this one comment must NOT wake. Subtractive only: the server
+    # computes who would wake and can merely drop from that set — a client can
+    # never add a trigger. A stale id (assignee changed since the preview) is a
+    # deliberate no-op rather than a silent suppression of an unseen agent.
+    suppress_agent_ids: Optional[List[str]] = None
 
     @model_validator(mode="after")
     def _strip_body(self) -> "IssueMessagePost":
@@ -82,8 +112,9 @@ class IssueMessagePost(BaseModel):
 
 
 class IssueMessagePostResponse(BaseModel):
-    """Response includes the user's comment row + the dispatched agent_run
-    placeholder row (when agent_id was set)."""
+    """The user's comment row (optimistic on the session paths; canonical on
+    the legacy path). ``agent_run`` is always None today — the dispatched turn
+    surfaces through GET /messages, not here — kept for wire compatibility."""
 
     comment: IssueMessage
     agent_run: Optional[IssueMessage] = None
