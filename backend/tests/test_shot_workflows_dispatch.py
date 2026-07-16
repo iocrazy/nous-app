@@ -416,7 +416,7 @@ async def test_generate_step_composes_prompt_and_returns_url():
             MagicMock(return_value=scene_repo),
         ),
         patch(
-            "app.services.storyboard.storyboard_ai_service.StoryboardAIService",
+            "app.services.ai.media.image_generation_service.ImageGenerationService",
             MagicMock(return_value=svc),
         ),
     ):
@@ -469,7 +469,7 @@ async def test_generate_step_threads_none_provider_to_service():
             MagicMock(return_value=scene_repo),
         ),
         patch(
-            "app.services.storyboard.storyboard_ai_service.StoryboardAIService",
+            "app.services.ai.media.image_generation_service.ImageGenerationService",
             MagicMock(return_value=svc),
         ),
     ):
@@ -501,7 +501,7 @@ async def test_generate_step_raises_when_no_url():
             MagicMock(return_value=scene_repo),
         ),
         patch(
-            "app.services.storyboard.storyboard_ai_service.StoryboardAIService",
+            "app.services.ai.media.image_generation_service.ImageGenerationService",
             MagicMock(return_value=svc),
         ),
     ):

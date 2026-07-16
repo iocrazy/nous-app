@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.services.storyboard.storyboard_ai_service import StoryboardAIService
+from app.services.ai.media.image_generation_service import ImageGenerationService
 
 
 def _cli_result(local_path: str = "/tmp/jimeng_x/clip.mp4"):
@@ -22,12 +22,12 @@ def _cli_result(local_path: str = "/tmp/jimeng_x/clip.mp4"):
 
 @pytest.mark.asyncio
 async def test_video_falls_back_to_db_catalog_on_empty_registry():
-    service = StoryboardAIService()
+    service = ImageGenerationService()
     provider = SimpleNamespace(generate_video=AsyncMock(return_value=_cli_result()))
 
     with (
         patch(
-            "app.services.storyboard.storyboard_ai_service.provider_registry.get_video_provider",
+            "app.services.ai.media.image_generation_service.provider_registry.get_video_provider",
             side_effect=KeyError("empty registry"),
         ),
         patch(
@@ -60,12 +60,12 @@ async def test_video_falls_back_to_db_catalog_on_empty_registry():
 
 @pytest.mark.asyncio
 async def test_video_fallback_unbridgeable_source_runs_text2video():
-    service = StoryboardAIService()
+    service = ImageGenerationService()
     provider = SimpleNamespace(generate_video=AsyncMock(return_value=_cli_result()))
 
     with (
         patch(
-            "app.services.storyboard.storyboard_ai_service.provider_registry.get_video_provider",
+            "app.services.ai.media.image_generation_service.provider_registry.get_video_provider",
             side_effect=KeyError("empty registry"),
         ),
         patch(
@@ -94,7 +94,7 @@ async def test_video_fallback_unbridgeable_source_runs_text2video():
 
 @pytest.mark.asyncio
 async def test_video_registry_hit_keeps_the_legacy_path():
-    service = StoryboardAIService()
+    service = ImageGenerationService()
     legacy = SimpleNamespace(
         generate=AsyncMock(
             return_value=SimpleNamespace(
@@ -112,7 +112,7 @@ async def test_video_registry_hit_keeps_the_legacy_path():
     legacy.generate = AsyncMock(return_value=_Res())
 
     with patch(
-        "app.services.storyboard.storyboard_ai_service.provider_registry.get_video_provider",
+        "app.services.ai.media.image_generation_service.provider_registry.get_video_provider",
         return_value=legacy,
     ):
         result = await service.generate_video(

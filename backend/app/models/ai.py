@@ -414,6 +414,18 @@ class AgentOverrides(Base):
             "((user_id IS NOT NULL)::int + (team_id IS NOT NULL)::int) = 1",
             name="agent_overrides_one_scope",
         ),
+        ForeignKeyConstraint(
+            ["agent_id"],
+            ["public.ai_agents.id"],
+            ondelete="CASCADE",
+            name="agent_overrides_agent_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["team_id"],
+            ["public.teams.id"],
+            ondelete="CASCADE",
+            name="agent_overrides_team_id_fkey",
+        ),
         PrimaryKeyConstraint("id", name="agent_overrides_pkey"),
         Index(
             "ux_agent_overrides_user",

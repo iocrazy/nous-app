@@ -259,7 +259,7 @@ async def test_resolve_raises_on_unsupported_provider_impl():
 
 
 # ---------------------------------------------------------------------------
-# Consumer wiring: StoryboardAIService.generate_image DB-catalog fallback
+# Consumer wiring: ImageGenerationService.generate_image DB-catalog fallback
 # ---------------------------------------------------------------------------
 
 
@@ -267,7 +267,7 @@ async def _generate_image_with(model: str):
     """Run generate_image against an EMPTY registry (registry miss → DB
     fallback) with a stubbed resolver returning a fake Ark provider whose
     actual_model is 'doubao-seedream-actual'. Returns (result, gen_model used)."""
-    from app.services.storyboard.storyboard_ai_service import StoryboardAIService
+    from app.services.ai.media.image_generation_service import ImageGenerationService
 
     fake_provider = MagicMock()
     fake_provider.generate = AsyncMock(
@@ -275,7 +275,7 @@ async def _generate_image_with(model: str):
     )
     resolver = AsyncMock(return_value=(fake_provider, "doubao-seedream-actual"))
 
-    svc = StoryboardAIService()
+    svc = ImageGenerationService()
     # Style/character fragments hit the DB — stub them out; the empty registry
     # naturally KeyErrors, driving the DB-catalog fallback branch.
     with (
