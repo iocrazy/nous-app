@@ -22,7 +22,9 @@ import {
   useState,
   type DragEvent,
   type KeyboardEvent,
-  type MouseEvent,
+  // Aliased: a bare `MouseEvent` import SHADOWS the global DOM MouseEvent, which
+  // silently broke `document.addEventListener('mousedown', ...)` typing below.
+  type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { applyLocal, buildInverse } from '../opBuilder';
@@ -826,7 +828,13 @@ export function SceneBlock({
       setElementDropTarget(null);
       const dragging = draggingElementId;
       setDraggingElementId(null);
-      console.log('[DRAG-DBG] handleElementDrop dragging=', dragging, 'target=', targetId, 'edge=', edge);
+      console.log(
+        '[DRAG-DBG] handleElementDrop scene=', scene.id,
+        'dragging=', dragging,
+        'target=', targetId,
+        'edge=', edge,
+        'externalDrag=', externalDrag ? externalDrag.element.id : null,
+      );
       if (dragging) {
         // Same-scene reorder (existing move-op path). Dropping onto itself is a
         // no-op; applyMove would also self-anchor-skip, but bailing here avoids
@@ -856,7 +864,7 @@ export function SceneBlock({
   // ── Right-click context menu (delete block / delete scene / move scene) ─────
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
   // Heading right-click: elementId is null (the row IS the scene heading).
-  const openHeadingContextMenu = useCallback((e: MouseEvent) => {
+  const openHeadingContextMenu = useCallback((e: ReactMouseEvent) => {
     e.preventDefault();
     setContextMenu({ x: e.clientX, y: e.clientY, elementId: null });
   }, []);

@@ -91,6 +91,22 @@ import { createMentionDecorationExtension } from './mentionDecorationPlugin';
 
 export type SceneFormat = 'hollywood' | 'asian';
 
+/**
+ * Does a DOM event's target sit inside `selector`?
+ *
+ * A drop/dragstart landing on TEXT reports a text NODE as `event.target`, and a
+ * text node has no `.closest` — the first cut of this check
+ * (`(event.target as HTMLElement)?.closest?.(sel)`) therefore silently returned
+ * undefined → false for exactly the common case, letting ProseMirror's built-in
+ * drop run and corrupt the doc. Climb to the parent element first.
+ */
+function hitsSelector(target: EventTarget | null, selector: string): boolean {
+  const node = target as Node | null;
+  if (!node) return false;
+  const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as HTMLElement);
+  return !!el?.closest?.(selector);
+}
+
 /** Text-edit dispatch debounce — matches `SceneBlock`'s `INPUT_DEBOUNCE_MS`. */
 const INPUT_DEBOUNCE_MS = 500;
 
@@ -643,16 +659,16 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
         // onDragStart, row → onDragOver/onDrop on .mh-el-row). ProseMirror's
         // built-in DnD otherwise fights it and wins: its dragstart sets
         // `view.dragging` for the grabbed node and its drop then moves that
-        // slice, eating our move op / corrupting the doc. Tell PM to ignore
-        // drags that originate from our grip or land on our rows. Returning true
-        // only makes PM skip ITS handler — it does NOT preventDefault (see
+        // slice — which lands as a mapper-derived `insert` with no element_id
+        // and the ops endpoint 422s ("invalid_payload: insert requires
+        // element_id"), with the doc already corrupted. Tell PM to ignore drags
+        // that originate from our grip or land on our rows. Returning true only
+        // makes PM skip ITS handler — it does NOT preventDefault (see
         // prosemirror-view runCustomHandler), so the native drag + our React
         // handlers still run.
         handleDOMEvents: {
-          dragstart: (_view, event) =>
-            !!(event.target as HTMLElement | null)?.closest?.('.mh-el-drag'),
-          drop: (_view, event) =>
-            !!(event.target as HTMLElement | null)?.closest?.('.mh-el-row'),
+          dragstart: (_view, event) => hitsSelector(event.target, '.mh-el-drag'),
+          drop: (_view, event) => hitsSelector(event.target, '.mh-el-row'),
         },
       },
       onUpdate: ({ editor: ed, transaction }) => {
