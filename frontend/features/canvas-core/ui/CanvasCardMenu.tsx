@@ -11,10 +11,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Download, Loader2, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { Download, ListTodo, Loader2, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 
 import { getCanvas, saveCanvas } from '../services/canvasService';
 import { serializeWorkflow } from '../smart/workflowIO';
+import { createIssue } from '../../../services/issuesService';
+import { buildOriginId } from '../../../components/Todolist/issueOrigin';
+import { useToast } from '../../../components/Toast';
 
 const FOCUS_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40';
@@ -33,6 +36,7 @@ export function CanvasCardMenu({
   onDelete,
 }: CanvasCardMenuProps) {
   const { t } = useTranslation();
+  const { addToast } = useToast();
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(canvasName);
@@ -71,6 +75,29 @@ export function CanvasCardMenu({
     } finally {
       setBusy(false);
       setRenaming(false);
+      setOpen(false);
+    }
+  };
+
+  /**
+   * Turn this canvas into a to-do. origin_kind stays 'manual' — a person
+   * clicked this, which is exactly what 'manual' means; the canvas it came
+   * from is recorded in origin_id (`canvas:{id}`), which the issue's Related
+   * tab reads to link back. No schema change needed for that.
+   */
+  const createIssueFromCanvas = async () => {
+    setBusy(true);
+    try {
+      const issue = await createIssue({
+        title: `Follow up: ${canvasName}`,
+        origin_id: buildOriginId('canvas', canvasId),
+      });
+      addToast(`Created ${issue.identifier} from this canvas`, 'success');
+    } catch (err) {
+      console.error('[CanvasCardMenu] create issue failed:', err);
+      addToast(err instanceof Error ? err.message : 'Could not create issue', 'error');
+    } finally {
+      setBusy(false);
       setOpen(false);
     }
   };
@@ -150,6 +177,11 @@ export function CanvasCardMenu({
                 icon={<Download size={12} />}
                 label={t('canvasList.export', 'Export canvas')}
                 onClick={() => void exportCanvas()}
+              />
+              <MenuItem
+                icon={<ListTodo size={12} />}
+                label={t('canvasList.createIssue', 'Create issue')}
+                onClick={() => void createIssueFromCanvas()}
               />
               <div className="mx-1.5 my-1 border-t border-ink-800" />
               <MenuItem
