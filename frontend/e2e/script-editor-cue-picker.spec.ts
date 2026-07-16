@@ -15,7 +15,7 @@
 // bridge, not an open trigger.
 
 import { expect, test, type Page } from '@playwright/test';
-import { SCRIPT_URL, setupScriptStubs, wireScene, type WireElement } from './helpers/script-stubs';
+import { SCRIPT_URL, setupScriptStubs, wireScene, type WireElement, SCENE_ID_BASE } from './helpers/script-stubs';
 
 const ELEMENTS: WireElement[] = [
   { id: 'el_00000001', type: 'action', text: 'Rain hammers the window.' },
@@ -25,7 +25,7 @@ const ELEMENTS: WireElement[] = [
 ];
 
 const SCENES = [
-  wireScene({ id: 7300000000000000101, sortOrder: 1, location: 'CORRIDOR', elements: ELEMENTS }),
+  wireScene({ id: SCENE_ID_BASE + 1, sortOrder: 1, location: 'CORRIDOR', elements: ELEMENTS }),
 ];
 
 const picker = (page: Page) => page.locator('[data-testid="mention-combobox"]');

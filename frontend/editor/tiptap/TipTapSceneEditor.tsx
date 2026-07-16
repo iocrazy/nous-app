@@ -83,7 +83,7 @@ import { ScriptKeymap, getElementCtx } from './keymap';
 import { createMenuBridgeKeymap, type MenuBridge } from './menuKeymap';
 import { applyLocal } from '../opBuilder';
 import { elementEdgeFromPointer } from '../render/layoutShared';
-import type { ElementOp, ElementType, ScriptElement } from '../types';
+import { MH_DRAG_MIME, type ElementOp, type ElementType, type ScriptElement } from '../types';
 import { HOLLYWOOD_LINE_CLASS } from '../render/HollywoodLayout';
 import { ASIAN_LINE_CLASS, ASIAN_PREFIX, ASIAN_SUFFIX } from '../render/AsianLayout';
 import { createPageSeamExtension, type PageSeamMap } from './pageSeamPlugin';
@@ -450,6 +450,7 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
             ? (e: ReactDragEvent<HTMLButtonElement>) => {
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', attrs.id);
+                e.dataTransfer.setData(MH_DRAG_MIME, attrs.id);
                 // DEFER the state update by a tick. Calling it synchronously
                 // re-renders this very NodeView (SceneBlock state → the
                 // propsSync no-op transaction → PM rebuilds the row DOM, and the
@@ -730,7 +731,22 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
         // handlers still run.
         handleDOMEvents: {
           dragstart: (_view, event) => hitsSelector(event.target, '.mh-el-drag'),
-          drop: (_view, event) => hitsSelector(event.target, '.mh-el-row'),
+          drop: (_view, event) => {
+            // OUR drag (scene handle / scene move overlay / element grip): the
+            // React handlers do the reorder, so nothing may write to the doc.
+            // preventDefault stops the browser from inserting the payload —
+            // every one of those drags carries its id as text/plain, and a drop
+            // on a contentEditable natively pastes it, so a scene reorder used
+            // to fire its move AND append the scene's own id to the line it
+            // landed on. Returning true only ever skipped PM's handler, which
+            // was never the thing writing the text. Propagation is untouched,
+            // so the React onDrop that performs the reorder still runs.
+            if (event.dataTransfer?.types.includes(MH_DRAG_MIME)) {
+              event.preventDefault();
+              return true;
+            }
+            return hitsSelector(event.target, '.mh-el-row');
+          },
           // Record the click's INTENT for the selection update it's about to
           // cause (see pointerIntentRef). Never returns true — PM must still run
           // its own mousedown or the caret would not move at all.

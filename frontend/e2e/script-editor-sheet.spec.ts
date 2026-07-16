@@ -12,7 +12,7 @@
 // below fails loudly if a future fixture change makes it too short to test.
 
 import { expect, test } from '@playwright/test';
-import { SCRIPT_URL, setupScriptStubs, wireScene, type WireElement } from './helpers/script-stubs';
+import { SCRIPT_URL, setupScriptStubs, wireScene, type WireElement, SCENE_ID_BASE } from './helpers/script-stubs';
 
 const PARAGRAPH =
   '林小满快步穿过狭窄的走廊，脚步声在空荡的楼道里回响，她一边整理着手里的文件一边低声念叨着明天要交的报告，' +
@@ -26,7 +26,7 @@ const els = (n: number): WireElement[] => [
 
 const SCENES = [1, 2, 3, 4, 5].map((i) =>
   wireScene({
-    id: 7300000000000000100 + i,
+    id: SCENE_ID_BASE + i,
     sortOrder: i,
     location: `LOCATION ${i}`,
     elements: els(i),

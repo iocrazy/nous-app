@@ -87,3 +87,19 @@ export interface CursorState {
   elementId: string | null;
   field: 'element' | 'heading_int_ext' | 'location' | 'time';
 }
+
+/**
+ * Marks a dragged payload as the editor's OWN reorder drag (a scene handle, the
+ * scene move overlay, or an element grip) so a drop can be told apart from text
+ * dragged in from anywhere else.
+ *
+ * Every one of those drags also carries the id as `text/plain` — that's what
+ * makes them draggable to other apps at all. But the drop lands on a
+ * contentEditable, whose NATIVE default is to insert the dragged text: a scene
+ * reorder would fire its move AND write the scene's own id into the script as
+ * prose. Skipping ProseMirror's handler doesn't help (returning true from
+ * `handleDOMEvents` never preventDefaults — see `runCustomHandler`); only
+ * preventDefault on the DROP stops the browser, and by then the drag is done, so
+ * unlike a dragstart preventDefault it cancels nothing.
+ */
+export const MH_DRAG_MIME = 'application/x-mediahub-reorder';

@@ -35,7 +35,14 @@ import {
   CopilotDisabledError,
   OpRejectedError,
 } from '../copilotService';
-import type { CursorState, ElementOp, ElementType, ScriptElement, SceneDoc } from '../types';
+import {
+  MH_DRAG_MIME,
+  type CursorState,
+  type ElementOp,
+  type ElementType,
+  type ScriptElement,
+  type SceneDoc,
+} from '../types';
 import { useSceneSync, type RemoteOpRow } from '../useSceneSync';
 import { MentionCombobox, filterMentionCandidates } from './MentionCombobox';
 import { SlashMenu, SLASH_ITEMS, filterSlashItems, type SlashItem } from './SlashMenu';
@@ -1189,6 +1196,7 @@ export function SceneBlock({
                 ? (e) => {
                     e.dataTransfer.effectAllowed = 'move';
                     e.dataTransfer.setData('text/plain', scene.id);
+                    e.dataTransfer.setData(MH_DRAG_MIME, scene.id);
                     reorder.onDragStart(scene.id);
                   }
                 : undefined
@@ -1351,6 +1359,7 @@ export function SceneBlock({
           onDragStart={(e) => {
             e.dataTransfer.effectAllowed = 'move';
             e.dataTransfer.setData('text/plain', scene.id);
+            e.dataTransfer.setData(MH_DRAG_MIME, scene.id);
             reorder.onDragStart(scene.id);
           }}
           onDragEnd={() => {

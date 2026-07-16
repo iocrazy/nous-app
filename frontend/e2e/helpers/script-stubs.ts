@@ -11,8 +11,19 @@ import { PARENT_PROJECT_ID, TEAM_ID, setupStubbedSession } from './stubs';
  * See editor/sceneService.ts:41-70.
  */
 
-export const SCRIPT_ID = '7300000000000000001';
+/**
+ * Ids must look like REAL snowflakes, and real snowflakes here are ~15 digits.
+ *
+ * `generate_snowflake_id()` is deliberately 53-bit — timestamp(41) | sequence(12),
+ * epoch 2024-01-01 — so ids stay under Number.MAX_SAFE_INTEGER and survive
+ * `res.json()` intact (migrations/050). A fixture with an invented 19-digit id
+ * silently rounds to a shared value the moment it is parsed, so every scene ends
+ * up with the SAME id and any id-keyed assertion tests a fiction.
+ */
+export const SCRIPT_ID = '323456789000001';
 export const SCRIPT_URL = `/team/${TEAM_ID}/projects/${PARENT_PROJECT_ID}/scripts/${SCRIPT_ID}`;
+/** Base for scene ids — same 53-bit-safe magnitude as production. */
+export const SCENE_ID_BASE = 323456789100000;
 
 /** localStorage key the shell reads synchronously at mount (editor/formatStorage.ts:14). */
 export const formatKey = (scriptId: string) => `editor.format.${scriptId}`;
