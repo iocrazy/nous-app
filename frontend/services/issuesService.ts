@@ -197,6 +197,26 @@ export async function transitionIssueStatus(
   return _json<Issue>(res);
 }
 
+export type DispatchBlockedReason =
+  | 'no_assignee'
+  | 'dbos_disabled'
+  | 'terminal_status'
+  | 'already_running';
+
+/** What POST /dispatch would do — predicted server-side; never re-derive it here. */
+export interface DispatchPreview {
+  will_start: boolean;
+  agent_id: string | null;
+  blocked_reason: DispatchBlockedReason | null;
+}
+
+export async function getDispatchPreview(issueId: number): Promise<DispatchPreview> {
+  const res = await fetch(`${_base}/${issueId}/dispatch-preview`, {
+    headers: await getAuthHeaders(),
+  });
+  return _json<DispatchPreview>(res);
+}
+
 export async function dispatchIssue(issueId: number): Promise<Issue> {
   const res = await fetch(`${_base}/${issueId}/dispatch`, {
     method: 'POST',

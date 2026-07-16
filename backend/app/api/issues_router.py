@@ -26,6 +26,8 @@ from loguru import logger
 from app.core.deps import AuthDep
 from app.repositories.issue_repository import issue_repository
 from app.schemas.issue import (
+    DispatchBlockedReason,
+    DispatchPreview,
     Issue,
     IssueCreate,
     IssueListResponse,
@@ -200,6 +202,53 @@ async def transition_status(
         logger.warning(f"[issues] transition {issue_id} failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     return Issue.model_validate(_normalise_uuid_strs(row))
+
+
+@router.get("/{issue_id}/dispatch-preview", response_model=DispatchPreview)
+async def dispatch_preview(issue_id: int, auth: AuthDep) -> DispatchPreview:
+    """Predict what POST /{id}/dispatch would start — without starting it.
+
+    Read-only. Mirrors dispatch_issue's own guards so the confirm dialog can
+    say "X will start working" (or why nothing would) from the server's rule
+    rather than a client-side copy that drifts.
+    """
+    from app.services.infra import dbos_orchestrator
+
+    existing = await issue_repository.get_by_id(issue_id)
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"id={issue_id} not found"
+        )
+    _assert_visibility(existing, auth)
+
+    agent_raw = existing.get("assignee_agent_id")
+    agent_id = str(agent_raw) if agent_raw else None
+    issue_status = existing.get("status")
+
+    if not dbos_orchestrator.is_enabled():
+        return DispatchPreview(
+            will_start=False,
+            agent_id=agent_id,
+            blocked_reason=DispatchBlockedReason.DBOS_DISABLED,
+        )
+    if issue_status in ("done", "cancelled"):
+        return DispatchPreview(
+            will_start=False,
+            agent_id=agent_id,
+            blocked_reason=DispatchBlockedReason.TERMINAL_STATUS,
+        )
+    if not agent_id:
+        return DispatchPreview(
+            will_start=False, blocked_reason=DispatchBlockedReason.NO_ASSIGNEE
+        )
+    # A live run holds the CAS lock; re-dispatching would be rejected downstream.
+    if existing.get("dbos_workflow_id") and issue_status == "in_progress":
+        return DispatchPreview(
+            will_start=False,
+            agent_id=agent_id,
+            blocked_reason=DispatchBlockedReason.ALREADY_RUNNING,
+        )
+    return DispatchPreview(will_start=True, agent_id=agent_id)
 
 
 @router.post("/{issue_id}/dispatch", response_model=Issue)
