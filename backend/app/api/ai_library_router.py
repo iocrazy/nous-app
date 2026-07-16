@@ -1056,8 +1056,8 @@ async def create_skill(
 
     # Base fields. User-created skills are private by default (is_public=False),
     # status='active', and owned by the creator.
-    # Dual-write body_md → content_md so legacy readers (storyboard_ai_service,
-    # /api/v1/skills endpoints) can still see the body. See migration 152.
+    # Dual-write body_md → content_md so legacy readers (the /api/v1/skills
+    # endpoints) can still see the body. See migration 152.
     fields: Dict[str, Any] = {
         "slug": payload.slug,
         "name": payload.name,
@@ -1147,8 +1147,8 @@ async def update_skill(
 
     skill_id = int(skill["id"])
     updates = payload.model_dump(exclude_none=True)
-    # Keep legacy content_md in sync with body_md edits so storyboard_ai_service
-    # and /api/v1/skills readers see the latest text. See migration 152.
+    # Keep legacy content_md in sync with body_md edits so the /api/v1/skills
+    # readers see the latest text. See migration 152.
     if "body_md" in updates:
         updates["content_md"] = updates["body_md"]
     if updates:

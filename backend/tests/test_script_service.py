@@ -286,20 +286,3 @@ async def test_asset_crud_delegation(
     assert asset_repo.created == [{"name": "Hero"}]
     assert asset_repo.updated == [("a-1", {"name": "Hero v2"})]
     assert asset_repo.deleted == ["a-1"]
-
-
-# ─── Storyboard links ──────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_link_crud_delegation(
-    service: tuple[ScriptService, Any, Any, Any, _FakeLinkRepo],
-) -> None:
-    svc, *_, link_repo = service
-    await svc.create_storyboard_link({"chapter_id": "ch-1", "storyboard_id": "sb-1"})
-    await svc.delete_storyboard_link("l-1")
-    link_repo.links_by_chapter["ch-1"] = [{"id": "l-1"}]
-    links = await svc.list_links_by_chapter("ch-1")
-    assert link_repo.created[0]["storyboard_id"] == "sb-1"
-    assert link_repo.deleted == ["l-1"]
-    assert links == [{"id": "l-1"}]

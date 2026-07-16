@@ -9,9 +9,8 @@ Each @DBOS.step constructs its service internally, so we patch the
 underlying service / repo methods rather than the steps:
 
   - ScriptAIService.expand_chapter / create_branches / split_chapter_to_scenes
-  - ScriptService.update_chapter / create_chapter / create_storyboard_link
+  - ScriptService.update_chapter / create_chapter
   - ScriptService.chapter_repo.get_by_id / project_repo.get_by_id
-  - StoryboardNodeRepository.bulk_upsert
 
 Cases per workflow: happy path persists the right data; a step failure
 propagates (raises).
@@ -29,7 +28,6 @@ pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 _USER = "11111111-1111-1111-1111-111111111111"
 _SCRIPT = "9000000000000000001"
 _CHAPTER = "9000000000000000002"
-_STORYBOARD = "9000000000000000003"
 
 
 def _expand_body():
@@ -42,12 +40,6 @@ def _branches_body():
     from app.workflows import script_ai_workflows as m
 
     return inspect.unwrap(m.script_create_branches_workflow)
-
-
-def _storyboard_body():
-    from app.workflows import script_ai_workflows as m
-
-    return inspect.unwrap(m.script_to_storyboard_workflow)
 
 
 # ---------------------------------------------------------------------------
@@ -185,150 +177,3 @@ async def test_create_branches_llm_failure_propagates():
             )
 
     create_chapter.assert_not_awaited()
-
-
-# ---------------------------------------------------------------------------
-# convert-to-storyboard
-# ---------------------------------------------------------------------------
-
-
-def _scene(n: int):
-    return {
-        "scene_number": n,
-        "description": f"scene {n}",
-        "camera_notes": f"cam {n}",
-    }
-
-
-async def test_to_storyboard_creates_node_and_link_per_scene():
-    scenes = [_scene(1), _scene(2)]
-    split = AsyncMock(return_value=scenes)
-    create_link = AsyncMock(return_value={"id": "l1"})
-
-    from app.services.storyboard.script.script_ai_service import ScriptAIService
-    from app.services.storyboard.script.script_service import ScriptService
-
-    chapter_repo = MagicMock()
-    chapter_repo.get_by_id = AsyncMock(
-        return_value={"title": "Act I", "summary": "s", "content": "body"}
-    )
-    project_repo = MagicMock()
-    project_repo.get_by_id = AsyncMock(
-        return_value={"settings_json": {"style_guide": "noir"}}
-    )
-
-    def _init(self):
-        self.chapter_repo = chapter_repo
-        self.project_repo = project_repo
-
-    node_repo = MagicMock()
-    node_repo.bulk_upsert = AsyncMock(side_effect=[[{"id": "n1"}], [{"id": "n2"}]])
-
-    with (
-        patch.object(ScriptAIService, "split_chapter_to_scenes", split),
-        patch.object(ScriptService, "__init__", _init),
-        patch.object(ScriptService, "create_storyboard_link", create_link),
-        patch(
-            "app.repositories.storyboard_repository.get_storyboard_node_repository",
-            return_value=node_repo,
-        ),
-    ):
-        result = await _storyboard_body()(
-            script_id=_SCRIPT,
-            chapter_id=_CHAPTER,
-            storyboard_project_id=_STORYBOARD,
-            user_id=_USER,
-        )
-
-    assert result["status"] == "success"
-    assert result["scene_count"] == 2
-    assert result["node_count"] == 2
-    # style guide read from project settings_json and threaded to the LLM.
-    split.assert_awaited_once_with(
-        title="Act I", summary="s", content="body", style_guide="noir"
-    )
-    assert node_repo.bulk_upsert.await_count == 2
-    first_node = node_repo.bulk_upsert.await_args_list[0].args[1][0]
-    assert first_node["node_type"] == "storyboard_split"
-    assert first_node["position_y"] == 1 * 300
-    assert first_node["data_json"]["scene_number"] == 1
-    assert first_node["data_json"]["source"] == "script_conversion"
-    assert create_link.await_count == 2
-    create_link.assert_any_await(
-        {
-            "chapter_id": _CHAPTER,
-            "storyboard_project_id": _STORYBOARD,
-            "storyboard_node_id": "n1",
-        }
-    )
-
-
-async def test_to_storyboard_without_target_skips_persist():
-    scenes = [_scene(1)]
-    split = AsyncMock(return_value=scenes)
-
-    from app.services.storyboard.script.script_ai_service import ScriptAIService
-    from app.services.storyboard.script.script_service import ScriptService
-
-    chapter_repo = MagicMock()
-    chapter_repo.get_by_id = AsyncMock(
-        return_value={"title": "Act I", "summary": "s", "content": None}
-    )
-    project_repo = MagicMock()
-    project_repo.get_by_id = AsyncMock(return_value=None)
-
-    def _init(self):
-        self.chapter_repo = chapter_repo
-        self.project_repo = project_repo
-
-    node_repo = MagicMock()
-    node_repo.bulk_upsert = AsyncMock()
-
-    with (
-        patch.object(ScriptAIService, "split_chapter_to_scenes", split),
-        patch.object(ScriptService, "__init__", _init),
-        patch(
-            "app.repositories.storyboard_repository.get_storyboard_node_repository",
-            return_value=node_repo,
-        ),
-    ):
-        result = await _storyboard_body()(
-            script_id=_SCRIPT,
-            chapter_id=_CHAPTER,
-            storyboard_project_id=None,
-            user_id=_USER,
-        )
-
-    assert result["status"] == "success"
-    assert result["node_count"] == 0
-    node_repo.bulk_upsert.assert_not_awaited()
-
-
-async def test_to_storyboard_missing_chapter_raises():
-    split = AsyncMock()
-
-    from app.services.storyboard.script.script_ai_service import ScriptAIService
-    from app.services.storyboard.script.script_service import ScriptService
-
-    chapter_repo = MagicMock()
-    chapter_repo.get_by_id = AsyncMock(return_value=None)
-    project_repo = MagicMock()
-    project_repo.get_by_id = AsyncMock(return_value=None)
-
-    def _init(self):
-        self.chapter_repo = chapter_repo
-        self.project_repo = project_repo
-
-    with (
-        patch.object(ScriptAIService, "split_chapter_to_scenes", split),
-        patch.object(ScriptService, "__init__", _init),
-    ):
-        with pytest.raises(ValueError, match="Chapter not found"):
-            await _storyboard_body()(
-                script_id=_SCRIPT,
-                chapter_id=_CHAPTER,
-                storyboard_project_id=_STORYBOARD,
-                user_id=_USER,
-            )
-
-    split.assert_not_awaited()
