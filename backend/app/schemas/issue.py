@@ -128,3 +128,25 @@ class IssueListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class DispatchBlockedReason(str, Enum):
+    """Why a dispatch would NOT start anything."""
+
+    NO_ASSIGNEE = "no_assignee"
+    DBOS_DISABLED = "dbos_disabled"
+    TERMINAL_STATUS = "terminal_status"
+    ALREADY_RUNNING = "already_running"
+
+
+class DispatchPreview(BaseModel):
+    """What POST /{id}/dispatch would actually do.
+
+    The rule lives here (server-side) so the confirm dialog reports what will
+    happen instead of the client re-deriving it and drifting: the preview and
+    the dispatch read the same predicate.
+    """
+
+    will_start: bool
+    agent_id: Optional[str] = None
+    blocked_reason: Optional[DispatchBlockedReason] = None

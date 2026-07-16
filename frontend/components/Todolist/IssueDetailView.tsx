@@ -23,7 +23,8 @@ import { IssueChatThread } from './IssueChatThread';
 import { IssueRelatedTab } from './IssueRelatedTab';
 import { IssueReplyBox, type ComposerAttachment } from './IssueReplyBox';
 import { listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
-import { dispatchIssue } from '../../services/issuesService';
+import { dispatchIssue, getDispatchPreview, type DispatchPreview } from '../../services/issuesService';
+import { DispatchConfirmDialog } from './DispatchConfirmDialog';
 import { openIssueChatSocket } from '../../services/issueChatSocket';
 import { getSupabaseClient } from '../../supabaseClient';
 import { useToast } from '../Toast';
@@ -38,6 +39,9 @@ interface IssueDetailViewProps {
   /** Called after a successful dispatch so the parent can re-fetch the issue row. */
   onIssueDispatched?: () => void;
 }
+
+/** Run-confirm gate — flag-dark until the flow is validated in prod. */
+const RUN_CONFIRM_ENABLED = import.meta.env.VITE_FEATURE_ISSUE_RUN_CONFIRM === 'true';
 
 // Chat + Activity were separate tabs over the SAME messages array (Activity
 // just filtered kind='system_status'). IssueChatThread already interleaves
@@ -79,6 +83,10 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dispatching, setDispatching] = useState(false);
+  // Run-confirm gate (flag: VITE_FEATURE_ISSUE_RUN_CONFIRM). When on, dispatch
+  // goes through a confirm dialog that renders the server's dispatch-preview.
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [preview, setPreview] = useState<DispatchPreview | null>(null);
   const [isAgentWorking, setIsAgentWorking] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const { addToast } = useToast();
@@ -223,6 +231,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
       await dispatchIssue(issue.id);
       await refresh();
       onIssueDispatched?.();
+      setConfirmOpen(false);
       addToast('Agent dispatched', 'success');
     } catch (e) {
       console.error('[IssueDetailView] dispatch failed', e);
@@ -230,6 +239,20 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
     } finally {
       setDispatching(false);
     }
+  };
+
+  /** Open the confirm gate and ask the server what a dispatch would start. */
+  const openDispatchConfirm = () => {
+    if (!issue?.id) return;
+    setPreview(null);
+    setConfirmOpen(true);
+    getDispatchPreview(issue.id)
+      .then(setPreview)
+      .catch((e) => {
+        console.error('[IssueDetailView] dispatch preview failed', e);
+        addToast(e instanceof Error ? e.message : 'Could not check dispatch', 'error');
+        setConfirmOpen(false);
+      });
   };
 
   return (
@@ -298,7 +321,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             </button>
             {issue.assignee && ['backlog', 'todo'].includes(issue.status) && (
               <button
-                onClick={handleDispatch}
+                onClick={RUN_CONFIRM_ENABLED ? openDispatchConfirm : handleDispatch}
                 disabled={dispatching}
                 className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] rounded border border-indigo-700/60 bg-indigo-900/30 text-indigo-300 hover:bg-indigo-800/40 disabled:opacity-50 disabled:cursor-not-allowed"
                 title={`Dispatch to ${issue.assignee.name}`}
@@ -367,6 +390,19 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           teamId={teamId}
         />
       </div>
+
+      {RUN_CONFIRM_ENABLED && confirmOpen && (
+        <DispatchConfirmDialog
+          preview={preview}
+          agentName={
+            (preview?.agent_id ? agentsById[preview.agent_id]?.name : undefined)
+            ?? issue.assignee?.name
+          }
+          confirming={dispatching}
+          onConfirm={handleDispatch}
+          onClose={() => setConfirmOpen(false)}
+        />
+      )}
     </div>
   );
 };
