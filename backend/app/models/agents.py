@@ -129,6 +129,11 @@ class AgentRuns(Base):
             " 'cancelled'::text, 'heartbeat_lost'::text])",
             name="agent_runs_status_check",
         ),
+        CheckConstraint(
+            "outcome IS NULL OR outcome = ANY (ARRAY['pending'::text,"
+            " 'user_accepted'::text, 'user_rejected'::text, 'timeout'::text])",
+            name="agent_runs_outcome_check",
+        ),
         ForeignKeyConstraint(
             ["agent_id"],
             ["public.ai_agents.id"],
@@ -151,6 +156,20 @@ class AgentRuns(Base):
             ["root_run_id"],
             ["public.agent_runs.id"],
             name="agent_runs_root_run_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["conversation_id"],
+            ["public.conversations.id"],
+            ondelete="SET NULL",
+            name="agent_runs_conversation_id_fkey",
+        ),
+        # task_id is text because task_tracking's PK is dbos_workflow_id, not a
+        # bigint surrogate.
+        ForeignKeyConstraint(
+            ["task_id"],
+            ["public.task_tracking.dbos_workflow_id"],
+            ondelete="SET NULL",
+            name="agent_runs_task_id_fkey",
         ),
         PrimaryKeyConstraint("id", name="agent_runs_pkey"),
         Index("idx_agent_runs_agent_started", "agent_id", "started_at"),
@@ -330,6 +349,18 @@ class AgentRuns(Base):
     session_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     parent_run_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     root_run_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    outcome: Mapped[Optional[str]] = mapped_column(
+        Text,
+        comment=(
+            "How the run was resolved once it finished. NULL until classified; "
+            "'pending' means awaiting user verdict."
+        ),
+    )
+    task_id: Mapped[Optional[str]] = mapped_column(
+        Text,
+        comment="Free-form external task correlation id (text, not the bigint issue_id).",
+    )
+    conversation_id: Mapped[Optional[int]] = mapped_column(BigInteger)
 
 
 class AgentSkills(Base):
@@ -419,6 +450,15 @@ class AgentRunEvents(Base):
     provider: Mapped[Optional[str]] = mapped_column(Text)
     error_code: Mapped[Optional[str]] = mapped_column(Text)
     error_message: Mapped[Optional[str]] = mapped_column(Text)
+    cost_snapshot: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        comment="Pricing inputs frozen at event time, so later price changes cannot rewrite history.",
+    )
+    byok_key_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        comment="provider_byok_keys row this event billed against. NULL = platform key.",
+    )
+    parent_run_id: Mapped[Optional[int]] = mapped_column(BigInteger)
 
 
 class AgentTasks(Base):

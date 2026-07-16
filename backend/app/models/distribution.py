@@ -191,3 +191,27 @@ class PublishTaskAccounts(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )
+
+
+class DistributionOauthStates(Base):
+    """Short-lived CSRF state for the platform OAuth handshake (mig 351).
+
+    PK is the opaque ``state`` value echoed back by the provider; the row is
+    consumed on callback. ``scope_id`` is text so it can carry either a team or
+    user snowflake without a second column.
+    """
+
+    __tablename__ = "distribution_oauth_states"
+    __table_args__ = (
+        PrimaryKeyConstraint("state", name="distribution_oauth_states_pkey"),
+        {"schema": "public"},
+    )
+
+    state: Mapped[str] = mapped_column(Text, primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    platform: Mapped[str] = mapped_column(String(50), nullable=False)
+    scope_type: Mapped[str] = mapped_column(String(10), nullable=False)
+    scope_id: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )

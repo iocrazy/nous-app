@@ -630,13 +630,13 @@ class ScriptStoryboardLinks(Base):
         ),
         ForeignKeyConstraint(
             ["storyboard_node_id"],
-            ["public.storyboard_nodes.id"],
+            ["public.zzz_deprecated_storyboard_nodes.id"],
             ondelete="SET NULL",
             name="script_storyboard_links_storyboard_node_id_fkey",
         ),
         ForeignKeyConstraint(
             ["storyboard_project_id"],
-            ["public.storyboard_projects.id"],
+            ["public.zzz_deprecated_storyboard_projects.id"],
             ondelete="CASCADE",
             name="script_storyboard_links_storyboard_project_id_fkey",
         ),
