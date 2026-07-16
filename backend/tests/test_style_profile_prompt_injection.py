@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 import pytest
 
-from app.services.storyboard.storyboard_ai_service import StoryboardAIService
+from app.services.ai.media.image_generation_service import ImageGenerationService
 
 
 class FakeStyleRepo:
@@ -23,8 +23,8 @@ class FakeStyleRepo:
 
 
 @pytest.fixture
-def service() -> StoryboardAIService:
-    return StoryboardAIService()
+def service() -> ImageGenerationService:
+    return ImageGenerationService()
 
 
 def _patch_repo(monkeypatch: pytest.MonkeyPatch, repo: FakeStyleRepo) -> None:
@@ -42,7 +42,7 @@ def _patch_repo(monkeypatch: pytest.MonkeyPatch, repo: FakeStyleRepo) -> None:
 
 @pytest.mark.asyncio
 async def test_fragment_joins_style_md_and_traits(
-    service: StoryboardAIService, monkeypatch: pytest.MonkeyPatch
+    service: ImageGenerationService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_repo(
         monkeypatch,
@@ -59,7 +59,7 @@ async def test_fragment_joins_style_md_and_traits(
 
 @pytest.mark.asyncio
 async def test_fragment_clips_long_style(
-    service: StoryboardAIService, monkeypatch: pytest.MonkeyPatch
+    service: ImageGenerationService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_repo(monkeypatch, FakeStyleRepo({"style_md": "x" * 5000}))
     fragment = await service.build_project_style_fragment("55")
@@ -68,7 +68,7 @@ async def test_fragment_clips_long_style(
 
 @pytest.mark.asyncio
 async def test_fragment_empty_without_profile_or_on_failure(
-    service: StoryboardAIService, monkeypatch: pytest.MonkeyPatch
+    service: ImageGenerationService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_repo(monkeypatch, FakeStyleRepo(None))
     assert await service.build_project_style_fragment("55") == ""
@@ -103,12 +103,12 @@ class FakeImageProvider:
 
 @pytest.mark.asyncio
 async def test_generate_image_appends_style_suffix(
-    service: StoryboardAIService, monkeypatch: pytest.MonkeyPatch
+    service: ImageGenerationService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_repo(monkeypatch, FakeStyleRepo({"style_md": "Anime cel-shading."}))
     provider = FakeImageProvider()
     monkeypatch.setattr(
-        "app.services.storyboard.storyboard_ai_service."
+        "app.services.ai.media.image_generation_service."
         "provider_registry.get_image_provider",
         lambda name: provider,
     )
@@ -124,12 +124,12 @@ async def test_generate_image_appends_style_suffix(
 
 @pytest.mark.asyncio
 async def test_generate_image_unchanged_without_profile(
-    service: StoryboardAIService, monkeypatch: pytest.MonkeyPatch
+    service: ImageGenerationService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _patch_repo(monkeypatch, FakeStyleRepo(None))
     provider = FakeImageProvider()
     monkeypatch.setattr(
-        "app.services.storyboard.storyboard_ai_service."
+        "app.services.ai.media.image_generation_service."
         "provider_registry.get_image_provider",
         lambda name: provider,
     )
