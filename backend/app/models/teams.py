@@ -293,6 +293,13 @@ class Projects(Base):
             ["public.project_workflows.id"],
             name="projects_workflow_id_fkey",
         ),
+        # current_canvas_id has no FK in the DB — deliberately unconstrained.
+        ForeignKeyConstraint(
+            ["current_stage_id"],
+            ["public.project_stages.id"],
+            ondelete="SET NULL",
+            name="projects_current_stage_id_fkey",
+        ),
         PrimaryKeyConstraint("id", name="projects_pkey"),
         Index("idx_projects_owner", "owner_id"),
         Index("idx_projects_team", "team_id"),
@@ -330,6 +337,14 @@ class Projects(Base):
         Text, comment="Project announcement (max 100 chars)"
     )
     color_label: Mapped[Optional[str]] = mapped_column(String(20))
+    current_canvas_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        comment="Canvas cursor: which canvas this project reopens on (projects-as-workspace).",
+    )
+    current_stage_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        comment="Stage cursor: which pipeline stage the workspace resumes at.",
+    )
     archived_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
 
 

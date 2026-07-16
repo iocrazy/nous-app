@@ -1,9 +1,12 @@
-"""SQLAlchemy 2.0 ORM model package — 108 mapped classes + 1 junction table = 109 tables.
+"""SQLAlchemy 2.0 ORM model package — 151 mapped classes + 2 bare Tables = 153 tables.
 
-(Was 106/107 before migration 333 retired the ai_sessions/ai_messages models —
-Phase 3 Wave 2 legacy-chat table drop; the conversations/messages family is
-now mapped too (style batch 3b), though conversation_repository keeps its
-text() SQL bodies on the session scopes.)
+The bare Tables (``t_storyboard_frame_characters``, ``t_worker_registry``) have
+no usable primary key in the DB, so they are mapped as Core Tables rather than
+declarative classes — no synthetic PK is invented for them.
+
+Kept honest by ``tests/db/test_schema_drift.py``, which diffs every model here
+against a real Postgres built from ``supabase/schema_baseline.sql``. A migration
+that adds a table or column must add it here in the same PR, or that gate fails.
 
 Flat models only: no joined-table inheritance, no relationships, no create_all.
 auth.users (GoTrue) is permanently EXCLUDED; FKs targeting users.id are omitted.
@@ -39,6 +42,7 @@ from app.models.agents import (  # noqa: F401
 )
 from app.models.ai import (  # noqa: F401
     AgentMemory,
+    AgentMemoryPromotions,
     AgentOverrides,
     AiAgents,
     AiAgentVersions,
@@ -50,6 +54,10 @@ from app.models.ai import (  # noqa: F401
     SkillFileVersions,
     Skills,
     SkillVersions,
+)
+from app.models.alerting import (  # noqa: F401
+    AlertHistory,
+    AlertRules,
 )
 from app.models.billing import (  # noqa: F401
     CreditPricing,
@@ -65,13 +73,16 @@ from app.models.canvas import (  # noqa: F401
     CanvasResourceRefs,
 )
 from app.models.chat import (  # noqa: F401
+    ConversationAiMeta,
     ConversationMembers,
     ConversationMemory,
     Conversations,
     MessageAttachments,
+    MessageRefs,
     Messages,
 )
 from app.models.distribution import (  # noqa: F401
+    DistributionOauthStates,
     PublishTaskAccounts,
     PublishTasks,
     SocialAccounts,
@@ -131,6 +142,15 @@ from app.models.project_library import (  # noqa: F401
     ProjectStageHistory,
     ProjectStages,
     ProjectStyleProfile,
+)
+from app.models.provider_costs import (  # noqa: F401
+    CostAuditLog,
+    FxRates,
+    ProviderByokKeys,
+    ProviderContracts,
+    ProviderCredits,
+    ProviderMonthlySpend,
+    ProviderPricing,
 )
 from app.models.reviews import (  # noqa: F401
     IssueMessages,
@@ -200,6 +220,9 @@ from app.models.users import (  # noqa: F401
     UserSettings,
     UserTagPreferences,
 )
+from app.models.workers import (  # noqa: F401
+    t_worker_registry,
+)
 
 __all__ = [
     # declarative base
@@ -222,6 +245,7 @@ __all__ = [
     "AgentWorkers",
     # ai
     "AgentMemory",
+    "AgentMemoryPromotions",
     "AgentOverrides",
     "AiAgentVersions",
     "AiAgents",
@@ -233,6 +257,9 @@ __all__ = [
     "SkillFiles",
     "SkillVersions",
     "Skills",
+    # alerting
+    "AlertHistory",
+    "AlertRules",
     # billing
     "CreditPricing",
     "CreditTransactions",
@@ -335,12 +362,15 @@ __all__ = [
     "CanvasResourceRefs",
     "Canvases",
     # chat / conversations
+    "ConversationAiMeta",
     "ConversationMembers",
     "ConversationMemory",
     "Conversations",
     "MessageAttachments",
+    "MessageRefs",
     "Messages",
     # distribution
+    "DistributionOauthStates",
     "PublishTaskAccounts",
     "PublishTasks",
     "SocialAccounts",
@@ -350,6 +380,14 @@ __all__ = [
     "ProjectStageHistory",
     "ProjectStages",
     "ProjectStyleProfile",
+    # provider cost governance
+    "CostAuditLog",
+    "FxRates",
+    "ProviderByokKeys",
+    "ProviderContracts",
+    "ProviderCredits",
+    "ProviderMonthlySpend",
+    "ProviderPricing",
     # topics / signal feed
     "Hotspots",
     "HotspotUserState",
@@ -365,4 +403,6 @@ __all__ = [
     "UserProfiles",
     "UserSettings",
     "UserTagPreferences",
+    # workers
+    "t_worker_registry",
 ]

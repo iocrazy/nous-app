@@ -118,7 +118,9 @@ async def test_asset_get_by_id_selects_by_bigint_id(monkeypatch):
     assert out is None
     assert len(session.statements) == 1
     stmt = session.statements[0]
-    assert "FROM public.storyboard_assets" in str(stmt)
+    # mig 348 rename-deprecated the storyboard tables; the model (and so the
+    # emitted SQL) names the real table, not the pre-348 one.
+    assert "FROM public.zzz_deprecated_storyboard_assets" in str(stmt)
     # str snowflake id must be bigint-coerced before binding.
     assert 123456789012345678 in stmt.compile().params.values()
 
