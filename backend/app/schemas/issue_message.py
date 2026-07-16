@@ -112,8 +112,9 @@ class IssueMessagePost(BaseModel):
 
 
 class IssueMessagePostResponse(BaseModel):
-    """Response includes the user's comment row + the dispatched agent_run
-    placeholder row (when agent_id was set)."""
+    """The user's comment row (optimistic on the session paths; canonical on
+    the legacy path). ``agent_run`` is always None today — the dispatched turn
+    surfaces through GET /messages, not here — kept for wire compatibility."""
 
     comment: IssueMessage
     agent_run: Optional[IssueMessage] = None

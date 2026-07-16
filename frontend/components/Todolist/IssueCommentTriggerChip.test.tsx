@@ -40,6 +40,14 @@ describe('IssueCommentTriggerChip', () => {
     expect(screen.queryByTestId('comment-trigger-chip')).toBeNull();
   });
 
+  it('stays hidden when a wake has no agent to opt out of', () => {
+    // will_wake:true + agent_id:null can't be suppressed (nothing to name), so
+    // rendering it would be an un-dismissible dead end. Disclose nothing rather
+    // than a stuck toggle.
+    setup({ preview: { will_wake: true, agent_id: null } });
+    expect(screen.queryByTestId('comment-trigger-chip')).toBeNull();
+  });
+
   it('reads as a pressed toggle once suppressed', () => {
     setup({ suppressed: true });
     const chip = screen.getByTestId('comment-trigger-chip');

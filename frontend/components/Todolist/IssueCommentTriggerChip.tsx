@@ -38,7 +38,11 @@ export function IssueCommentTriggerChip({
   draftEmpty,
   onToggle,
 }: IssueCommentTriggerChipProps) {
-  if (!preview.will_wake || draftEmpty) return null;
+  // will_wake with no agent_id can't be opted out of (there's no id to name in
+  // suppress_agent_ids), so the chip would be an un-dismissible dead end.
+  // Shouldn't happen by construction — a wake always has an assignee — but
+  // disclose-without-a-false-affordance beats a stuck toggle.
+  if (!preview.will_wake || !preview.agent_id || draftEmpty) return null;
 
   // The predicate is authoritative about WHETHER; the name is cosmetic. A
   // pending/renamed agent must degrade to a generic label, never "undefined".
