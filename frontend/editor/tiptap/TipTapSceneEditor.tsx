@@ -327,12 +327,16 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
 
   const onRowDragOver = (e: ReactDragEvent<HTMLDivElement>) => {
     const onOver = refs.onElementDragOverRef.current;
-    if (!refs.draggingElementIdRef.current || !onOver) return;
+    if (!refs.draggingElementIdRef.current || !onOver) {
+      console.log('[DRAG-DBG] dragOver SKIP', attrs.id, 'draggingRef=', refs.draggingElementIdRef.current, 'cb=', !!onOver);
+      return;
+    }
     e.preventDefault();
     onOver(attrs.id, elementEdgeFromPointer(e.currentTarget, e.clientY));
   };
   const onRowDrop = (e: ReactDragEvent<HTMLDivElement>) => {
     const onDropCb = refs.onElementDropRef.current;
+    console.log('[DRAG-DBG] DROP fired on row', attrs.id, 'draggingRef=', refs.draggingElementIdRef.current, 'cb=', !!onDropCb);
     if (!refs.draggingElementIdRef.current || !onDropCb) return;
     e.preventDefault();
     onDropCb(attrs.id, elementEdgeFromPointer(e.currentTarget, e.clientY));
@@ -361,6 +365,7 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
         aria-label="Drag to reorder"
         title="Move paragraph"
         draggable={dragEnabled}
+        onMouseDown={() => console.log('[DRAG-DBG] grip mousedown', attrs.id, 'dragEnabled=', dragEnabled)}
         // NOTE: do NOT preventDefault on mousedown here — on a draggable element
         // that also cancels the browser's native drag gesture, so onDragStart
         // would never fire and the grip couldn't drag (the scene handle works
@@ -369,13 +374,21 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
         onDragStart={
           dragEnabled
             ? (e: ReactDragEvent<HTMLButtonElement>) => {
+                console.log('[DRAG-DBG] DRAGSTART fired', attrs.id);
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', attrs.id);
                 refs.onElementDragStartRef.current?.(attrs.id);
               }
             : undefined
         }
-        onDragEnd={dragEnabled ? () => refs.onElementDragEndRef.current?.() : undefined}
+        onDragEnd={
+          dragEnabled
+            ? () => {
+                console.log('[DRAG-DBG] dragend', attrs.id);
+                refs.onElementDragEndRef.current?.();
+              }
+            : undefined
+        }
       >
         <span className="mh-el-dot" />
         <span className="mh-el-dot" />

@@ -826,6 +826,7 @@ export function SceneBlock({
       setElementDropTarget(null);
       const dragging = draggingElementId;
       setDraggingElementId(null);
+      console.log('[DRAG-DBG] handleElementDrop dragging=', dragging, 'target=', targetId, 'edge=', edge);
       if (dragging) {
         // Same-scene reorder (existing move-op path). Dropping onto itself is a
         // no-op; applyMove would also self-anchor-skip, but bailing here avoids
