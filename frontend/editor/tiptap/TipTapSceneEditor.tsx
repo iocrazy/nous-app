@@ -279,6 +279,15 @@ interface ScriptElementViewRefs {
   onElementContextMenuRef: MutableRefObject<
     ((elementId: string, x: number, y: number) => void) | undefined
   >;
+  /**
+   * Set while a press LANDED ON THE DRAG GRIP. The grip deliberately does NOT
+   * preventDefault its mousedown (that would cancel the native drag — the whole
+   * reason reorder was broken), so the browser still drops the caret into that
+   * row as a side effect. Focusing a character/transition row auto-opens its cue
+   * picker, so grabbing the grip of a character line popped the dropdown. This
+   * flag lets the selection handler skip that one picker-open.
+   */
+  gripPressRef: MutableRefObject<boolean>;
 }
 
 /** The row DOM (spec D5): gutter [num + 4-dot drag handle] + tick + content. */
@@ -343,10 +352,9 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
 
   const onRowDragOver = (e: ReactDragEvent<HTMLDivElement>) => {
     const onOver = refs.onElementDragOverRef.current;
-    if (!refs.draggingElementIdRef.current || !onOver) {
-      console.log('[DRAG-DBG] dragOver SKIP', attrs.id, 'draggingRef=', refs.draggingElementIdRef.current, 'cb=', !!onOver);
-      return;
-    }
+    // NO logging in here: dragover fires ~60×/s and console.log in that hot path
+    // is itself a stutter source (it also drowned the console).
+    if (!refs.draggingElementIdRef.current || !onOver) return;
     e.preventDefault();
     onOver(attrs.id, elementEdgeFromPointer(e.currentTarget, e.clientY));
   };
@@ -381,7 +389,21 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
         aria-label="Drag to reorder"
         title="Move paragraph"
         draggable={dragEnabled}
-        onMouseDown={() => console.log('[DRAG-DBG] grip mousedown', attrs.id, 'dragEnabled=', dragEnabled)}
+        // Flag the press so the selection handler can skip auto-opening the
+        // character/transition cue picker for the caret this press drops into
+        // the row (see gripPressRef's doc). We must NOT preventDefault here —
+        // that cancels the native drag.
+        onMouseDown={() => {
+          refs.gripPressRef.current = true;
+          // Self-clear: a grip press that never moves the caret would otherwise
+          // leave the flag armed and swallow the NEXT real click's picker. PM
+          // observes selection changes off a `selectionchange` listener (async),
+          // so this has to outlive a microtask — 250ms is far longer than that
+          // and far shorter than a human's next deliberate click.
+          setTimeout(() => {
+            refs.gripPressRef.current = false;
+          }, 250);
+        }}
         // NOTE: do NOT preventDefault on mousedown here — on a draggable element
         // that also cancels the browser's native drag gesture, so onDragStart
         // would never fire and the grip couldn't drag (the scene handle works
@@ -390,7 +412,6 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
         onDragStart={
           dragEnabled
             ? (e: ReactDragEvent<HTMLButtonElement>) => {
-                console.log('[DRAG-DBG] DRAGSTART fired', attrs.id);
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', attrs.id);
                 // DEFER the state update by a tick. Calling it synchronously
@@ -408,14 +429,7 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
               }
             : undefined
         }
-        onDragEnd={
-          dragEnabled
-            ? () => {
-                console.log('[DRAG-DBG] dragend', attrs.id);
-                refs.onElementDragEndRef.current?.();
-              }
-            : undefined
-        }
+        onDragEnd={dragEnabled ? () => refs.onElementDragEndRef.current?.() : undefined}
       >
         <span className="mh-el-dot" />
         <span className="mh-el-dot" />
@@ -556,6 +570,8 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
     onElementDropRef.current = onElementDrop;
     const onElementDragEndRef = useRef(onElementDragEnd);
     onElementDragEndRef.current = onElementDragEnd;
+    // True only between a drag-grip mousedown and the selection change it causes.
+    const gripPressRef = useRef(false);
     const onElementContextMenuRef = useRef(onElementContextMenu);
     onElementContextMenuRef.current = onElementContextMenu;
     const onSlashChangeRef = useRef(onSlashChange);
@@ -608,6 +624,7 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
         onElementDropRef,
         onElementDragEndRef,
         onElementContextMenuRef,
+        gripPressRef,
       };
       const ViewNode = ScriptElementNode.extend({
         addNodeView() {
@@ -749,7 +766,16 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
         // when leaving a character line. `onMentionClose` is safe to call
         // spuriously (SceneBlock's `setMention(null)` no-ops via React's
         // same-value state bailout when nothing was open).
-        if (ctx && (ctx.node.attrs.elType as ElementType) === 'character') {
+        if (gripPressRef.current) {
+          // This caret move is the side effect of grabbing the row's drag grip,
+          // not the writer clicking into the line — don't pop the cue picker (a
+          // character row's grip would otherwise always open the dropdown). The
+          // grip can't preventDefault its mousedown to stop the caret move: that
+          // cancels the native drag, which is what broke reorder in the first
+          // place. Only a real click on the LINE should open the picker.
+          gripPressRef.current = false;
+          onMentionCloseRef.current?.();
+        } else if (ctx && (ctx.node.attrs.elType as ElementType) === 'character') {
           onMentionOpenRef.current?.(id as string, 'character', ctx.node.textContent);
         } else if (ctx && (ctx.node.attrs.elType as ElementType) === 'transition') {
           // Transition preset picker (laper parity): a focused transition line

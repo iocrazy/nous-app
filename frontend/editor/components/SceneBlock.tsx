@@ -795,7 +795,16 @@ export function SceneBlock({
     onElementDragDone?.();
   }, [onElementDragDone]);
   const handleElementDragOver = useCallback((elementId: string, edge: 'top' | 'bottom') => {
-    setElementDropTarget({ elementId, edge });
+    // Bail out when the target row+edge is UNCHANGED. `dragover` fires ~60×/s and
+    // a fresh object literal every time made this state always-different, so each
+    // one re-rendered the block → propsSync no-op transaction → ProseMirror
+    // repainted every row. That is what made dragging stutter. Returning `prev`
+    // lets React skip the render entirely, so we only repaint when the drop
+    // indicator actually moves. Mirrors the scene-level guard EditorShell's
+    // `reorder.onDragOver` has always had.
+    setElementDropTarget((prev) =>
+      prev && prev.elementId === elementId && prev.edge === edge ? prev : { elementId, edge },
+    );
   }, []);
   /** Build the insert op that lands an external element at the given anchor. */
   const acceptExternalDrop = useCallback(
