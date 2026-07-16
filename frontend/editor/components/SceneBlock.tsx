@@ -27,7 +27,11 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useParams } from 'react-router-dom';
 import { applyLocal, buildInverse } from '../opBuilder';
+import { createIssue } from '../../services/issuesService';
+import { buildOriginId } from '../../components/Todolist/issueOrigin';
+import { useToast } from '../../components/Toast';
 import { newElementId, updateSceneMeta } from '../sceneService';
 import {
   buildPolishOps,
@@ -214,6 +218,11 @@ export function SceneBlock({
   pageSeams,
 }: SceneBlockProps) {
   const { t } = useTranslation();
+  const { addToast } = useToast();
+  // Scoping for a scene-spawned issue. Present on the fullscreen editor route
+  // (team/:teamId/projects/:projectId/scripts/:scriptId); absent in isolated
+  // embeds, where the issue is simply created unscoped.
+  const { teamId, projectId } = useParams();
   const sync = useSceneSync(scene, { selfActorId });
   const [mention, setMention] = useState<MentionState | null>(null);
   // Mention nav state owned HERE (the combobox is presentational): the active
@@ -907,6 +916,44 @@ export function SceneBlock({
   }, [reorder]);
   const disarmSceneMove = useCallback(() => setSceneMoveArmed(false), []);
 
+  /**
+   * Turn this scene into a to-do — the script-editor twin of the canvas card's
+   * 'Create issue' (PR #1402). origin_kind stays 'manual' (a person clicked it);
+   * the scene is recorded in origin_id as `scene:{id}`, which the issue's Related
+   * tab reads to link back. The id is a Snowflake BIGINT and is passed straight
+   * through as a string — never Number()-coerced (precision loss past 2^53).
+   * team/project scope come from the editor route so the issue lands where the
+   * script lives.
+   */
+  const createIssueFromScene = useCallback(async () => {
+    const slug = [scene.heading_int_ext, scene.location_text, scene.time_of_day]
+      .map((part) => (part ?? '').trim())
+      .filter(Boolean)
+      .join(' · ');
+    const label = slug ? `Scene ${index + 1} — ${slug}` : `Scene ${index + 1}`;
+    try {
+      const issue = await createIssue({
+        title: `Follow up: ${label}`,
+        origin_id: buildOriginId('scene', scene.id),
+        ...(teamId ? { team_id: teamId } : {}),
+        ...(projectId ? { project_id: projectId } : {}),
+      });
+      addToast(`Created ${issue.identifier} from this scene`, 'success');
+    } catch (err) {
+      console.error('[SceneBlock] create issue failed:', err);
+      addToast(err instanceof Error ? err.message : 'Could not create issue', 'error');
+    }
+  }, [
+    scene.id,
+    scene.heading_int_ext,
+    scene.location_text,
+    scene.time_of_day,
+    index,
+    teamId,
+    projectId,
+    addToast,
+  ]);
+
   // The menu items depend on WHERE it opened: an element row can delete just that
   // block; the heading can't (a scene must keep its heading). Both can delete the
   // whole scene and enter move mode. Reorder-dependent items hide when reorder is
@@ -923,22 +970,31 @@ export function SceneBlock({
         onSelect: () => deleteElement(elId),
       });
     }
+    // 'Create issue' and the scene-level ops only exist in the full editor
+    // (reorder is wired there); read-only / storyboard embeds pass no reorder
+    // and keep their bare menu.
     if (reorder) {
+      items.push({
+        key: 'create-issue',
+        label: t('editor.ctxCreateIssue', 'Create issue'),
+        dividerBefore: !!elId,
+        onSelect: () => void createIssueFromScene(),
+      });
       items.push({
         key: 'delete-scene',
         label: t('editor.ctxDeleteScene'),
         danger: true,
+        dividerBefore: true,
         onSelect: () => reorder.onDeleteScene(scene.id),
       });
       items.push({
         key: 'move-scene',
         label: t('editor.ctxMoveScene'),
-        dividerBefore: true,
         onSelect: armSceneMove,
       });
     }
     return items;
-  }, [contextMenu, reorder, scene.id, t, deleteElement, armSceneMove]);
+  }, [contextMenu, reorder, scene.id, t, deleteElement, armSceneMove, createIssueFromScene]);
 
   // Esc / outside-click while move mode is armed cancels it (the overlay itself
   // disarms on dragend/drop). Armed only ever true when reorder is present.

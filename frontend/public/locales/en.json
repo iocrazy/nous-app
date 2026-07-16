@@ -2870,6 +2870,7 @@
     "hintEnter": "new element",
     "hintMention": "mention",
     "dragScene": "Reorder Scene",
+    "ctxCreateIssue": "Create issue",
     "ctxDeleteBlock": "Delete this block",
     "ctxDeleteScene": "Delete this scene",
     "ctxMoveScene": "Move whole scene",
