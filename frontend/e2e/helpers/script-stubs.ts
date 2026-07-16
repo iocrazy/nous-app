@@ -1,4 +1,4 @@
-import { type Page, type Route } from '@playwright/test';
+import { type Locator, type Page, type Route } from '@playwright/test';
 import { PARENT_PROJECT_ID, TEAM_ID, setupStubbedSession } from './stubs';
 
 /**
@@ -34,6 +34,34 @@ function fulfillJson(route: Route, body: unknown, status = 200): Promise<void> {
     contentType: 'application/json',
     body: JSON.stringify(body),
   });
+}
+
+/**
+ * Drag `grip` onto `target` the way a hand does: press, edge away, cross in
+ * steps, settle, release.
+ *
+ * `locator.dragTo()` is NOT a substitute here. The drop target is bookkept by
+ * dragover handlers, and dragTo jumps straight to the destination — too few
+ * dragovers land for the row under the pointer to ever be recorded, so the drop
+ * fires with no target and the reorder silently no-ops. The test then reports a
+ * broken feature that works fine by hand. Element reorder is a timing-sensitive
+ * path (it was already broken once by a re-render mid-drag), so the drag that
+ * tests it has to have real timing.
+ */
+export async function dragGrip(page: Page, grip: Locator, target: Locator): Promise<void> {
+  const g = await grip.boundingBox();
+  const t = await target.boundingBox();
+  if (!g || !t) throw new Error('dragGrip: grip or target has no box (not rendered/visible?)');
+
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+  await page.mouse.down();
+  // Break away first — a drag that starts on top of its own row can settle on
+  // itself as the target.
+  await page.mouse.move(g.x + g.width / 2, g.y - 10, { steps: 5 });
+  await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2, { steps: 12 });
+  // Settle into the target's top edge so the drop resolves a stable edge.
+  await page.mouse.move(t.x + t.width / 2, t.y + 3, { steps: 6 });
+  await page.mouse.up();
 }
 
 export type WireElement = {

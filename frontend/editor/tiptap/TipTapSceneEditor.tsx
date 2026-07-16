@@ -396,7 +396,6 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
   };
   const onRowDrop = (e: ReactDragEvent<HTMLDivElement>) => {
     const onDropCb = refs.onElementDropRef.current;
-    console.log('[DRAG-DBG] DROP fired on row', attrs.id, 'draggingRef=', refs.draggingElementIdRef.current, 'cb=', !!onDropCb);
     if (!refs.draggingElementIdRef.current || !onDropCb) return;
     e.preventDefault();
     onDropCb(attrs.id, elementEdgeFromPointer(e.currentTarget, e.clientY));
