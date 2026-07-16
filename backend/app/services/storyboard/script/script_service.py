@@ -177,14 +177,3 @@ class ScriptService:
         self, script_id: str, asset_type: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         return await self.asset_repo.list_by_script(script_id, asset_type=asset_type)
-
-    # ─── Script-Storyboard link operations ───────────────────────────
-
-    async def create_storyboard_link(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        return await self.link_repo.create(data)
-
-    async def delete_storyboard_link(self, link_id: str) -> None:
-        await self.link_repo.delete(link_id)
-
-    async def list_links_by_chapter(self, chapter_id: str) -> List[Dict[str, Any]]:
-        return await self.link_repo.list_by_chapter(chapter_id)

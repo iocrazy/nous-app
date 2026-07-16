@@ -1139,8 +1139,8 @@ export function EditorShell({
       {/* ===== LEFT RAIL (standalone only) =====
           Embedded (studio) mode drops the rail entirely — the workspace tree
           is the single side navigation and the scene list is lifted up to it
-          (合一终稿, 2026-07-11). The grid is `auto 1fr auto`, so with the nav
-          gone the shell reflows to the two remaining columns. */}
+          (合一终稿, 2026-07-11). The grid is `auto minmax(0,1fr) auto`, so with
+          the nav gone the shell reflows to the two remaining columns. */}
       {!embedded && (
         <nav
           className={`mh-island mh-rail${railCollapsed ? ' collapsed' : ''}`}

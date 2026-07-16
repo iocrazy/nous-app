@@ -276,10 +276,9 @@ async def _generate_image_with(model: str):
     resolver = AsyncMock(return_value=(fake_provider, "doubao-seedream-actual"))
 
     svc = ImageGenerationService()
-    # Style/character fragments hit the DB — stub them out; the empty registry
-    # naturally KeyErrors, driving the DB-catalog fallback branch.
+    # The empty registry naturally KeyErrors, driving the DB-catalog fallback
+    # branch.
     with (
-        patch.object(svc, "build_project_style_fragment", AsyncMock(return_value="")),
         patch(
             "app.services.media.parsers.video_providers.db_registry."
             "resolve_image_provider",

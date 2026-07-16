@@ -18,7 +18,7 @@ from typing import Any, Optional
 from sqlalchemy import select, text
 
 from app.db.session import read_scope, write_scope
-from app.models import ProjectStyleProfile, StoryboardProjects
+from app.models import ProjectStyleProfile
 
 _SELECT_COLUMNS = (
     "project_id, style_md, visual_style, reference_links, "
@@ -96,33 +96,6 @@ class ProjectStyleProfileRepository:
                         select(*_PROFILE_COLS).where(
                             ProjectStyleProfile.project_id == int(project_id)
                         )
-                    )
-                )
-                .mappings()
-                .first()
-            )
-        return _serialize(dict(row)) if row else None
-
-    async def get_for_storyboard_project(
-        self, storyboard_project_id: int
-    ) -> Optional[dict[str, Any]]:
-        """Profile for the canonical project a storyboard project links to.
-
-        None when the storyboard project is unlinked (legacy rows) or no
-        profile has been saved yet. Bridges through the mig-110 link in one
-        query (storyboard_projects.project_id → project_style_profile)."""
-        async with read_scope() as session:
-            row = (
-                (
-                    await session.execute(
-                        select(*_PROFILE_COLS)
-                        .select_from(ProjectStyleProfile)
-                        .join(
-                            StoryboardProjects,
-                            StoryboardProjects.project_id
-                            == ProjectStyleProfile.project_id,
-                        )
-                        .where(StoryboardProjects.id == int(storyboard_project_id))
                     )
                 )
                 .mappings()

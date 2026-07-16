@@ -1,8 +1,8 @@
-"""SQLAlchemy 2.0 ORM model package — 151 mapped classes + 2 bare Tables = 153 tables.
+"""SQLAlchemy 2.0 ORM model package — 144 mapped classes + 1 bare Table = 145 tables.
 
-The bare Tables (``t_storyboard_frame_characters``, ``t_worker_registry``) have
-no usable primary key in the DB, so they are mapped as Core Tables rather than
-declarative classes — no synthetic PK is invented for them.
+The bare Table (``t_worker_registry``) has no usable primary key in the DB, so it
+is mapped as a Core Table rather than a declarative class — no synthetic PK is
+invented for it.
 
 Kept honest by ``tests/db/test_schema_drift.py``, which diffs every model here
 against a real Postgres built from ``supabase/schema_baseline.sql``. A migration
@@ -178,17 +178,7 @@ from app.models.scripts import (  # noqa: F401
     WorkflowNodes,
     WorkflowTimeoutPolicy,
 )
-from app.models.storyboard import (  # noqa: F401
-    StoryboardAssets,
-    StoryboardCharacters,
-    StoryboardEdges,
-    StoryboardFrames,
-    StoryboardNodes,
-    StoryboardProjects,
-    StoryboardVideoAssets,
-    UserSchedules,
-    t_storyboard_frame_characters,
-)
+from app.models.storyboard import UserSchedules  # noqa: F401
 from app.models.teams import (  # noqa: F401
     FileVersions,
     MemberQuotas,
@@ -331,16 +321,7 @@ __all__ = [
     "TaskFlows",
     "WorkflowNodes",
     "WorkflowTimeoutPolicy",
-    # storyboard
-    "StoryboardAssets",
-    "StoryboardCharacters",
-    "StoryboardEdges",
-    "StoryboardFrames",
-    "StoryboardNodes",
-    "StoryboardProjects",
-    "StoryboardVideoAssets",
     "UserSchedules",
-    "t_storyboard_frame_characters",
     # teams
     "FileVersions",
     "MemberQuotas",
