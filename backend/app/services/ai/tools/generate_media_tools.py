@@ -1,6 +1,6 @@
 """Agent media-generation tool handlers (sub-plan 5, Plan 2).
 
-GenerateImage / GenerateVideo: call StoryboardAIService for the provider URL,
+GenerateImage / GenerateVideo: call ImageGenerationService for the provider URL,
 register the result into the Tier-1 generated_media store with agent_run
 provenance, and return a structured reference. Never raises into the agent loop.
 """
@@ -39,9 +39,11 @@ async def _scope_for(run_context: dict) -> int:
 
 class GenerateMediaTools:
     def _svc(self) -> Any:
-        from app.services.storyboard.storyboard_ai_service import StoryboardAIService
+        from app.services.ai.media.image_generation_service import (
+            ImageGenerationService,
+        )
 
-        return StoryboardAIService()
+        return ImageGenerationService()
 
     async def generate_image(self, args: dict, run_context: dict) -> dict:
         prompt = (args.get("prompt") or "").strip()

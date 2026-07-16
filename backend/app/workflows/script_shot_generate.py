@@ -1,7 +1,7 @@
 """script_shot_generate DBOS workflow — single-shot image generation (spec v3
 §4, Phase B P3).
 
-Reuses the storyboard image-provider chain (``StoryboardAIService.generate_image``
+Reuses the generic image-provider chain (``ImageGenerationService.generate_image``
 → ``provider_registry.get_image_provider``) rather than a parallel generator:
 step1 composes a prompt from the shot's cinematography tags + description + the
 scene heading and runs the provider; step2 persists the produced image through
@@ -50,7 +50,7 @@ _JIMENG_SCRATCH_PREFIX = "jimeng_"
 # Default image provider/model. ``provider=None`` means "resolve from the DB
 # mediahub_models catalog" — the image ``provider_registry`` ships EMPTY, so a
 # named provider like "openai" would only KeyError; passing None lets
-# ``StoryboardAIService.generate_image`` resolve the admin-enabled image model
+# ``ImageGenerationService.generate_image`` resolve the admin-enabled image model
 # (house rule: provider config lives in the DB, not env). A caller may still
 # thread an explicit provider/model to override. ``_DEFAULT_MODEL`` stays the
 # legacy sentinel: generate_image treats it as "use the catalog row's model".
@@ -110,7 +110,7 @@ async def generate_shot_image_step(
     provider yields no url (so the workflow marks the shot failed)."""
     from app.repositories.script_scene_repository import get_script_scene_repository
     from app.repositories.script_shot_repository import get_script_shot_repository
-    from app.services.storyboard.storyboard_ai_service import StoryboardAIService
+    from app.services.ai.media.image_generation_service import ImageGenerationService
 
     shot = await get_script_shot_repository().get_by_id(shot_id)
     if not shot:
@@ -118,7 +118,7 @@ async def generate_shot_image_step(
     scene = await get_script_scene_repository().get_by_id(str(shot.get("scene_id")))
     prompt = _compose_prompt(shot, scene)
 
-    svc = StoryboardAIService()
+    svc = ImageGenerationService()
     # project_id="" → no storyboard style fragment (shots aren't storyboard
     # projects); node_id carries the shot id for the provider's logging.
     result = await svc.generate_image(
