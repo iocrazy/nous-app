@@ -13,10 +13,11 @@ from __future__ import annotations
 import datetime
 import decimal
 import uuid
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import (
     ARRAY,
+    REAL,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -32,7 +33,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.dialects.postgresql import UUID as Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import text
@@ -50,6 +51,14 @@ class AiAgents(Base):
         CheckConstraint(
             "paused_reason IS NULL OR (paused_reason = ANY (ARRAY['budget'::text, 'manual'::text]))",
             name="ai_agents_paused_reason_check",
+        ),
+        CheckConstraint(
+            "max_concurrent_runs IS NULL OR max_concurrent_runs >= 1",
+            name="ai_agents_max_concurrent_runs_check",
+        ),
+        CheckConstraint(
+            "timeout_sec IS NULL OR timeout_sec >= 0",
+            name="ai_agents_timeout_sec_check",
         ),
         PrimaryKeyConstraint("id", name="ai_agents_pkey"),
         Index(
@@ -159,6 +168,14 @@ class AiAgents(Base):
     seed_hash: Mapped[Optional[str]] = mapped_column(
         Text,
         comment="sha256 of IDENTITY.md + SOUL.md + AGENT.md + frontmatter; null = always re-upsert",
+    )
+    timeout_sec: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        comment="Per-run wall-clock ceiling. NULL = use code default.",
+    )
+    max_concurrent_runs: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        comment="Cap on simultaneous runs for this agent. NULL = uncapped.",
     )
 
 
@@ -507,6 +524,72 @@ class AgentMemory(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )
+    search_tsv: Mapped[Optional[Any]] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "setweight(to_tsvector('english', COALESCE(title, '') || ' ' || "
+            "COALESCE(when_to_use, '')), 'A') || "
+            "setweight(to_tsvector('english', COALESCE(body_md, '')), 'B')",
+            persisted=True,
+        ),
+    )
+
+
+class AgentMemoryPromotions(Base):
+    """Proposals to promote a private agent_memory row to team/project scope.
+
+    The promotion pipeline classifies + scrubs the body, then parks the
+    proposal here for review; ``scrubbed_body_md`` is what gets written on
+    approval, not the original.
+    """
+
+    __tablename__ = "agent_memory_promotions"
+    __table_args__ = (
+        CheckConstraint(
+            "proposed_scope = ANY (ARRAY['team'::text, 'project'::text])",
+            name="agent_memory_promotions_proposed_scope_check",
+        ),
+        CheckConstraint(
+            "status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text])",
+            name="agent_memory_promotions_status_check",
+        ),
+        ForeignKeyConstraint(
+            ["memory_id"],
+            ["public.agent_memory.id"],
+            ondelete="CASCADE",
+            name="agent_memory_promotions_memory_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="agent_memory_promotions_pkey"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    memory_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    proposed_scope: Mapped[str] = mapped_column(Text, nullable=False)
+    target_team_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    classification_kind: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'fact'::text")
+    )
+    confidence: Mapped[float] = mapped_column(
+        REAL, nullable=False, server_default=text("0")
+    )
+    justification: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''::text")
+    )
+    scrubbed_body_md: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''::text")
+    )
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'pending'::text")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    target_project_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    reviewed_by: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
+    reviewed_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
 
 
 class Skills(Base):

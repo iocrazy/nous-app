@@ -1,5 +1,27 @@
-"""Storyboard models: projects, assets, characters, nodes, edges, frames, video assets,
-plus user schedules."""
+"""Storyboard models (TOMBSTONE) + user schedules.
+
+⚠️ The eight Storyboard* models below map ``zzz_deprecated_storyboard_*`` —
+GRAVESTONE TABLES, not live ones. Migration 348 rename-deprecated them after
+#1109 turned every ``/storyboard/*`` route into 410 Gone; the class names are
+unchanged only because ~100 import sites still reference them. When the tables
+are finally DROPped, delete these models in the same change — they have no
+independent reason to exist.
+
+Why they are still here at all: the models are IMPORT-REACHABLE BUT
+QUERY-UNREACHABLE. ``storyboard_repository`` imports them at module level, and
+that repo is imported (transitively, via ``storyboard_ai_service``) by two LIVE
+callers — ``workflows/script_shot_generate`` and ``services/ai/tools/
+generate_media_tools`` — which reuse ``StoryboardAIService`` purely as a generic
+image-generation service and pass ``project_id=""`` precisely to skip the
+storyboard-specific path. The one active-path reader that would touch these
+tables, ``build_project_style_fragment``, dies on ``int("")`` inside a
+``try/except`` that swallows everything and returns "" (mig 348 says so
+explicitly: "style is seasoning"). So nothing live reads a zzz_ table — but
+deleting the models today would break those two live imports, which is why
+retiring the dead business code is a separate, tracked piece of work.
+
+``UserSchedules`` at the top is a normal LIVE table and unrelated to any of this.
+"""
 
 from __future__ import annotations
 
@@ -114,7 +136,7 @@ class UserSchedules(Base):
 
 
 class StoryboardProjects(Base):
-    __tablename__ = "storyboard_projects"
+    __tablename__ = "zzz_deprecated_storyboard_projects"
     __table_args__ = (
         CheckConstraint(
             "status::text = ANY (ARRAY['active'::character varying::text,"
@@ -170,7 +192,7 @@ class StoryboardProjects(Base):
 
 
 class StoryboardAssets(Base):
-    __tablename__ = "storyboard_assets"
+    __tablename__ = "zzz_deprecated_storyboard_assets"
     __table_args__ = (
         CheckConstraint(
             "source_type::text = ANY (ARRAY['uploaded'::character varying::text,"
@@ -180,7 +202,7 @@ class StoryboardAssets(Base):
         ),
         ForeignKeyConstraint(
             ["project_id"],
-            ["public.storyboard_projects.id"],
+            ["public.zzz_deprecated_storyboard_projects.id"],
             ondelete="CASCADE",
             name="storyboard_assets_project_id_fkey",
         ),
@@ -214,11 +236,11 @@ class StoryboardAssets(Base):
 
 
 class StoryboardCharacters(Base):
-    __tablename__ = "storyboard_characters"
+    __tablename__ = "zzz_deprecated_storyboard_characters"
     __table_args__ = (
         ForeignKeyConstraint(
             ["project_id"],
-            ["public.storyboard_projects.id"],
+            ["public.zzz_deprecated_storyboard_projects.id"],
             ondelete="CASCADE",
             name="storyboard_characters_project_id_fkey",
         ),
@@ -252,7 +274,7 @@ class StoryboardCharacters(Base):
 
 
 class StoryboardNodes(Base):
-    __tablename__ = "storyboard_nodes"
+    __tablename__ = "zzz_deprecated_storyboard_nodes"
     __table_args__ = (
         CheckConstraint(
             "node_type::text = ANY (ARRAY['upload'::character varying::text, 'image_edit'::character varying::text, "
@@ -263,7 +285,7 @@ class StoryboardNodes(Base):
         ),
         ForeignKeyConstraint(
             ["project_id"],
-            ["public.storyboard_projects.id"],
+            ["public.zzz_deprecated_storyboard_projects.id"],
             ondelete="CASCADE",
             name="storyboard_nodes_project_id_fkey",
         ),
@@ -305,23 +327,23 @@ class StoryboardNodes(Base):
 
 
 class StoryboardEdges(Base):
-    __tablename__ = "storyboard_edges"
+    __tablename__ = "zzz_deprecated_storyboard_edges"
     __table_args__ = (
         ForeignKeyConstraint(
             ["project_id"],
-            ["public.storyboard_projects.id"],
+            ["public.zzz_deprecated_storyboard_projects.id"],
             ondelete="CASCADE",
             name="storyboard_edges_project_id_fkey",
         ),
         ForeignKeyConstraint(
             ["source_node_id"],
-            ["public.storyboard_nodes.id"],
+            ["public.zzz_deprecated_storyboard_nodes.id"],
             ondelete="CASCADE",
             name="storyboard_edges_source_node_id_fkey",
         ),
         ForeignKeyConstraint(
             ["target_node_id"],
-            ["public.storyboard_nodes.id"],
+            ["public.zzz_deprecated_storyboard_nodes.id"],
             ondelete="CASCADE",
             name="storyboard_edges_target_node_id_fkey",
         ),
@@ -353,7 +375,7 @@ class StoryboardEdges(Base):
 
 
 class StoryboardFrames(Base):
-    __tablename__ = "storyboard_frames"
+    __tablename__ = "zzz_deprecated_storyboard_frames"
     __table_args__ = (
         CheckConstraint(
             "transition_type::text = ANY (ARRAY['cut'::character varying::text,"
@@ -362,13 +384,13 @@ class StoryboardFrames(Base):
         ),
         ForeignKeyConstraint(
             ["node_id"],
-            ["public.storyboard_nodes.id"],
+            ["public.zzz_deprecated_storyboard_nodes.id"],
             ondelete="CASCADE",
             name="storyboard_frames_node_id_fkey",
         ),
         ForeignKeyConstraint(
             ["project_id"],
-            ["public.storyboard_projects.id"],
+            ["public.zzz_deprecated_storyboard_projects.id"],
             ondelete="CASCADE",
             name="storyboard_frames_project_id_fkey",
         ),
@@ -421,7 +443,7 @@ class StoryboardFrames(Base):
 
 
 class StoryboardVideoAssets(Base):
-    __tablename__ = "storyboard_video_assets"
+    __tablename__ = "zzz_deprecated_storyboard_video_assets"
     __table_args__ = (
         CheckConstraint(
             "status::text = ANY (ARRAY['pending'::character varying::text,"
@@ -431,19 +453,19 @@ class StoryboardVideoAssets(Base):
         ),
         ForeignKeyConstraint(
             ["project_id"],
-            ["public.storyboard_projects.id"],
+            ["public.zzz_deprecated_storyboard_projects.id"],
             ondelete="CASCADE",
             name="storyboard_video_assets_project_id_fkey",
         ),
         ForeignKeyConstraint(
             ["source_frame_id"],
-            ["public.storyboard_frames.id"],
+            ["public.zzz_deprecated_storyboard_frames.id"],
             ondelete="SET NULL",
             name="storyboard_video_assets_source_frame_id_fkey",
         ),
         ForeignKeyConstraint(
             ["source_node_id"],
-            ["public.storyboard_nodes.id"],
+            ["public.zzz_deprecated_storyboard_nodes.id"],
             ondelete="SET NULL",
             name="storyboard_video_assets_source_node_id_fkey",
         ),
@@ -484,19 +506,19 @@ class StoryboardVideoAssets(Base):
 
 
 t_storyboard_frame_characters = Table(
-    "storyboard_frame_characters",
+    "zzz_deprecated_storyboard_frame_characters",
     Base.metadata,
     Column("frame_id", BigInteger, primary_key=True),
     Column("character_id", BigInteger, primary_key=True),
     ForeignKeyConstraint(
         ["character_id"],
-        ["public.storyboard_characters.id"],
+        ["public.zzz_deprecated_storyboard_characters.id"],
         ondelete="CASCADE",
         name="storyboard_frame_characters_character_id_fkey",
     ),
     ForeignKeyConstraint(
         ["frame_id"],
-        ["public.storyboard_frames.id"],
+        ["public.zzz_deprecated_storyboard_frames.id"],
         ondelete="CASCADE",
         name="storyboard_frame_characters_frame_id_fkey",
     ),

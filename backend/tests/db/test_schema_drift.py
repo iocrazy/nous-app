@@ -1,21 +1,25 @@
 """Schema-drift guard: reflect live Postgres and assert every ORM model matches.
 
 Replaces Alembic autogenerate as the "models stay in sync with the DB" guarantee.
-Models were generated from PROD via sqlacodegen; against PROD this test is GREEN
-by construction.
 
-Five hard gates (all run against the 105 mapped public tables — was 107
-before migration 333 retired the ai_sessions/ai_messages tables + models,
-Phase 3 Wave 2 legacy-chat cleanup):
+The models were originally generated from prod via sqlacodegen, but "green by
+construction" stopped being true the moment the first migration shipped without
+a regen — which is exactly what happened for months while this gate silently
+no-op'd. Nothing here is green by construction; it is green because it is
+checked. In CI the schema under test is built from supabase/schema_baseline.sql
+plus the migrations above its watermark, so this runs on every PR with no secret
+and no live database.
+
+Five hard gates (all run against the 153 mapped public tables):
   1. test_no_missing_tables         — every mapped table exists in live public schema
   2. test_column_names_match        — set(model cols) == set(live cols) per table
   3. test_nullability_matches       — model nullable matches live is_nullable per col
   4. test_column_types_match        — model SA type maps to expected udt_name per col
   5. test_no_unmapped_inscope_tables — (live tables) - {3 excluded} - {mapped} == empty
 
-Setup: set INTEGRATION_DATABASE_URL to a live Postgres DSN.
-  source /tmp/orm2_integration_prod.env
-  uv run pytest tests/db/test_schema_drift.py -v
+Setup: point INTEGRATION_DATABASE_URL at any Postgres built the CI way
+(ci_bootstrap.sql → schema_baseline.sql → migrations above the watermark):
+  INTEGRATION_DATABASE_URL=postgresql://... uv run pytest tests/db/test_schema_drift.py -v
 
 Skips cleanly when INTEGRATION_DATABASE_URL is unset (CI has no DB).
 """
@@ -63,22 +67,12 @@ _EXCLUDED_TABLES: frozenset[str] = frozenset(
 # all three lists; nothing here is intended to be permanent.
 
 # gate 1 — models whose table does not exist live.
-# Migration 348 renamed storyboard_* → zzz_deprecated_storyboard_* as part of
-# retiring the storyboard feature (#1109 turned every /storyboard/* route into
-# 410 Gone). The retirement is intended; only the models were left behind.
-# Remove these entries by DELETING the models in app/models/storyboard*.
-_ALLOWED_MISSING_TABLES: frozenset[str] = frozenset(
-    {
-        "storyboard_assets",
-        "storyboard_characters",
-        "storyboard_edges",
-        "storyboard_frame_characters",
-        "storyboard_frames",
-        "storyboard_nodes",
-        "storyboard_projects",
-        "storyboard_video_assets",
-    }
-)
+# EMPTY, and it should stay that way: a model pointing at a table that does not
+# exist is a 42P01 waiting to happen. The eight storyboard models that used to
+# live here now map their real post-migration-348 names
+# (zzz_deprecated_storyboard_*), so they are checked like everything else rather
+# than exempted. They disappear entirely when those tombstone tables are DROPped.
+_ALLOWED_MISSING_TABLES: frozenset[str] = frozenset()
 
 # gate 2 — columns that exist LIVE but are missing from the model.
 # Direction matters: this list only ever exempts live-has/model-lacks. The
@@ -90,67 +84,33 @@ _ALLOWED_MISSING_TABLES: frozenset[str] = frozenset(
 # columns and new code must reach them via column()/text(). Nothing crashes.
 # Each was added by a migration whose feature shipped without regenerating models.
 _ALLOWED_MISSING_COLUMNS: dict[str, frozenset[str]] = {
-    # Full-text search vector added for agent-memory search.
-    "agent_memory": frozenset({"search_tsv"}),
-    # BYOK + cost attribution + run nesting.
-    "agent_run_events": frozenset({"byok_key_id", "cost_snapshot", "parent_run_id"}),
-    # Conversation linkage + outcome classification + task linkage.
-    "agent_runs": frozenset({"conversation_id", "outcome", "task_id"}),
-    # Agent concurrency/timeout governance.
-    "ai_agents": frozenset({"max_concurrent_runs", "timeout_sec"}),
-    # Canvas/stage cursors from the projects-as-workspace epic.
-    "projects": frozenset({"current_canvas_id", "current_stage_id"}),
-    # Canvas mode (Standard/Smart) user preference.
-    "user_settings": frozenset({"canvas_mode_preference"}),
+    # EMPTY — every column below is now on its model. Keep it that way: a
+    # migration that adds a column must add it to the model in the same PR.
 }
 
 # gate 5 — live tables with no ORM model. Each shipped after the models were
 # generated; the ORM simply never learned about them. Remove an entry by ADDING
 # the model.
-_ALLOWED_UNMAPPED_TABLES: frozenset[str] = frozenset(
-    {
-        # Agent-memory layer (promotion pipeline).
-        "agent_memory_promotions",
-        # Alerting / monitoring.
-        "alert_history",
-        "alert_rules",
-        # Unified-conversations epic.
-        "conversation_ai_meta",
-        "message_refs",
-        # Cost / billing / provider governance (Nous models epic).
-        "cost_audit_log",
-        "fx_rates",
-        "provider_byok_keys",
-        "provider_contracts",
-        "provider_credits",
-        "provider_monthly_spend",
-        "provider_pricing",
-        # Distribution module (OAuth handshake state).
-        "distribution_oauth_states",
-        # Worker foundation.
-        "worker_registry",
-        # NOTE: migration 176 meant to drop project_tasks, but it never succeeded
-        # in prod (permission denied) — the table is still live and thus still
-        # in the baseline. Re-attempt the drop rather than adding a model.
-        "project_tasks",
-        # Migration 348 retirement leftovers: renamed out of the way, not yet
-        # dropped. These disappear when the storyboard tables are finally dropped.
-        "zzz_deprecated_storyboard_assets",
-        "zzz_deprecated_storyboard_characters",
-        "zzz_deprecated_storyboard_edges",
-        "zzz_deprecated_storyboard_frame_characters",
-        "zzz_deprecated_storyboard_frames",
-        "zzz_deprecated_storyboard_nodes",
-        "zzz_deprecated_storyboard_projects",
-        "zzz_deprecated_storyboard_video_assets",
-    }
-)
+# Empty by construction. The one entry this ever held, `project_tasks`, was a
+# zombie left by migration 176's half-landed drop (guard passed, task_assets
+# dropped, project_tasks did not — it was owned by postgres while 176 ran as
+# supabase_admin). Migration 365 re-attempted the drop without SET ROLE and it
+# is gone from prod (verified 2026-07-16) and from this gate's ephemeral schema
+# (365 > baseline watermark 364, so it applies here too). Entry removed per the
+# accuracy ratchet: an allowlist line that no longer describes real drift must
+# not linger.
+_ALLOWED_UNMAPPED_TABLES: frozenset[str] = frozenset()
 
 # Ratchet ceilings — measured against prod 2026-07-15. These may only ever be
 # LOWERED. See test_allowlists_only_shrink.
-_MAX_ALLOWED_MISSING_TABLES = 8
-_MAX_ALLOWED_MISSING_COLUMNS = 12
-_MAX_ALLOWED_UNMAPPED_TABLES = 23
+#
+# All three are now ZERO: no allowlist can take a single new entry without a
+# visible, reviewed edit to these lines. The models match prod exactly. Any
+# future drift — a migration that changes the schema without regenerating a
+# model — turns this gate red on the PR that introduces it.
+_MAX_ALLOWED_MISSING_TABLES = 0
+_MAX_ALLOWED_MISSING_COLUMNS = 0
+_MAX_ALLOWED_UNMAPPED_TABLES = 0
 
 # ── SQLAlchemy type → PG udt_name normalization map ─────────────────────
 # Maps the SQLAlchemy column type class name (from type(col.type).__name__)
@@ -180,6 +140,8 @@ _SA_TYPE_TO_UDT: dict[str, str] = {
     "UUID": "uuid",  # sqlalchemy.dialects.postgresql.UUID
     "Numeric": "numeric",
     "Double": "float8",
+    "REAL": "float4",  # sqlalchemy.REAL — single precision
+    "CHAR": "bpchar",  # blank-padded fixed-width char(n)
     "Date": "date",
     # Float: precision drives float4 vs float8 — handled dynamically in
     # _expected_udt() (SA renders bare Float as PG "float8"/double precision).
@@ -191,6 +153,9 @@ _SA_TYPE_TO_UDT: dict[str, str] = {
     # Handled dynamically in _expected_udt().
     # VECTOR: pgvector extension type.
     "VECTOR": "vector",
+    # TSVECTOR: full-text search vector (agent_memory.search_tsv, a STORED
+    # generated column — Computed() does not change the reported udt).
+    "TSVECTOR": "tsvector",
 }
 
 # Small allowlist for genuinely ambiguous mappings that cannot be normalized

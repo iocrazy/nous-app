@@ -146,6 +146,11 @@ class UserTagPreferences(Base):
 class UserSettings(Base):
     __tablename__ = "user_settings"
     __table_args__ = (
+        CheckConstraint(
+            "canvas_mode_preference IS NULL OR canvas_mode_preference = ANY"
+            " (ARRAY['smart'::text, 'classic'::text])",
+            name="user_settings_canvas_mode_preference_check",
+        ),
         PrimaryKeyConstraint("id", name="user_settings_pkey"),
         UniqueConstraint("user_id", name="user_settings_user_id_key"),
         Index("idx_user_settings_user_id", "user_id"),
@@ -173,6 +178,10 @@ class UserSettings(Base):
     )
     updated_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(True), server_default=text("now()")
+    )
+    canvas_mode_preference: Mapped[str | None] = mapped_column(
+        Text,
+        comment="Canvas mode: 'smart' or 'classic'. NULL = use code default.",
     )
 
 

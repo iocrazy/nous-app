@@ -26,6 +26,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
+    ForeignKeyConstraint,
     Integer,
     PrimaryKeyConstraint,
     Text,
@@ -185,3 +186,67 @@ class MessageAttachments(Base):
     message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     generated_media_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     ord: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+
+
+class ConversationAiMeta(Base):
+    """AI-session decoration for direct_agent conversations (mig 333 retired
+    ai_sessions in favour of this sidecar). PK = conversation_id (one row per
+    direct_agent conversation)."""
+
+    __tablename__ = "conversation_ai_meta"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["conversation_id"],
+            ["public.conversations.id"],
+            ondelete="CASCADE",
+            name="conversation_ai_meta_conversation_id_fkey",
+        ),
+        PrimaryKeyConstraint("conversation_id", name="conversation_ai_meta_pkey"),
+        {
+            "comment": (
+                "AI-session decoration for direct_agent conversations (agent "
+                "binding, token/message counters, client grouping hints). Phase 2 "
+                "sidecar; one row per direct_agent conversation. Backend-only "
+                "(service-role RLS)."
+            ),
+            "schema": "public",
+        },
+    )
+
+    conversation_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    agent_slug: Mapped[str] = mapped_column(Text, nullable=False)
+    total_tokens: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    message_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    context_type: Mapped[str | None] = mapped_column(Text)
+    context_id: Mapped[str | None] = mapped_column(Text)
+
+
+class MessageRefs(Base):
+    """Message → arbitrary entity references (@-mentions, linked resources).
+    ``ref_id`` is text so it can carry both snowflake ids and slugs."""
+
+    __tablename__ = "message_refs"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["message_id"],
+            ["public.messages.id"],
+            ondelete="CASCADE",
+            name="message_refs_message_id_fkey",
+        ),
+        PrimaryKeyConstraint(
+            "message_id", "ref_type", "ref_id", name="message_refs_pkey"
+        ),
+        {"schema": "public"},
+    )
+
+    message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    ref_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    ref_id: Mapped[str] = mapped_column(Text, primary_key=True)
