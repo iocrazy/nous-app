@@ -15,6 +15,8 @@ import { WorkspaceCanvas } from './WorkspaceCanvas';
 const mockNavigate = vi.fn();
 vi.mock('react-router-dom', () => ({
   useNavigate: () => mockNavigate,
+  // CanvasCardMenu reads team/project scope for its create-issue payload.
+  useParams: () => ({}),
 }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string, d?: string) => d ?? k }),
