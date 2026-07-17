@@ -6,7 +6,7 @@ import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown } from 'lucide-react';
 import { HotspotCard } from '../TopicInspiration/HotspotCard';
-import { HotspotDetail } from './HotspotDetail';
+import { HotspotCardExpand } from './HotspotCardExpand';
 import type { Hotspot, HotspotStatePatch } from '../../services/topicService';
 
 const RAIL_LEFT = 64;
@@ -168,16 +168,16 @@ export const HotspotTimeline: React.FC<Props> = ({ hotspots, onSaveAsNote, onPar
                         selected={expanded}
                         onToggleSave={toggleSave}
                         onToggleHide={hide}
-                      />
-                      {expanded && (
-                        <HotspotDetail
-                          hotspot={h}
-                          embedded
-                          onSaveAsNote={onSaveAsNote}
-                          onParse={onParse}
-                          onNotInterested={hide}
-                        />
-                      )}
+                      >
+                        {expanded && (
+                          <HotspotCardExpand
+                            hotspot={h}
+                            onSaveAsNote={onSaveAsNote}
+                            onParse={onParse}
+                            onNotInterested={hide}
+                          />
+                        )}
+                      </HotspotCard>
                     </div>
                   </div>
                 );
