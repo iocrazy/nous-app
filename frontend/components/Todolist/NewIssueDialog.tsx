@@ -11,7 +11,8 @@ import { UiSelect } from '../ui';
 
 interface NewIssueDialogProps {
   agents: AgentRef[];
-  teamId: number | null;
+  // Snowflake BIGINT — string preserves precision past 2^53; number kept for legacy callers.
+  teamId: number | string | null;
   /** When set, the dialog opens in "sub-issue" mode and writes parent_id on submit. */
   parentId?: number | null;
   /** Preselect the assignee (paperclip "Assign Task" from an agent page). */

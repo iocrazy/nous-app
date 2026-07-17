@@ -36,6 +36,26 @@ describe('NewIssueDialog project linkage', () => {
     });
   });
 
+  it('passes a Snowflake team id through as an exact string (no Number() rounding)', async () => {
+    // 2^53 + 1 — Number() would round this to ...992 and the created issue
+    // could never match the team-filtered list again.
+    const big = '9007199254740993';
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <NewIssueDialog
+        agents={AGENTS}
+        teamId={big}
+        lockedProjectId="99887766554433"
+        lockedProjectName="Neon Short"
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+    fillTitleAndSubmit('Precision check');
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].team_id).toBe(big);
+  });
+
   it('picker mode submits the chosen project id', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(

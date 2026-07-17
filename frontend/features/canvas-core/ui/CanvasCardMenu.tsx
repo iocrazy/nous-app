@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Download, ListTodo, Loader2, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 
@@ -37,6 +38,12 @@ export function CanvasCardMenu({
 }: CanvasCardMenuProps) {
   const { t } = useTranslation();
   const { addToast } = useToast();
+  // Scoping for a canvas-spawned issue (same shape as SceneBlock's create-issue).
+  // Present on the workspace route (team/:teamId/projects/:projectId); the canvas
+  // landing page carries at least teamId. Passed through as STRINGS — team/project
+  // ids are Snowflake BIGINTs and Number() rounds them past 2^53, which is exactly
+  // the bug that made canvas-spawned issues invisible on the team-filtered list.
+  const { teamId, projectId } = useParams();
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(canvasName);
@@ -91,6 +98,8 @@ export function CanvasCardMenu({
       const issue = await createIssue({
         title: `Follow up: ${canvasName}`,
         origin_id: buildOriginId('canvas', canvasId),
+        ...(teamId ? { team_id: teamId } : {}),
+        ...(projectId ? { project_id: projectId } : {}),
       });
       addToast(`Created ${issue.identifier} from this canvas`, 'success');
     } catch (err) {
