@@ -11,26 +11,39 @@ interface Props {
   onSaveAsNote: (h: Hotspot) => void;
   onParse: (h: Hotspot) => void;
   onNotInterested: (h: Hotspot) => void;
+  /** Content-only render for the timeline's inline expand: drops the island
+   *  wrapper + fixed-height column and renders in normal flow (spec §3). */
+  embedded?: boolean;
 }
 
-export const HotspotDetail: React.FC<Props> = ({ hotspot, onSaveAsNote, onParse, onNotInterested }) => {
+export const HotspotDetail: React.FC<Props> = ({ hotspot, onSaveAsNote, onParse, onNotInterested, embedded }) => {
   const { t } = useTranslation();
   const [full, setFull] = useState<Hotspot | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  // Bumped by Retry to re-run the lazy fetch.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!hotspot) {
       setFull(null);
+      setLoadError(false);
       return;
     }
     setFull(hotspot);
+    setLoadError(false);
     let alive = true;
     getHotspot(hotspot.id)
       .then((h) => alive && setFull(h))
-      .catch((err) => console.error('hotspot detail load failed', err));
+      .catch((err) => {
+        if (!alive) return;
+        // Keep the stub data on screen; surface a retryable inline error.
+        setLoadError(true);
+        console.error('hotspot detail load failed', err);
+      });
     return () => {
       alive = false;
     };
-  }, [hotspot]);
+  }, [hotspot, reloadKey]);
 
   if (!hotspot) {
     return (
@@ -45,8 +58,8 @@ export const HotspotDetail: React.FC<Props> = ({ hotspot, onSaveAsNote, onParse,
   const url = h.origin_url || h.url || undefined;
 
   return (
-    <div className="flex h-full flex-col rounded-xl bg-island">
-      <div className="flex-1 overflow-y-auto p-4">
+    <div className={embedded ? '' : 'flex h-full flex-col rounded-xl bg-island'}>
+      <div className={embedded ? 'pt-2' : 'flex-1 overflow-y-auto p-4'}>
         <div className="flex flex-wrap items-center gap-1.5">
           {h.source_label && (
             <span className="rounded bg-island-2 px-1.5 py-0.5 text-[10px] font-bold text-content-2">{h.source_label}</span>
@@ -74,8 +87,25 @@ export const HotspotDetail: React.FC<Props> = ({ hotspot, onSaveAsNote, onParse,
             <p className="mt-1.5 text-[12.5px] leading-relaxed text-content-2">{summary}</p>
           </>
         )}
+        {loadError && (
+          <div className="mt-3 flex items-center gap-2 text-[11px] text-red-400">
+            <span>{t('inspiration.detailLoadFailed', 'Failed to load details')}</span>
+            <button
+              onClick={() => setReloadKey((k) => k + 1)}
+              className="rounded bg-island-2 px-1.5 py-0.5 text-content-2 hover:text-content"
+            >
+              {t('inspiration.retry', 'Retry')}
+            </button>
+          </div>
+        )}
       </div>
-      <div className="flex flex-wrap items-center gap-2 border-t border-line p-3">
+      <div
+        className={
+          embedded
+            ? 'flex flex-wrap items-center gap-2 pt-3'
+            : 'flex flex-wrap items-center gap-2 border-t border-line p-3'
+        }
+      >
         <button
           onClick={() => onSaveAsNote(h)}
           className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-500 px-3 py-1.5 text-xs font-semibold text-white"
