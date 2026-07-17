@@ -40,10 +40,10 @@ export type PageSeamMap = Map<string, PageSeamEntry>;
 
 export const pageSeamPluginKey = new PluginKey<null>('pageSeamDecorations');
 
-/** Builds the SAME DOM `PageSeam.tsx` renders (kept byte-identical: class
- *  names, `data-testid`, the `filler` → `paddingTop` style, the "N." page
- *  number text) — imperative `document.createElement` because PM widget
- *  decorations render outside React's tree. */
+/** Builds the SAME DOM `PageSeam.tsx` renders (kept in sync: class names,
+ *  `data-testid`, the `filler` → `paddingTop` style, the bare-integer page
+ *  number nested in the dashed rule) — imperative `document.createElement`
+ *  because PM widget decorations render outside React's tree. */
 function seamDom(entry: PageSeamEntry): HTMLElement {
   const el = document.createElement('div');
   // `mh-page-seam-inline` marks the IN-EDITOR context: this widget renders inside
@@ -57,21 +57,14 @@ function seamDom(entry: PageSeamEntry): HTMLElement {
   el.setAttribute('contenteditable', 'false');
   el.setAttribute('data-testid', 'page-seam');
 
-  const bottom = document.createElement('div');
-  bottom.className = 'mh-page-seam-bottom';
-  el.appendChild(bottom);
-
-  const gap = document.createElement('div');
-  gap.className = 'mh-page-seam-gap';
-  el.appendChild(gap);
-
-  const topedge = document.createElement('div');
-  topedge.className = 'mh-page-seam-topedge';
+  const rule = document.createElement('div');
+  rule.className = 'mh-page-seam-rule';
   const num = document.createElement('span');
   num.className = 'mh-page-seam-num';
-  num.textContent = `${entry.page + 1}.`;
-  topedge.appendChild(num);
-  el.appendChild(topedge);
+  // Page that ENDS here (bare integer, no trailing period).
+  num.textContent = `${entry.page}`;
+  rule.appendChild(num);
+  el.appendChild(rule);
 
   return el;
 }
