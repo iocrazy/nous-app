@@ -5,6 +5,7 @@ import {
   Heart, MessageCircle, Share2, Music, User, Plus, Play, Pause, Volume2, VolumeX, Image as ImageIcon, Check, ChevronDown, ChevronUp, Loader2
 } from 'lucide-react';
 import { isVideoType, getVideoUrl, getCoverUrl } from '../utils/awemeType';
+import { pickCoverFrame } from '../utils/coverSource';
 import { useAuth } from '../contexts/AuthContext';
 
 interface LibraryFeedProps {
@@ -209,7 +210,9 @@ const FeedItem = ({
   const coverUrl = getCoverUrl(item, mediaToken ?? undefined);
   const isHlsUrl = videoUrl?.endsWith('.m3u8') ?? false;
 
-  const imageUrl = item.image_download_urls?.[0] || coverUrl || null;
+  // Local cover first — remote image_download_urls are signed CDN links
+  // that expire, while the downloaded cover is served locally.
+  const imageUrl = pickCoverFrame(coverUrl, item.image_download_urls || []) || null;
 
   // Setup HLS.js for .m3u8 video playback with tight buffer limits
   useEffect(() => {
