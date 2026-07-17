@@ -81,6 +81,41 @@ describe('computePageLayout', () => {
     expect(pathological.seams).toEqual([{ beforeKey: 'c2', filler: 55, page: 1 }]);
   });
 
+  it('does NOT cascade through a run of EMPTY scenes (consecutive headings)', () => {
+    // Empty scenes render only their heading row (EmptySceneHint is not a
+    // measured row), so a script of empty scenes is a run of consecutive
+    // 'heading' rows. The keep-with-next rule binds a heading to ITS OWN
+    // scene content — when the next row is ANOTHER scene's heading, the
+    // heading is a complete (empty) scene and must not chain the cascade,
+    // otherwise the break retreats to the page start and the first page
+    // becomes one scene + a full page of filler (prod 图92).
+    const { seams } = computePageLayout(
+      [
+        row('scene:1', 'heading', 0, 20),
+        row('scene:2', 'heading', 30, 50),
+        row('scene:3', 'heading', 60, 80),
+        row('scene:4', 'heading', 90, 110), // overflows pageHeight 100
+      ],
+      100,
+    );
+    // Break exactly before the overflowing heading — small filler, no cascade.
+    expect(seams).toEqual([{ beforeKey: 'scene:4', filler: 100 - 90, page: 1 }]);
+  });
+
+  it('heading before a WINDOWED placeholder does not bind either', () => {
+    // A placeholder stands in for a whole (windowed-out) scene, so the row
+    // before it never "introduces" it — same no-bind rule as heading→heading.
+    const { seams } = computePageLayout(
+      [
+        row('a', 'action', 0, 60),
+        row('scene:2', 'heading', 65, 85),
+        row('scene:3', 'placeholder', 90, 140), // overflows
+      ],
+      100,
+    );
+    expect(seams).toEqual([{ beforeKey: 'scene:3', filler: 100 - 90, page: 1 }]);
+  });
+
   it('numbers consecutive pages; a row taller than a page cannot loop', () => {
     const { seams, pageCount } = computePageLayout(
       [
