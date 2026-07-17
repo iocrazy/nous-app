@@ -1,86 +1,21 @@
-"""B4 + B5 + B7 retro-fits — verify boundary fires at each entry point.
+"""B5 + B7 retro-fits — verify boundary fires at each entry point.
 
-B4: sb_ai_router /storyboard/analyze-video + /storyboard/detect-scenes
 B5: visual_analysis_service._encode_image_from_url
 B7: download_progress.download_file_with_progress
+(B4 covered sb_ai_router; removed with the retired storyboard workbench.)
 """
 
 from __future__ import annotations
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from app.boundary import url_guard
-from app.core.exceptions import register_exception_handlers
 
 
 @pytest.fixture(autouse=True)
 def _reset_boundary_caches():
     url_guard._reset_dns_cache()
     url_guard._reset_network_cache()
-
-
-# ============================================================================
-# B4 — sb_ai_router (analyze-video + detect-scenes)
-# ============================================================================
-
-
-@pytest.fixture
-def sb_app() -> FastAPI:
-    from app.api.sb_ai_router import router
-    from app.core.deps import AuthContext, get_auth
-
-    async def _fake_auth():
-        return AuthContext(user_id="test-user", auth_type="jwt", scopes=None)
-
-    app = FastAPI()
-    register_exception_handlers(app)
-    app.dependency_overrides[get_auth] = _fake_auth
-    app.include_router(router)
-    return app
-
-
-@pytest.mark.unit
-def test_b4_analyze_video_rejects_internal_ip(sb_app: FastAPI):
-    """analyze-video: NAS IP must be blocked before workflow dispatch."""
-    client = TestClient(sb_app, raise_server_exceptions=False)
-    r = client.post(
-        "/storyboard/analyze-video",
-        json={"project_id": "p1", "video_url": "http://192.168.50.9:9080/video.mp4"},
-    )
-    assert r.status_code == 400, f"got {r.status_code}: {r.text}"
-    assert r.json()["code"] == "url_blocked"
-    assert "192.168.50.9" not in r.text
-
-
-@pytest.mark.unit
-def test_b4_detect_scenes_rejects_localhost(sb_app: FastAPI):
-    """detect-scenes: .localhost suffix must be blocked."""
-    client = TestClient(sb_app, raise_server_exceptions=False)
-    r = client.post(
-        "/storyboard/detect-scenes",
-        json={
-            "project_id": "p1",
-            "video_url": "http://printer.localhost/v.mp4",
-            "threshold": 0.3,
-        },
-    )
-    assert r.status_code == 400, f"got {r.status_code}: {r.text}"
-    assert r.json()["code"] == "url_blocked"
-    assert "printer.localhost" not in r.text
-
-
-@pytest.mark.unit
-def test_b4_analyze_video_rejects_decimal_ipv4(sb_app: FastAPI):
-    """analyze-video: decimal IPv4 (http://2130706433/) bypass blocked."""
-    client = TestClient(sb_app, raise_server_exceptions=False)
-    r = client.post(
-        "/storyboard/analyze-video",
-        json={"project_id": "p1", "video_url": "http://2130706433/v.mp4"},
-    )
-    assert r.status_code == 400
-    assert "2130706433" not in r.text
 
 
 # ============================================================================

@@ -1,5 +1,5 @@
 """script-AI DBOS workflows — async ports of the three inline script-AI
-endpoints (expand-chapter / create-branches / convert-to-storyboard).
+endpoints (expand-chapter / create-branches).
 
 Each mirrors ``script_outline_workflow``:
     - the LLM call is its own retryable ``@DBOS.step`` (transient HTTP
@@ -29,9 +29,6 @@ from loguru import logger
 # Branch canvas offsets — must match the legacy script_ai_router handler.
 BRANCH_X_OFFSET = 350
 BRANCH_Y_OFFSET = 250
-
-# Storyboard node vertical spacing — must match the legacy handler.
-NODE_Y_SPACING = 300
 
 
 # ---------------------------------------------------------------------------
@@ -196,127 +193,3 @@ async def script_create_branches_workflow(
     return await script_ai_branches_persist(
         script_id, chapter_id, branch_type, branches
     )
-
-
-# ---------------------------------------------------------------------------
-# convert-to-storyboard
-# ---------------------------------------------------------------------------
-
-
-@DBOS.step(retries_allowed=True, max_attempts=2)
-async def script_ai_scenes_step(
-    script_id: str,
-    chapter_id: str,
-    user_id: Optional[str],
-) -> list[dict[str, Any]]:
-    """Read the chapter + project style guide, then run the LLM scene-split
-    call. Returns a list of scene dicts.
-
-    Chapter/project reads moved INTO the workflow (the endpoint only
-    verifies access + dispatches chapter_id/storyboard_project_id now).
-    """
-    from app.services.ai.providers.ai_provider_helpers import (
-        resolve_script_provider_config,
-    )
-    from app.services.storyboard.script.script_ai_service import ScriptAIService
-    from app.services.storyboard.script.script_service import ScriptService
-
-    script_svc = ScriptService()
-    chapter = await script_svc.chapter_repo.get_by_id(chapter_id)
-    if not chapter:
-        raise ValueError(f"Chapter not found: {chapter_id}")
-
-    project = await script_svc.project_repo.get_by_id(script_id)
-    style_guide = None
-    if project and project.get("settings_json"):
-        style_guide = project["settings_json"].get("style_guide")
-
-    provider_key, provider_config, _model, agent_slug = (
-        await resolve_script_provider_config(user_id)
-    )
-    ai_svc = ScriptAIService(
-        user_id=user_id,
-        agent_slug=agent_slug,
-        provider_key=provider_key,
-        provider_config=provider_config,
-    )
-    scenes = await ai_svc.split_chapter_to_scenes(
-        title=chapter.get("title", ""),
-        summary=chapter.get("summary", ""),
-        content=chapter.get("content"),
-        style_guide=style_guide,
-    )
-    logger.info(f"[script_ai][scenes][step] LLM returned {len(scenes)} scenes")
-    return scenes
-
-
-@DBOS.step()
-async def script_ai_scenes_persist(
-    chapter_id: str,
-    storyboard_project_id: str,
-    scenes: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """Create one storyboard node per scene + a script_storyboard_link."""
-    from app.repositories.storyboard_repository import (
-        get_storyboard_node_repository,
-    )
-    from app.services.storyboard.script.script_service import ScriptService
-
-    script_svc = ScriptService()
-    node_repo = get_storyboard_node_repository()
-
-    created_nodes: list[dict[str, Any]] = []
-    for scene in scenes:
-        node_data = {
-            "project_id": storyboard_project_id,
-            "node_type": "storyboard_split",
-            "position_x": 100,
-            "position_y": scene["scene_number"] * NODE_Y_SPACING,
-            # scene_number / description / camera_notes are NOT columns on
-            # storyboard_nodes — nest them in the data_json jsonb (mirrors
-            # how workflows/storyboard.py persists split-scene node data).
-            "data_json": {
-                "source": "script_conversion",
-                "scene_number": scene["scene_number"],
-                "description": scene["description"],
-                "camera_notes": scene.get("camera_notes", ""),
-            },
-        }
-        rows = await node_repo.bulk_upsert(storyboard_project_id, [node_data])
-        if rows:
-            created_nodes.append(rows[0])
-
-    for node in created_nodes:
-        await script_svc.create_storyboard_link(
-            {
-                "chapter_id": chapter_id,
-                "storyboard_project_id": storyboard_project_id,
-                "storyboard_node_id": node.get("id"),
-            }
-        )
-
-    return {
-        "status": "success",
-        "scene_count": len(scenes),
-        "node_count": len(created_nodes),
-    }
-
-
-@DBOS.workflow()
-async def script_to_storyboard_workflow(
-    script_id: str,
-    chapter_id: str,
-    storyboard_project_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-) -> dict[str, Any]:
-    """Convert a script chapter into storyboard scenes via AI.
-
-    - input: script_id + chapter_id + storyboard_project_id + user_id
-    - output: {status, scene_count, node_count}
-    - side-effects: inserts storyboard_nodes + script_storyboard_links rows
-      (only when storyboard_project_id is provided)
-    """
-    scenes = await script_ai_scenes_step(script_id, chapter_id, user_id)
-    if storyboard_project_id:
-        return await script_ai_scenes_persist(chapter_id, storyboard_project_id, scenes)
-    return {"status": "success", "scene_count": len(scenes), "node_count": 0}

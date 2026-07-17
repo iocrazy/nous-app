@@ -16,13 +16,13 @@ import {
   MessageSquare, Link2, Bot,
 } from 'lucide-react';
 import type { UiIssue, AgentRef } from './types';
-import type { IssueMessage } from '../../services/issueMessageService';
+import type { CommentTriggerPreview, IssueMessage } from '../../services/issueMessageService';
 import { IssueStatusIcon, PriorityIcon } from './IssueStatusIcon';
 import { formatElapsed } from './formatElapsed';
 import { IssueChatThread } from './IssueChatThread';
 import { IssueRelatedTab } from './IssueRelatedTab';
 import { IssueReplyBox, type ComposerAttachment } from './IssueReplyBox';
-import { listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
+import { getCommentTriggerPreview, listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
 import { dispatchIssue, getDispatchPreview, type DispatchPreview } from '../../services/issuesService';
 import { DispatchConfirmDialog } from './DispatchConfirmDialog';
 import { openIssueChatSocket } from '../../services/issueChatSocket';
@@ -42,6 +42,13 @@ interface IssueDetailViewProps {
 
 /** Run-confirm gate — flag-dark until the flow is validated in prod. */
 const RUN_CONFIRM_ENABLED = import.meta.env.VITE_FEATURE_ISSUE_RUN_CONFIRM === 'true';
+
+/** Composer trigger disclosure — its own flag, deliberately NOT the run-confirm
+ *  one. Run-confirm gates the Dispatch button and is still dark; the comment
+ *  path is a live, undisclosed agent-start entry point, so this must be able to
+ *  go live on its own rather than waiting behind an unrelated dialog. */
+const COMMENT_TRIGGER_ENABLED =
+  import.meta.env.VITE_FEATURE_ISSUE_COMMENT_TRIGGER === 'true';
 
 // Chat + Activity were separate tabs over the SAME messages array (Activity
 // just filtered kind='system_status'). IssueChatThread already interleaves
@@ -87,6 +94,12 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   // goes through a confirm dialog that renders the server's dispatch-preview.
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [preview, setPreview] = useState<DispatchPreview | null>(null);
+  // What a COMMENT would start — a different predicate from `preview` above
+  // (the comment path has no terminal-status / already-running guard, so it
+  // wakes where a dispatch would be blocked). Server-owned on purpose: deriving
+  // it here from issue.assignee_agent_id would be right today and silently wrong
+  // the day the rule grows a branch.
+  const [triggerPreview, setTriggerPreview] = useState<CommentTriggerPreview | null>(null);
   const [isAgentWorking, setIsAgentWorking] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const { addToast } = useToast();
@@ -111,6 +124,30 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   }, [issue.id]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // ── Comment trigger disclosure ──────────────────────────────────────────
+  // Re-asks whenever the assignee changes: that's the only input to today's
+  // predicate, and a stale verdict would name the wrong agent on the chip.
+  useEffect(() => {
+    if (!COMMENT_TRIGGER_ENABLED) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const p = await getCommentTriggerPreview(issue.id);
+        if (!cancelled) setTriggerPreview(p);
+      } catch (err) {
+        // Non-fatal: no chip is better than a wrong chip, and the composer
+        // stays fully usable. Never silently swallow — this endpoint failing
+        // means the disclosure is off, which is worth seeing in the logs.
+        console.error('[IssueDetailView] comment-trigger-preview failed', err);
+        if (!cancelled) setTriggerPreview(null);
+      }
+    })();
+    return () => { cancelled = true; };
+    // raw.assignee_agent_id, not the mapped `assignee` ref: the raw column is
+    // the predicate's actual input, so keying on it re-asks exactly when the
+    // server's answer could change.
+  }, [issue.id, issue.raw.assignee_agent_id]);
 
   // ── WebSocket: open on mount / issue.id change, close on unmount ────────
   useEffect(() => {
@@ -200,7 +237,12 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
     return () => { void supa.removeChannel(channel); };
   }, [issue.id]);
 
-  const handleReply = async (body: string, agentId: string | null, attachments: ComposerAttachment[] = []) => {
+  const handleReply = async (
+    body: string,
+    agentId: string | null,
+    attachments: ComposerAttachment[] = [],
+    suppressAgentIds?: string[],
+  ) => {
     try {
       const attachmentPayload = attachments.length > 0
         ? attachments.map((a) =>
@@ -209,7 +251,14 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               : { kind: a.kind, url: a.url, mime: a.mime ?? undefined },
           )
         : undefined;
-      await postIssueMessage(issue.id, { body, agent_id: agentId ?? undefined, attachments: attachmentPayload });
+      await postIssueMessage(issue.id, {
+        body,
+        agent_id: agentId ?? undefined,
+        attachments: attachmentPayload,
+        // Omit the key entirely when nothing is suppressed — an empty array
+        // would read as "an explicit empty exclusion list".
+        suppress_agent_ids: suppressAgentIds?.length ? suppressAgentIds : undefined,
+      });
       // Spec-1b: for issues with an assigned agent the backend writes to
       // ai_messages (not issue_messages) and returns an optimistic comment
       // whose id does NOT match the real ai_messages row.  Appending the
@@ -387,6 +436,12 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           agents={agents}
           defaultAgentId={issue.assignee?.id ?? null}
           onSubmit={handleReply}
+          triggerPreview={triggerPreview}
+          triggerAgentName={
+            triggerPreview?.agent_id
+              ? agentsById?.[triggerPreview.agent_id]?.name
+              : undefined
+          }
           teamId={teamId}
         />
       </div>

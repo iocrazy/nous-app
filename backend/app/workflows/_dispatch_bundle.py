@@ -44,7 +44,6 @@ from app.workflows.publish_distribution import (  # noqa: F401
 from app.workflows.script_ai_workflows import (  # noqa: F401
     script_create_branches_workflow,
     script_expand_chapter_workflow,
-    script_to_storyboard_workflow,
 )
 from app.workflows.script_import import script_import_workflow  # noqa: F401
 from app.workflows.script_outline import script_outline_workflow  # noqa: F401
@@ -69,16 +68,6 @@ from app.workflows.soda_ugc_download import soda_ugc_download_workflow  # noqa: 
 from app.workflows.storage_migration import (  # noqa: F401
     storage_migration_workflow,
 )
-from app.workflows.storyboard import (  # noqa: F401
-    storyboard_annotation_workflow,
-    storyboard_export_workflow,
-    storyboard_image_batch_workflow,
-    storyboard_image_grid_split_workflow,
-    storyboard_image_workflow,
-    storyboard_script_split_workflow,
-    storyboard_video_analysis_workflow,
-    storyboard_video_workflow,
-)
 from app.workflows.thumbnail import (  # noqa: F401
     thumbnail_backfill_workflow,
     thumbnail_workflow,
@@ -91,7 +80,7 @@ from app.workflows.write_memory import write_memory_workflow  # noqa: F401
 
 # Shared NON-partitioned dispatch queue for the gateway → DBOSClient migration.
 # Workflows that today run in-process via DBOS.start_workflow (transcode / ai_* /
-# storyboard / script / issue / memory) will be enqueued here once the gateway
+# script / issue / memory) will be enqueued here once the gateway
 # goes enqueue-only. Declared in the dispatch bundle so the WORKER (which imports
 # this module) registers a poller for it. ADDITIVE + dormant: nothing enqueues to
 # it yet. Non-partitioned (no per-user key) — it is a global dispatch lane.

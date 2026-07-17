@@ -51,8 +51,22 @@ export type IssueMessageAttachment =
 
 export interface IssueMessagePostPayload {
   body: string;
+  /** @deprecated Never read by the backend — dispatch routes on the issue's
+   *  assignee_agent_id. Sending it has no effect. */
   agent_id?: string | null;
   attachments?: IssueMessageAttachment[];
+  /** Agents this one comment must not wake. Subtractive: the server computes
+   *  who would wake and can only drop from that set, never add. Omit the key
+   *  entirely when nothing is suppressed. */
+  suppress_agent_ids?: string[];
+}
+
+/** What posting a comment would start — the server's own verdict.
+ *  Distinct from DispatchPreview: the comment path has no terminal-status or
+ *  already-running guard, so a comment wakes where a dispatch would be blocked. */
+export interface CommentTriggerPreview {
+  will_wake: boolean;
+  agent_id: string | null;
 }
 
 export interface IssueMessagePostResponse {
@@ -78,6 +92,17 @@ export async function listIssueMessages(issueId: number): Promise<IssueMessageLi
     headers: await getAuthHeaders(),
   });
   return _json<IssueMessageList>(res);
+}
+
+/** Ask the server what a comment on this issue would start. Read-only.
+ *  Takes no draft body: the predicate reads only the issue row. */
+export async function getCommentTriggerPreview(
+  issueId: number,
+): Promise<CommentTriggerPreview> {
+  const res = await fetch(`${_base}/${issueId}/comment-trigger-preview`, {
+    headers: await getAuthHeaders(),
+  });
+  return _json<CommentTriggerPreview>(res);
 }
 
 export async function postIssueMessage(

@@ -107,20 +107,6 @@ async def test_get_returns_none_when_unsaved(
 
 
 @pytest.mark.asyncio
-async def test_get_for_storyboard_project_binds_int_and_joins(
-    fake_session: _CaptureSession,
-) -> None:
-    fake_session._row = None
-    repo = ProjectStyleProfileRepository()
-    assert await repo.get_for_storyboard_project(888) is None
-    call = fake_session.calls[0]
-    assert 888 in call["stmt"].compile().params.values()
-    # mig 348 rename-deprecated the storyboard tables; the model (and so the
-    # emitted SQL) names the real table, not the pre-348 one.
-    assert "JOIN public.zzz_deprecated_storyboard_projects" in str(call["stmt"])
-
-
-@pytest.mark.asyncio
 async def test_upsert_serializes_jsonb_params(fake_session: _CaptureSession) -> None:
     repo = ProjectStyleProfileRepository()
     await repo.upsert(
