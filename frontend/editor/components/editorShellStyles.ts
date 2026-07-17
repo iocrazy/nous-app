@@ -569,6 +569,12 @@ export const EDITOR_SHELL_STYLES = `
 }
 .hw-action{ text-align:left; }
 .hw-character{ padding-left:22ch; text-transform:uppercase; font-weight:700; letter-spacing:0.03em; color:var(--tick-character); }
+/* A character cue's name is clickable (opens the cast/cue picker). The name-hot
+   class is toggled on the row by the NodeView while the pointer is over the name
+   glyphs (TipTapSceneEditor onRowMouseMove) so the pointer only shows on the
+   name, not the blank space after it. Works for both engines (.mh-el-editable
+   covers .hw-character and .as-character). */
+.mh-el-row.name-hot .mh-el-editable{ cursor:pointer; }
 .hw-dialogue{ padding-left:10ch; padding-right:15ch; }
 .hw-paren{ padding-left:16ch; padding-right:17ch; font-style:italic; color:var(--sheet-ink-soft); }
 /* A parenthetical WEARS its parentheses (laper/industry): rendered as pseudo
@@ -1748,6 +1754,13 @@ export const EDITOR_SHELL_STYLES = `
   margin:0 -49px 0 -73px; pointer-events:none; user-select:none;
   position:relative; z-index:3;
 }
+/* IN-EDITOR seam (pageSeamPlugin widget): it renders inside .mh-scene-block,
+   which adds padding-left:4px, so the shared -73px left margin lands 4px short
+   of the paper's left edge (the scene-level <PageSeam> has no such inset and
+   bleeds correctly). Add that 4px back so both seam contexts reach the same
+   edge. The right edge already coincides (block has no right padding), so the
+   -49px right margin — and the page number's right:73px anchor — are unchanged. */
+.mh-page-seam-inline{ margin-left:-77px; }
 .mh-page-seam-bottom{
   height:12px;
   border-bottom:1px solid var(--sheet-border);
