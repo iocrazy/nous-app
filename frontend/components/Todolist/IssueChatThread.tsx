@@ -8,9 +8,10 @@
  */
 
 import React, { useState } from 'react';
-import { Zap } from 'lucide-react';
+import { Zap, ChevronRight, ChevronDown } from 'lucide-react';
 import type { IssueMessage, AgentLivenessState } from '../../services/issueMessageService';
 import { simulateAgentRunComplete } from '../../services/issueMessageService';
+import { coalesceSystemStatus } from './coalesceSystemStatus';
 import type { AgentRef } from './types';
 import { STATUS_LABEL, STATUS_COLOR, IssueStatusIcon } from './IssueStatusIcon';
 import type { IssueStatus } from '../../services/issuesService';
@@ -211,6 +212,38 @@ const CommentEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Age
   );
 };
 
+/**
+ * Collapsed run of consecutive system_status events. Renders a single
+ * summary row ("N status updates"); clicking expands the original rows
+ * inline, clicking again collapses them. Reuses the same muted ink
+ * tokens as the individual SystemStatusEvent row so it blends in.
+ */
+const SystemStatusGroup: React.FC<{ messages: IssueMessage[]; selfUserId?: string }> = ({ messages, selfUserId }) => {
+  const [expanded, setExpanded] = useState(false);
+  const count = messages.length;
+  return (
+    <div data-testid="system-status-group" className="my-2">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        data-testid="system-status-group-toggle"
+        className="mx-auto flex items-center gap-1 px-2 py-0.5 rounded text-[11px] text-ink-500 italic hover:text-ink-300 hover:bg-ink-900/40 transition-colors"
+      >
+        {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        <span className="not-italic font-medium">{count}</span> status updates
+      </button>
+      {expanded && (
+        <div data-testid="system-status-group-body">
+          {messages.map((m) => (
+            <SystemStatusEvent key={m.id} msg={m} selfUserId={selfUserId} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 /** Blinking text cursor shown while the agent is streaming. */
 const StreamingCursor: React.FC = () => (
   <span
@@ -244,12 +277,17 @@ export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agen
       </div>
     );
   }
+  const renderItems = coalesceSystemStatus(messages);
   return (
     <div className="px-4 py-3">
-      {messages.map((m) => {
-        if (m.kind === 'system_status') return <SystemStatusEvent key={m.id} msg={m} selfUserId={selfUserId} />;
-        if (m.kind === 'agent_run')     return <AgentRunEvent key={m.id} msg={m} agentsById={agentsById} />;
-        return <CommentEvent key={m.id} msg={m} agentsById={agentsById} selfUserId={selfUserId} />;
+      {renderItems.map((item) => {
+        if (item.type === 'status_group') {
+          return <SystemStatusGroup key={item.key} messages={item.messages} selfUserId={selfUserId} />;
+        }
+        const m = item.message;
+        if (m.kind === 'system_status') return <SystemStatusEvent key={item.key} msg={m} selfUserId={selfUserId} />;
+        if (m.kind === 'agent_run')     return <AgentRunEvent key={item.key} msg={m} agentsById={agentsById} />;
+        return <CommentEvent key={item.key} msg={m} agentsById={agentsById} selfUserId={selfUserId} />;
       })}
       {hasStreaming && <StreamingBubble text={streamingText as string} />}
     </div>
