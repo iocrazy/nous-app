@@ -1744,12 +1744,13 @@ export const EDITOR_SHELL_STYLES = `
 .mh-slash-item.active .mh-slash-glyph{ color:var(--indigo-deep); }
 .mh-slash-empty{ padding:8px 12px; font-size:12.5px; color:var(--sheet-ink-soft); }
 
-/* ── Paged mode v2: real page seams. An IN-FLOW band between rows: filler pads
-   the current page to fixed height, then paper-bottom edge, an inter-page gap
-   painted with the chrome surface (so one continuous sheet reads as separate
-   sheets), and the next paper's top edge with the screenplay page number
-   (top-right, trailing period). Heights 12+28+24 = SEAM_CHROME_PX (paginate.ts).
-   Bleeds past the sheet text padding so the edges run edge-to-edge. */
+/* ── Paged mode: laper-style page seams. An IN-FLOW band between rows: filler
+   pads the current page to fixed height, then a single faint dashed rule runs
+   the full paper width with the page number nested in its middle (dash-dash
+   NUMBER dash-dash). The paper stays one continuous sheet — no bottom-edge /
+   gap / top-edge three-piece break. Rule row height (40px) = SEAM_CHROME_PX
+   (paginate.ts). Bleeds past the sheet text padding so the rule runs
+   edge-to-edge. */
 .mh-page-seam{
   margin:0 -49px 0 -73px; pointer-events:none; user-select:none;
   position:relative; z-index:3;
@@ -1759,23 +1760,24 @@ export const EDITOR_SHELL_STYLES = `
    of the paper's left edge (the scene-level <PageSeam> has no such inset and
    bleeds correctly). Add that 4px back so both seam contexts reach the same
    edge. The right edge already coincides (block has no right padding), so the
-   -49px right margin — and the page number's right:73px anchor — are unchanged. */
+   -49px right margin is unchanged. */
 .mh-page-seam-inline{ margin-left:-77px; }
-.mh-page-seam-bottom{
-  height:12px;
-  border-bottom:1px solid var(--sheet-border);
-  box-shadow:0 12px 14px -12px rgba(35,20,90,0.20);
+/* The dashed rule: a 40px flex row whose two ::before/::after segments grow to
+   fill the width, with the page number pinned in the centre. The 1px dashed
+   border is drawn on the pseudo-elements in faint sheet ink, so it adapts to
+   both light and dark themes via --sheet-ink. */
+.mh-page-seam-rule{
+  height:40px; display:flex; align-items:center; gap:12px;
 }
-.mh-page-seam-gap{ height:28px; background:var(--surface-2); }
-.mh-page-seam-topedge{
-  height:24px; position:relative;
-  border-top:1px solid var(--sheet-border);
-  box-shadow:0 -10px 12px -12px rgba(35,20,90,0.14) inset;
+.mh-page-seam-rule::before,
+.mh-page-seam-rule::after{
+  content:""; flex:1 1 auto;
+  border-top:1px dashed color-mix(in srgb, var(--sheet-ink) 25%, transparent);
 }
 .mh-page-seam-num{
-  position:absolute; top:7px; right:73px;
+  flex:0 0 auto;
   font-family:var(--script-mono); font-size:10.5px; line-height:1;
-  color:color-mix(in srgb, var(--sheet-ink) 45%, transparent);
+  color:color-mix(in srgb, var(--sheet-ink) 42%, transparent);
 }
 
 /* ── Gutter micro-alignment (user pass-4): the block number and the dot

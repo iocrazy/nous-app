@@ -31,8 +31,12 @@
 /** ~55 Courier lines per screenplay page at 13.5px × 1.7 line-height. */
 export const PAGE_CONTENT_PX = 1260;
 
-/** Non-filler height of a seam (page-bottom edge + gap + next-page top). */
-export const SEAM_CHROME_PX = 64;
+/** Non-filler height of a seam — the laper-style dashed rule row
+ *  (`.mh-page-seam-rule`, 40px). Kept in sync with editorShellStyles.ts.
+ *  The EditorShell measurement subtracts each seam's real getBoundingClientRect
+ *  height, so this constant documents that rendered height rather than driving
+ *  the layout math. */
+export const SEAM_CHROME_PX = 40;
 
 export type RowKind =
   | 'heading'

@@ -50,13 +50,17 @@ test('paged seams bleed to both paper edges in both contexts', async ({ page }) 
       sheetRight: sr.right,
       seams: Array.from(document.querySelectorAll<HTMLElement>('.mh-page-seam')).map((el) => {
         const r = el.getBoundingClientRect();
-        const numR = el.querySelector<HTMLElement>('.mh-page-seam-num')?.getBoundingClientRect();
+        const numEl = el.querySelector<HTMLElement>('.mh-page-seam-num');
+        const numR = numEl?.getBoundingClientRect();
+        const filler = parseFloat(getComputedStyle(el).paddingTop) || 0;
         return {
           context: el.closest('.mh-tiptap-scene-editor') ? 'element' : 'scene',
           leftOverhang: sr.left - r.left, // 0 = flush with paper left edge
           rightOverhang: r.right - sr.right, // 0 = flush with paper right edge
           left: r.left,
           numRightFromSheet: numR ? sr.right - numR.right : null,
+          numText: numEl?.textContent ?? null,
+          chromeHeight: r.height - filler, // non-filler seam height
         };
       }),
     };
@@ -83,4 +87,17 @@ test('paged seams bleed to both paper edges in both contexts', async ({ page }) 
   const elNum = elementSeams[0].numRightFromSheet ?? -1;
   const scNum = sceneSeams[0].numRightFromSheet ?? -1;
   expect(Math.abs(elNum - scNum), 'page-number right offset consistent').toBeLessThanOrEqual(1);
+
+  // Laper style: the page number is the ENDED page (a bare integer, no
+  // trailing period). Scene 1 has 70 rows, so its first seam ends page 1.
+  for (const s of seams) {
+    expect(s.numText, `${s.context} seam page number is a bare integer`).toMatch(/^\d+$/);
+  }
+  expect(elementSeams[0].numText, 'element seam shows the ended page number').toBe('1');
+
+  // The seam's non-filler chrome height matches SEAM_CHROME_PX (the single
+  // dashed rule row), within 1px, in both contexts.
+  for (const s of seams) {
+    expect(Math.abs(s.chromeHeight - 40), `${s.context} seam chrome height = SEAM_CHROME_PX`).toBeLessThanOrEqual(1);
+  }
 });

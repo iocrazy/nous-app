@@ -87,10 +87,9 @@ describe('M3 — page seam widget decorations', () => {
     expect(seam.getAttribute('aria-hidden')).toBe('true');
     expect(seam.getAttribute('contenteditable')).toBe('false');
     expect(seam.getAttribute('data-testid')).toBe('page-seam');
-    expect(seam.querySelector('.mh-page-seam-bottom')).not.toBeNull();
-    expect(seam.querySelector('.mh-page-seam-gap')).not.toBeNull();
-    expect(seam.querySelector('.mh-page-seam-topedge')).not.toBeNull();
-    expect(seam.querySelector('.mh-page-seam-num')?.textContent).toBe('2.'); // page + 1
+    expect(seam.querySelector('.mh-page-seam-rule')).not.toBeNull();
+    // Page number = the page that ENDS here (no trailing period), not page + 1.
+    expect(seam.querySelector('.mh-page-seam-num')?.textContent).toBe('1');
   });
 
   it('supports multiple seams, each before its own row', async () => {
