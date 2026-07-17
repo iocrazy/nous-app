@@ -15,7 +15,10 @@ vi.mock('react-router-dom', () => ({
   useParams: () => ({ teamId: '8', projectId: '42' }),
 }));
 const toast = vi.hoisted(() => ({ addToast: vi.fn() }));
-vi.mock('../../components/Toast', () => ({ useToast: () => toast }));
+vi.mock('../../components/Toast', () => ({
+  useToast: () => toast,
+  useOptionalToast: () => toast,
+}));
 const issues = vi.hoisted(() => ({ createIssue: vi.fn() }));
 vi.mock('../../services/issuesService', () => ({ createIssue: issues.createIssue }));
 

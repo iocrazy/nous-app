@@ -31,7 +31,7 @@ import { useParams } from 'react-router-dom';
 import { applyLocal, buildInverse } from '../opBuilder';
 import { createIssue } from '../../services/issuesService';
 import { buildOriginId } from '../../components/Todolist/issueOrigin';
-import { useToast } from '../../components/Toast';
+import { useOptionalToast } from '../../components/Toast';
 import { newElementId, updateSceneMeta } from '../sceneService';
 import {
   buildPolishOps,
@@ -218,7 +218,10 @@ export function SceneBlock({
   pageSeams,
 }: SceneBlockProps) {
   const { t } = useTranslation();
-  const { addToast } = useToast();
+  // SceneBlock also mounts in provider-less hosts (isolated embeds, bare unit
+  // mounts) where a toast is a nice-to-have, not a dependency — hence the
+  // optional variant instead of the throwing useToast.
+  const toast = useOptionalToast();
   // Scoping for a scene-spawned issue. Present on the fullscreen editor route
   // (team/:teamId/projects/:projectId/scripts/:scriptId); absent in isolated
   // embeds, where the issue is simply created unscoped.
@@ -938,10 +941,10 @@ export function SceneBlock({
         ...(teamId ? { team_id: teamId } : {}),
         ...(projectId ? { project_id: projectId } : {}),
       });
-      addToast(`Created ${issue.identifier} from this scene`, 'success');
+      toast?.addToast(`Created ${issue.identifier} from this scene`, 'success');
     } catch (err) {
       console.error('[SceneBlock] create issue failed:', err);
-      addToast(err instanceof Error ? err.message : 'Could not create issue', 'error');
+      toast?.addToast(err instanceof Error ? err.message : 'Could not create issue', 'error');
     }
   }, [
     scene.id,
@@ -951,7 +954,7 @@ export function SceneBlock({
     index,
     teamId,
     projectId,
-    addToast,
+    toast,
   ]);
 
   // The menu items depend on WHERE it opened: an element row can delete just that

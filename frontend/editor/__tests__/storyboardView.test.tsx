@@ -50,6 +50,7 @@ vi.mock('../../services/scriptService', () => ({
 }));
 vi.mock('../../components/Toast', () => ({
   useToast: () => ({ addToast: vi.fn() }),
+  useOptionalToast: () => ({ addToast: vi.fn() }),
 }));
 
 import { StoryboardView, videoRegenSettled } from '../storyboard/StoryboardView';

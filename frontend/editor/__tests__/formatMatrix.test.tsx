@@ -24,6 +24,7 @@ vi.mock('../../services/scriptService', () => ({
 }));
 vi.mock('../../components/Toast', () => ({
   useToast: () => ({ addToast: vi.fn() }),
+  useOptionalToast: () => ({ addToast: vi.fn() }),
 }));
 
 // useSceneSync: stateful mock so optimistic edits render; no network.

@@ -30,7 +30,7 @@ const scriptSvc = vi.hoisted(() => ({
 vi.mock('../../services/scriptService', () => scriptSvc);
 
 const toast = vi.hoisted(() => ({ addToast: vi.fn() }));
-vi.mock('../../components/Toast', () => ({ useToast: () => ({ addToast: toast.addToast }) }));
+vi.mock('../../components/Toast', () => ({ useToast: () => ({ addToast: toast.addToast }), useOptionalToast: () => ({ addToast: toast.addToast }) }));
 
 import { EpisodePanel } from '../components/EpisodePanel';
 

@@ -24,6 +24,7 @@ vi.mock('react-router-dom', () => ({
 const addToast = vi.fn();
 vi.mock('../../components/Toast', () => ({
   useToast: () => ({ addToast }),
+  useOptionalToast: () => ({ addToast }),
 }));
 
 // Capture the latest useTaskCompletion args so a test can fire the terminal
