@@ -65,6 +65,9 @@ from app.workflows.soda_download import (  # noqa: F401
     soda_download_workflow,
 )
 from app.workflows.soda_ugc_download import soda_ugc_download_workflow  # noqa: F401
+from app.workflows.backfill_issue_scope import (  # noqa: F401
+    backfill_issue_scope_workflow,
+)
 from app.workflows.storage_migration import (  # noqa: F401
     storage_migration_workflow,
 )
