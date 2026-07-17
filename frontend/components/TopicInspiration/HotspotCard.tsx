@@ -10,6 +10,10 @@ interface Props {
   selected?: boolean;
   onToggleSave?: (h: Hotspot) => void;
   onToggleHide?: (h: Hotspot) => void;
+  /** Expanded content rendered inside the card, below the reason callout, so the
+   *  card + its expansion read as one unit. Clicks inside it must not collapse
+   *  the card (the wrapper stops propagation to the root's onClick). */
+  children?: React.ReactNode;
 }
 
 export const HotspotCard: React.FC<Props> = ({
@@ -18,6 +22,7 @@ export const HotspotCard: React.FC<Props> = ({
   selected,
   onToggleSave,
   onToggleHide,
+  children,
 }) => {
   const { t } = useTranslation();
   const isPick = typeof hotspot.score === 'number' && hotspot.score >= 0.8;
@@ -172,6 +177,12 @@ export const HotspotCard: React.FC<Props> = ({
           <span className="font-bold block mb-0.5">{t('topic.reason', 'Why it matters')}</span>
           {hotspot.reason}
         </div>
+      )}
+
+      {/* Expanded content (kept inside the card so the whole thing reads as one
+          unit). Stop propagation so interacting here never toggles the card. */}
+      {children && (
+        <div onClick={(e) => e.stopPropagation()}>{children}</div>
       )}
     </div>
   );

@@ -66,8 +66,8 @@ describe('HotspotTimeline', () => {
     expect(screen.getByText('Topic c')).toBeTruthy();
   });
 
-  it('clicking a card expands the detail and clicking again collapses it', async () => {
-    getHotspot.mockResolvedValue(HS('a', { captured_at: '2026-07-16T10:00:00', ai_summary: 'DETAIL BODY' }));
+  it('expands inside the card container and collapses on second click', async () => {
+    getHotspot.mockResolvedValue(HS('a', { captured_at: '2026-07-16T10:00:00', content_translated: 'DETAIL BODY' }));
     render(
       <HotspotTimeline
         hotspots={[HS('a', { captured_at: '2026-07-16T10:00:00' })]}
@@ -78,10 +78,30 @@ describe('HotspotTimeline', () => {
     );
     fireEvent.click(screen.getByText('Topic a'));
     await waitFor(() => expect(getHotspot).toHaveBeenCalledWith('a'));
-    expect(await screen.findByText('DETAIL BODY')).toBeTruthy();
+    const body = await screen.findByText('DETAIL BODY');
+    // The expansion lives INSIDE the single card container (one unit), not a sibling.
+    const card = screen.getByText('Topic a').closest('[role="button"]') as HTMLElement;
+    expect(card.contains(body)).toBe(true);
 
     fireEvent.click(screen.getAllByText('Topic a')[0]);
     await waitFor(() => expect(screen.queryByText('DETAIL BODY')).toBeNull());
+  });
+
+  it('clicking inside the expanded area does not collapse the card', async () => {
+    getHotspot.mockResolvedValue(HS('a', { captured_at: '2026-07-16T10:00:00', content_translated: 'DETAIL BODY' }));
+    render(
+      <HotspotTimeline
+        hotspots={[HS('a', { captured_at: '2026-07-16T10:00:00' })]}
+        onSaveAsNote={vi.fn()}
+        onParse={vi.fn()}
+        applyState={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByText('Topic a'));
+    const body = await screen.findByText('DETAIL BODY');
+    fireEvent.click(body);
+    // Still expanded — the stopPropagation wrapper prevented a toggle.
+    expect(screen.getByText('DETAIL BODY')).toBeTruthy();
   });
 
   it('clicking the save star toggles state without expanding the card', async () => {

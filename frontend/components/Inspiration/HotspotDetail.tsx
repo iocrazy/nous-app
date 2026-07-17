@@ -11,12 +11,9 @@ interface Props {
   onSaveAsNote: (h: Hotspot) => void;
   onParse: (h: Hotspot) => void;
   onNotInterested: (h: Hotspot) => void;
-  /** Content-only render for the timeline's inline expand: drops the island
-   *  wrapper + fixed-height column and renders in normal flow (spec §3). */
-  embedded?: boolean;
 }
 
-export const HotspotDetail: React.FC<Props> = ({ hotspot, onSaveAsNote, onParse, onNotInterested, embedded }) => {
+export const HotspotDetail: React.FC<Props> = ({ hotspot, onSaveAsNote, onParse, onNotInterested }) => {
   const { t } = useTranslation();
   const [full, setFull] = useState<Hotspot | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -58,8 +55,8 @@ export const HotspotDetail: React.FC<Props> = ({ hotspot, onSaveAsNote, onParse,
   const url = h.origin_url || h.url || undefined;
 
   return (
-    <div className={embedded ? '' : 'flex h-full flex-col rounded-xl bg-island'}>
-      <div className={embedded ? 'pt-2' : 'flex-1 overflow-y-auto p-4'}>
+    <div className="flex h-full flex-col rounded-xl bg-island">
+      <div className="flex-1 overflow-y-auto p-4">
         <div className="flex flex-wrap items-center gap-1.5">
           {h.source_label && (
             <span className="rounded bg-island-2 px-1.5 py-0.5 text-[10px] font-bold text-content-2">{h.source_label}</span>
@@ -99,13 +96,7 @@ export const HotspotDetail: React.FC<Props> = ({ hotspot, onSaveAsNote, onParse,
           </div>
         )}
       </div>
-      <div
-        className={
-          embedded
-            ? 'flex flex-wrap items-center gap-2 pt-3'
-            : 'flex flex-wrap items-center gap-2 border-t border-line p-3'
-        }
-      >
+      <div className="flex flex-wrap items-center gap-2 border-t border-line p-3">
         <button
           onClick={() => onSaveAsNote(h)}
           className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-500 px-3 py-1.5 text-xs font-semibold text-white"
