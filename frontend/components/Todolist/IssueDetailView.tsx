@@ -372,7 +372,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               <button
                 onClick={RUN_CONFIRM_ENABLED ? openDispatchConfirm : handleDispatch}
                 disabled={dispatching}
-                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] rounded border border-indigo-700/60 bg-indigo-900/30 text-indigo-300 hover:bg-indigo-800/40 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="btn-tint-indigo inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] rounded disabled:opacity-50 disabled:cursor-not-allowed"
                 title={`Dispatch to ${issue.assignee.name}`}
               >
                 <Bot size={13} /> {dispatching ? 'Dispatching…' : 'Dispatch to Agent'}
