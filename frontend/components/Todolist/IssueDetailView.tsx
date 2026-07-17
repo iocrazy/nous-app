@@ -40,16 +40,6 @@ interface IssueDetailViewProps {
   onIssueDispatched?: () => void;
 }
 
-/** Run-confirm gate — flag-dark until the flow is validated in prod. */
-const RUN_CONFIRM_ENABLED = import.meta.env.VITE_FEATURE_ISSUE_RUN_CONFIRM === 'true';
-
-/** Composer trigger disclosure — its own flag, deliberately NOT the run-confirm
- *  one. Run-confirm gates the Dispatch button and is still dark; the comment
- *  path is a live, undisclosed agent-start entry point, so this must be able to
- *  go live on its own rather than waiting behind an unrelated dialog. */
-const COMMENT_TRIGGER_ENABLED =
-  import.meta.env.VITE_FEATURE_ISSUE_COMMENT_TRIGGER === 'true';
-
 // Chat + Activity were separate tabs over the SAME messages array (Activity
 // just filtered kind='system_status'). IssueChatThread already interleaves
 // comments, agent runs and status events in one thread, so they're unified
@@ -90,8 +80,8 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dispatching, setDispatching] = useState(false);
-  // Run-confirm gate (flag: VITE_FEATURE_ISSUE_RUN_CONFIRM). When on, dispatch
-  // goes through a confirm dialog that renders the server's dispatch-preview.
+  // Run-confirm gate: dispatch always goes through a confirm dialog that
+  // renders the server's dispatch-preview verdict.
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [preview, setPreview] = useState<DispatchPreview | null>(null);
   // What a COMMENT would start — a different predicate from `preview` above
@@ -129,7 +119,6 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   // Re-asks whenever the assignee changes: that's the only input to today's
   // predicate, and a stale verdict would name the wrong agent on the chip.
   useEffect(() => {
-    if (!COMMENT_TRIGGER_ENABLED) return;
     let cancelled = false;
     (async () => {
       try {
@@ -370,7 +359,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             </button>
             {issue.assignee && ['backlog', 'todo'].includes(issue.status) && (
               <button
-                onClick={RUN_CONFIRM_ENABLED ? openDispatchConfirm : handleDispatch}
+                onClick={openDispatchConfirm}
                 disabled={dispatching}
                 className="btn-tint-indigo inline-flex items-center justify-center gap-1.5 px-3 py-2 text-[13px] rounded disabled:opacity-50 disabled:cursor-not-allowed"
                 title={`Dispatch to ${issue.assignee.name}`}
@@ -446,7 +435,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
         />
       </div>
 
-      {RUN_CONFIRM_ENABLED && confirmOpen && (
+      {confirmOpen && (
         <DispatchConfirmDialog
           preview={preview}
           agentName={
