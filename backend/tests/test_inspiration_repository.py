@@ -247,10 +247,14 @@ async def test_activity_calls_sql_function(monkeypatch):
     assert rows == [{"day": "2026-07-07", "cnt": 3}]  # date → ISO
     sql = str(session.statements[0])
     assert "inspiration_activity" in sql
+    # Binds MUST be date objects, not ISO strings: asyncpg's date codec
+    # rejects str ("'str' object has no attribute 'toordinal'"), the repo
+    # swallows the DataError and returns [] — prod calendar badges vanished
+    # after #1372 shipped exactly this way.
     assert session.params[0] == {
         "p_user_id": "u1",
-        "p_from": "2026-04-01",
-        "p_to": "2026-07-07",
+        "p_from": datetime.date(2026, 4, 1),
+        "p_to": datetime.date(2026, 7, 7),
     }
 
 
