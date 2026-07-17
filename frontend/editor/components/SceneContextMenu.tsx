@@ -82,6 +82,7 @@ export function SceneContextMenu({ x, y, items, onClose }: SceneContextMenuProps
           <button
             type="button"
             role="menuitem"
+            data-key={item.key}
             className={`mh-scene-ctx-item${item.danger ? ' danger' : ''}`}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => {

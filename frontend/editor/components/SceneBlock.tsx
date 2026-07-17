@@ -957,14 +957,21 @@ export function SceneBlock({
     toast,
   ]);
 
-  // The menu items depend on WHERE it opened: an element row can delete just that
-  // block; the heading can't (a scene must keep its heading). Both can delete the
-  // whole scene and enter move mode. Reorder-dependent items hide when reorder is
-  // unwired (e.g. read-only / storyboard embeds).
+  // The menu items are scoped to WHERE it opened. A paragraph (element) row
+  // offers only paragraph-level actions (delete this block); the SCENE-level
+  // actions (delete scene / move scene) live ONLY on the heading row. Mixing
+  // "Move scene" into a paragraph's menu let a writer arm the whole-scene move
+  // overlay while thinking they were acting on one paragraph, so a later drag on
+  // the scene body silently moved the entire scene. Keeping the whole-scene
+  // affordances on the heading row makes the target unambiguous. 'Create issue'
+  // stays available in both (the scene is the issue's subject either way).
+  // Reorder-dependent items hide when reorder is unwired (read-only / storyboard
+  // embeds pass no reorder and keep a bare menu).
   const contextMenuItems = useMemo<SceneContextMenuItem[]>(() => {
     if (!contextMenu) return [];
     const items: SceneContextMenuItem[] = [];
     const elId = contextMenu.elementId;
+    const onHeading = elId === null;
     if (elId) {
       items.push({
         key: 'delete-block',
@@ -973,9 +980,6 @@ export function SceneBlock({
         onSelect: () => deleteElement(elId),
       });
     }
-    // 'Create issue' and the scene-level ops only exist in the full editor
-    // (reorder is wired there); read-only / storyboard embeds pass no reorder
-    // and keep their bare menu.
     if (reorder) {
       items.push({
         key: 'create-issue',
@@ -983,18 +987,22 @@ export function SceneBlock({
         dividerBefore: !!elId,
         onSelect: () => void createIssueFromScene(),
       });
-      items.push({
-        key: 'delete-scene',
-        label: t('editor.ctxDeleteScene'),
-        danger: true,
-        dividerBefore: true,
-        onSelect: () => reorder.onDeleteScene(scene.id),
-      });
-      items.push({
-        key: 'move-scene',
-        label: t('editor.ctxMoveScene'),
-        onSelect: armSceneMove,
-      });
+      // Whole-scene actions belong to the heading row only — never a paragraph's
+      // menu (see the whole-scene-move confusion above).
+      if (onHeading) {
+        items.push({
+          key: 'delete-scene',
+          label: t('editor.ctxDeleteScene'),
+          danger: true,
+          dividerBefore: true,
+          onSelect: () => reorder.onDeleteScene(scene.id),
+        });
+        items.push({
+          key: 'move-scene',
+          label: t('editor.ctxMoveScene'),
+          onSelect: armSceneMove,
+        });
+      }
     }
     return items;
   }, [contextMenu, reorder, scene.id, t, deleteElement, armSceneMove, createIssueFromScene]);
