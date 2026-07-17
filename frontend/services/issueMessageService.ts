@@ -67,6 +67,11 @@ export interface IssueMessagePostPayload {
 export interface CommentTriggerPreview {
   will_wake: boolean;
   agent_id: string | null;
+  /** The draft body was a `/note` command → a silent note: it lands in the
+   *  thread but wakes nothing. The reason `will_wake` is false (distinct from
+   *  client suppression). Optional so a pre-note cached verdict still validates;
+   *  the backend always sends it (defaults to false). */
+  is_note?: boolean;
 }
 
 export interface IssueMessagePostResponse {
@@ -94,13 +99,19 @@ export async function listIssueMessages(issueId: number): Promise<IssueMessageLi
   return _json<IssueMessageList>(res);
 }
 
-/** Ask the server what a comment on this issue would start. Read-only.
- *  Takes no draft body: the predicate reads only the issue row. */
+/** Ask the server what a comment on this issue would start. Read-only (no
+ *  side effect) but a POST, because it carries the draft body — a `/note`
+ *  prefix flips the verdict to a silent note, so the predicate must see the
+ *  same body the send path will. Pass no body (or null) for the armed,
+ *  nothing-typed-yet verdict. */
 export async function getCommentTriggerPreview(
   issueId: number,
+  body?: string | null,
 ): Promise<CommentTriggerPreview> {
   const res = await fetch(`${_base}/${issueId}/comment-trigger-preview`, {
-    headers: await getAuthHeaders(),
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(await getAuthHeaders()) },
+    body: JSON.stringify({ body: body ?? null }),
   });
   return _json<CommentTriggerPreview>(res);
 }

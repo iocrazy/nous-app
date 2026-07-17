@@ -91,9 +91,30 @@ async function setupIssueStubs(page: Page): Promise<void> {
     `**/api/v1/issues/${ISSUE.id}/messages`,
     fulfillJson({ messages: [COMMENT], total: 1 }),
   );
+  // POST carrying the draft body (was GET until the /note keyboard flow). The
+  // stub mirrors the backend predicate's two outcomes: a /note body → quiet
+  // note, anything else → wake. Body-aware so the walkthrough exercises the
+  // real refetch-on-boundary wiring, not a canned verdict.
   await page.route(
     `**/api/v1/issues/${ISSUE.id}/comment-trigger-preview`,
-    fulfillJson({ will_wake: true, agent_id: AGENT.id }),
+    (route) => {
+      let body: string | null = null;
+      try {
+        body = (JSON.parse(route.request().postData() ?? '{}') as { body?: string | null }).body ?? null;
+      } catch {
+        body = null;
+      }
+      const isNote = typeof body === 'string' && /^\s*\/note(\s|$)/.test(body);
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(
+          isNote
+            ? { will_wake: false, agent_id: AGENT.id, is_note: true }
+            : { will_wake: true, agent_id: AGENT.id, is_note: false },
+        ),
+      });
+    },
   );
   await page.route(
     `**/api/v1/issues/${ISSUE.id}/dispatch-preview`,
@@ -149,6 +170,30 @@ test('dark: chip arms on draft, suppresses on click, restores', async ({ page })
   await expect(chip(page)).toContainText('Will start when sent');
   await expect(chip(page)).toHaveAttribute('aria-pressed', 'false');
   await page.screenshot({ path: `${SHOTS}/04-chip-restored-dark.png`, fullPage: true });
+});
+
+test('dark: /note prefix flips the chip to the quiet-note state and back', async ({ page }) => {
+  await setupIssueStubs(page);
+  await forceTheme(page, 'dark');
+  await openDetail(page);
+
+  // A /note draft → the chip discloses a quiet note (server verdict, not local).
+  await typeInComposer(page, '/note remember to check the license');
+  await expect(chip(page)).toBeVisible();
+  await expect(chip(page)).toContainText('Quiet note');
+  await expect(chip(page)).toContainText(`won't wake ${AGENT.name}`);
+  // Note is a keyboard intent, not a toggle — the chip must not be a button.
+  await expect(chip(page)).toHaveAttribute('data-state', 'note');
+  await page.screenshot({ path: `${SHOTS}/09-chip-note-dark.png`, fullPage: true });
+
+  // Deleting the draft back past the boundary re-arms the wake disclosure.
+  const editor = page.locator('[contenteditable="true"]').last();
+  await editor.click();
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a');
+  await page.keyboard.press('Backspace');
+  await typeInComposer(page, 'Normal comment again.');
+  await expect(chip(page)).toContainText('Will start when sent');
+  await page.screenshot({ path: `${SHOTS}/10-chip-rearmed-after-note-dark.png`, fullPage: true });
 });
 
 test('dark: run-confirm dialog renders the server verdict on Dispatch', async ({ page }) => {

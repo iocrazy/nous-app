@@ -276,6 +276,65 @@ describe('IssueReplyBox', () => {
       );
     });
 
+    it('renders the quiet-note state when the server says the draft is a note', () => {
+      editorText = '/note remember to check the license';
+      render(
+        <IssueReplyBox
+          agents={_agents as never}
+          onSubmit={vi.fn()}
+          triggerPreview={{ will_wake: false, agent_id: 'a1', is_note: true }}
+          triggerAgentName="Agent 1"
+        />,
+      );
+      const chip = screen.getByTestId('comment-trigger-chip');
+      expect(chip).toHaveTextContent(/Quiet note/i);
+      expect(chip).toHaveTextContent(/won't wake/i);
+    });
+
+    it('reports the note boundary to the parent so it can refetch the preview', () => {
+      // The mocked editor fires no update events, but the sync effect runs on
+      // mount — mounting with a /note draft must cross the boundary exactly once.
+      editorText = '/note quiet observation';
+      const onNoteBoundaryChange = vi.fn();
+      render(
+        <IssueReplyBox
+          agents={_agents as never}
+          onSubmit={vi.fn()}
+          triggerPreview={WAKES}
+          onNoteBoundaryChange={onNoteBoundaryChange}
+        />,
+      );
+      expect(onNoteBoundaryChange).toHaveBeenCalledWith('/note quiet observation');
+    });
+
+    it('does not report a boundary for a normal draft', () => {
+      editorText = 'just a normal comment';
+      const onNoteBoundaryChange = vi.fn();
+      render(
+        <IssueReplyBox
+          agents={_agents as never}
+          onSubmit={vi.fn()}
+          triggerPreview={WAKES}
+          onNoteBoundaryChange={onNoteBoundaryChange}
+        />,
+      );
+      expect(onNoteBoundaryChange).not.toHaveBeenCalled();
+    });
+
+    it('does not report a boundary for a /notex draft (mirror of the backend rule)', () => {
+      editorText = '/notex this is a comment';
+      const onNoteBoundaryChange = vi.fn();
+      render(
+        <IssueReplyBox
+          agents={_agents as never}
+          onSubmit={vi.fn()}
+          triggerPreview={WAKES}
+          onNoteBoundaryChange={onNoteBoundaryChange}
+        />,
+      );
+      expect(onNoteBoundaryChange).not.toHaveBeenCalled();
+    });
+
     it('re-arms when the assignee changes under a pending suppression', async () => {
       // The user skipped agent a1. If the issue is reassigned to a2 before they
       // send, that skip must not silently swallow a2's run — a2 is an agent they

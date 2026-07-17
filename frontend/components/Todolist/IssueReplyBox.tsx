@@ -33,6 +33,7 @@ import { createResourceMentionExtension } from '../chat/ChatInputResourceMention
 import { ResourcePickerSuggestion } from '../chat/ResourcePickerSuggestion';
 import type { ResourceRefAttachment, ResourceSearchResult } from '../../types';
 import { IssueCommentTriggerChip } from './IssueCommentTriggerChip';
+import { isNoteDraft } from './isNoteDraft';
 import type { CommentTriggerPreview } from '../../services/issueMessageService';
 
 /** Merged attachment payload the parent forwards to the backend: staged file
@@ -59,6 +60,12 @@ interface IssueReplyBoxProps {
   /** Resolved display name for triggerPreview.agent_id (the endpoint is a pure
    *  predicate and returns only the id). */
   triggerAgentName?: string;
+  /** Fires when the draft crosses the `/note` boundary (either direction),
+   *  carrying the draft body while it IS a note and null once it stops being
+   *  one. The parent re-asks the server's preview endpoint with it — this
+   *  callback is a refetch trigger, never a verdict (the chip renders only
+   *  what the server returned). */
+  onNoteBoundaryChange?: (noteBody: string | null) => void;
   /** Scope the @-mention resource picker to this team + personal resources. */
   teamId?: string;
 }
@@ -87,6 +94,7 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
   disabled,
   triggerPreview,
   triggerAgentName,
+  onNoteBoundaryChange,
   teamId,
 }) => {
   const { t } = useTranslation();
@@ -238,13 +246,33 @@ export const IssueReplyBox: React.FC<IssueReplyBoxProps> = ({
     editorRef.current = editor;
   }, [editor]);
 
+  // The parent's callback may change identity; route through a ref so the
+  // editor-update listener below stays stable.
+  const onNoteBoundaryChangeRef = useRef(onNoteBoundaryChange);
+  useEffect(() => {
+    onNoteBoundaryChangeRef.current = onNoteBoundaryChange;
+  }, [onNoteBoundaryChange]);
+  // Last note-ness we reported — boundary-triggered, not debounced: typing
+  // WITHIN a note (or within a normal comment) never refetches, only the flip
+  // does, and the flip is exactly when the server's verdict could change.
+  const lastNoteRef = useRef(false);
+
   // Track whether anything is staged to send — the trigger chip only discloses
   // a wake that's actually imminent (mirrors multica's
   // shouldRenderComposerHandoffPreview: empty body → no preview row).
+  // The same editor-update stream also watches the `/note` boundary: isNoteDraft
+  // here only decides WHEN to re-ask the server, never what the chip says.
   useEffect(() => {
     if (!editor) return;
-    const sync = () =>
-      setDraftEmpty(!editor.getText().trim() && collectRefs(editor).length === 0);
+    const sync = () => {
+      const text = editor.getText();
+      setDraftEmpty(!text.trim() && collectRefs(editor).length === 0);
+      const note = isNoteDraft(text);
+      if (note !== lastNoteRef.current) {
+        lastNoteRef.current = note;
+        onNoteBoundaryChangeRef.current?.(note ? text : null);
+      }
+    };
     sync();
     editor.on('update', sync);
     return () => {

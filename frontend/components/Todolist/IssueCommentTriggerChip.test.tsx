@@ -87,4 +87,57 @@ describe('IssueCommentTriggerChip', () => {
     expect(chip).toHaveTextContent(/Will start when sent/i);
     expect(chip.textContent).not.toMatch(/undefined|null/i);
   });
+
+  // ── Note state (/note keyboard flow) ─────────────────────────────────────
+  describe('note state', () => {
+    const NOTE = { will_wake: false, agent_id: 'agent-1', is_note: true };
+
+    it('renders the quiet-note disclosure naming who is not woken', () => {
+      setup({ preview: NOTE });
+      const chip = screen.getByTestId('comment-trigger-chip');
+      expect(chip).toHaveTextContent(/Quiet note/i);
+      expect(chip).toHaveTextContent(/won't wake/i);
+      expect(chip).toHaveTextContent('Scriptwriter');
+    });
+
+    it('is not a toggle — clicking a note chip does nothing', () => {
+      // /note is a keyboard intent: undone by editing the draft, not by
+      // clicking. The note state renders as a static span, not a button.
+      const { onToggle } = setup({ preview: NOTE });
+      const chip = screen.getByTestId('comment-trigger-chip');
+      expect(chip.tagName).not.toBe('BUTTON');
+      fireEvent.click(chip);
+      expect(onToggle).not.toHaveBeenCalled();
+    });
+
+    it('stays hidden while the draft is empty even for a note verdict', () => {
+      // Defensive: a note verdict with an empty draft shouldn't happen (the
+      // /note text IS the draft), but nothing-to-send means nothing to disclose.
+      setup({ preview: NOTE, draftEmpty: true });
+      expect(screen.queryByTestId('comment-trigger-chip')).toBeNull();
+    });
+
+    it('stays hidden for a note on an unassigned issue', () => {
+      // No agent → nothing billable was ever at stake; the chip's job is
+      // billing disclosure, so there is nothing to say.
+      setup({ preview: { will_wake: false, agent_id: null, is_note: true } });
+      expect(screen.queryByTestId('comment-trigger-chip')).toBeNull();
+    });
+
+    it('note state wins over a pending suppression', () => {
+      // The user suppressed, then typed /note: the note copy is the truthful
+      // one (the /note prefix alone already guarantees no wake).
+      setup({ preview: NOTE, suppressed: true });
+      const chip = screen.getByTestId('comment-trigger-chip');
+      expect(chip).toHaveTextContent(/Quiet note/i);
+      expect(chip.textContent).not.toMatch(/Click to restore/i);
+    });
+
+    it('falls back to a generic label when the agent name has not resolved', () => {
+      setup({ preview: NOTE, agentName: undefined });
+      const chip = screen.getByTestId('comment-trigger-chip');
+      expect(chip).toHaveTextContent(/won't wake the assigned agent/i);
+      expect(chip.textContent).not.toMatch(/undefined|null/i);
+    });
+  });
 });
