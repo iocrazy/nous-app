@@ -569,6 +569,12 @@ export const EDITOR_SHELL_STYLES = `
 }
 .hw-action{ text-align:left; }
 .hw-character{ padding-left:22ch; text-transform:uppercase; font-weight:700; letter-spacing:0.03em; color:var(--tick-character); }
+/* A character cue's name is clickable (opens the cast/cue picker). The name-hot
+   class is toggled on the row by the NodeView while the pointer is over the name
+   glyphs (TipTapSceneEditor onRowMouseMove) so the pointer only shows on the
+   name, not the blank space after it. Works for both engines (.mh-el-editable
+   covers .hw-character and .as-character). */
+.mh-el-row.name-hot .mh-el-editable{ cursor:pointer; }
 .hw-dialogue{ padding-left:10ch; padding-right:15ch; }
 .hw-paren{ padding-left:16ch; padding-right:17ch; font-style:italic; color:var(--sheet-ink-soft); }
 /* A parenthetical WEARS its parentheses (laper/industry): rendered as pseudo

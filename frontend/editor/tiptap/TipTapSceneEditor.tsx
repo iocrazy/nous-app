@@ -411,6 +411,27 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
     cb(attrs.id, e.clientX, e.clientY);
   };
 
+  // A character cue's NAME is clickable — clicking it opens the cast/cue picker
+  // (pointHitsText, onSelectionUpdate's `onName` path) — so it must read as
+  // clickable. Show a pointer cursor ONLY while the pointer is over the name
+  // glyphs (same hit-test as the click), never over the blank space a caret can
+  // land in. This toggles a class DIRECTLY on the row DOM off a plain mousemove:
+  // no React state and no ProseMirror transaction, so it never triggers the
+  // per-row re-render the rest of this file works to avoid (the guard skips
+  // redundant classList writes; mouseleave clears it when the row is left).
+  const isCharacterRow = (attrs.elType as ElementType) === 'character';
+  const onRowMouseMove = isCharacterRow
+    ? (e: ReactMouseEvent<HTMLDivElement>) => {
+        const row = e.currentTarget;
+        const line = row.querySelector<HTMLElement>('.mh-el-editable');
+        const hot = !!line && pointHitsText(line, e.clientX, e.clientY);
+        if (hot !== row.classList.contains('name-hot')) row.classList.toggle('name-hot', hot);
+      }
+    : undefined;
+  const onRowMouseLeave = isCharacterRow
+    ? (e: ReactMouseEvent<HTMLDivElement>) => e.currentTarget.classList.remove('name-hot')
+    : undefined;
+
   // Gutter + tick + content — the SAME three children in both formats;
   // what differs is what wraps them (see the isAsian branch below).
   const gutter = (
@@ -516,6 +537,8 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
           onDragOver={onRowDragOver}
           onDrop={onRowDrop}
           onContextMenu={onRowContextMenu}
+          onMouseMove={onRowMouseMove}
+          onMouseLeave={onRowMouseLeave}
         >
           {gutter}
           {tick}
@@ -537,6 +560,8 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
       onDragOver={onRowDragOver}
       onDrop={onRowDrop}
       onContextMenu={onRowContextMenu}
+      onMouseMove={onRowMouseMove}
+      onMouseLeave={onRowMouseLeave}
     >
       {gutter}
       {tick}
