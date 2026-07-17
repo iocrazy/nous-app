@@ -7,6 +7,21 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
 }));
 
+// SceneBlock reads the editor route (team/project scope) and shows toasts for
+// the 'Create issue' item — stub both so the component renders outside a Router
+// / ToastProvider. The issues service is stubbed so we can assert the writer↔
+// issueOrigin contract without a network call.
+vi.mock('react-router-dom', () => ({
+  useParams: () => ({ teamId: '8', projectId: '42' }),
+}));
+const toast = vi.hoisted(() => ({ addToast: vi.fn() }));
+vi.mock('../../components/Toast', () => ({
+  useToast: () => toast,
+  useOptionalToast: () => toast,
+}));
+const issues = vi.hoisted(() => ({ createIssue: vi.fn() }));
+vi.mock('../../services/issuesService', () => ({ createIssue: issues.createIssue }));
+
 // Deterministic, unique element ids so anchored inserts are assertable. Also
 // stubs updateSceneMeta so the head-row debounce test can observe the call.
 const svc = vi.hoisted(() => {
@@ -83,6 +98,8 @@ afterEach(() => {
   sync.reconcile.mockClear();
   sync.applyRemoteOps.mockClear();
   svc.updateSceneMeta.mockClear();
+  toast.addToast.mockClear();
+  issues.createIssue.mockReset();
   vi.useRealTimers();
 });
 
@@ -184,6 +201,33 @@ describe('SceneBlock right-click context menu', () => {
 
     fireEvent.click(within(menu).getByText('editor.ctxDeleteScene'));
     expect(onDeleteScene).toHaveBeenCalledWith('900');
+  });
+
+  it('"create issue" writes a scene: origin (snowflake id kept as a string)', async () => {
+    // scene.id is a Snowflake bigint past 2^53 — must reach the writer as an
+    // exact string, never Number()-coerced.
+    const bigId = '9007199254740993';
+    issues.createIssue.mockResolvedValue({ identifier: 'ISS-7' });
+    const { container } = render(
+      <SceneBlock
+        scene={{ ...makeScene([{ id: 'el_a', type: 'action', text: 'A' }]), id: bigId }}
+        index={2}
+        reorder={makeReorder()}
+      />,
+    );
+    fireEvent.contextMenu(container.querySelector('.mh-scene-headrow')!);
+    fireEvent.click(within(screen.getByRole('menu')).getByText('editor.ctxCreateIssue'));
+
+    await waitFor(() => expect(issues.createIssue).toHaveBeenCalledTimes(1));
+    const payload = issues.createIssue.mock.calls[0][0];
+    expect(payload.origin_id).toBe(`scene:${bigId}`);
+    expect(payload.team_id).toBe('8');
+    expect(payload.project_id).toBe('42');
+    // Scene number (index + 1) + heading slug feed the prefilled title.
+    expect(payload.title).toContain('Scene 3');
+    await waitFor(() =>
+      expect(toast.addToast).toHaveBeenCalledWith(expect.stringContaining('ISS-7'), 'success'),
+    );
   });
 
   it('choosing "move whole scene" arms the drag overlay', () => {

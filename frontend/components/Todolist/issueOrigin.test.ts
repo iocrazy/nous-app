@@ -14,9 +14,17 @@ describe('issueOrigin', () => {
     expect(parseOriginId(originId)).toEqual({ kind: 'canvas', id: '99887766554433' });
   });
 
+  it('round-trips a script scene the same way', () => {
+    const originId = buildOriginId('scene', '77665544332211');
+    expect(originId).toBe('scene:77665544332211');
+    expect(parseOriginId(originId)).toEqual({ kind: 'scene', id: '77665544332211' });
+  });
+
   it('keeps snowflake ids intact (no numeric coercion)', () => {
     const big = '9007199254740993'; // > 2^53
     expect(parseOriginId(buildOriginId('canvas', big))?.id).toBe(big);
+    // Scene ids are Snowflake bigints too — must never be Number()-coerced.
+    expect(parseOriginId(buildOriginId('scene', big))?.id).toBe(big);
   });
 
   it('renders no back-link for non-content origins', () => {
@@ -32,6 +40,7 @@ describe('issueOrigin', () => {
   it('ignores malformed values', () => {
     expect(parseOriginId(':42')).toBeNull();
     expect(parseOriginId('canvas:')).toBeNull();
+    expect(parseOriginId('scene:')).toBeNull();
   });
 
   it('builds a team-scoped canvas path, with a fallback when there is no team', () => {
@@ -39,5 +48,12 @@ describe('issueOrigin', () => {
     expect(originPath(origin, '8')).toBe('/team/8/canvas/c1');
     expect(originPath(origin, undefined)).toBe('/canvas/c1');
     expect(originLabel(origin)).toBe('From a canvas');
+  });
+
+  it('routes a scene origin to the projects area (bare scene id cannot deep-link)', () => {
+    const origin = { kind: 'scene' as const, id: '77665544332211' };
+    expect(originPath(origin, '8')).toBe('/team/8/projects');
+    expect(originPath(origin, undefined)).toBe('/projects');
+    expect(originLabel(origin)).toBe('From a script scene');
   });
 });

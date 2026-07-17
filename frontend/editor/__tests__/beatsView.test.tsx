@@ -25,6 +25,7 @@ vi.mock('../sceneService', () => svc);
 const toast = vi.hoisted(() => ({ addToast: vi.fn() }));
 vi.mock('../../components/Toast', () => ({
   useToast: () => ({ addToast: toast.addToast }),
+  useOptionalToast: () => ({ addToast: toast.addToast }),
 }));
 
 import { BeatsView } from '../beats/BeatsView';

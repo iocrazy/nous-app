@@ -16,6 +16,8 @@ vi.mock('react-router-dom', () => ({
 // Providers are irrelevant to the mount decision — make them pass-through.
 vi.mock('../../components/Toast', () => ({
   ToastProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useToast: () => ({ addToast: () => {} }),
+  useOptionalToast: () => null,
 }));
 vi.mock('../../contexts/TaskManagerContext', () => ({
   TaskManagerProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,

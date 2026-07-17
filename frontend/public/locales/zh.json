@@ -2870,6 +2870,7 @@
     "hintEnter": "新建元素",
     "hintMention": "提及",
     "dragScene": "重排场景",
+    "ctxCreateIssue": "创建待办",
     "ctxDeleteBlock": "删除这一块",
     "ctxDeleteScene": "删除这一场景",
     "ctxMoveScene": "移动整场景",

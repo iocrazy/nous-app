@@ -23,7 +23,7 @@ const scriptSvc = vi.hoisted(() => ({ fetchScriptProject: vi.fn() }));
 vi.mock('../../services/scriptService', () => scriptSvc);
 
 const toast = vi.hoisted(() => ({ addToast: vi.fn() }));
-vi.mock('../../components/Toast', () => ({ useToast: () => ({ addToast: toast.addToast }) }));
+vi.mock('../../components/Toast', () => ({ useToast: () => ({ addToast: toast.addToast }), useOptionalToast: () => ({ addToast: toast.addToast }) }));
 
 import { EditorShell } from '../components/EditorShell';
 

@@ -28,6 +28,7 @@ const scriptSvc = vi.hoisted(() => ({
 vi.mock('../../services/scriptService', () => scriptSvc);
 vi.mock('../../components/Toast', () => ({
   useToast: () => ({ addToast: vi.fn() }),
+  useOptionalToast: () => ({ addToast: vi.fn() }),
 }));
 
 import { ColdStart, EmptySceneHint } from '../components/EmptyStates';

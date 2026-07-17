@@ -23,6 +23,13 @@ export const useToast = (): ToastContextValue => {
   return ctx;
 };
 
+/** Like useToast, but returns null outside a ToastProvider instead of
+ *  throwing. For components that also mount in provider-less hosts
+ *  (isolated embeds, bare unit mounts) where a toast is a nice-to-have,
+ *  not a dependency. NOTE for tests: a `vi.mock('components/Toast')`
+ *  factory must export this too if the suite renders such a component. */
+export const useOptionalToast = (): ToastContextValue | null => useContext(ToastContext);
+
 const toastStyles: Record<ToastType, { icon: React.ElementType; border: string; bg: string; text: string; iconColor: string }> = {
   success: { icon: CheckCircle2, border: 'border-emerald-500/30', bg: 'bg-emerald-500/10', text: 'text-emerald-300', iconColor: 'text-emerald-400' },
   error:   { icon: AlertCircle,  border: 'border-red-500/30',     bg: 'bg-red-500/10',     text: 'text-red-300',     iconColor: 'text-red-400' },

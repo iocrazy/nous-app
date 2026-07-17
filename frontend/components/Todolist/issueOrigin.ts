@@ -13,7 +13,7 @@
  */
 
 /** Content surfaces that can spawn an issue. Add a case here + a writer. */
-export type OriginContentKind = 'canvas';
+export type OriginContentKind = 'canvas' | 'scene';
 
 export interface ParsedOrigin {
   kind: OriginContentKind;
@@ -37,7 +37,7 @@ export function parseOriginId(originId: string | null | undefined): ParsedOrigin
   const kind = originId.slice(0, idx);
   const id = originId.slice(idx + 1);
   if (!id) return null;
-  if (kind !== 'canvas') return null;
+  if (kind !== 'canvas' && kind !== 'scene') return null;
   return { kind, id };
 }
 
@@ -46,6 +46,14 @@ export function originPath(origin: ParsedOrigin, teamId: string | undefined): st
   switch (origin.kind) {
     case 'canvas':
       return teamId ? `/team/${teamId}/canvas/${origin.id}` : `/canvas/${origin.id}`;
+    case 'scene':
+      // A scene lives inside a script inside a project, so the fullscreen
+      // editor route (team/:teamId/projects/:projectId/scripts/:scriptId) can't
+      // be rebuilt from a bare scene id. Per the "don't over-design" call we
+      // land on the team's Projects area — where scripts live — rather than
+      // stamp a scene→script resolver we don't have. Falls back to the
+      // team-agnostic Projects list when the issue view has no team in scope.
+      return teamId ? `/team/${teamId}/projects` : `/projects`;
   }
 }
 
@@ -54,5 +62,7 @@ export function originLabel(origin: ParsedOrigin): string {
   switch (origin.kind) {
     case 'canvas':
       return 'From a canvas';
+    case 'scene':
+      return 'From a script scene';
   }
 }
