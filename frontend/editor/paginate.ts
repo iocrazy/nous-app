@@ -14,6 +14,10 @@
  *    the heading (i.e. the whole scene starts on the next page).
  *  Rules cascade (heading + cue stacked both move) but never move the break
  *  above the current page's start (a pathological all-keep page still breaks).
+ *  A row only binds to its OWN scene's content: when the next row starts a new
+ *  scene (heading / placeholder — e.g. runs of EMPTY scenes, which measure as
+ *  consecutive headings), the keep rule does not apply, so the cascade cannot
+ *  retreat across whole scenes and blank out the page with filler.
  *
  * Blocks are never split mid-row: a row taller than a whole page overflows its
  * page (accepted; true intra-dialogue splitting with MORE / CONT'D would need
@@ -68,6 +72,22 @@ function keepsWithNext(kind: RowKind): boolean {
   return kind === 'heading' || kind === 'character';
 }
 
+/** Rows that BEGIN a scene: another scene's heading, or a windowed stand-in. */
+function startsScene(kind: RowKind): boolean {
+  return kind === 'heading' || kind === 'placeholder';
+}
+
+/**
+ * Whether `prev` truly introduces `next` (keep-with-next applies). A heading
+ * or cue only binds to its OWN scene's content: when the next row starts a
+ * NEW scene, `prev` is the complete tail of an (empty) scene, and binding it
+ * would chain the cascade across every consecutive empty scene — retreating
+ * the break to the page start and leaving a near-full page of filler.
+ */
+function bindsToNext(prev: MeasuredRow, next: MeasuredRow): boolean {
+  return keepsWithNext(prev.kind) && !startsScene(next.kind);
+}
+
 export function computePageLayout(
   rows: MeasuredRow[],
   pageHeight: number = PAGE_CONTENT_PX,
@@ -83,7 +103,7 @@ export function computePageLayout(
       // Break before row i — then walk the keep-with-next chain upward so a
       // heading / character cue moves along with the row it introduces.
       let b = i;
-      while (b - 1 > pageStartIndex && keepsWithNext(rows[b - 1].kind)) b -= 1;
+      while (b - 1 > pageStartIndex && bindsToNext(rows[b - 1], rows[b])) b -= 1;
       const filler = Math.max(0, pageHeight - (rows[b].top - pageStartTop));
       seams.push({ beforeKey: rows[b].key, filler, page });
       page += 1;
