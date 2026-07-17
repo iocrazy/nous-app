@@ -48,10 +48,13 @@ export function TodolistPage() {
   const [newIssueParentId, setNewIssueParentId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<IssueViewMode>('list');
 
+  // Kept as a STRING: team ids are Snowflake BIGINTs and Number() rounds them
+  // past 2^53 — a rounded filter can never match rows created with the exact
+  // id (scene/canvas-spawned issues), and a rounded create writes a corrupt
+  // team_id. Validated digits-only; the backend parses it as an exact int64.
   const teamIdNum = useMemo(() => {
     if (!teamId) return null;
-    const n = Number(teamId);
-    return Number.isFinite(n) ? n : null;
+    return /^\d+$/.test(teamId) ? teamId : null;
   }, [teamId]);
 
   const projectOptions = useMemo(

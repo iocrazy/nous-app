@@ -102,7 +102,7 @@ export function WorkspaceTasks({ projectId, projectName, teamId }: WorkspaceTask
       {newIssueOpen && (
         <NewIssueDialog
           agents={agents}
-          teamId={teamId ? Number(teamId) : null}
+          teamId={teamId ?? null}
           lockedProjectId={projectId}
           lockedProjectName={projectName}
           onClose={() => setNewIssueOpen(false)}
