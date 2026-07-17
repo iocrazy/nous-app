@@ -3,6 +3,7 @@ import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { Video } from '../types';
 import { Video as VideoIcon, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check, AudioLines, Music, FileText, Sparkles, Eye } from 'lucide-react';
 import { isVideoType, getCoverUrl, getVideoUrl } from '../utils/awemeType';
+import { pickCoverFrame } from '../utils/coverSource';
 import { getPreviewSpriteUrl } from '../services/resourceService';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -79,10 +80,12 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
   // hardened it against hot-link to remote CDNs). We let it stay
   // undefined so the placeholder branch below renders, instead of falling
   // back to picsum.photos which serves random stock images and looks
-  // like mock content.
+  // like mock content. Album default frames go through pickCoverFrame so
+  // the local cover wins over the expiring remote slide URL.
+  const localCover = getCoverUrl(data, mediaToken ?? undefined);
   const coverUrl = isAlbum && images.length > 0
-    ? images[currentImageIndex]
-    : getCoverUrl(data, mediaToken ?? undefined);
+    ? pickCoverFrame(localCover, images, currentImageIndex)
+    : localCover;
   const hasCover = Boolean(coverUrl);
 
   // --- Video seek scrub (universal fallback for any video) ---

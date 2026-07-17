@@ -195,7 +195,11 @@ class InspirationNotesRepository:
                         "CAST(:p_user_id AS uuid), CAST(:p_from AS date), "
                         "CAST(:p_to AS date))"
                     ),
-                    {"p_user_id": user_id, "p_from": date_from, "p_to": date_to},
+                    {
+                        "p_user_id": user_id,
+                        "p_from": _date(date_from),
+                        "p_to": _date(date_to),
+                    },
                 )
                 return [_serialize(dict(r)) for r in result.mappings().all()]
         except Exception as e:

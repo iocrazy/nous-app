@@ -9,6 +9,7 @@ import {
   FileText, Sparkles, Eye
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../utils/awemeType';
+import { pickCoverFrame } from '../utils/coverSource';
 import { useAuth } from '../contexts/AuthContext';
 
 interface LibraryTableProps {
@@ -150,7 +151,11 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
          alert("No video stream available to play.");
        }
     } else {
-       const url = item.image_download_urls?.[0];
+       // Local cover first — remote slide URLs expire (signed CDN links).
+       const url = pickCoverFrame(
+         getCoverUrl(item, mediaToken ?? undefined),
+         item.image_download_urls || [],
+       );
        if (url) {
          setActiveMedia({ type: 'image', url });
        }
