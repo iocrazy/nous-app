@@ -61,6 +61,15 @@ class IssueMessageList(BaseModel):
     total: int
 
 
+class CommentTriggerPreviewRequest(BaseModel):
+    """Draft the composer is about to send, so the preview reads the SAME body
+    the POST would. `body` is optional: a bodyless preview (armed composer,
+    nothing typed yet) still returns the assignee-based verdict. A `/note`
+    prefix flips the verdict to a silent note — see comment_trigger.py."""
+
+    body: Optional[str] = None
+
+
 class CommentTriggerPreview(BaseModel):
     """What posting a comment on this issue would do — without posting it.
 
@@ -69,13 +78,16 @@ class CommentTriggerPreview(BaseModel):
     the comment path honours. Reusing it for the composer chip would state the
     opposite of what a comment actually does on a done or mid-run issue.
 
-    No draft body needed — the predicate reads only the issue row (MediaHub has
-    no @agent mentions or /note parsing). Adding either MUST turn this into a
-    POST that carries the draft, or the chip starts lying again.
+    Carries the draft body (POST): the predicate now reads it so a `/note`
+    prefix is disclosed as a quiet note. `is_note` records that the body was a
+    `/note` command — the reason `will_wake` is False, distinct from client
+    suppression — so the chip can render the quiet-note state and still name the
+    agent it won't wake.
     """
 
     will_wake: bool
     agent_id: Optional[str] = None
+    is_note: bool = False
 
 
 class IssueMessagePost(BaseModel):

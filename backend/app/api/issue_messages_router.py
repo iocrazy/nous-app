@@ -2,9 +2,11 @@
 
 Endpoints (mounted at /api/v1/issues/{issue_id}):
   GET    /{id}/messages                 — list the thread, oldest first
-  GET    /{id}/comment-trigger-preview  — what a comment would start (read-only)
+  POST   /{id}/comment-trigger-preview  — what a comment would start, given the
+                                          draft body (read-only; no side effect)
   POST   /{id}/messages                 — post a comment; wakes the issue's
                                           assigned agent unless suppressed
+                                          or the body is a /note command
 
 Whether a comment wakes an agent is driven by the ISSUE's assignee_agent_id —
 NOT by the payload's `agent_id` field, which is vestigial and never read (see
@@ -47,6 +49,7 @@ from app.core.deps import AuthDep
 from app.repositories.issue_repository import issue_repository
 from app.schemas.issue_message import (
     CommentTriggerPreview,
+    CommentTriggerPreviewRequest,
     IssueMessage,
     IssueMessageKind,
     IssueMessageList,
@@ -227,26 +230,37 @@ async def list_issue_messages(issue_id: int, auth: AuthDep) -> IssueMessageList:
     return IssueMessageList(messages=messages, total=len(messages))
 
 
-@router.get("/{issue_id}/comment-trigger-preview", response_model=CommentTriggerPreview)
+@router.post(
+    "/{issue_id}/comment-trigger-preview", response_model=CommentTriggerPreview
+)
 async def comment_trigger_preview(
-    issue_id: int, auth: AuthDep
+    issue_id: int, payload: CommentTriggerPreviewRequest, auth: AuthDep
 ) -> CommentTriggerPreview:
     """Predict what POST /{id}/messages would start — without posting.
 
-    Read-only. Backs the composer chip ("Will start when sent · X"), which today
-    is the ONLY signal that ⌘↩ spends money.
+    Read-only (no writes, no dispatch). Backs the composer chip ("Will start
+    when sent · X" / "Quiet note · won't wake X"), which today is the ONLY
+    signal that ⌘↩ spends money.
 
     Deliberately not GET /{id}/dispatch-preview: that mirrors dispatch_issue's
     guards, and the comment path honours none of them — commenting on a `done`
     issue, or mid-run, still wakes the agent. It would report `blocked` where
     this reports `will_wake`.
 
-    Takes no draft body: the predicate reads only the issue row. Adding @agent
-    mentions or a /note prefix MUST turn this into a POST carrying the draft.
+    POST (not GET) because it carries the draft body: a `/note` prefix flips the
+    verdict to a silent note, so the predicate MUST see the same body the send
+    path will. `body` is optional — a bodyless preview (armed composer, nothing
+    typed yet) returns the assignee-based verdict. Routes through the SAME
+    predicate as POST /messages so the chip can never promise something the send
+    path won't do.
     """
     issue_row = await _assert_issue_visible(issue_id, auth)
-    verdict = compute_comment_trigger(issue_row)
-    return CommentTriggerPreview(will_wake=verdict.will_wake, agent_id=verdict.agent_id)
+    verdict = compute_comment_trigger(issue_row, payload.body)
+    return CommentTriggerPreview(
+        will_wake=verdict.will_wake,
+        agent_id=verdict.agent_id,
+        is_note=verdict.is_note,
+    )
 
 
 async def _insert_legacy_comment(
@@ -332,17 +346,23 @@ async def post_issue_message(
     Three paths, chosen by the shared predicate (never by payload.agent_id):
 
     - Wake (Spec-1b): the issue has an assigned agent and the client did not
-      suppress it. The comment drives another agent turn on the issue's session
-      (respond_to_issue_reply). run_session_turn persists the human message and
-      the agent reply; the returned comment is optimistic.
-    - Note: the client suppressed this agent. The message is appended to the
-      session WITHOUT starting a turn — the agent reads it on its next wake
-      (history loads every message in the conversation, unfiltered by role).
+      suppress it AND the body is not a /note command. The comment drives
+      another agent turn on the issue's session (respond_to_issue_reply).
+      run_session_turn persists the human message and the agent reply; the
+      returned comment is optimistic.
+    - Note: the body opens with /note, OR the client suppressed this agent.
+      Either way the message is appended to the session WITHOUT starting a turn
+      — the agent reads it on its next wake (history loads every message in the
+      conversation, unfiltered by role). The body is stored verbatim, /note
+      prefix and all (multica parity — the literal text is the record).
     - Legacy: no assigned agent → plain issue_messages insert.
     """
     issue_row = await _assert_issue_visible(issue_id, auth)
+    # Pass the body so a /note prefix short-circuits the wake, exactly as the
+    # preview endpoint reported it. apply_suppression then layers the client's
+    # explicit skip on top (a no-op once /note already zeroed will_wake).
     verdict = apply_suppression(
-        compute_comment_trigger(issue_row), payload.suppress_agent_ids
+        compute_comment_trigger(issue_row, payload.body), payload.suppress_agent_ids
     )
 
     # ── Legacy path (nothing to wake) ─────────────────────────────────────

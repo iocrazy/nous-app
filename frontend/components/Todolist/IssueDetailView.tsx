@@ -90,6 +90,11 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   // it here from issue.assignee_agent_id would be right today and silently wrong
   // the day the rule grows a branch.
   const [triggerPreview, setTriggerPreview] = useState<CommentTriggerPreview | null>(null);
+  // The composer's draft body WHILE it is a /note command, else null. Set by
+  // IssueReplyBox exactly when the draft crosses the note boundary (either
+  // direction) — a refetch key, not a verdict: the server's preview endpoint
+  // reads the body and decides, we only forward it.
+  const [noteDraftBody, setNoteDraftBody] = useState<string | null>(null);
   const [isAgentWorking, setIsAgentWorking] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const { addToast } = useToast();
@@ -116,13 +121,14 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   useEffect(() => { void refresh(); }, [refresh]);
 
   // ── Comment trigger disclosure ──────────────────────────────────────────
-  // Re-asks whenever the assignee changes: that's the only input to today's
-  // predicate, and a stale verdict would name the wrong agent on the chip.
+  // Re-asks whenever the assignee changes OR the draft crosses the /note
+  // boundary: those are the only inputs to today's predicate, and a stale
+  // verdict would name the wrong agent — or the wrong state — on the chip.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const p = await getCommentTriggerPreview(issue.id);
+        const p = await getCommentTriggerPreview(issue.id, noteDraftBody);
         if (!cancelled) setTriggerPreview(p);
       } catch (err) {
         // Non-fatal: no chip is better than a wrong chip, and the composer
@@ -135,8 +141,10 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
     return () => { cancelled = true; };
     // raw.assignee_agent_id, not the mapped `assignee` ref: the raw column is
     // the predicate's actual input, so keying on it re-asks exactly when the
-    // server's answer could change.
-  }, [issue.id, issue.raw.assignee_agent_id]);
+    // server's answer could change. noteDraftBody changes only at the note
+    // boundary (IssueReplyBox is boundary-triggered), so typing doesn't spam
+    // the endpoint.
+  }, [issue.id, issue.raw.assignee_agent_id, noteDraftBody]);
 
   // ── WebSocket: open on mount / issue.id change, close on unmount ────────
   useEffect(() => {
@@ -426,6 +434,7 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           defaultAgentId={issue.assignee?.id ?? null}
           onSubmit={handleReply}
           triggerPreview={triggerPreview}
+          onNoteBoundaryChange={setNoteDraftBody}
           triggerAgentName={
             triggerPreview?.agent_id
               ? agentsById?.[triggerPreview.agent_id]?.name

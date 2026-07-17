@@ -14,9 +14,12 @@ These tests pin that thinness so a future guard is a conscious edit.
 
 from __future__ import annotations
 
+import pytest
+
 from app.services.issues.comment_trigger import (
     CommentTriggerVerdict,
     compute_comment_trigger,
+    is_note_comment,
 )
 
 
@@ -116,3 +119,83 @@ def test_suppression_on_a_no_wake_verdict_is_a_noop():
     s = apply_suppression(v, ["agent-1"])
     assert s.will_wake is False
     assert s.agent_id is None
+
+
+# ── /note prefix rule (is_note_comment) ────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "body,expected",
+    [
+        # canonical: /note followed by a space
+        ("/note remember this", True),
+        # /note followed by a tab
+        ("/note\tremember", True),
+        # /note followed by a newline
+        ("/note\nremember", True),
+        # /note alone (followed by end of string)
+        ("/note", True),
+        # /note with trailing whitespace only
+        ("/note ", True),
+        # leading whitespace before /note is ignored
+        ("   /note trim me", True),
+        # leading newline before /note
+        ("\n/note", True),
+        # NOT a note: /notex — the token must end at a boundary
+        ("/notex is a comment", False),
+        ("/noted", False),
+        ("/notes", False),
+        # NOT a note: /note not at the start (mid-body)
+        ("please /note this", False),
+        # NOT a note: case matters (verbatim match)
+        ("/NOTE loud", False),
+        ("/Note titled", False),
+        # NOT a note: empty / whitespace / None
+        ("", False),
+        ("   ", False),
+        (None, False),
+        # NOT a note: a bare slash or different command
+        ("/", False),
+        ("/n", False),
+        ("note without slash", False),
+    ],
+)
+def test_is_note_comment_rule(body, expected):
+    assert is_note_comment(body) is expected
+
+
+def test_note_body_flips_wake_but_keeps_agent_id():
+    """A /note body on an agent-assigned issue: will_wake False, is_note True,
+    agent_id still populated so the chip can name who was NOT woken."""
+    v = compute_comment_trigger(
+        {"id": 1, "assignee_agent_id": "agent-1"}, "/note quiet"
+    )
+    assert v.will_wake is False
+    assert v.is_note is True
+    assert v.agent_id == "agent-1"
+
+
+def test_non_note_body_wakes_as_before():
+    v = compute_comment_trigger(
+        {"id": 1, "assignee_agent_id": "agent-1"}, "change the intro"
+    )
+    assert v.will_wake is True
+    assert v.is_note is False
+    assert v.agent_id == "agent-1"
+
+
+def test_none_body_defaults_to_assignee_verdict():
+    """A bodyless preview (armed composer, nothing typed) still returns the
+    assignee-based wake, with is_note False."""
+    v = compute_comment_trigger({"id": 1, "assignee_agent_id": "agent-1"})
+    assert v.will_wake is True
+    assert v.is_note is False
+
+
+def test_note_body_on_unassigned_issue_is_note_but_no_agent():
+    """No assignee → nothing wakes regardless, but is_note still reflects the
+    body so a future caller isn't surprised."""
+    v = compute_comment_trigger({"id": 1, "assignee_agent_id": None}, "/note hi")
+    assert v.will_wake is False
+    assert v.is_note is True
+    assert v.agent_id is None

@@ -18,7 +18,10 @@ from uuid import UUID
 
 import pytest
 
-from app.schemas.issue_message import IssueMessagePost
+from app.schemas.issue_message import (
+    CommentTriggerPreviewRequest,
+    IssueMessagePost,
+)
 
 _AGENT = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 _OWNER = "11111111-1111-1111-1111-111111111111"
@@ -62,20 +65,25 @@ def _wire(monkeypatch, r, row):
 # ── preview endpoint ──────────────────────────────────────────────────────
 
 
+def _preview_req(body=None) -> CommentTriggerPreviewRequest:
+    return CommentTriggerPreviewRequest(body=body)
+
+
 @pytest.mark.asyncio
 async def test_preview_reports_wake_when_agent_assigned(monkeypatch):
     r = _router_module()
     _wire(monkeypatch, r, _issue_row())
-    p = await r.comment_trigger_preview(5, _auth())
+    p = await r.comment_trigger_preview(5, _preview_req(), _auth())
     assert p.will_wake is True
     assert p.agent_id == _AGENT
+    assert p.is_note is False
 
 
 @pytest.mark.asyncio
 async def test_preview_reports_no_wake_without_agent(monkeypatch):
     r = _router_module()
     _wire(monkeypatch, r, _issue_row(assignee_agent_id=None))
-    p = await r.comment_trigger_preview(5, _auth())
+    p = await r.comment_trigger_preview(5, _preview_req(), _auth())
     assert p.will_wake is False
     assert p.agent_id is None
 
@@ -87,8 +95,32 @@ async def test_preview_wakes_on_done_issue_unlike_dispatch_preview(monkeypatch):
     it exists rather than reusing dispatch-preview."""
     r = _router_module()
     _wire(monkeypatch, r, _issue_row(status="done"))
-    p = await r.comment_trigger_preview(5, _auth())
+    p = await r.comment_trigger_preview(5, _preview_req(), _auth())
     assert p.will_wake is True
+
+
+@pytest.mark.asyncio
+async def test_preview_reports_quiet_note_for_note_body(monkeypatch):
+    """A /note draft flips will_wake off but still names the agent it won't wake,
+    so the chip can render the quiet-note state."""
+    r = _router_module()
+    _wire(monkeypatch, r, _issue_row())
+    p = await r.comment_trigger_preview(5, _preview_req("/note remember this"), _auth())
+    assert p.will_wake is False
+    assert p.is_note is True
+    assert p.agent_id == _AGENT
+
+
+@pytest.mark.asyncio
+async def test_preview_notex_body_still_wakes(monkeypatch):
+    """/notex is NOT the note command — it must read as a normal comment."""
+    r = _router_module()
+    _wire(monkeypatch, r, _issue_row())
+    p = await r.comment_trigger_preview(
+        5, _preview_req("/notex still a comment"), _auth()
+    )
+    assert p.will_wake is True
+    assert p.is_note is False
 
 
 @pytest.mark.asyncio
@@ -98,7 +130,7 @@ async def test_preview_and_post_agree(monkeypatch):
     row = _issue_row()
     _wire(monkeypatch, r, row)
 
-    p = await r.comment_trigger_preview(5, _auth())
+    p = await r.comment_trigger_preview(5, _preview_req("go"), _auth())
 
     started = {}
     with (
@@ -153,6 +185,64 @@ async def test_suppressed_comment_starts_nothing_and_leaves_a_note(monkeypatch):
     assert kw["user_id"] == _OWNER
     assert resp.agent_run is None
     assert resp.comment.body == "wait for the client"
+
+
+@pytest.mark.asyncio
+async def test_note_prefix_comment_starts_nothing_and_stores_body_verbatim(monkeypatch):
+    """A /note body takes the note path with NO suppress list — the prefix alone
+    zeroes the wake. The body is appended verbatim (prefix and all)."""
+    r = _router_module()
+    _wire(monkeypatch, r, _issue_row())
+
+    append = AsyncMock(return_value={"id": 1})
+    started = {}
+
+    with (
+        patch.object(
+            r,
+            "DBOS",
+            SimpleNamespace(
+                start_workflow=lambda fn, *a: started.update(fn=fn.__name__)
+            ),
+        ),
+        patch.object(r, "SetWorkflowID", lambda *_a, **_k: _NullCtx()),
+        patch.object(r.ConversationsAiStore, "append_user_message", append),
+    ):
+        resp = await r.post_issue_message(
+            5,
+            IssueMessagePost(body="/note check the license before shipping"),
+            _auth(),
+        )
+
+    assert started == {}, "a /note comment must not dispatch a turn"
+    append.assert_awaited_once()
+    kw = append.await_args.kwargs
+    assert kw["content"] == "/note check the license before shipping"
+    assert resp.agent_run is None
+    assert resp.comment.body == "/note check the license before shipping"
+
+
+@pytest.mark.asyncio
+async def test_notex_prefix_comment_still_dispatches(monkeypatch):
+    """/notex is a normal comment — it must wake the agent, not take the note
+    path (guards the "followed by whitespace or end" rule at the router)."""
+    r = _router_module()
+    _wire(monkeypatch, r, _issue_row())
+
+    started = {}
+    with (
+        patch.object(
+            r,
+            "DBOS",
+            SimpleNamespace(
+                start_workflow=lambda fn, *a: started.update(fn=fn.__name__)
+            ),
+        ),
+        patch.object(r, "SetWorkflowID", lambda *_a, **_k: _NullCtx()),
+    ):
+        await r.post_issue_message(5, IssueMessagePost(body="/notex ship it"), _auth())
+
+    assert started["fn"] == "respond_to_issue_reply"
 
 
 @pytest.mark.asyncio
