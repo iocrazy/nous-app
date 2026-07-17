@@ -8,6 +8,7 @@ import {
   Sparkles, Eye, ExternalLink, MoreHorizontal, Star,
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl, isPlayableUrl, formatResolution } from '../utils/awemeType';
+import { pickCoverFrame } from '../utils/coverSource';
 import { getDownloadUrl, getCoverDownloadUrl } from '../services/dataService';
 import { downloadFile, downloadWithAuth } from '../utils/download';
 import { getAuthHeaders, parseShareLink, fetchMediaByType } from '../services/parserService';
@@ -629,7 +630,12 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             <div className="w-full h-full relative">
                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent z-10" />
                {(() => {
-                 const src = isAlbum ? images[currentImageIndex] : images[0];
+                 // Local cover first — remote slide URLs are signed CDN
+                 // links that expire (cards showed "Image unavailable" while
+                 // a downloaded cover sat unused).
+                 const src = isAlbum
+                   ? pickCoverFrame(coverUrl, images, currentImageIndex)
+                   : pickCoverFrame(coverUrl, images, 0);
                  return src ? (
                    <img
                      src={src}
