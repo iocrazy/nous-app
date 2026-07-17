@@ -430,15 +430,7 @@ class AILibraryChatService:
             session_id=session_id,
             user_id=str(user_id),
             content=content,
-            attachments=[
-                {
-                    k: a.get(k)
-                    for k in ("kind", "resource_id", "mime", "alt_text", "name")
-                    if a.get(k) is not None
-                }
-                for a in _att_dicts
-            ]
-            or None,
+            attachments=ConversationsAiStore.display_attachments(_att_dicts),
         )
 
         # M1.5 wiring: load agent record so we can read budget/fallback,

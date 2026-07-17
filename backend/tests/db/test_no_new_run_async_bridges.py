@@ -17,8 +17,6 @@ conversion in (a regression that re-introduces ``run_async`` there will fail).
 Converted so far:
   * ``app/workflows/scheduled_cleanup.py`` — 3 housekeeping steps → async
     (OFF the allowlist; no run_async left).
-  * ``app/workflows/storyboard.py`` — the 2 DB persist steps → async (still ON
-    the allowlist for its 6 remaining AI/export-service bridges).
   * ``app/services/ai/providers/ai_provider_helpers.py`` — the 2 repo reads
     (user_settings + analyze agent) → async; sole caller
     ``analyze_l1.resolve_analyze_provider`` is now an async @DBOS.step awaited
@@ -54,10 +52,6 @@ _ALLOWLIST: frozenset[str] = frozenset(
         "app/tasks/download_strategies.py",
         # Media parse path: parser subprocess chain inside sync @DBOS.step.
         "app/services/media/parsers/parse_helpers.py",
-        # Storyboard workflow: the 2 DB persist steps are now async-native; the
-        # 6 remaining run_async sites wrap AI / export SERVICES (not repos) — a
-        # service-bridge, not a §2.4b DB bridge. Deferred.
-        "app/workflows/storyboard.py",
         # AI chat wiring: the memory-harvester side_effect closure (_fire) is a
         # SYNC zero-arg callable per the HookResult.side_effect contract, invoked
         # by AgentRunner ON the event loop. It dispatches the memory-write

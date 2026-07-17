@@ -212,9 +212,9 @@ async def convert_to_storyboard(
     script_storyboard_links). The workbench is retired and its ``/storyboard/*``
     routes are 410-tombstoned; storyboarding now lives in the script editor as
     per-scene shots. The endpoint stays mounted (bookmarks / stale clients) but
-    answers 410 rather than writing to the deprecated tables. The unused
-    ``script_to_storyboard_workflow`` is left in place until the deferred
-    table-rename migration removes it together with the tables it targets.
+    answers 410 rather than writing to the deprecated tables. The workflow it
+    used to dispatch (``script_to_storyboard_workflow``) and the storyboard
+    tables it wrote were both removed once these 410s were confirmed stable.
     """
     from app.api.sb_gone_router import LEGACY_STORYBOARD_GONE_DETAIL
 

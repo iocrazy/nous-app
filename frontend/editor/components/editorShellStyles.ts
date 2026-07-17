@@ -68,7 +68,14 @@ export const EDITOR_SHELL_STYLES = `
   color:var(--ink);
   font-family:var(--sans);
   display:grid;
-  grid-template-columns:auto 1fr auto;
+  /* minmax(0,1fr) — NOT a bare 1fr — for the script column: a 1fr track's
+     implicit minimum is auto, which is the min-CONTENT of the fixed-width
+     .mh-sheet (780px). At narrow widths (embedded in the workspace, or a small
+     window) that floors the middle track at ~780px, so the column overflows the
+     shell's right edge and overflow:hidden clips the paper's right side. The
+     minmax(0,...) lets the track shrink below the sheet's width so .mh-sheet's
+     max-width:100% can fit the paper to the window (image-90 report). */
+  grid-template-columns:auto minmax(0, 1fr) auto;
   gap:16px;
   padding:16px;
   overflow:hidden;
@@ -77,11 +84,11 @@ export const EDITOR_SHELL_STYLES = `
 /* Embedded in the projects workspace: the editor's own left rail is NOT
    rendered (the workspace sidebar replaces it), so the shell has only two grid
    children — the script column and the Writing panel. The default 3-track
-   template (auto 1fr auto) then left the 296px panel floating inside the middle
-   1fr cell with a big empty gap to its right. Collapse to two tracks so the
+   template (auto minmax(0,1fr) auto) then left the 296px panel floating inside
+   the middle cell with a big empty gap to its right. Collapse to two tracks so the
    panel sits flush against the right edge and the script column fills + centres
    (via .mh-sheet-scroll{align-items:center} + .mh-sheet{max-width:100%}). */
-.mh-editor-shell.mh-embedded{ grid-template-columns:1fr auto; }
+.mh-editor-shell.mh-embedded{ grid-template-columns:minmax(0, 1fr) auto; }
 /* Embedded: don't paint the standalone lavender page gradient — it clashed with
    the workspace's own surface (a mismatched purple block in the empty area
    right of the sheet). Go transparent so the workspace background shows through
@@ -329,6 +336,17 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-sheet{
   width:820px; max-width:100%;
+  /* Graceful floor for very tight widths: the Hollywood ch-indents
+     (.hw-dialogue 10ch+15ch, .hw-character 22ch ≈ 200px) are FIXED padding
+     that never shrinks, so squashing the paper below ~480px would render
+     dialogue one character per line. Below the floor the paper overflows
+     .mh-sheet-scroll horizontally instead (overflow-y:auto makes its
+     overflow-x auto too), giving a scrollbar — never squashed, never clipped.
+     margin-inline:auto (not the parent's align-items:center) does the
+     centering: auto margins collapse to 0 when the paper is wider than the
+     scroller, keeping the LEFT edge reachable by scroll (a centered overflow
+     flex item's left side is unreachable — classic data-loss trap). */
+  min-width:480px; margin-inline:auto;
   background:linear-gradient(180deg, var(--sheet-bg) 0%, var(--sheet-bg-2) 100%);
   border:1px solid var(--sheet-border); border-radius:6px;
   box-shadow:var(--shadow-sheet); padding:34px 40px 44px;

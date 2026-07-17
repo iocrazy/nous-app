@@ -24,7 +24,7 @@ the helper):
 | Callsite                                  | Lane to use                      |
 |-------------------------------------------|----------------------------------|
 | media_fetch_router.fetch_video            | Origin.USER_CLICK → Lane.USER    |
-| sb_ai_router /storyboard/*                | Origin.USER_CLICK → Lane.USER    |
+| script_shots_router auto_storyboard       | Origin.USER_CLICK → Lane.USER    |
 | scheduled_recovery / scheduled_quotas     | Origin.SCHEDULED → Lane.SCHEDULED|
 | ai_summary / analyze workflows            | Origin.BACKGROUND → Lane.BACKGROUND |
 | AgentRunner delegate (workforce)          | Origin.SUBAGENT → Lane.SUBAGENT  |

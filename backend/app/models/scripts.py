@@ -634,18 +634,11 @@ class ScriptStoryboardLinks(Base):
             ondelete="CASCADE",
             name="script_storyboard_links_chapter_id_fkey",
         ),
-        ForeignKeyConstraint(
-            ["storyboard_node_id"],
-            ["public.zzz_deprecated_storyboard_nodes.id"],
-            ondelete="SET NULL",
-            name="script_storyboard_links_storyboard_node_id_fkey",
-        ),
-        ForeignKeyConstraint(
-            ["storyboard_project_id"],
-            ["public.zzz_deprecated_storyboard_projects.id"],
-            ondelete="CASCADE",
-            name="script_storyboard_links_storyboard_project_id_fkey",
-        ),
+        # storyboard_project_id / storyboard_node_id referenced the retired
+        # zzz_deprecated_storyboard_* tombstone tables. Migration 366 dropped
+        # those tables (and these two FK constraints); the columns stay as plain
+        # bigints (data preserved) with no FK — same convention as auth.users
+        # references (see app/models/__init__.py).
         PrimaryKeyConstraint("id", name="script_storyboard_links_pkey"),
         Index("idx_script_storyboard_links_chapter_id", "chapter_id"),
         Index("idx_script_storyboard_links_storyboard_node_id", "storyboard_node_id"),
