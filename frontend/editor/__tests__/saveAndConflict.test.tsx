@@ -22,6 +22,7 @@ vi.mock('../../services/scriptService', () => ({
 }));
 vi.mock('../../components/Toast', () => ({
   useToast: () => ({ addToast: vi.fn() }),
+  useOptionalToast: () => ({ addToast: vi.fn() }),
 }));
 
 const resolveSpy = vi.hoisted(() => vi.fn());

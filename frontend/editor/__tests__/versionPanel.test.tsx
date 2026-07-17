@@ -24,6 +24,7 @@ vi.mock('../sceneService', () => svc);
 const addToast = vi.fn();
 vi.mock('../../components/Toast', () => ({
   useToast: () => ({ addToast }),
+  useOptionalToast: () => ({ addToast }),
 }));
 
 import { VersionPanel } from '../versions/VersionPanel';
