@@ -46,7 +46,12 @@ export const pageSeamPluginKey = new PluginKey<null>('pageSeamDecorations');
  *  decorations render outside React's tree. */
 function seamDom(entry: PageSeamEntry): HTMLElement {
   const el = document.createElement('div');
-  el.className = 'mh-page-seam';
+  // `mh-page-seam-inline` marks the IN-EDITOR context: this widget renders inside
+  // `.mh-scene-block` (which has `padding-left:4px`), whereas the scene-level
+  // `<PageSeam>` component is a direct child of `.mh-sheet-inner` with no such
+  // inset. The shared negative left margin is tuned for the latter, so the inline
+  // variant needs 4px more to bleed to the same paper edge (editorShellStyles).
+  el.className = 'mh-page-seam mh-page-seam-inline';
   el.style.paddingTop = `${entry.filler}px`;
   el.setAttribute('aria-hidden', 'true');
   el.setAttribute('contenteditable', 'false');

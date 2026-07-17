@@ -1748,6 +1748,13 @@ export const EDITOR_SHELL_STYLES = `
   margin:0 -49px 0 -73px; pointer-events:none; user-select:none;
   position:relative; z-index:3;
 }
+/* IN-EDITOR seam (pageSeamPlugin widget): it renders inside .mh-scene-block,
+   which adds padding-left:4px, so the shared -73px left margin lands 4px short
+   of the paper's left edge (the scene-level <PageSeam> has no such inset and
+   bleeds correctly). Add that 4px back so both seam contexts reach the same
+   edge. The right edge already coincides (block has no right padding), so the
+   -49px right margin — and the page number's right:73px anchor — are unchanged. */
+.mh-page-seam-inline{ margin-left:-77px; }
 .mh-page-seam-bottom{
   height:12px;
   border-bottom:1px solid var(--sheet-border);
