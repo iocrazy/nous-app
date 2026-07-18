@@ -424,6 +424,21 @@ class HotspotsRepository:
         except Exception as e:  # noqa: BLE001
             logger.error(f"patch_enrichment failed for {hotspot_id}: {e}")
 
+    async def recent_tag_word_counts(self, days: int = 30) -> dict[str, int]:
+        """lower(word) → hotspot count within the window (spec §4.3).
+
+        One aggregate over ``unnest(tags)``; callers match by name/name_zh.
+        """
+        stmt = text(
+            "SELECT lower(w.word) AS word, COUNT(*)::bigint AS cnt "
+            "FROM hotspots h, LATERAL unnest(h.tags) AS w(word) "
+            "WHERE h.captured_at >= now() - make_interval(days => :days) "
+            "GROUP BY lower(w.word)"
+        )
+        async with read_scope() as session:
+            rows = (await session.execute(stmt, {"days": int(days)})).all()
+        return {str(r[0]): int(r[1]) for r in rows}
+
     async def distinct_dates(self, limit_days: int = 60) -> list[str]:
         async with read_scope() as session:
             result = await session.execute(
@@ -446,3 +461,13 @@ def _bigint(value: Any) -> int:
     if isinstance(value, int):
         return value
     return int(str(value))
+
+
+_repo: HotspotsRepository | None = None
+
+
+def get_hotspots_repository() -> HotspotsRepository:
+    global _repo
+    if _repo is None:
+        _repo = HotspotsRepository()
+    return _repo

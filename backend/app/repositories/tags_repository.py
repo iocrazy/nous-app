@@ -678,6 +678,25 @@ class TagsRepository:
             logger.warning(f"RPC get_user_tag_counts unavailable, using fallback: {e}")
         return await self._get_tag_counts_fallback(user_id, limit)
 
+    async def get_name_zh_map(self, tag_ids: list[int]) -> Dict[int, str]:
+        """id → name_zh for the given tag ids, in ONE in-list query.
+
+        ``get_tag_counts`` (both the get_user_tag_counts RPC and the manual
+        fallback) omit ``name_zh``; the statistics endpoint backfills it here so
+        Chinese hotspot words still match. Tags with no Chinese alias are absent.
+        """
+        if not tag_ids:
+            return {}
+        async with read_scope() as session:
+            rows = (
+                await session.execute(
+                    select(Tags.id, Tags.name_zh).where(
+                        Tags.id.in_([int(t) for t in tag_ids])
+                    )
+                )
+            ).all()
+        return {int(tid): zh for tid, zh in rows if zh is not None}
+
     async def _get_tag_counts_fallback(
         self, user_id: str, limit: int = 10
     ) -> List[dict]:

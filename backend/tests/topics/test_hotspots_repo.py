@@ -300,6 +300,23 @@ async def test_patch_embedding_empty_is_noop(monkeypatch):
     await HotspotsRepository().patch_embedding("1", [])
 
 
+@pytest.mark.asyncio
+async def test_recent_tag_word_counts_unnests_and_windows(monkeypatch):
+    """lower(word) → count over the last N days, one unnest aggregate."""
+    from app.repositories import hotspots_repository as mod
+
+    session = _FakeSession(_RowsResult([("ai", 5), ("文案", 2)]))
+    monkeypatch.setattr(mod, "read_scope", _cm(session))
+
+    out = await HotspotsRepository().recent_tag_word_counts(days=30)
+
+    assert out == {"ai": 5, "文案": 2}
+    sql = str(session.statements[0])
+    # one unnest aggregate windowed on captured_at
+    assert "unnest" in sql and "captured_at" in sql
+    assert session.params[0]["days"] == 30
+
+
 def test_repo_has_no_supabase_client():
     import inspect
 

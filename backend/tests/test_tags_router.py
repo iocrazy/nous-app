@@ -110,3 +110,107 @@ def test_list_tags_defaults_origin_curated(client: TestClient):
 
     assert resp.status_code == 200
     assert resp.json()["tags"][0]["origin"] == "curated"
+
+
+# ── Task 2.1: /tags/statistics cross-domain usage (resources + notes + hotspots) ──
+
+
+def _patch_statistics_sources(tags_repo, note_repo, hot_repo):
+    """Patch the three factories the statistics endpoint fans out to."""
+    return (
+        patch("app.api.tags_router.get_tags_repository", return_value=tags_repo),
+        patch("app.api.tags_router.get_note_tags_repository", return_value=note_repo),
+        patch("app.api.tags_router.get_hotspots_repository", return_value=hot_repo),
+    )
+
+
+def test_statistics_cross_domain(client: TestClient):
+    """count stays = resources; notes/hotspots decorate each item, hotspot words
+    matched by lower(name)/lower(name_zh)."""
+    tags_repo = AsyncMock()
+    tags_repo.get_tag_counts.return_value = [
+        {
+            "id": 1,
+            "name": "copywriting",
+            "name_zh": "文案",
+            "color": None,
+            "icon": None,
+            "type": "user",
+            "count": 3,
+        },
+    ]
+    note_repo = AsyncMock()
+    note_repo.counts_for_user.return_value = {1: 4}
+    hot_repo = AsyncMock()
+    hot_repo.recent_tag_word_counts.return_value = {"文案": 2}
+
+    p1, p2, p3 = _patch_statistics_sources(tags_repo, note_repo, hot_repo)
+    with p1, p2, p3:
+        resp = client.get("/api/v1/tags/statistics")
+
+    assert resp.status_code == 200
+    item = resp.json()["top_tags"][0]
+    assert (item["count"], item["notes"], item["hotspots"]) == (3, 4, 2)
+    # count (resources) semantics unchanged; note counts keyed by tag id.
+    note_repo.counts_for_user.assert_awaited_once_with(USER_ID)
+
+
+def test_statistics_backfills_missing_name_zh(client: TestClient):
+    """The RPC/fallback omit name_zh — the router backfills it in one in-list
+    query so Chinese hotspot words still match."""
+    tags_repo = AsyncMock()
+    tags_repo.get_tag_counts.return_value = [
+        # No name_zh key — mirrors get_user_tag_counts / fallback shape.
+        {
+            "id": 1,
+            "name": "copywriting",
+            "color": None,
+            "icon": None,
+            "type": "user",
+            "count": 3,
+        },
+    ]
+    tags_repo.get_name_zh_map.return_value = {1: "文案"}
+    note_repo = AsyncMock()
+    note_repo.counts_for_user.return_value = {}
+    hot_repo = AsyncMock()
+    hot_repo.recent_tag_word_counts.return_value = {"文案": 7}
+
+    p1, p2, p3 = _patch_statistics_sources(tags_repo, note_repo, hot_repo)
+    with p1, p2, p3:
+        resp = client.get("/api/v1/tags/statistics")
+
+    assert resp.status_code == 200
+    item = resp.json()["top_tags"][0]
+    # matched via the backfilled name_zh
+    assert item["hotspots"] == 7
+    tags_repo.get_name_zh_map.assert_awaited_once_with([1])
+
+
+def test_statistics_no_backfill_when_name_zh_present(client: TestClient):
+    """When name_zh is already on every item, no extra query fires (no N+1)."""
+    tags_repo = AsyncMock()
+    tags_repo.get_tag_counts.return_value = [
+        {
+            "id": 1,
+            "name": "ai",
+            "name_zh": None,
+            "color": None,
+            "icon": None,
+            "type": "user",
+            "count": 1,
+        },
+    ]
+    note_repo = AsyncMock()
+    note_repo.counts_for_user.return_value = {}
+    hot_repo = AsyncMock()
+    hot_repo.recent_tag_word_counts.return_value = {"ai": 9}
+
+    p1, p2, p3 = _patch_statistics_sources(tags_repo, note_repo, hot_repo)
+    with p1, p2, p3:
+        resp = client.get("/api/v1/tags/statistics")
+
+    assert resp.status_code == 200
+    item = resp.json()["top_tags"][0]
+    assert item["hotspots"] == 9
+    tags_repo.get_name_zh_map.assert_not_awaited()

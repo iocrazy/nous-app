@@ -1,5 +1,6 @@
 """API routes for Tags management."""
 
+import asyncio
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -7,6 +8,8 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
+from app.repositories.hotspots_repository import get_hotspots_repository
+from app.repositories.note_tags_repository import get_note_tags_repository
 from app.repositories.tag_preferences_repository import (
     get_tag_preferences_repository,
 )
@@ -235,14 +238,39 @@ async def get_tag_statistics(
     limit: int = Query(10, ge=1, le=50, description="Number of top tags to return"),
 ):
     """
-    Get tag usage statistics for the current user.
-    Returns top tags sorted by video count.
+    Get cross-domain tag usage statistics for the current user.
+
+    Each item's ``count`` is resource usage (unchanged), decorated with
+    ``notes`` (live inspiration notes) and ``hotspots`` (word hits in the recent
+    hotspot window). The three sources are read concurrently.
     """
     user_id = auth.user_id
     repo = get_tags_repository()
 
     try:
         tag_counts = await repo.get_tag_counts(user_id, limit)
+
+        # get_tag_counts (RPC + fallback) omits name_zh — backfill it in one
+        # in-list query so Chinese hotspot words still match (never N+1).
+        missing_zh = [int(t["id"]) for t in tag_counts if "name_zh" not in t]
+        if missing_zh:
+            zh_map = await repo.get_name_zh_map(missing_zh)
+            for t in tag_counts:
+                if "name_zh" not in t:
+                    t["name_zh"] = zh_map.get(int(t["id"]))
+
+        note_counts, hotspot_words = await asyncio.gather(
+            get_note_tags_repository().counts_for_user(user_id),
+            get_hotspots_repository().recent_tag_word_counts(),
+        )
+        for t in tag_counts:
+            words = {
+                (t.get("name") or "").lower(),
+                (t.get("name_zh") or "").lower(),
+            } - {""}
+            t["notes"] = note_counts.get(int(t["id"]), 0)
+            t["hotspots"] = sum(hotspot_words.get(w, 0) for w in words)
+
         total_tagged = sum(t.get("count", 0) for t in tag_counts)
 
         return TagStatisticsResponse(
