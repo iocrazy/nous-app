@@ -321,7 +321,7 @@ export default function GroupSettingsPanel({
                       value={nameDraft}
                       onChange={(e) => setNameDraft(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') void handleRename();
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) void handleRename();
                         if (e.key === 'Escape') setEditingName(false);
                       }}
                       autoFocus

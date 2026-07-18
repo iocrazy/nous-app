@@ -291,7 +291,7 @@ export const TopicInspirationPage: React.FC = () => {
             value={interestInput}
             onChange={(e) => setInterestInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') saveInterest();
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) saveInterest();
             }}
             placeholder={t('topic.interestPlaceholder', '关键词，空格分隔，如：综艺 明星 影视 世界杯')}
             className={`flex-1 rounded-lg px-3 py-2 text-sm outline-none transition-colors bg-island-2 border border-line-strong text-content placeholder:text-content-4 focus:border-accent/50`}

@@ -259,7 +259,7 @@ export const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, AnnotationCan
   };
 
   const handleTextKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleTextSubmit();
     } else if (e.key === 'Escape') {

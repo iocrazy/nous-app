@@ -554,7 +554,7 @@ export function UiSelect({
                     placeholder="Search…"
                     className="w-full bg-transparent text-sm text-content outline-none placeholder:text-content-3"
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
+                      if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
                         const first = shownItems.find(
                           (item) => item.kind === 'option' && !item.disabled
                         );

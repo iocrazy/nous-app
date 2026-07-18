@@ -163,7 +163,7 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
 
   // Allow pressing Enter in name field to submit
   function handleNameKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
       void handleCreate();
     }
   }

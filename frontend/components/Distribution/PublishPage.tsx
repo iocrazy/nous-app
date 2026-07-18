@@ -378,11 +378,13 @@ export const PublishPage: React.FC = () => {
             <h4>{t('distribution.publish.cover', 'Cover')} <span className="aux">{t('distribution.publish.notSetYet', 'Not set yet')}</span></h4>
             <div className="cover-wrap">
               <div className="cover-slots">
-                <div className="cover-slot v">
+                <div className="cover-slot v is-soon" aria-disabled="true">
+                  <span className="soon-tag">{t('distribution.publish.soon', 'Soon')}</span>
                   <Sparkles />
                   {t('distribution.publish.vertical34', 'Vertical 3:4')}
                 </div>
-                <div className="cover-slot h">
+                <div className="cover-slot h is-soon" aria-disabled="true">
+                  <span className="soon-tag">{t('distribution.publish.soon', 'Soon')}</span>
                   <Sparkles />
                   {t('distribution.publish.horizontal43', 'Horizontal 4:3')}
                 </div>
@@ -450,7 +452,7 @@ export const PublishPage: React.FC = () => {
             <div className="frow">
               <div className="lbl">
                 <b>{t('distribution.publish.aiContent', 'AI-generated content')}</b>
-                <span>{t('distribution.publish.aiContentDesc', 'Adds the disclosure label on platforms that require it')}</span>
+                <span>{t('distribution.publish.aiContentDesc', 'Saved with the task — Douyin requires setting the AI label in-app.')}</span>
               </div>
               <button
                 type="button"
@@ -659,7 +661,7 @@ export const PublishPage: React.FC = () => {
 
             <div className="check warn">
               <AlertTriangle />
-              {t('distribution.publish.coverNotSetWarning', 'Cover not set — a video-frame cover will be used automatically.')}
+              {t('distribution.publish.coverNotSetWarning', 'Cover Studio coming in D4 — Douyin picks the cover during publish.')}
             </div>
             {canPublish && (
               <div className="check ok">
