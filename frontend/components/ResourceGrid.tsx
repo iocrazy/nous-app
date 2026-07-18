@@ -510,7 +510,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                   value={searchQuery}
                   onChange={(e) => onQueryChange(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && searchQuery.trim()) {
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing && searchQuery.trim()) {
                       onAISearch(searchQuery, 'hybrid');
                     }
                     if (e.key === 'Escape') {
@@ -924,7 +924,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
               value={newFolderName}
               onChange={(e) => onNewFolderNameChange(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') onCreateFolder();
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing) onCreateFolder();
                 if (e.key === 'Escape') onCancelCreateFolder();
               }}
               onBlur={() => {

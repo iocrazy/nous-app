@@ -11,18 +11,49 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 ContentType = Literal["video", "images", "article"]
 Visibility = Literal["public", "friends", "private"]
 DistributionMode = Literal["broadcast", "one_to_one"]
 Channel = Literal["official", "h5"]
 
+# Topics == Douyin hashtags (话题). The UI collects them as chips and the
+# workflow delivers them to Douyin (H5 hashtag_list JsonArray / official post
+# text `#tag `). Bound so a single batch can't carry an absurd hashtag wall.
+MAX_TOPICS = 20
+MAX_TOPIC_LEN = 50
+
+
+def normalize_topics(topics: Optional[list[str]]) -> list[str]:
+    """Sanitize user-entered topics into bare hashtag words: strip surrounding
+    whitespace and leading '#' characters, drop empties (a stray '#' or a
+    trailing comma must not 422 the whole publish), reject over-long tags, and
+    cap the count. Returns a fresh list (never mutates the input)."""
+    if not topics:
+        return []
+    out: list[str] = []
+    for raw in topics:
+        tag = raw.strip().lstrip("#").strip()
+        if not tag:
+            continue
+        if len(tag) > MAX_TOPIC_LEN:
+            raise ValueError(f"topic exceeds {MAX_TOPIC_LEN} characters: {tag!r}")
+        out.append(tag)
+    if len(out) > MAX_TOPICS:
+        raise ValueError(f"at most {MAX_TOPICS} topics allowed")
+    return out
+
 
 class AccountConfigOverride(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     topics: Optional[list[str]] = None
+
+    @field_validator("topics")
+    @classmethod
+    def _clean_topics(cls, v: Optional[list[str]]) -> Optional[list[str]]:
+        return None if v is None else normalize_topics(v)
 
 
 class PublishTaskCreate(BaseModel):
@@ -40,6 +71,11 @@ class PublishTaskCreate(BaseModel):
     account_configs: dict[str, AccountConfigOverride] = Field(default_factory=dict)
     cover_vertical_resource_id: Optional[str] = None
     cover_horizontal_resource_id: Optional[str] = None
+
+    @field_validator("topics")
+    @classmethod
+    def _clean_topics(cls, v: list[str]) -> list[str]:
+        return normalize_topics(v)
 
     @model_validator(mode="after")
     def _validate_content(self) -> "PublishTaskCreate":

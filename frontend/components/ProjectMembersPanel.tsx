@@ -157,7 +157,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
                 onChange={(e) => setInviteEmail(e.target.value)}
                 placeholder={t('projects.members.userIdPlaceholder', 'User ID')}
                 className="flex-1 px-3 py-2 bg-ink-800 border border-ink-700 rounded-lg text-sm text-ink-200 placeholder-ink-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                onKeyDown={(e) => e.key === 'Enter' && handleInvite()}
+                onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && handleInvite()}
               />
               <UiSelect
                 value={inviteRole}

@@ -115,10 +115,13 @@ export async function setupScriptStubs(page: Page, opts: ScriptStubOptions): Pro
   await setupStubbedSession(page);
 
   const format = opts.format ?? 'hollywood';
+  // Seed the BARE string — readStoredFormat (editor/formatStorage.ts) compares the
+  // raw localStorage value against 'asian' / 'hollywood', so a JSON.stringify'd
+  // '"asian"' would never match and the asian engine would silently never render.
   await page.addInitScript(
     ([key, value]) => {
       try {
-        localStorage.setItem(key as string, JSON.stringify(value));
+        localStorage.setItem(key as string, value as string);
       } catch {
         /* localStorage unavailable — nothing we can do */
       }

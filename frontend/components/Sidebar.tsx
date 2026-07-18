@@ -22,7 +22,6 @@ import {
   Coins,
   Share2,
   Send,
-  Frame,
 } from 'lucide-react';
 import { Team, Project, SidebarMode, ViewState } from '../types';
 import { SmartCollection } from '../services/smartCollectionService';
@@ -32,7 +31,6 @@ import { hasPermission } from '../utils/permissions';
 import { VIEW_PATH_MAP, pathnameToView } from '../utils/routeConfig';
 import { useTopicModuleStatus } from '../hooks/useTopicModuleEnabled';
 import { useDistributionModuleStatus } from '../hooks/useDistributionModuleStatus';
-import { CANVAS_NAV_ENABLED } from '../features/canvas-core/flags';
 
 // ---------------------------------------------------------------------------
 // SidebarItem
@@ -357,9 +355,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {isViewEnabled('mediatrack') && (
               <SidebarItem icon={FolderKanban} label={t('sidebar.projects')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
             )}
-            {CANVAS_NAV_ENABLED && (
-              <SidebarItem icon={Frame} label={t('sidebar.canvas', 'Canvas')} active={currentView === 'canvas'} onClick={() => handleNav('canvas')} collapsed={collapsed} />
-            )}
             <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
             <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
             <SidebarItem icon={MessageSquare} label={t('chat.title')} active={currentView === 'chat'} onClick={() => handleNav('chat')} collapsed={collapsed} />
@@ -440,9 +435,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
           {isViewEnabled('mediatrack') && (
             <SidebarItem icon={FolderKanban} label={t('sidebar.projects')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
-          )}
-          {CANVAS_NAV_ENABLED && (
-            <SidebarItem icon={Frame} label={t('sidebar.canvas', 'Canvas')} active={currentView === 'canvas'} onClick={() => handleNav('canvas')} collapsed={collapsed} />
           )}
           <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
           <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />

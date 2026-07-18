@@ -45,7 +45,7 @@ export const NotesSidePanel: React.FC<Props> = ({ recentNotes, onQuickSave, onOp
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && void submit()}
+          onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && void submit()}
           placeholder={t('inspiration.quickNote', 'Quick note…')}
           className="w-full bg-transparent text-xs text-content placeholder:text-content-4 focus:outline-none"
         />

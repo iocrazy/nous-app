@@ -2,8 +2,9 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Hls from 'hls.js';
 import { Video } from '../types';
 import {
-  Heart, MessageCircle, Share2, Music, User, Plus, Play, Pause, Volume2, VolumeX, Image as ImageIcon, Check, ChevronDown, ChevronUp, Loader2
+  Heart, MessageCircle, Share2, Music, User, Plus, Play, Pause, Volume2, VolumeX, Image as ImageIcon, Check, ChevronDown, ChevronUp
 } from 'lucide-react';
+import { Loading } from './common/Loading';
 import { isVideoType, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 import { pickCoverFrame } from '../utils/coverSource';
 import { useAuth } from '../contexts/AuthContext';
@@ -145,7 +146,7 @@ export const LibraryFeed: React.FC<LibraryFeedProps> = ({
             aria-hidden={!isLoadingMore}
           >
             {isLoadingMore ? (
-              <Loader2 size={20} className="animate-spin" />
+              <Loading size="sm" />
             ) : (
               <span className="text-xs text-ink-600">Loading more…</span>
             )}
@@ -287,7 +288,7 @@ const FeedItem = ({
               {coverUrl ? (
                 <img src={coverUrl} alt="" className="absolute inset-0 w-full h-full object-contain opacity-30" />
               ) : null}
-              <Loader2 className="w-10 h-10 text-white/60 animate-spin" />
+              <Loading center className="text-white/60" />
             </div>
           )}
           <video
@@ -309,7 +310,7 @@ const FeedItem = ({
           {coverUrl ? (
             <img src={coverUrl} alt="" className="w-full h-full object-contain" loading="lazy" />
           ) : (
-            <Loader2 className="w-8 h-8 text-ink-600 animate-spin" />
+            <Loading center className="text-ink-600" />
           )}
         </div>
       ) : (

@@ -56,6 +56,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import read_scope, write_scope
 from app.models import (
+    Projects,
     ScriptAssets,
     ScriptChapters,
     ScriptProjects,
@@ -218,6 +219,66 @@ class ScriptProjectRepository(BaseRepository):
                 f"Failed to list script projects for project {project_id}: {e}"
             )
             return {"items": [], "total": 0, "page": page, "limit": limit}
+
+    async def list_recent_for_user(
+        self, user_id: str, limit: int = 8
+    ) -> List[Dict[str, Any]]:
+        """Recently-edited non-deleted scripts across every project OWNED by
+        ``user_id``, newest-edited first, capped at ``limit``.
+
+        Joins ``projects`` for owner scoping (mirrors the projects-list
+        endpoint's ``owner_id == user_id`` visibility), the project name, AND
+        the PROJECT's ``team_id`` — deliberately ``Projects.team_id``, not
+        ``script_projects.team_id`` (script_projects.team_id is NOT NULL and
+        falls back to the creator's personal team even for a personal
+        project, so using it would misroute a personal script to a team
+        route). The Recent view spans every team the caller owns projects
+        in, not just the team currently open in the UI, so each item must
+        carry its own team for the frontend to navigate to it directly
+        instead of assuming "current page's team" (cross-team recent items
+        were silently unopenable before this field existed). One query — no
+        per-script project lookup. Returns the recent-items wire shape
+        ``{id, name, project_id, project_name, team_id, updated_at}`` with
+        bigint ids stringified (JS precision; the recent-view contract uses
+        string ids, unlike the rest of this repo which keeps bigints native;
+        ``team_id`` is ``None`` for a personal project with no team).
+        Never raises — a failure degrades the Recent view to empty."""
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(
+                        ScriptProjects.id,
+                        ScriptProjects.name,
+                        ScriptProjects.project_id,
+                        ScriptProjects.updated_at,
+                        Projects.name.label("project_name"),
+                        Projects.team_id,
+                    )
+                    .join(Projects, Projects.id == ScriptProjects.project_id)
+                    .where(Projects.owner_id == user_id)
+                    .where(ScriptProjects.status != "deleted")
+                    .order_by(ScriptProjects.updated_at.desc())
+                    .limit(limit)
+                )
+                rows = result.mappings().all()
+            return [
+                {
+                    "id": str(r["id"]),
+                    "name": r["name"],
+                    "project_id": str(r["project_id"]),
+                    "project_name": r["project_name"],
+                    "team_id": (
+                        str(r["team_id"]) if r["team_id"] is not None else None
+                    ),
+                    "updated_at": (
+                        r["updated_at"].isoformat() if r["updated_at"] else None
+                    ),
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.error(f"Failed to list recent scripts for user {user_id}: {e}")
+            return []
 
 
 # ─── script_chapters ────────────────────────────────────────────────────

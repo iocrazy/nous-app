@@ -112,7 +112,7 @@ export const CollectionPicker: React.FC<CollectionPickerProps> = ({
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+              onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && handleCreate()}
               placeholder={t('team.name')}
               className="w-full px-3 py-2 bg-ink-800 border border-ink-700 rounded-lg text-sm text-ink-200 placeholder-ink-500 outline-none focus:border-indigo-500"
             />

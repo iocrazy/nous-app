@@ -1,5 +1,5 @@
 import {
-  LayoutGrid, Star, Archive,
+  LayoutGrid, Star, Archive, Clock,
   FolderOpen, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -9,6 +9,7 @@ interface ProjectFilterSidebarProps {
   onFilterChange: (filter: string) => void;
   folders: string[];
   projectCounts: {
+    recent: number;
     all: number;
     starred: number;
     archived: number;
@@ -19,11 +20,11 @@ interface ProjectFilterSidebarProps {
   onToggleCollapse: () => void;
 }
 
-// PR-9 (G7): Views rail reduced to All / Starred / Archived — Recent and
-// Active are dropped (the homepage work queue now surfaces "needs
-// attention" directly, making a separate Active filter redundant, and
-// Recent duplicated the project switcher's own recency sort).
+// Recent leads the Views rail — a cross-project feed of recently-edited
+// scripts / canvases (not a project filter, so the main pane swaps to a
+// Recent list). All / Starred / Archived remain project-card filters.
 const VIEW_FILTERS = [
+  { key: 'recent', labelKey: 'projects.view.recent', icon: Clock },
   { key: 'all', labelKey: 'projects.view.all', icon: LayoutGrid },
   { key: 'starred', labelKey: 'projects.view.starred', icon: Star },
   { key: 'archived', labelKey: 'projects.view.archived', icon: Archive },
