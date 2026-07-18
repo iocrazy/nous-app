@@ -126,6 +126,8 @@ class TagCountItem(BaseModel):
     icon: Optional[str] = None
     type: str = "system"
     count: int
+    notes: int = Field(0, description="Live inspiration-note usage count")
+    hotspots: int = Field(0, description="Hotspot word hits in the recent window")
 
 
 class TagStatisticsResponse(BaseModel):

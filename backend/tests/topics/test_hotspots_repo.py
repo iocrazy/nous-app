@@ -182,6 +182,33 @@ async def test_list_for_date_no_search_skips_or(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_for_date_tag_words_overlap(monkeypatch):
+    from app.repositories import hotspots_repository as mod
+
+    session = _FakeSession(_MappingResult([]))
+    monkeypatch.setattr(mod, "read_scope", _cm(session))
+    await HotspotsRepository().list_for_date(None, None, tag_words=["AI", "文案"])
+    stmt = session.statements[0]
+    sql = str(stmt).lower()
+    # array overlap → the `&&` operator (spec: hotspots.tags && words)
+    assert "&&" in sql or "overlap" in sql
+    # words are lower-cased before binding
+    assert ["ai", "文案"] in [
+        v for v in stmt.compile().params.values() if isinstance(v, list)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_list_for_date_no_tag_words_skips_overlap(monkeypatch):
+    from app.repositories import hotspots_repository as mod
+
+    session = _FakeSession(_MappingResult([]))
+    monkeypatch.setattr(mod, "read_scope", _cm(session))
+    await HotspotsRepository().list_for_date(None, None)
+    assert "&&" not in str(session.statements[0])
+
+
+@pytest.mark.asyncio
 async def test_list_for_date_empty_source_ids_short_circuits(monkeypatch):
     from app.repositories import hotspots_repository as mod
 
@@ -298,6 +325,23 @@ async def test_patch_embedding_empty_is_noop(monkeypatch):
 
     monkeypatch.setattr(mod, "write_scope", _explode)
     await HotspotsRepository().patch_embedding("1", [])
+
+
+@pytest.mark.asyncio
+async def test_recent_tag_word_counts_unnests_and_windows(monkeypatch):
+    """lower(word) → count over the last N days, one unnest aggregate."""
+    from app.repositories import hotspots_repository as mod
+
+    session = _FakeSession(_RowsResult([("ai", 5), ("文案", 2)]))
+    monkeypatch.setattr(mod, "read_scope", _cm(session))
+
+    out = await HotspotsRepository().recent_tag_word_counts(days=30)
+
+    assert out == {"ai": 5, "文案": 2}
+    sql = str(session.statements[0])
+    # one unnest aggregate windowed on captured_at
+    assert "unnest" in sql and "captured_at" in sql
+    assert session.params[0]["days"] == 30
 
 
 def test_repo_has_no_supabase_client():

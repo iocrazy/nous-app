@@ -678,6 +678,57 @@ class TagsRepository:
             logger.warning(f"RPC get_user_tag_counts unavailable, using fallback: {e}")
         return await self._get_tag_counts_fallback(user_id, limit)
 
+    async def get_tags_by_ids(self, ids: list[int], user_id: str) -> List[dict]:
+        """Full tag rows for the given ids, scoped to the caller-visible pool
+        (spec §5: ``type IN ('system','time') OR (type='user' AND user_id =
+        caller)``), in ONE in-list query.
+
+        Backs the topics feed's pool-tag filter, which resolves picked tag ids
+        to their name/name_zh word set. Without this scoping, a caller could
+        pass another user's private ``type='user'`` tag id and have its
+        name/name_zh silently become live filter words (cross-user existence
+        oracle + private-word-steered filtering) — mirrors the same predicate
+        ``resolve_note_tags`` uses above. Empty ids short-circuits. ``tags.id``
+        is BIGINT — the returned ``id`` stays a native int (5.3 trap)."""
+        if not ids:
+            return []
+        async with read_scope() as session:
+            objs = (
+                (
+                    await session.execute(
+                        select(Tags).where(
+                            Tags.id.in_([int(t) for t in ids]),
+                            or_(
+                                Tags.type.in_(("system", "time")),
+                                and_(Tags.type == "user", Tags.user_id == user_id),
+                            ),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [_tag_row(o) for o in objs]
+
+    async def get_name_zh_map(self, tag_ids: list[int]) -> Dict[int, str]:
+        """id → name_zh for the given tag ids, in ONE in-list query.
+
+        ``get_tag_counts`` (both the get_user_tag_counts RPC and the manual
+        fallback) omit ``name_zh``; the statistics endpoint backfills it here so
+        Chinese hotspot words still match. Tags with no Chinese alias are absent.
+        """
+        if not tag_ids:
+            return {}
+        async with read_scope() as session:
+            rows = (
+                await session.execute(
+                    select(Tags.id, Tags.name_zh).where(
+                        Tags.id.in_([int(t) for t in tag_ids])
+                    )
+                )
+            ).all()
+        return {int(tid): zh for tid, zh in rows if zh is not None}
+
     async def _get_tag_counts_fallback(
         self, user_id: str, limit: int = 10
     ) -> List[dict]:
