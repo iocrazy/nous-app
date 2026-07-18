@@ -254,7 +254,8 @@ class Issues(Base):
         ),
         CheckConstraint(
             "origin_kind = ANY (ARRAY['manual'::text, 'chat_delegate'::text, "
-            "'celery_pipeline'::text, 'agent_dispatch'::text, 'routine'::text, 'escalation'::text])",
+            "'celery_pipeline'::text, 'agent_dispatch'::text, 'routine'::text, "
+            "'escalation'::text, 'project_stage'::text])",
             name="issues_origin_kind_check",
         ),
         CheckConstraint(
