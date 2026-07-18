@@ -708,7 +708,7 @@ export const EDITOR_SHELL_STYLES = `
 .as-character{ font-family:var(--script-hei); font-weight:700; letter-spacing:0.03em; color:var(--tick-character); text-align:left; }
 .as-dialogue{ font-family:var(--script-song); text-align:left; }
 .as-paren{ font-family:var(--script-song); font-style:italic; color:var(--sheet-ink-soft); }
-.as-transition{ font-family:var(--script-hei); text-transform:uppercase; font-weight:700; letter-spacing:0.04em; color:var(--sheet-ink-soft); }
+.as-transition{ font-family:var(--script-hei); text-transform:uppercase; font-weight:700; letter-spacing:0.04em; color:var(--sheet-ink-soft); text-align:right; }
 .as-comment{ font-family:var(--script-song); border-left:3px solid color-mix(in srgb, var(--sheet-ink) 22%, transparent); padding-left:calc(var(--as-comment-body) - var(--as-comment-bar)); color:var(--sheet-ink-soft); font-style:italic; }
 .as-subtitle{ font-family:var(--script-hei); text-align:center; font-style:italic; color:var(--sheet-ink-soft); }
 
