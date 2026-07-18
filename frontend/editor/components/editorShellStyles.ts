@@ -1488,6 +1488,26 @@ export const EDITOR_SHELL_STYLES = `
 
 /* ── Version diff (centre pane takeover, Phase B P4) ──────────────────────── */
 .mh-version-diff{ display:flex; flex-direction:column; height:100%; min-height:0; }
+
+/* Morandi four-state palette — muted, grayed diff colours scoped to the diff
+   pane only, so the shell's semantic --green / --red / --amber / --indigo stay
+   untouched. Each state carries a readable ink (badge text, strike-through,
+   word ins/del) plus a soft grayed fill. Non-colour cues (line-through, +/−
+   badges) still carry the semantics, so the low-contrast morandi tones remain
+   colour-blind safe. Light and dark are tuned separately: dark drops the fills
+   to low-luminance chips and lifts the ink, keeping the grayed feel. */
+.mh-editor-shell[data-theme='light'] .mh-version-diff{
+  --diff-add:#4f7259;  --diff-add-bg:#e8efe9;
+  --diff-del:#a86560;  --diff-del-bg:#f4e7e6;
+  --diff-chg:#9a7a4c;  --diff-chg-bg:#f2ebdd;
+  --diff-move:#6e6796; --diff-move-bg:#ebe9f3;
+}
+.mh-editor-shell[data-theme='dark'] .mh-version-diff{
+  --diff-add:#8ebf9c;  --diff-add-bg:#25352c;
+  --diff-del:#d99b93;  --diff-del-bg:#3a2825;
+  --diff-chg:#cdb184;  --diff-chg-bg:#352c1e;
+  --diff-move:#a9a1cf; --diff-move-bg:#2d2842;
+}
 .mh-diff-topbar{
   display:flex; align-items:center; gap:12px; flex-shrink:0;
   padding:10px 16px; border-bottom:1px solid var(--surface-border);
@@ -1557,10 +1577,10 @@ export const EDITOR_SHELL_STYLES = `
   flex-shrink:0; font-family:var(--mono); font-size:9.5px; font-weight:700; letter-spacing:0.03em;
   text-transform:uppercase; padding:3px 7px; border-radius:999px;
 }
-.mh-diff-badge.added{ background:var(--green-soft); color:var(--green); }
-.mh-diff-badge.removed{ background:var(--red-soft,var(--surface-2)); color:var(--red); }
-.mh-diff-badge.changed{ background:var(--amber-soft); color:var(--amber); }
-.mh-diff-badge.moved{ background:var(--indigo-soft); color:var(--indigo-deep); }
+.mh-diff-badge.added{ background:var(--diff-add-bg); color:var(--diff-add); }
+.mh-diff-badge.removed{ background:var(--diff-del-bg); color:var(--diff-del); }
+.mh-diff-badge.changed{ background:var(--diff-chg-bg); color:var(--diff-chg); }
+.mh-diff-badge.moved{ background:var(--diff-move-bg); color:var(--diff-move); }
 
 /* Author chip — monochrome, quiet; sits after the kind badge. */
 .mh-diff-author{
@@ -1575,16 +1595,16 @@ export const EDITOR_SHELL_STYLES = `
   font-size:13px; line-height:1.5; padding:3px 8px; border-radius:5px;
   word-break:break-word; color:var(--ink);
 }
-.mh-diff-text.before{ background:var(--red-soft,var(--surface-2)); }
-.mh-diff-text.after{ background:var(--green-soft); }
+.mh-diff-text.before{ background:var(--diff-del-bg); }
+.mh-diff-text.after{ background:var(--diff-add-bg); }
 /* Whole-line removed / added keep their full colour cue. */
-.mh-diff-change.removed .mh-diff-text.before{ color:var(--red); text-decoration:line-through; }
-.mh-diff-change.added .mh-diff-text.after{ color:var(--green); }
-.mh-diff-change.moved .mh-diff-text.after{ color:var(--indigo-deep); background:var(--indigo-soft); }
+.mh-diff-change.removed .mh-diff-text.before{ color:var(--diff-del); text-decoration:line-through; }
+.mh-diff-change.added .mh-diff-text.after{ color:var(--diff-add); }
+.mh-diff-change.moved .mh-diff-text.after{ color:var(--diff-move); background:var(--diff-move-bg); }
 /* Word-level inline highlights (Cursor style). */
 .mh-w-eq{ color:var(--ink-soft); }
-.mh-w-del{ color:var(--red); text-decoration:line-through; font-weight:600; }
-.mh-w-ins{ color:var(--green); font-weight:600; }
+.mh-w-del{ color:var(--diff-del); text-decoration:line-through; font-weight:600; }
+.mh-w-ins{ color:var(--diff-add); font-weight:600; }
 
 /* Jump-to flash pulse on the live sheet target. */
 @keyframes mhDiffJumpFlash{
