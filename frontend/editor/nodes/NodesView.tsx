@@ -267,7 +267,7 @@ export function NodesView({
   const minimapConfig = useMemo(
     () => ({
       nodeColor: (node: Node) =>
-        node.type === 'chapterNode' ? 'var(--indigo)' : 'var(--ink-faint)',
+        node.type === 'chapterNode' ? 'var(--ink)' : 'var(--ink-faint)',
       maskColor: 'var(--minimap-mask)',
       ariaLabel: t('editor.nodesMinimapLabel'),
     }),

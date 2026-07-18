@@ -1068,7 +1068,12 @@ export const EDITOR_SHELL_STYLES = `
 /* ===== LOADING / ERROR ===== */
 .mh-shell-state{
   position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-  flex-direction:column; gap:10px; background:var(--bg); color:var(--ink-soft);
+  flex-direction:column; gap:10px; color:var(--ink-soft);
+  /* Opaque overlay that must read as the SAME paper-neutral surface as the
+     shell behind it — reuse the shell's own radial-gradient (var(--bg-2)→
+     var(--bg)) so "Loading scene…" no longer flashes a flat cold-lavender
+     block distinct from the editor region. */
+  background:radial-gradient(circle at 15% 0%, var(--bg-2) 0%, var(--bg) 55%);
   font-family:var(--sans); font-size:14px; padding:24px; text-align:center;
   /* Sits ABOVE the paper/rail while loading. Without this it paints behind
      .mh-center-col (position:relative, later in DOM), so the empty paper shows
@@ -1192,7 +1197,11 @@ export const EDITOR_SHELL_STYLES = `
 /* ===== NODE VIEW (scene/chapter flow projection) ===== */
 .mh-nodes-view{
   flex:1; min-height:0; min-width:0; position:relative;
-  background:var(--surface-2); border:1px solid var(--surface-border);
+  /* Transparent so the shell's own paper-neutral gradient is the canvas floor
+     (matches the script region's transparent .mh-sheet-scroll) instead of a
+     distinct cold-lavender --surface-2 panel. The dot grid + controls below
+     stay tinted to the theme vars, so the grain follows light/dark. */
+  background:transparent; border:1px solid var(--surface-border);
   border-radius:var(--radius-lg); overflow:hidden;
 }
 /* Empty state — no scenes and no chapters to project (ReactFlow unmounted). */
@@ -1233,7 +1242,7 @@ export const EDITOR_SHELL_STYLES = `
   border:1px solid var(--surface-border); border-radius:var(--radius-md);
   box-shadow:var(--shadow-island); padding:11px 13px 12px; font-family:var(--sans);
 }
-.mh-flow-handle{ width:7px; height:7px; background:var(--indigo); border:none; }
+.mh-flow-handle{ width:7px; height:7px; background:var(--ink-faint); border:none; }
 .mh-flow-scene-cover{
   display:block; width:100%; height:72px; object-fit:cover;
   border-radius:var(--radius-sm); border:1px solid var(--surface-border);
@@ -1253,11 +1262,11 @@ export const EDITOR_SHELL_STYLES = `
 .mh-flow-pill{
   font-size:10.5px; font-weight:600; font-family:var(--mono);
   padding:2px 8px; border-radius:999px;
-  background:var(--indigo-soft); color:var(--indigo-deep);
+  background:var(--chip-ink-bg); color:var(--chip-ink-fg);
 }
-.mh-flow-chapter{ width:200px; background:var(--indigo-soft); border-color:var(--surface-border); }
+.mh-flow-chapter{ width:200px; background:var(--surface-2); border-color:var(--surface-border); }
 .mh-flow-chapter-head{ display:flex; align-items:center; gap:8px; }
-.mh-flow-chapter-title{ font-size:13px; font-weight:700; color:var(--indigo-deep); }
+.mh-flow-chapter-title{ font-size:13px; font-weight:700; color:var(--ink); }
 .mh-flow-chapter-summary{
   margin-top:7px; font-size:12px; line-height:1.5; color:var(--ink-soft);
   display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
@@ -1272,13 +1281,16 @@ export const EDITOR_SHELL_STYLES = `
 .mh-flow-action:hover:not(:disabled){ background:var(--surface-2); color:var(--ink); }
 .mh-flow-action:disabled{ opacity:0.5; cursor:default; }
 .mh-flow-action.confirming{
-  background:var(--indigo); color:var(--accent-on); border-color:var(--indigo);
+  background:var(--pill-ink-bg); color:var(--pill-ink-on); border-color:transparent;
 }
 
 /* ===== STORYBOARD VIEW (scene columns + shot cards) ===== */
 .mh-storyboard{
   flex:1; min-height:0; min-width:0;
-  background:var(--surface-2); border:1px solid var(--surface-border);
+  /* Transparent board — the scene columns are white --surface cards floating on
+     the shell's paper-neutral gradient (parity with the script paper), not a
+     cold-lavender --surface-2 slab. */
+  background:transparent; border:1px solid var(--surface-border);
   border-radius:var(--radius-lg); padding:16px;
   display:flex; gap:16px; align-items:flex-start;
   overflow-x:auto; overflow-y:hidden;
@@ -1298,11 +1310,11 @@ export const EDITOR_SHELL_STYLES = `
 .mh-sb-auto-btn{
   flex-shrink:0; font-family:var(--sans); font-size:11px; font-weight:600;
   padding:5px 10px; border-radius:var(--radius-sm); cursor:pointer;
-  background:var(--indigo); color:var(--accent-on); border:1px solid transparent;
+  background:var(--surface-2); color:var(--ink-soft); border:1px solid var(--surface-border);
 }
-.mh-sb-auto-btn:hover:not(:disabled){ background:var(--indigo-deep); }
+.mh-sb-auto-btn:hover:not(:disabled){ background:var(--hover-ink-bg); color:var(--ink); }
 .mh-sb-auto-btn:disabled{ opacity:0.6; cursor:default; }
-.mh-sb-auto-btn.confirming{ background:var(--violet); border-color:var(--violet); }
+.mh-sb-auto-btn.confirming{ background:var(--pill-ink-bg); color:var(--pill-ink-on); border-color:transparent; }
 .mh-sb-shots{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:2px; }
 .mh-sb-empty{ padding:14px 8px; font-size:12px; color:var(--ink-faint); font-style:italic; text-align:center; }
 .mh-sb-empty-board{ margin:auto; font-size:13px; color:var(--ink-faint); font-style:italic; }
@@ -1312,7 +1324,7 @@ export const EDITOR_SHELL_STYLES = `
   background:var(--surface-2); color:var(--ink-soft);
   border:1px dashed var(--surface-border);
 }
-.mh-sb-add:hover{ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--indigo); }
+.mh-sb-add:hover{ background:var(--hover-ink-bg); color:var(--ink); border-color:var(--emph-ink-border); }
 
 /* Shot card */
 .mh-shot-card-wrap{ position:relative; }
@@ -1354,9 +1366,9 @@ export const EDITOR_SHELL_STYLES = `
 .mh-shot-pill{
   font-family:var(--mono); font-size:10px; font-weight:700; letter-spacing:0.02em;
   padding:3px 8px; border-radius:999px; cursor:pointer;
-  background:var(--indigo-soft); color:var(--indigo-deep); border:1px solid transparent;
+  background:var(--chip-ink-bg); color:var(--chip-ink-fg); border:1px solid transparent;
 }
-.mh-shot-pill:hover{ border-color:var(--indigo); }
+.mh-shot-pill:hover{ border-color:var(--emph-ink-border); }
 .mh-shot-pill.empty{ background:var(--surface); color:var(--ink-faint); }
 .mh-shot-focal{
   width:60px; font-family:var(--mono); font-size:10px; font-weight:700;
@@ -1378,16 +1390,16 @@ export const EDITOR_SHELL_STYLES = `
   padding:6px 10px; border-radius:var(--radius-sm); cursor:pointer;
   background:var(--surface); color:var(--ink-soft); border:1px solid var(--surface-border);
 }
-.mh-shot-generate:hover:not(:disabled){ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--indigo); }
+.mh-shot-generate:hover:not(:disabled){ background:var(--hover-ink-bg); color:var(--ink); border-color:var(--emph-ink-border); }
 .mh-shot-generate:disabled{ opacity:0.5; cursor:default; }
 .mh-shot-generate-video{
   flex:1; font-family:var(--sans); font-size:11.5px; font-weight:600;
   padding:6px 10px; border-radius:var(--radius-sm); cursor:pointer;
   background:var(--surface); color:var(--ink-soft); border:1px solid var(--surface-border);
 }
-.mh-shot-generate-video:hover:not(:disabled){ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--indigo); }
+.mh-shot-generate-video:hover:not(:disabled){ background:var(--hover-ink-bg); color:var(--ink); border-color:var(--emph-ink-border); }
 .mh-shot-generate-video:disabled{ opacity:0.5; cursor:default; }
-.mh-shot-generate-video.confirming{ background:var(--indigo); color:#fff; border-color:var(--indigo); }
+.mh-shot-generate-video.confirming{ background:var(--pill-ink-bg); color:var(--pill-ink-on); border-color:transparent; }
 .mh-shot-video{
   width:100%; max-width:100%; border-radius:6px; margin-top:2px;
   border:1px solid var(--surface-border); background:#000; display:block;
@@ -1665,7 +1677,7 @@ export const EDITOR_SHELL_STYLES = `
   background:transparent; border:1px solid var(--hairline); border-radius:var(--radius-sm);
   padding:4px 8px; cursor:pointer;
 }
-.mh-beat-notes-toggle[aria-expanded="true"]{ color:var(--indigo-deep); border-color:var(--indigo); }
+.mh-beat-notes-toggle[aria-expanded="true"]{ color:var(--ink); border-color:var(--emph-ink-border); background:var(--sel-ink-bg); }
 .mh-beat-delete{
   flex-shrink:0; font-size:14px; line-height:1; color:var(--ink-faint); background:transparent;
   border:1px solid transparent; border-radius:var(--radius-sm); padding:3px 8px; cursor:pointer;
@@ -1680,17 +1692,17 @@ export const EDITOR_SHELL_STYLES = `
 .mh-beat-summary:focus{ outline:none; border-color:var(--indigo); }
 .mh-beat-scenes{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
 .mh-beat-chip{
-  display:inline-flex; align-items:center; gap:2px; background:var(--indigo-soft);
+  display:inline-flex; align-items:center; gap:2px; background:var(--chip-ink-bg);
   border-radius:999px; padding:0 2px 0 0; max-width:100%;
 }
 .mh-beat-chip-label{
-  font-size:11.5px; font-weight:600; color:var(--indigo-deep); background:transparent;
+  font-size:11.5px; font-weight:600; color:var(--chip-ink-fg); background:transparent;
   border:none; border-radius:999px; padding:3px 4px 3px 10px; cursor:pointer;
   max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .mh-beat-chip-label:disabled{ cursor:default; color:var(--ink-faint); }
 .mh-beat-chip-x{
-  font-size:12px; line-height:1; color:var(--indigo-deep); background:transparent; border:none;
+  font-size:12px; line-height:1; color:var(--chip-ink-fg); background:transparent; border:none;
   border-radius:999px; width:16px; height:16px; cursor:pointer; opacity:0.65;
 }
 .mh-beat-chip-x:hover{ opacity:1; }
@@ -1700,17 +1712,17 @@ export const EDITOR_SHELL_STYLES = `
 }
 
 /* ===== FILM NUMBERING (合一终稿, 2026-07-11) =====
-   Storyboard scene heads read S1/S2 (mono, indigo) and shot codes read 1A/1B
+   Storyboard scene heads read S1/S2 (mono, neutral ink) and shot codes read 1A/1B
    (scene number + shot letter) instead of the old plain black number squares —
    the industry slate convention. Embedded (studio) mode now drops the editor's
    own rail entirely, so the old episode SWITCH menu that lived here is gone. */
 .mh-sc-mark{
   font-family:var(--mono); font-size:11px; font-weight:700;
-  color:var(--indigo); letter-spacing:.02em;
+  color:var(--ink-soft); letter-spacing:.02em;
 }
 .mh-shot-no{
-  font-family:var(--mono); font-size:9.5px; font-weight:700; color:var(--indigo);
-  background:var(--indigo-soft); border:1px solid var(--surface-border); border-radius:6px;
+  font-family:var(--mono); font-size:9.5px; font-weight:700; color:var(--chip-ink-fg);
+  background:var(--chip-ink-bg); border:1px solid var(--surface-border); border-radius:6px;
   padding:1.5px 6px; letter-spacing:.03em; flex-shrink:0;
 }
 
