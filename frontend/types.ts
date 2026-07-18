@@ -439,6 +439,7 @@ export interface Tag {
   user_id?: string;
   video_count?: number;
   media_count?: number;
+  origin?: 'curated' | 'note';  // 'note' = shadow tag auto-created from note #tags
   created_at: string;
 }
 

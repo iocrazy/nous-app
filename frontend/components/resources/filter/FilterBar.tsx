@@ -144,6 +144,13 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     isChipActive,
   } = config;
 
+  // Shadow tags (origin 'note') can never be attached to resources, so they're
+  // pure noise in the resource-list tag filter — exclude them here.
+  const filterableTags = useMemo(
+    () => allTags.filter((tag) => tag.origin !== 'note'),
+    [allTags],
+  );
+
   const handleMergeTags = React.useCallback(
     async (targetId: string, sourceIds: string[]) => {
       await mergeTagsApi(targetId, sourceIds);
@@ -270,7 +277,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
       case 'tags':
         return (
           <TagsFilterDropdown
-            allTags={allTags}
+            allTags={filterableTags}
             selectedTagIds={chipValues.tags.tag_ids}
             onChange={(next) => setChipValue('tags', { tag_ids: next })}
             onClearAll={() => clearChip('tags')}

@@ -88,6 +88,9 @@ export interface TagUpdate {
   enabled?: boolean;
   group_id?: string | null;
   sort_order?: number;
+  // Promote-only: 'note' → 'curated' moves a shadow tag into the curated
+  // pool. Backend rejects 'note' (422) — you can only promote, never demote.
+  origin?: 'curated';
 }
 
 export async function updateTag(
