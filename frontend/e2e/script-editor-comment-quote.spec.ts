@@ -6,9 +6,7 @@
 import { expect, test } from '@playwright/test';
 import {
   SCENE_ID_BASE,
-  SCRIPT_ID,
   SCRIPT_URL,
-  formatKey,
   setupScriptStubs,
   wireScene,
   type WireElement,
@@ -28,22 +26,6 @@ for (const { format, expectClass } of cases) {
     const scenes = [wireScene({ id: SCENE_ID_BASE + 1, sortOrder: 1, location: 'STAGE', elements })];
 
     await setupScriptStubs(page, { scenes, format });
-    // setupScriptStubs stores the format via JSON.stringify ('"asian"'), which
-    // readStoredFormat() never matches — so its format:'asian' silently renders
-    // hollywood. Write the RAW value (what persistFormat/readStoredFormat use)
-    // AFTER, so this later addInitScript wins and the asian engine truly renders.
-    // (Harness bug flagged separately; kept local here to avoid disturbing other
-    // asian specs that lean on the current fallback behaviour.)
-    await page.addInitScript(
-      ([key, value]) => {
-        try {
-          localStorage.setItem(key as string, value as string);
-        } catch {
-          /* ignore */
-        }
-      },
-      [formatKey(SCRIPT_ID), format] as const,
-    );
     await page.goto(SCRIPT_URL);
     await page.waitForSelector('[data-testid="scene-block"]', { timeout: 15_000 });
     await page.waitForTimeout(500);
