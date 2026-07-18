@@ -7,6 +7,10 @@ import type { PickerSettings, PanelSize } from '../../services/tagPreferencesSer
 interface FloatingPanelProps {
   triggerRef: React.RefObject<HTMLElement | null>;
   allTags: Tag[];
+  /** Hidden shadow tags (origin === 'note', not assigned). Forwarded to the
+   *  browser so an exact-name search reveals/attaches them instead of offering
+   *  a duplicate Create. */
+  shadowTags?: Tag[];
   selectedIds: Set<string>;
   starredIds: string[];
   settings: PickerSettings;
@@ -22,6 +26,7 @@ interface FloatingPanelProps {
 export const FloatingPanel: React.FC<FloatingPanelProps> = ({
   triggerRef,
   allTags,
+  shadowTags,
   selectedIds,
   starredIds,
   settings,
@@ -121,6 +126,7 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
   const browser = (
     <EagleTagBrowser
       allTags={allTags}
+      shadowTags={shadowTags}
       selectedIds={selectedIds}
       starredIds={starredIds}
       settings={settings}

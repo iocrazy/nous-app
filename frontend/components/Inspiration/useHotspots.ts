@@ -10,8 +10,8 @@ import {
   type HotspotStatePatch,
 } from '../../services/topicService';
 
-export function useHotspots(opts: { day?: string; enabled: boolean }) {
-  const { day, enabled } = opts;
+export function useHotspots(opts: { day?: string; enabled: boolean; tagIds?: string[] }) {
+  const { day, enabled, tagIds } = opts;
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,14 +19,21 @@ export function useHotspots(opts: { day?: string; enabled: boolean }) {
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 
+  // Tag ids are UUID strings (no commas), so a joined key is a stable
+  // dependency: it only changes when the *values* change, not on every new
+  // array identity handed down by the page — avoids an identity-churn refetch
+  // loop. The effect reconstructs the array from this key.
+  const tagKey = (tagIds ?? []).join(',');
+
   useEffect(() => {
     if (!enabled) return;
     let alive = true;
     setLoading(true);
     setError(null);
+    const filterTags = tagKey ? tagKey.split(',') : undefined;
     (async () => {
       try {
-        const rows = await getHotspots(day, undefined, undefined, 'all', undefined);
+        const rows = await getHotspots(day, undefined, undefined, 'all', undefined, filterTags);
         if (alive) setHotspots(rows);
       } catch (err) {
         if (alive) {
@@ -40,7 +47,7 @@ export function useHotspots(opts: { day?: string; enabled: boolean }) {
     return () => {
       alive = false;
     };
-  }, [day, enabled, reloadKey]);
+  }, [day, enabled, reloadKey, tagKey]);
 
   const applyState = useCallback(
     async (h: Hotspot, patch: HotspotStatePatch) => {

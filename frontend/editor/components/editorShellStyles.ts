@@ -113,24 +113,13 @@ export const EDITOR_SHELL_STYLES = `
   overflow:hidden;
 }
 .mh-editor-shell *{ box-sizing:border-box; }
-/* Embedded in the projects workspace: the editor hosts its OWN slim SCENES rail
-   as the left column beside the paper (laper-style), so the shell keeps the full
-   three-track template (auto minmax(0,1fr) auto) — scene rail, script column,
-   Writing panel. The rail is narrower than the standalone one (SCENES only, no
-   brand / ep selector / module nav — the workspace tree owns those); when
-   collapsed it shrinks to the shared 56px strip, and the script column's
-   minmax(0,1fr) + .mh-sheet{min-width} floor keeps handling any narrow-width
-   overflow (the paper scrolls, never clips — narrow-width spec guarantee). */
-.mh-editor-shell.mh-embedded{ grid-template-columns:auto minmax(0, 1fr) auto; }
-/* SCENES-only embedded rail: slimmer than the 258px standalone rail. */
-.mh-rail-embedded{ width:212px; }
-.mh-rail-embedded.collapsed{ width:56px; }
-/* Right-aligned cluster (count badge + collapse toggle) in the embedded rail's
-   section head — one group pushed to the right so the two never fight over the
-   shared .mh-rail-count-badge{margin-left:auto}. */
-.mh-rail-head-actions{ margin-left:auto; display:inline-flex; align-items:center; gap:6px; }
-.mh-rail-head-actions .mh-rail-count-badge{ margin-left:0; }
-.mh-rail-collapse-btn{ width:24px; height:24px; font-size:13px; }
+/* Embedded in the projects workspace: NO boxed left rail — the workspace tree
+   owns episode + module navigation, and scene navigation is the floating
+   SceneToc overlaying the paper (identical to the standalone route). So the
+   shell reflows to two tracks: script column + Writing panel. The script
+   column keeps its minmax(0,1fr) + .mh-sheet{min-width} floor so the paper
+   scrolls (never clips) at narrow widths — narrow-width spec guarantee. */
+.mh-editor-shell.mh-embedded{ grid-template-columns:minmax(0, 1fr) auto; }
 /* Embedded: don't paint the standalone lavender page gradient — it clashed with
    the workspace's own surface (a mismatched purple block in the empty area
    right of the sheet). Go transparent so the workspace background shows through
@@ -367,7 +356,84 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-flow-scene-head .mh-scene-presence-badge{ margin-left:auto; }
 
-.mh-page-frame{ flex:1; min-height:0; display:flex; }
+.mh-page-frame{ flex:1; min-height:0; display:flex; position:relative; }
+
+/* ===== SCENE TOC (Notion-style floating table of contents) =====
+   A minimal tick rail pinned to the LEFT edge of the paper frame that floats a
+   full scene panel on hover / pin. It overlays the paper (position:absolute) so
+   it NEVER pushes the sheet — the fix for "又是一个框". Ink language matches the
+   islands (#1430/#1438): surface panel, float shadow, warm-grey ticks. */
+.mh-scene-toc{
+  /* Above the sticky Element Toolbar (z-index:40) so the floating panel wins the
+     hit-test where they overlap at the sheet's left edge. */
+  position:absolute; left:0; top:0; bottom:0; z-index:41;
+  /* Centred vertically on the paper's left edge (Notion parity) — this also
+     clears the sticky Element Toolbar that sits at the top. */
+  display:flex; align-items:center;
+  /* Container is click-through; only the ticks + panel opt back into pointer
+     events, so the empty space over the paper stays fully interactive. */
+  pointer-events:none;
+}
+/* Tick rail — one short line per scene; the current scene's line is longer +
+   inked. Scrolls when a long script overflows the frame height (min gap keeps
+   the lines from fusing into a smear). */
+.mh-toc-ticks{
+  pointer-events:auto;
+  display:flex; flex-direction:column; gap:7px;
+  padding:20px 12px 20px 6px;
+  max-height:100%; overflow-y:auto; overflow-x:hidden;
+  transition:opacity 0.16s ease;
+}
+.mh-toc-ticks::-webkit-scrollbar{ width:0; height:0; }
+.mh-toc-tick{
+  flex-shrink:0;
+  width:15px; height:2px; padding:0; border:none; border-radius:2px;
+  background:var(--ink-faint); opacity:0.45; cursor:pointer;
+  transition:width 0.12s ease, opacity 0.12s ease, background 0.12s ease;
+}
+.mh-toc-tick:hover{ width:22px; opacity:0.8; }
+.mh-toc-tick.active{ width:28px; opacity:1; background:var(--ink); }
+/* Floating panel — reuses the SceneRail list. Hidden (faded + shifted) until the
+   toc is open (hover/pin) OR a scene row inside it gains focus (keyboard reveal).
+   Kept in the DOM so screen readers + Tab can always reach the list. */
+.mh-toc-panel{
+  position:absolute; left:0; top:50%;
+  width:244px; max-height:100%;
+  display:flex; flex-direction:column; overflow:hidden;
+  background:var(--surface); border:1px solid var(--surface-border);
+  border-radius:var(--radius-lg); box-shadow:var(--shadow-float);
+  opacity:0; transform:translate(-8px, -50%); pointer-events:none;
+  transition:opacity 0.16s ease, transform 0.16s ease;
+}
+.mh-scene-toc[data-open='true'] .mh-toc-panel,
+.mh-scene-toc:focus-within .mh-toc-panel{
+  opacity:1; transform:translate(0, -50%); pointer-events:auto;
+}
+/* When the panel is up, fade the ticks out (the panel replaces them in place). */
+.mh-scene-toc[data-open='true'] .mh-toc-ticks,
+.mh-scene-toc:focus-within .mh-toc-ticks{ opacity:0; pointer-events:none; }
+.mh-toc-panel-head{
+  display:flex; align-items:center; gap:8px; flex-shrink:0;
+  padding:12px 12px 8px;
+}
+.mh-toc-panel-title{
+  font-size:10.5px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase;
+  color:var(--ink-faint);
+}
+.mh-toc-panel-count{
+  flex-shrink:0;
+  min-width:17px; height:17px; padding:0 5px; border-radius:9px;
+  display:inline-flex; align-items:center; justify-content:center;
+  font-family:var(--mono); font-size:10px; font-weight:700; line-height:1;
+  background:var(--chip-ink-bg); color:var(--chip-ink-fg);
+}
+.mh-toc-pin{ margin-left:auto; width:26px; height:26px; font-size:13px; }
+.mh-toc-pin.pinned{ background:var(--pill-ink-bg); color:var(--pill-ink-on); border-color:transparent; }
+.mh-toc-pin.pinned:hover{ background:var(--pill-ink-bg); color:var(--pill-ink-on); }
+.mh-toc-panel-body{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; }
+/* SceneRail inside the panel: let the BODY own the scroll (its own flex:1 +
+   overflow would double-scroll), and tighten the padding to the panel edges. */
+.mh-toc-panel-body .mh-scene-list{ flex:0 0 auto; overflow:visible; padding:2px 8px 10px; }
 .mh-sheet-scroll{
   flex:1; min-height:0; min-width:0; overflow-y:auto;
   display:flex; flex-direction:column; align-items:center; gap:16px;
@@ -877,6 +943,9 @@ export const EDITOR_SHELL_STYLES = `
 .mh-mention-opt:hover{ background:color-mix(in srgb, var(--sheet-ink) 6%, transparent); }
 .mh-mention-opt.active{ background:color-mix(in srgb, var(--sheet-ink) 11%, transparent); color:var(--sheet-ink); }
 .mh-mention-opt[aria-selected='true']{ font-weight:600; }
+/* "Create <name>" row — same search-or-create affordance as .mh-heading-opt.create
+   (the location field), so coining a new cue reads identically across the sheet. */
+.mh-mention-opt.create{ font-weight:600; color:var(--sheet-ink); }
 .mh-mention-empty{ padding:8px 12px; font-size:12.5px; color:var(--sheet-ink-soft); }
 /* Embedded search row (character-cue picker, laper parity): full-bleed strip
    at the panel top, separated by a hairline. The input is chromeless — the
@@ -1065,7 +1134,12 @@ export const EDITOR_SHELL_STYLES = `
 /* ===== LOADING / ERROR ===== */
 .mh-shell-state{
   position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-  flex-direction:column; gap:10px; background:var(--bg); color:var(--ink-soft);
+  flex-direction:column; gap:10px; color:var(--ink-soft);
+  /* Opaque overlay that must read as the SAME paper-neutral surface as the
+     shell behind it — reuse the shell's own radial-gradient (var(--bg-2)→
+     var(--bg)) so "Loading scene…" no longer flashes a flat cold-lavender
+     block distinct from the editor region. */
+  background:radial-gradient(circle at 15% 0%, var(--bg-2) 0%, var(--bg) 55%);
   font-family:var(--sans); font-size:14px; padding:24px; text-align:center;
   /* Sits ABOVE the paper/rail while loading. Without this it paints behind
      .mh-center-col (position:relative, later in DOM), so the empty paper shows
@@ -1189,7 +1263,11 @@ export const EDITOR_SHELL_STYLES = `
 /* ===== NODE VIEW (scene/chapter flow projection) ===== */
 .mh-nodes-view{
   flex:1; min-height:0; min-width:0; position:relative;
-  background:var(--surface-2); border:1px solid var(--surface-border);
+  /* Transparent so the shell's own paper-neutral gradient is the canvas floor
+     (matches the script region's transparent .mh-sheet-scroll) instead of a
+     distinct cold-lavender --surface-2 panel. The dot grid + controls below
+     stay tinted to the theme vars, so the grain follows light/dark. */
+  background:transparent; border:1px solid var(--surface-border);
   border-radius:var(--radius-lg); overflow:hidden;
 }
 /* Empty state — no scenes and no chapters to project (ReactFlow unmounted). */
@@ -1230,7 +1308,7 @@ export const EDITOR_SHELL_STYLES = `
   border:1px solid var(--surface-border); border-radius:var(--radius-md);
   box-shadow:var(--shadow-island); padding:11px 13px 12px; font-family:var(--sans);
 }
-.mh-flow-handle{ width:7px; height:7px; background:var(--indigo); border:none; }
+.mh-flow-handle{ width:7px; height:7px; background:var(--ink-faint); border:none; }
 .mh-flow-scene-cover{
   display:block; width:100%; height:72px; object-fit:cover;
   border-radius:var(--radius-sm); border:1px solid var(--surface-border);
@@ -1250,11 +1328,11 @@ export const EDITOR_SHELL_STYLES = `
 .mh-flow-pill{
   font-size:10.5px; font-weight:600; font-family:var(--mono);
   padding:2px 8px; border-radius:999px;
-  background:var(--indigo-soft); color:var(--indigo-deep);
+  background:var(--chip-ink-bg); color:var(--chip-ink-fg);
 }
-.mh-flow-chapter{ width:200px; background:var(--indigo-soft); border-color:var(--surface-border); }
+.mh-flow-chapter{ width:200px; background:var(--surface-2); border-color:var(--surface-border); }
 .mh-flow-chapter-head{ display:flex; align-items:center; gap:8px; }
-.mh-flow-chapter-title{ font-size:13px; font-weight:700; color:var(--indigo-deep); }
+.mh-flow-chapter-title{ font-size:13px; font-weight:700; color:var(--ink); }
 .mh-flow-chapter-summary{
   margin-top:7px; font-size:12px; line-height:1.5; color:var(--ink-soft);
   display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
@@ -1269,13 +1347,16 @@ export const EDITOR_SHELL_STYLES = `
 .mh-flow-action:hover:not(:disabled){ background:var(--surface-2); color:var(--ink); }
 .mh-flow-action:disabled{ opacity:0.5; cursor:default; }
 .mh-flow-action.confirming{
-  background:var(--indigo); color:var(--accent-on); border-color:var(--indigo);
+  background:var(--pill-ink-bg); color:var(--pill-ink-on); border-color:transparent;
 }
 
 /* ===== STORYBOARD VIEW (scene columns + shot cards) ===== */
 .mh-storyboard{
   flex:1; min-height:0; min-width:0;
-  background:var(--surface-2); border:1px solid var(--surface-border);
+  /* Transparent board — the scene columns are white --surface cards floating on
+     the shell's paper-neutral gradient (parity with the script paper), not a
+     cold-lavender --surface-2 slab. */
+  background:transparent; border:1px solid var(--surface-border);
   border-radius:var(--radius-lg); padding:16px;
   display:flex; gap:16px; align-items:flex-start;
   overflow-x:auto; overflow-y:hidden;
@@ -1295,11 +1376,11 @@ export const EDITOR_SHELL_STYLES = `
 .mh-sb-auto-btn{
   flex-shrink:0; font-family:var(--sans); font-size:11px; font-weight:600;
   padding:5px 10px; border-radius:var(--radius-sm); cursor:pointer;
-  background:var(--indigo); color:var(--accent-on); border:1px solid transparent;
+  background:var(--surface-2); color:var(--ink-soft); border:1px solid var(--surface-border);
 }
-.mh-sb-auto-btn:hover:not(:disabled){ background:var(--indigo-deep); }
+.mh-sb-auto-btn:hover:not(:disabled){ background:var(--hover-ink-bg); color:var(--ink); }
 .mh-sb-auto-btn:disabled{ opacity:0.6; cursor:default; }
-.mh-sb-auto-btn.confirming{ background:var(--violet); border-color:var(--violet); }
+.mh-sb-auto-btn.confirming{ background:var(--pill-ink-bg); color:var(--pill-ink-on); border-color:transparent; }
 .mh-sb-shots{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:2px; }
 .mh-sb-empty{ padding:14px 8px; font-size:12px; color:var(--ink-faint); font-style:italic; text-align:center; }
 .mh-sb-empty-board{ margin:auto; font-size:13px; color:var(--ink-faint); font-style:italic; }
@@ -1309,7 +1390,7 @@ export const EDITOR_SHELL_STYLES = `
   background:var(--surface-2); color:var(--ink-soft);
   border:1px dashed var(--surface-border);
 }
-.mh-sb-add:hover{ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--indigo); }
+.mh-sb-add:hover{ background:var(--hover-ink-bg); color:var(--ink); border-color:var(--emph-ink-border); }
 
 /* Shot card */
 .mh-shot-card-wrap{ position:relative; }
@@ -1351,9 +1432,9 @@ export const EDITOR_SHELL_STYLES = `
 .mh-shot-pill{
   font-family:var(--mono); font-size:10px; font-weight:700; letter-spacing:0.02em;
   padding:3px 8px; border-radius:999px; cursor:pointer;
-  background:var(--indigo-soft); color:var(--indigo-deep); border:1px solid transparent;
+  background:var(--chip-ink-bg); color:var(--chip-ink-fg); border:1px solid transparent;
 }
-.mh-shot-pill:hover{ border-color:var(--indigo); }
+.mh-shot-pill:hover{ border-color:var(--emph-ink-border); }
 .mh-shot-pill.empty{ background:var(--surface); color:var(--ink-faint); }
 .mh-shot-focal{
   width:60px; font-family:var(--mono); font-size:10px; font-weight:700;
@@ -1375,16 +1456,16 @@ export const EDITOR_SHELL_STYLES = `
   padding:6px 10px; border-radius:var(--radius-sm); cursor:pointer;
   background:var(--surface); color:var(--ink-soft); border:1px solid var(--surface-border);
 }
-.mh-shot-generate:hover:not(:disabled){ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--indigo); }
+.mh-shot-generate:hover:not(:disabled){ background:var(--hover-ink-bg); color:var(--ink); border-color:var(--emph-ink-border); }
 .mh-shot-generate:disabled{ opacity:0.5; cursor:default; }
 .mh-shot-generate-video{
   flex:1; font-family:var(--sans); font-size:11.5px; font-weight:600;
   padding:6px 10px; border-radius:var(--radius-sm); cursor:pointer;
   background:var(--surface); color:var(--ink-soft); border:1px solid var(--surface-border);
 }
-.mh-shot-generate-video:hover:not(:disabled){ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--indigo); }
+.mh-shot-generate-video:hover:not(:disabled){ background:var(--hover-ink-bg); color:var(--ink); border-color:var(--emph-ink-border); }
 .mh-shot-generate-video:disabled{ opacity:0.5; cursor:default; }
-.mh-shot-generate-video.confirming{ background:var(--indigo); color:#fff; border-color:var(--indigo); }
+.mh-shot-generate-video.confirming{ background:var(--pill-ink-bg); color:var(--pill-ink-on); border-color:transparent; }
 .mh-shot-video{
   width:100%; max-width:100%; border-radius:6px; margin-top:2px;
   border:1px solid var(--surface-border); background:#000; display:block;
@@ -1662,7 +1743,7 @@ export const EDITOR_SHELL_STYLES = `
   background:transparent; border:1px solid var(--hairline); border-radius:var(--radius-sm);
   padding:4px 8px; cursor:pointer;
 }
-.mh-beat-notes-toggle[aria-expanded="true"]{ color:var(--indigo-deep); border-color:var(--indigo); }
+.mh-beat-notes-toggle[aria-expanded="true"]{ color:var(--ink); border-color:var(--emph-ink-border); background:var(--sel-ink-bg); }
 .mh-beat-delete{
   flex-shrink:0; font-size:14px; line-height:1; color:var(--ink-faint); background:transparent;
   border:1px solid transparent; border-radius:var(--radius-sm); padding:3px 8px; cursor:pointer;
@@ -1677,17 +1758,17 @@ export const EDITOR_SHELL_STYLES = `
 .mh-beat-summary:focus{ outline:none; border-color:var(--indigo); }
 .mh-beat-scenes{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
 .mh-beat-chip{
-  display:inline-flex; align-items:center; gap:2px; background:var(--indigo-soft);
+  display:inline-flex; align-items:center; gap:2px; background:var(--chip-ink-bg);
   border-radius:999px; padding:0 2px 0 0; max-width:100%;
 }
 .mh-beat-chip-label{
-  font-size:11.5px; font-weight:600; color:var(--indigo-deep); background:transparent;
+  font-size:11.5px; font-weight:600; color:var(--chip-ink-fg); background:transparent;
   border:none; border-radius:999px; padding:3px 4px 3px 10px; cursor:pointer;
   max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .mh-beat-chip-label:disabled{ cursor:default; color:var(--ink-faint); }
 .mh-beat-chip-x{
-  font-size:12px; line-height:1; color:var(--indigo-deep); background:transparent; border:none;
+  font-size:12px; line-height:1; color:var(--chip-ink-fg); background:transparent; border:none;
   border-radius:999px; width:16px; height:16px; cursor:pointer; opacity:0.65;
 }
 .mh-beat-chip-x:hover{ opacity:1; }
@@ -1697,17 +1778,17 @@ export const EDITOR_SHELL_STYLES = `
 }
 
 /* ===== FILM NUMBERING (合一终稿, 2026-07-11) =====
-   Storyboard scene heads read S1/S2 (mono, indigo) and shot codes read 1A/1B
+   Storyboard scene heads read S1/S2 (mono, neutral ink) and shot codes read 1A/1B
    (scene number + shot letter) instead of the old plain black number squares —
    the industry slate convention. Embedded (studio) mode now drops the editor's
    own rail entirely, so the old episode SWITCH menu that lived here is gone. */
 .mh-sc-mark{
   font-family:var(--mono); font-size:11px; font-weight:700;
-  color:var(--indigo); letter-spacing:.02em;
+  color:var(--ink-soft); letter-spacing:.02em;
 }
 .mh-shot-no{
-  font-family:var(--mono); font-size:9.5px; font-weight:700; color:var(--indigo);
-  background:var(--indigo-soft); border:1px solid var(--surface-border); border-radius:6px;
+  font-family:var(--mono); font-size:9.5px; font-weight:700; color:var(--chip-ink-fg);
+  background:var(--chip-ink-bg); border:1px solid var(--surface-border); border-radius:6px;
   padding:1.5px 6px; letter-spacing:.03em; flex-shrink:0;
 }
 

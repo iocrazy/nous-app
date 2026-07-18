@@ -5,6 +5,15 @@ import { TagPill } from './TagPill';
 import { FloatingPanel } from './FloatingPanel';
 import { useTagPreferences } from './useTagPreferences';
 import type { EagleTagPickerProps } from './types';
+import type { Tag } from '../../types';
+
+/**
+ * Shadow tags (origin === 'note', auto-created from note #tags) are hidden from the
+ * picker unless already assigned — so they keep their pill but don't clutter the browse list.
+ */
+export function filterPickerTags(allTags: Tag[], selectedIds: Set<string>): Tag[] {
+  return allTags.filter((t) => t.origin !== 'note' || selectedIds.has(String(t.id)));
+}
 
 export const EagleTagPicker: React.FC<EagleTagPickerProps> = ({
   assignedTags,
@@ -35,6 +44,17 @@ export const EagleTagPicker: React.FC<EagleTagPickerProps> = ({
     if (isMode1) return assignedTags!;
     return allTags.filter((t) => selectedIds.has(String(t.id)));
   }, [isMode1, assignedTags, allTags, selectedIds]);
+
+  // Tags offered in the floating panel: shadow tags hidden unless already assigned.
+  const pickerTags = useMemo(() => filterPickerTags(allTags, selectedIds), [allTags, selectedIds]);
+
+  // Hidden shadow tags (origin 'note', not yet assigned) — excluded from
+  // pickerTags but handed to the browser so a search that exactly matches one
+  // reveals/attaches it instead of offering a duplicate Create (→ backend 409).
+  const hiddenShadowTags = useMemo(
+    () => allTags.filter((t) => t.origin === 'note' && !selectedIds.has(String(t.id))),
+    [allTags, selectedIds],
+  );
 
   const handleToggleTag = useCallback(
     (tagId: string) => {
@@ -106,7 +126,8 @@ export const EagleTagPicker: React.FC<EagleTagPickerProps> = ({
       {panelOpen && (
         <FloatingPanel
           triggerRef={triggerRef}
-          allTags={allTags}
+          allTags={pickerTags}
+          shadowTags={hiddenShadowTags}
           selectedIds={selectedIds}
           starredIds={prefs.starred_tag_ids}
           settings={prefs.picker_settings}

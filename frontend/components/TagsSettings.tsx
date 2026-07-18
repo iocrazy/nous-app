@@ -20,6 +20,7 @@ import {
   LayoutGrid,
   Circle,
   GripVertical,
+  NotebookPen,
 } from 'lucide-react';
 import type { Tag } from '../types';
 import { UiSelect } from './ui';
@@ -107,6 +108,9 @@ export const TagsSettings: React.FC = () => {
   // Sidebar selection: null = All, '__uncategorized__' = Uncategorized, group name = specific group
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
 
+  // "From notes" shadow section — collapsed by default.
+  const [showShadow, setShowShadow] = useState(false);
+
   // Group management
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
@@ -158,17 +162,30 @@ export const TagsSettings: React.FC = () => {
     return tag.name;
   };
 
-  // Filter tags based on search
+  // Shadow tags (origin='note') are auto-created from note #text. They are
+  // kept out of every curated view on this page — the main grid, the All /
+  // group counts, and search — and surface only inside the dedicated
+  // "From notes" section below, where they can be promoted one-by-one.
+  const curatedTags = useMemo(
+    () => tags.filter((t) => t.origin !== 'note'),
+    [tags],
+  );
+  const shadowTags = useMemo(
+    () => tags.filter((t) => t.origin === 'note'),
+    [tags],
+  );
+
+  // Filter tags based on search (curated pool only)
   const filteredTags = useMemo(() => {
-    if (!searchQuery) return tags;
+    if (!searchQuery) return curatedTags;
     const query = searchQuery.toLowerCase();
-    return tags.filter((tag) => {
+    return curatedTags.filter((tag) => {
       const nameMatch = tag.name.toLowerCase().includes(query);
       const nameZhMatch = tag.name_zh?.toLowerCase().includes(query);
       const groupMatch = tag.group_name?.toLowerCase().includes(query);
       return nameMatch || nameZhMatch || groupMatch;
     });
-  }, [tags, searchQuery]);
+  }, [curatedTags, searchQuery]);
 
   // Names that collide with the sentinel "(no group)" display label — if
   // a real group has one of these names (legacy data — backend now blocks
@@ -194,7 +211,7 @@ export const TagsSettings: React.FC = () => {
       counts.set(group.name, 0);
     }
     counts.set('__uncategorized__', 0);
-    for (const tag of tags) {
+    for (const tag of curatedTags) {
       // Treat tags from a reserved-named real group as sentinel-bucket
       // tags so the count and the right pane line up.
       const collisionGroup = isReservedGroupName(tag.group_name);
@@ -203,7 +220,7 @@ export const TagsSettings: React.FC = () => {
       counts.set(key, (counts.get(key) || 0) + 1);
     }
     return counts;
-  }, [tags, visibleGroups]);
+  }, [curatedTags, visibleGroups]);
 
   // Group tags by group_name, preserving group sort order
   const groupedTags = useMemo(() => {
@@ -270,6 +287,34 @@ export const TagsSettings: React.FC = () => {
         next.delete(tag.id);
         return next;
       });
+    }
+  };
+
+  // Promote a shadow tag (origin='note') into the curated pool. Optimistic:
+  // patch the row's origin BEFORE the await (same pattern as
+  // handleToggleEnabled) so it drops out of "From notes" and into the main
+  // grid immediately; revert on failure.
+  const handlePromote = async (tag: Tag) => {
+    setTags((prev) =>
+      prev.map((t) =>
+        String(t.id) === String(tag.id) ? { ...t, origin: 'curated' } : t,
+      ),
+    );
+    try {
+      const updated = await updateTag(String(tag.id), { origin: 'curated' });
+      setTags((prev) =>
+        prev.map((t) =>
+          String(t.id) === String(tag.id) ? { ...t, ...updated } : t,
+        ),
+      );
+    } catch (err) {
+      // Revert on failure
+      setTags((prev) =>
+        prev.map((t) =>
+          String(t.id) === String(tag.id) ? { ...t, origin: 'note' } : t,
+        ),
+      );
+      setError(err instanceof Error ? err.message : 'Failed to promote tag');
     }
   };
 
@@ -543,7 +588,10 @@ export const TagsSettings: React.FC = () => {
   const handleDrop = async (targetGroupId: string) => {
     // ── Tag drop: reassign the dragged tag to ``targetGroupId`` ────────
     if (dragTagId) {
-      const draggedTag = tags.find((tt) => tt.id === dragTagId);
+      // Tag drag-and-drop only originates from curated grid rows (shadow
+      // rows aren't draggable), so look it up in curatedTags for
+      // consistency with the rest of the curated/shadow split.
+      const draggedTag = curatedTags.find((tt) => tt.id === dragTagId);
       const tagId = dragTagId;
       setDragTagId(null);
       setTagDropTargetGroupId(null);
@@ -599,7 +647,7 @@ export const TagsSettings: React.FC = () => {
     }
   };
 
-  const enabledCount = tags.filter((t) => t.enabled !== false).length;
+  const enabledCount = curatedTags.filter((t) => t.enabled !== false).length;
 
   return (
     <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden animate-in fade-in duration-300 flex flex-col max-h-[80vh]">
@@ -612,7 +660,7 @@ export const TagsSettings: React.FC = () => {
           <div>
             <h2 className="font-semibold text-ink-200">{t('settings.tags.title')}</h2>
             <p className="text-xs text-ink-500">
-              {tags.length} tags, {enabledCount} enabled
+              {curatedTags.length} tags, {enabledCount} enabled
             </p>
           </div>
         </div>
@@ -658,7 +706,7 @@ export const TagsSettings: React.FC = () => {
             >
               <LayoutGrid size={15} />
               <span className="flex-1 text-left font-medium">All</span>
-              <span className="text-xs text-ink-500">{tags.length}</span>
+              <span className="text-xs text-ink-500">{curatedTags.length}</span>
             </button>
 
             {/* Uncategorized — also a valid drop target. Dragging a tag
@@ -848,6 +896,48 @@ export const TagsSettings: React.FC = () => {
               </div>
               );
             })}
+
+            {/* From notes — shadow tags auto-created from note #text. A
+                collapsed bucket kept out of the curated pool above; each
+                row can be promoted into the real tag list one click. */}
+            {shadowTags.length > 0 && (
+              <div className="mt-4 border-t border-ink-800 pt-3">
+                <button
+                  onClick={() => setShowShadow(!showShadow)}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-ink-400 hover:bg-ink-800 hover:text-ink-300 transition-colors"
+                >
+                  <NotebookPen size={15} />
+                  <span className="flex-1 text-left font-medium">
+                    {t('settings.tags.fromNotes', 'From Notes')}
+                  </span>
+                  <span className="text-xs text-ink-500">{shadowTags.length}</span>
+                </button>
+                {showShadow &&
+                  shadowTags.map((tag) => (
+                    // Shadow tags are ordinary user tags — clicking the row
+                    // opens the SAME edit dialog as curated tags (rename /
+                    // delete just works there). This is also what makes the
+                    // origin==='note' rename hint inside that dialog
+                    // reachable at all.
+                    <div
+                      key={tag.id}
+                      onClick={() => handleStartEdit(tag)}
+                      className="flex items-center gap-2 px-3 py-1.5 text-sm text-ink-300 cursor-pointer rounded-md hover:bg-ink-800/60 hover:text-ink-100 transition-colors"
+                    >
+                      <span className="flex-1 truncate">#{tag.name}</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePromote(tag);
+                        }}
+                        className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                      >
+                        {t('settings.tags.promote', 'Promote')}
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -1209,6 +1299,25 @@ export const TagsSettings: React.FC = () => {
               </button>
             </div>
             <div className="p-6 space-y-4">
+              {/* Renaming a shadow tag won't rewrite the #text already
+                  living in note bodies — re-editing such a note re-creates
+                  the old tag. Warn before the user renames one.
+                  Known limitation: this hint is keyed on origin==='note',
+                  so a curated tag that's ALSO still referenced by note
+                  #text (e.g. after being promoted) won't show it — usage
+                  data isn't loaded on this page. Sanctioned fallback; not
+                  fixing here. */}
+              {editingTag.origin === 'note' && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200/90">
+                  <NotebookPen size={14} className="shrink-0 mt-0.5" />
+                  <span>
+                    {t(
+                      'settings.tags.renameNoteHint',
+                      'Notes keep their original #text; editing a note re-creates the old tag.',
+                    )}
+                  </span>
+                </div>
+              )}
               <div className="space-y-2">
                 <label className="text-sm font-medium text-ink-300">
                   {t('settings.tags.tagName')} (English)

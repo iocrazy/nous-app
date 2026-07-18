@@ -7,7 +7,15 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Calendar, Layers, LayoutGrid, Rss, X, type LucideIcon } from 'lucide-react';
+import {
+  Calendar,
+  Layers,
+  LayoutGrid,
+  Rss,
+  Tag as TagIcon,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import { FilterChip } from '../resources/filter/FilterChip';
 import {
   getSourceHealth,
@@ -15,6 +23,7 @@ import {
   type SourceHealth,
   type SourceHealthStatus,
 } from '../../services/topicService';
+import type { Tag } from '../../types';
 
 const CATEGORIES = ['all', 'model', 'product', 'industry', 'paper', 'tips'] as const;
 const VIEWS: HotspotView[] = ['all', 'featured', 'foryou', 'saved', 'hidden'];
@@ -25,7 +34,7 @@ const HEALTH_DOT: Record<SourceHealthStatus, string> = {
   dead: '#ef4444',
 };
 
-type ChipId = 'view' | 'category' | 'source' | 'date';
+type ChipId = 'view' | 'category' | 'source' | 'date' | 'tag';
 
 export interface TopicFilterBarProps {
   view: HotspotView;
@@ -37,6 +46,10 @@ export interface TopicFilterBarProps {
   day?: string;
   dates: string[];
   onDay: (d: string | undefined) => void;
+  /** Curated pool tags (own + visible system). Shadow tags are filtered out. */
+  allTags: Tag[];
+  selectedTagIds: string[];
+  onTagIdsChange: (ids: string[]) => void;
   /** When searching, the Date chip is meaningless (search spans all dates). */
   searching?: boolean;
 }
@@ -53,6 +66,9 @@ export const TopicFilterBar: React.FC<TopicFilterBarProps> = ({
   day,
   dates,
   onDay,
+  allTags,
+  selectedTagIds,
+  onTagIdsChange,
   searching = false,
 }) => {
   const { t } = useTranslation();
@@ -80,6 +96,18 @@ export const TopicFilterBar: React.FC<TopicFilterBarProps> = ({
     category: Layers,
     source: Rss,
     date: Calendar,
+    tag: TagIcon,
+  };
+
+  // Shadow tags (origin 'note') are never attachable to hotspots, so they're
+  // excluded from the filter options — consistent with the resource FilterBar.
+  const tagOptions = useMemo(
+    () => allTags.filter((tg) => tg.origin !== 'note'),
+    [allTags],
+  );
+  const tagName = (id: string) => {
+    const tg = allTags.find((x) => String(x.id) === id);
+    return tg ? tg.name_zh || tg.name : id;
   };
 
   const rowCls = (active: boolean) =>
@@ -98,6 +126,12 @@ export const TopicFilterBar: React.FC<TopicFilterBarProps> = ({
           ? sourceName(selectedSources[0])
           : String(selectedSources.length),
     date: day || null,
+    tag:
+      selectedTagIds.length === 0
+        ? null
+        : selectedTagIds.length === 1
+          ? tagName(selectedTagIds[0])
+          : String(selectedTagIds.length),
   };
 
   const isActive: Record<ChipId, boolean> = {
@@ -105,10 +139,15 @@ export const TopicFilterBar: React.FC<TopicFilterBarProps> = ({
     category: category !== 'all',
     source: selectedSources.length > 0,
     date: !!day,
+    tag: selectedTagIds.length > 0,
   };
 
   const hasAny =
-    isActive.view || isActive.category || isActive.source || isActive.date;
+    isActive.view ||
+    isActive.category ||
+    isActive.source ||
+    isActive.date ||
+    isActive.tag;
 
   const toggleSource = (id: string) => {
     onSources(
@@ -118,11 +157,20 @@ export const TopicFilterBar: React.FC<TopicFilterBarProps> = ({
     );
   };
 
+  const toggleTag = (id: string) => {
+    onTagIdsChange(
+      selectedTagIds.includes(id)
+        ? selectedTagIds.filter((x) => x !== id)
+        : [...selectedTagIds, id],
+    );
+  };
+
   const clearAll = () => {
     onView('all');
     onCategory('all');
     onSources([]);
     onDay(undefined);
+    onTagIdsChange([]);
   };
 
   const chip = (id: ChipId, label: string, body: React.ReactNode, onClear?: () => void) => (
@@ -221,6 +269,34 @@ export const TopicFilterBar: React.FC<TopicFilterBarProps> = ({
           ))}
         </div>,
         day ? () => onDay(undefined) : undefined,
+      )}
+
+      {chip(
+        'tag',
+        t('topic.filterTag', 'Tag'),
+        <div className="p-1 min-w-[14rem] max-h-64 overflow-y-auto">
+          {tagOptions.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-content-3">
+              {t('topic.noTags', 'No tags yet.')}
+            </div>
+          ) : (
+            tagOptions.map((tg) => {
+              const id = String(tg.id);
+              const checked = selectedTagIds.includes(id);
+              return (
+                <button key={id} className={rowCls(checked)} onClick={() => toggleTag(id)}>
+                  <span
+                    className="inline-block w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: tg.color || '#6366f1' }}
+                  />
+                  <span className="truncate flex-1">{tg.name_zh || tg.name}</span>
+                  {checked && <span className="text-accent text-xs">✓</span>}
+                </button>
+              );
+            })
+          )}
+        </div>,
+        selectedTagIds.length > 0 ? () => onTagIdsChange([]) : undefined,
       )}
 
       {searching && (
