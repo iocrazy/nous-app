@@ -438,6 +438,33 @@ async def _run_dispatch_with_continuation(
     return {"outcome": outcome, "attempts": attempt}
 
 
+async def _maybe_fire_subissue_barrier(issue_id: int) -> None:
+    """After the workflow lands this issue on its final status, check whether it
+    just closed its parent's sub-issue barrier (and, if so, report + wake).
+
+    Called from the WORKFLOW BODY, never a @DBOS.step: the barrier's wake path
+    dispatches respond_to_issue_reply, and dispatching a workflow inside a
+    @DBOS.step raises a bare AssertionError (bug_retry_failed_downloads_two_layer).
+    The workflow set this issue to in_progress before running, so the pre-status
+    is a definite non-terminal — pass "in_progress" as prev. The hook is
+    best-effort and self-guarding, but wrap anyway so it can never abort the
+    workflow's own completion."""
+    try:
+        from app.db import engine as db_engine
+        from app.services.issues.subissue_barrier import on_child_issue_terminal
+
+        row = await db_engine.fetch_one(
+            "SELECT status FROM public.issues WHERE id = :id", {"id": issue_id}
+        )
+        new_status = (row or {}).get("status")
+        if new_status:
+            await on_child_issue_terminal(issue_id, "in_progress", new_status)
+    except Exception as exc:  # noqa: BLE001 — the dispatch is the primary op
+        logger.warning(
+            f"[execute_issue] sub-issue barrier hook failed for {issue_id}: {exc!r}"
+        )
+
+
 @DBOS.workflow()
 async def execute_issue(issue_id: int) -> dict[str, Any]:
     """Parent workflow — owns the issue lifecycle."""
@@ -471,10 +498,16 @@ async def execute_issue(issue_id: int) -> dict[str, Any]:
                 load_issue=load_issue,
                 auto_close=auto_close,
             )
-            return {"issue_id": issue_id, "executed": True, **routed}
-        # No agent assigned → nothing to run; close it out.
-        await set_status(issue_id, "done")
-        return {"issue_id": issue_id, "executed": False}
+            result = {"issue_id": issue_id, "executed": True, **routed}
+        else:
+            # No agent assigned → nothing to run; close it out.
+            await set_status(issue_id, "done")
+            result = {"issue_id": issue_id, "executed": False}
+
+        # Fan-in: this issue may be someone's sub-issue — if it just landed
+        # terminal and was the last outstanding sibling, wake the parent.
+        await _maybe_fire_subissue_barrier(issue_id)
+        return result
 
     except Exception as exc:  # noqa: BLE001
         await set_status(
