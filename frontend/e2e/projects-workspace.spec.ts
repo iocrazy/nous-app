@@ -83,6 +83,37 @@ const ENTITIES = {
   locations: [{ name: 'Radio Booth', scene_count: 3, episode_ids: ['1'] }],
 };
 
+// The Characters module renders the CharacterLibrary bible-card wall (CC4) off
+// GET /projects/{id}/characters — the old derived `/entities` list was retired.
+const CHARACTERS = [
+  {
+    id: 'c1',
+    project_id: '1',
+    name: 'CLIENT',
+    role_tag: 'lead',
+    description: 'The buyer, always on the phone.',
+    tags: {},
+    portrait_url: null,
+    source: 'script',
+    sort_order: 10,
+    created_at: '2026-07-01T00:00:00Z',
+    updated_at: '2026-07-01T00:00:00Z',
+  },
+  {
+    id: 'c2',
+    project_id: '1',
+    name: 'DEV',
+    role_tag: 'support',
+    description: 'The engineer who ships.',
+    tags: {},
+    portrait_url: null,
+    source: 'script',
+    sort_order: 20,
+    created_at: '2026-07-01T00:00:00Z',
+    updated_at: '2026-07-01T00:00:00Z',
+  },
+];
+
 const RENDERS = {
   items: [
     { id: 'r1', media_kind: 'image', mime: 'image/png', origin_kind: 'shot_generate', node_id: 's1', created_at: '2026-07-08T00:00:00Z' },
@@ -125,9 +156,18 @@ async function routeWorkspaceApi(page: Page): Promise<void> {
     if (pathname.endsWith('/stage-suggestion')) return route.fulfill({ json: SUGGESTION });
     if (pathname.endsWith('/episodes/progress')) return route.fulfill({ json: { success: true, data: EPISODES } });
     if (pathname.endsWith('/entities')) return route.fulfill({ json: { success: true, data: ENTITIES } });
+    if (pathname.endsWith('/characters')) return route.fulfill({ json: { success: true, data: CHARACTERS } });
     if (pathname.endsWith('/renders')) return route.fulfill({ json: { success: true, data: RENDERS } });
     return route.fallback();
   });
+
+  // The CharacterLibrary bible cards each mount an EntityAssetStrip that lists
+  // generations for the entity (GET /generated-media?entity_kind=…). It reads
+  // `.data.items`, so the empty catch-all's `{data:[]}` would make `.items`
+  // undefined and crash the card — return the paged shape instead.
+  await page.route(/\/api\/v1\/generated-media(\?|$)/, (route) =>
+    route.fulfill({ json: { success: true, data: { items: [], next_cursor: null } } }),
+  );
 
   // Renders grid thumbnails — real bytes so the screenshot doesn't show a
   // broken-image icon for the image-kind render.
@@ -200,25 +240,27 @@ test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
     // Shell: top bar + sidebar render.
     await expect(page.getByTestId('workspace-topbar')).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId('workspace-sidebar')).toBeVisible();
-    await expect(page.getByTestId('ws-ep-card')).toHaveText(/Ep 1 — Pilot/);
 
-    // Ep switch via the sidebar's compact popover.
-    await page.getByTestId('ws-ep-card').click();
-    await page.getByTestId('ws-ep-option-2').click();
-    await expect(page.getByTestId('ws-ep-card')).toHaveText(/Ep 2 — Cutdown/);
-
-    // Episodes management module — full row list (not just the current ep).
+    // Episodes management module — opening it also EXPANDS the sidebar episode
+    // tree (collapsed by default on Overview), which the ep-card switcher below
+    // depends on. Shows the full row list, not just the current ep.
     await page.getByTestId('ws-module-episodes').click();
     await expect(page.getByTestId('ws-episodes')).toBeVisible();
     await expect(page.getByTestId('ws-episode-row-1')).toContainText('Ep 1 — Pilot');
     await expect(page.getByTestId('ws-episode-row-2')).toContainText('Ep 2 — Cutdown');
     await expect(page.getByTestId('ws-episode-progress-1')).toContainText('9/12');
 
-    // Characters main-library module.
+    // Ep switch via the sidebar's compact popover (tree now expanded).
+    await expect(page.getByTestId('ws-ep-card')).toHaveText(/Ep 1 — Pilot/);
+    await page.getByTestId('ws-ep-card').click();
+    await page.getByTestId('ws-ep-option-2').click();
+    await expect(page.getByTestId('ws-ep-card')).toHaveText(/Ep 2 — Cutdown/);
+
+    // Characters main-library module — the CharacterLibrary bible-card wall.
     await page.getByTestId('ws-module-characters').click();
-    await expect(page.getByTestId('ws-entities-characters')).toBeVisible();
-    await expect(page.getByTestId('ws-entities-row-0')).toContainText('CLIENT');
-    await expect(page.getByTestId('ws-entities-count-0')).toContainText('12');
+    await expect(page.getByTestId('character-library')).toBeVisible();
+    await expect(page.getByTestId('character-card')).toHaveCount(2);
+    await expect(page.getByTestId('character-card').first().locator('input')).toHaveValue('CLIENT');
 
     // Files module — Renders chip consumes the /renders endpoint.
     await page.getByTestId('ws-module-files').click();
@@ -249,7 +291,8 @@ test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
     await expect(page.getByTestId('ws-episode-row-1')).toContainText('Ep 1 — Pilot');
 
     await page.getByTestId('ws-module-characters').click();
-    await expect(page.getByTestId('ws-entities-row-0')).toContainText('CLIENT');
+    await expect(page.getByTestId('character-library')).toBeVisible();
+    await expect(page.getByTestId('character-card').first().locator('input')).toHaveValue('CLIENT');
 
     await page.getByTestId('ws-module-files').click();
     await page.getByTestId('ws-files-chip-renders').click();
@@ -266,6 +309,10 @@ test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
     await page.goto(`${PROJECTS_URL}/1`);
 
     await expect(page.getByTestId('workspace-topbar')).toBeVisible({ timeout: 10_000 });
+
+    // Expand the sidebar episode tree (collapsed by default on Overview) so the
+    // ep-card and its Script/Storyboard children are reachable.
+    await page.getByTestId('ws-module-episodes').click();
     await expect(page.getByTestId('ws-ep-card')).toHaveText(/Ep 1 — Pilot/);
 
     // Script child — inline mount, no route jump (URL stays on the project).
@@ -278,15 +325,14 @@ test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
     await expect(page.getByTestId('workspace-sidebar')).toBeVisible();
     await expect(page.getByTestId('ws-overview')).toHaveCount(0);
 
-    // Storyboard child — same shell, preset to the storyboard rail view
-    // (scoped to the editor's own RailModules nav, not the sidebar child
-    // button or the top-bar stage stepper's storyboard dot, which share
-    // the same accessible name).
+    // Storyboard child — the same embedded shell switches its centre pane to the
+    // storyboard view. The editor's own RailModules nav is suppressed in embedded
+    // mode (`{!embedded && <RailModules/>}` — the workspace sidebar is the single
+    // navigation), so assert the storyboard view itself took hold rather than a
+    // rail button's aria-current.
     await page.getByTestId('ws-ep-storyboard').click();
     await expect(page.locator('[data-editor-shell]')).toBeVisible();
-    await expect(
-      page.getByTestId('ws-script-editor').getByRole('button', { name: 'Storyboard' }),
-    ).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByTestId('storyboard-view')).toBeVisible();
 
     // Publish placeholder (G12) — visible, disabled, no module content.
     await expect(page.getByTestId('ws-ep-publish')).toBeVisible();
