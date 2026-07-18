@@ -23,13 +23,16 @@ export type IssueStatus =
 
 export type IssuePriority = 'critical' | 'high' | 'medium' | 'low';
 
+// Four mirrors of this enum exist: DB CHECK (mig 367), models/reviews.py,
+// schemas/issue.py, and here — change all four together.
 export type IssueOriginKind =
   | 'manual'
   | 'chat_delegate'
   | 'celery_pipeline'
   | 'agent_dispatch'
   | 'routine'
-  | 'escalation';
+  | 'escalation'
+  | 'project_stage';
 
 export interface Issue {
   id: number;
