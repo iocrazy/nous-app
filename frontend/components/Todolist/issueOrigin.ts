@@ -13,7 +13,7 @@
  */
 
 /** Content surfaces that can spawn an issue. Add a case here + a writer. */
-export type OriginContentKind = 'canvas' | 'scene' | 'project_stage';
+export type OriginContentKind = 'canvas' | 'scene' | 'project_stage' | 'publish';
 
 export interface ParsedOrigin {
   kind: OriginContentKind;
@@ -40,7 +40,7 @@ export function parseOriginId(originId: string | null | undefined): ParsedOrigin
   // split into numbers, so Snowflake bigints survive intact.
   const id = originId.slice(idx + 1);
   if (!id) return null;
-  if (kind !== 'canvas' && kind !== 'scene' && kind !== 'project_stage') return null;
+  if (kind !== 'canvas' && kind !== 'scene' && kind !== 'project_stage' && kind !== 'publish') return null;
   return { kind, id };
 }
 
@@ -65,6 +65,11 @@ export function originPath(origin: ParsedOrigin, teamId: string | undefined): st
       if (!teamId || !projectId) return '/projects';
       return `/team/${teamId}/projects/${projectId}`;
     }
+    case 'publish':
+      // The distribution surface lists batches; a per-batch deep link doesn't
+      // exist yet, so land on the module (same don't-over-design call as
+      // scene→Projects).
+      return teamId ? `/team/${teamId}/distribution` : '/distribution';
   }
 }
 
@@ -77,6 +82,8 @@ export function originLabel(origin: ParsedOrigin): string {
       return 'From a script scene';
     case 'project_stage':
       return 'From a project stage';
+    case 'publish':
+      return 'From a publish batch';
   }
 }
 
@@ -97,5 +104,7 @@ export function originModule(
       return { label: 'Script', dotClass: 'bg-violet-400' };
     case 'project_stage':
       return { label: 'Project', dotClass: 'bg-emerald-400' };
+    case 'publish':
+      return { label: 'Publish', dotClass: 'bg-rose-400' };
   }
 }

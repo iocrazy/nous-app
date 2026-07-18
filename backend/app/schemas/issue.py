@@ -47,6 +47,7 @@ class IssueOriginKind(str, Enum):
     ROUTINE = "routine"
     ESCALATION = "escalation"
     PROJECT_STAGE = "project_stage"
+    PUBLISH = "publish"
 
 
 class IssueBase(BaseModel):

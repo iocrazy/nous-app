@@ -24,6 +24,9 @@ from app.workflows.liveness_scanner import (  # noqa: F401
     liveness_scan_scheduled,
     reconcile_stranded_runs,
 )
+from app.workflows.publish_issue_mirror import (  # noqa: F401
+    publish_issue_mirror_workflow,
+)
 from app.workflows.scheduled_cleanup import (  # noqa: F401
     cleanup_old_task_tracking_workflow,
     cleanup_temp_files_workflow,
