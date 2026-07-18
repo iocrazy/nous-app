@@ -30,7 +30,9 @@ class NoteTagsRepository:
                 await session.execute(
                     pg_insert(NoteTags)
                     .values([{"note_id": nid, "tag_id": t} for t in to_add])
-                    .on_conflict_do_nothing()
+                    .on_conflict_do_nothing(
+                        index_elements=[NoteTags.note_id, NoteTags.tag_id]
+                    )
                 )
             if to_del:
                 await session.execute(
