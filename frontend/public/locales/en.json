@@ -3137,7 +3137,10 @@
     "diffScenesRemovedN": "Removed {{count}} scenes",
     "diffAuthorYou": "You",
     "diffAuthorAI": "AI",
-    "switchEpisode": "Switch episode"
+    "switchEpisode": "Switch episode",
+    "pinScenes": "Pin scene list",
+    "unpinScenes": "Unpin scene list",
+    "railNav": "Editor navigation"
   },
   "characters": {
     "extractFailed": "Failed to extract characters",

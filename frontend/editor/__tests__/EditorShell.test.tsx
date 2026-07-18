@@ -100,7 +100,11 @@ describe('EditorShell', () => {
     svc.listScenes.mockResolvedValue(twoScenes);
     render(<EditorShell scriptId="1" />);
 
-    await waitFor(() => expect(screen.getByRole('navigation')).toBeInTheDocument());
+    // Two navigation landmarks now: the rail island (brand / episodes / Views /
+    // entities) and the floating scene TOC — so scope the rail assertion by name.
+    await waitFor(() =>
+      expect(screen.getByRole('navigation', { name: 'editor.railNav' })).toBeInTheDocument(),
+    );
     expect(screen.getByRole('main')).toBeInTheDocument();
     expect(screen.getByRole('complementary')).toBeInTheDocument();
     // Loaded scenes surface in the scene list (the location also appears as a
@@ -109,7 +113,7 @@ describe('EditorShell', () => {
     expect(within(sceneRail).getByText('Rooftop Access')).toBeInTheDocument();
   });
 
-  it('embedded (studio) mode: the editor hosts its OWN slim scene rail beside the paper, still lifting scenes for the slate', async () => {
+  it('embedded (studio) mode: the editor owns scene navigation via the floating scene TOC, still lifting scenes for the slate', async () => {
     svc.listScenes.mockResolvedValue(twoScenes);
     const onScenesChange = vi.fn();
     const { container } = render(
@@ -117,11 +121,12 @@ describe('EditorShell', () => {
     );
     await waitFor(() => expect(screen.getByRole('main')).toBeInTheDocument());
 
-    // The SCENES list now lives as the editor's OWN left column beside the paper
-    // (laper-style), NOT lifted into the workspace nav — so the scene rail (and
-    // its navigation landmark) render right here.
+    // Scene navigation is the floating SceneToc (a labelled navigation landmark),
+    // NOT a boxed rail and NOT lifted into the workspace tree. Its panel reuses
+    // the SceneRail list, so the scene rail renders right here.
     expect(screen.getByRole('complementary')).toBeInTheDocument();
-    expect(screen.getByRole('navigation')).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'editor.scenesNav' })).toBeInTheDocument();
+    expect(screen.getByTestId('scene-toc')).toBeInTheDocument();
     const sceneRail = await screen.findByTestId('scene-rail');
     expect(within(sceneRail).getByText('Rooftop Access')).toBeInTheDocument();
     expect(container.querySelector('.mh-editor-shell.mh-embedded')).toBeInTheDocument();
@@ -143,7 +148,9 @@ describe('EditorShell', () => {
   it('standalone keeps the rail brand row + episode management selector', async () => {
     svc.listScenes.mockResolvedValue(twoScenes);
     const { container } = render(<EditorShell scriptId="1" />);
-    await waitFor(() => expect(screen.getByRole('navigation')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByRole('navigation', { name: 'editor.railNav' })).toBeInTheDocument(),
+    );
     expect(screen.getByLabelText('editor.manageEpisodes')).toBeInTheDocument();
     expect(container.querySelector('.mh-brand-row')).toBeInTheDocument();
     expect(container.querySelector('.mh-editor-shell.mh-embedded')).not.toBeInTheDocument();
@@ -214,7 +221,7 @@ describe('EditorShell', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'editor.collapseLeft' }));
     // Navigation must NOT disappear — the collapsed strip is still a landmark.
-    expect(screen.getByRole('navigation')).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'editor.railNav' })).toBeInTheDocument();
   });
 
   it('shows an error state and logs when the fetch fails', async () => {
@@ -269,7 +276,9 @@ describe('EditorShell', () => {
   it('orders the rail: modules nav, then Characters, then the Scenes list', async () => {
     svc.listScenes.mockResolvedValue(twoScenes);
     render(<EditorShell scriptId="1" />);
-    await waitFor(() => expect(screen.getByRole('navigation')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByRole('navigation', { name: 'editor.railNav' })).toBeInTheDocument(),
+    );
 
     const modules = screen.getByLabelText('editor.modulesLabel');
     const characters = screen.getByLabelText('editor.charactersLabel');

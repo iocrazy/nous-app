@@ -113,24 +113,13 @@ export const EDITOR_SHELL_STYLES = `
   overflow:hidden;
 }
 .mh-editor-shell *{ box-sizing:border-box; }
-/* Embedded in the projects workspace: the editor hosts its OWN slim SCENES rail
-   as the left column beside the paper (laper-style), so the shell keeps the full
-   three-track template (auto minmax(0,1fr) auto) — scene rail, script column,
-   Writing panel. The rail is narrower than the standalone one (SCENES only, no
-   brand / ep selector / module nav — the workspace tree owns those); when
-   collapsed it shrinks to the shared 56px strip, and the script column's
-   minmax(0,1fr) + .mh-sheet{min-width} floor keeps handling any narrow-width
-   overflow (the paper scrolls, never clips — narrow-width spec guarantee). */
-.mh-editor-shell.mh-embedded{ grid-template-columns:auto minmax(0, 1fr) auto; }
-/* SCENES-only embedded rail: slimmer than the 258px standalone rail. */
-.mh-rail-embedded{ width:212px; }
-.mh-rail-embedded.collapsed{ width:56px; }
-/* Right-aligned cluster (count badge + collapse toggle) in the embedded rail's
-   section head — one group pushed to the right so the two never fight over the
-   shared .mh-rail-count-badge{margin-left:auto}. */
-.mh-rail-head-actions{ margin-left:auto; display:inline-flex; align-items:center; gap:6px; }
-.mh-rail-head-actions .mh-rail-count-badge{ margin-left:0; }
-.mh-rail-collapse-btn{ width:24px; height:24px; font-size:13px; }
+/* Embedded in the projects workspace: NO boxed left rail — the workspace tree
+   owns episode + module navigation, and scene navigation is the floating
+   SceneToc overlaying the paper (identical to the standalone route). So the
+   shell reflows to two tracks: script column + Writing panel. The script
+   column keeps its minmax(0,1fr) + .mh-sheet{min-width} floor so the paper
+   scrolls (never clips) at narrow widths — narrow-width spec guarantee. */
+.mh-editor-shell.mh-embedded{ grid-template-columns:minmax(0, 1fr) auto; }
 /* Embedded: don't paint the standalone lavender page gradient — it clashed with
    the workspace's own surface (a mismatched purple block in the empty area
    right of the sheet). Go transparent so the workspace background shows through
@@ -367,7 +356,84 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-flow-scene-head .mh-scene-presence-badge{ margin-left:auto; }
 
-.mh-page-frame{ flex:1; min-height:0; display:flex; }
+.mh-page-frame{ flex:1; min-height:0; display:flex; position:relative; }
+
+/* ===== SCENE TOC (Notion-style floating table of contents) =====
+   A minimal tick rail pinned to the LEFT edge of the paper frame that floats a
+   full scene panel on hover / pin. It overlays the paper (position:absolute) so
+   it NEVER pushes the sheet — the fix for "又是一个框". Ink language matches the
+   islands (#1430/#1438): surface panel, float shadow, warm-grey ticks. */
+.mh-scene-toc{
+  /* Above the sticky Element Toolbar (z-index:40) so the floating panel wins the
+     hit-test where they overlap at the sheet's left edge. */
+  position:absolute; left:0; top:0; bottom:0; z-index:41;
+  /* Centred vertically on the paper's left edge (Notion parity) — this also
+     clears the sticky Element Toolbar that sits at the top. */
+  display:flex; align-items:center;
+  /* Container is click-through; only the ticks + panel opt back into pointer
+     events, so the empty space over the paper stays fully interactive. */
+  pointer-events:none;
+}
+/* Tick rail — one short line per scene; the current scene's line is longer +
+   inked. Scrolls when a long script overflows the frame height (min gap keeps
+   the lines from fusing into a smear). */
+.mh-toc-ticks{
+  pointer-events:auto;
+  display:flex; flex-direction:column; gap:7px;
+  padding:20px 12px 20px 6px;
+  max-height:100%; overflow-y:auto; overflow-x:hidden;
+  transition:opacity 0.16s ease;
+}
+.mh-toc-ticks::-webkit-scrollbar{ width:0; height:0; }
+.mh-toc-tick{
+  flex-shrink:0;
+  width:15px; height:2px; padding:0; border:none; border-radius:2px;
+  background:var(--ink-faint); opacity:0.45; cursor:pointer;
+  transition:width 0.12s ease, opacity 0.12s ease, background 0.12s ease;
+}
+.mh-toc-tick:hover{ width:22px; opacity:0.8; }
+.mh-toc-tick.active{ width:28px; opacity:1; background:var(--ink); }
+/* Floating panel — reuses the SceneRail list. Hidden (faded + shifted) until the
+   toc is open (hover/pin) OR a scene row inside it gains focus (keyboard reveal).
+   Kept in the DOM so screen readers + Tab can always reach the list. */
+.mh-toc-panel{
+  position:absolute; left:0; top:50%;
+  width:244px; max-height:100%;
+  display:flex; flex-direction:column; overflow:hidden;
+  background:var(--surface); border:1px solid var(--surface-border);
+  border-radius:var(--radius-lg); box-shadow:var(--shadow-float);
+  opacity:0; transform:translate(-8px, -50%); pointer-events:none;
+  transition:opacity 0.16s ease, transform 0.16s ease;
+}
+.mh-scene-toc[data-open='true'] .mh-toc-panel,
+.mh-scene-toc:focus-within .mh-toc-panel{
+  opacity:1; transform:translate(0, -50%); pointer-events:auto;
+}
+/* When the panel is up, fade the ticks out (the panel replaces them in place). */
+.mh-scene-toc[data-open='true'] .mh-toc-ticks,
+.mh-scene-toc:focus-within .mh-toc-ticks{ opacity:0; pointer-events:none; }
+.mh-toc-panel-head{
+  display:flex; align-items:center; gap:8px; flex-shrink:0;
+  padding:12px 12px 8px;
+}
+.mh-toc-panel-title{
+  font-size:10.5px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase;
+  color:var(--ink-faint);
+}
+.mh-toc-panel-count{
+  flex-shrink:0;
+  min-width:17px; height:17px; padding:0 5px; border-radius:9px;
+  display:inline-flex; align-items:center; justify-content:center;
+  font-family:var(--mono); font-size:10px; font-weight:700; line-height:1;
+  background:var(--chip-ink-bg); color:var(--chip-ink-fg);
+}
+.mh-toc-pin{ margin-left:auto; width:26px; height:26px; font-size:13px; }
+.mh-toc-pin.pinned{ background:var(--pill-ink-bg); color:var(--pill-ink-on); border-color:transparent; }
+.mh-toc-pin.pinned:hover{ background:var(--pill-ink-bg); color:var(--pill-ink-on); }
+.mh-toc-panel-body{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; }
+/* SceneRail inside the panel: let the BODY own the scroll (its own flex:1 +
+   overflow would double-scroll), and tighten the padding to the panel edges. */
+.mh-toc-panel-body .mh-scene-list{ flex:0 0 auto; overflow:visible; padding:2px 8px 10px; }
 .mh-sheet-scroll{
   flex:1; min-height:0; min-width:0; overflow-y:auto;
   display:flex; flex-direction:column; align-items:center; gap:16px;

@@ -3137,7 +3137,10 @@
     "diffScenesRemovedN": "删除 {{count}} 个场景",
     "diffAuthorYou": "我",
     "diffAuthorAI": "AI",
-    "switchEpisode": "切换剧集"
+    "switchEpisode": "切换剧集",
+    "pinScenes": "固定场景列表",
+    "unpinScenes": "取消固定场景列表",
+    "railNav": "编辑器导航"
   },
   "characters": {
     "extractFailed": "提取角色失败",
