@@ -474,6 +474,7 @@ async def get_share_schema(task_id: int, user: CurrentUserDep):
     creds = await get_douyin_credentials()
     adapter = get_adapter(h5.get("platform", "douyin"), creds)
     title = h5.get("title") or task.get("title") or ""
+    topics = h5.get("topics") or task.get("topics") or []
     allow_download = task.get("allow_download")
     if allow_download is None:
         allow_download = True
@@ -481,6 +482,7 @@ async def get_share_schema(task_id: int, user: CurrentUserDep):
         video_url=video_url,
         title=title,
         share_id=h5["share_id"],
+        hashtags=topics,
         private_status=visibility_to_private_status(task.get("visibility")),
         allow_download=bool(allow_download),
     )

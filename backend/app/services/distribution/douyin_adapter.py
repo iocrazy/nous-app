@@ -1,4 +1,5 @@
 import hashlib
+import json
 import secrets
 import time
 from dataclasses import dataclass
@@ -119,6 +120,9 @@ class DouyinAdapter(PlatformAdapter):
         Upload video to Douyin.
         Returns video_id for creating the post.
         """
+        # TODO(distribution): switch to Douyin chunked upload
+        # (init/part/complete) before enabling the official channel —
+        # whole-file in-memory upload won't survive large videos.
         async with httpx.AsyncClient(timeout=300.0) as client:
             # First download the video from Supabase Storage
             video_response = await client.get(video_url)
@@ -297,7 +301,11 @@ class DouyinAdapter(PlatformAdapter):
                 the H5 schema uses 1=allowed / 2=not allowed, which DIFFERS
                 from the official create API's 0/1 — the two mappings are kept
                 separate on purpose, never sharing a constant.
-            hashtag_list (str): Comma-separated hashtag list.
+            hashtags (list[str]): Bare topic words (no leading '#'). Encoded as
+                a JsonArray string ``["tag1","tag2"]`` for the schema's
+                ``hashtag_list`` param — Douyin's documented H5 format (NOT
+                comma-separated). On iOS ``hashtag_list`` is ignored when
+                ``title`` is empty; we always send a title, so this is moot.
 
         Returns:
             Schema URL string that opens Douyin app with content pre-filled.
@@ -305,7 +313,7 @@ class DouyinAdapter(PlatformAdapter):
         video_url: str = kwargs["video_url"]
         title: str = kwargs["title"]
         share_id: str = kwargs["share_id"]
-        hashtag_list: str = kwargs.get("hashtag_list", "")
+        hashtags: list[str] = list(kwargs.get("hashtags") or [])
         private_status: int = int(kwargs.get("private_status", 0))
         allow_download: bool = bool(kwargs.get("allow_download", True))
         # H5 share download_type: 1=allowed, 2=not allowed (distinct from the
@@ -332,8 +340,13 @@ class DouyinAdapter(PlatformAdapter):
             "private_status": private_status,
             "download_type": download_type,
         }
-        if hashtag_list:
-            params["hashtag_list"] = hashtag_list
+        if hashtags:
+            # JsonArray string, e.g. ["城市","4k"]. Compact separators (no space
+            # after comma) keep the URL param tight; ensure_ascii=False keeps
+            # CJK topics readable; quote() below percent-encodes the whole value.
+            params["hashtag_list"] = json.dumps(
+                hashtags, ensure_ascii=False, separators=(",", ":")
+            )
 
         query = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in params.items())
         return f"snssdk1128://openplatform/share?{query}"

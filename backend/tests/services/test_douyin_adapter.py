@@ -1,3 +1,6 @@
+import json
+from urllib.parse import parse_qs, quote, urlparse
+
 import pytest
 
 from app.services.distribution.douyin_adapter import DouyinAdapter, DouyinCredentials
@@ -33,6 +36,46 @@ def test_registry_resolves_and_rejects():
     assert isinstance(get_adapter("douyin", CREDS), DouyinAdapter)
     with pytest.raises(ValueError):
         get_adapter("myspace", CREDS)
+
+
+@pytest.mark.asyncio
+async def test_share_url_encodes_hashtags_as_json_array(monkeypatch):
+    """H5 schema's hashtag_list must be a URL-encoded JsonArray string
+    (`["城市","4k"]`) — Douyin's documented format, NOT comma-separated."""
+    adapter = DouyinAdapter(CREDS)
+
+    async def _fake_ticket():
+        return "tkt"
+
+    monkeypatch.setattr(adapter, "_get_ticket", _fake_ticket)
+
+    url = await adapter.generate_share_url(
+        video_url="https://cdn/x.mp4",
+        title="Hi",
+        share_id="sid1",
+        hashtags=["城市", "4k"],
+    )
+    # The value in the query string is percent-encoded; decode + parse it back.
+    qs = parse_qs(urlparse(url).query)
+    assert "hashtag_list" in qs
+    assert json.loads(qs["hashtag_list"][0]) == ["城市", "4k"]
+    # And it is a JSON array, not a comma-joined string.
+    assert quote('["城市","4k"]', safe="") in url
+
+
+@pytest.mark.asyncio
+async def test_share_url_omits_hashtag_list_when_empty(monkeypatch):
+    adapter = DouyinAdapter(CREDS)
+
+    async def _fake_ticket():
+        return "tkt"
+
+    monkeypatch.setattr(adapter, "_get_ticket", _fake_ticket)
+
+    url = await adapter.generate_share_url(
+        video_url="https://cdn/x.mp4", title="Hi", share_id="sid2", hashtags=[]
+    )
+    assert "hashtag_list" not in parse_qs(urlparse(url).query)
 
 
 # ── official create API: private_status / download_type ──────────────────

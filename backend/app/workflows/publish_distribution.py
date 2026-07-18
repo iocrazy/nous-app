@@ -69,11 +69,12 @@ def visibility_to_private_status(visibility: Optional[str]) -> int:
 
 def _account_publish_opts(account: dict, task: dict) -> dict:
     """Resolve the per-account publish options for one row: title/description
-    (account override → batch default) plus the batch-level visibility and
-    download toggles decoded into what the adapter needs.
+    and topics (account override → batch default) plus the batch-level
+    visibility and download toggles decoded into what the adapter needs.
 
-    Returns keys: title, description, private_status (int), allow_download
-    (bool). Extracted so it is unit-testable without the DBOS runtime."""
+    Returns keys: title, description, topics (list[str], Douyin hashtags),
+    private_status (int), allow_download (bool). Extracted so it is
+    unit-testable without the DBOS runtime."""
     title = account.get("title") or task.get("title") or ""
     description = account.get("description")
     if description is None:
@@ -81,12 +82,27 @@ def _account_publish_opts(account: dict, task: dict) -> dict:
     allow_download = task.get("allow_download")
     if allow_download is None:
         allow_download = True
+    topics = account.get("topics")
+    if topics is None:
+        topics = task.get("topics")
     return {
         "title": title,
         "description": description,
+        "topics": list(topics or []),
         "private_status": visibility_to_private_status(task.get("visibility")),
         "allow_download": bool(allow_download),
     }
+
+
+def _title_with_hashtags(title: str, topics: list[str]) -> str:
+    """Append topics to the official-post title as Douyin hashtags. The create
+    API has no dedicated hashtag field — topics ride in the post text as
+    ``#word `` (hash + word + trailing space, which terminates the tag).
+    Description is still newline-joined downstream by _create_video_post."""
+    if not topics:
+        return title
+    tags = "".join(f"#{t} " for t in topics)
+    return f"{title} {tags}"
 
 
 async def _resolve_video_url(account: dict, task: dict, repo) -> Optional[str]:
@@ -111,6 +127,7 @@ async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
     opts = _account_publish_opts(account, task)
     title = opts["title"]
     description = opts["description"]
+    topics = opts["topics"]
     private_status = opts["private_status"]
     allow_download = opts["allow_download"]
     try:
@@ -125,7 +142,8 @@ async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
                 access_token=account["access_token"],
                 open_id=account["platform_user_id"],
                 video_url=video_url,
-                title=title,
+                # topics ride in the post text (`#tag `) — no hashtag field.
+                title=_title_with_hashtags(title, topics),
                 description=description,
                 private_status=private_status,
                 download_type=official_download_type,
@@ -143,7 +161,8 @@ async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
                 published_at=datetime.now(timezone.utc),
             )
             return "success"
-        # H5 share channel — generate_share_url maps allow_download → the H5
+        # H5 share channel — topics go through the dedicated hashtag_list param
+        # (JsonArray); generate_share_url maps allow_download → the H5
         # download_type enum (1/2) itself.
         share_id = secrets.token_urlsafe(16)
         share_title = f"{title} {description}".strip() if description else title
@@ -151,6 +170,7 @@ async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
             video_url=video_url,
             title=share_title,
             share_id=share_id,
+            hashtags=topics,
             private_status=private_status,
             allow_download=allow_download,
         )
