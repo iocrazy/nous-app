@@ -6,6 +6,7 @@ from .agents_router import router as agents_catalog_router
 from .ai_usage_router import router as ai_usage_router
 from .alert_rules_router import router as alert_rules_router
 from .audit_logs_router import router as audit_logs_router
+from .backfill_router import router as backfill_router
 from .boundary_audit_router import router as boundary_audit_router
 from .celery_router import router as celery_router
 from .credits_router import router as credits_router
@@ -146,6 +147,11 @@ admin_router.include_router(
     storage_migration_router,
     prefix="/storage-migration",
     tags=["Admin - Storage Migration"],
+)
+admin_router.include_router(
+    backfill_router,
+    prefix="/backfill",
+    tags=["Admin - Backfill"],
 )
 
 # Wave I (I3): agent harness telemetry snapshot
