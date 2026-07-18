@@ -4,7 +4,12 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchGenerations, generatedMediaCoverUrl, generatedMediaFileUrl } from './generatedMediaService';
+import {
+  fetchEntityGenerations,
+  fetchGenerations,
+  generatedMediaCoverUrl,
+  generatedMediaFileUrl,
+} from './generatedMediaService';
 
 vi.mock('../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
 vi.mock('./parserService', () => ({
@@ -51,6 +56,41 @@ describe('fetchGenerations', () => {
   it('throws on non-ok response', async () => {
     stubFetch({}, 500);
     await expect(fetchGenerations()).rejects.toThrow('HTTP 500');
+  });
+
+  // Regression #1457: never trust the response shape. A payload missing `items`
+  // (or `data` entirely) must normalize to an empty page, not leak `undefined`
+  // to callers that read `.items`.
+  it.each([
+    ['data is an empty array', { data: [] }],
+    ['data is null', { data: null }],
+    ['data has no items key', { data: { next_cursor: 'x' } }],
+    ['data.items is null', { data: { items: null, next_cursor: null } }],
+    ['no data key at all', {}],
+  ])('normalizes a malformed page (%s) to an empty items array', async (_label, body) => {
+    stubFetch(body);
+    const page = await fetchGenerations();
+    expect(page.items).toEqual([]);
+    expect(Array.isArray(page.items)).toBe(true);
+  });
+});
+
+describe('fetchEntityGenerations', () => {
+  it('unwraps a well-formed entity page', async () => {
+    const spy = stubFetch({ data: { items: [{ id: '9' }], next_cursor: null } });
+    const page = await fetchEntityGenerations('character', '42');
+    const [url] = spy.mock.calls[0] as [string, ...unknown[]];
+    expect(url).toContain('entity_kind=character');
+    expect(url).toContain('entity_id=42');
+    expect(page.items).toHaveLength(1);
+  });
+
+  // Regression #1457: the entity asset strip crashed on this exact shape.
+  it('normalizes a malformed entity page to an empty items array', async () => {
+    stubFetch({ data: [] });
+    const page = await fetchEntityGenerations('character', '42');
+    expect(page.items).toEqual([]);
+    expect(page.next_cursor).toBeNull();
   });
 });
 

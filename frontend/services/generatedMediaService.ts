@@ -23,6 +23,23 @@ export interface GenerationsPage {
   next_cursor: string | null;
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Coerce an untrusted `data` payload into a well-formed GenerationsPage.
+ * The backend contract is `{ items: [...], next_cursor: ... }`, but a bare
+ * `[]`, `null`, or a page missing `items` must never leak `undefined` to
+ * callers that read `.items` (regression #1457: the entity asset strip crashed
+ * into its error boundary on exactly this shape).
+ */
+function normalizeGenerationsPage(raw: unknown): GenerationsPage {
+  const page = (raw && typeof raw === 'object' ? raw : {}) as Partial<GenerationsPage>;
+  return {
+    items: Array.isArray(page.items) ? page.items : [],
+    next_cursor: page.next_cursor ?? null,
+  };
+}
+
 // ─── API calls ────────────────────────────────────────────────────────────────
 
 /**
@@ -42,7 +59,7 @@ export async function fetchGenerations(
   });
 
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return (await res.json()).data as GenerationsPage;
+  return normalizeGenerationsPage((await res.json()).data);
 }
 
 /**
@@ -63,7 +80,7 @@ export async function fetchEntityGenerations(
     headers: await getAuthHeaders(),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return (await res.json()).data as GenerationsPage;
+  return normalizeGenerationsPage((await res.json()).data);
 }
 
 /**

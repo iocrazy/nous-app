@@ -30,7 +30,10 @@ export function EntityAssetStrip({ entityKind, entityId }: EntityAssetStripProps
     let cancelled = false;
     fetchEntityGenerations(entityKind, entityId)
       .then((page) => {
-        if (!cancelled) setItems(page.items);
+        // Guard the shape at the boundary too: never trust `page.items` to be
+        // an array (regression #1457 — an undefined here crashed the card into
+        // its error boundary via the items.length read below).
+        if (!cancelled) setItems(Array.isArray(page?.items) ? page.items : []);
       })
       .catch((err) => {
         // Asset strip is decoration — a failed fetch degrades to the empty
