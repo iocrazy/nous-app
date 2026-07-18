@@ -90,11 +90,11 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
     setSubmitting(true);
     setError(null);
     try {
-      // Resolve BIGINT scope ids — strings in the UI, numbers on the wire.
+      // Resolve BIGINT scope ids — strings end-to-end (Number() rounds past 2^53).
       const parsedTeamId =
-        scopeKind === 'team' && teamId ? Number(teamId) : undefined;
+        scopeKind === 'team' && teamId ? teamId : undefined;
       const parsedProjectId =
-        scopeKind === 'project' && projectId ? Number(projectId) : undefined;
+        scopeKind === 'project' && projectId ? projectId : undefined;
       const created = await aiLibraryService.createAgent({
         slug,
         name: name.trim(),
