@@ -240,11 +240,14 @@ class HotspotsRepository:
         source_ids: Optional[list[str]] = None,
         min_score: Optional[float] = None,
         order_score: bool = False,
+        tag_words: Optional[list[str]] = None,
     ) -> list[dict[str, Any]]:
         # source_ids is the caller's visible-source allowlist (system + own,
         # minus hidden). None = no scoping; [] = nothing visible → empty feed.
         # min_score / order_score drive the "Featured" view: a score floor +
         # best-first ordering instead of the default chronological feed.
+        # tag_words is the pool-tag filter: keep hotspots whose ``tags`` array
+        # overlaps the lower-cased word set (name/name_zh of the picked tags).
         if source_ids is not None and not source_ids:
             return []
         stmt = self._joined_select()
@@ -260,6 +263,8 @@ class HotspotsRepository:
             stmt = stmt.where(Hotspots.category == category)
         if min_score is not None:
             stmt = stmt.where(Hotspots.score >= min_score)
+        if tag_words:
+            stmt = stmt.where(Hotspots.tags.overlap([w.lower() for w in tag_words]))
         term = sanitize_search(q)
         if term:
             like = f"%{term}%"

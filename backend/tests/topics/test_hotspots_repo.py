@@ -182,6 +182,33 @@ async def test_list_for_date_no_search_skips_or(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_for_date_tag_words_overlap(monkeypatch):
+    from app.repositories import hotspots_repository as mod
+
+    session = _FakeSession(_MappingResult([]))
+    monkeypatch.setattr(mod, "read_scope", _cm(session))
+    await HotspotsRepository().list_for_date(None, None, tag_words=["AI", "文案"])
+    stmt = session.statements[0]
+    sql = str(stmt).lower()
+    # array overlap → the `&&` operator (spec: hotspots.tags && words)
+    assert "&&" in sql or "overlap" in sql
+    # words are lower-cased before binding
+    assert ["ai", "文案"] in [
+        v for v in stmt.compile().params.values() if isinstance(v, list)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_list_for_date_no_tag_words_skips_overlap(monkeypatch):
+    from app.repositories import hotspots_repository as mod
+
+    session = _FakeSession(_MappingResult([]))
+    monkeypatch.setattr(mod, "read_scope", _cm(session))
+    await HotspotsRepository().list_for_date(None, None)
+    assert "&&" not in str(session.statements[0])
+
+
+@pytest.mark.asyncio
 async def test_list_for_date_empty_source_ids_short_circuits(monkeypatch):
     from app.repositories import hotspots_repository as mod
 

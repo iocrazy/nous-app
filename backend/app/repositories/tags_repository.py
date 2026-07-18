@@ -678,6 +678,26 @@ class TagsRepository:
             logger.warning(f"RPC get_user_tag_counts unavailable, using fallback: {e}")
         return await self._get_tag_counts_fallback(user_id, limit)
 
+    async def get_tags_by_ids(self, ids: list[int]) -> List[dict]:
+        """Full tag rows for the given ids, in ONE in-list query.
+
+        Backs the topics feed's pool-tag filter, which resolves picked tag ids
+        to their name/name_zh word set. Empty ids short-circuits. ``tags.id`` is
+        BIGINT — the returned ``id`` stays a native int (5.3 trap)."""
+        if not ids:
+            return []
+        async with read_scope() as session:
+            objs = (
+                (
+                    await session.execute(
+                        select(Tags).where(Tags.id.in_([int(t) for t in ids]))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [_tag_row(o) for o in objs]
+
     async def get_name_zh_map(self, tag_ids: list[int]) -> Dict[int, str]:
         """id → name_zh for the given tag ids, in ONE in-list query.
 
