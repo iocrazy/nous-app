@@ -314,12 +314,10 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   const setQuick = (q: QuickFilter) => {
     if (q === 'all') {
       setFilters((prev) => ({ ...prev, statuses: new Set() }));
-    } else if (q === 'active') {
-      setFilters((prev) => ({ ...prev, statuses: new Set(['todo', 'in_progress']) }));
-    } else if (q === 'backlog') {
-      setFilters((prev) => ({ ...prev, statuses: new Set(['backlog']) }));
     } else {
-      setFilters((prev) => ({ ...prev, statuses: new Set(['done']) }));
+      // 'active' — the one multi-status preset the pipeline chips can't
+      // express in a single click (per-status filtering is theirs).
+      setFilters((prev) => ({ ...prev, statuses: new Set(['todo', 'in_progress', 'in_review']) }));
     }
   };
 
@@ -526,13 +524,13 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
       <div className="flex items-center gap-2 px-4 py-1.5 text-[12px] border-b border-line">
         <div className="flex items-center gap-1.5 shrink-0">
           <span className="text-ink-600">Quick:</span>
-          {(['all', 'active', 'backlog', 'done'] as QuickFilter[]).map((q) => {
-            const matches = (() => {
-              if (q === 'all') return filters.statuses.size === 0;
-              if (q === 'active') return filters.statuses.size === 2 && filters.statuses.has('todo') && filters.statuses.has('in_progress');
-              if (q === 'backlog') return filters.statuses.size === 1 && filters.statuses.has('backlog');
-              return filters.statuses.size === 1 && filters.statuses.has('done');
-            })();
+          {(['all', 'active'] as QuickFilter[]).map((q) => {
+            const matches = q === 'all'
+              ? filters.statuses.size === 0
+              : filters.statuses.size === 3
+                && filters.statuses.has('todo')
+                && filters.statuses.has('in_progress')
+                && filters.statuses.has('in_review');
             return (
               <button
                 key={q}
@@ -544,7 +542,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
                     : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
                 }`}
               >
-                {q === 'all' ? 'All' : q === 'active' ? 'Active' : q === 'backlog' ? 'Backlog' : 'Done'}
+                {q === 'all' ? 'All' : 'Active'}
               </button>
             );
           })}
