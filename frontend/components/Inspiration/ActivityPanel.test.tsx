@@ -94,36 +94,108 @@ describe('ActivityPanel calendar enrichment (go-live feedback)', () => {
   });
 });
 
-describe('ActivityPanel year/month picker', () => {
+describe('ActivityPanel year/month wheel picker', () => {
+  const nowYear = new Date().getFullYear();
+
   beforeEach(() => {
+    vi.clearAllMocks();
     localStorage.clear();
     localStorage.setItem('inspiration.activityMode', 'calendar');
     getActivity.mockResolvedValue([]);
   });
 
-  it('clicking the month label opens a 12-month picker with year nav', async () => {
+  it('clicking the month label opens a floating popover with the year wheel + months', async () => {
     render(<ActivityPanel selectedDate={null} onSelectDate={vi.fn()} refreshKey={0} />);
     fireEvent.click(await screen.findByLabelText('Choose year and month'));
-    expect(screen.getByLabelText('Previous year')).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Year and month picker' })).toBeTruthy();
+    // Wheel centers on the current year with two past years above it.
+    expect(screen.getByLabelText(`Year ${nowYear}`)).toBeTruthy();
+    expect(screen.getByLabelText(`Year ${nowYear - 1}`)).toBeTruthy();
     expect(screen.getByText('Jan')).toBeTruthy();
     expect(screen.getByText('Dec')).toBeTruthy();
   });
 
-  it('picking a month in another year jumps the calendar there', async () => {
+  it('opening the picker lazily fetches full-year activity for the browsed year', async () => {
     render(<ActivityPanel selectedDate={null} onSelectDate={vi.fn()} refreshKey={0} />);
     fireEvent.click(await screen.findByLabelText('Choose year and month'));
-    fireEvent.click(screen.getByLabelText('Previous year'));
+    await waitFor(() =>
+      expect(getActivity).toHaveBeenCalledWith(`${nowYear}-01-01`, `${nowYear}-12-31`),
+    );
+  });
+
+  it('clicking a year in the wheel recenters it and fetches that year', async () => {
+    render(<ActivityPanel selectedDate={null} onSelectDate={vi.fn()} refreshKey={0} />);
+    fireEvent.click(await screen.findByLabelText('Choose year and month'));
+    fireEvent.click(screen.getByLabelText(`Year ${nowYear - 2}`));
+    // Recentered: a year two below the new center (still <= now) is now visible.
+    expect(screen.getByLabelText(`Year ${nowYear - 4}`)).toBeTruthy();
+    await waitFor(() =>
+      expect(getActivity).toHaveBeenCalledWith(`${nowYear - 2}-01-01`, `${nowYear - 2}-12-31`),
+    );
+  });
+
+  it('mouse wheel steps the year into the past and reveals older years', async () => {
+    render(<ActivityPanel selectedDate={null} onSelectDate={vi.fn()} refreshKey={0} />);
+    fireEvent.click(await screen.findByLabelText('Choose year and month'));
+    // Before scrolling, nowYear-3 is out of the 5-slot window.
+    expect(screen.queryByLabelText(`Year ${nowYear - 3}`)).toBeNull();
+    const wheel = screen.getByLabelText(`Year ${nowYear}`).closest('div')!.parentElement!;
+    fireEvent.wheel(wheel, { deltaY: -1 }); // up = into the past
+    expect(screen.getByLabelText(`Year ${nowYear - 3}`)).toBeTruthy();
+  });
+
+  it('never renders a year beyond the current real year (future cap)', async () => {
+    render(<ActivityPanel selectedDate={null} onSelectDate={vi.fn()} refreshKey={0} />);
+    fireEvent.click(await screen.findByLabelText('Choose year and month'));
+    const wheel = screen.getByLabelText(`Year ${nowYear}`).closest('div')!.parentElement!;
+    fireEvent.wheel(wheel, { deltaY: 1 }); // down = toward now, but already capped
+    expect(screen.queryByLabelText(`Year ${nowYear + 1}`)).toBeNull();
+    expect(screen.getByLabelText(`Year ${nowYear}`)).toBeTruthy();
+  });
+
+  it('picking a month in another year jumps the calendar there and closes', async () => {
+    render(<ActivityPanel selectedDate={null} onSelectDate={vi.fn()} refreshKey={0} />);
+    fireEvent.click(await screen.findByLabelText('Choose year and month'));
+    fireEvent.click(screen.getByLabelText(`Year ${nowYear - 1}`));
     fireEvent.click(screen.getByText('Mar'));
-    const year = new Date().getFullYear() - 1;
-    expect(screen.getByLabelText('Choose year and month').textContent).toContain(`March ${year}`);
-    expect(screen.queryByText('Jan')).toBeNull(); // picker closed
+    expect(screen.getByLabelText('Choose year and month').textContent).toContain(
+      `March ${nowYear - 1}`,
+    );
+    expect(screen.queryByRole('dialog')).toBeNull(); // popover closed
+  });
+
+  it('Escape closes the popover', async () => {
+    render(<ActivityPanel selectedDate={null} onSelectDate={vi.fn()} refreshKey={0} />);
+    fireEvent.click(await screen.findByLabelText('Choose year and month'));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('mousedown outside the popover closes it', async () => {
+    render(<ActivityPanel selectedDate={null} onSelectDate={vi.fn()} refreshKey={0} />);
+    fireEvent.click(await screen.findByLabelText('Choose year and month'));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    fireEvent.mouseDown(screen.getByText('Activity'));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('Back to this month recenters + selects the current month and closes', async () => {
+    render(<ActivityPanel selectedDate={null} onSelectDate={vi.fn()} refreshKey={0} />);
+    fireEvent.click(await screen.findByLabelText('Choose year and month'));
+    // Browse away first.
+    fireEvent.click(screen.getByLabelText(`Year ${nowYear - 2}`));
+    fireEvent.click(screen.getByText('Back to this month'));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    const now = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    expect(screen.getByLabelText('Choose year and month').textContent).toContain(now);
   });
 
   it('Today closes the picker and returns to the current month', async () => {
     render(<ActivityPanel selectedDate={null} onSelectDate={vi.fn()} refreshKey={0} />);
     fireEvent.click(await screen.findByLabelText('Choose year and month'));
     fireEvent.click(screen.getByText('Today'));
-    expect(screen.queryByText('Jan')).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
     const now = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     expect(screen.getByLabelText('Choose year and month').textContent).toContain(now);
   });

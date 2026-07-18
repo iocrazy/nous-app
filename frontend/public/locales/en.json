@@ -2846,7 +2846,8 @@
     "attachFile": "Attach files",
     "insertLink": "Insert link",
     "private": "Private",
-    "privateHint": "Notes are private to your account"
+    "privateHint": "Notes are private to your account",
+    "backToThisMonth": "Back to this month"
   },
   "editor": {
     "brand": "MediaHub Projects",
