@@ -62,6 +62,7 @@ export async function getHotspots(
   q?: string,
   view: HotspotView = 'all',
   sources?: string[],
+  tagIds?: string[],
 ): Promise<Hotspot[]> {
   const params = new URLSearchParams();
   if (view !== 'all') params.set('view', view);
@@ -74,6 +75,10 @@ export async function getHotspots(
   // Source filter: narrow the feed to picked sources (intersected server-side
   // with the caller's visible allowlist). Empty/undefined = all visible.
   if (sources && sources.length > 0) params.set('source', sources.join(','));
+  // Tag filter: narrow to hotspots carrying any of the picked pool tags
+  // (intersected server-side with the caller's visible tag pool). Empty/
+  // undefined = no tag narrowing.
+  if (tagIds && tagIds.length > 0) params.set('tag_id', tagIds.join(','));
   const resp = await fetch(`${base()}?${params.toString()}`, { headers: await getAuthHeaders() });
   return (await jsonOrThrow(resp)).hotspots as Hotspot[];
 }

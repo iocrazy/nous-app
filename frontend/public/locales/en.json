@@ -2707,6 +2707,8 @@
     "filterCategory": "Category",
     "filterSource": "Source",
     "filterDate": "Date",
+    "filterTag": "Tag",
+    "noTags": "No tags yet.",
     "allDates": "All dates",
     "clearFilters": "Clear all filters",
     "today": "Today",

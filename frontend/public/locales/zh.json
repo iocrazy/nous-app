@@ -2707,6 +2707,8 @@
     "filterCategory": "分类",
     "filterSource": "信源",
     "filterDate": "日期",
+    "filterTag": "标签",
+    "noTags": "暂无标签。",
     "allDates": "全部日期",
     "clearFilters": "清除全部筛选",
     "today": "今天",
