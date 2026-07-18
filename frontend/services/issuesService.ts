@@ -32,7 +32,8 @@ export type IssueOriginKind =
   | 'agent_dispatch'
   | 'routine'
   | 'escalation'
-  | 'project_stage';
+  | 'project_stage'
+  | 'publish';
 
 export interface Issue {
   id: number;

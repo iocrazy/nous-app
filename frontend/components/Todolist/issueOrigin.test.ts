@@ -99,3 +99,15 @@ describe('originModule', () => {
     expect(originModule('12345')).toBeNull(); // routine schedule id
   });
 });
+
+describe('publish origin', () => {
+  it('round-trips, routes to the distribution surface, and chips as Publish', () => {
+    const big = '9007199254740993';
+    const parsed = parseOriginId(buildOriginId('publish', big));
+    expect(parsed).toEqual({ kind: 'publish', id: big });
+    expect(originPath(parsed!, 'team-1')).toBe('/team/team-1/distribution');
+    expect(originPath(parsed!, undefined)).toBe('/distribution');
+    expect(originLabel(parsed!)).toBe('From a publish batch');
+    expect(originModule(`publish:${big}`)).toEqual({ label: 'Publish', dotClass: 'bg-rose-400' });
+  });
+});
