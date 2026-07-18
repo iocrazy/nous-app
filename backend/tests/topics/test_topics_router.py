@@ -197,8 +197,9 @@ def client(monkeypatch):
             return calls.get("embed_result", [0.1, 0.2])
 
     class _FakeTagsRepo:
-        async def get_tags_by_ids(self, ids):
+        async def get_tags_by_ids(self, ids, user_id):
             calls["tag_ids"] = list(ids)
+            calls["tag_user_id"] = user_id
             return calls.get("tag_rows", [])
 
     monkeypatch.setattr(tr, "get_tags_repository", lambda: _FakeTagsRepo())
@@ -532,6 +533,66 @@ def test_tag_filter_resolves_ids_to_lowercased_words(client):
     assert r.status_code == 200
     assert client.calls["tag_ids"] == [1, 2]
     assert client.calls["tag_words"] == ["copywriting", "文案"]
+
+
+def test_tag_filter_threads_caller_user_id_to_repo(client):
+    # The repo enforces the caller-visible pool (spec §5); the router must
+    # thread auth.user_id through so the scoping predicate has something to
+    # scope against — regression guard for the id-only cross-user leak.
+    client.calls["tag_rows"] = [{"name": "AI", "name_zh": None}]
+    r = client.get("/api/v1/topics?tag_id=1")
+    assert r.status_code == 200
+    assert client.calls["tag_user_id"] == "u1"  # the fixture's auth.user_id
+
+
+def test_tag_filter_other_users_private_tag_yields_sentinel(client, monkeypatch):
+    # A type='user' tag owned by ANOTHER user is outside the caller-visible
+    # pool (spec §5): scoped at the repo, so get_tags_by_ids returns nothing
+    # for that id — same observable outcome as an unknown id, a no-match
+    # sentinel (empty feed), never the foreign tag's private name.
+    import app.api.topics_router as tr
+
+    class _ScopedFakeTagsRepo:
+        """Simulates the repo's DB-side visibility predicate: only returns
+        rows for system/time tags or type='user' tags owned by the given
+        user_id — a type='user' tag owned by someone else is silently
+        dropped from the result, exactly like the real WHERE clause."""
+
+        _TAGS = {
+            1: {"name": "AI", "name_zh": None, "type": "system", "owner": None},
+            2: {"name": "Own Secret", "name_zh": None, "type": "user", "owner": "u1"},
+            3: {
+                "name": "Other Users Private Word",
+                "name_zh": None,
+                "type": "user",
+                "owner": "someone-else",
+            },
+        }
+
+        async def get_tags_by_ids(self, ids, user_id):
+            out = []
+            for tid in ids:
+                t = self._TAGS.get(tid)
+                if t is None:
+                    continue
+                if t["type"] in ("system", "time") or (
+                    t["type"] == "user" and t["owner"] == user_id
+                ):
+                    out.append({"name": t["name"], "name_zh": t["name_zh"]})
+            return out
+
+    monkeypatch.setattr(tr, "get_tags_repository", lambda: _ScopedFakeTagsRepo())
+
+    # Other user's private tag alone → sentinel (empty feed), never leaks its
+    # name/name_zh as a filter word to the caller.
+    r = client.get("/api/v1/topics?tag_id=3")
+    assert r.status_code == 200
+    assert client.calls["tag_words"] == ["__no_match__"]
+
+    # Own tag + system tag still resolve normally (auth.user_id == "u1").
+    r = client.get("/api/v1/topics?tag_id=1,2")
+    assert r.status_code == 200
+    assert set(client.calls["tag_words"]) == {"ai", "own secret"}
 
 
 def test_tag_filter_none_when_no_tag_id(client):

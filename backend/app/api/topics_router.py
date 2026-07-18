@@ -121,19 +121,24 @@ async def _visible_source_ids(user_id: str) -> list[str]:
 _NO_TAG_MATCH: list[str] = ["__no_match__"]
 
 
-async def _resolve_tag_words(tag_id: Optional[str]) -> Optional[list[str]]:
+async def _resolve_tag_words(
+    tag_id: Optional[str], user_id: str
+) -> Optional[list[str]]:
     """Resolve a comma-separated pool tag-id list to the lower-cased set of
-    name/name_zh words those tags carry.
+    name/name_zh words those tags carry, scoped to the caller-visible pool
+    (spec §5) so a raw tag id can't pull another user's private tag name into
+    the filter word set.
 
     Returns None when no filter is requested (feed stays unfiltered), or the
     ``_NO_TAG_MATCH`` sentinel when ids were given but resolved to nothing — so
-    an invalid/unknown tag filter yields an empty feed, never all rows."""
+    an invalid/unknown/not-visible tag filter yields an empty feed, never all
+    rows."""
     if not tag_id:
         return None
     ids = [int(x) for x in tag_id.split(",") if x.strip().isdigit()][:20]
     words: list[str] = []
     if ids:
-        tag_rows = await get_tags_repository().get_tags_by_ids(ids)
+        tag_rows = await get_tags_repository().get_tags_by_ids(ids, user_id)
         words = [
             w.lower() for t in tag_rows for w in (t.get("name"), t.get("name_zh")) if w
         ]
@@ -176,7 +181,7 @@ async def list_hotspots(
     # Pool-tag filter: resolve the picked tag ids to their name/name_zh words.
     # The date-window views push this into the query (array overlap); the
     # id-driven views (saved/hidden/foryou) filter the fetched rows below.
-    tag_words = await _resolve_tag_words(tag_id)
+    tag_words = await _resolve_tag_words(tag_id, auth.user_id)
 
     if view == "featured":
         # Curated high-value board: score floor + best-first, spanning all
