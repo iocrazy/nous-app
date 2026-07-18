@@ -90,6 +90,7 @@ import { ScenePresenceContext, type ScenePresenceMap } from '../collab/scenePres
 import type { RemoteOpRow } from '../useSceneSync';
 import { reportError } from '../../services/errorReporter';
 import { SelectionAiChatButton } from '../selection/SelectionAiChatButton';
+import { Loading } from '../../components/common/Loading';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -1173,7 +1174,7 @@ export function EditorShell({
 
       {loadState === 'loading' && (
         <div className="mh-shell-state" role="status">
-          {t('editor.loading')}
+          <Loading label={t('editor.loading')} />
         </div>
       )}
       {loadState === 'error' && (

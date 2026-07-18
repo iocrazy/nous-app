@@ -17,7 +17,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Loader2 } from 'lucide-react';
+import { Loading } from '../common/Loading';
 import {
   fetchCurrentStage,
   fetchEpisodesProgress,
@@ -403,7 +403,7 @@ export function ProjectWorkspace({
         <Suspense
           fallback={
             <div className="flex-1 grid place-items-center text-ink-500">
-              <Loader2 className="animate-spin" size={20} />
+              <Loading center />
             </div>
           }
         >

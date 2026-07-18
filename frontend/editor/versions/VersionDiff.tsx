@@ -32,6 +32,7 @@ import {
 import type { SceneDoc } from '../types';
 import { authorLabel } from './authorLabel';
 import { wordDiff } from './wordDiff';
+import { Loading } from '../../components/common/Loading';
 
 export interface VersionDiffProps {
   scriptId: string;
@@ -362,7 +363,7 @@ export function VersionDiff({
       <div className="mh-diff-scroll">
         {loadState === 'loading' && (
           <div className="mh-diff-state" role="status">
-            {t('editor.diffLoading')}
+            <Loading label={t('editor.diffLoading')} />
           </div>
         )}
         {loadState === 'error' && (
