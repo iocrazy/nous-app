@@ -214,3 +214,37 @@ def test_statistics_no_backfill_when_name_zh_present(client: TestClient):
     item = resp.json()["top_tags"][0]
     assert item["hotspots"] == 9
     tags_repo.get_name_zh_map.assert_not_awaited()
+
+
+def test_statistics_hotspots_failure_degrades_independently(client: TestClient):
+    """A transient hotspots-repo failure must not zero the whole response —
+    count (resources) and notes stay intact, hotspots degrades to 0."""
+    tags_repo = AsyncMock()
+    tags_repo.get_tag_counts.return_value = [
+        {
+            "id": 1,
+            "name": "copywriting",
+            "name_zh": "文案",
+            "color": None,
+            "icon": None,
+            "type": "user",
+            "count": 3,
+        },
+    ]
+    note_repo = AsyncMock()
+    note_repo.counts_for_user.return_value = {1: 4}
+    hot_repo = AsyncMock()
+    hot_repo.recent_tag_word_counts.side_effect = RuntimeError("hotspots down")
+
+    p1, p2, p3 = _patch_statistics_sources(tags_repo, note_repo, hot_repo)
+    with p1, p2, p3:
+        resp = client.get("/api/v1/tags/statistics")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is True
+    item = body["top_tags"][0]
+    # Resource count and notes are unaffected by the hotspots failure.
+    assert item["count"] == 3
+    assert item["notes"] == 4
+    assert item["hotspots"] == 0

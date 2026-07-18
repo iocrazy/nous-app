@@ -259,10 +259,27 @@ async def get_tag_statistics(
                 if "name_zh" not in t:
                     t["name_zh"] = zh_map.get(int(t["id"]))
 
-        note_counts, hotspot_words = await asyncio.gather(
+        note_counts_result, hotspot_words_result = await asyncio.gather(
             get_note_tags_repository().counts_for_user(user_id),
             get_hotspots_repository().recent_tag_word_counts(),
+            return_exceptions=True,
         )
+        if isinstance(note_counts_result, Exception):
+            logger.error(
+                f"Failed to load note tag counts for tag statistics "
+                f"(user_id={user_id}): {note_counts_result}"
+            )
+            note_counts = {}
+        else:
+            note_counts = note_counts_result
+        if isinstance(hotspot_words_result, Exception):
+            logger.error(
+                f"Failed to load hotspot word counts for tag statistics "
+                f"(user_id={user_id}): {hotspot_words_result}"
+            )
+            hotspot_words = {}
+        else:
+            hotspot_words = hotspot_words_result
         for t in tag_counts:
             words = {
                 (t.get("name") or "").lower(),
