@@ -166,6 +166,17 @@
 .dist-v4 .desc-tag { color: var(--t-indigo); font-weight: 550; }
 .dist-v4 .topics { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
 .dist-v4 .topics .chip { cursor: default; }
+/* Interactive topic chips (the "# Topic" toggle + trending suggestions). */
+.dist-v4 .topics button.chip:not(:disabled) { cursor: pointer; }
+.dist-v4 .topics button.chip:not(:disabled):hover { border-color: var(--t-indigo); color: var(--t-indigo); }
+/* An added topic — carries an inline remove (×) button. */
+.dist-v4 .chip-topic { color: var(--t-indigo); background: rgba(99, 102, 241, .1); border-color: rgba(99, 102, 241, .28); }
+.dist-v4 .chip-topic .chip-x { display: inline-flex; align-items: center; justify-content: center; margin-left: 2px; padding: 0 2px; border: 0; background: none; color: inherit; font: inherit; font-size: 13px; line-height: 1; cursor: pointer; opacity: .7; }
+.dist-v4 .chip-topic .chip-x:hover { opacity: 1; }
+/* "@ Mention" placeholder — visibly parked with a Soon pill. */
+.dist-v4 .chip-soon { opacity: .55; cursor: not-allowed; }
+.dist-v4 .chip-soon .soon { font-style: normal; font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 1px 4px; border-radius: 999px; background: var(--line-strong); color: var(--content-4); }
+.dist-v4 .topic-input-row { display: flex; }
 .dist-v4 .topics .trending-label { font-size: 10.5px; color: var(--content-4); align-self: center; letter-spacing: .05em; text-transform: uppercase; font-weight: 600; }
 
 /* ═══ frow (options rows) ═══ */

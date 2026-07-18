@@ -67,6 +67,30 @@ def _account_title(account: dict, task: dict) -> tuple[str, Optional[str]]:
     return title, description
 
 
+def _account_publish_opts(
+    account: dict, task: dict
+) -> tuple[str, Optional[str], list[str]]:
+    """Resolve the title, description AND topics (Douyin hashtags) for one
+    account. Topics follow the same per-account override → batch fallback rule
+    as title/description (an account row's topics override the batch's)."""
+    title, description = _account_title(account, task)
+    topics = account.get("topics")
+    if topics is None:
+        topics = task.get("topics")
+    return title, description, list(topics or [])
+
+
+def _title_with_hashtags(title: str, topics: list[str]) -> str:
+    """Append topics to the official-post title as Douyin hashtags. The create
+    API has no dedicated hashtag field — topics ride in the post text as
+    ``#word `` (hash + word + trailing space, which terminates the tag).
+    Description is still newline-joined downstream by _create_video_post."""
+    if not topics:
+        return title
+    tags = "".join(f"#{t} " for t in topics)
+    return f"{title} {tags}"
+
+
 async def _resolve_video_url(account: dict, task: dict, repo) -> Optional[str]:
     """Resolve the servable video URL for this account. one_to_one carries a
     per-account resource_id; broadcast uses the batch's first resource."""
@@ -86,7 +110,7 @@ async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
     @DBOS.step so it is unit-testable with fakes."""
     account_row_id = int(account["id"])
     channel = decide_channel(account.get("channel", "h5"), account)
-    title, description = _account_title(account, task)
+    title, description, topics = _account_publish_opts(account, task)
     try:
         video_url = await _resolve_video_url(account, task, repo)
         if not video_url:
@@ -96,7 +120,8 @@ async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
                 access_token=account["access_token"],
                 open_id=account["platform_user_id"],
                 video_url=video_url,
-                title=title,
+                # topics ride in the post text (`#tag `) — no hashtag field.
+                title=_title_with_hashtags(title, topics),
                 description=description,
             )
             from datetime import datetime, timezone
@@ -112,11 +137,15 @@ async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
                 published_at=datetime.now(timezone.utc),
             )
             return "success"
-        # H5 share channel
+        # H5 share channel — topics go through the dedicated hashtag_list param
+        # (JsonArray), not the title text.
         share_id = secrets.token_urlsafe(16)
         share_title = f"{title} {description}".strip() if description else title
         await adapter.generate_share_url(
-            video_url=video_url, title=share_title, share_id=share_id
+            video_url=video_url,
+            title=share_title,
+            share_id=share_id,
+            hashtags=topics,
         )
         await repo.set_account_status(
             account_row_id, "pending_share", share_id=share_id

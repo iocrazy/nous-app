@@ -1,8 +1,10 @@
 import pytest
 
 from app.workflows.publish_distribution import (
+    _account_publish_opts,
     _publish_one_account,
     _run_accounts,
+    _title_with_hashtags,
     classify_batch,
     decide_channel,
 )
@@ -19,10 +21,16 @@ def test_decide_channel_official_needs_token():
 
 
 class _FakeAdapter:
+    def __init__(self):
+        self.publish_kw = None
+        self.share_kw = None
+
     async def publish_video(self, **kw):
+        self.publish_kw = kw
         return "item-123"
 
     async def generate_share_url(self, **kw):
+        self.share_kw = kw
         return f"snssdk1128://openplatform/share?state={kw['share_id']}"
 
 
@@ -96,6 +104,77 @@ async def test_publish_one_account_failure_records_error():
     status = await _publish_one_account(account, _BoomAdapter(), task, repo)
     assert status == "failed"
     assert "upload rejected" in repo.updates[-1][1]["error_message"]
+
+
+# ── topics (Douyin hashtags) delivery ─────────────────────────────────────
+
+
+def test_account_publish_opts_falls_back_to_task_topics():
+    account = {"id": "1"}
+    task = {"title": "T", "description": "d", "topics": ["city", "4k"]}
+    title, description, topics = _account_publish_opts(account, task)
+    assert (title, description, topics) == ("T", "d", ["city", "4k"])
+
+
+def test_account_publish_opts_account_override_wins():
+    account = {"id": "1", "topics": ["override"]}
+    task = {"title": "T", "topics": ["city"]}
+    _, _, topics = _account_publish_opts(account, task)
+    assert topics == ["override"]
+
+
+def test_title_with_hashtags_appends_trailing_space_tags():
+    text = _title_with_hashtags("My clip", ["city", "4k"])
+    # Douyin needs `#tag ` (trailing space terminates the tag).
+    assert "#city " in text and "#4k " in text
+    assert text.startswith("My clip ")
+
+
+def test_title_with_hashtags_noop_without_topics():
+    assert _title_with_hashtags("My clip", []) == "My clip"
+
+
+@pytest.mark.asyncio
+async def test_official_publish_injects_hashtags_into_title():
+    repo = _FakeRepo()
+    adapter = _FakeAdapter()
+    account = {
+        "id": "10",
+        "account_id": "20",
+        "channel": "official",
+        "access_token": "act",
+        "platform_user_id": "open1",
+        "platform": "douyin",
+        "resource_id": "30",
+    }
+    task = {
+        "title": "Hi",
+        "description": "d",
+        "resource_ids": ["30"],
+        "topics": ["city"],
+    }
+    status = await _publish_one_account(account, adapter, task, repo)
+    assert status == "success"
+    assert "#city " in adapter.publish_kw["title"]
+
+
+@pytest.mark.asyncio
+async def test_h5_publish_passes_topics_as_list():
+    repo = _FakeRepo()
+    adapter = _FakeAdapter()
+    account = {
+        "id": "11",
+        "account_id": "21",
+        "channel": "h5",
+        "access_token": None,
+        "platform_user_id": "open2",
+        "platform": "douyin",
+        "resource_id": "30",
+    }
+    task = {"title": "Hi", "resource_ids": ["30"], "topics": ["city", "4k"]}
+    status = await _publish_one_account(account, adapter, task, repo)
+    assert status == "pending_share"
+    assert adapter.share_kw["hashtags"] == ["city", "4k"]
 
 
 # ── classify_batch ────────────────────────────────────────────────────────

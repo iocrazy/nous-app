@@ -83,6 +83,39 @@ describe('PublishPage', () => {
     expect(arg.title).toBe('Launch day');
   });
 
+  it('collects topics and submits them in the payload', async () => {
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+
+    // Open the topic input via the "# Topic" chip, type tags (Enter commits;
+    // a trending chip adds one too), then run the standard publish flow.
+    fireEvent.click(screen.getByRole('button', { name: /# Topic/i }));
+    const topicInput = screen.getByLabelText(/Add a topic/i);
+    fireEvent.change(topicInput, { target: { value: '#goldenhour' } });
+    fireEvent.keyDown(topicInput, { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: '#cityscape' }));
+
+    fireEvent.click(screen.getByRole('button', { name: /Add from Library/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /clip-a\.mp4/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Done$/i }));
+    fireEvent.click(screen.getByText('HEYGO'));
+    fireEvent.change(screen.getByPlaceholderText(/Add a title/i), {
+      target: { value: 'Topic day' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
+
+    await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+    const arg = createPublishTask.mock.calls.at(-1)?.[0];
+    // Leading '#' is stripped; both the typed and trending tag are present.
+    expect(arg.topics).toEqual(['goldenhour', 'cityscape']);
+  });
+
+  it('locks the Official API channel behind Douyin review', async () => {
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /Official API/i })).toBeDisabled();
+  });
+
   it('promotes a generated video on pick and publishes its resource id', async () => {
     render(<MemoryRouter><PublishPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());

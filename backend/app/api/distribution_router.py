@@ -471,7 +471,11 @@ async def get_share_schema(task_id: int, user: CurrentUserDep):
     creds = await get_douyin_credentials()
     adapter = get_adapter(h5.get("platform", "douyin"), creds)
     title = h5.get("title") or task.get("title") or ""
+    topics = h5.get("topics") or task.get("topics") or []
     schema_url = await adapter.generate_share_url(
-        video_url=video_url, title=title, share_id=h5["share_id"]
+        video_url=video_url,
+        title=title,
+        share_id=h5["share_id"],
+        hashtags=topics,
     )
     return ShareSchemaResponse(schema_url=schema_url or "", share_id=h5["share_id"])
