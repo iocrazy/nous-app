@@ -18,6 +18,10 @@ vi.mock('../services/topicService', () => ({
   getHotspot: (...a: unknown[]) => getHotspot(...a),
   setHotspotState: vi.fn(),
 }));
+const fetchAllTags = vi.fn();
+vi.mock('../services/unifiedTagService', () => ({
+  fetchAllTags: (...a: unknown[]) => fetchAllTags(...a),
+}));
 vi.mock('../components/Inspiration/ActivityPanel', () => ({
   ActivityPanel: ({ onSelectDate }: { onSelectDate: (date: string) => void; selectedDate?: string | null; refreshKey?: number }) => (
     <button data-testid="activity-panel-select-date" onClick={() => onSelectDate('2025-01-15')}>
@@ -55,6 +59,7 @@ describe('InspirationPage P3 hotspots', () => {
     getActivity.mockResolvedValue([]);
     getHotspots.mockResolvedValue([HS('1'), HS('2'), HS('3')]);
     getHotspot.mockResolvedValue(HS('1'));
+    fetchAllTags.mockResolvedValue([]);
   });
 
   it('renders Notes/Hotspots tabs and a global Parse button', async () => {
@@ -93,6 +98,28 @@ describe('InspirationPage P3 hotspots', () => {
     });
     expect(ta.value).toContain('#food');
     expect(ta.value).toContain('#trend');
+  });
+
+  it('renders pool-tag filter chips on the Hotspots tab (shadow excluded) and filters on click', async () => {
+    fetchAllTags.mockResolvedValue([
+      { id: 't1', name: 'Trend', name_zh: '趋势', origin: 'curated' },
+      { id: 't2', name: 'FromNote', origin: 'note' }, // shadow — must be excluded
+    ]);
+    render(<InspirationPage />);
+    fireEvent.click(screen.getByText('Hotspots'));
+
+    // Curated pool tag renders bilingual display name; shadow tag is excluded.
+    await waitFor(() => expect(screen.getByText('趋势')).toBeTruthy());
+    expect(screen.queryByText('FromNote')).toBeNull();
+
+    // Clicking a tag chip threads its id into getHotspots as the 6th arg.
+    getHotspots.mockClear();
+    fireEvent.click(screen.getByText('趋势'));
+    await waitFor(() =>
+      expect(getHotspots).toHaveBeenCalledWith(undefined, undefined, undefined, 'all', undefined, [
+        't1',
+      ]),
+    );
   });
 
   it('resets category filter when the selected day changes', async () => {

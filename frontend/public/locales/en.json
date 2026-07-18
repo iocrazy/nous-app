@@ -2795,6 +2795,8 @@
     "hotspotsTab": "Hotspots",
     "parseUrl": "Parse URL",
     "hotspots": "Hotspots",
+    "filterTag": "Tag",
+    "clearFilter": "Clear",
     "allHotspots": "All hotspots →",
     "saveAsNote": "Save as note",
     "parse": "Parse",

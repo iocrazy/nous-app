@@ -908,7 +908,7 @@ export const TagsSettings: React.FC = () => {
                 >
                   <NotebookPen size={15} />
                   <span className="flex-1 text-left font-medium">
-                    {t('settings.tags.fromNotes', 'From notes')}
+                    {t('settings.tags.fromNotes', 'From Notes')}
                   </span>
                   <span className="text-xs text-ink-500">{shadowTags.length}</span>
                 </button>

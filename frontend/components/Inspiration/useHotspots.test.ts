@@ -27,7 +27,48 @@ describe('useHotspots', () => {
   it('fetches for the given day when enabled', async () => {
     const { result } = renderHook(() => useHotspots({ enabled: true, day: '2026-07-07' }));
     await waitFor(() => expect(result.current.hotspots).toHaveLength(2));
-    expect(getHotspots).toHaveBeenCalledWith('2026-07-07', undefined, undefined, 'all', undefined);
+    expect(getHotspots).toHaveBeenCalledWith('2026-07-07', undefined, undefined, 'all', undefined, undefined);
+  });
+
+  it('threads tagIds into getHotspots as the 6th arg', async () => {
+    const { result } = renderHook(() =>
+      useHotspots({ enabled: true, day: '2026-07-07', tagIds: ['a', 'b'] }),
+    );
+    await waitFor(() => expect(result.current.hotspots).toHaveLength(2));
+    expect(getHotspots).toHaveBeenCalledWith('2026-07-07', undefined, undefined, 'all', undefined, [
+      'a',
+      'b',
+    ]);
+  });
+
+  it('passes undefined tag filter when tagIds is empty', async () => {
+    const { result } = renderHook(() => useHotspots({ enabled: true, tagIds: [] }));
+    await waitFor(() => expect(result.current.hotspots).toHaveLength(2));
+    expect(getHotspots).toHaveBeenCalledWith(undefined, undefined, undefined, 'all', undefined, undefined);
+  });
+
+  it('refetches when tagIds change', async () => {
+    const { rerender } = renderHook(({ ids }) => useHotspots({ enabled: true, tagIds: ids }), {
+      initialProps: { ids: ['a'] as string[] },
+    });
+    await waitFor(() => expect(getHotspots).toHaveBeenCalledTimes(1));
+    rerender({ ids: ['a', 'b'] });
+    await waitFor(() => expect(getHotspots).toHaveBeenCalledTimes(2));
+    expect(getHotspots).toHaveBeenLastCalledWith(undefined, undefined, undefined, 'all', undefined, [
+      'a',
+      'b',
+    ]);
+  });
+
+  it('does not refetch when tagIds keeps the same values', async () => {
+    const { rerender } = renderHook(({ ids }) => useHotspots({ enabled: true, tagIds: ids }), {
+      initialProps: { ids: ['a', 'b'] as string[] },
+    });
+    await waitFor(() => expect(getHotspots).toHaveBeenCalledTimes(1));
+    rerender({ ids: ['a', 'b'] }); // new array identity, same values
+    // stable-key deps must not trigger an identity-churn refetch
+    await new Promise((r) => setTimeout(r, 20));
+    expect(getHotspots).toHaveBeenCalledTimes(1);
   });
 
   it('applyState optimistically patches then persists', async () => {

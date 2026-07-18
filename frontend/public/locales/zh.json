@@ -2795,6 +2795,8 @@
     "hotspotsTab": "热点",
     "parseUrl": "解析链接",
     "hotspots": "热点",
+    "filterTag": "标签",
+    "clearFilter": "清除",
     "allHotspots": "全部热点 →",
     "saveAsNote": "存为灵感",
     "parse": "解析",

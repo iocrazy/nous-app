@@ -74,14 +74,14 @@ describe('TagsSettings — From notes shadow section', () => {
     expect(screen.queryByText('scratch')).toBeNull();
 
     // Expand "From notes"
-    fireEvent.click(screen.getByText('From notes'));
+    fireEvent.click(screen.getByText('From Notes'));
     expect(screen.getByText('#scratch')).toBeTruthy();
   });
 
   it('promotes a shadow tag: updateTag called with curated origin, row enters the curated grid', async () => {
     render(<TagsSettings />);
     await waitFor(() => expect(screen.getByText('ai')).toBeTruthy());
-    fireEvent.click(screen.getByText('From notes'));
+    fireEvent.click(screen.getByText('From Notes'));
     expect(screen.getByText('#scratch')).toBeTruthy();
 
     fireEvent.click(screen.getByText('Promote'));
@@ -105,7 +105,7 @@ describe('TagsSettings — From notes shadow section', () => {
     );
     render(<TagsSettings />);
     await waitFor(() => expect(screen.getByText('ai')).toBeTruthy());
-    fireEvent.click(screen.getByText('From notes'));
+    fireEvent.click(screen.getByText('From Notes'));
     expect(screen.getByText('#scratch')).toBeTruthy();
 
     fireEvent.click(screen.getByText('Promote'));
@@ -123,7 +123,7 @@ describe('TagsSettings — From notes shadow section', () => {
     updateTag.mockReset().mockRejectedValue(new Error('Promote failed'));
     render(<TagsSettings />);
     await waitFor(() => expect(screen.getByText('ai')).toBeTruthy());
-    fireEvent.click(screen.getByText('From notes'));
+    fireEvent.click(screen.getByText('From Notes'));
     expect(screen.getByText('#scratch')).toBeTruthy();
 
     fireEvent.click(screen.getByText('Promote'));
@@ -150,7 +150,7 @@ describe('TagsSettings — shadow row opens the edit dialog (rename hint reachab
   it('clicking a shadow row opens the edit dialog and shows the rename hint', async () => {
     render(<TagsSettings />);
     await waitFor(() => expect(screen.getByText('ai')).toBeTruthy());
-    fireEvent.click(screen.getByText('From notes'));
+    fireEvent.click(screen.getByText('From Notes'));
     expect(screen.getByText('#scratch')).toBeTruthy();
 
     // Click the "#scratch" text itself — the entry point for shadow rows.
@@ -169,7 +169,7 @@ describe('TagsSettings — shadow row opens the edit dialog (rename hint reachab
   it('clicking Promote does not also open the edit dialog', async () => {
     render(<TagsSettings />);
     await waitFor(() => expect(screen.getByText('ai')).toBeTruthy());
-    fireEvent.click(screen.getByText('From notes'));
+    fireEvent.click(screen.getByText('From Notes'));
 
     fireEvent.click(screen.getByText('Promote'));
 
