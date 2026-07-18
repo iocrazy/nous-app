@@ -335,22 +335,41 @@ export const EDITOR_SHELL_STYLES = `
   padding:20px 26px 22px;
 }
 .mh-sheet{
-  width:820px; max-width:100%;
+  /* Industry screenplay margins (laper parity), expressed in the Courier
+     character grid so they line up with the fixed 60ch text column below:
+       --sheet-pad-l 15ch = 1.5" left margin  (10 cpi → 15 chars)
+       --sheet-pad-r 10ch = 1"   right margin (10 cpi → 10 chars)
+     Every consumer that must reach the paper edge (the page-seam bleed math)
+     derives its offset from these + the border width, never a raw magic px. */
+  --sheet-pad-l:15ch; --sheet-pad-r:10ch; --sheet-border-w:1px;
+  /* 85ch frame = 15 (left) + 60 (text) + 10 (right); + both borders. With
+     box-sizing:border-box the CONTENT box lands at exactly 60ch, so the
+     left-aligned .hw-* text column fills it and the leftover width can no
+     longer pile up on the right (the asymmetric right-whitespace report). */
+  width:calc(60ch + var(--sheet-pad-l) + var(--sheet-pad-r) + 2 * var(--sheet-border-w)); max-width:100%;
   /* Graceful floor for very tight widths: the Hollywood ch-indents
-     (.hw-dialogue 10ch+15ch, .hw-character 22ch ≈ 200px) are FIXED padding
-     that never shrinks, so squashing the paper below ~480px would render
-     dialogue one character per line. Below the floor the paper overflows
-     .mh-sheet-scroll horizontally instead (overflow-y:auto makes its
-     overflow-x auto too), giving a scrollbar — never squashed, never clipped.
-     margin-inline:auto (not the parent's align-items:center) does the
-     centering: auto margins collapse to 0 when the paper is wider than the
-     scroller, keeping the LEFT edge reachable by scroll (a centered overflow
-     flex item's left side is unreachable — classic data-loss trap). */
-  min-width:480px; margin-inline:auto;
+     (.hw-dialogue 10ch+15ch) are FIXED padding that never shrinks, so squashing
+     the paper too far would render dialogue one character per line. Below the
+     floor the paper overflows .mh-sheet-scroll horizontally instead
+     (overflow-y:auto makes its overflow-x auto too), giving a scrollbar — never
+     squashed, never clipped. margin-inline:auto (not the parent's
+     align-items:center) does the centering: auto margins collapse to 0 when the
+     paper is wider than the scroller, keeping the LEFT edge reachable by scroll
+     (a centered overflow flex item's left side is unreachable — classic
+     data-loss trap).
+     Floor raised 480 → 520: the industry margins (25ch of sheet padding) plus
+     dialogue's own 25ch indent eat 50ch of the width, so at 480 the dialogue
+     measure fell to ~69px (one short word per line); 520 keeps a readable
+     >100px column — the narrow-width spec's guarantee. */
+  min-width:520px; margin-inline:auto;
   background:linear-gradient(180deg, var(--sheet-bg) 0%, var(--sheet-bg-2) 100%);
   border:1px solid var(--sheet-border); border-radius:6px;
-  box-shadow:var(--shadow-sheet); padding:34px 40px 44px;
-  font-family:var(--mono); color:var(--sheet-ink);
+  box-shadow:var(--shadow-sheet); padding:34px var(--sheet-pad-r) 44px var(--sheet-pad-l);
+  /* The paper shares the SCRIPT's Courier grid (--script-mono @ 13.5px, the
+     same font-size the .hw-* text column resolves 60ch against) so the ch-based
+     margins here — and the seam-bleed offsets derived from them — resolve to
+     the identical px as the text column. */
+  font-family:var(--script-mono); font-size:13.5px; color:var(--sheet-ink);
   position:relative; min-height:60%; isolation:isolate;
   /* Column-flex item in .mh-sheet-scroll: the default flex-shrink:1 lets the
      bounded scroll container squash the paper back to its min-height, turning
@@ -1590,9 +1609,16 @@ export const EDITOR_SHELL_STYLES = `
   background:linear-gradient(180deg, #fdfcf8 0%, #faf8f1 100%);
   border-color:#eae7db;
 }
-/* A page, not a panel: screenplay margins (wide left like a bound page) and an
-   A4-ish minimum height so even an empty script reads as a sheet of paper. */
-.mh-sheet{ width:780px; padding:56px 48px 72px 72px; min-height:1040px; }
+/* A page, not a panel: this LAPER-PARITY override wins over the base rule for
+   the vertical rhythm (roomier top/bottom) and the A4-ish min-height so even an
+   empty script reads as a sheet. Horizontal margins + width now come from the
+   shared --sheet-pad-* vars (base rule) so both rules stay in one Courier grid —
+   only the vertical padding and the floor differ here. */
+.mh-sheet{
+  width:calc(60ch + var(--sheet-pad-l) + var(--sheet-pad-r) + 2 * var(--sheet-border-w));
+  padding:56px var(--sheet-pad-r) 72px var(--sheet-pad-l);
+  min-height:1040px;
+}
 /* Slug is uppercase REGULAR weight on a printed page (laper too) — position and
    case carry the meaning, not boldness. Weight/case live on .mh-scene-heading. */
 /* Focused empty block whispers its element type (laper/Notion affordance) —
@@ -1751,17 +1777,29 @@ export const EDITOR_SHELL_STYLES = `
    gap / top-edge three-piece break. Rule row height (40px) = SEAM_CHROME_PX
    (paginate.ts). Bleeds past the sheet text padding so the rule runs
    edge-to-edge. */
+/* The seam lives in the sheet's CONTENT box, so to bleed edge-to-edge it must
+   pull back past the paper's horizontal padding + border on each side. Derive
+   both from the shared --sheet-pad-* vars (they resolve to the SAME px here as
+   on .mh-sheet — the seam inherits the sheet's font, so its ch matches) rather
+   than the old hardcoded -73/-49 that were tied to the retired 72/48px padding.
+     left  = padding-left  + border  →  reaches the left  paper edge
+     right = padding-right + border  →  reaches the right paper edge */
 .mh-page-seam{
-  margin:0 -49px 0 -73px; pointer-events:none; user-select:none;
+  margin:0
+    calc(-1 * (var(--sheet-pad-r) + var(--sheet-border-w))) 0
+    calc(-1 * (var(--sheet-pad-l) + var(--sheet-border-w)));
+  pointer-events:none; user-select:none;
   position:relative; z-index:3;
 }
 /* IN-EDITOR seam (pageSeamPlugin widget): it renders inside .mh-scene-block,
-   which adds padding-left:4px, so the shared -73px left margin lands 4px short
-   of the paper's left edge (the scene-level <PageSeam> has no such inset and
-   bleeds correctly). Add that 4px back so both seam contexts reach the same
-   edge. The right edge already coincides (block has no right padding), so the
-   -49px right margin is unchanged. */
-.mh-page-seam-inline{ margin-left:-77px; }
+   which adds padding-left:4px, so the shared left margin lands 4px short of the
+   paper's left edge (the scene-level <PageSeam> has no such inset and bleeds
+   correctly). Add that 4px back so both seam contexts reach the same edge. The
+   right edge already coincides (block has no right padding), so the right
+   margin above is unchanged. */
+.mh-page-seam-inline{
+  margin-left:calc(-1 * (var(--sheet-pad-l) + var(--sheet-border-w) + 4px));
+}
 /* The dashed rule: a 40px flex row whose two ::before/::after segments grow to
    fill the width, with the page number pinned in the centre. The 1px dashed
    border is drawn on the pseudo-elements in faint sheet ink, so it adapts to
