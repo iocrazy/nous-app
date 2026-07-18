@@ -331,7 +331,7 @@ describe('ProjectWorkspace', () => {
     expect(mockScriptService.fetchScriptProjects).toHaveBeenCalledTimes(2);
   });
 
-  it('lifts the editor scene list into the sidebar SCENES section and routes clicks back', async () => {
+  it('does NOT render a SCENES list in the sidebar — the editor owns its own scene rail now', async () => {
     mockScriptService.fetchScriptProjects.mockResolvedValue({
       data: [
         { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
@@ -344,12 +344,9 @@ describe('ProjectWorkspace', () => {
     fireEvent.click(await screen.findByTestId('ws-ep-script'));
     await screen.findByTestId('mock-editor-shell');
 
-    const sceneRow = await screen.findByTestId('ws-scene-sc1');
-    expect(sceneRow).toHaveTextContent('S1');
-    expect(sceneRow).toHaveTextContent('Test Loc');
-
-    fireEvent.click(sceneRow);
-    expect(mockSelectScene).toHaveBeenCalledWith('sc1');
+    // The scene list moved OUT of the workspace nav into the editor's own slim
+    // left rail beside the paper — the sidebar never shows per-scene rows.
+    expect(screen.queryByTestId('ws-scene-sc1')).toBeNull();
   });
 
   it('auto-provisions an empty script when the episode has none, then mounts it', async () => {

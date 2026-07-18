@@ -113,14 +113,24 @@ export const EDITOR_SHELL_STYLES = `
   overflow:hidden;
 }
 .mh-editor-shell *{ box-sizing:border-box; }
-/* Embedded in the projects workspace: the editor's own left rail is NOT
-   rendered (the workspace sidebar replaces it), so the shell has only two grid
-   children — the script column and the Writing panel. The default 3-track
-   template (auto minmax(0,1fr) auto) then left the 296px panel floating inside
-   the middle cell with a big empty gap to its right. Collapse to two tracks so the
-   panel sits flush against the right edge and the script column fills + centres
-   (via .mh-sheet-scroll{align-items:center} + .mh-sheet{max-width:100%}). */
-.mh-editor-shell.mh-embedded{ grid-template-columns:minmax(0, 1fr) auto; }
+/* Embedded in the projects workspace: the editor hosts its OWN slim SCENES rail
+   as the left column beside the paper (laper-style), so the shell keeps the full
+   three-track template (auto minmax(0,1fr) auto) — scene rail, script column,
+   Writing panel. The rail is narrower than the standalone one (SCENES only, no
+   brand / ep selector / module nav — the workspace tree owns those); when
+   collapsed it shrinks to the shared 56px strip, and the script column's
+   minmax(0,1fr) + .mh-sheet{min-width} floor keeps handling any narrow-width
+   overflow (the paper scrolls, never clips — narrow-width spec guarantee). */
+.mh-editor-shell.mh-embedded{ grid-template-columns:auto minmax(0, 1fr) auto; }
+/* SCENES-only embedded rail: slimmer than the 258px standalone rail. */
+.mh-rail-embedded{ width:212px; }
+.mh-rail-embedded.collapsed{ width:56px; }
+/* Right-aligned cluster (count badge + collapse toggle) in the embedded rail's
+   section head — one group pushed to the right so the two never fight over the
+   shared .mh-rail-count-badge{margin-left:auto}. */
+.mh-rail-head-actions{ margin-left:auto; display:inline-flex; align-items:center; gap:6px; }
+.mh-rail-head-actions .mh-rail-count-badge{ margin-left:0; }
+.mh-rail-collapse-btn{ width:24px; height:24px; font-size:13px; }
 /* Embedded: don't paint the standalone lavender page gradient — it clashed with
    the workspace's own surface (a mismatched purple block in the empty area
    right of the sheet). Go transparent so the workspace background shows through
