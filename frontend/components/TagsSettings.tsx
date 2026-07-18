@@ -744,7 +744,7 @@ export const TagsSettings: React.FC = () => {
                     type="text"
                     value={newGroupName}
                     onChange={(e) => setNewGroupName(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleCreateGroup()}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleCreateGroup(); }}
                     placeholder="Group name"
                     autoFocus
                     className="flex-1 min-w-0 px-2.5 py-1.5 rounded-md bg-ink-800 border border-ink-700 text-xs text-ink-200 placeholder-ink-500 outline-none focus:border-indigo-500"
@@ -791,7 +791,7 @@ export const TagsSettings: React.FC = () => {
                       autoFocus
                       onChange={(e) => setRenameGroupValue(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleRenameGroupConfirm(group.id);
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleRenameGroupConfirm(group.id);
                         if (e.key === 'Escape') setRenamingGroupId(null);
                       }}
                       onBlur={() => handleRenameGroupConfirm(group.id)}
@@ -1044,7 +1044,7 @@ export const TagsSettings: React.FC = () => {
                   }}
                   className="w-full px-4 py-3 bg-ink-950 border border-ink-800 rounded-lg text-ink-200 placeholder-ink-500 focus:outline-none focus:border-indigo-500 transition-colors"
                   autoFocus
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreateTag()}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleCreateTag(); }}
                 />
               </div>
               <div className="space-y-2">
@@ -1118,7 +1118,7 @@ export const TagsSettings: React.FC = () => {
                       ? 'border-indigo-500/40 cursor-not-allowed opacity-80'
                       : 'border-ink-800 focus:border-indigo-500'
                   }`}
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreateTag()}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleCreateTag(); }}
                 />
               </div>
               <div className="space-y-2">
@@ -1225,7 +1225,7 @@ export const TagsSettings: React.FC = () => {
                   }}
                   className="w-full px-4 py-3 bg-ink-950 border border-ink-800 rounded-lg text-ink-200 placeholder-ink-500 focus:outline-none focus:border-indigo-500 transition-colors"
                   autoFocus
-                  onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit()}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleSaveEdit(); }}
                 />
               </div>
               <div className="space-y-2">
@@ -1285,7 +1285,7 @@ export const TagsSettings: React.FC = () => {
                       ? 'border-indigo-500/40 cursor-not-allowed opacity-80'
                       : 'border-ink-800 focus:border-indigo-500'
                   }`}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSaveEdit()}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleSaveEdit(); }}
                 />
               </div>
               <div className="space-y-2">
