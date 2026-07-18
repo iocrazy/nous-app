@@ -2931,6 +2931,7 @@
     "cueHintEnter": "Select or create",
     "cueHintTab": "To action",
     "mentionHintEnter": "Insert",
+    "cueCreate": "Create \"{{name}}\"",
     "cueCreateHint": "Press Enter to create \"{{name}}\"",
     "transHintTab": "Next type",
     "transNoMatch": "No matching preset",
