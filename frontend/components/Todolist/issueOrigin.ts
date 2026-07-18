@@ -79,3 +79,23 @@ export function originLabel(origin: ParsedOrigin): string {
       return 'From a project stage';
   }
 }
+
+/** Compact module chip for list/board rows (the mockup's per-row tag).
+ *  Derived from the origin — the row's honest module context — because a
+ *  labels schema doesn't exist. Rows without a content origin get no chip,
+ *  exactly like the mockup's untagged rows. Dot colors ride existing
+ *  tailwind tokens (no new palette). */
+export function originModule(
+  originId: string | null | undefined,
+): { label: string; dotClass: string } | null {
+  const origin = parseOriginId(originId);
+  if (!origin) return null;
+  switch (origin.kind) {
+    case 'canvas':
+      return { label: 'Canvas', dotClass: 'bg-sky-400' };
+    case 'scene':
+      return { label: 'Script', dotClass: 'bg-violet-400' };
+    case 'project_stage':
+      return { label: 'Project', dotClass: 'bg-emerald-400' };
+  }
+}
