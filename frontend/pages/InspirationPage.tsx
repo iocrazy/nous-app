@@ -29,14 +29,43 @@ import {
   type NoteAttachment,
   type RefHotspot,
 } from '../services/inspirationService';
+import { fetchAllTags } from '../services/unifiedTagService';
+import type { Tag } from '../types';
 
 const PAGE_SIZE = 50;
+
+/**
+ * Suggestions for the note `#` completion menu: curated pool tags first
+ * (each with its bilingual name_zh alias), then the user's own note history.
+ * Shadow pool tags (origin === 'note') are skipped since they duplicate note history.
+ */
+export function buildTagSuggestions(
+  noteTags: { tag: string; cnt: number }[],
+  poolTags: Tag[],
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (w: string | null | undefined) => {
+    const v = (w || '').trim();
+    if (!v || seen.has(v.toLowerCase())) return;
+    seen.add(v.toLowerCase());
+    out.push(v);
+  };
+  for (const t of poolTags) {
+    if (t.origin === 'note') continue;
+    push(t.name);
+    push(t.name_zh);
+  }
+  for (const n of noteTags) push(n.tag);
+  return out;
+}
 
 export const InspirationPage: React.FC = () => {
   const { t } = useTranslation();
   const { addToast } = useToast();
   const [notes, setNotes] = useState<InspirationNote[]>([]);
   const [tags, setTags] = useState<{ tag: string; cnt: number }[]>([]);
+  const [poolTags, setPoolTags] = useState<Tag[]>([]);
   const [date, setDate] = useState<string | null>(null);
   const [tag, setTag] = useState<string | null>(null);
   const [queryInput, setQueryInput] = useState('');
@@ -134,6 +163,12 @@ export const InspirationPage: React.FC = () => {
       alive = false;
     };
   }, [refreshKey]);
+
+  useEffect(() => {
+    fetchAllTags()
+      .then(setPoolTags)
+      .catch((err) => console.error('fetchAllTags failed', err));
+  }, []);
 
   const loadMore = useCallback(async () => {
     if (!notes.length || loading) return;
@@ -316,7 +351,7 @@ export const InspirationPage: React.FC = () => {
                   setPrefill(null);
                 }}
                 onAttachmentUploaded={onAttachmentUploaded}
-                tagSuggestions={tags.map((x) => x.tag)}
+                tagSuggestions={buildTagSuggestions(tags, poolTags)}
               />
               <NoteTimeline
                 notes={notes}
@@ -434,7 +469,13 @@ export const InspirationPage: React.FC = () => {
             <h4 className="mb-2 text-sm font-semibold text-content">
               {t('inspiration.editNote', 'Edit note')}
             </h4>
-            <NoteEditor value={editText} onChange={setEditText} minRows={6} onSubmit={() => void saveEdit()} />
+            <NoteEditor
+              value={editText}
+              onChange={setEditText}
+              minRows={6}
+              onSubmit={() => void saveEdit()}
+              tagSuggestions={buildTagSuggestions(tags, poolTags)}
+            />
             <div className="mt-3 flex justify-end gap-2">
               <button onClick={() => setEditing(null)} className="rounded-lg bg-island-2 px-4 py-1.5 text-xs text-content-2">
                 {t('inspiration.cancel', 'Cancel')}
