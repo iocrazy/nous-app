@@ -603,7 +603,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
               autoFocus
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSubmit(); if (e.key === 'Escape') setRenameFile(null); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleRenameSubmit(); if (e.key === 'Escape') setRenameFile(null); }}
               className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-200 focus:outline-none focus:border-indigo-500"
             />
             <div className="flex justify-end gap-2 mt-4">

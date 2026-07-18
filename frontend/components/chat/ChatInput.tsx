@@ -120,7 +120,7 @@ export function ChatInput({
           return false; // don't prevent insertion
         }
         // Enter (without Shift) → send
-        if (event.key === 'Enter' && !event.shiftKey) {
+        if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
           event.preventDefault();
           if (disabledRef.current) return true;
           const currentEditor = view.dom.closest('[data-tiptap-editor]')

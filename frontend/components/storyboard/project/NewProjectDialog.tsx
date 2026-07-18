@@ -20,7 +20,7 @@ export default function NewProjectDialog({ onCreate, onCancel }: NewProjectDialo
           autoFocus
           className="mb-4 w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-ink-100 placeholder-ink-500 focus:border-indigo-500 focus:outline-none transition-colors"
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && name.trim()) onCreate(name.trim());
+            if (e.key === 'Enter' && !e.nativeEvent.isComposing && name.trim()) onCreate(name.trim());
             if (e.key === 'Escape') onCancel();
           }}
         />

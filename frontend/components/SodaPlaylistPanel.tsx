@@ -125,7 +125,7 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
             className="flex-1 bg-transparent border-none outline-none text-ink-200 placeholder-ink-600 px-4 py-3"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleLoad()}
+            onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && handleLoad()}
           />
           <button
             onClick={handleLoad}

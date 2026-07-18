@@ -134,7 +134,7 @@ export function SessionList({
                       onClick={(e) => e.stopPropagation()}
                       onBlur={commitEdit}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') commitEdit();
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) commitEdit();
                         if (e.key === 'Escape') setEditingId(null);
                       }}
                       className="w-full rounded bg-ink-800 px-1 py-0.5 text-xs text-ink-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"

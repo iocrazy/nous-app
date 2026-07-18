@@ -60,7 +60,7 @@ const RenameInput: React.FC<{
     value={value}
     onChange={(e) => onChange?.(e.target.value)}
     onKeyDown={(e) => {
-      if (e.key === 'Enter') onConfirm?.();
+      if (e.key === 'Enter' && !e.nativeEvent.isComposing) onConfirm?.();
       if (e.key === 'Escape') onCancel?.();
     }}
     onBlur={() => onCancel?.()}
