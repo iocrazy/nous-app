@@ -12,6 +12,8 @@ import {
   type HotspotView,
   type HotspotStatePatch,
 } from '../services/topicService';
+import { fetchAllTags } from '../services/unifiedTagService';
+import type { Tag } from '../types';
 import { useToast } from '../components/Toast';
 import { Timeline } from '../components/TopicInspiration/Timeline';
 import { HotspotInfoPanel } from '../components/TopicInspiration/HotspotInfoPanel';
@@ -35,6 +37,8 @@ export const TopicInspirationPage: React.FC = () => {
   const [day, setDay] = useState<string | undefined>(undefined);
   const [category, setCategory] = useState<string>('all');
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
+  const [allTags, setAllTags] = useState<Tag[]>([]);
+  const [tagFilterIds, setTagFilterIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Hotspot | null>(null);
   const [queryInput, setQueryInput] = useState('');
@@ -94,6 +98,23 @@ export const TopicInspirationPage: React.FC = () => {
     return () => clearTimeout(id);
   }, [queryInput]);
 
+  // Load the curated tag pool once for the Tag filter chip.
+  useEffect(() => {
+    if (notesEnabled) return;
+    let alive = true;
+    (async () => {
+      try {
+        const tags = await fetchAllTags();
+        if (alive) setAllTags(tags);
+      } catch (err) {
+        console.error('load tags for topic filter failed', err);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [notesEnabled]);
+
   // addToast is wrapped in useCallback in Toast context and is referentially stable,
   // but omitted here per brief guidance to prevent any potential infinite-refetch risk.
   useEffect(() => {
@@ -107,7 +128,7 @@ export const TopicInspirationPage: React.FC = () => {
       setLoading(true);
       try {
         const [hs, ds] = await Promise.all([
-          getHotspots(day, category, query, view, selectedSources),
+          getHotspots(day, category, query, view, selectedSources, tagFilterIds),
           getHotspotDates(),
         ]);
         if (!alive) return;
@@ -122,7 +143,7 @@ export const TopicInspirationPage: React.FC = () => {
     return () => {
       alive = false;
     };
-  }, [day, category, query, view, selectedSources, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [day, category, query, view, selectedSources, tagFilterIds, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Optimistically apply a state patch, drop the card if it no longer belongs
   // to the current view, persist, and revert (via refetch) on failure.
@@ -255,6 +276,9 @@ export const TopicInspirationPage: React.FC = () => {
           day={day}
           dates={dates}
           onDay={setDay}
+          allTags={allTags}
+          selectedTagIds={tagFilterIds}
+          onTagIdsChange={setTagFilterIds}
           searching={searching}
         />
       </div>
@@ -267,7 +291,7 @@ export const TopicInspirationPage: React.FC = () => {
             value={interestInput}
             onChange={(e) => setInterestInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') saveInterest();
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) saveInterest();
             }}
             placeholder={t('topic.interestPlaceholder', '关键词，空格分隔，如：综艺 明星 影视 世界杯')}
             className={`flex-1 rounded-lg px-3 py-2 text-sm outline-none transition-colors bg-island-2 border border-line-strong text-content placeholder:text-content-4 focus:border-accent/50`}

@@ -93,10 +93,11 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
     setSubmitting(true);
     setError(null);
     try {
+      // Snowflake BIGINTs stay strings — Number() rounds past 2^53.
       const parsedTeamId =
-        scopeKind === 'team' && teamId ? Number(teamId) : undefined;
+        scopeKind === 'team' && teamId ? teamId : undefined;
       const parsedProjectId =
-        scopeKind === 'project' && projectId ? Number(projectId) : undefined;
+        scopeKind === 'project' && projectId ? projectId : undefined;
       const created = await aiLibraryService.createSkill({
         slug,
         name: name.trim(),

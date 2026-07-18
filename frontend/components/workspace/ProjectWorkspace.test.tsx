@@ -209,6 +209,22 @@ describe('ProjectWorkspace', () => {
     expect(screen.getByTestId('ws-module-settings')).toBeTruthy();
   });
 
+  it('keeps the 剧集 row icon left-aligned with the other rows (expand chevron does not indent it)', async () => {
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    const epRow = await screen.findByTestId('ws-module-episodes');
+    const icons = Array.from(epRow.querySelectorAll('svg.lucide'));
+    // The row's LEADING icon must be the module glyph (ListVideo), NOT the
+    // expand chevron — the chevron used to sit before it and pushed the icon
+    // out of the shared left-icon column.
+    expect(icons.length).toBeGreaterThan(0);
+    expect(icons[0]!.classList.contains('lucide-list-video')).toBe(true);
+    // The expand affordance still exists (relocated to the row's right group).
+    expect(
+      epRow.querySelector('.lucide-chevron-right, .lucide-chevron-down'),
+    ).toBeTruthy();
+  });
+
   it('switches the current episode via the ⇄ card popover and persists the choice', async () => {
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
@@ -315,7 +331,7 @@ describe('ProjectWorkspace', () => {
     expect(mockScriptService.fetchScriptProjects).toHaveBeenCalledTimes(2);
   });
 
-  it('lifts the editor scene list into the sidebar SCENES section and routes clicks back', async () => {
+  it('does NOT render a SCENES list in the sidebar — the editor owns its own scene rail now', async () => {
     mockScriptService.fetchScriptProjects.mockResolvedValue({
       data: [
         { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
@@ -328,12 +344,9 @@ describe('ProjectWorkspace', () => {
     fireEvent.click(await screen.findByTestId('ws-ep-script'));
     await screen.findByTestId('mock-editor-shell');
 
-    const sceneRow = await screen.findByTestId('ws-scene-sc1');
-    expect(sceneRow).toHaveTextContent('S1');
-    expect(sceneRow).toHaveTextContent('Test Loc');
-
-    fireEvent.click(sceneRow);
-    expect(mockSelectScene).toHaveBeenCalledWith('sc1');
+    // The scene list moved OUT of the workspace nav into the editor's own slim
+    // left rail beside the paper — the sidebar never shows per-scene rows.
+    expect(screen.queryByTestId('ws-scene-sc1')).toBeNull();
   });
 
   it('auto-provisions an empty script when the episode has none, then mounts it', async () => {

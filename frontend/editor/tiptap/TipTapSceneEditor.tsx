@@ -375,6 +375,38 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
   const prefix = isAsian ? ASIAN_PREFIX[attrs.elType] : undefined;
   const suffix = isAsian ? ASIAN_SUFFIX[attrs.elType] : undefined;
 
+  // Asian dialogue continuation mark (∟, spec B §3): a wrapped dialogue block
+  // carries the manuscript continuation glyph at its left; a single-line block
+  // does not (laper parity). CSS renders the ∟ as a pseudo-element gated on
+  // `.as-multiline`, so it never enters the doc and can't be edited — this only
+  // toggles that class off the REAL laid-out height, decoupled from React
+  // re-renders/PM transactions via a ResizeObserver so text growth is caught even
+  // though the per-row re-render is otherwise gated (item 1c). Attached to every
+  // asian row's inner `.mh-el-row`; the effect no-ops unless the row is dialogue.
+  const asianRowInnerRef = useRef<HTMLDivElement | null>(null);
+  const isAsianDialogue = isAsian && (attrs.elType as ElementType) === 'dialogue';
+  useEffect(() => {
+    if (!isAsianDialogue) return undefined;
+    const rowEl = asianRowInnerRef.current;
+    const wrapper = rowEl?.parentElement;
+    const editable = rowEl?.querySelector<HTMLElement>('.mh-el-editable');
+    if (!rowEl || !wrapper || !editable) return undefined;
+    const measure = () => {
+      const lineHeight = parseFloat(getComputedStyle(editable).lineHeight) || 0;
+      // One line box ≈ lineHeight; a wrapped block runs past ~1.5× that. The
+      // midpoint threshold avoids sub-pixel flicker at exactly one line.
+      const multi = lineHeight > 0 && editable.getBoundingClientRect().height > lineHeight * 1.5;
+      wrapper.classList.toggle('as-multiline', multi);
+    };
+    measure();
+    // jsdom (unit tests) has no ResizeObserver; the one initial measure above is
+    // enough there (real wrap detection is exercised in the Playwright asian spec).
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(measure);
+    ro.observe(editable);
+    return () => ro.disconnect();
+  }, [isAsianDialogue]);
+
   const onTickClick = refs.onTickClickRef.current;
   const selected = refs.selectedElementIdsRef.current?.has(attrs.id) ?? false;
 
@@ -533,6 +565,7 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
           </span>
         )}
         <div
+          ref={asianRowInnerRef}
           className={`mh-el-row${dropClass}`}
           onDragOver={onRowDragOver}
           onDrop={onRowDrop}

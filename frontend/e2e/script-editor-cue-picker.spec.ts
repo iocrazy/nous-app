@@ -14,7 +14,7 @@
 // Typing while the picker IS open still filters it — that path is the query
 // bridge, not an open trigger.
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { SCRIPT_URL, setupScriptStubs, wireScene, type WireElement, SCENE_ID_BASE } from './helpers/script-stubs';
 
 const ELEMENTS: WireElement[] = [
@@ -132,4 +132,90 @@ test('arrowing into a character line does not pop the picker', async ({ page }) 
   await page.keyboard.press('End');
   await page.waitForTimeout(300);
   await expect(picker(page)).toBeHidden();
+});
+
+// ── Create-a-character parity with the location dropdown ────────────────────
+//
+// The footer promises "Select or create". Before the fix the picker only ever
+// SELECTED: a substring candidate ("55555555") auto-highlighted, so Enter picked
+// it and the writer's freshly typed name ("5555555") could never become its own
+// cue. And with no candidate at all, the line-driven Enter just closed the popup.
+// Contract (location-dropdown parity): a non-empty query that matches nothing
+// EXACTLY appends a navigable "Create '<name>'" row; Enter on it (or on the sole
+// create row when nothing matches) writes the new name — which, since the cast is
+// the set of distinct cues, is exactly how a character is born.
+
+const cueRow = (page: Page) => page.locator('[data-el-type="character"]').nth(1);
+const createRow = (page: Page) => page.locator('.mh-mention-opt.create');
+
+/** Open the picker on the empty cue line (index 1) and return its search input. */
+async function openEmptyCue(page: Page): Promise<Locator> {
+  const box = await cueRow(page).boundingBox();
+  expect(box, 'fixture must render an empty character row').not.toBeNull();
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await expect(picker(page)).toBeVisible();
+  return picker(page).locator('input');
+}
+
+test('a brand-new name offers a Create row and Enter creates the character', async ({ page }) => {
+  await open(page);
+  const input = await openEmptyCue(page);
+  await input.fill('NEW HERO');
+  // Nothing in the cast matches, so the sole navigable row is the Create row.
+  await expect(createRow(page)).toBeVisible();
+  await expect(createRow(page)).toContainText('NEW HERO');
+  await input.press('Enter');
+  await expect(picker(page)).toBeHidden();
+  await expect(cueRow(page)).toHaveText(/NEW HERO/);
+  // The new cue joins the cast (distinct-cue derivation) — the rail lists it.
+  await expect(page.locator('.mh-rail-entity-name', { hasText: 'NEW HERO' })).toBeVisible();
+});
+
+test('a partial match keeps Create reachable — Enter on it coins the shorter name', async ({
+  page,
+}) => {
+  await open(page);
+  const input = await openEmptyCue(page);
+  // "LIN" is a substring of the existing "LIN XIAOMAN": the candidate highlights
+  // first, but the Create row must still be there to reach.
+  await input.fill('LIN');
+  await expect(createRow(page)).toContainText('LIN');
+  await input.press('ArrowDown'); // step off the highlighted candidate onto Create
+  await input.press('Enter');
+  await expect(picker(page)).toBeHidden();
+  await expect(cueRow(page)).toHaveText(/^LIN$/); // the new short name, not "LIN XIAOMAN"
+});
+
+test('an exact match selects and never creates', async ({ page }) => {
+  await open(page);
+  const input = await openEmptyCue(page);
+  await input.fill('LIN XIAOMAN');
+  // Exact hit → no synthetic Create row; Enter commits the existing cue.
+  await expect(createRow(page)).toHaveCount(0);
+  await input.press('Enter');
+  await expect(picker(page)).toBeHidden();
+  await expect(cueRow(page)).toHaveText(/LIN XIAOMAN/);
+});
+
+test('the line keyboard path also creates on Enter when nothing matches', async ({ page }) => {
+  await open(page);
+  // No search-box focus this time: type straight into the cue line.
+  const box = await cueRow(page).boundingBox();
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await expect(picker(page)).toBeVisible();
+  await page.keyboard.type('NOVA');
+  await expect(createRow(page)).toContainText('NOVA');
+  await page.keyboard.press('Enter');
+  await expect(picker(page)).toBeHidden();
+  await expect(cueRow(page)).toHaveText(/NOVA/);
+});
+
+test('the create affordance works in Asian format too', async ({ page }) => {
+  await open(page, 'asian');
+  const input = await openEmptyCue(page);
+  await input.fill('5555555');
+  await expect(createRow(page)).toContainText('5555555');
+  await input.press('Enter');
+  await expect(picker(page)).toBeHidden();
+  await expect(cueRow(page)).toHaveText(/5555555/);
 });

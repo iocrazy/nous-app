@@ -33,6 +33,12 @@ const TAG_COLORS = [
 
 export interface EagleTagBrowserProps {
   allTags: Tag[];
+  /** Hidden shadow tags (origin === 'note', not yet assigned) excluded from
+   *  `allTags`. They stay out of the default list but are (a) matched for the
+   *  exact-name check so Create never offers a name that already exists, and
+   *  (b) revealed in results when the search text matches them, so a user can
+   *  click/Enter to attach one instead of hitting a dead key. */
+  shadowTags?: Tag[];
   selectedIds: Set<string>;
   starredIds: string[];
   settings: PickerSettings;
@@ -71,6 +77,7 @@ export interface EagleTagBrowserProps {
 
 export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
   allTags,
+  shadowTags = [],
   selectedIds,
   starredIds,
   settings,
@@ -109,11 +116,30 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
 
   const shouldAutoFocus = autoFocusSearch ?? !isMobile;
 
+  // Shadow tags whose name/name_zh matches the current search — revealed in the
+  // rendered list so they can be clicked/Entered to attach (same match rule as
+  // the browser's normal tag search). Empty search keeps shadows hidden.
+  const shadowMatches = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return [] as Tag[];
+    return shadowTags.filter(
+      (tag) =>
+        tag.name.toLowerCase().includes(q) ||
+        (tag.name_zh ?? '').toLowerCase().includes(q),
+    );
+  }, [search, shadowTags]);
+
+  // Tags actually rendered: the visible set plus any search-revealed shadows.
+  const visibleTags = useMemo(
+    () => (shadowMatches.length ? [...allTags, ...shadowMatches] : allTags),
+    [allTags, shadowMatches],
+  );
+
   // Groups / counts
   const { groups, totalCount, uncategorizedCount } = useMemo(() => {
     const groupMap = new Map<string, number>();
     let uncat = 0;
-    for (const tag of allTags) {
+    for (const tag of visibleTags) {
       if (tag.group_name) {
         groupMap.set(tag.group_name, (groupMap.get(tag.group_name) || 0) + 1);
       } else {
@@ -122,17 +148,37 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
     }
     return {
       groups: Array.from(groupMap.entries()).map(([name, count]) => ({ name, count })),
-      totalCount: allTags.length,
+      totalCount: visibleTags.length,
       uncategorizedCount: uncat,
     };
-  }, [allTags]);
+  }, [visibleTags]);
 
-  // Create affordance: show only when search has no exact match
+  // Exact-name match against visible tags AND hidden shadow tags — a hidden
+  // shadow tag's exact name must not offer Create (backend would 409).
+  const exactShadowMatch = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return null;
+    return (
+      shadowTags.find(
+        (tag) =>
+          tag.name.toLowerCase() === q ||
+          (tag.name_zh ?? '').toLowerCase() === q,
+      ) ?? null
+    );
+  }, [search, shadowTags]);
+
+  // Create affordance: show only when search has no exact match (in either the
+  // visible tags or the hidden shadow tags).
   const noExactMatch = useMemo(() => {
     if (!search.trim()) return false;
     const q = search.trim().toLowerCase();
-    return !allTags.some((tag) => tag.name.toLowerCase() === q);
-  }, [search, allTags]);
+    if (exactShadowMatch) return false;
+    return !allTags.some(
+      (tag) =>
+        tag.name.toLowerCase() === q ||
+        (tag.name_zh ?? '').toLowerCase() === q,
+    );
+  }, [search, allTags, exactShadowMatch]);
 
   const handleCreate = useCallback(async () => {
     const name = search.trim();
@@ -156,9 +202,16 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
           className="w-full bg-ink-800 border border-ink-700/50 rounded pl-7 pr-2 py-1.5 text-xs text-ink-200 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50"
           autoFocus={shouldAutoFocus}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && noExactMatch && onCreate) {
+            if (e.nativeEvent.isComposing) return; // IME 组合中的 Enter 属于输入法
+            if (e.key !== 'Enter') return;
+            if (noExactMatch && onCreate) {
               e.preventDefault();
               handleCreate();
+            } else if (exactShadowMatch) {
+              // Search exactly matches a hidden shadow tag — attach it instead
+              // of dead-keying (no Create row is shown for it).
+              e.preventDefault();
+              onToggleTag(String(exactShadowMatch.id));
             }
           }}
         />
@@ -266,7 +319,7 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
 
         {/* Full-width tag content */}
         <TagContent
-          allTags={allTags}
+          allTags={visibleTags}
           selectedIds={selectedIds}
           starredIds={starredIds}
           settings={settings}
@@ -305,7 +358,7 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
           onSelectGroup={setSelectedGroup}
         />
         <TagContent
-          allTags={allTags}
+          allTags={visibleTags}
           selectedIds={selectedIds}
           starredIds={starredIds}
           settings={settings}

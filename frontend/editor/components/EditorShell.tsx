@@ -67,7 +67,7 @@ import {
   type SceneSyncStatus,
   type SceneReorderApi,
 } from './SceneBlock';
-import { SceneRail } from './SceneRail';
+import { SceneToc } from './SceneToc';
 import { RailModules, type RailView } from './RailModules';
 import { BeatsView } from '../beats/BeatsView';
 import { NodesView } from '../nodes/NodesView';
@@ -89,6 +89,8 @@ import { PresenceAvatars } from '../collab/PresenceAvatars';
 import { ScenePresenceContext, type ScenePresenceMap } from '../collab/scenePresenceContext';
 import type { RemoteOpRow } from '../useSceneSync';
 import { reportError } from '../../services/errorReporter';
+import { SelectionAiChatButton } from '../selection/SelectionAiChatButton';
+import { Loading } from '../../components/common/Loading';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -312,6 +314,26 @@ export function EditorShell({
   const handleCompareCommit = useCallback((commit: ScriptCommit) => {
     setDiffCommit(commit);
   }, []);
+
+  // Click-to-jump from the diff rail: scroll the live sheet to the changed
+  // element (or its scene when the element is gone) and pulse a highlight so the
+  // eye lands on it. Best-effort — a missing target (deleted since) is a no-op.
+  const handleJumpToDiff = useCallback(
+    (sceneId: string, elementId: string | null) => {
+      const root = shellRef.current;
+      if (!root) return;
+      const block = root.querySelector<HTMLElement>(`[data-scene-id="${sceneId}"]`);
+      if (!block) return;
+      const target =
+        (elementId &&
+          block.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`)) ||
+        block;
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.classList.add('mh-diff-jump-flash');
+      window.setTimeout(() => target.classList.remove('mh-diff-jump-flash'), 1400);
+    },
+    [],
+  );
 
   // A rollback wrote new ops server-side — drop the stale optimistic overlay and
   // re-fetch the scenes so the sheet reflects the rolled-back content.
@@ -1109,6 +1131,12 @@ export function EditorShell({
     scenes.length === 0 &&
     orphanChapters.length === 0;
 
+  // The floating scene TOC belongs only to the script sheet — the node canvas,
+  // storyboard, beats and outline views own their own navigation. SceneToc
+  // itself renders nothing when scenes.length === 0, so the gate is just the
+  // view/mode context.
+  const showSceneToc = railView === 'script' && state.mode === 'script' && !showColdStart;
+
   // Focus the seeded row once the new scene has rendered (cold start). The
   // TipTap editor builds its ProseMirror view in an effect, so the row may not
   // be in the DOM on the same commit the scene lands — poll a few frames until
@@ -1152,7 +1180,7 @@ export function EditorShell({
 
       {loadState === 'loading' && (
         <div className="mh-shell-state" role="status">
-          {t('editor.loading')}
+          <Loading label={t('editor.loading')} />
         </div>
       )}
       {loadState === 'error' && (
@@ -1169,7 +1197,7 @@ export function EditorShell({
       {!embedded && (
         <nav
           className={`mh-island mh-rail${railCollapsed ? ' collapsed' : ''}`}
-          aria-label={t('editor.scenesNav')}
+          aria-label={t('editor.railNav')}
         >
           {railCollapsed ? (
             <div className="mh-rail-collapsed-strip">
@@ -1225,30 +1253,29 @@ export function EditorShell({
                 </div>
               </div>
               <RailModules activeView={railView} onSelect={selectRailView} />
+              {/* The SCENE list moved OUT of this boxed rail into the floating
+                  Notion-style SceneToc that overlays the paper's left edge (it
+                  no longer reads as "又是一个框"). This rail keeps only the
+                  brand / episode selector / Views nav / entity sections; scene
+                  navigation is the SceneToc in the centre column below. */}
               <div className="mh-rail-scroll">
                 <RailEntities
                   characters={railCharacters}
                   locations={railLocations}
                   onSelect={handleSelectScene}
                 />
-                <section className="mh-rail-section" aria-label={t('editor.scenesLabel')}>
-                  <div className="mh-rail-section-head">
-                    <span className="mh-rail-section-label">{t('editor.scenesLabel')}</span>
-                    {scenes.length > 0 && (
-                      <span className="mh-rail-count-badge">{scenes.length}</span>
-                    )}
-                  </div>
-                  <SceneRail
-                    scenes={scenes}
-                    activeSceneId={state.activeSceneId}
-                    onSelect={handleSelectScene}
-                  />
-                </section>
               </div>
             </>
           )}
         </nav>
       )}
+
+      {/* Embedded (studio) mode has NO boxed left rail: the workspace tree owns
+          episode + module navigation, and scene navigation is the floating
+          SceneToc overlaying the paper (rendered in the centre column below),
+          identical to the standalone route. The shell reflows to two columns
+          (paper + Writing) — see .mh-editor-shell.mh-embedded. Scenes still lift
+          up via onScenesChange for the workspace top-bar slate. */}
 
       {/* ===== CENTER PAPER COLUMN ===== */}
       <main className="mh-center-col" aria-label={t('editor.paperColumn')}>
@@ -1282,6 +1309,14 @@ export function EditorShell({
         </div>
 
         <div className="mh-page-frame">
+          {showSceneToc && (
+            <SceneToc
+              scenes={scenes}
+              activeSceneId={state.activeSceneId}
+              onSelect={handleSelectScene}
+              scriptId={scriptId}
+            />
+          )}
           {railView === 'nodes' ? (
             <ScenePresenceContext.Provider value={presenceByScene}>
               <NodesView
@@ -1337,19 +1372,27 @@ export function EditorShell({
                       scriptId={scriptId}
                       commit={diffCommit}
                       scenes={scenes}
+                      currentUserId={currentUserId}
                       onBack={() => setDiffCommit(null)}
+                      onJumpTo={handleJumpToDiff}
                     />
                   </div>
                 </div>
               )}
               <div
-                className="mh-sheet"
+                className={`mh-sheet${state.format === 'asian' ? ' asian' : ''}`}
                 ref={pageSheetRef}
                 style={{ zoom: sheetZoom / 100 }}
                 data-zoom={sheetZoom}
               >
                 <div className="mh-sheet-inner">
-                  {state.mode !== 'outline' && scriptUntouched && (
+                  {/* `scriptUntouched` is `[].every(...)` === true while scenes
+                      are still loading, so the empty-script keyboard hint must
+                      NOT show until the load resolves — otherwise every open of
+                      a non-empty script flashes the "empty script" affordance
+                      before its scenes arrive (the loading overlay paints
+                      behind the paper, so it can't hide this). Gate on ready. */}
+                  {loadState === 'ready' && state.mode !== 'outline' && scriptUntouched && (
                     <div className="mh-keyboard-hint" aria-hidden="true">
                       <div>
                         <kbd>Tab</kbd> {t('editor.hintTab')}
@@ -1507,6 +1550,7 @@ export function EditorShell({
               scriptId={scriptId}
               onCompareCommit={handleCompareCommit}
               onRolledBack={handleRolledBack}
+              currentUserId={currentUserId}
             />
           </>
         )}
@@ -1518,6 +1562,13 @@ export function EditorShell({
           onClose={() => setShowImportModal(false)}
         />
       )}
+
+      {/* laper-style "select text → AI chat" pill. Mounted here (inside the
+          data-theme root so its ink chrome resolves per editor theme); it is
+          position:fixed and only paints while script text is selected. Works
+          in both the fullscreen route and the embedded studio — the store it
+          drives is global, so the quote lands in whichever chat host is up. */}
+      <SelectionAiChatButton />
     </div>
   );
 }

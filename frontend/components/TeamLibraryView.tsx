@@ -1,6 +1,7 @@
 import React from 'react';
-import { ChevronRight, Loader2, Video } from 'lucide-react';
+import { ChevronRight, Video } from 'lucide-react';
 import { Collection, Team } from '../types';
+import { Loading } from './common/Loading';
 import { CollectionFolderCard } from './CollectionFolderCard';
 import { NewCollectionCard } from './NewCollectionCard';
 
@@ -40,8 +41,7 @@ export const TeamLibraryView: React.FC<TeamLibraryViewProps> = ({
         {/* Loading */}
         {currentTeam && isLoading && (
           <div className="flex flex-col items-center justify-center h-96 text-ink-500">
-            <Loader2 className="w-8 h-8 animate-spin mb-4 text-indigo-500" />
-            <p>Loading collections...</p>
+            <Loading center label="Loading collections..." />
           </div>
         )}
 

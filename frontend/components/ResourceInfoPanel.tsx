@@ -290,7 +290,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
             onChange={(e) => setNameValue(e.target.value)}
             onBlur={commitName}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') commitName();
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) commitName();
               if (e.key === 'Escape') { setNameValue(resource.filename); setEditingName(false); }
             }}
             className={`w-full ${cFieldBg} border border-indigo-500/50 rounded px-2 py-1 text-sm ${cPrimary} focus:outline-none`}

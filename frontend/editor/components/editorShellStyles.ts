@@ -63,6 +63,38 @@ export const EDITOR_SHELL_STYLES = `
   --script-hei:"PingFang SC","Microsoft YaHei","Hiragino Sans GB","Heiti SC","Noto Sans CJK SC","SimHei","黑体",sans-serif;
   --script-song:"Songti SC","STSong","SimSun","宋体","Noto Serif CJK SC","Source Han Serif SC",serif;
   --sans:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif;
+  /* ── Neutral-ink chrome (laper parity) ──────────────────────────────────
+     The editor shell's active / selected chrome used to be a wall of brand
+     indigo (active toolbar pills, doc tabs, the pagination + format
+     segmenteds, selected scene rows, stat tiles, count/IE chips) — read as
+     "整体蓝白". laper's chrome is ink, not colour: the active state is a near-
+     black pill (light) / near-white pill (dark), selection is a soft warm-grey
+     ink wash. These tokens carry that language. Every value derives from the
+     theme's own --ink / --surface, so light and dark INVERT automatically
+     (deep-ink pill ↔ bright-ink pill) and no new hex enters the sheet. Brand
+     indigo now survives only on the focus ring and genuine primary CTAs (Save
+     version, empty-state create) — the single accent, not the whole chrome. */
+  --pill-ink-bg:var(--ink);                                   /* active pill: near-black (light) / near-white (dark) */
+  --pill-ink-on:var(--surface);                               /* text on the pill — inverts with it */
+  --sel-ink-bg:color-mix(in srgb, var(--ink) 8%, transparent);/* soft selected row / current item */
+  --sel-ink-fg:var(--ink);                                    /* text on a soft-selected row */
+  --hover-ink-bg:color-mix(in srgb, var(--ink) 6%, transparent);
+  --chip-ink-bg:color-mix(in srgb, var(--ink) 8%, transparent);/* neutral count / IE / stat chip fill */
+  --chip-ink-fg:var(--ink-soft);                              /* quiet ink for chip text */
+  --emph-ink-border:color-mix(in srgb, var(--ink) 42%, var(--surface-border));
+  --emph-ink-glow:color-mix(in srgb, var(--ink) 12%, transparent);
+  /* Asian (华语) per-element indent grid — laper 亚洲格式 parity. Every value is a
+     named ch var so the whole hierarchy scales 1:1 with display zoom (which scales
+     the row font-size, and ch tracks font-size). action/dialogue share a 4ch body
+     column so they read as one indented text block; the △ / ∟ manuscript marks
+     hang in the gutter to the left of that column. */
+  --as-action-mark:1ch;        /* △ hangs here (left of the action body column) */
+  --as-action-body:4ch;        /* action text column + hanging indent for wraps */
+  --as-dialogue-body:4ch;      /* dialogue text column (aligned with action body) */
+  --as-dialogue-mark:1.5ch;    /* ∟ continuation mark hangs here on wrapped dialogue */
+  --as-comment-bar:0.5ch;      /* comment quote bar offset from the text edge */
+  --as-comment-body:4ch;       /* comment text column */
+  --as-paren-body:0.5ch;       /* parenthetical indent */
   position:absolute; inset:0;
   background:radial-gradient(circle at 15% 0%, var(--bg-2) 0%, var(--bg) 55%);
   color:var(--ink);
@@ -81,13 +113,12 @@ export const EDITOR_SHELL_STYLES = `
   overflow:hidden;
 }
 .mh-editor-shell *{ box-sizing:border-box; }
-/* Embedded in the projects workspace: the editor's own left rail is NOT
-   rendered (the workspace sidebar replaces it), so the shell has only two grid
-   children — the script column and the Writing panel. The default 3-track
-   template (auto minmax(0,1fr) auto) then left the 296px panel floating inside
-   the middle cell with a big empty gap to its right. Collapse to two tracks so the
-   panel sits flush against the right edge and the script column fills + centres
-   (via .mh-sheet-scroll{align-items:center} + .mh-sheet{max-width:100%}). */
+/* Embedded in the projects workspace: NO boxed left rail — the workspace tree
+   owns episode + module navigation, and scene navigation is the floating
+   SceneToc overlaying the paper (identical to the standalone route). So the
+   shell reflows to two tracks: script column + Writing panel. The script
+   column keeps its minmax(0,1fr) + .mh-sheet{min-width} floor so the paper
+   scrolls (never clips) at narrow widths — narrow-width spec guarantee. */
 .mh-editor-shell.mh-embedded{ grid-template-columns:minmax(0, 1fr) auto; }
 /* Embedded: don't paint the standalone lavender page gradient — it clashed with
    the workspace's own surface (a mismatched purple block in the empty area
@@ -121,12 +152,12 @@ export const EDITOR_SHELL_STYLES = `
 .mh-ep-selector-wrap{ position:relative; }
 .mh-ep-selector{
   display:block; width:100%; text-align:left; cursor:pointer; font-family:var(--sans);
-  background:var(--indigo-soft); border:1px solid var(--surface-border);
+  background:var(--surface-2); border:1px solid var(--surface-border);
   border-radius:var(--radius-md); padding:10px 12px;
 }
-.mh-ep-selector:hover{ border-color:var(--indigo); }
+.mh-ep-selector:hover{ border-color:color-mix(in srgb, var(--ink) 28%, var(--surface-border)); }
 .mh-ep-selector:focus-visible{ outline:2px solid var(--indigo); outline-offset:2px; }
-.mh-ep-name{ font-weight:700; font-size:14px; color:var(--indigo-deep); }
+.mh-ep-name{ font-weight:700; font-size:14px; color:var(--ink); }
 .mh-ep-sub{ font-size:11px; color:var(--ink-faint); margin-top:2px; }
 
 /* ===== EPISODE PANEL (multi-episode management, Task 5) ===== */
@@ -140,9 +171,9 @@ export const EDITOR_SHELL_STYLES = `
 .mh-ep-new-btn{
   font-family:var(--sans); font-size:11.5px; font-weight:600;
   padding:4px 10px; border-radius:var(--radius-sm); cursor:pointer;
-  background:var(--indigo); color:var(--accent-on); border:1px solid transparent;
+  background:var(--surface-2); color:var(--ink-soft); border:1px solid var(--surface-border);
 }
-.mh-ep-new-btn:hover:not(:disabled){ background:var(--indigo-deep); }
+.mh-ep-new-btn:hover:not(:disabled){ background:var(--hover-ink-bg); color:var(--ink); }
 .mh-ep-new-btn:disabled{ opacity:0.5; cursor:default; }
 .mh-ep-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; }
 .mh-ep-item{ display:flex; align-items:center; gap:4px; }
@@ -153,7 +184,7 @@ export const EDITOR_SHELL_STYLES = `
   color:var(--ink-soft);
 }
 .mh-ep-item-main:hover:not(:disabled){ background:var(--surface-2); }
-.mh-ep-item-main.current{ background:var(--indigo-soft); color:var(--indigo-deep); cursor:default; }
+.mh-ep-item-main.current{ background:var(--sel-ink-bg); color:var(--sel-ink-fg); cursor:default; }
 .mh-ep-item-title{
   flex:1; min-width:0; font-size:12.5px; font-weight:600;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
@@ -163,7 +194,7 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-ep-current-badge{
   flex-shrink:0; font-size:9.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase;
-  padding:1px 6px; border-radius:8px; background:var(--indigo); color:var(--accent-on);
+  padding:1px 6px; border-radius:8px; background:var(--pill-ink-bg); color:var(--pill-ink-on);
 }
 .mh-ep-delete-btn{
   flex-shrink:0; width:24px; height:24px; border-radius:var(--radius-sm);
@@ -191,7 +222,7 @@ export const EDITOR_SHELL_STYLES = `
   min-width:17px; height:17px; padding:0 5px; border-radius:9px;
   display:inline-flex; align-items:center; justify-content:center;
   font-family:var(--mono); font-size:10px; font-weight:700; line-height:1;
-  background:var(--indigo-soft); color:var(--indigo-deep);
+  background:var(--chip-ink-bg); color:var(--chip-ink-fg);
 }
 .mh-scene-list{ flex:1; overflow-y:auto; padding:4px 10px 14px; display:flex; flex-direction:column; gap:5px; }
 .mh-scene-row{
@@ -201,21 +232,23 @@ export const EDITOR_SHELL_STYLES = `
   font-family:var(--sans);
 }
 .mh-scene-row:hover{ background:var(--surface-2); }
-.mh-scene-row.active{ background:var(--indigo-soft); border-color:var(--surface-border); }
+.mh-scene-row.active{ background:var(--sel-ink-bg); border-color:var(--surface-border); }
 .mh-scene-num-chip{
   width:21px; height:21px; border-radius:6px; background:var(--ink-faint);
   color:var(--surface); font-size:10.5px; font-weight:700; font-family:var(--mono);
   display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:1px;
 }
-.mh-scene-row.active .mh-scene-num-chip{ background:var(--indigo); color:var(--accent-on); }
+.mh-scene-row.active .mh-scene-num-chip{ background:var(--pill-ink-bg); color:var(--pill-ink-on); }
 .mh-scene-meta-text{ min-width:0; flex:1; }
 .mh-scene-row-head{ display:flex; align-items:center; gap:6px; }
 .mh-ie-badge{
   font-family:var(--mono); font-size:9.5px; font-weight:700; letter-spacing:0.03em;
   padding:1px 5px; border-radius:4px; flex-shrink:0;
 }
-.mh-ie-badge.int{ background:var(--indigo-soft); color:var(--indigo-deep); }
-.mh-ie-badge.ext{ background:var(--violet-soft); color:var(--violet); }
+/* INT / EXT read as one neutral ink chip — the INT/EXT text carries the
+   distinction, not two brand colours (laper keeps sluglines monochrome). */
+.mh-ie-badge.int{ background:var(--chip-ink-bg); color:var(--chip-ink-fg); }
+.mh-ie-badge.ext{ background:var(--chip-ink-bg); color:var(--chip-ink-fg); }
 .mh-scene-title{
   font-size:12px; font-weight:600; color:var(--ink);
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
@@ -240,13 +273,13 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-rail-module:hover:not(:disabled){ background:var(--surface-2); }
 .mh-rail-module:disabled{ opacity:0.5; cursor:default; }
-.mh-rail-module.active{ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--surface-border); }
-.mh-rail-module.active:hover:not(:disabled){ background:var(--indigo-soft); }
+.mh-rail-module.active{ background:var(--sel-ink-bg); color:var(--sel-ink-fg); border-color:var(--surface-border); }
+.mh-rail-module.active:hover:not(:disabled){ background:var(--sel-ink-bg); }
 .mh-rail-module-glyph{
   width:16px; text-align:center; flex-shrink:0;
   font-family:var(--mono); font-size:12px; color:var(--ink-faint);
 }
-.mh-rail-module.active .mh-rail-module-glyph{ color:var(--indigo-deep); }
+.mh-rail-module.active .mh-rail-module-glyph{ color:var(--sel-ink-fg); }
 /* One scroll region for Characters + Locations + Scenes; the modules nav and
    Episode selector above it stay fixed (navigation never scrolls away). */
 .mh-rail-scroll{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; }
@@ -280,7 +313,7 @@ export const EDITOR_SHELL_STYLES = `
   color:var(--ink-soft); cursor:pointer; font-size:13px; flex-shrink:0;
   font-family:var(--sans);
 }
-.mh-icon-btn:hover{ background:var(--indigo-soft); color:var(--indigo-deep); }
+.mh-icon-btn:hover{ background:var(--hover-ink-bg); color:var(--ink); }
 
 /* ===== CENTER COLUMN ===== */
 .mh-center-col{ display:flex; flex-direction:column; min-height:0; position:relative; }
@@ -293,7 +326,7 @@ export const EDITOR_SHELL_STYLES = `
   font-size:12.5px; font-weight:600; padding:7px 16px; border-radius:9px;
   color:var(--ink-soft); cursor:pointer; background:none; border:none; font-family:var(--sans);
 }
-.mh-doc-tab[aria-selected='true']{ background:var(--indigo); color:var(--accent-on); }
+.mh-doc-tab[aria-selected='true']{ background:var(--pill-ink-bg); color:var(--pill-ink-on); }
 .mh-topbar-right{ display:flex; align-items:center; gap:10px; }
 
 /* ── Collaboration presence (Phase B P5 / C1) ─────────────────────────────── */
@@ -301,13 +334,13 @@ export const EDITOR_SHELL_STYLES = `
 .mh-presence-avatar{
   display:inline-flex; align-items:center; justify-content:center;
   width:26px; height:26px; margin-left:-7px; border-radius:50%;
-  background:var(--indigo-soft); color:var(--indigo-deep);
+  background:var(--surface-2); color:var(--ink-soft);
   border:2px solid var(--surface); box-shadow:var(--shadow-island);
   font-size:11px; font-weight:600; font-family:var(--sans);
   user-select:none;
 }
 .mh-presence-avatar:first-child{ margin-left:0; }
-.mh-presence-avatar.editing{ background:var(--indigo); color:var(--accent-on); }
+.mh-presence-avatar.editing{ background:var(--pill-ink-bg); color:var(--pill-ink-on); }
 .mh-presence-avatar.overflow{ background:var(--surface-2); color:var(--ink-soft); }
 
 .mh-scene-presence-badge{
@@ -319,11 +352,88 @@ export const EDITOR_SHELL_STYLES = `
   white-space:nowrap;
 }
 .mh-scene-presence-badge.editing{
-  background:var(--indigo-soft); color:var(--indigo-deep); border-color:transparent;
+  background:var(--sel-ink-bg); color:var(--sel-ink-fg); border-color:transparent;
 }
 .mh-flow-scene-head .mh-scene-presence-badge{ margin-left:auto; }
 
-.mh-page-frame{ flex:1; min-height:0; display:flex; }
+.mh-page-frame{ flex:1; min-height:0; display:flex; position:relative; }
+
+/* ===== SCENE TOC (Notion-style floating table of contents) =====
+   A minimal tick rail pinned to the LEFT edge of the paper frame that floats a
+   full scene panel on hover / pin. It overlays the paper (position:absolute) so
+   it NEVER pushes the sheet — the fix for "又是一个框". Ink language matches the
+   islands (#1430/#1438): surface panel, float shadow, warm-grey ticks. */
+.mh-scene-toc{
+  /* Above the sticky Element Toolbar (z-index:40) so the floating panel wins the
+     hit-test where they overlap at the sheet's left edge. */
+  position:absolute; left:0; top:0; bottom:0; z-index:41;
+  /* Centred vertically on the paper's left edge (Notion parity) — this also
+     clears the sticky Element Toolbar that sits at the top. */
+  display:flex; align-items:center;
+  /* Container is click-through; only the ticks + panel opt back into pointer
+     events, so the empty space over the paper stays fully interactive. */
+  pointer-events:none;
+}
+/* Tick rail — one short line per scene; the current scene's line is longer +
+   inked. Scrolls when a long script overflows the frame height (min gap keeps
+   the lines from fusing into a smear). */
+.mh-toc-ticks{
+  pointer-events:auto;
+  display:flex; flex-direction:column; gap:7px;
+  padding:20px 12px 20px 6px;
+  max-height:100%; overflow-y:auto; overflow-x:hidden;
+  transition:opacity 0.16s ease;
+}
+.mh-toc-ticks::-webkit-scrollbar{ width:0; height:0; }
+.mh-toc-tick{
+  flex-shrink:0;
+  width:15px; height:2px; padding:0; border:none; border-radius:2px;
+  background:var(--ink-faint); opacity:0.45; cursor:pointer;
+  transition:width 0.12s ease, opacity 0.12s ease, background 0.12s ease;
+}
+.mh-toc-tick:hover{ width:22px; opacity:0.8; }
+.mh-toc-tick.active{ width:28px; opacity:1; background:var(--ink); }
+/* Floating panel — reuses the SceneRail list. Hidden (faded + shifted) until the
+   toc is open (hover/pin) OR a scene row inside it gains focus (keyboard reveal).
+   Kept in the DOM so screen readers + Tab can always reach the list. */
+.mh-toc-panel{
+  position:absolute; left:0; top:50%;
+  width:244px; max-height:100%;
+  display:flex; flex-direction:column; overflow:hidden;
+  background:var(--surface); border:1px solid var(--surface-border);
+  border-radius:var(--radius-lg); box-shadow:var(--shadow-float);
+  opacity:0; transform:translate(-8px, -50%); pointer-events:none;
+  transition:opacity 0.16s ease, transform 0.16s ease;
+}
+.mh-scene-toc[data-open='true'] .mh-toc-panel,
+.mh-scene-toc:focus-within .mh-toc-panel{
+  opacity:1; transform:translate(0, -50%); pointer-events:auto;
+}
+/* When the panel is up, fade the ticks out (the panel replaces them in place). */
+.mh-scene-toc[data-open='true'] .mh-toc-ticks,
+.mh-scene-toc:focus-within .mh-toc-ticks{ opacity:0; pointer-events:none; }
+.mh-toc-panel-head{
+  display:flex; align-items:center; gap:8px; flex-shrink:0;
+  padding:12px 12px 8px;
+}
+.mh-toc-panel-title{
+  font-size:10.5px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase;
+  color:var(--ink-faint);
+}
+.mh-toc-panel-count{
+  flex-shrink:0;
+  min-width:17px; height:17px; padding:0 5px; border-radius:9px;
+  display:inline-flex; align-items:center; justify-content:center;
+  font-family:var(--mono); font-size:10px; font-weight:700; line-height:1;
+  background:var(--chip-ink-bg); color:var(--chip-ink-fg);
+}
+.mh-toc-pin{ margin-left:auto; width:26px; height:26px; font-size:13px; }
+.mh-toc-pin.pinned{ background:var(--pill-ink-bg); color:var(--pill-ink-on); border-color:transparent; }
+.mh-toc-pin.pinned:hover{ background:var(--pill-ink-bg); color:var(--pill-ink-on); }
+.mh-toc-panel-body{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; }
+/* SceneRail inside the panel: let the BODY own the scroll (its own flex:1 +
+   overflow would double-scroll), and tighten the padding to the panel edges. */
+.mh-toc-panel-body .mh-scene-list{ flex:0 0 auto; overflow:visible; padding:2px 8px 10px; }
 .mh-sheet-scroll{
   flex:1; min-height:0; min-width:0; overflow-y:auto;
   display:flex; flex-direction:column; align-items:center; gap:16px;
@@ -503,6 +613,15 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-heading.asian{
   font-family:var(--script-hei); font-size:14px; letter-spacing:0.02em; text-transform:none;
 }
+/* Asian scene head = "N. 地点 时间 / INT" — the scene number is an INLINE, always
+   -visible BOLD prefix at the head of the slug (laper 亚洲格式), not the hollywood
+   hover-reveal margin badge. Hide that margin number in asian mode (the drag
+   handle in the same gutter still hover-reveals) so the number never doubles. */
+.mh-scene-num-inline{
+  font-family:var(--script-hei); font-weight:700; color:var(--sheet-ink);
+  margin-right:2px; user-select:none;
+}
+.mh-scene-headrow.asian .mh-scene-num-badge{ display:none; }
 /* Decorative separators between tokens — keep their exact spaces (". " / " - " /
    " · "), never interactive, slightly muted so the tokens read as the content. */
 .mh-heading-sep{ white-space:pre; color:var(--sheet-ink-soft); user-select:none; }
@@ -636,7 +755,7 @@ export const EDITOR_SHELL_STYLES = `
    indented dialogue, inline parens, right transitions, quoted comments,
    centred subtitles. Colours come from the theme-scoped variables above, so
    light and dark are both covered without extra selectors. */
-.as-row{ display:flex; align-items:baseline; gap:6px; margin:0 0 7px; }
+.as-row{ display:flex; align-items:baseline; gap:6px; margin:0 0 7px; position:relative; }
 .as-row .mh-el-tick{ display:none; }
 .as-row .mh-el-row{ flex:1 1 auto; margin:0; }
 .as-mark{
@@ -645,12 +764,39 @@ export const EDITOR_SHELL_STYLES = `
 }
 .as-prefix{ color:var(--tick-transition); font-weight:700; }
 .as-suffix{ margin-left:-3px; color:var(--tick-character); font-weight:700; }
-/* Character cue = left-aligned label (NOT centred like Hollywood); the row
-   packs cue + colon to the left instead of letting the editable stretch. */
+/* Character cue = left-aligned label, FLUSH LEFT (顶格, 0 indent) — the dialogue
+   below it hangs under it (see .as-row-dialogue). The row packs cue + colon to
+   the left instead of letting the editable stretch. */
 .as-row-character{ justify-content:flex-start; }
 .as-row-character .mh-el-row{ flex:0 1 auto; }
 .as-row-character .mh-el-editable{ flex:0 1 auto; }
-.as-row-dialogue{ padding-left:2.4em; }
+/* Action (△ prefix): the whole text block sits at the 4ch body column with a
+   HANGING indent (block padding-left = wrapped lines align at 4ch too), and the
+   △ mark hangs one char to the left at 1ch. Absolute so it never widens the row
+   or perturbs the .mh-el-row box the paginator measures. */
+.as-row-action{ position:relative; padding-left:var(--as-action-body); }
+.as-row-action > .as-prefix{
+  position:absolute; left:var(--as-action-mark); top:0; margin:0;
+}
+/* Dialogue hangs under its character cue at the 4ch body column (aligned with
+   action). A wrapped dialogue block carries the ∟ continuation mark (国内剧本
+   续接记号) hanging at 1.5ch, vertically centred on the block — added as a
+   pseudo-element (never editable, never in the doc) and gated on .as-multiline,
+   which the NodeView toggles only when the block actually wraps past one line
+   (a single-line short line has no ∟, laper parity). */
+.as-row-dialogue{ position:relative; padding-left:var(--as-dialogue-body); }
+.as-row-dialogue.as-multiline::before{
+  content:'\\221F'; /* ∟ U+221F RIGHT ANGLE — manuscript continuation mark */
+  position:absolute; left:var(--as-dialogue-mark); top:50%; transform:translateY(-50%);
+  font-family:var(--script-hei); color:var(--sheet-ink-soft);
+  font-size:13.5px; line-height:1; user-select:none; pointer-events:none;
+}
+/* Parenthetical: a shallow 0.5ch indent so it tucks just inside the body column. */
+.as-row-paren{ padding-left:var(--as-paren-body); }
+/* Comment quote block: the left rule sits 0.5ch in, the text at the 4ch body
+   column (bar offset via wrapper padding, remaining reach via the editable's own
+   padding so text and body column line up). */
+.as-row-comment{ padding-left:var(--as-comment-bar); }
 .as-row-transition{ justify-content:flex-end; }
 .as-row-subtitle{ justify-content:center; }
 /* Font split per 分景剧本 convention: 正文(action/dialogue/paren) = 宋体,
@@ -660,8 +806,8 @@ export const EDITOR_SHELL_STYLES = `
 .as-character{ font-family:var(--script-hei); font-weight:700; letter-spacing:0.03em; color:var(--tick-character); text-align:left; }
 .as-dialogue{ font-family:var(--script-song); text-align:left; }
 .as-paren{ font-family:var(--script-song); font-style:italic; color:var(--sheet-ink-soft); }
-.as-transition{ font-family:var(--script-hei); text-transform:uppercase; font-weight:700; letter-spacing:0.04em; color:var(--sheet-ink-soft); }
-.as-comment{ font-family:var(--script-song); border-left:3px solid color-mix(in srgb, var(--sheet-ink) 22%, transparent); padding-left:10px; color:var(--sheet-ink-soft); font-style:italic; }
+.as-transition{ font-family:var(--script-hei); text-transform:uppercase; font-weight:700; letter-spacing:0.04em; color:var(--sheet-ink-soft); text-align:right; }
+.as-comment{ font-family:var(--script-song); border-left:3px solid color-mix(in srgb, var(--sheet-ink) 22%, transparent); padding-left:calc(var(--as-comment-body) - var(--as-comment-bar)); color:var(--sheet-ink-soft); font-style:italic; }
 .as-subtitle{ font-family:var(--script-hei); text-align:center; font-style:italic; color:var(--sheet-ink-soft); }
 
 /* A5/A1: the scene-head badge is the SAME hover-reveal block number in both
@@ -682,8 +828,8 @@ export const EDITOR_SHELL_STYLES = `
    the type controls are live for the line under the caret. Pure styling — it
    does not drive focus or a11y, only this visual emphasis. */
 .mh-editor-shell[data-editing='true'] .mh-h-toolbar{
-  border-color:var(--indigo);
-  box-shadow:var(--shadow-float), 0 0 0 1px var(--indigo-soft);
+  border-color:var(--emph-ink-border);
+  box-shadow:var(--shadow-float), 0 0 0 1px var(--emph-ink-glow);
 }
 .mh-h-item{
   display:flex; align-items:center; gap:6px; padding:7px 13px; border-radius:999px;
@@ -692,17 +838,17 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-h-item:hover:not(:disabled){ background:var(--surface-2); }
 .mh-h-item:disabled{ opacity:0.5; cursor:default; }
-.mh-h-item.active{ background:var(--indigo); color:var(--accent-on); }
+.mh-h-item.active{ background:var(--pill-ink-bg); color:var(--pill-ink-on); }
 /* :hover:not(:disabled) is (0,3,0) and BEATS .active's (0,2,0) while the
    pointer is still on the just-clicked button — the active pill degraded to
    surface-2 with white text (invisible). Re-assert the active look at hover
    specificity. Same guard applied to every state-class button in this sheet. */
-.mh-h-item.active:hover:not(:disabled){ background:var(--indigo); color:var(--accent-on); }
+.mh-h-item.active:hover:not(:disabled){ background:var(--pill-ink-bg); color:var(--pill-ink-on); }
 .mh-h-glyph{
   width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center;
   font-size:9.5px; font-family:var(--mono); font-weight:700; color:var(--ink-faint); flex-shrink:0;
 }
-.mh-h-item.active .mh-h-glyph{ color:var(--accent-on); }
+.mh-h-item.active .mh-h-glyph{ color:var(--pill-ink-on); }
 
 /* ===== RIGHT PANEL WIDGETS ===== */
 .mh-field-label{
@@ -714,7 +860,7 @@ export const EDITOR_SHELL_STYLES = `
   flex:1; text-align:center; font-size:12px; font-weight:600; padding:7px 0; border-radius:8px;
   color:var(--ink-soft); cursor:pointer; background:none; border:none; font-family:var(--sans);
 }
-.mh-seg.active{ background:var(--indigo); color:var(--accent-on); }
+.mh-seg.active{ background:var(--pill-ink-bg); color:var(--pill-ink-on); }
 .mh-seg:disabled{ opacity:0.45; cursor:default; }
 .mh-zoom{ display:flex; align-items:stretch; background:var(--surface-2); border-radius:10px; padding:3px; gap:2px; }
 .mh-zoom-btn{
@@ -732,13 +878,16 @@ export const EDITOR_SHELL_STYLES = `
 .mh-zoom-value:hover{ background:var(--surface); }
 .mh-divider{ height:1px; background:var(--surface-border); margin:0 -16px; }
 .mh-stats-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+/* laper parity: stat tiles are a quiet warm-grey card with a deep-ink number,
+   not the old indigo-soft / violet-soft colour blocks. The .v2 tint is dropped
+   (all four tiles read as one neutral set) — the numbers carry the emphasis. */
 .mh-stat-tile{
-  background:var(--indigo-soft); border:1px solid var(--surface-border);
+  background:var(--surface-2); border:1px solid var(--surface-border);
   border-radius:12px; padding:12px 12px 10px;
 }
-.mh-stat-tile.v2{ background:var(--violet-soft); }
-.mh-stat-num{ font-size:19px; font-weight:800; color:var(--indigo-deep); font-family:var(--mono); }
-.mh-stat-tile.v2 .mh-stat-num{ color:var(--violet); }
+.mh-stat-tile.v2{ background:var(--surface-2); }
+.mh-stat-num{ font-size:19px; font-weight:800; color:var(--ink); font-family:var(--mono); }
+.mh-stat-tile.v2 .mh-stat-num{ color:var(--ink); }
 .mh-stat-lbl{ font-size:10.5px; color:var(--ink-faint); font-weight:600; margin-top:2px; }
 .mh-cast-row{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink-soft); padding:3px 0; }
 .mh-cast-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
@@ -752,8 +901,8 @@ export const EDITOR_SHELL_STYLES = `
   flex-shrink:0;
 }
 .mh-scene-chip{ font-size:11px; font-weight:700; letter-spacing:0.03em; padding:4px 9px; border-radius:6px; font-family:var(--mono); }
-.mh-scene-chip.ie-int{ background:var(--indigo-soft); color:var(--indigo-deep); }
-.mh-scene-chip.ie-ext{ background:var(--violet-soft); color:var(--violet); }
+.mh-scene-chip.ie-int{ background:var(--chip-ink-bg); color:var(--chip-ink-fg); }
+.mh-scene-chip.ie-ext{ background:var(--chip-ink-bg); color:var(--chip-ink-fg); }
 .mh-scene-chip.loc{ background:var(--surface-2); color:var(--sheet-ink-soft); border:1px solid var(--sheet-border); }
 .mh-el-line{ font-size:13.5px; line-height:1.7; color:var(--sheet-ink); margin-bottom:7px; }
 .mh-placeholder-line{ color:var(--sheet-ink-soft); font-style:italic; }
@@ -794,6 +943,9 @@ export const EDITOR_SHELL_STYLES = `
 .mh-mention-opt:hover{ background:color-mix(in srgb, var(--sheet-ink) 6%, transparent); }
 .mh-mention-opt.active{ background:color-mix(in srgb, var(--sheet-ink) 11%, transparent); color:var(--sheet-ink); }
 .mh-mention-opt[aria-selected='true']{ font-weight:600; }
+/* "Create <name>" row — same search-or-create affordance as .mh-heading-opt.create
+   (the location field), so coining a new cue reads identically across the sheet. */
+.mh-mention-opt.create{ font-weight:600; color:var(--sheet-ink); }
 .mh-mention-empty{ padding:8px 12px; font-size:12.5px; color:var(--sheet-ink-soft); }
 /* Embedded search row (character-cue picker, laper parity): full-bleed strip
    at the panel top, separated by a hairline. The input is chromeless — the
@@ -982,8 +1134,19 @@ export const EDITOR_SHELL_STYLES = `
 /* ===== LOADING / ERROR ===== */
 .mh-shell-state{
   position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-  flex-direction:column; gap:10px; background:var(--bg); color:var(--ink-soft);
+  flex-direction:column; gap:10px; color:var(--ink-soft);
+  /* Opaque overlay that must read as the SAME paper-neutral surface as the
+     shell behind it — reuse the shell's own radial-gradient (var(--bg-2)→
+     var(--bg)) so "Loading scene…" no longer flashes a flat cold-lavender
+     block distinct from the editor region. */
+  background:radial-gradient(circle at 15% 0%, var(--bg-2) 0%, var(--bg) 55%);
   font-family:var(--sans); font-size:14px; padding:24px; text-align:center;
+  /* Sits ABOVE the paper/rail while loading. Without this it paints behind
+     .mh-center-col (position:relative, later in DOM), so the empty paper shows
+     through the overlay and a non-empty script flashes its blank/empty state
+     during the scene fetch. Above the sticky element toolbar (z-index:40) so
+     the whole editor region reads as a single clean "Loading…" state. */
+  z-index:50;
 }
 .mh-shell-state.error{ color:var(--red); }
 
@@ -1100,7 +1263,11 @@ export const EDITOR_SHELL_STYLES = `
 /* ===== NODE VIEW (scene/chapter flow projection) ===== */
 .mh-nodes-view{
   flex:1; min-height:0; min-width:0; position:relative;
-  background:var(--surface-2); border:1px solid var(--surface-border);
+  /* Transparent so the shell's own paper-neutral gradient is the canvas floor
+     (matches the script region's transparent .mh-sheet-scroll) instead of a
+     distinct cold-lavender --surface-2 panel. The dot grid + controls below
+     stay tinted to the theme vars, so the grain follows light/dark. */
+  background:transparent; border:1px solid var(--surface-border);
   border-radius:var(--radius-lg); overflow:hidden;
 }
 /* Empty state — no scenes and no chapters to project (ReactFlow unmounted). */
@@ -1141,7 +1308,7 @@ export const EDITOR_SHELL_STYLES = `
   border:1px solid var(--surface-border); border-radius:var(--radius-md);
   box-shadow:var(--shadow-island); padding:11px 13px 12px; font-family:var(--sans);
 }
-.mh-flow-handle{ width:7px; height:7px; background:var(--indigo); border:none; }
+.mh-flow-handle{ width:7px; height:7px; background:var(--ink-faint); border:none; }
 .mh-flow-scene-cover{
   display:block; width:100%; height:72px; object-fit:cover;
   border-radius:var(--radius-sm); border:1px solid var(--surface-border);
@@ -1161,11 +1328,11 @@ export const EDITOR_SHELL_STYLES = `
 .mh-flow-pill{
   font-size:10.5px; font-weight:600; font-family:var(--mono);
   padding:2px 8px; border-radius:999px;
-  background:var(--indigo-soft); color:var(--indigo-deep);
+  background:var(--chip-ink-bg); color:var(--chip-ink-fg);
 }
-.mh-flow-chapter{ width:200px; background:var(--indigo-soft); border-color:var(--surface-border); }
+.mh-flow-chapter{ width:200px; background:var(--surface-2); border-color:var(--surface-border); }
 .mh-flow-chapter-head{ display:flex; align-items:center; gap:8px; }
-.mh-flow-chapter-title{ font-size:13px; font-weight:700; color:var(--indigo-deep); }
+.mh-flow-chapter-title{ font-size:13px; font-weight:700; color:var(--ink); }
 .mh-flow-chapter-summary{
   margin-top:7px; font-size:12px; line-height:1.5; color:var(--ink-soft);
   display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
@@ -1180,13 +1347,16 @@ export const EDITOR_SHELL_STYLES = `
 .mh-flow-action:hover:not(:disabled){ background:var(--surface-2); color:var(--ink); }
 .mh-flow-action:disabled{ opacity:0.5; cursor:default; }
 .mh-flow-action.confirming{
-  background:var(--indigo); color:var(--accent-on); border-color:var(--indigo);
+  background:var(--pill-ink-bg); color:var(--pill-ink-on); border-color:transparent;
 }
 
 /* ===== STORYBOARD VIEW (scene columns + shot cards) ===== */
 .mh-storyboard{
   flex:1; min-height:0; min-width:0;
-  background:var(--surface-2); border:1px solid var(--surface-border);
+  /* Transparent board — the scene columns are white --surface cards floating on
+     the shell's paper-neutral gradient (parity with the script paper), not a
+     cold-lavender --surface-2 slab. */
+  background:transparent; border:1px solid var(--surface-border);
   border-radius:var(--radius-lg); padding:16px;
   display:flex; gap:16px; align-items:flex-start;
   overflow-x:auto; overflow-y:hidden;
@@ -1206,11 +1376,11 @@ export const EDITOR_SHELL_STYLES = `
 .mh-sb-auto-btn{
   flex-shrink:0; font-family:var(--sans); font-size:11px; font-weight:600;
   padding:5px 10px; border-radius:var(--radius-sm); cursor:pointer;
-  background:var(--indigo); color:var(--accent-on); border:1px solid transparent;
+  background:var(--surface-2); color:var(--ink-soft); border:1px solid var(--surface-border);
 }
-.mh-sb-auto-btn:hover:not(:disabled){ background:var(--indigo-deep); }
+.mh-sb-auto-btn:hover:not(:disabled){ background:var(--hover-ink-bg); color:var(--ink); }
 .mh-sb-auto-btn:disabled{ opacity:0.6; cursor:default; }
-.mh-sb-auto-btn.confirming{ background:var(--violet); border-color:var(--violet); }
+.mh-sb-auto-btn.confirming{ background:var(--pill-ink-bg); color:var(--pill-ink-on); border-color:transparent; }
 .mh-sb-shots{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:2px; }
 .mh-sb-empty{ padding:14px 8px; font-size:12px; color:var(--ink-faint); font-style:italic; text-align:center; }
 .mh-sb-empty-board{ margin:auto; font-size:13px; color:var(--ink-faint); font-style:italic; }
@@ -1220,7 +1390,7 @@ export const EDITOR_SHELL_STYLES = `
   background:var(--surface-2); color:var(--ink-soft);
   border:1px dashed var(--surface-border);
 }
-.mh-sb-add:hover{ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--indigo); }
+.mh-sb-add:hover{ background:var(--hover-ink-bg); color:var(--ink); border-color:var(--emph-ink-border); }
 
 /* Shot card */
 .mh-shot-card-wrap{ position:relative; }
@@ -1262,9 +1432,9 @@ export const EDITOR_SHELL_STYLES = `
 .mh-shot-pill{
   font-family:var(--mono); font-size:10px; font-weight:700; letter-spacing:0.02em;
   padding:3px 8px; border-radius:999px; cursor:pointer;
-  background:var(--indigo-soft); color:var(--indigo-deep); border:1px solid transparent;
+  background:var(--chip-ink-bg); color:var(--chip-ink-fg); border:1px solid transparent;
 }
-.mh-shot-pill:hover{ border-color:var(--indigo); }
+.mh-shot-pill:hover{ border-color:var(--emph-ink-border); }
 .mh-shot-pill.empty{ background:var(--surface); color:var(--ink-faint); }
 .mh-shot-focal{
   width:60px; font-family:var(--mono); font-size:10px; font-weight:700;
@@ -1286,16 +1456,16 @@ export const EDITOR_SHELL_STYLES = `
   padding:6px 10px; border-radius:var(--radius-sm); cursor:pointer;
   background:var(--surface); color:var(--ink-soft); border:1px solid var(--surface-border);
 }
-.mh-shot-generate:hover:not(:disabled){ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--indigo); }
+.mh-shot-generate:hover:not(:disabled){ background:var(--hover-ink-bg); color:var(--ink); border-color:var(--emph-ink-border); }
 .mh-shot-generate:disabled{ opacity:0.5; cursor:default; }
 .mh-shot-generate-video{
   flex:1; font-family:var(--sans); font-size:11.5px; font-weight:600;
   padding:6px 10px; border-radius:var(--radius-sm); cursor:pointer;
   background:var(--surface); color:var(--ink-soft); border:1px solid var(--surface-border);
 }
-.mh-shot-generate-video:hover:not(:disabled){ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--indigo); }
+.mh-shot-generate-video:hover:not(:disabled){ background:var(--hover-ink-bg); color:var(--ink); border-color:var(--emph-ink-border); }
 .mh-shot-generate-video:disabled{ opacity:0.5; cursor:default; }
-.mh-shot-generate-video.confirming{ background:var(--indigo); color:#fff; border-color:var(--indigo); }
+.mh-shot-generate-video.confirming{ background:var(--pill-ink-bg); color:var(--pill-ink-on); border-color:transparent; }
 .mh-shot-video{
   width:100%; max-width:100%; border-radius:6px; margin-top:2px;
   border:1px solid var(--surface-border); background:#000; display:block;
@@ -1338,9 +1508,9 @@ export const EDITOR_SHELL_STYLES = `
 .mh-version-showall{
   align-self:flex-start; margin-top:2px; cursor:pointer;
   font-family:var(--sans); font-size:11.5px; font-weight:600;
-  color:var(--indigo); background:none; border:none; padding:2px 0;
+  color:var(--ink-soft); background:none; border:none; padding:2px 0;
 }
-.mh-version-showall:hover{ text-decoration:underline; }
+.mh-version-showall:hover{ text-decoration:underline; color:var(--ink); }
 /* COMPACT single-row cards (user: a tall card per version stretches the
    island): message + time on one line; the action pills float in over the
    row's right side only on hover/focus (absolutely positioned with the
@@ -1361,6 +1531,11 @@ export const EDITOR_SHELL_STYLES = `
   font-size:12.5px; font-weight:600; color:var(--ink);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
+.mh-version-meta{ display:flex; align-items:baseline; gap:8px; flex-shrink:0; }
+.mh-version-author{
+  font-family:var(--sans); font-size:10.5px; font-weight:600; color:var(--ink-soft);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:96px;
+}
 .mh-version-time{ font-family:var(--mono); font-size:10.5px; color:var(--ink-faint); flex-shrink:0; }
 .mh-version-actions{
   display:flex; flex-wrap:nowrap; gap:5px;
@@ -1376,10 +1551,10 @@ export const EDITOR_SHELL_STYLES = `
   padding:3px 9px; border-radius:999px;
   background:var(--surface); color:var(--ink-soft); border:1px solid var(--surface-border);
 }
-.mh-version-action:hover:not(:disabled){ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--indigo); }
+.mh-version-action:hover:not(:disabled){ background:var(--hover-ink-bg); color:var(--ink); border-color:color-mix(in srgb, var(--ink) 22%, var(--surface-border)); }
 .mh-version-action:disabled{ opacity:0.5; cursor:default; }
-.mh-version-action.confirming{ background:var(--indigo); color:var(--accent-on); border-color:transparent; }
-.mh-version-action.confirming:hover:not(:disabled){ background:var(--indigo); color:var(--accent-on); border-color:transparent; }
+.mh-version-action.confirming{ background:var(--pill-ink-bg); color:var(--pill-ink-on); border-color:transparent; }
+.mh-version-action.confirming:hover:not(:disabled){ background:var(--pill-ink-bg); color:var(--pill-ink-on); border-color:transparent; }
 .mh-version-action.danger:hover:not(:disabled){ background:var(--red); color:#fff; border-color:transparent; }
 .mh-version-action.danger.confirming{ background:var(--red); color:#fff; border-color:transparent; }
 .mh-version-partial{
@@ -1394,6 +1569,26 @@ export const EDITOR_SHELL_STYLES = `
 
 /* ── Version diff (centre pane takeover, Phase B P4) ──────────────────────── */
 .mh-version-diff{ display:flex; flex-direction:column; height:100%; min-height:0; }
+
+/* Morandi four-state palette — muted, grayed diff colours scoped to the diff
+   pane only, so the shell's semantic --green / --red / --amber / --indigo stay
+   untouched. Each state carries a readable ink (badge text, strike-through,
+   word ins/del) plus a soft grayed fill. Non-colour cues (line-through, +/−
+   badges) still carry the semantics, so the low-contrast morandi tones remain
+   colour-blind safe. Light and dark are tuned separately: dark drops the fills
+   to low-luminance chips and lifts the ink, keeping the grayed feel. */
+.mh-editor-shell[data-theme='light'] .mh-version-diff{
+  --diff-add:#4f7259;  --diff-add-bg:#e8efe9;
+  --diff-del:#a86560;  --diff-del-bg:#f4e7e6;
+  --diff-chg:#9a7a4c;  --diff-chg-bg:#f2ebdd;
+  --diff-move:#6e6796; --diff-move-bg:#ebe9f3;
+}
+.mh-editor-shell[data-theme='dark'] .mh-version-diff{
+  --diff-add:#8ebf9c;  --diff-add-bg:#25352c;
+  --diff-del:#d99b93;  --diff-del-bg:#3a2825;
+  --diff-chg:#cdb184;  --diff-chg-bg:#352c1e;
+  --diff-move:#a9a1cf; --diff-move-bg:#2d2842;
+}
 .mh-diff-topbar{
   display:flex; align-items:center; gap:12px; flex-shrink:0;
   padding:10px 16px; border-bottom:1px solid var(--surface-border);
@@ -1411,28 +1606,93 @@ export const EDITOR_SHELL_STYLES = `
 .mh-diff-scroll{ flex:1; min-height:0; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:14px; }
 .mh-diff-state{ margin:auto; font-size:13px; color:var(--ink-faint); font-style:italic; }
 .mh-diff-state.error{ color:var(--red); font-style:normal; }
-.mh-diff-scene-set{ display:flex; flex-direction:column; gap:6px; }
-.mh-diff-scene-chip{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink); }
-.mh-diff-scene-name{ font-weight:600; }
+/* Collapsible group heads (scene-set aggregation + per-scene sections). */
+.mh-diff-group-head{
+  display:flex; align-items:center; gap:8px; width:100%; text-align:left;
+  background:none; border:none; cursor:pointer; padding:2px 0; min-width:0;
+}
+.mh-diff-caret{
+  flex-shrink:0; font-size:9px; color:var(--ink-faint);
+  transition:transform 0.12s ease; transform:rotate(0deg);
+}
+.mh-diff-caret.open{ transform:rotate(90deg); }
+
+/* Scene-set add/remove aggregation ("Added N scenes" → expandable list). */
+.mh-diff-sceneset{ display:flex; flex-direction:column; gap:6px; }
+.mh-diff-group-label{
+  font-size:12.5px; font-weight:600; color:var(--ink); overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap;
+}
+.mh-diff-sceneset-list{
+  list-style:none; margin:0; padding:0 0 0 18px; display:flex; flex-direction:column; gap:3px;
+}
+.mh-diff-sceneset-item{
+  display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink);
+  padding:2px 6px; border-radius:5px; min-width:0;
+}
+.mh-diff-sceneset-item.jumpable{ cursor:pointer; }
+.mh-diff-sceneset-item.jumpable:hover{ background:var(--surface-2); }
+.mh-diff-scene-name{ font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* Per-scene change section. */
 .mh-diff-scene{ display:flex; flex-direction:column; gap:8px; }
+.mh-diff-scene-head{ align-items:baseline; }
 .mh-diff-scene-heading{
   margin:0; font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.04em;
-  text-transform:uppercase; color:var(--ink-faint);
+  text-transform:uppercase; color:var(--ink-faint); overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap;
 }
-.mh-diff-changes{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
-.mh-diff-change{ display:flex; gap:10px; align-items:flex-start; }
+.mh-diff-scene-count{
+  flex-shrink:0; font-family:var(--mono); font-size:10px; font-weight:700;
+  color:var(--ink-faint); background:var(--surface-2); border-radius:999px; padding:1px 7px;
+}
+.mh-diff-changes{ list-style:none; margin:0; padding:0 0 0 18px; display:flex; flex-direction:column; gap:8px; }
+.mh-diff-change{
+  display:flex; flex-direction:column; gap:4px; padding:5px 8px; border-radius:6px;
+  border:1px solid transparent;
+}
+.mh-diff-change.jumpable{ cursor:pointer; }
+.mh-diff-change.jumpable:hover{ border-color:var(--surface-border); background:var(--surface-2); }
+.mh-diff-change-head{ display:flex; align-items:center; gap:8px; }
 .mh-diff-badge{
   flex-shrink:0; font-family:var(--mono); font-size:9.5px; font-weight:700; letter-spacing:0.03em;
-  text-transform:uppercase; padding:3px 7px; border-radius:999px; margin-top:1px;
+  text-transform:uppercase; padding:3px 7px; border-radius:999px;
 }
-.mh-diff-badge.added{ background:var(--green-soft); color:var(--green); }
-.mh-diff-badge.removed{ background:var(--red-soft,var(--surface-2)); color:var(--red); }
-.mh-diff-badge.changed{ background:var(--amber-soft); color:var(--amber); }
-.mh-diff-badge.moved{ background:var(--indigo-soft); color:var(--indigo-deep); }
-.mh-diff-texts{ flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
-.mh-diff-text{ font-size:13px; line-height:1.5; padding:3px 8px; border-radius:5px; word-break:break-word; }
-.mh-diff-text.before{ background:var(--red-soft,var(--surface-2)); color:var(--red); text-decoration:line-through; }
-.mh-diff-text.after{ background:var(--green-soft); color:var(--green); }
+.mh-diff-badge.added{ background:var(--diff-add-bg); color:var(--diff-add); }
+.mh-diff-badge.removed{ background:var(--diff-del-bg); color:var(--diff-del); }
+.mh-diff-badge.changed{ background:var(--diff-chg-bg); color:var(--diff-chg); }
+.mh-diff-badge.moved{ background:var(--diff-move-bg); color:var(--diff-move); }
+
+/* Author chip — monochrome, quiet; sits after the kind badge. */
+.mh-diff-author{
+  flex-shrink:0; font-family:var(--sans); font-size:10.5px; font-weight:600;
+  color:var(--ink-soft); background:var(--surface-2); border-radius:999px; padding:2px 8px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:120px;
+}
+
+/* Change bodies. Equal word segments stay readable; only del/ins are tinted. */
+.mh-diff-texts{ min-width:0; display:flex; flex-direction:column; gap:4px; }
+.mh-diff-text{
+  font-size:13px; line-height:1.5; padding:3px 8px; border-radius:5px;
+  word-break:break-word; color:var(--ink);
+}
+.mh-diff-text.before{ background:var(--diff-del-bg); }
+.mh-diff-text.after{ background:var(--diff-add-bg); }
+/* Whole-line removed / added keep their full colour cue. */
+.mh-diff-change.removed .mh-diff-text.before{ color:var(--diff-del); text-decoration:line-through; }
+.mh-diff-change.added .mh-diff-text.after{ color:var(--diff-add); }
+.mh-diff-change.moved .mh-diff-text.after{ color:var(--diff-move); background:var(--diff-move-bg); }
+/* Word-level inline highlights (Cursor style). */
+.mh-w-eq{ color:var(--ink-soft); }
+.mh-w-del{ color:var(--diff-del); text-decoration:line-through; font-weight:600; }
+.mh-w-ins{ color:var(--diff-add); font-weight:600; }
+
+/* Jump-to flash pulse on the live sheet target. */
+@keyframes mhDiffJumpFlash{
+  0%{ box-shadow:0 0 0 3px var(--indigo-soft); }
+  100%{ box-shadow:0 0 0 3px transparent; }
+}
+.mh-diff-jump-flash{ animation:mhDiffJumpFlash 1.4s ease-out; border-radius:4px; }
 
 /* ── Beats view ─────────────────────────────────────────────────────────── */
 .mh-beats-view{ height:100%; overflow-y:auto; padding:20px 24px; }
@@ -1483,7 +1743,7 @@ export const EDITOR_SHELL_STYLES = `
   background:transparent; border:1px solid var(--hairline); border-radius:var(--radius-sm);
   padding:4px 8px; cursor:pointer;
 }
-.mh-beat-notes-toggle[aria-expanded="true"]{ color:var(--indigo-deep); border-color:var(--indigo); }
+.mh-beat-notes-toggle[aria-expanded="true"]{ color:var(--ink); border-color:var(--emph-ink-border); background:var(--sel-ink-bg); }
 .mh-beat-delete{
   flex-shrink:0; font-size:14px; line-height:1; color:var(--ink-faint); background:transparent;
   border:1px solid transparent; border-radius:var(--radius-sm); padding:3px 8px; cursor:pointer;
@@ -1498,17 +1758,17 @@ export const EDITOR_SHELL_STYLES = `
 .mh-beat-summary:focus{ outline:none; border-color:var(--indigo); }
 .mh-beat-scenes{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
 .mh-beat-chip{
-  display:inline-flex; align-items:center; gap:2px; background:var(--indigo-soft);
+  display:inline-flex; align-items:center; gap:2px; background:var(--chip-ink-bg);
   border-radius:999px; padding:0 2px 0 0; max-width:100%;
 }
 .mh-beat-chip-label{
-  font-size:11.5px; font-weight:600; color:var(--indigo-deep); background:transparent;
+  font-size:11.5px; font-weight:600; color:var(--chip-ink-fg); background:transparent;
   border:none; border-radius:999px; padding:3px 4px 3px 10px; cursor:pointer;
   max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .mh-beat-chip-label:disabled{ cursor:default; color:var(--ink-faint); }
 .mh-beat-chip-x{
-  font-size:12px; line-height:1; color:var(--indigo-deep); background:transparent; border:none;
+  font-size:12px; line-height:1; color:var(--chip-ink-fg); background:transparent; border:none;
   border-radius:999px; width:16px; height:16px; cursor:pointer; opacity:0.65;
 }
 .mh-beat-chip-x:hover{ opacity:1; }
@@ -1518,17 +1778,17 @@ export const EDITOR_SHELL_STYLES = `
 }
 
 /* ===== FILM NUMBERING (合一终稿, 2026-07-11) =====
-   Storyboard scene heads read S1/S2 (mono, indigo) and shot codes read 1A/1B
+   Storyboard scene heads read S1/S2 (mono, neutral ink) and shot codes read 1A/1B
    (scene number + shot letter) instead of the old plain black number squares —
    the industry slate convention. Embedded (studio) mode now drops the editor's
    own rail entirely, so the old episode SWITCH menu that lived here is gone. */
 .mh-sc-mark{
   font-family:var(--mono); font-size:11px; font-weight:700;
-  color:var(--indigo); letter-spacing:.02em;
+  color:var(--ink-soft); letter-spacing:.02em;
 }
 .mh-shot-no{
-  font-family:var(--mono); font-size:9.5px; font-weight:700; color:var(--indigo);
-  background:var(--indigo-soft); border:1px solid var(--surface-border); border-radius:6px;
+  font-family:var(--mono); font-size:9.5px; font-weight:700; color:var(--chip-ink-fg);
+  background:var(--chip-ink-bg); border:1px solid var(--surface-border); border-radius:6px;
   padding:1.5px 6px; letter-spacing:.03em; flex-shrink:0;
 }
 
@@ -1649,6 +1909,13 @@ export const EDITOR_SHELL_STYLES = `
   padding:56px var(--sheet-pad-r) 72px var(--sheet-pad-l);
   min-height:1040px;
 }
+/* Asian (华语) paper uses NARROWER, SYMMETRIC margins (8ch/8ch) than the
+   Hollywood industry 15ch/10ch — the whole geometry (width + padding + the
+   page-seam bleed, which derives its offsets from these same --sheet-pad-* vars)
+   follows automatically because every consumer reads the vars, never a raw px.
+   Custom properties inherit, so the seam widgets nested inside the sheet pick up
+   the asian values too. Specificity (0,2,0) wins over the base .mh-sheet (0,1,0). */
+.mh-sheet.asian{ --sheet-pad-l:8ch; --sheet-pad-r:8ch; }
 /* Slug is uppercase REGULAR weight on a printed page (laper too) — position and
    case carry the meaning, not boldness. Weight/case live on .mh-scene-heading. */
 /* Focused empty block whispers its element type (laper/Notion affordance) —

@@ -35,12 +35,18 @@ class IssuePriority(str, Enum):
 
 
 class IssueOriginKind(str, Enum):
+    """MUST stay in lock-step with the DB CHECK (migration 367 /
+    models/reviews.py) and the TS union in issuesService.ts — the enum has
+    FOUR mirrors, and missing one here made GET /issues/ 500 for any team
+    holding a stage-mirror issue (2026-07-18)."""
+
     MANUAL = "manual"
     CHAT_DELEGATE = "chat_delegate"
     CELERY_PIPELINE = "celery_pipeline"
     AGENT_DISPATCH = "agent_dispatch"
     ROUTINE = "routine"
     ESCALATION = "escalation"
+    PROJECT_STAGE = "project_stage"
 
 
 class IssueBase(BaseModel):

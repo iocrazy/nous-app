@@ -29,14 +29,43 @@ import {
   type NoteAttachment,
   type RefHotspot,
 } from '../services/inspirationService';
+import { fetchAllTags } from '../services/unifiedTagService';
+import type { Tag } from '../types';
 
 const PAGE_SIZE = 50;
+
+/**
+ * Suggestions for the note `#` completion menu: curated pool tags first
+ * (each with its bilingual name_zh alias), then the user's own note history.
+ * Shadow pool tags (origin === 'note') are skipped since they duplicate note history.
+ */
+export function buildTagSuggestions(
+  noteTags: { tag: string; cnt: number }[],
+  poolTags: Tag[],
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (w: string | null | undefined) => {
+    const v = (w || '').trim();
+    if (!v || seen.has(v.toLowerCase())) return;
+    seen.add(v.toLowerCase());
+    out.push(v);
+  };
+  for (const t of poolTags) {
+    if (t.origin === 'note') continue;
+    push(t.name);
+    push(t.name_zh);
+  }
+  for (const n of noteTags) push(n.tag);
+  return out;
+}
 
 export const InspirationPage: React.FC = () => {
   const { t } = useTranslation();
   const { addToast } = useToast();
   const [notes, setNotes] = useState<InspirationNote[]>([]);
   const [tags, setTags] = useState<{ tag: string; cnt: number }[]>([]);
+  const [poolTags, setPoolTags] = useState<Tag[]>([]);
   const [date, setDate] = useState<string | null>(null);
   const [tag, setTag] = useState<string | null>(null);
   const [queryInput, setQueryInput] = useState('');
@@ -52,6 +81,9 @@ export const InspirationPage: React.FC = () => {
   const [parseOpen, setParseOpen] = useState(false);
   const [parseUrl, setParseUrl] = useState<string | null>(null);
   const [tokensOpen, setTokensOpen] = useState(false);
+  // Hotspots-tab tag narrowing (§7.4): multi-select over the visible pool tags,
+  // threaded server-side through useHotspots → getHotspots(tag_id=…).
+  const [tagFilterIds, setTagFilterIds] = useState<string[]>([]);
   // Single page-wide hotspots instance (task-3): the Hotspots-tab workspace,
   // the Notes-tab side panel and the category chips all read off this one
   // fetch, so hiding a hotspot (applyState) is instantly consistent
@@ -59,6 +91,7 @@ export const InspirationPage: React.FC = () => {
   const { hotspots, loading: hotspotsLoading, applyState } = useHotspots({
     enabled: true,
     day: date ?? undefined,
+    tagIds: tagFilterIds,
   });
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   // Monotonic request version: guards both the main filter-driven fetch and
@@ -88,6 +121,10 @@ export const InspirationPage: React.FC = () => {
     [date, tag, q],
   );
 
+  // Autocomplete suggestions shared by the Composer and the edit NoteEditor —
+  // memoized so both consumers get one stable array per (tags, poolTags).
+  const tagSuggestions = useMemo(() => buildTagSuggestions(tags, poolTags), [tags, poolTags]);
+
   const hotspotCategories = useMemo(() => {
     const counts = new Map<string, number>();
     for (const h of hotspots) {
@@ -100,6 +137,18 @@ export const InspirationPage: React.FC = () => {
   // Clicking the active category again clears the filter.
   const onCategoryClick = (category: string) => {
     setActiveCategory((prev) => (prev === category ? null : category));
+  };
+
+  // Hotspot tag-filter options: the visible pool tags minus shadow rows
+  // (origin === 'note'), which duplicate note history and aren't curated
+  // narrowing dimensions.
+  const tagFilterOptions = useMemo(
+    () => poolTags.filter((tg) => tg.origin !== 'note'),
+    [poolTags],
+  );
+
+  const onTagFilterToggle = (id: string) => {
+    setTagFilterIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
   useEffect(() => {
@@ -134,6 +183,12 @@ export const InspirationPage: React.FC = () => {
       alive = false;
     };
   }, [refreshKey]);
+
+  useEffect(() => {
+    fetchAllTags()
+      .then(setPoolTags)
+      .catch((err) => console.error('fetchAllTags failed', err));
+  }, []);
 
   const loadMore = useCallback(async () => {
     if (!notes.length || loading) return;
@@ -316,7 +371,7 @@ export const InspirationPage: React.FC = () => {
                   setPrefill(null);
                 }}
                 onAttachmentUploaded={onAttachmentUploaded}
-                tagSuggestions={tags.map((x) => x.tag)}
+                tagSuggestions={tagSuggestions}
               />
               <NoteTimeline
                 notes={notes}
@@ -381,6 +436,36 @@ export const InspirationPage: React.FC = () => {
                   </div>
                 </div>
               )}
+              {tagFilterOptions.length > 0 && (
+                <div className="rounded-xl bg-island px-4 py-3.5">
+                  <h3 className="mb-2.5 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-content-3">
+                    <span>{t('inspiration.filterTag', 'Tag')}</span>
+                    {tagFilterIds.length > 0 && (
+                      <button
+                        onClick={() => setTagFilterIds([])}
+                        className="text-[10px] font-normal normal-case tracking-normal text-content-4 hover:text-content-2"
+                      >
+                        {t('inspiration.clearFilter', 'Clear')}
+                      </button>
+                    )}
+                  </h3>
+                  <div className="flex flex-wrap gap-1.5">
+                    {tagFilterOptions.map((tg) => (
+                      <button
+                        key={tg.id}
+                        onClick={() => onTagFilterToggle(tg.id)}
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs transition-colors ${
+                          tagFilterIds.includes(tg.id)
+                            ? 'bg-indigo-500/25 text-indigo-300'
+                            : 'bg-island-2 text-content-2 hover:bg-line'
+                        }`}
+                      >
+                        {tg.name_zh || tg.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <NotesSidePanel
                 recentNotes={notes.slice(0, 3)}
                 onQuickSave={async (content) => {
@@ -434,7 +519,13 @@ export const InspirationPage: React.FC = () => {
             <h4 className="mb-2 text-sm font-semibold text-content">
               {t('inspiration.editNote', 'Edit note')}
             </h4>
-            <NoteEditor value={editText} onChange={setEditText} minRows={6} onSubmit={() => void saveEdit()} />
+            <NoteEditor
+              value={editText}
+              onChange={setEditText}
+              minRows={6}
+              onSubmit={() => void saveEdit()}
+              tagSuggestions={tagSuggestions}
+            />
             <div className="mt-3 flex justify-end gap-2">
               <button onClick={() => setEditing(null)} className="rounded-lg bg-island-2 px-4 py-1.5 text-xs text-content-2">
                 {t('inspiration.cancel', 'Cancel')}

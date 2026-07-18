@@ -68,10 +68,29 @@ for (const format of ['hollywood', 'asian'] as const) {
     const overName = await cursorAt(page, nameG!.glyph!.x + nameG!.glyph!.w / 2, nameG!.glyph!.y + nameG!.glyph!.h / 2);
     expect(overName, 'hovering the character name → pointer').toBe('pointer');
 
-    // Blank space well to the right of the name, still inside the line box → NOT pointer.
-    const blankX = Math.min(nameG!.glyph!.x + nameG!.glyph!.w + 80, nameG!.box.right - 6);
+    // Just past the name's right edge, on the same line → NOT pointer. This is
+    // the boundary the pointer must not cross. It is engine-agnostic on purpose:
+    //  • Hollywood — the cue editable is the full column, so this lands in the
+    //    blank caret space to the right of a short centred name.
+    //  • Asian — the character editable SHRINK-WRAPS to the name (顶格 cue+colon;
+    //    editorShellStyles `.as-row-character`), so there is no in-editable blank
+    //    to the right; this lands on the `：` colon suffix / row gap instead.
+    //
+    // NOTE — issue #1428 supposed a DORMANT asian hit-test bug here (the #1424
+    // pointer-on-cue-name path "not working under the asian engine"). That does
+    // NOT hold: the product scoping is correct in BOTH engines. Do not re-open it
+    // on that premise. What actually broke was this test's geometry assumption —
+    // the old probe clamped to `box.right - 6`, valid only when the editable is
+    // wider than the name. Per-point cursor measurement (headless chromium):
+    //   Hollywood — editable 443‥844, name 621‥710; box.right-6 = 838 → auto (real blank).
+    //   Asian     — editable 386‥479 == name 386‥479; box.right-6 = 473 → pointer,
+    //               i.e. the clamp folds back ONTO the glyphs. Sweeping outward:
+    //               name-centre 433 → pointer, right-edge 477 → pointer,
+    //               +5px 484 → auto (`：` as-suffix), +20px 499 → auto (as-row).
+    // So probe just past the name's right edge instead; it holds for both engines.
+    const blankX = nameG!.glyph!.x + nameG!.glyph!.w + 12;
     const overBlank = await cursorAt(page, blankX, nameG!.glyph!.y + nameG!.glyph!.h / 2);
-    expect(overBlank, 'blank space after the name → not pointer').not.toBe('pointer');
+    expect(overBlank, 'just past the name → not pointer').not.toBe('pointer');
 
     // Ordinary action line → NOT pointer.
     if (actionG?.glyph) {

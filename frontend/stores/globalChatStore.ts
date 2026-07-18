@@ -35,6 +35,27 @@ export interface ChatRequest {
   nonce: number;
 }
 
+/** One-shot "send this selected text into the chat as a quoted reference"
+ *  request (Script editor's selection → AI chat pill). The selected text is
+ *  injected into the composer as a blockquote, tagged with its source scene,
+ *  and the input is focused so the user can immediately give an instruction.
+ *  Nonce disambiguates repeat sends of the same text. Consumed (cleared) by
+ *  AIChatPanel once injected; never persisted. */
+export interface PendingQuote {
+  /** The selected plain text. */
+  text: string;
+  /** Short label for the source scene, e.g. "S2" or the heading. */
+  sceneLabel?: string;
+  /** Source scene id (structural context). */
+  sceneId?: string;
+  /** Source element id + type (structural context). */
+  elementId?: string;
+  elementType?: string;
+  /** True when the selection spanned more than one scene. */
+  crossScene?: boolean;
+  nonce: number;
+}
+
 interface GlobalChatState {
   open: boolean;
   /** Window rect, anchored bottom-right (offsets in px). */
@@ -46,6 +67,8 @@ interface GlobalChatState {
   pageContext: PageChatContext | null;
   /** Pending open-with-agent request (not persisted). */
   chatRequest: ChatRequest | null;
+  /** Pending "quote this selection into the composer" request (not persisted). */
+  pendingQuote: PendingQuote | null;
 
   setOpen: (open: boolean) => void;
   toggle: () => void;
@@ -57,6 +80,9 @@ interface GlobalChatState {
    *  pass sessionId to also resume a specific session (Sessions page). */
   requestChat: (agentSlug: string, sessionId?: string) => void;
   consumeChatRequest: () => void;
+  /** Open the floating chat and stage a quoted selection for the composer. */
+  sendSelectionToChat: (quote: Omit<PendingQuote, 'nonce'>) => void;
+  consumePendingQuote: () => void;
 }
 
 export const CHAT_MIN_W = 340;
@@ -73,6 +99,7 @@ export const useGlobalChatStore = create<GlobalChatState>()(
       height: 620,
       pageContext: null,
       chatRequest: null,
+      pendingQuote: null,
 
       setOpen: (open) => set({ open }),
       toggle: () => set((s) => ({ open: !s.open })),
@@ -84,6 +111,12 @@ export const useGlobalChatStore = create<GlobalChatState>()(
           chatRequest: { agentSlug, sessionId, nonce: (s.chatRequest?.nonce ?? 0) + 1 },
         })),
       consumeChatRequest: () => set({ chatRequest: null }),
+      sendSelectionToChat: (quote) =>
+        set((s) => ({
+          open: true,
+          pendingQuote: { ...quote, nonce: (s.pendingQuote?.nonce ?? 0) + 1 },
+        })),
+      consumePendingQuote: () => set({ pendingQuote: null }),
     }),
     {
       name: 'mediahub.global_chat',

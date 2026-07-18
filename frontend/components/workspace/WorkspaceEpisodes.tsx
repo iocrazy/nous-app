@@ -194,7 +194,7 @@ export function WorkspaceEpisodes({
                     onChange={(e) => setRenameValue(e.target.value)}
                     onBlur={() => commitRename(ep.episode_id)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') commitRename(ep.episode_id);
+                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) commitRename(ep.episode_id);
                       if (e.key === 'Escape') setRenamingId(null);
                     }}
                     className="w-full bg-ink-800 border border-ink-600 rounded px-1.5 py-0.5 text-ink-100"

@@ -27,6 +27,7 @@ import {
   type ScriptCommit,
 } from '../sceneService';
 import { useToast } from '../../components/Toast';
+import { authorLabel } from './authorLabel';
 
 /** How long an armed inline "Confirm?" stays live before auto-disarming. */
 const CONFIRM_WINDOW_MS = 3000;
@@ -63,9 +64,16 @@ export interface VersionPanelProps {
   onCompare: (commit: ScriptCommit) => void;
   /** A clean rollback landed — the shell should reload its scenes. */
   onRolledBack: () => void;
+  /** The signed-in user id — their own versions read as "You". */
+  currentUserId?: string | null;
 }
 
-export function VersionPanel({ scriptId, onCompare, onRolledBack }: VersionPanelProps) {
+export function VersionPanel({
+  scriptId,
+  onCompare,
+  onRolledBack,
+  currentUserId,
+}: VersionPanelProps) {
   const { t } = useTranslation();
   const { addToast } = useToast();
 
@@ -268,8 +276,22 @@ export function VersionPanel({ scriptId, onCompare, onRolledBack }: VersionPanel
               <li key={id} className="mh-version-item" data-testid="version-item">
                 <div className="mh-version-item-main">
                   <div className="mh-version-msg">{commit.message}</div>
-                  <div className="mh-version-time">
-                    {relativeTime(commit.created_at, t)}
+                  <div className="mh-version-meta">
+                    {(() => {
+                      const author = authorLabel(commit.created_by, {
+                        currentUserId,
+                        authors: commit.author_name
+                          ? { [commit.created_by]: commit.author_name }
+                          : undefined,
+                        t,
+                      });
+                      return author ? (
+                        <span className="mh-version-author">{author}</span>
+                      ) : null;
+                    })()}
+                    <span className="mh-version-time">
+                      {relativeTime(commit.created_at, t)}
+                    </span>
                   </div>
                 </div>
                 <div className="mh-version-actions">

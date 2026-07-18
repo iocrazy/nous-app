@@ -64,11 +64,11 @@ export function WorkspaceOverview({
             </div>
           </div>
           <button
-            data-testid="ws-open-studio-btn"
+            data-testid="ws-open-episode-btn"
             onClick={onOpenScript}
             className="flex items-center gap-1.5 shrink-0 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white font-semibold text-sm px-4 py-2 transition-colors"
           >
-            {t('projects.workspace.overview.openStudio')}
+            {t('projects.workspace.overview.openEpisode')}
             <ArrowRight size={15} />
           </button>
         </div>

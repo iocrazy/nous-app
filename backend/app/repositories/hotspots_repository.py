@@ -240,11 +240,14 @@ class HotspotsRepository:
         source_ids: Optional[list[str]] = None,
         min_score: Optional[float] = None,
         order_score: bool = False,
+        tag_words: Optional[list[str]] = None,
     ) -> list[dict[str, Any]]:
         # source_ids is the caller's visible-source allowlist (system + own,
         # minus hidden). None = no scoping; [] = nothing visible → empty feed.
         # min_score / order_score drive the "Featured" view: a score floor +
         # best-first ordering instead of the default chronological feed.
+        # tag_words is the pool-tag filter: keep hotspots whose ``tags`` array
+        # overlaps the lower-cased word set (name/name_zh of the picked tags).
         if source_ids is not None and not source_ids:
             return []
         stmt = self._joined_select()
@@ -260,6 +263,8 @@ class HotspotsRepository:
             stmt = stmt.where(Hotspots.category == category)
         if min_score is not None:
             stmt = stmt.where(Hotspots.score >= min_score)
+        if tag_words:
+            stmt = stmt.where(Hotspots.tags.overlap([w.lower() for w in tag_words]))
         term = sanitize_search(q)
         if term:
             like = f"%{term}%"
@@ -424,6 +429,21 @@ class HotspotsRepository:
         except Exception as e:  # noqa: BLE001
             logger.error(f"patch_enrichment failed for {hotspot_id}: {e}")
 
+    async def recent_tag_word_counts(self, days: int = 30) -> dict[str, int]:
+        """lower(word) → hotspot count within the window (spec §4.3).
+
+        One aggregate over ``unnest(tags)``; callers match by name/name_zh.
+        """
+        stmt = text(
+            "SELECT lower(w.word) AS word, COUNT(*)::bigint AS cnt "
+            "FROM hotspots h, LATERAL unnest(h.tags) AS w(word) "
+            "WHERE h.captured_at >= now() - make_interval(days => :days) "
+            "GROUP BY lower(w.word)"
+        )
+        async with read_scope() as session:
+            rows = (await session.execute(stmt, {"days": int(days)})).all()
+        return {str(r[0]): int(r[1]) for r in rows}
+
     async def distinct_dates(self, limit_days: int = 60) -> list[str]:
         async with read_scope() as session:
             result = await session.execute(
@@ -446,3 +466,13 @@ def _bigint(value: Any) -> int:
     if isinstance(value, int):
         return value
     return int(str(value))
+
+
+_repo: HotspotsRepository | None = None
+
+
+def get_hotspots_repository() -> HotspotsRepository:
+    global _repo
+    if _repo is None:
+        _repo = HotspotsRepository()
+    return _repo

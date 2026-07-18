@@ -41,7 +41,10 @@ from app.services.distribution.credentials import (
 from app.services.distribution.registry import get_adapter
 from app.services.infra.dbos_orchestrator import start_workflow_routed
 from app.services.infra.unified_task_manager import get_task_manager
-from app.workflows.publish_distribution import publish_distribution_workflow
+from app.workflows.publish_distribution import (
+    publish_distribution_workflow,
+    visibility_to_private_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -472,10 +475,15 @@ async def get_share_schema(task_id: int, user: CurrentUserDep):
     adapter = get_adapter(h5.get("platform", "douyin"), creds)
     title = h5.get("title") or task.get("title") or ""
     topics = h5.get("topics") or task.get("topics") or []
+    allow_download = task.get("allow_download")
+    if allow_download is None:
+        allow_download = True
     schema_url = await adapter.generate_share_url(
         video_url=video_url,
         title=title,
         share_id=h5["share_id"],
         hashtags=topics,
+        private_status=visibility_to_private_status(task.get("visibility")),
+        allow_download=bool(allow_download),
     )
     return ShareSchemaResponse(schema_url=schema_url or "", share_id=h5["share_id"])

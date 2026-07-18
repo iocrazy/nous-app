@@ -51,6 +51,11 @@ class TagUpdate(BaseModel):
         None,
         description="Reassign to a tag group (or null to leave uncategorized)",
     )
+    origin: Optional[Literal["curated"]] = Field(
+        None,
+        description="Promote a shadow (origin='note') tag into the curated pool. "
+        "Only 'curated' is settable — 'note' is never accepted (422).",
+    )
 
 
 class TagResponse(TagBase):
@@ -62,6 +67,11 @@ class TagResponse(TagBase):
     group_id: Optional[SnowflakeId] = None
     group_name: Optional[str] = Field(None, description="Tag group name")
     enabled: bool = Field(True, description="Whether visible in frontend API")
+    origin: str = Field(
+        "curated",
+        description="'curated' (real tag) or 'note' (shadow tag auto-created "
+        "from an inspiration note word).",
+    )
     created_at: datetime
     media_count: Optional[int] = Field(
         0, description="Number of resources using this tag"
@@ -116,6 +126,8 @@ class TagCountItem(BaseModel):
     icon: Optional[str] = None
     type: str = "system"
     count: int
+    notes: int = Field(0, description="Live inspiration-note usage count")
+    hotspots: int = Field(0, description="Hotspot word hits in the recent window")
 
 
 class TagStatisticsResponse(BaseModel):

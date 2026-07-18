@@ -212,7 +212,7 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
                       value={newLibraryName}
                       onChange={(e) => setNewLibraryName(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleCreateLibrary();
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleCreateLibrary();
                         if (e.key === 'Escape') {
                           setCreatingLibrary(false);
                           setNewLibraryName('');

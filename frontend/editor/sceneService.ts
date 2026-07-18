@@ -508,6 +508,8 @@ export interface SceneSnapshot {
   sort_order: number | null;
   heading_int_ext: string | null;
   location_text: string | null;
+  /** Who last worked on this scene up to its watermark (uuid / 'copilot'). */
+  author?: string | null;
 }
 
 /**
@@ -522,6 +524,8 @@ export interface ScriptCommit {
   watermarks: Record<string, number>;
   scene_ids: SceneSnapshot[];
   created_by: string;
+  /** Server-resolved display name for `created_by` (null when unresolved). */
+  author_name?: string | null;
   created_at: string;
 }
 
@@ -533,23 +537,30 @@ export interface DiffChange {
   id: string;
   before: ScriptElement | null;
   after: ScriptElement | null;
+  /** Who last touched this element between the two watermarks (uuid / 'copilot'). */
+  actor?: string | null;
 }
 
 /** The changes for one scene present on both sides of a diff. */
 export interface SceneDiff {
   scene_id: string;
   elements: DiffChange[];
+  /** Dominant author of the scene's changes (uuid / 'copilot'). */
+  author?: string | null;
 }
 
 /**
  * The diff of one commit against another (or against the live 'current' state):
  * per-scene element changes, plus scene-set adds/removes. Only scenes with
- * changes appear in `scenes`.
+ * changes appear in `scenes`. `authors` maps the actor uuids referenced across
+ * the diff to display names (server-resolved; 'copilot' and the caller's own id
+ * are left for the client to label).
  */
 export interface CommitDiff {
   scenes: SceneDiff[];
   scenes_added: SceneSnapshot[];
   scenes_removed: SceneSnapshot[];
+  authors?: Record<string, string>;
 }
 
 export type RollbackSceneStatus = 'unchanged' | 'rolled_back' | 'failed';

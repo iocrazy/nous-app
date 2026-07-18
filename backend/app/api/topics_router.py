@@ -17,6 +17,7 @@ from app.repositories.signal_sources_repository import (
     ALLOWED_KINDS,
     SignalSourcesRepository,
 )
+from app.repositories.tags_repository import get_tags_repository
 from app.repositories.user_hidden_sources_repository import (
     UserHiddenSourcesRepository,
 )
@@ -114,6 +115,47 @@ async def _visible_source_ids(user_id: str) -> list[str]:
     ]
 
 
+# Sentinel word set for a tag filter that resolved to nothing (invalid / unknown
+# ids). It can never match a real hotspot tag, so the feed comes back empty
+# instead of silently unfiltered.
+_NO_TAG_MATCH: list[str] = ["__no_match__"]
+
+
+async def _resolve_tag_words(
+    tag_id: Optional[str], user_id: str
+) -> Optional[list[str]]:
+    """Resolve a comma-separated pool tag-id list to the lower-cased set of
+    name/name_zh words those tags carry, scoped to the caller-visible pool
+    (spec §5) so a raw tag id can't pull another user's private tag name into
+    the filter word set.
+
+    Returns None when no filter is requested (feed stays unfiltered), or the
+    ``_NO_TAG_MATCH`` sentinel when ids were given but resolved to nothing — so
+    an invalid/unknown/not-visible tag filter yields an empty feed, never all
+    rows."""
+    if not tag_id:
+        return None
+    ids = [int(x) for x in tag_id.split(",") if x.strip().isdigit()][:20]
+    words: list[str] = []
+    if ids:
+        tag_rows = await get_tags_repository().get_tags_by_ids(ids, user_id)
+        words = [
+            w.lower() for t in tag_rows for w in (t.get("name"), t.get("name_zh")) if w
+        ]
+    return words or _NO_TAG_MATCH
+
+
+def _filter_rows_by_tag_words(rows: list[dict], tag_words: Optional[list[str]]) -> list:
+    """Router-level tag filter for the id-driven views (saved/hidden/foryou),
+    which fetch by hotspot id and so can't push the array overlap into the
+    query: keep hotspots whose ``tags`` intersect the word set (case-folded).
+    No-op when no filter is requested."""
+    if not tag_words:
+        return rows
+    wanted = set(tag_words)
+    return [r for r in rows if wanted & {str(t).lower() for t in (r.get("tags") or [])}]
+
+
 @router.get("", response_model=HotspotListResponse)
 async def list_hotspots(
     auth: AuthDep,
@@ -124,6 +166,7 @@ async def list_hotspots(
     source: Optional[str] = Query(
         None, description="comma-separated source ids to narrow the feed to"
     ),
+    tag_id: Optional[str] = Query(None, description="comma-separated tag ids"),
     limit: int = Query(100, ge=1, le=300),
 ):
     repo = HotspotsRepository()
@@ -134,6 +177,11 @@ async def list_hotspots(
         # they're allowed to see (a picked id outside the allowlist is dropped).
         picked = {s.strip() for s in source.split(",") if s.strip()}
         visible = [sid for sid in visible if sid in picked]
+
+    # Pool-tag filter: resolve the picked tag ids to their name/name_zh words.
+    # The date-window views push this into the query (array overlap); the
+    # id-driven views (saved/hidden/foryou) filter the fetched rows below.
+    tag_words = await _resolve_tag_words(tag_id, auth.user_id)
 
     if view == "featured":
         # Curated high-value board: score floor + best-first, spanning all
@@ -148,6 +196,7 @@ async def list_hotspots(
             source_ids=visible,
             min_score=cfg.featured_min_score,
             order_score=True,
+            tag_words=tag_words,
         )
     elif view == "foryou":
         # Personalized: hotspots ranked by cosine similarity to the user's
@@ -159,17 +208,24 @@ async def list_hotspots(
         fetched = await repo.list_by_ids(ranked, limit=limit, source_ids=visible)
         order = {rid: n for n, rid in enumerate(ranked)}
         rows = sorted(fetched, key=lambda r: order.get(str(r.get("id")), 1 << 30))
+        rows = _filter_rows_by_tag_words(rows, tag_words)
     elif view in ("saved", "hidden"):
         # These views span all dates: drive off the user's state table.
         flag = "is_saved" if view == "saved" else "is_hidden"
         ids = await state_repo.list_ids_where(auth.user_id, flag=flag)
         rows = await repo.list_by_ids(ids, limit=limit, source_ids=visible)
+        rows = _filter_rows_by_tag_words(rows, tag_words)
     else:
         # When searching, span all dates — a topic is found regardless of which
         # day it landed on. The day filter only applies to plain browsing.
         effective_day = None if (q and q.strip()) else day
         rows = await repo.list_for_date(
-            effective_day, category, limit=limit, q=q, source_ids=visible
+            effective_day,
+            category,
+            limit=limit,
+            q=q,
+            source_ids=visible,
+            tag_words=tag_words,
         )
 
     states = await state_repo.get_states(auth.user_id, [str(r.get("id")) for r in rows])

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import app.services.inspiration.notes_service as svc_mod
 from app.services.inspiration.notes_service import (
     NoteNotFound,
     NotePersistFailed,
@@ -17,6 +18,27 @@ def _service():
     svc._attachments = AsyncMock()
     svc._attachments.list_for_notes.return_value = []
     return svc
+
+
+@pytest.fixture(autouse=True)
+def _stub_pool_tags(monkeypatch):
+    """Default no-op tag-pool sync so orchestration tests don't hit the real
+    tags / note_tags repos. Tests that assert on the sync override these."""
+
+    class _NoopTags:
+        async def resolve_note_tags(self, user_id, names):
+            return []
+
+    class _NoopNoteTags:
+        async def sync_for_note(self, note_id, tag_ids):
+            return None
+
+    monkeypatch.setattr(
+        svc_mod, "get_tags_repository", lambda: _NoopTags(), raising=False
+    )
+    monkeypatch.setattr(
+        svc_mod, "get_note_tags_repository", lambda: _NoopNoteTags(), raising=False
+    )
 
 
 @pytest.mark.asyncio
@@ -106,3 +128,88 @@ async def test_assert_owned_raises_for_missing():
     svc._notes.get_by_id.return_value = None
     with pytest.raises(NoteNotFound):
         await svc.assert_owned("u1", "404")
+
+
+@pytest.mark.asyncio
+async def test_create_note_syncs_note_tags(monkeypatch):
+    svc = _service()
+
+    resolve_calls, sync_calls = [], []
+
+    class _FakeTagsRepo:
+        async def resolve_note_tags(self, user_id, names):
+            resolve_calls.append((user_id, names))
+            return [101, 102]
+
+    class _FakeNoteTagsRepo:
+        async def sync_for_note(self, note_id, tag_ids):
+            sync_calls.append((note_id, tag_ids))
+
+    monkeypatch.setattr(
+        svc_mod, "get_tags_repository", lambda: _FakeTagsRepo(), raising=False
+    )
+    monkeypatch.setattr(
+        svc_mod, "get_note_tags_repository", lambda: _FakeNoteTagsRepo(), raising=False
+    )
+    svc._notes.create.return_value = {
+        "id": 7,
+        "content_md": "x #ai #ml",
+        "tags": ["ai", "ml"],
+    }
+
+    await svc.create_note("user-1", "x #ai #ml")
+
+    assert resolve_calls == [("user-1", ["ai", "ml"])]
+    assert sync_calls == [(7, [101, 102])]
+
+
+@pytest.mark.asyncio
+async def test_update_content_change_syncs_note_tags(monkeypatch):
+    svc = _service()
+
+    resolve_calls, sync_calls = [], []
+
+    class _FakeTagsRepo:
+        async def resolve_note_tags(self, user_id, names):
+            resolve_calls.append((user_id, names))
+            return [201]
+
+    class _FakeNoteTagsRepo:
+        async def sync_for_note(self, note_id, tag_ids):
+            sync_calls.append((note_id, tag_ids))
+
+    monkeypatch.setattr(
+        svc_mod, "get_tags_repository", lambda: _FakeTagsRepo(), raising=False
+    )
+    monkeypatch.setattr(
+        svc_mod, "get_note_tags_repository", lambda: _FakeNoteTagsRepo(), raising=False
+    )
+    svc._notes.get_by_id.return_value = {"id": 7, "user_id": "user-1"}
+    svc._notes.update.return_value = {"id": 7, "tags": ["fresh"]}
+
+    await svc.update_note("user-1", "7", content_md="now #fresh")
+
+    assert resolve_calls == [("user-1", ["fresh"])]
+    assert sync_calls == [(7, [201])]
+
+
+@pytest.mark.asyncio
+async def test_update_note_without_content_change_skips_tag_sync(monkeypatch):
+    svc = _service()
+
+    called = []
+
+    class _RecordingTagsRepo:
+        async def resolve_note_tags(self, user_id, names):
+            called.append((user_id, names))
+            return []
+
+    monkeypatch.setattr(
+        svc_mod, "get_tags_repository", lambda: _RecordingTagsRepo(), raising=False
+    )
+    svc._notes.get_by_id.return_value = {"id": 7, "user_id": "user-1"}
+    svc._notes.update.return_value = {"id": 7}
+
+    await svc.update_note("user-1", "7", pinned=True)  # content_md=None
+
+    assert called == []

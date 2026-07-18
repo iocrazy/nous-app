@@ -48,7 +48,7 @@ import {
   type SceneDoc,
 } from '../types';
 import { useSceneSync, type RemoteOpRow } from '../useSceneSync';
-import { MentionCombobox, filterMentionCandidates } from './MentionCombobox';
+import { MentionCombobox, mentionEntries } from './MentionCombobox';
 import { SlashMenu, SLASH_ITEMS, filterSlashItems, type SlashItem } from './SlashMenu';
 import { CopilotCard, type CopilotPhase } from './CopilotCard';
 import { EmptySceneHint } from './EmptyStates';
@@ -323,11 +323,15 @@ export function SceneBlock({
   // The transition preset picker rides the same pipeline with its own list.
   const activeMentionCandidates =
     mention?.kind === 'transition' ? TRANSITION_PRESETS : mentionCandidates;
-  const mentionFiltered = useMemo(
-    () => (mention ? filterMentionCandidates(activeMentionCandidates, mention.query) : []),
+  // The picker's navigable rows — filtered cast PLUS a synthetic "create" row
+  // for a character cue whose typed name matches nothing exactly (location-field
+  // parity). Enter on that row writes the new name, which IS how a character is
+  // born (the cast is the set of distinct cues). Shared verbatim with the popup.
+  const { entries: mentionEntriesList } = useMemo(
+    () => (mention ? mentionEntries(activeMentionCandidates, mention.query, mention.kind) : { entries: [], createIndex: -1 }),
     [mention, activeMentionCandidates],
   );
-  const mentionFilteredRef = useRef<string[]>(mentionFiltered);
+  const mentionEntriesRef = useRef<string[]>(mentionEntriesList);
   const mentionActiveRef = useRef(0);
 
   // ── Slash menu (`/` at block start → block-type picker) ──────────────────
@@ -350,7 +354,7 @@ export function SceneBlock({
 
   elementsRef.current = sync.elements;
   mentionRef.current = mention;
-  mentionFilteredRef.current = mentionFiltered;
+  mentionEntriesRef.current = mentionEntriesList;
   mentionActiveRef.current = mentionActive;
   slashRef.current = slash;
   slashFilteredRef.current = slashFiltered;
@@ -690,19 +694,22 @@ export function SceneBlock({
       elementId: mention.elementId,
       onArrowDown: () =>
         setMentionActive((prev) =>
-          mentionFilteredRef.current.length > 0 ? (prev + 1) % mentionFilteredRef.current.length : prev,
+          mentionEntriesRef.current.length > 0 ? (prev + 1) % mentionEntriesRef.current.length : prev,
         ),
       onArrowUp: () =>
         setMentionActive((prev) =>
-          mentionFilteredRef.current.length > 0
-            ? (prev - 1 + mentionFilteredRef.current.length) % mentionFilteredRef.current.length
+          mentionEntriesRef.current.length > 0
+            ? (prev - 1 + mentionEntriesRef.current.length) % mentionEntriesRef.current.length
             : prev,
         ),
       onApply: () => {
-        const filtered = mentionFilteredRef.current;
+        // entries carries the create row too (its value IS the typed name), so
+        // committing entries[active] both selects a cast member AND coins a new
+        // one — the line-driven Enter no longer just closes on a miss.
+        const entries = mentionEntriesRef.current;
         const active = mentionActiveRef.current;
-        if (filtered.length > 0 && active >= 0 && active < filtered.length) {
-          handleTiptapMentionSelect(filtered[active]);
+        if (entries.length > 0 && active >= 0 && active < entries.length) {
+          handleTiptapMentionSelect(entries[active]);
         } else {
           setMention(null);
         }
@@ -1278,40 +1285,91 @@ export function SceneBlock({
          *  so a partially-filled heading still reads INT. LOCATION - DAY. The
          *  separators (.·-) are decorative, so a fully-filled Hollywood heading
          *  still reads as the slug "INT. LOCATION - DAY". */}
-        <span className={`mh-scene-heading${format === 'asian' ? ' asian' : ''}`}>
-          <HeadingSelect
-            value={meta.heading_int_ext}
-            options={INT_EXT_OPTIONS}
-            placeholder="INT/EXT"
-            ariaLabel={t('editor.intExt')}
-            tabHint={t('editor.headingTabLocation')}
-            onChange={(v) => commitMeta({ heading_int_ext: v })}
-            onTabNext={() => focusHeadField(1)}
-          />
-          <span className="mh-heading-sep" aria-hidden="true">
-            {format === 'asian' ? ' · ' : '. '}
+        {/* Token order differs by format. Hollywood is the industry slug
+         *  `INT. LOCATION - DAY`. Asian (华语) is `N. 地点 时间 / INT` — the scene
+         *  NUMBER leads (inline bold, laper 亚洲格式), location + time sit as the
+         *  centred content, and INT/EXT moves to the TAIL behind a ` / `. Tab flow
+         *  follows visual order in both: onTabNext advances to the NEXT
+         *  `.mh-scene-select` in DOM order (focusHeadField reads them positionally).
+         *  The three HeadingSelects are otherwise identical — only their order,
+         *  separators, and tab wiring change. */}
+        {format === 'asian' ? (
+          <span className="mh-scene-heading asian">
+            {/* Asian 亚洲格式 scene numbers are sequential scene ordinals
+             *  (1. 2. 3. …), matching the left rail's S1/S2 — NOT the continuous
+             *  document-order block index (blockIndexBase) the Hollywood hover
+             *  badge uses, which would jump 1 → 3 → 14 across scenes. */}
+            <span className="mh-scene-num-inline" aria-hidden="true">
+              {index + 1}.
+            </span>
+            <HeadingSelect
+              searchable
+              candidates={locationCandidates}
+              value={meta.location_text}
+              placeholder={t('editor.locationPlaceholder')}
+              ariaLabel={t('editor.location')}
+              tabHint={t('editor.headingTabTime')}
+              onChange={(v) => commitMeta({ location_text: v })}
+              onTabNext={() => focusHeadField(1)}
+            />
+            <span className="mh-heading-sep" aria-hidden="true">
+              {' '}
+            </span>
+            <HeadingSelect
+              value={meta.time_of_day}
+              options={TIME_OPTIONS}
+              placeholder="DAY/NIGHT"
+              ariaLabel={t('editor.timeOfDay')}
+              onChange={(v) => commitMeta({ time_of_day: v })}
+              onTabNext={() => focusHeadField(2)}
+            />
+            <span className="mh-heading-sep" aria-hidden="true">
+              {' / '}
+            </span>
+            <HeadingSelect
+              value={meta.heading_int_ext}
+              options={INT_EXT_OPTIONS}
+              placeholder="INT/EXT"
+              ariaLabel={t('editor.intExt')}
+              onChange={(v) => commitMeta({ heading_int_ext: v })}
+            />
           </span>
-          <HeadingSelect
-            searchable
-            candidates={locationCandidates}
-            value={meta.location_text}
-            placeholder={t('editor.locationPlaceholder')}
-            ariaLabel={t('editor.location')}
-            tabHint={t('editor.headingTabTime')}
-            onChange={(v) => commitMeta({ location_text: v })}
-            onTabNext={() => focusHeadField(2)}
-          />
-          <span className="mh-heading-sep" aria-hidden="true">
-            {format === 'asian' ? ' · ' : ' - '}
+        ) : (
+          <span className="mh-scene-heading">
+            <HeadingSelect
+              value={meta.heading_int_ext}
+              options={INT_EXT_OPTIONS}
+              placeholder="INT/EXT"
+              ariaLabel={t('editor.intExt')}
+              tabHint={t('editor.headingTabLocation')}
+              onChange={(v) => commitMeta({ heading_int_ext: v })}
+              onTabNext={() => focusHeadField(1)}
+            />
+            <span className="mh-heading-sep" aria-hidden="true">
+              {'. '}
+            </span>
+            <HeadingSelect
+              searchable
+              candidates={locationCandidates}
+              value={meta.location_text}
+              placeholder={t('editor.locationPlaceholder')}
+              ariaLabel={t('editor.location')}
+              tabHint={t('editor.headingTabTime')}
+              onChange={(v) => commitMeta({ location_text: v })}
+              onTabNext={() => focusHeadField(2)}
+            />
+            <span className="mh-heading-sep" aria-hidden="true">
+              {' - '}
+            </span>
+            <HeadingSelect
+              value={meta.time_of_day}
+              options={TIME_OPTIONS}
+              placeholder="DAY/NIGHT"
+              ariaLabel={t('editor.timeOfDay')}
+              onChange={(v) => commitMeta({ time_of_day: v })}
+            />
           </span>
-          <HeadingSelect
-            value={meta.time_of_day}
-            options={TIME_OPTIONS}
-            placeholder="DAY/NIGHT"
-            ariaLabel={t('editor.timeOfDay')}
-            onChange={(v) => commitMeta({ time_of_day: v })}
-          />
-        </span>
+        )}
         <ScenePresenceBadge users={focusPresence ?? []} />
       </div>
 

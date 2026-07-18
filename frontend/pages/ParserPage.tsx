@@ -156,7 +156,7 @@ export function ParserPage() {
                 className="flex-1 bg-transparent border-none outline-none text-ink-200 placeholder-ink-600 px-4 py-3"
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleParse()}
+                onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && handleParse()}
               />
               <button
                 onClick={handleParse}

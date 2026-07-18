@@ -439,6 +439,7 @@ export interface Tag {
   user_id?: string;
   video_count?: number;
   media_count?: number;
+  origin?: 'curated' | 'note';  // 'note' = shadow tag auto-created from note #tags
   created_at: string;
 }
 
@@ -1234,8 +1235,9 @@ export interface CreateAgentPayload {
   fork_from?: string;
   // Scope (Phase 2 PR 2.9) — at most one of team_id / project_id. Omit both
   // for a private per-user agent.
-  team_id?: number;
-  project_id?: number;
+  // Snowflake BIGINTs — string preserves precision past 2^53.
+  team_id?: number | string;
+  project_id?: number | string;
   model?: string;
   temperature?: number;
   max_tokens?: number;
@@ -1299,8 +1301,9 @@ export interface CreateSkillPayload {
   body_md?: string;
   frontmatter_json?: Record<string, unknown>;
   output_format?: string;
-  team_id?: number;
-  project_id?: number;
+  // Snowflake BIGINTs — string preserves precision past 2^53.
+  team_id?: number | string;
+  project_id?: number | string;
   fork_from?: string;
 }
 
@@ -1605,8 +1608,9 @@ export interface ChatSessionWithMessages extends ChatSession {
 
 export interface CreateChatSessionPayload {
   title?: string;
-  project_id?: number;
-  team_id?: number;
+  // Snowflake BIGINTs — string preserves precision past 2^53.
+  project_id?: number | string;
+  team_id?: number | string;
   context_type?: string;
   context_id?: string;
 }

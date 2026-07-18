@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { buildOriginId, originLabel, originPath, parseOriginId } from './issueOrigin';
+import { buildOriginId, originLabel, originModule, originPath, parseOriginId } from './issueOrigin';
 
 describe('issueOrigin', () => {
   it('round-trips what a content surface writes', () => {
@@ -82,5 +82,20 @@ describe('issueOrigin', () => {
     // Missing projectId (leading colon in the composite id) → list fallback.
     const origin = { kind: 'project_stage' as const, id: ':9002' };
     expect(originPath(origin, '8')).toBe('/projects');
+  });
+});
+
+describe('originModule', () => {
+  it('maps each content origin to its module chip', () => {
+    expect(originModule('canvas:123')).toEqual({ label: 'Canvas', dotClass: 'bg-sky-400' });
+    expect(originModule('scene:456')).toEqual({ label: 'Script', dotClass: 'bg-violet-400' });
+    expect(originModule('project_stage:1:2')).toEqual({ label: 'Project', dotClass: 'bg-emerald-400' });
+  });
+
+  it('returns null for non-content origins (no chip, like the mockup)', () => {
+    expect(originModule(null)).toBeNull();
+    expect(originModule(undefined)).toBeNull();
+    expect(originModule('')).toBeNull();
+    expect(originModule('12345')).toBeNull(); // routine schedule id
   });
 });

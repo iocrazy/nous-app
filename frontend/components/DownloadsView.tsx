@@ -1301,7 +1301,7 @@ export const DownloadsView: React.FC = () => {
                     handleSearchQueryChange(e.target.value);
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
                       e.preventDefault();
                       const q = mobileSearchQuery.trim();
                       if (q.length > 0) {
@@ -1401,7 +1401,7 @@ export const DownloadsView: React.FC = () => {
               autoFocus
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleRenameSubmit(); if (e.key === 'Escape') setRenameTarget(null); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleRenameSubmit(); if (e.key === 'Escape') setRenameTarget(null); }}
               className="w-full bg-ink-800 border border-ink-700 rounded-lg px-3 py-2 text-sm text-ink-50 focus:outline-none focus:border-ink-500 transition-colors"
             />
             <div className="flex justify-end gap-2 mt-4">

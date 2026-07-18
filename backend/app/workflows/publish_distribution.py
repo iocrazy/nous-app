@@ -59,25 +59,39 @@ def decide_channel(task_channel: str, account: dict) -> str:
     return "h5"
 
 
-def _account_title(account: dict, task: dict) -> tuple[str, Optional[str]]:
+def visibility_to_private_status(visibility: Optional[str]) -> int:
+    """Map the task's ``visibility`` to Douyin's ``private_status`` enum:
+    public→0 (everyone), private→1 (self only), friends→2 (friends). Unknown
+    values fall back to public (0). Same enum for both the official create API
+    and the H5 share schema, so a single mapping is correct here."""
+    return {"public": 0, "private": 1, "friends": 2}.get(visibility or "public", 0)
+
+
+def _account_publish_opts(account: dict, task: dict) -> dict:
+    """Resolve the per-account publish options for one row: title/description
+    and topics (account override → batch default) plus the batch-level
+    visibility and download toggles decoded into what the adapter needs.
+
+    Returns keys: title, description, topics (list[str], Douyin hashtags),
+    private_status (int), allow_download (bool). Extracted so it is
+    unit-testable without the DBOS runtime."""
     title = account.get("title") or task.get("title") or ""
     description = account.get("description")
     if description is None:
         description = task.get("description")
-    return title, description
-
-
-def _account_publish_opts(
-    account: dict, task: dict
-) -> tuple[str, Optional[str], list[str]]:
-    """Resolve the title, description AND topics (Douyin hashtags) for one
-    account. Topics follow the same per-account override → batch fallback rule
-    as title/description (an account row's topics override the batch's)."""
-    title, description = _account_title(account, task)
+    allow_download = task.get("allow_download")
+    if allow_download is None:
+        allow_download = True
     topics = account.get("topics")
     if topics is None:
         topics = task.get("topics")
-    return title, description, list(topics or [])
+    return {
+        "title": title,
+        "description": description,
+        "topics": list(topics or []),
+        "private_status": visibility_to_private_status(task.get("visibility")),
+        "allow_download": bool(allow_download),
+    }
 
 
 def _title_with_hashtags(title: str, topics: list[str]) -> str:
@@ -110,12 +124,20 @@ async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
     @DBOS.step so it is unit-testable with fakes."""
     account_row_id = int(account["id"])
     channel = decide_channel(account.get("channel", "h5"), account)
-    title, description, topics = _account_publish_opts(account, task)
+    opts = _account_publish_opts(account, task)
+    title = opts["title"]
+    description = opts["description"]
+    topics = opts["topics"]
+    private_status = opts["private_status"]
+    allow_download = opts["allow_download"]
     try:
         video_url = await _resolve_video_url(account, task, repo)
         if not video_url:
             raise RuntimeError("no servable media URL for resource")
         if channel == "official":
+            # Official create API download_type: 0=allowed, 1=not allowed
+            # (distinct from the H5 schema's 1/2 — see douyin_adapter).
+            official_download_type = 0 if allow_download else 1
             item_id = await adapter.publish_video(
                 access_token=account["access_token"],
                 open_id=account["platform_user_id"],
@@ -123,6 +145,8 @@ async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
                 # topics ride in the post text (`#tag `) — no hashtag field.
                 title=_title_with_hashtags(title, topics),
                 description=description,
+                private_status=private_status,
+                download_type=official_download_type,
             )
             from datetime import datetime, timezone
 
@@ -138,7 +162,8 @@ async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
             )
             return "success"
         # H5 share channel — topics go through the dedicated hashtag_list param
-        # (JsonArray), not the title text.
+        # (JsonArray); generate_share_url maps allow_download → the H5
+        # download_type enum (1/2) itself.
         share_id = secrets.token_urlsafe(16)
         share_title = f"{title} {description}".strip() if description else title
         await adapter.generate_share_url(
@@ -146,6 +171,8 @@ async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
             title=share_title,
             share_id=share_id,
             hashtags=topics,
+            private_status=private_status,
+            allow_download=allow_download,
         )
         await repo.set_account_status(
             account_row_id, "pending_share", share_id=share_id
