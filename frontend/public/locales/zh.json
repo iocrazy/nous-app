@@ -1227,6 +1227,7 @@
   },
   "projects": {
     "title": "全部项目",
+    "recentEmpty": "暂无最近编辑",
     "view": {
       "title": "视图",
       "all": "全部",

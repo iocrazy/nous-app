@@ -1434,6 +1434,43 @@ class ProjectsService:
         return {"dispatched_count": len(task_ids), "task_ids": task_ids}
 
     # ------------------------------------------------------------------ #
+    # Recent items (Projects "Recent" view)
+    # ------------------------------------------------------------------ #
+
+    async def get_recent_items(self, user_id: str, limit: int = 8) -> list[dict]:
+        """Recently-edited scripts + canvases across the caller's projects,
+        merged and sorted by ``updated_at`` desc, capped at ``limit``.
+
+        Scope mirrors the projects-list endpoint exactly: each repo joins
+        ``projects`` and filters ``owner_id == user_id``, so the Recent view
+        can never surface work from a project the caller can't see. ``limit``
+        is clamped to 1..20; each repo is asked for the clamped ceiling so the
+        merge always has enough candidates before the final cap.
+
+        Timestamps are DB-issued UTC ISO strings (``+00:00``), so a lexical
+        sort is chronological. Best-effort at the repo layer — a failing repo
+        returns ``[]`` and simply contributes nothing to the merge.
+        """
+        from app.repositories.canvas_repository import CanvasRepository
+        from app.repositories.script_repository import (
+            get_script_project_repository,
+        )
+
+        # Router already clamps via Query(ge=1, le=20); re-clamped here as
+        # defense for any direct (non-router) caller of this service method.
+        capped = max(1, min(int(limit), 20))
+        scripts = await get_script_project_repository().list_recent_for_user(
+            user_id, capped
+        )
+        canvases = await CanvasRepository().list_recent_for_user(user_id, capped)
+
+        merged = [{**s, "kind": "script"} for s in scripts] + [
+            {**c, "kind": "canvas"} for c in canvases
+        ]
+        merged.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
+        return merged[:capped]
+
+    # ------------------------------------------------------------------ #
     # Project entities — Characters/Locations ASSETS view (PR-10a, G13)
     # ------------------------------------------------------------------ #
 

@@ -26,6 +26,10 @@ EXEMPT = {
     # visible-projects call the GET /projects list route uses), not a
     # single project_id — no per-object guard applies.
     ("GET", "/projects/suggestions"),
+    # Recent view: cross-project feed scoped by owner_id == user_id at the
+    # repo join (same visibility as the GET /projects list), not a single
+    # project_id — no per-object guard applies.
+    ("GET", "/projects/recent-items"),
 }
 
 
