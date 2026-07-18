@@ -131,7 +131,11 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
   const noExactMatch = useMemo(() => {
     if (!search.trim()) return false;
     const q = search.trim().toLowerCase();
-    return !allTags.some((tag) => tag.name.toLowerCase() === q);
+    return !allTags.some(
+      (tag) =>
+        tag.name.toLowerCase() === q ||
+        (tag.name_zh ?? '').toLowerCase() === q,
+    );
   }, [search, allTags]);
 
   const handleCreate = useCallback(async () => {
@@ -156,6 +160,7 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
           className="w-full bg-ink-800 border border-ink-700/50 rounded pl-7 pr-2 py-1.5 text-xs text-ink-200 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50"
           autoFocus={shouldAutoFocus}
           onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return; // IME 组合中的 Enter 属于输入法
             if (e.key === 'Enter' && noExactMatch && onCreate) {
               e.preventDefault();
               handleCreate();
