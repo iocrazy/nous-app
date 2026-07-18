@@ -1057,6 +1057,12 @@ export const EDITOR_SHELL_STYLES = `
   position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
   flex-direction:column; gap:10px; background:var(--bg); color:var(--ink-soft);
   font-family:var(--sans); font-size:14px; padding:24px; text-align:center;
+  /* Sits ABOVE the paper/rail while loading. Without this it paints behind
+     .mh-center-col (position:relative, later in DOM), so the empty paper shows
+     through the overlay and a non-empty script flashes its blank/empty state
+     during the scene fetch. Above the sticky element toolbar (z-index:40) so
+     the whole editor region reads as a single clean "Loading…" state. */
+  z-index:50;
 }
 .mh-shell-state.error{ color:var(--red); }
 
