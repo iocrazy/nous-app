@@ -316,13 +316,15 @@ async def put_current_stage(
     _project_guard: None = Depends(verify_project_write_access),
 ):
     """Set (or advance) the project's SOP stage. Same stage → 200 no-op (data: null).
-    Closes the previous open history row and inserts a new one atomically."""
-    from app.repositories.project_stages_repository import (
-        get_project_stages_repository,
-    )
+    Closes the previous open history row and inserts a new one atomically.
+
+    A real advance also mirrors the stage into the todo list (best-effort): a new
+    ``status='todo'`` issue for the new stage, the previous stage's issue closed.
+    The issue sync never blocks the advance — see ``project_stage_issues``."""
+    from app.services.library.project_stage_issues import advance_project_stage
 
     try:
-        stage = await get_project_stages_repository().set_current_stage(
+        stage = await advance_project_stage(
             int(project_id), data.stage_id, auth.user_id
         )
         return {"success": True, "data": stage}

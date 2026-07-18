@@ -56,4 +56,31 @@ describe('issueOrigin', () => {
     expect(originPath(origin, undefined)).toBe('/projects');
     expect(originLabel(origin)).toBe('From a script scene');
   });
+
+  it('round-trips a project_stage origin, keeping the composite id a string', () => {
+    // origin_id = project_stage:{projectId}:{stageId} — the id half itself
+    // carries a colon and must NOT be split into numbers.
+    const originId = buildOriginId('project_stage', '9007199254740993:123456789012345');
+    expect(originId).toBe('project_stage:9007199254740993:123456789012345');
+    expect(parseOriginId(originId)).toEqual({
+      kind: 'project_stage',
+      id: '9007199254740993:123456789012345',
+    });
+  });
+
+  it('routes a project_stage origin to the project detail page (projectId only)', () => {
+    const origin = { kind: 'project_stage' as const, id: '5001:9002' };
+    expect(originPath(origin, '8')).toBe('/team/8/projects/5001');
+    // No team in scope → team-agnostic projects list fallback.
+    expect(originPath(origin, undefined)).toBe('/projects');
+    expect(originLabel(origin)).toBe('From a project stage');
+  });
+
+  it('degrades a malformed project_stage id without crashing', () => {
+    // Empty id after the kind prefix is not a content reference.
+    expect(parseOriginId('project_stage:')).toBeNull();
+    // Missing projectId (leading colon in the composite id) → list fallback.
+    const origin = { kind: 'project_stage' as const, id: ':9002' };
+    expect(originPath(origin, '8')).toBe('/projects');
+  });
 });
