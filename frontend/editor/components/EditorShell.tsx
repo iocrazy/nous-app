@@ -89,6 +89,7 @@ import { PresenceAvatars } from '../collab/PresenceAvatars';
 import { ScenePresenceContext, type ScenePresenceMap } from '../collab/scenePresenceContext';
 import type { RemoteOpRow } from '../useSceneSync';
 import { reportError } from '../../services/errorReporter';
+import { SelectionAiChatButton } from '../selection/SelectionAiChatButton';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -1547,6 +1548,13 @@ export function EditorShell({
           onClose={() => setShowImportModal(false)}
         />
       )}
+
+      {/* laper-style "select text → AI chat" pill. Mounted here (inside the
+          data-theme root so its ink chrome resolves per editor theme); it is
+          position:fixed and only paints while script text is selected. Works
+          in both the fullscreen route and the embedded studio — the store it
+          drives is global, so the quote lands in whichever chat host is up. */}
+      <SelectionAiChatButton />
     </div>
   );
 }

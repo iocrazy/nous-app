@@ -207,6 +207,54 @@ export function AIChatPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatRequest, lockedAgent]);
 
+  // Script editor "select text → AI chat": a staged selection is injected into
+  // the composer as a quoted reference (blockquote tagged with its source
+  // scene), then the input is focused so the user can instruct the AI about it.
+  // The composer editor mounts a frame or two after the panel opens, so retry
+  // over a few frames until chatEditorRef is live; only then consume the quote.
+  const pendingQuote = useGlobalChatStore((s) => s.pendingQuote);
+  useEffect(() => {
+    if (!pendingQuote) return;
+    let raf = 0;
+    let tries = 0;
+    const inject = () => {
+      const editor = chatEditorRef.current;
+      if (!editor) {
+        if (tries++ > 30) return; // give up quietly rather than loop forever
+        raf = requestAnimationFrame(inject);
+        return;
+      }
+      const scene = pendingQuote.sceneLabel;
+      const label = scene
+        ? t('chat.selectionFrom', 'Selection from {{scene}}', { scene })
+        : t('chat.selection', 'Selection');
+      const labelLine = pendingQuote.crossScene ? `${label} +` : label;
+      // Split the selected text on blank lines so a multi-line (cross-element)
+      // selection becomes multiple paragraphs inside the quote — ProseMirror
+      // text nodes don't carry hard newlines cleanly.
+      const paras = pendingQuote.text
+        .split(/\n+/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => ({ type: 'paragraph', content: [{ type: 'text', text: line }] }));
+      editor
+        .chain()
+        .focus('end')
+        .insertContent([
+          { type: 'paragraph', content: [{ type: 'text', text: labelLine }] },
+          { type: 'blockquote', content: paras.length ? paras : [{ type: 'paragraph' }] },
+          { type: 'paragraph' },
+        ])
+        .run();
+      useGlobalChatStore.getState().consumePendingQuote();
+    };
+    inject();
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingQuote]);
+
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   // O3: plan-mode toggle. 'auto' = normal execute; 'prompt_user' = LLM

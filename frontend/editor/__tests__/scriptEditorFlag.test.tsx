@@ -8,6 +8,12 @@ vi.mock('../components/EditorShell', () => ({
     <div data-testid="v2-shell">{scriptId}</div>
   ),
 }));
+// The route also co-mounts the global AI chat widget (its second host lives on
+// this fullscreen route). It is irrelevant to the mount-decision assertions and
+// pulls in useLocation + the chat stack, so stub it to a no-op.
+vi.mock('../../components/FloatingChatWidget', () => ({
+  FloatingChatWidget: () => null,
+}));
 
 let mockScriptId: string | undefined = '42';
 vi.mock('react-router-dom', () => ({
