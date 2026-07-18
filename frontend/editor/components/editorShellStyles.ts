@@ -877,6 +877,9 @@ export const EDITOR_SHELL_STYLES = `
 .mh-mention-opt:hover{ background:color-mix(in srgb, var(--sheet-ink) 6%, transparent); }
 .mh-mention-opt.active{ background:color-mix(in srgb, var(--sheet-ink) 11%, transparent); color:var(--sheet-ink); }
 .mh-mention-opt[aria-selected='true']{ font-weight:600; }
+/* "Create <name>" row — same search-or-create affordance as .mh-heading-opt.create
+   (the location field), so coining a new cue reads identically across the sheet. */
+.mh-mention-opt.create{ font-weight:600; color:var(--sheet-ink); }
 .mh-mention-empty{ padding:8px 12px; font-size:12.5px; color:var(--sheet-ink-soft); }
 /* Embedded search row (character-cue picker, laper parity): full-bleed strip
    at the panel top, separated by a hairline. The input is chromeless — the

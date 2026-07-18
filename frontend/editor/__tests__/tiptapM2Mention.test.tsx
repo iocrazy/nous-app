@@ -254,9 +254,11 @@ describe('TipTap M2 — character-cue picker', () => {
       editor.commands.insertContent('BO');
     });
     // Typing rides the query bridge — the invited picker narrows, never reopens.
+    // "BO" is a substring of BOB but not an exact hit, so the search-or-create
+    // list also carries the "Create <query>" row (location-field parity).
     await waitFor(() => {
       const opts = Array.from(document.querySelectorAll('.mh-mention-opt'));
-      expect(opts.map((o) => o.textContent)).toEqual(['BOB']);
+      expect(opts.map((o) => o.textContent)).toEqual(['BOB', 'editor.cueCreate']);
     });
   });
 
@@ -295,7 +297,9 @@ describe('TipTap M2 — character-cue picker', () => {
     act(() => {
       editor.commands.insertContent('BO');
     });
-    await waitFor(() => expect(document.querySelectorAll('.mh-mention-opt')).toHaveLength(1));
+    // BOB (the substring match) plus the appended "Create BO" row = two options;
+    // the active row is still index 0 (BOB), so Enter commits the candidate.
+    await waitFor(() => expect(document.querySelectorAll('.mh-mention-opt')).toHaveLength(2));
 
     pressKey(editor, 'Enter');
 

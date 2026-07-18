@@ -2931,6 +2931,7 @@
     "cueHintEnter": "选择或新建",
     "cueHintTab": "切换为动作",
     "mentionHintEnter": "插入",
+    "cueCreate": "新建 \"{{name}}\"",
     "cueCreateHint": "回车新建 \"{{name}}\"",
     "transHintTab": "下一类型",
     "transNoMatch": "没有匹配的预设",

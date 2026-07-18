@@ -60,6 +60,33 @@ export function filterMentionCandidates(candidates: string[], query: string): st
   return candidates.filter((c) => c.toLowerCase().includes(q));
 }
 
+/**
+ * The picker's navigable rows: the filtered candidates plus a synthetic "create"
+ * row (the trimmed query) when it is non-empty and matches nothing EXACTLY.
+ *
+ * This is the location-dropdown's search-or-create list (HeadingSelect), lifted
+ * so the character cue picker gains the same affordance: a substring match like
+ * "5555555" against an existing "55555555" no longer traps Enter into selecting
+ * the neighbour — the writer's typed name is always reachable as its own row.
+ * Only the 'character' kind coins names (its cues ARE the cast); inline
+ * @-mentions and the transition preset list never create.
+ *
+ * Shared verbatim by SceneBlock (the keyboard source) so both surfaces navigate
+ * and commit the exact same array. Returns the create row's index or -1.
+ */
+export function mentionEntries(
+  candidates: string[],
+  query: string,
+  kind?: 'inline' | 'character' | 'transition',
+): { entries: string[]; createIndex: number } {
+  const filtered = filterMentionCandidates(candidates, query);
+  if (kind !== 'character') return { entries: filtered, createIndex: -1 };
+  const q = query.trim();
+  const exact = candidates.some((c) => c.toLowerCase() === q.toLowerCase());
+  if (!q || exact) return { entries: filtered, createIndex: -1 };
+  return { entries: [...filtered, q], createIndex: filtered.length };
+}
+
 export function MentionCombobox({
   candidates,
   query,
@@ -74,7 +101,10 @@ export function MentionCombobox({
   onClose,
 }: MentionComboboxProps) {
   const { t } = useTranslation();
-  const filtered = useMemo(() => filterMentionCandidates(candidates, query), [candidates, query]);
+  const { entries, createIndex } = useMemo(
+    () => mentionEntries(candidates, query, kind),
+    [candidates, query, kind],
+  );
 
   const style: CSSProperties = position
     ? { position: 'absolute', top: position.top, left: position.left }
@@ -85,20 +115,22 @@ export function MentionCombobox({
   const handleSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      if (filtered.length > 0) onHover((activeIndex + 1) % filtered.length);
+      if (entries.length > 0) onHover((activeIndex + 1) % entries.length);
       return;
     }
     if (e.key === 'ArrowUp') {
       e.preventDefault();
-      if (filtered.length > 0) onHover((activeIndex - 1 + filtered.length) % filtered.length);
+      if (entries.length > 0) onHover((activeIndex - 1 + entries.length) % entries.length);
       return;
     }
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (filtered.length > 0 && activeIndex >= 0 && activeIndex < filtered.length) {
-        onSelect(filtered[activeIndex]);
+      // The active row already carries the create row (entries[createIndex] IS
+      // the typed name), so a single lookup covers both select and create.
+      if (entries.length > 0 && activeIndex >= 0 && activeIndex < entries.length) {
+        onSelect(entries[activeIndex]);
       } else if (query.trim()) {
-        // No match → the typed text becomes a NEW character (laper behaviour).
+        // No row highlighted but text typed → coin it (laper behaviour).
         onSelect(query.trim());
       } else {
         onClose?.();
@@ -133,13 +165,9 @@ export function MentionCombobox({
           />
         </div>
       )}
-      {filtered.length === 0 ? (
+      {entries.length === 0 ? (
         <div className="mh-mention-empty" role="note">
-          {searchable && query.trim()
-            ? t('editor.cueCreateHint', { name: query.trim() })
-            : kind === 'transition'
-              ? t('editor.transNoMatch')
-              : t('editor.mentionNoMatch')}
+          {kind === 'transition' ? t('editor.transNoMatch') : t('editor.mentionNoMatch')}
         </div>
       ) : (
         <ul
@@ -148,13 +176,15 @@ export function MentionCombobox({
           id={listboxId}
           aria-label={t('editor.mentionListLabel')}
         >
-          {filtered.map((name, i) => (
+          {entries.map((name, i) => (
             <li
-              key={name}
+              key={i === createIndex ? `__create__${name}` : name}
               id={`${listboxId}-opt-${i}`}
               role="option"
               aria-selected={i === activeIndex}
-              className={`mh-mention-opt${i === activeIndex ? ' active' : ''}`}
+              className={`mh-mention-opt${i === activeIndex ? ' active' : ''}${
+                i === createIndex ? ' create' : ''
+              }`}
               // preventDefault keeps focus on the editable line while selecting.
               onMouseDown={(e) => {
                 e.preventDefault();
@@ -162,7 +192,7 @@ export function MentionCombobox({
               }}
               onMouseEnter={() => onHover(i)}
             >
-              {name}
+              {i === createIndex ? t('editor.cueCreate', { name }) : name}
             </li>
           ))}
         </ul>
