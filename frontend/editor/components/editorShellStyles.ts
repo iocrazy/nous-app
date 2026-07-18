@@ -63,6 +63,18 @@ export const EDITOR_SHELL_STYLES = `
   --script-hei:"PingFang SC","Microsoft YaHei","Hiragino Sans GB","Heiti SC","Noto Sans CJK SC","SimHei","黑体",sans-serif;
   --script-song:"Songti SC","STSong","SimSun","宋体","Noto Serif CJK SC","Source Han Serif SC",serif;
   --sans:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif;
+  /* Asian (华语) per-element indent grid — laper 亚洲格式 parity. Every value is a
+     named ch var so the whole hierarchy scales 1:1 with display zoom (which scales
+     the row font-size, and ch tracks font-size). action/dialogue share a 4ch body
+     column so they read as one indented text block; the △ / ∟ manuscript marks
+     hang in the gutter to the left of that column. */
+  --as-action-mark:1ch;        /* △ hangs here (left of the action body column) */
+  --as-action-body:4ch;        /* action text column + hanging indent for wraps */
+  --as-dialogue-body:4ch;      /* dialogue text column (aligned with action body) */
+  --as-dialogue-mark:1.5ch;    /* ∟ continuation mark hangs here on wrapped dialogue */
+  --as-comment-bar:0.5ch;      /* comment quote bar offset from the text edge */
+  --as-comment-body:4ch;       /* comment text column */
+  --as-paren-body:0.5ch;       /* parenthetical indent */
   position:absolute; inset:0;
   background:radial-gradient(circle at 15% 0%, var(--bg-2) 0%, var(--bg) 55%);
   color:var(--ink);
@@ -503,6 +515,15 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-heading.asian{
   font-family:var(--script-hei); font-size:14px; letter-spacing:0.02em; text-transform:none;
 }
+/* Asian scene head = "N. 地点 时间 / INT" — the scene number is an INLINE, always
+   -visible BOLD prefix at the head of the slug (laper 亚洲格式), not the hollywood
+   hover-reveal margin badge. Hide that margin number in asian mode (the drag
+   handle in the same gutter still hover-reveals) so the number never doubles. */
+.mh-scene-num-inline{
+  font-family:var(--script-hei); font-weight:700; color:var(--sheet-ink);
+  margin-right:2px; user-select:none;
+}
+.mh-scene-headrow.asian .mh-scene-num-badge{ display:none; }
 /* Decorative separators between tokens — keep their exact spaces (". " / " - " /
    " · "), never interactive, slightly muted so the tokens read as the content. */
 .mh-heading-sep{ white-space:pre; color:var(--sheet-ink-soft); user-select:none; }
@@ -636,7 +657,7 @@ export const EDITOR_SHELL_STYLES = `
    indented dialogue, inline parens, right transitions, quoted comments,
    centred subtitles. Colours come from the theme-scoped variables above, so
    light and dark are both covered without extra selectors. */
-.as-row{ display:flex; align-items:baseline; gap:6px; margin:0 0 7px; }
+.as-row{ display:flex; align-items:baseline; gap:6px; margin:0 0 7px; position:relative; }
 .as-row .mh-el-tick{ display:none; }
 .as-row .mh-el-row{ flex:1 1 auto; margin:0; }
 .as-mark{
@@ -645,12 +666,39 @@ export const EDITOR_SHELL_STYLES = `
 }
 .as-prefix{ color:var(--tick-transition); font-weight:700; }
 .as-suffix{ margin-left:-3px; color:var(--tick-character); font-weight:700; }
-/* Character cue = left-aligned label (NOT centred like Hollywood); the row
-   packs cue + colon to the left instead of letting the editable stretch. */
+/* Character cue = left-aligned label, FLUSH LEFT (顶格, 0 indent) — the dialogue
+   below it hangs under it (see .as-row-dialogue). The row packs cue + colon to
+   the left instead of letting the editable stretch. */
 .as-row-character{ justify-content:flex-start; }
 .as-row-character .mh-el-row{ flex:0 1 auto; }
 .as-row-character .mh-el-editable{ flex:0 1 auto; }
-.as-row-dialogue{ padding-left:2.4em; }
+/* Action (△ prefix): the whole text block sits at the 4ch body column with a
+   HANGING indent (block padding-left = wrapped lines align at 4ch too), and the
+   △ mark hangs one char to the left at 1ch. Absolute so it never widens the row
+   or perturbs the .mh-el-row box the paginator measures. */
+.as-row-action{ position:relative; padding-left:var(--as-action-body); }
+.as-row-action > .as-prefix{
+  position:absolute; left:var(--as-action-mark); top:0; margin:0;
+}
+/* Dialogue hangs under its character cue at the 4ch body column (aligned with
+   action). A wrapped dialogue block carries the ∟ continuation mark (国内剧本
+   续接记号) hanging at 1.5ch, vertically centred on the block — added as a
+   pseudo-element (never editable, never in the doc) and gated on .as-multiline,
+   which the NodeView toggles only when the block actually wraps past one line
+   (a single-line short line has no ∟, laper parity). */
+.as-row-dialogue{ position:relative; padding-left:var(--as-dialogue-body); }
+.as-row-dialogue.as-multiline::before{
+  content:'\\221F'; /* ∟ U+221F RIGHT ANGLE — manuscript continuation mark */
+  position:absolute; left:var(--as-dialogue-mark); top:50%; transform:translateY(-50%);
+  font-family:var(--script-hei); color:var(--sheet-ink-soft);
+  font-size:13.5px; line-height:1; user-select:none; pointer-events:none;
+}
+/* Parenthetical: a shallow 0.5ch indent so it tucks just inside the body column. */
+.as-row-paren{ padding-left:var(--as-paren-body); }
+/* Comment quote block: the left rule sits 0.5ch in, the text at the 4ch body
+   column (bar offset via wrapper padding, remaining reach via the editable's own
+   padding so text and body column line up). */
+.as-row-comment{ padding-left:var(--as-comment-bar); }
 .as-row-transition{ justify-content:flex-end; }
 .as-row-subtitle{ justify-content:center; }
 /* Font split per 分景剧本 convention: 正文(action/dialogue/paren) = 宋体,
@@ -660,8 +708,8 @@ export const EDITOR_SHELL_STYLES = `
 .as-character{ font-family:var(--script-hei); font-weight:700; letter-spacing:0.03em; color:var(--tick-character); text-align:left; }
 .as-dialogue{ font-family:var(--script-song); text-align:left; }
 .as-paren{ font-family:var(--script-song); font-style:italic; color:var(--sheet-ink-soft); }
-.as-transition{ font-family:var(--script-hei); text-transform:uppercase; font-weight:700; letter-spacing:0.04em; color:var(--sheet-ink-soft); }
-.as-comment{ font-family:var(--script-song); border-left:3px solid color-mix(in srgb, var(--sheet-ink) 22%, transparent); padding-left:10px; color:var(--sheet-ink-soft); font-style:italic; }
+.as-transition{ font-family:var(--script-hei); text-transform:uppercase; font-weight:700; letter-spacing:0.04em; color:var(--sheet-ink-soft); text-align:right; }
+.as-comment{ font-family:var(--script-song); border-left:3px solid color-mix(in srgb, var(--sheet-ink) 22%, transparent); padding-left:calc(var(--as-comment-body) - var(--as-comment-bar)); color:var(--sheet-ink-soft); font-style:italic; }
 .as-subtitle{ font-family:var(--script-hei); text-align:center; font-style:italic; color:var(--sheet-ink-soft); }
 
 /* A5/A1: the scene-head badge is the SAME hover-reveal block number in both
@@ -1649,6 +1697,13 @@ export const EDITOR_SHELL_STYLES = `
   padding:56px var(--sheet-pad-r) 72px var(--sheet-pad-l);
   min-height:1040px;
 }
+/* Asian (华语) paper uses NARROWER, SYMMETRIC margins (8ch/8ch) than the
+   Hollywood industry 15ch/10ch — the whole geometry (width + padding + the
+   page-seam bleed, which derives its offsets from these same --sheet-pad-* vars)
+   follows automatically because every consumer reads the vars, never a raw px.
+   Custom properties inherit, so the seam widgets nested inside the sheet pick up
+   the asian values too. Specificity (0,2,0) wins over the base .mh-sheet (0,1,0). */
+.mh-sheet.asian{ --sheet-pad-l:8ch; --sheet-pad-r:8ch; }
 /* Slug is uppercase REGULAR weight on a printed page (laper too) — position and
    case carry the meaning, not boldness. Weight/case live on .mh-scene-heading. */
 /* Focused empty block whispers its element type (laper/Notion affordance) —
