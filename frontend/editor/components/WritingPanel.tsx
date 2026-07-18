@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 import type { SceneDoc } from '../types';
 import type { EditorFormat } from '../useEditorState';
 import type { PaginationMode } from '../paginationStorage';
+import { DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, stepZoom } from '../zoomStorage';
 import type { ScriptCommit } from '../sceneService';
 import { VersionPanel } from '../versions/VersionPanel';
 
@@ -75,6 +76,10 @@ export interface WritingPanelProps {
    *  renders standalone in stats-only tests. */
   pagination?: PaginationMode;
   onPaginationChange?: (mode: PaginationMode) => void;
+  /** Display zoom (percent of print size). Optional so the panel renders
+   *  standalone in stats-only tests. Purely visual — see zoomStorage.ts. */
+  zoom?: number;
+  onZoomChange?: (zoom: number) => void;
   // Version history (Phase B P4). Optional so the panel renders standalone
   // (statistics-only) when no script is bound — e.g. the deriveStatistics
   // tests. Compare renders in the margin rail BESIDE the sheet (EditorShell's
@@ -90,6 +95,8 @@ export function WritingPanel({
   onFormatChange,
   pagination,
   onPaginationChange,
+  zoom,
+  onZoomChange,
   scriptId,
   onCompareCommit,
   onRolledBack,
@@ -130,6 +137,47 @@ export function WritingPanel({
                 onClick={() => onPaginationChange('paged')}
               >
                 {t('editor.paged')}
+              </button>
+            </div>
+          </div>
+          <div className="mh-divider" />
+        </>
+      )}
+
+      {zoom != null && onZoomChange && (
+        <>
+          <div>
+            <div className="mh-field-label">{t('editor.zoom')}</div>
+            <div className="mh-zoom" role="group" aria-label={t('editor.zoom')}>
+              <button
+                type="button"
+                className="mh-zoom-btn"
+                aria-label={t('editor.zoomOut')}
+                data-testid="zoom-out"
+                disabled={zoom <= MIN_ZOOM}
+                onClick={() => onZoomChange(stepZoom(zoom, -1))}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                className="mh-zoom-value"
+                aria-label={t('editor.zoomReset')}
+                title={t('editor.zoomReset')}
+                onClick={() => onZoomChange(DEFAULT_ZOOM)}
+                data-testid="zoom-value"
+              >
+                {zoom}%
+              </button>
+              <button
+                type="button"
+                className="mh-zoom-btn"
+                aria-label={t('editor.zoomIn')}
+                data-testid="zoom-in"
+                disabled={zoom >= MAX_ZOOM}
+                onClick={() => onZoomChange(stepZoom(zoom, 1))}
+              >
+                +
               </button>
             </div>
           </div>

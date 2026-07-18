@@ -48,6 +48,7 @@ import { useEditorState, type EditorFormat, type EditorMode } from '../useEditor
 import type { SaveState } from '../useSceneSync';
 import { persistFormat, readStoredFormat } from '../formatStorage';
 import { persistPagination, readStoredPagination, type PaginationMode } from '../paginationStorage';
+import { persistZoom, readStoredZoom, DEFAULT_ZOOM } from '../zoomStorage';
 import { computePageLayout, type MeasuredRow, type RowKind } from '../paginate';
 import { PageSeam } from './PageSeam';
 import { persistRailView, readStoredRailView } from '../railViewStorage';
@@ -163,6 +164,21 @@ export function EditorShell({
     (mode: PaginationMode) => {
       setPaginationMode(mode);
       persistPagination(scriptId, mode);
+    },
+    [scriptId],
+  );
+  // Display zoom (laper-style), persisted per script. PURELY VISUAL: a CSS
+  // `zoom` on the sheet reflows the paper (scroll size stays correct) while the
+  // stored document, export/print semantics and pagination break points are
+  // untouched — the seam measurement below divides its readings back to logical
+  // (100%) coordinates, so breaks land on identical rows at every zoom level.
+  const [sheetZoom, setSheetZoom] = useState<number>(
+    () => readStoredZoom(scriptId) ?? DEFAULT_ZOOM,
+  );
+  const handleZoomChange = useCallback(
+    (zoom: number) => {
+      setSheetZoom(zoom);
+      persistZoom(scriptId, zoom);
     },
     [scriptId],
   );
@@ -823,11 +839,18 @@ export function EditorShell({
     if (!sheet) return;
     let frame = 0;
     const compute = () => {
+      // getBoundingClientRect returns VISUAL px — the sheet's CSS `zoom` scales
+      // every reading by k. Divide back to logical (100%) coordinates so the
+      // break math (and thus the seam beforeKey sequence) is identical at every
+      // zoom level; the filler we store is logical too, and renders k× larger
+      // inside the zoomed sheet, keeping page bottoms aligned. k is read from
+      // the known state value (zoom lives on this very sheet).
+      const k = sheetZoom / 100;
       const sheetTop = sheet.getBoundingClientRect().top;
       const seamBoxes = Array.from(sheet.querySelectorAll<HTMLElement>('.mh-page-seam')).map(
         (el) => {
           const r = el.getBoundingClientRect();
-          return { top: r.top - sheetTop, height: r.height };
+          return { top: (r.top - sheetTop) / k, height: r.height / k };
         },
       );
       const seamHeightAbove = (top: number) =>
@@ -841,7 +864,9 @@ export function EditorShell({
       );
       for (const el of rowEls) {
         const r = el.getBoundingClientRect();
-        const sub = seamHeightAbove(r.top - sheetTop);
+        const top = (r.top - sheetTop) / k;
+        const bottom = (r.bottom - sheetTop) / k;
+        const sub = seamHeightAbove(top);
         let key = '';
         let kind: RowKind = 'action';
         if (el.classList.contains('mh-scene-headrow')) {
@@ -861,7 +886,7 @@ export function EditorShell({
           kind = (editable.dataset.elType as RowKind) || 'action';
         }
         if (!key) continue;
-        rows.push({ key, kind, top: r.top - sheetTop - sub, bottom: r.bottom - sheetTop - sub });
+        rows.push({ key, kind, top: top - sub, bottom: bottom - sub });
       }
 
       const layout = computePageLayout(rows);
@@ -893,7 +918,7 @@ export function EditorShell({
       cancelAnimationFrame(frame);
       ro.disconnect();
     };
-  }, [paginationMode, state.mode, scenes]);
+  }, [paginationMode, state.mode, scenes, sheetZoom]);
 
   // ── Cross-scene paragraph drag coordination ───────────────────────────────
   // The shell broadcasts which element is mid-drag (and from which scene) so
@@ -1317,7 +1342,12 @@ export function EditorShell({
                   </div>
                 </div>
               )}
-              <div className="mh-sheet" ref={pageSheetRef}>
+              <div
+                className="mh-sheet"
+                ref={pageSheetRef}
+                style={{ zoom: sheetZoom / 100 }}
+                data-zoom={sheetZoom}
+              >
                 <div className="mh-sheet-inner">
                   {state.mode !== 'outline' && scriptUntouched && (
                     <div className="mh-keyboard-hint" aria-hidden="true">
@@ -1472,6 +1502,8 @@ export function EditorShell({
               onFormatChange={handleFormatChange}
               pagination={paginationMode}
               onPaginationChange={handlePaginationChange}
+              zoom={sheetZoom}
+              onZoomChange={handleZoomChange}
               scriptId={scriptId}
               onCompareCommit={handleCompareCommit}
               onRolledBack={handleRolledBack}
