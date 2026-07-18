@@ -63,6 +63,26 @@ export const EDITOR_SHELL_STYLES = `
   --script-hei:"PingFang SC","Microsoft YaHei","Hiragino Sans GB","Heiti SC","Noto Sans CJK SC","SimHei","黑体",sans-serif;
   --script-song:"Songti SC","STSong","SimSun","宋体","Noto Serif CJK SC","Source Han Serif SC",serif;
   --sans:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif;
+  /* ── Neutral-ink chrome (laper parity) ──────────────────────────────────
+     The editor shell's active / selected chrome used to be a wall of brand
+     indigo (active toolbar pills, doc tabs, the pagination + format
+     segmenteds, selected scene rows, stat tiles, count/IE chips) — read as
+     "整体蓝白". laper's chrome is ink, not colour: the active state is a near-
+     black pill (light) / near-white pill (dark), selection is a soft warm-grey
+     ink wash. These tokens carry that language. Every value derives from the
+     theme's own --ink / --surface, so light and dark INVERT automatically
+     (deep-ink pill ↔ bright-ink pill) and no new hex enters the sheet. Brand
+     indigo now survives only on the focus ring and genuine primary CTAs (Save
+     version, empty-state create) — the single accent, not the whole chrome. */
+  --pill-ink-bg:var(--ink);                                   /* active pill: near-black (light) / near-white (dark) */
+  --pill-ink-on:var(--surface);                               /* text on the pill — inverts with it */
+  --sel-ink-bg:color-mix(in srgb, var(--ink) 8%, transparent);/* soft selected row / current item */
+  --sel-ink-fg:var(--ink);                                    /* text on a soft-selected row */
+  --hover-ink-bg:color-mix(in srgb, var(--ink) 6%, transparent);
+  --chip-ink-bg:color-mix(in srgb, var(--ink) 8%, transparent);/* neutral count / IE / stat chip fill */
+  --chip-ink-fg:var(--ink-soft);                              /* quiet ink for chip text */
+  --emph-ink-border:color-mix(in srgb, var(--ink) 42%, var(--surface-border));
+  --emph-ink-glow:color-mix(in srgb, var(--ink) 12%, transparent);
   /* Asian (华语) per-element indent grid — laper 亚洲格式 parity. Every value is a
      named ch var so the whole hierarchy scales 1:1 with display zoom (which scales
      the row font-size, and ch tracks font-size). action/dialogue share a 4ch body
@@ -133,12 +153,12 @@ export const EDITOR_SHELL_STYLES = `
 .mh-ep-selector-wrap{ position:relative; }
 .mh-ep-selector{
   display:block; width:100%; text-align:left; cursor:pointer; font-family:var(--sans);
-  background:var(--indigo-soft); border:1px solid var(--surface-border);
+  background:var(--surface-2); border:1px solid var(--surface-border);
   border-radius:var(--radius-md); padding:10px 12px;
 }
-.mh-ep-selector:hover{ border-color:var(--indigo); }
+.mh-ep-selector:hover{ border-color:color-mix(in srgb, var(--ink) 28%, var(--surface-border)); }
 .mh-ep-selector:focus-visible{ outline:2px solid var(--indigo); outline-offset:2px; }
-.mh-ep-name{ font-weight:700; font-size:14px; color:var(--indigo-deep); }
+.mh-ep-name{ font-weight:700; font-size:14px; color:var(--ink); }
 .mh-ep-sub{ font-size:11px; color:var(--ink-faint); margin-top:2px; }
 
 /* ===== EPISODE PANEL (multi-episode management, Task 5) ===== */
@@ -152,9 +172,9 @@ export const EDITOR_SHELL_STYLES = `
 .mh-ep-new-btn{
   font-family:var(--sans); font-size:11.5px; font-weight:600;
   padding:4px 10px; border-radius:var(--radius-sm); cursor:pointer;
-  background:var(--indigo); color:var(--accent-on); border:1px solid transparent;
+  background:var(--surface-2); color:var(--ink-soft); border:1px solid var(--surface-border);
 }
-.mh-ep-new-btn:hover:not(:disabled){ background:var(--indigo-deep); }
+.mh-ep-new-btn:hover:not(:disabled){ background:var(--hover-ink-bg); color:var(--ink); }
 .mh-ep-new-btn:disabled{ opacity:0.5; cursor:default; }
 .mh-ep-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; }
 .mh-ep-item{ display:flex; align-items:center; gap:4px; }
@@ -165,7 +185,7 @@ export const EDITOR_SHELL_STYLES = `
   color:var(--ink-soft);
 }
 .mh-ep-item-main:hover:not(:disabled){ background:var(--surface-2); }
-.mh-ep-item-main.current{ background:var(--indigo-soft); color:var(--indigo-deep); cursor:default; }
+.mh-ep-item-main.current{ background:var(--sel-ink-bg); color:var(--sel-ink-fg); cursor:default; }
 .mh-ep-item-title{
   flex:1; min-width:0; font-size:12.5px; font-weight:600;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
@@ -175,7 +195,7 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-ep-current-badge{
   flex-shrink:0; font-size:9.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase;
-  padding:1px 6px; border-radius:8px; background:var(--indigo); color:var(--accent-on);
+  padding:1px 6px; border-radius:8px; background:var(--pill-ink-bg); color:var(--pill-ink-on);
 }
 .mh-ep-delete-btn{
   flex-shrink:0; width:24px; height:24px; border-radius:var(--radius-sm);
@@ -203,7 +223,7 @@ export const EDITOR_SHELL_STYLES = `
   min-width:17px; height:17px; padding:0 5px; border-radius:9px;
   display:inline-flex; align-items:center; justify-content:center;
   font-family:var(--mono); font-size:10px; font-weight:700; line-height:1;
-  background:var(--indigo-soft); color:var(--indigo-deep);
+  background:var(--chip-ink-bg); color:var(--chip-ink-fg);
 }
 .mh-scene-list{ flex:1; overflow-y:auto; padding:4px 10px 14px; display:flex; flex-direction:column; gap:5px; }
 .mh-scene-row{
@@ -213,21 +233,23 @@ export const EDITOR_SHELL_STYLES = `
   font-family:var(--sans);
 }
 .mh-scene-row:hover{ background:var(--surface-2); }
-.mh-scene-row.active{ background:var(--indigo-soft); border-color:var(--surface-border); }
+.mh-scene-row.active{ background:var(--sel-ink-bg); border-color:var(--surface-border); }
 .mh-scene-num-chip{
   width:21px; height:21px; border-radius:6px; background:var(--ink-faint);
   color:var(--surface); font-size:10.5px; font-weight:700; font-family:var(--mono);
   display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:1px;
 }
-.mh-scene-row.active .mh-scene-num-chip{ background:var(--indigo); color:var(--accent-on); }
+.mh-scene-row.active .mh-scene-num-chip{ background:var(--pill-ink-bg); color:var(--pill-ink-on); }
 .mh-scene-meta-text{ min-width:0; flex:1; }
 .mh-scene-row-head{ display:flex; align-items:center; gap:6px; }
 .mh-ie-badge{
   font-family:var(--mono); font-size:9.5px; font-weight:700; letter-spacing:0.03em;
   padding:1px 5px; border-radius:4px; flex-shrink:0;
 }
-.mh-ie-badge.int{ background:var(--indigo-soft); color:var(--indigo-deep); }
-.mh-ie-badge.ext{ background:var(--violet-soft); color:var(--violet); }
+/* INT / EXT read as one neutral ink chip — the INT/EXT text carries the
+   distinction, not two brand colours (laper keeps sluglines monochrome). */
+.mh-ie-badge.int{ background:var(--chip-ink-bg); color:var(--chip-ink-fg); }
+.mh-ie-badge.ext{ background:var(--chip-ink-bg); color:var(--chip-ink-fg); }
 .mh-scene-title{
   font-size:12px; font-weight:600; color:var(--ink);
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
@@ -252,13 +274,13 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-rail-module:hover:not(:disabled){ background:var(--surface-2); }
 .mh-rail-module:disabled{ opacity:0.5; cursor:default; }
-.mh-rail-module.active{ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--surface-border); }
-.mh-rail-module.active:hover:not(:disabled){ background:var(--indigo-soft); }
+.mh-rail-module.active{ background:var(--sel-ink-bg); color:var(--sel-ink-fg); border-color:var(--surface-border); }
+.mh-rail-module.active:hover:not(:disabled){ background:var(--sel-ink-bg); }
 .mh-rail-module-glyph{
   width:16px; text-align:center; flex-shrink:0;
   font-family:var(--mono); font-size:12px; color:var(--ink-faint);
 }
-.mh-rail-module.active .mh-rail-module-glyph{ color:var(--indigo-deep); }
+.mh-rail-module.active .mh-rail-module-glyph{ color:var(--sel-ink-fg); }
 /* One scroll region for Characters + Locations + Scenes; the modules nav and
    Episode selector above it stay fixed (navigation never scrolls away). */
 .mh-rail-scroll{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; }
@@ -292,7 +314,7 @@ export const EDITOR_SHELL_STYLES = `
   color:var(--ink-soft); cursor:pointer; font-size:13px; flex-shrink:0;
   font-family:var(--sans);
 }
-.mh-icon-btn:hover{ background:var(--indigo-soft); color:var(--indigo-deep); }
+.mh-icon-btn:hover{ background:var(--hover-ink-bg); color:var(--ink); }
 
 /* ===== CENTER COLUMN ===== */
 .mh-center-col{ display:flex; flex-direction:column; min-height:0; position:relative; }
@@ -305,7 +327,7 @@ export const EDITOR_SHELL_STYLES = `
   font-size:12.5px; font-weight:600; padding:7px 16px; border-radius:9px;
   color:var(--ink-soft); cursor:pointer; background:none; border:none; font-family:var(--sans);
 }
-.mh-doc-tab[aria-selected='true']{ background:var(--indigo); color:var(--accent-on); }
+.mh-doc-tab[aria-selected='true']{ background:var(--pill-ink-bg); color:var(--pill-ink-on); }
 .mh-topbar-right{ display:flex; align-items:center; gap:10px; }
 
 /* ── Collaboration presence (Phase B P5 / C1) ─────────────────────────────── */
@@ -313,13 +335,13 @@ export const EDITOR_SHELL_STYLES = `
 .mh-presence-avatar{
   display:inline-flex; align-items:center; justify-content:center;
   width:26px; height:26px; margin-left:-7px; border-radius:50%;
-  background:var(--indigo-soft); color:var(--indigo-deep);
+  background:var(--surface-2); color:var(--ink-soft);
   border:2px solid var(--surface); box-shadow:var(--shadow-island);
   font-size:11px; font-weight:600; font-family:var(--sans);
   user-select:none;
 }
 .mh-presence-avatar:first-child{ margin-left:0; }
-.mh-presence-avatar.editing{ background:var(--indigo); color:var(--accent-on); }
+.mh-presence-avatar.editing{ background:var(--pill-ink-bg); color:var(--pill-ink-on); }
 .mh-presence-avatar.overflow{ background:var(--surface-2); color:var(--ink-soft); }
 
 .mh-scene-presence-badge{
@@ -331,7 +353,7 @@ export const EDITOR_SHELL_STYLES = `
   white-space:nowrap;
 }
 .mh-scene-presence-badge.editing{
-  background:var(--indigo-soft); color:var(--indigo-deep); border-color:transparent;
+  background:var(--sel-ink-bg); color:var(--sel-ink-fg); border-color:transparent;
 }
 .mh-flow-scene-head .mh-scene-presence-badge{ margin-left:auto; }
 
@@ -730,8 +752,8 @@ export const EDITOR_SHELL_STYLES = `
    the type controls are live for the line under the caret. Pure styling — it
    does not drive focus or a11y, only this visual emphasis. */
 .mh-editor-shell[data-editing='true'] .mh-h-toolbar{
-  border-color:var(--indigo);
-  box-shadow:var(--shadow-float), 0 0 0 1px var(--indigo-soft);
+  border-color:var(--emph-ink-border);
+  box-shadow:var(--shadow-float), 0 0 0 1px var(--emph-ink-glow);
 }
 .mh-h-item{
   display:flex; align-items:center; gap:6px; padding:7px 13px; border-radius:999px;
@@ -740,17 +762,17 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-h-item:hover:not(:disabled){ background:var(--surface-2); }
 .mh-h-item:disabled{ opacity:0.5; cursor:default; }
-.mh-h-item.active{ background:var(--indigo); color:var(--accent-on); }
+.mh-h-item.active{ background:var(--pill-ink-bg); color:var(--pill-ink-on); }
 /* :hover:not(:disabled) is (0,3,0) and BEATS .active's (0,2,0) while the
    pointer is still on the just-clicked button — the active pill degraded to
    surface-2 with white text (invisible). Re-assert the active look at hover
    specificity. Same guard applied to every state-class button in this sheet. */
-.mh-h-item.active:hover:not(:disabled){ background:var(--indigo); color:var(--accent-on); }
+.mh-h-item.active:hover:not(:disabled){ background:var(--pill-ink-bg); color:var(--pill-ink-on); }
 .mh-h-glyph{
   width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center;
   font-size:9.5px; font-family:var(--mono); font-weight:700; color:var(--ink-faint); flex-shrink:0;
 }
-.mh-h-item.active .mh-h-glyph{ color:var(--accent-on); }
+.mh-h-item.active .mh-h-glyph{ color:var(--pill-ink-on); }
 
 /* ===== RIGHT PANEL WIDGETS ===== */
 .mh-field-label{
@@ -762,7 +784,7 @@ export const EDITOR_SHELL_STYLES = `
   flex:1; text-align:center; font-size:12px; font-weight:600; padding:7px 0; border-radius:8px;
   color:var(--ink-soft); cursor:pointer; background:none; border:none; font-family:var(--sans);
 }
-.mh-seg.active{ background:var(--indigo); color:var(--accent-on); }
+.mh-seg.active{ background:var(--pill-ink-bg); color:var(--pill-ink-on); }
 .mh-seg:disabled{ opacity:0.45; cursor:default; }
 .mh-zoom{ display:flex; align-items:stretch; background:var(--surface-2); border-radius:10px; padding:3px; gap:2px; }
 .mh-zoom-btn{
@@ -780,13 +802,16 @@ export const EDITOR_SHELL_STYLES = `
 .mh-zoom-value:hover{ background:var(--surface); }
 .mh-divider{ height:1px; background:var(--surface-border); margin:0 -16px; }
 .mh-stats-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+/* laper parity: stat tiles are a quiet warm-grey card with a deep-ink number,
+   not the old indigo-soft / violet-soft colour blocks. The .v2 tint is dropped
+   (all four tiles read as one neutral set) — the numbers carry the emphasis. */
 .mh-stat-tile{
-  background:var(--indigo-soft); border:1px solid var(--surface-border);
+  background:var(--surface-2); border:1px solid var(--surface-border);
   border-radius:12px; padding:12px 12px 10px;
 }
-.mh-stat-tile.v2{ background:var(--violet-soft); }
-.mh-stat-num{ font-size:19px; font-weight:800; color:var(--indigo-deep); font-family:var(--mono); }
-.mh-stat-tile.v2 .mh-stat-num{ color:var(--violet); }
+.mh-stat-tile.v2{ background:var(--surface-2); }
+.mh-stat-num{ font-size:19px; font-weight:800; color:var(--ink); font-family:var(--mono); }
+.mh-stat-tile.v2 .mh-stat-num{ color:var(--ink); }
 .mh-stat-lbl{ font-size:10.5px; color:var(--ink-faint); font-weight:600; margin-top:2px; }
 .mh-cast-row{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink-soft); padding:3px 0; }
 .mh-cast-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
@@ -800,8 +825,8 @@ export const EDITOR_SHELL_STYLES = `
   flex-shrink:0;
 }
 .mh-scene-chip{ font-size:11px; font-weight:700; letter-spacing:0.03em; padding:4px 9px; border-radius:6px; font-family:var(--mono); }
-.mh-scene-chip.ie-int{ background:var(--indigo-soft); color:var(--indigo-deep); }
-.mh-scene-chip.ie-ext{ background:var(--violet-soft); color:var(--violet); }
+.mh-scene-chip.ie-int{ background:var(--chip-ink-bg); color:var(--chip-ink-fg); }
+.mh-scene-chip.ie-ext{ background:var(--chip-ink-bg); color:var(--chip-ink-fg); }
 .mh-scene-chip.loc{ background:var(--surface-2); color:var(--sheet-ink-soft); border:1px solid var(--sheet-border); }
 .mh-el-line{ font-size:13.5px; line-height:1.7; color:var(--sheet-ink); margin-bottom:7px; }
 .mh-placeholder-line{ color:var(--sheet-ink-soft); font-style:italic; }
@@ -1386,9 +1411,9 @@ export const EDITOR_SHELL_STYLES = `
 .mh-version-showall{
   align-self:flex-start; margin-top:2px; cursor:pointer;
   font-family:var(--sans); font-size:11.5px; font-weight:600;
-  color:var(--indigo); background:none; border:none; padding:2px 0;
+  color:var(--ink-soft); background:none; border:none; padding:2px 0;
 }
-.mh-version-showall:hover{ text-decoration:underline; }
+.mh-version-showall:hover{ text-decoration:underline; color:var(--ink); }
 /* COMPACT single-row cards (user: a tall card per version stretches the
    island): message + time on one line; the action pills float in over the
    row's right side only on hover/focus (absolutely positioned with the
@@ -1429,10 +1454,10 @@ export const EDITOR_SHELL_STYLES = `
   padding:3px 9px; border-radius:999px;
   background:var(--surface); color:var(--ink-soft); border:1px solid var(--surface-border);
 }
-.mh-version-action:hover:not(:disabled){ background:var(--indigo-soft); color:var(--indigo-deep); border-color:var(--indigo); }
+.mh-version-action:hover:not(:disabled){ background:var(--hover-ink-bg); color:var(--ink); border-color:color-mix(in srgb, var(--ink) 22%, var(--surface-border)); }
 .mh-version-action:disabled{ opacity:0.5; cursor:default; }
-.mh-version-action.confirming{ background:var(--indigo); color:var(--accent-on); border-color:transparent; }
-.mh-version-action.confirming:hover:not(:disabled){ background:var(--indigo); color:var(--accent-on); border-color:transparent; }
+.mh-version-action.confirming{ background:var(--pill-ink-bg); color:var(--pill-ink-on); border-color:transparent; }
+.mh-version-action.confirming:hover:not(:disabled){ background:var(--pill-ink-bg); color:var(--pill-ink-on); border-color:transparent; }
 .mh-version-action.danger:hover:not(:disabled){ background:var(--red); color:#fff; border-color:transparent; }
 .mh-version-action.danger.confirming{ background:var(--red); color:#fff; border-color:transparent; }
 .mh-version-partial{
