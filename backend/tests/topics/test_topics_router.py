@@ -9,7 +9,7 @@ def client(monkeypatch):
 
     calls = {}
 
-    def _row(rid, title):
+    def _row(rid, title, tags=None):
         return {
             "id": rid,
             "title": title,
@@ -20,7 +20,7 @@ def client(monkeypatch):
             "ai_summary": None,
             "reason": None,
             "score": None,
-            "tags": [],
+            "tags": tags or [],
             "category": "model",
             "media_url": None,
             "cover_url": None,
@@ -37,6 +37,7 @@ def client(monkeypatch):
             source_ids=None,
             min_score=None,
             order_score=False,
+            tag_words=None,
         ):
             calls["day"] = day
             calls["category"] = category
@@ -44,12 +45,14 @@ def client(monkeypatch):
             calls["source_ids"] = source_ids
             calls["min_score"] = min_score
             calls["order_score"] = order_score
+            calls["tag_words"] = tag_words
             return [_row("1", "Hello"), _row("2", "World")]
 
         async def list_by_ids(self, ids, limit=100, source_ids=None):
             calls["list_by_ids"] = list(ids)
             calls["source_ids"] = source_ids
-            return [_row(i, f"Saved {i}") for i in ids]
+            row_tags = calls.get("row_tags", {})
+            return [_row(i, f"Saved {i}", tags=row_tags.get(i)) for i in ids]
 
         async def get_by_id(self, hotspot_id, source_ids=None):
             calls["detail_source_ids"] = source_ids
@@ -193,6 +196,13 @@ def client(monkeypatch):
         async def embed_text(self, text):
             return calls.get("embed_result", [0.1, 0.2])
 
+    class _FakeTagsRepo:
+        async def get_tags_by_ids(self, ids, user_id):
+            calls["tag_ids"] = list(ids)
+            calls["tag_user_id"] = user_id
+            return calls.get("tag_rows", [])
+
+    monkeypatch.setattr(tr, "get_tags_repository", lambda: _FakeTagsRepo())
     monkeypatch.setattr(tr, "HotspotsRepository", lambda: _FakeRepo())
     monkeypatch.setattr(tr, "SignalSourcesRepository", lambda: _FakeSourcesRepo())
     monkeypatch.setattr(tr, "UserHiddenSourcesRepository", lambda: _FakeHiddenRepo())
@@ -510,3 +520,127 @@ def test_unhide_source(client):
     r = client.delete("/api/v1/topics/sources/10/hide")
     assert r.status_code == 200
     assert "10" in client.calls.get("unhidden", [])
+
+
+# ---- Tag filter (pool tag ids → name/name_zh overlap) -------------------------
+
+
+def test_tag_filter_resolves_ids_to_lowercased_words(client):
+    # default (list_for_date) view: ids resolve to the lower-cased name+name_zh
+    # word set, which is handed to the repo as tag_words.
+    client.calls["tag_rows"] = [{"name": "Copywriting", "name_zh": "文案"}]
+    r = client.get("/api/v1/topics?tag_id=1,2")
+    assert r.status_code == 200
+    assert client.calls["tag_ids"] == [1, 2]
+    assert client.calls["tag_words"] == ["copywriting", "文案"]
+
+
+def test_tag_filter_threads_caller_user_id_to_repo(client):
+    # The repo enforces the caller-visible pool (spec §5); the router must
+    # thread auth.user_id through so the scoping predicate has something to
+    # scope against — regression guard for the id-only cross-user leak.
+    client.calls["tag_rows"] = [{"name": "AI", "name_zh": None}]
+    r = client.get("/api/v1/topics?tag_id=1")
+    assert r.status_code == 200
+    assert client.calls["tag_user_id"] == "u1"  # the fixture's auth.user_id
+
+
+def test_tag_filter_other_users_private_tag_yields_sentinel(client, monkeypatch):
+    # A type='user' tag owned by ANOTHER user is outside the caller-visible
+    # pool (spec §5): scoped at the repo, so get_tags_by_ids returns nothing
+    # for that id — same observable outcome as an unknown id, a no-match
+    # sentinel (empty feed), never the foreign tag's private name.
+    import app.api.topics_router as tr
+
+    class _ScopedFakeTagsRepo:
+        """Simulates the repo's DB-side visibility predicate: only returns
+        rows for system/time tags or type='user' tags owned by the given
+        user_id — a type='user' tag owned by someone else is silently
+        dropped from the result, exactly like the real WHERE clause."""
+
+        _TAGS = {
+            1: {"name": "AI", "name_zh": None, "type": "system", "owner": None},
+            2: {"name": "Own Secret", "name_zh": None, "type": "user", "owner": "u1"},
+            3: {
+                "name": "Other Users Private Word",
+                "name_zh": None,
+                "type": "user",
+                "owner": "someone-else",
+            },
+        }
+
+        async def get_tags_by_ids(self, ids, user_id):
+            out = []
+            for tid in ids:
+                t = self._TAGS.get(tid)
+                if t is None:
+                    continue
+                if t["type"] in ("system", "time") or (
+                    t["type"] == "user" and t["owner"] == user_id
+                ):
+                    out.append({"name": t["name"], "name_zh": t["name_zh"]})
+            return out
+
+    monkeypatch.setattr(tr, "get_tags_repository", lambda: _ScopedFakeTagsRepo())
+
+    # Other user's private tag alone → sentinel (empty feed), never leaks its
+    # name/name_zh as a filter word to the caller.
+    r = client.get("/api/v1/topics?tag_id=3")
+    assert r.status_code == 200
+    assert client.calls["tag_words"] == ["__no_match__"]
+
+    # Own tag + system tag still resolve normally (auth.user_id == "u1").
+    r = client.get("/api/v1/topics?tag_id=1,2")
+    assert r.status_code == 200
+    assert set(client.calls["tag_words"]) == {"ai", "own secret"}
+
+
+def test_tag_filter_none_when_no_tag_id(client):
+    client.get("/api/v1/topics")
+    # no tag filter requested → repo receives None (unfiltered)
+    assert client.calls["tag_words"] is None
+
+
+def test_tag_filter_invalid_ids_yield_no_match_sentinel(client):
+    # non-numeric ids resolve to nothing → a no-match sentinel, never unfiltered
+    r = client.get("/api/v1/topics?tag_id=abc")
+    assert r.status_code == 200
+    assert client.calls["tag_words"] == ["__no_match__"]
+
+
+def test_tag_filter_unknown_ids_yield_no_match_sentinel(client):
+    # valid ids that resolve to no tags → sentinel (empty feed, not unfiltered)
+    client.calls["tag_rows"] = []
+    r = client.get("/api/v1/topics?tag_id=999")
+    assert r.status_code == 200
+    assert client.calls["tag_ids"] == [999]
+    assert client.calls["tag_words"] == ["__no_match__"]
+
+
+def test_tag_filter_featured_view_passes_words_to_repo(client):
+    # featured runs through list_for_date, so the filter reaches the query.
+    client.calls["tag_rows"] = [{"name": "AI", "name_zh": None}]
+    r = client.get("/api/v1/topics?view=featured&tag_id=1")
+    assert r.status_code == 200
+    assert client.calls["tag_words"] == ["ai"]
+
+
+def test_tag_filter_saved_view_filters_at_router(client):
+    # saved view goes through list_by_ids → router-level tag intersection.
+    client.calls["ids"] = ["7", "8"]
+    client.calls["row_tags"] = {"7": ["copywriting"], "8": ["other"]}
+    client.calls["tag_rows"] = [{"name": "Copywriting", "name_zh": "文案"}]
+    r = client.get("/api/v1/topics?view=saved&tag_id=1")
+    body = r.json()
+    # only the hotspot whose tags intersect the word set survives
+    assert [h["id"] for h in body["hotspots"]] == ["7"]
+
+
+def test_tag_filter_foryou_view_filters_at_router(client):
+    # for-you view (list_by_ids) also filters by tag words at the router.
+    client.calls["ranked"] = ["2", "1"]
+    client.calls["row_tags"] = {"2": ["ai"], "1": ["nope"]}
+    client.calls["tag_rows"] = [{"name": "AI", "name_zh": None}]
+    r = client.get("/api/v1/topics?view=foryou&tag_id=1")
+    ids = [h["id"] for h in r.json()["hotspots"]]
+    assert ids == ["2"]

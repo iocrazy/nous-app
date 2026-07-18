@@ -127,6 +127,12 @@ class Tags(Base):
     scope_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     group_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     sort_order: Mapped[Optional[int]] = mapped_column(Integer, server_default=text("0"))
+    origin: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        server_default=text("'curated'::character varying"),
+        comment="'curated' = user-managed shelf; 'note' = auto-created from note #tags.",
+    )
 
 
 class Libraries(Base):

@@ -138,3 +138,32 @@ class InspirationApiTokens(Base):
         DateTime(True), nullable=False, server_default=text("now()")
     )
     revoked_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(True))
+
+
+class NoteTags(Base):
+    """Junction: note ↔ tag (mirror of resource_tags). Mig 368."""
+
+    __tablename__ = "note_tags"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["note_id"],
+            ["public.inspiration_notes.id"],
+            ondelete="CASCADE",
+            name="note_tags_note_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["tag_id"],
+            ["public.tags.id"],
+            ondelete="CASCADE",
+            name="note_tags_tag_id_fkey",
+        ),
+        PrimaryKeyConstraint("note_id", "tag_id", name="note_tags_pkey"),
+        Index("idx_note_tags_tag_id", "tag_id"),
+        {"schema": "public"},
+    )
+
+    note_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    tag_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )

@@ -1,5 +1,6 @@
 """API routes for Tags management."""
 
+import asyncio
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -7,6 +8,8 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep
+from app.repositories.hotspots_repository import get_hotspots_repository
+from app.repositories.note_tags_repository import get_note_tags_repository
 from app.repositories.tag_preferences_repository import (
     get_tag_preferences_repository,
 )
@@ -235,14 +238,56 @@ async def get_tag_statistics(
     limit: int = Query(10, ge=1, le=50, description="Number of top tags to return"),
 ):
     """
-    Get tag usage statistics for the current user.
-    Returns top tags sorted by video count.
+    Get cross-domain tag usage statistics for the current user.
+
+    Each item's ``count`` is resource usage (unchanged), decorated with
+    ``notes`` (live inspiration notes) and ``hotspots`` (word hits in the recent
+    hotspot window). The three sources are read concurrently.
     """
     user_id = auth.user_id
     repo = get_tags_repository()
 
     try:
         tag_counts = await repo.get_tag_counts(user_id, limit)
+
+        # get_tag_counts (RPC + fallback) omits name_zh — backfill it in one
+        # in-list query so Chinese hotspot words still match (never N+1).
+        missing_zh = [int(t["id"]) for t in tag_counts if "name_zh" not in t]
+        if missing_zh:
+            zh_map = await repo.get_name_zh_map(missing_zh)
+            for t in tag_counts:
+                if "name_zh" not in t:
+                    t["name_zh"] = zh_map.get(int(t["id"]))
+
+        note_counts_result, hotspot_words_result = await asyncio.gather(
+            get_note_tags_repository().counts_for_user(user_id),
+            get_hotspots_repository().recent_tag_word_counts(),
+            return_exceptions=True,
+        )
+        if isinstance(note_counts_result, Exception):
+            logger.error(
+                f"Failed to load note tag counts for tag statistics "
+                f"(user_id={user_id}): {note_counts_result}"
+            )
+            note_counts = {}
+        else:
+            note_counts = note_counts_result
+        if isinstance(hotspot_words_result, Exception):
+            logger.error(
+                f"Failed to load hotspot word counts for tag statistics "
+                f"(user_id={user_id}): {hotspot_words_result}"
+            )
+            hotspot_words = {}
+        else:
+            hotspot_words = hotspot_words_result
+        for t in tag_counts:
+            words = {
+                (t.get("name") or "").lower(),
+                (t.get("name_zh") or "").lower(),
+            } - {""}
+            t["notes"] = note_counts.get(int(t["id"]), 0)
+            t["hotspots"] = sum(hotspot_words.get(w, 0) for w in words)
+
         total_tagged = sum(t.get("count", 0) for t in tag_counts)
 
         return TagStatisticsResponse(
@@ -395,6 +440,9 @@ async def update_tag(
         icon=tag_update.icon,
         enabled=tag_update.enabled,
         group_id=tag_update.group_id,
+        # Promote-only: schema restricts this to "curated"; the repo's
+        # _TAG_ATTRS whitelist already admits the ``origin`` column.
+        origin=tag_update.origin,
     )
 
     return updated

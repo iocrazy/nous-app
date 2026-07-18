@@ -67,7 +67,7 @@ import uuid as _uuid
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -107,11 +107,95 @@ def _rt_row(obj: Any) -> Dict[str, Any]:
     return _parity(_orm_obj_to_dict(obj, _RT_N2A))
 
 
+def pick_note_tag_match(word: str, rows: list[dict]) -> Optional[int]:
+    """Spec §5 ranking: own user tag > system/time; name hit > name_zh hit;
+    oldest created_at wins. ``rows`` are candidate tag dicts already filtered
+    to lower(name)/lower(name_zh) == word and visibility scope."""
+    w = word.lower()
+
+    def _key(r: dict):
+        return (
+            0 if r.get("type") == "user" else 1,
+            0 if (r.get("name") or "").lower() == w else 1,
+            str(r.get("created_at") or ""),
+        )
+
+    hits = [
+        r
+        for r in rows
+        if (r.get("name") or "").lower() == w or (r.get("name_zh") or "").lower() == w
+    ]
+    if not hits:
+        return None
+    return int(sorted(hits, key=_key)[0]["id"])
+
+
 class TagsRepository:
     """ORM-backed repository for tags CRUD + the resource_tags junction (异步)."""
 
     def __init__(self):
         pass
+
+    async def resolve_note_tags(self, user_id: str, names: list[str]) -> list[int]:
+        """Resolve parsed note-tag words to tag ids, creating origin='note'
+        shadow tags for unseen words (spec §2/§5). Idempotent under races via
+        unique_tag_per_scope + re-select."""
+        words: list[str] = []
+        for n in names:
+            w = n.strip().lower()
+            if w and w not in words:
+                words.append(w)
+        if not words:
+            return []
+        resolved: dict[str, int] = {}
+        # Race window (accepted by design): the SELECT snapshot below is taken
+        # before the per-word INSERTs, so two concurrent callers can each miss a
+        # same-named system/time tag and both create a user shadow tag — leaving a
+        # benign cross-type duplicate (one 'note' user tag alongside the system
+        # one). The unique_tag_per_scope index still prevents same-scope dupes via
+        # the ON CONFLICT re-select; the cross-type overlap is tolerated.
+        async with write_scope() as session:
+            stmt = select(
+                Tags.id, Tags.name, Tags.name_zh, Tags.type, Tags.created_at
+            ).where(
+                or_(
+                    func.lower(Tags.name).in_(words),
+                    func.lower(Tags.name_zh).in_(words),
+                ),
+                or_(
+                    and_(Tags.type == "user", Tags.user_id == user_id),
+                    Tags.type.in_(("system", "time")),
+                ),
+            )
+            rows = [dict(m) for m in (await session.execute(stmt)).mappings().all()]
+            for w in words:
+                hit = pick_note_tag_match(w, rows)
+                if hit is not None:
+                    resolved[w] = hit
+            for w in words:
+                if w in resolved:
+                    continue
+                ins = (
+                    pg_insert(Tags)
+                    .values(name=w, type="user", user_id=user_id, origin="note")
+                    .on_conflict_do_nothing(index_elements=["name", "type", "user_id"])
+                    .returning(Tags.id)
+                )
+                new_id = (await session.execute(ins)).scalar()
+                if new_id is None:  # lost the race — re-select
+                    new_id = (
+                        await session.execute(
+                            select(Tags.id).where(
+                                Tags.name == w,
+                                Tags.type == "user",
+                                Tags.user_id == user_id,
+                            )
+                        )
+                    ).scalar()
+                if new_id is None:
+                    raise RuntimeError(f"resolve_note_tags: failed to ensure tag '{w}'")
+                resolved[w] = int(new_id)
+        return [resolved[w] for w in words]
 
     async def get_all_tags(
         self, user_id: Optional[str] = None, enabled_only: bool = False
@@ -593,6 +677,57 @@ class TagsRepository:
         except Exception as e:
             logger.warning(f"RPC get_user_tag_counts unavailable, using fallback: {e}")
         return await self._get_tag_counts_fallback(user_id, limit)
+
+    async def get_tags_by_ids(self, ids: list[int], user_id: str) -> List[dict]:
+        """Full tag rows for the given ids, scoped to the caller-visible pool
+        (spec §5: ``type IN ('system','time') OR (type='user' AND user_id =
+        caller)``), in ONE in-list query.
+
+        Backs the topics feed's pool-tag filter, which resolves picked tag ids
+        to their name/name_zh word set. Without this scoping, a caller could
+        pass another user's private ``type='user'`` tag id and have its
+        name/name_zh silently become live filter words (cross-user existence
+        oracle + private-word-steered filtering) — mirrors the same predicate
+        ``resolve_note_tags`` uses above. Empty ids short-circuits. ``tags.id``
+        is BIGINT — the returned ``id`` stays a native int (5.3 trap)."""
+        if not ids:
+            return []
+        async with read_scope() as session:
+            objs = (
+                (
+                    await session.execute(
+                        select(Tags).where(
+                            Tags.id.in_([int(t) for t in ids]),
+                            or_(
+                                Tags.type.in_(("system", "time")),
+                                and_(Tags.type == "user", Tags.user_id == user_id),
+                            ),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [_tag_row(o) for o in objs]
+
+    async def get_name_zh_map(self, tag_ids: list[int]) -> Dict[int, str]:
+        """id → name_zh for the given tag ids, in ONE in-list query.
+
+        ``get_tag_counts`` (both the get_user_tag_counts RPC and the manual
+        fallback) omit ``name_zh``; the statistics endpoint backfills it here so
+        Chinese hotspot words still match. Tags with no Chinese alias are absent.
+        """
+        if not tag_ids:
+            return {}
+        async with read_scope() as session:
+            rows = (
+                await session.execute(
+                    select(Tags.id, Tags.name_zh).where(
+                        Tags.id.in_([int(t) for t in tag_ids])
+                    )
+                )
+            ).all()
+        return {int(tid): zh for tid, zh in rows if zh is not None}
 
     async def _get_tag_counts_fallback(
         self, user_id: str, limit: int = 10

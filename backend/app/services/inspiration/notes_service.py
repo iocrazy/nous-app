@@ -15,6 +15,8 @@ from app.repositories.inspiration_attachments_repository import (
     get_inspiration_attachments_repository,
 )
 from app.repositories.inspiration_repository import get_inspiration_notes_repository
+from app.repositories.note_tags_repository import get_note_tags_repository
+from app.repositories.tags_repository import get_tags_repository
 from app.services.inspiration.note_tags import parse_tags
 
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -64,6 +66,7 @@ class NotesService:
         )
         if row is not None:
             row.setdefault("attachments", [])
+            await self._sync_pool_tags(user_id, row)
         return row
 
     async def list_notes(
@@ -107,7 +110,23 @@ class NotesService:
         if row is not None:
             atts = await self._attachments.list_for_notes([row["id"]])
             row["attachments"] = atts
+            if content_md is not None:
+                await self._sync_pool_tags(user_id, row)
         return row
+
+    async def _sync_pool_tags(self, user_id: str, row: Dict[str, Any]) -> None:
+        """Keep the global tag pool + note_tags junction in step with the note
+        body (spec §4.1). content_md is the source of truth; note_tags is derived
+        data — any drift self-heals on the next save.
+
+        The note row write and this tag sync are two separate transactions (the
+        repos follow the per-call session idiom, no cross-repo session passing).
+        A failure here propagates to the caller by design: the note row is
+        already persisted and reconverges on the next save.
+        """
+        names = list(row.get("tags") or [])
+        tag_ids = await get_tags_repository().resolve_note_tags(user_id, names)
+        await get_note_tags_repository().sync_for_note(int(row["id"]), tag_ids)
 
     async def delete_note(self, user_id: str, note_id: Any) -> None:
         await self._owned(user_id, note_id)

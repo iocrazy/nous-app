@@ -94,6 +94,7 @@ from app.models.inspiration import (  # noqa: F401
     InspirationApiTokens,
     InspirationAttachments,
     InspirationNotes,
+    NoteTags,
 )
 from app.models.library import (  # noqa: F401
     Authors,
@@ -339,6 +340,7 @@ __all__ = [
     "InspirationApiTokens",
     "InspirationAttachments",
     "InspirationNotes",
+    "NoteTags",
     # canvas
     "CanvasResourceRefs",
     "Canvases",
