@@ -19,7 +19,11 @@ import type { IssueStatus, IssuePriority } from '../../services/issuesService';
 import { STATUS_LABEL, STATUS_ORDER, PRIORITY_LABEL, PRIORITY_ORDER, IssueStatusIcon, PriorityIcon } from './IssueStatusIcon';
 import type { AgentRef, ProjectRef } from './types';
 
-export type QuickFilter = 'all' | 'active' | 'backlog' | 'done';
+// Slimmed 2026-07-18 (user call): Backlog/Done quick presets duplicated the
+// pipeline chips one-for-one — per-status filtering is the chips' job. Only
+// 'active' earns a preset: the one multi-status set the chips can't express
+// in a single click.
+export type QuickFilter = 'all' | 'active';
 
 export interface IssueFilters {
   statuses: Set<IssueStatus>;
@@ -50,9 +54,8 @@ export const EMPTY_FILTERS: IssueFilters = {
 };
 
 const QUICK_PRESETS: Record<Exclude<QuickFilter, 'all'>, IssueStatus[]> = {
-  active: ['todo', 'in_progress'],
-  backlog: ['backlog'],
-  done: ['done'],
+  // In-flight work — review is still active work, so it belongs here.
+  active: ['todo', 'in_progress', 'in_review'],
 };
 
 export function detectQuick(statuses: Set<IssueStatus>): QuickFilter {
@@ -153,9 +156,9 @@ export const IssueFilterPopover: React.FC<IssueFilterPopoverProps> = ({ filters,
       <div className="px-3 py-2 border-b border-ink-800/60">
         <div className="text-[10px] uppercase tracking-wider text-ink-500 mb-1.5">Quick filters</div>
         <div className="flex items-center gap-1.5">
-          {(['all', 'active', 'backlog', 'done'] as QuickFilter[]).map((q) => (
+          {(['all', 'active'] as QuickFilter[]).map((q) => (
             <Pill key={q} active={activeQuick === q} onClick={() => setQuick(q)}>
-              {q === 'all' ? 'All' : q === 'active' ? 'Active' : q === 'backlog' ? 'Backlog' : 'Done'}
+              {q === 'all' ? 'All' : 'Active'}
             </Pill>
           ))}
         </div>
