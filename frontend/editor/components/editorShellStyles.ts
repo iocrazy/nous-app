@@ -711,6 +711,20 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-seg.active{ background:var(--indigo); color:var(--accent-on); }
 .mh-seg:disabled{ opacity:0.45; cursor:default; }
+.mh-zoom{ display:flex; align-items:stretch; background:var(--surface-2); border-radius:10px; padding:3px; gap:2px; }
+.mh-zoom-btn{
+  width:34px; display:flex; align-items:center; justify-content:center;
+  font-size:16px; font-weight:600; border-radius:8px; line-height:1;
+  color:var(--ink-soft); cursor:pointer; background:none; border:none; font-family:var(--sans);
+}
+.mh-zoom-btn:hover:not(:disabled){ background:var(--surface); color:var(--ink); }
+.mh-zoom-btn:disabled{ opacity:0.35; cursor:default; }
+.mh-zoom-value{
+  flex:1; text-align:center; font-size:12.5px; font-weight:600; padding:7px 0; border-radius:8px;
+  color:var(--ink); cursor:pointer; background:none; border:none; font-family:var(--sans);
+  font-variant-numeric:tabular-nums;
+}
+.mh-zoom-value:hover{ background:var(--surface); }
 .mh-divider{ height:1px; background:var(--surface-border); margin:0 -16px; }
 .mh-stats-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .mh-stat-tile{
