@@ -67,7 +67,7 @@ import {
   type SceneSyncStatus,
   type SceneReorderApi,
 } from './SceneBlock';
-import { SceneRail } from './SceneRail';
+import { SceneToc } from './SceneToc';
 import { RailModules, type RailView } from './RailModules';
 import { BeatsView } from '../beats/BeatsView';
 import { NodesView } from '../nodes/NodesView';
@@ -1131,6 +1131,12 @@ export function EditorShell({
     scenes.length === 0 &&
     orphanChapters.length === 0;
 
+  // The floating scene TOC belongs only to the script sheet — the node canvas,
+  // storyboard, beats and outline views own their own navigation. SceneToc
+  // itself renders nothing when scenes.length === 0, so the gate is just the
+  // view/mode context.
+  const showSceneToc = railView === 'script' && state.mode === 'script' && !showColdStart;
+
   // Focus the seeded row once the new scene has rendered (cold start). The
   // TipTap editor builds its ProseMirror view in an effect, so the row may not
   // be in the DOM on the same commit the scene lands — poll a few frames until
@@ -1191,7 +1197,7 @@ export function EditorShell({
       {!embedded && (
         <nav
           className={`mh-island mh-rail${railCollapsed ? ' collapsed' : ''}`}
-          aria-label={t('editor.scenesNav')}
+          aria-label={t('editor.railNav')}
         >
           {railCollapsed ? (
             <div className="mh-rail-collapsed-strip">
@@ -1247,85 +1253,29 @@ export function EditorShell({
                 </div>
               </div>
               <RailModules activeView={railView} onSelect={selectRailView} />
+              {/* The SCENE list moved OUT of this boxed rail into the floating
+                  Notion-style SceneToc that overlays the paper's left edge (it
+                  no longer reads as "又是一个框"). This rail keeps only the
+                  brand / episode selector / Views nav / entity sections; scene
+                  navigation is the SceneToc in the centre column below. */}
               <div className="mh-rail-scroll">
                 <RailEntities
                   characters={railCharacters}
                   locations={railLocations}
                   onSelect={handleSelectScene}
                 />
-                <section className="mh-rail-section" aria-label={t('editor.scenesLabel')}>
-                  <div className="mh-rail-section-head">
-                    <span className="mh-rail-section-label">{t('editor.scenesLabel')}</span>
-                    {scenes.length > 0 && (
-                      <span className="mh-rail-count-badge">{scenes.length}</span>
-                    )}
-                  </div>
-                  <SceneRail
-                    scenes={scenes}
-                    activeSceneId={state.activeSceneId}
-                    onSelect={handleSelectScene}
-                  />
-                </section>
               </div>
             </>
           )}
         </nav>
       )}
 
-      {/* ===== EMBEDDED SCENE RAIL (studio only) =====
-          In the workspace the editor owns the SCENES list again: it renders as a
-          SLIM left column right beside the paper (laper-style), instead of being
-          lifted into the workspace nav tree. The workspace sidebar still owns
-          episode + module navigation, so this rail carries ONLY the scene list
-          (no brand row / ep selector / RailModules). Collapsible so a narrow
-          window can reclaim the width; the paper's own minmax(0,1fr)+min-width
-          floor keeps handling any remaining overflow. Scenes still lift up via
-          onScenesChange for the workspace top-bar slate. */}
-      {embedded && (
-        <nav
-          className={`mh-island mh-rail mh-rail-embedded${railCollapsed ? ' collapsed' : ''}`}
-          aria-label={t('editor.scenesNav')}
-        >
-          {railCollapsed ? (
-            <div className="mh-rail-collapsed-strip">
-              <button
-                type="button"
-                className="mh-icon-btn"
-                aria-label={t('editor.expandLeft')}
-                onClick={() => setRailCollapsed(false)}
-              >
-                ›
-              </button>
-            </div>
-          ) : (
-            <div className="mh-rail-scroll">
-              <section className="mh-rail-section" aria-label={t('editor.scenesLabel')}>
-                <div className="mh-rail-section-head">
-                  <span className="mh-rail-section-label">{t('editor.scenesLabel')}</span>
-                  <span className="mh-rail-head-actions">
-                    {scenes.length > 0 && (
-                      <span className="mh-rail-count-badge">{scenes.length}</span>
-                    )}
-                    <button
-                      type="button"
-                      className="mh-icon-btn mh-rail-collapse-btn"
-                      aria-label={t('editor.collapseLeft')}
-                      onClick={() => setRailCollapsed(true)}
-                    >
-                      ‹
-                    </button>
-                  </span>
-                </div>
-                <SceneRail
-                  scenes={scenes}
-                  activeSceneId={state.activeSceneId}
-                  onSelect={handleSelectScene}
-                />
-              </section>
-            </div>
-          )}
-        </nav>
-      )}
+      {/* Embedded (studio) mode has NO boxed left rail: the workspace tree owns
+          episode + module navigation, and scene navigation is the floating
+          SceneToc overlaying the paper (rendered in the centre column below),
+          identical to the standalone route. The shell reflows to two columns
+          (paper + Writing) — see .mh-editor-shell.mh-embedded. Scenes still lift
+          up via onScenesChange for the workspace top-bar slate. */}
 
       {/* ===== CENTER PAPER COLUMN ===== */}
       <main className="mh-center-col" aria-label={t('editor.paperColumn')}>
@@ -1359,6 +1309,14 @@ export function EditorShell({
         </div>
 
         <div className="mh-page-frame">
+          {showSceneToc && (
+            <SceneToc
+              scenes={scenes}
+              activeSceneId={state.activeSceneId}
+              onSelect={handleSelectScene}
+              scriptId={scriptId}
+            />
+          )}
           {railView === 'nodes' ? (
             <ScenePresenceContext.Provider value={presenceByScene}>
               <NodesView
