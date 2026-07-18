@@ -142,12 +142,18 @@ class TagsRepository:
         unique_tag_per_scope + re-select."""
         words: list[str] = []
         for n in names:
-            w = n.lower()
+            w = n.strip().lower()
             if w and w not in words:
                 words.append(w)
         if not words:
             return []
         resolved: dict[str, int] = {}
+        # Race window (accepted by design): the SELECT snapshot below is taken
+        # before the per-word INSERTs, so two concurrent callers can each miss a
+        # same-named system/time tag and both create a user shadow tag — leaving a
+        # benign cross-type duplicate (one 'note' user tag alongside the system
+        # one). The unique_tag_per_scope index still prevents same-scope dupes via
+        # the ON CONFLICT re-select; the cross-type overlap is tolerated.
         async with write_scope() as session:
             stmt = select(
                 Tags.id, Tags.name, Tags.name_zh, Tags.type, Tags.created_at
