@@ -33,6 +33,13 @@ const PLATFORM_LABEL: Record<string, string> = {
 // Created lazily on first mark.
 const TO_PUBLISH_TAG_NAME = 'To Publish';
 
+// Suggested topics shown under the composer. Clicking one adds it like any
+// typed topic (they map to Douyin hashtags — # + word).
+const TRENDING_TOPICS = ['goldenhour', 'cityscape', '4k'];
+// Mirrors the backend schema bounds (normalize_topics): ≤20 tags, ≤50 chars.
+const MAX_TOPICS = 20;
+const MAX_TOPIC_LEN = 50;
+
 // Deterministic gradient pick per account id — keeps avatars visually
 // distinct without needing per-user color config.
 const AVA_GRADIENTS = [
@@ -94,6 +101,9 @@ export const PublishPage: React.FC = () => {
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [topics, setTopics] = useState<string[]>([]);
+  const [topicInput, setTopicInput] = useState('');
+  const [topicInputOpen, setTopicInputOpen] = useState(false);
   const [visibility, setVisibility] = useState<Visibility>('public');
   const [aiContent, setAiContent] = useState(false);
   const [allowDownload, setAllowDownload] = useState(true);
@@ -159,6 +169,44 @@ export const PublishPage: React.FC = () => {
 
   const removeVideo = (id: string) =>
     setSelectedVideos((s) => s.filter((x) => x !== id));
+
+  // ── Topics (Douyin hashtags) ──
+  // Add one bare tag (strip leading '#'), enforcing the same bounds as the
+  // backend schema and de-duplicating case-insensitively. Immutable update.
+  const addTopic = useCallback((raw: string) => {
+    const tag = raw.replace(/^#+/, '').trim();
+    if (!tag || tag.length > MAX_TOPIC_LEN) return;
+    setTopics((prev) => (
+      prev.length >= MAX_TOPICS || prev.some((x) => x.toLowerCase() === tag.toLowerCase())
+        ? prev
+        : [...prev, tag]
+    ));
+  }, []);
+
+  // Commit the input: split on comma/whitespace so a pasted "a, b c" adds all.
+  const commitTopicInput = useCallback(() => {
+    topicInput
+      .split(/[,\s]+/)
+      .map((s) => s.replace(/^#+/, '').trim())
+      .filter(Boolean)
+      .forEach((p) => addTopic(p));
+    setTopicInput('');
+  }, [topicInput, addTopic]);
+
+  const removeTopic = (tag: string) =>
+    setTopics((prev) => prev.filter((x) => x !== tag));
+
+  const onTopicKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // IME composition guard (#1453 pattern): never commit mid-composition.
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === 'Enter' || e.key === ',' || (e.key === ' ' && topicInput.trim())) {
+      e.preventDefault();
+      commitTopicInput();
+    } else if (e.key === 'Backspace' && !topicInput && topics.length) {
+      e.preventDefault();
+      setTopics((prev) => prev.slice(0, -1));
+    }
+  };
 
   // Only the videos the user actually picked are shown as content thumbs —
   // never the whole Library. Resolve ids → video rows, dropping any that no
@@ -288,6 +336,7 @@ export const PublishPage: React.FC = () => {
         resource_ids: selectedVideos,
         title: title.trim(),
         description: description.trim() || undefined,
+        topics: topics.length ? topics : undefined,
         visibility,
         ai_content: aiContent,
         allow_download: allowDownload,
@@ -378,11 +427,13 @@ export const PublishPage: React.FC = () => {
             <h4>{t('distribution.publish.cover', 'Cover')} <span className="aux">{t('distribution.publish.notSetYet', 'Not set yet')}</span></h4>
             <div className="cover-wrap">
               <div className="cover-slots">
-                <div className="cover-slot v">
+                <div className="cover-slot v is-soon" aria-disabled="true">
+                  <span className="soon-tag">{t('distribution.publish.soon', 'Soon')}</span>
                   <Sparkles />
                   {t('distribution.publish.vertical34', 'Vertical 3:4')}
                 </div>
-                <div className="cover-slot h">
+                <div className="cover-slot h is-soon" aria-disabled="true">
+                  <span className="soon-tag">{t('distribution.publish.soon', 'Soon')}</span>
                   <Sparkles />
                   {t('distribution.publish.horizontal43', 'Horizontal 4:3')}
                 </div>
@@ -425,14 +476,63 @@ export const PublishPage: React.FC = () => {
               placeholder={t('distribution.publish.descPlaceholder', 'Add a description')}
             />
             <div className="topics">
-              <span className="chip chip-mute">{t('distribution.publish.topicChip', '# Topic')}</span>
-              <span className="chip chip-mute">{t('distribution.publish.mentionChip', '@ Mention')}</span>
+              <button
+                type="button"
+                className={`chip ${topicInputOpen ? 'chip-indigo' : 'chip-mute'}`}
+                aria-pressed={topicInputOpen}
+                aria-expanded={topicInputOpen}
+                onClick={() => setTopicInputOpen((v) => !v)}
+              >
+                {t('distribution.publish.topicChip', '# Topic')}
+              </button>
+              <span
+                className="chip chip-mute chip-soon"
+                aria-disabled="true"
+                title={t('distribution.publish.mentionSoon', 'Mentions need the recipient’s open_id — coming later')}
+              >
+                {t('distribution.publish.mentionChip', '@ Mention')}
+                <em className="soon">{t('distribution.publish.soon', 'Soon')}</em>
+              </span>
+              {topics.map((tag) => (
+                <span key={tag} className="chip chip-topic">
+                  #{tag}
+                  <button
+                    type="button"
+                    className="chip-x"
+                    aria-label={t('distribution.publish.removeTopic', 'Remove topic {{tag}}', { tag })}
+                    onClick={() => removeTopic(tag)}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
             </div>
+            {topicInputOpen && (
+              <div className="topic-input-row" style={{ marginTop: 7 }}>
+                <input
+                  className="input"
+                  value={topicInput}
+                  maxLength={MAX_TOPIC_LEN}
+                  aria-label={t('distribution.publish.topicInputAria', 'Add a topic')}
+                  placeholder={t('distribution.publish.topicInputPlaceholder', 'Type a topic, press Enter (comma or space also adds)')}
+                  onChange={(e) => setTopicInput(e.target.value)}
+                  onKeyDown={onTopicKeyDown}
+                  onBlur={commitTopicInput}
+                />
+              </div>
+            )}
             <div className="topics" style={{ marginTop: 7 }}>
               <span className="trending-label">{t('distribution.publish.trending', 'Trending')}</span>
-              <span className="chip chip-mute">#goldenhour</span>
-              <span className="chip chip-mute">#cityscape</span>
-              <span className="chip chip-mute">#4k</span>
+              {TRENDING_TOPICS.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  className="chip chip-mute"
+                  onClick={() => addTopic(tag)}
+                >
+                  #{tag}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -450,7 +550,7 @@ export const PublishPage: React.FC = () => {
             <div className="frow">
               <div className="lbl">
                 <b>{t('distribution.publish.aiContent', 'AI-generated content')}</b>
-                <span>{t('distribution.publish.aiContentDesc', 'Adds the disclosure label on platforms that require it')}</span>
+                <span>{t('distribution.publish.aiContentDesc', 'Saved with the task — Douyin requires setting the AI label in-app.')}</span>
               </div>
               <button
                 type="button"
@@ -574,7 +674,16 @@ export const PublishPage: React.FC = () => {
             </h4>
             <div className="seg" style={{ marginBottom: 10 }}>
               <button type="button" className={channel === 'h5' ? 'on' : ''} onClick={() => setChannel('h5')}>{t('distribution.publish.channelH5', 'H5 share')}</button>
-              <button type="button" className={channel === 'official' ? 'on' : ''} onClick={() => setChannel('official')}>{t('distribution.publish.channel_official', 'Official API')}</button>
+              {/* Official API stays locked until the Douyin app clears review —
+                  the backend code path is intact and re-enables by dropping
+                  `disabled`. Channel is pinned to H5 meanwhile. */}
+              <button
+                type="button"
+                disabled
+                title={t('distribution.publish.officialLocked', 'Requires Douyin app review — H5 share only for now')}
+              >
+                {t('distribution.publish.channel_official', 'Official API')}
+              </button>
             </div>
 
             {accounts.map((a) => {
@@ -659,7 +768,7 @@ export const PublishPage: React.FC = () => {
 
             <div className="check warn">
               <AlertTriangle />
-              {t('distribution.publish.coverNotSetWarning', 'Cover not set — a video-frame cover will be used automatically.')}
+              {t('distribution.publish.coverNotSetWarning', 'Cover Studio coming in D4 — Douyin picks the cover during publish.')}
             </div>
             {canPublish && (
               <div className="check ok">

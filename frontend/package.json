@@ -1,7 +1,7 @@
 {
   "name": "mediahub",
   "private": true,
-  "version": "0.25.407",
+  "version": "0.25.410",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -73,5 +73,8 @@
     "vite": "^7.3.1",
     "vite-plugin-pwa": "^1.2.0",
     "vitest": "^4.1.4"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true
   }
 }

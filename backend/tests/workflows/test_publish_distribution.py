@@ -1,10 +1,13 @@
 import pytest
 
 from app.workflows.publish_distribution import (
+    _account_publish_opts,
     _publish_one_account,
     _run_accounts,
+    _title_with_hashtags,
     classify_batch,
     decide_channel,
+    visibility_to_private_status,
 )
 
 
@@ -19,10 +22,16 @@ def test_decide_channel_official_needs_token():
 
 
 class _FakeAdapter:
+    def __init__(self):
+        self.publish_kw = None
+        self.share_kw = None
+
     async def publish_video(self, **kw):
+        self.publish_kw = kw
         return "item-123"
 
     async def generate_share_url(self, **kw):
+        self.share_kw = kw
         return f"snssdk1128://openplatform/share?state={kw['share_id']}"
 
 
@@ -96,6 +105,188 @@ async def test_publish_one_account_failure_records_error():
     status = await _publish_one_account(account, _BoomAdapter(), task, repo)
     assert status == "failed"
     assert "upload rejected" in repo.updates[-1][1]["error_message"]
+
+
+# ── topics (Douyin hashtags) delivery ─────────────────────────────────────
+
+
+def test_account_publish_opts_falls_back_to_task_topics():
+    account = {"id": "1"}
+    task = {"title": "T", "description": "d", "topics": ["city", "4k"]}
+    opts = _account_publish_opts(account, task)
+    assert (opts["title"], opts["description"], opts["topics"]) == (
+        "T",
+        "d",
+        ["city", "4k"],
+    )
+
+
+def test_account_publish_opts_account_override_wins():
+    account = {"id": "1", "topics": ["override"]}
+    task = {"title": "T", "topics": ["city"]}
+    assert _account_publish_opts(account, task)["topics"] == ["override"]
+
+
+def test_title_with_hashtags_appends_trailing_space_tags():
+    text = _title_with_hashtags("My clip", ["city", "4k"])
+    # Douyin needs `#tag ` (trailing space terminates the tag).
+    assert "#city " in text and "#4k " in text
+    assert text.startswith("My clip ")
+
+
+def test_title_with_hashtags_noop_without_topics():
+    assert _title_with_hashtags("My clip", []) == "My clip"
+
+
+@pytest.mark.asyncio
+async def test_official_publish_injects_hashtags_into_title():
+    repo = _FakeRepo()
+    adapter = _FakeAdapter()
+    account = {
+        "id": "10",
+        "account_id": "20",
+        "channel": "official",
+        "access_token": "act",
+        "platform_user_id": "open1",
+        "platform": "douyin",
+        "resource_id": "30",
+    }
+    task = {
+        "title": "Hi",
+        "description": "d",
+        "resource_ids": ["30"],
+        "topics": ["city"],
+    }
+    status = await _publish_one_account(account, adapter, task, repo)
+    assert status == "success"
+    assert "#city " in adapter.publish_kw["title"]
+
+
+@pytest.mark.asyncio
+async def test_h5_publish_passes_topics_as_list():
+    repo = _FakeRepo()
+    adapter = _FakeAdapter()
+    account = {
+        "id": "11",
+        "account_id": "21",
+        "channel": "h5",
+        "access_token": None,
+        "platform_user_id": "open2",
+        "platform": "douyin",
+        "resource_id": "30",
+    }
+    task = {"title": "Hi", "resource_ids": ["30"], "topics": ["city", "4k"]}
+    status = await _publish_one_account(account, adapter, task, repo)
+    assert status == "pending_share"
+    assert adapter.share_kw["hashtags"] == ["city", "4k"]
+
+
+# ── visibility / download options ──────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "vis,expected",
+    [
+        ("public", 0),
+        ("private", 1),
+        ("friends", 2),
+        ("weird", 0),
+        (None, 0),
+    ],
+)
+def test_visibility_to_private_status(vis, expected):
+    assert visibility_to_private_status(vis) == expected
+
+
+def test_account_publish_opts_reads_task_visibility_and_download():
+    task = {
+        "title": "T",
+        "description": "D",
+        "visibility": "friends",
+        "allow_download": False,
+    }
+    opts = _account_publish_opts({}, task)
+    assert opts == {
+        "title": "T",
+        "description": "D",
+        "topics": [],
+        "private_status": 2,
+        "allow_download": False,
+    }
+
+
+def test_account_publish_opts_defaults_and_title_override():
+    # account title overrides the batch title; missing visibility → public (0);
+    # missing allow_download → True.
+    opts = _account_publish_opts({"title": "OV"}, {"title": "T"})
+    assert opts["title"] == "OV"
+    assert opts["private_status"] == 0
+    assert opts["allow_download"] is True
+
+
+class _CaptureAdapter:
+    """Records the kwargs the last publish call received."""
+
+    def __init__(self):
+        self.calls: dict = {}
+
+    async def publish_video(self, **kw):
+        self.calls = kw
+        return "item-1"
+
+    async def generate_share_url(self, **kw):
+        self.calls = kw
+        return "snssdk1128://openplatform/share?state=x"
+
+
+@pytest.mark.asyncio
+async def test_publish_one_account_official_forwards_opts():
+    repo = _FakeRepo()
+    adapter = _CaptureAdapter()
+    account = {
+        "id": "1",
+        "account_id": "2",
+        "channel": "official",
+        "access_token": "act",
+        "platform_user_id": "o",
+        "platform": "douyin",
+        "resource_id": "3",
+    }
+    task = {
+        "title": "Hi",
+        "visibility": "private",
+        "allow_download": False,
+        "resource_ids": ["3"],
+    }
+    await _publish_one_account(account, adapter, task, repo)
+    assert adapter.calls["private_status"] == 1
+    # official create API: not-allowed → download_type 1 (0/1 mapping).
+    assert adapter.calls["download_type"] == 1
+
+
+@pytest.mark.asyncio
+async def test_publish_one_account_h5_forwards_opts():
+    repo = _FakeRepo()
+    adapter = _CaptureAdapter()
+    account = {
+        "id": "1",
+        "account_id": "2",
+        "channel": "h5",
+        "access_token": None,
+        "platform_user_id": "o",
+        "platform": "douyin",
+        "resource_id": "3",
+    }
+    task = {
+        "title": "Hi",
+        "visibility": "friends",
+        "allow_download": True,
+        "resource_ids": ["3"],
+    }
+    await _publish_one_account(account, adapter, task, repo)
+    assert adapter.calls["private_status"] == 2
+    # H5 path forwards the bool; the adapter maps it to the 1/2 schema enum.
+    assert adapter.calls["allow_download"] is True
 
 
 # ── classify_batch ────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 import hashlib
+import json
 import secrets
 import time
 from dataclasses import dataclass
@@ -119,6 +120,9 @@ class DouyinAdapter(PlatformAdapter):
         Upload video to Douyin.
         Returns video_id for creating the post.
         """
+        # TODO(distribution): switch to Douyin chunked upload
+        # (init/part/complete) before enabling the official channel —
+        # whole-file in-memory upload won't survive large videos.
         async with httpx.AsyncClient(timeout=300.0) as client:
             # First download the video from Supabase Storage
             video_response = await client.get(video_url)
@@ -144,9 +148,18 @@ class DouyinAdapter(PlatformAdapter):
         video_id: str,
         title: str,
         description: Optional[str] = None,
+        private_status: int = 0,
+        download_type: int = 0,
     ) -> str:
         """
         Create a video post on Douyin.
+
+        private_status (official create API enum): 0=everyone, 1=self only,
+        2=friends. download_type (official create API enum): 0=allowed,
+        1=not allowed. NOTE these enums differ from the H5 share schema's
+        download_type (1=allowed / 2=not allowed) — the two mappings are kept
+        deliberately separate (see ``generate_share_url``).
+
         Returns the published item_id.
         """
         async with httpx.AsyncClient() as client:
@@ -160,6 +173,8 @@ class DouyinAdapter(PlatformAdapter):
                 json={
                     "video_id": video_id,
                     "text": text,
+                    "private_status": private_status,
+                    "download_type": download_type,
                 },
             )
             data = response.json()
@@ -176,14 +191,27 @@ class DouyinAdapter(PlatformAdapter):
         video_url: str,
         title: str,
         description: Optional[str] = None,
+        private_status: int = 0,
+        download_type: int = 0,
     ) -> str:
         """
         Full flow: upload video and create post.
+
+        private_status / download_type follow the official create API enums
+        (see ``_create_video_post``); defaults keep the pre-existing behaviour
+        (public + downloadable) for callers that don't pass them.
+
         Returns the item_id (can be used to construct the video URL).
         """
         video_id = await self._upload_video(access_token, open_id, video_url)
         item_id = await self._create_video_post(
-            access_token, open_id, video_id, title, description
+            access_token,
+            open_id,
+            video_id,
+            title,
+            description,
+            private_status=private_status,
+            download_type=download_type,
         )
         return item_id
 
@@ -255,15 +283,29 @@ class DouyinAdapter(PlatformAdapter):
 
     async def generate_share_url(self, **kwargs) -> Optional[str]:
         """
-        Generate the Schema URL for H5 share to Douyin.
+        Generate the Schema URL for H5 share to Douyin
+        (``snssdk1128://openplatform/share``).
 
         Required kwargs:
-            video_url (str): URL of the video to share.
+            video_url (str): URL of the video to share. Emitted under the
+                schema's ``video_path`` key (the kwarg keeps the ``video_url``
+                name so existing callers don't break).
             title (str): Title for the shared content.
             share_id (str): Unique share identifier (maps to state param).
 
         Optional kwargs:
-            hashtag_list (str): Comma-separated hashtag list.
+            private_status (int): H5 visibility enum — 0=public, 1=self only,
+                2=friends (default 0).
+            allow_download (bool): whether viewers may download (default True).
+                Mapped to the schema's download_type: True→1, False→2. NOTE
+                the H5 schema uses 1=allowed / 2=not allowed, which DIFFERS
+                from the official create API's 0/1 — the two mappings are kept
+                separate on purpose, never sharing a constant.
+            hashtags (list[str]): Bare topic words (no leading '#'). Encoded as
+                a JsonArray string ``["tag1","tag2"]`` for the schema's
+                ``hashtag_list`` param — Douyin's documented H5 format (NOT
+                comma-separated). On iOS ``hashtag_list`` is ignored when
+                ``title`` is empty; we always send a title, so this is moot.
 
         Returns:
             Schema URL string that opens Douyin app with content pre-filled.
@@ -271,24 +313,40 @@ class DouyinAdapter(PlatformAdapter):
         video_url: str = kwargs["video_url"]
         title: str = kwargs["title"]
         share_id: str = kwargs["share_id"]
-        hashtag_list: str = kwargs.get("hashtag_list", "")
+        hashtags: list[str] = list(kwargs.get("hashtags") or [])
+        private_status: int = int(kwargs.get("private_status", 0))
+        allow_download: bool = bool(kwargs.get("allow_download", True))
+        # H5 share download_type: 1=allowed, 2=not allowed (distinct from the
+        # official create API's 0/1 — do not unify these two enums).
+        download_type = 1 if allow_download else 2
 
         ticket = await self._get_ticket()
         timestamp = int(time.time())
         nonce_str = secrets.token_hex(16)
         signature = self._generate_signature(ticket, timestamp, nonce_str)
 
+        # share_type is a fixed "h5" discriminator required by the schema; it
+        # is NOT part of the signature (which only covers nonce_str/ticket/
+        # timestamp).
         params = {
+            "share_type": "h5",
             "client_key": self._creds.client_key,
             "nonce_str": nonce_str,
             "timestamp": str(timestamp),
             "signature": signature,
             "state": share_id,
-            "video_url": video_url,
+            "video_path": video_url,
             "title": title,
+            "private_status": private_status,
+            "download_type": download_type,
         }
-        if hashtag_list:
-            params["hashtag_list"] = hashtag_list
+        if hashtags:
+            # JsonArray string, e.g. ["城市","4k"]. Compact separators (no space
+            # after comma) keep the URL param tight; ensure_ascii=False keeps
+            # CJK topics readable; quote() below percent-encodes the whole value.
+            params["hashtag_list"] = json.dumps(
+                hashtags, ensure_ascii=False, separators=(",", ":")
+            )
 
         query = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in params.items())
         return f"snssdk1128://openplatform/share?{query}"
