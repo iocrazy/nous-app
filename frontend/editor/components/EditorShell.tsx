@@ -1371,7 +1371,13 @@ export function EditorShell({
                 data-zoom={sheetZoom}
               >
                 <div className="mh-sheet-inner">
-                  {state.mode !== 'outline' && scriptUntouched && (
+                  {/* `scriptUntouched` is `[].every(...)` === true while scenes
+                      are still loading, so the empty-script keyboard hint must
+                      NOT show until the load resolves — otherwise every open of
+                      a non-empty script flashes the "empty script" affordance
+                      before its scenes arrive (the loading overlay paints
+                      behind the paper, so it can't hide this). Gate on ready. */}
+                  {loadState === 'ready' && state.mode !== 'outline' && scriptUntouched && (
                     <div className="mh-keyboard-hint" aria-hidden="true">
                       <div>
                         <kbd>Tab</kbd> {t('editor.hintTab')}
