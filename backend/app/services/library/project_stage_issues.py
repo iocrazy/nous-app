@@ -1,7 +1,10 @@
 """Project SOP stage → auto todo (issue) sync.
 
-When a project's SOP stage advances (the manual PUT /current_stage entry point),
-this module keeps a mirror issue in lock-step with the stage:
+When a project's SOP stage advances — via the manual PUT, project creation's
+born-on-first-stage, or resolve_current_stage's auto-derivation (all three
+funnel through ``ProjectStagesRepository.set_current_stage``, which fires
+``sync_stage_issues`` as a post-commit callback) — this module keeps a mirror
+issue in lock-step with the stage:
 
   * a new stage → an idempotent ``status='todo'`` issue is created, back-linked
     to the stage via ``origin_kind='project_stage'`` +
@@ -16,8 +19,9 @@ Discipline (project立约):
     so it can never block the stage advance itself (the primary operation).
   * Same-stage no-ops do nothing — ``set_current_stage`` returns ``None`` and the
     hook is skipped.
-  * Only forward, future advances are mirrored — existing stages are not
-    retroactively back-filled.
+  * Live advances are mirrored here; projects that predate the hook are
+    healed by the ``project_stage_issues`` backfill (same idempotent
+    ``ensure_stage_issue``, so the two can never double-create).
 """
 
 from __future__ import annotations
@@ -49,13 +53,14 @@ def build_stage_origin_id(project_id: Any, stage_id: Any) -> str:
 async def advance_project_stage(
     project_id: int, stage_id: Any, user_id: str
 ) -> Optional[dict[str, Any]]:
-    """Advance a project's SOP stage and mirror the change into issues.
+    """Advance a project's SOP stage. Returns the new stage row, or ``None``
+    for a same-stage no-op.
 
-    Thin orchestration over ``ProjectStagesRepository.set_current_stage`` (the
-    stage machine stays the single source of truth for the transition): reads the
-    current stage first to know which issue to close, performs the advance, then
-    runs the best-effort issue sync. Returns the new stage row, or ``None`` for a
-    same-stage no-op (in which case NO issue action is taken).
+    The issue mirror now fires inside ``set_current_stage`` itself (repo-level
+    post-commit callback), so ALL advance paths — manual PUT, project creation's
+    born-on-first-stage, resolve_current_stage's auto-derivation — are mirrored
+    uniformly. This wrapper stays as the router's entry point and the seam the
+    tests exercise; it must NOT sync again (the repo already did).
 
     Raises ``ValueError`` straight through from ``set_current_stage`` for an
     invalid project/stage — the router maps that to a 422 exactly as before.
@@ -64,29 +69,12 @@ async def advance_project_stage(
         get_project_stages_repository,
     )
 
-    stages_repo = get_project_stages_repository()
-
-    # Capture the outgoing stage BEFORE advancing so we know which issue to close.
-    prev = await stages_repo.get_current(int(project_id))
-    old_stage_id = prev.get("id") if prev else None
-
-    new_stage = await stages_repo.set_current_stage(int(project_id), stage_id, user_id)
-    if new_stage is None:
-        # Same-stage no-op — nothing advanced, nothing to mirror.
-        return None
-
-    try:
-        await _sync_stage_issues(int(project_id), old_stage_id, new_stage, user_id)
-    except Exception as exc:  # noqa: BLE001 — the advance is the primary op
-        logger.warning(
-            f"[project_stage_issues] issue sync failed for project "
-            f"{project_id} → stage {new_stage.get('id')}: {exc!r}"
-        )
-
-    return new_stage
+    return await get_project_stages_repository().set_current_stage(
+        int(project_id), stage_id, user_id
+    )
 
 
-async def _sync_stage_issues(
+async def sync_stage_issues(
     project_id: int,
     old_stage_id: Any,
     new_stage: dict[str, Any],
@@ -115,7 +103,7 @@ async def _sync_stage_issues(
 
     # 2) Idempotently open the new stage's issue.
     try:
-        await _ensure_stage_issue(issues, project_id, new_stage, user_id)
+        await ensure_stage_issue(issues, project_id, new_stage, user_id)
     except Exception as exc:  # noqa: BLE001 — best-effort mirror
         logger.warning(
             f"[project_stage_issues] opening new-stage issue failed for "
@@ -133,7 +121,7 @@ async def _close_stage_issue(issues, project_id: int, stage_id: str) -> None:
         await issues.transition_status(int(issue["id"]), "done")
 
 
-async def _ensure_stage_issue(
+async def ensure_stage_issue(
     issues, project_id: int, new_stage: dict[str, Any], user_id: str
 ) -> None:
     """Create the new stage's issue unless one already exists (idempotent)."""

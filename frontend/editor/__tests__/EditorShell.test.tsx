@@ -109,7 +109,7 @@ describe('EditorShell', () => {
     expect(within(sceneRail).getByText('Rooftop Access')).toBeInTheDocument();
   });
 
-  it('embedded (studio) mode: the whole left rail is gone, scenes lift out via onScenesChange', async () => {
+  it('embedded (studio) mode: the editor hosts its OWN slim scene rail beside the paper, still lifting scenes for the slate', async () => {
     svc.listScenes.mockResolvedValue(twoScenes);
     const onScenesChange = vi.fn();
     const { container } = render(
@@ -117,16 +117,23 @@ describe('EditorShell', () => {
     );
     await waitFor(() => expect(screen.getByRole('main')).toBeInTheDocument());
 
-    // The centre + right zones are present, but the entire left rail (the
-    // navigation landmark, its brand row AND the scene list) is dropped — the
-    // workspace tree is the single side navigation now (合一终稿, 2026-07-11).
+    // The SCENES list now lives as the editor's OWN left column beside the paper
+    // (laper-style), NOT lifted into the workspace nav — so the scene rail (and
+    // its navigation landmark) render right here.
     expect(screen.getByRole('complementary')).toBeInTheDocument();
-    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('scene-rail')).not.toBeInTheDocument();
-    expect(container.querySelector('.mh-brand-row')).not.toBeInTheDocument();
+    expect(screen.getByRole('navigation')).toBeInTheDocument();
+    const sceneRail = await screen.findByTestId('scene-rail');
+    expect(within(sceneRail).getByText('Rooftop Access')).toBeInTheDocument();
     expect(container.querySelector('.mh-editor-shell.mh-embedded')).toBeInTheDocument();
 
-    // The scene list is reported up to the workspace instead.
+    // …but the rail stays SLIM: the standalone chrome (brand row + episode
+    // management selector + module nav) is NOT rendered — the workspace tree
+    // owns that navigation (合一终稿, 2026-07-11).
+    expect(container.querySelector('.mh-brand-row')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('editor.manageEpisodes')).not.toBeInTheDocument();
+
+    // Scenes are still reported up so the workspace top-bar slate can show the
+    // active scene number.
     await waitFor(() => {
       const last = onScenesChange.mock.calls.at(-1)?.[0];
       expect(last).toHaveLength(2);

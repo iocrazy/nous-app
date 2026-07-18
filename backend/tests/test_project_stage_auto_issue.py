@@ -27,6 +27,11 @@ _USER = "00000000-0000-0000-0000-000000000001"
 
 
 class _FakeStagesRepo:
+    """Mimics the REAL repo's contract: the issue mirror fires inside
+    ``set_current_stage`` as a post-commit callback (covering the manual PUT,
+    project creation and auto-derivation uniformly), and a same-stage no-op
+    (``new_stage=None``) returns None WITHOUT syncing."""
+
     def __init__(self, current, new_stage):
         self._current = current
         self._new_stage = new_stage
@@ -37,6 +42,12 @@ class _FakeStagesRepo:
 
     async def set_current_stage(self, pid, stage_id, user_id):
         self.set_calls.append((pid, stage_id, user_id))
+        if self._new_stage is None:
+            return None
+        from app.services.library.project_stage_issues import sync_stage_issues
+
+        old_id = (self._current or {}).get("id")
+        await sync_stage_issues(int(pid), old_id, self._new_stage, user_id)
         return self._new_stage
 
 

@@ -412,7 +412,31 @@ class ProjectStagesRepository:
         if stage_row is None:
             raise ValueError(f"Stage {sid} not found in project_stages")
 
-        return _serialize(dict(stage_row))
+        new_stage = _serialize(dict(stage_row))
+
+        # Post-commit hook: mirror the stage change into the todo list. Lives
+        # HERE (not in the service wrapper) because set_current_stage has three
+        # callers — the manual PUT, project creation ("born on the first SOP
+        # stage") and resolve_current_stage's forward-only auto-derivation —
+        # and hooking only the PUT wrapper left the other two silently
+        # mirror-less. Same repo-level post-callback precedent as
+        # IssueRepository.transition_status (#1434). Late import + best-effort:
+        # the stage transition committed above is the primary op and must never
+        # be failed by the mirror; runs OUTSIDE the write_scope block so issue
+        # writes never extend the FOR UPDATE lock window.
+        try:
+            from app.services.library.project_stage_issues import (
+                sync_stage_issues,
+            )
+
+            await sync_stage_issues(pid, current_stage_id, new_stage, user_id)
+        except Exception as exc:  # noqa: BLE001 — mirror is best-effort
+            logger.warning(
+                f"[project_stages] stage-issue mirror failed for project {pid} "
+                f"→ stage {sid}: {exc!r}"
+            )
+
+        return new_stage
 
 
 # ── Singleton ────────────────────────────────────────────────────────────────
