@@ -1697,6 +1697,13 @@ export const EDITOR_SHELL_STYLES = `
   padding:56px var(--sheet-pad-r) 72px var(--sheet-pad-l);
   min-height:1040px;
 }
+/* Asian (华语) paper uses NARROWER, SYMMETRIC margins (8ch/8ch) than the
+   Hollywood industry 15ch/10ch — the whole geometry (width + padding + the
+   page-seam bleed, which derives its offsets from these same --sheet-pad-* vars)
+   follows automatically because every consumer reads the vars, never a raw px.
+   Custom properties inherit, so the seam widgets nested inside the sheet pick up
+   the asian values too. Specificity (0,2,0) wins over the base .mh-sheet (0,1,0). */
+.mh-sheet.asian{ --sheet-pad-l:8ch; --sheet-pad-r:8ch; }
 /* Slug is uppercase REGULAR weight on a printed page (laper too) — position and
    case carry the meaning, not boldness. Weight/case live on .mh-scene-heading. */
 /* Focused empty block whispers its element type (laper/Notion affordance) —

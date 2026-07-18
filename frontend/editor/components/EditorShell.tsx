@@ -1343,7 +1343,7 @@ export function EditorShell({
                 </div>
               )}
               <div
-                className="mh-sheet"
+                className={`mh-sheet${state.format === 'asian' ? ' asian' : ''}`}
                 ref={pageSheetRef}
                 style={{ zoom: sheetZoom / 100 }}
                 data-zoom={sheetZoom}
