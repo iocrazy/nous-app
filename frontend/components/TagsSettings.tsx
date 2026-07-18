@@ -291,9 +291,15 @@ export const TagsSettings: React.FC = () => {
   };
 
   // Promote a shadow tag (origin='note') into the curated pool. Optimistic:
-  // patch the row in place so it drops out of "From notes" and into the main
-  // grid immediately; reconcile from the server response.
+  // patch the row's origin BEFORE the await (same pattern as
+  // handleToggleEnabled) so it drops out of "From notes" and into the main
+  // grid immediately; revert on failure.
   const handlePromote = async (tag: Tag) => {
+    setTags((prev) =>
+      prev.map((t) =>
+        String(t.id) === String(tag.id) ? { ...t, origin: 'curated' } : t,
+      ),
+    );
     try {
       const updated = await updateTag(String(tag.id), { origin: 'curated' });
       setTags((prev) =>
@@ -302,6 +308,12 @@ export const TagsSettings: React.FC = () => {
         ),
       );
     } catch (err) {
+      // Revert on failure
+      setTags((prev) =>
+        prev.map((t) =>
+          String(t.id) === String(tag.id) ? { ...t, origin: 'note' } : t,
+        ),
+      );
       setError(err instanceof Error ? err.message : 'Failed to promote tag');
     }
   };
@@ -576,7 +588,10 @@ export const TagsSettings: React.FC = () => {
   const handleDrop = async (targetGroupId: string) => {
     // ── Tag drop: reassign the dragged tag to ``targetGroupId`` ────────
     if (dragTagId) {
-      const draggedTag = tags.find((tt) => tt.id === dragTagId);
+      // Tag drag-and-drop only originates from curated grid rows (shadow
+      // rows aren't draggable), so look it up in curatedTags for
+      // consistency with the rest of the curated/shadow split.
+      const draggedTag = curatedTags.find((tt) => tt.id === dragTagId);
       const tagId = dragTagId;
       setDragTagId(null);
       setTagDropTargetGroupId(null);
@@ -899,13 +914,22 @@ export const TagsSettings: React.FC = () => {
                 </button>
                 {showShadow &&
                   shadowTags.map((tag) => (
+                    // Shadow tags are ordinary user tags — clicking the row
+                    // opens the SAME edit dialog as curated tags (rename /
+                    // delete just works there). This is also what makes the
+                    // origin==='note' rename hint inside that dialog
+                    // reachable at all.
                     <div
                       key={tag.id}
-                      className="flex items-center gap-2 px-3 py-1.5 text-sm text-ink-300"
+                      onClick={() => handleStartEdit(tag)}
+                      className="flex items-center gap-2 px-3 py-1.5 text-sm text-ink-300 cursor-pointer rounded-md hover:bg-ink-800/60 hover:text-ink-100 transition-colors"
                     >
                       <span className="flex-1 truncate">#{tag.name}</span>
                       <button
-                        onClick={() => handlePromote(tag)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePromote(tag);
+                        }}
                         className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
                       >
                         {t('settings.tags.promote', 'Promote')}
@@ -1277,7 +1301,12 @@ export const TagsSettings: React.FC = () => {
             <div className="p-6 space-y-4">
               {/* Renaming a shadow tag won't rewrite the #text already
                   living in note bodies — re-editing such a note re-creates
-                  the old tag. Warn before the user renames one. */}
+                  the old tag. Warn before the user renames one.
+                  Known limitation: this hint is keyed on origin==='note',
+                  so a curated tag that's ALSO still referenced by note
+                  #text (e.g. after being promoted) won't show it — usage
+                  data isn't loaded on this page. Sanctioned fallback; not
+                  fixing here. */}
               {editingTag.origin === 'note' && (
                 <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200/90">
                   <NotebookPen size={14} className="shrink-0 mt-0.5" />
