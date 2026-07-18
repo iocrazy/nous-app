@@ -162,7 +162,7 @@ export const ApiTokensPanel: React.FC = () => {
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') void submitCreate();
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) void submitCreate();
               if (e.key === 'Escape') {
                 setCreating(false);
                 setName('');

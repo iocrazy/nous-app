@@ -227,7 +227,7 @@ export const SessionsPage: React.FC = () => {
                         value={renameDraft}
                         onChange={(e) => setRenameDraft(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') void commitRename();
+                          if (e.key === 'Enter' && !e.nativeEvent.isComposing) void commitRename();
                           if (e.key === 'Escape') setRenamingId(null);
                         }}
                         className="min-w-0 flex-1 rounded border border-ink-700 bg-ink-900 px-1.5 py-0.5 text-[13px] text-ink-200 focus:outline-none"

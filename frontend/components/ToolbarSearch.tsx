@@ -107,7 +107,7 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
   }, [isAI, onQueryChange, onClear]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && query.trim()) {
+    if (e.key === 'Enter' && !e.nativeEvent.isComposing && query.trim()) {
       if (isAI) {
         onAISearch(query.trim(), mode as 'hybrid' | 'semantic');
       } else {

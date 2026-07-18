@@ -212,7 +212,7 @@ export function Composer({
           setActiveIndex((i) => Math.max(i - 1, 0));
           return;
         }
-        if (e.key === 'Enter' || e.key === 'Tab') {
+        if ((e.key === 'Enter' || e.key === 'Tab') && !e.nativeEvent.isComposing) {
           e.preventDefault();
           const candidate = candidates[activeIndex];
           if (candidate) handlePick(candidate);
@@ -227,7 +227,7 @@ export function Composer({
       }
 
       // Normal composer behaviour when dropdown is closed
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
         e.preventDefault();
         handleSend();
       }

@@ -412,7 +412,7 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
               value={newFolderName}
               onChange={(e) => setNewFolderName(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') handleCreateFolder();
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleCreateFolder();
                 if (e.key === 'Escape') { setCreatingFolder(false); setNewFolderName(''); }
               }}
               placeholder={t('resources.folderName')}

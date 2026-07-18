@@ -310,7 +310,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
               value={renameValue}
               onChange={(e) => onRenameChange?.(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') onRenameConfirm?.();
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing) onRenameConfirm?.();
                 if (e.key === 'Escape') onRenameCancel?.();
               }}
               onBlur={() => onRenameCancel?.()}
@@ -478,7 +478,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
             value={renameValue}
             onChange={(e) => onRenameChange?.(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') onRenameConfirm?.();
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) onRenameConfirm?.();
               if (e.key === 'Escape') onRenameCancel?.();
             }}
             onBlur={() => onRenameCancel?.()}
