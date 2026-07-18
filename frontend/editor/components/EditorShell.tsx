@@ -90,6 +90,7 @@ import { ScenePresenceContext, type ScenePresenceMap } from '../collab/scenePres
 import type { RemoteOpRow } from '../useSceneSync';
 import { reportError } from '../../services/errorReporter';
 import { SelectionAiChatButton } from '../selection/SelectionAiChatButton';
+import { Loading } from '../../components/common/Loading';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -1173,7 +1174,7 @@ export function EditorShell({
 
       {loadState === 'loading' && (
         <div className="mh-shell-state" role="status">
-          {t('editor.loading')}
+          <Loading label={t('editor.loading')} />
         </div>
       )}
       {loadState === 'error' && (
@@ -1267,6 +1268,61 @@ export function EditorShell({
                 </section>
               </div>
             </>
+          )}
+        </nav>
+      )}
+
+      {/* ===== EMBEDDED SCENE RAIL (studio only) =====
+          In the workspace the editor owns the SCENES list again: it renders as a
+          SLIM left column right beside the paper (laper-style), instead of being
+          lifted into the workspace nav tree. The workspace sidebar still owns
+          episode + module navigation, so this rail carries ONLY the scene list
+          (no brand row / ep selector / RailModules). Collapsible so a narrow
+          window can reclaim the width; the paper's own minmax(0,1fr)+min-width
+          floor keeps handling any remaining overflow. Scenes still lift up via
+          onScenesChange for the workspace top-bar slate. */}
+      {embedded && (
+        <nav
+          className={`mh-island mh-rail mh-rail-embedded${railCollapsed ? ' collapsed' : ''}`}
+          aria-label={t('editor.scenesNav')}
+        >
+          {railCollapsed ? (
+            <div className="mh-rail-collapsed-strip">
+              <button
+                type="button"
+                className="mh-icon-btn"
+                aria-label={t('editor.expandLeft')}
+                onClick={() => setRailCollapsed(false)}
+              >
+                ›
+              </button>
+            </div>
+          ) : (
+            <div className="mh-rail-scroll">
+              <section className="mh-rail-section" aria-label={t('editor.scenesLabel')}>
+                <div className="mh-rail-section-head">
+                  <span className="mh-rail-section-label">{t('editor.scenesLabel')}</span>
+                  <span className="mh-rail-head-actions">
+                    {scenes.length > 0 && (
+                      <span className="mh-rail-count-badge">{scenes.length}</span>
+                    )}
+                    <button
+                      type="button"
+                      className="mh-icon-btn mh-rail-collapse-btn"
+                      aria-label={t('editor.collapseLeft')}
+                      onClick={() => setRailCollapsed(true)}
+                    >
+                      ‹
+                    </button>
+                  </span>
+                </div>
+                <SceneRail
+                  scenes={scenes}
+                  activeSceneId={state.activeSceneId}
+                  onSelect={handleSelectScene}
+                />
+              </section>
+            </div>
           )}
         </nav>
       )}

@@ -98,6 +98,66 @@ test('asian scene head renders N. Location Time / INT|EXT (number leads, INT/EXT
   expect(time.left, 'time left of INT/EXT (INT/EXT trails)').toBeLessThan(intExt.left);
 });
 
+test('asian scene numbers are sequential scene ordinals (1. 2. 3.), not continuous block numbers', async ({
+  page,
+}) => {
+  // Three scenes with DIFFERENT element counts. The old inline number reused the
+  // continuous document-order block index (blockIndexBase + 1), so the scene
+  // headers jumped (1 → 5 → 7). The asian scene number must be the scene ordinal
+  // (its position among scenes), matching the left rail's S1/S2/S3.
+  const scenes = [
+    wireScene({
+      id: SCENE_ID_BASE + 1,
+      sortOrder: 1,
+      location: 'STAGE',
+      elements: [
+        { id: 'el_1a', type: 'action', text: 'One.' },
+        { id: 'el_1b', type: 'action', text: 'Two.' },
+        { id: 'el_1c', type: 'action', text: 'Three.' },
+      ],
+    }),
+    wireScene({
+      id: SCENE_ID_BASE + 2,
+      sortOrder: 2,
+      location: 'ALLEY',
+      elements: [{ id: 'el_2a', type: 'action', text: 'Solo.' }],
+    }),
+    wireScene({
+      id: SCENE_ID_BASE + 3,
+      sortOrder: 3,
+      location: 'ROOF',
+      elements: [
+        { id: 'el_3a', type: 'action', text: 'A.' },
+        { id: 'el_3b', type: 'action', text: 'B.' },
+        { id: 'el_3c', type: 'action', text: 'C.' },
+        { id: 'el_3d', type: 'action', text: 'D.' },
+        { id: 'el_3e', type: 'action', text: 'E.' },
+      ],
+    }),
+  ];
+  await setupScriptStubs(page, { scenes, format: 'asian' });
+  await page.addInitScript(
+    ([key, value]) => {
+      try {
+        localStorage.setItem(key as string, value as string);
+      } catch {
+        /* ignore */
+      }
+    },
+    [formatKey(SCRIPT_ID), 'asian'] as const,
+  );
+  await page.goto(SCRIPT_URL);
+  await page.waitForSelector('[data-testid="scene-block"]', { timeout: 15_000 });
+  expect(await page.locator('.as-row').count(), 'asian engine rendered').toBeGreaterThan(0);
+
+  const nums = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>('.mh-scene-num-inline')).map(
+      (el) => el.textContent?.trim() ?? '',
+    ),
+  );
+  expect(nums, 'inline scene numbers are sequential scene ordinals').toEqual(['1.', '2.', '3.']);
+});
+
 test('asian per-type indent hierarchy (relative to sheet content box)', async ({ page }) => {
   await gotoAsian(page);
 

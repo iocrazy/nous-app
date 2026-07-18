@@ -1553,7 +1553,7 @@
       },
       "overview": {
         "continue": "Continue",
-        "openStudio": "Open studio",
+        "openEpisode": "Open Episode",
         "scriptScenes": "{{count}} scenes",
         "shotsProgress": "Shots {{done}}/{{total}}",
         "rendersCount": "Renders {{count}}"

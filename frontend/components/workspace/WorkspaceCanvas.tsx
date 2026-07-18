@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Frame, Loader2, Plus, Sparkles } from 'lucide-react';
+import { Loading } from '../common/Loading';
 import { useToast } from '../Toast';
 import {
   createCanvas,
@@ -108,8 +109,8 @@ export function WorkspaceCanvas({ projectId, teamId }: WorkspaceCanvasProps) {
 
   if (canvases === null) {
     return (
-      <div className="flex h-40 items-center justify-center">
-        <Loader2 size={18} className="animate-spin text-ink-500" />
+      <div className="flex h-40 items-center justify-center text-ink-500">
+        <Loading center />
       </div>
     );
   }

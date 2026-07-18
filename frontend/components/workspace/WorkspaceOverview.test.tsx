@@ -96,7 +96,11 @@ describe('WorkspaceOverview', () => {
     // Mono read-out: {scene_count} SC · SHOTS {done}/{total} · CUTS {renders}.
     expect(card).toHaveTextContent('4 SC · SHOTS 9/12 · CUTS 1');
 
-    fireEvent.click(screen.getByTestId('ws-open-studio-btn'));
+    // The CTA opens the episode workspace, so it reads "Open Episode" (not the
+    // old "Open studio" — there is no separate studio). Key renamed to match.
+    const cta = screen.getByTestId('ws-open-episode-btn');
+    expect(cta).toHaveTextContent('projects.workspace.overview.openEpisode');
+    fireEvent.click(cta);
     expect(onOpenScript).toHaveBeenCalledTimes(1);
   });
 
