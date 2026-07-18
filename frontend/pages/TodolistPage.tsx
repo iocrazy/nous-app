@@ -12,6 +12,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ListTodo } from 'lucide-react';
 import { IssueListView, type IssueViewMode } from '../components/Todolist/IssueListView';
+import { PageHeader } from '../components/AILibrary/PageHeader';
+import { fetchMyTeams, fetchPersonalTeam } from '../services/teamService';
 import { IssueDetailView } from '../components/Todolist/IssueDetailView';
 import { NewIssueDialog } from '../components/Todolist/NewIssueDialog';
 import type { AgentRef, UiIssue } from '../components/Todolist/types';
@@ -39,6 +41,29 @@ export function TodolistPage() {
   const [agents, setAgents] = useState<AgentRef[]>([]);
   const [agentsById, setAgentsById] = useState<Record<string, AgentRef>>({});
   const [projectsById, setProjectsById] = useState<ProjectNameMap>({});
+  // Team name for the page header (mockup: "Issues  Team 8"). Best-effort —
+  // a fetch failure just renders the title without the team suffix.
+  const [teamName, setTeamName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!teamId) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [mine, personal] = await Promise.all([
+          fetchMyTeams().catch(() => []),
+          fetchPersonalTeam().catch(() => null),
+        ]);
+        if (cancelled) return;
+        const all = personal ? [personal, ...mine] : mine;
+        const hit = all.find((t) => String(t.id) === String(teamId));
+        if (hit) setTeamName(hit.name);
+      } catch (err) {
+        console.error('[TodolistPage] team name resolve failed:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [teamId]);
 
   const [selectedIssue, setSelectedIssue] = useState<UiIssue | null>(null);
   const [selectedLoading, setSelectedLoading] = useState(false);
@@ -249,6 +274,28 @@ export function TodolistPage() {
 
   return (
     <>
+      <div className="px-4 pt-4">
+        <PageHeader
+          title={
+            <span className="flex items-baseline gap-2">
+              Issues
+              {teamName && (
+                <span className="text-sm font-normal text-ink-500">{teamName}</span>
+              )}
+            </span>
+          }
+          actions={
+            <span data-testid="issues-kbd-hints" className="hidden md:flex items-center gap-1.5 text-[12px] text-ink-500">
+              <kbd className="font-mono text-[10px] leading-none px-1 py-0.5 rounded border border-ink-700 bg-ink-800/50 text-ink-400">C</kbd>
+              new issue
+              <span className="text-ink-700">·</span>
+              <kbd className="font-mono text-[10px] leading-none px-1 py-0.5 rounded border border-ink-700 bg-ink-800/50 text-ink-400">/</kbd>
+              search
+            </span>
+          }
+          className="pb-2"
+        />
+      </div>
       <IssueListView
         issues={issues}
         loading={issuesLoading}

@@ -60,6 +60,7 @@ import {
   type IssueSort,
 } from './IssueSortMenu';
 import { relativeTime } from '../../utils/taskDisplay';
+import { originModule } from './issueOrigin';
 
 export type IssueViewMode = 'list' | 'board';
 
@@ -98,6 +99,7 @@ interface IssueRowProps {
 }
 
 const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentLookup }) => {
+  const moduleTag = originModule(issue.raw.origin_id);
   const initials = issue.assignee?.name.slice(0, 2).toUpperCase() ?? (issue.assignee_user_label?.slice(0, 2).toUpperCase() ?? '·');
   const parent = issue.parent_id ? parentLookup.get(issue.parent_id) : null;
   // An agent is actively working this issue: dispatched to a DBOS workflow and
@@ -135,10 +137,13 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
           ↳ {parent.identifier}
         </Link>
       )}
-      {visibleCols.has('tags') && (
-        <span className="hidden lg:inline-flex items-center gap-1 text-[12px] text-ink-600 italic">
-          {/* tags schema not in place yet */}
-          —
+      {visibleCols.has('tags') && moduleTag && (
+        <span
+          className="hidden lg:inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-full bg-ink-800/60 ring-1 ring-ink-700 text-ink-400 text-[12px]"
+          title={`Origin: ${moduleTag.label}`}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full ${moduleTag.dotClass}`} />
+          {moduleTag.label}
         </span>
       )}
       {visibleCols.has('project') && issue.project && (
