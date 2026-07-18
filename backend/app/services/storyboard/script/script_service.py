@@ -56,7 +56,16 @@ class ScriptService:
         project_id: int,
         name: str,
         description: Optional[str] = None,
+        episode_id: Optional[Any] = None,
     ) -> Dict[str, Any]:
+        """Create a script project.
+
+        When ``episode_id`` is set (the episode auto-provision path) the create
+        is idempotent: it routes through the repository's race-safe
+        get-or-create so a double-fire returns the episode's existing active
+        script instead of inserting a duplicate (#1432). Without it (the normal
+        "New Script" button) a plain create is used.
+        """
         data: Dict[str, Any] = {
             "team_id": team_id,
             "created_by": user_id,
@@ -67,15 +76,24 @@ class ScriptService:
         if description is not None:
             data["description"] = description
 
-        project = await self.project_repo.create(data)
-
-        try:
-            display_code = await generate_display_code(int(team_id), "S")
-            project = await self.project_repo.update(
-                project["id"], {"display_code": display_code}
+        if episode_id is not None:
+            project = await self.project_repo.get_or_create_for_episode(
+                data, episode_id
             )
-        except Exception as exc:
-            logger.warning(f"Failed to generate display_code for script: {exc}")
+        else:
+            project = await self.project_repo.create(data)
+
+        # Stamp a display_code only for a freshly created row: a reused
+        # (get-or-create hit) row already carries its own code, and we must
+        # never overwrite it.
+        if not project.get("display_code"):
+            try:
+                display_code = await generate_display_code(int(team_id), "S")
+                project = await self.project_repo.update(
+                    project["id"], {"display_code": display_code}
+                )
+            except Exception as exc:
+                logger.warning(f"Failed to generate display_code for script: {exc}")
 
         return project
 

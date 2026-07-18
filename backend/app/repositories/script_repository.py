@@ -51,7 +51,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import delete, func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import read_scope, write_scope
@@ -162,6 +162,78 @@ class ScriptProjectRepository(BaseRepository):
                 return _to_dict(row, _PROJECT_N2A) if row else {}
         except Exception as e:
             logger.error(f"Failed to update script_projects {record_id}: {e}")
+            raise
+
+    async def get_or_create_for_episode(
+        self, data: Dict[str, Any], episode_id: Any
+    ) -> Dict[str, Any]:
+        """Race-safe get-or-create keyed on ``episode_id`` — the auto-provision
+        invariant is "at most ONE non-deleted script per episode".
+
+        A per-episode Postgres advisory xact lock serialises concurrent
+        provisions for the SAME episode: a double-fire (double navigation /
+        double click while the first provision is still in flight) can never
+        insert a second empty row — the loser blocks on the lock until the
+        winner commits, then finds and returns the winner's row. This is a true
+        kill, not a window-narrowing check-then-insert (which is not race-safe
+        without either a unique index or this lock). Mirrors the
+        ``pg_advisory_xact_lock`` idiom already documented in
+        episode_repository.
+
+        No DB unique index is added deliberately (see PR rationale): the manual
+        reassign path (``update`` with ``episode_id``) does NOT enforce this
+        invariant, so a partial unique index ``(episode_id) WHERE status<>'deleted'``
+        would turn a legitimate reassign-to-occupied-episode into a raw 500, and
+        the existing prod duplicate rows would make the ``CREATE INDEX`` itself
+        fail under CI auto-apply. The app-level lock is the surgical guard.
+        """
+        eid = _bigint(episode_id)
+        values = _coerce_bigint_cols(
+            {**data, "episode_id": eid},
+            ("id", "project_id", "team_id", "episode_id"),
+        )
+        try:
+            async with write_scope() as session:
+                # Serialise same-episode provisions. hashtextextended(text, int8)
+                # → int8 yields a namespaced 64-bit advisory key from the id, so
+                # it never collides with episode_repository's hashtext() locks.
+                await session.execute(
+                    text(
+                        "SELECT pg_advisory_xact_lock("
+                        "hashtextextended('script_provision:' || :eid, 0))"
+                    ),
+                    {"eid": str(eid)},
+                )
+                existing = await session.execute(
+                    select(ScriptProjects)
+                    .where(
+                        ScriptProjects.episode_id == eid,
+                        ScriptProjects.status != "deleted",
+                    )
+                    .order_by(ScriptProjects.updated_at.desc())
+                    .limit(1)
+                )
+                found = existing.scalars().first()
+                if found is not None:
+                    out = _to_dict(found, _PROJECT_N2A)
+                    logger.info(
+                        f"Reused existing script for episode {episode_id} "
+                        "(get-or-create)"
+                    )
+                    return out
+                result = await session.execute(
+                    insert(ScriptProjects).values(**values).returning(ScriptProjects)
+                )
+                row = result.scalars().first()
+                if row is None:
+                    raise RuntimeError("Insert into script_projects returned no data")
+                out = _to_dict(row, _PROJECT_N2A)
+            logger.info(f"Created script for episode {episode_id} (get-or-create)")
+            return out
+        except Exception as e:
+            logger.error(
+                f"Failed to get-or-create script for episode {episode_id}: {e}"
+            )
             raise
 
     async def soft_delete(self, record_id: str) -> None:

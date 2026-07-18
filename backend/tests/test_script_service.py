@@ -16,10 +16,30 @@ class _FakeProjectRepo:
         self.updates: list[tuple[str, dict[str, Any]]] = []
         self.soft_deletes: list[str] = []
         self.create_returns: dict[str, Any] = {}
+        self.create_calls = 0
+        self.get_or_create_calls = 0
+        self._by_episode: dict[str, str] = {}
+        self._seq = 0
 
     async def create(self, data: dict[str, Any]) -> dict[str, Any]:
+        self.create_calls += 1
         proj = {"id": "sp-1", **data}
         self.projects["sp-1"] = proj
+        return proj
+
+    async def get_or_create_for_episode(
+        self, data: dict[str, Any], episode_id: Any
+    ) -> dict[str, Any]:
+        """Simulate the race-safe repo method: at most one row per episode."""
+        self.get_or_create_calls += 1
+        key = str(episode_id)
+        if key in self._by_episode:
+            return self.projects[self._by_episode[key]]
+        self._seq += 1
+        sid = f"sp-ep-{self._seq}"
+        proj = {"id": sid, "episode_id": key, **data}
+        self.projects[sid] = proj
+        self._by_episode[key] = sid
         return proj
 
     async def get_by_id(self, script_id: str) -> Optional[dict[str, Any]]:
@@ -171,6 +191,60 @@ async def test_create_project_survives_display_code_failure(
     )
     # Without display_code update, but the create still succeeded
     assert result["name"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_create_project_with_episode_is_get_or_create(
+    service: tuple[ScriptService, _FakeProjectRepo, Any, Any, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auto-provision path: passing ``episode_id`` routes through the race-safe
+    get-or-create (single atomic create+bind), NOT the plain create + separate
+    episode update. A second provision for the SAME episode returns the SAME
+    row instead of inserting a duplicate (the #1432 duplicate-script kill)."""
+    svc, project_repo, *_ = service
+
+    async def _fake_generate_display_code(team_id: int, prefix: str) -> str:
+        return "S-202604001"
+
+    monkeypatch.setattr(
+        svc_module, "generate_display_code", _fake_generate_display_code
+    )
+
+    first = await svc.create_project(
+        team_id="42", user_id="u-1", project_id=100, name="Ep 1", episode_id="900"
+    )
+    second = await svc.create_project(
+        team_id="42", user_id="u-1", project_id=100, name="Ep 1", episode_id="900"
+    )
+
+    assert first["id"] == second["id"]
+    # Went through get-or-create both times; the plain create was never used.
+    assert project_repo.get_or_create_calls == 2
+    assert project_repo.create_calls == 0
+    # Exactly one row exists for the episode.
+    assert len(project_repo.projects) == 1
+
+
+@pytest.mark.asyncio
+async def test_create_project_without_episode_uses_plain_create(
+    service: tuple[ScriptService, _FakeProjectRepo, Any, Any, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The normal "New Script" button (no episode binding) keeps the plain
+    create path — get-or-create is only for the episode-keyed provision."""
+    svc, project_repo, *_ = service
+
+    async def _fake_generate_display_code(team_id: int, prefix: str) -> str:
+        return "S-1"
+
+    monkeypatch.setattr(
+        svc_module, "generate_display_code", _fake_generate_display_code
+    )
+
+    await svc.create_project(team_id="42", user_id="u-1", project_id=100, name="X")
+    assert project_repo.create_calls == 1
+    assert project_repo.get_or_create_calls == 0
 
 
 @pytest.mark.asyncio

@@ -382,6 +382,93 @@ async def test_link_crud_and_listings(integration_db_url, patched_engine, scaffo
     assert await repo.list_by_chapter(str(chapter_id)) == []
 
 
+# ─── episode auto-provision (get-or-create) ─────────────────────────────
+
+
+async def _seed_episode(conn, scaffold) -> int:
+    return await conn.fetchval(
+        "INSERT INTO episodes (project_id, title, sort_order) "
+        "VALUES ($1, $2, 1) RETURNING id",
+        scaffold["project_id"],
+        f"{_PREFIX}ep_{uuid.uuid4().hex[:8]}",
+    )
+
+
+async def test_get_or_create_for_episode_reuses_existing(
+    integration_db_url, patched_engine, scaffold
+):
+    """Second provision for the SAME episode returns the SAME row (no dup)."""
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        episode_id = await _seed_episode(conn, scaffold)
+    finally:
+        await conn.close()
+
+    repo = _project_repo()
+    base = {
+        "project_id": scaffold["project_id"],
+        "team_id": scaffold["team_id"],
+        "created_by": scaffold["user_id"],
+        "name": f"{_PREFIX}{uuid.uuid4().hex[:8]}",
+    }
+    first = await repo.get_or_create_for_episode(base, episode_id)
+    second = await repo.get_or_create_for_episode({**base}, episode_id)
+
+    assert first["id"] == second["id"]
+    assert int(first["episode_id"]) == episode_id
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        rows = await conn.fetch(
+            "SELECT id FROM script_projects "
+            "WHERE episode_id = $1 AND status <> 'deleted'",
+            episode_id,
+        )
+    finally:
+        await conn.close()
+    assert len(rows) == 1  # exactly one row despite two provisions
+
+
+async def test_get_or_create_for_episode_race_is_single_row(
+    integration_db_url, patched_engine, scaffold
+):
+    """Two concurrent provisions for a fresh episode: the advisory lock
+    serialises them, so exactly ONE row is created and both callers get it.
+    This is the #1432 double-fire kill (prod saw two active scripts ~1.3s
+    apart, the first empty)."""
+    import asyncio
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        episode_id = await _seed_episode(conn, scaffold)
+    finally:
+        await conn.close()
+
+    repo = _project_repo()
+    base = {
+        "project_id": scaffold["project_id"],
+        "team_id": scaffold["team_id"],
+        "created_by": scaffold["user_id"],
+        "name": f"{_PREFIX}{uuid.uuid4().hex[:8]}",
+    }
+    a, b = await asyncio.gather(
+        repo.get_or_create_for_episode({**base}, episode_id),
+        repo.get_or_create_for_episode({**base}, episode_id),
+    )
+    assert a["id"] == b["id"]  # both share the single winner row
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        rows = await conn.fetch(
+            "SELECT id FROM script_projects "
+            "WHERE episode_id = $1 AND status <> 'deleted'",
+            episode_id,
+        )
+    finally:
+        await conn.close()
+    assert len(rows) == 1  # no duplicate despite the concurrent double-fire
+
+
 # ─── factory parity ─────────────────────────────────────────────────────
 
 
