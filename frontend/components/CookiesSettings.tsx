@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Cookie, Upload, Trash2, AlertCircle, Check, Loader2, ChevronDown, FileCode2 } from 'lucide-react';
+import { Loading } from './common/Loading';
 import { fetchCookieStatuses, setCookie, deleteCookie, CookieStatus, fetchHeaders, setHeaders } from '../services/cookiesService';
 import { useToast } from './Toast';
 import { useConfirm } from './ConfirmDialog';
@@ -209,8 +210,7 @@ export const CookiesSettings: React.FC = () => {
       {/* Loading state */}
       {loading && (
         <div className="flex items-center justify-center gap-3 py-16 text-ink-500">
-          <Loader2 size={20} className="animate-spin" />
-          <span className="text-sm">Loading cookie statuses...</span>
+          <Loading center label="Loading cookie statuses..." />
         </div>
       )}
 

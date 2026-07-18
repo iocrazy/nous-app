@@ -21,10 +21,10 @@ import {
   Check,
   XCircle,
   Trash2,
-  Loader2,
   ExternalLink,
   Filter,
 } from 'lucide-react';
+import Loading from '../components/common/Loading';
 import { fetchShares, cancelShare as cancelShareApi, deleteSharePermanent } from '../services/sharesService';
 import { useConfirm } from '../components/ConfirmDialog';
 import { useTeamContext } from '../contexts/TeamContext';
@@ -135,7 +135,7 @@ export const SharedPage: React.FC = () => {
       {/* Content */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <Loader2 size={24} className="animate-spin text-ink-500" />
+          <Loading center />
         </div>
       ) : filteredShares.length === 0 ? (
         <div className="text-center py-20">

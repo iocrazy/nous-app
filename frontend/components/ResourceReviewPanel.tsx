@@ -26,6 +26,7 @@ import {
   ReviewStatus,
 } from '../services/reviewService';
 import { ReviewStatusBadge } from './ReviewStatusBadge';
+import Loading from './common/Loading';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -392,8 +393,8 @@ export const ResourceReviewPanel: React.FC<ResourceReviewPanelProps> = ({
       {/* Comments list */}
       <div className="flex-1 overflow-y-auto min-h-0 divide-y divide-ink-800/50">
         {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 size={18} className="animate-spin text-ink-500" />
+          <div className="flex items-center justify-center py-12 text-ink-500">
+            <Loading center />
           </div>
         ) : comments.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-ink-500">

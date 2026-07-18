@@ -23,6 +23,7 @@ import {
   NotebookPen,
 } from 'lucide-react';
 import type { Tag } from '../types';
+import { Loading } from './common/Loading';
 import { UiSelect } from './ui';
 import { mergeUpdatedTag } from './tagEditMerge';
 import {
@@ -964,9 +965,7 @@ export const TagsSettings: React.FC = () => {
           {/* Tags by Group (independent scroll) */}
           <div className="p-4 flex-1 overflow-y-auto min-h-0">
             {isLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 size={24} className="animate-spin text-ink-500" />
-              </div>
+              <Loading center />
             ) : filteredTags.length === 0 ? (
               <div className="text-center py-12 text-ink-500">
                 <TagIcon size={40} className="mx-auto mb-3 opacity-30" />

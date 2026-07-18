@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ArrowLeft, Upload, Link, LayoutGrid, LayoutList, Loader2, FileText, FolderOpen, ChevronDown, Plus, ChevronRight, Folder as FolderIcon, Search, Users, Inbox } from 'lucide-react';
+import { Loading } from './common/Loading';
 import { useTranslation } from 'react-i18next';
 import { Project, ProjectFile, ProjectFolder, ReviewStatus } from '../types';
 import { fetchProjectFiles, uploadFile, fetchProjectFolders, createProjectFolder, updateFile, deleteFile, updateReviewStatus, getProjectFileDownloadUrl } from '../services/projectsService';
@@ -432,7 +433,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
         {/* Loading */}
         {isLoading && (
           <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
+            <Loading center />
           </div>
         )}
 

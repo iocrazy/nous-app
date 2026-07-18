@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Loader2, Music, AlertCircle, CloudDownload, Copy, Check } from 'lucide-react';
+import Loading from './common/Loading';
 import { getMediaLyrics, fetchMediaLyrics, type LyricLine } from '../services/lyricsService';
 import type { SodaTheme } from '../utils/sodaTheme';
 import { LyricsView } from './LyricsView';
@@ -96,17 +97,15 @@ const SodaLyricsTab = ({ mediaId, currentTime, theme, variant = 'card', sourcePl
   if (loading) {
     if (isBare) {
       return (
-        <div className="flex items-center justify-center gap-2 py-16 text-white/60">
-          <Loader2 size={16} className="animate-spin" />
-          <span className="text-sm">Loading lyrics...</span>
+        <div className="flex items-center justify-center py-16 text-white/60">
+          <Loading center label="Loading lyrics..." />
         </div>
       );
     }
     return (
       <div className="p-4 bg-ink-900 rounded-xl border border-ink-800">
-        <div className="flex items-center justify-center gap-2 text-ink-500">
-          <Loader2 size={16} className="animate-spin" />
-          <span className="text-sm">Loading lyrics...</span>
+        <div className="flex items-center justify-center text-ink-500">
+          <Loading center label="Loading lyrics..." />
         </div>
       </div>
     );

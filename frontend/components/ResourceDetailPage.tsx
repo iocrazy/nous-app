@@ -101,6 +101,7 @@ import {
   pollForResult,
 } from '../services/aiService';
 import { TranscriptData, SummaryData } from '../types';
+import Loading from './common/Loading';
 
 // ─── Utility functions ──────────────────────────────────
 
@@ -967,9 +968,8 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   // Loading state
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
-        <Loader2 size={32} className={`animate-spin ${cLabel} mb-3`} />
-        <p className={`${cLabel} text-sm`}>{t('common.loading')}</p>
+      <div className={`flex flex-col items-center justify-center h-full min-h-[400px] ${cLabel}`}>
+        <Loading center label={t('common.loading')} />
       </div>
     );
   }
@@ -2152,7 +2152,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               {/* Loading existing transcript */}
               {transcriptLoading && transcribeStatus !== 'processing' && (
                 <div className="flex items-center justify-center py-16">
-                  <Loader2 size={20} className="animate-spin text-indigo-400" />
+                  <Loading />
                 </div>
               )}
 
@@ -2323,7 +2323,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
                 {summaryLoading && resource.summary_status === 'completed' && (
                   <div className="flex items-center justify-center py-6">
-                    <Loader2 size={16} className="animate-spin text-indigo-400" />
+                    <Loading />
                   </div>
                 )}
 

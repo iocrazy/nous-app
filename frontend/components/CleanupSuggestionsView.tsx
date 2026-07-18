@@ -31,6 +31,7 @@ import {
   getReasonLabel,
   getReasonColor,
 } from '../services/cleanupService';
+import Loading from './common/Loading';
 
 interface CleanupSuggestionsViewProps {
   onClose?: () => void;
@@ -166,8 +167,8 @@ export const CleanupSuggestionsView: React.FC<CleanupSuggestionsViewProps> = ({ 
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+      <div className="flex items-center justify-center h-96 text-ink-400">
+        <Loading center />
       </div>
     );
   }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Copy, Check, Loader2, Link2, Clock, Users, Trash2 } from 'lucide-react';
+import { Loading } from './common/Loading';
 import { TeamInvite, ExpiryOption, createInvite, fetchInvites, deleteInvite, getInviteLink } from '../services/inviteService';
 import { UiSelect } from './ui';
 
@@ -199,9 +200,7 @@ export const InviteMembersModal: React.FC<InviteMembersModalProps> = ({
 
           {/* Existing Invites */}
           {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="animate-spin text-ink-500" size={24} />
-            </div>
+            <Loading center />
           ) : invites.length > 0 ? (
             <div className="space-y-3">
               <p className="text-xs font-medium text-ink-500 uppercase tracking-wider">Active Invites</p>

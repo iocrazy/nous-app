@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, UserPlus, Loader2, Crown, Pencil, Eye, Trash2 } from 'lucide-react';
+import { Loading } from './common/Loading';
 import { Project, ProjectMember } from '../types';
 import { UiSelect } from './ui';
 import { fetchProjectMembers, addProjectMember, updateMemberRole, removeProjectMember } from '../services/projectsService';
@@ -187,9 +188,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
               {t('projects.members.memberList', 'Members')} ({members.length})
             </label>
             {isLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 size={20} className="animate-spin text-ink-500" />
-              </div>
+              <Loading center />
             ) : members.length === 0 ? (
               <p className="text-sm text-ink-500 py-4 text-center">
                 {t('projects.members.noMembers', 'No members yet')}

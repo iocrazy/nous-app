@@ -6,6 +6,7 @@ import {
   Save, Key, Plus, Trash2, Copy, Calendar, Shield, X, CheckSquare, Square, Edit2,
   CheckCircle, Power, Zap, Check, Loader2, AlertCircle, SunMoon
 } from 'lucide-react';
+import { Loading } from './common/Loading';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../contexts/ThemeContext';
 import { LogsPanel } from './LogsPanel';
@@ -590,8 +591,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
            {/* Loading/Error State */}
            {apiKeysLoading && (
               <div className="p-12 flex items-center justify-center gap-3 text-ink-500">
-                 <Loader2 size={20} className="animate-spin" />
-                 <span>Loading API keys...</span>
+                 <Loading center label="Loading API keys..." />
               </div>
            )}
 

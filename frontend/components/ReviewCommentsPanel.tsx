@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { ReviewComment, DrawingData } from '../types';
 import { fetchComments, addComment, deleteComment } from '../services/projectsService';
 import { ReviewCommentItem } from './ReviewCommentItem';
+import Loading from './common/Loading';
 
 interface ReviewCommentsPanelProps {
   projectId: string;
@@ -154,8 +155,8 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
       {/* Comment List */}
       <div className="flex-1 overflow-y-auto min-h-0">
         {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-5 h-5 animate-spin text-ink-500" />
+          <div className="flex items-center justify-center py-12 text-ink-500">
+            <Loading center />
           </div>
         ) : comments.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-ink-500">

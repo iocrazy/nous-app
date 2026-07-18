@@ -4,6 +4,7 @@ import {
   Share2, Download, MoreHorizontal, ExternalLink, Copy, Trash2,
   Video as VideoIcon, Music,
 } from 'lucide-react';
+import Loading from '../components/common/Loading';
 import { VideoPlayer } from '../components/VideoPlayer';
 import { SlidePlayer } from '../components/SlidePlayer';
 import { AudioHero } from '../components/AudioHero';
@@ -243,9 +244,8 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
-        <Loader2 size={32} className="animate-spin text-ink-500 mb-3" />
-        <p className="text-ink-500 text-sm">Loading...</p>
+      <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-ink-500">
+        <Loading center label="Loading..." />
       </div>
     );
   }

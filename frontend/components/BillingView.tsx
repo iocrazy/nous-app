@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Coins, Package, CreditCard, HardDrive, TrendingUp, BarChart3, Loader2, MessageSquare, Settings } from 'lucide-react';
+import { Loading } from './common/Loading';
 import { TeamQuota, PointTransaction, PointPricing, PointPackage, PaymentOrder } from '../types';
 import { fetchPointsBalance, fetchPointsPricing, fetchUsageStats, adjustPoints } from '../services/pointsService';
 import { fetchPackages, fetchOrders } from '../services/paymentService';
@@ -104,7 +105,7 @@ export const BillingView: React.FC<BillingViewProps> = ({ teamId, permissions, o
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64 text-ink-400">
-        <Loader2 className="animate-spin" size={24} />
+        <Loading center />
       </div>
     );
   }
