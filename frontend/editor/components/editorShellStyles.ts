@@ -614,7 +614,12 @@ export const EDITOR_SHELL_STYLES = `
 /* Superimpose is a flush-left action line (SUPER: …) per industry standard —
    NOT centred. The gutter tick colour is what distinguishes it. */
 .hw-subtitle{ text-align:left; }
-.hw-comment{ font-family:var(--script-mono); border-left:3px solid var(--tick-comment); padding-left:8px; color:var(--sheet-ink-soft); font-style:italic; }
+/* Comment reads as a QUOTE block (laper parity): a subtle left rule in
+   low-saturation ink (not the teal tick colour, which read as a form field),
+   italic + faint text. --sheet-ink flips with the theme so the bar stays quiet
+   on both cream and dark paper. Same treatment on the Asian engine (.as-comment)
+   so the two formats match. */
+.hw-comment{ font-family:var(--script-mono); border-left:3px solid color-mix(in srgb, var(--sheet-ink) 22%, transparent); padding-left:10px; color:var(--sheet-ink-soft); font-style:italic; }
 /* Transition keeps the SAME col-0 origin as every other row: the tick space is
    preserved (visibility, not display) so its 60ch box starts where the others
    do, then text-align:right pushes the text to column 60. No flex-end reflow. */
@@ -651,7 +656,7 @@ export const EDITOR_SHELL_STYLES = `
 .as-dialogue{ font-family:var(--script-song); text-align:left; }
 .as-paren{ font-family:var(--script-song); font-style:italic; color:var(--sheet-ink-soft); }
 .as-transition{ font-family:var(--script-hei); text-transform:uppercase; font-weight:700; letter-spacing:0.04em; color:var(--sheet-ink-soft); }
-.as-comment{ font-family:var(--script-song); border-left:3px solid var(--tick-comment); padding-left:8px; color:var(--sheet-ink-soft); font-style:italic; }
+.as-comment{ font-family:var(--script-song); border-left:3px solid color-mix(in srgb, var(--sheet-ink) 22%, transparent); padding-left:10px; color:var(--sheet-ink-soft); font-style:italic; }
 .as-subtitle{ font-family:var(--script-hei); text-align:center; font-style:italic; color:var(--sheet-ink-soft); }
 
 /* A5/A1: the scene-head badge is the SAME hover-reveal block number in both
@@ -1561,9 +1566,11 @@ export const EDITOR_SHELL_STYLES = `
    "(dry…)" renders gray italic under the cue) — position AND voice carry it. */
 .hw-paren{ color:var(--sheet-ink-soft); }
 .hw-subtitle{ color:var(--sheet-ink); }
-/* Comment on the clean page: laper renders it as a quiet gray italic line —
-   the colored left border read as a form element on printed paper. */
-.hw-comment{ border-left:none; padding-left:0; color:var(--sheet-ink-soft); }
+/* Comment on the clean page: laper renders it as a QUOTE block — a subtle left
+   rule + gray italic. The base .hw-comment already carries the low-saturation
+   ink bar; keep it here (only re-assert the soft text colour) rather than the
+   old strip-to-borderless treatment. */
+.hw-comment{ color:var(--sheet-ink-soft); }
 
 /* ==================================================================
    EMPTY-STATE POLISH — the 16-point audit (empty scenes read like a
