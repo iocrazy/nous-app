@@ -242,6 +242,27 @@ class IssueRepository:
             items = [_row(r) for r in result.scalars().all()]
         return items, total
 
+    async def list_children(
+        self,
+        parent_id: int,
+        *,
+        include_hidden: bool = False,
+    ) -> list[dict[str, Any]]:
+        """All sub-issues of ``parent_id`` (issues.parent_id == parent_id).
+
+        Backs the sub-issue completion barrier (subissue_barrier.py): after a
+        child reaches a terminal status we load its full sibling set to decide
+        whether the barrier has closed. Hidden (soft-deleted) rows are excluded
+        by default — a trashed child must not keep the barrier open, and it is
+        not part of the barrier size the pinned wake-id is derived from.
+        """
+        async with read_scope() as session:
+            stmt = select(Issues).where(Issues.parent_id == int(parent_id))
+            if not include_hidden:
+                stmt = stmt.where(Issues.hidden_at.is_(None))
+            result = await session.execute(stmt)
+            return [_row(r) for r in result.scalars().all()]
+
     async def list_by_origin(
         self,
         origin_kind: str,
@@ -281,6 +302,13 @@ class IssueRepository:
     ) -> dict[str, Any]:
         """Status-transition setter. Includes lifecycle timestamp side-effects
         (started_at / completed_at / cancelled_at) per design doc Protocol 5."""
+        # Capture the pre-transition status BEFORE the write — the sub-issue
+        # barrier's first gate is a non-terminal→terminal edge check, so an
+        # edit/repeat-save landing the same status must be told apart from a real
+        # transition. Read once here; the update below is the write.
+        prev = await self.get_by_id(issue_id)
+        prev_status = prev.get("status") if prev else None
+
         patch: dict[str, Any] = {"status": new_status}
         now = datetime.now(timezone.utc).isoformat()
 
@@ -294,7 +322,41 @@ class IssueRepository:
         if dbos_workflow_id is not None:
             patch["dbos_workflow_id"] = dbos_workflow_id
 
-        return await self.update(issue_id, patch)
+        result = await self.update(issue_id, patch)
+        # Post-commit sub-issue barrier hook. Placed at the repository layer (not
+        # each caller) so BOTH transition_status entry points — the router's
+        # /transition endpoint and project_stage_issues' stage-close — are
+        # covered by one call site, with no chance of a future caller forgetting
+        # it. The agent-workflow terminal path uses a raw SQL setter that does
+        # NOT go through this method, so issue_lifecycle.execute_issue fires the
+        # same hook from its workflow body (two-site rationale in
+        # subissue_barrier). Best-effort: never let the barrier break the
+        # transition.
+        await _fire_subissue_barrier(int(issue_id), prev_status, new_status)
+        return result
+
+
+async def _fire_subissue_barrier(
+    issue_id: int, prev_status: Optional[str], new_status: str
+) -> None:
+    """Best-effort sub-issue barrier evaluation after a status transition.
+
+    Lazy-imports the service (repo → service inversion is deliberate here — the
+    barrier is a domain reaction to a data write, and routing it through the one
+    repository method that owns status transitions is what makes coverage
+    exhaustive). ``on_child_issue_terminal`` already swallows its own errors; the
+    outer guard is belt-and-braces so even an import failure can never bubble up
+    and abort the child's own status flow.
+    """
+    try:
+        from app.services.issues.subissue_barrier import on_child_issue_terminal
+
+        await on_child_issue_terminal(issue_id, prev_status, new_status)
+    except Exception as exc:  # noqa: BLE001 — the transition is the primary op
+        logger.warning(
+            f"[issue_repository] sub-issue barrier hook failed for issue "
+            f"{issue_id}: {exc!r}"
+        )
 
 
 def get_issue_repository() -> "IssueRepository":
