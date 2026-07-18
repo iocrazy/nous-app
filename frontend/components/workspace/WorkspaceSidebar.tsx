@@ -194,16 +194,21 @@ export function WorkspaceSidebar({
         aria-expanded={epExpanded}
         className={sideItemClass(activeModule === 'episodes')}
       >
-        <span className="flex items-center gap-1.5 min-w-0">
+        <span className="flex items-center gap-2 min-w-0">
+          <ListVideo size={14} className="shrink-0" />
+          <span className="truncate">{t('projects.workspace.modules.episodes')}</span>
+        </span>
+        {/* The expand chevron sits at the row's RIGHT end (beside the count),
+            so the leading ListVideo icon stays in the same left column as every
+            other nav row instead of being pushed right by the chevron. */}
+        <span className="flex items-center gap-1.5 shrink-0">
+          <span className="text-[10px] text-ink-500 font-mono">{episodes.length}</span>
           {epExpanded ? (
             <ChevronDown size={12} className="shrink-0 text-ink-500" />
           ) : (
             <ChevronRight size={12} className="shrink-0 text-ink-500" />
           )}
-          <ListVideo size={14} className="shrink-0" />
-          <span className="truncate">{t('projects.workspace.modules.episodes')}</span>
         </span>
-        <span className="text-[10px] text-ink-500 font-mono">{episodes.length}</span>
       </button>
 
       {epExpanded && currentEpisode && (

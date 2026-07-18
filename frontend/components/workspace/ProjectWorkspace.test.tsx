@@ -209,6 +209,22 @@ describe('ProjectWorkspace', () => {
     expect(screen.getByTestId('ws-module-settings')).toBeTruthy();
   });
 
+  it('keeps the 剧集 row icon left-aligned with the other rows (expand chevron does not indent it)', async () => {
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    const epRow = await screen.findByTestId('ws-module-episodes');
+    const icons = Array.from(epRow.querySelectorAll('svg.lucide'));
+    // The row's LEADING icon must be the module glyph (ListVideo), NOT the
+    // expand chevron — the chevron used to sit before it and pushed the icon
+    // out of the shared left-icon column.
+    expect(icons.length).toBeGreaterThan(0);
+    expect(icons[0]!.classList.contains('lucide-list-video')).toBe(true);
+    // The expand affordance still exists (relocated to the row's right group).
+    expect(
+      epRow.querySelector('.lucide-chevron-right, .lucide-chevron-down'),
+    ).toBeTruthy();
+  });
+
   it('switches the current episode via the ⇄ card popover and persists the choice', async () => {
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
