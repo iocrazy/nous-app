@@ -503,6 +503,15 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-heading.asian{
   font-family:var(--script-hei); font-size:14px; letter-spacing:0.02em; text-transform:none;
 }
+/* Asian scene head = "N. 地点 时间 / INT" — the scene number is an INLINE, always
+   -visible BOLD prefix at the head of the slug (laper 亚洲格式), not the hollywood
+   hover-reveal margin badge. Hide that margin number in asian mode (the drag
+   handle in the same gutter still hover-reveals) so the number never doubles. */
+.mh-scene-num-inline{
+  font-family:var(--script-hei); font-weight:700; color:var(--sheet-ink);
+  margin-right:2px; user-select:none;
+}
+.mh-scene-headrow.asian .mh-scene-num-badge{ display:none; }
 /* Decorative separators between tokens — keep their exact spaces (". " / " - " /
    " · "), never interactive, slightly muted so the tokens read as the content. */
 .mh-heading-sep{ white-space:pre; color:var(--sheet-ink-soft); user-select:none; }
