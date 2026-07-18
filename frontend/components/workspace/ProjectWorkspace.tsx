@@ -17,7 +17,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Loader2 } from 'lucide-react';
+import { Loading } from '../common/Loading';
 import {
   fetchCurrentStage,
   fetchEpisodesProgress,
@@ -216,14 +216,14 @@ export function ProjectWorkspace({
 
   // ── Studio (inline EditorShell) state ──────────────────────────────────
   // studioView drives BOTH which work view the sidebar highlights and which
-  // centre-pane view the shell opens on. studioScenes/activeSceneId are lifted
-  // out of the embedded editor to feed the sidebar's SCENES sub-section;
-  // selectSceneRef lets a sidebar scene click reach back into the editor.
+  // centre-pane view the shell opens on. studioScenes/activeSceneId are still
+  // lifted out of the embedded editor — not for a sidebar list (the editor owns
+  // its own scene rail now), but so the workspace top-bar slate can read the
+  // active scene number.
   const [resolvedScriptId, setResolvedScriptId] = useState<string | null>(null);
   const [studioView, setStudioView] = useState<RailView>('script');
   const [studioScenes, setStudioScenes] = useState<SceneLift[]>([]);
   const [studioActiveSceneId, setStudioActiveSceneId] = useState<string | null>(null);
-  const selectSceneRef = useRef<((id: string) => void) | null>(null);
 
   // Resolve a given episode's most recently updated script and mount
   // EditorShell inline (no route jump); no script → provision an empty one the
@@ -364,15 +364,6 @@ export function ProjectWorkspace({
       ? studioScenes.findIndex((s) => s.id === studioActiveSceneId) + 1
       : 0) || null;
 
-  const sidebarScenes =
-    activeModule === 'script' && studioScenes.length
-      ? studioScenes.map((s) => ({
-          scene_id: s.id,
-          int_ext: s.heading_int_ext,
-          label: s.location_text || t('editor.untitledScene'),
-        }))
-      : null;
-
   return (
     <div data-testid="project-workspace" className="flex flex-col h-full min-h-0">
       {/* Full-width project bar on top, spanning over the sidebar. */}
@@ -395,15 +386,12 @@ export function ProjectWorkspace({
         activeWorkView={activeModule === 'script' ? studioView : null}
         onOpenWorkView={handleOpenWorkView}
         onOpenRenders={handleOpenRenders}
-        scenes={sidebarScenes}
-        activeSceneId={studioActiveSceneId}
-        onSelectScene={(id) => selectSceneRef.current?.(id)}
       />
       <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
         <Suspense
           fallback={
             <div className="flex-1 grid place-items-center text-ink-500">
-              <Loader2 className="animate-spin" size={20} />
+              <Loading center />
             </div>
           }
         >
@@ -423,7 +411,6 @@ export function ProjectWorkspace({
               embedded
               onScenesChange={handleScenesChange}
               onActiveSceneChange={handleActiveSceneChange}
-              selectSceneRef={selectSceneRef}
             />
           </div>
         ) : (

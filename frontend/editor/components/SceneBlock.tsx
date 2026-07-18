@@ -1288,8 +1288,12 @@ export function SceneBlock({
          *  separators, and tab wiring change. */}
         {format === 'asian' ? (
           <span className="mh-scene-heading asian">
+            {/* Asian 亚洲格式 scene numbers are sequential scene ordinals
+             *  (1. 2. 3. …), matching the left rail's S1/S2 — NOT the continuous
+             *  document-order block index (blockIndexBase) the Hollywood hover
+             *  badge uses, which would jump 1 → 3 → 14 across scenes. */}
             <span className="mh-scene-num-inline" aria-hidden="true">
-              {blockIndexBase + 1}.
+              {index + 1}.
             </span>
             <HeadingSelect
               searchable

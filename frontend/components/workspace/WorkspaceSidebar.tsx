@@ -2,13 +2,13 @@
  * WorkspaceSidebar — the unified project sidebar (合一终稿, 2026-07-11). One
  * left menu tree: Overview / Canvas at the top, then an EXPANDABLE 剧集
  * (Episodes) item whose work views — 剧本 / 节拍 / 分镜 / 场景 / 成片 / 发布 —
- * live indented underneath it, plus a live SCENES sub-section (lifted out of
- * the embedded editor) when a script is open. ASSETS and MANAGE groups follow.
+ * live indented underneath it. ASSETS and MANAGE groups follow.
  *
- * The whole thing stays mounted even while the studio editor is embedded — the
- * editor drops its own left rail in embedded mode (EditorShell), so this tree
- * is the single side navigation. The current-episode ⇄ card opens a compact
- * fixed popover (never grows the sidebar height with episode count).
+ * The whole thing stays mounted even while the studio editor is embedded. The
+ * per-scene SCENES list is NOT here: the embedded editor renders it as its own
+ * slim left column beside the paper (EditorShell `mh-rail-embedded`), so this
+ * tree owns episode + module navigation only. The current-episode ⇄ card opens
+ * a compact fixed popover (never grows the sidebar height with episode count).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -33,12 +33,6 @@ import { ASSET_MODULES, MANAGE_MODULES, type WorkspaceModule } from './workspace
 /** The episode-scoped work views the tree can open (maps to editor RailView). */
 export type WorkView = 'script' | 'beats' | 'storyboard' | 'nodes';
 
-export interface WorkspaceSidebarScene {
-  scene_id: string;
-  int_ext: string | null;
-  label: string;
-}
-
 interface WorkspaceSidebarProps {
   activeModule: WorkspaceModule;
   onModuleChange: (module: WorkspaceModule) => void;
@@ -50,10 +44,6 @@ interface WorkspaceSidebarProps {
   /** Open one of the episode's work views (剧本 / 节拍 / 分镜 / 场景). */
   onOpenWorkView: (view: WorkView) => void;
   onOpenRenders: () => void;
-  /** Lifted scene list (from the embedded editor); null → the section hides. */
-  scenes: WorkspaceSidebarScene[] | null;
-  activeSceneId: string | null;
-  onSelectScene: (sceneId: string) => void;
 }
 
 function sideItemClass(active: boolean): string {
@@ -82,9 +72,6 @@ export function WorkspaceSidebar({
   activeWorkView,
   onOpenWorkView,
   onOpenRenders,
-  scenes,
-  activeSceneId,
-  onSelectScene,
 }: WorkspaceSidebarProps) {
   const { t } = useTranslation();
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -194,16 +181,21 @@ export function WorkspaceSidebar({
         aria-expanded={epExpanded}
         className={sideItemClass(activeModule === 'episodes')}
       >
-        <span className="flex items-center gap-1.5 min-w-0">
+        <span className="flex items-center gap-2 min-w-0">
+          <ListVideo size={14} className="shrink-0" />
+          <span className="truncate">{t('projects.workspace.modules.episodes')}</span>
+        </span>
+        {/* The expand chevron sits at the row's RIGHT end (beside the count),
+            so the leading ListVideo icon stays in the same left column as every
+            other nav row instead of being pushed right by the chevron. */}
+        <span className="flex items-center gap-1.5 shrink-0">
+          <span className="text-[10px] text-ink-500 font-mono">{episodes.length}</span>
           {epExpanded ? (
             <ChevronDown size={12} className="shrink-0 text-ink-500" />
           ) : (
             <ChevronRight size={12} className="shrink-0 text-ink-500" />
           )}
-          <ListVideo size={14} className="shrink-0" />
-          <span className="truncate">{t('projects.workspace.modules.episodes')}</span>
         </span>
-        <span className="text-[10px] text-ink-500 font-mono">{episodes.length}</span>
       </button>
 
       {epExpanded && currentEpisode && (
@@ -323,46 +315,6 @@ export function WorkspaceSidebar({
             <ExternalLink size={13} className="shrink-0" />
             <span className="truncate">{t('projects.workspace.modules.publish')}</span>
           </button>
-
-          {/* ── SCENES sub-section (lifted from the embedded editor) ── */}
-          {scenes && scenes.length > 0 && (
-            <div className="mt-1 pt-1.5 border-t border-line">
-              <div className="pl-6 pb-1 font-mono text-[8.5px] tracking-widest text-ink-500">
-                SCENES · {scenes.length}
-              </div>
-              <div className="flex flex-col gap-0.5 max-h-64 overflow-y-auto">
-                {scenes.map((sc, i) => {
-                  const active = activeSceneId != null && sc.scene_id === activeSceneId;
-                  return (
-                    <button
-                      key={sc.scene_id}
-                      data-testid={`ws-scene-${sc.scene_id}`}
-                      onClick={() => onSelectScene(sc.scene_id)}
-                      className={`flex items-center gap-1.5 pr-2 py-1 text-[12px] text-left transition-colors ${
-                        active
-                          ? 'bg-[var(--accent-soft)] rounded-r-md border-l-2 border-[var(--accent-text)] pl-[22px]'
-                          : 'pl-6 hover:bg-ink-800/50'
-                      }`}
-                    >
-                      <span
-                        className={`font-mono font-bold shrink-0 ${
-                          active ? 'text-[var(--accent-text)]' : 'text-ink-300'
-                        }`}
-                      >
-                        S{i + 1}
-                      </span>
-                      {sc.int_ext && (
-                        <span className="shrink-0 font-mono text-[8.5px] rounded px-1 py-0.5 text-violet-400 bg-violet-500/10">
-                          {sc.int_ext}
-                        </span>
-                      )}
-                      <span className="truncate text-ink-300">{sc.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
         </div>
       )}
 

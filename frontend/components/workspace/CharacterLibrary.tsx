@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Loader2, Plus, Sparkles, UserRound, Wand2 } from 'lucide-react';
+import { Loading } from '../common/Loading';
 
 import {
   createCharacter,
@@ -140,8 +141,8 @@ export function CharacterLibrary({ projectId }: CharacterLibraryProps) {
 
   if (characters === null) {
     return (
-      <div className="flex h-40 items-center justify-center">
-        <Loader2 size={18} className="animate-spin text-ink-500" />
+      <div className="flex h-40 items-center justify-center text-ink-500">
+        <Loading center />
       </div>
     );
   }
