@@ -33,7 +33,17 @@ export const ISSUE_COLUMN_DEFS: Array<{
   { key: 'updated', label: 'Last updated', hint: 'Latest visible activity time.' },
 ];
 
-export const DEFAULT_VISIBLE_COLUMNS: IssueColumnKey[] = ['status', 'id', 'updated'];
+// Mirrors the approved mockup: assignee avatar, project pill and the
+// origin-module tag are first-class row context, on by default. ('parent'
+// stays opt-in.) Users who customised columns keep their saved choice.
+export const DEFAULT_VISIBLE_COLUMNS: IssueColumnKey[] = [
+  'status',
+  'id',
+  'assignee',
+  'project',
+  'tags',
+  'updated',
+];
 
 const STORAGE_KEY_PREFIX = 'mediahub:todolist:columns';
 

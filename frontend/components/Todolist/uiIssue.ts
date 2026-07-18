@@ -48,7 +48,18 @@ export function toUiIssue(
     description: raw.description,
     status: raw.status,
     priority: raw.priority,
-    assignee: raw.assignee_agent_id ? agentsById[raw.assignee_agent_id] : undefined,
+    // Fallback ref: an assigned agent missing from agentsById (deleted agent,
+    // scope-filtered list) must still render an avatar — the mockup shows the
+    // assignee for every assigned row, and silently dropping it reads as
+    // "unassigned".
+    assignee: raw.assignee_agent_id
+      ? agentsById[raw.assignee_agent_id] ?? {
+          id: raw.assignee_agent_id,
+          slug: 'agent',
+          name: 'Agent',
+          avatar_color: 'bg-ink-600',
+        }
+      : undefined,
     assignee_user_label: raw.assignee_user_id ? `User ${raw.assignee_user_id.slice(0, 6)}` : undefined,
     project: raw.project_id != null
       ? { id: raw.project_id, name: projectMeta?.name ?? `Project ${raw.project_id}`, color: projectMeta?.color }
