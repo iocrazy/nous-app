@@ -1,0 +1,112 @@
+"""Tests for the tags router promote endpoint + origin field exposure.
+
+Covers Task 1.5 (Unified Tags PR-1):
+- PUT /api/v1/tags/{id} accepts ``origin: "curated"`` to promote a shadow
+  (origin='note') tag into the curated pool — the only direction the API allows.
+- ``origin: "note"`` is rejected at request validation (Pydantic Literal) → 422.
+- ``origin`` is surfaced on the tag response so list/get expose it (PR-3 frontend
+  consumes it).
+
+Convention: build a FastAPI app around just the tags router, override the auth
+dependency, and patch ``get_tags_repository`` with an AsyncMock repo — matching
+``test_ai_library_admin_routes.py``.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.api.tags_router import router
+from app.core.deps import get_auth
+
+USER_ID = "11111111-1111-1111-1111-111111111111"
+
+
+def _app() -> FastAPI:
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1")
+    return app
+
+
+@pytest.fixture
+def client() -> TestClient:
+    app = _app()
+
+    async def _auth():
+        class _FakeAuth:
+            user_id = USER_ID
+            email = "u@example.com"
+
+        return _FakeAuth()
+
+    app.dependency_overrides[get_auth] = _auth
+    c = TestClient(app)
+    yield c
+    app.dependency_overrides.clear()
+
+
+def _user_tag(origin: str = "note") -> dict:
+    return {
+        "id": 1,
+        "name": "ai",
+        "type": "user",
+        "user_id": USER_ID,
+        "created_at": "2026-01-01T00:00:00",
+        "origin": origin,
+    }
+
+
+def test_promote_shadow_tag(client: TestClient):
+    """PUT with origin='curated' promotes and passes origin through to update_tag."""
+    mock_repo = AsyncMock()
+    mock_repo.get_tag_by_id.return_value = _user_tag(origin="note")
+    mock_repo.update_tag.return_value = _user_tag(origin="curated")
+
+    with patch("app.api.tags_router.get_tags_repository", return_value=mock_repo):
+        resp = client.put("/api/v1/tags/1", json={"origin": "curated"})
+
+    assert resp.status_code == 200
+    assert mock_repo.update_tag.call_args.kwargs["origin"] == "curated"
+    assert resp.json()["origin"] == "curated"
+
+
+def test_demote_to_note_rejected(client: TestClient):
+    """origin='note' is not a settable value — Pydantic Literal rejects it (422)."""
+    resp = client.put("/api/v1/tags/1", json={"origin": "note"})
+    assert resp.status_code == 422
+
+
+def test_get_tag_exposes_origin(client: TestClient):
+    """GET surfaces the tag's origin so the frontend can badge shadow tags."""
+    mock_repo = AsyncMock()
+    mock_repo.get_tag_by_id.return_value = _user_tag(origin="note")
+
+    with patch("app.api.tags_router.get_tags_repository", return_value=mock_repo):
+        resp = client.get("/api/v1/tags/1")
+
+    assert resp.status_code == 200
+    assert resp.json()["origin"] == "note"
+
+
+def test_list_tags_defaults_origin_curated(client: TestClient):
+    """A tag row missing ``origin`` serializes with the curated default."""
+    mock_repo = AsyncMock()
+    mock_repo.get_all_tags.return_value = [
+        {
+            "id": 2,
+            "name": "design",
+            "type": "user",
+            "user_id": USER_ID,
+            "created_at": "2026-01-01T00:00:00",
+        }
+    ]
+
+    with patch("app.api.tags_router.get_tags_repository", return_value=mock_repo):
+        resp = client.get("/api/v1/tags")
+
+    assert resp.status_code == 200
+    assert resp.json()["tags"][0]["origin"] == "curated"

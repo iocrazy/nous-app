@@ -395,6 +395,9 @@ async def update_tag(
         icon=tag_update.icon,
         enabled=tag_update.enabled,
         group_id=tag_update.group_id,
+        # Promote-only: schema restricts this to "curated"; the repo's
+        # _TAG_ATTRS whitelist already admits the ``origin`` column.
+        origin=tag_update.origin,
     )
 
     return updated
