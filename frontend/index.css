@@ -1081,6 +1081,28 @@ body {
   animation: mh-shimmer 1.5s ease-in-out infinite;
 }
 
+/* Activity calendar year-wheel picker pop-in — .16s scale/fade matching the
+   approved mockup (2026-07-17-activity-year-wheel). Under reduced-motion the
+   pop and the wheel's per-step transitions are both dropped. */
+@keyframes mh-year-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+}
+.mh-year-pop {
+  transform-origin: top center;
+  animation: mh-year-pop 0.16s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+@media (prefers-reduced-motion: reduce) {
+  .mh-year-pop {
+    animation: none;
+  }
+  .mh-year-pop button {
+    transition: none;
+  }
+}
+
 /* ===== Infinite Canvas Vignette ===== */
 .canvas-vignette {
   pointer-events: none;

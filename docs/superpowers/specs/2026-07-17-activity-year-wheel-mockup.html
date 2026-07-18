@@ -1,0 +1,230 @@
+<title>活跃度日历·年月选择器 定稿(B·年轮+月格)</title>
+<style>
+  :root {
+    --app-bg: #f6f6f8; --island: #ffffff; --island-2: #f4f4f5;
+    --line: rgba(0,0,0,.08); --line-strong: rgba(0,0,0,.16);
+    --content: #18181b; --content-2: #52525b; --content-3: #8b8b94; --content-4: #b0b0b8;
+    --accent: #6366f1; --accent-text: #4f46e5;
+    --accent-soft: rgba(99,102,241,.10); --accent-border: rgba(99,102,241,.35);
+    --pop-shadow: 0 12px 32px rgba(24,24,27,.14), 0 2px 8px rgba(24,24,27,.08);
+  }
+  @media (prefers-color-scheme: dark) { :root {
+    --app-bg:#0e0e11; --island:#15151a; --island-2:#1c1c21;
+    --line:rgba(255,255,255,.07); --line-strong:rgba(255,255,255,.12);
+    --content:#ececf1; --content-2:#a3a3ad; --content-3:#74747e; --content-4:#55555e;
+    --accent-text:#a5b4fc; --pop-shadow:0 12px 32px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.4);
+  }}
+  :root[data-theme="dark"] {
+    --app-bg:#0e0e11; --island:#15151a; --island-2:#1c1c21;
+    --line:rgba(255,255,255,.07); --line-strong:rgba(255,255,255,.12);
+    --content:#ececf1; --content-2:#a3a3ad; --content-3:#74747e; --content-4:#55555e;
+    --accent-text:#a5b4fc; --pop-shadow:0 12px 32px rgba(0,0,0,.5), 0 2px 8px rgba(0,0,0,.4);
+  }
+  :root[data-theme="light"] {
+    --app-bg:#f6f6f8; --island:#ffffff; --island-2:#f4f4f5;
+    --line:rgba(0,0,0,.08); --line-strong:rgba(0,0,0,.16);
+    --content:#18181b; --content-2:#52525b; --content-3:#8b8b94; --content-4:#b0b0b8;
+    --accent-text:#4f46e5; --pop-shadow:0 12px 32px rgba(24,24,27,.14), 0 2px 8px rgba(24,24,27,.08);
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--app-bg); color:var(--content);
+    font:14px/1.5 -apple-system,"PingFang SC","Segoe UI",sans-serif; }
+  .wrap { max-width:760px; margin:0 auto; padding:28px 20px 80px; }
+  h1 { font-size:16px; margin:0 0 4px; }
+  .sub { font-size:12.5px; color:var(--content-3); margin-bottom:22px; }
+  .note { border-left:3px solid var(--accent); background:var(--accent-soft); color:var(--content-2);
+    font-size:12.5px; padding:10px 14px; border-radius:0 8px 8px 0; margin:20px 0; }
+  .note b { color:var(--content); }
+  .row2 { display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; }
+
+  .panel { width:340px; background:var(--island); border:1px solid var(--line); border-radius:14px;
+    padding:16px 16px 12px; box-shadow:0 1px 3px rgba(0,0,0,.04); position:relative; }
+  .p-head { display:flex; align-items:center; margin-bottom:10px; }
+  .p-head .ttl { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--content-3); }
+  .mrow { display:flex; align-items:center; gap:6px; margin-bottom:8px; }
+  .mtrigger { display:inline-flex; align-items:center; gap:5px; border:0; background:transparent;
+    font-size:13px; font-weight:700; color:var(--content); padding:3px 8px; border-radius:8px; cursor:pointer;
+    font-variant-numeric:tabular-nums; }
+  .mtrigger:hover { background:var(--island-2); color:var(--accent-text); }
+  .mtrigger .caret { font-size:9px; color:var(--content-4); transition:transform .18s; display:inline-block; transform:rotate(180deg); }
+  .mrow .nav { margin-left:auto; display:flex; gap:4px; }
+  .mrow .nav button { border:0; background:var(--island-2); color:var(--content-3); border-radius:7px;
+    width:24px; height:22px; cursor:pointer; font-size:11px; }
+  .mrow .nav .today { width:auto; padding:0 9px; font-size:10.5px; font-weight:700; }
+
+  .pop { position:absolute; left:12px; right:12px; top:72px; z-index:20;
+    background:var(--island); border:1px solid var(--line-strong); border-radius:16px;
+    box-shadow:var(--pop-shadow); padding:14px; transform-origin:top center;
+    animation:pop .16s cubic-bezier(.2,.9,.3,1.2); }
+  @keyframes pop { from { opacity:0; transform:scale(.96) translateY(-4px); } }
+  @media (prefers-reduced-motion:reduce){ .pop{ animation:none; } .ywheel button { transition:none; } }
+
+  .bwrap { display:flex; gap:12px; }
+
+  /* ── year wheel: 5 fixed slots, selected centered, fading with distance,
+     future years never rendered (cap at the real current year) ── */
+  .ywheel { width:64px; display:flex; flex-direction:column; justify-content:center;
+    border-right:1px solid var(--line); padding-right:10px; position:relative; }
+  .ywheel .slot { height:30px; display:flex; align-items:center; justify-content:center; }
+  .ywheel button { border:0; background:transparent; cursor:pointer; border-radius:9px;
+    font-variant-numeric:tabular-nums; padding:3px 10px; line-height:1;
+    transition: color .18s, opacity .18s, transform .18s, background .18s, font-size .18s; position:relative; }
+  .ywheel .d0 { font-size:14.5px; font-weight:800; color:var(--accent-text); background:var(--accent-soft);
+    box-shadow: inset 0 0 0 1px var(--accent-border); }
+  .ywheel .d1 { font-size:12px; font-weight:600; color:var(--content-3); }
+  .ywheel .d2 { font-size:11px; font-weight:600; color:var(--content-4); opacity:.55; }
+  .ywheel .d1:hover, .ywheel .d2:hover { color:var(--accent-text); opacity:1; background:var(--island-2); }
+  .ywheel .ydot { position:absolute; right:2px; top:50%; transform:translateY(-50%);
+    width:3.5px; height:3.5px; border-radius:50%; background:var(--accent); opacity:.75; }
+
+  .mgrid { flex:1; display:grid; grid-template-columns:repeat(3,1fr); gap:6px; align-content:center; }
+  .mcell { position:relative; border:1px solid transparent; background:transparent; border-radius:10px;
+    padding:9px 0 13px; font-size:12px; font-weight:600; color:var(--content-2); cursor:pointer;
+    transition:background .12s,border-color .12s,color .12s; }
+  .mcell:hover { background:var(--accent-soft); border-color:var(--accent-border); color:var(--accent-text); }
+  .mcell:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  .mcell.sel { background:var(--accent); color:#fff; font-weight:800; box-shadow:0 2px 8px rgba(99,102,241,.35); }
+  .mcell.now:not(.sel)::after { content:""; position:absolute; left:50%; bottom:5px; transform:translateX(-50%);
+    width:3.5px; height:3.5px; border-radius:50%; border:1px solid var(--accent-text); }
+  .mcell .dot { position:absolute; left:50%; bottom:5px; transform:translateX(-50%);
+    width:4px; height:4px; border-radius:50%; background:var(--accent); opacity:.85; }
+  .mcell.sel .dot { background:#fff; }
+  .mcell.future { color:var(--content-4); opacity:.55; }
+  .pfoot { display:flex; align-items:center; margin-top:12px; padding-top:10px; border-top:1px solid var(--line); }
+  .pfoot .hint { font-size:10.5px; color:var(--content-4); display:inline-flex; align-items:center; gap:5px; }
+  .pfoot .hint i { width:4px; height:4px; border-radius:50%; background:var(--accent); }
+  .pfoot .tbtn { margin-left:auto; border:0; background:var(--island-2); color:var(--content-2);
+    font-size:11px; font-weight:700; border-radius:7px; padding:4px 11px; cursor:pointer; }
+  .pfoot .tbtn:hover { color:var(--accent-text); }
+
+  .dhead { display:grid; grid-template-columns:repeat(7,1fr); margin-bottom:2px; }
+  .dhead span { text-align:center; font-size:9px; font-weight:700; text-transform:uppercase; color:var(--content-4); padding:2px 0; }
+  .dgrid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+  .day { position:relative; height:36px; border-radius:9px; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; font-size:11px; color:var(--content-2); font-variant-numeric:tabular-nums; }
+  .day.out { color:var(--content-4); opacity:.5; }
+  .day.tint { background:var(--accent-soft); }
+  .day.today { font-weight:800; color:var(--accent-text); box-shadow:inset 0 0 0 1.5px var(--accent); }
+  .day .cnt { margin-top:1px; background:rgba(99,102,241,.8); color:#fff; font-size:8.5px; font-weight:800;
+    line-height:12px; border-radius:99px; padding:0 4px; }
+
+  .spec { background:var(--island); border:1px solid var(--line); border-radius:12px; padding:14px 16px;
+    font-size:12.5px; max-width:330px; }
+  .spec h3 { margin:0 0 8px; font-size:13px; }
+  .spec ul { margin:0; padding-left:18px; color:var(--content-2); }
+  .spec li { margin-bottom:6px; }
+</style>
+
+<div class="wrap">
+  <h1>年月选择器 · 定稿(B 方案 + 年轮改版)</h1>
+  <div class="sub">可交互:点上下年份试"滚轮"效果(试试点 2024);点月份选择。</div>
+
+  <div class="row2">
+    <div class="panel">
+      <div class="p-head"><span class="ttl">活跃度</span></div>
+      <div class="mrow">
+        <button class="mtrigger">July 2026 <span class="caret">▼</span></button>
+        <span class="nav"><button>‹</button><button>›</button><button class="today">今天</button></span>
+      </div>
+
+      <div class="pop">
+        <div class="bwrap">
+          <div class="ywheel" id="ywheel"></div>
+          <div class="mgrid" id="mgrid"></div>
+        </div>
+        <div class="pfoot"><span class="hint"><i></i>有笔记</span><button class="tbtn" id="backNow">回到本月</button></div>
+      </div>
+
+      <div class="dhead"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
+      <div class="dgrid">
+        <div class="day out">29</div><div class="day out">30</div><div class="day">1</div><div class="day">2</div><div class="day">3</div><div class="day">4</div><div class="day">5</div>
+        <div class="day">6</div><div class="day">7</div><div class="day">8</div><div class="day">9</div><div class="day tint">10<span class="cnt">1</span></div><div class="day">11</div><div class="day">12</div>
+        <div class="day">13</div><div class="day tint">14<span class="cnt">1</span></div><div class="day tint">15<span class="cnt">1</span></div><div class="day">16</div><div class="day today">17</div><div class="day">18</div><div class="day">19</div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>年轮交互规格(按你说的)</h3>
+      <ul>
+        <li><b>无滚动条</b>:固定 5 槽,选中年居中(大字加粗 + 淡紫衬底)</li>
+        <li><b>上方 = 过去</b>:往上一年比一年<b>浅</b>(距离 1 档灰、距离 2 档更浅);下方 = 未来方向,同样按距离变浅</li>
+        <li><b>未来封顶</b>:不显示比今年(2026)晚的年份——居中 2026 时下方两槽留空</li>
+        <li><b>点即滚</b>:点 2024 → 2024 滚到中心,上方变 2023/2022(渐浅),下方 2025/2026;180ms 过渡</li>
+        <li><b>鼠标滚轮</b>:悬停年轮上滚动直接换年(上滚=往过去,下滚=往现在,封顶 2026);带节流,一次一格</li>
+        <li>有笔记的年份右侧小圆点;月份格同前稿(圆点 + 未来月降灰 + 当前月空心点)</li>
+        <li>「回到本月」一键回 2026 年 7 月</li>
+      </ul>
+      <h3 style="margin-top:14px">实现说明</h3>
+      <ul>
+        <li>纯自研零依赖,改 <code>ActivityPanel.tsx</code> picker 区块;年份"有笔记"用现有 activity 数据按年聚合</li>
+        <li>键盘:↑↓ 换年、←→ 换月、Enter 选中(无障碍)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note"><b>确认这版就开工</b>——派 Opus 在 worktree 实现,完成后照旧审查 + PR。</div>
+</div>
+
+<script>
+  const NOW_Y = 2026, NOW_M = 6; // July (0-based)
+  const NOTE_YEARS = new Set([2026, 2025]);
+  const NOTE_MONTHS = { 2026:[2,4,5,6], 2025:[1,8,10], 2024:[] };
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  let centerY = 2026, selY = 2026, selM = 6;
+
+  const wheel = document.getElementById('ywheel');
+  const mgrid = document.getElementById('mgrid');
+
+  function renderWheel() {
+    wheel.innerHTML = '';
+    for (let off = -2; off <= 2; off++) {
+      const y = centerY + off;
+      const slot = document.createElement('div');
+      slot.className = 'slot';
+      if (y <= NOW_Y) {           // future years never render
+        const b = document.createElement('button');
+        const d = Math.abs(off);
+        b.className = d === 0 ? 'd0' : d === 1 ? 'd1' : 'd2';
+        b.textContent = y;
+        if (NOTE_YEARS.has(y)) { const i = document.createElement('span'); i.className='ydot'; b.appendChild(i); }
+        b.addEventListener('click', () => { centerY = y; selY = y; renderWheel(); renderMonths(); });
+        slot.appendChild(b);
+      }
+      wheel.appendChild(slot);
+    }
+  }
+
+  function renderMonths() {
+    mgrid.innerHTML = '';
+    MONTHS.forEach((name, i) => {
+      const b = document.createElement('button');
+      const isFuture = selY === NOW_Y && i > NOW_M;
+      const isSel = selY === selY && i === selM && centerY === selY;
+      b.className = 'mcell' + (i === selM && selY === centerY ? ' sel' : '') +
+        (selY === NOW_Y && i === NOW_M ? ' now' : '') + (isFuture ? ' future' : '');
+      b.textContent = name;
+      if ((NOTE_MONTHS[selY] || []).includes(i)) { const d=document.createElement('span'); d.className='dot'; b.appendChild(d); }
+      b.addEventListener('click', () => { selM = i; renderMonths(); });
+      mgrid.appendChild(b);
+    });
+  }
+
+  // Mouse wheel on the year rail: scroll up = into the past, scroll down =
+  // toward now (capped at NOW_Y). Throttled to one step per gesture tick.
+  let wheelLock = 0;
+  wheel.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const now = Date.now();
+    if (now - wheelLock < 140) return;
+    wheelLock = now;
+    const dir = e.deltaY > 0 ? 1 : -1;
+    const next = Math.min(NOW_Y, centerY + dir);
+    if (next !== centerY) { centerY = next; selY = next; renderWheel(); renderMonths(); }
+  }, { passive: false });
+
+  document.getElementById('backNow').addEventListener('click', () => {
+    centerY = NOW_Y; selY = NOW_Y; selM = NOW_M; renderWheel(); renderMonths();
+  });
+
+  renderWheel(); renderMonths();
+</script>

@@ -242,6 +242,30 @@ class IssueRepository:
             items = [_row(r) for r in result.scalars().all()]
         return items, total
 
+    async def list_by_origin(
+        self,
+        origin_kind: str,
+        origin_id: str,
+        *,
+        include_hidden: bool = False,
+    ) -> list[dict[str, Any]]:
+        """All issues stamped with a given (origin_kind, origin_id) pair.
+
+        Backs the content back-link reverse lookup (issues_origin_idx). Used by
+        the project-stage auto-issue hook for idempotency (has this stage's
+        issue already been created?) and for closing the previous stage's issue.
+        Hidden (soft-deleted) rows are excluded by default.
+        """
+        async with read_scope() as session:
+            stmt = select(Issues).where(
+                Issues.origin_kind == origin_kind,
+                Issues.origin_id == origin_id,
+            )
+            if not include_hidden:
+                stmt = stmt.where(Issues.hidden_at.is_(None))
+            result = await session.execute(stmt)
+            return [_row(r) for r in result.scalars().all()]
+
     async def soft_delete(self, issue_id: int) -> dict[str, Any]:
         """User-facing delete — sets hidden_at, keeps row for audit / undo."""
         return await self.update(

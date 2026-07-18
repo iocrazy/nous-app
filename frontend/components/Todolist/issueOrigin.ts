@@ -13,7 +13,7 @@
  */
 
 /** Content surfaces that can spawn an issue. Add a case here + a writer. */
-export type OriginContentKind = 'canvas' | 'scene';
+export type OriginContentKind = 'canvas' | 'scene' | 'project_stage';
 
 export interface ParsedOrigin {
   kind: OriginContentKind;
@@ -35,9 +35,12 @@ export function parseOriginId(originId: string | null | undefined): ParsedOrigin
   const idx = originId.indexOf(':');
   if (idx <= 0) return null;
   const kind = originId.slice(0, idx);
+  // Everything after the FIRST colon is the id. For 'project_stage' the id is
+  // itself `{projectId}:{stageId}` (a second colon) — kept as a string, never
+  // split into numbers, so Snowflake bigints survive intact.
   const id = originId.slice(idx + 1);
   if (!id) return null;
-  if (kind !== 'canvas' && kind !== 'scene') return null;
+  if (kind !== 'canvas' && kind !== 'scene' && kind !== 'project_stage') return null;
   return { kind, id };
 }
 
@@ -54,6 +57,14 @@ export function originPath(origin: ParsedOrigin, teamId: string | undefined): st
       // stamp a scene→script resolver we don't have. Falls back to the
       // team-agnostic Projects list when the issue view has no team in scope.
       return teamId ? `/team/${teamId}/projects` : `/projects`;
+    case 'project_stage': {
+      // id is `{projectId}:{stageId}` — the project detail route only needs the
+      // projectId (stageId is carried for the reverse lookup, not routing).
+      // Split on the first colon; keep it a string (Snowflake bigint).
+      const projectId = origin.id.split(':')[0];
+      if (!teamId || !projectId) return '/projects';
+      return `/team/${teamId}/projects/${projectId}`;
+    }
   }
 }
 
@@ -64,5 +75,7 @@ export function originLabel(origin: ParsedOrigin): string {
       return 'From a canvas';
     case 'scene':
       return 'From a script scene';
+    case 'project_stage':
+      return 'From a project stage';
   }
 }
