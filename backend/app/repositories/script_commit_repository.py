@@ -96,7 +96,9 @@ class ScriptCommitRepository:
 
     async def list_by_script(self, script_id: str) -> List[Dict[str, Any]]:
         """All commits for a script, newest first (created_at DESC) — the version
-        history list order."""
+        history list order. Each row is enriched with ``author_name`` resolved
+        from ``created_by`` (service-role read; the client falls back to a short
+        id / "You" when it's blank)."""
         try:
             async with read_scope() as session:
                 result = await session.execute(
@@ -104,7 +106,11 @@ class ScriptCommitRepository:
                     .where(ScriptCommits.script_id == _bigint(script_id))
                     .order_by(ScriptCommits.created_at.desc())
                 )
-                return [_row(r) for r in result.scalars().all()]
+                rows = [_row(r) for r in result.scalars().all()]
+            names = await self.resolve_usernames(
+                [r["created_by"] for r in rows if r.get("created_by")]
+            )
+            return [{**r, "author_name": names.get(r.get("created_by"))} for r in rows]
         except Exception as e:
             logger.error(f"Failed to list commits for script {script_id}: {e}")
             return []
@@ -123,6 +129,28 @@ class ScriptCommitRepository:
         except Exception as e:
             logger.error(f"Failed to get commit {commit_id}: {e}")
             return None
+
+    async def resolve_usernames(self, user_ids: List[str]) -> Dict[str, str]:
+        """Batch-resolve author uuids → ``user_profiles.username`` (service-role
+        read; ``user_profiles`` RLS only exposes the caller's own row, so this
+        must run server-side). Ids with no profile / blank username are omitted —
+        the client falls back to a short id. Returns ``{}`` on any failure so
+        author enrichment never sinks the diff."""
+        if not user_ids:
+            return {}
+        try:
+            from app.models.users import UserProfiles
+
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(UserProfiles.id, UserProfiles.username).where(
+                        UserProfiles.id.in_([str(u) for u in user_ids])
+                    )
+                )
+                return {str(uid): name for uid, name in result.all() if name}
+        except Exception as e:
+            logger.error(f"Failed to resolve usernames: {e}")
+            return {}
 
     async def delete(self, commit_id: str) -> bool:
         """Delete a commit tag (the referenced ops in script_ops are untouched)."""

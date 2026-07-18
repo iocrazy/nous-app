@@ -3121,6 +3121,10 @@
     "diffKindChanged": "Changed",
     "diffKindMoved": "Moved",
     "diffEmptyLine": "(empty line)",
+    "diffScenesAddedN": "Added {{count}} scenes",
+    "diffScenesRemovedN": "Removed {{count}} scenes",
+    "diffAuthorYou": "You",
+    "diffAuthorAI": "AI",
     "switchEpisode": "Switch episode"
   },
   "characters": {

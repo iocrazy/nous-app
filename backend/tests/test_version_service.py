@@ -17,8 +17,10 @@ import pytest
 from app.services.script.scene_ops import apply_ops
 from app.services.script.version_service import (
     VersionService,
+    actor_by_element,
     diff_scenes,
     inverse_between,
+    last_actor,
     replay_to,
 )
 
@@ -49,14 +51,24 @@ def _upd(el_id: str, text: str) -> dict:
     }
 
 
-def _ledger(batches: List[List[dict]]):
-    """Replay ``batches`` forward, returning (ledger_rows, {op_seq: elements})."""
+def _ledger(batches: List[List[dict]], actors: List[str] | None = None):
+    """Replay ``batches`` forward, returning (ledger_rows, {op_seq: elements}).
+
+    When ``actors`` is supplied (one per batch) each row carries that ``actor``
+    so authorship attribution can be exercised; omitted keeps rows actor-free
+    (the pre-attribution shape, for the pure replay/diff tests)."""
     rows: List[Dict[str, Any]] = []
     elements: List[dict] = []
     per_seq: Dict[int, List[dict]] = {0: []}
     for seq, ops in enumerate(batches, start=1):
         new, inverse = apply_ops(elements, ops)
-        rows.append({"op_seq": seq, "op_json": {"ops": ops, "inverse": inverse}})
+        row: Dict[str, Any] = {
+            "op_seq": seq,
+            "op_json": {"ops": ops, "inverse": inverse},
+        }
+        if actors is not None:
+            row["actor"] = actors[seq - 1]
+        rows.append(row)
         elements = new
         per_seq[seq] = new
     return rows, per_seq
@@ -157,6 +169,48 @@ def test_diff_identical_is_empty():
 
 
 # --------------------------------------------------------------------------- #
+# actor_by_element / last_actor — authorship attribution
+# --------------------------------------------------------------------------- #
+
+
+def test_actor_by_element_takes_last_toucher_in_range():
+    rows, _ = _ledger(
+        [
+            [_ins("el_1", "one")],
+            [_ins("el_2", "two", after_id="el_1")],
+            [_upd("el_1", "one-edited")],
+        ],
+        actors=["alice", "bob", "carol"],
+    )
+    # Range (0, 3]: el_1 last touched by carol (op 3), el_2 by bob (op 2).
+    by_el = actor_by_element(rows, 0, 3)
+    assert by_el == {"el_1": "carol", "el_2": "bob"}
+
+
+def test_actor_by_element_respects_watermark_window():
+    rows, _ = _ledger(
+        [[_ins("el_1", "one")], [_upd("el_1", "two")], [_upd("el_1", "three")]],
+        actors=["alice", "bob", "carol"],
+    )
+    # Only ops in (1, 3]: el_1's last toucher is carol; op 1 (alice) is excluded.
+    assert actor_by_element(rows, 1, 3) == {"el_1": "carol"}
+
+
+def test_actor_by_element_missing_actor_is_none():
+    rows, _ = _ledger([[_ins("el_1", "one")]])  # actor-free rows
+    assert actor_by_element(rows, 0, 1) == {"el_1": None}
+
+
+def test_last_actor_returns_highest_seq_within_watermark():
+    rows, _ = _ledger(
+        [[_ins("el_1", "a")], [_upd("el_1", "b")]], actors=["alice", "bob"]
+    )
+    assert last_actor(rows, 2) == "bob"
+    assert last_actor(rows, 1) == "alice"
+    assert last_actor([], 5) is None
+
+
+# --------------------------------------------------------------------------- #
 # inverse_between — round-trip against apply
 # --------------------------------------------------------------------------- #
 
@@ -219,9 +273,11 @@ class _FakeSceneRepo:
 
 
 class _FakeCommitRepo:
-    def __init__(self, commit: dict | None = None):
+    def __init__(self, commit: dict | None = None, usernames: dict | None = None):
         self._commit = commit
+        self._usernames = usernames or {}
         self.created: List[dict] = []
+        self.resolved_with: List[List[str]] = []
 
     async def create(self, data: dict) -> dict:
         self.created.append(data)
@@ -229,6 +285,10 @@ class _FakeCommitRepo:
 
     async def get(self, commit_id: str) -> dict | None:
         return self._commit
+
+    async def resolve_usernames(self, user_ids: List[str]) -> dict:
+        self.resolved_with.append(list(user_ids))
+        return {u: self._usernames[u] for u in user_ids if u in self._usernames}
 
 
 @pytest.mark.asyncio
@@ -295,6 +355,31 @@ async def test_compute_diff_against_current_reports_element_and_scene_changes():
     # 333 added since the commit; 222 removed since the commit.
     assert [s["id"] for s in diff["scenes_added"]] == ["333"]
     assert [s["id"] for s in diff["scenes_removed"]] == ["222"]
+    # authors map is present (empty here — the fake ledger carries no actors).
+    assert diff["authors"] == {}
+
+
+@pytest.mark.asyncio
+async def test_compute_diff_attributes_actor_and_resolves_authors():
+    rows, _ = _ledger(
+        [[_ins("el_1", "one")], [_upd("el_1", "one-edited")]],
+        actors=["u-alice", "u-bob"],
+    )
+    scenes = [{"id": 111, "content_version": 2, "sort_order": 1000}]
+    scene_repo = _FakeSceneRepo(scenes, {"111": rows})
+    commit_repo = _FakeCommitRepo(usernames={"u-bob": "Bob"})
+    svc = VersionService(scene_repo=scene_repo, commit_repo=commit_repo)
+
+    commit_a = {"watermarks": {"111": 1}, "scene_ids": [{"id": "111"}]}
+    diff = await svc.compute_diff("900", commit_a, None)
+
+    scene_111 = next(s for s in diff["scenes"] if s["scene_id"] == "111")
+    change = scene_111["elements"][0]
+    # el_1 was last touched by u-bob (op 2) between watermark 1 and 2.
+    assert change["actor"] == "u-bob"
+    assert scene_111["author"] == "u-bob"
+    # The batched resolve turned the uuid into a display name.
+    assert diff["authors"] == {"u-bob": "Bob"}
 
 
 @pytest.mark.asyncio

@@ -3121,6 +3121,10 @@
     "diffKindChanged": "修改",
     "diffKindMoved": "移动",
     "diffEmptyLine": "（空行）",
+    "diffScenesAddedN": "新增 {{count}} 个场景",
+    "diffScenesRemovedN": "删除 {{count}} 个场景",
+    "diffAuthorYou": "我",
+    "diffAuthorAI": "AI",
     "switchEpisode": "切换剧集"
   },
   "characters": {
