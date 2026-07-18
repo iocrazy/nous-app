@@ -1894,6 +1894,8 @@
   },
   "chat": {
     "newSession": "新会话",
+    "selection": "选中内容",
+    "selectionFrom": "选自 {{scene}}",
     "placeholder": "输入消息...",
     "placeholderNoAgent": "请先选择一个 Agent",
     "placeholderNoSession": "请先创建会话",
@@ -2876,6 +2878,8 @@
     "hintTab": "切换元素",
     "hintEnter": "新建元素",
     "hintMention": "提及",
+    "selectionAiChat": "AI 对话",
+    "selectionAiChatTooltip": "将选中文字发送到 AI 对话",
     "dragScene": "重排场景",
     "ctxCreateIssue": "创建待办",
     "ctxDeleteBlock": "删除这一块",

@@ -1894,6 +1894,8 @@
   },
   "chat": {
     "newSession": "New session",
+    "selection": "Selection",
+    "selectionFrom": "Selection from {{scene}}",
     "placeholder": "Type a message...",
     "placeholderNoAgent": "Select an agent to start",
     "placeholderNoSession": "Create a session first",
@@ -2876,6 +2878,8 @@
     "hintTab": "cycles element",
     "hintEnter": "new element",
     "hintMention": "mention",
+    "selectionAiChat": "AI chat",
+    "selectionAiChatTooltip": "Send selection to AI chat",
     "dragScene": "Reorder Scene",
     "ctxCreateIssue": "Create issue",
     "ctxDeleteBlock": "Delete this block",
