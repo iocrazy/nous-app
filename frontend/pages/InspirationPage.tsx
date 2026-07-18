@@ -117,6 +117,10 @@ export const InspirationPage: React.FC = () => {
     [date, tag, q],
   );
 
+  // Autocomplete suggestions shared by the Composer and the edit NoteEditor —
+  // memoized so both consumers get one stable array per (tags, poolTags).
+  const tagSuggestions = useMemo(() => buildTagSuggestions(tags, poolTags), [tags, poolTags]);
+
   const hotspotCategories = useMemo(() => {
     const counts = new Map<string, number>();
     for (const h of hotspots) {
@@ -351,7 +355,7 @@ export const InspirationPage: React.FC = () => {
                   setPrefill(null);
                 }}
                 onAttachmentUploaded={onAttachmentUploaded}
-                tagSuggestions={buildTagSuggestions(tags, poolTags)}
+                tagSuggestions={tagSuggestions}
               />
               <NoteTimeline
                 notes={notes}
@@ -474,7 +478,7 @@ export const InspirationPage: React.FC = () => {
               onChange={setEditText}
               minRows={6}
               onSubmit={() => void saveEdit()}
-              tagSuggestions={buildTagSuggestions(tags, poolTags)}
+              tagSuggestions={tagSuggestions}
             />
             <div className="mt-3 flex justify-end gap-2">
               <button onClick={() => setEditing(null)} className="rounded-lg bg-island-2 px-4 py-1.5 text-xs text-content-2">

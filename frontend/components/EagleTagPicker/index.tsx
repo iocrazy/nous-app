@@ -48,6 +48,14 @@ export const EagleTagPicker: React.FC<EagleTagPickerProps> = ({
   // Tags offered in the floating panel: shadow tags hidden unless already assigned.
   const pickerTags = useMemo(() => filterPickerTags(allTags, selectedIds), [allTags, selectedIds]);
 
+  // Hidden shadow tags (origin 'note', not yet assigned) — excluded from
+  // pickerTags but handed to the browser so a search that exactly matches one
+  // reveals/attaches it instead of offering a duplicate Create (→ backend 409).
+  const hiddenShadowTags = useMemo(
+    () => allTags.filter((t) => t.origin === 'note' && !selectedIds.has(String(t.id))),
+    [allTags, selectedIds],
+  );
+
   const handleToggleTag = useCallback(
     (tagId: string) => {
       if (isMode1) {
@@ -119,6 +127,7 @@ export const EagleTagPicker: React.FC<EagleTagPickerProps> = ({
         <FloatingPanel
           triggerRef={triggerRef}
           allTags={pickerTags}
+          shadowTags={hiddenShadowTags}
           selectedIds={selectedIds}
           starredIds={prefs.starred_tag_ids}
           settings={prefs.picker_settings}
