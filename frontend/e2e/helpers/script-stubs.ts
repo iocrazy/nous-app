@@ -28,6 +28,9 @@ export const SCENE_ID_BASE = 323456789100000;
 /** localStorage key the shell reads synchronously at mount (editor/formatStorage.ts:14). */
 export const formatKey = (scriptId: string) => `editor.format.${scriptId}`;
 
+/** localStorage key for display zoom (bare number string, editor/zoomStorage.ts). */
+export const zoomKey = (scriptId: string) => `editor.zoom.${scriptId}`;
+
 function fulfillJson(route: Route, body: unknown, status = 200): Promise<void> {
   return route.fulfill({
     status,
@@ -95,6 +98,13 @@ export interface ScriptStubOptions {
   scenes: unknown[];
   /** Seed the persisted layout variant so runs are deterministic. */
   format?: 'hollywood' | 'asian';
+  /**
+   * Seed the persisted display zoom (percent). Defaults to 100 so the many
+   * geometry-sensitive specs (seam alignment, narrow-width floor, sheet width)
+   * keep the print-baseline size regardless of the product's 115% default.
+   * Pass `null` to seed nothing and let the app default (115%) apply.
+   */
+  zoom?: number | null;
 }
 
 /**
@@ -115,6 +125,23 @@ export async function setupScriptStubs(page: Page, opts: ScriptStubOptions): Pro
     },
     [formatKey(SCRIPT_ID), format] as const,
   );
+
+  // Zoom seeds a BARE number string (not JSON) — matches zoomStorage's writer.
+  // Default 100 keeps geometry specs on the print baseline; `null` opts out so
+  // the app's 115% default applies (used by the default-zoom assertion).
+  const zoom = opts.zoom === undefined ? 100 : opts.zoom;
+  if (zoom !== null) {
+    await page.addInitScript(
+      ([key, value]) => {
+        try {
+          localStorage.setItem(key as string, value as string);
+        } catch {
+          /* localStorage unavailable — nothing we can do */
+        }
+      },
+      [zoomKey(SCRIPT_ID), String(zoom)] as const,
+    );
+  }
 
   await page.route(`**/api/v1/scripts/${SCRIPT_ID}/scenes`, (route) =>
     fulfillJson(route, { success: true, data: opts.scenes }),

@@ -439,20 +439,24 @@ export const EDITOR_SHELL_STYLES = `
 .mh-heading-pop{
   position:absolute; top:calc(100% + 3px); left:0; z-index:20;
   min-width:150px; max-width:280px;
-  /* #fff to match .mh-mention-pop / .mh-slash-menu exactly — one light DNA for
-     every editor popup, never a theme-dependent --surface shade. */
-  background:#fff; border:1px solid var(--sheet-border);
-  border-radius:8px; box-shadow:0 10px 28px rgba(35,20,90,0.14);
+  /* Elevated chrome surface to match .mh-mention-pop / .mh-slash-menu exactly —
+     one paper-toned DNA for every editor popup, flipping with the theme so it
+     never flashes white on dark paper. */
+  background:var(--surface); border:1px solid var(--sheet-border);
+  border-radius:10px; box-shadow:0 10px 28px rgba(35,20,90,0.14);
   padding:4px; font-family:var(--sans);
 }
 .mh-heading-opt{
-  padding:8px 12px; border-radius:5px; font-size:13px;
+  padding:8px 12px; border-radius:6px; font-size:13px;
   font-family:var(--mono); font-weight:700; letter-spacing:0.03em;
   color:var(--sheet-ink); cursor:pointer; white-space:nowrap;
   transition:background 0.12s ease;
 }
-.mh-heading-opt:hover{ background:var(--surface-2); }
-.mh-heading-opt.active{ background:var(--indigo-soft); color:var(--indigo-deep); }
+/* laper neutrality: hover + keyboard-active are warm ink-mix greys (derived from
+   --sheet-ink, so they stay neutral and theme-aware), NOT the brand indigo tint.
+   Selected reads as darker-grey-on-paper with the sheet's own ink, never indigo. */
+.mh-heading-opt:hover{ background:color-mix(in srgb, var(--sheet-ink) 6%, transparent); }
+.mh-heading-opt.active{ background:color-mix(in srgb, var(--sheet-ink) 11%, transparent); color:var(--sheet-ink); }
 .mh-heading-opt[aria-selected='true']{ font-weight:800; }
 /* Searchable location picker: a chromeless search-or-create input at the top of
    the popup (mirrors the cue picker's mh-mention-search). */
@@ -465,8 +469,9 @@ export const EDITOR_SHELL_STYLES = `
   font-family:var(--sans); font-size:13px; color:var(--sheet-ink); padding:0;
 }
 .mh-heading-search input::placeholder{ color:var(--sheet-ink-soft); }
-/* The Create row reads as an action, not a location — sans, not mono. */
-.mh-heading-opt.create{ font-family:var(--sans); font-weight:600; color:var(--indigo-deep); }
+/* The Create row reads as an action, not a location — sans + a touch heavier,
+   but the sheet's own ink (no brand indigo; the font shift carries the meaning). */
+.mh-heading-opt.create{ font-family:var(--sans); font-weight:600; color:var(--sheet-ink); }
 .mh-heading-empty{ padding:8px 12px; font-size:12.5px; color:var(--sheet-ink-soft); }
 /* laper's "Tab — Switch to location" hint at the top of the open picker. */
 .mh-heading-hint{
@@ -711,6 +716,20 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-seg.active{ background:var(--indigo); color:var(--accent-on); }
 .mh-seg:disabled{ opacity:0.45; cursor:default; }
+.mh-zoom{ display:flex; align-items:stretch; background:var(--surface-2); border-radius:10px; padding:3px; gap:2px; }
+.mh-zoom-btn{
+  width:34px; display:flex; align-items:center; justify-content:center;
+  font-size:16px; font-weight:600; border-radius:8px; line-height:1;
+  color:var(--ink-soft); cursor:pointer; background:none; border:none; font-family:var(--sans);
+}
+.mh-zoom-btn:hover:not(:disabled){ background:var(--surface); color:var(--ink); }
+.mh-zoom-btn:disabled{ opacity:0.35; cursor:default; }
+.mh-zoom-value{
+  flex:1; text-align:center; font-size:12.5px; font-weight:600; padding:7px 0; border-radius:8px;
+  color:var(--ink); cursor:pointer; background:none; border:none; font-family:var(--sans);
+  font-variant-numeric:tabular-nums;
+}
+.mh-zoom-value:hover{ background:var(--surface); }
 .mh-divider{ height:1px; background:var(--surface-border); margin:0 -16px; }
 .mh-stats-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .mh-stat-tile{
@@ -752,27 +771,28 @@ export const EDITOR_SHELL_STYLES = `
   box-decoration-break:clone; -webkit-box-decoration-break:clone;
 }
 .mh-mention.unknown{ color:var(--ink-faint); background:var(--surface-2); font-weight:500; }
-/* Editor popups follow the LIGHT model-filter dropdown (the "Filter models…"
-   panel the user pinned as the reference): white panel, hairline border, soft
-   shadow, quiet gray hover — a light page gets a light popup. Active row uses
-   the sheet's indigo-soft accent so keyboard position stays visible. */
+/* Editor popups follow laper's paper-toned dropdown: a near-white elevated
+   panel, hairline border, soft large-radius shadow, and a quiet WARM-grey
+   hover/selection derived from the sheet's own ink — no brand-indigo one-size
+   fill. The selected row is darker-grey-on-paper with black ink (laper), so
+   keyboard position stays visible without shouting a colour. */
 .mh-mention-pop{
   z-index:20; min-width:200px; max-width:300px; margin-top:2px;
-  /* Elevated chrome surface (not the hardcoded #fff it used to be) so the cue
-     picker flips with the editor theme instead of flashing white on dark paper. */
+  /* Elevated chrome surface (not a hardcoded #fff) so the cue picker flips with
+     the editor theme instead of flashing white on dark paper. */
   background:var(--surface); border:1px solid var(--sheet-border);
-  border-radius:8px; box-shadow:0 10px 28px rgba(35,20,90,0.14);
+  border-radius:10px; box-shadow:0 10px 28px rgba(35,20,90,0.14);
   padding:4px; font-family:var(--sans);
 }
 .mh-mention-list{ list-style:none; margin:0; padding:0; max-height:228px; overflow-y:auto; }
 .mh-mention-opt{
-  padding:8px 12px; border-radius:5px; font-size:13px;
+  padding:8px 12px; border-radius:6px; font-size:13px;
   color:var(--sheet-ink); cursor:pointer; white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis;
   transition:background 0.12s ease;
 }
-.mh-mention-opt:hover{ background:var(--surface-2); }
-.mh-mention-opt.active{ background:var(--indigo-soft); color:var(--indigo-deep); }
+.mh-mention-opt:hover{ background:color-mix(in srgb, var(--sheet-ink) 6%, transparent); }
+.mh-mention-opt.active{ background:color-mix(in srgb, var(--sheet-ink) 11%, transparent); color:var(--sheet-ink); }
 .mh-mention-opt[aria-selected='true']{ font-weight:600; }
 .mh-mention-empty{ padding:8px 12px; font-size:12.5px; color:var(--sheet-ink-soft); }
 /* Embedded search row (character-cue picker, laper parity): full-bleed strip
@@ -801,7 +821,8 @@ export const EDITOR_SHELL_STYLES = `
 .mh-pop-kbd{
   font-family:var(--mono); font-size:10px; line-height:1; font-weight:600;
   padding:3px 5px; border-radius:4px;
-  background:var(--surface-2); border:1px solid var(--sheet-border);
+  background:color-mix(in srgb, var(--sheet-ink) 5%, transparent);
+  border:1px solid var(--sheet-border);
   color:var(--sheet-ink-soft);
 }
 
@@ -1756,27 +1777,28 @@ export const EDITOR_SHELL_STYLES = `
 /* ── Slash menu (the "/" block-type picker) ── mirrors the mention popup.
    NOTE: never put backticks inside this template literal — one terminated the
    string early and the whole stylesheet evaluated to NaN (total unstyle). */
-/* Same light dropdown DNA as .mh-mention-pop above (the model-filter
-   reference): one look for every floating option list on the sheet. */
+/* Same paper-toned dropdown DNA as .mh-mention-pop above: one look for every
+   floating option list on the sheet — elevated surface, warm-grey selection,
+   no brand-indigo fill. */
 .mh-slash-menu{
   position:absolute; z-index:30; min-width:190px;
-  background:#fff; border:1px solid var(--sheet-border);
-  border-radius:8px; box-shadow:0 10px 28px rgba(35,20,90,0.14); padding:4px;
+  background:var(--surface); border:1px solid var(--sheet-border);
+  border-radius:10px; box-shadow:0 10px 28px rgba(35,20,90,0.14); padding:4px;
   font-family:var(--sans);
 }
 .mh-slash-item{
   display:flex; align-items:center; gap:9px; width:100%; text-align:left;
-  padding:8px 12px; border:none; border-radius:5px; background:none;
+  padding:8px 12px; border:none; border-radius:6px; background:none;
   font-size:13px; color:var(--sheet-ink); cursor:pointer;
   transition:background 0.12s ease;
 }
-.mh-slash-item:hover{ background:var(--surface-2); }
-.mh-slash-item.active{ background:var(--indigo-soft); color:var(--indigo-deep); }
+.mh-slash-item:hover{ background:color-mix(in srgb, var(--sheet-ink) 6%, transparent); }
+.mh-slash-item.active{ background:color-mix(in srgb, var(--sheet-ink) 11%, transparent); color:var(--sheet-ink); }
 .mh-slash-glyph{
   width:18px; text-align:center; font-family:var(--mono); font-size:11px;
   color:var(--sheet-ink-soft); flex-shrink:0;
 }
-.mh-slash-item.active .mh-slash-glyph{ color:var(--indigo-deep); }
+.mh-slash-item.active .mh-slash-glyph{ color:var(--sheet-ink); }
 .mh-slash-empty{ padding:8px 12px; font-size:12.5px; color:var(--sheet-ink-soft); }
 
 /* ── Paged mode: laper-style page seams. An IN-FLOW band between rows: filler
