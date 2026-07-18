@@ -94,6 +94,46 @@ def inverse_between(
     return inverse
 
 
+def actor_by_element(
+    ops_rows: List[Dict[str, Any]], lo_seq: int, hi_seq: int
+) -> Dict[str, Optional[str]]:
+    """Map each element id touched in ``(lo_seq, hi_seq]`` to the actor of the
+    LAST op that touched it (latest ``op_seq`` wins).
+
+    Every op inside the range contributes its row's ``actor`` for the element it
+    names; because rows are walked in ascending ``op_seq`` order, the final entry
+    is the most recent author of that element between the two watermarks. Rows
+    without an ``actor`` key (e.g. an in-memory fake ledger) map to ``None``.
+    Used to attribute authorship to each element-level diff change."""
+    actors: Dict[str, Optional[str]] = {}
+    for row in sorted(ops_rows, key=lambda r: r["op_seq"]):
+        seq = row["op_seq"]
+        if seq <= lo_seq or seq > hi_seq:
+            continue
+        actor = row.get("actor")
+        for op in _ops_of(row):
+            eid = op.get("element_id")
+            if eid:
+                actors[eid] = actor
+    return actors
+
+
+def last_actor(ops_rows: List[Dict[str, Any]], hi_seq: int) -> Optional[str]:
+    """The actor of the highest-``op_seq`` op row at or below ``hi_seq``.
+
+    Represents "who last worked on this scene up to a watermark" — used to
+    attribute a scene-set add/remove (and a scene diff's dominant author).
+    Returns ``None`` for an empty ledger or a row without an ``actor``."""
+    latest: Optional[str] = None
+    latest_seq = -1
+    for row in ops_rows:
+        seq = row["op_seq"]
+        if seq <= hi_seq and seq > latest_seq:
+            latest_seq = seq
+            latest = row.get("actor")
+    return latest
+
+
 def _element_content(element: dict) -> dict:
     """The element minus its id — the part a 'changed' diff compares."""
     return {k: v for k, v in element.items() if k != _ELEMENT_ID_KEY}
@@ -237,13 +277,34 @@ class VersionService:
         """Diff ``commit_a`` → ``commit_b`` (``commit_b=None`` = current state).
 
         Returns scene-set adds/removes plus, for each scene present on both
-        sides, an element-level diff (only scenes with changes are listed)."""
+        sides, an element-level diff (only scenes with changes are listed).
+        Each element change carries the ``actor`` who last touched it between the
+        two watermarks; each scene diff and each scene-set add/remove carries the
+        ``author`` who last worked on that scene. A batched ``authors`` map
+        resolves the collected actor uuids to display names (``copilot`` and the
+        caller's own id are left for the client to label)."""
         wm_a, snap_a = await self._resolve_side(script_id, commit_a)
         wm_b, snap_b = await self._resolve_side(script_id, commit_b)
 
         ids_a, ids_b = set(wm_a), set(wm_b)
-        scenes_added = [snap_b[sid] for sid in snap_b if sid not in ids_a]
-        scenes_removed = [snap_a[sid] for sid in snap_a if sid not in ids_b]
+        # Collect every actor id we attribute so names resolve in one batch.
+        actor_ids: set = set()
+
+        scenes_added: List[Dict[str, Any]] = []
+        for sid in snap_b:
+            if sid in ids_a:
+                continue
+            author = last_actor(await self.scenes.list_ops_by_scene(sid), wm_b[sid])
+            scenes_added.append({**snap_b[sid], "author": author})
+            actor_ids.add(author)
+
+        scenes_removed: List[Dict[str, Any]] = []
+        for sid in snap_a:
+            if sid in ids_b:
+                continue
+            author = last_actor(await self.scenes.list_ops_by_scene(sid), wm_a[sid])
+            scenes_removed.append({**snap_a[sid], "author": author})
+            actor_ids.add(author)
 
         scene_diffs: List[Dict[str, Any]] = []
         for sid in ids_a & ids_b:
@@ -251,14 +312,38 @@ class VersionService:
             elements_a = replay_to(rows, wm_a[sid])
             elements_b = replay_to(rows, wm_b[sid])
             elements = diff_scenes(elements_a, elements_b)
-            if elements:
-                scene_diffs.append({"scene_id": sid, "elements": elements})
+            if not elements:
+                continue
+            lo, hi = sorted((wm_a[sid], wm_b[sid]))
+            by_el = actor_by_element(rows, lo, hi)
+            elements = [{**c, "actor": by_el.get(c["id"])} for c in elements]
+            author = last_actor(rows, hi)
+            actor_ids.update(c["actor"] for c in elements)
+            actor_ids.add(author)
+            scene_diffs.append(
+                {"scene_id": sid, "elements": elements, "author": author}
+            )
+
+        authors = await self._resolve_authors(actor_ids)
 
         return {
             "scenes": scene_diffs,
             "scenes_added": scenes_added,
             "scenes_removed": scenes_removed,
+            "authors": authors,
         }
+
+    async def _resolve_authors(self, actor_ids: set) -> Dict[str, str]:
+        """Resolve real user actor ids to display names in one batched read.
+
+        ``copilot`` and ``None`` are skipped (the client labels those). Falls
+        back to ``{}`` when the repository can't resolve names (an in-memory fake
+        without ``resolve_usernames``), so the client degrades to a short id."""
+        ids = sorted(a for a in actor_ids if a and a != "copilot")
+        resolver = getattr(self.commits, "resolve_usernames", None)
+        if not ids or resolver is None:
+            return {}
+        return await resolver(ids)
 
     async def rollback_to(
         self, script_id: str, commit_id: str, actor: str
