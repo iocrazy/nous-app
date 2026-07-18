@@ -1409,6 +1409,11 @@ export const EDITOR_SHELL_STYLES = `
   font-size:12.5px; font-weight:600; color:var(--ink);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
+.mh-version-meta{ display:flex; align-items:baseline; gap:8px; flex-shrink:0; }
+.mh-version-author{
+  font-family:var(--sans); font-size:10.5px; font-weight:600; color:var(--ink-soft);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:96px;
+}
 .mh-version-time{ font-family:var(--mono); font-size:10.5px; color:var(--ink-faint); flex-shrink:0; }
 .mh-version-actions{
   display:flex; flex-wrap:nowrap; gap:5px;
@@ -1459,28 +1464,93 @@ export const EDITOR_SHELL_STYLES = `
 .mh-diff-scroll{ flex:1; min-height:0; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:14px; }
 .mh-diff-state{ margin:auto; font-size:13px; color:var(--ink-faint); font-style:italic; }
 .mh-diff-state.error{ color:var(--red); font-style:normal; }
-.mh-diff-scene-set{ display:flex; flex-direction:column; gap:6px; }
-.mh-diff-scene-chip{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink); }
-.mh-diff-scene-name{ font-weight:600; }
+/* Collapsible group heads (scene-set aggregation + per-scene sections). */
+.mh-diff-group-head{
+  display:flex; align-items:center; gap:8px; width:100%; text-align:left;
+  background:none; border:none; cursor:pointer; padding:2px 0; min-width:0;
+}
+.mh-diff-caret{
+  flex-shrink:0; font-size:9px; color:var(--ink-faint);
+  transition:transform 0.12s ease; transform:rotate(0deg);
+}
+.mh-diff-caret.open{ transform:rotate(90deg); }
+
+/* Scene-set add/remove aggregation ("Added N scenes" → expandable list). */
+.mh-diff-sceneset{ display:flex; flex-direction:column; gap:6px; }
+.mh-diff-group-label{
+  font-size:12.5px; font-weight:600; color:var(--ink); overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap;
+}
+.mh-diff-sceneset-list{
+  list-style:none; margin:0; padding:0 0 0 18px; display:flex; flex-direction:column; gap:3px;
+}
+.mh-diff-sceneset-item{
+  display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink);
+  padding:2px 6px; border-radius:5px; min-width:0;
+}
+.mh-diff-sceneset-item.jumpable{ cursor:pointer; }
+.mh-diff-sceneset-item.jumpable:hover{ background:var(--surface-2); }
+.mh-diff-scene-name{ font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* Per-scene change section. */
 .mh-diff-scene{ display:flex; flex-direction:column; gap:8px; }
+.mh-diff-scene-head{ align-items:baseline; }
 .mh-diff-scene-heading{
   margin:0; font-family:var(--mono); font-size:11px; font-weight:700; letter-spacing:0.04em;
-  text-transform:uppercase; color:var(--ink-faint);
+  text-transform:uppercase; color:var(--ink-faint); overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap;
 }
-.mh-diff-changes{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
-.mh-diff-change{ display:flex; gap:10px; align-items:flex-start; }
+.mh-diff-scene-count{
+  flex-shrink:0; font-family:var(--mono); font-size:10px; font-weight:700;
+  color:var(--ink-faint); background:var(--surface-2); border-radius:999px; padding:1px 7px;
+}
+.mh-diff-changes{ list-style:none; margin:0; padding:0 0 0 18px; display:flex; flex-direction:column; gap:8px; }
+.mh-diff-change{
+  display:flex; flex-direction:column; gap:4px; padding:5px 8px; border-radius:6px;
+  border:1px solid transparent;
+}
+.mh-diff-change.jumpable{ cursor:pointer; }
+.mh-diff-change.jumpable:hover{ border-color:var(--surface-border); background:var(--surface-2); }
+.mh-diff-change-head{ display:flex; align-items:center; gap:8px; }
 .mh-diff-badge{
   flex-shrink:0; font-family:var(--mono); font-size:9.5px; font-weight:700; letter-spacing:0.03em;
-  text-transform:uppercase; padding:3px 7px; border-radius:999px; margin-top:1px;
+  text-transform:uppercase; padding:3px 7px; border-radius:999px;
 }
 .mh-diff-badge.added{ background:var(--green-soft); color:var(--green); }
 .mh-diff-badge.removed{ background:var(--red-soft,var(--surface-2)); color:var(--red); }
 .mh-diff-badge.changed{ background:var(--amber-soft); color:var(--amber); }
 .mh-diff-badge.moved{ background:var(--indigo-soft); color:var(--indigo-deep); }
-.mh-diff-texts{ flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
-.mh-diff-text{ font-size:13px; line-height:1.5; padding:3px 8px; border-radius:5px; word-break:break-word; }
-.mh-diff-text.before{ background:var(--red-soft,var(--surface-2)); color:var(--red); text-decoration:line-through; }
-.mh-diff-text.after{ background:var(--green-soft); color:var(--green); }
+
+/* Author chip — monochrome, quiet; sits after the kind badge. */
+.mh-diff-author{
+  flex-shrink:0; font-family:var(--sans); font-size:10.5px; font-weight:600;
+  color:var(--ink-soft); background:var(--surface-2); border-radius:999px; padding:2px 8px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:120px;
+}
+
+/* Change bodies. Equal word segments stay readable; only del/ins are tinted. */
+.mh-diff-texts{ min-width:0; display:flex; flex-direction:column; gap:4px; }
+.mh-diff-text{
+  font-size:13px; line-height:1.5; padding:3px 8px; border-radius:5px;
+  word-break:break-word; color:var(--ink);
+}
+.mh-diff-text.before{ background:var(--red-soft,var(--surface-2)); }
+.mh-diff-text.after{ background:var(--green-soft); }
+/* Whole-line removed / added keep their full colour cue. */
+.mh-diff-change.removed .mh-diff-text.before{ color:var(--red); text-decoration:line-through; }
+.mh-diff-change.added .mh-diff-text.after{ color:var(--green); }
+.mh-diff-change.moved .mh-diff-text.after{ color:var(--indigo-deep); background:var(--indigo-soft); }
+/* Word-level inline highlights (Cursor style). */
+.mh-w-eq{ color:var(--ink-soft); }
+.mh-w-del{ color:var(--red); text-decoration:line-through; font-weight:600; }
+.mh-w-ins{ color:var(--green); font-weight:600; }
+
+/* Jump-to flash pulse on the live sheet target. */
+@keyframes mhDiffJumpFlash{
+  0%{ box-shadow:0 0 0 3px var(--indigo-soft); }
+  100%{ box-shadow:0 0 0 3px transparent; }
+}
+.mh-diff-jump-flash{ animation:mhDiffJumpFlash 1.4s ease-out; border-radius:4px; }
 
 /* ── Beats view ─────────────────────────────────────────────────────────── */
 .mh-beats-view{ height:100%; overflow-y:auto; padding:20px 24px; }

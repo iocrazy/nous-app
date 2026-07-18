@@ -87,6 +87,8 @@ export interface WritingPanelProps {
   scriptId?: string;
   onCompareCommit?: (commit: ScriptCommit) => void;
   onRolledBack?: () => void;
+  /** The signed-in user id — their own versions read as "You". */
+  currentUserId?: string | null;
 }
 
 export function WritingPanel({
@@ -100,6 +102,7 @@ export function WritingPanel({
   scriptId,
   onCompareCommit,
   onRolledBack,
+  currentUserId,
 }: WritingPanelProps) {
   const { t } = useTranslation();
   const stats = deriveStatistics(scenes);
@@ -112,6 +115,7 @@ export function WritingPanel({
             scriptId={scriptId}
             onCompare={onCompareCommit}
             onRolledBack={onRolledBack}
+            currentUserId={currentUserId}
           />
           <div className="mh-divider" />
         </>

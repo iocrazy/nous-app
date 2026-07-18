@@ -313,6 +313,26 @@ export function EditorShell({
     setDiffCommit(commit);
   }, []);
 
+  // Click-to-jump from the diff rail: scroll the live sheet to the changed
+  // element (or its scene when the element is gone) and pulse a highlight so the
+  // eye lands on it. Best-effort — a missing target (deleted since) is a no-op.
+  const handleJumpToDiff = useCallback(
+    (sceneId: string, elementId: string | null) => {
+      const root = shellRef.current;
+      if (!root) return;
+      const block = root.querySelector<HTMLElement>(`[data-scene-id="${sceneId}"]`);
+      if (!block) return;
+      const target =
+        (elementId &&
+          block.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`)) ||
+        block;
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.classList.add('mh-diff-jump-flash');
+      window.setTimeout(() => target.classList.remove('mh-diff-jump-flash'), 1400);
+    },
+    [],
+  );
+
   // A rollback wrote new ops server-side — drop the stale optimistic overlay and
   // re-fetch the scenes so the sheet reflects the rolled-back content.
   // rollbackNonce keys the scene subtree: useSceneSync only reseeds when
@@ -1337,7 +1357,9 @@ export function EditorShell({
                       scriptId={scriptId}
                       commit={diffCommit}
                       scenes={scenes}
+                      currentUserId={currentUserId}
                       onBack={() => setDiffCommit(null)}
+                      onJumpTo={handleJumpToDiff}
                     />
                   </div>
                 </div>
@@ -1507,6 +1529,7 @@ export function EditorShell({
               scriptId={scriptId}
               onCompareCommit={handleCompareCommit}
               onRolledBack={handleRolledBack}
+              currentUserId={currentUserId}
             />
           </>
         )}
