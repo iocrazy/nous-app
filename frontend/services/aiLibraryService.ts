@@ -400,7 +400,7 @@ export const aiLibraryService = {
     month: string,
     scope: UsageScope = 'user',
     teamId?: number,
-    projectId?: number,
+    projectId?: number | string,
   ): Promise<UsageAggregate> {
     const qs = new URLSearchParams({ month, scope });
     if (scope === 'team' && teamId != null) qs.set('team_id', String(teamId));
@@ -488,7 +488,7 @@ export const aiLibraryService = {
    */
   async listChatSessions(
     slug: string,
-    projectId?: number,
+    projectId?: number | string,
     limit = 50,
     search?: string,
   ): Promise<ChatSession[]> {

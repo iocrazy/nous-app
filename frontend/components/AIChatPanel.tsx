@@ -111,11 +111,12 @@ function extractAwaitingApproval(
   };
 }
 
-/** Coerce the string project id to a BIGINT-compatible number when possible. */
-function parseProjectId(projectId: string | undefined): number | undefined {
+/** Validate the project id (digits-only) but KEEP it a string — project ids
+ *  are Snowflake BIGINTs and Number() rounds them past 2^53. The backend
+ *  parses the string as an exact int64. */
+function parseProjectId(projectId: string | undefined): string | undefined {
   if (!projectId) return undefined;
-  const n = Number(projectId);
-  return Number.isFinite(n) && n > 0 ? n : undefined;
+  return /^\d+$/.test(projectId) ? projectId : undefined;
 }
 
 // Per-agent "last active session" memory: switching agents (or reopening the
