@@ -51,6 +51,7 @@ from app.schemas.projects import (
     ProjectFileUpdate,
     ProjectSuggestionsResponse,
     ProjectUpdate,
+    RecentItemsResponse,
     RenameFolderRequest,
     ReviewStatusUpdate,
     StageSuggestionResponse,
@@ -142,6 +143,24 @@ async def get_project_suggestions(
     svc = ProjectsService()
     items = await svc.get_project_suggestions(auth.user_id, team_id=team_id)
     return ProjectSuggestionsResponse(items=items)
+
+
+@router.get("/recent-items", response_model=RecentItemsResponse)
+async def get_recent_items(
+    auth: AuthDep,
+    limit: int = Query(8, ge=1, le=20, description="Max items (capped at 20)"),
+) -> RecentItemsResponse:
+    """Recently-edited scripts + canvases across the caller's projects, merged
+    and sorted by ``updated_at`` desc, capped at ``limit``.
+
+    MUST stay declared before ``/{project_id}`` below — like ``/suggestions``,
+    ``recent-items`` is a single path segment under this prefix, so a later
+    declaration would be swallowed as ``project_id="recent-items"`` (FastAPI /
+    Starlette match routes in registration order).
+    """
+    svc = ProjectsService()
+    items = await svc.get_recent_items(auth.user_id, limit=limit)
+    return RecentItemsResponse(items=items)
 
 
 @router.get("/{project_id}")

@@ -11,6 +11,7 @@ import {
   ProjectSuggestionItem,
   EpisodeProgress,
   ProjectEntities,
+  RecentItem,
   RenderItemPage,
 } from '../types';
 import { apiClient, apiFetch } from './apiClient';
@@ -589,6 +590,25 @@ export const fetchProjectSuggestions = async (
   const response = await apiClient.get<{ items: ProjectSuggestionItem[] }>(
     '/api/v1/projects/suggestions',
     { query: { team_id: teamId } },
+  );
+  return response.items ?? [];
+};
+
+// ============================================
+// Recent view — recently-edited scripts + canvases
+// ============================================
+
+// NOTE: same convention as fetchProjectSuggestions above — this endpoint
+// returns its response model DIRECTLY (`{items: [...]}`, no `{data}` envelope),
+// so we consume `.items` as-is. Do not add a `.data` unwrap here.
+
+/** Fetch the caller's recently-edited scripts + canvases (newest first, capped at 20). */
+export const fetchRecentItems = async (
+  limit = 8,
+): Promise<RecentItem[]> => {
+  const response = await apiClient.get<{ items: RecentItem[] }>(
+    '/api/v1/projects/recent-items',
+    { query: { limit } },
   );
   return response.items ?? [];
 };

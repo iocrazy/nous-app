@@ -1052,6 +1052,16 @@ export interface ProjectSuggestionItem {
   latest_activity?: ProjectCardActivity | null;
 }
 
+/** One recently-edited script or canvas for the Projects "Recent" view. */
+export interface RecentItem {
+  kind: 'script' | 'canvas';
+  id: string;
+  name: string;
+  project_id: string;
+  project_name: string;
+  updated_at: string | null;
+}
+
 export type ScriptAssetType = 'worldview' | 'character' | 'location' | 'prop' | 'plot_point';
 
 export interface ScriptAsset {

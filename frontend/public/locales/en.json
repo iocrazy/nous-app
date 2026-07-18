@@ -1220,6 +1220,7 @@
   },
   "projects": {
     "title": "All Projects",
+    "recentEmpty": "No recent items",
     "view": {
       "title": "View",
       "all": "All",

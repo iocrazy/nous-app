@@ -301,3 +301,18 @@ class ProjectSuggestionItem(BaseModel):
 
 class ProjectSuggestionsResponse(BaseModel):
     items: list[ProjectSuggestionItem]
+
+
+class RecentItem(BaseModel):
+    """One recently-edited script or canvas for the Projects "Recent" view."""
+
+    kind: str  # 'script' | 'canvas'
+    id: str
+    name: str
+    project_id: str
+    project_name: str
+    updated_at: Optional[str] = None  # ISO-8601 (DB-issued UTC)
+
+
+class RecentItemsResponse(BaseModel):
+    items: list[RecentItem]

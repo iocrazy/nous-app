@@ -234,6 +234,50 @@ class CanvasRepository:
             logger.error(f"canvas list_team_tree({team_id}) failed: {e}")
             return []
 
+    async def list_recent_for_user(
+        self, user_id: str, limit: int = 8
+    ) -> List[Dict[str, Any]]:
+        """Recently-edited LIVE canvases across every project OWNED by
+        ``user_id``, newest-edited first, capped at ``limit``.
+
+        Joins ``projects`` for BOTH owner scoping (mirrors the projects-list
+        endpoint's ``owner_id == user_id`` visibility) and the project name,
+        in ONE query. Returns the recent-items wire shape
+        ``{id, name, project_id, project_name, updated_at}`` with bigint ids
+        stringified. Never raises — degrades the Recent view to empty."""
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(
+                        Canvases.id,
+                        Canvases.name,
+                        Canvases.project_id,
+                        Canvases.updated_at,
+                        Projects.name.label("project_name"),
+                    )
+                    .join(Projects, Projects.id == Canvases.project_id)
+                    .where(Projects.owner_id == user_id)
+                    .where(Canvases.deleted_at.is_(None))
+                    .order_by(Canvases.updated_at.desc())
+                    .limit(limit)
+                )
+                rows = result.mappings().all()
+            return [
+                {
+                    "id": str(r["id"]),
+                    "name": r["name"],
+                    "project_id": str(r["project_id"]),
+                    "project_name": r["project_name"],
+                    "updated_at": (
+                        r["updated_at"].isoformat() if r["updated_at"] else None
+                    ),
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.error(f"canvas list_recent_for_user({user_id}) failed: {e}")
+            return []
+
     # ------------------------------------------------------------------
     # Writes
     # ------------------------------------------------------------------

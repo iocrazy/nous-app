@@ -1,12 +1,14 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Project, ProjectFile } from '../types';
+import { Project, ProjectFile, RecentItem } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
-import { fetchProjects } from '../services/projectsService';
+import { useWorkspaceScope } from '../hooks/useWorkspaceScope';
+import { fetchProjects, fetchRecentItems } from '../services/projectsService';
 import { ProjectsListView } from '../components/ProjectsListView';
 import { ProjectFilterSidebar } from '../components/project/ProjectFilterSidebar';
+import { RecentItemsList } from '../components/project/RecentItemsList';
 import { VideoReviewPage } from '../components/VideoReviewPage';
 import { CreateProjectModal } from '../components/CreateProjectModal';
 import { ProjectWorkspace } from '../components/workspace/ProjectWorkspace';
@@ -18,6 +20,7 @@ export function ProjectsPage() {
   const [, setSearchParams] = useSearchParams();
   const { currentUserId } = useAuth();
   const { selectedTeamId, personalTeamId } = useTeamContext();
+  const { effectiveTeamId } = useWorkspaceScope();
 
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [reviewFile, setReviewFile] = useState<ProjectFile | null>(null);
@@ -25,6 +28,8 @@ export function ProjectsPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeFilter, setActiveFilter] = useState('all');
+  const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
+  const [recentLoaded, setRecentLoaded] = useState(false);
 
   // Load projects + auto-select from URL
   useEffect(() => {
@@ -47,6 +52,30 @@ export function ProjectsPage() {
     load();
   }, [projectId, selectedTeamId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Load the Recent feed lazily — only when the Recent view is active. Keyed
+  // on the team scope too so switching workspaces refetches.
+  useEffect(() => {
+    if (activeFilter !== 'recent') return;
+    let cancelled = false;
+    fetchRecentItems(8)
+      .then((items) => {
+        if (!cancelled) {
+          setRecentItems(items);
+          setRecentLoaded(true);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load recent items:', err);
+        if (!cancelled) {
+          setRecentItems([]);
+          setRecentLoaded(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFilter, selectedTeamId]);
+
   // Derive filter counts and folders
   const starredProjects = useMemo(() => projects.filter(p => p.is_starred), [projects]);
 
@@ -59,12 +88,12 @@ export function ProjectsPage() {
     return [...groups].sort();
   }, [projects]);
 
-  // PR-9 (G7): Views rail reduced to All / Starred / Archived.
   const projectCounts = useMemo(() => ({
+    recent: recentLoaded ? recentItems.length : 0,
     all: projects.length,
     starred: starredProjects.length,
     archived: projects.filter(p => !!p.archived_at).length,
-  }), [projects, starredProjects]);
+  }), [projects, starredProjects, recentItems, recentLoaded]);
 
   const folderCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -92,6 +121,7 @@ export function ProjectsPage() {
 
   const filterTitle = useMemo(() => {
     switch (activeFilter) {
+      case 'recent': return t('projects.view.recent');
       case 'starred': return t('projects.filterTitle.starred');
       case 'archived': return t('projects.filterTitle.archived');
       default:
@@ -111,6 +141,23 @@ export function ProjectsPage() {
     setSelectedProject(null);
     navigate(teamId ? `/team/${teamId}/projects` : '/projects');
   }, [navigate, teamId]);
+
+  // Recent-row navigation. Canvas → the standalone canvas editor
+  // (/team/:teamId/canvas/:canvasId — always team-scoped; personal falls back
+  // to the personal-team snowflake). Script → the project workspace with the
+  // Script module preselected (the workspace URL contract only targets a
+  // module via ?module=, not a specific script/episode — it auto-resolves the
+  // active episode's script itself).
+  const handleRecentSelect = useCallback((item: RecentItem) => {
+    if (item.kind === 'canvas') {
+      navigate(`/team/${effectiveTeamId}/canvas/${item.id}`);
+      return;
+    }
+    const base = teamId
+      ? `/team/${teamId}/projects/${item.project_id}`
+      : `/projects/${item.project_id}`;
+    navigate(`${base}?module=script`);
+  }, [navigate, teamId, effectiveTeamId]);
 
   const refreshProjects = useCallback(async () => {
     try {
@@ -177,13 +224,20 @@ export function ProjectsPage() {
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         />
         <div className={'flex-1 min-w-0 h-full overflow-y-auto px-8 pt-3 pb-8'}>
-          <ProjectsListView
-            projects={filteredProjects}
-            onProjectSelect={handleProjectSelect}
-            onCreateProject={() => setIsCreateProjectModalOpen(true)}
-            onProjectsChange={refreshProjects}
-            title={filterTitle}
-          />
+          {activeFilter === 'recent' ? (
+            <>
+              <h2 className="text-lg font-semibold text-ink-100 mb-4">{filterTitle}</h2>
+              <RecentItemsList items={recentItems} onSelect={handleRecentSelect} />
+            </>
+          ) : (
+            <ProjectsListView
+              projects={filteredProjects}
+              onProjectSelect={handleProjectSelect}
+              onCreateProject={() => setIsCreateProjectModalOpen(true)}
+              onProjectsChange={refreshProjects}
+              title={filterTitle}
+            />
+          )}
         </div>
       </div>
       <CreateProjectModal

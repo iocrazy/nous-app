@@ -56,6 +56,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import read_scope, write_scope
 from app.models import (
+    Projects,
     ScriptAssets,
     ScriptChapters,
     ScriptProjects,
@@ -218,6 +219,52 @@ class ScriptProjectRepository(BaseRepository):
                 f"Failed to list script projects for project {project_id}: {e}"
             )
             return {"items": [], "total": 0, "page": page, "limit": limit}
+
+    async def list_recent_for_user(
+        self, user_id: str, limit: int = 8
+    ) -> List[Dict[str, Any]]:
+        """Recently-edited non-deleted scripts across every project OWNED by
+        ``user_id``, newest-edited first, capped at ``limit``.
+
+        Joins ``projects`` for BOTH owner scoping (mirrors the projects-list
+        endpoint's ``owner_id == user_id`` visibility) and the project name,
+        in ONE query — no per-script project lookup. Returns the recent-items
+        wire shape ``{id, name, project_id, project_name, updated_at}`` with
+        bigint ids stringified (JS precision; the recent-view contract uses
+        string ids, unlike the rest of this repo which keeps bigints native).
+        Never raises — a failure degrades the Recent view to empty."""
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(
+                        ScriptProjects.id,
+                        ScriptProjects.name,
+                        ScriptProjects.project_id,
+                        ScriptProjects.updated_at,
+                        Projects.name.label("project_name"),
+                    )
+                    .join(Projects, Projects.id == ScriptProjects.project_id)
+                    .where(Projects.owner_id == user_id)
+                    .where(ScriptProjects.status != "deleted")
+                    .order_by(ScriptProjects.updated_at.desc())
+                    .limit(limit)
+                )
+                rows = result.mappings().all()
+            return [
+                {
+                    "id": str(r["id"]),
+                    "name": r["name"],
+                    "project_id": str(r["project_id"]),
+                    "project_name": r["project_name"],
+                    "updated_at": (
+                        r["updated_at"].isoformat() if r["updated_at"] else None
+                    ),
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.error(f"Failed to list recent scripts for user {user_id}: {e}")
+            return []
 
 
 # ─── script_chapters ────────────────────────────────────────────────────
