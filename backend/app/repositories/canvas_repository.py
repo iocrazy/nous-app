@@ -240,11 +240,18 @@ class CanvasRepository:
         """Recently-edited LIVE canvases across every project OWNED by
         ``user_id``, newest-edited first, capped at ``limit``.
 
-        Joins ``projects`` for BOTH owner scoping (mirrors the projects-list
-        endpoint's ``owner_id == user_id`` visibility) and the project name,
-        in ONE query. Returns the recent-items wire shape
-        ``{id, name, project_id, project_name, updated_at}`` with bigint ids
-        stringified. Never raises — degrades the Recent view to empty."""
+        Joins ``projects`` for owner scoping (mirrors the projects-list
+        endpoint's ``owner_id == user_id`` visibility), the project name, AND
+        the project's ``team_id`` — the Recent view spans EVERY team the
+        caller owns projects in, not just the team currently open in the UI,
+        so each item must carry its OWN team so the frontend can navigate to
+        it directly instead of assuming "current page's team" (cross-team
+        recent items were silently unopenable before this field existed).
+        One query. Returns the recent-items wire shape
+        ``{id, name, project_id, project_name, team_id, updated_at}`` with
+        bigint ids stringified (``team_id`` is ``None`` for a personal
+        project with no team). Never raises — degrades the Recent view to
+        empty."""
         try:
             async with read_scope() as session:
                 result = await session.execute(
@@ -254,6 +261,7 @@ class CanvasRepository:
                         Canvases.project_id,
                         Canvases.updated_at,
                         Projects.name.label("project_name"),
+                        Projects.team_id,
                     )
                     .join(Projects, Projects.id == Canvases.project_id)
                     .where(Projects.owner_id == user_id)
@@ -268,6 +276,9 @@ class CanvasRepository:
                     "name": r["name"],
                     "project_id": str(r["project_id"]),
                     "project_name": r["project_name"],
+                    "team_id": (
+                        str(r["team_id"]) if r["team_id"] is not None else None
+                    ),
                     "updated_at": (
                         r["updated_at"].isoformat() if r["updated_at"] else None
                     ),

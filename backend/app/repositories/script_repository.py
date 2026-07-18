@@ -226,12 +226,22 @@ class ScriptProjectRepository(BaseRepository):
         """Recently-edited non-deleted scripts across every project OWNED by
         ``user_id``, newest-edited first, capped at ``limit``.
 
-        Joins ``projects`` for BOTH owner scoping (mirrors the projects-list
-        endpoint's ``owner_id == user_id`` visibility) and the project name,
-        in ONE query — no per-script project lookup. Returns the recent-items
-        wire shape ``{id, name, project_id, project_name, updated_at}`` with
+        Joins ``projects`` for owner scoping (mirrors the projects-list
+        endpoint's ``owner_id == user_id`` visibility), the project name, AND
+        the PROJECT's ``team_id`` — deliberately ``Projects.team_id``, not
+        ``script_projects.team_id`` (script_projects.team_id is NOT NULL and
+        falls back to the creator's personal team even for a personal
+        project, so using it would misroute a personal script to a team
+        route). The Recent view spans every team the caller owns projects
+        in, not just the team currently open in the UI, so each item must
+        carry its own team for the frontend to navigate to it directly
+        instead of assuming "current page's team" (cross-team recent items
+        were silently unopenable before this field existed). One query — no
+        per-script project lookup. Returns the recent-items wire shape
+        ``{id, name, project_id, project_name, team_id, updated_at}`` with
         bigint ids stringified (JS precision; the recent-view contract uses
-        string ids, unlike the rest of this repo which keeps bigints native).
+        string ids, unlike the rest of this repo which keeps bigints native;
+        ``team_id`` is ``None`` for a personal project with no team).
         Never raises — a failure degrades the Recent view to empty."""
         try:
             async with read_scope() as session:
@@ -242,6 +252,7 @@ class ScriptProjectRepository(BaseRepository):
                         ScriptProjects.project_id,
                         ScriptProjects.updated_at,
                         Projects.name.label("project_name"),
+                        Projects.team_id,
                     )
                     .join(Projects, Projects.id == ScriptProjects.project_id)
                     .where(Projects.owner_id == user_id)
@@ -256,6 +267,9 @@ class ScriptProjectRepository(BaseRepository):
                     "name": r["name"],
                     "project_id": str(r["project_id"]),
                     "project_name": r["project_name"],
+                    "team_id": (
+                        str(r["team_id"]) if r["team_id"] is not None else None
+                    ),
                     "updated_at": (
                         r["updated_at"].isoformat() if r["updated_at"] else None
                     ),

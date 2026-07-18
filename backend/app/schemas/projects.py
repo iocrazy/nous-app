@@ -9,7 +9,7 @@ video linking operations.
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -306,11 +306,17 @@ class ProjectSuggestionsResponse(BaseModel):
 class RecentItem(BaseModel):
     """One recently-edited script or canvas for the Projects "Recent" view."""
 
-    kind: str  # 'script' | 'canvas'
+    kind: Literal["script", "canvas"]
     id: str
     name: str
     project_id: str
     project_name: str
+    # The item's OWN project's team (None for a personal project with no
+    # team) — the Recent view is owner-scoped across every team the caller
+    # belongs to, so the frontend must navigate using THIS field, never the
+    # current page's team (that was the cross-team-open bug this field
+    # fixes).
+    team_id: Optional[str] = None
     updated_at: Optional[str] = None  # ISO-8601 (DB-issued UTC)
 
 

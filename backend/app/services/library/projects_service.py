@@ -1456,6 +1456,8 @@ class ProjectsService:
             get_script_project_repository,
         )
 
+        # Router already clamps via Query(ge=1, le=20); re-clamped here as
+        # defense for any direct (non-router) caller of this service method.
         capped = max(1, min(int(limit), 20))
         scripts = await get_script_project_repository().list_recent_for_user(
             user_id, capped

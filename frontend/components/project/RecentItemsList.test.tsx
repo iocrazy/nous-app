@@ -14,8 +14,8 @@ vi.mock('react-i18next', () => ({
 vi.mock('../../utils/relativeTime', () => ({ formatRelativeTime: () => '2h ago' }));
 
 const items: RecentItem[] = [
-  { kind: 'script', id: 's1', name: 'Episode 1', project_id: '10', project_name: 'My Show', updated_at: '2026-07-05T00:00:00+00:00' },
-  { kind: 'canvas', id: 'c1', name: 'Board A', project_id: '10', project_name: 'My Show', updated_at: '2026-07-04T00:00:00+00:00' },
+  { kind: 'script', id: 's1', name: 'Episode 1', project_id: '10', project_name: 'My Show', team_id: '100', updated_at: '2026-07-05T00:00:00+00:00' },
+  { kind: 'canvas', id: 'c1', name: 'Board A', project_id: '10', project_name: 'My Show', team_id: '100', updated_at: '2026-07-04T00:00:00+00:00' },
 ];
 
 describe('RecentItemsList', () => {

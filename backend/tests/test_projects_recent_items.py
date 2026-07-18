@@ -40,6 +40,7 @@ _OWNER_ID = str(uuid.uuid4())
 _PROJECT_ID = 900000000000001
 _SCRIPT_ID = 900000000000002
 _CANVAS_ID = 900000000000003
+_TEAM_ID = 900000000000004
 
 
 class _FakeMappings:
@@ -94,9 +95,13 @@ async def test_script_recent_sql_join_scope_order_limit():
         await ScriptProjectRepository().list_recent_for_user(_OWNER_ID, limit=8)
 
     sql, _params = _rendered(session.statements[0])
-    # Joins projects for owner scoping + project name.
+    # Joins projects for owner scoping + project name + team_id (cross-team
+    # navigation contract — the Recent view is owner-scoped across every
+    # team the caller belongs to, so the wire shape must carry the item's
+    # OWN team so the frontend can route to it, not the current page's team).
     assert "JOIN public.projects" in sql
     assert "public.projects.owner_id" in sql
+    assert "public.projects.team_id" in sql
     # Excludes soft-deleted scripts.
     assert "public.script_projects.status !=" in sql
     # Newest-edited first, capped.
@@ -112,6 +117,7 @@ async def test_script_recent_row_shape_stringifies_ids():
         "project_id": _PROJECT_ID,
         "updated_at": _dt.datetime(2026, 7, 1, tzinfo=_dt.timezone.utc),
         "project_name": "My Show",
+        "team_id": _TEAM_ID,
     }
     session = _CaptureSession(rows=[row])
     with patch.object(script_mod, "read_scope", lambda: _ScopeCtx(session)):
@@ -123,9 +129,29 @@ async def test_script_recent_row_shape_stringifies_ids():
             "name": "Episode 1",
             "project_id": str(_PROJECT_ID),
             "project_name": "My Show",
+            "team_id": str(_TEAM_ID),
             "updated_at": "2026-07-01T00:00:00+00:00",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_script_recent_row_shape_null_team_id_passes_through():
+    """A personal project (``projects.team_id IS NULL``) must surface
+    ``team_id: None`` — never coerced to the string ``"None"``."""
+    row = {
+        "id": _SCRIPT_ID,
+        "name": "Episode 1",
+        "project_id": _PROJECT_ID,
+        "updated_at": _dt.datetime(2026, 7, 1, tzinfo=_dt.timezone.utc),
+        "project_name": "My Show",
+        "team_id": None,
+    }
+    session = _CaptureSession(rows=[row])
+    with patch.object(script_mod, "read_scope", lambda: _ScopeCtx(session)):
+        out = await ScriptProjectRepository().list_recent_for_user(_OWNER_ID, limit=8)
+
+    assert out[0]["team_id"] is None
 
 
 @pytest.mark.asyncio
@@ -154,6 +180,7 @@ async def test_canvas_recent_sql_join_scope_order_limit():
     sql, _params = _rendered(session.statements[0])
     assert "JOIN public.projects" in sql
     assert "public.projects.owner_id" in sql
+    assert "public.projects.team_id" in sql
     # Live canvases only.
     assert "public.canvases.deleted_at IS NULL" in sql
     assert "ORDER BY public.canvases.updated_at DESC" in sql
@@ -168,6 +195,7 @@ async def test_canvas_recent_row_shape_stringifies_ids():
         "project_id": _PROJECT_ID,
         "updated_at": _dt.datetime(2026, 7, 2, tzinfo=_dt.timezone.utc),
         "project_name": "My Show",
+        "team_id": _TEAM_ID,
     }
     session = _CaptureSession(rows=[row])
     with patch.object(canvas_mod, "read_scope", lambda: _ScopeCtx(session)):
@@ -179,9 +207,27 @@ async def test_canvas_recent_row_shape_stringifies_ids():
             "name": "Board A",
             "project_id": str(_PROJECT_ID),
             "project_name": "My Show",
+            "team_id": str(_TEAM_ID),
             "updated_at": "2026-07-02T00:00:00+00:00",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_canvas_recent_row_shape_null_team_id_passes_through():
+    row = {
+        "id": _CANVAS_ID,
+        "name": "Board A",
+        "project_id": _PROJECT_ID,
+        "updated_at": _dt.datetime(2026, 7, 2, tzinfo=_dt.timezone.utc),
+        "project_name": "My Show",
+        "team_id": None,
+    }
+    session = _CaptureSession(rows=[row])
+    with patch.object(canvas_mod, "read_scope", lambda: _ScopeCtx(session)):
+        out = await CanvasRepository().list_recent_for_user(_OWNER_ID, limit=8)
+
+    assert out[0]["team_id"] is None
 
 
 # ── ProjectsService.get_recent_items — merge / sort / cap / kind ──────────
@@ -201,6 +247,7 @@ async def test_recent_items_merges_sorts_tags_and_caps():
             "name": "S older",
             "project_id": "10",
             "project_name": "P",
+            "team_id": "500",
             "updated_at": "2026-07-01T00:00:00+00:00",
         },
         {
@@ -208,6 +255,7 @@ async def test_recent_items_merges_sorts_tags_and_caps():
             "name": "S newest",
             "project_id": "10",
             "project_name": "P",
+            "team_id": "500",
             "updated_at": "2026-07-05T00:00:00+00:00",
         },
     ]
@@ -215,8 +263,12 @@ async def test_recent_items_merges_sorts_tags_and_caps():
         {
             "id": "3",
             "name": "C middle",
-            "project_id": "10",
-            "project_name": "P",
+            "project_id": "20",
+            "project_name": "Q",
+            # A DIFFERENT team than the scripts above — the Recent view is
+            # owner-scoped across every team the caller belongs to, so the
+            # merge must pass each item's own team_id through untouched.
+            "team_id": "777",
             "updated_at": "2026-07-03T00:00:00+00:00",
         },
     ]
@@ -237,6 +289,10 @@ async def test_recent_items_merges_sorts_tags_and_caps():
     assert [i["id"] for i in out] == ["2", "3"]
     assert out[0]["kind"] == "script"
     assert out[1]["kind"] == "canvas"
+    # team_id passes through the merge untouched — the frontend routes
+    # cross-team items using this, not the current page's team.
+    assert out[0]["team_id"] == "500"
+    assert out[1]["team_id"] == "777"
 
 
 @pytest.mark.asyncio
@@ -257,3 +313,47 @@ async def test_recent_items_clamps_limit_to_20():
     # Each repo is asked for at most the clamped ceiling (20).
     script_repo.list_recent_for_user.assert_awaited_once_with(_OWNER_ID, 20)
     canvas_repo.list_recent_for_user.assert_awaited_once_with(_OWNER_ID, 20)
+
+
+# ── RecentItem schema — team_id field + Literal kind ─────────────────────
+
+
+def test_recent_item_schema_accepts_team_id_and_null_team_id():
+    from app.schemas.projects import RecentItem
+
+    with_team = RecentItem(
+        kind="script",
+        id="1",
+        name="Ep 1",
+        project_id="10",
+        project_name="P",
+        team_id="500",
+        updated_at="2026-07-01T00:00:00+00:00",
+    )
+    assert with_team.team_id == "500"
+
+    personal = RecentItem(
+        kind="canvas",
+        id="2",
+        name="Board",
+        project_id="20",
+        project_name="Q",
+        team_id=None,
+        updated_at=None,
+    )
+    assert personal.team_id is None
+
+
+def test_recent_item_schema_rejects_invalid_kind():
+    from pydantic import ValidationError
+
+    from app.schemas.projects import RecentItem
+
+    with pytest.raises(ValidationError):
+        RecentItem(
+            kind="bogus",
+            id="1",
+            name="Ep 1",
+            project_id="10",
+            project_name="P",
+        )

@@ -1,10 +1,9 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Project, ProjectFile, RecentItem } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
-import { useWorkspaceScope } from '../hooks/useWorkspaceScope';
 import { fetchProjects, fetchRecentItems } from '../services/projectsService';
 import { ProjectsListView } from '../components/ProjectsListView';
 import { ProjectFilterSidebar } from '../components/project/ProjectFilterSidebar';
@@ -20,7 +19,6 @@ export function ProjectsPage() {
   const [, setSearchParams] = useSearchParams();
   const { currentUserId } = useAuth();
   const { selectedTeamId, personalTeamId } = useTeamContext();
-  const { effectiveTeamId } = useWorkspaceScope();
 
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [reviewFile, setReviewFile] = useState<ProjectFile | null>(null);
@@ -52,29 +50,52 @@ export function ProjectsPage() {
     load();
   }, [projectId, selectedTeamId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load the Recent feed lazily — only when the Recent view is active. Keyed
-  // on the team scope too so switching workspaces refetches.
-  useEffect(() => {
-    if (activeFilter !== 'recent') return;
-    let cancelled = false;
+  // Recent feed loader, shared by the eager mount fetch and the
+  // refresh-on-activate effect below. `recentInFlightRef` guards against
+  // both effects firing a redundant overlapping request in the same tick
+  // (e.g. the team scope changes while the Recent view is already active).
+  // `mountedRef` avoids setState after unmount if the request resolves late.
+  const recentInFlightRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => () => {
+    mountedRef.current = false;
+  }, []);
+  const loadRecentItems = useCallback(() => {
+    if (recentInFlightRef.current) return;
+    recentInFlightRef.current = true;
     fetchRecentItems(8)
       .then((items) => {
-        if (!cancelled) {
-          setRecentItems(items);
-          setRecentLoaded(true);
-        }
+        if (!mountedRef.current) return;
+        setRecentItems(items);
+        setRecentLoaded(true);
       })
       .catch((err) => {
         console.error('Failed to load recent items:', err);
-        if (!cancelled) {
-          setRecentItems([]);
-          setRecentLoaded(true);
-        }
+        if (!mountedRef.current) return;
+        setRecentItems([]);
+        setRecentLoaded(true);
+      })
+      .finally(() => {
+        recentInFlightRef.current = false;
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeFilter, selectedTeamId]);
+  }, []);
+
+  // Eager fetch on mount (+ whenever the team scope changes) so the
+  // sidebar "Recent" count is correct immediately — the user shouldn't have
+  // to click into the Recent view first just to see how many items are
+  // there. `limit=8` keeps this a cheap single request.
+  useEffect(() => {
+    loadRecentItems();
+  }, [selectedTeamId, loadRecentItems]);
+
+  // Refresh when the Recent view is activated, in case the eager fetch
+  // above is now stale (e.g. a script/canvas was edited elsewhere since
+  // mount). `recentInFlightRef` prevents this from double-firing alongside
+  // the mount effect above.
+  useEffect(() => {
+    if (activeFilter !== 'recent') return;
+    loadRecentItems();
+  }, [activeFilter, loadRecentItems]);
 
   // Derive filter counts and folders
   const starredProjects = useMemo(() => projects.filter(p => p.is_starred), [projects]);
@@ -142,22 +163,29 @@ export function ProjectsPage() {
     navigate(teamId ? `/team/${teamId}/projects` : '/projects');
   }, [navigate, teamId]);
 
-  // Recent-row navigation. Canvas → the standalone canvas editor
-  // (/team/:teamId/canvas/:canvasId — always team-scoped; personal falls back
-  // to the personal-team snowflake). Script → the project workspace with the
-  // Script module preselected (the workspace URL contract only targets a
-  // module via ?module=, not a specific script/episode — it auto-resolves the
+  // Recent-row navigation. `/projects/recent-items` is owner-scoped across
+  // EVERY team the caller belongs to (not just the team currently open in
+  // this page), so the target URL MUST be built from the item's OWN
+  // `team_id` — never the active page's `teamId` / `effectiveTeamId` — or a
+  // cross-team item silently fails to open (it's not in the current page's
+  // project list, since that list only ever fetches the active team's
+  // projects). A personal project carries `team_id: null`; fall back to the
+  // personal-team snowflake, mirroring the existing canvas convention
+  // ("personal falls back to the personal-team snowflake").
+  //
+  // Canvas → the standalone canvas editor (/team/:teamId/canvas/:canvasId —
+  // always team-scoped). Script → the project workspace with the Script
+  // module preselected (the workspace URL contract only targets a module
+  // via ?module=, not a specific script/episode — it auto-resolves the
   // active episode's script itself).
   const handleRecentSelect = useCallback((item: RecentItem) => {
+    const targetTeamId = item.team_id || personalTeamId;
     if (item.kind === 'canvas') {
-      navigate(`/team/${effectiveTeamId}/canvas/${item.id}`);
+      navigate(`/team/${targetTeamId}/canvas/${item.id}`);
       return;
     }
-    const base = teamId
-      ? `/team/${teamId}/projects/${item.project_id}`
-      : `/projects/${item.project_id}`;
-    navigate(`${base}?module=script`);
-  }, [navigate, teamId, effectiveTeamId]);
+    navigate(`/team/${targetTeamId}/projects/${item.project_id}?module=script`);
+  }, [navigate, personalTeamId]);
 
   const refreshProjects = useCallback(async () => {
     try {

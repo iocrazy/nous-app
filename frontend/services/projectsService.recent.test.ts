@@ -20,7 +20,7 @@ beforeEach(() => {
 describe('fetchRecentItems', () => {
   it('GETs /projects/recent-items with the limit query and unwraps items', async () => {
     const items = [
-      { kind: 'script', id: '1', name: 'Ep 1', project_id: '10', project_name: 'Show', updated_at: '2026-07-05T00:00:00+00:00' },
+      { kind: 'script', id: '1', name: 'Ep 1', project_id: '10', project_name: 'Show', team_id: '500', updated_at: '2026-07-05T00:00:00+00:00' },
     ];
     get.mockResolvedValueOnce({ items });
 

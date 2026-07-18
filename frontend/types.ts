@@ -1059,6 +1059,11 @@ export interface RecentItem {
   name: string;
   project_id: string;
   project_name: string;
+  // The item's OWN project's team (null for a personal project with no
+  // team) — the Recent view is owner-scoped across every team the caller
+  // belongs to, so navigation MUST use this field, never the current page's
+  // teamId (see ProjectsPage.handleRecentSelect).
+  team_id: string | null;
   updated_at: string | null;
 }
 
