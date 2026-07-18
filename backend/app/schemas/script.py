@@ -16,6 +16,11 @@ class ScriptProjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = Field(None, max_length=2000)
     project_id: int
+    # Auto-provision (episode → empty script). When set, create is idempotent:
+    # the endpoint returns the episode's existing active script instead of
+    # inserting a duplicate (#1432 double-fire kill). Snowflake id as str; the
+    # repo bigint-coerces it. Omitted by the normal "New Script" button.
+    episode_id: Optional[str] = None
 
 
 class ScriptImportRequest(BaseModel):

@@ -26,7 +26,6 @@ import {
 import {
   createScriptProject,
   fetchScriptProjects,
-  updateScriptProject,
 } from '../../services/scriptService';
 import { useToast } from '../Toast';
 import { useAuth } from '../../contexts/AuthContext';
@@ -225,6 +224,63 @@ export function ProjectWorkspace({
   const [studioScenes, setStudioScenes] = useState<SceneLift[]>([]);
   const [studioActiveSceneId, setStudioActiveSceneId] = useState<string | null>(null);
 
+  // Concurrent triggers for the SAME episode share one resolve/provision.
+  // Without this, a double-fire — double-clicking a work view, or the
+  // episode-change effect firing alongside an explicit open — runs the
+  // check-then-create twice and provisions two scripts (prod #1432: two active
+  // scripts ~1.3s apart, the first empty). Callers share ONE promise so at most
+  // one createScriptProject is issued; the backend get-or-create covers the
+  // cross-tab / lost-race case as defense in depth.
+  const provisionInFlightRef = useRef<Map<string, Promise<string | null>>>(new Map());
+
+  const resolveOrProvisionScript = useCallback(
+    (episode: EpisodeProgress): Promise<string | null> => {
+      const key = String(episode.episode_id);
+      const inflight = provisionInFlightRef.current.get(key);
+      if (inflight) return inflight;
+      const run = (async (): Promise<string | null> => {
+        const result = await fetchScriptProjects(project.id);
+        const candidates = (result.data ?? []).filter(
+          (s) => String(s.episode_id ?? '') === String(episode.episode_id),
+        );
+        if (candidates.length === 0) {
+          // Pre-epic projects have episodes with no script (mig353 backfilled
+          // Episode 1 but only attached scripts that already existed) — the
+          // old silent fall-back to the Episodes pane read as "点了没反应"
+          // (prod feedback 2026-07-11). Atomic create+bind: the backend
+          // returns the episode's existing active script if one already
+          // exists, so a lost race still can't duplicate.
+          const created = await createScriptProject({
+            project_id: project.id,
+            name: episode.title,
+            episode_id: episode.episode_id,
+          });
+          return created.id;
+        }
+        candidates.sort(
+          (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+        );
+        return candidates[0].id;
+      })();
+      provisionInFlightRef.current.set(key, run);
+      // Housekeeping branch: clear the in-flight entry once settled. The
+      // `.catch` swallows rejection on THIS branch only — the real error still
+      // propagates through the `run` promise returned to (and awaited by)
+      // callers; without it a failed provision would surface as an unhandled
+      // rejection.
+      void run
+        .finally(() => {
+          // Clear only if a later distinct run hasn't already replaced this one.
+          if (provisionInFlightRef.current.get(key) === run) {
+            provisionInFlightRef.current.delete(key);
+          }
+        })
+        .catch(() => {});
+      return run;
+    },
+    [project.id],
+  );
+
   // Resolve a given episode's most recently updated script and mount
   // EditorShell inline (no route jump); no script → provision an empty one the
   // same way project-create does, then mount it. `railView` presets the work
@@ -237,29 +293,12 @@ export function ProjectWorkspace({
       }
       setStudioView(railView);
       try {
-        const result = await fetchScriptProjects(project.id);
-        const candidates = (result.data ?? []).filter(
-          (s) => String(s.episode_id ?? '') === String(episode.episode_id),
-        );
-        if (candidates.length === 0) {
-          // Pre-epic projects have episodes with no script (mig353 backfilled
-          // Episode 1 but only attached scripts that already existed) — the
-          // old silent fall-back to the Episodes pane read as "点了没反应"
-          // (prod feedback 2026-07-11). Provision an empty script the same
-          // way project-create does, then mount it.
-          const created = await createScriptProject({
-            project_id: project.id,
-            name: episode.title,
-          });
-          await updateScriptProject(created.id, { episode_id: episode.episode_id });
-          setResolvedScriptId(created.id);
-          setActiveModule('script');
+        const scriptId = await resolveOrProvisionScript(episode);
+        if (!scriptId) {
+          setActiveModule('episodes');
           return;
         }
-        candidates.sort(
-          (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-        );
-        setResolvedScriptId(candidates[0].id);
+        setResolvedScriptId(scriptId);
         setActiveModule('script');
       } catch (err) {
         console.error('[ProjectWorkspace] failed to resolve current episode script:', err);
@@ -268,7 +307,7 @@ export function ProjectWorkspace({
         setActiveModule('episodes');
       }
     },
-    [project.id, addToast, t],
+    [resolveOrProvisionScript, addToast, t],
   );
 
   const openCurrentEpisodeScript = useCallback(

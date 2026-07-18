@@ -79,6 +79,17 @@ describe('scriptService project CRUD', () => {
     expect(created.id).toBe('s1');
   });
 
+  it('createScriptProject forwards episode_id in the body (atomic create+bind)', async () => {
+    const spy = stubJson({ success: true, data: { id: 's1', name: 'Ep 1' } });
+    await createScriptProject({ project_id: 'p-1', name: 'Ep 1', episode_id: '900' });
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({
+      project_id: 'p-1',
+      name: 'Ep 1',
+      episode_id: '900',
+    });
+  });
+
   it('updateScriptProject PUTs to /:id', async () => {
     const spy = stubJson({ success: true, data: { id: 's1', name: 'renamed' } });
     await updateScriptProject('s1', { name: 'renamed' });
