@@ -192,6 +192,33 @@ describe('BeatsView arrangement fields (M1)', () => {
     expect(svc.updateBeat).toHaveBeenCalledWith('a', { duration_sec: 120 });
   });
 
+  it('clearing the duration input commits null (clear semantics)', async () => {
+    svc.listBeats.mockResolvedValue([beat({ id: 'a', duration_sec: 600 })]);
+    renderView();
+    const input = await screen.findByLabelText('editor.beatDuration');
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.blur(input);
+    expect(svc.updateBeat).toHaveBeenCalledWith('a', { duration_sec: null });
+  });
+
+  it('an invalid duration reverts to the saved value without a network call', async () => {
+    svc.listBeats.mockResolvedValue([beat({ id: 'a', duration_sec: 600 })]);
+    renderView();
+    const input = await screen.findByLabelText('editor.beatDuration');
+    fireEvent.change(input, { target: { value: '-5' } });
+    fireEvent.blur(input);
+    expect(svc.updateBeat).not.toHaveBeenCalled();
+    expect((input as HTMLInputElement).value).toBe('600');
+  });
+
+  it('clicking the selected swatch clears the color (toggle-off)', async () => {
+    svc.listBeats.mockResolvedValue([beat({ id: 'a', color: '#b8a9a0' })]);
+    renderView();
+    const swatches = await screen.findAllByTestId('beat-color-swatch');
+    fireEvent.click(swatches[0]);
+    expect(svc.updateBeat).toHaveBeenCalledWith('a', { color: null });
+  });
+
   it('picks a color swatch and commits it through updateBeat', async () => {
     svc.listBeats.mockResolvedValue([beat({ id: 'a' })]);
     renderView();

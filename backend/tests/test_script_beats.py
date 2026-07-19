@@ -19,6 +19,7 @@ Three halves, matching the plan's Task-1 gate:
 from __future__ import annotations
 
 import datetime as _dt
+from typing import Any, Dict
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -131,6 +132,80 @@ async def test_script_beats_list_403_foreign_team(client, _foreign_team):
     # The script-scoped route resolves via verify_script_access → same team gate.
     resp = await client.get("/api/v1/scripts/9001/beats")
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_beat_patch_explicit_null_clears_fields(client, monkeypatch):
+    """PATCH with explicit nulls must reach the repo as None (clear semantics).
+
+    The frontend clears duration / color / summary by sending ``{"field": null}``.
+    ``model_dump(exclude_none=True)`` silently drops those keys, turning every
+    clear into a no-op — so the router must use ``exclude_unset`` (true PATCH
+    semantics: absent = untouched, null = clear)."""
+    captured: Dict[str, Any] = {}
+
+    async def fake_beat_get(self, beat_id):
+        return {"id": beat_id, "script_id": "9001"}
+
+    async def fake_project_get(self, script_id):
+        return {"id": script_id, "team_id": "TEAM_1"}
+
+    async def fake_member(team_id, user_id):
+        return True
+
+    async def fake_update(self, beat_id, data):
+        captured.update(data)
+        return {"id": beat_id, "script_id": "9001", **data}
+
+    import app.core.scope_guards as guards
+    from app.repositories.script_repository import ScriptProjectRepository
+
+    monkeypatch.setattr(ScriptBeatRepository, "get_by_id", fake_beat_get)
+    monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_project_get)
+    monkeypatch.setattr(guards, "_is_team_member", fake_member)
+    monkeypatch.setattr(ScriptBeatRepository, "update", fake_update)
+
+    resp = await client.patch(
+        "/api/v1/beats/123",
+        json={"summary": None, "duration_sec": None, "color": None},
+    )
+    assert resp.status_code == 200
+    # Explicit nulls arrive as None — the clear must not be silently dropped.
+    assert captured == {"summary": None, "duration_sec": None, "color": None}
+
+
+@pytest.mark.asyncio
+async def test_beat_patch_null_title_not_forwarded(client, monkeypatch):
+    """``title`` is NOT NULL in the DB — an explicit ``{"title": null}`` must be
+    dropped (treated as untouched), never forwarded as a NULL write."""
+    captured: Dict[str, Any] = {}
+
+    async def fake_beat_get(self, beat_id):
+        return {"id": beat_id, "script_id": "9001"}
+
+    async def fake_project_get(self, script_id):
+        return {"id": script_id, "team_id": "TEAM_1"}
+
+    async def fake_member(team_id, user_id):
+        return True
+
+    async def fake_update(self, beat_id, data):
+        captured.update(data)
+        return {"id": beat_id, "script_id": "9001", **data}
+
+    import app.core.scope_guards as guards
+    from app.repositories.script_repository import ScriptProjectRepository
+
+    monkeypatch.setattr(ScriptBeatRepository, "get_by_id", fake_beat_get)
+    monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_project_get)
+    monkeypatch.setattr(guards, "_is_team_member", fake_member)
+    monkeypatch.setattr(ScriptBeatRepository, "update", fake_update)
+
+    resp = await client.patch(
+        "/api/v1/beats/123", json={"title": None, "summary": "Keep me"}
+    )
+    assert resp.status_code == 200
+    assert captured == {"summary": "Keep me"}
 
 
 @pytest.mark.asyncio
