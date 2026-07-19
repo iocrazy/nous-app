@@ -171,9 +171,11 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
         <ArrangementView
           scriptId={scriptId}
           beats={beats}
+          scenes={scenes}
           onAdd={() => void handleAdd()}
           onUpdate={handleUpdate}
           onCreate={(data) => void handleCreate(data)}
+          onOpenScene={onOpenScene}
         />
       )}
     </div>

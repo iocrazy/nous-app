@@ -1813,88 +1813,135 @@ export const EDITOR_SHELL_STYLES = `
    min-content width blows the column past the right island and cards paint over
    the writing panel (same class of bug as the sheet's minmax(0,1fr) fix). */
 .mh-beats-pane{ flex:1; min-width:0; display:flex; flex-direction:column; min-height:0; }
-.mh-beats-subview{ flex:0 0 auto; padding:12px 24px 0; }
+/* laper parity: the sub-view segmented sits top-centre of the pane. */
+.mh-beats-subview{ flex:0 0 auto; padding:12px 24px 8px; display:flex; justify-content:center; }
 .mh-beats-seg{ display:inline-flex; width:max-content; }
-.mh-beats-seg .mh-seg{ flex:0 0 auto; padding:6px 18px; }
+.mh-beats-seg .mh-seg{ flex:0 0 auto; padding:6px 20px; }
 .mh-beats-pane > .mh-beats-view,
 .mh-beats-pane > .mh-arr-root{ flex:1; min-height:0; }
 
 .mh-arr-root{ position:relative; display:flex; flex-direction:column; overflow:hidden; }
 .mh-arr-root > .mh-beats-empty{ margin:auto; }
 .mh-arr-body{ flex:1; min-height:0; display:flex; }
+
+/* Left rail — laper-light: no card blocks, just grip + number + title. The
+   selected beat reads as bold ink, not a filled row. */
 .mh-arr-list{
-  flex:0 0 190px; overflow-y:auto; border-right:1px solid var(--surface-border);
-  padding:12px 8px; display:flex; flex-direction:column; gap:2px;
+  flex:0 0 178px; overflow-y:auto; padding:14px 6px;
+  border-right:1px solid color-mix(in srgb, var(--surface-border) 60%, transparent);
+  display:flex; flex-direction:column; gap:1px;
 }
 .mh-arr-list-item{
-  display:flex; align-items:center; gap:8px; text-align:left; cursor:pointer;
-  background:none; border:1px solid transparent; border-radius:var(--radius-sm);
-  padding:6px 8px; color:var(--ink-soft); font-family:var(--sans);
+  display:flex; align-items:center; gap:7px; text-align:left; cursor:pointer;
+  background:none; border:none; border-radius:8px; padding:5px 8px;
+  color:var(--ink-faint); font-family:var(--sans);
 }
-.mh-arr-list-item:hover{ background:var(--hover-ink-bg); }
-.mh-arr-list-item.selected{ background:var(--sel-ink-bg); color:var(--ink); }
-.mh-arr-list-num{
-  flex-shrink:0; width:20px; height:20px; border-radius:6px; background:var(--surface-2);
-  color:var(--ink-faint); font-size:11px; font-weight:700;
-  display:flex; align-items:center; justify-content:center;
-}
-.mh-arr-list-item.selected .mh-arr-list-num{ background:var(--pill-ink-bg); color:var(--pill-ink-on); }
+.mh-arr-list-item:hover{ color:var(--ink-soft); background:var(--hover-ink-bg); }
+.mh-arr-list-item.selected{ color:var(--ink); }
+.mh-arr-list-grip{ flex-shrink:0; font-size:12px; line-height:1; opacity:0.45; }
+.mh-arr-list-num{ flex-shrink:0; min-width:16px; font-size:11px; font-weight:700; font-variant-numeric:tabular-nums; }
 .mh-arr-list-title{ font-size:12.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mh-arr-list-item.selected .mh-arr-list-title{ font-weight:800; }
 
+.mh-arr-stage{ position:relative; flex:1; min-width:0; display:flex; }
 .mh-arr-timeline-scroll{ flex:1; min-width:0; overflow:auto; position:relative; }
 .mh-arr-canvas{ position:relative; min-width:100%; }
+
+/* Ruler: a thin baseline with film-apostrophe labels; majors drop an 8px tick,
+   minors a 4px hairline. */
 .mh-arr-ruler{
-  position:sticky; top:0; height:26px; z-index:2;
+  position:sticky; top:0; height:30px; z-index:3;
   background:var(--surface); border-bottom:1px solid var(--surface-border);
 }
-.mh-arr-tick{ position:absolute; top:0; bottom:0; width:1px; background:var(--hairline); }
-.mh-arr-tick.major{ background:var(--surface-border); }
+.mh-arr-tick{ position:absolute; bottom:0; width:1px; height:4px; background:var(--hairline); }
+.mh-arr-tick.major{ height:8px; background:var(--ink-faint); }
 .mh-arr-tick-label{
-  position:absolute; top:5px; left:4px; white-space:nowrap;
-  font-size:10px; font-weight:600; color:var(--ink-faint); font-variant-numeric:tabular-nums;
+  position:absolute; bottom:11px; left:3px; white-space:nowrap;
+  font-size:10px; font-weight:700; color:var(--ink-faint); font-variant-numeric:tabular-nums;
 }
-.mh-arr-lanes{ position:relative; }
 
+/* Lanes: the dot-grid canvas the cards float on. */
+.mh-arr-lanes{
+  position:relative;
+  background-image:radial-gradient(circle, color-mix(in srgb, var(--ink) 8%, transparent) 1.4px, transparent 1.4px);
+  background-size:24px 24px; background-position:12px 12px;
+}
+
+/* Tall white beat card: top color bar (color data's new home) + title + 2-line
+   summary + footer (neutral duration chip / Edit Beat ghost). */
 .mh-arr-card{
-  position:absolute; height:44px; box-sizing:border-box; cursor:grab; user-select:none;
-  touch-action:none; overflow:hidden; display:flex; align-items:center; gap:6px;
-  padding:6px 10px 6px 12px; background:var(--surface); border:1px solid var(--hairline);
-  border-radius:var(--radius-sm);
+  position:absolute; box-sizing:border-box; cursor:grab; user-select:none; touch-action:none;
+  overflow:hidden; display:flex; flex-direction:column; gap:5px; padding:12px 13px 10px;
+  background:var(--surface); border:1px solid var(--surface-border); border-radius:var(--radius-md);
+  box-shadow:var(--shadow-island); transition:box-shadow 0.15s ease, transform 0.15s ease;
 }
+.mh-arr-card:hover{ box-shadow:var(--shadow-float); transform:translateY(-1px); }
 .mh-arr-card.selected{ border-color:var(--emph-ink-border); }
-.mh-arr-card.dragging{ cursor:grabbing; z-index:3; box-shadow:var(--shadow-float); }
+.mh-arr-card.dragging{ cursor:grabbing; z-index:4; box-shadow:var(--shadow-float); transform:none; }
 .mh-arr-card.flash{ animation:mh-arr-flash 0.7s ease; }
-@keyframes mh-arr-flash{ 0%,100%{ box-shadow:none; } 30%{ box-shadow:0 0 0 3px var(--accent-soft); } }
-.mh-arr-card-strip{ position:absolute; left:0; top:0; bottom:0; width:4px; }
+@keyframes mh-arr-flash{
+  0%,100%{ box-shadow:var(--shadow-island); }
+  30%{ box-shadow:0 0 0 3px var(--accent-soft), var(--shadow-float); }
+}
+.mh-arr-card-bar{ flex-shrink:0; width:24px; height:3px; border-radius:2px; background:var(--ink-faint); }
 .mh-arr-card-title{
-  flex:1; min-width:0; font-size:12.5px; font-weight:600; color:var(--ink);
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font-size:13.5px; font-weight:700; line-height:1.3; color:var(--ink);
+  overflow:hidden; text-overflow:ellipsis;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
 }
+.mh-arr-card-summary{
+  flex:1; min-height:0; font-size:12px; line-height:1.5; color:var(--ink-faint);
+  overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+}
+.mh-arr-card-foot{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:auto; }
 .mh-arr-card-chip{
-  flex-shrink:0; font-size:10.5px; font-weight:700; color:var(--accent-text);
-  background:var(--accent-soft); border:1px solid var(--accent-border);
-  border-radius:999px; padding:1px 6px; line-height:1.4;
+  flex-shrink:0; font-size:10.5px; font-weight:700; color:var(--chip-ink-fg);
+  background:var(--chip-ink-bg); border-radius:999px; padding:2px 8px; font-variant-numeric:tabular-nums;
 }
-.mh-arr-card-resize{ position:absolute; right:0; top:0; bottom:0; width:8px; cursor:ew-resize; touch-action:none; }
-.mh-arr-card-resize:hover{ background:var(--accent-soft); }
+.mh-arr-card-edit{
+  flex-shrink:0; font-size:10.5px; font-weight:600; color:var(--ink-soft); font-family:var(--sans);
+  background:none; border:1px solid var(--hairline); border-radius:999px; padding:2px 9px; cursor:pointer;
+}
+.mh-arr-card-edit:hover{ color:var(--ink); border-color:var(--emph-ink-border); background:var(--hover-ink-bg); }
+.mh-arr-card-resize{ position:absolute; right:0; top:0; bottom:0; width:10px; cursor:ew-resize; touch-action:none; }
+.mh-arr-card-resize:hover{ background:linear-gradient(to right, transparent, var(--accent-soft)); }
 
+/* M4 memo-pin rail: a second, empty ruler line below the cards (visual anchor). */
+.mh-arr-memo-rail{ position:relative; height:40px; margin-top:6px; border-top:1px dashed var(--surface-border); }
+.mh-arr-memo-tick{ position:absolute; top:0; width:1px; height:8px; background:var(--hairline); }
+
+/* Tools pill — top-right, laper-style with text labels (Fit / Zoom out / in). */
+.mh-arr-tools{
+  position:absolute; top:10px; right:14px; z-index:6; display:flex; align-items:center; gap:2px;
+  background:var(--surface); border:1px solid var(--surface-border); border-radius:10px;
+  padding:4px; box-shadow:var(--shadow-island);
+}
+.mh-arr-tool-btn{
+  display:flex; align-items:center; gap:4px; height:26px; padding:0 10px; line-height:1;
+  border:none; background:none; border-radius:7px; cursor:pointer; font-family:var(--sans);
+  font-size:11px; font-weight:700; color:var(--ink-soft); white-space:nowrap;
+}
+.mh-arr-tool-btn:hover{ background:var(--hover-ink-bg); color:var(--ink); }
+.mh-arr-tool-sep{ width:1px; height:16px; background:var(--surface-border); margin:0 2px; }
+
+/* Unarranged tray — dashed ghost cards below the canvas. */
 .mh-arr-tray{
   flex:0 0 auto; border-top:1px solid var(--surface-border); padding:10px 24px 14px;
   display:flex; align-items:flex-start; gap:12px; overflow-x:auto;
 }
 .mh-arr-tray-label{
-  flex-shrink:0; padding-top:8px; font-size:10.5px; font-weight:700; letter-spacing:0.05em;
+  flex-shrink:0; padding-top:9px; font-size:10.5px; font-weight:700; letter-spacing:0.05em;
   text-transform:uppercase; color:var(--ink-faint);
 }
 .mh-arr-tray-cards{ display:flex; gap:8px; flex-wrap:wrap; }
 .mh-arr-tray-card{
-  position:relative; display:flex; align-items:center; gap:8px; overflow:hidden;
-  background:var(--surface); border:1px solid var(--hairline); border-radius:var(--radius-sm);
-  padding:6px 8px 6px 12px;
+  display:flex; align-items:center; gap:8px; overflow:hidden;
+  background:transparent; border:1px dashed var(--surface-border); border-radius:var(--radius-sm);
+  padding:7px 10px 7px 11px;
 }
-.mh-arr-tray-strip{ position:absolute; left:0; top:0; bottom:0; width:4px; }
+.mh-arr-tray-bar{ flex-shrink:0; width:10px; height:10px; border-radius:50%; background:var(--ink-faint); }
 .mh-arr-tray-title{
-  font-size:12px; font-weight:600; color:var(--ink); max-width:150px;
+  font-size:12px; font-weight:600; color:var(--ink-soft); max-width:150px;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .mh-arr-tray-place{
@@ -1904,20 +1951,44 @@ export const EDITOR_SHELL_STYLES = `
 }
 .mh-arr-tray-place:hover{ filter:brightness(1.04); }
 
-.mh-arr-tools{
-  /* Bottom-right of the pane — the canvas-tool convention. Top-right sat on the
-     first lane and covered whatever card was scrolled under it. */
-  position:absolute; right:16px; bottom:16px; z-index:5; display:flex; gap:2px;
-  background:var(--surface); border:1px solid var(--surface-border); border-radius:10px;
-  padding:3px; box-shadow:var(--shadow-island);
+/* Edit Beat modal — centred overlay in the editor-shell ink chrome. */
+.mh-arr-modal-overlay{
+  position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center;
+  padding:24px; background:color-mix(in srgb, #000 55%, transparent);
 }
-.mh-arr-tool-btn{
-  min-width:30px; height:28px; display:flex; align-items:center; justify-content:center;
-  border:none; background:none; border-radius:8px; cursor:pointer; font-family:var(--sans);
-  font-size:15px; font-weight:600; color:var(--ink-soft); line-height:1;
+.mh-arr-modal{
+  width:100%; max-width:440px; max-height:88vh; overflow-y:auto; box-sizing:border-box;
+  display:flex; flex-direction:column; gap:14px; padding:18px;
+  background:var(--surface); border:1px solid var(--surface-border);
+  border-radius:var(--radius-lg); box-shadow:var(--shadow-float);
 }
-.mh-arr-tool-btn:hover{ background:var(--hover-ink-bg); color:var(--ink); }
-.mh-arr-tool-btn.wide{ padding:0 10px; font-size:12px; font-weight:700; }
+.mh-arr-modal-head{ display:flex; align-items:center; justify-content:space-between; }
+.mh-arr-modal-title{ font-size:14px; font-weight:800; color:var(--ink); }
+.mh-arr-modal-x{
+  background:none; border:none; font-size:18px; line-height:1; color:var(--ink-faint);
+  cursor:pointer; padding:2px 7px; border-radius:6px;
+}
+.mh-arr-modal-x:hover{ color:var(--ink); background:var(--hover-ink-bg); }
+.mh-arr-field{ display:flex; flex-direction:column; gap:6px; }
+.mh-arr-field-label{
+  font-size:11px; font-weight:700; letter-spacing:0.03em; text-transform:uppercase; color:var(--ink-faint);
+}
+.mh-arr-input, .mh-arr-textarea{
+  width:100%; box-sizing:border-box; font-family:var(--sans); font-size:13px; color:var(--ink);
+  background:var(--surface-2); border:1px solid var(--hairline); border-radius:var(--radius-sm); padding:8px 10px;
+}
+.mh-arr-input.narrow{ width:120px; }
+.mh-arr-textarea{ resize:vertical; line-height:1.5; }
+.mh-arr-input:focus, .mh-arr-textarea:focus{ outline:none; border-color:var(--indigo); }
+.mh-arr-modal-foot{ display:flex; justify-content:flex-end; gap:8px; margin-top:2px; }
+.mh-arr-modal-btn{
+  font-family:var(--sans); font-size:12.5px; font-weight:700; border-radius:var(--radius-sm);
+  padding:7px 16px; cursor:pointer;
+}
+.mh-arr-modal-btn.ghost{ background:none; border:1px solid var(--hairline); color:var(--ink-soft); }
+.mh-arr-modal-btn.ghost:hover{ color:var(--ink); background:var(--hover-ink-bg); }
+.mh-arr-modal-btn.primary{ background:var(--indigo); border:none; color:var(--accent-on); }
+.mh-arr-modal-btn.primary:hover{ background:var(--indigo-deep); }
 
 /* ===== FILM NUMBERING (合一终稿, 2026-07-11) =====
    Storyboard scene heads read S1/S2 (mono, neutral ink) and shot codes read 1A/1B
