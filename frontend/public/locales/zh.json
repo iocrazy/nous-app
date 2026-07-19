@@ -216,7 +216,7 @@
       "title": "发布",
       "subtitle": "从素材库选择视频，发布到已连接的账号",
       "content": "内容",
-      "noContent": "素材库中还没有视频资源",
+      "noContent": "还没有上传或生成的视频 — 下载的素材不可发布",
       "titlePlaceholder": "添加标题",
       "descPlaceholder": "添加描述",
       "visibility": "可见范围",
