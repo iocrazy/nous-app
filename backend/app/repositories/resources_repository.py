@@ -92,6 +92,7 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, insert, or_, select, text, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.pg_coerce import coerce_datetime_strings
 from app.db.repository_base import AsyncpgRepository
@@ -1700,16 +1701,38 @@ class ResourcesRepository(AsyncpgRepository):
         included; ``tagged_by`` uuid → str via ``_mappings_dict``)."""
         try:
             async with write_scope() as session:
+                # Idempotent attach: the (resource_id, tag_id) PK means a repeat
+                # attach (double-fired toggle, stale client state) raised a
+                # duplicate-key error → 500 (prod 2026-07-19). ON CONFLICT DO
+                # NOTHING + re-select returns the existing row instead — "make
+                # sure this tag is on this resource" is naturally idempotent.
                 result = await session.execute(
-                    insert(ResourceTags)
+                    pg_insert(ResourceTags)
                     .values(
                         resource_id=self._bigint(resource_id),
                         tag_id=self._bigint(tag_id),
                         tagged_by=tagged_by,
                     )
+                    .on_conflict_do_nothing(index_elements=["resource_id", "tag_id"])
                     .returning(*ResourceTags.__table__.columns)
                 )
                 row = result.mappings().first()
+                if row is None:
+                    row = (
+                        (
+                            await session.execute(
+                                select(ResourceTags.__table__)
+                                .where(
+                                    ResourceTags.resource_id
+                                    == self._bigint(resource_id)
+                                )
+                                .where(ResourceTags.tag_id == self._bigint(tag_id))
+                                .limit(1)
+                            )
+                        )
+                        .mappings()
+                        .first()
+                    )
                 created = _mappings_dict(row) if row else {}
             logger.info(f"Tagged resource {resource_id} with tag {tag_id}")
             return created
