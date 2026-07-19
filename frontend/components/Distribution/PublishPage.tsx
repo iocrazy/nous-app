@@ -10,8 +10,9 @@ import {
   promoteGeneratedVideo, GeneratedVideo,
 } from '../../services/distributionService';
 import {
-  addResourceTag, createTag, fetchAllTags, removeResourceTag,
+  addResourceTag, createTag, removeResourceTag,
 } from '../../services/unifiedTagService';
+import { TO_PUBLISH_TAG_NAME, findToPublishTagId } from '../../services/toPublishService';
 import { SocialAccount, LibraryVideo } from '../../types';
 import { useToast } from '../Toast';
 import { useWorkspaceScope } from '../../hooks/useWorkspaceScope';
@@ -27,11 +28,9 @@ const PLATFORM_LABEL: Record<string, string> = {
   douyin: 'Douyin', kuaishou: 'Kuaishou', xiaohongshu: 'Xiaohongshu',
 };
 
-// Well-known tag that marks Library assets as queued for publishing ("待发布").
-// Users can apply it from the Library tag UI or the picker's bookmark toggle;
-// the picker's "To publish" filter lists exactly the resources carrying it.
-// Created lazily on first mark.
-const TO_PUBLISH_TAG_NAME = 'To Publish';
+// The "To Publish" well-known tag (name, lookup, lazy-create) now lives in
+// services/toPublishService.ts so the Resources context-menu "Mark to publish"
+// action and this picker filter share one source of truth.
 
 // Suggested topics shown under the composer. Clicking one adds it like any
 // typed topic (they map to Douyin hashtags — # + word).
@@ -142,11 +141,10 @@ export const PublishPage: React.FC = () => {
     // "To publish" mark state — non-fatal side channel; failures leave the
     // filter empty but never block the page.
     try {
-      const tags = await fetchAllTags();
-      const tag = tags.find((tg) => tg.name.toLowerCase() === TO_PUBLISH_TAG_NAME.toLowerCase());
-      if (tag) {
-        setToPublishTagId(tag.id);
-        const marked = await listLibraryVideos(scopeId, { tagId: tag.id });
+      const tagId = await findToPublishTagId();
+      if (tagId) {
+        setToPublishTagId(tagId);
+        const marked = await listLibraryVideos(scopeId, { tagId });
         setMarkedIds(new Set(marked.map((m) => m.id)));
       }
     } catch (err) {
