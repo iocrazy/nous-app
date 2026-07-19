@@ -621,6 +621,37 @@ class ResourceTags(Base):
     confidence: Mapped[float | None] = mapped_column(Double(53))
 
 
+class GalleryItems(Base):
+    __tablename__ = "gallery_items"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["gallery_id"],
+            ["public.resources.id"],
+            ondelete="CASCADE",
+            name="gallery_items_gallery_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["image_id"],
+            ["public.resources.id"],
+            ondelete="CASCADE",
+            name="gallery_items_image_id_fkey",
+        ),
+        PrimaryKeyConstraint("gallery_id", "image_id", name="gallery_items_pkey"),
+        UniqueConstraint(
+            "gallery_id", "position", name="gallery_items_gallery_id_position_key"
+        ),
+        Index("idx_gallery_items_image", "image_id"),
+        {"schema": "public"},
+    )
+
+    gallery_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    image_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+
+
 class Folders(Base):
     __tablename__ = "folders"
     __table_args__ = (
