@@ -67,6 +67,25 @@ from app.db.session import read_scope, write_scope
 from app.models import Issues
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 
+
+def visibility_predicate(user_id: str):
+    """The D6.1 issue-visibility WHERE clause, extracted for testability.
+
+    visible = created by me OR assigned to me OR issue.team_id ∈ my teams.
+    Team membership is a correlated IN-subquery against team_members — the
+    single source of the "team 是铁边界" contract: same-team members see each
+    other's issues, other teams never leak.
+    """
+    from app.models.teams import TeamMembers
+
+    member_teams = select(TeamMembers.team_id).where(TeamMembers.user_id == user_id)
+    return or_(
+        Issues.created_by_user_id == user_id,
+        Issues.assignee_user_id == user_id,
+        Issues.team_id.in_(member_teams),
+    )
+
+
 _ISSUE_N2A: Dict[str, str] = _name_to_attr(Issues)
 _ISSUE_ATTRS = {p.key for p in Issues.__mapper__.column_attrs}
 
@@ -195,6 +214,21 @@ class IssueRepository:
                 raise ValueError(f"issue id={issue_id} not found or update no-op")
             return _row(row)
 
+    async def is_team_member(self, user_id: str, team_id: int) -> bool:
+        """True when user_id belongs to team_id. Backs the D6.1 visibility
+        fold on the detail-side asserts (list-side folds in SQL)."""
+        from app.models.teams import TeamMembers
+
+        _uuid.UUID(user_id)
+        async with read_scope() as session:
+            row = await session.execute(
+                select(TeamMembers.user_id).where(
+                    TeamMembers.user_id == user_id,
+                    TeamMembers.team_id == int(team_id),
+                )
+            )
+            return row.first() is not None
+
     async def list_for_user(
         self,
         user_id: str,
@@ -206,20 +240,22 @@ class IssueRepository:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
-        """List issues visible to user_id (own OR assignee). Returns
-        (items, total)."""
+        """List issues visible to user_id. Returns (items, total).
+
+        D6.1 team folding (用户立约 2026-07-19: team 是铁边界): visible =
+        (created by me) OR (assigned to me) OR (the issue's team is one I
+        belong to). Membership comes from a team_members subquery — the
+        client's team_id param is only ever an AND-filter on top, never an
+        authorization input, so passing another team's id yields nothing
+        beyond rows already visible (own/assigned).
+        """
         # Defensive: validate user_id is a real UUID before it reaches the WHERE
         # bind. A malformed value (or one from an untrusted source in the future)
         # would otherwise flow straight into the query.
         _uuid.UUID(user_id)
 
         async with read_scope() as session:
-            base = select(Issues).where(
-                or_(
-                    Issues.created_by_user_id == user_id,
-                    Issues.assignee_user_id == user_id,
-                )
-            )
+            base = select(Issues).where(visibility_predicate(user_id))
             if status:
                 base = base.where(Issues.status == status)
             if project_id:

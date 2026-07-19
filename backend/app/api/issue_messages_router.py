@@ -136,6 +136,13 @@ async def _assert_issue_visible(issue_id: int, auth) -> dict:
         or row.get("assignee_user_id") == user_id
     ):
         return row
+    # D6.1 team folding (用户立约: team 是铁边界): same-team members see the
+    # issue and its thread; other teams 404 (never leak existence).
+    team_id = row.get("team_id")
+    if team_id is not None and await issue_repository.is_team_member(
+        user_id, int(team_id)
+    ):
+        return row
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
 
 
