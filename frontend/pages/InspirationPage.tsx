@@ -3,11 +3,10 @@
 // Notes/Hotspots tabs, the save-as-note loop and a global Parse entry point.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { KeyRound, Link2, Search, X } from 'lucide-react';
+import { Link2, Search, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { Composer } from '../components/Inspiration/Composer';
 import { NoteEditor } from '../components/Inspiration/NoteEditor';
-import { ApiTokensPanel } from '../components/Inspiration/ApiTokensPanel';
 import { NoteTimeline } from '../components/Inspiration/NoteTimeline';
 import { ActivityPanel } from '../components/Inspiration/ActivityPanel';
 import { TagsPanel } from '../components/Inspiration/TagsPanel';
@@ -80,7 +79,6 @@ export const InspirationPage: React.FC = () => {
   const [prefillNonce, setPrefillNonce] = useState(0);
   const [parseOpen, setParseOpen] = useState(false);
   const [parseUrl, setParseUrl] = useState<string | null>(null);
-  const [tokensOpen, setTokensOpen] = useState(false);
   // Hotspots-tab tag narrowing (§7.4): multi-select over the visible pool tags,
   // threaded server-side through useHotspots → getHotspots(tag_id=…).
   const [tagFilterIds, setTagFilterIds] = useState<string[]>([]);
@@ -348,14 +346,6 @@ export const InspirationPage: React.FC = () => {
           <Link2 size={13} />
           {t('inspiration.parseUrl', 'Parse URL')}
         </button>
-        <button
-          onClick={() => setTokensOpen(true)}
-          title={t('inspiration.tokens.title', 'API Tokens')}
-          aria-label={t('inspiration.tokens.title', 'API Tokens')}
-          className="inline-flex shrink-0 items-center justify-center rounded-lg bg-island-2 p-1.5 text-content-3 hover:bg-line hover:text-content-2"
-        >
-          <KeyRound size={15} />
-        </button>
       </div>
 
       <div className="flex gap-3">
@@ -485,33 +475,6 @@ export const InspirationPage: React.FC = () => {
       </div>
 
       <FloatingParse open={parseOpen} onOpenChange={setParseOpen} initialUrl={parseUrl ?? undefined} />
-
-      {tokensOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={() => setTokensOpen(false)}
-        >
-          <div
-            className="w-full max-w-lg rounded-xl bg-island p-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-3 flex items-center gap-2">
-              <KeyRound size={15} className="text-indigo-300" />
-              <h4 className="text-sm font-semibold text-content">
-                {t('inspiration.tokens.title', 'API Tokens')}
-              </h4>
-              <button
-                onClick={() => setTokensOpen(false)}
-                aria-label={t('inspiration.tokens.close', 'Close')}
-                className="ml-auto rounded p-1 text-content-3 hover:bg-island-2 hover:text-content-2"
-              >
-                <X size={15} />
-              </button>
-            </div>
-            <ApiTokensPanel />
-          </div>
-        </div>
-      )}
 
       {editing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
