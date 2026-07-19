@@ -958,6 +958,7 @@ class ResourcesRepository(AsyncpgRepository):
         tag_ids: Optional[List[str]] = None,
         min_rating: Optional[int] = None,
         types: Optional[List[str]] = None,
+        source_types: Optional[List[str]] = None,
         platforms: Optional[List[str]] = None,
         ai_transcribed: Optional[bool] = None,
         ai_summarized: Optional[bool] = None,
@@ -1033,6 +1034,14 @@ class ResourcesRepository(AsyncpgRepository):
             mime_sql = self._build_mime_sql(types)
             if mime_sql:
                 where.append(mime_sql)
+
+            # Provenance filter — restrict to specific resource.source_type
+            # values (web / upload / generated / derived). Used by the
+            # Distribution Publish picker to exclude platform-downloaded
+            # ("web") material and list only the user's own content.
+            if source_types:
+                where.append("r.source_type = ANY(:source_types)")
+                params["source_types"] = list(source_types)
 
             # AI status filters: each requires == "completed".
             for key, flag, column in (
