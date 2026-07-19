@@ -49,6 +49,10 @@ export interface ApiKeyScopesResponse {
   scopes: ApiKeyScopeInfo[];
 }
 
+export interface ApiKeyRevealResponse {
+  key: string; // Full plaintext key — copy-only, never render into the DOM
+}
+
 export interface CreateApiKeyRequest {
   name: string;
   description?: string;
@@ -128,4 +132,16 @@ export async function deleteApiKey(keyId: string): Promise<void> {
  */
 export async function revokeApiKey(keyId: string): Promise<void> {
   await apiClient.post(`/api/v1/api-keys/${keyId}/revoke`);
+}
+
+/**
+ * Reveal the FULL plaintext key for copy-to-clipboard (owner-only, audited).
+ * The backend decrypts the encrypt-at-rest value; callers must copy the result
+ * to the clipboard and never render it into the DOM.
+ */
+export async function revealApiKey(keyId: string): Promise<string> {
+  const data = await apiClient.post<ApiKeyRevealResponse>(
+    `/api/v1/api-keys/${keyId}/reveal`,
+  );
+  return data.key;
 }

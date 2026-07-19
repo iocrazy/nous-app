@@ -138,6 +138,16 @@ class ApiKeyListResponse(BaseModel):
     keys: List[ApiKeyResponse] = Field(..., description="密钥列表")
 
 
+class ApiKeyRevealResponse(BaseModel):
+    """Full-key reveal response (owner-only, audited).
+
+    Returns the complete plaintext ``dk_`` key so the frontend can copy it to
+    the clipboard. The frontend must NOT render it into the DOM (copy-only).
+    """
+
+    key: str = Field(..., description="完整密钥（明文，仅供复制）")
+
+
 class ApiKeyScopeInfo(BaseModel):
     """权限范围信息"""
 

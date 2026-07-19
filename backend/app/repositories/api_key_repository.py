@@ -140,6 +140,7 @@ from loguru import logger
 from sqlalchemy import func, select, text
 from sqlalchemy import update as sa_update
 
+from app.core.secret_box import decrypt as decrypt_secret
 from app.core.secret_box import encrypt as encrypt_secret
 from app.db.session import read_scope, write_scope
 from app.models import ApiKeys
@@ -206,6 +207,33 @@ def _mask_key(row: Dict[str, Any]) -> Dict[str, Any]:
     is_set = bool(row.get("key_value"))
     masked = (row.get("key_prefix") or "") + "…" if is_set else None
     return {**row, "key_value": masked, "key_value_set": is_set}
+
+
+def reveal_full_key(row: Dict[str, Any]) -> Optional[str]:
+    """Recover the plaintext full key from a stored row's ``key_value``.
+
+    This is the ONE deliberate widening of the read-side secret boundary
+    (the owner-only, audited reveal endpoint uses it for copy-to-clipboard).
+    ``key_value`` is Fernet ciphertext at rest (``gAAAAA`` prefix) or a legacy
+    plaintext ``dk_`` value; ``secret_box.decrypt`` passes non-``gAAAAA``
+    values through, so both are recoverable.
+
+    Returns the plaintext ``dk_...`` key, or None when the row has NO
+    recoverable key material — a NULL ``key_value``, ciphertext that fails to
+    decrypt, or a value that does not decrypt to a ``dk_`` key (e.g. a
+    pre-encryption SHA-256 hash-only row). Never raises, and never returns a
+    value that is not a real key — the caller maps None to a 422 "rotate".
+    """
+    stored = row.get("key_value")
+    if not stored:
+        return None
+    try:
+        plain = decrypt_secret(stored)
+    except Exception:
+        return None
+    if not isinstance(plain, str) or not plain.startswith("dk_"):
+        return None
+    return plain
 
 
 class ApiKeyRepository:

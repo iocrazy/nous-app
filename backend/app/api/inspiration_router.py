@@ -16,7 +16,9 @@ from fastapi import (
     status,
 )
 
+from app.core.api_key_scopes import ApiKeyScope, check_scope_permission
 from app.core.deps import get_current_user
+from app.repositories.api_key_repository import get_api_key_repository
 from app.repositories.inspiration_attachments_repository import (
     get_inspiration_attachments_repository,
 )
@@ -61,12 +63,18 @@ def _uid(current_user: dict) -> str:
 
 
 async def get_inspiration_actor(authorization: str = Header(...)) -> dict:
-    """Dual auth for inspiration write endpoints.
+    """Triple auth for inspiration write endpoints.
 
-    Accepts either a Supabase JWT (the page) or a `mhk_`-prefixed Personal
-    Access Token (external scripts / shortcuts / bots). A PAT is scoped to
-    inspiration read/write only — it can create notes and upload attachments
-    but cannot manage tokens (those endpoints stay JWT-only).
+    Accepts:
+      * a Supabase JWT (the page);
+      * a `mhk_`-prefixed Personal Access Token (legacy — its management UI is
+        retired but the backend path stays dormant for any minted tokens);
+      * a `dk_`-prefixed main API key BEARING the ``inspiration:write`` scope —
+        the supported way for external scripts / shortcuts / bots to ingest.
+
+    None of these can manage tokens (those endpoints stay JWT-only). The dk_
+    path reuses the main API-key validation + scope check (``validate_key`` /
+    ``check_scope_permission``) rather than reinventing them.
     """
     token = authorization.replace("Bearer ", "", 1).strip()
     if token.startswith(TOKEN_PREFIX):
@@ -82,6 +90,30 @@ async def get_inspiration_actor(authorization: str = Header(...)) -> dict:
             "role": None,
             "aud": None,
             "auth_via": "pat",
+        }
+    if token.startswith("dk_"):
+        repo = get_api_key_repository()
+        key_data = await repo.validate_key(token)
+        if not key_data:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="invalid or revoked API key",
+            )
+        if not check_scope_permission(
+            [ApiKeyScope.INSPIRATION_WRITE.value], key_data.get("scopes") or []
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="API key lacks the inspiration scope",
+            )
+        # Best-effort usage bump, mirroring the main API-key auth dependency.
+        await repo.update_usage(key_data["key_id"])
+        return {
+            "id": str(key_data["user_id"]),
+            "email": None,
+            "role": None,
+            "aud": None,
+            "auth_via": "api_key",
         }
     return await get_current_user(authorization)
 
