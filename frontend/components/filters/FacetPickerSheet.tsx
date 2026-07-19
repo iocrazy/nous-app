@@ -158,7 +158,7 @@ export function FacetPickerSheet({
           })
         }
         className={`w-full px-4 py-3 flex items-center gap-3 text-left border-b border-ink-800/50 ${
-          checked ? 'bg-indigo-500/10' : 'active:bg-ink-800/50'
+          checked ? 'bg-[var(--accent-soft)]' : 'active:bg-ink-800/50'
         }`}
       >
         <span
@@ -225,7 +225,7 @@ export function FacetPickerSheet({
             <button
               type="button"
               onClick={() => clearChip(facetId)}
-              className="text-[11px] text-indigo-400 active:text-indigo-300"
+              className="text-[11px] text-[var(--accent-text)] active:text-[var(--accent-text)]"
             >
               {t('resources.filter.clear', 'Clear')}
             </button>
@@ -257,7 +257,7 @@ export function FacetPickerSheet({
                 <span className="w-5 h-5 rounded-md flex items-center justify-center shrink-0 bg-indigo-500 text-white">
                   <Plus size={13} />
                 </span>
-                <span className="text-sm text-indigo-300 flex-1 truncate">
+                <span className="text-sm text-[var(--accent-text)] flex-1 truncate">
                   {t('resources.filter.createTag', 'Create "{{name}}"', {
                     name: trimmed,
                   })}

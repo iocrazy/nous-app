@@ -114,7 +114,7 @@ export const UserDropdown: React.FC<UserDropdownProps> = ({
                   onClick={() => onTeamSelect(team.id)}
                   className="flex items-center gap-2 flex-1 min-w-0"
                 >
-                  <div className="w-7 h-7 rounded-lg bg-indigo-600/20 flex items-center justify-center text-indigo-400 text-sm font-bold">
+                  <div className="w-7 h-7 rounded-lg bg-[var(--accent-soft)] flex items-center justify-center text-[var(--accent-text)] text-sm font-bold">
                     {team.name.charAt(0).toUpperCase()}
                   </div>
                   <span className="text-sm text-ink-300 truncate">{team.name}</span>
@@ -129,14 +129,14 @@ export const UserDropdown: React.FC<UserDropdownProps> = ({
                     </button>
                   )}
                   {activeTeamId === team.id && (
-                    <Check size={16} className="text-indigo-400" />
+                    <Check size={16} className="text-[var(--accent-text)]" />
                   )}
                 </div>
               </div>
             ))}
             <button
               onClick={onCreateTeam}
-              className="flex items-center gap-2 w-full px-2 py-2 rounded-lg text-indigo-400 hover:bg-indigo-500/10 transition-colors"
+              className="flex items-center gap-2 w-full px-2 py-2 rounded-lg text-[var(--accent-text)] hover:bg-[var(--accent-soft)] transition-colors"
             >
               <Plus size={18} />
               <span className="text-sm font-medium">{t('user.createTeam')}</span>

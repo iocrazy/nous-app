@@ -184,7 +184,7 @@ export const SemanticSearchBar: React.FC<SemanticSearchBarProps> = ({
           onClick={() => setShowModeDropdown(!showModeDropdown)}
           className="absolute left-3 flex items-center gap-1.5 px-2 py-1 rounded-md bg-ink-800/50 hover:bg-ink-800 text-ink-400 hover:text-ink-300 transition-colors z-10"
         >
-          <currentMode.icon size={14} className={searchMode === 'semantic' || searchMode === 'hybrid' ? 'text-indigo-400' : ''} />
+          <currentMode.icon size={14} className={searchMode === 'semantic' || searchMode === 'hybrid' ? 'text-[var(--accent-text)]' : ''} />
           <ChevronDown size={12} />
         </button>
 
@@ -245,7 +245,7 @@ export const SemanticSearchBar: React.FC<SemanticSearchBarProps> = ({
                 }}
                 className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg transition-colors ${
                   searchMode === mode.id
-                    ? 'bg-indigo-600/10 text-indigo-400'
+                    ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                     : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
                 }`}
               >
@@ -291,7 +291,7 @@ export const SemanticSearchBar: React.FC<SemanticSearchBarProps> = ({
             <div className="text-sm font-medium text-ink-50">Search Tips</div>
             <div className="space-y-2 text-xs text-ink-400">
               <div className="flex items-center gap-2">
-                <Sparkles size={12} className="text-indigo-400" />
+                <Sparkles size={12} className="text-[var(--accent-text)]" />
                 <span>Use natural language: "funny cat videos"</span>
               </div>
               <div className="flex items-center gap-2">

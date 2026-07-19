@@ -59,7 +59,7 @@ export function DashboardPage() {
             onClick={() => setDashboardSubView(tab.value)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition ${
               dashboardSubView === tab.value
-                ? 'bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-500/30'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] ring-1 ring-indigo-500/30'
                 : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800/50'
             }`}
           >
@@ -117,7 +117,7 @@ export function DashboardPage() {
                 </div>
                 <button
                   onClick={() => setDashboardSubView('logs')}
-                  className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                  className="text-xs text-[var(--accent-text)] hover:text-[var(--accent-text)] transition-colors"
                 >
                   View all logs
                 </button>

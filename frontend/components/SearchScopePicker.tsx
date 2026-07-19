@@ -92,7 +92,7 @@ export const SearchScopePicker: React.FC<SearchScopePickerProps> = ({
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={`${buttonClass} ${
-          !isDefault ? 'text-indigo-400 hover:text-indigo-300' : ''
+          !isDefault ? 'text-[var(--accent-text)] hover:text-[var(--accent-text)]' : ''
         }`}
         title={t('search.scopeTooltip', 'Search scope')}
         aria-label={t('search.scopeTooltip', 'Search scope')}
@@ -118,7 +118,7 @@ export const SearchScopePicker: React.FC<SearchScopePickerProps> = ({
                     {t(`search.scope.${field}`, defaultLabel(field))}
                   </span>
                   {checked && (
-                    <Check size={14} className="shrink-0 text-indigo-400" />
+                    <Check size={14} className="shrink-0 text-[var(--accent-text)]" />
                   )}
                 </button>
               );

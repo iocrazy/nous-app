@@ -500,7 +500,7 @@ const UserAvatar: React.FC<{
 
   return (
     <div
-      className="flex items-center justify-center rounded-full bg-indigo-500/20 text-indigo-400 font-semibold text-sm select-none"
+      className="flex items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent-text)] font-semibold text-sm select-none"
       style={{ width: size, height: size }}
     >
       {initial}

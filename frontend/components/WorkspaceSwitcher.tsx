@@ -210,7 +210,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
                 {capitalizedName ? `${capitalizedName}'s Workspace` : (t('sidebar.personal') || 'Personal')}
               </span>
               {isPersonal && (
-                <Check size={14} className="text-indigo-400 flex-shrink-0" />
+                <Check size={14} className="text-[var(--accent-text)] flex-shrink-0" />
               )}
             </button>
 
@@ -238,7 +238,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
                     {t('plans.free')}
                   </span>
                   {isActive && (
-                    <Check size={14} className="text-indigo-400 flex-shrink-0" />
+                    <Check size={14} className="text-[var(--accent-text)] flex-shrink-0" />
                   )}
                 </button>
               );

@@ -125,7 +125,7 @@ export function MobileTabBar({ tabs, collapsed, onExpand, hidden }: MobileTabBar
                 <button
                   onClick={collapsed ? onExpand : tab.onClick}
                   className={`relative z-10 flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-full transition-colors ${
-                    tab.active ? 'text-indigo-400' : 'text-ink-500'
+                    tab.active ? 'text-[var(--accent-text)]' : 'text-ink-500'
                   }`}
                 >
                   {tab.icon}

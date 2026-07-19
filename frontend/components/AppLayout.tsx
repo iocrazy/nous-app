@@ -253,7 +253,7 @@ function AppLayoutInner() {
         <button
           onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources')); setIsResourcesMenuOpen(false); }}
           className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
-            view === 'resources' && !isDownloadsRoute && !location.pathname.includes('/shared') && !location.pathname.includes('/recycle') && !location.pathname.includes('/library/') && !location.pathname.includes('/smart/') ? 'bg-indigo-500/10 text-indigo-300' : 'text-ink-300 hover:bg-ink-800/60'
+            view === 'resources' && !isDownloadsRoute && !location.pathname.includes('/shared') && !location.pathname.includes('/recycle') && !location.pathname.includes('/library/') && !location.pathname.includes('/smart/') ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'text-ink-300 hover:bg-ink-800/60'
           }`}
         >
           <FolderOpen size={16} className="shrink-0" />
@@ -262,7 +262,7 @@ function AppLayoutInner() {
         <button
           onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources/shared')); setIsResourcesMenuOpen(false); }}
           className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
-            location.pathname.includes('/shared') ? 'bg-indigo-500/10 text-indigo-300' : 'text-ink-300 hover:bg-ink-800/60'
+            location.pathname.includes('/shared') ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'text-ink-300 hover:bg-ink-800/60'
           }`}
         >
           <Share2 size={16} className="shrink-0" />
@@ -271,7 +271,7 @@ function AppLayoutInner() {
         <button
           onClick={(e) => { e.stopPropagation(); navigate(teamPath('/resources/recycle')); setIsResourcesMenuOpen(false); }}
           className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
-            location.pathname.includes('/recycle') ? 'bg-indigo-500/10 text-indigo-300' : 'text-ink-300 hover:bg-ink-800/60'
+            location.pathname.includes('/recycle') ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'text-ink-300 hover:bg-ink-800/60'
           }`}
         >
           <Trash2 size={16} className="shrink-0" />
@@ -291,7 +291,7 @@ function AppLayoutInner() {
                 key={lib.id}
                 onClick={(e) => { e.stopPropagation(); navigate(teamPath(`/resources/library/${lib.id}`)); setIsResourcesMenuOpen(false); }}
                 className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
-                  location.pathname.includes(`/library/${lib.id}`) ? 'bg-indigo-500/10 text-indigo-300' : 'text-ink-300 hover:bg-ink-800/60'
+                  location.pathname.includes(`/library/${lib.id}`) ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'text-ink-300 hover:bg-ink-800/60'
                 }`}
               >
                 <BookOpen size={16} className="shrink-0" />
@@ -314,7 +314,7 @@ function AppLayoutInner() {
                 key={sf.id}
                 onClick={(e) => { e.stopPropagation(); navigate(teamPath(`/resources/smart/${sf.id}`)); setIsResourcesMenuOpen(false); }}
                 className={`w-full text-left px-3.5 py-2 transition-colors flex items-center gap-2.5 ${
-                  location.pathname.includes(`/smart/${sf.id}`) ? 'bg-indigo-500/10 text-indigo-300' : 'text-ink-300 hover:bg-ink-800/60'
+                  location.pathname.includes(`/smart/${sf.id}`) ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'text-ink-300 hover:bg-ink-800/60'
                 }`}
               >
                 <Zap size={16} className="shrink-0" />

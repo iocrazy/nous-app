@@ -408,14 +408,14 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
                   {authMode === 'login' ? (
                     <button
                       onClick={() => { setAuthMode('register'); setError(null); }}
-                      className="text-indigo-500 hover:underline"
+                      className="text-[var(--accent-text)] hover:underline"
                     >
                       {t('auth.noAccount')}
                     </button>
                   ) : (
                     <button
                       onClick={() => { setAuthMode('login'); setError(null); }}
-                      className="text-indigo-500 hover:underline"
+                      className="text-[var(--accent-text)] hover:underline"
                     >
                       {t('auth.hasAccount')}
                     </button>
@@ -451,7 +451,7 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
 
               {/* Terms */}
               <p className="text-center text-xs text-ink-400 mt-4">
-                 By logging in, you agree to our <a href="#" className="text-indigo-500 hover:underline">Terms of Service</a>.
+                 By logging in, you agree to our <a href="#" className="text-[var(--accent-text)] hover:underline">Terms of Service</a>.
               </p>
            </div>
         </div>
