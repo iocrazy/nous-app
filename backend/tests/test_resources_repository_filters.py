@@ -216,6 +216,47 @@ async def test_list_resources_types_empty_skips_mime_clause(
     assert "mime_type LIKE" not in sql
 
 
+# ─── source_types (resource.source_type provenance) ───────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_resources_source_types_adds_any_clause(
+    repo: ResourcesRepository, cap_session: _CapSession
+) -> None:
+    """The Distribution Publish picker passes own-content source types →
+    ``r.source_type = ANY(:source_types)`` with the values bound verbatim."""
+    await repo.get_resource_items(
+        scope_type="personal",
+        scope_id="user-1",
+        source_types=["upload", "generated", "derived"],
+    )
+    sql, params = _main_call(cap_session)
+    assert "r.source_type = ANY(:source_types)" in sql
+    assert params["source_types"] == ["upload", "generated", "derived"]
+
+
+@pytest.mark.asyncio
+async def test_list_resources_source_types_none_skips_clause(
+    repo: ResourcesRepository, cap_session: _CapSession
+) -> None:
+    await repo.get_resource_items(scope_type="personal", scope_id="user-1")
+    sql, params = _main_call(cap_session)
+    assert "source_type" not in sql
+    assert "source_types" not in params
+
+
+@pytest.mark.asyncio
+async def test_list_resources_source_types_empty_skips_clause(
+    repo: ResourcesRepository, cap_session: _CapSession
+) -> None:
+    await repo.get_resource_items(
+        scope_type="personal", scope_id="user-1", source_types=[]
+    )
+    sql, params = _main_call(cap_session)
+    assert "source_type" not in sql
+    assert "source_types" not in params
+
+
 # ─── tag_ids / platforms pre-resolution + intersection ────────────────
 
 
