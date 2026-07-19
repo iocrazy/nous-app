@@ -11,6 +11,7 @@
 // that isn't from the latest write for that note.
 import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 
 const listNotes = vi.fn();
 const getTagCounts = vi.fn();
@@ -71,7 +72,7 @@ describe('InspirationPage checkbox toggle race', () => {
     const second = deferred<typeof NOTE>(); // newer write: toggling checkbox 1
     updateNote.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
 
-    render(<InspirationPage />);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
     await screen.findByText('a');
 
     const boxes = () => screen.getAllByRole('checkbox') as HTMLInputElement[];

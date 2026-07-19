@@ -47,6 +47,7 @@ import {
   timeToPx,
 } from './arrangementGeometry';
 import { persistBeatsZoom, readStoredBeatsZoom } from './beatsZoomStorage';
+import { MemoRail } from './MemoRail';
 import { BEAT_TEMPLATES, deriveTemplateAnchors } from './templates';
 
 interface Props {
@@ -190,6 +191,10 @@ export function ArrangementView({
   const unit = chooseTickUnit(totalSec);
   const granularity = snapGranularity(unit);
   const ticks = useMemo(() => buildTicks(totalSec, unit), [totalSec, unit]);
+  const majorTickSecs = useMemo(
+    () => ticks.filter((tick) => tick.major).map((tick) => tick.sec),
+    [ticks],
+  );
 
   // Stable layout from the STORED placements (not the drag fold): the dragged
   // card tracks the pointer directly and must not shove its neighbours around
@@ -769,19 +774,16 @@ export function ArrangementView({
                 })}
               </div>
 
-              {/* M4 memo-pin rail: a second ruler line reserved for time-anchored
-                  memos. Rendered as a visual anchor only — no interaction yet. */}
-              <div className="mh-arr-memo-rail" data-testid="arr-memo-rail" aria-hidden="true">
-                {ticks
-                  .filter((tick) => tick.major)
-                  .map((tick) => (
-                    <div
-                      key={tick.sec}
-                      className="mh-arr-memo-tick"
-                      style={{ left: `${timeToPx(tick.sec, pxPerSec)}px` }}
-                    />
-                  ))}
-              </div>
+              {/* M4 memo-pin rail: time-anchored inspiration memos as draggable
+                  pins with floating cards. Owns its own note data + REST. */}
+              <MemoRail
+                scriptId={scriptId}
+                beats={beats}
+                pxPerSec={pxPerSec}
+                granularity={granularity}
+                canvasWidth={canvasWidth}
+                majorTickSecs={majorTickSecs}
+              />
             </div>
           </div>
         </div>

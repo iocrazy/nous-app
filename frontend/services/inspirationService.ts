@@ -26,9 +26,19 @@ export interface InspirationNote {
   ref_hotspot: RefHotspot | null;
   pinned: boolean;
   note_date: string;
+  /** Beats M4 timeline anchor: script id (Snowflake string) or null. */
+  anchor_script_id?: string | null;
+  /** Whole-second offset on that script's beats timeline, or null. */
+  anchor_sec?: number | null;
   created_at: string;
   updated_at: string;
   attachments: NoteAttachment[];
+}
+
+/** A memo pin's timeline anchor (both fields together). */
+export interface NoteAnchor {
+  scriptId: string;
+  sec: number;
 }
 
 export interface NoteFilters {
@@ -81,9 +91,14 @@ export async function listNotes(
 export async function createNote(
   contentMd: string,
   refHotspot?: RefHotspot,
+  anchor?: NoteAnchor,
 ): Promise<InspirationNote> {
   const body: Record<string, unknown> = { content_md: contentMd };
   if (refHotspot) body.ref_hotspot = refHotspot;
+  if (anchor) {
+    body.anchor_script_id = anchor.scriptId;
+    body.anchor_sec = anchor.sec;
+  }
   const resp = await fetch(`${base()}/notes`, {
     method: 'POST',
     headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
@@ -92,9 +107,28 @@ export async function createNote(
   return jsonOrThrow(resp);
 }
 
+/**
+ * Every note this user has pinned to a script's beats timeline (any offset) —
+ * the memo-rail query. A high limit fetches them all in one shot; the backing
+ * partial index (mig 378) keeps it cheap.
+ */
+export async function listAnchoredNotes(scriptId: string): Promise<InspirationNote[]> {
+  const params = new URLSearchParams({ anchor_script_id: scriptId, limit: '200' });
+  const resp = await fetch(`${base()}/notes?${params.toString()}`, {
+    headers: await getAuthHeaders(),
+  });
+  return jsonOrThrow(resp);
+}
+
 export async function updateNote(
   id: string,
-  patch: { content_md?: string; pinned?: boolean },
+  patch: {
+    content_md?: string;
+    pinned?: boolean;
+    // Explicit null clears the anchor (un-pin); an absent key leaves it as-is.
+    anchor_script_id?: string | null;
+    anchor_sec?: number | null;
+  },
 ): Promise<InspirationNote> {
   const resp = await fetch(`${base()}/notes/${id}`, {
     method: 'PATCH',

@@ -34,6 +34,16 @@ const scriptSvc = vi.hoisted(() => ({
 }));
 vi.mock('../../services/scriptService', () => scriptSvc);
 
+// M4: ArrangementView (under BeatsView) hosts MemoRail — stub its Auth + notes deps.
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ mediaToken: 'tok' }) }));
+vi.mock('../../services/inspirationService', () => ({
+  listAnchoredNotes: vi.fn().mockResolvedValue([]),
+  createNote: vi.fn(),
+  updateNote: vi.fn(),
+  deleteNote: vi.fn(),
+  uploadAttachment: vi.fn(),
+  attachmentUrlWithToken: (id: string) => `att/${id}`,
+}));
 const tplSvc = vi.hoisted(() => ({
   listBeatTemplates: vi.fn(),
   createBeatTemplate: vi.fn(),

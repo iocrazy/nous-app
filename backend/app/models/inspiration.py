@@ -22,6 +22,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKeyConstraint,
     Index,
+    Integer,
     PrimaryKeyConstraint,
     String,
     Text,
@@ -43,6 +44,7 @@ class InspirationNotes(Base):
         Index("idx_inspiration_notes_user_date", "user_id", "note_date"),
         Index("idx_inspiration_notes_user_pinned", "user_id", "pinned"),
         Index("idx_inspiration_notes_tags", "tags", postgresql_using="gin"),
+        Index("idx_inspiration_notes_anchor", "anchor_script_id", "anchor_sec"),
         {"schema": "public"},
     )
 
@@ -63,6 +65,11 @@ class InspirationNotes(Base):
         Boolean, nullable=False, server_default=text("false")
     )
     note_date: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    # Beats M4 timeline anchor (mig 378). Both NULL = a plain library note; both
+    # set = a memo pin at ``anchor_sec`` on script ``anchor_script_id``'s beats
+    # timeline. No FK (mirrors the mig 372 arrangement columns).
+    anchor_script_id: Mapped[int | None] = mapped_column(BigInteger)
+    anchor_sec: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )

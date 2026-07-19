@@ -3,7 +3,7 @@
 // ref_hotspot reference card, tag chips, attachments.
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ExternalLink, Flame, MoreHorizontal, Pin } from 'lucide-react';
+import { Anchor, ExternalLink, Flame, MoreHorizontal, Pin } from 'lucide-react';
 import { NoteMarkdown } from './NoteMarkdown';
 import { AttachmentView } from './AttachmentView';
 import type { InspirationNote } from '../../services/inspirationService';
@@ -15,6 +15,8 @@ interface Props {
   onDelete: (note: InspirationNote) => void;
   onTagClick: (tag: string) => void;
   onToggleTask?: (note: InspirationNote, index: number) => void;
+  /** Open the beats timeline this note is pinned to (Beats M4 reverse-nav). */
+  onOpenAnchor?: (note: InspirationNote) => void;
 }
 
 function timeOf(iso: string): string {
@@ -22,7 +24,16 @@ function timeOf(iso: string): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete, onTagClick, onToggleTask }) => {
+/** Film-apostrophe offset for the anchor chip (`45s`, `1'`, `1'30`). */
+function anchorLabel(sec: number): string {
+  const whole = Math.max(0, Math.round(sec));
+  if (whole < 60) return `${whole}s`;
+  const m = Math.floor(whole / 60);
+  const s = whole % 60;
+  return s === 0 ? `${m}'` : `${m}'${String(s).padStart(2, '0')}`;
+}
+
+export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete, onTagClick, onToggleTask, onOpenAnchor }) => {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -99,6 +110,21 @@ export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete,
       {/* Tags now render inline in the body via NoteMarkdown's tag chips
           (they are highlighted #tag occurrences in content_md); the former
           duplicate below-body chip row was removed (2026-07-19). */}
+
+      {note.anchor_script_id && note.anchor_sec != null && (
+        <button
+          type="button"
+          data-testid="note-anchor-chip"
+          onClick={() => onOpenAnchor?.(note)}
+          disabled={!onOpenAnchor}
+          className="mt-2 inline-flex items-center gap-1 rounded-full bg-island-2 px-2 py-0.5 text-[10.5px] font-semibold text-content-2 tabular-nums hover:text-content disabled:cursor-default disabled:hover:text-content-2"
+          title={t('editor.memoAnchorChip', 'Pinned to a script timeline at {{time}}', {
+            time: anchorLabel(note.anchor_sec),
+          })}
+        >
+          <Anchor size={11} /> {anchorLabel(note.anchor_sec)}
+        </button>
+      )}
 
       <AttachmentView attachments={note.attachments} />
     </div>

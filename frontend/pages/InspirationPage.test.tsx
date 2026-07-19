@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 
 const listNotes = vi.fn();
 const getTagCounts = vi.fn();
@@ -86,13 +87,13 @@ describe('InspirationPage', () => {
   });
 
   it('loads and renders notes grouped by day', async () => {
-    render(<InspirationPage />);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
     await waitFor(() => expect(listNotes).toHaveBeenCalled());
     expect(await screen.findByText(noteBody('first idea #hooks'))).toBeTruthy();
   });
 
   it('tag panel click sets filter chip and refetches with tag', async () => {
-    render(<InspirationPage />);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
     await waitFor(() => expect(getTagCounts).toHaveBeenCalled());
     fireEvent.click(await screen.findByText('#hooks (3)'));
     await waitFor(() =>
@@ -107,7 +108,7 @@ describe('InspirationPage', () => {
 
   it('search input debounces into q filter', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    render(<InspirationPage />);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
     await waitFor(() => expect(listNotes).toHaveBeenCalled());
     fireEvent.change(screen.getByPlaceholderText('Search notes…'), { target: { value: 'ferry' } });
     await vi.advanceTimersByTimeAsync(350);
@@ -124,7 +125,7 @@ describe('InspirationPage', () => {
   it('delete flows through confirm and removes the card', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     deleteNote.mockResolvedValue(undefined);
-    render(<InspirationPage />);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
     await screen.findByText(noteBody('first idea #hooks'));
     fireEvent.click(screen.getByLabelText('Note actions'));
     fireEvent.click(screen.getByText('Delete'));
@@ -135,7 +136,7 @@ describe('InspirationPage', () => {
   it('stale loadMore response is discarded after filters change', async () => {
     const first = Array.from({ length: 50 }, (_, i) => ({ ...NOTE, id: String(100 - i) }));
     listNotes.mockResolvedValueOnce(first); // initial page (hasMore=true, len===PAGE_SIZE)
-    render(<InspirationPage />);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
     await screen.findAllByText(noteBody('first idea #hooks'));
 
     // Reset the call counter so earlier tests' invocation history doesn't
@@ -171,7 +172,7 @@ describe('InspirationPage', () => {
       { id: '1', title: 'Food topic', tags: [], category: 'food', heat: 90 },
       { id: '2', title: 'Music topic', tags: [], category: 'music', heat: 80 },
     ]);
-    render(<InspirationPage />);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
     fireEvent.click(screen.getByText('Hotspots'));
     await waitFor(() => expect(screen.getByRole('button', { name: /Music topic/ })).toBeTruthy());
     fireEvent.click(screen.getByText('#food (1)'));
@@ -181,7 +182,7 @@ describe('InspirationPage', () => {
 
   it('edits a note through the modal (NoteEditor) and saves the new content', async () => {
     updateNote.mockResolvedValue({ ...NOTE, content_md: 'updated content #hooks' });
-    render(<InspirationPage />);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
     await screen.findByText(noteBody('first idea #hooks'));
     fireEvent.click(screen.getByLabelText('Note actions'));
     fireEvent.click(screen.getByText('Edit'));
@@ -211,7 +212,7 @@ describe('InspirationPage', () => {
       { id: '1', title: 'Food topic', tags: [], category: 'food', heat: 90 },
       { id: '2', title: 'Music topic', tags: [], category: 'music', heat: 80 },
     ]);
-    render(<InspirationPage />);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
     fireEvent.click(screen.getByText('Hotspots'));
     await waitFor(() => expect(screen.getByRole('button', { name: /Music topic/ })).toBeTruthy());
     fireEvent.click(screen.getByText('#food (1)'));
