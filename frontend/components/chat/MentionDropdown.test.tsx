@@ -6,7 +6,7 @@
  * The component uses onMouseDown (not onClick) to avoid blurring the textarea.
  * Tests fire mouseDown events to trigger onPick.
  *
- * Active styling: the active row has className containing 'bg-indigo-500/[.22]'.
+ * Active styling: the active row has className containing 'bg-[var(--accent-soft)]'.
  * User candidate: shows an avatar initial span with the first letter uppercased.
  * Agent candidate: shows an amber 'AGENT' badge span.
  */
@@ -79,7 +79,7 @@ describe('MentionDropdown', () => {
     // Bot is at index 1 (activeIndex=1) — should have the active indigo class
     const botLabel = screen.getByText('Bot');
     const botBtn = botLabel.closest('button');
-    expect(botBtn?.className).toContain('bg-indigo-500/[.22]');
+    expect(botBtn?.className).toContain('bg-[var(--accent-soft)]');
   });
 
   it('non-active rows do NOT have the active class', () => {
@@ -94,7 +94,7 @@ describe('MentionDropdown', () => {
     // Alice is at index 0, not active
     const aliceLabel = screen.getByText('Alice');
     const aliceBtn = aliceLabel.closest('button');
-    expect(aliceBtn?.className).not.toContain('bg-indigo-500/[.22]');
+    expect(aliceBtn?.className).not.toContain('bg-[var(--accent-soft)]');
   });
 
   it('the first row is active when activeIndex=0', () => {
@@ -108,11 +108,11 @@ describe('MentionDropdown', () => {
     );
     const aliceLabel = screen.getByText('Alice');
     const aliceBtn = aliceLabel.closest('button');
-    expect(aliceBtn?.className).toContain('bg-indigo-500/[.22]');
+    expect(aliceBtn?.className).toContain('bg-[var(--accent-soft)]');
 
     const botLabel = screen.getByText('Bot');
     const botBtn = botLabel.closest('button');
-    expect(botBtn?.className).not.toContain('bg-indigo-500/[.22]');
+    expect(botBtn?.className).not.toContain('bg-[var(--accent-soft)]');
   });
 
   // ── onPick callback ───────────────────────────────────────────────────────

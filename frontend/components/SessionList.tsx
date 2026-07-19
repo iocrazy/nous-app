@@ -146,7 +146,7 @@ export function SessionList({
                   )}
                   <p className="text-[10px] text-ink-600 mt-0.5 flex items-center gap-1.5">
                     {session.agent_slug && (
-                      <span className="rounded bg-indigo-500/10 px-1 py-px font-medium text-indigo-400">
+                      <span className="rounded bg-[var(--accent-soft)] px-1 py-px font-medium text-[var(--accent-text)]">
                         {session.agent_slug}
                       </span>
                     )}

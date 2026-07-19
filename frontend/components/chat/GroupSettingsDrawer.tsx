@@ -248,7 +248,7 @@ export default function GroupSettingsPanel({
           'inline-flex items-center gap-[3px] text-[10px] font-semibold px-[6px] py-[1.5px] rounded-[5px] flex-shrink-0',
           isOwnerBadge
             ? 'bg-amber-500/[.15] text-amber-300'
-            : 'bg-indigo-500/[.15] text-indigo-300',
+            : 'bg-[var(--accent-soft)] text-[var(--accent-text)]',
         ].join(' ')}
       >
         {isOwnerBadge ? <Crown size={9} /> : <Shield size={9} />}
@@ -376,12 +376,12 @@ export default function GroupSettingsPanel({
                         className={[
                           'flex-1 flex items-center gap-2 border rounded-[9px] px-3 py-[8px] text-[12.5px] font-semibold transition-colors disabled:cursor-not-allowed',
                           active
-                            ? 'border-indigo-500 bg-indigo-500/[.08] text-content'
+                            ? 'border-[var(--accent-border)] bg-[var(--accent-soft)] text-content'
                             : 'border-line-strong text-content-3',
                           canManage && !active ? 'hover:text-content-2' : '',
                         ].join(' ')}
                       >
-                        <Icon size={13} className={active ? 'text-indigo-300' : ''} />
+                        <Icon size={13} className={active ? 'text-[var(--accent-text)]' : ''} />
                         {t(v === 'group' ? 'chat.groupSettings.private' : 'chat.groupSettings.public')}
                       </button>
                     );
@@ -470,7 +470,7 @@ export default function GroupSettingsPanel({
                           type="button"
                           disabled={busy}
                           onClick={() => void handleAddMember(m.user_id)}
-                          className="flex items-center gap-[5px] rounded-[16px] pl-[7px] pr-[10px] py-[3px] text-[12px] border border-dashed border-line-strong text-content-3 hover:text-content hover:border-indigo-500/50 transition-colors disabled:opacity-50"
+                          className="flex items-center gap-[5px] rounded-[16px] pl-[7px] pr-[10px] py-[3px] text-[12px] border border-dashed border-line-strong text-content-3 hover:text-content hover:border-[var(--accent-border)] transition-colors disabled:opacity-50"
                         >
                           <Plus size={11} />
                           {label}

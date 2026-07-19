@@ -263,7 +263,7 @@ export function FloatingChatWidget(): React.ReactElement | null {
           <GripHorizontal size={14} />
         </button>
         {pageContext?.moduleLabel && (
-          <span className="rounded bg-indigo-500/10 px-1.5 py-0.5 text-[11px] font-medium text-indigo-400">
+          <span className="rounded bg-[var(--accent-soft)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--accent-text)]">
             {pageContext.moduleLabel}
           </span>
         )}

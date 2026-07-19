@@ -25,7 +25,7 @@ export function EmptyState({ onSuggest }: EmptyStateProps): React.ReactElement {
 
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4 px-6 py-10 text-center">
-      <Sparkles size={32} className="text-indigo-400" />
+      <Sparkles size={32} className="text-[var(--accent-text)]" />
 
       <div>
         <h3 className="text-base font-medium text-ink-200">{t('chat.emptyTitle')}</h3>

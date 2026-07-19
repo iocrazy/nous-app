@@ -56,7 +56,7 @@ interface NavItemProps {
 
 function NavItem({ icon: Icon, label, active, onClick, trailing, title }: NavItemProps) {
   const style = active
-    ? 'bg-indigo-500/8 text-indigo-300'
+    ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
     : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800/40';
   return (
     <button
@@ -67,7 +67,7 @@ function NavItem({ icon: Icon, label, active, onClick, trailing, title }: NavIte
     >
       <Icon
         size={16}
-        className={`shrink-0 ${active ? 'text-indigo-300' : 'text-ink-500'}`}
+        className={`shrink-0 ${active ? 'text-[var(--accent-text)]' : 'text-ink-500'}`}
       />
       <span className="flex-1 truncate text-left">{label}</span>
       {trailing}
@@ -360,7 +360,7 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
                 <button
                   type="button"
                   onClick={() => void loadAgents()}
-                  className="text-[11px] text-indigo-400 hover:text-indigo-300"
+                  className="text-[11px] text-[var(--accent-text)] hover:text-[var(--accent-text)]"
                 >
                   {t('aiLibrary.retry', 'Retry')}
                 </button>

@@ -157,7 +157,7 @@ const RoutineForm: React.FC<{
           type="button"
           disabled={submitting || !form.name.trim() || !form.prompt_md.trim()}
           onClick={() => onSubmit(form)}
-          className="rounded-md border border-indigo-500/30 bg-indigo-500/10 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-md border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-1.5 text-xs font-medium text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {submitting ? t('common.saving', 'Saving…') : t('common.save', 'Save')}
         </button>
@@ -280,7 +280,7 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
               setEditing(null);
               setFormOpen(true);
             }}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-indigo-500/30 bg-indigo-500/10 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-500/20"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-1.5 text-xs font-medium text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"
           >
             <Plus size={12} />
             {t('aiLibrary.agents.routines.add', 'New routine')}
@@ -339,7 +339,7 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
                       setEditing(r);
                       setFormOpen(true);
                     }}
-                    className="truncate text-left text-sm font-medium text-ink-100 hover:text-indigo-300"
+                    className="truncate text-left text-sm font-medium text-ink-100 hover:text-[var(--accent-text)]"
                   >
                     {r.name}
                   </button>

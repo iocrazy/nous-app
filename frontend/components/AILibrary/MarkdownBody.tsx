@@ -66,7 +66,7 @@ export const MarkdownBody: React.FC<MarkdownBodyProps> = ({
               href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-indigo-400 underline-offset-2 hover:underline"
+              className="text-[var(--accent-text)] underline-offset-2 hover:underline"
             >
               {children}
             </a>

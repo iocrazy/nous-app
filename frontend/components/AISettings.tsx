@@ -832,7 +832,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       {/* Master AI Toggle Section */}
       <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden">
         <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50 flex items-center gap-3">
-          <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
+          <div className="p-2 bg-[var(--accent-soft)] rounded-lg text-[var(--accent-text)]">
             <Brain size={20} />
           </div>
           <div className="flex-1">
@@ -853,7 +853,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
                 localSettings.ai_enabled
                   ? 'bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20'
-                  : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/20'
+                  : 'bg-[var(--accent-soft)] text-[var(--accent-text)] border border-[var(--accent-border)] hover:bg-[var(--accent-soft)]'
               }`}
             >
               {localSettings.ai_enabled ? (

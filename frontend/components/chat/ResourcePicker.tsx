@@ -234,7 +234,7 @@ export default function ResourcePicker({ open, teamId, onClose, onSelect }: Prop
                     key={item.id}
                     type="button"
                     onClick={() => handleSelect(item)}
-                    className="flex flex-col rounded-[10px] bg-island-2 border border-line overflow-hidden text-left hover:border-indigo-500/50 hover:bg-card transition-colors group"
+                    className="flex flex-col rounded-[10px] bg-island-2 border border-line overflow-hidden text-left hover:border-[var(--accent-border)] hover:bg-card transition-colors group"
                   >
                     {/* Thumbnail */}
                     <div className="relative w-full aspect-video bg-ink-950 overflow-hidden shrink-0">

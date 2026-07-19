@@ -156,7 +156,7 @@ export function MessageBubble({
               <button
                 type="button"
                 onClick={onApply}
-                className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors"
+                className="text-[10px] text-[var(--accent-text)] hover:text-[var(--accent-text)] transition-colors"
               >
                 Apply
               </button>

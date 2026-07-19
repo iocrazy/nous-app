@@ -538,7 +538,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
           )}
           {isPreset &&
             (agent.override_scope ? (
-              <div className="flex items-center justify-between gap-3 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs text-indigo-300">
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-2 text-xs text-[var(--accent-text)]">
                 <span>
                   {t(
                     'aiLibrary.agents.overrideActive',
@@ -549,7 +549,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
                 <button
                   onClick={resetOverride}
                   disabled={resetting}
-                  className="shrink-0 rounded-md border border-indigo-500/40 px-2.5 py-1 font-medium text-indigo-300 hover:bg-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="shrink-0 rounded-md border border-[var(--accent-border)] px-2.5 py-1 font-medium text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {resetting
                     ? t('common.loading')
@@ -854,7 +854,7 @@ const ScopeBadge: React.FC<{ agent: AILibraryAgent }> = ({ agent }) => {
   }
   if (agent.team_id != null) {
     return (
-      <span className={`${base} border-indigo-500/40 bg-indigo-500/10 text-indigo-300`}>
+      <span className={`${base} border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]`}>
         {t('aiLibrary.agents.scopeBadgeTeam', 'Team: {{name}}', {
           name: agent.team_name ?? agent.team_id,
         })}
@@ -1151,7 +1151,7 @@ const SkillsSection: React.FC<{
                   <button
                     type="button"
                     onClick={() => onAdd(skill.id)}
-                    className="inline-flex items-center gap-1 rounded-md border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-500/20"
+                    className="inline-flex items-center gap-1 rounded-md border border-[var(--accent-border)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"
                   >
                     <Plus size={12} />
                     {t('aiLibrary.agents.addSkill', 'Add')}
@@ -1185,7 +1185,7 @@ const SkillScopeBadge: React.FC<{ skill: AILibrarySkill }> = ({ skill }) => {
   }
   if (skill.team_id != null) {
     return (
-      <span className={`${base} border-indigo-500/40 bg-indigo-500/10 text-indigo-300`}>
+      <span className={`${base} border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]`}>
         {t('aiLibrary.skills.scopeBadgeTeam', 'Team: {{name}}', {
           name: skill.team_name ?? skill.team_id,
         })}

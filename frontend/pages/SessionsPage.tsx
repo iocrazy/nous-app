@@ -190,7 +190,7 @@ export const SessionsPage: React.FC = () => {
                   onClick={() => setAgentFilter(on ? null : slug)}
                   className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
                     on
-                      ? 'border-indigo-500/50 bg-indigo-500/15 text-indigo-300'
+                      ? 'border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]'
                       : 'border-ink-800 text-ink-500 hover:text-ink-300 hover:border-ink-700'
                   }`}
                 >
@@ -215,7 +215,7 @@ export const SessionsPage: React.FC = () => {
                   key={s.id}
                   className={`group rounded-lg border px-3 py-2 transition-colors cursor-pointer ${
                     active
-                      ? 'border-indigo-500/40 bg-indigo-500/8'
+                      ? 'border-[var(--accent-border)] bg-[var(--accent-soft)]'
                       : 'border-transparent hover:border-ink-800 hover:bg-ink-900/40'
                   }`}
                   onClick={() => navigate(`${base}/${s.id}`)}
@@ -320,7 +320,7 @@ export const SessionsPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => requestChat(selected.agent_slug!, selected.id)}
-                    className="flex items-center gap-1.5 rounded-md border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1 text-[12px] text-indigo-300 transition-colors hover:bg-indigo-500/20"
+                    className="flex items-center gap-1.5 rounded-md border border-[var(--accent-border)] bg-[var(--accent-soft)] px-2.5 py-1 text-[12px] text-[var(--accent-text)] transition-colors hover:bg-[var(--accent-soft)]"
                   >
                     <MessagesSquare size={13} />
                     {t('aiLibrary.sessions.openInChat', 'Open in Chat')}

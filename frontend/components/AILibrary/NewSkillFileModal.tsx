@@ -295,7 +295,7 @@ const ModeButton: React.FC<ModeButtonProps> = ({
     disabled={disabled}
     className={`flex-1 rounded-md border px-3 py-2 text-sm transition-colors ${
       active
-        ? 'border-indigo-500 bg-indigo-500/10 text-indigo-200'
+        ? 'border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]'
         : 'border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-750'
     } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
   >
