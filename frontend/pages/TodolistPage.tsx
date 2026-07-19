@@ -10,21 +10,44 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ListTodo } from 'lucide-react';
+import { ListTodo, Users, User, Bot } from 'lucide-react';
 import { IssueListView, type IssueViewMode } from '../components/Todolist/IssueListView';
 import { PageHeader } from '../components/AILibrary/PageHeader';
 import { fetchMyTeams, fetchPersonalTeam } from '../services/teamService';
 import { IssueDetailView } from '../components/Todolist/IssueDetailView';
 import { NewIssueDialog } from '../components/Todolist/NewIssueDialog';
 import type { AgentRef, UiIssue } from '../components/Todolist/types';
+import type { IssueScope } from '../components/Todolist/issueScope';
 import {
   listIssues, getIssueByIdentifier, createIssue, type Issue, type IssueCreatePayload,
 } from '../services/issuesService';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { toAgentRef, toUiIssue, type ProjectNameMap } from '../components/Todolist/uiIssue';
-import { fetchProjects } from '../services/projectsService';
+import { fetchProjects, createProject } from '../services/projectsService';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
+
+/** Which slice of the team's issues the list is showing (client-side toggle). */
+type ScopeMode = 'team' | 'my' | 'agent';
+
+const ScopePill: React.FC<{
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}> = ({ active, onClick, icon, label }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full ring-1 transition ${
+      active
+        ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] ring-[var(--accent-border)]'
+        : 'text-ink-400 hover:text-ink-200 ring-ink-800 hover:bg-ink-800'
+    }`}
+  >
+    {icon} {label}
+  </button>
+);
 import { getSupabaseClient } from '../supabaseClient';
 // useAuth gives currentUserId via context; UserProfile shape doesn't carry id.
 
@@ -72,6 +95,8 @@ export function TodolistPage() {
   const [newIssueOpen, setNewIssueOpen] = useState(false);
   const [newIssueParentId, setNewIssueParentId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<IssueViewMode>('list');
+  const [scopeMode, setScopeMode] = useState<ScopeMode>('team');
+  const [scopeAgentId, setScopeAgentId] = useState<string | null>(null);
 
   // Kept as a STRING: team ids are Snowflake BIGINTs and Number() rounds them
   // past 2^53 — a rounded filter can never match rows created with the exact
@@ -86,6 +111,35 @@ export function TodolistPage() {
     () => Object.entries(projectsById).map(([id, v]) => ({ id, name: v.name })),
     [projectsById],
   );
+
+  // The scope handed to IssueListView. team is the default and hard boundary;
+  // `my`/`agent` are client-side projections (no refetch). Falls back to team
+  // when the mode's required id (userId / agentId) isn't available yet.
+  const scopeTeamId = teamIdNum ?? teamId ?? '';
+  const scope: IssueScope = useMemo(() => {
+    if (scopeMode === 'my' && currentUserId) {
+      return { type: 'my', teamId: scopeTeamId, userId: currentUserId };
+    }
+    if (scopeMode === 'agent' && scopeAgentId) {
+      return { type: 'agent', teamId: scopeTeamId, agentId: scopeAgentId };
+    }
+    return { type: 'team', teamId: scopeTeamId };
+  }, [scopeMode, scopeAgentId, currentUserId, scopeTeamId]);
+
+  // Create a project inline (from the New Issue picker or the Group-by-Project
+  // header). Stamps the current team; ids stay strings (Snowflake-safe).
+  const handleCreateProject = useCallback(async (name: string) => {
+    try {
+      const created = await createProject({ name, team_id: teamIdNum ?? undefined });
+      const id = String(created.id);
+      setProjectsById((prev) => ({ ...prev, [id]: { name: created.name } }));
+      addToast(`Created project ${created.name}`, 'success');
+      return { id, name: created.name };
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Failed to create project', 'error');
+      throw err;
+    }
+  }, [teamIdNum, addToast]);
 
   const refreshIssues = useCallback(async (
     agentMap: Record<string, AgentRef>,
@@ -264,6 +318,7 @@ export function TodolistPage() {
             teamId={teamIdNum}
             parentId={newIssueParentId}
             projects={projectOptions}
+            onCreateProject={handleCreateProject}
             onClose={() => { setNewIssueOpen(false); setNewIssueParentId(null); }}
             onSubmit={handleCreate}
           />
@@ -286,15 +341,62 @@ export function TodolistPage() {
           }
           actions={
             <span data-testid="issues-kbd-hints" className="hidden md:flex items-center gap-1.5 text-[12px] text-ink-500">
-              <kbd className="font-mono text-[10px] leading-none px-1 py-0.5 rounded border border-ink-700 bg-ink-800/50 text-ink-400">C</kbd>
-              new issue
-              <span className="text-ink-700">·</span>
+              {scopeMode !== 'agent' && (
+                <>
+                  <kbd className="font-mono text-[10px] leading-none px-1 py-0.5 rounded border border-ink-700 bg-ink-800/50 text-ink-400">C</kbd>
+                  new issue
+                  <span className="text-ink-700">·</span>
+                </>
+              )}
               <kbd className="font-mono text-[10px] leading-none px-1 py-0.5 rounded border border-ink-700 bg-ink-800/50 text-ink-400">/</kbd>
               search
             </span>
           }
           className="pb-2"
         />
+        <div className="flex items-center gap-1.5 pb-2 text-[12px]" data-testid="scope-pills">
+          <ScopePill
+            active={scopeMode === 'team'}
+            onClick={() => setScopeMode('team')}
+            icon={<Users size={12} />}
+            label="Team"
+          />
+          <ScopePill
+            active={scopeMode === 'my'}
+            onClick={() => setScopeMode('my')}
+            icon={<User size={12} />}
+            label="My Issues"
+          />
+          <div
+            className={`inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full ring-1 transition ${
+              scopeMode === 'agent'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] ring-[var(--accent-border)]'
+                : 'text-ink-400 ring-ink-800'
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => setScopeMode('agent')}
+              className="inline-flex items-center gap-1"
+            >
+              <Bot size={12} /> Agent
+            </button>
+            <select
+              value={scopeAgentId ?? ''}
+              onChange={(e) => {
+                setScopeAgentId(e.target.value || null);
+                setScopeMode('agent');
+              }}
+              className="bg-transparent text-[11px] focus:outline-none cursor-pointer max-w-[8rem]"
+              title="Filter to an agent's issues"
+            >
+              <option value="">Select…</option>
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
       <IssueListView
         issues={issues}
@@ -306,6 +408,9 @@ export function TodolistPage() {
         onRefresh={() => { void refreshIssues(agentsById, projectsById); }}
         agents={agents}
         currentUserId={currentUserId ?? undefined}
+        scope={scope}
+        teamName={teamName ?? undefined}
+        onCreateProject={handleCreateProject}
       />
       {newIssueOpen && (
         <NewIssueDialog
@@ -313,6 +418,7 @@ export function TodolistPage() {
           teamId={teamIdNum}
           parentId={newIssueParentId}
           projects={projectOptions}
+          onCreateProject={handleCreateProject}
           onClose={() => { setNewIssueOpen(false); setNewIssueParentId(null); }}
           onSubmit={handleCreate}
         />
