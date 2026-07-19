@@ -232,7 +232,13 @@ describe('laper topbar + NLE drag guide', () => {
     await waitFor(() => expect(screen.getByTestId('beats-arrangement')).toBeInTheDocument());
     expect(screen.getByTestId('beats-count')).toHaveTextContent('2');
     fireEvent.click(screen.getByTestId('beats-topbar-add'));
-    await waitFor(() => expect(svc.createBeat).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(svc.createBeat).toHaveBeenCalledWith('1', {
+        title: 'editor.beatDefaultTitle',
+        start_sec: 60,
+        duration_sec: 60,
+      }),
+    );
   });
 
   it('renders a full-height guide with a time chip while dragging, gone on release', async () => {

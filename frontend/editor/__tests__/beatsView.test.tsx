@@ -91,8 +91,14 @@ describe('BeatsView empty state', () => {
     svc.listBeats.mockResolvedValue([beat({ id: 'a' })]);
     fireEvent.click(screen.getByTestId('beats-add'));
 
+    // Adds now arrange at the timeline end (0 on an empty script) — an
+    // unplaced beat would land in the below-the-fold tray where nobody finds it.
     await waitFor(() =>
-      expect(svc.createBeat).toHaveBeenCalledWith('1', { title: 'editor.beatDefaultTitle' }),
+      expect(svc.createBeat).toHaveBeenCalledWith('1', {
+        title: 'editor.beatDefaultTitle',
+        start_sec: 0,
+        duration_sec: 60,
+      }),
     );
   });
 });

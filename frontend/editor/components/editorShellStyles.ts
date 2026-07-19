@@ -1888,11 +1888,13 @@ export const EDITOR_SHELL_STYLES = `
 .mh-arr-card{
   position:absolute; box-sizing:border-box; cursor:grab; user-select:none; touch-action:none;
   overflow:hidden; display:flex; flex-direction:column; gap:5px; padding:12px 13px 10px;
-  /* laper minimal: hairline border, flat at rest — shadow only when lifted. */
-  background:var(--surface); border:1px solid var(--hairline); border-radius:10px;
+  /* laper minimal but LEGIBLE: white card on the near-white canvas needs a
+     visible border + a whisper of resting shadow, or it disappears. */
+  background:var(--surface); border:1px solid var(--surface-border); border-radius:10px;
+  box-shadow:0 1px 3px rgba(28,27,32,0.07);
   transition:box-shadow 0.15s ease, border-color 0.15s ease;
 }
-.mh-arr-card:hover{ box-shadow:var(--shadow-island); border-color:var(--surface-border); }
+.mh-arr-card:hover{ box-shadow:var(--shadow-island); }
 .mh-arr-card.selected{ border-color:var(--emph-ink-border); }
 .mh-arr-card.dragging{ cursor:grabbing; z-index:4; box-shadow:var(--shadow-float); transform:none; }
 .mh-arr-card.flash{ animation:mh-arr-flash 0.7s ease; }

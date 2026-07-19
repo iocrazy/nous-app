@@ -70,13 +70,24 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
 
   const handleAdd = useCallback(async () => {
     try {
-      await createBeat(scriptId, { title: t('editor.beatDefaultTitle') });
+      // Append ARRANGED at the end of the timeline (laper behaviour) — an
+      // unplaced beat lands in the below-the-fold tray where nobody finds it.
+      const end = beats.reduce(
+        (max, b) =>
+          b.start_sec == null ? max : Math.max(max, b.start_sec + (b.duration_sec ?? 0)),
+        0,
+      );
+      await createBeat(scriptId, {
+        title: t('editor.beatDefaultTitle'),
+        start_sec: end,
+        duration_sec: 60,
+      });
       await reload();
     } catch (err) {
       console.error('[BeatsView] create failed', err);
       addToast(t('editor.beatCreateFailed'), 'error');
     }
-  }, [scriptId, reload, addToast, t]);
+  }, [scriptId, beats, reload, addToast, t]);
 
   const handleCreate = useCallback(
     async (data: BeatInput) => {

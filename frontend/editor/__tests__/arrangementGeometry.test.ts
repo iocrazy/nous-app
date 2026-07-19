@@ -62,8 +62,8 @@ describe('chooseTickUnit', () => {
 
 describe('snapGranularity + snapSec', () => {
   it('snaps to 5s in seconds mode and 30s in minutes mode', () => {
-    expect(snapGranularity('seconds')).toBe(5);
-    expect(snapGranularity('minutes')).toBe(30);
+    expect(snapGranularity('seconds')).toBe(1);
+    expect(snapGranularity('minutes')).toBe(5);
     expect(snapSec(37, 5)).toBe(35);
     expect(snapSec(38, 5)).toBe(40);
     expect(snapSec(44, 30)).toBe(30);

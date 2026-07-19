@@ -67,9 +67,11 @@ export function chooseTickUnit(totalSec: number): TickUnit {
   return totalSec < SECONDS_UNIT_CEILING ? 'seconds' : 'minutes';
 }
 
-/** Drag snap grid: 5s in seconds mode, 30s in minutes mode. */
+/** Drag snap grid — FINE, per user feedback ("只能 5 秒 5 秒的移动"): 1s in
+ * seconds mode, 5s in minutes mode. NLE-style precision; the guide chip shows
+ * the exact landing value while dragging. */
 export function snapGranularity(unit: TickUnit): number {
-  return unit === 'seconds' ? 5 : 30;
+  return unit === 'seconds' ? 1 : 5;
 }
 
 /** Snap a (possibly negative) offset to the nearest grid step, clamped to 0. */
