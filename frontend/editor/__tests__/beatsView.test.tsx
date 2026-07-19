@@ -48,6 +48,10 @@ const beat = (over: Partial<Beat> & { id: string }): Beat => ({
   summary: null,
   scene_ids: [],
   sort_order: 1000,
+  start_sec: null,
+  duration_sec: null,
+  beat_role: null,
+  color: null,
   ...over,
 });
 
@@ -144,6 +148,96 @@ describe('BeatsView scene links', () => {
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole('option', { name: 'INT · Room · DAY' }));
     expect(svc.updateBeat).toHaveBeenCalledWith('a', { scene_ids: ['s1'] });
+  });
+});
+
+describe('BeatsView arrangement fields (M1)', () => {
+  it('renders a duration chip in minutes for a long beat', async () => {
+    svc.listBeats.mockResolvedValue([beat({ id: 'a', duration_sec: 600 })]);
+    renderView();
+    const chip = await screen.findByTestId('beat-duration-chip');
+    expect(chip).toHaveTextContent('10m');
+  });
+
+  it('renders a duration chip in seconds for a short beat (<180s)', async () => {
+    svc.listBeats.mockResolvedValue([beat({ id: 'a', duration_sec: 90 })]);
+    renderView();
+    const chip = await screen.findByTestId('beat-duration-chip');
+    expect(chip).toHaveTextContent('90s');
+  });
+
+  it('renders a color bar when a color is set', async () => {
+    svc.listBeats.mockResolvedValue([beat({ id: 'a', color: '#b8b0a0' })]);
+    renderView();
+    const bar = await screen.findByTestId('beat-color-bar');
+    expect(bar).toHaveStyle({ background: '#b8b0a0' });
+  });
+
+  it('old (all-NULL) beats render with no chip and no color bar', async () => {
+    svc.listBeats.mockResolvedValue([beat({ id: 'a' })]);
+    renderView();
+    await screen.findByTestId('beat-card');
+    expect(screen.queryByTestId('beat-duration-chip')).toBeNull();
+    expect(screen.queryByTestId('beat-color-bar')).toBeNull();
+  });
+
+  it('commits a duration edit as an integer through updateBeat', async () => {
+    svc.listBeats.mockResolvedValue([beat({ id: 'a' })]);
+    renderView();
+    // The duration input lives in the (expandable) notes/edit panel.
+    fireEvent.click(await screen.findByText('editor.beatNotes'));
+    const input = await screen.findByLabelText('editor.beatDuration');
+    fireEvent.change(input, { target: { value: '120' } });
+    fireEvent.blur(input);
+    expect(svc.updateBeat).toHaveBeenCalledWith('a', { duration_sec: 120 });
+  });
+
+  it('clearing the duration input commits null (clear semantics)', async () => {
+    svc.listBeats.mockResolvedValue([beat({ id: 'a', duration_sec: 600 })]);
+    renderView();
+    const input = await screen.findByLabelText('editor.beatDuration');
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.blur(input);
+    expect(svc.updateBeat).toHaveBeenCalledWith('a', { duration_sec: null });
+  });
+
+  it('an invalid duration reverts to the saved value without a network call', async () => {
+    svc.listBeats.mockResolvedValue([beat({ id: 'a', duration_sec: 600 })]);
+    renderView();
+    const input = await screen.findByLabelText('editor.beatDuration');
+    fireEvent.change(input, { target: { value: '-5' } });
+    fireEvent.blur(input);
+    expect(svc.updateBeat).not.toHaveBeenCalled();
+    expect((input as HTMLInputElement).value).toBe('600');
+  });
+
+  it('a duration beyond the PG INTEGER ceiling reverts instead of round-tripping', async () => {
+    svc.listBeats.mockResolvedValue([beat({ id: 'a', duration_sec: 600 })]);
+    renderView();
+    const input = await screen.findByLabelText('editor.beatDuration');
+    fireEvent.change(input, { target: { value: '9999999999' } });
+    fireEvent.blur(input);
+    expect(svc.updateBeat).not.toHaveBeenCalled();
+    expect((input as HTMLInputElement).value).toBe('600');
+  });
+
+  it('clicking the selected swatch clears the color (toggle-off)', async () => {
+    svc.listBeats.mockResolvedValue([beat({ id: 'a', color: '#b8a9a0' })]);
+    renderView();
+    const swatches = await screen.findAllByTestId('beat-color-swatch');
+    fireEvent.click(swatches[0]);
+    expect(svc.updateBeat).toHaveBeenCalledWith('a', { color: null });
+  });
+
+  it('picks a color swatch and commits it through updateBeat', async () => {
+    svc.listBeats.mockResolvedValue([beat({ id: 'a' })]);
+    renderView();
+    fireEvent.click(await screen.findByText('editor.beatNotes'));
+    const swatches = await screen.findAllByTestId('beat-color-swatch');
+    fireEvent.click(swatches[0]);
+    expect(svc.updateBeat).toHaveBeenCalledWith('a', {
+      color: expect.stringMatching(/^#[0-9a-fA-F]{6}$/),
+    });
   });
 });
 

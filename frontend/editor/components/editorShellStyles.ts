@@ -1716,10 +1716,40 @@ export const EDITOR_SHELL_STYLES = `
 .mh-beats-empty-sub{ font-size:13px; line-height:1.6; color:var(--ink-faint); margin:0; }
 
 .mh-beat-card{
-  border:1px solid var(--hairline); border-radius:var(--radius-md);
+  position:relative; border:1px solid var(--hairline); border-radius:var(--radius-md);
   background:var(--surface); padding:10px 12px; margin:5px 0;
-  display:flex; flex-direction:column; gap:8px;
+  display:flex; flex-direction:column; gap:8px; overflow:hidden;
 }
+.mh-beat-color-bar{
+  position:absolute; left:0; top:0; bottom:0; width:4px; border-radius:var(--radius-md) 0 0 var(--radius-md);
+}
+.mh-beat-duration-chip{
+  flex-shrink:0; font-size:11px; font-weight:700; color:var(--accent-text);
+  background:var(--accent-soft); border:1px solid var(--accent-border);
+  border-radius:999px; padding:2px 8px; line-height:1.4;
+}
+.mh-beat-arrange{
+  display:flex; flex-wrap:wrap; align-items:center; gap:12px;
+}
+.mh-beat-duration-field{ display:flex; align-items:center; gap:6px; }
+.mh-beat-field-label{ font-size:11.5px; font-weight:600; color:var(--ink-faint); }
+.mh-beat-duration-input{
+  width:72px; font-family:var(--sans); font-size:12px; color:var(--ink);
+  background:var(--surface-2); border:1px solid var(--hairline);
+  border-radius:var(--radius-sm); padding:4px 7px;
+}
+.mh-beat-duration-input:focus{ outline:none; border-color:var(--indigo); }
+.mh-beat-color-swatches{ display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+.mh-beat-color-swatch{
+  width:18px; height:18px; border-radius:50%; border:1px solid var(--hairline);
+  cursor:pointer; padding:0;
+}
+.mh-beat-color-swatch.selected{ box-shadow:0 0 0 2px var(--surface), 0 0 0 3.5px var(--ink-soft); }
+.mh-beat-color-clear{
+  font-size:12px; line-height:1; color:var(--ink-faint); background:transparent;
+  border:1px solid var(--hairline); border-radius:50%; width:18px; height:18px; cursor:pointer;
+}
+.mh-beat-color-clear:hover{ color:var(--red); }
 .mh-beat-card.dragging{ opacity:0.55; }
 .mh-beat-card-head{ display:flex; align-items:center; gap:8px; }
 .mh-beat-drag-handle{
