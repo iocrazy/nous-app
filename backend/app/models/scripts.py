@@ -542,6 +542,12 @@ class ScriptBeats(Base):
     sort_order: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
     )
+    # Arrangement columns (mig 372). All NULLable — NULL start_sec = "not yet
+    # arranged" (classic list-mode beat), NULL beat_role = free-form beat.
+    start_sec: Mapped[Optional[int]] = mapped_column(Integer)
+    duration_sec: Mapped[Optional[int]] = mapped_column(Integer)
+    beat_role: Mapped[Optional[str]] = mapped_column(String(40))
+    color: Mapped[Optional[str]] = mapped_column(String(20))
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True),
         nullable=False,

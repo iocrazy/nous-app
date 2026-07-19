@@ -369,12 +369,24 @@ export interface Beat {
   /** Ordered linked scene ids (Snowflake strings — never Number()-coerce). */
   scene_ids: string[];
   sort_order: number;
+  /** Timeline start offset in seconds; null = not yet arranged (list-mode beat). */
+  start_sec: number | null;
+  /** Beat duration in seconds; null = unset. */
+  duration_sec: number | null;
+  /** Methodology-template role key (e.g. save_the_cat.catalyst); null = free-form. */
+  beat_role: string | null;
+  /** Card color-strip hex (e.g. #b8b0a0); null = neutral chrome. */
+  color: string | null;
 }
 
 export interface BeatInput {
   title?: string;
   summary?: string | null;
   scene_ids?: string[];
+  start_sec?: number | null;
+  duration_sec?: number | null;
+  beat_role?: string | null;
+  color?: string | null;
 }
 
 /** Coerce scene ids to strings on write (#1006 — a bigint id must not round-trip
