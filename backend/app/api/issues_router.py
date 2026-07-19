@@ -107,11 +107,11 @@ async def list_issues(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> IssueListResponse:
-    """List issues visible to the authenticated user (own OR assignee).
+    """List issues visible to the authenticated user.
 
-    Team / project visibility folding is intentionally NOT implemented
-    here — it requires a JOIN against team_members which the repo will
-    add in PR-D6.1. For now: own + assignee scope only.
+    D6.1 team folding: own OR assignee OR member of the issue's team
+    (team_members subquery in the repo). The team_id param is a filter on
+    top of that visibility, never an authorization input.
     """
     items, total = await issue_repository.list_for_user(
         user_id=str(auth.user_id),
@@ -139,7 +139,7 @@ async def get_by_identifier(identifier: str, auth: AuthDep) -> Issue:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"identifier={identifier} not found",
         )
-    _assert_visibility(row, auth)
+    await _assert_visibility(row, auth)
     return Issue.model_validate(_normalise_uuid_strs(row))
 
 
@@ -151,7 +151,7 @@ async def get_issue(issue_id: int, auth: AuthDep) -> Issue:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"id={issue_id} not found",
         )
-    _assert_visibility(row, auth)
+    await _assert_visibility(row, auth)
     return Issue.model_validate(_normalise_uuid_strs(row))
 
 
@@ -165,7 +165,7 @@ async def update_issue(issue_id: int, payload: IssueUpdate, auth: AuthDep) -> Is
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"id={issue_id} not found"
         )
-    _assert_visibility(existing, auth)
+    await _assert_visibility(existing, auth)
 
     patch = payload.model_dump(exclude_none=True)
     for field in ("priority",):
@@ -195,7 +195,7 @@ async def transition_status(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"id={issue_id} not found"
         )
-    _assert_visibility(existing, auth)
+    await _assert_visibility(existing, auth)
     try:
         row = await issue_repository.transition_status(issue_id, body.status.value)
     except Exception as e:
@@ -219,7 +219,7 @@ async def dispatch_preview(issue_id: int, auth: AuthDep) -> DispatchPreview:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"id={issue_id} not found"
         )
-    _assert_visibility(existing, auth)
+    await _assert_visibility(existing, auth)
 
     agent_raw = existing.get("assignee_agent_id")
     agent_id = str(agent_raw) if agent_raw else None
@@ -263,7 +263,7 @@ async def dispatch_issue(issue_id: int, auth: AuthDep) -> Issue:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"id={issue_id} not found"
         )
-    _assert_visibility(existing, auth)
+    await _assert_visibility(existing, auth)
 
     if not dbos_orchestrator.is_enabled():
         raise HTTPException(
@@ -312,23 +312,32 @@ async def soft_delete_issue(issue_id: int, auth: AuthDep) -> None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"id={issue_id} not found"
         )
-    _assert_visibility(existing, auth)
+    await _assert_visibility(existing, auth)
     await issue_repository.soft_delete(issue_id)
 
 
 # ── helpers ────────────────────────────────────────────────────────
 
 
-def _assert_visibility(row: dict, auth) -> None:
-    """App-layer visibility check (own OR assignee). RLS does the same
-    at the DB layer for non-service-role callers, but since the repo
-    uses service_role we re-check here."""
+async def _assert_visibility(row: dict, auth) -> None:
+    """App-layer visibility check. RLS does the same at the DB layer for
+    non-service-role callers, but since the repo uses service_role we
+    re-check here.
+
+    D6.1 (用户立约: team 是铁边界): visible = own OR assignee OR member of
+    the issue's team. Membership is checked server-side against
+    team_members — never inferred from client input. 404 (not 403) so we
+    don't leak existence across teams.
+    """
     user_id = str(auth.user_id)
     if (
         row.get("created_by_user_id") == user_id
         or row.get("assignee_user_id") == user_id
     ):
         return
-    # Team/project visibility folded in by repo in D6.1; until then
-    # restrict to own/assignee. 404 (not 403) so we don't leak existence.
+    team_id = row.get("team_id")
+    if team_id is not None and await issue_repository.is_team_member(
+        user_id, int(team_id)
+    ):
+        return
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
