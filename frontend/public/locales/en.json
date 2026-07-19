@@ -62,6 +62,7 @@
     "agents": "Agents",
     "skills": "Skills",
     "aiUsage": "AI Usage",
+    "aiCost": "Cost & Budget",
     "newAgent": "New agent",
     "agentRunning": "Running...",
     "agentPausedBudget": "Paused: monthly budget exceeded",
@@ -2561,6 +2562,10 @@
       "weekTokens": "Tokens · 7d",
       "topModels": "Top models · 7d"
     }
+  },
+  "teamUsage": {
+    "title": "AI Cost & Budget",
+    "subtitle": "Token spend for this workspace, attributed by agent, model, and human vs automation."
   },
   "aiUsage": {
     "title": "AI Usage",

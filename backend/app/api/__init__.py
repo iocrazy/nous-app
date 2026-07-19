@@ -71,6 +71,7 @@ from app.api.teams_router import router as teams_router
 from app.api.temp_token_router import router as temp_token_router
 from app.api.temp_ttl_router import router as temp_ttl_router
 from app.api.topics_router import router as _topics_router
+from app.api.usage_router import router as usage_router
 from app.api.user_settings_router import router as settings_router
 from app.api.workforce_router import router as workforce_router
 
@@ -149,6 +150,7 @@ api_router.include_router(router=task_manager_router, tags=["Task Manager"])
 api_router.include_router(router=flows_router)
 
 api_router.include_router(router=teams_router, tags=["Teams"])
+api_router.include_router(router=usage_router, tags=["Usage"])
 
 api_router.include_router(router=conversation_router, tags=["Conversations"])
 

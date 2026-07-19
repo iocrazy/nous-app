@@ -26,6 +26,25 @@ class TeamMemberAdd(BaseModel):
     role: str = "member"
 
 
+class TeamAiBudgetUpdate(BaseModel):
+    """Request to set a team's monthly AI budget (W3c).
+
+    ``monthly_budget_cents`` None = unlimited (removes the ceiling)."""
+
+    monthly_budget_cents: Optional[float] = None
+
+
+class TeamAiBudgetResponse(BaseModel):
+    """A team's monthly AI budget + current calendar-month spend (W3c)."""
+
+    team_id: str
+    monthly_budget_cents: Optional[float] = None
+    month_spend_cents: float = 0.0
+    over_budget: bool = False
+    updated_by_user_id: Optional[str] = None
+    updated_at: Optional[datetime] = None
+
+
 class TeamMemberUpdate(BaseModel):
     """Request to update a team member's role."""
 

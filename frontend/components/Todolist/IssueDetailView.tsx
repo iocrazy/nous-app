@@ -26,6 +26,7 @@ import { getCommentTriggerPreview, listIssueMessages, postIssueMessage } from '.
 import { dispatchIssue, getDispatchPreview, type DispatchPreview } from '../../services/issuesService';
 import { DispatchConfirmDialog } from './DispatchConfirmDialog';
 import { PipelineRunStrip } from './PipelineRunStrip';
+import { IssueCostLine } from './IssueCostLine';
 import { RunPipelineMenu } from './RunPipelineMenu';
 import { openIssueChatSocket } from '../../services/issueChatSocket';
 import { getSupabaseClient } from '../../supabaseClient';
@@ -357,6 +358,8 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             agentsById={agentsById}
             refreshKey={pipelineRefresh}
           />
+
+          <IssueCostLine issueId={issue.id} refreshKey={pipelineRefresh} />
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-5">
             <button

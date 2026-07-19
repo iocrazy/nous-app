@@ -106,6 +106,12 @@ class RunRecorder:
     model: Optional[str] = None
     provider: Optional[str] = None
     input_summary: Optional[str] = None
+    # W3c two-level cost attribution: 'direct_human' (a human initiated this
+    # turn) vs 'rule_owner' (a scheduled routine / pipeline advance fired it on
+    # the owner's behalf). None → treated as direct_human on finish. Set by the
+    # issue-dispatch path from the issue origin_kind; interactive chat/script
+    # leave it None (human).
+    attribution: Optional[str] = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     # Internal state (populated by start / methods; not caller-facing)
@@ -685,6 +691,10 @@ class RunRecorder:
         if self._prompt_rate is not None and self._completion_rate is not None:
             cost_cents = self.compute_cost_cents()
 
+        # W3c: classify every finished run. None → direct_human (a human turn);
+        # the issue-dispatch path sets rule_owner for routine/pipeline fires.
+        effective_attribution = self.attribution or "direct_human"
+
         # "now()" sentinel → native datetime for the asyncpg timestamptz bind.
         updates: dict[str, Any] = {
             "status": status,
@@ -693,6 +703,7 @@ class RunRecorder:
             "completion_tokens": self._completion_tokens,
             "cached_input_tokens": self._cached_input_tokens,
             "skill_slugs_used": self._skill_slugs_used,
+            "attribution": effective_attribution,
         }
         if cost_cents is not None:
             updates["cost_cents"] = cost_cents
@@ -710,6 +721,29 @@ class RunRecorder:
                 .where(AgentRuns.status == "running")  # idempotent guard
                 .values(**updates)
             )
+
+        # W3c: accumulate this turn into the ai_usage_hourly rollup the Usage
+        # panel reads. Fire-and-forget (record_usage swallows internally) and
+        # only when tokens were actually burned, so we don't create empty
+        # rollup buckets for pre-flight rejects. module = the run trigger.
+        if (self._prompt_tokens + self._completion_tokens) > 0:
+            try:
+                from app.services.ai_usage import record_usage
+
+                await record_usage(
+                    module=self.trigger,
+                    attribution=effective_attribution,
+                    prompt_tokens=self._prompt_tokens,
+                    completion_tokens=self._completion_tokens,
+                    cached_input_tokens=self._cached_input_tokens,
+                    team_id=self.team_id,
+                    project_id=self.project_id,
+                    agent_id=self.agent_id,
+                    model=self.model,
+                    cost_cents=cost_cents,
+                )
+            except Exception as exc:  # noqa: BLE001 — defence in depth
+                logger.warning(f"[RunRecorder] usage rollup failed (non-fatal): {exc}")
 
         # Phase 3 Token Billing: reconcile usage on terminal status only.
         # Failure here is logged but never raised — billing must not be

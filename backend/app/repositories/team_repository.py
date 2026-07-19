@@ -273,6 +273,16 @@ class TeamRepository:
 
             return rows
 
+    async def get_member_role(self, team_id: str, user_id: str) -> Optional[str]:
+        """Return the caller's role in the team, or None if not a member."""
+        async with read_scope() as session:
+            return await session.scalar(
+                select(TeamMembers.role)
+                .where(TeamMembers.team_id == int(team_id))
+                .where(TeamMembers.user_id == user_id)
+                .limit(1)
+            )
+
     async def add_member(
         self, team_id: str, new_user_id: str, role: str = "member"
     ) -> Optional[Dict[str, Any]]:

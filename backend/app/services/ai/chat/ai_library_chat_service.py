@@ -344,10 +344,15 @@ class AILibraryChatService:
         plan_mode: Optional[str] = None,
         chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None,
         attachments: Optional[list] = None,
+        attribution: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Per-user concurrency gate around the turn. Both chat (.chat) and
         issue (run_issue_reply_step) funnel through here, so one gate caps a
-        user's concurrent agent turns. See agent_concurrency."""
+        user's concurrent agent turns. See agent_concurrency.
+
+        ``attribution`` (W3c) forwards a two-level cost tag to RunRecorder —
+        the issue-dispatch path passes 'rule_owner' for routine/pipeline fires;
+        interactive chat leaves it None (→ direct_human)."""
         from app.services.ai.chat.agent_concurrency import user_slot
 
         async with user_slot(str(user_id)):
@@ -359,6 +364,7 @@ class AILibraryChatService:
                 plan_mode=plan_mode,
                 chunk_callback=chunk_callback,
                 attachments=attachments,
+                attribution=attribution,
             )
 
     async def _run_session_turn_inner(
@@ -371,6 +377,7 @@ class AILibraryChatService:
         plan_mode: Optional[str] = None,
         chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None,
         attachments: Optional[list] = None,
+        attribution: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute a single turn against a session.
 
@@ -839,6 +846,7 @@ class AILibraryChatService:
                 model=model or None,
                 provider=provider,
                 input_summary=content,
+                attribution=attribution,
                 metadata={"full_input": content},
             ) as recorder:
                 try:

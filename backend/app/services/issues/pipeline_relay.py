@@ -507,6 +507,28 @@ async def _evaluate_advance(
 
     # Done child → advance or complete.
     if step_order < total:
+        # W3c budget breaker: before spinning up the next (paid) pipeline step,
+        # gate on the parent's team budget. Over budget → halt the run with a
+        # visible reason so it's stopped, not silently stuck. Pipeline children
+        # propagate the parent's team_id, so no owner→team resolution is needed.
+        from app.services.ai_usage import is_team_over_budget
+
+        if await is_team_over_budget(parent.get("team_id")):
+            halted = await gw.halt_run(
+                run_id, reason="Budget exceeded — monthly AI budget reached"
+            )
+            if not halted:
+                return {"fired": False, "reason": "already_terminal"}
+            await gw.post_parent_message(
+                parent,
+                (
+                    f"Pipeline halted at step {step_order + 1} — the team's "
+                    "monthly AI budget has been reached."
+                ),
+                key=build_origin_id(run_id, step_order),
+            )
+            return {"fired": True, "reason": "halted_budget", "run_id": str(run_id)}
+
         next_step = steps[step_order]  # steps is 0-indexed; step_order is 1-based
         advanced = await gw.advance_run_step(
             run_id, from_step=step_order, to_step=step_order + 1
