@@ -3,6 +3,7 @@ import pytest
 from app.workflows.publish_distribution import (
     _account_publish_opts,
     _publish_one_account,
+    _resolve_image_urls,
     _run_accounts,
     _title_with_hashtags,
     classify_batch,
@@ -287,6 +288,151 @@ async def test_publish_one_account_h5_forwards_opts():
     assert adapter.calls["private_status"] == 2
     # H5 path forwards the bool; the adapter maps it to the 1/2 schema enum.
     assert adapter.calls["allow_download"] is True
+
+
+# ── images (图文/note) publish branch ─────────────────────────────────────
+
+
+class _ImageAdapter:
+    """Captures the kwargs generate_image_share_url received; explodes if a
+    caller mistakenly routes an images task down the video path."""
+
+    def __init__(self):
+        self.image_kw = None
+
+    async def generate_image_share_url(self, **kw):
+        self.image_kw = kw
+        return f"snssdk1128://openplatform/share?state={kw['share_id']}"
+
+    async def publish_video(self, **kw):
+        raise AssertionError("images task must not call publish_video")
+
+    async def generate_share_url(self, **kw):
+        raise AssertionError("images task must not call the video share path")
+
+
+class _MapRepo:
+    """Resolves per-id URLs so gallery ORDER can be asserted; returns None for
+    unknown ids (missing media)."""
+
+    def __init__(self, mapping):
+        self.mapping = mapping
+        self.updates = []
+
+    async def get_resource_media_url(self, rid):
+        return self.mapping.get(int(rid))
+
+    async def set_account_status(self, account_row_id, status, **fields):
+        self.updates.append((status, fields))
+
+
+@pytest.mark.asyncio
+async def test_resolve_image_urls_preserves_order():
+    repo = _MapRepo({30: "https://cdn/a.jpg", 31: "https://cdn/b.jpg"})
+    task = {"resource_ids": ["30", "31"]}
+    assert await _resolve_image_urls(task, repo) == [
+        "https://cdn/a.jpg",
+        "https://cdn/b.jpg",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resolve_image_urls_raises_on_missing():
+    repo = _MapRepo({30: "https://cdn/a.jpg"})  # 31 unresolved
+    with pytest.raises(RuntimeError):
+        await _resolve_image_urls({"resource_ids": ["30", "31"]}, repo)
+
+
+@pytest.mark.asyncio
+async def test_images_h5_publishes_all_urls_in_order():
+    repo = _MapRepo(
+        {30: "https://cdn/a.jpg", 31: "https://cdn/b.jpg", 32: "https://cdn/c.jpg"}
+    )
+    adapter = _ImageAdapter()
+    account = {
+        "id": "1",
+        "account_id": "2",
+        "channel": "h5",
+        "access_token": None,
+        "platform_user_id": "o",
+        "platform": "douyin",
+    }
+    task = {
+        "title": "Gallery",
+        "content_type": "images",
+        "resource_ids": ["30", "31", "32"],
+        "topics": ["city"],
+    }
+    status = await _publish_one_account(account, adapter, task, repo)
+    assert status == "pending_share"
+    # the note carries every image, in the batch's resource_ids order.
+    assert adapter.image_kw["image_urls"] == [
+        "https://cdn/a.jpg",
+        "https://cdn/b.jpg",
+        "https://cdn/c.jpg",
+    ]
+    assert adapter.image_kw["hashtags"] == ["city"]
+    assert repo.updates[-1][0] == "pending_share"
+    assert repo.updates[-1][1]["share_id"]
+
+
+@pytest.mark.asyncio
+async def test_images_official_channel_records_failed_business_state():
+    """An account that actually resolved to 'official' (has a live token) can't
+    do images yet → recorded as failed business state, loop keeps going. The
+    adapter is never invoked."""
+    repo = _MapRepo({30: "https://cdn/a.jpg"})
+    adapter = _ImageAdapter()
+    account = {
+        "id": "1",
+        "account_id": "2",
+        "channel": "official",
+        "access_token": "act",  # → decide_channel resolves 'official'
+        "platform_user_id": "o",
+        "platform": "douyin",
+    }
+    task = {"title": "G", "content_type": "images", "resource_ids": ["30"]}
+    status = await _publish_one_account(account, adapter, task, repo)
+    assert status == "failed"
+    assert "official" in repo.updates[-1][1]["error_message"]
+    assert adapter.image_kw is None
+
+
+@pytest.mark.asyncio
+async def test_images_official_no_token_falls_back_to_h5():
+    """official requested but NO token → decide_channel falls back to h5, so
+    images publish succeeds through the note handoff."""
+    repo = _MapRepo({30: "https://cdn/a.jpg"})
+    adapter = _ImageAdapter()
+    account = {
+        "id": "1",
+        "account_id": "2",
+        "channel": "official",
+        "access_token": None,
+        "platform_user_id": "o",
+        "platform": "douyin",
+    }
+    task = {"title": "G", "content_type": "images", "resource_ids": ["30"]}
+    status = await _publish_one_account(account, adapter, task, repo)
+    assert status == "pending_share"
+    assert adapter.image_kw["image_urls"] == ["https://cdn/a.jpg"]
+
+
+@pytest.mark.asyncio
+async def test_images_missing_media_records_failed():
+    repo = _MapRepo({30: "https://cdn/a.jpg"})  # 31 missing
+    adapter = _ImageAdapter()
+    account = {
+        "id": "1",
+        "account_id": "2",
+        "channel": "h5",
+        "access_token": None,
+        "platform_user_id": "o",
+        "platform": "douyin",
+    }
+    task = {"title": "G", "content_type": "images", "resource_ids": ["30", "31"]}
+    status = await _publish_one_account(account, adapter, task, repo)
+    assert status == "failed"
 
 
 # ── classify_batch ────────────────────────────────────────────────────────

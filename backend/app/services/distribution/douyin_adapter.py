@@ -281,6 +281,34 @@ class DouyinAdapter(PlatformAdapter):
         sign_str = f"nonce_str={nonce_str}&ticket={ticket}&timestamp={timestamp}"
         return hashlib.md5(sign_str.encode()).hexdigest()
 
+    async def _fresh_signature(self) -> tuple[int, str, str]:
+        """Mint the (timestamp, nonce_str, signature) triplet for one H5 share
+        Schema URL. Fetches a fresh ticket (cached), a random nonce and the
+        current timestamp, then signs. Shared by both the video and image
+        share builders so the signing口径 stays identical."""
+        ticket = await self._get_ticket()
+        timestamp = int(time.time())
+        nonce_str = secrets.token_hex(16)
+        signature = self._generate_signature(ticket, timestamp, nonce_str)
+        return timestamp, nonce_str, signature
+
+    @staticmethod
+    def _hashtag_list_param(hashtags: list[str]) -> Optional[str]:
+        """Encode topics as Douyin's H5 ``hashtag_list`` JsonArray string
+        (``["城市","4k"]``), or None when there are no topics. Compact
+        separators keep the param tight; ensure_ascii=False keeps CJK topics
+        readable (``quote`` percent-encodes the value at emit time)."""
+        if not hashtags:
+            return None
+        return json.dumps(hashtags, ensure_ascii=False, separators=(",", ":"))
+
+    @staticmethod
+    def _schema_url(params: dict) -> str:
+        """Percent-encode every value and assemble the ``snssdk1128`` Schema
+        URL. Extracted so both share builders emit an identical URL shape."""
+        query = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in params.items())
+        return f"snssdk1128://openplatform/share?{query}"
+
     async def generate_share_url(self, **kwargs) -> Optional[str]:
         """
         Generate the Schema URL for H5 share to Douyin
@@ -320,10 +348,7 @@ class DouyinAdapter(PlatformAdapter):
         # official create API's 0/1 — do not unify these two enums).
         download_type = 1 if allow_download else 2
 
-        ticket = await self._get_ticket()
-        timestamp = int(time.time())
-        nonce_str = secrets.token_hex(16)
-        signature = self._generate_signature(ticket, timestamp, nonce_str)
+        timestamp, nonce_str, signature = await self._fresh_signature()
 
         # share_type is a fixed "h5" discriminator required by the schema; it
         # is NOT part of the signature (which only covers nonce_str/ticket/
@@ -340,13 +365,74 @@ class DouyinAdapter(PlatformAdapter):
             "private_status": private_status,
             "download_type": download_type,
         }
-        if hashtags:
-            # JsonArray string, e.g. ["城市","4k"]. Compact separators (no space
-            # after comma) keep the URL param tight; ensure_ascii=False keeps
-            # CJK topics readable; quote() below percent-encodes the whole value.
-            params["hashtag_list"] = json.dumps(
-                hashtags, ensure_ascii=False, separators=(",", ":")
-            )
+        hashtag_list = self._hashtag_list_param(hashtags)
+        if hashtag_list is not None:
+            params["hashtag_list"] = hashtag_list
 
-        query = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in params.items())
-        return f"snssdk1128://openplatform/share?{query}"
+        return self._schema_url(params)
+
+    async def generate_image_share_url(self, **kwargs) -> Optional[str]:
+        """
+        Generate the H5 share Schema URL for an image / gallery (图文/note)
+        post — the image counterpart of ``generate_share_url``.
+
+        Same ticket / signature / download_type machinery, but emits the
+        image-post schema keys: ``image_list_path`` (a JsonArray string of
+        image URLs — Douyin's documented gallery format, png/jpg only, no gif)
+        plus ``feature="note"`` (renders the multi-image post as a 图文笔记
+        note). A SINGLE image still rides ``image_list_path`` as a one-element
+        list — the schema's single-image ``image_path`` key is deliberately
+        unused so callers have one uniform path.
+
+        Required kwargs:
+            image_urls (list[str]): ordered image URLs. The list order IS the
+                gallery order shown in the post (never reordered here).
+            title (str): title for the shared post.
+            share_id (str): unique share identifier (maps to the state param).
+
+        Optional kwargs (identical semantics/enums to ``generate_share_url``):
+            private_status (int): H5 visibility enum — 0=public, 1=self only,
+                2=friends (default 0).
+            allow_download (bool): mapped to the H5 download_type (True→1,
+                False→2 — distinct from the official create API's 0/1).
+            hashtags (list[str]): bare topic words → ``hashtag_list`` JsonArray.
+
+        Returns:
+            Schema URL string that opens Douyin app with the images pre-filled.
+        """
+        image_urls: list[str] = list(kwargs["image_urls"])
+        if not image_urls:
+            raise ValueError("image_urls must be a non-empty list")
+        title: str = kwargs["title"]
+        share_id: str = kwargs["share_id"]
+        hashtags: list[str] = list(kwargs.get("hashtags") or [])
+        private_status: int = int(kwargs.get("private_status", 0))
+        allow_download: bool = bool(kwargs.get("allow_download", True))
+        # H5 share download_type: 1=allowed, 2=not allowed (same enum as the
+        # video share — distinct from the official create API's 0/1).
+        download_type = 1 if allow_download else 2
+
+        timestamp, nonce_str, signature = await self._fresh_signature()
+
+        params = {
+            "share_type": "h5",
+            "client_key": self._creds.client_key,
+            "nonce_str": nonce_str,
+            "timestamp": str(timestamp),
+            "signature": signature,
+            "state": share_id,
+            # image_list_path is a JsonArray string of URLs (gallery mode).
+            # feature="note" renders it as a 图文笔记. png/jpg only.
+            "image_list_path": json.dumps(
+                image_urls, ensure_ascii=False, separators=(",", ":")
+            ),
+            "feature": "note",
+            "title": title,
+            "private_status": private_status,
+            "download_type": download_type,
+        }
+        hashtag_list = self._hashtag_list_param(hashtags)
+        if hashtag_list is not None:
+            params["hashtag_list"] = hashtag_list
+
+        return self._schema_url(params)

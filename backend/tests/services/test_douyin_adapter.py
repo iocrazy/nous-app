@@ -197,3 +197,77 @@ async def test_share_url_download_type_true_maps_to_one(monkeypatch):
     assert q["private_status"] == ["0"]
     # allowed → 1 under the H5 schema (distinct from official 0).
     assert q["download_type"] == ["1"]
+
+
+# ── H5 image / gallery (图文/note) share schema ──────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_image_share_url_emits_image_list_note_and_download(monkeypatch):
+    """Image share must emit the note-post schema: image_list_path (a JsonArray
+    string preserving order), feature=note, share_type=h5 — and NO video_path.
+    private_status/download_type follow the H5 enums (2=friends, 2=no-download)."""
+    adapter = DouyinAdapter(CREDS)
+
+    async def fake_ticket():
+        return "tkt"
+
+    monkeypatch.setattr(adapter, "_get_ticket", fake_ticket)
+    url = await adapter.generate_image_share_url(
+        image_urls=["https://cdn/1.jpg", "https://cdn/2.jpg"],
+        title="Gallery",
+        share_id="sid-img",
+        hashtags=["城市"],
+        private_status=2,
+        allow_download=False,
+    )
+    assert url.startswith("snssdk1128://openplatform/share?")
+    q = _query(url)
+    assert q["share_type"] == ["h5"]
+    assert q["feature"] == ["note"]
+    assert q["state"] == ["sid-img"]
+    # image_list_path is a JsonArray string preserving the picked order.
+    assert json.loads(q["image_list_path"][0]) == [
+        "https://cdn/1.jpg",
+        "https://cdn/2.jpg",
+    ]
+    # the media key is image_list_path — never the video schema's video_path.
+    assert "video_path" not in q
+    assert q["private_status"] == ["2"]
+    # H5 download_type 1/2 — not-allowed → 2.
+    assert q["download_type"] == ["2"]
+    assert json.loads(q["hashtag_list"][0]) == ["城市"]
+
+
+@pytest.mark.asyncio
+async def test_image_share_url_single_image_still_uses_list(monkeypatch):
+    adapter = DouyinAdapter(CREDS)
+
+    async def fake_ticket():
+        return "tkt"
+
+    monkeypatch.setattr(adapter, "_get_ticket", fake_ticket)
+    url = await adapter.generate_image_share_url(
+        image_urls=["https://cdn/only.jpg"], title="One", share_id="s1"
+    )
+    q = _query(url)
+    # single image rides image_list_path as a one-element array (image_path unused).
+    assert json.loads(q["image_list_path"][0]) == ["https://cdn/only.jpg"]
+    assert "image_path" not in q
+    # defaults: public + downloadable.
+    assert q["private_status"] == ["0"]
+    assert q["download_type"] == ["1"]
+    # no topics → no hashtag_list param.
+    assert "hashtag_list" not in q
+
+
+@pytest.mark.asyncio
+async def test_image_share_url_rejects_empty_list(monkeypatch):
+    adapter = DouyinAdapter(CREDS)
+
+    async def fake_ticket():
+        return "tkt"
+
+    monkeypatch.setattr(adapter, "_get_ticket", fake_ticket)
+    with pytest.raises(ValueError):
+        await adapter.generate_image_share_url(image_urls=[], title="x", share_id="s")
