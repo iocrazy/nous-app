@@ -154,7 +154,7 @@ export function LlmNodeView({ id, data, selected }: NodeProps) {
           type="button"
           onClick={() => void run()}
           disabled={d.run_status === 'running'}
-          className="nodrag mt-2 flex items-center gap-1.5 rounded-full border border-canvas-line px-3 py-1 text-xs font-medium text-canvas-text transition-colors hover:border-indigo-500/50 hover:text-indigo-400 disabled:opacity-50"
+          className="nodrag mt-2 flex items-center gap-1.5 rounded-full border border-canvas-line px-3 py-1 text-xs font-medium text-canvas-text transition-colors hover:border-[var(--accent-border)] hover:text-[var(--accent-text)] disabled:opacity-50"
         >
           <Play size={11} />
           Run

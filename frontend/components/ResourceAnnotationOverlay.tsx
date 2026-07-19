@@ -84,7 +84,7 @@ const InlineToolbar: React.FC<{
     <div className="flex items-center gap-0.5">
       {TOOL_ITEMS.map(({ id, icon: Icon, label }) => (
         <button key={id} onClick={() => onToolChange(id)} title={label}
-          className={`p-1.5 rounded-lg transition-colors ${tool === id ? 'bg-indigo-500/20 text-indigo-400' : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'}`}
+          className={`p-1.5 rounded-lg transition-colors ${tool === id ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'}`}
         ><Icon size={16} /></button>
       ))}
     </div>

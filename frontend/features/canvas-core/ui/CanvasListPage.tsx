@@ -160,12 +160,12 @@ export default function CanvasListPage() {
                     <div key={canvas.id} className="group relative">
                       <button
                         onClick={() => navigate(`/team/${teamId}/canvas/${canvas.id}`)}
-                        className={`flex w-full flex-col items-start gap-2 rounded-2xl border border-line bg-island p-4 text-left transition-all duration-200 hover:border-indigo-500/40 hover:bg-island-2 ${FOCUS_RING}`}
+                        className={`flex w-full flex-col items-start gap-2 rounded-2xl border border-line bg-island p-4 text-left transition-all duration-200 hover:border-[var(--accent-border)] hover:bg-island-2 ${FOCUS_RING}`}
                       >
                         <div className="flex w-full items-center gap-2">
                           <Frame
                             size={16}
-                            className="shrink-0 text-content-3 group-hover:text-indigo-400"
+                            className="shrink-0 text-content-3 group-hover:text-[var(--accent-text)]"
                           />
                           <span className="truncate pr-6 text-sm font-medium text-content">
                             {canvas.name || t('canvasList.untitled', 'Untitled Canvas')}
@@ -201,7 +201,7 @@ export default function CanvasListPage() {
                   <button
                     onClick={() => setDialogProjectId(project_id)}
                     disabled={creatingProjectId !== null}
-                    className={`flex min-h-[76px] items-center justify-center gap-2 rounded-2xl border border-dashed border-line p-4 text-sm text-content-3 transition-all duration-200 hover:border-indigo-500/40 hover:text-content disabled:opacity-50 ${FOCUS_RING}`}
+                    className={`flex min-h-[76px] items-center justify-center gap-2 rounded-2xl border border-dashed border-line p-4 text-sm text-content-3 transition-all duration-200 hover:border-[var(--accent-border)] hover:text-content disabled:opacity-50 ${FOCUS_RING}`}
                   >
                     {creatingProjectId === project_id ? (
                       <Loader2 size={16} className="animate-spin" />
