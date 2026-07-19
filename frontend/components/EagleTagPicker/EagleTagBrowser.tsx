@@ -198,7 +198,7 @@ export const EagleTagBrowser: React.FC<EagleTagBrowserProps> = ({
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder={t('resources.searchTags', 'Search tags...')}
+          placeholder={t('resources.searchOrCreate', 'Search or create...')}
           className="w-full bg-ink-800 border border-ink-700/50 rounded pl-7 pr-2 py-1.5 text-xs text-ink-200 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50"
           autoFocus={shouldAutoFocus}
           onKeyDown={(e) => {

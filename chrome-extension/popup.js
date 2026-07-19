@@ -20,6 +20,13 @@ let allTags = [];
 let currentTabUrl = '';
 let tagQuery = '';
 
+// Show the extension version beside the header — read at runtime from the
+// manifest so it never drifts from manifest.json.
+const versionEl = document.getElementById('appVersion');
+if (versionEl && chrome.runtime && chrome.runtime.getManifest) {
+  versionEl.textContent = 'v' + chrome.runtime.getManifest().version;
+}
+
 // Init: check if configured, show appropriate view
 chrome.storage.local.get(['apiUrl', 'apiKey'], (config) => {
   if (config.apiUrl && config.apiKey) {

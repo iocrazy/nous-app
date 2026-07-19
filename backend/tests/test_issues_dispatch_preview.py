@@ -27,8 +27,13 @@ def _setup(monkeypatch, row, *, dbos_enabled: bool = True) -> None:
 
     monkeypatch.setattr(issues_router.issue_repository, "get_by_id", _fake_get)
     monkeypatch.setattr(dbos_orchestrator, "is_enabled", lambda: dbos_enabled)
+
     # Visibility is asserted elsewhere; keep these focused on the predicate.
-    monkeypatch.setattr(issues_router, "_assert_visibility", lambda row, auth: None)
+    # (async since D6.1 team folding made the assert query team_members.)
+    async def _fake_visibility(row, auth):  # noqa: ANN001, ANN202
+        return None
+
+    monkeypatch.setattr(issues_router, "_assert_visibility", _fake_visibility)
 
 
 def _preview(issue_id: int = 1):
