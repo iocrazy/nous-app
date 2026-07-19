@@ -85,6 +85,17 @@ _ALLOWLIST: dict[str, str] = {
         "UPDATE resources by folder subtree membership (resource_items.folder_id), "
         "not creator_id"
     ),
+    "validate_scope_image_ids": (
+        "JOIN resources via resource_items filtered by i.scope_id (scope membership) "
+        "to validate a gallery's proposed child images — same membership scoping as "
+        "get_resource_items; creator_id would wrongly reject team members' images in "
+        "a shared team scope"
+    ),
+    "get_gallery_items": (
+        "JOIN resources via gallery_items filtered by gi.gallery_id (gallery "
+        "membership); access is gated at the router by check_media_access on the "
+        "gallery — creator scoping would break team-library gallery reads"
+    ),
 }
 
 

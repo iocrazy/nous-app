@@ -9,7 +9,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   FolderOpen, Upload, Trash2, Share2, Download,
   FolderPlus, ExternalLink, Pencil, Copy, Move, RefreshCw, Eye,
-  Sparkles, Tag, Bookmark,
+  Sparkles, Tag, Bookmark, Images,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ContextMenuItem } from '../components/ContextMenu';
@@ -52,6 +52,8 @@ interface UseContextMenuItemsOptions {
   canDo: (action: string) => boolean;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   setCreatingFolder: (v: boolean) => void;
+  /** Open the Upload Gallery dialog (empty-area menu). */
+  onUploadGallery: () => void;
   setLoading: (v: boolean) => void;
   setSelectedResource: (v: any) => void;
   setSelectedFolder: (v: any) => void;
@@ -92,6 +94,7 @@ export function useContextMenuItems({
   canDo,
   fileInputRef,
   setCreatingFolder,
+  onUploadGallery,
   setLoading,
   setSelectedResource,
   setSelectedFolder,
@@ -291,6 +294,7 @@ export function useContextMenuItems({
     if (canDo('upload')) {
       emptyItems.push(
         { label: t('resources.uploadFile'), icon: <Upload size={14} />, onClick: () => fileInputRef.current?.click() },
+        { label: t('resources.uploadGallery', 'Upload Gallery'), icon: <Images size={14} />, onClick: () => onUploadGallery() },
         { label: t('resources.newFolder'), icon: <FolderPlus size={14} />, onClick: () => setCreatingFolder(true) },
       );
     }
@@ -321,5 +325,5 @@ export function useContextMenuItems({
       });
     }
     return emptyItems;
-  }, [contextMenu, t, selectedLibraryId, navigate, resPath, handleTrash, ops, isPersonal, scopeId, selectedFolderId, loadFolders, loadChildFolders, reloadResources, canDo, fileInputRef, setSelectedResource, setSelectedFolder, setShowInfoPanel, addToast, setLoading, setResources, setCreatingFolder, versionInputRef, publishMark]);
+  }, [contextMenu, t, selectedLibraryId, navigate, resPath, handleTrash, ops, isPersonal, scopeId, selectedFolderId, loadFolders, loadChildFolders, reloadResources, canDo, fileInputRef, setSelectedResource, setSelectedFolder, setShowInfoPanel, addToast, setLoading, setResources, setCreatingFolder, onUploadGallery, versionInputRef, publishMark]);
 }

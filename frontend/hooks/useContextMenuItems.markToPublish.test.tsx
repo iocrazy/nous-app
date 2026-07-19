@@ -42,6 +42,7 @@ function buildOptions(target: any) {
     canDo: () => true,
     fileInputRef: { current: null },
     setCreatingFolder: noop,
+    onUploadGallery: noop,
     setLoading: noop,
     setSelectedResource: noop,
     setSelectedFolder: noop,

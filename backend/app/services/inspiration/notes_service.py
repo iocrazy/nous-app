@@ -11,6 +11,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
+from app.db.engine import is_configured
+from app.db.session import maybe_unit_of_work
 from app.repositories.inspiration_attachments_repository import (
     get_inspiration_attachments_repository,
 )
@@ -28,6 +30,17 @@ class NoteNotFound(Exception):
 
 class NotePersistFailed(Exception):
     """Raised when a repo write reports failure — mapped to HTTP 502 by the router."""
+
+    pass
+
+
+class _NoteWriteAborted(Exception):
+    """Internal control-flow signal: the note row write returned failure (None)
+    from inside the save unit-of-work. Raising it unwinds the ambient
+    ``unit_of_work()`` with a clean ROLLBACK (the note-row INSERT/UPDATE having
+    aborted the transaction, we must NOT let ``session.begin()`` try to commit
+    it) and is caught at the method boundary to surface the legacy ``None``
+    return → HTTP 502. Never escapes ``NotesService``."""
 
     pass
 
@@ -57,16 +70,27 @@ class NotesService:
         content_md: str,
         ref_hotspot: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
-        row = await self._notes.create(
-            user_id=user_id,
-            content_md=content_md,
-            tags=parse_tags(content_md),
-            note_date=_today_shanghai(),
-            ref_hotspot=ref_hotspot,
-        )
-        if row is not None:
-            row.setdefault("attachments", [])
-            await self._sync_pool_tags(user_id, row)
+        # Single-connection save pipeline: the note-row INSERT, the tag-pool
+        # resolve, and the note_tags junction sync all join ONE ambient
+        # transaction (each repo's write_scope() joins the UoW instead of
+        # opening its own fresh connection — the NullPool per-connection cost on
+        # prod was ~+1.5-2s from the three sequential connects). The whole save
+        # is now atomic: a tag-sync failure rolls the note row back too.
+        try:
+            async with maybe_unit_of_work(is_configured()):
+                row = await self._notes.create(
+                    user_id=user_id,
+                    content_md=content_md,
+                    tags=parse_tags(content_md),
+                    note_date=_today_shanghai(),
+                    ref_hotspot=ref_hotspot,
+                )
+                if row is None:
+                    raise _NoteWriteAborted()
+                row.setdefault("attachments", [])
+                await self._sync_pool_tags(user_id, row)
+        except _NoteWriteAborted:
+            return None
         return row
 
     async def list_notes(
@@ -104,14 +128,23 @@ class NotesService:
     ) -> Optional[Dict[str, Any]]:
         await self._owned(user_id, note_id)
         tags = parse_tags(content_md) if content_md is not None else None
-        row = await self._notes.update(
-            note_id, content_md=content_md, tags=tags, pinned=pinned
-        )
-        if row is not None:
-            atts = await self._attachments.list_for_notes([row["id"]])
-            row["attachments"] = atts
-            if content_md is not None:
-                await self._sync_pool_tags(user_id, row)
+        # Only the content-changed save is a multi-write pipeline (update +
+        # tag resolve + junction sync) that must share ONE connection/transaction.
+        # A pinned-only patch is a single write — enabled=False keeps its legacy
+        # per-call session (no UoW opened), byte-for-byte unchanged.
+        try:
+            async with maybe_unit_of_work(is_configured() and content_md is not None):
+                row = await self._notes.update(
+                    note_id, content_md=content_md, tags=tags, pinned=pinned
+                )
+                if row is None:
+                    raise _NoteWriteAborted()
+                atts = await self._attachments.list_for_notes([row["id"]])
+                row["attachments"] = atts
+                if content_md is not None:
+                    await self._sync_pool_tags(user_id, row)
+        except _NoteWriteAborted:
+            return None
         return row
 
     async def _sync_pool_tags(self, user_id: str, row: Dict[str, Any]) -> None:
@@ -119,10 +152,13 @@ class NotesService:
         body (spec §4.1). content_md is the source of truth; note_tags is derived
         data — any drift self-heals on the next save.
 
-        The note row write and this tag sync are two separate transactions (the
-        repos follow the per-call session idiom, no cross-repo session passing).
-        A failure here propagates to the caller by design: the note row is
-        already persisted and reconverges on the next save.
+        Called inside the caller's save unit_of_work(): resolve_note_tags and
+        sync_for_note join the SAME transaction as the note-row write (their
+        write_scope() joins the ambient UoW). So a failure here rolls the note
+        row back too — the save is atomic, closing the former spec §4.1
+        deviation (no more note-saved-but-tag-sync-errored half-state). The
+        error still propagates to the caller; there is simply no longer an
+        orphaned committed note row when it does.
         """
         names = list(row.get("tags") or [])
         tag_ids = await get_tags_repository().resolve_note_tags(user_id, names)

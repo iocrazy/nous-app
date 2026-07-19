@@ -27,6 +27,7 @@ import { useResourcesDisplay } from '../hooks/useResourcesDisplay';
 import { useResourceTouch } from '../hooks/useResourceTouch';
 import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
 import { ResourcesModals } from './ResourcesModals';
+import { GalleryUploadDialog } from './GalleryUploadDialog';
 import { ProjectAssetsTree, type ProjectAssetsSelection } from './resources/ProjectAssetsTree';
 import { fetchCanvasAssets, type CanvasAssetItem } from '../services/projectAssetsService';
 import { fetchGenerations, generatedMediaCoverUrl, generatedMediaFileUrl, promoteGeneration, type GenerationItem } from '../services/generatedMediaService';
@@ -79,6 +80,9 @@ export const ResourcesViewInner: React.FC = () => {
   const [newFolderName, setNewFolderName] = useState('');
   const [savingFolder, setSavingFolder] = useState(false);
   const newFolderInputRef = useRef<HTMLInputElement>(null);
+
+  // ─── Gallery upload dialog ───────────────────────────
+  const [galleryDialogOpen, setGalleryDialogOpen] = useState(false);
 
   // ─── AI search state ──────────────────────────────────
   const [aiSearchMatchedMediaIds, setAiSearchMatchedMediaIds] = useState<Set<string> | null>(null);
@@ -395,7 +399,7 @@ export const ResourcesViewInner: React.FC = () => {
     contextMenu,
     isPersonal, scopeId, selectedFolderId, selectedLibraryId,
     navigate, resPath, canDo,
-    fileInputRef, setCreatingFolder, setLoading,
+    fileInputRef, setCreatingFolder, onUploadGallery: () => setGalleryDialogOpen(true), setLoading,
     setSelectedResource, setSelectedFolder, setShowInfoPanel,
     setResources, addToast, loadFolders, loadChildFolders, reloadResources,
     handleTrash, ops, versionInputRef,
@@ -766,6 +770,16 @@ export const ResourcesViewInner: React.FC = () => {
         onCancelPermanentDelete={() => { setPendingPermanentDelete(null); setPendingBatchPermanentDelete(null); setPendingBatchPermanentDeleteFolders(null); }}
         onConfirmPermanentDelete={confirmPermanentDelete}
         touchDragState={touchDragState}
+      />
+
+      {/* Upload Gallery dialog */}
+      <GalleryUploadDialog
+        isOpen={galleryDialogOpen}
+        onClose={() => setGalleryDialogOpen(false)}
+        scopeId={scopeId}
+        folderId={selectedFolderId}
+        addToast={addToast}
+        onCreated={reloadResources}
       />
     </>
   );

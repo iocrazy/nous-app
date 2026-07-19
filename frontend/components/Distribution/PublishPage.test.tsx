@@ -4,10 +4,14 @@ import { vi, describe, it, expect } from 'vitest';
 
 // vi.mock is hoisted above top-level consts, so the fns it references must be
 // hoisted too (vi.hoisted) — otherwise "Cannot access before initialization".
-const { createPublishTask, promoteGeneratedVideo } = vi.hoisted(() => ({
+const { createPublishTask, promoteGeneratedVideo, uploadResource } = vi.hoisted(() => ({
   createPublishTask: vi.fn().mockResolvedValue({ id: '700', accounts: [] }),
   promoteGeneratedVideo: vi.fn().mockResolvedValue('900'),
+  uploadResource: vi.fn(),
 }));
+
+// Stable toast spy so the upload-failure test can assert on it.
+const { addToast } = vi.hoisted(() => ({ addToast: vi.fn() }));
 
 vi.mock('../../services/distributionService', () => ({
   listAccounts: vi.fn().mockResolvedValue([
@@ -53,7 +57,10 @@ vi.mock('react-router-dom', async (orig) => ({
 }));
 
 // PublishPage calls useToast — mock it so the test needn't wrap ToastProvider.
-vi.mock('../Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
+vi.mock('../Toast', () => ({ useToast: () => ({ addToast }) }));
+
+// Inline image upload path (resourceService.uploadResource).
+vi.mock('../../services/resourceService', () => ({ uploadResource }));
 
 // PublishPage derives scope via useWorkspaceScope → useTeamContext, which throws
 // without a TeamProvider. Mock the context so the hook resolves a scope id.
@@ -185,6 +192,59 @@ describe('PublishPage', () => {
     expect(arg.resource_ids).toEqual(['img-2', 'img-1']);
     // Images always broadcast — one note per account.
     expect(arg.distribution_mode).toBe('broadcast');
+  });
+
+  it('uploads picked images inline and auto-selects them in pick order', async () => {
+    uploadResource.mockReset();
+    uploadResource
+      .mockResolvedValueOnce({ id: 'up-1', filename: 'up-a.jpg' })
+      .mockResolvedValueOnce({ id: 'up-2', filename: 'up-b.jpg' });
+
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+
+    // Images mode exposes an enabled Upload button + a hidden file input.
+    fireEvent.click(screen.getByRole('tab', { name: /^Images$/ }));
+    const input = screen.getByLabelText(/Upload images/i);
+    const fileA = new File(['a'], 'up-a.jpg', { type: 'image/jpeg' });
+    const fileB = new File(['b'], 'up-b.jpg', { type: 'image/jpeg' });
+    fireEvent.change(input, { target: { files: [fileA, fileB] } });
+
+    await waitFor(() => expect(uploadResource).toHaveBeenCalledTimes(2));
+    // Both uploads auto-selected → their thumbs appear in the content card.
+    await waitFor(() => expect(screen.getByLabelText('up-a.jpg')).toBeInTheDocument());
+    expect(screen.getByLabelText('up-b.jpg')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('HEYGO'));
+    fireEvent.change(screen.getByPlaceholderText(/Add a title/i), {
+      target: { value: 'Uploaded gallery' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
+
+    await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+    const arg = createPublishTask.mock.calls.at(-1)?.[0];
+    expect(arg.content_type).toBe('images');
+    // Selection order follows the pick order, not upload completion timing.
+    expect(arg.resource_ids).toEqual(['up-1', 'up-2']);
+  });
+
+  it('shows an error toast when an image upload fails', async () => {
+    addToast.mockClear();
+    uploadResource.mockReset();
+    uploadResource.mockRejectedValueOnce(new Error('boom'));
+
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('tab', { name: /^Images$/ }));
+    const input = screen.getByLabelText(/Upload images/i);
+    fireEvent.change(input, {
+      target: { files: [new File(['x'], 'bad.jpg', { type: 'image/jpeg' })] },
+    });
+
+    await waitFor(() => expect(uploadResource).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith(expect.stringContaining('failed'), 'error'));
   });
 
   it('clears the selection when toggling content type', async () => {

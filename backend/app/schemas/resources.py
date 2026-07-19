@@ -47,6 +47,21 @@ class ResourceUpdate(BaseModel):
     )
 
 
+class GallerySetItemsRequest(BaseModel):
+    """Body for PUT /resources/{id}/gallery-items — set the ordered children.
+
+    ``image_ids`` is the FULL ordered membership (the endpoint resets the
+    junction to exactly this list). Each id must be an image resource in the
+    same scope as the gallery.
+    """
+
+    image_ids: List[str] = Field(
+        ...,
+        max_length=500,
+        description="Ordered list of image resource ids that make up the gallery.",
+    )
+
+
 class GenPromptTranslateRequest(BaseModel):
     """Body for POST /resources/{id}/gen-prompt/translate."""
 

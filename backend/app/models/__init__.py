@@ -112,6 +112,7 @@ from app.models.library import (  # noqa: F401
 )
 from app.models.media import (  # noqa: F401
     Folders,
+    GalleryItems,
     ParsedMedia,
     ResourceAccessLogs,
     ResourceAnalysis,
@@ -284,6 +285,7 @@ __all__ = [
     "TempTokens",
     # media
     "Folders",
+    "GalleryItems",
     "GeneratedMedia",
     "ParsedMedia",
     "ResourceAccessLogs",
