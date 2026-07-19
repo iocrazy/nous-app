@@ -334,7 +334,10 @@ class BeatTemplateCreate(BaseModel):
     empty template would generate nothing."""
 
     name: str = Field(..., min_length=1, max_length=100)
-    anchors: List[BeatTemplateAnchor] = Field(..., min_length=1)
+    # Cap the sheet size: an unbounded list is a JSONB-bloat / apply-storm
+    # vector (every anchor becomes a createBeat on apply). Save the Cat is 15;
+    # 100 is beyond any real methodology.
+    anchors: List[BeatTemplateAnchor] = Field(..., min_length=1, max_length=100)
 
 
 class BeatTemplateRename(BaseModel):

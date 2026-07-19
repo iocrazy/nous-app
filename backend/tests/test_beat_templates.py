@@ -203,6 +203,12 @@ async def test_create_scopes_owner_to_caller(client, monkeypatch):
             "name": "X",
             "anchors": [{"title": "A", "pctStart": 0, "pctEnd": 10, "color": "red"}],
         },  # non-hex color
+        {
+            "name": "X",
+            "anchors": [
+                {"title": f"A{i}", "pctStart": 0, "pctEnd": 1} for i in range(101)
+            ],
+        },  # anchors over the 100 cap (JSONB-bloat / apply-storm guard)
     ],
 )
 async def test_create_rejects_invalid_payload(client, monkeypatch, payload):
