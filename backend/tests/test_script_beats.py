@@ -19,6 +19,7 @@ Three halves, matching the plan's Task-1 gate:
 from __future__ import annotations
 
 import datetime as _dt
+from typing import Any, Dict
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -134,6 +135,151 @@ async def test_script_beats_list_403_foreign_team(client, _foreign_team):
 
 
 @pytest.mark.asyncio
+async def test_beat_patch_explicit_null_clears_fields(client, monkeypatch):
+    """PATCH with explicit nulls must reach the repo as None (clear semantics).
+
+    The frontend clears duration / color / summary by sending ``{"field": null}``.
+    ``model_dump(exclude_none=True)`` silently drops those keys, turning every
+    clear into a no-op — so the router must use ``exclude_unset`` (true PATCH
+    semantics: absent = untouched, null = clear)."""
+    captured: Dict[str, Any] = {}
+
+    async def fake_beat_get(self, beat_id):
+        return {"id": beat_id, "script_id": "9001"}
+
+    async def fake_project_get(self, script_id):
+        return {"id": script_id, "team_id": "TEAM_1"}
+
+    async def fake_member(team_id, user_id):
+        return True
+
+    async def fake_update(self, beat_id, data):
+        captured.update(data)
+        return {"id": beat_id, "script_id": "9001", **data}
+
+    import app.core.scope_guards as guards
+    from app.repositories.script_repository import ScriptProjectRepository
+
+    monkeypatch.setattr(ScriptBeatRepository, "get_by_id", fake_beat_get)
+    monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_project_get)
+    monkeypatch.setattr(guards, "_is_team_member", fake_member)
+    monkeypatch.setattr(ScriptBeatRepository, "update", fake_update)
+
+    resp = await client.patch(
+        "/api/v1/beats/123",
+        json={"summary": None, "duration_sec": None, "color": None},
+    )
+    assert resp.status_code == 200
+    # Explicit nulls arrive as None — the clear must not be silently dropped.
+    assert captured == {"summary": None, "duration_sec": None, "color": None}
+
+
+@pytest.mark.asyncio
+async def test_beat_patch_null_title_not_forwarded(client, monkeypatch):
+    """``title`` is NOT NULL in the DB — an explicit ``{"title": null}`` must be
+    dropped (treated as untouched), never forwarded as a NULL write."""
+    captured: Dict[str, Any] = {}
+
+    async def fake_beat_get(self, beat_id):
+        return {"id": beat_id, "script_id": "9001"}
+
+    async def fake_project_get(self, script_id):
+        return {"id": script_id, "team_id": "TEAM_1"}
+
+    async def fake_member(team_id, user_id):
+        return True
+
+    async def fake_update(self, beat_id, data):
+        captured.update(data)
+        return {"id": beat_id, "script_id": "9001", **data}
+
+    import app.core.scope_guards as guards
+    from app.repositories.script_repository import ScriptProjectRepository
+
+    monkeypatch.setattr(ScriptBeatRepository, "get_by_id", fake_beat_get)
+    monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_project_get)
+    monkeypatch.setattr(guards, "_is_team_member", fake_member)
+    monkeypatch.setattr(ScriptBeatRepository, "update", fake_update)
+
+    resp = await client.patch(
+        "/api/v1/beats/123", json={"title": None, "summary": "Keep me"}
+    )
+    assert resp.status_code == 200
+    assert captured == {"summary": "Keep me"}
+
+
+@pytest.mark.asyncio
+async def test_beat_patch_null_scene_ids_not_forwarded(client, monkeypatch):
+    """``scene_ids: null`` must be treated as untouched — forwarding it would
+    coerce to [] downstream and silently wipe every scene link."""
+    captured: Dict[str, Any] = {}
+
+    async def fake_beat_get(self, beat_id):
+        return {"id": beat_id, "script_id": "9001"}
+
+    async def fake_project_get(self, script_id):
+        return {"id": script_id, "team_id": "TEAM_1"}
+
+    async def fake_member(team_id, user_id):
+        return True
+
+    async def fake_update(self, beat_id, data):
+        captured.update(data)
+        return {"id": beat_id, "script_id": "9001", **data}
+
+    import app.core.scope_guards as guards
+    from app.repositories.script_repository import ScriptProjectRepository
+
+    monkeypatch.setattr(ScriptBeatRepository, "get_by_id", fake_beat_get)
+    monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_project_get)
+    monkeypatch.setattr(guards, "_is_team_member", fake_member)
+    monkeypatch.setattr(ScriptBeatRepository, "update", fake_update)
+
+    resp = await client.patch(
+        "/api/v1/beats/123", json={"scene_ids": None, "summary": "Keep links"}
+    )
+    assert resp.status_code == 200
+    assert captured == {"summary": "Keep links"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"color": "url(//evil.io)"},  # CSS beacon inside the old 20-char cap
+        {"color": "#abc"},  # short hex — only #rrggbb allowed
+        {"color": "red"},  # named colors rejected
+        {"duration_sec": 2_147_483_648},  # PG INTEGER + 1 → 22003 if forwarded
+        {"start_sec": 99_999_999_999},
+    ],
+)
+async def test_beat_patch_rejects_invalid_arrangement_values(
+    client, monkeypatch, payload
+):
+    """Non-hex colors and out-of-INTEGER-range seconds must 422 at the schema
+    boundary, never reach the repo (asyncpg 22003 → opaque 500)."""
+
+    async def fake_beat_get(self, beat_id):
+        return {"id": beat_id, "script_id": "9001"}
+
+    async def fake_project_get(self, script_id):
+        return {"id": script_id, "team_id": "TEAM_1"}
+
+    async def fake_member(team_id, user_id):
+        return True
+
+    import app.core.scope_guards as guards
+    from app.repositories.script_repository import ScriptProjectRepository
+
+    monkeypatch.setattr(ScriptBeatRepository, "get_by_id", fake_beat_get)
+    monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_project_get)
+    monkeypatch.setattr(guards, "_is_team_member", fake_member)
+
+    resp = await client.patch("/api/v1/beats/123", json=payload)
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_beat_missing_returns_404(client, monkeypatch):
     """A missing beat 404s before any team check (guard row-missing ordering)."""
 
@@ -190,7 +336,14 @@ class _ScopeCtx:
         return False
 
 
-def _beat_obj(sort_order=1000, scene_ids=None):
+def _beat_obj(
+    sort_order=1000,
+    scene_ids=None,
+    start_sec=None,
+    duration_sec=None,
+    beat_role=None,
+    color=None,
+):
     return ScriptBeats(
         id=_BEAT_ID,
         script_id=_SCRIPT_ID,
@@ -198,6 +351,10 @@ def _beat_obj(sort_order=1000, scene_ids=None):
         summary="The hero gets the call.",
         scene_ids=scene_ids if scene_ids is not None else [],
         sort_order=sort_order,
+        start_sec=start_sec,
+        duration_sec=duration_sec,
+        beat_role=beat_role,
+        color=color,
         created_at=_dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc),
         updated_at=_dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc),
     )
@@ -281,6 +438,79 @@ async def test_update_coerces_scene_ids_and_ignores_non_whitelist():
     assert ["1", "2"] in upd_params.values()
     # sort_order / id are NOT in the update whitelist → never bound.
     assert 999 not in upd_params.values()
+
+
+# --------------------------------------------------------------------------- #
+# 4. Arrangement fields (M1): start_sec / duration_sec / beat_role / color
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_create_binds_arrangement_fields_int_typed():
+    """create() persists the arrangement columns; the INTEGER columns bind as
+    native ints (asyncpg strict — never a string) and the text columns pass
+    through as-is."""
+    session = _CaptureSession(
+        [
+            _FakeResult(scalar_first=0),  # func.max(sort_order)
+            _FakeResult(
+                scalar_first=_beat_obj(
+                    start_sec=12,
+                    duration_sec=30,
+                    beat_role="save_the_cat.catalyst",
+                    color="#b8b0a0",
+                )
+            ),
+        ]
+    )
+    with patch.object(beat_mod, "write_scope", lambda: _ScopeCtx(session)):
+        out = await ScriptBeatRepository().create(
+            {
+                "script_id": str(_SCRIPT_ID),
+                "title": "Catalyst",
+                "start_sec": "12",  # str at the boundary → coerced to int
+                "duration_sec": 30,
+                "beat_role": "save_the_cat.catalyst",
+                "color": "#b8b0a0",
+            }
+        )
+    _, ins_params = _rendered(session.statements[1])
+    assert 12 in ins_params.values()
+    assert 30 in ins_params.values()
+    assert "save_the_cat.catalyst" in ins_params.values()
+    assert "#b8b0a0" in ins_params.values()
+    # INTEGER columns must not round-trip as strings.
+    assert "12" not in ins_params.values()
+    # Read-back parity: ints stay native, text passes through.
+    assert out["start_sec"] == 12
+    assert out["duration_sec"] == 30
+    assert out["beat_role"] == "save_the_cat.catalyst"
+    assert out["color"] == "#b8b0a0"
+
+
+@pytest.mark.asyncio
+async def test_update_whitelists_arrangement_fields():
+    """update() accepts the arrangement columns, int-coercing the INTEGER ones."""
+    session = _CaptureSession(
+        [_FakeResult(scalar_first=_beat_obj(start_sec=60, duration_sec=90))]
+    )
+    with patch.object(beat_mod, "write_scope", lambda: _ScopeCtx(session)):
+        await ScriptBeatRepository().update(
+            str(_BEAT_ID),
+            {
+                "start_sec": "60",  # str → int
+                "duration_sec": 90,
+                "beat_role": "five.crisis",
+                "color": "#a0a8b0",
+            },
+        )
+    upd_sql, upd_params = _rendered(session.statements[0])
+    assert upd_sql.strip().upper().startswith("UPDATE PUBLIC.SCRIPT_BEATS")
+    assert 60 in upd_params.values()
+    assert 90 in upd_params.values()
+    assert "five.crisis" in upd_params.values()
+    assert "#a0a8b0" in upd_params.values()
+    assert "60" not in upd_params.values()
 
 
 @pytest.mark.asyncio

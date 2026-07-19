@@ -66,11 +66,19 @@ async def update_beat(
     body: BeatUpdate,
     _guard: None = Depends(verify_beat_access),
 ) -> Dict[str, Any]:
-    """Update a beat's title / summary / linked scenes."""
+    """Update a beat's title / summary / linked scenes / arrangement fields."""
     try:
-        beat = await get_script_beat_repository().update(
-            beat_id, body.model_dump(exclude_none=True)
-        )
+        # exclude_unset (NOT exclude_none): true PATCH semantics — an absent
+        # field stays untouched while an explicit null clears the column
+        # (summary / duration_sec / color). title is NOT NULL, so a null there
+        # is dropped rather than forwarded as a NULL write.
+        data = body.model_dump(exclude_unset=True)
+        # title is NOT NULL; scene_ids-null would coerce to [] and silently wipe
+        # all links. Both are "untouched", never destructive, when sent as null.
+        for immutable_via_null in ("title", "scene_ids"):
+            if data.get(immutable_via_null) is None:
+                data.pop(immutable_via_null, None)
+        beat = await get_script_beat_repository().update(beat_id, data)
         if beat is None:
             raise HTTPException(status_code=404, detail="Beat not found")
         return {"success": True, "data": beat}

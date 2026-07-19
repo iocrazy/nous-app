@@ -457,6 +457,23 @@ async def _fire_agent_routine(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             return None
         raise
     issue_id = int(issue_row["id"])
+    issue_identifier = issue_row.get("identifier") or str(issue_id)
+
+    # W3d narrow inbox (producer 3/3): the schedule owner gets one
+    # 'autopilot_output' notification carrying the issue identifier, deep-linked
+    # to the issue. notify() is best-effort — it never raises (see
+    # app.services.notifications), so a notification hiccup can't kill a fire.
+    from app.services.notifications import notify as _inbox_notify
+
+    await _inbox_notify(
+        user_id=str(user_id),
+        kind="autopilot_output",
+        title=f"Autopilot: {issue_identifier}",
+        body=body["title"],
+        severity="info",
+        link_kind="issue",
+        link_id=issue_identifier,
+    )
 
     # Pin the workflow id now and persist it; the WORKFLOW body performs
     # the actual dispatch (same path as POST /issues/{id}/dispatch).

@@ -24,6 +24,7 @@ from app.api.error_report_router import router as error_report_router
 from app.api.flows_router import router as flows_router
 from app.api.frontend_config_router import router as frontend_config_router
 from app.api.generated_media_router import router as generated_media_router
+from app.api.inbox_router import router as inbox_router
 from app.api.inspiration_router import router as inspiration_router
 from app.api.invites_router import router as invites_router
 from app.api.libraries_router import router as libraries_router
@@ -176,6 +177,7 @@ api_router.include_router(router=pipelines_router, tags=["Pipelines"])
 api_router.include_router(router=invites_router, tags=["Invites"])
 
 api_router.include_router(router=notifications_router, tags=["Notifications"])
+api_router.include_router(router=inbox_router, tags=["Inbox"])
 
 api_router.include_router(router=realtime_router, tags=["Realtime"])
 

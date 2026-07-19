@@ -32,6 +32,8 @@ import { LanguageSwitcher } from './LanguageSwitcher';
 import { useUpload, formatSpeed as uploadFormatSpeed, formatFileSize as uploadFormatFileSize } from '../contexts/UploadContext';
 import { useExportTasks } from '../contexts/ExportTaskContext';
 import { useTaskManager, type UnifiedTask } from '../contexts/TaskManagerContext';
+import { useInbox } from '../contexts/InboxContext';
+import { InboxPanel } from './notifications/InboxPanel';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -389,20 +391,11 @@ const TaskCenterPanel: React.FC<{
 // Notifications panel
 // ---------------------------------------------------------------------------
 
-const NotificationsPanel: React.FC = () => {
-  const { t } = useTranslation();
-  return (
-    <PanelShell className="w-[calc(100vw-2rem)] sm:w-80">
-      <div className={`px-4 py-3 border-b border-line`}>
-        <span className={`text-sm font-semibold text-content-2`}>{t('topbar.notifications')}</span>
-      </div>
-      <div className={`flex flex-col items-center justify-center py-10 text-content-3`}>
-        <Bell size={28} className={`mb-2 text-content-4`} />
-        <span className="text-sm">{t('topbar.noNotifications')}</span>
-      </div>
-    </PanelShell>
-  );
-};
+const NotificationsPanel: React.FC<{ onClose?: () => void }> = ({ onClose }) => (
+  <PanelShell className="w-[calc(100vw-2rem)] sm:w-80">
+    <InboxPanel onClose={onClose} />
+  </PanelShell>
+);
 
 // ---------------------------------------------------------------------------
 // Avatar menu
@@ -517,6 +510,7 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
   const [openPanel, setOpenPanel] = useState<PanelType>(null);
   const upload = useUpload();
   const { totalActive } = useTaskManager();
+  const inbox = useInbox();
   const uploadingCount = upload.items.filter(i => i.status === 'uploading').length;
   const badgeCount = totalActive + uploadingCount;
 
@@ -631,11 +625,13 @@ export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigat
           title={t('topbar.notifications')}
           onClick={() => togglePanel('notifications')}
           active={openPanel === 'notifications'}
-          badge={unreadCount}
+          badge={inbox.unreadCount}
         >
           <Bell size={18} />
         </IconButton>
-        {openPanel === 'notifications' && <NotificationsPanel />}
+        {openPanel === 'notifications' && (
+          <NotificationsPanel onClose={() => setOpenPanel(null)} />
+        )}
       </div>
 
       {/* G1-UI: Approvals (agent hook gates pending user decision) */}
