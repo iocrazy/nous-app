@@ -84,23 +84,46 @@ export const getShareSchema = (
  * newest 500 so huge libraries can't flood the response (search happens
  * client-side within that window). Fails soft to [] so the page renders.
  */
+/**
+ * One row of `GET /api/v1/resources` (backend `get_resource_items`). The row
+ * is a `resource_items` row — its top-level `id` is the JOIN row id, NOT the
+ * resource id. The real resource id is `resource_id`, and the file fields live
+ * in the nested `resource` object (backend `row_to_json(r.*) AS resource`).
+ * Reading `filename`/`thumbnail_path` off the top level (the old bug) always
+ * yielded `undefined` → every tile fell back to "Untitled" + placeholder, and
+ * publishing later failed because the picked ids were JOIN-row ids.
+ */
+interface ResourceItemRow {
+  id?: unknown;
+  resource_id?: unknown;
+  resource?: {
+    filename?: unknown;
+    thumbnail_path?: unknown;
+  } | null;
+}
+
 export const listLibraryVideos = async (
   scopeId: string,
   opts?: { tagId?: string },
 ): Promise<LibraryVideo[]> => {
   try {
     const tagFilter = opts?.tagId ? `&tag_ids=${encodeURIComponent(opts.tagId)}` : '';
-    const res = await request<{ success: boolean; data: Array<Record<string, unknown>> }>(
+    const res = await request<{ success: boolean; data: ResourceItemRow[] }>(
       `/../resources?scope_id=${encodeURIComponent(scopeId)}&types=video&all_folders=true&limit=500${tagFilter}`,
     );
     const rows = res?.data ?? [];
-    return rows.map((r) => ({
-      id: String(r.id),
-      filename: String(r.filename ?? 'Untitled'),
-      thumbnail_url: r.thumbnail_path
-        ? `${getApiUrl()}/api/v1/resources/${String(r.id)}/cover`
-        : null,
-    }));
+    return rows.map((r) => {
+      // Prefer the true resource id; fall back to the join-row id defensively.
+      const resourceId = String(r.resource_id ?? r.id);
+      const filename = r.resource?.filename;
+      return {
+        id: resourceId,
+        filename: filename != null ? String(filename) : 'Untitled',
+        thumbnail_url: r.resource?.thumbnail_path
+          ? `${getApiUrl()}/api/v1/resources/${resourceId}/cover`
+          : null,
+      };
+    });
   } catch (err) {
     console.error('distribution: list library videos failed', err);
     return [];
