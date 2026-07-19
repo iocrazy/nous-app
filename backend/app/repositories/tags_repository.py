@@ -398,15 +398,43 @@ class TagsRepository:
             values["group_id"] = int(group_id)
 
         async with write_scope() as session:
+            # Race-safe get-or-create: two concurrent same-name creates (e.g. a
+            # double-fired "Mark to publish" lazily creating its well-known tag)
+            # both passed the router's exists-check, and the loser blew up with
+            # an unhandled unique_tag_per_scope IntegrityError → 500 (prod
+            # 2026-07-19). ON CONFLICT DO NOTHING + re-select makes the loser
+            # return the winner's row — concurrent same-intent creation is
+            # success, not an error.
             row = (
                 (
                     await session.execute(
-                        pg_insert(Tags).values(**values).returning(Tags)
+                        pg_insert(Tags)
+                        .values(**values)
+                        .on_conflict_do_nothing(constraint="unique_tag_per_scope")
+                        .returning(Tags)
                     )
                 )
                 .scalars()
                 .first()
             )
+            if row is None:
+                row = (
+                    (
+                        await session.execute(
+                            select(Tags)
+                            .where(Tags.name == name)
+                            .where(Tags.type == "user")
+                            .where(Tags.user_id == user_id)
+                            .limit(1)
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
+            if row is None:  # conflict yet no row visible — surface loudly
+                raise RuntimeError(
+                    f"create_tag: conflict on {name!r} but existing row not found"
+                )
             out = _tag_row(row)
         logger.info(f"Created tag: {name} (zh: {name_zh}) for user: {user_id}")
         return out
