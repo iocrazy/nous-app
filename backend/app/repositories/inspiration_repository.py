@@ -144,6 +144,12 @@ class InspirationNotesRepository:
                 stmt = stmt.where(
                     InspirationNotes.anchor_script_id == _bigint(anchor_script_id)
                 )
+            else:
+                # User verdict (2026-07-19): timeline memos are INTERFACE-LOCAL,
+                # laper-style — they must never surface in the inspiration
+                # library. The default (library) list therefore excludes every
+                # anchored note; only the memo-rail query above sees them.
+                stmt = stmt.where(InspirationNotes.anchor_script_id.is_(None))
             if date:
                 stmt = stmt.where(InspirationNotes.note_date == _date(date))
             if tag:
