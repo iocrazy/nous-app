@@ -181,3 +181,118 @@ async def test_sync_and_counts_roundtrip(orm_dsn, pg):
     )
     counts_after = await nt_repo.counts_for_user(user_id)
     assert counts_after == {}
+
+
+@_skip
+async def test_service_create_note_persists_atomically_in_one_session(orm_dsn, pg):
+    """Drive the SERVICE create path (not repos directly): the note row, the
+    resolved tags, and the note_tags junction must ALL be present after one save.
+
+    Also proves the single-connection goal: the note-row write, the tag resolve,
+    and the junction sync each observe the SAME ambient unit_of_work session
+    (``_request_session``), i.e. they joined one transaction rather than opening
+    three fresh connections."""
+    import app.db.session as session_mod
+    from app.repositories.note_tags_repository import NoteTagsRepository
+    from app.repositories.tags_repository import TagsRepository
+    from app.services.inspiration import notes_service as notes_svc_mod
+    from app.services.inspiration.notes_service import NotesService
+
+    user_id = await _new_user(pg)
+    seen: dict[str, object] = {}
+
+    real_tags = TagsRepository()
+    real_nt = NoteTagsRepository()
+    real_notes = notes_svc_mod.get_inspiration_notes_repository()
+
+    class _RecTags:
+        async def resolve_note_tags(self, uid, names):
+            seen["resolve"] = session_mod._request_session.get()
+            return await real_tags.resolve_note_tags(uid, names)
+
+    class _RecNoteTags:
+        async def sync_for_note(self, note_id, tag_ids):
+            seen["sync"] = session_mod._request_session.get()
+            return await real_nt.sync_for_note(note_id, tag_ids)
+
+    class _RecNotes:
+        async def create(self, **kwargs):
+            row = await real_notes.create(**kwargs)
+            seen["create"] = session_mod._request_session.get()
+            return row
+
+    notes_svc_mod.get_tags_repository = lambda: _RecTags()  # type: ignore[assignment]
+    notes_svc_mod.get_note_tags_repository = lambda: _RecNoteTags()  # type: ignore
+    try:
+        svc = NotesService()
+        svc._notes = _RecNotes()  # type: ignore[assignment]
+        row = await svc.create_note(user_id, "captured idea #alpha #beta")
+    finally:
+        notes_svc_mod.get_tags_repository = TagsRepository  # restore factories
+        notes_svc_mod.get_note_tags_repository = NoteTagsRepository
+
+    assert row is not None
+    note_id = int(row["id"])
+
+    # (a) note row present
+    note_rows = await pg.fetch(
+        "SELECT id FROM inspiration_notes WHERE id = $1 AND deleted_at IS NULL",
+        note_id,
+    )
+    assert len(note_rows) == 1
+
+    # (a) two shadow tags resolved
+    tag_rows = await pg.fetch(
+        "SELECT name FROM tags WHERE user_id = $1 ORDER BY name",
+        uuid.UUID(user_id),
+    )
+    assert {r["name"] for r in tag_rows} == {"alpha", "beta"}
+
+    # (a) junction wired to exactly those two tags
+    junction = await pg.fetch(
+        "SELECT tag_id FROM note_tags WHERE note_id = $1", note_id
+    )
+    assert len(junction) == 2
+
+    # single-session proof: all three writes saw the SAME ambient UoW session
+    assert seen["create"] is not None
+    assert seen["create"] is seen["resolve"] is seen["sync"]
+
+
+@_skip
+async def test_service_create_note_rolls_back_when_tag_sync_fails(orm_dsn, pg):
+    """Force a failure mid-UoW (junction sync raises): the whole save must roll
+    back — NO note row, NO orphaned shadow tags — proving the note write and the
+    tag sync share ONE transaction (the pre-fix three-transaction path would have
+    left the note row committed)."""
+    from app.repositories.note_tags_repository import NoteTagsRepository
+    from app.repositories.tags_repository import TagsRepository
+    from app.services.inspiration import notes_service as notes_svc_mod
+    from app.services.inspiration.notes_service import NotesService
+
+    user_id = await _new_user(pg)
+
+    class _BoomNoteTags:
+        async def sync_for_note(self, note_id, tag_ids):
+            raise RuntimeError("forced sync failure mid-UoW")
+
+    notes_svc_mod.get_note_tags_repository = lambda: _BoomNoteTags()  # type: ignore
+    try:
+        svc = NotesService()
+        with pytest.raises(RuntimeError, match="forced sync failure"):
+            await svc.create_note(user_id, "doomed idea #gamma")
+    finally:
+        notes_svc_mod.get_note_tags_repository = NoteTagsRepository
+
+    # Atomic rollback: the note row must be absent.
+    note_rows = await pg.fetch(
+        "SELECT id FROM inspiration_notes WHERE user_id = $1", uuid.UUID(user_id)
+    )
+    assert note_rows == []
+
+    # The shadow tag created by resolve inside the same txn must also be gone.
+    tag_rows = await pg.fetch(
+        "SELECT id FROM tags WHERE user_id = $1 AND name = 'gamma'",
+        uuid.UUID(user_id),
+    )
+    assert tag_rows == []
