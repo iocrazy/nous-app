@@ -2168,6 +2168,40 @@ export const EDITOR_SHELL_STYLES = `
 /* Empty-state template guide cards — leading affordance above Add Beat. */
 .mh-tpl-empty-cards{ display:flex; flex-direction:column; gap:8px; width:100%; max-width:340px; }
 
+/* ── Custom templates (M3.5) ─────────────────────────────────────────────── */
+/* Each wizard card sits in a relative wrapper so a custom card can float its
+   inline (two-click) delete button in the top-right corner without nesting a
+   button inside the selection button. */
+.mh-tpl-card-wrap{ position:relative; }
+.mh-tpl-card-wrap .mh-tpl-card{ width:100%; }
+.mh-tpl-card-delete{
+  position:absolute; top:8px; right:8px; display:inline-flex; align-items:center;
+  justify-content:center; min-width:22px; height:22px; padding:0 6px; cursor:pointer;
+  border:1px solid var(--surface-border); border-radius:6px; background:var(--surface-1);
+  color:var(--ink-faint); font-size:13px; font-weight:700; line-height:1;
+}
+.mh-tpl-card-delete:hover{ color:var(--red); border-color:var(--red); }
+.mh-tpl-card-delete.confirm{
+  color:var(--accent-on); background:var(--red); border-color:var(--red); font-size:11px;
+}
+/* Save-as-template dialog: a narrow name-only modal. */
+.mh-tpl-save-modal{ max-width:420px; }
+/* Empty-state "Your templates" section below the built-in guide cards. */
+.mh-tpl-empty-custom{
+  display:flex; flex-direction:column; gap:8px; width:100%; max-width:340px; margin-top:14px;
+}
+.mh-tpl-empty-custom-label{
+  font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--ink-faint);
+}
+.mh-tpl-empty-custom-cards{ display:flex; flex-direction:column; gap:6px; }
+.mh-tpl-empty-custom-card{
+  display:flex; flex-direction:column; gap:3px; text-align:left; cursor:pointer;
+  padding:9px 12px; border:1px solid var(--surface-border); border-radius:var(--radius-md);
+  background:var(--surface-2); font-family:var(--sans);
+}
+.mh-tpl-empty-custom-card:hover{ border-color:var(--emph-ink-border); }
+
 
 /* ===== FILM NUMBERING (合一终稿, 2026-07-11) =====
    Storyboard scene heads read S1/S2 (mono, neutral ink) and shot codes read 1A/1B

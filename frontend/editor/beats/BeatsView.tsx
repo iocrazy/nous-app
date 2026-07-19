@@ -25,7 +25,14 @@ import {
 } from '../sceneService';
 import type { SceneDoc } from '../types';
 import { ArrangementView } from './ArrangementView';
+import {
+  createBeatTemplate,
+  deleteBeatTemplate,
+  listBeatTemplates,
+  type CustomTemplate,
+} from './beatTemplateService';
 import { BeatsListView } from './BeatsListView';
+import type { CustomTemplateAnchor } from './templates';
 import {
   persistBeatsSubview,
   readStoredBeatsSubview,
@@ -47,6 +54,8 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
   const [subview, setSubview] = useState<BeatsSubview>(() => readStoredBeatsSubview(scriptId));
   // M3 target total runtime; drives the Arrangement ruler + template defaults.
   const [targetDurationSec, setTargetDurationSec] = useState<number | null>(null);
+  // M3.5 user custom templates (global to the caller, not per-script).
+  const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([]);
 
   const reload = useCallback(async () => {
     try {
@@ -62,6 +71,20 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Custom templates load once (caller-global). A failure is soft — the built-in
+  // three still work; log, no toast.
+  const reloadTemplates = useCallback(async () => {
+    try {
+      setCustomTemplates(await listBeatTemplates());
+    } catch (err) {
+      console.error('[BeatsView] load templates failed', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reloadTemplates();
+  }, [reloadTemplates]);
 
   // Pull the target length once per script — a soft dependency: a failure just
   // leaves the ruler on its beat-derived default (no toast, the timeline works).
@@ -112,6 +135,35 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
       }
     },
     [scriptId, beats, targetDurationSec, handleSetTargetDuration, reload, addToast, t],
+  );
+
+  const handleSaveTemplate = useCallback(
+    async (name: string, anchors: CustomTemplateAnchor[]) => {
+      try {
+        await createBeatTemplate(name, anchors);
+        addToast(t('editor.beatSaveTemplateSaved'), 'success');
+        await reloadTemplates();
+      } catch (err) {
+        console.error('[BeatsView] save template failed', err);
+        addToast(t('editor.beatSaveTemplateFailed'), 'error');
+      }
+    },
+    [reloadTemplates, addToast, t],
+  );
+
+  const handleDeleteCustomTemplate = useCallback(
+    async (templateId: string) => {
+      // Optimistic removal so the card disappears immediately; re-pull on failure.
+      setCustomTemplates((prev) => prev.filter((tpl) => tpl.id !== templateId));
+      try {
+        await deleteBeatTemplate(templateId);
+      } catch (err) {
+        console.error('[BeatsView] delete template failed', err);
+        addToast(t('editor.beatTemplateDeleteFailed'), 'error');
+        void reloadTemplates();
+      }
+    },
+    [reloadTemplates, addToast, t],
   );
 
   const selectSubview = useCallback(
@@ -257,6 +309,9 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
           onApplyTemplate={(templateBeats, mode, targetSec) =>
             void handleApplyTemplate(templateBeats, mode, targetSec)
           }
+          customTemplates={customTemplates}
+          onSaveTemplate={(name, anchors) => void handleSaveTemplate(name, anchors)}
+          onDeleteCustomTemplate={(id) => void handleDeleteCustomTemplate(id)}
         />
       )}
     </div>

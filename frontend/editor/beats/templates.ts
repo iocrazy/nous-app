@@ -17,7 +17,7 @@
  * `editor.beatTpl.<key>.<role>.name` / `.guide` for each beat. `beat_role` is
  * persisted as `<key>.<role>` (the free-form-beat convention is a null role).
  */
-import type { BeatInput } from '../sceneService';
+import type { Beat, BeatInput } from '../sceneService';
 import { BEAT_COLORS } from './beatColors';
 import { snapSec } from './arrangementGeometry';
 
@@ -102,6 +102,35 @@ export function getTemplate(key: string): BeatTemplate | undefined {
   return BEAT_TEMPLATES.find((t) => t.key === key);
 }
 
+/** A point anchor still needs a visible, grabbable length on the timeline. */
+function pointLenFor(totalSec: number, granularity: number): number {
+  return Math.max(
+    granularity,
+    snapSec(Math.max(Math.round(totalSec * 0.01), granularity), granularity),
+  );
+}
+
+/**
+ * Map a single percentage anchor to a grid-aligned `{ start_sec, duration_sec }`
+ * for `totalSec`. A POINT anchor (`pctEnd <= pctStart`) gets `pointLen`; an
+ * INTERVAL anchor spans its percentage window (min one snap granularity). Shared
+ * by the built-in template path and the user-custom path so both snap identically.
+ */
+function placeAnchor(
+  pctStart: number,
+  pctEnd: number,
+  totalSec: number,
+  granularity: number,
+  pointLen: number,
+): { start_sec: number; duration_sec: number } {
+  const start = snapSec((pctStart / 100) * totalSec, granularity);
+  const isPoint = pctEnd <= pctStart;
+  const duration = isPoint
+    ? pointLen
+    : Math.max(granularity, snapSec(((pctEnd - pctStart) / 100) * totalSec, granularity));
+  return { start_sec: start, duration_sec: duration };
+}
+
 /**
  * Instantiate a template's percentage anchors against `totalSec` into concrete
  * `BeatInput` rows. `translate` maps the beat name / guidance i18n keys to text
@@ -114,24 +143,110 @@ export function instantiateTemplate(
   granularity: number,
   translate: (key: string) => string,
 ): BeatInput[] {
-  // A point anchor still needs a visible, grabbable length on the timeline.
-  const pointLen = Math.max(
-    granularity,
-    snapSec(Math.max(Math.round(totalSec * 0.01), granularity), granularity),
-  );
+  const pointLen = pointLenFor(totalSec, granularity);
   return template.beats.map((b, i) => {
-    const start = snapSec((b.pctStart / 100) * totalSec, granularity);
-    const isPoint = b.pctEnd <= b.pctStart;
-    const duration = isPoint
-      ? pointLen
-      : Math.max(granularity, snapSec(((b.pctEnd - b.pctStart) / 100) * totalSec, granularity));
+    const { start_sec, duration_sec } = placeAnchor(
+      b.pctStart,
+      b.pctEnd,
+      totalSec,
+      granularity,
+      pointLen,
+    );
     return {
       title: translate(`editor.beatTpl.${template.key}.${b.role}.name`),
       summary: translate(`editor.beatTpl.${template.key}.${b.role}.guide`),
-      start_sec: start,
-      duration_sec: duration,
+      start_sec,
+      duration_sec,
       beat_role: `${template.key}.${b.role}`,
       color: BEAT_COLORS[i % BEAT_COLORS.length],
+    };
+  });
+}
+
+// ── User custom templates (M3.5) ─────────────────────────────────────────────
+//
+// A user template stores its own beat titles (not i18n role keys) alongside the
+// percentage anchors: the sheet a user arranged by hand is theirs verbatim. It
+// persists as a `beat_templates` row (anchors JSONB). The wizard renders these
+// beside the built-in three; instantiation carries title/summary/color straight
+// through and leaves `beat_role` null (custom beats are free-form).
+
+export interface CustomTemplateAnchor {
+  /** The beat's own title (user text) — used verbatim on instantiate. */
+  title: string;
+  /** Optional beat guidance/summary; carried through when present. */
+  summary?: string | null;
+  /** Timeline start, as a percentage of the total (0–100, 1 decimal). */
+  pctStart: number;
+  /** Timeline end, as a percentage of the total; == pctStart for a point beat. */
+  pctEnd: number;
+  /** Card color-strip hex; carried through when present. */
+  color?: string | null;
+}
+
+/** Round to one decimal place (the persisted anchor precision). */
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+/** Clamp a percentage into the valid [0, 100] band. */
+function clampPct(n: number): number {
+  return Math.min(100, Math.max(0, n));
+}
+
+/**
+ * Reverse-compute percentage anchors from the beats a user has arranged on the
+ * timeline, relative to `totalSec`. Unarranged beats (start_sec null — the tray)
+ * are skipped; the rest are ordered by start. Each beat's title / summary / color
+ * ride along so the saved template reproduces the exact sheet. A non-positive
+ * total yields `[]` (percentages are undefined without a span).
+ */
+export function deriveTemplateAnchors(beats: Beat[], totalSec: number): CustomTemplateAnchor[] {
+  if (!(totalSec > 0)) return [];
+  return beats
+    .filter((b) => b.start_sec != null)
+    .slice()
+    .sort((a, b) => (a.start_sec ?? 0) - (b.start_sec ?? 0))
+    .map((b) => {
+      const start = b.start_sec ?? 0;
+      const dur = b.duration_sec ?? 0;
+      return {
+        title: b.title,
+        summary: b.summary,
+        pctStart: clampPct(round1((start / totalSec) * 100)),
+        pctEnd: clampPct(round1(((start + dur) / totalSec) * 100)),
+        color: b.color,
+      };
+    });
+}
+
+/**
+ * Instantiate user-custom anchors against `totalSec` into `BeatInput` rows,
+ * carrying the stored title / summary / color verbatim (no i18n) and snapping
+ * to the arrangement grid exactly as the built-in path does. `beat_role` is null
+ * — a custom beat has no namespaced methodology role.
+ */
+export function instantiateCustomAnchors(
+  anchors: CustomTemplateAnchor[],
+  totalSec: number,
+  granularity: number,
+): BeatInput[] {
+  const pointLen = pointLenFor(totalSec, granularity);
+  return anchors.map((a) => {
+    const { start_sec, duration_sec } = placeAnchor(
+      a.pctStart,
+      a.pctEnd,
+      totalSec,
+      granularity,
+      pointLen,
+    );
+    return {
+      title: a.title,
+      summary: a.summary ?? null,
+      start_sec,
+      duration_sec,
+      beat_role: null,
+      color: a.color ?? null,
     };
   });
 }

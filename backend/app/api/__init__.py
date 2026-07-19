@@ -15,6 +15,7 @@ from app.api.ai_memory_router import router as ai_memory_router
 from app.api.ai_router import router as ai_pipeline_router
 from app.api.ai_settings_router import router as ai_settings_router
 from app.api.api_key_router import router as api_key_router
+from app.api.beat_templates_router import router as beat_templates_router
 from app.api.canvases_router import router as canvases_router
 from app.api.cleanup_router import router as cleanup_router
 from app.api.collections_router import router as collections_router
@@ -204,6 +205,7 @@ api_router.include_router(router=script_export_router, tags=["Script Export"])
 api_router.include_router(router=script_scenes_router, tags=["Script Scenes"])
 api_router.include_router(router=script_shots_router, tags=["Script Shots"])
 api_router.include_router(router=script_beats_router, tags=["Script Beats"])
+api_router.include_router(router=beat_templates_router, tags=["Beat Templates"])
 api_router.include_router(router=script_versions_router, tags=["Script Versions"])
 api_router.include_router(router=episodes_router, tags=["Episodes"])
 

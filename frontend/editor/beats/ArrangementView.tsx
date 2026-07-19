@@ -24,7 +24,9 @@ import type { SceneDoc } from '../types';
 import { formatBeatDuration } from './beatColors';
 import { BeatEditModal } from './BeatEditModal';
 import { BeatsDurationControl } from './BeatsDurationControl';
+import { BeatsSaveTemplateModal } from './BeatsSaveTemplateModal';
 import { BeatsTemplateWizard } from './BeatsTemplateWizard';
+import type { CustomTemplate } from './beatTemplateService';
 import {
   CARD_GAP_PX,
   DEFAULT_PX_PER_SEC,
@@ -46,7 +48,7 @@ import {
 } from './arrangementGeometry';
 import { persistBeatsZoom, readStoredBeatsZoom } from './beatsZoomStorage';
 import { MemoRail } from './MemoRail';
-import { BEAT_TEMPLATES } from './templates';
+import { BEAT_TEMPLATES, deriveTemplateAnchors } from './templates';
 
 interface Props {
   scriptId: string;
@@ -63,6 +65,12 @@ interface Props {
   /** Apply a methodology template: batch-create the rows, optionally replacing
    *  the existing beats, and persist the chosen target length. */
   onApplyTemplate: (beats: BeatInput[], mode: 'append' | 'replace', targetSec: number) => void;
+  /** The caller's saved custom templates, shown beside the built-in three. */
+  customTemplates?: CustomTemplate[];
+  /** Persist the current arrangement as a new custom template. */
+  onSaveTemplate?: (name: string, anchors: ReturnType<typeof deriveTemplateAnchors>) => void;
+  /** Delete a saved custom template by id. */
+  onDeleteCustomTemplate?: (id: string) => void;
 }
 
 /** Card + lane geometry (px) — pure layout constants, not stored data. */
@@ -107,6 +115,9 @@ export function ArrangementView({
   onOpenScene,
   onSetTargetDuration,
   onApplyTemplate,
+  customTemplates = [],
+  onSaveTemplate,
+  onDeleteCustomTemplate,
 }: Props) {
   const { t } = useTranslation();
 
@@ -124,6 +135,8 @@ export function ArrangementView({
   // length changes while beats are already arranged.
   const [wizardKey, setWizardKey] = useState<string | null | undefined>(undefined);
   const [conform, setConform] = useState<{ next: number; old: number } | null>(null);
+  // M3.5: the "Save as template" name dialog.
+  const [savingTemplate, setSavingTemplate] = useState(false);
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const lanesRef = useRef<HTMLDivElement | null>(null);
@@ -480,8 +493,21 @@ export function ArrangementView({
           initialTemplateKey={wizardKey}
           currentTargetSec={targetDurationSec}
           hasExistingBeats={beats.length > 0}
+          customTemplates={customTemplates}
           onApply={onApplyTemplate}
+          onDeleteCustom={onDeleteCustomTemplate}
           onClose={() => setWizardKey(undefined)}
+        />
+      )}
+      {savingTemplate && onSaveTemplate && (
+        <BeatsSaveTemplateModal
+          onSave={(name) => {
+            // Reverse-compute the anchors from the beats arranged RIGHT NOW
+            // (relative to the current total) — the geometry owner is here.
+            onSaveTemplate(name, deriveTemplateAnchors(arranged, totalSec));
+            setSavingTemplate(false);
+          }}
+          onClose={() => setSavingTemplate(false)}
         />
       )}
     </>
@@ -511,6 +537,28 @@ export function ArrangementView({
               </button>
             ))}
           </div>
+          {customTemplates.length > 0 && (
+            <div className="mh-tpl-empty-custom" data-testid="beats-template-empty-custom">
+              <span className="mh-tpl-empty-custom-label">{t('editor.beatTplCustomHeading')}</span>
+              <div className="mh-tpl-empty-custom-cards">
+                {customTemplates.map((ct) => (
+                  <button
+                    key={ct.id}
+                    type="button"
+                    className="mh-tpl-empty-custom-card"
+                    data-testid="beats-template-empty-custom-card"
+                    data-id={ct.id}
+                    onClick={() => setWizardKey(`custom:${ct.id}`)}
+                  >
+                    <span className="mh-tpl-card-name">{ct.name}</span>
+                    <span className="mh-tpl-card-count">
+                      {t('editor.beatTplBeatCount', { count: ct.anchors.length })}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <button type="button" className="mh-beats-add-btn" data-testid="beats-add" onClick={onAdd}>
             {t('editor.beatAdd')}
           </button>
@@ -537,6 +585,17 @@ export function ArrangementView({
           >
             {t('editor.beatTemplatesBtn')}
           </button>
+          {onSaveTemplate && (
+            <button
+              type="button"
+              className="mh-arr-tool-btn"
+              data-testid="arr-save-template"
+              disabled={arranged.length === 0}
+              onClick={() => setSavingTemplate(true)}
+            >
+              {t('editor.beatSaveTemplateBtn')}
+            </button>
+          )}
         </div>
         <div
           className="mh-arr-tools"
