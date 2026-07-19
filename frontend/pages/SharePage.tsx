@@ -21,7 +21,6 @@ import {
   Eye,
   Clock,
   XCircle,
-  Loader2,
   Sparkles,
   FileText,
   Image as ImageIcon,
@@ -31,6 +30,7 @@ import {
   Send,
   Timer,
 } from 'lucide-react';
+import Loading from '../components/common/Loading';
 import { accessShare } from '../services/sharesService';
 import { Share } from '../types';
 import {
@@ -191,8 +191,7 @@ export const SharePage: React.FC = () => {
     return (
       <div className="min-h-screen bg-ink-950 flex items-center justify-center">
         <div className="text-center">
-          <Loader2 size={40} className="animate-spin text-indigo-500 mx-auto mb-4" />
-          <p className="text-ink-400">{t('common.loading')}</p>
+          <Loading center label={t('common.loading')} />
         </div>
       </div>
     );
@@ -381,7 +380,7 @@ export const SharePage: React.FC = () => {
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {commentsLoading ? (
                 <div className="flex items-center justify-center py-8">
-                  <Loader2 size={20} className="animate-spin text-ink-500" />
+                  <Loading center />
                 </div>
               ) : comments.length === 0 ? (
                 <div className="text-center py-8">

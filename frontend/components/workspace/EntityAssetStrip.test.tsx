@@ -91,4 +91,15 @@ describe('EntityAssetStrip', () => {
       await screen.findByText('Generated assets appear here'),
     ).toBeTruthy();
   });
+
+  it('degrades to the empty hint when the page lacks items (malformed shape)', async () => {
+    // Regression #1457: a response missing `items` left setItems(undefined),
+    // and the subsequent items.length read crashed the card into its error
+    // boundary. The component must guard the shape and render the hint instead.
+    fetchEntityGenerations.mockResolvedValue({ next_cursor: null } as never);
+    render(<EntityAssetStrip entityKind="character" entityId="42" />);
+    expect(
+      await screen.findByText('Generated assets appear here'),
+    ).toBeTruthy();
+  });
 });

@@ -7,8 +7,9 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Clock, Plus, Pencil, Trash2, Loader2, Play, Power, PowerOff, Calendar,
+  Clock, Plus, Pencil, Trash2, Play, Power, PowerOff, Calendar,
 } from 'lucide-react';
+import Loading from '../components/common/Loading';
 import {
   schedulesService,
   type ScheduleResponse,
@@ -244,7 +245,7 @@ export const SchedulesPage: React.FC = () => {
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-ink-500"><Loader2 className="w-4 h-4 animate-spin" /> Loading…</div>
+        <Loading center label="Loading…" />
       ) : schedules.length === 0 ? (
         <div className="text-sm text-ink-500 italic">No schedules yet. Create one to run a task on a cron schedule.</div>
       ) : (

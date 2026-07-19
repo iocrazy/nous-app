@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Brain, Plus, Pencil, Trash2, Loader2,
+  Brain, Plus, Pencil, Trash2,
   ToggleLeft, ToggleRight, ArrowLeft,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { Loading } from '../../components/common/Loading';
 import { getAuthHeaders } from '../../services/parserService';
 import { getApiUrl } from '../../utils/apiConfig';
 import { useToast } from '../../components/Toast';
@@ -218,7 +219,7 @@ export function AdminNousModelsPage() {
         {/* Table */}
         {loading ? (
           <div className="flex items-center justify-center py-20">
-            <Loader2 size={28} className="animate-spin text-ink-500" />
+            <Loading center className="text-ink-500" />
           </div>
         ) : models.length === 0 ? (
           <div className="text-center py-20">

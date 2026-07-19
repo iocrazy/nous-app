@@ -26,6 +26,7 @@ import { FacetPickerSheet } from './filters/FacetPickerSheet';
 import type { ChipId } from './resources/filter/types';
 import { DownloadsBatchToolbar } from './DownloadsView/DownloadsBatchToolbar';
 import { BatchTagSheet } from './DownloadsView/BatchTagSheet';
+import Loading from './common/Loading';
 import { CompactMediaCard } from './CompactMediaCard';
 import { LibraryTable } from './LibraryTable';
 import { LibraryFeed } from './LibraryFeed';
@@ -1047,9 +1048,8 @@ export const DownloadsView: React.FC = () => {
         )}
 
         {isLoadingLibrary && library.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full min-h-[300px]">
-            <Loader2 size={24} className="animate-spin text-ink-500 mb-3" />
-            <p className="text-ink-500 text-sm">{t('common.loading', 'Loading...')}</p>
+          <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-ink-500">
+            <Loading center label={t('common.loading', 'Loading...')} />
           </div>
         ) : filteredLibrary.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
@@ -1144,7 +1144,7 @@ export const DownloadsView: React.FC = () => {
                 {hasMoreData && (
                   <div className="hidden md:flex w-full py-6 justify-center">
                     {isLoadingMore ? (
-                      <Loader2 size={20} className="animate-spin text-ink-500" />
+                      <Loading size="sm" className="text-ink-500" />
                     ) : (
                       <button
                         onClick={() => loadMoreLibrary()}
@@ -1177,8 +1177,8 @@ export const DownloadsView: React.FC = () => {
                     }}
                   >
                     {isLoadingMore ? (
-                      <div className="px-5 py-2 bg-ink-900/95 backdrop-blur-md border border-ink-800/60 rounded-full shadow-2xl">
-                        <Loader2 size={18} className="animate-spin text-ink-400" />
+                      <div className="px-5 py-2 bg-ink-900/95 backdrop-blur-md border border-ink-800/60 rounded-full shadow-2xl text-ink-400">
+                        <Loading size="sm" />
                       </div>
                     ) : (
                       <button

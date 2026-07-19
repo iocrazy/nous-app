@@ -6,8 +6,9 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Activity, Loader2 } from 'lucide-react';
+import { ArrowLeft, Activity } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { Loading } from '../../components/common/Loading';
 import { lanesService, type LaneStatus, type LanesSnapshotResponse } from '../../services/lanesService';
 
 const REFRESH_INTERVAL_MS = 3000;
@@ -97,7 +98,7 @@ export const AdminLanesPage: React.FC = () => {
 
       {loading && !snapshot && (
         <div className="flex items-center gap-2 text-sm text-gray-500">
-          <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+          <Loading size="sm" label="Loading…" />
         </div>
       )}
       {error && (

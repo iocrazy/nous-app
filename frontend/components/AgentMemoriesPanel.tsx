@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Cpu, Trash2, Loader2, AlertTriangle, X } from 'lucide-react';
+import { Cpu, Trash2, AlertTriangle, X } from 'lucide-react';
+import Loading from './common/Loading';
 import { useTranslation } from 'react-i18next';
 import {
   listAgentMemories,
@@ -89,10 +90,7 @@ export const AgentMemoriesPanel: React.FC = () => {
         )}
 
         {loading ? (
-          <div className="flex items-center gap-2 text-sm text-ink-500">
-            <Loader2 size={16} className="animate-spin" />
-            {t('common.loading')}
-          </div>
+          <Loading center label={t('common.loading')} />
         ) : items.length === 0 ? (
           <p className="text-xs text-ink-500">{t('agentMemories.empty')}</p>
         ) : (

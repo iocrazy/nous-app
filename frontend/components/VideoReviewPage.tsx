@@ -224,7 +224,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
           <div ref={versionDropdownRef} className="relative flex-shrink-0">
             <button
               onClick={() => setIsVersionDropdownOpen(!isVersionDropdownOpen)}
-              className="flex items-center gap-1 px-2.5 py-1 bg-indigo-500/20 text-indigo-300 text-xs font-medium rounded-full hover:bg-indigo-500/30 transition-colors"
+              className="flex items-center gap-1 px-2.5 py-1 bg-[var(--accent-soft)] text-[var(--accent-text)] text-xs font-medium rounded-full hover:bg-[var(--accent-border)] transition-colors"
             >
               V{selectedVersion?.version_number || file.current_version}
               <ChevronDown size={12} />
@@ -240,14 +240,14 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
                     }}
                     className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors ${
                       selectedVersion?.id === v.id
-                        ? 'bg-indigo-500/20 text-indigo-300'
+                        ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                         : 'text-ink-300 hover:bg-ink-700'
                     }`}
                   >
                     <span className="font-medium">V{v.version_number}</span>
                     <span className="text-xs text-ink-500 truncate">{v.filename}</span>
                     {v.version_number === file.current_version && (
-                      <span className="ml-auto text-[10px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded-full">
+                      <span className="ml-auto text-[10px] bg-[var(--accent-soft)] text-[var(--accent-text)] px-1.5 py-0.5 rounded-full">
                         {t('mediatrack.review.currentVersion')}
                       </span>
                     )}

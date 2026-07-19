@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Layers, Loader2, Upload } from 'lucide-react';
+import { Loading } from './common/Loading';
 import { useTranslation } from 'react-i18next';
 import { FileVersion } from '../types';
 import { fetchFileVersions, uploadNewVersion } from '../services/projectsService';
@@ -139,9 +140,7 @@ export const ProjectVersionModal: React.FC<ProjectVersionModalProps> = ({
           )}
 
           {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 size={24} className="text-ink-400 animate-spin" />
-            </div>
+            <Loading center />
           ) : versions.length === 0 ? (
             <div className="text-center py-8 text-ink-500 text-sm">
               {t('projects.versions.empty', 'No versions found')}

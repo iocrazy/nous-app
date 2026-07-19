@@ -15,9 +15,9 @@ import {
   XCircle,
   Clock,
   Activity,
-  Loader2,
   AlertCircle,
 } from 'lucide-react';
+import { Loading } from './common/Loading';
 import { getAuthHeaders } from '../services/parserService';
 import { getQueueBreakdown, type QueueBreakdownRow } from '../services/systemService';
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
@@ -264,9 +264,7 @@ export const SystemMonitorPanel: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div className="flex items-center justify-center py-4">
-              <Loader2 size={20} className="animate-spin text-ink-500" />
-            </div>
+            <Loading center />
           )}
         </div>
 
@@ -312,9 +310,7 @@ export const SystemMonitorPanel: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div className="flex items-center justify-center py-4">
-              <Loader2 size={20} className="animate-spin text-ink-500" />
-            </div>
+            <Loading center />
           )}
         </div>
 
@@ -343,9 +339,7 @@ export const SystemMonitorPanel: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div className="flex items-center justify-center py-4">
-              <Loader2 size={20} className="animate-spin text-ink-500" />
-            </div>
+            <Loading center />
           )}
         </div>
       </div>
@@ -412,7 +406,7 @@ export const SystemMonitorPanel: React.FC = () => {
         ) : (
           <div className="text-center py-6 text-ink-500">
             {isLoading ? (
-              <Loader2 size={20} className="animate-spin mx-auto" />
+              <Loading center />
             ) : (
               <>
                 <XCircle size={24} className="mx-auto mb-2 opacity-50" />
@@ -455,7 +449,7 @@ export const SystemMonitorPanel: React.FC = () => {
         ) : (
           <div className="text-center py-6 text-ink-500">
             {isLoading ? (
-              <Loader2 size={20} className="animate-spin mx-auto" />
+              <Loading center />
             ) : (
               <>
                 <CheckCircle size={24} className="mx-auto mb-2 opacity-50" />

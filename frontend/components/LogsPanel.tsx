@@ -19,8 +19,8 @@ import {
   Bug,
   Filter,
   Calendar,
-  Loader2,
 } from 'lucide-react';
+import { Loading } from './common/Loading';
 
 // Types
 interface LogEntry {
@@ -341,7 +341,7 @@ export const LogsPanel: React.FC = () => {
       <div className="bg-ink-950 border border-ink-800 rounded-xl overflow-hidden">
         {isLoading ? (
           <div className="flex items-center justify-center py-16">
-            <Loader2 size={24} className="animate-spin text-indigo-400" />
+            <Loading center />
           </div>
         ) : error ? (
           <div className="flex items-center justify-center py-16 text-red-400">
