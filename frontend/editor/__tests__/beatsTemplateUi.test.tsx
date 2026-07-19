@@ -15,6 +15,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 import { ArrangementView } from '../beats/ArrangementView';
+import type { CustomTemplate } from '../beats/beatTemplateService';
 
 const noScenes: SceneDoc[] = [];
 
@@ -31,10 +32,16 @@ const beat = (over: Partial<Beat> & { id: string }): Beat => ({
   ...over,
 });
 
-function renderArr(beats: Beat[], targetDurationSec: number | null) {
+function renderArr(
+  beats: Beat[],
+  targetDurationSec: number | null,
+  extra: { customTemplates?: CustomTemplate[] } = {},
+) {
   const onSetTargetDuration = vi.fn();
   const onApplyTemplate = vi.fn();
   const onUpdate = vi.fn();
+  const onSaveTemplate = vi.fn();
+  const onDeleteCustomTemplate = vi.fn();
   localStorage.setItem('editor.beatsZoom.1', '6');
   render(
     <ArrangementView
@@ -48,10 +55,22 @@ function renderArr(beats: Beat[], targetDurationSec: number | null) {
       onOpenScene={vi.fn()}
       onSetTargetDuration={onSetTargetDuration}
       onApplyTemplate={onApplyTemplate}
+      customTemplates={extra.customTemplates ?? []}
+      onSaveTemplate={onSaveTemplate}
+      onDeleteCustomTemplate={onDeleteCustomTemplate}
     />,
   );
-  return { onSetTargetDuration, onApplyTemplate, onUpdate };
+  return { onSetTargetDuration, onApplyTemplate, onUpdate, onSaveTemplate, onDeleteCustomTemplate };
 }
+
+const customTpl = (over: Partial<CustomTemplate> & { id: string }): CustomTemplate => ({
+  name: 'My Structure',
+  anchors: [
+    { title: 'Hook', summary: null, pctStart: 0, pctEnd: 10, color: '#b8b0a0' },
+    { title: 'Payoff', summary: null, pctStart: 80, pctEnd: 100, color: null },
+  ],
+  ...over,
+});
 
 beforeEach(() => {
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -170,6 +189,87 @@ describe('template Apply wizard', () => {
       .getAllByTestId('beats-template-card')
       .find((c) => c.dataset.key === 'kishotenketsu')!;
     expect(selected.className).toContain('selected');
+  });
+});
+
+describe('custom templates (M3.5)', () => {
+  it('lists custom templates beside the built-in three in the wizard', async () => {
+    renderArr([beat({ id: 'a', start_sec: 0, duration_sec: 30 })], 600, {
+      customTemplates: [customTpl({ id: '77', name: 'My Two-Beater' })],
+    });
+    fireEvent.click(screen.getByTestId('arr-templates'));
+    const wizard = await screen.findByTestId('beats-template-wizard');
+    const cards = within(wizard).getAllByTestId('beats-template-card');
+    // 3 built-in + 1 custom.
+    expect(cards).toHaveLength(4);
+    const custom = cards.find((c) => c.dataset.key === 'custom:77')!;
+    expect(custom).toHaveTextContent('My Two-Beater');
+    expect(custom.dataset.custom).toBe('true');
+  });
+
+  it('applies a custom template, replaying its stored anchors verbatim', async () => {
+    const h = renderArr([beat({ id: 'a', start_sec: 0, duration_sec: 30 })], 600, {
+      customTemplates: [customTpl({ id: '77', name: 'My Two-Beater' })],
+    });
+    fireEvent.click(screen.getByTestId('arr-templates'));
+    const wizard = await screen.findByTestId('beats-template-wizard');
+    fireEvent.click(within(wizard).getAllByTestId('beats-template-card').find((c) => c.dataset.key === 'custom:77')!);
+    fireEvent.click(within(wizard).getByTestId('beats-template-next')); // → length
+    fireEvent.click(within(wizard).getByTestId('beats-template-next')); // → mode (beats exist)
+    fireEvent.click(within(wizard).getByTestId('beats-template-mode-append'));
+    fireEvent.click(within(wizard).getByTestId('beats-template-next')); // Generate
+
+    expect(h.onApplyTemplate).toHaveBeenCalledTimes(1);
+    const [beats] = h.onApplyTemplate.mock.calls[0];
+    expect(beats).toHaveLength(2);
+    // Custom beats carry the user's own title and no methodology role.
+    expect(beats[0].title).toBe('Hook');
+    expect(beats[0].beat_role).toBeNull();
+    expect(beats[1].title).toBe('Payoff');
+  });
+
+  it('deletes a custom template on a two-click confirm', async () => {
+    const h = renderArr([beat({ id: 'a', start_sec: 0, duration_sec: 30 })], 600, {
+      customTemplates: [customTpl({ id: '77', name: 'My Two-Beater' })],
+    });
+    fireEvent.click(screen.getByTestId('arr-templates'));
+    const wizard = await screen.findByTestId('beats-template-wizard');
+    // First click arms the confirm; nothing deleted yet.
+    fireEvent.click(within(wizard).getByTestId('beats-template-custom-delete'));
+    expect(h.onDeleteCustomTemplate).not.toHaveBeenCalled();
+    // Second click on the armed button deletes.
+    fireEvent.click(within(wizard).getByTestId('beats-template-custom-delete-confirm'));
+    expect(h.onDeleteCustomTemplate).toHaveBeenCalledWith('77');
+  });
+
+  it('save-as-template is disabled with no arranged beats and opens the name modal otherwise', () => {
+    // Empty script → the topbar Save button lives only in the populated view, so
+    // render with an arranged beat and drive the toolbar button.
+    const h = renderArr([beat({ id: 'a', start_sec: 60, duration_sec: 120 })], 600);
+    const saveBtn = screen.getByTestId('arr-save-template');
+    expect(saveBtn).not.toBeDisabled();
+    fireEvent.click(saveBtn);
+
+    const modal = screen.getByTestId('beats-save-template-modal');
+    fireEvent.change(within(modal).getByTestId('beats-save-template-name'), {
+      target: { value: 'My Custom Sheet' },
+    });
+    fireEvent.click(within(modal).getByTestId('beats-save-template-save'));
+
+    expect(h.onSaveTemplate).toHaveBeenCalledTimes(1);
+    const [name, anchors] = h.onSaveTemplate.mock.calls[0];
+    expect(name).toBe('My Custom Sheet');
+    // Anchors reverse-computed from the arranged beat against the 600s total.
+    expect(anchors).toEqual([
+      { title: 'Setup', summary: null, pctStart: 10, pctEnd: 30, color: null },
+    ]);
+  });
+
+  it('disables save-as-template when only unarranged (tray) beats exist', () => {
+    // A single tray beat (start_sec null) → the populated topbar renders, but
+    // nothing is arranged, so there is no geometry to snapshot → button disabled.
+    renderArr([beat({ id: 'tray', start_sec: null })], 600);
+    expect(screen.getByTestId('arr-save-template')).toBeDisabled();
   });
 });
 

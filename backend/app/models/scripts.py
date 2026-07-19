@@ -563,6 +563,35 @@ class ScriptBeats(Base):
     )
 
 
+class BeatTemplates(Base):
+    __tablename__ = "beat_templates"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="beat_templates_pkey"),
+        Index("idx_beat_templates_user_created", "user_id", "created_at"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    # Owner (auth.users.id). No DB FK — auth.users lives outside the app schema
+    # (same convention as inbox_notifications; the FK gate exempts auth.users).
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Ordered percentage anchors: [{title, summary, pctStart, pctEnd, color}].
+    anchors: Mapped[list] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
 class ScriptOps(Base):
     __tablename__ = "script_ops"
     __table_args__ = (

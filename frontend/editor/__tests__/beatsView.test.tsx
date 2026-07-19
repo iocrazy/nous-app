@@ -3,7 +3,7 @@
  * state, and inline title edit. React Flow-free — BeatsView is a plain list —
  * so we mock the sceneService beats API + Toast and drive the real component.
  */
-import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, act, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Beat } from '../sceneService';
@@ -33,6 +33,14 @@ const scriptSvc = vi.hoisted(() => ({
   updateScriptProject: vi.fn(),
 }));
 vi.mock('../../services/scriptService', () => scriptSvc);
+
+const tplSvc = vi.hoisted(() => ({
+  listBeatTemplates: vi.fn(),
+  createBeatTemplate: vi.fn(),
+  deleteBeatTemplate: vi.fn(),
+  renameBeatTemplate: vi.fn(),
+}));
+vi.mock('../beats/beatTemplateService', () => tplSvc);
 
 import { BeatsView } from '../beats/BeatsView';
 
@@ -74,6 +82,9 @@ beforeEach(() => {
   svc.moveBeat.mockResolvedValue(beat({ id: 'a' }));
   scriptSvc.fetchScriptProject.mockResolvedValue({ target_duration_sec: null });
   scriptSvc.updateScriptProject.mockResolvedValue({});
+  tplSvc.listBeatTemplates.mockResolvedValue([]);
+  tplSvc.createBeatTemplate.mockResolvedValue({ id: '9', name: 'X', anchors: [] });
+  tplSvc.deleteBeatTemplate.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -281,5 +292,73 @@ describe('BeatsView reorder', () => {
     });
 
     expect(svc.moveBeat).toHaveBeenCalledWith('a', { after_beat_id: 'b' });
+  });
+});
+
+describe('BeatsView custom templates (M3.5)', () => {
+  beforeEach(() => {
+    // The Save button + wizard live in the Arrangement sub-view.
+    localStorage.setItem('editor.beatsView.1', 'arrangement');
+    localStorage.setItem('editor.beatsZoom.1', '6');
+    window.HTMLElement.prototype.scrollIntoView = vi.fn();
+    scriptSvc.fetchScriptProject.mockResolvedValue({ target_duration_sec: 600 });
+  });
+
+  it('saves the current arrangement as a template (POST + success toast + reload)', async () => {
+    svc.listBeats.mockResolvedValue([beat({ id: 'a', title: 'Open', start_sec: 60, duration_sec: 120 })]);
+    renderView();
+
+    await waitFor(() => expect(screen.getByTestId('arr-save-template')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('arr-save-template'));
+
+    const modal = screen.getByTestId('beats-save-template-modal');
+    fireEvent.change(within(modal).getByTestId('beats-save-template-name'), {
+      target: { value: 'My Sheet' },
+    });
+    fireEvent.click(within(modal).getByTestId('beats-save-template-save'));
+
+    await waitFor(() =>
+      expect(tplSvc.createBeatTemplate).toHaveBeenCalledWith('My Sheet', [
+        { title: 'Open', summary: null, pctStart: 10, pctEnd: 30, color: null },
+      ]),
+    );
+    expect(toast.addToast).toHaveBeenCalledWith('editor.beatSaveTemplateSaved', 'success');
+    // Reloads the template list after a successful save (1 on mount + 1 after).
+    await waitFor(() => expect(tplSvc.listBeatTemplates).toHaveBeenCalledTimes(2));
+  });
+
+  it('lists fetched custom templates in the wizard', async () => {
+    svc.listBeats.mockResolvedValue([beat({ id: 'a', start_sec: 0, duration_sec: 30 })]);
+    tplSvc.listBeatTemplates.mockResolvedValue([
+      { id: '77', name: 'My Method', anchors: [{ title: 'Hook', pctStart: 0, pctEnd: 10 }] },
+    ]);
+    renderView();
+
+    await waitFor(() => expect(screen.getByTestId('arr-templates')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('arr-templates'));
+
+    const wizard = await screen.findByTestId('beats-template-wizard');
+    await waitFor(() =>
+      expect(
+        within(wizard).getAllByTestId('beats-template-card').some((c) => c.dataset.key === 'custom:77'),
+      ).toBe(true),
+    );
+  });
+
+  it('deletes a custom template through the wizard (two-click confirm)', async () => {
+    svc.listBeats.mockResolvedValue([beat({ id: 'a', start_sec: 0, duration_sec: 30 })]);
+    tplSvc.listBeatTemplates.mockResolvedValue([
+      { id: '77', name: 'My Method', anchors: [{ title: 'Hook', pctStart: 0, pctEnd: 10 }] },
+    ]);
+    renderView();
+
+    await waitFor(() => expect(screen.getByTestId('arr-templates')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('arr-templates'));
+    const wizard = await screen.findByTestId('beats-template-wizard');
+
+    fireEvent.click(await within(wizard).findByTestId('beats-template-custom-delete'));
+    fireEvent.click(within(wizard).getByTestId('beats-template-custom-delete-confirm'));
+
+    await waitFor(() => expect(tplSvc.deleteBeatTemplate).toHaveBeenCalledWith('77'));
   });
 });

@@ -280,6 +280,31 @@ async def verify_beat_access(
     await _assert_script_team_access(str(beat.get("script_id")), auth.user_id)
 
 
+async def verify_beat_template_access(
+    template_id: str,
+    auth: AuthContext = Depends(get_auth),
+) -> None:
+    """Guard for `/beat-templates/{template_id}` targets (PUT/DELETE) — resolves
+    the template → owner ``user_id`` and requires the caller to be that owner
+    (404 if the template is missing, before the 403).
+
+    A beat template is a private, per-user artifact (no team sharing), so
+    ownership collapses to a straight ``user_id`` equality — unlike the script
+    guards, which resolve to a team membership check. ``str()`` coercion handles
+    the #1006 trap (the repo returns ``user_id`` as a str; auth.user_id is a
+    str, so this matches, but the coercion keeps it robust to a native-UUID
+    read)."""
+    from app.repositories.beat_template_repository import (
+        get_beat_template_repository,
+    )
+
+    template = await get_beat_template_repository().get_by_id(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Beat template not found")
+    if str(template.get("user_id")) != auth.user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+
 async def verify_episode_write_access(
     episode_id: str,
     auth: AuthContext = Depends(get_auth),
