@@ -124,3 +124,92 @@ describe('TagsSettings — search-or-create', () => {
     await waitFor(() => expect(screen.getByText('Create failed')).toBeTruthy());
   });
 });
+
+// Regression coverage for the "shadow-search dead-end" finding: a query
+// that matches ONLY a hidden shadow tag (origin='note') used to render
+// silently — noExactMatch checked the full tag pool (so no Create
+// affordance appeared) but filteredTags (curated-only) was empty, so the
+// bare "No matching tags found" state rendered instead. The fix mirrors
+// EagleTagBrowser's search-reveal: matching shadow tags now surface in the
+// results area as a "From Notes" group with a Promote button.
+describe('TagsSettings — search reveals matching shadow tags (dead-end fix)', () => {
+  const shadowByName = {
+    id: '10',
+    name: 'brainwave',
+    origin: 'note',
+    type: 'user',
+    color: null,
+    icon: null,
+    created_at: '',
+  };
+  const shadowByNameZh = {
+    id: '11',
+    name: 'daydream',
+    name_zh: '白日梦',
+    origin: 'note',
+    type: 'user',
+    color: null,
+    icon: null,
+    created_at: '',
+  };
+
+  beforeEach(() => {
+    fetchAllTags
+      .mockReset()
+      .mockResolvedValue([curated, shadowByName, shadowByNameZh]);
+    fetchTagGroups.mockReset().mockResolvedValue([]);
+    updateTag.mockReset().mockResolvedValue({
+      id: '10',
+      name: 'brainwave',
+      origin: 'curated',
+    });
+  });
+
+  const search = async (value: string) => {
+    render(<TagsSettings />);
+    await waitFor(() => expect(screen.getByText('copywriting')).toBeTruthy());
+    const input = screen.getByPlaceholderText('Search or create...');
+    fireEvent.change(input, { target: { value } });
+    return input;
+  };
+
+  it('empty query: shadow rows are not in the main results area', async () => {
+    render(<TagsSettings />);
+    await waitFor(() => expect(screen.getByText('copywriting')).toBeTruthy());
+    expect(screen.queryByText('#brainwave')).toBeNull();
+    expect(screen.queryByText('#daydream')).toBeNull();
+  });
+
+  it('exact name match on a shadow-only tag: no Create affordance, row visible with a Promote button', async () => {
+    await search('brainwave');
+    expect(screen.queryByText(/Create "brainwave"/)).toBeNull();
+    expect(screen.getByText('#brainwave')).toBeTruthy();
+    expect(screen.getByText('Promote')).toBeTruthy();
+  });
+
+  it('exact name_zh match on a shadow-only tag: no Create affordance, row visible with a Promote button', async () => {
+    await search('白日梦');
+    expect(screen.queryByText(/Create "白日梦"/)).toBeNull();
+    expect(screen.getByText('#daydream')).toBeTruthy();
+    expect(screen.getByText('Promote')).toBeTruthy();
+  });
+
+  it('partial shadow match: row is visible in the results area', async () => {
+    await search('brain');
+    expect(screen.getByText('#brainwave')).toBeTruthy();
+  });
+
+  it('clicking Promote on a matched shadow row calls updateTag with curated origin', async () => {
+    await search('brainwave');
+    fireEvent.click(screen.getByText('Promote'));
+    await waitFor(() =>
+      expect(updateTag).toHaveBeenCalledWith('10', { origin: 'curated' }),
+    );
+  });
+
+  it('clicking the shadow row itself (not Promote) opens the edit dialog', async () => {
+    await search('brainwave');
+    fireEvent.click(screen.getByText('#brainwave'));
+    expect(screen.getByText('settings.tags.editTag')).toBeTruthy();
+  });
+});

@@ -222,6 +222,27 @@ export const TagsSettings: React.FC = () => {
     });
   }, [curatedTags, searchQuery]);
 
+  // Shadow (origin='note') tags matching the search query — same
+  // partial-match rule ``filteredTags`` uses for curated (name OR
+  // name_zh, case-insensitive substring). Empty query → no shadow
+  // matches, keeping the default view's contract that shadow tags stay
+  // out of sight until asked for. This is what turns a query that hits
+  // ONLY a hidden shadow tag from a silent dead-end (no result, no
+  // Create, no pointer — noExactMatch above suppresses Create because it
+  // checks the full pool, but filteredTags is curated-only so the grid
+  // shows nothing) into an actionable result: the row renders in a
+  // "From Notes" group with a Promote button, mirroring
+  // EagleTagBrowser's search-reveal behavior.
+  const shadowMatches = useMemo(() => {
+    if (!searchQuery) return [];
+    const query = searchQuery.toLowerCase();
+    return shadowTags.filter((tag) => {
+      const nameMatch = tag.name.toLowerCase().includes(query);
+      const nameZhMatch = tag.name_zh?.toLowerCase().includes(query);
+      return nameMatch || nameZhMatch;
+    });
+  }, [shadowTags, searchQuery]);
+
   // Names that collide with the sentinel "(no group)" display label — if
   // a real group has one of these names (legacy data — backend now blocks
   // creating new ones), we merge its tags into the sentinel bucket so the
@@ -1032,7 +1053,7 @@ export const TagsSettings: React.FC = () => {
                     </span>
                   </button>
                 )}
-                {filteredTags.length === 0 ? (
+                {filteredTags.length === 0 && shadowMatches.length === 0 ? (
                   noExactMatch ? null : (
                     <div className="text-center py-12 text-ink-500">
                       <TagIcon size={40} className="mx-auto mb-3 opacity-30" />
@@ -1041,7 +1062,7 @@ export const TagsSettings: React.FC = () => {
                   )
                 ) : (
                   <div className="space-y-5">
-                {groupedTags.map(({ name, tags: groupTags }) => (
+                {filteredTags.length > 0 && groupedTags.map(({ name, tags: groupTags }) => (
                   <div key={name}>
                     <div className="flex items-center gap-2 mb-2">
                       <FolderOpen size={14} className="text-ink-500" />
@@ -1155,6 +1176,45 @@ export const TagsSettings: React.FC = () => {
                     </div>
                   </div>
                 ))}
+                {/* "From Notes" results group — shadow (origin='note') tags
+                    whose name/name_zh matches the search query. Reuses the
+                    same click contract as the sidebar shadow section:
+                    clicking the row opens the edit dialog (handleStartEdit),
+                    Promote stops propagation so it doesn't also trigger
+                    that. This is the search-reveal fix — without it, a
+                    query matching ONLY a shadow tag rendered nothing at
+                    all (no result, no Create, no pointer). */}
+                {shadowMatches.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <NotebookPen size={14} className="text-ink-500" />
+                      <span className="text-xs font-medium text-ink-400 uppercase tracking-wider">
+                        {t('settings.tags.fromNotes', 'From Notes')}
+                      </span>
+                      <span className="text-xs text-ink-600">({shadowMatches.length})</span>
+                    </div>
+                    <div className="space-y-1">
+                      {shadowMatches.map((tag) => (
+                        <div
+                          key={tag.id}
+                          onClick={() => handleStartEdit(tag)}
+                          className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-ink-800 text-sm text-ink-300 cursor-pointer hover:bg-ink-800/60 hover:text-ink-100 transition-colors"
+                        >
+                          <span className="flex-1 truncate">#{tag.name}</span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handlePromote(tag);
+                            }}
+                            className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                          >
+                            {t('settings.tags.promote', 'Promote')}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                   </div>
                 )}
               </>
