@@ -12,8 +12,15 @@
  * transparent — no time, no randomness, no globals.
  */
 
-/** Minimum on-screen card width so a zero/short-duration beat stays grabbable. */
-export const MIN_CARD_PX = 40;
+/**
+ * Minimum on-screen card width. The laper-style card carries a title + a
+ * two-line summary + a footer (duration chip / Edit Beat), so a short beat still
+ * needs room to be legible and grabbable — hence a generous floor, not 40px.
+ */
+export const MIN_CARD_PX = 180;
+
+/** Visual gap subtracted from each card's rendered width so neighbours breathe. */
+export const CARD_GAP_PX = 8;
 
 /** Zoom band (px per timeline second). */
 export const MIN_PX_PER_SEC = 0.02;
@@ -103,17 +110,41 @@ export function stepPxPerSec(pxPerSec: number, dir: 1 | -1): number {
   return clampPxPerSec(dir === 1 ? pxPerSec * ZOOM_FACTOR : pxPerSec / ZOOM_FACTOR);
 }
 
+/**
+ * Scroll-left that keeps the timeline point currently under `anchorClientX`
+ * pinned under the same screen x after a zoom change (cursor-anchored zoom, à la
+ * dnd-timeline). `viewportLeft` is the viewport's left edge in client coords;
+ * `prevScrollLeft` its current horizontal scroll. Clamped to ≥0.
+ */
+export function anchorScrollLeft(args: {
+  prevPxPerSec: number;
+  nextPxPerSec: number;
+  anchorClientX: number;
+  viewportLeft: number;
+  prevScrollLeft: number;
+}): number {
+  const { prevPxPerSec, nextPxPerSec, anchorClientX, viewportLeft, prevScrollLeft } = args;
+  const offsetX = anchorClientX - viewportLeft;
+  const timeAtCursor = pxToTime(prevScrollLeft + offsetX, prevPxPerSec);
+  const nextContentX = timeToPx(timeAtCursor, nextPxPerSec);
+  return Math.max(0, nextContentX - offsetX);
+}
+
 export interface Tick {
   sec: number;
   label: string;
   major: boolean;
 }
 
-function labelSeconds(sec: number): string {
-  if (sec < 60) return `${sec}s`;
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return s === 0 ? `${m}m` : `${m}:${String(s).padStart(2, '0')}`;
+/**
+ * laper-style ruler label. Minutes use the film apostrophe (`0'`, `5'`, `10'`);
+ * the seconds ruler shows sub-minute ticks as `Ns` and minute boundaries as the
+ * apostrophe form (`0s`, `30s`, `1'`).
+ */
+function labelTick(sec: number, unit: TickUnit): string {
+  if (unit === 'minutes') return `${Math.round(sec / 60)}'`;
+  if (sec === 0) return '0s';
+  return sec % 60 === 0 ? `${sec / 60}'` : `${sec}s`;
 }
 
 /** Smallest minute interval that keeps the major-tick count reasonable (≤12). */
@@ -141,7 +172,7 @@ export function buildTicks(totalSec: number, unit: TickUnit): Tick[] {
     const major = rounded % majorSec === 0;
     ticks.push({
       sec: rounded,
-      label: major ? (unit === 'seconds' ? labelSeconds(rounded) : `${rounded / 60}m`) : '',
+      label: major ? labelTick(rounded, unit) : '',
       major,
     });
   }

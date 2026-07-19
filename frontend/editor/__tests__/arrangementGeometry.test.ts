@@ -14,6 +14,7 @@ import {
   MAX_TIMELINE_SEC,
   MIN_CARD_PX,
   MIN_PX_PER_SEC,
+  anchorScrollLeft,
   assignLanes,
   buildTicks,
   cardWidthPx,
@@ -119,7 +120,7 @@ describe('buildTicks', () => {
     expect(buildTicks(2_147_483_647, 'seconds').length).toBeLessThanOrEqual(2000);
   });
 
-  it('emits 10s major ticks in seconds mode with labels only on majors', () => {
+  it('emits 10s major ticks in seconds mode, apostrophe on minute boundaries', () => {
     const ticks = buildTicks(60, 'seconds');
     expect(ticks[0]).toEqual({ sec: 0, label: '0s', major: true });
     // minor tick at 5s carries no label
@@ -127,15 +128,58 @@ describe('buildTicks', () => {
     expect(five).toEqual({ sec: 5, label: '', major: false });
     const ten = ticks.find((t) => t.sec === 10);
     expect(ten).toEqual({ sec: 10, label: '10s', major: true });
-    expect(ticks[ticks.length - 1].sec).toBe(60);
+    // the 60s boundary reads as the film apostrophe minute
+    const minute = ticks.find((t) => t.sec === 60);
+    expect(minute).toEqual({ sec: 60, label: "1'", major: true });
   });
 
-  it('emits minute-labelled major ticks in minutes mode', () => {
+  it('emits apostrophe minute labels in minutes mode', () => {
     const ticks = buildTicks(240, 'minutes');
-    expect(ticks[0]).toEqual({ sec: 0, label: '0m', major: true });
+    expect(ticks[0]).toEqual({ sec: 0, label: "0'", major: true });
     const oneMin = ticks.find((t) => t.sec === 60 && t.major);
-    expect(oneMin?.label).toBe('1m');
+    expect(oneMin?.label).toBe("1'");
     expect(ticks[ticks.length - 1].sec).toBe(240);
+  });
+});
+
+describe('anchorScrollLeft', () => {
+  it('pins the time under the cursor across a zoom-in', () => {
+    // cursor 100px into the viewport, no scroll, 6→12 px/s: the time there is
+    // 100/6 s; after doubling zoom it sits at 200px, so scrollLeft must be 100
+    // to keep it under the same 100px cursor offset.
+    expect(
+      anchorScrollLeft({
+        prevPxPerSec: 6,
+        nextPxPerSec: 12,
+        anchorClientX: 200,
+        viewportLeft: 100,
+        prevScrollLeft: 0,
+      }),
+    ).toBe(100);
+  });
+
+  it('is a no-op when the zoom does not change', () => {
+    expect(
+      anchorScrollLeft({
+        prevPxPerSec: 6,
+        nextPxPerSec: 6,
+        anchorClientX: 200,
+        viewportLeft: 100,
+        prevScrollLeft: 60,
+      }),
+    ).toBe(60);
+  });
+
+  it('clamps to zero instead of scrolling negative', () => {
+    expect(
+      anchorScrollLeft({
+        prevPxPerSec: 6,
+        nextPxPerSec: 3,
+        anchorClientX: 150,
+        viewportLeft: 100,
+        prevScrollLeft: 0,
+      }),
+    ).toBe(0);
   });
 });
 
