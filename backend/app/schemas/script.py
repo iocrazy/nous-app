@@ -246,19 +246,33 @@ class ShotMoveRequest(BaseModel):
 
 class BeatCreate(BaseModel):
     """Request body for creating a beat under a script. ``script_id`` comes from
-    the path; ``scene_ids`` is an ordered list of linked scene id strings."""
+    the path; ``scene_ids`` is an ordered list of linked scene id strings.
+
+    Arrangement fields (M1) are all optional: ``start_sec`` (timeline offset;
+    omit for a not-yet-arranged list-mode beat), ``duration_sec``, ``beat_role``
+    (methodology-template role key, e.g. ``save_the_cat.catalyst``), ``color``
+    (card color strip hex)."""
 
     title: str = Field(..., min_length=1, max_length=200)
     summary: Optional[str] = None
     scene_ids: Optional[List[str]] = None
+    start_sec: Optional[int] = Field(None, ge=0)
+    duration_sec: Optional[int] = Field(None, ge=0)
+    beat_role: Optional[str] = Field(None, max_length=40)
+    color: Optional[str] = Field(None, max_length=20)
 
 
 class BeatUpdate(BaseModel):
-    """Request body for updating a beat's title / summary / linked scenes."""
+    """Request body for updating a beat's title / summary / linked scenes plus
+    the M1 arrangement fields (start_sec / duration_sec / beat_role / color)."""
 
     title: Optional[str] = Field(None, min_length=1, max_length=200)
     summary: Optional[str] = None
     scene_ids: Optional[List[str]] = None
+    start_sec: Optional[int] = Field(None, ge=0)
+    duration_sec: Optional[int] = Field(None, ge=0)
+    beat_role: Optional[str] = Field(None, max_length=40)
+    color: Optional[str] = Field(None, max_length=20)
 
 
 class BeatMoveRequest(BaseModel):

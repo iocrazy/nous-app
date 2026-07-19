@@ -41,13 +41,24 @@ _BEATS_ATTRS = {p.key for p in ScriptBeats.__mapper__.column_attrs}
 # bigint columns coerced on write. Ids/FKs stay native int on read (5.3 trap).
 _BEAT_BIGINT_FIELDS = ("script_id",)
 
+# INTEGER (non-id) columns coerced to native int on write — asyncpg binds an
+# INTEGER column strictly, so a string at the API boundary must become int.
+_BEAT_INT_FIELDS = ("start_sec", "duration_sec")
+
 # update() whitelist — the editable beat fields. NEVER script_id, sort_order
 # (move owns it), or id.
-_UPDATE_FIELDS = frozenset({"title", "summary", "scene_ids"})
+_UPDATE_FIELDS = frozenset(
+    {"title", "summary", "scene_ids", "start_sec", "duration_sec", "beat_role", "color"}
+)
 
 
 def _bigint(v: Any) -> Optional[int]:
     """Coerce a bigint id/FK bind value to native int; None passes through."""
+    return None if v is None else int(v)
+
+
+def _int_or_none(v: Any) -> Optional[int]:
+    """Coerce an INTEGER-column bind value to native int; None passes through."""
     return None if v is None else int(v)
 
 
@@ -84,6 +95,9 @@ def _beat_write_values(data: Dict[str, Any]) -> Dict[str, Any]:
     for field in _BEAT_BIGINT_FIELDS:
         if field in known and known[field] is not None:
             known[field] = _bigint(known[field])
+    for field in _BEAT_INT_FIELDS:
+        if field in known and known[field] is not None:
+            known[field] = _int_or_none(known[field])
     if "scene_ids" in known:
         known["scene_ids"] = _coerce_scene_ids(known["scene_ids"])
     return known
@@ -167,6 +181,9 @@ class ScriptBeatRepository:
             values = {k: v for k, v in data.items() if k in _UPDATE_FIELDS}
             if "scene_ids" in values:
                 values["scene_ids"] = _coerce_scene_ids(values["scene_ids"])
+            for field in _BEAT_INT_FIELDS:
+                if field in values and values[field] is not None:
+                    values[field] = _int_or_none(values[field])
             if not values:
                 return await self.get_by_id(beat_id)
             async with write_scope() as session:

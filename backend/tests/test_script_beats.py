@@ -190,7 +190,14 @@ class _ScopeCtx:
         return False
 
 
-def _beat_obj(sort_order=1000, scene_ids=None):
+def _beat_obj(
+    sort_order=1000,
+    scene_ids=None,
+    start_sec=None,
+    duration_sec=None,
+    beat_role=None,
+    color=None,
+):
     return ScriptBeats(
         id=_BEAT_ID,
         script_id=_SCRIPT_ID,
@@ -198,6 +205,10 @@ def _beat_obj(sort_order=1000, scene_ids=None):
         summary="The hero gets the call.",
         scene_ids=scene_ids if scene_ids is not None else [],
         sort_order=sort_order,
+        start_sec=start_sec,
+        duration_sec=duration_sec,
+        beat_role=beat_role,
+        color=color,
         created_at=_dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc),
         updated_at=_dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc),
     )
@@ -281,6 +292,79 @@ async def test_update_coerces_scene_ids_and_ignores_non_whitelist():
     assert ["1", "2"] in upd_params.values()
     # sort_order / id are NOT in the update whitelist → never bound.
     assert 999 not in upd_params.values()
+
+
+# --------------------------------------------------------------------------- #
+# 4. Arrangement fields (M1): start_sec / duration_sec / beat_role / color
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_create_binds_arrangement_fields_int_typed():
+    """create() persists the arrangement columns; the INTEGER columns bind as
+    native ints (asyncpg strict — never a string) and the text columns pass
+    through as-is."""
+    session = _CaptureSession(
+        [
+            _FakeResult(scalar_first=0),  # func.max(sort_order)
+            _FakeResult(
+                scalar_first=_beat_obj(
+                    start_sec=12,
+                    duration_sec=30,
+                    beat_role="save_the_cat.catalyst",
+                    color="#b8b0a0",
+                )
+            ),
+        ]
+    )
+    with patch.object(beat_mod, "write_scope", lambda: _ScopeCtx(session)):
+        out = await ScriptBeatRepository().create(
+            {
+                "script_id": str(_SCRIPT_ID),
+                "title": "Catalyst",
+                "start_sec": "12",  # str at the boundary → coerced to int
+                "duration_sec": 30,
+                "beat_role": "save_the_cat.catalyst",
+                "color": "#b8b0a0",
+            }
+        )
+    _, ins_params = _rendered(session.statements[1])
+    assert 12 in ins_params.values()
+    assert 30 in ins_params.values()
+    assert "save_the_cat.catalyst" in ins_params.values()
+    assert "#b8b0a0" in ins_params.values()
+    # INTEGER columns must not round-trip as strings.
+    assert "12" not in ins_params.values()
+    # Read-back parity: ints stay native, text passes through.
+    assert out["start_sec"] == 12
+    assert out["duration_sec"] == 30
+    assert out["beat_role"] == "save_the_cat.catalyst"
+    assert out["color"] == "#b8b0a0"
+
+
+@pytest.mark.asyncio
+async def test_update_whitelists_arrangement_fields():
+    """update() accepts the arrangement columns, int-coercing the INTEGER ones."""
+    session = _CaptureSession(
+        [_FakeResult(scalar_first=_beat_obj(start_sec=60, duration_sec=90))]
+    )
+    with patch.object(beat_mod, "write_scope", lambda: _ScopeCtx(session)):
+        await ScriptBeatRepository().update(
+            str(_BEAT_ID),
+            {
+                "start_sec": "60",  # str → int
+                "duration_sec": 90,
+                "beat_role": "five.crisis",
+                "color": "#a0a8b0",
+            },
+        )
+    upd_sql, upd_params = _rendered(session.statements[0])
+    assert upd_sql.strip().upper().startswith("UPDATE PUBLIC.SCRIPT_BEATS")
+    assert 60 in upd_params.values()
+    assert 90 in upd_params.values()
+    assert "five.crisis" in upd_params.values()
+    assert "#a0a8b0" in upd_params.values()
+    assert "60" not in upd_params.values()
 
 
 @pytest.mark.asyncio
