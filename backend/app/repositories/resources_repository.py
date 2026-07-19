@@ -100,6 +100,7 @@ from app.db.scope import is_enforced, scoped_sql, system_request_scope
 from app.db.session import read_scope, write_scope
 from app.models import (
     Folders,
+    GalleryItems,
     ResourceItems,
     Resources,
     ResourceTags,
@@ -900,6 +901,97 @@ class ResourcesRepository(AsyncpgRepository):
             logger.error(f"Failed to count items for resource {resource_id}: {e}")
             return 0
 
+    # ── Gallery (first-class gallery entity, PR-A) ──────────────────
+
+    async def validate_scope_image_ids(
+        self, scope_id: str, image_ids: List[str]
+    ) -> set:
+        """Of ``image_ids``, return the subset that are image resources with a
+        ``resource_items`` row in ``scope_id``. Used to validate a gallery's
+        proposed children belong to the caller's scope and are actually images.
+
+        Empty input short-circuits to ``set()`` without a query. Returns a set
+        of the ids AS PASSED (str) so the caller can diff against its input."""
+        if not image_ids:
+            return set()
+        try:
+            id_ints = self._bigint_list(image_ids)
+            async with read_scope() as session:
+                result = await session.execute(
+                    text(
+                        "SELECT DISTINCT r.id "
+                        "FROM resources r "
+                        "INNER JOIN resource_items i ON i.resource_id = r.id "
+                        "WHERE r.id = ANY(:ids) "
+                        "  AND i.scope_id = :scope_id "
+                        "  AND r.mime_type LIKE 'image/%'"
+                    ),
+                    {"ids": id_ints, "scope_id": self._bigint(scope_id)},
+                )
+                found = {int(row["id"]) for row in result.mappings().all()}
+            # Map back to the caller's original str/int representation.
+            return {orig for orig in image_ids if self._bigint(orig) in found}
+        except Exception as e:
+            logger.error(f"Failed to validate scope image ids: {e}")
+            return set()
+
+    async def set_gallery_items(
+        self, gallery_id: str, image_ids: List[str]
+    ) -> List[Dict[str, Any]]:
+        """Replace a gallery's ordered children with ``image_ids`` (full reset).
+
+        The delete + re-insert run inside ONE ``write_scope`` so the membership
+        swap is atomic (all-or-nothing). ``position`` is the 0-based index of
+        each id in the passed order. Returns the new junction rows."""
+        gid = self._bigint(gallery_id)
+        rows_out: List[Dict[str, Any]] = []
+        try:
+            async with write_scope() as session:
+                await session.execute(
+                    sa_delete(GalleryItems).where(GalleryItems.gallery_id == gid)
+                )
+                if image_ids:
+                    values = [
+                        {
+                            "gallery_id": gid,
+                            "image_id": self._bigint(image_id),
+                            "position": idx,
+                        }
+                        for idx, image_id in enumerate(image_ids)
+                    ]
+                    result = await session.execute(
+                        insert(GalleryItems)
+                        .values(values)
+                        .returning(*GalleryItems.__table__.columns)
+                    )
+                    rows_out = [_mappings_dict(r) for r in result.mappings().all()]
+            logger.info(f"Set {len(image_ids)} gallery items for gallery {gallery_id}")
+            return rows_out
+        except Exception as e:
+            logger.error(f"Failed to set gallery items for {gallery_id}: {e}")
+            raise
+
+    async def get_gallery_items(self, gallery_id: str) -> List[Dict[str, Any]]:
+        """Ordered child images of a gallery: ``[{id, filename,
+        thumbnail_path, position}, ...]`` sorted by ``position``."""
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    text(
+                        "SELECT r.id, r.filename, r.thumbnail_path, gi.position "
+                        "FROM gallery_items gi "
+                        "INNER JOIN resources r ON r.id = gi.image_id "
+                        "WHERE gi.gallery_id = :gid "
+                        "ORDER BY gi.position ASC"
+                    ),
+                    {"gid": self._bigint(gallery_id)},
+                )
+                rows = [_rest_parity(dict(r)) for r in result.mappings().all()]
+            return rows
+        except Exception as e:
+            logger.error(f"Failed to get gallery items for {gallery_id}: {e}")
+            return []
+
     # ── Listing with filters (the 22-arg behemoth) ──────────────────
 
     @staticmethod
@@ -927,6 +1019,7 @@ class ResourcesRepository(AsyncpgRepository):
             "OR r.mime_type = 'application/pdf' "
             "OR r.mime_type LIKE 'application/msword%' "
             "OR r.mime_type LIKE 'application/vnd.%' "
+            "OR r.mime_type = 'application/x-mediahub-gallery' "
             "OR r.mime_type LIKE 'text/%')"
         )
 
@@ -940,6 +1033,8 @@ class ResourcesRepository(AsyncpgRepository):
                 clauses.append("r.mime_type LIKE 'audio/%'")
             elif category == "document":
                 clauses.append(document_clause)
+            elif category == "gallery":
+                clauses.append("r.mime_type = 'application/x-mediahub-gallery'")
             elif category == "other":
                 clauses.append(f"NOT {known_clause}")
             # Silently ignore unknown categories (matches legacy behaviour).
@@ -975,6 +1070,7 @@ class ResourcesRepository(AsyncpgRepository):
         min_shares: Optional[int] = None,
         social_combine: str = "and",
         has_comments: Optional[bool] = None,
+        include_gallery_children: bool = False,
     ) -> List[Dict[str, Any]]:
         """List resource_items joined to their resources.
 
@@ -1023,6 +1119,16 @@ class ResourcesRepository(AsyncpgRepository):
 
             if not include_trashed:
                 where.append("r.is_trashed = false")
+
+            # Gallery children are hidden from the normal library listing so a
+            # gallery reads as a single tile. A child is any resource that
+            # appears as a gallery_items.image_id. include_gallery_children=True
+            # opts out (e.g. a picker that wants the raw images too).
+            if not include_gallery_children:
+                where.append(
+                    "NOT EXISTS (SELECT 1 FROM gallery_items gi "
+                    "WHERE gi.image_id = i.resource_id)"
+                )
 
             if matched_resource_ids is not None:
                 where.append("i.resource_id = ANY(:matched_ids)")
@@ -1097,7 +1203,9 @@ class ResourcesRepository(AsyncpgRepository):
                 "SELECT i.id, i.resource_id, i.scope_id, "
                 "       i.folder_id, i.added_by, i.library_id, "
                 "       i.created_at AS i_created_at, "
-                "       row_to_json(r.*) AS resource "
+                "       row_to_json(r.*) AS resource, "
+                "       (SELECT count(*) FROM gallery_items gc "
+                "        WHERE gc.gallery_id = r.id) AS gallery_count "
                 "FROM resource_items i "
                 "INNER JOIN resources r ON i.resource_id = r.id "
                 f"WHERE {' AND '.join(where)} "
@@ -1110,7 +1218,14 @@ class ResourcesRepository(AsyncpgRepository):
             for row in rows:
                 resource = row.get("resource")
                 if isinstance(resource, str):
-                    row["resource"] = json.loads(resource)
+                    resource = json.loads(resource)
+                    row["resource"] = resource
+                # gallery_count rides along inside the resource object so the
+                # frontend reads it as ``resource.gallery_count`` (0 for a
+                # non-gallery row — gallery_items only has rows for galleries).
+                gallery_count = row.pop("gallery_count", 0)
+                if isinstance(resource, dict):
+                    resource["gallery_count"] = int(gallery_count or 0)
                 row["created_at"] = row.pop("i_created_at")
             return [_rest_parity(row) for row in rows]
         except Exception as e:
