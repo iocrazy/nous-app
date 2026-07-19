@@ -26,6 +26,13 @@ export interface ScheduleResponse {
   last_error: string | null;
   created_at: string;
   updated_at: string;
+  // W2a autopilot hardening (mig 370)
+  timezone: string;
+  consecutive_fails: number;
+  paused_at: string | null;
+  pause_reason: string | null;
+  skipped_count: number;
+  stale_after_minutes: number;
 }
 
 export interface ScheduleCreatePayload {
@@ -34,6 +41,7 @@ export interface ScheduleCreatePayload {
   task_type: string;
   payload?: Record<string, unknown>;
   enabled?: boolean;
+  timezone?: string;
 }
 
 export interface ScheduleUpdatePayload {
@@ -41,6 +49,7 @@ export interface ScheduleUpdatePayload {
   cron_expr?: string;
   payload?: Record<string, unknown>;
   enabled?: boolean;
+  timezone?: string;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -72,4 +81,9 @@ export const schedulesService = {
 
   fireNow: (id: string): Promise<{ schedule_id: string; fired_at: string }> =>
     request(`/${id}/fire-now`, { method: 'POST' }),
+
+  // Clear an auto-paused (or disabled) routine: re-enable, reset the
+  // consecutive-failure run, drop pause metadata, recompute next_fire_at.
+  resume: (id: string): Promise<ScheduleResponse> =>
+    request<ScheduleResponse>(`/${id}/resume`, { method: 'POST' }),
 };
