@@ -2267,7 +2267,13 @@ export const EDITOR_SHELL_STYLES = `
    the fixed column position does, exactly like a printed screenplay. */
 /* A printed script distinguishes cues/transitions by COLUMN POSITION, not by
    weight — everything is uniform Courier. Drop the bold to match a real page. */
-.hw-character{ color:var(--sheet-ink); font-weight:normal; letter-spacing:0; }
+/* User verdict (2026-07-19): the character cue reads CENTERED on the page —
+   not first-char-at-a-fixed-column. Centering replaces the 22ch indent as the
+   cue's positional signal (long cues wrap centered too). */
+.hw-character{
+  color:var(--sheet-ink); font-weight:normal; letter-spacing:0;
+  padding-left:0; text-align:center;
+}
 .hw-transition{ color:var(--sheet-ink); font-weight:normal; letter-spacing:0; }
 /* Parenthetical stays ITALIC + soft even on the clean page (laper reference:
    "(dry…)" renders gray italic under the cue) — position AND voice carry it. */
