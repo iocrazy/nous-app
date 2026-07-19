@@ -49,6 +49,20 @@ vi.mock('../components/Inspiration/NoteEditor', () => import('../components/Insp
 
 import { InspirationPage } from './InspirationPage';
 
+// Inline tag chips (see components/Inspiration/NoteMarkdown.tsx) split a note
+// body like "first idea #hooks" into a leading text node plus a
+// `<button>#hooks</button>` chip, so `getByText('first idea #hooks')` no
+// longer has a single text-only match. Match on the rendered `<p>`'s full
+// (descendant-inclusive) `textContent` instead — mirrors
+// NoteMarkdown.test.tsx's own `container.querySelector('p')?.textContent`
+// idiom. Scoped to the `<p>` tag specifically (not "any element whose
+// textContent equals X") because the wrapping NoteMarkdown/NoteCard divs
+// around a single-paragraph body also have that same full textContent —
+// matching any element would find those ancestors too and throw "multiple
+// elements found".
+const noteBody = (text: string) => (_content: string, el: Element | null) =>
+  el?.tagName === 'P' && el.textContent === text;
+
 const NOTE = {
   id: '1', content_md: 'first idea #hooks', tags: ['hooks'], ref_hotspot: null,
   pinned: false, note_date: '2026-07-07',
@@ -74,7 +88,7 @@ describe('InspirationPage', () => {
   it('loads and renders notes grouped by day', async () => {
     render(<InspirationPage />);
     await waitFor(() => expect(listNotes).toHaveBeenCalled());
-    expect(await screen.findByText('first idea #hooks')).toBeTruthy();
+    expect(await screen.findByText(noteBody('first idea #hooks'))).toBeTruthy();
   });
 
   it('tag panel click sets filter chip and refetches with tag', async () => {
@@ -111,18 +125,18 @@ describe('InspirationPage', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     deleteNote.mockResolvedValue(undefined);
     render(<InspirationPage />);
-    await screen.findByText('first idea #hooks');
+    await screen.findByText(noteBody('first idea #hooks'));
     fireEvent.click(screen.getByLabelText('Note actions'));
     fireEvent.click(screen.getByText('Delete'));
     await waitFor(() => expect(deleteNote).toHaveBeenCalledWith('1'));
-    await waitFor(() => expect(screen.queryByText('first idea #hooks')).toBeNull());
+    await waitFor(() => expect(screen.queryByText(noteBody('first idea #hooks'))).toBeNull());
   });
 
   it('stale loadMore response is discarded after filters change', async () => {
     const first = Array.from({ length: 50 }, (_, i) => ({ ...NOTE, id: String(100 - i) }));
     listNotes.mockResolvedValueOnce(first); // initial page (hasMore=true, len===PAGE_SIZE)
     render(<InspirationPage />);
-    await screen.findAllByText('first idea #hooks');
+    await screen.findAllByText(noteBody('first idea #hooks'));
 
     // Reset the call counter so earlier tests' invocation history doesn't
     // pollute the relative assertions below (mocks aren't reset between
@@ -168,7 +182,7 @@ describe('InspirationPage', () => {
   it('edits a note through the modal (NoteEditor) and saves the new content', async () => {
     updateNote.mockResolvedValue({ ...NOTE, content_md: 'updated content #hooks' });
     render(<InspirationPage />);
-    await screen.findByText('first idea #hooks');
+    await screen.findByText(noteBody('first idea #hooks'));
     fireEvent.click(screen.getByLabelText('Note actions'));
     fireEvent.click(screen.getByText('Edit'));
 
@@ -187,7 +201,7 @@ describe('InspirationPage', () => {
     await waitFor(() =>
       expect(updateNote).toHaveBeenCalledWith('1', { content_md: 'updated content #hooks' }),
     );
-    await waitFor(() => expect(screen.getByText('updated content #hooks')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(noteBody('updated content #hooks'))).toBeTruthy());
     // Modal closes after a successful save.
     expect(screen.queryByText('Edit note')).toBeNull();
   });
