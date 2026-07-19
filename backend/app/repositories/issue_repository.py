@@ -369,7 +369,29 @@ class IssueRepository:
         # subissue_barrier). Best-effort: never let the barrier break the
         # transition.
         await _fire_subissue_barrier(int(issue_id), prev_status, new_status)
+        # Pipeline relay (W2b) fan-out rides the SAME seam as the barrier fan-in:
+        # a pipeline-step child reaching terminal advances its run to the next
+        # step. Separate best-effort call so a relay failure never affects the
+        # barrier or the transition.
+        await _fire_pipeline_relay(int(issue_id), prev_status, new_status)
         return result
+
+
+async def _fire_pipeline_relay(
+    issue_id: int, prev_status: Optional[str], new_status: str
+) -> None:
+    """Best-effort pipeline-relay advance after a status transition. Same repo→
+    service inversion rationale as ``_fire_subissue_barrier``; the relay hook
+    swallows its own errors, this outer guard is belt-and-braces."""
+    try:
+        from app.services.issues.pipeline_relay import on_pipeline_child_terminal
+
+        await on_pipeline_child_terminal(issue_id, prev_status, new_status)
+    except Exception as exc:  # noqa: BLE001 — the transition is the primary op
+        logger.warning(
+            f"[issue_repository] pipeline relay hook failed for issue "
+            f"{issue_id}: {exc!r}"
+        )
 
 
 async def _fire_subissue_barrier(
