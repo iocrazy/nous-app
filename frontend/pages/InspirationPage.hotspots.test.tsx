@@ -142,20 +142,21 @@ describe('InspirationPage P3 hotspots', () => {
     const musicChip = screen.getByText(/^#music \(/) as HTMLElement;
     fireEvent.click(musicChip);
 
-    // Verify Music chip is now active (indigo colored)
+    // Verify Music chip is now active (accent-token colored — the accent
+    // migration replaced the hardcoded indigo classes with var(--accent-*))
     await waitFor(() => {
       const activeChip = screen.getByText(/^#music \(/).closest('button');
-      expect(activeChip?.className).toContain('indigo');
+      expect(activeChip?.className).toContain('accent');
     });
 
     // Trigger date change by clicking the mock ActivityPanel button
     const dateSelectBtn = screen.getByTestId('activity-panel-select-date');
     fireEvent.click(dateSelectBtn);
 
-    // After date change, the Music chip should no longer be active (not indigo)
+    // After date change, the Music chip should no longer be active (no accent fill)
     await waitFor(() => {
       const musicChipAfter = screen.getByText(/^#music \(/).closest('button');
-      expect(musicChipAfter?.className).not.toContain('indigo-500/25');
+      expect(musicChipAfter?.className).not.toContain('accent-soft');
     });
   });
 });
