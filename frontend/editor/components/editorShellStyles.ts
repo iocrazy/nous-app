@@ -1923,9 +1923,102 @@ export const EDITOR_SHELL_STYLES = `
 .mh-arr-card-resize{ position:absolute; right:0; top:0; bottom:0; width:10px; cursor:ew-resize; touch-action:none; }
 .mh-arr-card-resize:hover{ background:linear-gradient(to right, transparent, var(--accent-soft)); }
 
-/* M4 memo-pin rail: a second, empty ruler line below the cards (visual anchor). */
-.mh-arr-memo-rail{ position:relative; height:40px; margin-top:6px; border-top:1px dashed var(--surface-border); }
-.mh-arr-memo-tick{ position:absolute; top:0; width:1px; height:8px; background:var(--hairline); }
+/* ── M4 memo-pin rail ─────────────────────────────────────────────────────
+   A second ruler line below the cards where time-anchored inspiration memos
+   hang as draggable pins with relaxed connector curves + floating cards. */
+.mh-memo-rail{ position:relative; margin-top:8px; padding-top:6px; border-top:1px dashed var(--surface-border); }
+.mh-memo-ruler-line{ position:absolute; left:0; right:0; top:15px; height:1px; background:var(--hairline); }
+.mh-memo-tick{ position:absolute; top:11px; width:1px; height:9px; background:var(--surface-border); }
+.mh-memo-hitzone{ position:absolute; left:0; right:0; top:0; z-index:1; cursor:copy; }
+/* Hover "+" snapped to the grid — laper's add affordance in accent green. */
+.mh-memo-add{
+  position:absolute; z-index:3; transform:translate(-50%,-50%);
+  width:18px; height:18px; border-radius:999px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:14px; font-weight:700; line-height:1; color:#fff;
+  background:var(--positive, #3fae6a); box-shadow:var(--shadow-island);
+  pointer-events:none; /* pure hover hint; the hitzone owns the click */
+}
+.mh-memo-links{ position:absolute; left:0; top:0; z-index:1; pointer-events:none; overflow:visible; }
+.mh-memo-link{ fill:none; stroke-width:1.5; opacity:0.55; }
+.mh-memo-dot{
+  position:absolute; z-index:4; transform:translate(-50%,-50%);
+  width:11px; height:11px; border-radius:999px; padding:0; cursor:grab;
+  border:2px solid var(--surface-1, #fff); box-shadow:var(--shadow-island);
+  touch-action:none;
+}
+.mh-memo-dot:hover{ filter:brightness(1.05); }
+.mh-memo-dot.dragging{ cursor:grabbing; z-index:6; transform:translate(-50%,-50%) scale(1.15); }
+.mh-memo-card{
+  position:absolute; z-index:2; box-sizing:border-box;
+  background:var(--surface-1, #fff); border:1px solid var(--hairline); border-radius:10px;
+  padding:8px 10px; box-shadow:var(--shadow-island);
+}
+.mh-memo-card-head{ display:flex; align-items:center; gap:8px; }
+.mh-memo-card-chip{
+  font-size:10.5px; font-weight:700; color:var(--chip-ink-fg); background:var(--chip-ink-bg);
+  border-radius:999px; padding:2px 8px; font-variant-numeric:tabular-nums;
+}
+.mh-memo-card-edit{
+  margin-left:auto; font-size:10.5px; font-weight:600; color:var(--ink-soft);
+  background:none; border:none; cursor:pointer; padding:2px 2px;
+}
+.mh-memo-card-edit:hover{ color:var(--ink); text-decoration:underline; }
+.mh-memo-card-thumb{
+  display:block; width:100%; max-height:88px; object-fit:cover;
+  border-radius:6px; margin-top:6px;
+}
+.mh-memo-card-body{
+  margin-top:6px; font-size:12px; line-height:1.5; color:var(--ink-faint);
+  overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+}
+
+/* Quick-capture popover — laper post-style composer. */
+.mh-memo-quick{
+  position:absolute; z-index:20; top:30px; width:272px; box-sizing:border-box;
+  background:var(--surface-1, #fff); border:1px solid var(--emph-ink-border); border-radius:12px;
+  padding:10px; box-shadow:var(--shadow-float);
+}
+.mh-memo-quick-head{ display:flex; align-items:center; gap:8px; }
+.mh-memo-quick-chip{
+  font-size:11px; font-weight:700; color:var(--chip-ink-fg); background:var(--chip-ink-bg);
+  border-radius:999px; padding:2px 9px; font-variant-numeric:tabular-nums;
+}
+.mh-memo-quick-x{ margin-left:auto; color:var(--ink-soft); background:none; border:none; cursor:pointer; padding:2px; display:flex; }
+.mh-memo-quick-x:hover{ color:var(--ink); }
+.mh-memo-quick-body{
+  width:100%; box-sizing:border-box; margin-top:8px; resize:vertical; min-height:64px;
+  font-family:var(--sans); font-size:13px; line-height:1.5; color:var(--ink);
+  background:var(--surface-2, transparent); border:1px solid var(--hairline); border-radius:8px; padding:8px;
+}
+.mh-memo-quick-body:focus{ outline:none; border-color:var(--emph-ink-border); }
+.mh-memo-quick-thumbs{ display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.mh-memo-quick-thumb-wrap{ position:relative; display:inline-flex; }
+.mh-memo-quick-thumb{ width:48px; height:48px; object-fit:cover; border-radius:6px; border:1px solid var(--hairline); }
+.mh-memo-quick-thumb-x{
+  position:absolute; top:-6px; right:-6px; width:16px; height:16px; border-radius:999px;
+  display:flex; align-items:center; justify-content:center; cursor:pointer;
+  color:#fff; background:var(--ink); border:none;
+}
+.mh-memo-quick-foot{ display:flex; align-items:center; gap:8px; margin-top:10px; }
+.mh-memo-quick-foot-spacer{ flex:1; }
+.mh-memo-quick-attach{
+  display:inline-flex; align-items:center; gap:3px; font-size:11px; font-weight:600;
+  color:var(--ink-soft); background:none; border:1px solid var(--hairline); border-radius:999px;
+  padding:4px 9px; cursor:pointer;
+}
+.mh-memo-quick-attach:hover:not(:disabled){ color:var(--ink); border-color:var(--emph-ink-border); }
+.mh-memo-quick-attach:disabled{ opacity:0.4; cursor:not-allowed; }
+.mh-memo-quick-ghost{
+  font-size:11px; font-weight:600; color:var(--ink-soft); background:none; border:none;
+  cursor:pointer; padding:4px 4px; display:inline-flex; align-items:center;
+}
+.mh-memo-quick-ghost:hover{ color:var(--ink); }
+.mh-memo-quick-publish{
+  font-size:12px; font-weight:700; color:#fff; background:var(--accent-strong, var(--indigo));
+  border:none; border-radius:999px; padding:5px 14px; cursor:pointer;
+}
+.mh-memo-quick-publish:disabled{ opacity:0.45; cursor:not-allowed; }
 
 /* Tools pill — top-right, laper-style with text labels (Fit / Zoom out / in). */
 /* NLE drag guide — full-height edge line with a live time chip. */

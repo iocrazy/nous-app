@@ -36,6 +36,18 @@ const scriptSvc = vi.hoisted(() => ({
 vi.mock('../../services/scriptService', () => scriptSvc);
 
 import { BeatsView } from '../beats/BeatsView';
+// M4: ArrangementView now hosts MemoRail, which reads AuthContext + the
+// inspiration notes API. Stub both so the timeline tests stay geometry-focused.
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ mediaToken: 'tok' }) }));
+vi.mock('../../services/inspirationService', () => ({
+  listAnchoredNotes: vi.fn().mockResolvedValue([]),
+  createNote: vi.fn(),
+  updateNote: vi.fn(),
+  deleteNote: vi.fn(),
+  uploadAttachment: vi.fn(),
+  attachmentUrlWithToken: (id: string) => `att/${id}`,
+}));
+
 import { ArrangementView } from '../beats/ArrangementView';
 
 const beat = (over: Partial<Beat> & { id: string }): Beat => ({
