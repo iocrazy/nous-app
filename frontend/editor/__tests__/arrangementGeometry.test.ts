@@ -238,6 +238,20 @@ describe('layoutCards (laper sequential flow)', () => {
     expect(layout.get('b')).toEqual({ x: MIN_CARD_PX, lane: 0, width: MIN_CARD_PX });
   });
 
+  it('sorts safely when ids are numbers at runtime (Snowflake wire shape)', () => {
+    // `id` is typed string but the API sends JSON numbers; two beats sharing a
+    // start_sec force the tiebreak comparator, which must not assume a string.
+    const numericIds = [
+      { id: 200002 as unknown as string, start_sec: 0, duration_sec: 30 },
+      { id: 200001 as unknown as string, start_sec: 0, duration_sec: 30 },
+    ];
+    expect(() => layoutCards(numericIds, 6)).not.toThrow();
+    const layout = layoutCards(numericIds, 6);
+    // Both placed; the lower id sorts first onto lane 0.
+    expect(layout.size).toBe(2);
+    expect(layout.get(200001 as unknown as string)?.lane).toBe(0);
+  });
+
   it('layoutExtentPx covers pushed overflow past the ruler end', () => {
     const layout = layoutCards(
       [

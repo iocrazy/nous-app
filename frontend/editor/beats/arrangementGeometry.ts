@@ -252,8 +252,12 @@ export interface CardLayout {
  * packs cards edge-to-edge so the rendered gap equals that subtraction.
  */
 export function layoutCards(beats: LaneInput[], pxPerSec: number): Map<string, CardLayout> {
+  // Stable tiebreak on id. `id` is TYPED as string but arrives from the API as a
+  // JSON number (Snowflake bigint), so coerce before comparing — a bare
+  // `a.id.localeCompare` throws "localeCompare is not a function" the moment two
+  // beats share a start_sec (M2 only ever exercised a single-beat sort).
   const ordered = [...beats].sort(
-    (a, b) => a.start_sec - b.start_sec || a.id.localeCompare(b.id),
+    (a, b) => a.start_sec - b.start_sec || String(a.id).localeCompare(String(b.id)),
   );
   const laneTimeEnds: number[] = [];
   const lanePxEnds: number[] = [];
