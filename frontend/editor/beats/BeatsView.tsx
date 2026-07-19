@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useToast } from '../../components/Toast';
+import { fetchScriptProject, updateScriptProject } from '../../services/scriptService';
 import {
   createBeat,
   deleteBeat,
@@ -44,6 +45,8 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
   const [beats, setBeats] = useState<Beat[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [subview, setSubview] = useState<BeatsSubview>(() => readStoredBeatsSubview(scriptId));
+  // M3 target total runtime; drives the Arrangement ruler + template defaults.
+  const [targetDurationSec, setTargetDurationSec] = useState<number | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -59,6 +62,57 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Pull the target length once per script — a soft dependency: a failure just
+  // leaves the ruler on its beat-derived default (no toast, the timeline works).
+  useEffect(() => {
+    let cancelled = false;
+    fetchScriptProject(scriptId)
+      .then((project) => {
+        if (!cancelled) setTargetDurationSec(project.target_duration_sec ?? null);
+      })
+      .catch((err) => console.error('[BeatsView] target length load failed', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [scriptId]);
+
+  const handleSetTargetDuration = useCallback(
+    (sec: number) => {
+      setTargetDurationSec(sec); // optimistic
+      updateScriptProject(scriptId, { target_duration_sec: sec }).catch((err) => {
+        console.error('[BeatsView] set target length failed', err);
+        addToast(t('editor.beatTargetLengthFailed'), 'error');
+      });
+    },
+    [scriptId, addToast, t],
+  );
+
+  const handleApplyTemplate = useCallback(
+    async (templateBeats: BeatInput[], mode: 'append' | 'replace', targetSec: number) => {
+      try {
+        if (targetSec !== targetDurationSec) handleSetTargetDuration(targetSec);
+        // CREATE first, DELETE last: a mid-batch create failure must leave the
+        // user's existing sheet intact (replace degrades to a no-op + toast),
+        // never "old sheet destroyed + 7 of 15 template rows". Sequential
+        // create preserves template order (create auto-assigns sort_order =
+        // script MAX + step, so a parallel burst would race it).
+        const priorIds = beats.map((b) => b.id);
+        for (const data of templateBeats) {
+          await createBeat(scriptId, data);
+        }
+        if (mode === 'replace') {
+          await Promise.all(priorIds.map((id) => deleteBeat(id)));
+        }
+        await reload();
+      } catch (err) {
+        console.error('[BeatsView] apply template failed', err);
+        addToast(t('editor.beatTemplateApplyFailed'), 'error');
+        void reload();
+      }
+    },
+    [scriptId, beats, targetDurationSec, handleSetTargetDuration, reload, addToast, t],
+  );
 
   const selectSubview = useCallback(
     (next: BeatsSubview) => {
@@ -145,9 +199,8 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
     <div className="mh-beats-pane" data-testid="beats-pane">
       {/* laper topbar: count left · segmented centre · Add right. */}
       <div className="mh-beats-subview" role="group" aria-label={t('editor.beatsViewLabel')}>
-        <span className="mh-beats-count" data-testid="beats-count">
-          {t('editor.moduleBeats')} <b>{beats.length}</b>
-        </span>
+        {/* Left spacer keeps the segmented dead-centre against the right Add. */}
+        <span aria-hidden="true" />
         <div className="mh-segmented mh-beats-seg">
           <button
             type="button"
@@ -195,10 +248,15 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
           scriptId={scriptId}
           beats={beats}
           scenes={scenes}
+          targetDurationSec={targetDurationSec}
           onAdd={() => void handleAdd()}
           onUpdate={handleUpdate}
           onCreate={(data) => void handleCreate(data)}
           onOpenScene={onOpenScene}
+          onSetTargetDuration={handleSetTargetDuration}
+          onApplyTemplate={(templateBeats, mode, targetSec) =>
+            void handleApplyTemplate(templateBeats, mode, targetSec)
+          }
         />
       )}
     </div>

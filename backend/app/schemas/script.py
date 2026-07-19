@@ -47,6 +47,10 @@ class ScriptProjectUpdate(BaseModel):
     # Reassign the script to another episode (Phase B P2). Snowflake id as str;
     # the repo bigint-coerces it. FK is ON DELETE RESTRICT.
     episode_id: Optional[str] = None
+    # Beats timeline target total runtime in seconds (M3). INTEGER column, so the
+    # same PG range guard as the beat arrangement fields (out-of-range → 422 here,
+    # never asyncpg 22003 → opaque 500). NULL = unset (handled via exclude_none).
+    target_duration_sec: Optional[int] = Field(None, ge=0, le=2_147_483_647)
 
 
 class ScriptProjectResponse(BaseModel):
@@ -63,6 +67,7 @@ class ScriptProjectResponse(BaseModel):
     status: str
     settings_json: Optional[Dict[str, Any]] = None
     viewport_json: Optional[Dict[str, Any]] = None
+    target_duration_sec: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 

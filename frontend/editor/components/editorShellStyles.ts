@@ -1820,8 +1820,6 @@ export const EDITOR_SHELL_STYLES = `
   flex:0 0 auto; padding:12px 24px 8px; display:flex; align-items:center;
   justify-content:space-between; position:relative;
 }
-.mh-beats-count{ font-size:12.5px; font-weight:600; color:var(--ink-faint); }
-.mh-beats-count b{ color:var(--ink); font-weight:700; margin-left:2px; }
 .mh-beats-add-ink{
   font-family:var(--sans); font-size:12px; font-weight:700; color:var(--pill-ink-on);
   background:var(--pill-ink-bg); border:none; border-radius:999px; padding:7px 16px;
@@ -1941,8 +1939,9 @@ export const EDITOR_SHELL_STYLES = `
   font-variant-numeric:tabular-nums; white-space:nowrap;
 }
 
-/* In-flow toolbar row (absolute over the canvas covered the ruler labels). */
-.mh-arr-topbar{ display:flex; justify-content:flex-end; padding:0 6px 8px; flex:0 0 auto; }
+/* In-flow toolbar row (absolute over the canvas covered the ruler labels).
+   Left group = length + methodology tools, right group = zoom. */
+.mh-arr-topbar{ display:flex; justify-content:space-between; align-items:center; gap:8px; padding:0 6px 8px; flex:0 0 auto; }
 .mh-arr-tools{
   display:flex; align-items:center; gap:2px;
   background:var(--surface); border:1px solid var(--surface-border); border-radius:10px;
@@ -2015,12 +2014,67 @@ export const EDITOR_SHELL_STYLES = `
 .mh-arr-modal-foot{ display:flex; justify-content:flex-end; gap:8px; margin-top:2px; }
 .mh-arr-modal-btn{
   font-family:var(--sans); font-size:12.5px; font-weight:700; border-radius:var(--radius-sm);
-  padding:7px 16px; cursor:pointer;
+  padding:7px 16px; cursor:pointer; white-space:nowrap; flex-shrink:0;
 }
 .mh-arr-modal-btn.ghost{ background:none; border:1px solid var(--hairline); color:var(--ink-soft); }
 .mh-arr-modal-btn.ghost:hover{ color:var(--ink); background:var(--hover-ink-bg); }
 .mh-arr-modal-btn.primary{ background:var(--indigo); border:none; color:var(--accent-on); }
 .mh-arr-modal-btn.primary:hover{ background:var(--indigo-deep); }
+.mh-arr-modal-btn:disabled{ opacity:0.45; cursor:not-allowed; }
+
+/* ── Beats M3: target-length control, template wizard, methodology guide ─── */
+/* Target length control — a tool-btn trigger + a small popover of presets. */
+.mh-arr-len{ position:relative; }
+.mh-arr-len-btn.unset{ color:var(--ink-faint); }
+.mh-arr-len-icon{ font-size:11px; opacity:0.7; }
+.mh-arr-len-pop{
+  position:absolute; top:calc(100% + 6px); left:0; z-index:20; width:248px;
+  display:flex; flex-direction:column; gap:10px; padding:12px;
+  background:var(--surface); border:1px solid var(--surface-border);
+  border-radius:var(--radius-md); box-shadow:var(--shadow-float);
+}
+.mh-arr-len-presets{ display:flex; flex-wrap:wrap; gap:6px; }
+.mh-arr-len-preset{
+  font-family:var(--sans); font-size:12px; font-weight:700; color:var(--ink-soft);
+  background:var(--surface-2); border:1px solid var(--hairline); border-radius:999px;
+  padding:4px 12px; cursor:pointer; font-variant-numeric:tabular-nums;
+}
+.mh-arr-len-preset:hover{ color:var(--ink); border-color:var(--emph-ink-border); }
+.mh-arr-len-preset.selected{ color:var(--accent-on); background:var(--indigo); border-color:transparent; }
+.mh-arr-len-custom{ display:flex; align-items:center; gap:6px; }
+/* min-width:0 releases the input's min-content floor — without it the fixed-
+   width popover shoves the Set button past its own right edge (超界). */
+.mh-arr-len-custom .mh-arr-input.narrow{ flex:1; width:auto; min-width:0; }
+
+/* Template wizard — reuses the arr-modal shell; wider for the three cards. */
+.mh-tpl-modal{ max-width:520px; }
+.mh-tpl-cards{ display:flex; flex-direction:column; gap:10px; }
+.mh-tpl-card, .mh-tpl-empty-card{
+  display:flex; flex-direction:column; gap:4px; text-align:left; cursor:pointer;
+  padding:12px 14px; border:1px solid var(--surface-border); border-radius:var(--radius-md);
+  background:var(--surface-2); font-family:var(--sans);
+}
+.mh-tpl-card:hover, .mh-tpl-empty-card:hover{ border-color:var(--emph-ink-border); }
+.mh-tpl-card.selected{ border-color:var(--indigo); box-shadow:0 0 0 1px var(--indigo); }
+.mh-tpl-card-name{ font-size:13.5px; font-weight:800; color:var(--ink); }
+.mh-tpl-card-desc{ font-size:12px; line-height:1.5; color:var(--ink-faint); }
+.mh-tpl-card-count{ font-size:11px; font-weight:700; color:var(--accent-text); }
+.mh-tpl-hint{ margin:0; font-size:12px; line-height:1.5; color:var(--ink-faint); }
+.mh-tpl-mode{
+  display:flex; align-items:flex-start; gap:10px; cursor:pointer;
+  padding:11px 13px; border:1px solid var(--surface-border); border-radius:var(--radius-md);
+  background:var(--surface-2);
+}
+.mh-tpl-mode.selected{ border-color:var(--indigo); }
+.mh-tpl-mode.danger.selected{ border-color:var(--red); }
+.mh-tpl-mode input{ margin-top:3px; }
+.mh-tpl-mode-body{ display:flex; flex-direction:column; gap:2px; }
+.mh-tpl-mode-name{ font-size:13px; font-weight:700; color:var(--ink); }
+.mh-tpl-mode.danger .mh-tpl-mode-name{ color:var(--red); }
+.mh-tpl-mode-desc{ font-size:11.5px; line-height:1.45; color:var(--ink-faint); }
+/* Empty-state template guide cards — leading affordance above Add Beat. */
+.mh-tpl-empty-cards{ display:flex; flex-direction:column; gap:8px; width:100%; max-width:340px; }
+
 
 /* ===== FILM NUMBERING (合一终稿, 2026-07-11) =====
    Storyboard scene heads read S1/S2 (mono, neutral ink) and shot codes read 1A/1B

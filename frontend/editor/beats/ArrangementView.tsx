@@ -23,11 +23,14 @@ import type { Beat, BeatInput } from '../sceneService';
 import type { SceneDoc } from '../types';
 import { formatBeatDuration } from './beatColors';
 import { BeatEditModal } from './BeatEditModal';
+import { BeatsDurationControl } from './BeatsDurationControl';
+import { BeatsTemplateWizard } from './BeatsTemplateWizard';
 import {
   CARD_GAP_PX,
   DEFAULT_PX_PER_SEC,
   MIN_CARD_PX,
   anchorScrollLeft,
+  conformBeats,
   layoutCards,
   layoutExtentPx,
   buildTicks,
@@ -42,15 +45,23 @@ import {
   timeToPx,
 } from './arrangementGeometry';
 import { persistBeatsZoom, readStoredBeatsZoom } from './beatsZoomStorage';
+import { BEAT_TEMPLATES } from './templates';
 
 interface Props {
   scriptId: string;
   beats: Beat[];
   scenes: SceneDoc[];
+  /** Per-script target total runtime in seconds (M3); null = unset. */
+  targetDurationSec: number | null;
   onAdd: () => void;
   onUpdate: (beatId: string, data: BeatInput) => void;
   onCreate: (data: BeatInput) => void;
   onOpenScene: (sceneId: string) => void;
+  /** Persist a new target total length (PATCH script_projects). */
+  onSetTargetDuration: (sec: number) => void;
+  /** Apply a methodology template: batch-create the rows, optionally replacing
+   *  the existing beats, and persist the chosen target length. */
+  onApplyTemplate: (beats: BeatInput[], mode: 'append' | 'replace', targetSec: number) => void;
 }
 
 /** Card + lane geometry (px) — pure layout constants, not stored data. */
@@ -88,10 +99,13 @@ export function ArrangementView({
   scriptId,
   beats,
   scenes,
+  targetDurationSec,
   onAdd,
   onUpdate,
   onCreate,
   onOpenScene,
+  onSetTargetDuration,
+  onApplyTemplate,
 }: Props) {
   const { t } = useTranslation();
 
@@ -104,6 +118,11 @@ export function ArrangementView({
   const [flashId, setFlashId] = useState<string | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // M3 overlays: the Apply-template wizard (with an optional preselected key),
+  // the methodology Guide drawer, and the conform prompt shown when the target
+  // length changes while beats are already arranged.
+  const [wizardKey, setWizardKey] = useState<string | null | undefined>(undefined);
+  const [conform, setConform] = useState<{ next: number; old: number } | null>(null);
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const lanesRef = useRef<HTMLDivElement | null>(null);
@@ -152,8 +171,8 @@ export function ArrangementView({
   );
 
   const totalSec = useMemo(
-    () => computeTotalSec(arranged.map((b) => placementOf(b))),
-    [arranged, placementOf],
+    () => computeTotalSec(arranged.map((b) => placementOf(b)), targetDurationSec),
+    [arranged, placementOf, targetDurationSec],
   );
   const unit = chooseTickUnit(totalSec);
   const granularity = snapGranularity(unit);
@@ -255,9 +274,10 @@ export function ArrangementView({
       beats
         .filter((b) => b.start_sec != null)
         .map((b) => ({ start_sec: b.start_sec, duration_sec: b.duration_sec })),
+      targetDurationSec,
     );
     setPxPerSec(fitPxPerSec(total, width));
-  }, [beats]);
+  }, [beats, targetDurationSec]);
 
   // Ctrl/Cmd+wheel zoom needs a NATIVE non-passive listener: React ≥17 registers
   // root wheel handlers as passive, so preventDefault() in onWheel is a no-op and
@@ -391,6 +411,47 @@ export function ArrangementView({
     [arranged, placementOf, onUpdate, granularity],
   );
 
+  // ── Target length + conform ────────────────────────────────────────────────
+  // Committing a new target with beats already arranged AND a previous target
+  // set prompts the conform choice; the first-ever set (old == null) or an empty
+  // timeline just moves the ruler.
+  const commitTarget = useCallback(
+    (nextSec: number) => {
+      if (arranged.length > 0 && targetDurationSec != null && targetDurationSec !== nextSec) {
+        setConform({ next: nextSec, old: targetDurationSec });
+      } else {
+        onSetTargetDuration(nextSec);
+      }
+    },
+    [arranged.length, targetDurationSec, onSetTargetDuration],
+  );
+
+  const resolveConform = useCallback(
+    (stretch: boolean) => {
+      if (!conform) return;
+      const { next, old } = conform;
+      if (stretch) {
+        const g = snapGranularity(chooseTickUnit(Math.max(next, 60)));
+        const scaled = conformBeats(
+          arranged.map((b) => ({
+            id: b.id,
+            start_sec: b.start_sec,
+            duration_sec: b.duration_sec,
+          })),
+          old,
+          next,
+          g,
+        );
+        for (const s of scaled) {
+          onUpdate(s.id, { start_sec: s.start_sec, duration_sec: s.duration_sec });
+        }
+      }
+      onSetTargetDuration(next);
+      setConform(null);
+    },
+    [conform, arranged, onUpdate, onSetTargetDuration],
+  );
+
   const setCardRef = useCallback(
     (id: string) => (el: HTMLDivElement | null) => {
       if (el) cardRefs.current.set(id, el);
@@ -405,16 +466,51 @@ export function ArrangementView({
 
   const editingBeat = editingId ? beats.find((b) => b.id === editingId) ?? null : null;
 
+  // Shared M3 overlays — rendered in both the empty and populated views so the
+  // empty-state template cards and the topbar tools open the same modals.
+  const overlays = (
+    <>
+      {wizardKey !== undefined && (
+        <BeatsTemplateWizard
+          initialTemplateKey={wizardKey}
+          currentTargetSec={targetDurationSec}
+          hasExistingBeats={beats.length > 0}
+          onApply={onApplyTemplate}
+          onClose={() => setWizardKey(undefined)}
+        />
+      )}
+    </>
+  );
+
   if (beats.length === 0) {
     return (
       <div className="mh-arr-root" data-testid="beats-arrangement">
         <div className="mh-beats-empty" data-testid="beats-arrangement-empty">
           <div className="mh-beats-empty-title">{t('editor.beatsEmptyTitle')}</div>
-          <p className="mh-beats-empty-sub">{t('editor.arrEmptySub')}</p>
+          <p className="mh-beats-empty-sub">{t('editor.arrTemplateEmptySub')}</p>
+          <div className="mh-tpl-empty-cards" data-testid="beats-template-empty-cards">
+            {BEAT_TEMPLATES.map((tpl) => (
+              <button
+                key={tpl.key}
+                type="button"
+                className="mh-tpl-empty-card"
+                data-testid="beats-template-empty-card"
+                data-key={tpl.key}
+                onClick={() => setWizardKey(tpl.key)}
+              >
+                <span className="mh-tpl-card-name">{t(tpl.nameKey)}</span>
+                <span className="mh-tpl-card-desc">{t(tpl.descKey)}</span>
+                <span className="mh-tpl-card-count">
+                  {t('editor.beatTplBeatCount', { count: tpl.beats.length })}
+                </span>
+              </button>
+            ))}
+          </div>
           <button type="button" className="mh-beats-add-btn" data-testid="beats-add" onClick={onAdd}>
             {t('editor.beatAdd')}
           </button>
         </div>
+        {overlays}
       </div>
     );
   }
@@ -422,8 +518,21 @@ export function ArrangementView({
   return (
     <div className="mh-arr-root" data-testid="beats-arrangement">
       {/* Toolbar row above the canvas — the pill floated over the ruler labels
-          when absolute-positioned, so it lives in normal flow up here. */}
+          when absolute-positioned, so it lives in normal flow up here. Left
+          group = target length + methodology tools; right group = zoom. */}
       <div className="mh-arr-topbar">
+        <div className="mh-arr-tools" data-testid="arr-tools-left" role="group">
+          <BeatsDurationControl targetSec={targetDurationSec} onCommit={commitTarget} />
+          <span className="mh-arr-tool-sep" aria-hidden="true" />
+          <button
+            type="button"
+            className="mh-arr-tool-btn"
+            data-testid="arr-templates"
+            onClick={() => setWizardKey(null)}
+          >
+            {t('editor.beatTemplatesBtn')}
+          </button>
+        </div>
         <div
           className="mh-arr-tools"
           data-testid="arr-tools"
@@ -661,6 +770,51 @@ export function ArrangementView({
           onOpenScene={onOpenScene}
         />
       )}
+
+      {conform && (
+        <div
+          className="mh-arr-modal-overlay"
+          data-testid="beats-conform-modal"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setConform(null);
+          }}
+        >
+          <div className="mh-arr-modal" role="dialog" aria-modal="true" aria-label={t('editor.beatConformTitle')}>
+            <div className="mh-arr-modal-head">
+              <span className="mh-arr-modal-title">{t('editor.beatConformTitle')}</span>
+              <button
+                type="button"
+                className="mh-arr-modal-x"
+                aria-label={t('common.cancel')}
+                onClick={() => setConform(null)}
+              >
+                ×
+              </button>
+            </div>
+            <p className="mh-beats-empty-sub">{t('editor.beatConformBody')}</p>
+            <div className="mh-arr-modal-foot">
+              <button
+                type="button"
+                className="mh-arr-modal-btn ghost"
+                data-testid="beats-conform-resize"
+                onClick={() => resolveConform(false)}
+              >
+                {t('editor.beatConformResizeOnly')}
+              </button>
+              <button
+                type="button"
+                className="mh-arr-modal-btn primary"
+                data-testid="beats-conform-stretch"
+                onClick={() => resolveConform(true)}
+              >
+                {t('editor.beatConformStretch')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {overlays}
     </div>
   );
 }

@@ -3072,6 +3072,140 @@
     "arrZoomIn": "Zoom in",
     "arrZoomOut": "Zoom out",
     "arrFit": "Fit view",
+    "arrSetLength": "Set length",
+    "arrLengthCustom": "Custom length",
+    "arrLengthCustomPlaceholder": "e.g. 2700 or 45:00",
+    "arrLengthSet": "Set",
+    "arrTemplateEmptySub": "Start from a proven structure, or add a beat by hand.",
+    "beatTemplatesBtn": "Templates",
+    "beatTargetLengthFailed": "Failed to save target length",
+    "beatTemplateApplyFailed": "Failed to apply template",
+    "beatTplWizardTitle": "Apply Template",
+    "beatTplBeatCount": "{{count}} beats",
+    "beatTplTargetLength": "Target total length",
+    "beatTplLengthHint": "Generates {{count}} beats across {{length}}.",
+    "beatTplModeLabel": "You already have beats",
+    "beatTplModeAppend": "Append",
+    "beatTplModeAppendDesc": "Add the template's beats after your existing ones.",
+    "beatTplModeReplace": "Replace",
+    "beatTplModeReplaceDesc": "Delete all existing beats, then generate the template. This cannot be undone.",
+    "beatTplBack": "Back",
+    "beatTplNext": "Next",
+    "beatTplGenerate": "Generate",
+    "beatConformTitle": "Target length changed",
+    "beatConformBody": "You have beats arranged on the timeline. Resize just the ruler, or stretch the beats to fit the new length?",
+    "beatConformResizeOnly": "Only resize ruler",
+    "beatConformStretch": "Stretch beats proportionally",
+    "beatTpl": {
+      "save_the_cat": {
+        "name": "Save the Cat!",
+        "desc": "Blake Snyder's 15-beat structure for a feature-length story.",
+        "opening_image": {
+          "name": "Opening Image",
+          "guide": "A snapshot of the hero's world and tone, before the story changes everything."
+        },
+        "theme_stated": {
+          "name": "Theme Stated",
+          "guide": "Someone states what the story is really about — the lesson the hero must learn."
+        },
+        "setup": {
+          "name": "Setup",
+          "guide": "Introduce the hero, their world, and what is missing from their life."
+        },
+        "catalyst": {
+          "name": "Catalyst",
+          "guide": "An event breaks the hero's ordinary life and sets the story in motion."
+        },
+        "debate": {
+          "name": "Debate",
+          "guide": "The hero hesitates — should they answer the call, and what is at stake?"
+        },
+        "break_into_two": {
+          "name": "Break into Two",
+          "guide": "The hero makes a choice and steps into the new world of Act Two."
+        },
+        "b_story": {
+          "name": "B Story",
+          "guide": "A secondary story — often love or friendship — that carries the theme."
+        },
+        "fun_and_games": {
+          "name": "Fun and Games",
+          "guide": "The promise of the premise: the set pieces the audience came to see."
+        },
+        "midpoint": {
+          "name": "Midpoint",
+          "guide": "A false victory or false defeat raises the stakes and turns the story."
+        },
+        "bad_guys_close_in": {
+          "name": "Bad Guys Close In",
+          "guide": "Internal and external pressures tighten around the hero."
+        },
+        "all_is_lost": {
+          "name": "All Is Lost",
+          "guide": "The lowest point — the hero loses what matters most."
+        },
+        "dark_night_of_the_soul": {
+          "name": "Dark Night of the Soul",
+          "guide": "The hero wallows in defeat before finding a new resolve."
+        },
+        "break_into_three": {
+          "name": "Break into Three",
+          "guide": "A revelation, often from the B story, shows the hero the way forward."
+        },
+        "finale": {
+          "name": "Finale",
+          "guide": "The hero applies the lesson and confronts the antagonist one last time."
+        },
+        "final_image": {
+          "name": "Final Image",
+          "guide": "The mirror of the opening image, showing how far the hero has changed."
+        }
+      },
+      "five_beats": {
+        "name": "Five Beats",
+        "desc": "The compact dramatic spine — five turning points from inciting incident to resolution.",
+        "inciting_incident": {
+          "name": "Inciting Incident",
+          "guide": "The event that upsets the balance and launches the story."
+        },
+        "progressive_complications": {
+          "name": "Progressive Complications",
+          "guide": "Rising obstacles force ever-harder choices on the protagonist."
+        },
+        "crisis": {
+          "name": "Crisis",
+          "guide": "The protagonist faces a dilemma with no easy way out."
+        },
+        "climax": {
+          "name": "Climax",
+          "guide": "The decisive confrontation — the story's peak of tension."
+        },
+        "resolution": {
+          "name": "Resolution",
+          "guide": "The new balance settles; consequences and change are shown."
+        }
+      },
+      "kishotenketsu": {
+        "name": "Kishotenketsu",
+        "desc": "A four-act structure built on development and a twist rather than conflict.",
+        "ki": {
+          "name": "Ki — Introduction",
+          "guide": "Introduce the characters, the setting, and the situation."
+        },
+        "sho": {
+          "name": "Sho — Development",
+          "guide": "Develop the situation, deepening it without a major change."
+        },
+        "ten": {
+          "name": "Ten — Twist",
+          "guide": "An unexpected turn recontextualizes everything that came before."
+        },
+        "ketsu": {
+          "name": "Ketsu — Conclusion",
+          "guide": "Reconcile the twist with the whole and bring the story to a close."
+        }
+      }
+    },
     "importScript": "Import Script",
     "importTitle": "Import Script",
     "importName": "Name",

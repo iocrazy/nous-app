@@ -28,6 +28,12 @@ vi.mock('../../components/Toast', () => ({
   useOptionalToast: () => ({ addToast: toast.addToast }),
 }));
 
+const scriptSvc = vi.hoisted(() => ({
+  fetchScriptProject: vi.fn(),
+  updateScriptProject: vi.fn(),
+}));
+vi.mock('../../services/scriptService', () => scriptSvc);
+
 import { BeatsView } from '../beats/BeatsView';
 
 const scene = (over: Partial<SceneDoc> & { id: string }): SceneDoc => ({
@@ -66,6 +72,8 @@ beforeEach(() => {
   svc.updateBeat.mockResolvedValue(beat({ id: 'a' }));
   svc.deleteBeat.mockResolvedValue(undefined);
   svc.moveBeat.mockResolvedValue(beat({ id: 'a' }));
+  scriptSvc.fetchScriptProject.mockResolvedValue({ target_duration_sec: null });
+  scriptSvc.updateScriptProject.mockResolvedValue({});
 });
 
 afterEach(() => {

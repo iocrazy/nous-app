@@ -29,6 +29,12 @@ vi.mock('../../components/Toast', () => ({
   useOptionalToast: () => ({ addToast: toast.addToast }),
 }));
 
+const scriptSvc = vi.hoisted(() => ({
+  fetchScriptProject: vi.fn(),
+  updateScriptProject: vi.fn(),
+}));
+vi.mock('../../services/scriptService', () => scriptSvc);
+
 import { BeatsView } from '../beats/BeatsView';
 import { ArrangementView } from '../beats/ArrangementView';
 
@@ -49,6 +55,8 @@ beforeEach(() => {
   svc.listBeats.mockResolvedValue([]);
   svc.createBeat.mockResolvedValue(beat({ id: 'a' }));
   svc.updateBeat.mockResolvedValue(beat({ id: 'a' }));
+  scriptSvc.fetchScriptProject.mockResolvedValue({ target_duration_sec: null });
+  scriptSvc.updateScriptProject.mockResolvedValue({});
   // jsdom has no scrollIntoView — the left-rail focus calls it.
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
 });
@@ -105,10 +113,13 @@ describe('ArrangementView timeline geometry', () => {
         scriptId="1"
         beats={beats}
         scenes={noScenes}
+        targetDurationSec={null}
         onAdd={vi.fn()}
         onUpdate={onUpdate}
         onCreate={onCreate}
         onOpenScene={vi.fn()}
+        onSetTargetDuration={vi.fn()}
+        onApplyTemplate={vi.fn()}
       />,
     );
     return { onUpdate, onCreate };
@@ -230,7 +241,6 @@ describe('laper topbar + NLE drag guide', () => {
     ]);
     render(<BeatsView scriptId="1" scenes={noScenes} onOpenScene={vi.fn()} />);
     await waitFor(() => expect(screen.getByTestId('beats-arrangement')).toBeInTheDocument());
-    expect(screen.getByTestId('beats-count')).toHaveTextContent('2');
     fireEvent.click(screen.getByTestId('beats-topbar-add'));
     await waitFor(() =>
       expect(svc.createBeat).toHaveBeenCalledWith('1', {
@@ -247,10 +257,13 @@ describe('laper topbar + NLE drag guide', () => {
         scriptId="1"
         beats={[beat({ id: 'a', start_sec: 60, duration_sec: 30 })]}
         scenes={noScenes}
+        targetDurationSec={null}
         onAdd={vi.fn()}
         onUpdate={vi.fn()}
         onCreate={vi.fn()}
         onOpenScene={vi.fn()}
+        onSetTargetDuration={vi.fn()}
+        onApplyTemplate={vi.fn()}
       />,
     );
     const card = await screen.findByTestId('arr-card');
@@ -263,5 +276,44 @@ describe('laper topbar + NLE drag guide', () => {
     expect(guide).toHaveTextContent("1'05");
     fireEvent.pointerUp(card, { pointerId: 1 });
     expect(screen.queryByTestId('arr-drag-guide')).toBeNull();
+  });
+});
+
+describe('template replace ordering (data-loss guard)', () => {
+  it('creates ALL template beats before deleting any existing beat', async () => {
+    const calls: string[] = [];
+    svc.listBeats.mockResolvedValue([
+      beat({ id: 'old1', start_sec: 0, duration_sec: 30 }),
+      beat({ id: 'old2', start_sec: 30, duration_sec: 30 }),
+    ]);
+    svc.createBeat.mockImplementation(async () => {
+      calls.push('create');
+      return beat({ id: `n${calls.length}` });
+    });
+    svc.deleteBeat.mockImplementation(async (id: string) => {
+      calls.push(`delete:${id}`);
+    });
+    render(<BeatsView scriptId="1" scenes={noScenes} onOpenScene={vi.fn()} />);
+    await waitFor(() => expect(screen.getAllByTestId('arr-card')).toHaveLength(2));
+
+    fireEvent.click(screen.getByTestId('arr-templates'));
+    const wizard = await screen.findByTestId('beats-template-wizard');
+    fireEvent.click(
+      within(wizard)
+        .getAllByTestId('beats-template-card')
+        .find((c) => (c as HTMLElement).dataset.key === 'five_beats')!,
+    );
+    fireEvent.click(within(wizard).getByTestId('beats-template-next')); // → length
+    fireEvent.click(within(wizard).getByTestId('beats-template-next')); // → mode
+    fireEvent.click(within(wizard).getByTestId('beats-template-mode-replace'));
+    fireEvent.click(within(wizard).getByTestId('beats-template-next')); // Generate
+
+    await waitFor(() => expect(calls.filter((c) => c.startsWith('delete')).length).toBe(2));
+    // Every create precedes every delete — a mid-batch create failure must
+    // leave the user's existing sheet untouched.
+    const lastCreate = calls.lastIndexOf('create');
+    const firstDelete = calls.findIndex((c) => c.startsWith('delete'));
+    expect(calls.filter((c) => c === 'create')).toHaveLength(5);
+    expect(firstDelete).toBeGreaterThan(lastCreate);
   });
 });
