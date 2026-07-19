@@ -1,14 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle, AlertTriangle, ArrowLeftRight, Bookmark, Calendar, Check, Folder,
-  ListOrdered, MapPin, Plus, Radio, Search, Send, Sparkles, TrendingUp, X,
+  ListOrdered, Loader2, MapPin, Plus, Radio, Search, Send, Sparkles, TrendingUp, X,
 } from 'lucide-react';
 import {
   createPublishTask, listAccounts, listGeneratedVideos, listLibraryMedia,
   promoteGeneratedVideo, GeneratedVideo,
 } from '../../services/distributionService';
+import { uploadResource } from '../../services/resourceService';
 import {
   addResourceTag, createTag, removeResourceTag,
 } from '../../services/unifiedTagService';
@@ -39,6 +40,9 @@ const TRENDING_TOPICS = ['goldenhour', 'cityscape', '4k'];
 // Mirrors the backend schema bounds (normalize_topics): ≤20 tags, ≤50 chars.
 const MAX_TOPICS = 20;
 const MAX_TOPIC_LEN = 50;
+// Cap concurrent image uploads so a large multi-select can't open dozens of
+// parallel requests at once — pick order is preserved regardless of timing.
+const UPLOAD_CONCURRENCY = 3;
 
 // Deterministic gradient pick per account id — keeps avatars visually
 // distinct without needing per-user color config.
@@ -126,6 +130,8 @@ export const PublishPage: React.FC = () => {
   const [toPublishTagId, setToPublishTagId] = useState<string | null>(null);
   const [markedIds, setMarkedIds] = useState<Set<string>>(new Set());
   const [promotingId, setPromotingId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     const mediaType = contentType === 'images' ? 'image' : 'video';
@@ -312,6 +318,66 @@ export const PublishPage: React.FC = () => {
     }
   };
 
+  // ── Inline image upload (Images mode only) ──
+  // Open the hidden file input. Guarded while a batch is in flight.
+  const onUploadClick = () => {
+    if (uploading) return;
+    fileInputRef.current?.click();
+  };
+
+  // Upload one file into the current scope's My Uploads root (source_type
+  // 'upload' is the endpoint default). Returns the new resource row, or null
+  // so a single failure never aborts the rest of the batch.
+  const uploadOne = async (file: File): Promise<{ id: string; name: string } | null> => {
+    try {
+      const r = await uploadResource(file, scopeId);
+      return { id: r.id, name: r.filename };
+    } catch (err) {
+      console.error('distribution: inline image upload failed', err);
+      return null;
+    }
+  };
+
+  // Upload the picked images (concurrency ≤ UPLOAD_CONCURRENCY), then insert the
+  // successes into the Library rows and auto-select them IN PICK ORDER — the
+  // result slot is keyed by the original index, so completion timing can't
+  // reorder the gallery. Aggregates failures into a single toast.
+  const onFilesSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    // Reset so re-picking the same file still fires a change event.
+    e.target.value = '';
+    if (files.length === 0) return;
+    setUploading(true);
+    try {
+      const results: Array<{ id: string; name: string } | null> = new Array(files.length).fill(null);
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < files.length) {
+          const idx = cursor;
+          cursor += 1;
+          results[idx] = await uploadOne(files[idx]);
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(UPLOAD_CONCURRENCY, files.length) }, worker),
+      );
+      let failures = 0;
+      results.forEach((res) => {
+        if (!res) { failures += 1; return; }
+        ensureVideoRow(res.id, res.name);
+        setSelectedVideos((s) => (s.includes(res.id) ? s : [...s, res.id]));
+      });
+      if (failures > 0) {
+        addToast(
+          t('distribution.publish.uploadFailed', '{{n}} image(s) failed to upload', { n: failures }),
+          'error',
+        );
+      }
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const canPublish = useMemo(
     () => selectedVideos.length > 0 && selectedAccounts.length > 0 && title.trim().length > 0,
     [selectedVideos, selectedAccounts, title],
@@ -435,8 +501,38 @@ export const PublishPage: React.FC = () => {
             </div>
             <div className="seg">
               <button type="button" className="on">{t('distribution.publish.fromLibrary', 'From Library')}</button>
-              <button type="button" disabled title={t('distribution.comingInD3', 'Coming in D3')}>{t('distribution.publish.upload', 'Upload')}</button>
+              {isImages ? (
+                <button
+                  type="button"
+                  disabled={uploading}
+                  aria-busy={uploading}
+                  onClick={onUploadClick}
+                >
+                  {uploading ? (
+                    <>
+                      <Loader2 size={12} className="animate-spin" />
+                      {t('distribution.publish.uploading', 'Uploading…')}
+                    </>
+                  ) : (
+                    t('distribution.publish.upload', 'Upload')
+                  )}
+                </button>
+              ) : (
+                // Video uploads stay locked — large files need a resumable path.
+                <button type="button" disabled title={t('distribution.comingInD3', 'Coming in D3')}>{t('distribution.publish.upload', 'Upload')}</button>
+              )}
             </div>
+            {isImages && (
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                aria-label={t('distribution.publish.uploadImagesAria', 'Upload images')}
+                onChange={onFilesSelected}
+              />
+            )}
             <div className="thumbs">
               {selectedVideoObjs.map((v, idx) => {
                 const hasImg = Boolean(v.thumbnail_url);
