@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 
 const listNotes = vi.fn();
 const getTagCounts = vi.fn();
@@ -63,20 +64,20 @@ describe('InspirationPage P3 hotspots', () => {
   });
 
   it('renders Notes/Hotspots tabs and a global Parse button', async () => {
-    render(<InspirationPage />);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
     expect(screen.getByText('Notes')).toBeTruthy();
     expect(screen.getByText('Hotspots')).toBeTruthy();
     expect(screen.getByText('Parse URL')).toBeTruthy();
   });
 
   it('switching to Hotspots tab shows the ranked workspace', async () => {
-    render(<InspirationPage />);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
     fireEvent.click(screen.getByText('Hotspots'));
     await waitFor(() => expect(screen.getAllByText('Hot 1').length).toBeGreaterThan(0));
   });
 
   it('save-as-note from the sidebar switches to Notes with the composer ref chip', async () => {
-    render(<InspirationPage />);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
     // Notes-tab sidebar Top3 renders after hotspots load
     await waitFor(() => expect(screen.getByText('Hot 1')).toBeTruthy());
     fireEvent.click(screen.getAllByLabelText('Save as note')[0]);
@@ -86,7 +87,7 @@ describe('InspirationPage P3 hotspots', () => {
 
   it('save-as-note prefills hotspot tags into the composer', async () => {
     getHotspots.mockResolvedValue([{ id: '1', title: 'Hot 1', tags: ['trend'], category: 'food', heat: 90, source_label: 'WEIBO' }]);
-    render(<InspirationPage />);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('Hot 1')).toBeTruthy());
     fireEvent.click(screen.getAllByLabelText('Save as note')[0]);
     // Two textbox-role elements are on screen (the header search input plus
@@ -105,7 +106,7 @@ describe('InspirationPage P3 hotspots', () => {
       { id: 't1', name: 'Trend', name_zh: '趋势', origin: 'curated' },
       { id: 't2', name: 'FromNote', origin: 'note' }, // shadow — must be excluded
     ]);
-    render(<InspirationPage />);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
     fireEvent.click(screen.getByText('Hotspots'));
 
     // Curated pool tag renders bilingual display name; shadow tag is excluded.
@@ -128,7 +129,7 @@ describe('InspirationPage P3 hotspots', () => {
       { id: '2', title: 'Hot 2', tags: [], category: 'music', heat: 80, source_label: 'WEIBO' },
       { id: '3', title: 'Hot 3', tags: [], category: 'food', heat: 70, source_label: 'WEIBO' },
     ]);
-    render(<InspirationPage />);
+    render(<MemoryRouter><InspirationPage /></MemoryRouter>);
 
     // Switch to Hotspots tab
     fireEvent.click(screen.getByText('Hotspots'));
