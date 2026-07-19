@@ -10,8 +10,9 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ListTodo, Users, User, Bot } from 'lucide-react';
+import { ListTodo, Users, User, Bot, GitBranch } from 'lucide-react';
 import { IssueListView, type IssueViewMode } from '../components/Todolist/IssueListView';
+import { PipelinesManagerModal } from '../components/Todolist/PipelinesManagerModal';
 import { PageHeader } from '../components/AILibrary/PageHeader';
 import { fetchMyTeams, fetchPersonalTeam } from '../services/teamService';
 import { IssueDetailView } from '../components/Todolist/IssueDetailView';
@@ -63,6 +64,7 @@ export function TodolistPage() {
 
   const [agents, setAgents] = useState<AgentRef[]>([]);
   const [agentsById, setAgentsById] = useState<Record<string, AgentRef>>({});
+  const [pipelinesOpen, setPipelinesOpen] = useState(false);
   const [projectsById, setProjectsById] = useState<ProjectNameMap>({});
   // Team name for the page header (mockup: "Issues  Team 8"). Best-effort —
   // a fetch failure just renders the title without the team suffix.
@@ -340,7 +342,18 @@ export function TodolistPage() {
             </span>
           }
           actions={
-            <span data-testid="issues-kbd-hints" className="hidden md:flex items-center gap-1.5 text-[12px] text-ink-500">
+            <div className="flex items-center gap-3">
+              {teamIdNum && (
+                <button
+                  type="button"
+                  onClick={() => setPipelinesOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[12px] rounded border border-ink-800 text-ink-300 hover:bg-ink-800/60"
+                  title="Manage content relay pipelines"
+                >
+                  <GitBranch size={13} /> Pipelines
+                </button>
+              )}
+              <span data-testid="issues-kbd-hints" className="hidden md:flex items-center gap-1.5 text-[12px] text-ink-500">
               {scopeMode !== 'agent' && (
                 <>
                   <kbd className="font-mono text-[10px] leading-none px-1 py-0.5 rounded border border-ink-700 bg-ink-800/50 text-ink-400">C</kbd>
@@ -351,6 +364,7 @@ export function TodolistPage() {
               <kbd className="font-mono text-[10px] leading-none px-1 py-0.5 rounded border border-ink-700 bg-ink-800/50 text-ink-400">/</kbd>
               search
             </span>
+            </div>
           }
           className="pb-2"
         />
@@ -421,6 +435,13 @@ export function TodolistPage() {
           onCreateProject={handleCreateProject}
           onClose={() => { setNewIssueOpen(false); setNewIssueParentId(null); }}
           onSubmit={handleCreate}
+        />
+      )}
+      {pipelinesOpen && teamIdNum && (
+        <PipelinesManagerModal
+          teamId={teamIdNum}
+          agents={agents}
+          onClose={() => setPipelinesOpen(false)}
         />
       )}
     </>

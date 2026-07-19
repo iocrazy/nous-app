@@ -12,8 +12,16 @@
  * (the issue's Related tab) can't drift apart.
  */
 
-/** Content surfaces that can spawn an issue. Add a case here + a writer. */
-export type OriginContentKind = 'canvas' | 'scene' | 'project_stage' | 'publish';
+/** Content surfaces that can spawn an issue. Add a case here + a writer.
+ *  'pipeline' is not a content surface — it marks a content-relay step child
+ *  (W2b, origin_id `pipeline:{run}:{step}`); it renders a module chip but has
+ *  no back-link target (the parent issue id is not carried in origin_id). */
+export type OriginContentKind =
+  | 'canvas'
+  | 'scene'
+  | 'project_stage'
+  | 'publish'
+  | 'pipeline';
 
 export interface ParsedOrigin {
   kind: OriginContentKind;
@@ -40,12 +48,24 @@ export function parseOriginId(originId: string | null | undefined): ParsedOrigin
   // split into numbers, so Snowflake bigints survive intact.
   const id = originId.slice(idx + 1);
   if (!id) return null;
-  if (kind !== 'canvas' && kind !== 'scene' && kind !== 'project_stage' && kind !== 'publish') return null;
+  if (
+    kind !== 'canvas' &&
+    kind !== 'scene' &&
+    kind !== 'project_stage' &&
+    kind !== 'publish' &&
+    kind !== 'pipeline'
+  )
+    return null;
   return { kind, id };
 }
 
-/** Route to the content a parsed origin points at. */
-export function originPath(origin: ParsedOrigin, teamId: string | undefined): string {
+/** Route to the content a parsed origin points at. Returns null when the origin
+ *  has no navigable target (a pipeline step child — its parent issue id is not
+ *  in origin_id, so there is nothing to link to). */
+export function originPath(
+  origin: ParsedOrigin,
+  teamId: string | undefined,
+): string | null {
   switch (origin.kind) {
     case 'canvas':
       return teamId ? `/team/${teamId}/canvas/${origin.id}` : `/canvas/${origin.id}`;
@@ -70,6 +90,11 @@ export function originPath(origin: ParsedOrigin, teamId: string | undefined): st
       // exist yet, so land on the module (same don't-over-design call as
       // scene→Projects).
       return teamId ? `/team/${teamId}/distribution` : '/distribution';
+    case 'pipeline':
+      // A pipeline step child's origin_id is `pipeline:{run}:{step}` — the
+      // parent issue id is NOT in it, so there is no sensible landing. Return
+      // null; the Related tab renders the origin label without a link.
+      return null;
   }
 }
 
@@ -84,6 +109,8 @@ export function originLabel(origin: ParsedOrigin): string {
       return 'From a project stage';
     case 'publish':
       return 'From a publish batch';
+    case 'pipeline':
+      return 'From a pipeline step';
   }
 }
 
@@ -115,5 +142,7 @@ export function originModule(
       return { label: 'Project', dotClass: 'bg-emerald-400' };
     case 'publish':
       return { label: 'Publish', dotClass: 'bg-rose-400' };
+    case 'pipeline':
+      return { label: 'Pipeline', dotClass: 'bg-cyan-400' };
   }
 }

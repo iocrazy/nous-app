@@ -33,7 +33,8 @@ export type IssueOriginKind =
   | 'routine'
   | 'escalation'
   | 'project_stage'
-  | 'publish';
+  | 'publish'
+  | 'pipeline';
 
 export interface Issue {
   id: number;

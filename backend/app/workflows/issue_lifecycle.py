@@ -459,6 +459,12 @@ async def _maybe_fire_subissue_barrier(issue_id: int) -> None:
         new_status = (row or {}).get("status")
         if new_status:
             await on_child_issue_terminal(issue_id, "in_progress", new_status)
+            # W2b: pipeline-step children advance their run from the SAME seam.
+            # Same rationale as the barrier — fired from the workflow BODY, never
+            # a @DBOS.step (start_pipeline_run's dispatch would raise inside one).
+            from app.services.issues.pipeline_relay import on_pipeline_child_terminal
+
+            await on_pipeline_child_terminal(issue_id, "in_progress", new_status)
     except Exception as exc:  # noqa: BLE001 — the dispatch is the primary op
         logger.warning(
             f"[execute_issue] sub-issue barrier hook failed for {issue_id}: {exc!r}"

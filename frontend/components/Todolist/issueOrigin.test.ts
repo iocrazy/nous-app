@@ -129,3 +129,28 @@ describe('publish origin', () => {
     expect(originModule(`publish:${big}`)).toEqual({ label: 'Publish', dotClass: 'bg-rose-400' });
   });
 });
+
+describe('pipeline origin (W2b)', () => {
+  it('parses a pipeline step child origin, keeping run:step as a string', () => {
+    // origin_id = pipeline:{run}:{step}; the id half carries a colon and must
+    // stay a string (run id is a Snowflake bigint).
+    const parsed = parseOriginId('pipeline:9007199254740993:2');
+    expect(parsed).toEqual({ kind: 'pipeline', id: '9007199254740993:2' });
+  });
+
+  it('has no navigable path (parent id is not in origin_id) → null', () => {
+    const parsed = parseOriginId('pipeline:500:1');
+    expect(parsed).not.toBeNull();
+    expect(originPath(parsed!, '8')).toBeNull();
+    expect(originPath(parsed!, undefined)).toBeNull();
+    expect(originLabel(parsed!)).toBe('From a pipeline step');
+  });
+
+  it('chips as Pipeline (cyan)', () => {
+    expect(originModule('pipeline:500:2')).toEqual({ label: 'Pipeline', dotClass: 'bg-cyan-400' });
+  });
+
+  it('degrades a malformed pipeline origin without crashing', () => {
+    expect(parseOriginId('pipeline:')).toBeNull();
+  });
+});

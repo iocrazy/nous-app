@@ -304,6 +304,26 @@ async def dispatch_issue(issue_id: int, auth: AuthDep) -> Issue:
     return Issue.model_validate(_normalise_uuid_strs(row))
 
 
+@router.get("/{issue_id}/pipeline-runs")
+async def list_issue_pipeline_runs(issue_id: int, auth: AuthDep):
+    """List content-relay runs (W2b) whose parent is this issue, newest first,
+    decorated with pipeline name / total steps / current agent for the UI strip.
+    Visibility follows the same team boundary as the issue itself."""
+    from app.api.pipelines_router import _enrich_run
+    from app.repositories.pipeline_repository import pipeline_repository
+    from app.schemas.pipeline import PipelineRun, PipelineRunListResponse
+
+    existing = await issue_repository.get_by_id(issue_id)
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"id={issue_id} not found"
+        )
+    await _assert_visibility(existing, auth)
+    runs = await pipeline_repository.list_runs_for_parent(issue_id)
+    items = [PipelineRun.model_validate(await _enrich_run(r)) for r in runs]
+    return PipelineRunListResponse(items=items)
+
+
 @router.delete("/{issue_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def soft_delete_issue(issue_id: int, auth: AuthDep) -> None:
     """User-facing delete — sets hidden_at, keeps row for audit / undo."""
