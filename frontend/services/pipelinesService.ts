@@ -83,7 +83,7 @@ interface PipelineRunListResponse {
 
 // ── HTTP ───────────────────────────────────────────────────────────
 
-const _base = `${getApiUrl()}/pipelines`;
+const _base = `${getApiUrl()}/api/v1/pipelines`;
 
 async function _json<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -154,7 +154,7 @@ export async function runPipeline(
 export async function listIssuePipelineRuns(
   issueId: number | string,
 ): Promise<PipelineRun[]> {
-  const res = await fetch(`${getApiUrl()}/issues/${issueId}/pipeline-runs`, {
+  const res = await fetch(`${getApiUrl()}/api/v1/issues/${issueId}/pipeline-runs`, {
     headers: await getAuthHeaders(),
   });
   const body = await _json<PipelineRunListResponse>(res);

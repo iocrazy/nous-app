@@ -63,7 +63,7 @@ describe('pipelinesService', () => {
     const spy = stub([pipeline()]);
     const out = await listPipelines('7');
     expect(spy).toHaveBeenCalledWith(
-      'https://api.test/pipelines/?team_id=7',
+      'https://api.test/api/v1/pipelines/?team_id=7',
       expect.anything(),
     );
     expect(out[0].id).toBe(BIG); // string, not Number()-ed
@@ -78,7 +78,7 @@ describe('pipelinesService', () => {
       steps: [{ step_order: 1, agent_id: 'a1', title_template: 'T', prompt_template: 'P' }],
     });
     const [url, init] = spy.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://api.test/pipelines/');
+    expect(url).toBe('https://api.test/api/v1/pipelines/');
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body as string).steps).toHaveLength(1);
   });
@@ -102,14 +102,20 @@ describe('pipelinesService', () => {
     const spy = stub(run);
     const out = await runPipeline(BIG, 1000);
     const [url, init] = spy.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(`https://api.test/pipelines/${BIG}/run`);
+    expect(url).toBe(`https://api.test/api/v1/pipelines/${BIG}/run`);
     expect(JSON.parse(init.body as string)).toEqual({ parent_issue_id: '1000' });
     expect(out.status).toBe('running');
   });
 
   it('unwraps the runs-for-parent list envelope', async () => {
     stub({ items: [{ id: '900', status: 'running' }] });
+    const spy = vi.spyOn(globalThis, 'fetch');
     const out = await listIssuePipelineRuns(1000);
+    // URL shape pinned end-to-end: a missing /api/v1 prefix once shipped to
+    // prod because these expectations mirrored the service's own bug.
+    expect(String((spy.mock.calls[0] as [string])[0])).toBe(
+      'https://api.test/api/v1/issues/1000/pipeline-runs',
+    );
     expect(out).toHaveLength(1);
     expect(out[0].id).toBe('900');
   });

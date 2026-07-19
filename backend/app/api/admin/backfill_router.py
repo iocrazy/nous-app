@@ -22,6 +22,12 @@ from pydantic import BaseModel, Field
 from app.core.admin_deps import AdminAuthDep
 from app.utils.admin_helpers import create_audit_log
 from app.workflows.backfill_issue_scope import backfill_issue_scope_workflow
+from app.workflows.backfill_normalize_personal_project_team_ids import (
+    backfill_normalize_personal_project_team_ids_workflow,
+)
+from app.workflows.backfill_project_stage_issue_team_ids import (
+    backfill_project_stage_issue_team_ids_workflow,
+)
 from app.workflows.backfill_project_stage_issues import (
     backfill_project_stage_issues_workflow,
 )
@@ -33,6 +39,10 @@ router = APIRouter()
 _BACKFILLS: dict[str, Callable[..., Any]] = {
     "issue_scope": backfill_issue_scope_workflow,
     "project_stage_issues": backfill_project_stage_issues_workflow,
+    "project_stage_issue_team_ids": backfill_project_stage_issue_team_ids_workflow,
+    "normalize_personal_project_team_ids": (
+        backfill_normalize_personal_project_team_ids_workflow
+    ),
 }
 
 

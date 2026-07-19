@@ -22,6 +22,12 @@ Discipline (project立约):
   * Live advances are mirrored here; projects that predate the hook are
     healed by the ``project_stage_issues`` backfill (same idempotent
     ``ensure_stage_issue``, so the two can never double-create).
+  * team_id boundary translation: a *personal* project has ``team_id IS NULL``
+    (the projects convention), but a NULL-team issue is invisible to the
+    team-scoped Todolist. ``_resolve_issue_team_id`` translates a NULL project
+    team into the owner's personal-team snowflake for the ISSUE only — the
+    project row's NULL is left as-is. Legacy issues written before this
+    hardening are repaired by the ``project_stage_issue_team_ids`` backfill.
 """
 
 from __future__ import annotations
@@ -145,11 +151,48 @@ async def ensure_stage_issue(
         # Automation never assigns — assignee_* stays null (no silent指派/计费).
         "created_by_user_id": str(user_id),
     }
-    team_id = (project or {}).get("team_id")
+    team_id = await _resolve_issue_team_id(project)
     if team_id is not None:
         payload["team_id"] = int(team_id)
 
     await issues.atomic_create(payload)
+
+
+async def _resolve_issue_team_id(project: Optional[dict[str, Any]]) -> Optional[int]:
+    """Team id (snowflake) to stamp on a project-stage mirror issue.
+
+    Boundary translation between two conventions: a ``projects`` row encodes a
+    *personal* project as ``team_id IS NULL`` (see projects_repository.
+    get_user_projects), but the ``issues`` / Todolist subsystem scopes personal
+    work by the owner's personal-team snowflake — a NULL-team issue is filtered
+    out of every team-scoped Todolist query and is effectively invisible. So when
+    the project carries no team, resolve the OWNER's personal team and stamp the
+    ISSUE with it (the project stays NULL — that convention is untouched).
+
+    Returns ``None`` only when the project has no team AND the owner has no
+    personal team; the issue is then created team-less (its creator-required
+    CHECK is still satisfied), same as before this hardening.
+    """
+    if project is None:
+        return None
+    team_id = project.get("team_id")
+    if team_id is not None:
+        return int(team_id)
+
+    owner_id = project.get("owner_id")
+    if not owner_id:
+        return None
+    try:
+        from app.repositories.team_repository import get_team_repository
+
+        personal = await get_team_repository().get_personal_team_id(str(owner_id))
+        return int(personal) if personal else None
+    except Exception as exc:  # noqa: BLE001 — degrade to team-less, never block mirror
+        logger.warning(
+            f"[project_stage_issues] personal-team resolve failed for project "
+            f"owner {owner_id}: {exc!r}"
+        )
+        return None
 
 
 async def _load_project(project_id: int) -> Optional[dict[str, Any]]:

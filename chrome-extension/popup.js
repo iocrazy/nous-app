@@ -19,6 +19,10 @@ let selectedTags = new Set();
 let allTags = [];
 let currentTabUrl = '';
 let tagQuery = '';
+// Search-or-create state: an in-flight quick-create keeps the affordance in a
+// disabled "Creating..." state; a failure surfaces inline (never silent).
+let isCreatingQuick = false;
+let quickCreateError = '';
 
 // Show the extension version beside the header — read at runtime from the
 // manifest so it never drifts from manifest.json.
@@ -115,9 +119,26 @@ async function loadTags(config) {
 }
 
 // Re-render on every keystroke — the tag list is small, no debounce needed.
+// Editing the query dismisses any stale quick-create error.
 tagSearch.addEventListener('input', () => {
   tagQuery = tagSearch.value;
+  quickCreateError = '';
   renderTags(allTags);
+});
+
+// Enter in the search box creates the typed tag when it matches nothing
+// exactly — the same fast path the "Create" affordance offers. The
+// isComposing guard keeps an IME confirmation Enter (Chinese input) from
+// firing a create (repo convention from #1442/#1453; plain DOM → read
+// event.isComposing directly).
+tagSearch.addEventListener('keydown', (e) => {
+  if (e.isComposing) return;
+  if (e.key !== 'Enter') return;
+  const query = tagSearch.value.trim();
+  if (query && !hasExactMatch(query)) {
+    e.preventDefault();
+    quickCreateTag(query);
+  }
 });
 
 // Most-used first within any list.
@@ -131,17 +152,45 @@ function matchesQuery(tag, q) {
   return name.includes(q) || nameZh.includes(q);
 }
 
+// Exact-match check for search-or-create: does any loaded tag already equal the
+// query by English name OR Chinese name_zh (case-insensitive)? Mirrors the web
+// app's TagsSettings noExactMatch rule — the backend 409s on a duplicate name,
+// so an exact match must suppress the Create affordance. Empty query counts as
+// "matched" so a blank search never offers Create.
+function hasExactMatch(query) {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) return true;
+  return allTags.some(
+    (tag) =>
+      (tag.name || '').toLowerCase() === q ||
+      (tag.name_zh || '').toLowerCase() === q,
+  );
+}
+
 function renderTags(tags) {
   tagsContainer.innerHTML = '';
 
-  const q = tagQuery.trim().toLowerCase();
+  const rawQuery = tagQuery.trim();
+  const q = rawQuery.toLowerCase();
   const filtered = tags.filter(tag => matchesQuery(tag, q));
 
+  // Search-or-create: when the query matches no tag exactly, offer a
+  // "Create <query>" affordance. It sits atop any partial-match results and
+  // fully replaces the "No tags match" empty state — mirroring the web app's
+  // Settings behavior. Enter in the search box triggers the same create.
+  const showCreate = rawQuery.length > 0 && !hasExactMatch(rawQuery);
+  if (showCreate) {
+    tagsContainer.appendChild(createAffordanceRow(rawQuery));
+    if (quickCreateError) tagsContainer.appendChild(createErrorRow(quickCreateError));
+  }
+
   if (filtered.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'tags-empty';
-    empty.textContent = q ? 'No tags match your search' : 'No tags yet';
-    tagsContainer.appendChild(empty);
+    if (!showCreate) {
+      const empty = document.createElement('div');
+      empty.className = 'tags-empty';
+      empty.textContent = q ? 'No tags match your search' : 'No tags yet';
+      tagsContainer.appendChild(empty);
+    }
     return;
   }
 
@@ -215,6 +264,83 @@ function createTagPill(tag) {
   });
 
   return pill;
+}
+
+// Full-width "Create <query>" row shown atop the tag list. Disabled while a
+// create is in flight so a double-click can't fire two POSTs.
+function createAffordanceRow(query) {
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'tag-create-affordance';
+  row.disabled = isCreatingQuick;
+  row.textContent = isCreatingQuick
+    ? `Creating "${query}"...`
+    : `Create "${query}"`;
+  row.addEventListener('click', () => quickCreateTag(query));
+  return row;
+}
+
+// Inline error line for a failed quick-create (403 scope hint, 409 duplicate,
+// network, etc.) — never silent.
+function createErrorRow(message) {
+  const el = document.createElement('div');
+  el.className = 'tag-create-error';
+  el.textContent = message;
+  return el;
+}
+
+// Search-or-create fast path: POST /tags {name} (default color), then select
+// the new tag and clear the search so it surfaces as a selected pill. Mirrors
+// the web app's handleQuickCreate (optimistic append, no auto-translate detour).
+async function quickCreateTag(rawQuery) {
+  const name = (rawQuery || '').trim();
+  if (!name || isCreatingQuick) return;
+
+  isCreatingQuick = true;
+  quickCreateError = '';
+  renderTags(allTags); // reflect the disabled "Creating..." state
+
+  const config = await chrome.storage.local.get(['apiUrl', 'apiKey']);
+
+  try {
+    const res = await fetch(`${config.apiUrl}/api/v1/tags`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': config.apiKey,
+      },
+      body: JSON.stringify({ name }),
+    });
+
+    if (!res.ok) {
+      let detail;
+      if (res.status === 403) {
+        // dk_ API key without the "Manage Tags" (tags:write) scope — the
+        // create endpoint rejects it. Point the user at the fix instead of
+        // showing a bare 403.
+        detail = 'API key lacks Manage Tags scope';
+      } else {
+        const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+        detail = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail);
+      }
+      throw new Error(detail);
+    }
+
+    const created = await res.json();
+    isCreatingQuick = false;
+    // Optimistic append + immediate selection, then clear the search so the
+    // new (uncategorized) tag surfaces as a selected pill.
+    allTags = [...allTags, created];
+    if (created.id) selectedTags.add(created.id);
+    updatePushBtn();
+    tagQuery = '';
+    tagSearch.value = '';
+    renderTags(allTags);
+  } catch (err) {
+    isCreatingQuick = false;
+    quickCreateError = err.message;
+    renderTags(allTags);
+  }
 }
 
 function updatePushBtn() {
