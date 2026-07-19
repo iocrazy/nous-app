@@ -18,6 +18,7 @@ import { CookiesSettings } from './CookiesSettings';
 import * as apiKeyService from '../services/apiKeyService';
 import { useConfirm } from './ConfirmDialog';
 import { ChatTempTtlPanel } from './ChatTempTtlPanel';
+import { ApiTokensPanel } from './Inspiration/ApiTokensPanel';
 
 interface SettingsViewProps {
   settings: UserSettings;
@@ -635,10 +636,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                           </td>
                           <td className="px-6 py-4 font-mono text-xs">
                              <div className="flex items-center gap-2">
-                                <span
-                                   className="opacity-70 bg-ink-950 px-2 py-1 rounded border border-ink-800 select-all"
-                                   title="The full key is shown only once, at creation time. Only the prefix is kept for display."
-                                >{key.key_prefix}</span>
+                                <button
+                                   type="button"
+                                   onClick={() => handleCopyKey(key.key_prefix, String(key.id))}
+                                   className="opacity-70 hover:opacity-100 bg-ink-950 px-2 py-1 rounded border border-ink-800 cursor-pointer transition-opacity"
+                                   title="Click to copy the prefix. The full key is shown only once, at creation time; only the prefix is kept for display."
+                                >{key.key_prefix}</button>
+                                <button
+                                   type="button"
+                                   onClick={() => handleCopyKey(key.key_prefix, String(key.id))}
+                                   aria-label={copiedKeyId === String(key.id) ? 'Copied' : 'Copy key prefix'}
+                                   title={copiedKeyId === String(key.id) ? 'Copied' : 'Copy key prefix'}
+                                   className={`p-1 rounded transition-colors ${copiedKeyId === String(key.id) ? 'text-green-500' : 'text-ink-500 hover:text-indigo-400'}`}
+                                >
+                                   {copiedKeyId === String(key.id) ? <CheckCircle size={14} /> : <Copy size={14} />}
+                                </button>
                                 <span className="text-[10px] text-ink-600 italic whitespace-nowrap flex-shrink-0">shown once at creation</span>
                              </div>
                           </td>
@@ -706,6 +718,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
               </table>
            </div>
            )}
+        </section>
+
+        {/* Inspiration Tokens — personal access tokens for the notes API */}
+        <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden animate-in fade-in duration-300 mt-6">
+           <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50">
+              <div className="flex items-center gap-3">
+                 <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
+                    <Key size={20} />
+                 </div>
+                 <div>
+                    <h2 className="font-semibold text-ink-200">Inspiration Tokens</h2>
+                    <p className="text-xs text-ink-500 mt-0.5">Tokens for writing notes from external scripts.</p>
+                 </div>
+              </div>
+           </div>
+           <div className="p-6">
+              <ApiTokensPanel />
+           </div>
         </section>
 
         </>

@@ -1,6 +1,6 @@
 import {
   LayoutGrid, Star, Archive, Clock,
-  FolderOpen, ChevronLeft, ChevronRight,
+  FolderOpen, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -30,7 +30,7 @@ const VIEW_FILTERS = [
   { key: 'archived', labelKey: 'projects.view.archived', icon: Archive },
 ] as const;
 
-const iconBtnClass = 'rounded p-1 text-ink-500 transition-colors hover:text-ink-300';
+const iconBtnClass = 'rounded p-1 text-ink-400 transition-colors hover:text-ink-200';
 
 function FilterItem({
   icon: Icon, label, count, active, onClick,
@@ -72,24 +72,34 @@ export function ProjectFilterSidebar({
   const { t } = useTranslation();
 
   if (collapsed) {
+    // Slim full-height rail (no mid-air pill) — one click restores the panel.
     return (
-      <div className="relative w-4 flex-shrink-0">
+      <div className="flex w-6 flex-shrink-0 flex-col border-r border-ink-800/40 transition-colors hover:bg-ink-800/20">
         <button
           onClick={onToggleCollapse}
-          className="absolute top-1/2 -translate-y-1/2 left-0 z-10 w-4 h-10 flex items-center justify-center rounded-r-md bg-ink-800/80 text-ink-500 hover:text-ink-200 hover:bg-ink-700 transition-colors"
+          aria-label={t('projects.nav.expandSidebar')}
           title={t('projects.nav.expandSidebar')}
+          className={`mt-3 flex w-full items-center justify-center ${iconBtnClass}`}
         >
-          <ChevronRight size={12} />
+          <PanelLeftOpen size={16} />
         </button>
       </div>
     );
   }
 
   return (
-    <div className={`group relative flex w-52 flex-col border-r border-ink-800/40`}>
-      {/* Header */}
-      <div className="px-4 pt-4 pb-3">
+    <div className={`flex w-52 flex-col border-r border-ink-800/40`}>
+      {/* Header — title + inline collapse control */}
+      <div className="flex items-center justify-between px-4 pt-4 pb-3">
         <span className="text-sm font-semibold text-ink-200">{t('mediatrack.projects')}</span>
+        <button
+          onClick={onToggleCollapse}
+          aria-label={t('projects.nav.collapseSidebar')}
+          title={t('projects.nav.collapseSidebar')}
+          className={iconBtnClass}
+        >
+          <PanelLeftClose size={16} />
+        </button>
       </div>
 
       {/* View filters */}
@@ -130,15 +140,6 @@ export function ProjectFilterSidebar({
           </div>
         </>
       )}
-
-      {/* Collapse toggle — right edge, mid-height */}
-      <button
-        onClick={onToggleCollapse}
-        className="absolute top-1/2 -translate-y-1/2 right-0 z-10 w-4 h-10 flex items-center justify-center rounded-l-md bg-ink-800/80 text-ink-500 hover:text-ink-200 hover:bg-ink-700 transition-colors opacity-0 group-hover:opacity-100"
-        title={t('projects.nav.collapseSidebar')}
-      >
-        <ChevronLeft size={12} />
-      </button>
     </div>
   );
 }

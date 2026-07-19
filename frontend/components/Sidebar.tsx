@@ -355,16 +355,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {isViewEnabled('mediatrack') && (
               <SidebarItem icon={FolderKanban} label={t('sidebar.projects')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
             )}
-            <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
-            <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
-            <SidebarItem icon={MessageSquare} label={t('chat.title')} active={currentView === 'chat'} onClick={() => handleNav('chat')} collapsed={collapsed} />
-            <SidebarItem
-              icon={Sparkles}
-              label={t('sidebar.aiLibrary', 'AI Library')}
-              active={currentView === 'ailibrary'}
-              onClick={() => handleNav('ailibrary')}
-              collapsed={collapsed}
-            />
             {distributionModuleVisible && (
               <SidebarItem
                 icon={Send}
@@ -374,6 +364,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 collapsed={collapsed}
               />
             )}
+            <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
+            <SidebarItem
+              icon={Sparkles}
+              label={t('sidebar.aiLibrary', 'AI Library')}
+              active={currentView === 'ailibrary'}
+              onClick={() => handleNav('ailibrary')}
+              collapsed={collapsed}
+            />
+            <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
+            <SidebarItem icon={MessageSquare} label={t('chat.title')} active={currentView === 'chat'} onClick={() => handleNav('chat')} collapsed={collapsed} />
           </SidebarSection>
 
           {hasPermission(permissions, 'member.view') && (
@@ -436,16 +436,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {isViewEnabled('mediatrack') && (
             <SidebarItem icon={FolderKanban} label={t('sidebar.projects')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
           )}
-          <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
-          <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
-          <SidebarItem icon={Coins} label={t('sidebar.points')} active={currentView === 'points'} onClick={() => handleNav('points')} collapsed={collapsed} />
-          <SidebarItem
-            icon={Sparkles}
-            label={t('sidebar.aiLibrary', 'AI Library')}
-            active={currentView === 'ailibrary'}
-            onClick={() => handleNav('ailibrary')}
-            collapsed={collapsed}
-          />
           {distributionModuleVisible && (
             <SidebarItem
               icon={Send}
@@ -455,6 +445,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
               collapsed={collapsed}
             />
           )}
+          <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
+          <SidebarItem
+            icon={Sparkles}
+            label={t('sidebar.aiLibrary', 'AI Library')}
+            active={currentView === 'ailibrary'}
+            onClick={() => handleNav('ailibrary')}
+            collapsed={collapsed}
+          />
+          <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
+          <SidebarItem icon={Coins} label={t('sidebar.points')} active={currentView === 'points'} onClick={() => handleNav('points')} collapsed={collapsed} />
         </SidebarSection>
       </nav>
 
