@@ -61,6 +61,14 @@ const FLASH_MS = 700;
 
 type DragMode = 'move' | 'resize';
 
+/** Guide readout: `1'30` past the minute, `45s` under it (film-apostrophe). */
+function formatGuideSec(sec: number): string {
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return s === 0 ? `${m}'` : `${m}'${String(s).padStart(2, '0')}`;
+}
+
 interface DragState {
   id: string;
   mode: DragMode;
@@ -474,6 +482,32 @@ export function ArrangementView({
         <div className="mh-arr-stage">
           <div className="mh-arr-timeline-scroll" ref={viewportRef} data-testid="arr-viewport">
             <div className="mh-arr-canvas" style={{ width: `${canvasWidth}px` }}>
+              {/* NLE-style guide: while dragging, a full-height line tracks the
+                  active edge (start for a move, end for a resize) with a live
+                  time readout — the editing-software affordance. */}
+              {drag && (
+                <div
+                  className="mh-arr-guide"
+                  data-testid="arr-drag-guide"
+                  aria-hidden="true"
+                  style={{
+                    left: `${timeToPx(
+                      drag.mode === 'move'
+                        ? drag.start_sec
+                        : drag.start_sec + (drag.duration_sec ?? 0),
+                      pxPerSec,
+                    )}px`,
+                  }}
+                >
+                  <span className="mh-arr-guide-chip">
+                    {formatGuideSec(
+                      drag.mode === 'move'
+                        ? drag.start_sec
+                        : drag.start_sec + (drag.duration_sec ?? 0),
+                    )}
+                  </span>
+                </div>
+              )}
               <div className="mh-arr-ruler" data-testid="arr-ruler">
                 {ticks.map((tick) => (
                   <div

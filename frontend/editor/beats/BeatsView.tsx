@@ -132,7 +132,11 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
 
   return (
     <div className="mh-beats-pane" data-testid="beats-pane">
+      {/* laper topbar: count left · segmented centre · Add right. */}
       <div className="mh-beats-subview" role="group" aria-label={t('editor.beatsViewLabel')}>
+        <span className="mh-beats-count" data-testid="beats-count">
+          {t('editor.moduleBeats')} <b>{beats.length}</b>
+        </span>
         <div className="mh-segmented mh-beats-seg">
           <button
             type="button"
@@ -153,6 +157,14 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
             {t('editor.beatsViewList')}
           </button>
         </div>
+        <button
+          type="button"
+          className="mh-beats-add-ink"
+          data-testid="beats-topbar-add"
+          onClick={() => void handleAdd()}
+        >
+          + {t('editor.beatAdd')}
+        </button>
       </div>
 
       {!loaded ? (

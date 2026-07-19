@@ -1814,8 +1814,24 @@ export const EDITOR_SHELL_STYLES = `
    the writing panel (same class of bug as the sheet's minmax(0,1fr) fix). */
 .mh-beats-pane{ flex:1; min-width:0; display:flex; flex-direction:column; min-height:0; }
 /* laper parity: the sub-view segmented sits top-centre of the pane. */
-.mh-beats-subview{ flex:0 0 auto; padding:12px 24px 8px; display:flex; justify-content:center; }
-.mh-beats-seg{ display:inline-flex; width:max-content; }
+/* laper topbar: count left · segmented dead-centre (absolute, so the right
+   controls can't skew it) · Add right. */
+.mh-beats-subview{
+  flex:0 0 auto; padding:12px 24px 8px; display:flex; align-items:center;
+  justify-content:space-between; position:relative;
+}
+.mh-beats-count{ font-size:12.5px; font-weight:600; color:var(--ink-faint); }
+.mh-beats-count b{ color:var(--ink); font-weight:700; margin-left:2px; }
+.mh-beats-add-ink{
+  font-family:var(--sans); font-size:12px; font-weight:700; color:var(--pill-ink-on);
+  background:var(--pill-ink-bg); border:none; border-radius:999px; padding:7px 16px;
+  cursor:pointer; line-height:1;
+}
+.mh-beats-add-ink:hover{ opacity:0.88; }
+.mh-beats-seg{
+  display:inline-flex; width:max-content;
+  position:absolute; left:50%; transform:translateX(-50%);
+}
 .mh-beats-seg .mh-seg{ flex:0 0 auto; padding:6px 20px; }
 .mh-beats-pane > .mh-beats-view,
 .mh-beats-pane > .mh-arr-root{ flex:1; min-height:0; }
@@ -1872,10 +1888,11 @@ export const EDITOR_SHELL_STYLES = `
 .mh-arr-card{
   position:absolute; box-sizing:border-box; cursor:grab; user-select:none; touch-action:none;
   overflow:hidden; display:flex; flex-direction:column; gap:5px; padding:12px 13px 10px;
-  background:var(--surface); border:1px solid var(--surface-border); border-radius:var(--radius-md);
-  box-shadow:var(--shadow-island); transition:box-shadow 0.15s ease, transform 0.15s ease;
+  /* laper minimal: hairline border, flat at rest — shadow only when lifted. */
+  background:var(--surface); border:1px solid var(--hairline); border-radius:10px;
+  transition:box-shadow 0.15s ease, border-color 0.15s ease;
 }
-.mh-arr-card:hover{ box-shadow:var(--shadow-float); transform:translateY(-1px); }
+.mh-arr-card:hover{ box-shadow:var(--shadow-island); border-color:var(--surface-border); }
 .mh-arr-card.selected{ border-color:var(--emph-ink-border); }
 .mh-arr-card.dragging{ cursor:grabbing; z-index:4; box-shadow:var(--shadow-float); transform:none; }
 .mh-arr-card.flash{ animation:mh-arr-flash 0.7s ease; }
@@ -1911,6 +1928,17 @@ export const EDITOR_SHELL_STYLES = `
 .mh-arr-memo-tick{ position:absolute; top:0; width:1px; height:8px; background:var(--hairline); }
 
 /* Tools pill — top-right, laper-style with text labels (Fit / Zoom out / in). */
+/* NLE drag guide — full-height edge line with a live time chip. */
+.mh-arr-guide{
+  position:absolute; top:0; bottom:0; width:1px; z-index:5; pointer-events:none;
+  background:var(--indigo); opacity:0.75;
+}
+.mh-arr-guide-chip{
+  position:absolute; top:2px; left:4px; font-size:10px; font-weight:700; line-height:1;
+  color:#fff; background:var(--indigo); border-radius:5px; padding:3px 6px;
+  font-variant-numeric:tabular-nums; white-space:nowrap;
+}
+
 /* In-flow toolbar row (absolute over the canvas covered the ruler labels). */
 .mh-arr-topbar{ display:flex; justify-content:flex-end; padding:0 6px 8px; flex:0 0 auto; }
 .mh-arr-tools{

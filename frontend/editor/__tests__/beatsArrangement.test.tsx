@@ -221,3 +221,41 @@ describe('ArrangementView timeline geometry', () => {
     }
   });
 });
+
+describe('laper topbar + NLE drag guide', () => {
+  it('shows the beat count and creates a beat from the topbar Add', async () => {
+    svc.listBeats.mockResolvedValue([
+      beat({ id: 'a', start_sec: 0, duration_sec: 30 }),
+      beat({ id: 'b', start_sec: 30, duration_sec: 30 }),
+    ]);
+    render(<BeatsView scriptId="1" scenes={noScenes} onOpenScene={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId('beats-arrangement')).toBeInTheDocument());
+    expect(screen.getByTestId('beats-count')).toHaveTextContent('2');
+    fireEvent.click(screen.getByTestId('beats-topbar-add'));
+    await waitFor(() => expect(svc.createBeat).toHaveBeenCalled());
+  });
+
+  it('renders a full-height guide with a time chip while dragging, gone on release', async () => {
+    render(
+      <ArrangementView
+        scriptId="1"
+        beats={[beat({ id: 'a', start_sec: 60, duration_sec: 30 })]}
+        scenes={noScenes}
+        onAdd={vi.fn()}
+        onUpdate={vi.fn()}
+        onCreate={vi.fn()}
+        onOpenScene={vi.fn()}
+      />,
+    );
+    const card = await screen.findByTestId('arr-card');
+    expect(screen.queryByTestId('arr-drag-guide')).toBeNull();
+    fireEvent.pointerDown(card, { pointerId: 1, button: 0, clientX: 400 });
+    fireEvent.pointerMove(card, { pointerId: 1, clientX: 430 });
+    const guide = screen.getByTestId('arr-drag-guide');
+    // moved +30px at 6 px/s = +5s → snapped start 65 → guide at 65×6 = 390px
+    expect(guide.style.left).toBe('390px');
+    expect(guide).toHaveTextContent("1'05");
+    fireEvent.pointerUp(card, { pointerId: 1 });
+    expect(screen.queryByTestId('arr-drag-guide')).toBeNull();
+  });
+});
