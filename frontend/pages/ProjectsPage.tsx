@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Project, ProjectFile, RecentItem } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
+import { useWorkspaceScope } from '../hooks/useWorkspaceScope';
 import { fetchProjects, fetchRecentItems } from '../services/projectsService';
 import { ProjectsListView } from '../components/ProjectsListView';
 import { ProjectFilterSidebar } from '../components/project/ProjectFilterSidebar';
@@ -19,6 +20,11 @@ export function ProjectsPage() {
   const [, setSearchParams] = useSearchParams();
   const { currentUserId } = useAuth();
   const { selectedTeamId, personalTeamId } = useTeamContext();
+  // Default the create-project Team selector to the active workspace: a real
+  // collaborative team pre-selects itself, personal stays "Personal" (empty →
+  // team_id=NULL, the projects personal convention). Snowflake ids stay strings.
+  const { isPersonal, effectiveTeamId } = useWorkspaceScope();
+  const createDefaultTeamId = isPersonal ? '' : effectiveTeamId;
 
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [reviewFile, setReviewFile] = useState<ProjectFile | null>(null);
@@ -271,6 +277,7 @@ export function ProjectsPage() {
       <CreateProjectModal
         isOpen={isCreateProjectModalOpen}
         onClose={() => setIsCreateProjectModalOpen(false)}
+        defaultTeamId={createDefaultTeamId}
         onProjectCreated={(project) => {
           setIsCreateProjectModalOpen(false);
           setSelectedProject(project);

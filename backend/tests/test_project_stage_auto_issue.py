@@ -164,6 +164,8 @@ async def test_new_stage_creates_unassigned_todo_issue(patch):
 
 @pytest.mark.asyncio
 async def test_personal_project_omits_team_id(patch):
+    # No owner_id on the project → the personal-team resolve short-circuits
+    # before touching the repo, so the issue stays team-less.
     stages = _FakeStagesRepo(current=None, new_stage={"id": "20", "name": "Script"})
     issues = _FakeIssueRepo()
     patch(stages=stages, issues=issues, project={"name": "Solo", "team_id": None})
@@ -171,6 +173,85 @@ async def test_personal_project_omits_team_id(patch):
     await advance_project_stage(100, 20, _USER)
 
     assert "team_id" not in issues.created[0]
+
+
+class _FakeTeamRepo:
+    def __init__(self, personal_id):
+        self._personal = personal_id
+        self.resolved_for = []
+
+    async def get_personal_team_id(self, owner_id):
+        self.resolved_for.append(owner_id)
+        return self._personal
+
+
+@pytest.mark.asyncio
+async def test_personal_project_stamps_owner_personal_team(patch, monkeypatch):
+    # team_id boundary translation: a NULL-team (personal) project resolves the
+    # OWNER's personal team so the mirror issue is visible in the team-scoped
+    # Todolist (the project row itself stays NULL).
+    stages = _FakeStagesRepo(current=None, new_stage={"id": "20", "name": "Script"})
+    issues = _FakeIssueRepo()
+    patch(
+        stages=stages,
+        issues=issues,
+        project={"name": "Solo", "team_id": None, "owner_id": "owner-x"},
+    )
+    team_repo = _FakeTeamRepo("777")
+    monkeypatch.setattr(
+        "app.repositories.team_repository.get_team_repository",
+        lambda: team_repo,
+    )
+
+    await advance_project_stage(100, 20, _USER)
+
+    assert team_repo.resolved_for == ["owner-x"]
+    # Snowflake resolved as a str → int-coerced onto the issue payload.
+    assert issues.created[0]["team_id"] == 777
+
+
+@pytest.mark.asyncio
+async def test_personal_project_owner_without_personal_team_omits_team_id(
+    patch, monkeypatch
+):
+    stages = _FakeStagesRepo(current=None, new_stage={"id": "20", "name": "Script"})
+    issues = _FakeIssueRepo()
+    patch(
+        stages=stages,
+        issues=issues,
+        project={"name": "Solo", "team_id": None, "owner_id": "owner-x"},
+    )
+    monkeypatch.setattr(
+        "app.repositories.team_repository.get_team_repository",
+        lambda: _FakeTeamRepo(None),  # owner has no personal team
+    )
+
+    await advance_project_stage(100, 20, _USER)
+
+    assert "team_id" not in issues.created[0]
+
+
+@pytest.mark.asyncio
+async def test_team_project_keeps_explicit_team_without_resolving(patch, monkeypatch):
+    # A project that already carries a team_id never triggers the personal-team
+    # resolve (the fast path returns the explicit team).
+    stages = _FakeStagesRepo(current=None, new_stage={"id": "20", "name": "Script"})
+    issues = _FakeIssueRepo()
+    patch(
+        stages=stages,
+        issues=issues,
+        project={"name": "Team Film", "team_id": 42, "owner_id": "owner-x"},
+    )
+    team_repo = _FakeTeamRepo("777")
+    monkeypatch.setattr(
+        "app.repositories.team_repository.get_team_repository",
+        lambda: team_repo,
+    )
+
+    await advance_project_stage(100, 20, _USER)
+
+    assert issues.created[0]["team_id"] == 42
+    assert team_repo.resolved_for == []
 
 
 # ── idempotency ───────────────────────────────────────────────────────────────

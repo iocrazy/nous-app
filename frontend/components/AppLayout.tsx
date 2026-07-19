@@ -574,6 +574,7 @@ function AppLayoutInner() {
       <CreateProjectModal
         isOpen={isCreateProjectModalOpen}
         onClose={() => setIsCreateProjectModalOpen(false)}
+        defaultTeamId={isPersonalWorkspace ? '' : (selectedTeamId ?? '')}
         onProjectCreated={(project) => {
           setIsCreateProjectModalOpen(false);
           setSelectedProject(project);
