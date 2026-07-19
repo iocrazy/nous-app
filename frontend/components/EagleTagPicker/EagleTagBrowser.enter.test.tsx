@@ -32,7 +32,7 @@ describe('EagleTagBrowser enter-to-create', () => {
   it('does not create while IME composition is active', () => {
     const onCreate = vi.fn().mockResolvedValue(null);
     render(<EagleTagBrowser {...baseProps} onCreate={onCreate} />);
-    const input = screen.getByPlaceholderText('Search tags...');
+    const input = screen.getByPlaceholderText('Search or create...');
     fireEvent.change(input, { target: { value: '新标签' } });
     keyDownComposing(input);
     expect(onCreate).not.toHaveBeenCalled();
@@ -41,7 +41,7 @@ describe('EagleTagBrowser enter-to-create', () => {
   it('creates on Enter after composition ends', () => {
     const onCreate = vi.fn().mockResolvedValue(null);
     render(<EagleTagBrowser {...baseProps} onCreate={onCreate} />);
-    const input = screen.getByPlaceholderText('Search tags...');
+    const input = screen.getByPlaceholderText('Search or create...');
     fireEvent.change(input, { target: { value: '新标签' } });
     fireEvent.keyDown(input, { key: 'Enter', isComposing: false });
     expect(onCreate).toHaveBeenCalledWith('新标签', expect.any(String));
@@ -50,7 +50,7 @@ describe('EagleTagBrowser enter-to-create', () => {
   it('treats a name_zh exact match as existing (no create row)', () => {
     const onCreate = vi.fn().mockResolvedValue(null);
     render(<EagleTagBrowser {...baseProps} onCreate={onCreate} />);
-    const input = screen.getByPlaceholderText('Search tags...');
+    const input = screen.getByPlaceholderText('Search or create...');
     fireEvent.change(input, { target: { value: '文案' } });
     expect(screen.queryByText(/Create "文案"/)).toBeNull();
     fireEvent.keyDown(input, { key: 'Enter', isComposing: false });
@@ -72,7 +72,7 @@ describe('EagleTagBrowser hidden shadow tags', () => {
         shadowTags={[shadow]}
       />,
     );
-    const input = screen.getByPlaceholderText('Search tags...');
+    const input = screen.getByPlaceholderText('Search or create...');
     fireEvent.change(input, { target: { value: 'project-x' } });
     expect(screen.queryByText(/Create "project-x"/)).toBeNull();
     fireEvent.keyDown(input, { key: 'Enter', isComposing: false });
@@ -91,7 +91,7 @@ describe('EagleTagBrowser hidden shadow tags', () => {
         shadowTags={[shadow]}
       />,
     );
-    const input = screen.getByPlaceholderText('Search tags...');
+    const input = screen.getByPlaceholderText('Search or create...');
     fireEvent.change(input, { target: { value: '项目' } });
     expect(screen.queryByText(/Create "项目"/)).toBeNull();
     fireEvent.keyDown(input, { key: 'Enter', isComposing: false });
@@ -101,7 +101,7 @@ describe('EagleTagBrowser hidden shadow tags', () => {
 
   it('partial search reveals the shadow tag; empty search hides it', () => {
     render(<EagleTagBrowser {...baseProps} shadowTags={[shadow]} />);
-    const input = screen.getByPlaceholderText('Search tags...');
+    const input = screen.getByPlaceholderText('Search or create...');
     // Default (empty search): shadow tag is hidden.
     expect(screen.queryByText('project-x')).toBeNull();
     // Partial match reveals it.
@@ -115,7 +115,7 @@ describe('EagleTagBrowser hidden shadow tags', () => {
   it('clicking a revealed shadow tag toggles it', () => {
     const onToggleTag = vi.fn();
     render(<EagleTagBrowser {...baseProps} onToggleTag={onToggleTag} shadowTags={[shadow]} />);
-    const input = screen.getByPlaceholderText('Search tags...');
+    const input = screen.getByPlaceholderText('Search or create...');
     fireEvent.change(input, { target: { value: 'project' } });
     fireEvent.click(screen.getByText('project-x'));
     expect(onToggleTag).toHaveBeenCalledWith('99');
@@ -124,7 +124,7 @@ describe('EagleTagBrowser hidden shadow tags', () => {
   it('unrelated new word still offers Create and Enter still creates (PR-0 regression)', () => {
     const onCreate = vi.fn().mockResolvedValue(null);
     render(<EagleTagBrowser {...baseProps} onCreate={onCreate} shadowTags={[shadow]} />);
-    const input = screen.getByPlaceholderText('Search tags...');
+    const input = screen.getByPlaceholderText('Search or create...');
     fireEvent.change(input, { target: { value: 'brandnew' } });
     expect(screen.getByText(/Create "brandnew"/)).toBeInTheDocument();
     fireEvent.keyDown(input, { key: 'Enter', isComposing: false });
