@@ -915,7 +915,7 @@ export const PublishPage: React.FC = () => {
                 {pickerResults.length === 0 && (
                   <p className="picker-empty">
                     {videos.length === 0
-                      ? t('distribution.publish.noContent', 'No video resources in your Library yet')
+                      ? t('distribution.publish.noContent', "No uploads or generated videos yet — downloads aren't publishable")
                       : toPublishOnly && markedIds.size === 0
                         ? t('distribution.publish.pickerNoMarked', 'No videos marked to publish yet')
                         : t('distribution.publish.pickerNoResults', 'No videos match your search')}

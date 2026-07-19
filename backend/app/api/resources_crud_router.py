@@ -58,6 +58,10 @@ MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB
 _ALLOWED_TYPE_CATEGORIES = {"video", "image", "audio", "document", "other"}
 _ALLOWED_ASPECT_RATIOS = {"9:16", "16:9", "1:1", "4:3", "other"}
 _ALLOWED_SOCIAL_COMBINE = {"and", "or"}
+# resources.source_type CHECK enum (see promote_generated_media_service):
+# web = platform parse/download, upload = user upload,
+# generated = AI/canvas promote artifact, derived = derived from another.
+_ALLOWED_SOURCE_TYPES = {"web", "upload", "generated", "derived"}
 
 
 @router.get("")
@@ -98,6 +102,16 @@ async def list_resources(
         description=(
             "Filter by resource type category (IN semantics). "
             "Allowed: video, image, audio, document, other."
+        ),
+    ),
+    source_types: Optional[List[str]] = Query(
+        None,
+        description=(
+            "Filter by resource provenance (IN semantics) — matches "
+            "resources.source_type. Allowed: web (platform download), "
+            "upload, generated (AI/canvas promote), derived. The "
+            "Distribution Publish picker passes upload/generated/derived "
+            "to exclude platform-downloaded material."
         ),
     ),
     platforms: Optional[List[str]] = Query(
@@ -216,6 +230,23 @@ async def list_resources(
                     ),
                 )
 
+    # Validate + normalise `source_types` (resources.source_type provenance).
+    # Drop empty strings so `?source_types=` is treated as absent.
+    normalised_source_types: Optional[List[str]] = None
+    if source_types:
+        normalised_source_types = [s.strip() for s in source_types if s and s.strip()]
+        for s in normalised_source_types:
+            if s not in _ALLOWED_SOURCE_TYPES:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Invalid source_type: {s!r}. "
+                        f"Allowed: {sorted(_ALLOWED_SOURCE_TYPES)}."
+                    ),
+                )
+        if not normalised_source_types:
+            normalised_source_types = None
+
     # Strip / drop empty strings from platforms so `?platforms=&platforms=`
     # is treated as absent rather than "match nothing".
     normalised_platforms: Optional[List[str]] = None
@@ -282,6 +313,7 @@ async def list_resources(
             tag_ids=tag_ids or None,
             min_rating=min_rating,
             types=normalised_types,
+            source_types=normalised_source_types,
             platforms=normalised_platforms,
             ai_transcribed=ai_transcribed,
             ai_summarized=ai_summarized,
