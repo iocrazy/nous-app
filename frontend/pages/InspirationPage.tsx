@@ -3,10 +3,8 @@
 // Notes/Hotspots tabs, the save-as-note loop and a global Parse entry point.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
 import { Link2, Search, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
-import { fetchScriptProject } from '../services/scriptService';
 import { Composer } from '../components/Inspiration/Composer';
 import { NoteEditor } from '../components/Inspiration/NoteEditor';
 import { NoteTimeline } from '../components/Inspiration/NoteTimeline';
@@ -64,26 +62,7 @@ export function buildTagSuggestions(
 export const InspirationPage: React.FC = () => {
   const { t } = useTranslation();
   const { addToast } = useToast();
-  const navigate = useNavigate();
 
-  // Reverse-nav (Beats M4): jump from a note's anchor chip to the script's beats
-  // timeline. The note stores only the script id, so resolve team/project lazily
-  // on click (the fullscreen script route needs all three ids).
-  const openAnchor = useCallback(
-    async (note: InspirationNote) => {
-      if (!note.anchor_script_id) return;
-      try {
-        const proj = await fetchScriptProject(note.anchor_script_id);
-        navigate(
-          `/team/${proj.team_id}/projects/${proj.project_id}/scripts/${proj.id}`,
-        );
-      } catch (err) {
-        console.error('[InspirationPage] open anchor failed', err);
-        addToast(t('editor.memoLoadFailed', 'Failed to load memos'), 'error');
-      }
-    },
-    [navigate, addToast, t],
-  );
   const [notes, setNotes] = useState<InspirationNote[]>([]);
   const [tags, setTags] = useState<{ tag: string; cnt: number }[]>([]);
   const [poolTags, setPoolTags] = useState<Tag[]>([]);
@@ -392,7 +371,6 @@ export const InspirationPage: React.FC = () => {
                 onDelete={onDelete}
                 onTagClick={(tg) => setTag(tg)}
                 onToggleTask={(note, index) => void onToggleTask(note, index)}
-                onOpenAnchor={(note) => void openAnchor(note)}
                 hasMore={hasMore}
                 loading={loading}
                 loadMore={() => void loadMore()}

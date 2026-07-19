@@ -167,6 +167,27 @@ async def test_list_applies_keyset_and_filters(monkeypatch):
     assert datetime.date(2026, 7, 7) in params.values()
 
 
+@pytest.mark.asyncio
+async def test_default_list_excludes_timeline_memos(monkeypatch):
+    """User verdict (2026-07-19): timeline memos are interface-local — the
+    library list (no anchor filter) must exclude every anchored note, and the
+    memo-rail query (anchor filter set) must NOT carry the exclusion."""
+    from app.repositories import inspiration_repository as mod
+    from app.repositories.inspiration_repository import InspirationNotesRepository
+
+    session = _FakeSession(_ScalarResult([]))
+    monkeypatch.setattr(mod, "read_scope", _cm(session))
+    await InspirationNotesRepository().list("u1")
+    assert "anchor_script_id IS NULL" in str(session.statements[0])
+
+    session2 = _FakeSession(_ScalarResult([]))
+    monkeypatch.setattr(mod, "read_scope", _cm(session2))
+    await InspirationNotesRepository().list("u1", anchor_script_id="123")
+    sql2 = str(session2.statements[0])
+    assert "anchor_script_id IS NULL" not in sql2
+    assert "anchor_script_id =" in sql2
+
+
 # ── get_by_id / soft_delete ────────────────────────────────────────────────
 
 
