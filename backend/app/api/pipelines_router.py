@@ -1,0 +1,149 @@
+"""Content relay pipelines REST API (W2b).
+
+Endpoints (under /api/v1/pipelines):
+    GET    /?team_id=            — list a team's pipelines (member-validated)
+    POST   /                     — create a pipeline with an ordered step set
+    GET    /{id}                 — get a pipeline + steps
+    PATCH  /{id}                 — update (steps, when given, replace atomically)
+    DELETE /{id}                 — delete (cascades steps + runs)
+    POST   /{id}/run             — start a relay run against a parent issue
+
+Team is a HARD boundary: every route validates membership server-side against
+team_members and returns 404 (never 403) on a cross-team access so existence
+never leaks. The runs-for-parent read lives on the issues path
+(GET /api/v1/issues/{issue_id}/pipeline-runs) in issues_router.
+"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException, Query, status
+from loguru import logger
+
+from app.core.deps import AuthDep
+from app.repositories.issue_repository import issue_repository
+from app.repositories.pipeline_repository import pipeline_repository
+from app.schemas.pipeline import (
+    Pipeline,
+    PipelineCreate,
+    PipelineRun,
+    PipelineRunCreate,
+    PipelineUpdate,
+)
+from app.services.issues.pipeline_relay import (
+    PipelineRelayError,
+    start_pipeline_run,
+)
+
+router = APIRouter(prefix="/pipelines", tags=["Pipelines"])
+
+
+async def _assert_team_member(user_id: str, team_id: int) -> None:
+    """404 (not 403) when the user is not a member of ``team_id``."""
+    if not await issue_repository.is_team_member(user_id, int(team_id)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+
+
+async def _load_pipeline_or_404(pipeline_id: int, auth) -> dict:
+    pipeline = await pipeline_repository.get_pipeline(pipeline_id)
+    if not pipeline:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    await _assert_team_member(str(auth.user_id), int(pipeline["team_id"]))
+    return pipeline
+
+
+@router.get("/", response_model=list[Pipeline])
+async def list_pipelines(auth: AuthDep, team_id: int = Query(...)) -> list[Pipeline]:
+    await _assert_team_member(str(auth.user_id), team_id)
+    rows = await pipeline_repository.list_pipelines(team_id)
+    return [Pipeline.model_validate(r) for r in rows]
+
+
+@router.post("/", response_model=Pipeline, status_code=status.HTTP_201_CREATED)
+async def create_pipeline(payload: PipelineCreate, auth: AuthDep) -> Pipeline:
+    await _assert_team_member(str(auth.user_id), payload.team_id)
+    try:
+        row = await pipeline_repository.create_pipeline(
+            team_id=payload.team_id,
+            name=payload.name,
+            description=payload.description,
+            enabled=payload.enabled,
+            created_by_user_id=str(auth.user_id),
+            steps=[s.model_dump() for s in payload.steps],
+        )
+    except Exception as exc:  # noqa: BLE001 — surface a clean 400
+        logger.warning(f"[pipelines] create failed: {exc}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return Pipeline.model_validate(row)
+
+
+@router.get("/{pipeline_id}", response_model=Pipeline)
+async def get_pipeline(pipeline_id: int, auth: AuthDep) -> Pipeline:
+    pipeline = await _load_pipeline_or_404(pipeline_id, auth)
+    return Pipeline.model_validate(pipeline)
+
+
+@router.patch("/{pipeline_id}", response_model=Pipeline)
+async def update_pipeline(
+    pipeline_id: int, payload: PipelineUpdate, auth: AuthDep
+) -> Pipeline:
+    await _load_pipeline_or_404(pipeline_id, auth)
+    steps = (
+        [s.model_dump() for s in payload.steps] if payload.steps is not None else None
+    )
+    try:
+        row = await pipeline_repository.update_pipeline(
+            pipeline_id,
+            name=payload.name,
+            description=payload.description,
+            enabled=payload.enabled,
+            steps=steps,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[pipelines] update {pipeline_id} failed: {exc}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    return Pipeline.model_validate(row)
+
+
+@router.delete("/{pipeline_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_pipeline(pipeline_id: int, auth: AuthDep) -> None:
+    await _load_pipeline_or_404(pipeline_id, auth)
+    await pipeline_repository.delete_pipeline(pipeline_id)
+
+
+@router.post("/{pipeline_id}/run", response_model=PipelineRun)
+async def run_pipeline(
+    pipeline_id: int, payload: PipelineRunCreate, auth: AuthDep
+) -> PipelineRun:
+    """Start a relay run of ``pipeline_id`` against ``parent_issue_id``. Creates
+    and dispatches the step-1 child. Membership on the pipeline's team is checked
+    here; same-team + active-run guards live in start_pipeline_run."""
+    await _load_pipeline_or_404(pipeline_id, auth)
+    try:
+        run = await start_pipeline_run(
+            pipeline_id, payload.parent_issue_id, str(auth.user_id)
+        )
+    except PipelineRelayError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    return PipelineRun.model_validate(await _enrich_run(run))
+
+
+async def _enrich_run(run: dict) -> dict:
+    """Join the pipeline name / total steps / current step's agent onto a run
+    row for the UI strip. Best-effort — missing pieces stay None."""
+    enriched = dict(run)
+    try:
+        pipeline = await pipeline_repository.get_pipeline(int(run["pipeline_id"]))
+        if pipeline:
+            steps = sorted(
+                pipeline.get("steps") or [], key=lambda s: int(s["step_order"])
+            )
+            enriched["pipeline_name"] = pipeline.get("name")
+            enriched["total_steps"] = len(steps)
+            cur = int(run.get("current_step") or 0)
+            match = next((s for s in steps if int(s["step_order"]) == cur), None)
+            enriched["current_agent_id"] = match["agent_id"] if match else None
+    except Exception as exc:  # noqa: BLE001 — decoration only
+        logger.debug(f"[pipelines] enrich run failed: {exc!r}")
+    return enriched

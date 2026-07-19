@@ -70,14 +70,23 @@ export const IssueRelatedTab: React.FC<IssueRelatedTabProps> = ({ issue }) => {
       {origin && (
         <section>
           <h3 className="text-[12px] font-semibold uppercase tracking-wider text-ink-500 mb-2">Origin</h3>
-          <Link
-            to={origin.to}
-            className="flex items-center gap-2 px-3 py-2 rounded border border-ink-800 bg-ink-900/50 hover:bg-ink-800/60 transition text-[13px]"
-          >
-            <origin.Icon size={13} className="text-ink-500 shrink-0" />
-            <span className="text-ink-200">{origin.label}</span>
-            <span className="ml-auto text-[12px] text-ink-500">Open</span>
-          </Link>
+          {origin.to ? (
+            <Link
+              to={origin.to}
+              className="flex items-center gap-2 px-3 py-2 rounded border border-ink-800 bg-ink-900/50 hover:bg-ink-800/60 transition text-[13px]"
+            >
+              <origin.Icon size={13} className="text-ink-500 shrink-0" />
+              <span className="text-ink-200">{origin.label}</span>
+              <span className="ml-auto text-[12px] text-ink-500">Open</span>
+            </Link>
+          ) : (
+            // No navigable target (e.g. a pipeline step child) — render the
+            // label as a static row rather than a dead link.
+            <div className="flex items-center gap-2 px-3 py-2 rounded border border-ink-800 bg-ink-900/50 text-[13px]">
+              <origin.Icon size={13} className="text-ink-500 shrink-0" />
+              <span className="text-ink-200">{origin.label}</span>
+            </div>
+          )}
         </section>
       )}
 

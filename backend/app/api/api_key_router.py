@@ -11,12 +11,17 @@ from loguru import logger
 
 from app.core.api_key_scopes import AVAILABLE_SCOPES
 from app.core.deps import AuthDep
-from app.repositories.api_key_repository import _mask_key, get_api_key_repository
+from app.repositories.api_key_repository import (
+    _mask_key,
+    get_api_key_repository,
+    reveal_full_key,
+)
 from app.schemas.api_key import (
     ApiKeyCreate,
     ApiKeyCreateResponse,
     ApiKeyListResponse,
     ApiKeyResponse,
+    ApiKeyRevealResponse,
     ApiKeyScopeInfo,
     ApiKeyScopesResponse,
     ApiKeyUpdate,
@@ -170,6 +175,46 @@ async def get_api_key(key_id: str, auth: AuthDep):
         created_at=key_data["created_at"],
         updated_at=key_data["updated_at"],
     )
+
+
+@router.post("/{key_id}/reveal", response_model=ApiKeyRevealResponse)
+async def reveal_api_key(key_id: str, auth: AuthDep):
+    """
+    读取完整 API 密钥（用于复制到剪贴板）
+
+    仅密钥所有者（JWT 认证）可调用。密钥在库中加密存储，此处解密后返回完整明文。
+    前端只把它复制到剪贴板，不渲染进 DOM。旧的仅哈希/无 key_value 行不可恢复，
+    返回 422 提示用户轮换（删除后重建）。
+
+    审计：每次读取记录 user_id + key_id，绝不记录密钥内容本身。
+    """
+    repo = get_api_key_repository()
+    key_data = await repo.get_by_key_id(key_id)
+
+    if not key_data:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="密钥不存在")
+
+    # 验证所有权（与 get_api_key 一致：user_id 已在 repo 层 str 化）
+    if key_data["user_id"] != auth.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="无权访问此密钥"
+        )
+
+    full_key = reveal_full_key(key_data)
+    if not full_key:
+        logger.warning(
+            f"API 密钥不可恢复（需轮换）: key_id={key_id} user={auth.user_id}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "This key is not recoverable — rotate it "
+                "(delete it and create a new key)."
+            ),
+        )
+
+    logger.info(f"API 密钥完整值已读取: key_id={key_id} user={auth.user_id}")
+    return ApiKeyRevealResponse(key=full_key)
 
 
 @router.patch("/{key_id}", response_model=ApiKeyResponse)

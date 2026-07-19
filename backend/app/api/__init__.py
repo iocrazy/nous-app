@@ -166,6 +166,11 @@ from app.api.issues_router import router as issues_router  # noqa: E402
 
 api_router.include_router(router=issues_router, tags=["Issues"])
 
+# Content relay pipelines (W2b) — fixed-order agent handoff on sub-issues
+from app.api.pipelines_router import router as pipelines_router  # noqa: E402
+
+api_router.include_router(router=pipelines_router, tags=["Pipelines"])
+
 api_router.include_router(router=invites_router, tags=["Invites"])
 
 api_router.include_router(router=notifications_router, tags=["Notifications"])

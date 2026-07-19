@@ -1,4 +1,4 @@
-"""SQLAlchemy 2.0 ORM model package — 144 mapped classes + 1 bare Table = 145 tables.
+"""SQLAlchemy 2.0 ORM model package — 147 mapped classes + 1 bare Table = 148 tables.
 
 The bare Table (``t_worker_registry``) has no usable primary key in the DB, so it
 is mapped as a Core Table rather than a declarative class — no synthetic PK is
@@ -136,6 +136,11 @@ from app.models.ops import (  # noqa: F401
     SystemSettings,
     SystemStatus,
     TaskTracking,
+)
+from app.models.pipelines import (  # noqa: F401
+    IssuePipelineRuns,
+    IssuePipelines,
+    IssuePipelineSteps,
 )
 from app.models.project_library import (  # noqa: F401
     ProjectCharacters,
@@ -298,6 +303,10 @@ __all__ = [
     "SystemSettings",
     "SystemStatus",
     "TaskTracking",
+    # pipelines (W2b content relay)
+    "IssuePipelines",
+    "IssuePipelineSteps",
+    "IssuePipelineRuns",
     # reviews
     "IssueMessages",
     "IssueSequence",

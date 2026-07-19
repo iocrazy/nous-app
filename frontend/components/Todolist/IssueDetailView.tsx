@@ -25,6 +25,8 @@ import { IssueReplyBox, type ComposerAttachment } from './IssueReplyBox';
 import { getCommentTriggerPreview, listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
 import { dispatchIssue, getDispatchPreview, type DispatchPreview } from '../../services/issuesService';
 import { DispatchConfirmDialog } from './DispatchConfirmDialog';
+import { PipelineRunStrip } from './PipelineRunStrip';
+import { RunPipelineMenu } from './RunPipelineMenu';
 import { openIssueChatSocket } from '../../services/issueChatSocket';
 import { getSupabaseClient } from '../../supabaseClient';
 import { useToast } from '../Toast';
@@ -80,6 +82,12 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dispatching, setDispatching] = useState(false);
+  // Bumped after a pipeline run is started so the active-run strip re-fetches.
+  const [pipelineRefresh, setPipelineRefresh] = useState(0);
+  // Only a numeric team id is a valid pipeline scope (personal-team snowflake).
+  const pipelineTeamId = teamId && /^\d+$/.test(teamId) ? teamId : null;
+  // A pipeline child issue should not itself be a pipeline parent.
+  const isPipelineChild = issue.raw.origin_kind === 'pipeline';
   // Run-confirm gate: dispatch always goes through a confirm dialog that
   // renders the server's dispatch-preview verdict.
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -344,6 +352,12 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             <p className="mt-2 text-[14px] text-ink-400 leading-relaxed whitespace-pre-wrap">{issue.description}</p>
           )}
 
+          <PipelineRunStrip
+            issueId={issue.id}
+            agentsById={agentsById}
+            refreshKey={pipelineRefresh}
+          />
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-5">
             <button
               onClick={() => onCreateSubIssue(issue.id)}
@@ -374,6 +388,13 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               >
                 <Bot size={13} /> {dispatching ? 'Dispatching…' : 'Dispatch to Agent'}
               </button>
+            )}
+            {!isPipelineChild && pipelineTeamId && (
+              <RunPipelineMenu
+                issueId={issue.id}
+                teamId={pipelineTeamId}
+                onRan={() => setPipelineRefresh((v) => v + 1)}
+              />
             )}
           </div>
 

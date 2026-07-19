@@ -98,6 +98,24 @@ describe('originModule', () => {
     expect(originModule('')).toBeNull();
     expect(originModule('12345')).toBeNull(); // routine schedule id
   });
+
+  it('chips a routine-created issue as Autopilot from origin_kind alone', () => {
+    // A routine stores a bare schedule id in origin_id (not a content ref), so
+    // the kind is what surfaces the trace — regardless of origin_id shape.
+    expect(originModule('12345', 'routine')).toEqual({
+      label: 'Autopilot',
+      dotClass: 'bg-amber-400',
+    });
+    expect(originModule(null, 'routine')).toEqual({
+      label: 'Autopilot',
+      dotClass: 'bg-amber-400',
+    });
+    // A non-routine kind still defers to the content origin_id.
+    expect(originModule('canvas:123', 'manual')).toEqual({
+      label: 'Canvas',
+      dotClass: 'bg-sky-400',
+    });
+  });
 });
 
 describe('publish origin', () => {
@@ -109,5 +127,30 @@ describe('publish origin', () => {
     expect(originPath(parsed!, undefined)).toBe('/distribution');
     expect(originLabel(parsed!)).toBe('From a publish batch');
     expect(originModule(`publish:${big}`)).toEqual({ label: 'Publish', dotClass: 'bg-rose-400' });
+  });
+});
+
+describe('pipeline origin (W2b)', () => {
+  it('parses a pipeline step child origin, keeping run:step as a string', () => {
+    // origin_id = pipeline:{run}:{step}; the id half carries a colon and must
+    // stay a string (run id is a Snowflake bigint).
+    const parsed = parseOriginId('pipeline:9007199254740993:2');
+    expect(parsed).toEqual({ kind: 'pipeline', id: '9007199254740993:2' });
+  });
+
+  it('has no navigable path (parent id is not in origin_id) → null', () => {
+    const parsed = parseOriginId('pipeline:500:1');
+    expect(parsed).not.toBeNull();
+    expect(originPath(parsed!, '8')).toBeNull();
+    expect(originPath(parsed!, undefined)).toBeNull();
+    expect(originLabel(parsed!)).toBe('From a pipeline step');
+  });
+
+  it('chips as Pipeline (cyan)', () => {
+    expect(originModule('pipeline:500:2')).toEqual({ label: 'Pipeline', dotClass: 'bg-cyan-400' });
+  });
+
+  it('degrades a malformed pipeline origin without crashing', () => {
+    expect(parseOriginId('pipeline:')).toBeNull();
   });
 });

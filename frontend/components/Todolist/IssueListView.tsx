@@ -159,7 +159,7 @@ interface IssueRowProps {
 }
 
 const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentLookup, hideProjectPill }) => {
-  const moduleTag = originModule(issue.raw.origin_id);
+  const moduleTag = originModule(issue.raw.origin_id, issue.raw.origin_kind);
   const initials = issue.assignee?.name.slice(0, 2).toUpperCase() ?? (issue.assignee_user_label?.slice(0, 2).toUpperCase() ?? '·');
   const parent = issue.parent_id ? parentLookup.get(issue.parent_id) : null;
   // An agent is actively working this issue: dispatched to a DBOS workflow and

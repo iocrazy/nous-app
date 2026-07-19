@@ -271,6 +271,13 @@ def test_schedules_create_validates_cron_and_returns_next_fire_at() -> None:
         "last_error": None,
         "created_at": "2026-05-04T00:00:00Z",
         "updated_at": "2026-05-04T00:00:00Z",
+        # W2a autopilot columns (mig 370) — the DB returns these with defaults.
+        "timezone": "UTC",
+        "consecutive_fails": 0,
+        "paused_at": None,
+        "pause_reason": None,
+        "skipped_count": 0,
+        "stale_after_minutes": 60,
     }
     with patch.object(schedules_module, "write_scope", _orm_scope([fake_row])):
         client = TestClient(_app_with(schedules_module.router))

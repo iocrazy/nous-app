@@ -90,6 +90,8 @@ class ScheduleCreatePayload(BaseModel):
     task_type: str
     payload: Dict[str, Any] = Field(default_factory=dict)
     enabled: bool = True
+    # IANA tz name the cron is interpreted in (default UTC — old behavior).
+    timezone: str = Field(default="UTC", min_length=1, max_length=64)
 
 
 class ScheduleUpdatePayload(BaseModel):
@@ -97,6 +99,7 @@ class ScheduleUpdatePayload(BaseModel):
     cron_expr: Optional[str] = Field(None, min_length=1, max_length=100)
     payload: Optional[Dict[str, Any]] = None
     enabled: Optional[bool] = None
+    timezone: Optional[str] = Field(None, min_length=1, max_length=64)
 
 
 class ScheduleResponse(BaseModel):
@@ -115,16 +118,39 @@ class ScheduleResponse(BaseModel):
     last_error: Optional[str]
     created_at: str
     updated_at: str
+    # W2a autopilot hardening (mig 370)
+    timezone: str
+    consecutive_fails: int
+    paused_at: Optional[str]
+    pause_reason: Optional[str]
+    skipped_count: int
+    stale_after_minutes: int
 
 
-def _validate_cron(cron_expr: str) -> datetime:
-    """Validate via croniter; return next fire time."""
+def _validate_timezone(tz_name: str) -> Any:
+    """Validate an IANA timezone name via ZoneInfo; 400 on unknown. Returns
+    the resolved tzinfo so the caller can anchor the cron base to it."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(tz_name)
+    except Exception:
+        raise HTTPException(400, f"invalid timezone: {tz_name!r}")
+
+
+def _validate_cron(cron_expr: str, tz_name: str = "UTC") -> datetime:
+    """Validate the cron via croniter and return the next fire time as UTC,
+    interpreting the cron in ``tz_name`` (so "0 9 * * *" means 9am local and
+    survives DST). Mirrors scheduled_master._compute_next_fire."""
+    tz = _validate_timezone(tz_name)
     try:
         from croniter import croniter
 
-        base = datetime.now(timezone.utc)
+        base = datetime.now(tz)
         itr = croniter(cron_expr, base)
-        return itr.get_next(datetime)
+        return itr.get_next(datetime).astimezone(timezone.utc)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(400, f"invalid cron expression: {exc}")
 
@@ -143,7 +169,7 @@ async def create_schedule(
 ) -> ScheduleResponse:
     """Create a new schedule. Validates cron expression and task_type."""
     _validate_task_type(payload.task_type)
-    next_at = _validate_cron(payload.cron_expr)
+    next_at = _validate_cron(payload.cron_expr, payload.timezone)
     if payload.task_type == "agent_routine":
         _validate_agent_routine_payload(payload.payload)
 
@@ -154,6 +180,7 @@ async def create_schedule(
         "task_type": payload.task_type,
         "payload": payload.payload,
         "enabled": payload.enabled,
+        "timezone": payload.timezone,
         "next_fire_at": next_at,
     }
     try:
@@ -231,24 +258,51 @@ async def update_schedule(
     if not fields:
         raise HTTPException(400, "no fields to update")
 
+    # We need the existing row's cron_expr / timezone / task_type to (a)
+    # validate agent_routine payload edits and (b) recompute next_fire_at when
+    # either cron_expr OR timezone changes (each depends on the other's
+    # effective value). One read covers both.
+    needs_existing = (
+        ("payload" in fields) or ("cron_expr" in fields) or ("timezone" in fields)
+    )
+    existing_row: Optional[Mapping[str, Any]] = None
+    if needs_existing:
+        async with read_scope() as session:
+            existing_row = (
+                (
+                    await session.execute(
+                        select(
+                            UserSchedules.task_type,
+                            UserSchedules.cron_expr,
+                            UserSchedules.timezone,
+                        )
+                        .where(UserSchedules.id == schedule_id)
+                        .where(UserSchedules.user_id == str(auth.user_id))
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+
     # agent_routine payload edits must keep the contract the master
     # scheduler relies on. (task_type itself is immutable on update.)
-    if "payload" in fields and isinstance(fields["payload"], dict):
-        async with read_scope() as session:
-            existing = (
-                await session.execute(
-                    select(UserSchedules.task_type)
-                    .where(UserSchedules.id == schedule_id)
-                    .where(UserSchedules.user_id == str(auth.user_id))
-                    .limit(1)
-                )
-            ).first()
-        if existing is not None and existing[0] == "agent_routine":
-            _validate_agent_routine_payload(fields["payload"])
+    if (
+        "payload" in fields
+        and isinstance(fields["payload"], dict)
+        and existing_row is not None
+        and existing_row["task_type"] == "agent_routine"
+    ):
+        _validate_agent_routine_payload(fields["payload"])
 
-    if "cron_expr" in fields:
-        next_at = _validate_cron(fields["cron_expr"])
-        fields["next_fire_at"] = next_at
+    if "cron_expr" in fields or "timezone" in fields:
+        effective_cron = fields.get("cron_expr") or (
+            existing_row["cron_expr"] if existing_row else "* * * * *"
+        )
+        effective_tz = fields.get("timezone") or (
+            existing_row["timezone"] if existing_row else "UTC"
+        )
+        fields["next_fire_at"] = _validate_cron(effective_cron, effective_tz)
 
     try:
         async with write_scope() as session:
@@ -319,6 +373,59 @@ async def fire_schedule_now(schedule_id: str, auth: AuthDep) -> Dict[str, Any]:
             .values(next_fire_at=datetime.now(timezone.utc))
         )
     return {"ok": True, "queued_for_next_tick": True}
+
+
+@router.post("/{schedule_id}/resume", response_model=ScheduleResponse)
+async def resume_schedule(schedule_id: str, auth: AuthDep) -> ScheduleResponse:
+    """Clear an auto-paused (or manually disabled) schedule: re-enable it,
+    reset the consecutive-failure run, drop the pause metadata, and recompute
+    next_fire_at from its cron + timezone so it fires fresh rather than
+    immediately backfilling. Owner-only."""
+    async with read_scope() as session:
+        existing = (
+            (
+                await session.execute(
+                    select(UserSchedules.cron_expr, UserSchedules.timezone)
+                    .where(UserSchedules.id == schedule_id)
+                    .where(UserSchedules.user_id == str(auth.user_id))
+                    .limit(1)
+                )
+            )
+            .mappings()
+            .first()
+        )
+    if existing is None:
+        raise HTTPException(404, "schedule not found")
+
+    next_at = _validate_cron(existing["cron_expr"], existing["timezone"] or "UTC")
+    try:
+        async with write_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        sa_update(UserSchedules)
+                        .where(UserSchedules.id == schedule_id)
+                        .where(UserSchedules.user_id == str(auth.user_id))
+                        .values(
+                            enabled=True,
+                            consecutive_fails=0,
+                            paused_at=None,
+                            pause_reason=None,
+                            last_error=None,
+                            next_fire_at=next_at,
+                        )
+                        .returning(*UserSchedules.__table__.columns)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+    except Exception as exc:
+        logger.exception(f"schedule resume failed: {exc}")
+        raise HTTPException(500, "resume failed")
+    if not rows:
+        raise HTTPException(404, "schedule not found")
+    return ScheduleResponse(**_serialize_schedule(rows[0]))
 
 
 __all__ = ["router"]

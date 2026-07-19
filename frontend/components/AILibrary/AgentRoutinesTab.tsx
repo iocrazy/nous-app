@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Clock, Play, Plus, Trash2 } from 'lucide-react';
+import { Clock, Play, Plus, Sparkles, Trash2 } from 'lucide-react';
 import type { AILibraryAgent } from '../../types';
 import {
   schedulesService,
@@ -15,34 +15,94 @@ import { UiSelect } from '../ui';
 // existing execute_issue chain — results land as issue replies.
 
 const CRON_PRESETS: Array<{ label: string; expr: string }> = [
-  { label: 'Daily 09:00 UTC', expr: '0 9 * * *' },
+  { label: 'Daily 09:00', expr: '0 9 * * *' },
   { label: 'Hourly', expr: '0 * * * *' },
-  { label: 'Weekly Mon 09:00 UTC', expr: '0 9 * * 1' },
+  { label: 'Weekly Mon 09:00', expr: '0 9 * * 1' },
   { label: 'Every 15 min', expr: '*/15 * * * *' },
 ];
 
-// "+8" / "-5:30" — shown in the UTC hint so users can translate cron hours.
-function localUtcOffsetLabel(): string {
-  const tzMin = -new Date().getTimezoneOffset();
-  const sign = tzMin >= 0 ? '+' : '-';
-  const abs = Math.abs(tzMin);
-  const mins = abs % 60;
-  return `${sign}${Math.floor(abs / 60)}${mins ? `:${String(mins).padStart(2, '0')}` : ''}`;
+// The browser's IANA timezone — the sensible default for a new routine.
+const BROWSER_TZ: string = ((): string => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+})();
+
+// A curated set of common IANA zones. The browser tz + the routine's current
+// tz are merged in at render time so every valid value is always selectable.
+const COMMON_TIMEZONES: string[] = [
+  'UTC',
+  'America/Los_Angeles',
+  'America/Denver',
+  'America/Chicago',
+  'America/New_York',
+  'America/Sao_Paulo',
+  'Europe/London',
+  'Europe/Paris',
+  'Europe/Berlin',
+  'Europe/Moscow',
+  'Asia/Dubai',
+  'Asia/Kolkata',
+  'Asia/Shanghai',
+  'Asia/Singapore',
+  'Asia/Tokyo',
+  'Asia/Hong_Kong',
+  'Australia/Sydney',
+  'Pacific/Auckland',
+];
+
+function timezoneOptions(current: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const tz of [BROWSER_TZ, ...COMMON_TIMEZONES, current]) {
+    if (tz && !seen.has(tz)) {
+      seen.add(tz);
+      out.push(tz);
+    }
+  }
+  return out;
 }
 
 interface RoutineFormState {
   name: string;
   cron_expr: string;
+  timezone: string;
   prompt_md: string;
   delivery_policy: 'skip_if_active' | 'always';
 }
 
-const EMPTY_FORM: RoutineFormState = {
-  name: '',
-  cron_expr: '0 9 * * *',
-  prompt_md: '',
-  delivery_policy: 'skip_if_active',
-};
+function emptyForm(): RoutineFormState {
+  return {
+    name: '',
+    cron_expr: '0 9 * * *',
+    timezone: BROWSER_TZ,
+    prompt_md: '',
+    delivery_policy: 'skip_if_active',
+  };
+}
+
+// "Daily topic scout" template — prefills a routine that reviews the topic
+// inspiration pool each morning and proposes concrete video topics.
+const DAILY_TOPIC_SCOUT_PROMPT = [
+  "Review the team's topic inspiration pool and propose 3 concrete video",
+  'topics for today. For each topic give: (1) a specific angle, (2) a',
+  'scroll-stopping hook for the first 3 seconds, and (3) one reference or',
+  'example to model it on. Favor ideas that build on notes already in the',
+  'inspiration pool over generic trends. Keep each topic tight — one or two',
+  'sentences per part.',
+].join(' ');
+
+function dailyTopicScoutForm(): RoutineFormState {
+  return {
+    name: 'Daily topic scout',
+    cron_expr: '0 9 * * *',
+    timezone: BROWSER_TZ,
+    prompt_md: DAILY_TOPIC_SCOUT_PROMPT,
+    delivery_policy: 'skip_if_active',
+  };
+}
 
 const RoutineForm: React.FC<{
   initial: RoutineFormState;
@@ -53,6 +113,7 @@ const RoutineForm: React.FC<{
   const { t } = useTranslation();
   const [form, setForm] = useState<RoutineFormState>(initial);
   const isPreset = CRON_PRESETS.some((p) => p.expr === form.cron_expr);
+  const tzOptions = timezoneOptions(form.timezone);
 
   return (
     <div className="space-y-3 rounded-lg border border-ink-700 bg-ink-900/60 p-4">
@@ -98,9 +159,8 @@ const RoutineForm: React.FC<{
           />
           <p className="mt-1 text-[10px] text-ink-500">
             {t(
-              'aiLibrary.agents.routines.cronUtcHint',
-              'Cron hours are UTC — your timezone is UTC{{offset}}.',
-              { offset: localUtcOffsetLabel() },
+              'aiLibrary.agents.routines.cronTzHint',
+              'Cron hours are interpreted in the timezone below.',
             )}
           </p>
         </label>
@@ -128,6 +188,21 @@ const RoutineForm: React.FC<{
           </UiSelect>
         </label>
       </div>
+
+      <label className="block text-xs">
+        <span className="font-medium text-ink-400">
+          {t('aiLibrary.agents.routines.timezoneLabel', 'Timezone')}
+        </span>
+        <UiSelect
+          value={form.timezone}
+          onChange={(e) => setForm((f) => ({ ...f, timezone: e.target.value }))}
+          className="mt-1 w-full"
+        >
+          {tzOptions.map((tz) => (
+            <option key={tz} value={tz}>{tz}</option>
+          ))}
+        </UiSelect>
+      </label>
 
       <label className="block text-xs">
         <span className="font-medium text-ink-400">
@@ -171,6 +246,10 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
   const { addToast } = useToast();
   const [routines, setRoutines] = useState<ScheduleResponse[] | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [formInitial, setFormInitial] = useState<RoutineFormState>(emptyForm);
+  // Bumped on every open so RoutineForm remounts with fresh initial state even
+  // when it's already open (e.g. switching from edit to a template).
+  const [formKey, setFormKey] = useState(0);
   const [editing, setEditing] = useState<ScheduleResponse | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -194,6 +273,26 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
     void load();
   }, [load]);
 
+  const openForm = useCallback(
+    (initial: RoutineFormState, editRow: ScheduleResponse | null): void => {
+      setEditing(editRow);
+      setFormInitial(initial);
+      setFormKey((k) => k + 1);
+      setFormOpen(true);
+    },
+    [],
+  );
+
+  const editForm = (r: ScheduleResponse): RoutineFormState => ({
+    name: r.name,
+    cron_expr: r.cron_expr,
+    timezone: r.timezone || BROWSER_TZ,
+    prompt_md: String((r.payload as { prompt_md?: string }).prompt_md ?? ''),
+    delivery_policy:
+      ((r.payload as { delivery_policy?: string }).delivery_policy as
+        RoutineFormState['delivery_policy']) ?? 'skip_if_active',
+  });
+
   const submit = async (form: RoutineFormState): Promise<void> => {
     setSubmitting(true);
     try {
@@ -210,12 +309,14 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
         await schedulesService.update(editing.id, {
           name: form.name,
           cron_expr: form.cron_expr,
+          timezone: form.timezone,
           payload,
         });
       } else {
         await schedulesService.create({
           name: form.name,
           cron_expr: form.cron_expr,
+          timezone: form.timezone,
           task_type: 'agent_routine',
           payload,
           enabled: true,
@@ -252,6 +353,16 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
     }
   };
 
+  const resume = async (r: ScheduleResponse): Promise<void> => {
+    try {
+      await schedulesService.resume(r.id);
+      addToast(t('aiLibrary.agents.routines.resumed', 'Routine resumed'), 'success');
+      await load();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : String(err), 'error');
+    }
+  };
+
   const remove = async (r: ScheduleResponse): Promise<void> => {
     if (!window.confirm(t('aiLibrary.agents.routines.deleteConfirm', 'Delete this routine?'))) {
       return;
@@ -274,37 +385,35 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
           )}
         </p>
         {!formOpen && (
-          <button
-            type="button"
-            onClick={() => {
-              setEditing(null);
-              setFormOpen(true);
-            }}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-1.5 text-xs font-medium text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"
-          >
-            <Plus size={12} />
-            {t('aiLibrary.agents.routines.add', 'New routine')}
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => openForm(dailyTopicScoutForm(), null)}
+              title={t(
+                'aiLibrary.agents.routines.templateHint',
+                'Prefill a daily topic-scouting routine',
+              )}
+              className="inline-flex items-center gap-1.5 rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 text-xs font-medium text-ink-300 hover:bg-ink-700"
+            >
+              <Sparkles size={12} />
+              {t('aiLibrary.agents.routines.templateDailyTopic', 'Daily topic scout')}
+            </button>
+            <button
+              type="button"
+              onClick={() => openForm(emptyForm(), null)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-1.5 text-xs font-medium text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"
+            >
+              <Plus size={12} />
+              {t('aiLibrary.agents.routines.add', 'New routine')}
+            </button>
+          </div>
         )}
       </header>
 
       {formOpen && (
         <RoutineForm
-          initial={
-            editing
-              ? {
-                  name: editing.name,
-                  cron_expr: editing.cron_expr,
-                  prompt_md: String(
-                    (editing.payload as { prompt_md?: string }).prompt_md ?? '',
-                  ),
-                  delivery_policy:
-                    ((editing.payload as { delivery_policy?: string })
-                      .delivery_policy as RoutineFormState['delivery_policy']) ??
-                    'skip_if_active',
-                }
-              : EMPTY_FORM
-          }
+          key={formKey}
+          initial={formInitial}
           submitting={submitting}
           onCancel={() => {
             setFormOpen(false);
@@ -327,6 +436,7 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
         <div className="space-y-2">
           {routines.map((r) => {
             const lastIssue = (r.payload as { last_issue_id?: number }).last_issue_id;
+            const isPaused = !!r.paused_at;
             return (
               <div
                 key={r.id}
@@ -335,10 +445,7 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      setEditing(r);
-                      setFormOpen(true);
-                    }}
+                    onClick={() => openForm(editForm(r), r)}
                     className="truncate text-left text-sm font-medium text-ink-100 hover:text-[var(--accent-text)]"
                   >
                     {r.name}
@@ -347,12 +454,30 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
                     <Clock size={10} />
                     {r.cron_expr}
                   </span>
-                  {!r.enabled && (
-                    <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-px text-[10px] text-amber-300">
-                      {t('aiLibrary.agents.routines.disabled', 'disabled')}
+                  <span className="rounded border border-ink-700 bg-ink-800 px-1.5 py-px text-[10px] text-ink-500">
+                    {r.timezone}
+                  </span>
+                  {isPaused ? (
+                    <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-px text-[10px] font-medium text-amber-300">
+                      {t('aiLibrary.agents.routines.paused', 'Paused')}
                     </span>
+                  ) : (
+                    !r.enabled && (
+                      <span className="rounded border border-ink-700 bg-ink-800 px-1.5 py-px text-[10px] text-ink-400">
+                        {t('aiLibrary.agents.routines.disabled', 'disabled')}
+                      </span>
+                    )
                   )}
                   <span className="ml-auto flex items-center gap-1.5">
+                    {isPaused && (
+                      <button
+                        type="button"
+                        onClick={() => void resume(r)}
+                        className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-300 hover:bg-amber-500/20"
+                      >
+                        {t('aiLibrary.agents.routines.resume', 'Resume')}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => void fireNow(r)}
@@ -379,6 +504,9 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
                     </button>
                   </span>
                 </div>
+                {isPaused && r.pause_reason && (
+                  <p className="mt-1.5 text-[11px] text-amber-400/90">{r.pause_reason}</p>
+                )}
                 <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-ink-500">
                   <span>
                     {t('aiLibrary.agents.routines.nextFire', 'Next')}:{' '}
@@ -388,12 +516,17 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
                     {t('aiLibrary.agents.routines.lastFire', 'Last')}:{' '}
                     {r.last_fired_at ? new Date(r.last_fired_at).toLocaleString() : '—'}
                   </span>
+                  {r.skipped_count > 0 && (
+                    <span>
+                      {t('aiLibrary.agents.routines.skipped', 'Skipped')}: {r.skipped_count}
+                    </span>
+                  )}
                   {lastIssue != null && (
                     <span>
                       {t('aiLibrary.agents.routines.lastIssue', 'Last issue')}: #{lastIssue}
                     </span>
                   )}
-                  {r.last_error && (
+                  {!isPaused && r.last_error && (
                     <span className="text-red-400">{r.last_error}</span>
                   )}
                 </div>
