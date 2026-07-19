@@ -11,7 +11,9 @@ heals the issues written before that hardening: for every
 ``origin_kind='project_stage'`` issue with ``team_id IS NULL`` whose project has
 a resolvable owner personal team, stamp that snowflake on the issue.
 
-Order of operations (both idempotent, run either order):
+Order of operations (all idempotent):
+  * ``normalize_personal_project_team_ids`` — first restores mis-stamped
+    personal projects to ``team_id IS NULL`` (the inverse seam bug).
   * ``project_stage_issues`` — creates the missing mirror issues for projects
     that predate the mirror hook; via the hardened ``ensure_stage_issue`` those
     new rows already carry the right team_id, so they never need this repair.

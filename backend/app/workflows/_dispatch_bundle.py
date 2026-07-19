@@ -26,6 +26,9 @@ from app.workflows.analyze_l1 import analyze_l1_workflow  # noqa: F401
 from app.workflows.backfill_issue_scope import (  # noqa: F401
     backfill_issue_scope_workflow,
 )
+from app.workflows.backfill_normalize_personal_project_team_ids import (  # noqa: F401
+    backfill_normalize_personal_project_team_ids_workflow,
+)
 from app.workflows.backfill_project_stage_issue_team_ids import (  # noqa: F401
     backfill_project_stage_issue_team_ids_workflow,
 )
