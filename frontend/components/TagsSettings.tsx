@@ -931,7 +931,7 @@ export const TagsSettings: React.FC = () => {
                           e.stopPropagation();
                           handlePromote(tag);
                         }}
-                        className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                        className="text-xs text-[var(--accent-text)] hover:text-[var(--accent-text)] transition-colors"
                       >
                         {t('settings.tags.promote', 'Promote')}
                       </button>
