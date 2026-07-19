@@ -5,15 +5,15 @@
  * what was right-clicked (file, folder, smartFolder, or empty area).
  */
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   FolderOpen, Upload, Trash2, Share2, Download,
   FolderPlus, ExternalLink, Pencil, Copy, Move, RefreshCw, Eye,
-  Sparkles, Tag,
+  Sparkles, Tag, Bookmark,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ContextMenuItem } from '../components/ContextMenu';
-import type { Folder, SmartCollection, ResourceItem } from '../types';
+import type { Folder, SmartCollection, ResourceItem, Resource } from '../types';
 import {
   getFolderContentCount,
   getResourceFileUrl,
@@ -21,7 +21,18 @@ import {
   generateGenPrompt,
   classifyResource,
 } from '../services/resourceService';
+import { fetchResourceTags } from '../services/unifiedTagService';
+import { hasToPublishTag, toggleToPublish } from '../services/toPublishService';
 import { downloadWithAuth } from '../utils/download';
+
+// Publishing currently supports video only, mirroring the Distribution publish
+// picker (uploads/generated videos; downloads aren't publishable). The
+// "Mark to publish" menu item therefore shows for video resources only.
+function isVideoResource(resource: Resource | undefined): boolean {
+  if (!resource) return false;
+  return resource.file_type === 'video'
+    || Boolean(resource.mime_type && resource.mime_type.startsWith('video/'));
+}
 
 interface ContextMenuState {
   x: number;
@@ -96,6 +107,48 @@ export function useContextMenuItems({
 }: UseContextMenuItemsOptions): ContextMenuItem[] {
   const { t } = useTranslation();
 
+  // "Mark to publish" reflects whether the right-clicked video already carries
+  // the well-known "To Publish" tag. Resolved synchronously from the row's
+  // joined tags when present, else fetched when the menu opens. null =
+  // unknown/loading → the item shows the default "Mark to publish" affordance.
+  const [publishMark, setPublishMark] = useState<{
+    resourceId: string | null;
+    marked: boolean | null;
+  }>({ resourceId: null, marked: null });
+
+  useEffect(() => {
+    if (!contextMenu || contextMenu.type !== 'file') {
+      setPublishMark({ resourceId: null, marked: null });
+      return undefined;
+    }
+    const resource = contextMenu.target?.resource as Resource | undefined;
+    const rid = resource?.id ? String(resource.id) : null;
+    if (!rid || !isVideoResource(resource)) {
+      setPublishMark({ resourceId: rid, marked: null });
+      return undefined;
+    }
+    // Prefer the joined tags array already present on the resource row.
+    if (Array.isArray(resource?.tags)) {
+      setPublishMark({ resourceId: rid, marked: hasToPublishTag(resource.tags) });
+      return undefined;
+    }
+    // Otherwise resolve asynchronously; guard against a stale response landing
+    // after the menu retargets to a different resource.
+    let cancelled = false;
+    setPublishMark({ resourceId: rid, marked: null });
+    (async () => {
+      try {
+        const assoc = await fetchResourceTags(rid);
+        if (cancelled) return;
+        setPublishMark({ resourceId: rid, marked: hasToPublishTag(assoc.map((a) => a.tag)) });
+      } catch (err) {
+        console.error('resources: load to-publish mark failed', err);
+        if (!cancelled) setPublishMark({ resourceId: rid, marked: false });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [contextMenu]);
+
   return useMemo((): ContextMenuItem[] => {
     if (!contextMenu) return [];
 
@@ -151,6 +204,33 @@ export function useContextMenuItems({
       if (canDo('copy')) items.push({ label: t('resources.copyTo'), icon: <Copy size={14} />, onClick: () => { ops.setOperationTargetItems([item]); ops.setOperationTargetFolders([]); ops.setFolderPickerMode('copy'); } });
       if (canDo('move')) items.push({ label: t('resources.moveTo'), icon: <Move size={14} />, onClick: () => { ops.setOperationTargetItems([item]); ops.setOperationTargetFolders([]); ops.setFolderPickerMode('move'); } });
       if (canDo('share')) items.push({ label: t('resources.share'), icon: <Share2 size={14} />, onClick: () => ops.setShareTarget({ resourceId: String(item.resource?.id) }) });
+      // Mark to publish (video only): feeds the Distribution publish picker's
+      // "To publish" filter via the shared "To Publish" tag.
+      if (canDo('update') && isVideoResource(item.resource)) {
+        const marked = publishMark.resourceId === String(resourceId) && publishMark.marked === true;
+        items.push({
+          label: marked
+            ? t('resources.unmarkToPublish', 'Unmark to Publish')
+            : t('resources.markToPublish', 'Mark to Publish'),
+          icon: <Bookmark size={14} />,
+          onClick: async () => {
+            if (!resourceId) return;
+            try {
+              const nowMarked = await toggleToPublish(String(resourceId), marked);
+              addToast(
+                nowMarked
+                  ? t('resources.markedToPublish', 'Marked to publish')
+                  : t('resources.unmarkedToPublish', 'Removed from publish list'),
+                'success',
+              );
+            } catch (err) {
+              console.error('resources: toggle to-publish failed', err);
+              addToast(t('resources.markToPublishFailed', 'Could not update publish mark'), 'error');
+            }
+          },
+          disabled: !resourceId,
+        });
+      }
       if (canDo('delete')) items.push({ label: t('resources.moveToTrash'), icon: <Trash2 size={14} />, onClick: () => { if (resourceId) handleTrash(resourceId); }, danger: true, divider: true });
       return items;
     }
@@ -241,5 +321,5 @@ export function useContextMenuItems({
       });
     }
     return emptyItems;
-  }, [contextMenu, t, selectedLibraryId, navigate, resPath, handleTrash, ops, isPersonal, scopeId, selectedFolderId, loadFolders, loadChildFolders, reloadResources, canDo, fileInputRef, setSelectedResource, setSelectedFolder, setShowInfoPanel, addToast, setLoading, setResources, setCreatingFolder, versionInputRef]);
+  }, [contextMenu, t, selectedLibraryId, navigate, resPath, handleTrash, ops, isPersonal, scopeId, selectedFolderId, loadFolders, loadChildFolders, reloadResources, canDo, fileInputRef, setSelectedResource, setSelectedFolder, setShowInfoPanel, addToast, setLoading, setResources, setCreatingFolder, versionInputRef, publishMark]);
 }
