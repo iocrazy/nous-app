@@ -83,9 +83,10 @@ test('renders an arranged card at start×zoom with width duration×zoom', async 
   const card = page.locator('[data-testid="arr-card"]');
   const box = await card.boundingBox();
   if (!box) throw new Error('arr-card has no box');
-  // width = 40s × 6 = 240 (± border). left offset relative to lanes = 20s × 6 = 120.
-  expect(box.width).toBeGreaterThan(232);
-  expect(box.width).toBeLessThan(250);
+  // width = 40s × 6 = 240, minus the 8px inter-card gap → 232 (border-box).
+  // left offset relative to lanes = 20s × 6 = 120.
+  expect(box.width).toBeGreaterThan(224);
+  expect(box.width).toBeLessThan(244);
 
   const lanes = await page.locator('[data-testid="arr-lanes"]').boundingBox();
   if (!lanes) throw new Error('arr-lanes has no box');

@@ -4,7 +4,7 @@
  * directly. Pointer-drag persistence is covered by the e2e spec (real timing);
  * here we assert the render math and the non-drag mutations.
  */
-import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, act, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Beat } from '../sceneService';
@@ -96,17 +96,19 @@ describe('BeatsView sub-view toggle', () => {
 });
 
 describe('ArrangementView timeline geometry', () => {
-  function renderArrangement(beats: Beat[], zoom = 6) {
-    localStorage.setItem('editor.beatsZoom.1', String(zoom));
+  function renderArrangement(beats: Beat[], zoom: number | null = 6) {
+    if (zoom != null) localStorage.setItem('editor.beatsZoom.1', String(zoom));
     const onUpdate = vi.fn();
     const onCreate = vi.fn();
     render(
       <ArrangementView
         scriptId="1"
         beats={beats}
+        scenes={noScenes}
         onAdd={vi.fn()}
         onUpdate={onUpdate}
         onCreate={onCreate}
+        onOpenScene={vi.fn()}
       />,
     );
     return { onUpdate, onCreate };
@@ -115,8 +117,8 @@ describe('ArrangementView timeline geometry', () => {
   it('positions and sizes an arranged card from start/duration × pxPerSec', async () => {
     renderArrangement([beat({ id: 'a', start_sec: 60, duration_sec: 120 })], 6);
     const card = await screen.findByTestId('arr-card');
-    // left = 60 × 6 = 360; width = 120 × 6 = 720
-    expect(card).toHaveStyle({ left: '360px', width: '720px' });
+    // left = 60 × 6 = 360; width = 120 × 6 = 720, minus the 8px inter-card gap → 712
+    expect(card).toHaveStyle({ left: '360px', width: '712px' });
   });
 
   it('renders a duration chip using the shared formatter', async () => {
@@ -181,5 +183,41 @@ describe('ArrangementView timeline geometry', () => {
     const row = await screen.findByTestId('arr-list-item');
     fireEvent.click(row);
     expect(row.className).toContain('selected');
+  });
+
+  it('opens the Edit Beat modal and saves a changed title via onUpdate', async () => {
+    const { onUpdate } = renderArrangement([
+      beat({ id: 'a', start_sec: 0, duration_sec: 60, title: 'Setup' }),
+    ]);
+    fireEvent.click(await screen.findByTestId('arr-card-edit'));
+    const modal = await screen.findByTestId('beat-edit-modal');
+    fireEvent.change(within(modal).getByTestId('beat-edit-title'), {
+      target: { value: 'Opening Image' },
+    });
+    fireEvent.click(within(modal).getByTestId('beat-edit-save'));
+    // Only the changed field is committed (exclude_unset semantics).
+    expect(onUpdate).toHaveBeenCalledWith('a', { title: 'Opening Image' });
+    await waitFor(() => expect(screen.queryByTestId('beat-edit-modal')).toBeNull());
+  });
+
+  it('auto-fits the timeline on first open when no zoom is stored', async () => {
+    // No editor.beatsZoom seed → the auto-fit path runs. Stub the viewport width
+    // (jsdom reports 0) so Fit has a real width to fit into.
+    const proto = window.HTMLElement.prototype;
+    const desc = Object.getOwnPropertyDescriptor(proto, 'clientWidth');
+    Object.defineProperty(proto, 'clientWidth', { configurable: true, get: () => 800 });
+    try {
+      renderArrangement([beat({ id: 'a', start_sec: 0, duration_sec: 600 })], null);
+      await screen.findByTestId('arr-card');
+      // Auto-fit → ~800/600 px·s⁻¹, width ≈ 792 — far below the default-zoom (6)
+      // width of 3592, proving the fit ran instead of the default applying.
+      await waitFor(() => {
+        const w = Number.parseFloat((screen.getByTestId('arr-card') as HTMLElement).style.width);
+        expect(w).toBeLessThan(1500);
+      });
+    } finally {
+      if (desc) Object.defineProperty(proto, 'clientWidth', desc);
+      else delete (proto as unknown as Record<string, unknown>).clientWidth;
+    }
   });
 });
