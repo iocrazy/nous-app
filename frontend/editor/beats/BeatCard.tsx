@@ -18,17 +18,8 @@ import { useTranslation } from 'react-i18next';
 
 import type { Beat, BeatInput } from '../sceneService';
 import type { SceneDoc } from '../types';
-import { UiSelect } from '../../components/ui';
 import { BEAT_COLORS, formatBeatDuration } from './beatColors';
-
-/** `INT · Location · TIME`, empty parts dropped (mirrors OutlineView's head). */
-function sceneLabel(scene: SceneDoc, fallback: string): string {
-  const label = [scene.heading_int_ext, scene.location_text, scene.time_of_day]
-    .map((part) => (part ?? '').trim())
-    .filter((part) => part.length > 0)
-    .join(' · ');
-  return label || fallback;
-}
+import { BeatSceneLinks } from './BeatSceneLinks';
 
 /** Auto-disarm window for the two-click delete confirm (ms). */
 const CONFIRM_WINDOW_MS = 3000;
@@ -134,7 +125,6 @@ export function BeatCard({
   }, [confirmingDelete, onDelete]);
 
   const linkedIds = beat.scene_ids;
-  const unlinkedScenes = scenes.filter((s) => !linkedIds.includes(String(s.id)));
   const durationLabel = formatBeatDuration(beat.duration_sec);
 
   return (
@@ -266,55 +256,12 @@ export function BeatCard({
         </>
       )}
 
-      <div className="mh-beat-scenes">
-        {linkedIds.map((sceneId) => {
-          const scene = scenes.find((s) => String(s.id) === String(sceneId));
-          const label = scene
-            ? sceneLabel(scene, t('editor.untitledScene'))
-            : t('editor.beatSceneMissing');
-          return (
-            <span className="mh-beat-chip" key={sceneId} data-testid="beat-scene-chip">
-              <button
-                type="button"
-                className="mh-beat-chip-label"
-                disabled={!scene}
-                onClick={() => scene && onOpenScene(String(sceneId))}
-              >
-                {label}
-              </button>
-              <button
-                type="button"
-                className="mh-beat-chip-x"
-                aria-label={t('editor.beatUnlinkScene')}
-                onClick={() =>
-                  onUpdate({ scene_ids: linkedIds.filter((id) => id !== sceneId) })
-                }
-              >
-                ×
-              </button>
-            </span>
-          );
-        })}
-        {unlinkedScenes.length > 0 && (
-          <UiSelect
-            triggerClassName="mh-beat-link-select"
-            data-testid="beat-link-scene"
-            aria-label={t('editor.beatLinkScene')}
-            value=""
-            onChange={(e) => {
-              const id = e.target.value;
-              if (id) onUpdate({ scene_ids: [...linkedIds, id] });
-            }}
-          >
-            <option value="">{t('editor.beatLinkScene')}</option>
-            {unlinkedScenes.map((s) => (
-              <option key={s.id} value={String(s.id)}>
-                {sceneLabel(s, t('editor.untitledScene'))}
-              </option>
-            ))}
-          </UiSelect>
-        )}
-      </div>
+      <BeatSceneLinks
+        linkedIds={linkedIds}
+        scenes={scenes}
+        onOpenScene={onOpenScene}
+        onChange={(scene_ids) => onUpdate({ scene_ids })}
+      />
     </div>
   );
 }
