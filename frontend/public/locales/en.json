@@ -3093,7 +3093,6 @@
     "memoMoveFailed": "Failed to move memo",
     "memoUnpinFailed": "Failed to remove memo from timeline",
     "memoDeleteFailed": "Failed to delete memo",
-    "memoAnchorChip": "Pinned to a script timeline at {{time}}",
     "beatSaveTemplateBtn": "Save as template",
     "beatSaveTemplateTitle": "Save as Template",
     "beatSaveTemplateNameLabel": "Template name",
