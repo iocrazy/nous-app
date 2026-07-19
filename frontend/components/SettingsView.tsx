@@ -322,7 +322,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
 
            {/* Section 0: Appearance — Theme (island redesign D11) */}
            <div className="px-6 py-4 border-y border-ink-800 bg-ink-900/50 flex items-center gap-3">
-              <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
+              <div className="p-2 bg-[var(--accent-soft)] rounded-lg text-[var(--accent-text)]">
                  <SunMoon size={20} />
               </div>
               <h2 className="font-semibold text-ink-200">Appearance</h2>
@@ -411,7 +411,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                     onClick={() => setLocalSettings({...localSettings, progressStyle: 'wave'})}
                  >
                     <div className="flex flex-col items-center gap-3">
-                       <div className="w-full aspect-video rounded-lg bg-ink-950 border border-indigo-500/50 flex items-center justify-center relative overflow-hidden">
+                       <div className="w-full aspect-video rounded-lg bg-ink-950 border border-[var(--accent-border)] flex items-center justify-center relative overflow-hidden">
                           {/* Wave preview - animated only when selected */}
                           <div
                              className="absolute inset-x-0 bottom-0 transition-all duration-300 ease-out"
@@ -800,7 +800,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                               />
                               <button
                                  onClick={() => handleCopyKey(newKeySecret, 'new-key')}
-                                 className={`absolute right-3 top-1/2 -translate-y-1/2 ${copiedKeyId === 'new-key' ? 'text-green-500' : 'text-ink-500 hover:text-indigo-400'}`}
+                                 className={`absolute right-3 top-1/2 -translate-y-1/2 ${copiedKeyId === 'new-key' ? 'text-green-500' : 'text-ink-500 hover:text-[var(--accent-text)]'}`}
                               >
                                  {copiedKeyId === 'new-key' ? <CheckCircle size={18} /> : <Copy size={18} />}
                               </button>
@@ -889,7 +889,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                              className="w-full bg-ink-950 border border-ink-800 rounded-lg pl-10 pr-4 py-3 text-ink-200 outline-none focus:border-indigo-500 transition-colors"
                           />
                           {keyForm.expirationDate && (
-                             <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-indigo-400 font-medium">
+                             <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[var(--accent-text)] font-medium">
                                 Expires in {calculateDaysLeft(keyForm.expirationDate)} days
                              </div>
                           )}
@@ -901,7 +901,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                   <div className="space-y-3">
                      <div className="flex items-center justify-between">
                         <label className="text-sm font-medium text-ink-300 flex items-center gap-2">
-                           <Shield size={14} className="text-indigo-400"/>
+                           <Shield size={14} className="text-[var(--accent-text)]"/>
                            API Scopes (Required)
                         </label>
                         <button
@@ -911,7 +911,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                                  : DEFAULT_SCOPES;
                               setKeyForm({...keyForm, scopes: allScopes});
                            }}
-                           className="text-xs text-indigo-400 hover:text-indigo-300"
+                           className="text-xs text-[var(--accent-text)] hover:text-[var(--accent-text)]"
                         >
                            Select All
                         </button>
@@ -930,7 +930,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                               }}
                               className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
                                  keyForm.scopes.includes(scope)
-                                    ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-300'
+                                    ? 'bg-[var(--accent-soft)] border-[var(--accent-border)] text-[var(--accent-text)]'
                                     : 'bg-ink-900 border-ink-800 text-ink-400 hover:border-ink-700'
                               }`}
                            >

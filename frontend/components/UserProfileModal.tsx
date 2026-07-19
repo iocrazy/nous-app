@@ -37,7 +37,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, isOpen
             {/* Avatar Section */}
             <div className="flex flex-col items-center gap-3">
                 <div className="relative group">
-                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border-2 border-indigo-500/30 bg-ink-800">
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border-2 border-[var(--accent-border)] bg-ink-800">
                     {formData.avatarUrl ? (
                         <img src={formData.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
                     ) : (

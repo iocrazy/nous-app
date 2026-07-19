@@ -85,7 +85,7 @@ function escapeHtml(input: string): string {
 function renderInline(escaped: string): string {
   return escaped
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/`([^`]+)`/g, '<code class="text-indigo-300 bg-ink-800 px-1 rounded text-[11px]">$1</code>');
+    .replace(/`([^`]+)`/g, '<code class="text-[var(--accent-text)] bg-ink-800 px-1 rounded text-[11px]">$1</code>');
 }
 
 /** Simple markdown-ish renderer for release_notes */
@@ -99,8 +99,8 @@ function ReleaseNotes({ text }: { text: string }) {
         // Highlight block (starts with 🎯)
         if (trimmed.startsWith('🎯')) {
           return (
-            <div key={i} className="bg-indigo-950/60 border-l-3 border-indigo-500 pl-3 py-2 rounded-r-lg mb-2">
-              <p className="text-[13px] text-indigo-200 leading-relaxed" dangerouslySetInnerHTML={{
+            <div key={i} className="bg-[var(--accent-soft)] border-l-3 border-indigo-500 pl-3 py-2 rounded-r-lg mb-2">
+              <p className="text-[13px] text-[var(--accent-text)] leading-relaxed" dangerouslySetInnerHTML={{
                 __html: renderInline(escapeHtml(trimmed))
               }} />
             </div>
@@ -373,7 +373,7 @@ export const AdminDeploymentLogsPage: React.FC = () => {
                         <div className="flex items-center gap-1.5 mt-3 pt-2 border-t border-ink-800/50 text-[11px] text-ink-600">
                           <User size={10} />
                           <span>{log.published_by === 'claude-code' ? 'Release notes by Claude Code' : `Deployed by ${log.deployed_by}`}</span>
-                          {log.published_by === 'claude-code' && <Zap size={10} className="text-indigo-400" />}
+                          {log.published_by === 'claude-code' && <Zap size={10} className="text-[var(--accent-text)]" />}
                         </div>
                       )}
                     </div>

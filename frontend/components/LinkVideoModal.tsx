@@ -89,8 +89,8 @@ export const LinkVideoModal: React.FC<LinkVideoModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-ink-800 flex-shrink-0">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-500/20 rounded-lg">
-              <Video size={20} className="text-indigo-400" />
+            <div className="p-2 bg-[var(--accent-soft)] rounded-lg">
+              <Video size={20} className="text-[var(--accent-text)]" />
             </div>
             <h2 className="text-lg font-semibold text-ink-50">
               {t('mediatrack.selectVideo')}
@@ -170,7 +170,7 @@ export const LinkVideoModal: React.FC<LinkVideoModalProps> = ({
 
               {/* Loading state */}
               {isLinking === video.id && (
-                <Loader2 size={16} className="text-indigo-400 animate-spin flex-shrink-0" />
+                <Loader2 size={16} className="text-[var(--accent-text)] animate-spin flex-shrink-0" />
               )}
             </button>
           ))}

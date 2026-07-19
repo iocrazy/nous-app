@@ -199,7 +199,7 @@ export const CookiesSettings: React.FC = () => {
       {/* Header */}
       <div>
         <h2 className="text-base font-semibold text-ink-50 flex items-center gap-2">
-          <Cookie size={18} className="text-indigo-400" />
+          <Cookie size={18} className="text-[var(--accent-text)]" />
           Cookie Management
         </h2>
         <p className="text-sm text-ink-500 mt-1">
@@ -313,13 +313,13 @@ export const CookiesSettings: React.FC = () => {
                         onClick={() => fileInputRefs.current[platform.id]?.click()}
                         className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-lg py-6 cursor-pointer transition-colors text-center ${
                           card.isDragging
-                            ? 'border-indigo-500 bg-indigo-500/10'
+                            ? 'border-[var(--accent-border)] bg-[var(--accent-soft)]'
                             : 'border-ink-700 hover:border-ink-600 bg-ink-950/40'
                         }`}
                       >
                         <Upload size={20} className="text-ink-500" />
                         {card.fileName ? (
-                          <p className="text-xs text-indigo-400 font-medium px-2 truncate max-w-full">
+                          <p className="text-xs text-[var(--accent-text)] font-medium px-2 truncate max-w-full">
                             {card.fileName}
                           </p>
                         ) : (

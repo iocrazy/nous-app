@@ -49,7 +49,7 @@ const KanbanCard: React.FC<{
       onClick={onClick}
       className={`w-full text-left p-2 rounded border transition mb-1.5 ${
         selected
-          ? 'border-indigo-500/50 bg-indigo-500/10'
+          ? 'border-[var(--accent-border)] bg-[var(--accent-soft)]'
           : 'border-ink-800 bg-ink-900/60 hover:border-ink-700 hover:bg-ink-800/60'
       }`}
     >

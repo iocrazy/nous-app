@@ -118,7 +118,7 @@ export const IssueFilterPopover: React.FC<IssueFilterPopoverProps> = ({ filters,
       onClick={onClick}
       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded transition text-[11px] ${
         active
-          ? 'bg-indigo-500/20 text-indigo-200 ring-1 ring-indigo-500/40'
+          ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] ring-1 ring-indigo-500/40'
           : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800/80 ring-1 ring-ink-800'
       }`}
     >

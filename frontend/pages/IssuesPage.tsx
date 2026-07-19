@@ -262,7 +262,7 @@ const IssueListRow: React.FC<{
 }> = ({ issue, selected, onClick }) => (
   <button
     className={`w-full text-left px-4 py-3 border-b border-line hover:bg-ink-800/60 ${
-      selected ? 'bg-indigo-500/10' : ''
+      selected ? 'bg-[var(--accent-soft)]' : ''
     }`}
     onClick={onClick}
   >

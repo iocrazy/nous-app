@@ -140,7 +140,7 @@ export const InviteMembersModal: React.FC<InviteMembersModalProps> = ({
               <p className="text-sm text-ink-300">Create a new invite link:</p>
               <button
                 onClick={() => setShowSettings(!showSettings)}
-                className="text-xs text-indigo-400 hover:text-indigo-300"
+                className="text-xs text-[var(--accent-text)] hover:text-[var(--accent-text)]"
               >
                 {showSettings ? 'Hide Settings' : 'Link Settings'}
               </button>

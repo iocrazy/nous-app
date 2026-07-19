@@ -194,8 +194,8 @@ export function AdminNousModelsPage() {
             <ArrowLeft size={18} />
           </button>
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-indigo-500/10 rounded-xl flex items-center justify-center">
-              <Brain size={20} className="text-indigo-400" />
+            <div className="w-9 h-9 bg-[var(--accent-soft)] rounded-xl flex items-center justify-center">
+              <Brain size={20} className="text-[var(--accent-text)]" />
             </div>
             <div>
               <h1 className="text-xl font-bold text-ink-50">Nous Models</h1>
@@ -226,7 +226,7 @@ export function AdminNousModelsPage() {
             <Brain size={40} className="mx-auto text-ink-700 mb-3" />
             <p className="text-ink-500 text-sm">No models configured yet</p>
             <button onClick={openCreate}
-              className="mt-4 text-sm text-indigo-400 hover:text-indigo-300 transition-colors">
+              className="mt-4 text-sm text-[var(--accent-text)] hover:text-[var(--accent-text)] transition-colors">
               Add your first model
             </button>
           </div>
@@ -273,7 +273,7 @@ export function AdminNousModelsPage() {
                     <td className="px-4 py-3 text-center">
                       <button onClick={() => handleToggleEnabled(model)} className="inline-flex">
                         {model.is_enabled
-                          ? <ToggleRight size={22} className="text-indigo-400" />
+                          ? <ToggleRight size={22} className="text-[var(--accent-text)]" />
                           : <ToggleLeft size={22} className="text-ink-600" />}
                       </button>
                     </td>

@@ -64,7 +64,7 @@ export const MediaResultBody: React.FC<MediaResultBodyProps> = ({
       <div className="flex items-center gap-2 pt-1">
         <button
           onClick={() => onOpenResource(rid)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-indigo-300 bg-indigo-500/15 hover:bg-indigo-500/25 transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs text-[var(--accent-text)] bg-[var(--accent-soft)] hover:bg-[var(--accent-soft)] transition-colors"
         >
           <ExternalLink size={13} /> {t('topbar.openResource')}
         </button>

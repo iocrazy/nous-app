@@ -382,7 +382,7 @@ export const ShortcutsTagsPage: React.FC = () => {
           {translatedName && (
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-ink-800/50 text-xs">
               <span className="text-ink-500">{isChinese(newTagInput) ? 'EN:' : 'ZH:'}</span>
-              <span className="text-indigo-400">{translatedName}</span>
+              <span className="text-[var(--accent-text)]">{translatedName}</span>
             </div>
           )}
           <UiSelect

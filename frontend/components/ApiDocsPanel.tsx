@@ -72,7 +72,7 @@ const ParamsTable: React.FC<{ params: Param[] }> = ({ params }) => (
       <tbody>
         {params.map((p) => (
           <tr key={p.name} className="border-b border-ink-800/50">
-            <td className="py-2 px-3 font-mono text-indigo-300">{p.name}</td>
+            <td className="py-2 px-3 font-mono text-[var(--accent-text)]">{p.name}</td>
             <td className="py-2 px-3 text-ink-400">{p.type}</td>
             <td className="py-2 px-3">
               {p.required
@@ -367,8 +367,8 @@ export const ApiDocsPanel: React.FC = () => {
 
       {/* Header */}
       <div className="flex items-center gap-4">
-        <div className="p-3 bg-indigo-500/10 rounded-xl">
-          <BookOpen size={24} className="text-indigo-400" />
+        <div className="p-3 bg-[var(--accent-soft)] rounded-xl">
+          <BookOpen size={24} className="text-[var(--accent-text)]" />
         </div>
         <div>
           <h1 className="text-2xl font-bold text-ink-50">API Documentation</h1>
@@ -380,7 +380,7 @@ export const ApiDocsPanel: React.FC = () => {
       <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden">
         <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50">
           <h2 className="font-semibold text-ink-200 flex items-center gap-2">
-            <Server size={18} className="text-indigo-400" />
+            <Server size={18} className="text-[var(--accent-text)]" />
             Quick Start
           </h2>
         </div>
@@ -388,16 +388,16 @@ export const ApiDocsPanel: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="p-4 bg-ink-950/50 rounded-lg border border-ink-800/50">
               <div className="text-xs text-ink-500 mb-1">Base URL</div>
-              <code className="text-sm text-indigo-300 font-mono break-all">{BASE_URL}</code>
+              <code className="text-sm text-[var(--accent-text)] font-mono break-all">{BASE_URL}</code>
             </div>
             <div className="p-4 bg-ink-950/50 rounded-lg border border-ink-800/50">
               <div className="text-xs text-ink-500 mb-1">Authentication</div>
-              <code className="text-sm text-indigo-300 font-mono">X-API-Key</code>
+              <code className="text-sm text-[var(--accent-text)] font-mono">X-API-Key</code>
               <span className="text-ink-500 text-xs ml-1">header</span>
             </div>
             <div className="p-4 bg-ink-950/50 rounded-lg border border-ink-800/50">
               <div className="text-xs text-ink-500 mb-1">Content Type</div>
-              <code className="text-sm text-indigo-300 font-mono">application/json</code>
+              <code className="text-sm text-[var(--accent-text)] font-mono">application/json</code>
             </div>
           </div>
 
@@ -415,7 +415,7 @@ export const ApiDocsPanel: React.FC = () => {
       <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden">
         <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50">
           <h2 className="font-semibold text-ink-200 flex items-center gap-2">
-            <Shield size={18} className="text-indigo-400" />
+            <Shield size={18} className="text-[var(--accent-text)]" />
             Authentication
           </h2>
         </div>
@@ -468,7 +468,7 @@ Authorization: Bearer eyJhbGciOi...`} />
                 <tbody>
                   {scopesData.map((s) => (
                     <tr key={s.scope} className="border-b border-ink-800/50">
-                      <td className="py-2 px-3 font-mono text-indigo-300">{s.scope}</td>
+                      <td className="py-2 px-3 font-mono text-[var(--accent-text)]">{s.scope}</td>
                       <td className="py-2 px-3 text-ink-400">{s.description}</td>
                     </tr>
                   ))}

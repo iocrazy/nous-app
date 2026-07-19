@@ -115,7 +115,7 @@ const Pill: React.FC<{ active: boolean; onClick: () => void; children: React.Rea
     onClick={onClick}
     className={`px-2 py-0.5 text-[11px] rounded transition ${
       active
-        ? 'bg-indigo-500/20 text-indigo-300 ring-1 ring-indigo-500/40'
+        ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] ring-1 ring-indigo-500/40'
         : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
     }`}
   >
@@ -140,7 +140,7 @@ export const TaskToolbar: React.FC<TaskToolbarProps> = ({
            rather than show a disabled "+ New" stub. */}
         <a
           href="../dashboard/schedules"
-          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-500/30 hover:bg-indigo-500/25 hover:text-indigo-200"
+          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs rounded bg-[var(--accent-soft)] text-[var(--accent-text)] ring-1 ring-indigo-500/30 hover:bg-[var(--accent-soft)] hover:text-[var(--accent-text)]"
           title="Create a recurring schedule that fires tasks. Tasks themselves are auto-created by parser, AI pipelines, and the Workforce."
         >
           <Calendar size={13} /> Schedule

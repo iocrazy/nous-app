@@ -43,9 +43,9 @@ export const BatchActionBar: React.FC<BatchActionBarProps> = ({
   const { t } = useTranslation();
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2 bg-ink-900/95 border-t border-indigo-500/30 shadow-[0_-4px_12px_rgba(0,0,0,0.3)] text-xs shrink-0">
+    <div className="flex items-center gap-2 px-4 py-2 bg-ink-900/95 border-t border-[var(--accent-border)] shadow-[0_-4px_12px_rgba(0,0,0,0.3)] text-xs shrink-0">
       {busy && progress ? (
-        <span className="flex items-center gap-2 text-indigo-300">
+        <span className="flex items-center gap-2 text-[var(--accent-text)]">
           <Loader2 size={13} className="animate-spin" />
           {t('taskCenter.batch.running', {
             done: progress.done,
@@ -64,7 +64,7 @@ export const BatchActionBar: React.FC<BatchActionBarProps> = ({
         <button
           type="button"
           onClick={onSelectAllMatching}
-          className="text-indigo-300 hover:text-indigo-200 underline underline-offset-2 transition"
+          className="text-[var(--accent-text)] hover:text-[var(--accent-text)] underline underline-offset-2 transition"
         >
           {t('taskCenter.batch.selectAllMatching', { count: matchTotal ?? 0 })}
         </button>
@@ -87,7 +87,7 @@ export const BatchActionBar: React.FC<BatchActionBarProps> = ({
         type="button"
         onClick={onRetry}
         disabled={busy || retryableCount === 0}
-        className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-indigo-500/15 text-indigo-200 hover:bg-indigo-500/25 disabled:opacity-40 disabled:hover:bg-indigo-500/15 transition"
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[var(--accent-soft)] text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:opacity-40 disabled:hover:bg-[var(--accent-soft)] transition"
       >
         <RotateCw size={13} />
         {t('taskCenter.batch.retry', { count: retryableCount })}
