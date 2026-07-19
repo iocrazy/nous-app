@@ -18,7 +18,6 @@ import { CookiesSettings } from './CookiesSettings';
 import * as apiKeyService from '../services/apiKeyService';
 import { useConfirm } from './ConfirmDialog';
 import { ChatTempTtlPanel } from './ChatTempTtlPanel';
-import { ApiTokensPanel } from './Inspiration/ApiTokensPanel';
 
 interface SettingsViewProps {
   settings: UserSettings;
@@ -51,6 +50,7 @@ const DEFAULT_SCOPES = [
   'search:read',
   'tasks:read',
   'system:read',
+  'inspiration:write',
 ];
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSettings, activeTab, aiSettings, onSaveAISettings, embedded = false, currentUserId, userTeams = [] }) => {
@@ -61,6 +61,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
   const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
+  const [revealingKeyId, setRevealingKeyId] = useState<string | null>(null);
 
   // Animated progress for style preview
   const [animatedProgress, setAnimatedProgress] = useState(0);
@@ -175,6 +176,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
     navigator.clipboard.writeText(key);
     setCopiedKeyId(id);
     setTimeout(() => setCopiedKeyId(null), 2000);
+  };
+
+  // Reveal the FULL key (owner-only, decrypted server-side) and copy it to the
+  // clipboard. The full key is never rendered into the DOM — copy-only.
+  const handleCopyFullKey = async (keyId: string, rowId: string) => {
+    setRevealingKeyId(rowId);
+    try {
+      const fullKey = await apiKeyService.revealApiKey(keyId);
+      await navigator.clipboard.writeText(fullKey);
+      setCopiedKeyId(rowId);
+      setTimeout(() => setCopiedKeyId(null), 2000);
+    } catch (err) {
+      console.error('Failed to reveal API key:', err);
+      setApiKeysError(err instanceof Error ? err.message : 'Failed to copy full key');
+    } finally {
+      setRevealingKeyId(null);
+    }
   };
 
   const openCreateModal = () => {
@@ -571,7 +589,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
 
       {/* API Management Tab */}
       {activeTab === 'api' && (
-        <>
         <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden animate-in fade-in duration-300">
            <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -638,20 +655,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                              <div className="flex items-center gap-2">
                                 <button
                                    type="button"
-                                   onClick={() => handleCopyKey(key.key_prefix, String(key.id))}
-                                   className="opacity-70 hover:opacity-100 bg-ink-950 px-2 py-1 rounded border border-ink-800 cursor-pointer transition-opacity"
-                                   title="Click to copy the prefix. The full key is shown only once, at creation time; only the prefix is kept for display."
+                                   onClick={() => handleCopyFullKey(key.key_id, String(key.id))}
+                                   disabled={revealingKeyId === String(key.id)}
+                                   className="opacity-70 hover:opacity-100 bg-ink-950 px-2 py-1 rounded border border-ink-800 cursor-pointer transition-opacity disabled:cursor-wait"
+                                   title="Click to copy the full API key to your clipboard."
                                 >{key.key_prefix}</button>
                                 <button
                                    type="button"
-                                   onClick={() => handleCopyKey(key.key_prefix, String(key.id))}
-                                   aria-label={copiedKeyId === String(key.id) ? 'Copied' : 'Copy key prefix'}
-                                   title={copiedKeyId === String(key.id) ? 'Copied' : 'Copy key prefix'}
-                                   className={`p-1 rounded transition-colors ${copiedKeyId === String(key.id) ? 'text-green-500' : 'text-ink-500 hover:text-indigo-400'}`}
+                                   onClick={() => handleCopyFullKey(key.key_id, String(key.id))}
+                                   disabled={revealingKeyId === String(key.id)}
+                                   aria-label={copiedKeyId === String(key.id) ? 'Copied' : 'Copy full key'}
+                                   title={copiedKeyId === String(key.id) ? 'Copied' : 'Copy full key'}
+                                   className={`p-1 rounded transition-colors disabled:cursor-wait ${copiedKeyId === String(key.id) ? 'text-green-500' : 'text-ink-500 hover:text-indigo-400'}`}
                                 >
-                                   {copiedKeyId === String(key.id) ? <CheckCircle size={14} /> : <Copy size={14} />}
+                                   {revealingKeyId === String(key.id)
+                                      ? <Loader2 size={14} className="animate-spin" />
+                                      : copiedKeyId === String(key.id) ? <CheckCircle size={14} /> : <Copy size={14} />}
                                 </button>
-                                <span className="text-[10px] text-ink-600 italic whitespace-nowrap flex-shrink-0">shown once at creation</span>
+                                <span className="text-[10px] text-ink-600 italic whitespace-nowrap flex-shrink-0">click to copy full key</span>
                              </div>
                           </td>
                           <td className="px-6 py-4">
@@ -719,26 +740,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
            </div>
            )}
         </section>
-
-        {/* Inspiration Tokens — personal access tokens for the notes API */}
-        <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden animate-in fade-in duration-300 mt-6">
-           <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50">
-              <div className="flex items-center gap-3">
-                 <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
-                    <Key size={20} />
-                 </div>
-                 <div>
-                    <h2 className="font-semibold text-ink-200">Inspiration Tokens</h2>
-                    <p className="text-xs text-ink-500 mt-0.5">Tokens for writing notes from external scripts.</p>
-                 </div>
-              </div>
-           </div>
-           <div className="p-6">
-              <ApiTokensPanel />
-           </div>
-        </section>
-
-        </>
       )}
 
       {/* Logs Tab */}

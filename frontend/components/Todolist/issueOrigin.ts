@@ -118,10 +118,19 @@ export function originLabel(origin: ParsedOrigin): string {
  *  Derived from the origin — the row's honest module context — because a
  *  labels schema doesn't exist. Rows without a content origin get no chip,
  *  exactly like the mockup's untagged rows. Dot colors ride existing
- *  tailwind tokens (no new palette). */
+ *  tailwind tokens (no new palette).
+ *
+ *  `originKind` is the issue's origin_kind column. A routine-created issue
+ *  ('routine') stores a bare schedule id in origin_id (not a content ref), so
+ *  it can't be chipped from origin_id alone — the kind gives it a visible,
+ *  filterable "Autopilot" trace regardless. */
 export function originModule(
   originId: string | null | undefined,
+  originKind?: string | null,
 ): { label: string; dotClass: string } | null {
+  if (originKind === 'routine') {
+    return { label: 'Autopilot', dotClass: 'bg-amber-400' };
+  }
   const origin = parseOriginId(originId);
   if (!origin) return null;
   switch (origin.kind) {

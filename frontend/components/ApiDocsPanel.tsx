@@ -277,6 +277,30 @@ const endpoints: EndpointDef[] = [
   "videos": [ ... ]
 }`,
   },
+  {
+    method: 'POST',
+    path: '/api/v1/inspiration/notes',
+    description: 'Write a note into the inspiration library from an external script. Requires an API key with the "Inspiration Notes" scope. Note: this endpoint authenticates via the Authorization: Bearer header (not X-API-Key).',
+    params: [
+      { name: 'content_md', type: 'string', required: true, description: 'Note body in Markdown (#hashtags become tags)' },
+    ],
+    curl: `curl -X POST "${BASE_URL}/api/v1/inspiration/notes" \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer dk_your_api_key_here" \\
+  -d '{
+    "content_md": "a captured idea #inbox"
+  }'`,
+    response: `{
+  "id": "123456789",
+  "content_md": "a captured idea #inbox",
+  "tags": ["inbox"],
+  "note_date": "2026-07-18",
+  "pinned": false,
+  "attachments": [],
+  "created_at": "2026-07-18T00:00:00Z",
+  "updated_at": "2026-07-18T00:00:00Z"
+}`,
+  },
 ];
 
 // --- Collapsible Endpoint ---
@@ -346,6 +370,7 @@ const scopesData = [
   { scope: 'collections:write', description: 'Create and update collections' },
   { scope: 'collections:delete', description: 'Delete collections' },
   { scope: 'system:read', description: 'View system status' },
+  { scope: 'inspiration:write', description: 'Write notes into the inspiration library' },
 ];
 
 // --- Error Codes Table ---

@@ -1,10 +1,11 @@
 /**
- * Part 1 — Settings → API Management: KEY PREFIX cell is click-to-copy.
+ * Part 1 — Settings → API Management: the prefix cell copies the FULL key.
  *
- * The full key is only shown once at creation (encrypt-at-rest, #1005); the
- * table keeps only the prefix. This asserts the prefix chip + its copy button
- * copy `key.key_prefix` to the clipboard and surface the copied state, reusing
- * the file's existing handleCopyKey / copiedKeyId feedback.
+ * Keys are encrypted at rest (#1005); the table only ever shows the masked
+ * prefix. Clicking the chip or its copy button now calls the owner-only reveal
+ * endpoint and copies the COMPLETE key to the clipboard — the full key is never
+ * rendered into the DOM (copy-only). This asserts reveal → clipboard(full key)
+ * and the copied-state feedback.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -13,7 +14,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 const KEY_ROW = {
   id: 42,
   key_id: 'kid-42',
-  key_prefix: 'mhk_abcd1234',
+  key_prefix: 'dk_abcd1234...',
   key_value: null,
   key_value_set: true,
   name: 'CI Token',
@@ -28,12 +29,14 @@ const KEY_ROW = {
   updated_at: '2026-07-01T10:00:00Z',
 };
 
+const FULL_KEY = 'dk_abcd1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab';
+
 vi.mock('../services/apiKeyService', () => ({
   listApiKeys: vi.fn().mockResolvedValue([
     {
       id: 42,
       key_id: 'kid-42',
-      key_prefix: 'mhk_abcd1234',
+      key_prefix: 'dk_abcd1234...',
       key_value: null,
       key_value_set: true,
       name: 'CI Token',
@@ -49,6 +52,11 @@ vi.mock('../services/apiKeyService', () => ({
     },
   ]),
   getAvailableScopes: vi.fn().mockResolvedValue([]),
+  revealApiKey: vi
+    .fn()
+    .mockResolvedValue(
+      'dk_abcd1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab',
+    ),
   createApiKey: vi.fn(),
   updateApiKey: vi.fn(),
   deleteApiKey: vi.fn(),
@@ -76,10 +84,9 @@ vi.mock('./TagsSettings', () => ({ TagsSettings: () => null }));
 vi.mock('./ApiDocsPanel', () => ({ ApiDocsPanel: () => null }));
 vi.mock('./CookiesSettings', () => ({ CookiesSettings: () => null }));
 vi.mock('./ChatTempTtlPanel', () => ({ ChatTempTtlPanel: () => null }));
-// Inspiration tokens section embedded below API keys — not under test here.
-vi.mock('./Inspiration/ApiTokensPanel', () => ({ ApiTokensPanel: () => null }));
 
 import { SettingsView } from './SettingsView';
+import * as apiKeyService from '../services/apiKeyService';
 
 const writeText = vi.fn().mockResolvedValue(undefined);
 
@@ -93,7 +100,7 @@ function renderApiTab() {
   );
 }
 
-describe('SettingsView — API key prefix click-to-copy', () => {
+describe('SettingsView — API key full-key copy (reveal)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     Object.defineProperty(navigator, 'clipboard', {
@@ -102,22 +109,30 @@ describe('SettingsView — API key prefix click-to-copy', () => {
     });
   });
 
-  it('copies the prefix and shows copied state when the copy button is clicked', async () => {
+  it('reveals and copies the FULL key when the copy button is clicked', async () => {
     renderApiTab();
     await screen.findByText(KEY_ROW.key_prefix);
 
-    fireEvent.click(screen.getByLabelText('Copy key prefix'));
+    fireEvent.click(screen.getByLabelText('Copy full key'));
 
-    expect(writeText).toHaveBeenCalledWith(KEY_ROW.key_prefix);
+    await waitFor(() =>
+      expect(apiKeyService.revealApiKey).toHaveBeenCalledWith('kid-42'),
+    );
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(FULL_KEY));
+    // Never copies the masked prefix.
+    expect(writeText).not.toHaveBeenCalledWith(KEY_ROW.key_prefix);
     await waitFor(() => expect(screen.getByLabelText('Copied')).toBeTruthy());
   });
 
-  it('copies the prefix when the chip itself is clicked', async () => {
+  it('reveals and copies the FULL key when the chip itself is clicked', async () => {
     renderApiTab();
     const chip = await screen.findByText(KEY_ROW.key_prefix);
 
     fireEvent.click(chip);
 
-    expect(writeText).toHaveBeenCalledWith(KEY_ROW.key_prefix);
+    await waitFor(() =>
+      expect(apiKeyService.revealApiKey).toHaveBeenCalledWith('kid-42'),
+    );
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(FULL_KEY));
   });
 });

@@ -109,3 +109,52 @@ class UserSchedules(Base):
     )
     last_fired_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
     last_error: Mapped[Optional[str]] = mapped_column(Text)
+    # W2a autopilot hardening (mig 370). See the migration for column semantics.
+    timezone: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'UTC'::text"),
+        comment=(
+            "IANA timezone name the cron_expr is interpreted in. Cron fields are\n"
+            "     wall-clock in this zone; next_fire_at is stored as UTC. Invalid\n"
+            "     names fall back to UTC at compute time."
+        ),
+    )
+    consecutive_fails: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+        comment=(
+            "Run of dispatch failures since the last success. Reset to 0 on a\n"
+            "     successful fire; NOT changed by skipped fires. Drives auto-pause."
+        ),
+    )
+    paused_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(True),
+        comment=(
+            "When the master scheduler auto-paused this row (NULL = not\n"
+            "     auto-paused). An operator/user disable leaves this NULL."
+        ),
+    )
+    pause_reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        comment="Human-readable reason for an auto-pause, shown in the Routines UI.",
+    )
+    skipped_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+        comment=(
+            "Count of fires discarded as stale or gated by delivery policy.\n"
+            "     Telemetry only — excluded from the failure rate."
+        ),
+    )
+    stale_after_minutes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("60"),
+        comment=(
+            "A due fire more than this many minutes past its next_fire_at is\n"
+            "     discarded (counted in skipped_count) instead of dispatched."
+        ),
+    )

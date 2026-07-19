@@ -43,6 +43,10 @@ class ApiKeyScope(str, Enum):
     USER_PROFILE_READ = "user:profile:read"
     USER_PROFILE_WRITE = "user:profile:write"
 
+    # Inspiration notes (write access for external ingestion — supersedes the
+    # standalone mhk_ PAT surface)
+    INSPIRATION_WRITE = "inspiration:write"
+
 
 # Legacy scope aliases for backward compatibility
 LEGACY_SCOPE_MAP = {
@@ -309,6 +313,13 @@ AVAILABLE_SCOPES = [
         "name": "Read Teams",
         "description": "List your teams (scope picker for uploads)",
         "category": "Teams",
+    },
+    # Inspiration
+    {
+        "scope": ApiKeyScope.INSPIRATION_WRITE.value,
+        "name": "Inspiration Notes",
+        "description": "Write notes into the inspiration library",
+        "category": "Inspiration",
     },
 ]
 

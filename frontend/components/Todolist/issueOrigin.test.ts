@@ -98,6 +98,24 @@ describe('originModule', () => {
     expect(originModule('')).toBeNull();
     expect(originModule('12345')).toBeNull(); // routine schedule id
   });
+
+  it('chips a routine-created issue as Autopilot from origin_kind alone', () => {
+    // A routine stores a bare schedule id in origin_id (not a content ref), so
+    // the kind is what surfaces the trace — regardless of origin_id shape.
+    expect(originModule('12345', 'routine')).toEqual({
+      label: 'Autopilot',
+      dotClass: 'bg-amber-400',
+    });
+    expect(originModule(null, 'routine')).toEqual({
+      label: 'Autopilot',
+      dotClass: 'bg-amber-400',
+    });
+    // A non-routine kind still defers to the content origin_id.
+    expect(originModule('canvas:123', 'manual')).toEqual({
+      label: 'Canvas',
+      dotClass: 'bg-sky-400',
+    });
+  });
 });
 
 describe('publish origin', () => {
