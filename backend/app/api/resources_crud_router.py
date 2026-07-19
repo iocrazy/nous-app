@@ -55,7 +55,7 @@ MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB
 # ============================================
 
 
-_ALLOWED_TYPE_CATEGORIES = {"video", "image", "audio", "document", "other"}
+_ALLOWED_TYPE_CATEGORIES = {"video", "image", "audio", "document", "gallery", "other"}
 _ALLOWED_ASPECT_RATIOS = {"9:16", "16:9", "1:1", "4:3", "other"}
 _ALLOWED_SOCIAL_COMBINE = {"and", "or"}
 # resources.source_type CHECK enum (see promote_generated_media_service):

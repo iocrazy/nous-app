@@ -16,6 +16,7 @@ from fastapi import APIRouter
 from app.api.resources_ai_router import router as ai_router
 from app.api.resources_crud_router import router as crud_router
 from app.api.resources_folders_router import router as folders_router
+from app.api.resources_gallery_router import router as gallery_router
 from app.api.resources_search_router import router as search_router
 from app.api.resources_upload_router import router as upload_router
 from app.api.resources_versions_router import router as versions_router
@@ -34,4 +35,8 @@ router.include_router(upload_router)
 router.include_router(folders_router)
 router.include_router(versions_router)
 router.include_router(ai_router)
+# Gallery routes must precede crud_router: crud owns the catch-all
+# GET /resources/{resource_id}. POST /resources/galleries and the
+# /resources/{id}/gallery-items sub-paths register first as the defensive default.
+router.include_router(gallery_router)
 router.include_router(crud_router)
