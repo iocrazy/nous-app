@@ -463,6 +463,38 @@ async def get_share_schema(task_id: int, user: CurrentUserDep):
     if not h5:
         raise HTTPException(status_code=400, detail="No H5 share pending for this task")
     task = await publish_repo.get_task(task_id)
+    content_type = task.get("content_type") or "video"
+    creds = await get_douyin_credentials()
+    adapter = get_adapter(h5.get("platform", "douyin"), creds)
+    title = h5.get("title") or task.get("title") or ""
+    topics = h5.get("topics") or task.get("topics") or []
+    allow_download = task.get("allow_download")
+    if allow_download is None:
+        allow_download = True
+    private_status = visibility_to_private_status(task.get("visibility"))
+
+    if content_type == "images":
+        # An images note carries EVERY resource in batch order (never split per
+        # account), so resolve straight from the batch's resource_ids.
+        image_urls: list[str] = []
+        for rid in task.get("resource_ids") or []:
+            if not rid:
+                continue
+            url = await publish_repo.get_resource_media_url(int(rid))
+            if url:
+                image_urls.append(url)
+        if not image_urls:
+            raise HTTPException(status_code=400, detail="No media URL for share")
+        schema_url = await adapter.generate_image_share_url(
+            image_urls=image_urls,
+            title=title,
+            share_id=h5["share_id"],
+            hashtags=topics,
+            private_status=private_status,
+            allow_download=bool(allow_download),
+        )
+        return ShareSchemaResponse(schema_url=schema_url or "", share_id=h5["share_id"])
+
     resource_id = h5.get("resource_id") or (task.get("resource_ids") or [None])[0]
     video_url = (
         await publish_repo.get_resource_media_url(int(resource_id))
@@ -471,19 +503,12 @@ async def get_share_schema(task_id: int, user: CurrentUserDep):
     )
     if not video_url:
         raise HTTPException(status_code=400, detail="No media URL for share")
-    creds = await get_douyin_credentials()
-    adapter = get_adapter(h5.get("platform", "douyin"), creds)
-    title = h5.get("title") or task.get("title") or ""
-    topics = h5.get("topics") or task.get("topics") or []
-    allow_download = task.get("allow_download")
-    if allow_download is None:
-        allow_download = True
     schema_url = await adapter.generate_share_url(
         video_url=video_url,
         title=title,
         share_id=h5["share_id"],
         hashtags=topics,
-        private_status=visibility_to_private_status(task.get("visibility")),
+        private_status=private_status,
         allow_download=bool(allow_download),
     )
     return ShareSchemaResponse(schema_url=schema_url or "", share_id=h5["share_id"])

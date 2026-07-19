@@ -6,7 +6,7 @@ import {
   ListOrdered, MapPin, Plus, Radio, Search, Send, Sparkles, TrendingUp, X,
 } from 'lucide-react';
 import {
-  createPublishTask, listAccounts, listGeneratedVideos, listLibraryVideos,
+  createPublishTask, listAccounts, listGeneratedVideos, listLibraryMedia,
   promoteGeneratedVideo, GeneratedVideo,
 } from '../../services/distributionService';
 import {
@@ -22,6 +22,7 @@ type Visibility = 'public' | 'friends' | 'private';
 type Mode = 'broadcast' | 'one_to_one';
 type Channel = 'official' | 'h5';
 type Orientation = 'vertical' | 'horizontal';
+type ContentKind = 'video' | 'images';
 
 const VIS: Visibility[] = ['public', 'friends', 'private'];
 const PLATFORM_LABEL: Record<string, string> = {
@@ -94,8 +95,11 @@ export const PublishPage: React.FC = () => {
   const navigate = useNavigate();
   const { scopeId } = useWorkspaceScope();
 
+  const [contentType, setContentType] = useState<ContentKind>('video');
   const [videos, setVideos] = useState<LibraryVideo[]>([]);
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
+  // selectedVideos holds media resource ids in PICK ORDER — for images that
+  // order IS the gallery order sent to the note.
   const [selectedVideos, setSelectedVideos] = useState<string[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [title, setTitle] = useState('');
@@ -124,9 +128,13 @@ export const PublishPage: React.FC = () => {
   const [promotingId, setPromotingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    const mediaType = contentType === 'images' ? 'image' : 'video';
     try {
+      // Generated media is video-only today — skip it entirely in images mode.
       const [v, a, gen] = await Promise.all([
-        listLibraryVideos(scopeId), listAccounts(), listGeneratedVideos(),
+        listLibraryMedia(scopeId, { mediaType }),
+        listAccounts(),
+        contentType === 'images' ? Promise.resolve([]) : listGeneratedVideos(),
       ]);
       setVideos(v);
       setAccounts(a);
@@ -139,18 +147,19 @@ export const PublishPage: React.FC = () => {
       addToast(t('distribution.publish.loadFailed', 'Failed to load publish data'), 'error');
     }
     // "To publish" mark state — non-fatal side channel; failures leave the
-    // filter empty but never block the page.
+    // filter empty but never block the page. Scoped to the current media type
+    // so marks line up with the listed media.
     try {
       const tagId = await findToPublishTagId();
       if (tagId) {
         setToPublishTagId(tagId);
-        const marked = await listLibraryVideos(scopeId, { tagId });
+        const marked = await listLibraryMedia(scopeId, { tagId, mediaType });
         setMarkedIds(new Set(marked.map((m) => m.id)));
       }
     } catch (err) {
       console.error('distribution: load to-publish marks failed', err);
     }
-  }, [addToast, t, scopeId]);
+  }, [addToast, t, scopeId, contentType]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -167,6 +176,19 @@ export const PublishPage: React.FC = () => {
 
   const removeVideo = (id: string) =>
     setSelectedVideos((s) => s.filter((x) => x !== id));
+
+  const isImages = contentType === 'images';
+
+  // Switch content type: clears the selection (video ids ≠ image ids), resets
+  // the picker to the Library tab (Generated is video-only), and pins images
+  // to broadcast (a note is one post per account — never round-robin split).
+  const onContentTypeChange = (kind: ContentKind) => {
+    if (kind === contentType) return;
+    setContentType(kind);
+    setSelectedVideos([]);
+    setPickerTab('library');
+    if (kind === 'images') setMode('broadcast');
+  };
 
   // ── Topics (Douyin hashtags) ──
   // Add one bare tag (strip leading '#'), enforcing the same bounds as the
@@ -297,7 +319,11 @@ export const PublishPage: React.FC = () => {
 
   const postsBroadcast = selectedVideos.length * selectedAccounts.length;
   const postsOneToOne = selectedVideos.length > 0 ? selectedAccounts.length : 0;
-  const totalPosts = mode === 'broadcast' ? postsBroadcast : postsOneToOne;
+  // Images = ONE note per account carrying every picked image, so the post
+  // count is just the account count (the gallery is never split).
+  const totalPosts = isImages
+    ? (selectedVideos.length > 0 ? selectedAccounts.length : 0)
+    : (mode === 'broadcast' ? postsBroadcast : postsOneToOne);
 
   const firstSelectedAccount = useMemo(
     () => accounts.find((a) => a.id === selectedAccounts[0]),
@@ -330,7 +356,7 @@ export const PublishPage: React.FC = () => {
           .map(([id, cfg]) => [id, { title: cfg.title.trim() }]),
       );
       await createPublishTask({
-        content_type: 'video',
+        content_type: contentType,
         resource_ids: selectedVideos,
         title: title.trim(),
         description: description.trim() || undefined,
@@ -338,7 +364,9 @@ export const PublishPage: React.FC = () => {
         visibility,
         ai_content: aiContent,
         allow_download: allowDownload,
-        distribution_mode: mode,
+        // Images always broadcast (one note per account); force it so a stale
+        // one_to_one selection can't leak into the payload.
+        distribution_mode: isImages ? 'broadcast' : mode,
         channel,
         account_ids: selectedAccounts,
         account_configs: Object.keys(accountConfigsPayload).length ? accountConfigsPayload : undefined,
@@ -379,8 +407,32 @@ export const PublishPage: React.FC = () => {
           <div className="fcard">
             <h4>
               {t('distribution.publish.content', 'Content')}
-              <span className="aux">{t('distribution.publish.videoSelectedCount', 'Video · {{n}} selected', { n: selectedVideos.length })}</span>
+              <span className="aux">
+                {isImages
+                  ? t('distribution.publish.imagesSelectedCount', 'Images · {{n}} selected', { n: selectedVideos.length })
+                  : t('distribution.publish.videoSelectedCount', 'Video · {{n}} selected', { n: selectedVideos.length })}
+              </span>
             </h4>
+            <div className="seg" style={{ marginBottom: 10 }} role="tablist" aria-label={t('distribution.publish.contentType', 'Content type')}>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={!isImages}
+                className={!isImages ? 'on' : ''}
+                onClick={() => onContentTypeChange('video')}
+              >
+                {t('distribution.publish.contentTypeVideo', 'Video')}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={isImages}
+                className={isImages ? 'on' : ''}
+                onClick={() => onContentTypeChange('images')}
+              >
+                {t('distribution.publish.contentTypeImages', 'Images')}
+              </button>
+            </div>
             <div className="seg">
               <button type="button" className="on">{t('distribution.publish.fromLibrary', 'From Library')}</button>
               <button type="button" disabled title={t('distribution.comingInD3', 'Coming in D3')}>{t('distribution.publish.upload', 'Upload')}</button>
@@ -404,9 +456,18 @@ export const PublishPage: React.FC = () => {
                     >
                       ×
                     </button>
-                    <span className="play">
-                      <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                    </span>
+                    {isImages ? (
+                      <span
+                        className="ord"
+                        aria-label={t('distribution.publish.imageOrder', 'Image {{n}}', { n: idx + 1 })}
+                      >
+                        {idx + 1}
+                      </span>
+                    ) : (
+                      <span className="play">
+                        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                      </span>
+                    )}
                   </div>
                 );
               })}
@@ -611,24 +672,26 @@ export const PublishPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="fcard">
-            <h4>
-              {t('distribution.publish.distributionMode', 'Distribution mode')}
-              <span className="aux">
-                {t('distribution.publish.videosAccountsCount', '{{v}} videos × {{a}} accounts', { v: selectedVideos.length, a: selectedAccounts.length })}
-              </span>
-            </h4>
-            <div className="mode-cards">
-              <button type="button" className={`mode ${mode === 'broadcast' ? 'on' : ''}`} onClick={() => setMode('broadcast')}>
-                <b><Radio /> {t('distribution.publish.mode_broadcast', 'Broadcast')}</b>
-                <span>{t('distribution.publish.broadcastDesc', 'Every account posts every video — {{n}} posts total.', { n: postsBroadcast })}</span>
-              </button>
-              <button type="button" className={`mode ${mode === 'one_to_one' ? 'on' : ''}`} onClick={() => setMode('one_to_one')}>
-                <b><ArrowLeftRight /> {t('distribution.publish.mode_one_to_one', 'One-to-one')}</b>
-                <span>{t('distribution.publish.oneToOneDesc', 'Videos are assigned round-robin — {{n}} posts total.', { n: postsOneToOne })}</span>
-              </button>
+          {!isImages && (
+            <div className="fcard">
+              <h4>
+                {t('distribution.publish.distributionMode', 'Distribution mode')}
+                <span className="aux">
+                  {t('distribution.publish.videosAccountsCount', '{{v}} videos × {{a}} accounts', { v: selectedVideos.length, a: selectedAccounts.length })}
+                </span>
+              </h4>
+              <div className="mode-cards">
+                <button type="button" className={`mode ${mode === 'broadcast' ? 'on' : ''}`} onClick={() => setMode('broadcast')}>
+                  <b><Radio /> {t('distribution.publish.mode_broadcast', 'Broadcast')}</b>
+                  <span>{t('distribution.publish.broadcastDesc', 'Every account posts every video — {{n}} posts total.', { n: postsBroadcast })}</span>
+                </button>
+                <button type="button" className={`mode ${mode === 'one_to_one' ? 'on' : ''}`} onClick={() => setMode('one_to_one')}>
+                  <b><ArrowLeftRight /> {t('distribution.publish.mode_one_to_one', 'One-to-one')}</b>
+                  <span>{t('distribution.publish.oneToOneDesc', 'Videos are assigned round-robin — {{n}} posts total.', { n: postsOneToOne })}</span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* ── right: rail ── */}
@@ -643,7 +706,15 @@ export const PublishPage: React.FC = () => {
             </div>
             <div className="phone">
               <span className="notch" />
-              <div className="scene" />
+              <div
+                className="scene"
+                aria-label={isImages
+                  ? t('distribution.publish.imagePreviewAria', 'First image preview — gallery post')
+                  : undefined}
+                style={isImages && selectedVideoObjs[0]?.thumbnail_url
+                  ? { backgroundImage: `url(${selectedVideoObjs[0].thumbnail_url})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                  : undefined}
+              />
               <div className="shade" />
               <div className="ui">
                 <div className="tabs"><span>{t('distribution.publish.following', 'Following')}</span><span className="cur-t">{t('distribution.publish.forYou', 'For You')}</span></div>
@@ -759,9 +830,14 @@ export const PublishPage: React.FC = () => {
 
           <div className="summary">
             <h4>{t('distribution.publish.summaryHeading', 'Summary')}</h4>
-            <div className="line"><span>{t('distribution.publish.videosLabel', 'Videos')}</span><b>{selectedVideos.length}</b></div>
+            <div className="line">
+              <span>{isImages ? t('distribution.publish.imagesLabel', 'Images') : t('distribution.publish.videosLabel', 'Videos')}</span>
+              <b>{selectedVideos.length}</b>
+            </div>
             <div className="line"><span>{t('distribution.publish.accountsLabel', 'Accounts')}</span><b>{selectedAccounts.length}</b></div>
-            <div className="line"><span>{t('distribution.publish.modeLabel', 'Mode')}</span><b>{mode === 'broadcast' ? t('distribution.publish.mode_broadcast', 'Broadcast') : t('distribution.publish.mode_one_to_one', 'One-to-one')}</b></div>
+            {!isImages && (
+              <div className="line"><span>{t('distribution.publish.modeLabel', 'Mode')}</span><b>{mode === 'broadcast' ? t('distribution.publish.mode_broadcast', 'Broadcast') : t('distribution.publish.mode_one_to_one', 'One-to-one')}</b></div>
+            )}
             <div className="line total"><span>{t('distribution.publish.postsToCreate', 'Posts to create')}</span><b>{totalPosts}</b></div>
 
             <div className="check warn">
@@ -842,13 +918,16 @@ export const PublishPage: React.FC = () => {
                 >
                   {t('distribution.publish.pickerTabLibrary', 'Library')}
                 </button>
-                <button
-                  type="button"
-                  className={pickerTab === 'generated' ? 'on' : ''}
-                  onClick={() => setPickerTab('generated')}
-                >
-                  {t('distribution.publish.pickerTabGenerated', 'Generated')}
-                </button>
+                {/* Generated media is video-only — hide the tab for images. */}
+                {!isImages && (
+                  <button
+                    type="button"
+                    className={pickerTab === 'generated' ? 'on' : ''}
+                    onClick={() => setPickerTab('generated')}
+                  >
+                    {t('distribution.publish.pickerTabGenerated', 'Generated')}
+                  </button>
+                )}
               </div>
               {pickerTab === 'library' && (
                 <button
@@ -913,7 +992,9 @@ export const PublishPage: React.FC = () => {
                 {pickerResults.length === 0 && (
                   <p className="picker-empty">
                     {videos.length === 0
-                      ? t('distribution.publish.noContent', "No uploads or generated videos yet — downloads aren't publishable")
+                      ? (isImages
+                        ? t('distribution.publish.noImages', "No uploaded images yet — downloads aren't publishable")
+                        : t('distribution.publish.noContent', "No uploads or generated videos yet — downloads aren't publishable"))
                       : toPublishOnly && markedIds.size === 0
                         ? t('distribution.publish.pickerNoMarked', 'No videos marked to publish yet')
                         : t('distribution.publish.pickerNoResults', 'No videos match your search')}

@@ -11,7 +11,7 @@ vi.mock('../utils/apiConfig', () => ({
   getApiUrl: () => 'https://api.test',
 }));
 
-import { listLibraryVideos } from './distributionService';
+import { listLibraryVideos, listLibraryMedia } from './distributionService';
 
 /**
  * The real `GET /api/v1/resources` row (backend `get_resource_items`):
@@ -145,5 +145,35 @@ describe('listLibraryVideos — own-content provenance filter', () => {
     expect(url).toContain('source_types=generated');
     expect(url).toContain('source_types=derived');
     expect(url).toContain('tag_ids=tag-9');
+  });
+});
+
+describe('listLibraryMedia — media type filter', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it('defaults to types=video (back-compat alias)', async () => {
+    const spy = mockFetchJson({ success: true, data: [] });
+    vi.stubGlobal('fetch', spy);
+    await listLibraryMedia('scope-1');
+    const url = spy.mock.calls[0][0] as string;
+    expect(url).toContain('types=video');
+  });
+
+  it('requests types=image when mediaType is image', async () => {
+    const spy = mockFetchJson({ success: true, data: [] });
+    vi.stubGlobal('fetch', spy);
+    await listLibraryMedia('scope-1', { mediaType: 'image' });
+    const url = spy.mock.calls[0][0] as string;
+    expect(url).toContain('types=image');
+    expect(url).not.toContain('types=video');
+    // own-content provenance filter still applies to images.
+    expect(url).toContain('source_types=upload');
+  });
+
+  it('listLibraryVideos is the video-defaulted alias of listLibraryMedia', () => {
+    expect(listLibraryVideos).toBe(listLibraryMedia);
   });
 });

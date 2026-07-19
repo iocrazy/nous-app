@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.schemas.distribution_publish import (
+    MAX_IMAGES,
     MAX_TOPIC_LEN,
     MAX_TOPICS,
     AccountConfigOverride,
@@ -56,3 +57,47 @@ def test_create_schema_rejects_overlong_topic():
 def test_account_override_topics_normalized_and_none_safe():
     assert AccountConfigOverride(topics=None).topics is None
     assert AccountConfigOverride(topics=["#a", ""]).topics == ["a"]
+
+
+# ── images content type ───────────────────────────────────────────────────
+
+
+def test_images_accepts_up_to_max_images():
+    ids = [str(i) for i in range(MAX_IMAGES)]
+    task = _make(content_type="images", resource_ids=ids)
+    assert task.content_type == "images"
+    assert len(task.resource_ids) == MAX_IMAGES
+
+
+def test_images_rejects_over_max_images():
+    ids = [str(i) for i in range(MAX_IMAGES + 1)]
+    with pytest.raises(ValidationError, match="at most"):
+        _make(content_type="images", resource_ids=ids)
+
+
+def test_images_requires_resource_ids():
+    with pytest.raises(ValidationError, match="resource_ids required"):
+        _make(content_type="images", resource_ids=[])
+
+
+def test_images_one_to_one_bypasses_video_resource_count_check():
+    # one image, two accounts: a video one_to_one batch would 422 (fewer
+    # resources than accounts), but an images note broadcasts every image to
+    # each account, so the count check must NOT apply.
+    task = _make(
+        content_type="images",
+        resource_ids=["10"],
+        account_ids=["1", "2"],
+        distribution_mode="one_to_one",
+    )
+    assert task.content_type == "images"
+
+
+def test_video_one_to_one_still_enforces_resource_count():
+    with pytest.raises(ValidationError, match="at least as many resources"):
+        _make(
+            content_type="video",
+            resource_ids=["10"],
+            account_ids=["1", "2"],
+            distribution_mode="one_to_one",
+        )

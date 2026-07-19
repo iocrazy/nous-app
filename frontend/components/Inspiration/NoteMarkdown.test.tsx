@@ -37,6 +37,48 @@ describe('NoteMarkdown', () => {
   });
 });
 
+describe('NoteMarkdown inline tag chips', () => {
+  it('renders a tag-only line as a single chip without duplicating the raw text', () => {
+    const { container } = render(<NoteMarkdown source={'#颜值'} onTagClick={vi.fn()} />);
+    expect(screen.getByRole('button', { name: '#颜值' })).toBeTruthy();
+    // exactly one occurrence of the tag text — the chip, not chip + leftover
+    expect(container.textContent).toBe('#颜值');
+  });
+
+  it('keeps a mid-sentence tag inline with the surrounding text intact', () => {
+    const { container } = render(<NoteMarkdown source={'look at #颜值 today'} onTagClick={vi.fn()} />);
+    expect(screen.getByRole('button', { name: '#颜值' })).toBeTruthy();
+    // chip lives inside the paragraph flow, surrounding words preserved
+    expect(container.querySelector('p')?.textContent).toBe('look at #颜值 today');
+  });
+
+  it('does not chip a #word inside a fenced code block', () => {
+    const { container } = render(<NoteMarkdown source={'```\n#nope in code\n```'} onTagClick={vi.fn()} />);
+    expect(screen.queryByRole('button')).toBeNull();
+    // highlight may tokenize into spans, so read the raw text off the block
+    expect(container.querySelector('pre')?.textContent).toContain('#nope in code');
+  });
+
+  it('does not chip a #word inside inline code', () => {
+    const { container } = render(<NoteMarkdown source={'use `#nope` here'} onTagClick={vi.fn()} />);
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(container.querySelector('code')?.textContent).toBe('#nope');
+  });
+
+  it('clicking a chip fires onTagClick with the lowercased tag', () => {
+    const onTagClick = vi.fn();
+    render(<NoteMarkdown source={'idea #Hooks'} onTagClick={onTagClick} />);
+    fireEvent.click(screen.getByRole('button', { name: '#Hooks' }));
+    expect(onTagClick).toHaveBeenCalledWith('hooks');
+  });
+
+  it('renders a non-clickable styled span when no onTagClick is given', () => {
+    render(<NoteMarkdown source={'idea #hooks'} />);
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.getByText('#hooks').tagName).toBe('SPAN');
+  });
+});
+
 describe('NoteMarkdown headings/blockquote styling', () => {
   it('## renders a styled h2, not body text', () => {
     const { container } = render(<NoteMarkdown source={'## Section title'} />);
