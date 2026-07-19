@@ -279,3 +279,42 @@ describe('laper topbar + NLE drag guide', () => {
     expect(screen.queryByTestId('arr-drag-guide')).toBeNull();
   });
 });
+
+describe('template replace ordering (data-loss guard)', () => {
+  it('creates ALL template beats before deleting any existing beat', async () => {
+    const calls: string[] = [];
+    svc.listBeats.mockResolvedValue([
+      beat({ id: 'old1', start_sec: 0, duration_sec: 30 }),
+      beat({ id: 'old2', start_sec: 30, duration_sec: 30 }),
+    ]);
+    svc.createBeat.mockImplementation(async () => {
+      calls.push('create');
+      return beat({ id: `n${calls.length}` });
+    });
+    svc.deleteBeat.mockImplementation(async (id: string) => {
+      calls.push(`delete:${id}`);
+    });
+    render(<BeatsView scriptId="1" scenes={noScenes} onOpenScene={vi.fn()} />);
+    await waitFor(() => expect(screen.getAllByTestId('arr-card')).toHaveLength(2));
+
+    fireEvent.click(screen.getByTestId('arr-templates'));
+    const wizard = await screen.findByTestId('beats-template-wizard');
+    fireEvent.click(
+      within(wizard)
+        .getAllByTestId('beats-template-card')
+        .find((c) => (c as HTMLElement).dataset.key === 'five_beats')!,
+    );
+    fireEvent.click(within(wizard).getByTestId('beats-template-next')); // → length
+    fireEvent.click(within(wizard).getByTestId('beats-template-next')); // → mode
+    fireEvent.click(within(wizard).getByTestId('beats-template-mode-replace'));
+    fireEvent.click(within(wizard).getByTestId('beats-template-next')); // Generate
+
+    await waitFor(() => expect(calls.filter((c) => c.startsWith('delete')).length).toBe(2));
+    // Every create precedes every delete — a mid-batch create failure must
+    // leave the user's existing sheet untouched.
+    const lastCreate = calls.lastIndexOf('create');
+    const firstDelete = calls.findIndex((c) => c.startsWith('delete'));
+    expect(calls.filter((c) => c === 'create')).toHaveLength(5);
+    expect(firstDelete).toBeGreaterThan(lastCreate);
+  });
+});

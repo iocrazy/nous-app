@@ -92,13 +92,17 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
     async (templateBeats: BeatInput[], mode: 'append' | 'replace', targetSec: number) => {
       try {
         if (targetSec !== targetDurationSec) handleSetTargetDuration(targetSec);
-        if (mode === 'replace') {
-          await Promise.all(beats.map((b) => deleteBeat(b.id)));
-        }
-        // Sequential create preserves template order (create auto-assigns
-        // sort_order = script MAX + step, so a parallel burst would race it).
+        // CREATE first, DELETE last: a mid-batch create failure must leave the
+        // user's existing sheet intact (replace degrades to a no-op + toast),
+        // never "old sheet destroyed + 7 of 15 template rows". Sequential
+        // create preserves template order (create auto-assigns sort_order =
+        // script MAX + step, so a parallel burst would race it).
+        const priorIds = beats.map((b) => b.id);
         for (const data of templateBeats) {
           await createBeat(scriptId, data);
+        }
+        if (mode === 'replace') {
+          await Promise.all(priorIds.map((id) => deleteBeat(id)));
         }
         await reload();
       } catch (err) {

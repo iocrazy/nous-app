@@ -8,7 +8,7 @@
  * on the grid the arrangement drag would snap to. The wizard only produces the
  * rows + the intent; BeatsView does the REST writes and the target PATCH.
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { BeatInput } from '../sceneService';
@@ -55,8 +55,13 @@ export function BeatsTemplateWizard({
     }
   }, [custom]);
 
+  const appliedRef = useRef(false);
   const generate = useCallback(() => {
     if (!template) return;
+    // One shot: a double-click must not double-create (or double-delete in
+    // replace mode) — the modal unmounts async after onClose.
+    if (appliedRef.current) return;
+    appliedRef.current = true;
     const granularity = snapGranularity(chooseTickUnit(lengthSec));
     const beats = instantiateTemplate(template, lengthSec, granularity, t);
     onApply(beats, hasExistingBeats ? mode : 'append', lengthSec);
