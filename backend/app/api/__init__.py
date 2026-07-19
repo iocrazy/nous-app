@@ -24,6 +24,7 @@ from app.api.error_report_router import router as error_report_router
 from app.api.flows_router import router as flows_router
 from app.api.frontend_config_router import router as frontend_config_router
 from app.api.generated_media_router import router as generated_media_router
+from app.api.inbox_router import router as inbox_router
 from app.api.inspiration_router import router as inspiration_router
 from app.api.invites_router import router as invites_router
 from app.api.libraries_router import router as libraries_router
@@ -70,6 +71,7 @@ from app.api.teams_router import router as teams_router
 from app.api.temp_token_router import router as temp_token_router
 from app.api.temp_ttl_router import router as temp_ttl_router
 from app.api.topics_router import router as _topics_router
+from app.api.usage_router import router as usage_router
 from app.api.user_settings_router import router as settings_router
 from app.api.workforce_router import router as workforce_router
 
@@ -148,6 +150,7 @@ api_router.include_router(router=task_manager_router, tags=["Task Manager"])
 api_router.include_router(router=flows_router)
 
 api_router.include_router(router=teams_router, tags=["Teams"])
+api_router.include_router(router=usage_router, tags=["Usage"])
 
 api_router.include_router(router=conversation_router, tags=["Conversations"])
 
@@ -174,6 +177,7 @@ api_router.include_router(router=pipelines_router, tags=["Pipelines"])
 api_router.include_router(router=invites_router, tags=["Invites"])
 
 api_router.include_router(router=notifications_router, tags=["Notifications"])
+api_router.include_router(router=inbox_router, tags=["Inbox"])
 
 api_router.include_router(router=realtime_router, tags=["Realtime"])
 

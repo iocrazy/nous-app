@@ -19,6 +19,7 @@ import {
   MessageSquare,
   MessagesSquare,
   Plus,
+  Wallet,
 } from 'lucide-react';
 import type { AILibraryAgent } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
@@ -119,6 +120,7 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
   const skillsActive = /\/ai-library\/skills(\/|$)/.test(location.pathname);
   const sessionsActive = /\/ai-library\/sessions(\/|$)/.test(location.pathname);
   const usageActive = /\/ai-library\/usage(\/|$)/.test(location.pathname);
+  const aiCostActive = /\/ai-library\/ai-cost(\/|$)/.test(location.pathname);
   const workforceActive = /\/ai-library\/workforce(\/|$)/.test(location.pathname);
   const memoryActive = /\/ai-library\/memory(\/|$)/.test(location.pathname);
 
@@ -431,6 +433,12 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
               label={t('sidebar.aiUsage', 'AI Usage')}
               active={usageActive}
               onClick={() => navigate(`${urlPrefix}/ai-library/usage`)}
+            />
+            <NavItem
+              icon={Wallet}
+              label={t('sidebar.aiCost', 'Cost & Budget')}
+              active={aiCostActive}
+              onClick={() => navigate(`${urlPrefix}/ai-library/ai-cost`)}
             />
             <NavItem
               icon={Brain}

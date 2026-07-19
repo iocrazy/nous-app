@@ -620,6 +620,37 @@ async def mark_download_processing_step(workflow_id: str) -> None:
         logger.warning(f"[download.mark_processing] {workflow_id}: {e}")
 
 
+@DBOS.step()
+async def emit_download_notification_step(
+    user_id: str,
+    resource_id: Optional[str],
+    video_title: str,
+    severity: str,
+) -> None:
+    """W3d narrow inbox (producer 1/3): notify the download owner when a media
+    download reaches a terminal outcome — success (file is in the library) or
+    failure — deep-linked to the resource when one exists. Wrapped as a DBOS
+    step (memoized on replay → no duplicate notify on retry). notify() is itself
+    best-effort and never raises, so this can't fail the download workflow."""
+    from app.services.notifications import notify
+
+    if severity == "success":
+        title = f"Download ready: {video_title or 'Media'}"
+        body = None
+    else:
+        title = f"Download failed: {video_title or 'Media'}"
+        body = "The download did not complete."
+    await notify(
+        user_id=str(user_id),
+        kind="generation_result",
+        title=title,
+        body=body,
+        severity=severity,  # type: ignore[arg-type]
+        link_kind="resource" if resource_id else None,
+        link_id=str(resource_id) if resource_id else None,
+    )
+
+
 @DBOS.workflow()
 async def download_workflow(
     platform_id: str,
@@ -693,6 +724,9 @@ async def download_workflow(
             media_type=media_type,
             outcome="success",  # cache hit counts as success in audit log
         )
+        await emit_download_notification_step(
+            user_id, resource_id, video_title, "success"
+        )
         return {
             "status": "success",
             "platform_id": platform_id,
@@ -740,6 +774,9 @@ async def download_workflow(
             media_type=media_type,
             outcome="failed",
             error=str(e),
+        )
+        await emit_download_notification_step(
+            user_id, resource_id, video_title, "error"
         )
         # Re-raise so DBOS marks the workflow FAILED and the
         # mirror_dbos_lifecycle_to_tracking trigger writes
@@ -793,6 +830,9 @@ async def download_workflow(
             outcome="failed",
             error=f"Video download did not complete (result={results.get('video')!r})",
         )
+        await emit_download_notification_step(
+            user_id, resource_id, video_title, "error"
+        )
         raise RuntimeError(
             f"Video download did not complete for {platform_id}: "
             f"video={results.get('video')!r}, failed_parts={download_result['failed_parts']!r}"
@@ -816,6 +856,11 @@ async def download_workflow(
     await mark_task_user_visible_complete_step(
         workflow_id=DBOS.workflow_id,
         subtitle=video_title or "Downloaded",
+    )
+
+    # W3d inbox: file is on disk and visible in the library — notify the owner.
+    await emit_download_notification_step(
+        user_id, resource_id, video_title, "success" if not has_failures else "error"
     )
 
     # 4. Audit log

@@ -7,6 +7,8 @@ from app.core.deps import AuthDep
 from app.repositories.team_repository import get_team_repository
 from app.schemas.team import (
     JoinTeamRequest,
+    TeamAiBudgetResponse,
+    TeamAiBudgetUpdate,
     TeamCreate,
     TeamListResponse,
     TeamMemberListResponse,
@@ -17,6 +19,23 @@ from app.schemas.team import (
 )
 
 router = APIRouter(prefix="/teams", tags=["Teams"])
+
+
+def _budget_response(team_id: str, budget_row, spend) -> TeamAiBudgetResponse:
+    """Shape a team_ai_budgets row + month spend into the API response."""
+    from decimal import Decimal
+
+    ceiling = budget_row.get("monthly_budget_cents") if budget_row else None
+    over = ceiling is not None and Decimal(str(spend)) >= Decimal(str(ceiling))
+    uid = budget_row.get("updated_by_user_id") if budget_row else None
+    return TeamAiBudgetResponse(
+        team_id=str(team_id),
+        monthly_budget_cents=float(ceiling) if ceiling is not None else None,
+        month_spend_cents=float(spend),
+        over_budget=over,
+        updated_by_user_id=str(uid) if uid else None,
+        updated_at=budget_row.get("updated_at") if budget_row else None,
+    )
 
 
 @router.get("", response_model=TeamListResponse)
@@ -246,3 +265,63 @@ async def join_team(request: JoinTeamRequest, auth: AuthDep):
         created_at=team["created_at"],
         kind=team.get("kind") or "collaborative",
     )
+
+
+@router.get("/{team_id}/ai-budget", response_model=TeamAiBudgetResponse)
+async def get_team_ai_budget(team_id: str, auth: AuthDep):
+    """Get a team's monthly AI budget + current calendar-month spend.
+
+    Any team member may read. 404 for non-members (no cross-team leakage)."""
+    from app.services import ai_usage
+
+    repo = get_team_repository()
+    team = await repo.get_team_by_id(team_id, auth.user_id)
+    if not team:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Team not found or access denied",
+        )
+
+    budget_row = await ai_usage.get_team_budget(team_id)
+    spend = await ai_usage.get_team_month_spend_cents(team_id)
+    return _budget_response(team_id, budget_row, spend)
+
+
+@router.put("/{team_id}/ai-budget", response_model=TeamAiBudgetResponse)
+async def put_team_ai_budget(team_id: str, update: TeamAiBudgetUpdate, auth: AuthDep):
+    """Set a team's monthly AI budget (owner or admin only).
+
+    monthly_budget_cents None = unlimited (removes the ceiling)."""
+    from app.services import ai_usage
+
+    repo = get_team_repository()
+    team = await repo.get_team_by_id(team_id, auth.user_id)
+    if not team:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Team not found or access denied",
+        )
+
+    is_owner = str(team.get("owner_id")) == str(auth.user_id)
+    if not is_owner:
+        role = await repo.get_member_role(team_id, auth.user_id)
+        if role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the team owner or an admin can set the AI budget",
+            )
+
+    if update.monthly_budget_cents is not None and update.monthly_budget_cents < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="monthly_budget_cents must be >= 0",
+        )
+
+    await ai_usage.upsert_team_budget(
+        team_id,
+        monthly_budget_cents=update.monthly_budget_cents,
+        updated_by_user_id=auth.user_id,
+    )
+    budget_row = await ai_usage.get_team_budget(team_id)
+    spend = await ai_usage.get_team_month_spend_cents(team_id)
+    return _budget_response(team_id, budget_row, spend)

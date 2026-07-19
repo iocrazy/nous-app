@@ -62,6 +62,7 @@
     "agents": "智能体",
     "skills": "技能",
     "aiUsage": "AI 用量",
+    "aiCost": "成本与预算",
     "newAgent": "新建智能体",
     "agentRunning": "运行中...",
     "agentPausedBudget": "已暂停：超出月度预算",
@@ -498,6 +499,10 @@
     "paymentSuccessful": "支付成功！",
     "pointsAdded": "已充值 {{amount}} 积分",
     "orderHistory": "订单历史"
+  },
+  "inbox": {
+    "markAllRead": "全部标为已读",
+    "empty": "暂无新通知"
   },
   "topbar": {
     "search": "搜索 (⌘K)",
@@ -2557,6 +2562,10 @@
       "weekTokens": "7 日 tokens",
       "topModels": "7 日模型排行"
     }
+  },
+  "teamUsage": {
+    "title": "AI 成本与预算",
+    "subtitle": "本工作区的 token 消耗，按智能体、模型以及人工/自动化归因。"
   },
   "aiUsage": {
     "title": "AI 使用统计",

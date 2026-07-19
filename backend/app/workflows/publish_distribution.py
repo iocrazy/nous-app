@@ -252,6 +252,29 @@ async def _run_accounts(rows, accounts_repo, creds, task: dict, repo) -> list[st
     return statuses
 
 
+@DBOS.step()
+async def emit_publish_notification_step(
+    user_id: str, task_id: int, severity: str, summary: str
+) -> None:
+    """W3d narrow inbox (producer 2/3): one 'publish_result' notification to the
+    batch initiator when a publish batch reaches a terminal outcome, deep-linked
+    to the distribution records. Wrapped as a DBOS step (durable + memoized on
+    replay) so a retry doesn't re-notify. notify() is itself best-effort — it
+    never raises, so this step can't fail the publish workflow."""
+    from app.services.notifications import notify
+
+    title = "Publish complete" if severity == "success" else "Publish failed"
+    await notify(
+        user_id=str(user_id),
+        kind="publish_result",
+        title=title,
+        body=summary,
+        severity=severity,  # type: ignore[arg-type]
+        link_kind="publish_batch",
+        link_id=str(task_id),
+    )
+
+
 @DBOS.workflow()
 async def publish_distribution_workflow(task_id: int, user_id: str) -> dict[str, Any]:
     """Publish every account in the batch, then classify the outcome via
@@ -283,6 +306,9 @@ async def publish_distribution_workflow(task_id: int, user_id: str) -> dict[str,
         result = await run_publish_accounts_step(task_id)
     except Exception as e:
         await manager.fail(DBOS.workflow_id, f"publish batch errored: {e}")
+        await emit_publish_notification_step(
+            user_id, task_id, "error", f"Publish batch errored: {e}"
+        )
         raise RuntimeError(f"publish task {task_id} errored: {e}") from e
 
     statuses = result["statuses"]
@@ -291,6 +317,9 @@ async def publish_distribution_workflow(task_id: int, user_id: str) -> dict[str,
     if outcome == "all_failed":
         # Every account failed / cancelled — surface as a failed task.
         await manager.fail(DBOS.workflow_id, "all accounts failed to publish")
+        await emit_publish_notification_step(
+            user_id, task_id, "error", "All accounts failed to publish"
+        )
         raise RuntimeError(f"publish task {task_id}: all accounts failed")
 
     if outcome == "partial":
@@ -298,6 +327,12 @@ async def publish_distribution_workflow(task_id: int, user_id: str) -> dict[str,
         nfailed = sum(1 for s in statuses if s == "failed")
         await manager.fail(
             DBOS.workflow_id, f"{nfailed} account(s) failed ({ok} published)"
+        )
+        await emit_publish_notification_step(
+            user_id,
+            task_id,
+            "error",
+            f"{nfailed} account(s) failed ({ok} published)",
         )
         raise RuntimeError(f"publish task {task_id}: {nfailed} account(s) failed")
 
@@ -307,4 +342,5 @@ async def publish_distribution_workflow(task_id: int, user_id: str) -> dict[str,
     if pending:
         subtitle += f", {pending} awaiting Douyin"
     await manager.complete(DBOS.workflow_id, subtitle=subtitle)
+    await emit_publish_notification_step(user_id, task_id, "success", subtitle)
     return {"status": "completed", "task_id": task_id, "statuses": statuses}

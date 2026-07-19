@@ -159,6 +159,7 @@ from app.models.provider_costs import (  # noqa: F401
     ProviderPricing,
 )
 from app.models.reviews import (  # noqa: F401
+    InboxNotifications,
     IssueMessages,
     Issues,
     IssueSequence,
@@ -206,6 +207,10 @@ from app.models.topics import (  # noqa: F401
     TopicGroups,
     UserHiddenSources,
     UserTopicInterests,
+)
+from app.models.usage import (  # noqa: F401
+    AiUsageHourly,
+    TeamAiBudgets,
 )
 from app.models.users import (  # noqa: F401
     UserCookies,
@@ -308,6 +313,7 @@ __all__ = [
     "IssuePipelineSteps",
     "IssuePipelineRuns",
     # reviews
+    "InboxNotifications",
     "IssueMessages",
     "IssueSequence",
     "Issues",
@@ -395,6 +401,9 @@ __all__ = [
     "UserProfiles",
     "UserSettings",
     "UserTagPreferences",
+    # usage (W3c)
+    "AiUsageHourly",
+    "TeamAiBudgets",
     # workers
     "t_worker_registry",
 ]

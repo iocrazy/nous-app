@@ -380,6 +380,31 @@ async def _fire_agent_routine(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             f"user_id={'set' if user_id else 'empty'})"
         )
 
+    # W3c budget breaker: a routine issue carries no team_id, so gate on the
+    # schedule owner's personal team. Over budget → skip this fire (bump
+    # skipped_count; leave consecutive_fails untouched — a budget pause is not a
+    # dispatch failure) instead of creating + dispatching more paid agent work.
+    # An unresolvable team yields is_team_over_budget(None) == False, so the
+    # gate is a no-op for users without a personal team / budget row.
+    from app.services.ai_usage import is_team_over_budget
+
+    budget_team_id = await db_engine.fetch_val(
+        "SELECT id FROM public.teams "
+        "WHERE owner_id = CAST(:uid AS uuid) AND kind = 'personal' LIMIT 1",
+        {"uid": str(user_id)},
+    )
+    if await is_team_over_budget(budget_team_id):
+        await db_engine.execute(
+            "UPDATE public.user_schedules "
+            "SET skipped_count = skipped_count + 1 WHERE id = :id",
+            {"id": sched_id},
+        )
+        logger.info(
+            f"[scheduled_master] routine {sched_id} budget-paused — team "
+            f"{budget_team_id} over monthly AI budget; fire skipped"
+        )
+        return None
+
     # Delivery gate: previous fire's issue still open → skip quietly.
     last_issue_id = payload.get("last_issue_id")
     if policy == "skip_if_active" and last_issue_id:
@@ -432,6 +457,23 @@ async def _fire_agent_routine(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             return None
         raise
     issue_id = int(issue_row["id"])
+    issue_identifier = issue_row.get("identifier") or str(issue_id)
+
+    # W3d narrow inbox (producer 3/3): the schedule owner gets one
+    # 'autopilot_output' notification carrying the issue identifier, deep-linked
+    # to the issue. notify() is best-effort — it never raises (see
+    # app.services.notifications), so a notification hiccup can't kill a fire.
+    from app.services.notifications import notify as _inbox_notify
+
+    await _inbox_notify(
+        user_id=str(user_id),
+        kind="autopilot_output",
+        title=f"Autopilot: {issue_identifier}",
+        body=body["title"],
+        severity="info",
+        link_kind="issue",
+        link_id=issue_identifier,
+    )
 
     # Pin the workflow id now and persist it; the WORKFLOW body performs
     # the actual dispatch (same path as POST /issues/{id}/dispatch).
