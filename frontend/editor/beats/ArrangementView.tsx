@@ -151,7 +151,8 @@ export function ArrangementView({ scriptId, beats, onAdd, onUpdate, onCreate }: 
     setSelectedId(beatId);
     const el = cardRefs.current.get(beatId);
     if (el) {
-      el.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+      // Optional-call: jsdom has no scrollIntoView; centering is best-effort.
+      el.scrollIntoView?.({ inline: 'center', block: 'nearest', behavior: 'smooth' });
       setFlashId(beatId);
       if (flashTimer.current) clearTimeout(flashTimer.current);
       flashTimer.current = setTimeout(() => setFlashId(null), FLASH_MS);
@@ -240,14 +241,22 @@ export function ArrangementView({ scriptId, beats, onAdd, onUpdate, onCreate }: 
     applyZoom(fitPxPerSec(totalSec, width));
   }, [applyZoom, totalSec]);
 
-  const onWheel = useCallback(
-    (e: React.WheelEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      e.preventDefault();
-      applyZoom(stepPxPerSec(pxPerSec, e.deltaY < 0 ? 1 : -1));
-    },
-    [applyZoom, pxPerSec],
-  );
+  // Ctrl/Cmd+wheel zoom needs a NATIVE non-passive listener: React ≥17 registers
+  // root wheel handlers as passive, so preventDefault() in onWheel is a no-op and
+  // the browser page-zooms alongside the timeline (same fix as ActivityPanel).
+  const wheelZoomRef = useRef<(e: WheelEvent) => void>(() => {});
+  wheelZoomRef.current = (e: WheelEvent) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    applyZoom(stepPxPerSec(pxPerSec, e.deltaY < 0 ? 1 : -1));
+  };
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => wheelZoomRef.current(e);
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
 
   // ── Double-click empty timeline → new beat at that instant ──────────────────
   const onLanesDoubleClick = useCallback(
@@ -323,12 +332,7 @@ export function ArrangementView({ scriptId, beats, onAdd, onUpdate, onCreate }: 
           ))}
         </aside>
 
-        <div
-          className="mh-arr-timeline-scroll"
-          ref={viewportRef}
-          data-testid="arr-viewport"
-          onWheel={onWheel}
-        >
+        <div className="mh-arr-timeline-scroll" ref={viewportRef} data-testid="arr-viewport">
           <div className="mh-arr-canvas" style={{ width: `${canvasWidth}px` }}>
             <div className="mh-arr-ruler" data-testid="arr-ruler">
               {ticks.map((tick) => (

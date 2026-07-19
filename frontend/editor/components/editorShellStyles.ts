@@ -1808,7 +1808,11 @@ export const EDITOR_SHELL_STYLES = `
 }
 
 /* ── Beats pane (M2): sub-view toggle + Arrangement timeline ─────────────── */
-.mh-beats-pane{ height:100%; display:flex; flex-direction:column; min-height:0; }
+/* flex:1 + min-width:0 (NOT height:100%): the pane is a flex item of
+   .mh-page-frame — without the min-width floor release the timeline canvas's
+   min-content width blows the column past the right island and cards paint over
+   the writing panel (same class of bug as the sheet's minmax(0,1fr) fix). */
+.mh-beats-pane{ flex:1; min-width:0; display:flex; flex-direction:column; min-height:0; }
 .mh-beats-subview{ flex:0 0 auto; padding:12px 24px 0; }
 .mh-beats-seg{ display:inline-flex; width:max-content; }
 .mh-beats-seg .mh-seg{ flex:0 0 auto; padding:6px 18px; }
@@ -1901,7 +1905,9 @@ export const EDITOR_SHELL_STYLES = `
 .mh-arr-tray-place:hover{ filter:brightness(1.04); }
 
 .mh-arr-tools{
-  position:absolute; right:16px; top:34px; z-index:5; display:flex; gap:2px;
+  /* Bottom-right of the pane — the canvas-tool convention. Top-right sat on the
+     first lane and covered whatever card was scrolled under it. */
+  position:absolute; right:16px; bottom:16px; z-index:5; display:flex; gap:2px;
   background:var(--surface); border:1px solid var(--surface-border); border-radius:10px;
   padding:3px; box-shadow:var(--shadow-island);
 }
