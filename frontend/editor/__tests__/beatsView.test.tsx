@@ -56,6 +56,10 @@ const beat = (over: Partial<Beat> & { id: string }): Beat => ({
 });
 
 beforeEach(() => {
+  // M2 added a per-script sub-view toggle defaulting to the Arrangement timeline.
+  // These are the List sub-view regressions, so pin the persisted choice to
+  // 'list' (scriptId "1") before mount — one seed keeps all 17 assertions intact.
+  localStorage.setItem('editor.beatsView.1', 'list');
   // Every mutation returns a promise so the component's `.catch` chains resolve.
   svc.listBeats.mockResolvedValue([]);
   svc.createBeat.mockResolvedValue(beat({ id: 'a' }));
@@ -67,6 +71,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  localStorage.clear();
 });
 
 function renderView(scenes: SceneDoc[] = []) {
@@ -86,8 +91,14 @@ describe('BeatsView empty state', () => {
     svc.listBeats.mockResolvedValue([beat({ id: 'a' })]);
     fireEvent.click(screen.getByTestId('beats-add'));
 
+    // Adds now arrange at the timeline end (0 on an empty script) — an
+    // unplaced beat would land in the below-the-fold tray where nobody finds it.
     await waitFor(() =>
-      expect(svc.createBeat).toHaveBeenCalledWith('1', { title: 'editor.beatDefaultTitle' }),
+      expect(svc.createBeat).toHaveBeenCalledWith('1', {
+        title: 'editor.beatDefaultTitle',
+        start_sec: 0,
+        duration_sec: 60,
+      }),
     );
   });
 });

@@ -1,14 +1,15 @@
 /**
- * BeatsView — the beat-sheet pane (Beats view, PR-BT2).
+ * BeatsView — the beat-sheet pane (Beats view). Owns the beats data + REST and
+ * hosts the two M2 sub-views behind a persisted segmented toggle:
  *
- * A vertical list of ordered beat cards with an Add Beat header. Beats are
- * drag-reordered (the G2 Outline drag pattern: drag handle + before/after drop
- * indicator) which calls the move API (`after_beat_id` — null = front). CRUD is
- * plain REST: mutate then reload; a failure re-pulls from the server + toasts
- * (beats have no concurrency protocol, so last-write-wins is fine). The empty
- * state mirrors the cold-start affordance (No beats yet + Add).
+ *   - Arrangement (default) — the timeline editor (ArrangementView)
+ *   - List — the ordered card list (BeatsListView), unchanged from M1
+ *
+ * CRUD is plain REST: mutate then reload; a failure re-pulls from the server +
+ * toasts (beats have no concurrency protocol, so last-write-wins is fine). The
+ * sub-view choice persists per-script in localStorage (beatsViewStorage).
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useToast } from '../../components/Toast';
@@ -22,19 +23,18 @@ import {
   type BeatInput,
 } from '../sceneService';
 import type { SceneDoc } from '../types';
-import { BeatCard } from './BeatCard';
+import { ArrangementView } from './ArrangementView';
+import { BeatsListView } from './BeatsListView';
+import {
+  persistBeatsSubview,
+  readStoredBeatsSubview,
+  type BeatsSubview,
+} from './beatsViewStorage';
 
 interface Props {
   scriptId: string;
   scenes: SceneDoc[];
   onOpenScene: (sceneId: string) => void;
-}
-
-type DropTarget = { beatId: string; edge: 'before' | 'after' };
-
-function edgeFromPointer(el: HTMLElement, clientY: number): 'before' | 'after' {
-  const rect = el.getBoundingClientRect();
-  return clientY < rect.top + rect.height / 2 ? 'before' : 'after';
 }
 
 export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
@@ -43,9 +43,7 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
 
   const [beats, setBeats] = useState<Beat[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [dragging, setDragging] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
-  const draggingRef = useRef<string | null>(null);
+  const [subview, setSubview] = useState<BeatsSubview>(() => readStoredBeatsSubview(scriptId));
 
   const reload = useCallback(async () => {
     try {
@@ -62,22 +60,52 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
     void reload();
   }, [reload]);
 
+  const selectSubview = useCallback(
+    (next: BeatsSubview) => {
+      setSubview(next);
+      persistBeatsSubview(scriptId, next);
+    },
+    [scriptId],
+  );
+
   const handleAdd = useCallback(async () => {
     try {
-      await createBeat(scriptId, { title: t('editor.beatDefaultTitle') });
+      // Append ARRANGED at the end of the timeline (laper behaviour) — an
+      // unplaced beat lands in the below-the-fold tray where nobody finds it.
+      const end = beats.reduce(
+        (max, b) =>
+          b.start_sec == null ? max : Math.max(max, b.start_sec + (b.duration_sec ?? 0)),
+        0,
+      );
+      await createBeat(scriptId, {
+        title: t('editor.beatDefaultTitle'),
+        start_sec: end,
+        duration_sec: 60,
+      });
       await reload();
     } catch (err) {
       console.error('[BeatsView] create failed', err);
       addToast(t('editor.beatCreateFailed'), 'error');
     }
-  }, [scriptId, reload, addToast, t]);
+  }, [scriptId, beats, reload, addToast, t]);
+
+  const handleCreate = useCallback(
+    async (data: BeatInput) => {
+      try {
+        await createBeat(scriptId, { title: t('editor.beatDefaultTitle'), ...data });
+        await reload();
+      } catch (err) {
+        console.error('[BeatsView] create failed', err);
+        addToast(t('editor.beatCreateFailed'), 'error');
+      }
+    },
+    [scriptId, reload, addToast, t],
+  );
 
   const handleUpdate = useCallback(
     (beatId: string, data: BeatInput) => {
       // Optimistic: merge locally so the edit sticks without a refetch flicker.
-      setBeats((prev) =>
-        prev.map((b) => (b.id === beatId ? { ...b, ...data } : b)),
-      );
+      setBeats((prev) => prev.map((b) => (b.id === beatId ? { ...b, ...data } : b)));
       updateBeat(beatId, data).catch((err) => {
         console.error('[BeatsView] update failed', err);
         addToast(t('editor.beatUpdateFailed'), 'error');
@@ -99,13 +127,7 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
     [reload, addToast, t],
   );
 
-  const endDrag = useCallback(() => {
-    draggingRef.current = null;
-    setDragging(null);
-    setDropTarget(null);
-  }, []);
-
-  const runMove = useCallback(
+  const handleMove = useCallback(
     async (draggedId: string, afterBeatId: string | null) => {
       try {
         await moveBeat(draggedId, { after_beat_id: afterBeatId });
@@ -119,120 +141,66 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
     [reload, addToast, t],
   );
 
-  const handleDrop = useCallback(
-    (targetId: string, edge: 'before' | 'after') => {
-      const draggedId = draggingRef.current;
-      endDrag();
-      if (!draggedId || draggedId === targetId) return;
-      // Translate the before/after-target drop into an `after_beat_id` anchor
-      // (null = front) over the sibling list with the dragged beat removed.
-      const ordered = beats.filter((b) => b.id !== draggedId);
-      const idx = ordered.findIndex((b) => b.id === targetId);
-      if (idx < 0) return;
-      const afterBeatId =
-        edge === 'after' ? targetId : idx > 0 ? ordered[idx - 1].id : null;
-      void runMove(draggedId, afterBeatId);
-    },
-    [beats, endDrag, runMove],
-  );
-
-  if (!loaded) {
-    return <div className="mh-beats-view" data-testid="beats-view" />;
-  }
-
-  if (beats.length === 0) {
-    return (
-      <div className="mh-beats-view" data-testid="beats-view">
-        <div className="mh-beats-empty" data-testid="beats-empty">
-          <div className="mh-beats-empty-title">{t('editor.beatsEmptyTitle')}</div>
-          <p className="mh-beats-empty-sub">{t('editor.beatsEmptySub')}</p>
+  return (
+    <div className="mh-beats-pane" data-testid="beats-pane">
+      {/* laper topbar: count left · segmented centre · Add right. */}
+      <div className="mh-beats-subview" role="group" aria-label={t('editor.beatsViewLabel')}>
+        <span className="mh-beats-count" data-testid="beats-count">
+          {t('editor.moduleBeats')} <b>{beats.length}</b>
+        </span>
+        <div className="mh-segmented mh-beats-seg">
           <button
             type="button"
-            className="mh-beats-add-btn"
-            data-testid="beats-add"
-            onClick={() => void handleAdd()}
+            className={`mh-seg${subview === 'arrangement' ? ' active' : ''}`}
+            data-testid="beats-subview-arrangement"
+            aria-pressed={subview === 'arrangement'}
+            onClick={() => selectSubview('arrangement')}
           >
-            {t('editor.beatAdd')}
+            {t('editor.beatsViewArrangement')}
+          </button>
+          <button
+            type="button"
+            className={`mh-seg${subview === 'list' ? ' active' : ''}`}
+            data-testid="beats-subview-list"
+            aria-pressed={subview === 'list'}
+            onClick={() => selectSubview('list')}
+          >
+            {t('editor.beatsViewList')}
           </button>
         </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mh-beats-view" data-testid="beats-view">
-      <div className="mh-beats-head">
-        <div className="mh-beats-title">{t('editor.moduleBeats')}</div>
         <button
           type="button"
-          className="mh-beats-add-btn"
-          data-testid="beats-add"
+          className="mh-beats-add-ink"
+          data-testid="beats-topbar-add"
           onClick={() => void handleAdd()}
         >
-          {t('editor.beatAdd')}
+          + {t('editor.beatAdd')}
         </button>
       </div>
 
-      <div className="mh-beats-list">
-        {beats.map((beat, index) => {
-          const edge = dropTarget?.beatId === beat.id ? dropTarget.edge : null;
-          return (
-            <div
-              key={beat.id}
-              className="mh-beat-row"
-              onDragOver={
-                dragging && dragging !== beat.id
-                  ? (e) => {
-                      e.preventDefault();
-                      const nextEdge = edgeFromPointer(e.currentTarget, e.clientY);
-                      setDropTarget((prev) =>
-                        prev && prev.beatId === beat.id && prev.edge === nextEdge
-                          ? prev
-                          : { beatId: beat.id, edge: nextEdge },
-                      );
-                    }
-                  : undefined
-              }
-              onDrop={
-                dragging
-                  ? (e) => {
-                      e.preventDefault();
-                      handleDrop(beat.id, edgeFromPointer(e.currentTarget, e.clientY));
-                    }
-                  : undefined
-              }
-            >
-              {edge === 'before' && (
-                <div className="mh-drop-indicator before" aria-hidden="true" />
-              )}
-              <BeatCard
-                beat={beat}
-                index={index}
-                scenes={scenes}
-                isDragging={dragging === beat.id}
-                onOpenScene={onOpenScene}
-                onUpdate={(data) => handleUpdate(beat.id, data)}
-                onDelete={() => handleDelete(beat.id)}
-                handleProps={{
-                  draggable: true,
-                  onDragStart: (e) => {
-                    if (e.dataTransfer) {
-                      e.dataTransfer.effectAllowed = 'move';
-                      e.dataTransfer.setData('text/plain', beat.id);
-                    }
-                    draggingRef.current = beat.id;
-                    setDragging(beat.id);
-                  },
-                  onDragEnd: endDrag,
-                }}
-              />
-              {edge === 'after' && (
-                <div className="mh-drop-indicator after" aria-hidden="true" />
-              )}
-            </div>
-          );
-        })}
-      </div>
+      {!loaded ? (
+        <div className="mh-beats-view" data-testid="beats-view" />
+      ) : subview === 'list' ? (
+        <BeatsListView
+          beats={beats}
+          scenes={scenes}
+          onOpenScene={onOpenScene}
+          onAdd={() => void handleAdd()}
+          onUpdate={handleUpdate}
+          onDelete={handleDelete}
+          onMove={(draggedId, afterId) => void handleMove(draggedId, afterId)}
+        />
+      ) : (
+        <ArrangementView
+          scriptId={scriptId}
+          beats={beats}
+          scenes={scenes}
+          onAdd={() => void handleAdd()}
+          onUpdate={handleUpdate}
+          onCreate={(data) => void handleCreate(data)}
+          onOpenScene={onOpenScene}
+        />
+      )}
     </div>
   );
 }
