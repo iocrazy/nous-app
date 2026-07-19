@@ -121,6 +121,7 @@ async def test_fire_creates_issue_returns_order_and_stashes_last_issue() -> None
 
     with (
         patch("app.db.engine.fetch_one", fetch_one),
+        patch("app.db.engine.fetch_val", AsyncMock(return_value=None)),
         patch("app.db.engine.execute", execute),
         patch("app.db.engine.execute_as_service_role", execute_sr),
         patch("app.repositories.issue_repository.issue_repository", repo),
@@ -187,6 +188,7 @@ async def test_unique_violation_is_quiet_skip() -> None:
 
     with (
         patch("app.db.engine.fetch_one", fetch_one),
+        patch("app.db.engine.fetch_val", AsyncMock(return_value=None)),
         patch("app.db.engine.execute", AsyncMock()),
         patch("app.repositories.issue_repository.issue_repository", repo),
     ):
@@ -214,6 +216,7 @@ async def test_always_policy_uses_unique_fingerprint() -> None:
 
     with (
         patch("app.db.engine.fetch_one", fetch_one),
+        patch("app.db.engine.fetch_val", AsyncMock(return_value=None)),
         patch("app.db.engine.execute", AsyncMock()),
         patch("app.db.engine.execute_as_service_role", AsyncMock()),
         patch("app.repositories.issue_repository.issue_repository", repo),
@@ -263,6 +266,7 @@ async def test_skip_if_active_skips_when_previous_issue_open() -> None:
 
     with (
         patch("app.db.engine.fetch_one", fetch_one),
+        patch("app.db.engine.fetch_val", AsyncMock(return_value=None)),
         patch("app.db.engine.execute", AsyncMock()),
         patch("app.repositories.issue_repository.issue_repository", repo),
     ):
@@ -284,6 +288,7 @@ async def test_always_policy_fires_even_with_open_previous_issue() -> None:
 
     with (
         patch("app.db.engine.fetch_one", fetch_one),
+        patch("app.db.engine.fetch_val", AsyncMock(return_value=None)),
         patch("app.db.engine.execute", AsyncMock()),
         patch("app.db.engine.execute_as_service_role", AsyncMock()),
         patch("app.repositories.issue_repository.issue_repository", repo),
