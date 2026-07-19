@@ -48,18 +48,65 @@ const SECONDS_UNIT_CEILING = 180; // <3min reads in seconds
 export const MAX_TIMELINE_SEC = 4 * 60 * 60;
 
 /**
- * Total timeline length in seconds: the furthest beat end, floored at 60s,
- * rounded UP to a whole minute so the ruler always ends on a clean tick, and
- * clamped to MAX_TIMELINE_SEC.
+ * Total timeline length in seconds: the greater of the per-script target
+ * runtime (M3) and the furthest beat end, floored at 60s, rounded UP to a whole
+ * minute so the ruler always ends on a clean tick, and clamped to
+ * MAX_TIMELINE_SEC. `targetSec` is optional (null / non-positive is ignored) so
+ * the historic no-arg call keeps its exact behaviour.
  */
-export function computeTotalSec(beats: Placement[]): number {
+export function computeTotalSec(beats: Placement[], targetSec?: number | null): number {
   const furthest = beats.reduce((max, b) => {
     if (b.start_sec == null) return max;
     const end = b.start_sec + (b.duration_sec ?? 0);
     return end > max ? end : max;
   }, 0);
-  const floored = Math.max(furthest, 60);
+  const target = targetSec != null && Number.isFinite(targetSec) && targetSec > 0 ? targetSec : 0;
+  const floored = Math.max(target, furthest, 60);
   return Math.min(MAX_TIMELINE_SEC, Math.ceil(floored / 60) * 60);
+}
+
+/** A beat placement carrying its id, for conform (proportional stretch). */
+export interface ConformInput {
+  id: string;
+  start_sec: number | null;
+  duration_sec: number | null;
+}
+
+/** A conformed placement — always arranged (start_sec is a concrete second). */
+export interface ConformResult {
+  id: string;
+  start_sec: number;
+  duration_sec: number | null;
+}
+
+/**
+ * Proportionally rescale every ARRANGED beat when the target total changes
+ * (`oldTotal` → `newTotal`), snapping the result to the arrangement grid. Used
+ * by the "Stretch beats proportionally" conform option: each start/duration is
+ * multiplied by `newTotal / oldTotal`, snapped to `granularity`, and a present
+ * duration is floored at one grid step so a beat never collapses to zero.
+ * Unarranged beats (null start) are left out — there is nothing on the timeline
+ * to stretch. A non-positive `oldTotal` yields no changes (guard against /0).
+ */
+export function conformBeats(
+  beats: ConformInput[],
+  oldTotal: number,
+  newTotal: number,
+  granularity: number,
+): ConformResult[] {
+  if (oldTotal <= 0) return [];
+  const scale = newTotal / oldTotal;
+  const out: ConformResult[] = [];
+  for (const b of beats) {
+    if (b.start_sec == null) continue;
+    const start = snapSec(b.start_sec * scale, granularity);
+    const duration =
+      b.duration_sec == null
+        ? null
+        : Math.max(granularity, snapSec(b.duration_sec * scale, granularity));
+    out.push({ id: b.id, start_sec: start, duration_sec: duration });
+  }
+  return out;
 }
 
 /** Seconds ruler under 3 minutes, minutes ruler at/above. */

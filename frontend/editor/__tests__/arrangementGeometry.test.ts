@@ -20,6 +20,7 @@ import {
   chooseTickUnit,
   clampPxPerSec,
   computeTotalSec,
+  conformBeats,
   fitPxPerSec,
   layoutCards,
   layoutExtentPx,
@@ -247,6 +248,76 @@ describe('layoutCards (laper sequential flow)', () => {
     );
     // ruler span 60s×0.2 = 12px, but two pushed min-width cards need 360px
     expect(layoutExtentPx(layout, 60, 0.2)).toBe(MIN_CARD_PX * 2);
+  });
+});
+
+describe('computeTotalSec with a target length', () => {
+  it('takes the target when it exceeds the furthest beat', () => {
+    // target 2700s (45\') beats a single short beat → 2700 (already a whole min)
+    expect(computeTotalSec([{ start_sec: 0, duration_sec: 60 }], 2700)).toBe(2700);
+  });
+
+  it('lets the furthest beat win when it exceeds the target', () => {
+    // furthest end 200s beats a 60s target → ceil(200/60)*60 = 240
+    expect(computeTotalSec([{ start_sec: 0, duration_sec: 200 }], 60)).toBe(240);
+  });
+
+  it('keeps the 60s floor when the target is smaller and there are no beats', () => {
+    expect(computeTotalSec([], 45)).toBe(60);
+  });
+
+  it('ignores a null / non-positive target (back-compat with the no-arg call)', () => {
+    expect(computeTotalSec([{ start_sec: 30, duration_sec: 40 }], null)).toBe(120);
+    expect(computeTotalSec([{ start_sec: 30, duration_sec: 40 }], 0)).toBe(120);
+  });
+
+  it('clamps a corrupt/huge target to the display ceiling', () => {
+    expect(computeTotalSec([], 2_147_483_647)).toBe(MAX_TIMELINE_SEC);
+  });
+});
+
+describe('conformBeats', () => {
+  it('scales arranged starts + durations by newTotal/oldTotal, snapped to grid', () => {
+    const out = conformBeats(
+      [
+        { id: 'a', start_sec: 0, duration_sec: 30 },
+        { id: 'b', start_sec: 30, duration_sec: 30 },
+      ],
+      60,
+      120,
+      1,
+    );
+    expect(out).toEqual([
+      { id: 'a', start_sec: 0, duration_sec: 60 },
+      { id: 'b', start_sec: 60, duration_sec: 60 },
+    ]);
+  });
+
+  it('snaps to the minutes-mode 5s grid when stretching to a long total', () => {
+    // 60s → 6600s (×110): a midpoint beat at 30s/1s → 3300s/110s, both grid-aligned
+    const out = conformBeats([{ id: 'm', start_sec: 30, duration_sec: 1 }], 60, 6600, 5);
+    expect(out).toEqual([{ id: 'm', start_sec: 3300, duration_sec: 110 }]);
+  });
+
+  it('floors a shrunk duration at one grid step (never collapses to zero)', () => {
+    // 600s → 60s (÷10): a 3s beat scales to 0.3s → snaps to 0 → floored to grid 1
+    const out = conformBeats([{ id: 's', start_sec: 30, duration_sec: 3 }], 600, 60, 1);
+    expect(out).toEqual([{ id: 's', start_sec: 3, duration_sec: 1 }]);
+  });
+
+  it('keeps a null duration null', () => {
+    const out = conformBeats([{ id: 'x', start_sec: 10, duration_sec: null }], 60, 120, 1);
+    expect(out).toEqual([{ id: 'x', start_sec: 20, duration_sec: null }]);
+  });
+
+  it('leaves unarranged beats out of the result', () => {
+    expect(conformBeats([{ id: 'u', start_sec: null, duration_sec: null }], 60, 120, 1)).toEqual(
+      [],
+    );
+  });
+
+  it('is a no-op guard when oldTotal is non-positive', () => {
+    expect(conformBeats([{ id: 'a', start_sec: 10, duration_sec: 5 }], 0, 120, 1)).toEqual([]);
   });
 });
 
