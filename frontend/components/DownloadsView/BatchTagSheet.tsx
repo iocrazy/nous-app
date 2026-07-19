@@ -115,7 +115,7 @@ export function BatchTagSheet({
                 type="button"
                 onClick={() => toggle(tag.id)}
                 className={`w-full px-4 py-3 flex items-center gap-3 text-left border-b border-ink-800/50 ${
-                  on ? 'bg-indigo-500/10' : 'active:bg-ink-800/50'
+                  on ? 'bg-[var(--accent-soft)]' : 'active:bg-ink-800/50'
                 }`}
               >
                 <span

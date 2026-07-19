@@ -87,7 +87,7 @@ export const ProjectShareModal: React.FC<ProjectShareModalProps> = ({
         <div className="px-5 py-4 space-y-4">
           {/* File info */}
           <div className="flex items-center gap-3 bg-ink-800/50 rounded-xl px-3 py-2.5">
-            <Link2 size={16} className="text-indigo-400 shrink-0" />
+            <Link2 size={16} className="text-[var(--accent-text)] shrink-0" />
             <span className="text-sm text-ink-300 truncate">{file.filename}</span>
           </div>
 
@@ -105,7 +105,7 @@ export const ProjectShareModal: React.FC<ProjectShareModalProps> = ({
                       onClick={() => setShareType(type)}
                       className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                         shareType === type
-                          ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                          ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] border border-[var(--accent-border)]'
                           : 'bg-ink-800 text-ink-400 border border-ink-700 hover:border-ink-600'
                       }`}
                     >

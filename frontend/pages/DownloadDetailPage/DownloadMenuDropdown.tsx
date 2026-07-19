@@ -64,11 +64,11 @@ export function DownloadMenuDropdown({
           {isVideoType(video.media_type) && (
             isCompleted(videoStatus) ? (
               <button onClick={() => onDownload('video')} className={btnClass}>
-                <VideoIcon size={13} className="text-indigo-400" /> Video
+                <VideoIcon size={13} className="text-[var(--accent-text)]" /> Video
               </button>
             ) : isPending(videoStatus) ? (
               <button disabled className={disabledClass}>
-                <Loader2 size={13} className="text-indigo-400 animate-spin" /> Video Downloading...
+                <Loader2 size={13} className="text-[var(--accent-text)] animate-spin" /> Video Downloading...
               </button>
             ) : isFailed(videoStatus) ? (
               <button onClick={() => onFetchMedia({ video: true })} className={btnClass}>
@@ -76,7 +76,7 @@ export function DownloadMenuDropdown({
               </button>
             ) : video.original_url ? (
               <button onClick={() => onFetchMedia({ video: true })} className={btnClass}>
-                <CloudDownload size={13} className="text-indigo-400" /> Fetch Video
+                <CloudDownload size={13} className="text-[var(--accent-text)]" /> Fetch Video
               </button>
             ) : null
           )}
@@ -194,12 +194,12 @@ export function MobileDownloadMenu({
       {/* Video: only for non-album (真正的视频) */}
       {!isAlbumType(video.media_type) && isCompleted(video.video_download_status) && hasVideoFile && (
         <button onClick={() => { onClose(); onDownload('video'); }} className={btnClass}>
-          <Download size={13} className="text-indigo-400" /> Download Video
+          <Download size={13} className="text-[var(--accent-text)]" /> Download Video
         </button>
       )}
       {!isAlbumType(video.media_type) && !isCompleted(video.video_download_status) && video.original_url && (
         <button onClick={() => { onClose(); onFetchMedia({ video: true }); }} className={btnClass}>
-          <CloudDownload size={13} className="text-indigo-400" /> Fetch Video
+          <CloudDownload size={13} className="text-[var(--accent-text)]" /> Fetch Video
         </button>
       )}
       {/* Gallery (image-text / carousel / 动图): packaged zip */}

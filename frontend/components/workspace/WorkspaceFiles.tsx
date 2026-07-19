@@ -235,7 +235,7 @@ export function WorkspaceFiles({
             onClick={() => setChip(c.key)}
             className={`text-[12px] rounded-full px-3 py-1 border transition-colors ${
               chip === c.key
-                ? 'bg-indigo-500/10 text-indigo-300 border-transparent font-medium'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] border-transparent font-medium'
                 : 'text-ink-300 border-ink-700 hover:border-ink-500'
             }`}
           >
@@ -250,7 +250,7 @@ export function WorkspaceFiles({
             disabled={!currentEpisode}
             className={`text-[11px] rounded-full px-2.5 py-1 border transition-colors disabled:opacity-40 ${
               epFilterOn
-                ? 'bg-indigo-500/10 text-indigo-300 border-transparent font-medium'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] border-transparent font-medium'
                 : 'text-ink-400 border-ink-700 hover:border-ink-500'
             }`}
           >

@@ -122,7 +122,7 @@ export const SharedPage: React.FC = () => {
               onClick={() => setFilter(status)}
               className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
                 filter === status
-                  ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/30'
+                  ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] border border-[var(--accent-border)]'
                   : 'text-ink-500 hover:text-ink-300 border border-transparent'
               }`}
             >

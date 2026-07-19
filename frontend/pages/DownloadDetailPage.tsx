@@ -418,7 +418,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     <div className="w-full h-full bg-black rounded-lg flex flex-col items-center justify-center gap-3">
       {video.video_download_status === 'downloading' || video.video_download_status === 'pending' ? (
         <>
-          <Loader2 size={48} className="text-indigo-500 animate-spin" />
+          <Loader2 size={48} className="text-[var(--accent-text)] animate-spin" />
           <p className="text-ink-300 text-sm font-medium">Downloading...</p>
           <p className="text-ink-500 text-xs">The media file is being downloaded. Please wait.</p>
         </>
@@ -436,7 +436,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
           href={video.original_url}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-2 flex items-center gap-1.5 px-3 py-1.5 text-xs text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-lg transition-colors"
+          className="mt-2 flex items-center gap-1.5 px-3 py-1.5 text-xs text-[var(--accent-text)] hover:text-[var(--accent-text)] bg-[var(--accent-soft)] hover:bg-[var(--accent-soft)] rounded-lg transition-colors"
         >
           <ExternalLink size={13} />
           Open Original Link

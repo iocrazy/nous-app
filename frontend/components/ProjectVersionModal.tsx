@@ -116,8 +116,8 @@ export const ProjectVersionModal: React.FC<ProjectVersionModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-ink-800">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-500/20 rounded-lg">
-              <Layers size={20} className="text-indigo-400" />
+            <div className="p-2 bg-[var(--accent-soft)] rounded-lg">
+              <Layers size={20} className="text-[var(--accent-text)]" />
             </div>
             <h2 className="text-lg font-semibold text-ink-50">
               {t('projects.versions.title', 'Version History')}
@@ -155,7 +155,7 @@ export const ProjectVersionModal: React.FC<ProjectVersionModalProps> = ({
                     onClick={() => onVersionSelect(version)}
                     className={`w-full text-left p-3 rounded-xl border transition-colors ${
                       isCurrent
-                        ? 'border-indigo-500/30 bg-indigo-500/5'
+                        ? 'border-[var(--accent-border)] bg-[var(--accent-soft)]'
                         : 'border-ink-800 hover:border-ink-700 hover:bg-ink-800/50'
                     }`}
                   >
@@ -163,7 +163,7 @@ export const ProjectVersionModal: React.FC<ProjectVersionModalProps> = ({
                       <span
                         className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
                           isCurrent
-                            ? 'bg-indigo-500/20 text-indigo-300'
+                            ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                             : 'bg-ink-700 text-ink-300'
                         }`}
                       >

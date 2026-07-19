@@ -51,7 +51,7 @@ export function RecentItemsList({ items, onSelect }: RecentItemsListProps) {
             className="flex w-full items-center gap-3.5 px-4 py-3 border-t border-ink-700/50 first:border-t-0
                        bg-ink-800/40 hover:bg-ink-800/70 transition-colors text-left"
           >
-            <Icon size={18} className="shrink-0 text-indigo-300" data-testid="recent-icon" />
+            <Icon size={18} className="shrink-0 text-[var(--accent-text)]" data-testid="recent-icon" />
             <span className="text-sm font-medium text-ink-50 truncate min-w-0 flex-1">
               {item.name}
             </span>

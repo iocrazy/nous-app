@@ -212,7 +212,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
                 {selectedVideo.transcript_status && selectedVideo.transcript_status !== 'none' && (
                   <div className="flex items-center justify-between py-1">
                     <div className="flex items-center gap-2">
-                      <Brain size={12} className="text-indigo-400" />
+                      <Brain size={12} className="text-[var(--accent-text)]" />
                       <span className={`text-xs ${cText400}`}>Transcript</span>
                     </div>
                     <AIStatusBadge status={selectedVideo.transcript_status} />
@@ -221,7 +221,7 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
                 {selectedVideo.summary_status && selectedVideo.summary_status !== 'none' && (
                   <div className="flex items-center justify-between py-1">
                     <div className="flex items-center gap-2">
-                      <Sparkles size={12} className="text-indigo-400" />
+                      <Sparkles size={12} className="text-[var(--accent-text)]" />
                       <span className={`text-xs ${cText400}`}>Summary</span>
                     </div>
                     <AIStatusBadge status={selectedVideo.summary_status} />

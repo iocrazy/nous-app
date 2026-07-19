@@ -334,7 +334,7 @@ export const SharePage: React.FC = () => {
           ) : isAudio && mediaUrl ? (
             /* Audio preview */
             <div className="bg-ink-900 rounded-2xl border border-ink-800 p-12 flex flex-col items-center justify-center gap-6">
-              <Music size={64} className="text-indigo-400" />
+              <Music size={64} className="text-[var(--accent-text)]" />
               <h2 className="text-lg font-medium text-ink-200">{share.share_name}</h2>
               <audio src={mediaUrl} controls className="w-full max-w-md" />
             </div>
@@ -401,7 +401,7 @@ export const SharePage: React.FC = () => {
                     {comment.timestamp_seconds != null && (
                       <button
                         onClick={() => seekToTimecode(comment.timestamp_seconds!)}
-                        className="text-xs text-indigo-400 hover:text-indigo-300 font-mono"
+                        className="text-xs text-[var(--accent-text)] hover:text-[var(--accent-text)] font-mono"
                       >
                         {formatTimecode(comment.timestamp_seconds)}
                       </button>
@@ -415,7 +415,7 @@ export const SharePage: React.FC = () => {
             {/* Comment input */}
             <form onSubmit={handleSubmitComment} className="p-3 border-t border-ink-800 space-y-2">
               {commentTimecode != null && (
-                <div className="flex items-center gap-1.5 text-xs text-indigo-400">
+                <div className="flex items-center gap-1.5 text-xs text-[var(--accent-text)]">
                   <Timer size={12} />
                   <span className="font-mono">{formatTimecode(commentTimecode)}</span>
                   <button
@@ -432,7 +432,7 @@ export const SharePage: React.FC = () => {
                   type="button"
                   onClick={captureTimecode}
                   title={t('review.timecode')}
-                  className="p-2 text-ink-500 hover:text-indigo-400 hover:bg-ink-800 rounded-lg transition-colors"
+                  className="p-2 text-ink-500 hover:text-[var(--accent-text)] hover:bg-ink-800 rounded-lg transition-colors"
                 >
                   <Timer size={16} />
                 </button>
@@ -446,7 +446,7 @@ export const SharePage: React.FC = () => {
                 <button
                   type="submit"
                   disabled={!commentText.trim() || submittingComment}
-                  className="p-2 text-indigo-400 hover:text-indigo-300 disabled:text-ink-600 transition-colors"
+                  className="p-2 text-[var(--accent-text)] hover:text-[var(--accent-text)] disabled:text-ink-600 transition-colors"
                 >
                   <Send size={16} />
                 </button>

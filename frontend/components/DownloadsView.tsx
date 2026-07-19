@@ -935,7 +935,7 @@ export const DownloadsView: React.FC = () => {
               onClick={toggleFilterBar}
               className={`p-1.5 rounded-lg transition-colors ${
                 isFilterBarVisible
-                  ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
+                  ? 'text-[var(--accent-text)] bg-[var(--accent-soft)] hover:bg-[var(--accent-soft)]'
                   : 'text-ink-500 hover:text-ink-200 hover:bg-ink-800/80'
               }`}
               title={
@@ -1284,7 +1284,7 @@ export const DownloadsView: React.FC = () => {
                 {isAISearching ? (
                   <Loader2
                     size={16}
-                    className="mr-2 flex-shrink-0 animate-spin text-indigo-300"
+                    className="mr-2 flex-shrink-0 animate-spin text-[var(--accent-text)]"
                   />
                 ) : (
                   <Search size={16} className="text-ink-300 mr-2 flex-shrink-0" />
