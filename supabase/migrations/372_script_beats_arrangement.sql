@@ -1,4 +1,4 @@
--- 370_script_beats_arrangement.sql — Beats redesign M1 (data layer).
+-- 372_script_beats_arrangement.sql — Beats redesign M1 (data layer).
 -- Adds the timeline-arrangement columns to script_beats so a beat can carry a
 -- start offset, a duration, a methodology-template role key, and a card color
 -- strip. All NULLable: a NULL start_sec means "not yet arranged" (the classic

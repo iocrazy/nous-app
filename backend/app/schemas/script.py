@@ -244,7 +244,7 @@ class ShotMoveRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-# PG INTEGER ceiling — start_sec/duration_sec are INTEGER columns (mig 370); an
+# PG INTEGER ceiling — start_sec/duration_sec are INTEGER columns (mig 372); an
 # unbounded int would pass Pydantic and blow up as an asyncpg 22003 → 500.
 _PG_INT_MAX = 2_147_483_647
 
