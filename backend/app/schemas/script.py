@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, constr
+from pydantic import BaseModel, Field, constr, model_validator
 
 # ---------------------------------------------------------------------------
 # Script Project schemas
@@ -297,6 +297,50 @@ class BeatMoveRequest(BaseModel):
     to the front. Beats are reordered within their script only."""
 
     after_beat_id: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Beat template schemas (Beats M3.5 — user custom methodology templates)
+# ---------------------------------------------------------------------------
+
+
+class BeatTemplateAnchor(BaseModel):
+    """One percentage anchor of a user custom template. Carries the beat's own
+    title / summary / color verbatim (custom beats are free-form — no i18n role
+    key). ``pctStart`` / ``pctEnd`` are stored camelCase to match the JSONB shape
+    the frontend reads back directly.
+
+    ``color`` is pinned to a hex literal for the same reason as the beat card
+    (it renders straight into a CSS ``background``). ``pctEnd >= pctStart`` and
+    both within [0, 100] — a malformed anchor 422s at the boundary rather than
+    producing a beat that snaps off the timeline."""
+
+    title: str = Field(..., min_length=1, max_length=200)
+    summary: Optional[str] = None
+    pctStart: float = Field(..., ge=0, le=100)
+    pctEnd: float = Field(..., ge=0, le=100)
+    color: Optional[str] = Field(None, pattern=_HEX_COLOR_PATTERN)
+
+    @model_validator(mode="after")
+    def _end_after_start(self) -> "BeatTemplateAnchor":
+        if self.pctEnd < self.pctStart:
+            raise ValueError("pctEnd must be >= pctStart")
+        return self
+
+
+class BeatTemplateCreate(BaseModel):
+    """Request body for `POST /beat-templates`. ``user_id`` is taken from the
+    authenticated caller, never the body. At least one anchor is required — an
+    empty template would generate nothing."""
+
+    name: str = Field(..., min_length=1, max_length=100)
+    anchors: List[BeatTemplateAnchor] = Field(..., min_length=1)
+
+
+class BeatTemplateRename(BaseModel):
+    """Request body for `PUT /beat-templates/{template_id}` (rename only)."""
+
+    name: str = Field(..., min_length=1, max_length=100)
 
 
 # ---------------------------------------------------------------------------
