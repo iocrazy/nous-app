@@ -65,6 +65,7 @@ const DownloadDetailPage = lazyWithRetry(() => import('./pages/DownloadDetailPag
 const AgentsPage = lazyWithRetry(() => import('./pages/AgentsPage').then(m => ({ default: m.AgentsPage })));
 const SkillsPage = lazyWithRetry(() => import('./pages/SkillsPage').then(m => ({ default: m.SkillsPage })));
 const UsagePage = lazyWithRetry(() => import('./pages/UsagePage').then(m => ({ default: m.UsagePage })));
+const TeamAiUsagePage = lazyWithRetry(() => import('./pages/TeamAiUsagePage').then(m => ({ default: m.TeamAiUsagePage })));
 const WorkforcePage = lazyWithRetry(() => import('./pages/WorkforcePage').then(m => ({ default: m.WorkforcePage })));
 const SessionsPage = lazyWithRetry(() => import('./pages/SessionsPage').then(m => ({ default: m.SessionsPage })));
 const MemoryPage = lazyWithRetry(() => import('./pages/MemoryPage').then(m => ({ default: m.MemoryPage })));
@@ -239,6 +240,7 @@ export const router = createBrowserRouter([
               { path: 'sessions', element: <SuspenseWrap><SessionsPage /></SuspenseWrap> },
               { path: 'sessions/:sessionId', element: <SuspenseWrap><SessionsPage /></SuspenseWrap> },
               { path: 'usage', element: <SuspenseWrap><UsagePage /></SuspenseWrap> },
+              { path: 'ai-cost', element: <SuspenseWrap><TeamAiUsagePage /></SuspenseWrap> },
               { path: 'workforce', element: <SuspenseWrap><WorkforcePage /></SuspenseWrap> },
               { path: 'memory', element: <SuspenseWrap><MemoryPage /></SuspenseWrap> },
             ],

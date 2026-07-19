@@ -79,6 +79,14 @@ async def run_issue_agent(
 
     content_in = CONTINUATION_NUDGE if is_continuation else _build_user_message(issue)
 
+    # W3c: classify spend by who ultimately caused it. A routine/pipeline issue
+    # runs on the schedule/pipeline owner's behalf (rule_owner); anything else
+    # is a human action (direct_human). Derived from the issue origin_kind —
+    # no new flag threaded through the dispatch seam.
+    from app.services.ai_usage import attribution_from_origin_kind
+
+    attribution = attribution_from_origin_kind(issue.get("origin_kind"))
+
     await publish_status(iid, "running")
     try:
         result = await AILibraryChatService().run_session_turn(
@@ -87,6 +95,7 @@ async def run_issue_agent(
             content=content_in,
             trigger="issue_dispatch",
             chunk_callback=_cb,
+            attribution=attribution,
         )
         assistant = result.get("assistant_message") or {}
         await publish_message(iid, assistant, session_user_id=None)

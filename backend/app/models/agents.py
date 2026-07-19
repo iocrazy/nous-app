@@ -361,6 +361,15 @@ class AgentRuns(Base):
         comment="Free-form external task correlation id (text, not the bigint issue_id).",
     )
     conversation_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    attribution: Mapped[Optional[str]] = mapped_column(
+        Text,
+        comment=(
+            "Two-level cost attribution (W3c): 'direct_human' (a human "
+            "initiated this turn) vs 'rule_owner' (a scheduled routine or "
+            "pipeline advance fired it on the owner's behalf). Derived from the "
+            "issue origin_kind at dispatch. NULL = legacy / unclassified."
+        ),
+    )
 
 
 class AgentSkills(Base):
