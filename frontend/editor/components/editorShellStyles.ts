@@ -2016,7 +2016,7 @@ export const EDITOR_SHELL_STYLES = `
 .mh-arr-modal-foot{ display:flex; justify-content:flex-end; gap:8px; margin-top:2px; }
 .mh-arr-modal-btn{
   font-family:var(--sans); font-size:12.5px; font-weight:700; border-radius:var(--radius-sm);
-  padding:7px 16px; cursor:pointer;
+  padding:7px 16px; cursor:pointer; white-space:nowrap; flex-shrink:0;
 }
 .mh-arr-modal-btn.ghost{ background:none; border:1px solid var(--hairline); color:var(--ink-soft); }
 .mh-arr-modal-btn.ghost:hover{ color:var(--ink); background:var(--hover-ink-bg); }
