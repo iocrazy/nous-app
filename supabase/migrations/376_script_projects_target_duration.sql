@@ -1,4 +1,4 @@
--- 375_script_projects_target_duration.sql — Beats redesign M3 (target length).
+-- 376_script_projects_target_duration.sql — Beats redesign M3 (target length).
 -- A script can carry an OPTIONAL target total runtime in seconds. The Beats
 -- Arrangement view uses it to size the timeline ruler (max of target / furthest
 -- beat / 60s) and as the default total when applying a methodology template

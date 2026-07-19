@@ -7,7 +7,7 @@
  * (`2700`) or an `m:ss` clock (`45:00`) — both resolve to a second count.
  */
 
-/** PG INTEGER ceiling — the column the target persists to (mig 375). */
+/** PG INTEGER ceiling — the column the target persists to (mig 376). */
 const MAX_TARGET_SEC = 2_147_483_647;
 
 /** Topbar quick-picks (issue #1471): 60s · 3' · 20' · 45' · 90'. */
