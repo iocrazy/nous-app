@@ -1919,3 +1919,69 @@ export async function trashResources(
     if (!response.ok) throw new Error('Failed to trash resource');
   }));
 }
+
+// ─── Gallery (first-class gallery entity, PR-A) ──────────────────────
+
+/** Ordered child image of a gallery, as returned by the gallery-items API. */
+export interface GalleryChildItem {
+  id: string;
+  filename: string;
+  thumbnail_path: string | null;
+  position: number;
+}
+
+/** Create an empty gallery entity in a scope. Children are attached
+ *  separately via {@link setGalleryItems}. Returns the gallery resource. */
+export async function createGallery(
+  scopeId: string,
+  filename: string,
+  folderId?: string | null,
+): Promise<Resource> {
+  const apiUrl = getApiUrl();
+  const params = new URLSearchParams({ scope_id: scopeId, filename });
+  if (folderId) params.set('folder_id', folderId);
+
+  const response = await fetch(`${apiUrl}/api/v1/resources/galleries?${params}`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+  });
+  if (!response.ok) throw new Error('Failed to create gallery');
+  const json = await response.json();
+  return json.data;
+}
+
+/** Replace a gallery's ordered children with ``imageIds`` (full reset). Every
+ *  id must be an image resource in ``scopeId``. Returns the new child list. */
+export async function setGalleryItems(
+  galleryId: string,
+  scopeId: string,
+  imageIds: string[],
+): Promise<GalleryChildItem[]> {
+  const apiUrl = getApiUrl();
+  const params = new URLSearchParams({ scope_id: scopeId });
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/${galleryId}/gallery-items?${params}`,
+    {
+      method: 'PUT',
+      headers: { ...(await getAuthHeaders()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_ids: imageIds }),
+    },
+  );
+  if (!response.ok) throw new Error('Failed to set gallery items');
+  const json = await response.json();
+  return json.data ?? [];
+}
+
+/** Read a gallery's ordered child images. */
+export async function getGalleryItems(
+  galleryId: string,
+): Promise<GalleryChildItem[]> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/${galleryId}/gallery-items`,
+    { headers: await getAuthHeaders() },
+  );
+  if (!response.ok) throw new Error('Failed to load gallery items');
+  const json = await response.json();
+  return json.data ?? [];
+}

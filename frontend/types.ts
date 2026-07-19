@@ -355,6 +355,9 @@ export interface Resource {
   last_scope_id?: string | null;
   created_at: string;
   updated_at: string;
+  /** Number of child images when this resource is a gallery entity
+   *  (mime_type='application/x-mediahub-gallery'). 0 / absent otherwise. */
+  gallery_count?: number;
   // Joined
   tags?: Tag[];
   folder_name?: string;
