@@ -159,6 +159,7 @@ from app.models.provider_costs import (  # noqa: F401
     ProviderPricing,
 )
 from app.models.reviews import (  # noqa: F401
+    InboxNotifications,
     IssueMessages,
     Issues,
     IssueSequence,
@@ -308,6 +309,7 @@ __all__ = [
     "IssuePipelineSteps",
     "IssuePipelineRuns",
     # reviews
+    "InboxNotifications",
     "IssueMessages",
     "IssueSequence",
     "Issues",

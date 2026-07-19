@@ -499,6 +499,10 @@
     "pointsAdded": "{{amount}} points added",
     "orderHistory": "Order History"
   },
+  "inbox": {
+    "markAllRead": "Mark all read",
+    "empty": "You're all caught up."
+  },
   "topbar": {
     "search": "Search (⌘K)",
     "taskCenter": "Task Center",

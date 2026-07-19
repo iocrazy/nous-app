@@ -499,6 +499,10 @@
     "pointsAdded": "已充值 {{amount}} 积分",
     "orderHistory": "订单历史"
   },
+  "inbox": {
+    "markAllRead": "全部标为已读",
+    "empty": "暂无新通知"
+  },
   "topbar": {
     "search": "搜索 (⌘K)",
     "taskCenter": "任务中心",

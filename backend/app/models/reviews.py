@@ -233,6 +233,68 @@ class UserNotifications(Base):
     read_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
 
 
+class InboxNotifications(Base):
+    """W3d narrow inbox — one row per recipient, exactly three producer kinds
+    (generation_result / publish_result / autopilot_output). Distinct from the
+    broadcast ``notifications`` table (migration 009). See migration 373."""
+
+    __tablename__ = "inbox_notifications"
+    __table_args__ = (
+        CheckConstraint(
+            "kind = ANY (ARRAY['generation_result'::text, 'publish_result'::text, "
+            "'autopilot_output'::text])",
+            name="inbox_notifications_kind_check",
+        ),
+        CheckConstraint(
+            "severity = ANY (ARRAY['info'::text, 'success'::text, 'error'::text])",
+            name="inbox_notifications_severity_check",
+        ),
+        CheckConstraint(
+            "link_kind = ANY (ARRAY['issue'::text, 'resource'::text, "
+            "'publish_batch'::text])",
+            name="inbox_notifications_link_kind_check",
+        ),
+        ForeignKeyConstraint(
+            ["team_id"],
+            ["public.teams.id"],
+            ondelete="CASCADE",
+            name="inbox_notifications_team_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="inbox_notifications_pkey"),
+        Index("idx_inbox_notifications_user_created", "user_id", "created_at"),
+        Index("idx_inbox_notifications_user_unread", "user_id"),
+        Index(
+            "idx_inbox_notifications_dedupe",
+            "user_id",
+            "kind",
+            "link_kind",
+            "link_id",
+            "created_at",
+        ),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[Optional[str]] = mapped_column(Text)
+    severity: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'info'::text")
+    )
+    link_kind: Mapped[Optional[str]] = mapped_column(Text)
+    link_id: Mapped[Optional[str]] = mapped_column(Text)
+    team_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    read_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
 class Issues(Base):
     __tablename__ = "issues"
     __table_args__ = (
