@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_PX_PER_SEC,
   MAX_PX_PER_SEC,
+  MAX_TIMELINE_SEC,
   MIN_CARD_PX,
   MIN_PX_PER_SEC,
   assignLanes,
@@ -39,6 +40,12 @@ describe('computeTotalSec', () => {
 
   it('treats a null duration as zero length', () => {
     expect(computeTotalSec([{ start_sec: 90, duration_sec: null }])).toBe(120);
+  });
+
+  it('clamps a corrupt/huge start_sec to the display ceiling (tab-freeze DoS guard)', () => {
+    expect(computeTotalSec([{ start_sec: 2_147_483_647, duration_sec: 60 }])).toBe(
+      MAX_TIMELINE_SEC,
+    );
   });
 });
 
@@ -108,6 +115,10 @@ describe('fitPxPerSec / clampPxPerSec / stepPxPerSec', () => {
 });
 
 describe('buildTicks', () => {
+  it('caps emitted ticks even for an absurd totalSec (belt-and-braces)', () => {
+    expect(buildTicks(2_147_483_647, 'seconds').length).toBeLessThanOrEqual(2000);
+  });
+
   it('emits 10s major ticks in seconds mode with labels only on majors', () => {
     const ticks = buildTicks(60, 'seconds');
     expect(ticks[0]).toEqual({ sec: 0, label: '0s', major: true });

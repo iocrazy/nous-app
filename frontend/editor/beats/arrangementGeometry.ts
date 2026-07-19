@@ -33,8 +33,17 @@ export interface Placement {
 const SECONDS_UNIT_CEILING = 180; // <3min reads in seconds
 
 /**
- * Total timeline length in seconds: the furthest beat end, floored at 60s and
- * rounded UP to a whole minute so the ruler always ends on a clean tick.
+ * Display ceiling for the ruler (4h). The server accepts start_sec up to PG
+ * INTEGER max, so without a clamp one corrupt row (start_sec≈2^31) renders a
+ * ~1.2M-tick ruler and a multi-gigapixel canvas — a tab-freezing DoS on open.
+ * Cards beyond the ceiling keep their data; the ruler just stops here.
+ */
+export const MAX_TIMELINE_SEC = 4 * 60 * 60;
+
+/**
+ * Total timeline length in seconds: the furthest beat end, floored at 60s,
+ * rounded UP to a whole minute so the ruler always ends on a clean tick, and
+ * clamped to MAX_TIMELINE_SEC.
  */
 export function computeTotalSec(beats: Placement[]): number {
   const furthest = beats.reduce((max, b) => {
@@ -43,7 +52,7 @@ export function computeTotalSec(beats: Placement[]): number {
     return end > max ? end : max;
   }, 0);
   const floored = Math.max(furthest, 60);
-  return Math.ceil(floored / 60) * 60;
+  return Math.min(MAX_TIMELINE_SEC, Math.ceil(floored / 60) * 60);
 }
 
 /** Seconds ruler under 3 minutes, minutes ruler at/above. */
@@ -116,6 +125,9 @@ function majorMinuteInterval(totalSec: number): number {
   return 60;
 }
 
+/** Hard cap on emitted ticks — belt-and-braces after the totalSec clamp. */
+const MAX_TICKS = 2000;
+
 /**
  * Ruler ticks from 0..totalSec inclusive. Majors carry a label; the minor ticks
  * between them (half a major step) are unlabelled hairlines.
@@ -124,7 +136,7 @@ export function buildTicks(totalSec: number, unit: TickUnit): Tick[] {
   const majorSec = unit === 'seconds' ? 10 : majorMinuteInterval(totalSec) * 60;
   const minorSec = Math.max(1, majorSec / 2);
   const ticks: Tick[] = [];
-  for (let sec = 0; sec <= totalSec + 0.5; sec += minorSec) {
+  for (let sec = 0; sec <= totalSec + 0.5 && ticks.length < MAX_TICKS; sec += minorSec) {
     const rounded = Math.round(sec);
     const major = rounded % majorSec === 0;
     ticks.push({

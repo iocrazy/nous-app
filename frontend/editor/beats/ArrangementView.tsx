@@ -111,6 +111,16 @@ export function ArrangementView({ scriptId, beats, onAdd, onUpdate, onCreate }: 
     [drag],
   );
 
+  // If the dragged beat vanishes mid-drag (reload/delete), its card unmounts
+  // with the pointer listeners, so endDrag can never fire — reset the machine.
+  useEffect(() => {
+    const ctx = dragRef.current;
+    if (ctx && !beats.some((b) => b.id === ctx.id)) {
+      dragRef.current = null;
+      setDrag(null);
+    }
+  }, [beats]);
+
   const arranged = useMemo(
     () => beats.filter((b) => placementOf(b).start_sec != null),
     [beats, placementOf],
@@ -138,10 +148,11 @@ export function ArrangementView({ scriptId, beats, onAdd, onUpdate, onCreate }: 
       minDurationSec,
     );
   }, [arranged, placementOf, pxPerSec]);
-  const laneCount = useMemo(
-    () => (lanes.size === 0 ? 1 : Math.max(...lanes.values()) + 1),
-    [lanes],
-  );
+  const laneCount = useMemo(() => {
+    let max = 0;
+    for (const lane of lanes.values()) if (lane > max) max = lane;
+    return max + 1;
+  }, [lanes]);
 
   const canvasWidth = timeToPx(totalSec, pxPerSec);
   const lanesHeight = LANES_PAD_TOP + laneCount * (LANE_HEIGHT + LANE_GAP);
@@ -163,6 +174,9 @@ export function ArrangementView({ scriptId, beats, onAdd, onUpdate, onCreate }: 
   const beginDrag = useCallback(
     (e: React.PointerEvent, beat: Beat, mode: DragMode) => {
       if (e.button !== 0) return;
+      // One drag at a time: a second touch mid-drag would hijack dragRef, strand
+      // the first pointer's capture and silently drop its pending write.
+      if (dragRef.current) return;
       const p = placementOf(beat);
       const card = cardRefs.current.get(beat.id);
       try {
