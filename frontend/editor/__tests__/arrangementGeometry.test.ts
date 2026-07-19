@@ -22,6 +22,8 @@ import {
   clampPxPerSec,
   computeTotalSec,
   fitPxPerSec,
+  layoutCards,
+  layoutExtentPx,
   pxToTime,
   snapGranularity,
   snapSec,
@@ -180,6 +182,72 @@ describe('anchorScrollLeft', () => {
         prevScrollLeft: 0,
       }),
     ).toBe(0);
+  });
+});
+
+describe('layoutCards (laper sequential flow)', () => {
+  it('keeps back-to-back beats on one lane, pushing right when min-width crowds', () => {
+    // 0.2 px/s: each 60s beat is 12px of time but MIN_CARD_PX wide → without the
+    // push these would zigzag onto lanes; laper flow keeps one row.
+    const layout = layoutCards(
+      [
+        { id: 'a', start_sec: 0, duration_sec: 60 },
+        { id: 'b', start_sec: 60, duration_sec: 60 },
+        { id: 'c', start_sec: 120, duration_sec: 60 },
+      ],
+      0.2,
+    );
+    expect(layout.get('a')).toEqual({ x: 0, lane: 0, width: MIN_CARD_PX });
+    expect(layout.get('b')).toEqual({ x: MIN_CARD_PX, lane: 0, width: MIN_CARD_PX });
+    expect(layout.get('c')).toEqual({ x: MIN_CARD_PX * 2, lane: 0, width: MIN_CARD_PX });
+  });
+
+  it('positions cards at their true time when the zoom leaves room', () => {
+    const layout = layoutCards(
+      [
+        { id: 'a', start_sec: 0, duration_sec: 60 },
+        { id: 'b', start_sec: 90, duration_sec: 60 },
+      ],
+      6,
+    );
+    expect(layout.get('a')).toEqual({ x: 0, lane: 0, width: 360 });
+    expect(layout.get('b')).toEqual({ x: 540, lane: 0, width: 360 });
+  });
+
+  it('splits lanes only on TRUE time overlap', () => {
+    const layout = layoutCards(
+      [
+        { id: 'a', start_sec: 0, duration_sec: 120 },
+        { id: 'b', start_sec: 60, duration_sec: 60 }, // starts inside a
+      ],
+      6,
+    );
+    expect(layout.get('a')?.lane).toBe(0);
+    expect(layout.get('b')?.lane).toBe(1);
+  });
+
+  it('seats zero-length beats at the same instant adjacent on one lane', () => {
+    const layout = layoutCards(
+      [
+        { id: 'a', start_sec: 0, duration_sec: null },
+        { id: 'b', start_sec: 0, duration_sec: null },
+      ],
+      6,
+    );
+    expect(layout.get('a')).toEqual({ x: 0, lane: 0, width: MIN_CARD_PX });
+    expect(layout.get('b')).toEqual({ x: MIN_CARD_PX, lane: 0, width: MIN_CARD_PX });
+  });
+
+  it('layoutExtentPx covers pushed overflow past the ruler end', () => {
+    const layout = layoutCards(
+      [
+        { id: 'a', start_sec: 0, duration_sec: 30 },
+        { id: 'b', start_sec: 30, duration_sec: 30 },
+      ],
+      0.2,
+    );
+    // ruler span 60s×0.2 = 12px, but two pushed min-width cards need 360px
+    expect(layoutExtentPx(layout, 60, 0.2)).toBe(MIN_CARD_PX * 2);
   });
 });
 

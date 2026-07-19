@@ -28,7 +28,8 @@ import {
   DEFAULT_PX_PER_SEC,
   MIN_CARD_PX,
   anchorScrollLeft,
-  assignLanes,
+  layoutCards,
+  layoutExtentPx,
   buildTicks,
   cardWidthPx,
   chooseTickUnit,
@@ -150,23 +151,28 @@ export function ArrangementView({
   const granularity = snapGranularity(unit);
   const ticks = useMemo(() => buildTicks(totalSec, unit), [totalSec, unit]);
 
-  const lanes = useMemo(() => {
-    const minDurationSec = pxToTime(MIN_CARD_PX, pxPerSec);
-    return assignLanes(
-      arranged.map((b) => {
-        const p = placementOf(b);
-        return { id: b.id, start_sec: p.start_sec ?? 0, duration_sec: p.duration_sec };
-      }),
-      minDurationSec,
-    );
-  }, [arranged, placementOf, pxPerSec]);
+  // Stable layout from the STORED placements (not the drag fold): the dragged
+  // card tracks the pointer directly and must not shove its neighbours around
+  // mid-drag — everyone else keeps their settled spot until pointer-up commits.
+  const layout = useMemo(
+    () =>
+      layoutCards(
+        arranged.map((b) => ({
+          id: b.id,
+          start_sec: b.start_sec ?? 0,
+          duration_sec: b.duration_sec,
+        })),
+        pxPerSec,
+      ),
+    [arranged, pxPerSec],
+  );
   const laneCount = useMemo(() => {
     let max = 0;
-    for (const lane of lanes.values()) if (lane > max) max = lane;
+    for (const l of layout.values()) if (l.lane > max) max = l.lane;
     return max + 1;
-  }, [lanes]);
+  }, [layout]);
 
-  const canvasWidth = timeToPx(totalSec, pxPerSec);
+  const canvasWidth = layoutExtentPx(layout, totalSec, pxPerSec);
   const lanesHeight = LANES_PAD_TOP + laneCount * (CARD_HEIGHT + LANE_GAP);
 
   // ── Zoom (cursor-anchored) ──────────────────────────────────────────────
@@ -407,6 +413,40 @@ export function ArrangementView({
 
   return (
     <div className="mh-arr-root" data-testid="beats-arrangement">
+      {/* Toolbar row above the canvas — the pill floated over the ruler labels
+          when absolute-positioned, so it lives in normal flow up here. */}
+      <div className="mh-arr-topbar">
+        <div
+          className="mh-arr-tools"
+          data-testid="arr-tools"
+          role="group"
+          aria-label={t('editor.arrZoomTools')}
+        >
+          <button type="button" className="mh-arr-tool-btn" data-testid="arr-fit" onClick={fitView}>
+            {t('editor.arrFit')}
+          </button>
+          <span className="mh-arr-tool-sep" aria-hidden="true" />
+          <button
+            type="button"
+            className="mh-arr-tool-btn"
+            data-testid="arr-zoom-out"
+            aria-label={t('editor.arrZoomOut')}
+            onClick={zoomOut}
+          >
+            − {t('editor.arrZoomOut')}
+          </button>
+          <button
+            type="button"
+            className="mh-arr-tool-btn"
+            data-testid="arr-zoom-in"
+            aria-label={t('editor.arrZoomIn')}
+            onClick={zoomIn}
+          >
+            + {t('editor.arrZoomIn')}
+          </button>
+        </div>
+      </div>
+
       <div className="mh-arr-body">
         <aside className="mh-arr-list" aria-label={t('editor.arrBeatList')}>
           {beats.map((beat, index) => (
@@ -455,12 +495,17 @@ export function ArrangementView({
               >
                 {arranged.map((beat) => {
                   const p = placementOf(beat);
-                  const lane = lanes.get(beat.id) ?? 0;
+                  const slot = layout.get(beat.id) ?? { x: 0, lane: 0, width: MIN_CARD_PX };
+                  const isDragging = drag?.id === beat.id;
+                  // Dragged card follows the pointer's TIME directly (no push);
+                  // everyone else sits on the settled layout.
+                  const x = isDragging ? timeToPx(p.start_sec ?? 0, pxPerSec) : slot.x;
+                  const fullWidth = isDragging
+                    ? cardWidthPx(p.duration_sec, pxPerSec)
+                    : slot.width;
+                  const lane = slot.lane;
                   const durationLabel = formatBeatDuration(p.duration_sec);
-                  const width = Math.max(
-                    MIN_CARD_PX - CARD_GAP_PX,
-                    cardWidthPx(p.duration_sec, pxPerSec) - CARD_GAP_PX,
-                  );
+                  const width = Math.max(MIN_CARD_PX - CARD_GAP_PX, fullWidth - CARD_GAP_PX);
                   return (
                     <div
                       key={beat.id}
@@ -471,7 +516,7 @@ export function ArrangementView({
                       data-testid="arr-card"
                       data-beat-id={beat.id}
                       style={{
-                        left: `${timeToPx(p.start_sec ?? 0, pxPerSec)}px`,
+                        left: `${x}px`,
                         width: `${width}px`,
                         height: `${CARD_HEIGHT}px`,
                         top: `${LANES_PAD_TOP + lane * (CARD_HEIGHT + LANE_GAP)}px`,
@@ -536,41 +581,6 @@ export function ArrangementView({
                   ))}
               </div>
             </div>
-          </div>
-
-          <div
-            className="mh-arr-tools"
-            data-testid="arr-tools"
-            role="group"
-            aria-label={t('editor.arrZoomTools')}
-          >
-            <button
-              type="button"
-              className="mh-arr-tool-btn"
-              data-testid="arr-fit"
-              onClick={fitView}
-            >
-              {t('editor.arrFit')}
-            </button>
-            <span className="mh-arr-tool-sep" aria-hidden="true" />
-            <button
-              type="button"
-              className="mh-arr-tool-btn"
-              data-testid="arr-zoom-out"
-              aria-label={t('editor.arrZoomOut')}
-              onClick={zoomOut}
-            >
-              − {t('editor.arrZoomOut')}
-            </button>
-            <button
-              type="button"
-              className="mh-arr-tool-btn"
-              data-testid="arr-zoom-in"
-              aria-label={t('editor.arrZoomIn')}
-              onClick={zoomIn}
-            >
-              + {t('editor.arrZoomIn')}
-            </button>
           </div>
         </div>
       </div>

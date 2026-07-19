@@ -1911,8 +1911,10 @@ export const EDITOR_SHELL_STYLES = `
 .mh-arr-memo-tick{ position:absolute; top:0; width:1px; height:8px; background:var(--hairline); }
 
 /* Tools pill — top-right, laper-style with text labels (Fit / Zoom out / in). */
+/* In-flow toolbar row (absolute over the canvas covered the ruler labels). */
+.mh-arr-topbar{ display:flex; justify-content:flex-end; padding:0 6px 8px; flex:0 0 auto; }
 .mh-arr-tools{
-  position:absolute; top:10px; right:14px; z-index:6; display:flex; align-items:center; gap:2px;
+  display:flex; align-items:center; gap:2px;
   background:var(--surface); border:1px solid var(--surface-border); border-radius:10px;
   padding:4px; box-shadow:var(--shadow-island);
 }

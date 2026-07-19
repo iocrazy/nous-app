@@ -185,6 +185,66 @@ export interface LaneInput {
   duration_sec: number | null;
 }
 
+/** A card's resolved timeline placement: pixel x, packed lane, full width. */
+export interface CardLayout {
+  x: number;
+  lane: number;
+  width: number;
+}
+
+/**
+ * laper-style sequential layout. Lanes split ONLY on true time overlap
+ * (B starts before A ends); back-to-back or merely min-width-crowded beats stay
+ * on one row, each card starting at its own time but PUSHED right past the
+ * previous card when the zoom leaves no room (approximate positioning — the
+ * ruler stays true, the flow stays single-row). Zero-length beats at the same
+ * instant don't "overlap", so they sit adjacent on one lane instead of
+ * stacking. Renderers subtract their visual gap from `width`; the push itself
+ * packs cards edge-to-edge so the rendered gap equals that subtraction.
+ */
+export function layoutCards(beats: LaneInput[], pxPerSec: number): Map<string, CardLayout> {
+  const ordered = [...beats].sort(
+    (a, b) => a.start_sec - b.start_sec || a.id.localeCompare(b.id),
+  );
+  const laneTimeEnds: number[] = [];
+  const lanePxEnds: number[] = [];
+  const result = new Map<string, CardLayout>();
+  for (const beat of ordered) {
+    const timeEnd = beat.start_sec + (beat.duration_sec ?? 0);
+    let lane = laneTimeEnds.findIndex((end) => end <= beat.start_sec);
+    if (lane === -1) {
+      lane = laneTimeEnds.length;
+      laneTimeEnds.push(timeEnd);
+      lanePxEnds.push(0);
+      const x = timeToPx(beat.start_sec, pxPerSec);
+      const width = cardWidthPx(beat.duration_sec, pxPerSec);
+      lanePxEnds[lane] = x + width;
+      result.set(beat.id, { x, lane, width });
+      continue;
+    }
+    const width = cardWidthPx(beat.duration_sec, pxPerSec);
+    const x = Math.max(timeToPx(beat.start_sec, pxPerSec), lanePxEnds[lane]);
+    laneTimeEnds[lane] = timeEnd;
+    lanePxEnds[lane] = x + width;
+    result.set(beat.id, { x, lane, width });
+  }
+  return result;
+}
+
+/**
+ * Canvas width: the ruler's full span or the furthest pushed card edge,
+ * whichever is wider — otherwise a card pushed past the timeline end clips.
+ */
+export function layoutExtentPx(
+  layout: Map<string, CardLayout>,
+  totalSec: number,
+  pxPerSec: number,
+): number {
+  let max = timeToPx(totalSec, pxPerSec);
+  for (const l of layout.values()) if (l.x + l.width > max) max = l.x + l.width;
+  return max;
+}
+
 /**
  * Greedy lane packing: process beats left-to-right, drop each into the first
  * lane whose last card ends at/before this card starts, else open a new lane.
