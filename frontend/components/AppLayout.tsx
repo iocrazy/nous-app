@@ -21,6 +21,7 @@ import { ConfirmProvider } from './ConfirmDialog';
 import { UploadProvider } from '../contexts/UploadContext';
 import { ExportTaskProvider } from '../contexts/ExportTaskContext';
 import { TaskManagerProvider } from '../contexts/TaskManagerContext';
+import { InboxProvider } from '../contexts/InboxContext';
 import { UserProfileModal } from './UserProfileModal';
 import { MobileProfilePage } from './MobileProfilePage';
 import { MobileTasksPage } from './MobileTasksPage';
@@ -423,6 +424,7 @@ function AppLayoutInner() {
     <ToastProvider>
     <ConfirmProvider>
     <TaskManagerProvider>
+    <InboxProvider>
     <UploadProvider>
     <ExportTaskProvider>
     {/* overflow-x-CLIP (not hidden): clip horizontal overflow WITHOUT becoming a
@@ -581,6 +583,7 @@ function AppLayoutInner() {
     </div>
     </ExportTaskProvider>
     </UploadProvider>
+    </InboxProvider>
     </TaskManagerProvider>
     </ConfirmProvider>
     </ToastProvider>
