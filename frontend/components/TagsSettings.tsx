@@ -175,6 +175,41 @@ export const TagsSettings: React.FC = () => {
     [tags],
   );
 
+  // Search-or-create: when the trimmed query exactly matches no existing tag
+  // (by English name OR Chinese name_zh, case-insensitive), the results area
+  // offers an inline "Create" affordance. Exact-match is checked against the
+  // full tag pool — curated AND shadow (origin='note') — because the backend
+  // 409s on a duplicate name regardless of origin; this mirrors
+  // EagleTagBrowser's noExactMatch guard.
+  const trimmedQuery = searchQuery.trim();
+  const noExactMatch = useMemo(() => {
+    if (!trimmedQuery) return false;
+    const q = trimmedQuery.toLowerCase();
+    return !tags.some(
+      (tag) =>
+        tag.name.toLowerCase() === q ||
+        (tag.name_zh ?? '').toLowerCase() === q,
+    );
+  }, [trimmedQuery, tags]);
+
+  // Fast-path create: same service the modal uses (createTag), default color,
+  // no name_zh / auto-translate detour. Optimistic append to the grid, then
+  // clear the search so the new (uncategorized) tag is immediately visible.
+  const handleQuickCreate = async () => {
+    const name = trimmedQuery;
+    if (!name || isCreating) return;
+    setIsCreating(true);
+    try {
+      const newTag = await createTag({ name });
+      setTags((prev) => [...prev, newTag]);
+      setSearchQuery('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create tag');
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
   // Filter tags based on search (curated pool only)
   const filteredTags = useMemo(() => {
     if (!searchQuery) return curatedTags;
@@ -953,9 +988,17 @@ export const TagsSettings: React.FC = () => {
               />
               <input
                 type="text"
-                placeholder={t('settings.tags.searchPlaceholder')}
+                placeholder={t('settings.tags.searchOrCreate', 'Search or create...')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  // IME 组合中的 Enter 属于输入法，不触发创建。
+                  if (e.nativeEvent.isComposing) return;
+                  if (e.key === 'Enter' && noExactMatch) {
+                    e.preventDefault();
+                    handleQuickCreate();
+                  }
+                }}
                 className="w-full pl-10 pr-4 py-2.5 bg-ink-950 border border-ink-800 rounded-lg text-sm text-ink-200 placeholder-ink-500 focus:outline-none focus:border-indigo-500 transition-colors"
               />
             </div>
@@ -967,13 +1010,37 @@ export const TagsSettings: React.FC = () => {
               <div className="flex items-center justify-center py-12">
                 <Loader2 size={24} className="animate-spin text-ink-500" />
               </div>
-            ) : filteredTags.length === 0 ? (
-              <div className="text-center py-12 text-ink-500">
-                <TagIcon size={40} className="mx-auto mb-3 opacity-30" />
-                <p>{searchQuery ? t('settings.tags.noResults') : t('settings.tags.empty')}</p>
-              </div>
             ) : (
-              <div className="space-y-5">
+              <>
+                {/* Search-or-create fast path — offered whenever the query
+                    matches no existing tag exactly. Sits atop the results
+                    (or replaces the empty state entirely). Enter in the
+                    search box triggers the same create. */}
+                {noExactMatch && (
+                  <button
+                    onClick={handleQuickCreate}
+                    disabled={isCreating}
+                    className="flex items-center gap-2 w-full mb-4 px-3 py-2.5 rounded-lg border border-dashed border-indigo-500/40 bg-indigo-500/5 text-sm text-ink-300 hover:bg-indigo-500/10 hover:border-indigo-500/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isCreating ? (
+                      <Loader2 size={14} className="animate-spin text-indigo-400 shrink-0" />
+                    ) : (
+                      <Plus size={14} className="text-indigo-400 shrink-0" />
+                    )}
+                    <span className="truncate">
+                      {t('settings.tags.create', 'Create')} &quot;{trimmedQuery}&quot;
+                    </span>
+                  </button>
+                )}
+                {filteredTags.length === 0 ? (
+                  noExactMatch ? null : (
+                    <div className="text-center py-12 text-ink-500">
+                      <TagIcon size={40} className="mx-auto mb-3 opacity-30" />
+                      <p>{searchQuery ? t('settings.tags.noResults') : t('settings.tags.empty')}</p>
+                    </div>
+                  )
+                ) : (
+                  <div className="space-y-5">
                 {groupedTags.map(({ name, tags: groupTags }) => (
                   <div key={name}>
                     <div className="flex items-center gap-2 mb-2">
@@ -1088,7 +1155,9 @@ export const TagsSettings: React.FC = () => {
                     </div>
                   </div>
                 ))}
-              </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
