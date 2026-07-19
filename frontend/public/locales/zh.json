@@ -278,6 +278,8 @@
       "generatedUntitled": "生成的视频",
       "promoteFailed": "无法添加生成的视频",
       "markUpdateFailed": "更新待发布标记失败",
+      "galleryExpandFailed": "无法打开图集",
+      "galleryEmpty": "该图集没有图片",
       "cover": "封面",
       "soon": "即将推出",
       "notSetYet": "尚未设置",
@@ -715,6 +717,12 @@
     "galleryCreatedPartial": "图集已创建（{{count}} 张图片上传失败）",
     "galleryUploadAllFailed": "所有图片上传失败",
     "galleryCreateFailed": "创建图集失败",
+    "gallery": {
+      "empty": "该图集还没有图片",
+      "prev": "上一张",
+      "next": "下一张",
+      "goTo": "跳到第 {{n}} 张"
+    },
     "itemCount": "{{count}} 项",
     "download": "下载",
     "noPreview": "暂不支持预览",
