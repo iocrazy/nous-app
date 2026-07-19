@@ -117,6 +117,28 @@ async def _resolve_video_url(account: dict, task: dict, repo) -> Optional[str]:
     return await repo.get_resource_media_url(int(rid))
 
 
+async def _resolve_image_urls(task: dict, repo) -> list[str]:
+    """Resolve the ordered servable URLs for every image in an images batch.
+    The batch's ``resource_ids`` order IS the gallery order (never reordered).
+
+    Unlike video one_to_one (which round-robins a resource per account), an
+    images task is always ONE note carrying ALL images — we do not split a
+    gallery across accounts, so every account posts the full ordered set from
+    the batch (see the ``images`` branch in ``_publish_one_account``). Raises
+    if any resource id has no servable URL: a note is an all-or-nothing gallery,
+    so publishing a silently-truncated set would be worse than failing loud."""
+    ids = task.get("resource_ids") or []
+    urls: list[str] = []
+    for rid in ids:
+        if not rid:
+            continue
+        url = await repo.get_resource_media_url(int(rid))
+        if not url:
+            raise RuntimeError(f"no servable media URL for resource {rid}")
+        urls.append(url)
+    return urls
+
+
 async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
     """Publish one account and write its business status. Returns the final
     status. Never raises — records 'failed' + error_message instead (a single
@@ -124,6 +146,7 @@ async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
     @DBOS.step so it is unit-testable with fakes."""
     account_row_id = int(account["id"])
     channel = decide_channel(account.get("channel", "h5"), account)
+    content_type = task.get("content_type") or "video"
     opts = _account_publish_opts(account, task)
     title = opts["title"]
     description = opts["description"]
@@ -131,6 +154,30 @@ async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
     private_status = opts["private_status"]
     allow_download = opts["allow_download"]
     try:
+        if content_type == "images":
+            # Images publish only through the H5 note handoff for now. The
+            # official create API has no image-post path yet, so an account
+            # that actually resolved to 'official' (has a live token) fails as
+            # BUSINESS state — the loop keeps going for the other accounts.
+            if channel == "official":
+                raise RuntimeError("images not supported on official channel yet")
+            image_urls = await _resolve_image_urls(task, repo)
+            if not image_urls:
+                raise RuntimeError("no servable media URL for resource")
+            share_id = secrets.token_urlsafe(16)
+            share_title = f"{title} {description}".strip() if description else title
+            await adapter.generate_image_share_url(
+                image_urls=image_urls,
+                title=share_title,
+                share_id=share_id,
+                hashtags=topics,
+                private_status=private_status,
+                allow_download=allow_download,
+            )
+            await repo.set_account_status(
+                account_row_id, "pending_share", share_id=share_id
+            )
+            return "pending_share"
         video_url = await _resolve_video_url(account, task, repo)
         if not video_url:
             raise RuntimeError("no servable media URL for resource")

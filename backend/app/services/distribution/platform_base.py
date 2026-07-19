@@ -34,3 +34,8 @@ class PlatformAdapter(ABC):
 
     async def generate_share_url(self, **kwargs) -> Optional[str]:
         return None
+
+    async def generate_image_share_url(self, **kwargs) -> Optional[str]:
+        """H5 image / gallery (图文/note) share. Default no-op for platforms
+        that don't support an image share handoff."""
+        return None

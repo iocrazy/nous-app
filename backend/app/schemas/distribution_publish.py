@@ -24,6 +24,11 @@ Channel = Literal["official", "h5"]
 MAX_TOPICS = 20
 MAX_TOPIC_LEN = 50
 
+# Douyin caps an image / gallery (图文/note) post at 35 images. The H5 share
+# doc doesn't state the ceiling explicitly, so this mirrors the app's known
+# gallery limit — bound so a single note can't carry an absurd image wall.
+MAX_IMAGES = 35
+
 
 def normalize_topics(topics: Optional[list[str]]) -> list[str]:
     """Sanitize user-entered topics into bare hashtag words: strip surrounding
@@ -81,8 +86,15 @@ class PublishTaskCreate(BaseModel):
     def _validate_content(self) -> "PublishTaskCreate":
         if self.content_type in ("video", "images") and not self.resource_ids:
             raise ValueError("resource_ids required for video/images content")
-        if self.distribution_mode == "one_to_one" and len(self.resource_ids) < len(
-            self.account_ids
+        if self.content_type == "images" and len(self.resource_ids) > MAX_IMAGES:
+            raise ValueError(f"at most {MAX_IMAGES} images allowed")
+        # one_to_one round-robins a resource per account — that's a VIDEO
+        # semantic. An images task is one note carrying every image (broadcast
+        # to each account, never split), so the count check doesn't apply.
+        if (
+            self.content_type == "video"
+            and self.distribution_mode == "one_to_one"
+            and len(self.resource_ids) < len(self.account_ids)
         ):
             raise ValueError("one_to_one needs at least as many resources as accounts")
         return self
