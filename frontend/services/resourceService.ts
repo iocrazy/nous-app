@@ -1922,6 +1922,11 @@ export async function trashResources(
 
 // ─── Gallery (first-class gallery entity, PR-A) ──────────────────────
 
+/** Mime type marking a resource as a first-class gallery entity (PR-A). A
+ *  gallery is one `resources` row; its ordered child images are ordinary
+ *  image resources linked through the `gallery_items` junction. */
+export const GALLERY_MIME = 'application/x-mediahub-gallery';
+
 /** Ordered child image of a gallery, as returned by the gallery-items API. */
 export interface GalleryChildItem {
   id: string;

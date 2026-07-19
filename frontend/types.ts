@@ -1888,4 +1888,11 @@ export interface LibraryVideo {
   id: string;
   filename: string;
   thumbnail_url: string | null;
+  /** Resource mime type — lets the publish picker tell a gallery entity
+   *  (`application/x-mediahub-gallery`) apart from a plain image. Optional
+   *  so existing video callers stay unaffected. */
+  mime_type?: string | null;
+  /** Child-image count when this row is a gallery entity; 0 / absent
+   *  otherwise (projected by the backend `get_resource_items` query). */
+  gallery_count?: number;
 }
