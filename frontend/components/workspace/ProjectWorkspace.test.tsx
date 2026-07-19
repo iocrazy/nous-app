@@ -360,15 +360,48 @@ describe('ProjectWorkspace', () => {
     fireEvent.click(await screen.findByTestId('ws-ep-script'));
     const shell = await screen.findByTestId('mock-editor-shell');
     expect(shell).toHaveAttribute('data-script-id', 'fresh-1');
+    // Atomic create+bind: episode_id goes in the create body (single call), no
+    // follow-up update. This collapses the old create-then-bind two-call dance
+    // that raced into duplicate scripts (#1432).
     expect(mockScriptService.createScriptProject).toHaveBeenCalledWith({
       project_id: 'p1',
       name: 'Ep 1 — Pilot',
-    });
-    // Attached to the clicked episode so the next open resolves it directly.
-    expect(mockScriptService.updateScriptProject).toHaveBeenCalledWith('fresh-1', {
       episode_id: '1',
     });
+    expect(mockScriptService.updateScriptProject).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('provisions exactly ONE script when the work view is double-clicked (no duplicate)', async () => {
+    // The double-fire that produced two active scripts on prod (#1432): two
+    // opens for the same episode before the first provision resolves must share
+    // ONE createScriptProject call, not race into two.
+    mockScriptService.fetchScriptProjects.mockResolvedValue({ data: [], total: 0 });
+    let resolveCreate!: (v: { id: string; name: string }) => void;
+    mockScriptService.createScriptProject.mockImplementation(
+      () =>
+        new Promise((res) => {
+          resolveCreate = res;
+        }),
+    );
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    await expandEpisodesTree();
+    const scriptView = await screen.findByTestId('ws-ep-script');
+    // Two clicks while the first provision is still in flight (create pending).
+    fireEvent.click(scriptView);
+    fireEvent.click(scriptView);
+
+    // Both opens shared the single in-flight provision — createScriptProject
+    // was issued exactly once.
+    await waitFor(() =>
+      expect(mockScriptService.createScriptProject).toHaveBeenCalledTimes(1),
+    );
+
+    resolveCreate({ id: 'fresh-1', name: 'Episode 1' });
+    const shell = await screen.findByTestId('mock-editor-shell');
+    expect(shell).toHaveAttribute('data-script-id', 'fresh-1');
+    expect(mockScriptService.createScriptProject).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to the Episodes module (with an error toast) when provisioning fails', async () => {

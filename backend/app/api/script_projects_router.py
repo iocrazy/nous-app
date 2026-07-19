@@ -45,6 +45,7 @@ async def create_script_project(
             project_id=body.project_id,
             name=body.name,
             description=body.description,
+            episode_id=body.episode_id,
         )
         return {"success": True, "data": project}
     except Exception as exc:

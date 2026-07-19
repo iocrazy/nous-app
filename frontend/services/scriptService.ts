@@ -36,6 +36,11 @@ export async function createScriptProject(data: {
   project_id: string;
   name: string;
   description?: string;
+  // Auto-provision: bind the new script to an episode atomically. When set,
+  // the backend is idempotent (returns the episode's existing active script
+  // instead of a duplicate), collapsing the old create-then-bind two-call
+  // dance that raced into duplicate scripts (#1432).
+  episode_id?: string;
 }): Promise<ScriptProject> {
   const headers = await getAuthHeaders();
   const res = await fetch(`${getApiUrl()}/api/v1/scripts/projects`, {
