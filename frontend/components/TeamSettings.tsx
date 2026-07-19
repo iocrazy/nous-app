@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Loader2, UserPlus, Trash2, LogOut, Shield, User, Crown, AlertTriangle, BarChart3 } from 'lucide-react';
+import { Loading } from './common/Loading';
 import { TeamMember } from '../types';
 import { fetchTeamMembers, updateTeam, updateMemberRole, removeMember, deleteTeam, leaveTeam } from '../services/teamService';
 import { fetchUsageStats, fetchPointsBalance } from '../services/pointsService';
@@ -254,9 +255,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
           </h3>
           <div className="border border-ink-800 rounded-lg p-4 bg-ink-900/30">
             {isLoadingStats ? (
-              <div className="flex items-center justify-center py-6">
-                <Loader2 className="animate-spin text-ink-500" size={20} />
-              </div>
+              <Loading center />
             ) : (
               <div className="space-y-4">
                 {/* Summary row */}
@@ -321,9 +320,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
         </div>
 
         {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="animate-spin text-ink-500" size={24} />
-          </div>
+          <Loading center />
         ) : (
           <div className="border border-ink-800 rounded-lg overflow-hidden">
             <table className="w-full">

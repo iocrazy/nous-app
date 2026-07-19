@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Brain, Trash2, Loader2, Save, AlertTriangle, X } from 'lucide-react';
+import Loading from './common/Loading';
 import { useTranslation } from 'react-i18next';
 import {
   getMemoryProfile,
@@ -123,10 +124,7 @@ export const MemoryPanel: React.FC = () => {
         )}
 
         {loading ? (
-          <div className="flex items-center gap-2 text-sm text-ink-500">
-            <Loader2 size={16} className="animate-spin" />
-            {t('common.loading')}
-          </div>
+          <Loading center label={t('common.loading')} />
         ) : !profile ? null : (
           <>
             {/* Toggles */}

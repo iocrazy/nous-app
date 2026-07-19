@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import Loading from '../components/common/Loading';
 import { ResourceDetailPage } from '../components/ResourceDetailPage';
 import { DownloadDetailPage } from './DownloadDetailPage';
 import { getSupabaseClient, isSupabaseConfigured } from '../supabaseClient';
@@ -73,8 +73,8 @@ export function FileDetailDispatcher() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="w-6 h-6 animate-spin text-ink-500" />
+      <div className="flex items-center justify-center h-full text-ink-500">
+        <Loading center />
       </div>
     );
   }

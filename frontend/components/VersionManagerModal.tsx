@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Layers, Loader2, Upload, Trash2, Check, AlertTriangle } from 'lucide-react';
+import { Loading } from './common/Loading';
 import { useTranslation } from 'react-i18next';
 import { ResourceVersion } from '../types';
 import {
@@ -173,9 +174,7 @@ export const VersionManagerModal: React.FC<VersionManagerModalProps> = ({
           )}
 
           {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 size={24} className="text-ink-400 animate-spin" />
-            </div>
+            <Loading center />
           ) : versions.length === 0 ? (
             <div className="text-center py-8 text-ink-500 text-sm">
               {t('resources.noVersions', 'No versions found')}

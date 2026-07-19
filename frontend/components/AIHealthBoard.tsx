@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Activity, CheckCircle2, AlertTriangle, XCircle, Loader2, RefreshCw } from 'lucide-react';
+import { Loading } from './common/Loading';
 import { useTranslation } from 'react-i18next';
 import { getAIHealth, type CapabilityHealth } from '../services/aiService';
 
@@ -67,8 +68,7 @@ export const AIHealthBoard: React.FC = () => {
           </div>
         ) : !rows ? (
           <div className="flex items-center gap-2 text-sm text-ink-500 px-2 py-1">
-            <Loader2 size={16} className="animate-spin" />
-            {t('common.loading')}
+            <Loading label={t('common.loading')} />
           </div>
         ) : (
           <ul className="space-y-1">

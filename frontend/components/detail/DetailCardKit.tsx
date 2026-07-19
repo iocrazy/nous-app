@@ -80,7 +80,7 @@ export function DetailBadge({
 }) {
   if (variant === 'accent') {
     return (
-      <span className="px-2 py-1 text-xs font-semibold bg-indigo-900/30 text-indigo-400 rounded-md border border-indigo-900/50">
+      <span className="px-2 py-1 text-xs font-semibold bg-[var(--accent-soft)] text-[var(--accent-text)] rounded-md border border-[var(--accent-border)]">
         {children}
       </span>
     );

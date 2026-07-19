@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, Volume2, VolumeX, Loader2, ImageOff } from 'lucide-react';
+import Loading from './common/Loading';
 import { getApiUrl } from '../utils/apiConfig';
 import { getAuthHeaders } from '../services/parserService';
 
@@ -142,8 +143,8 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
   // Loading state
   if (isLoading) {
     return (
-      <div className="w-full h-full bg-ink-950 rounded-lg flex items-center justify-center">
-        <Loader2 size={32} className="animate-spin text-ink-500" />
+      <div className="w-full h-full bg-ink-950 rounded-lg flex items-center justify-center text-ink-500">
+        <Loading center />
       </div>
     );
   }

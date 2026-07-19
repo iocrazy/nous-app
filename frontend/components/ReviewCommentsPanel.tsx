@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { ReviewComment, DrawingData } from '../types';
 import { fetchComments, addComment, deleteComment } from '../services/projectsService';
 import { ReviewCommentItem } from './ReviewCommentItem';
+import Loading from './common/Loading';
 
 interface ReviewCommentsPanelProps {
   projectId: string;
@@ -113,11 +114,11 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
         <div className="flex items-center justify-between mt-2">
           <div className="flex items-center gap-2">
             {capturedTime !== null && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-500/20 text-indigo-300">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--accent-soft)] text-[var(--accent-text)]">
                 [{formatTimestamp(capturedTime)}]
                 <button
                   onClick={() => setCapturedTime(null)}
-                  className="hover:text-indigo-100 transition-colors"
+                  className="hover:opacity-70 transition-opacity"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -154,8 +155,8 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
       {/* Comment List */}
       <div className="flex-1 overflow-y-auto min-h-0">
         {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-5 h-5 animate-spin text-ink-500" />
+          <div className="flex items-center justify-center py-12 text-ink-500">
+            <Loading center />
           </div>
         ) : comments.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-ink-500">

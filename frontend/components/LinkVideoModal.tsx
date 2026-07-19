@@ -6,6 +6,7 @@ import { linkVideoToProject } from '../services/projectsService';
 import { Video as VideoType } from '../types';
 import { getCoverUrl } from '../utils/awemeType';
 import { useAuth } from '../contexts/AuthContext';
+import Loading from './common/Loading';
 
 interface LinkVideoModalProps {
   isOpen: boolean;
@@ -120,8 +121,8 @@ export const LinkVideoModal: React.FC<LinkVideoModalProps> = ({
         {/* Video list */}
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-2">
           {isLoading && (
-            <div className="flex items-center justify-center py-10">
-              <Loader2 className="w-6 h-6 text-indigo-400 animate-spin" />
+            <div className="flex items-center justify-center py-10 text-ink-400">
+              <Loading center />
             </div>
           )}
 

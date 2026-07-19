@@ -5,6 +5,7 @@ import {
   PanelRightClose,
 } from 'lucide-react';
 import { Video, TranscriptData, SummaryData, Collection } from '../types';
+import Loading from './common/Loading';
 import { MediaCard } from './MediaCard';
 import SodaLyricsTab from './SodaLyricsTab';
 import type { SodaTheme } from '../utils/sodaTheme';
@@ -550,9 +551,8 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
 
             {/* Loading existing transcript from server */}
             {transcriptLoading && transcribeStatus !== 'processing' && !transcript && (
-              <div className="flex flex-col items-center justify-center py-16">
-                <Loader2 size={24} className="animate-spin text-indigo-400 mb-3" />
-                <p className={`text-xs ${cText500}`}>Loading transcript...</p>
+              <div className="flex flex-col items-center justify-center py-16 text-indigo-400">
+                <Loading center label="Loading transcript..." />
               </div>
             )}
 
@@ -768,8 +768,8 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
 
               {/* Summary loading */}
               {summaryLoading && video.summary_status === 'completed' && (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 size={20} className="animate-spin text-indigo-400" />
+                <div className="flex items-center justify-center py-8 text-indigo-400">
+                  <Loading center />
                 </div>
               )}
 
@@ -906,10 +906,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                     || video.visual_analysis_status === 'failed')) && (
                 <div className={`p-4 ${cCardBg} border ${cBorder800} rounded-lg`}>
                   {visualAnalysisFetching ? (
-                    <div className="flex items-center gap-3">
-                      <Loader2 size={18} className="animate-spin text-purple-400" />
-                      <span className={`text-sm ${cText400}`}>Loading analysis...</span>
-                    </div>
+                    <Loading label="Loading analysis..." className="text-purple-400" />
                   ) : (
                     <>
                       <p className={`text-sm ${cText500} mb-3`}>

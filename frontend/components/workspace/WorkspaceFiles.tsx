@@ -18,6 +18,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Folder, Film, Image as ImageIcon, FileText, Upload as UploadIcon, Loader2 } from 'lucide-react';
+import { Loading } from '../common/Loading';
 import {
   fetchProjectFiles,
   fetchProjectFolders,
@@ -367,7 +368,7 @@ export function WorkspaceFiles({
             disabled={loadingMore}
             className="flex items-center gap-1.5 text-[12px] rounded-full px-4 py-1.5 border border-ink-700 text-ink-300 hover:border-ink-500 disabled:opacity-50 transition-colors"
           >
-            {loadingMore && <Loader2 size={13} className="animate-spin" />}
+            {loadingMore && <Loading size="sm" />}
             {t(
               loadingMore
                 ? 'projects.workspace.files.loadingMore'

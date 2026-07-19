@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { UserPlus, Trash2, Shield, User, Crown, Loader2, Search, Users } from 'lucide-react';
+import { Loading } from './common/Loading';
 import { TeamMember } from '../types';
 import { fetchTeamMembers, updateMemberRole, removeMember } from '../services/teamService';
 import { fetchUsageStats } from '../services/pointsService';
@@ -128,7 +129,7 @@ export const MembersView: React.FC<MembersViewProps> = ({
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64 text-ink-400">
-        <Loader2 className="animate-spin" size={24} />
+        <Loading center />
       </div>
     );
   }
