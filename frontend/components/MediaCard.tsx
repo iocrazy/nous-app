@@ -694,11 +694,11 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 {isAudio ? 'Audio' : getAwemeTypeLabel(data.media_type)}
                 </span>
                 {data.resolution ? (
-                <span className="px-2 py-1 text-xs font-semibold bg-indigo-900/30 text-indigo-400 rounded-md border border-indigo-900/50">
+                <span className="px-2 py-1 text-xs font-semibold bg-[var(--accent-soft)] text-[var(--accent-text)] rounded-md border border-[var(--accent-border)]">
                 {formatResolution(data.resolution)}
                 </span>
                 ) : isAudio && audioBitrate ? (
-                <span className="px-2 py-1 text-xs font-semibold bg-indigo-900/30 text-indigo-400 rounded-md border border-indigo-900/50">
+                <span className="px-2 py-1 text-xs font-semibold bg-[var(--accent-soft)] text-[var(--accent-text)] rounded-md border border-[var(--accent-border)]">
                 {audioBitrate}kbps
                 </span>
                 ) : null}
@@ -808,7 +808,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             releaseTime={ugcStatsMissing ? null : formatDateTime(data.published_at)}
             duration={formatDuration(data.duration)}
             durationSuffix={data.resolution ? (
-              <span className="sm:hidden px-1.5 py-0.5 text-xs font-medium bg-indigo-900/30 text-indigo-400 rounded border border-indigo-900/50">
+              <span className="sm:hidden px-1.5 py-0.5 text-xs font-medium bg-[var(--accent-soft)] text-[var(--accent-text)] rounded border border-[var(--accent-border)]">
                 {formatResolution(data.resolution)}
               </span>
             ) : undefined}
@@ -1002,7 +1002,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                         <div className="p-1 rounded bg-indigo-500/10 text-indigo-400">
                            <PenTool size={12} />
                         </div>
-                        <span className="text-xs font-semibold text-indigo-200">AI Rewrite</span>
+                        <span className="text-xs font-semibold text-[var(--accent-text)]">AI Rewrite</span>
                     </div>
                     <div className="p-3 rounded-lg border border-indigo-500/20 bg-indigo-500/5 text-sm text-ink-300 leading-relaxed">
                         {rewrittenText}

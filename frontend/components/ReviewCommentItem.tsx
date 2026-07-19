@@ -108,7 +108,7 @@ const ReviewCommentItem: React.FC<ReviewCommentItemProps> = ({
           {comment.timestamp_seconds !== null && (
             <button
               onClick={() => onSeekTo(comment.timestamp_seconds!)}
-              className="flex-shrink-0 px-1.5 py-0.5 text-xs font-mono rounded bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 transition-colors cursor-pointer"
+              className="flex-shrink-0 px-1.5 py-0.5 text-xs font-mono rounded bg-[var(--accent-soft)] text-[var(--accent-text)] hover:bg-[var(--accent-border)] transition-colors cursor-pointer"
               title={t('mediatrack.review.seekTo')}
             >
               {formatTimestamp(comment.timestamp_seconds)}

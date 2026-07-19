@@ -114,11 +114,11 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
         <div className="flex items-center justify-between mt-2">
           <div className="flex items-center gap-2">
             {capturedTime !== null && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-500/20 text-indigo-300">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--accent-soft)] text-[var(--accent-text)]">
                 [{formatTimestamp(capturedTime)}]
                 <button
                   onClick={() => setCapturedTime(null)}
-                  className="hover:text-indigo-100 transition-colors"
+                  className="hover:opacity-70 transition-opacity"
                 >
                   <X className="w-3 h-3" />
                 </button>

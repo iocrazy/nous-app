@@ -448,9 +448,9 @@ export const ResourceReviewPanel: React.FC<ResourceReviewPanelProps> = ({
               </>
             )}
             {capturedTime != null && (
-              <span className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono bg-indigo-500/15 text-indigo-400 rounded">
+              <span className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono bg-[var(--accent-soft)] text-[var(--accent-text)] rounded">
                 [{formatTimecode(capturedTime)}]
-                <button onClick={() => setCapturedTime(null)} className="hover:text-indigo-200">
+                <button onClick={() => setCapturedTime(null)} className="hover:opacity-70">
                   <X size={9} />
                 </button>
               </span>

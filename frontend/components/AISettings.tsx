@@ -288,13 +288,13 @@ const EnabledModelsField: React.FC<{
         {enabledModels.map((m) => (
           <span
             key={m}
-            className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/15 border border-indigo-500/30 px-3 py-1 text-xs font-mono text-indigo-200"
+            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] border border-[var(--accent-border)] px-3 py-1 text-xs font-mono text-[var(--accent-text)]"
           >
             {m}
             <button
               type="button"
               onClick={() => onRemove(m)}
-              className="text-indigo-300 hover:text-white transition-colors"
+              className="text-[var(--accent-text)] hover:opacity-70 transition-opacity"
               aria-label={`Remove ${m}`}
             >
               <X size={12} />
@@ -1366,15 +1366,15 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             );
           })}
           {governance.nous_enabled && (
-            <div className="bg-ink-950 border border-indigo-700/40 rounded-xl overflow-hidden">
+            <div className="bg-ink-950 border border-[var(--accent-border)] rounded-xl overflow-hidden">
               <div className="px-6 py-4 flex items-center gap-4">
-                <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400">
+                <div className="p-2 rounded-lg bg-[var(--accent-soft)] text-[var(--accent-text)]">
                   <Sparkles size={18} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-ink-100">MediaHub (Platform)</span>
-                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300">
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--accent-soft)] text-[var(--accent-text)]">
                       Platform-managed
                     </span>
                   </div>
