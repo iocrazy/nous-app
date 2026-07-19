@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findActiveTag, parseTags } from './noteTags';
+import { findActiveTag, parseTags, splitTagParts } from './noteTags';
 
 describe('parseTags — mirrors backend note_tags.py contract', () => {
   it('extracts in order', () => {
@@ -24,6 +24,29 @@ describe('parseTags — mirrors backend note_tags.py contract', () => {
   it('empty and markdown headings are not tags', () => {
     expect(parseTags('')).toEqual([]);
     expect(parseTags('# heading text')).toEqual([]);
+  });
+});
+
+describe('splitTagParts — text/tag segments the inline chip renderer consumes', () => {
+  it('splits a tag off surrounding text, keeping the boundary space as text', () => {
+    expect(splitTagParts('look at #颜值 today')).toEqual([
+      { type: 'text', value: 'look at ' },
+      { type: 'tag', raw: '颜值', value: '颜值' },
+      { type: 'text', value: ' today' },
+    ]);
+  });
+  it('preserves original casing in raw, lowercases the filter value', () => {
+    expect(splitTagParts('#Hooks')).toEqual([{ type: 'tag', raw: 'Hooks', value: 'hooks' }]);
+  });
+  it('returns a single text part when there is no tag', () => {
+    expect(splitTagParts('plain text only')).toEqual([{ type: 'text', value: 'plain text only' }]);
+  });
+  it('handles consecutive tags with the boundary space between them', () => {
+    expect(splitTagParts('#a #b')).toEqual([
+      { type: 'tag', raw: 'a', value: 'a' },
+      { type: 'text', value: ' ' },
+      { type: 'tag', raw: 'b', value: 'b' },
+    ]);
   });
 });
 

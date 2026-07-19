@@ -7,11 +7,22 @@ vi.mock('../../services/inspirationService', () => ({
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ mediaToken: 'tok' }),
 }));
-// NoteMarkdown's real props are `{ source: string, onToggleTask?: (index) => void }`
-// (verified by reading components/Inspiration/NoteMarkdown.tsx) — the mock mirrors
-// that shape and preserves the previous MarkdownBody mock's testid/text contract.
+// NoteMarkdown's real props are `{ source, onToggleTask?, onTagClick? }`
+// (verified by reading components/Inspiration/NoteMarkdown.tsx). Tags now render
+// as inline chips INSIDE NoteMarkdown, so the mock exposes an onTagClick relay
+// button to verify NoteCard threads the filter callback through (the real chip
+// rendering is covered by NoteMarkdown's own tests).
 vi.mock('./NoteMarkdown', () => ({
-  NoteMarkdown: ({ source }: { source: string }) => <div data-testid="md">{source}</div>,
+  NoteMarkdown: ({ source, onTagClick }: { source: string; onTagClick?: (t: string) => void }) => (
+    <div data-testid="md">
+      {source}
+      {onTagClick && (
+        <button data-testid="md-tag" onClick={() => onTagClick('hooks')}>
+          inline-chip
+        </button>
+      )}
+    </div>
+  ),
 }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_k: string, fallback: string) => fallback }),
@@ -34,20 +45,21 @@ const note = (over: Partial<InspirationNote> = {}): InspirationNote => ({
 });
 
 describe('NoteCard', () => {
-  it('renders markdown body and tag chips', () => {
+  it('renders the markdown body and no separate below-body chip row', () => {
     render(
       <NoteCard note={note()} onEdit={vi.fn()} onTogglePin={vi.fn()} onDelete={vi.fn()} onTagClick={vi.fn()} />,
     );
-    expect(screen.getByTestId('md').textContent).toBe('hello #hooks');
-    expect(screen.getByText('#hooks')).toBeTruthy();
+    expect(screen.getByTestId('md').textContent).toContain('hello #hooks');
+    // the old duplicate chip row rendered a standalone `#hooks` button — gone now
+    expect(screen.queryByRole('button', { name: '#hooks' })).toBeNull();
   });
 
-  it('tag chip click bubbles the tag', () => {
+  it('threads onTagClick down to NoteMarkdown for inline chips', () => {
     const onTagClick = vi.fn();
     render(
       <NoteCard note={note()} onEdit={vi.fn()} onTogglePin={vi.fn()} onDelete={vi.fn()} onTagClick={onTagClick} />,
     );
-    fireEvent.click(screen.getByText('#hooks'));
+    fireEvent.click(screen.getByTestId('md-tag'));
     expect(onTagClick).toHaveBeenCalledWith('hooks');
   });
 

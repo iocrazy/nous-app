@@ -69,6 +69,7 @@ export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete,
         <NoteMarkdown
           source={note.content_md}
           onToggleTask={onToggleTask ? (index) => onToggleTask(note, index) : undefined}
+          onTagClick={onTagClick}
         />
       </div>
 
@@ -95,19 +96,9 @@ export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete,
         </div>
       )}
 
-      {note.tags.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {note.tags.map((tag) => (
-            <button
-              key={tag}
-              onClick={() => onTagClick(tag)}
-              className="rounded bg-[var(--accent-soft)] px-1.5 py-0.5 text-xs text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"
-            >
-              #{tag}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Tags now render inline in the body via NoteMarkdown's tag chips
+          (they are highlighted #tag occurrences in content_md); the former
+          duplicate below-body chip row was removed (2026-07-19). */}
 
       <AttachmentView attachments={note.attachments} />
     </div>
