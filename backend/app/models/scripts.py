@@ -278,6 +278,9 @@ class ScriptProjects(Base):
         String(50), comment="Story genre/style"
     )
     episode_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    target_duration_sec: Mapped[Optional[int]] = mapped_column(
+        Integer, comment="Beats timeline target total runtime (sec); NULL=unset"
+    )
 
 
 class ScriptAssets(Base):

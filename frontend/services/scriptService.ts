@@ -54,7 +54,10 @@ export async function createScriptProject(data: {
 export async function updateScriptProject(
   scriptId: string,
   data: Partial<
-    Pick<ScriptProject, 'name' | 'description' | 'status' | 'settings_json' | 'episode_id'>
+    Pick<
+      ScriptProject,
+      'name' | 'description' | 'status' | 'settings_json' | 'episode_id' | 'target_duration_sec'
+    >
   >,
 ): Promise<ScriptProject> {
   const headers = await getAuthHeaders();

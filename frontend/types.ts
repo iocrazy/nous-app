@@ -898,6 +898,8 @@ export interface ScriptProject {
   settings_json?: Record<string, unknown>;
   viewport_json?: { x: number; y: number; zoom: number };
   status: 'active' | 'archived' | 'deleted';
+  /** Beats timeline target total runtime in seconds (M3); null/absent = unset. */
+  target_duration_sec?: number | null;
   created_at: string;
   updated_at: string;
 }
