@@ -244,6 +244,16 @@ class ShotMoveRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# PG INTEGER ceiling — start_sec/duration_sec are INTEGER columns (mig 370); an
+# unbounded int would pass Pydantic and blow up as an asyncpg 22003 → 500.
+_PG_INT_MAX = 2_147_483_647
+
+# The card renders `color` straight into a CSS `background`, so the server must
+# pin it to a hex literal — a free-form string ≤20 chars admits `url(//host)`
+# beacons from direct API callers on team-shared beats.
+_HEX_COLOR_PATTERN = r"^#[0-9a-fA-F]{6}$"
+
+
 class BeatCreate(BaseModel):
     """Request body for creating a beat under a script. ``script_id`` comes from
     the path; ``scene_ids`` is an ordered list of linked scene id strings.
@@ -256,10 +266,10 @@ class BeatCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     summary: Optional[str] = None
     scene_ids: Optional[List[str]] = None
-    start_sec: Optional[int] = Field(None, ge=0)
-    duration_sec: Optional[int] = Field(None, ge=0)
+    start_sec: Optional[int] = Field(None, ge=0, le=_PG_INT_MAX)
+    duration_sec: Optional[int] = Field(None, ge=0, le=_PG_INT_MAX)
     beat_role: Optional[str] = Field(None, max_length=40)
-    color: Optional[str] = Field(None, max_length=20)
+    color: Optional[str] = Field(None, pattern=_HEX_COLOR_PATTERN)
 
 
 class BeatUpdate(BaseModel):
@@ -269,10 +279,10 @@ class BeatUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=200)
     summary: Optional[str] = None
     scene_ids: Optional[List[str]] = None
-    start_sec: Optional[int] = Field(None, ge=0)
-    duration_sec: Optional[int] = Field(None, ge=0)
+    start_sec: Optional[int] = Field(None, ge=0, le=_PG_INT_MAX)
+    duration_sec: Optional[int] = Field(None, ge=0, le=_PG_INT_MAX)
     beat_role: Optional[str] = Field(None, max_length=40)
-    color: Optional[str] = Field(None, max_length=20)
+    color: Optional[str] = Field(None, pattern=_HEX_COLOR_PATTERN)
 
 
 class BeatMoveRequest(BaseModel):

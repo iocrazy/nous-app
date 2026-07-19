@@ -109,7 +109,9 @@ export function BeatCard({
       return;
     }
     const parsed = Number.parseInt(raw, 10);
-    if (Number.isNaN(parsed) || parsed < 0) {
+    // Upper bound mirrors the server's PG INTEGER ceiling — out-of-range input
+    // reverts to the saved value instead of round-tripping into a 422/500.
+    if (Number.isNaN(parsed) || parsed < 0 || parsed > 2_147_483_647) {
       setDurationDraft(beat.duration_sec == null ? '' : String(beat.duration_sec));
       return;
     }

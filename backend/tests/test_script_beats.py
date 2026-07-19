@@ -209,6 +209,77 @@ async def test_beat_patch_null_title_not_forwarded(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_beat_patch_null_scene_ids_not_forwarded(client, monkeypatch):
+    """``scene_ids: null`` must be treated as untouched — forwarding it would
+    coerce to [] downstream and silently wipe every scene link."""
+    captured: Dict[str, Any] = {}
+
+    async def fake_beat_get(self, beat_id):
+        return {"id": beat_id, "script_id": "9001"}
+
+    async def fake_project_get(self, script_id):
+        return {"id": script_id, "team_id": "TEAM_1"}
+
+    async def fake_member(team_id, user_id):
+        return True
+
+    async def fake_update(self, beat_id, data):
+        captured.update(data)
+        return {"id": beat_id, "script_id": "9001", **data}
+
+    import app.core.scope_guards as guards
+    from app.repositories.script_repository import ScriptProjectRepository
+
+    monkeypatch.setattr(ScriptBeatRepository, "get_by_id", fake_beat_get)
+    monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_project_get)
+    monkeypatch.setattr(guards, "_is_team_member", fake_member)
+    monkeypatch.setattr(ScriptBeatRepository, "update", fake_update)
+
+    resp = await client.patch(
+        "/api/v1/beats/123", json={"scene_ids": None, "summary": "Keep links"}
+    )
+    assert resp.status_code == 200
+    assert captured == {"summary": "Keep links"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"color": "url(//evil.io)"},  # CSS beacon inside the old 20-char cap
+        {"color": "#abc"},  # short hex — only #rrggbb allowed
+        {"color": "red"},  # named colors rejected
+        {"duration_sec": 2_147_483_648},  # PG INTEGER + 1 → 22003 if forwarded
+        {"start_sec": 99_999_999_999},
+    ],
+)
+async def test_beat_patch_rejects_invalid_arrangement_values(
+    client, monkeypatch, payload
+):
+    """Non-hex colors and out-of-INTEGER-range seconds must 422 at the schema
+    boundary, never reach the repo (asyncpg 22003 → opaque 500)."""
+
+    async def fake_beat_get(self, beat_id):
+        return {"id": beat_id, "script_id": "9001"}
+
+    async def fake_project_get(self, script_id):
+        return {"id": script_id, "team_id": "TEAM_1"}
+
+    async def fake_member(team_id, user_id):
+        return True
+
+    import app.core.scope_guards as guards
+    from app.repositories.script_repository import ScriptProjectRepository
+
+    monkeypatch.setattr(ScriptBeatRepository, "get_by_id", fake_beat_get)
+    monkeypatch.setattr(ScriptProjectRepository, "get_by_id", fake_project_get)
+    monkeypatch.setattr(guards, "_is_team_member", fake_member)
+
+    resp = await client.patch("/api/v1/beats/123", json=payload)
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_beat_missing_returns_404(client, monkeypatch):
     """A missing beat 404s before any team check (guard row-missing ordering)."""
 

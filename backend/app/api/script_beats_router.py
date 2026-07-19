@@ -73,8 +73,11 @@ async def update_beat(
         # (summary / duration_sec / color). title is NOT NULL, so a null there
         # is dropped rather than forwarded as a NULL write.
         data = body.model_dump(exclude_unset=True)
-        if data.get("title") is None:
-            data.pop("title", None)
+        # title is NOT NULL; scene_ids-null would coerce to [] and silently wipe
+        # all links. Both are "untouched", never destructive, when sent as null.
+        for immutable_via_null in ("title", "scene_ids"):
+            if data.get(immutable_via_null) is None:
+                data.pop(immutable_via_null, None)
         beat = await get_script_beat_repository().update(beat_id, data)
         if beat is None:
             raise HTTPException(status_code=404, detail="Beat not found")

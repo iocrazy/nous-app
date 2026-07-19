@@ -211,6 +211,16 @@ describe('BeatsView arrangement fields (M1)', () => {
     expect((input as HTMLInputElement).value).toBe('600');
   });
 
+  it('a duration beyond the PG INTEGER ceiling reverts instead of round-tripping', async () => {
+    svc.listBeats.mockResolvedValue([beat({ id: 'a', duration_sec: 600 })]);
+    renderView();
+    const input = await screen.findByLabelText('editor.beatDuration');
+    fireEvent.change(input, { target: { value: '9999999999' } });
+    fireEvent.blur(input);
+    expect(svc.updateBeat).not.toHaveBeenCalled();
+    expect((input as HTMLInputElement).value).toBe('600');
+  });
+
   it('clicking the selected swatch clears the color (toggle-off)', async () => {
     svc.listBeats.mockResolvedValue([beat({ id: 'a', color: '#b8a9a0' })]);
     renderView();
