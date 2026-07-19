@@ -229,7 +229,7 @@ export function MobileFilterSheet({
         {/* Header */}
         <div className="px-4 py-3 flex items-center justify-between border-b border-ink-800 shrink-0">
           <div className="flex items-center gap-2">
-            <Filter size={16} className="text-indigo-400" />
+            <Filter size={16} className="text-[var(--accent-text)]" />
             <span className="text-sm font-semibold text-ink-50">
               {t('resources.filter.title', 'Filters')}
             </span>

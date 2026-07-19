@@ -82,7 +82,7 @@ export const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ variant = 'd
               disabled={isChanging}
               className={`w-full px-4 py-2 text-left text-sm transition-colors disabled:opacity-50 ${
                 i18n.language === lang.code
-                  ? 'text-indigo-400 bg-indigo-500/10'
+                  ? 'text-[var(--accent-text)] bg-[var(--accent-soft)]'
                   : 'text-ink-300 hover:bg-ink-800'
               }`}
             >

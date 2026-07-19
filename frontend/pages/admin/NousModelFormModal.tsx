@@ -198,7 +198,7 @@ export const NousModelFormModal: React.FC<NousModelFormModalProps> = ({
             className="flex items-center gap-2 text-sm text-ink-300"
           >
             {form.is_enabled
-              ? <ToggleRight size={24} className="text-indigo-400" />
+              ? <ToggleRight size={24} className="text-[var(--accent-text)]" />
               : <ToggleLeft size={24} className="text-ink-500" />}
             <span>{form.is_enabled ? 'Enabled' : 'Disabled'}</span>
           </button>

@@ -207,7 +207,7 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
     <div
       className={`group relative flex flex-col bg-ink-900 rounded-lg overflow-hidden border transition-[background-color,box-shadow] duration-150 active:scale-[0.98] shadow-sm ${
         isChecked || isSelected
-          ? 'border-indigo-500/50 ring-1 ring-inset ring-indigo-500/30'
+          ? 'border-[var(--accent-border)] ring-1 ring-inset ring-indigo-500/30'
           : 'border-ink-800 hover:border-ink-600'
       }`}
       onDoubleClick={onDoubleClick}

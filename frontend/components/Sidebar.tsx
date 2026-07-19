@@ -60,12 +60,12 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
     title={collapsed ? label : undefined}
     className={`w-full flex items-center ${collapsed ? 'justify-center px-0 py-2.5' : 'justify-between px-3 py-2.5'} rounded-xl text-sm font-medium transition-all duration-200 group ${
       active
-        ? 'bg-indigo-500/10 text-indigo-400'
+        ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
         : 'text-content-2 hover:text-content hover:bg-island-2'
     }`}
   >
     <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-3'}`}>
-      <Icon size={collapsed ? 24 : 20} className={`flex-shrink-0 ${active ? 'text-indigo-400' : 'text-content-3 group-hover:text-content-2'}`} />
+      <Icon size={collapsed ? 24 : 20} className={`flex-shrink-0 ${active ? 'text-[var(--accent-text)]' : 'text-content-3 group-hover:text-content-2'}`} />
       {!collapsed && <span>{label}</span>}
     </div>
     {hasSubmenu && !collapsed && (
@@ -91,11 +91,11 @@ const SidebarSubItem: React.FC<{
     onClick={onClick}
     className={`w-full flex items-center gap-3 pl-11 pr-3 py-2 rounded-xl text-sm transition-all duration-200 group ${
       active
-        ? 'bg-indigo-500/10 text-indigo-400'
+        ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
         : 'text-content-3 hover:text-content-2 hover:bg-island-2'
     }`}
   >
-    <Icon size={16} className={active ? 'text-indigo-400' : 'text-content-4 group-hover:text-content-2'} />
+    <Icon size={16} className={active ? 'text-[var(--accent-text)]' : 'text-content-4 group-hover:text-content-2'} />
     <span>{label}</span>
   </button>
 );

@@ -118,7 +118,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <StageRing stage={stage} archived={isArchived} />
           <div className="min-w-0">
-            <h3 className="text-ink-50 font-medium text-base truncate group-hover:text-indigo-300 transition-colors">
+            <h3 className="text-ink-50 font-medium text-base truncate group-hover:text-[var(--accent-text)] transition-colors">
               {project.name}
             </h3>
             {project.description && (
@@ -189,7 +189,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
               {t('projects.card.archived')}
             </span>
           ) : stage ? (
-            <span className="px-2 py-0.5 rounded-full font-medium bg-indigo-500/15 text-indigo-300">
+            <span className="px-2 py-0.5 rounded-full font-medium bg-[var(--accent-soft)] text-[var(--accent-text)]">
               {stage.name}
             </span>
           ) : (

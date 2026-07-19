@@ -148,7 +148,7 @@ const TreeRow: React.FC<TreeProps> = ({
       <div
         className={`group flex w-full items-center gap-1 pr-1 text-[12px] transition-colors ${
           active
-            ? 'bg-indigo-500/12 text-indigo-200'
+            ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
             : 'text-ink-400 hover:bg-ink-800/40 hover:text-ink-200'
         }`}
       >
@@ -160,7 +160,7 @@ const TreeRow: React.FC<TreeProps> = ({
         >
           <Icon
             size={12}
-            className={`shrink-0 ${active ? 'text-indigo-300' : 'text-ink-500'}`}
+            className={`shrink-0 ${active ? 'text-[var(--accent-text)]' : 'text-ink-500'}`}
           />
           <span className="truncate">{node.name}</span>
         </button>
@@ -407,7 +407,7 @@ export const SkillList: React.FC<SkillListProps> = ({
                       onClick={() => onSelectSkill(s.slug ?? String(s.id))}
                       className={`flex w-full items-center gap-2 py-1 pl-6 pr-2 text-left text-[12px] transition-colors ${
                         skillActive && !activeFilePath
-                          ? 'bg-indigo-500/12 text-indigo-200'
+                          ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                           : 'text-ink-400 hover:bg-ink-800/40 hover:text-ink-200'
                       }`}
                     >
@@ -415,7 +415,7 @@ export const SkillList: React.FC<SkillListProps> = ({
                         size={12}
                         className={`shrink-0 ${
                           skillActive && !activeFilePath
-                            ? 'text-indigo-300'
+                            ? 'text-[var(--accent-text)]'
                             : 'text-ink-500'
                         }`}
                       />

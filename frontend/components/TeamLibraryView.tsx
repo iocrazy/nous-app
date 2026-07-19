@@ -84,7 +84,7 @@ export const TeamLibraryView: React.FC<TeamLibraryViewProps> = ({
       {currentCollection && (
         <span className="flex items-center gap-1 text-xs px-2 py-0.5 bg-ink-800 rounded text-ink-400">
           <span>{currentCollection.video_count || 0}</span>
-          <Video size={12} className="text-indigo-400" />
+          <Video size={12} className="text-[var(--accent-text)]" />
         </span>
       )}
     </div>

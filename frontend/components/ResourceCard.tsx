@@ -295,7 +295,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
         onContextMenu={onContextMenu}
         className={`flex items-center gap-3 px-4 py-2.5 hover:bg-ink-800/60 rounded-lg cursor-pointer transition-[background-color] duration-150 group relative ${
           isChecked || isSelected
-            ? 'bg-indigo-500/10 ring-1 ring-inset ring-indigo-500/30'
+            ? 'bg-[var(--accent-soft)] ring-1 ring-inset ring-indigo-500/30'
             : ''
         }`}
       >
@@ -315,7 +315,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
               }}
               onBlur={() => onRenameCancel?.()}
               onClick={(e) => e.stopPropagation()}
-              className="w-full bg-ink-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-ink-50 focus:outline-none"
+              className="w-full bg-ink-900 border border-[var(--accent-border)] rounded px-2 py-0.5 text-sm text-ink-50 focus:outline-none"
             />
           ) : (
             <p
@@ -388,7 +388,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
       onContextMenu={onContextMenu}
       className={`relative hover:bg-ink-800 border rounded-xl cursor-pointer transition-[background-color,box-shadow,transform] duration-150 group overflow-hidden hover:shadow-lg hover:shadow-black/20 hover:-translate-y-0.5 ${
         isChecked || isSelected
-          ? 'bg-indigo-500/10 border-indigo-500/30 shadow-[0_0_0_1px_rgba(99,102,241,0.3)]'
+          ? 'bg-[var(--accent-soft)] border-[var(--accent-border)] shadow-[0_0_0_1px_rgba(99,102,241,0.3)]'
           : 'bg-ink-800/60 border-ink-700/30 hover:border-ink-600'
       }`}
     >
@@ -483,7 +483,7 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
             }}
             onBlur={() => onRenameCancel?.()}
             onClick={(e) => e.stopPropagation()}
-            className="w-full bg-ink-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-ink-50 focus:outline-none"
+            className="w-full bg-ink-900 border border-[var(--accent-border)] rounded px-2 py-0.5 text-sm text-ink-50 focus:outline-none"
           />
         ) : (
           <p

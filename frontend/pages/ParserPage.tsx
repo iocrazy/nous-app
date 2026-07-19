@@ -212,7 +212,7 @@ export function ParserPage() {
                 onClick={() => toggleAiIntent(name)}
                 className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                   checked
-                    ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-300'
+                    ? 'border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]'
                     : 'border-ink-800 bg-ink-900/50 text-ink-500 hover:border-ink-700'
                 }`}
               >
@@ -265,7 +265,7 @@ export function ParserPage() {
               <h3 className="text-lg font-semibold text-ink-300">Analysis Result</h3>
               <div className="flex items-center gap-2">
                  {downloadTaskId && downloadStatus !== 'completed' && downloadStatus !== 'failed' ? (
-                   <span className="text-xs text-indigo-400 flex items-center gap-1">
+                   <span className="text-xs text-[var(--accent-text)] flex items-center gap-1">
                       <Loader2 size={12} className="animate-spin" />
                       {t('download.downloading')} {downloadPercent}%
                       {downloadSpeed && <span className="text-ink-500 ml-1">({downloadSpeed})</span>}
@@ -333,7 +333,7 @@ export function ParserPage() {
               onClick={() => setShowActiveTasks(prev => !prev)}
               className={`p-3 md:p-5 rounded-xl bg-ink-900/50 border transition-colors text-center flex flex-col items-center justify-center min-h-0 cursor-pointer ${
                 showActiveTasks
-                  ? 'border-indigo-500/60 ring-1 ring-indigo-500/20' :
+                  ? 'border-[var(--accent-border)] ring-1 ring-indigo-500/20' :
                 systemStatus?.queue.status === 'offline'
                   ? 'border-red-800/60' : 'border-ink-800/50 hover:border-ink-700'
               }`}
@@ -401,7 +401,7 @@ export function ParserPage() {
               <div className="max-h-60 overflow-y-auto divide-y divide-ink-800/50">
                 {activeTasks.map((task) => (
                   <div key={task.id} className="px-4 py-3 flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm bg-indigo-500/20 text-indigo-400">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm bg-[var(--accent-soft)] text-[var(--accent-text)]">
                       <TaskTypeIcon type={task.task_type} size={14} />
                     </div>
                     <div className="flex-1 min-w-0">

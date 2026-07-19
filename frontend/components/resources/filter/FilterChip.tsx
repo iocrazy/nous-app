@@ -75,7 +75,7 @@ export const FilterChip: React.FC<FilterChipProps> = ({
       <div
         className={`inline-flex items-center rounded-lg border transition-colors ${
           isActive
-            ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-300'
+            ? 'border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]'
             : 'border-line bg-island-2 text-content-2 hover:border-line-strong hover:text-content'
         }`}
       >

@@ -877,7 +877,7 @@ export function AIChatPanel({
                       onClick={() => setSessionScope(scope)}
                       className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
                         sessionScope === scope
-                          ? 'bg-indigo-500/10 text-indigo-400'
+                          ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                           : 'text-ink-500 hover:text-ink-300'
                       }`}
                     >

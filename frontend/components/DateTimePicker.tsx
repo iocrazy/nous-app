@@ -205,7 +205,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({ value, onChange 
                         isSelected(date)
                           ? 'bg-indigo-600 text-white'
                           : isToday(date) && inMonth
-                            ? 'text-indigo-400 font-semibold'
+                            ? 'text-[var(--accent-text)] font-semibold'
                             : inMonth
                               ? 'text-ink-300 hover:bg-ink-800'
                               : 'text-ink-600'
@@ -236,7 +236,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({ value, onChange 
                     setMinute(d.getMinutes());
                     onChange(toLocalDatetime(d));
                   }}
-                  className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                  className="text-xs text-[var(--accent-text)] hover:text-[var(--accent-text)] transition-colors"
                 >
                   Now
                 </button>
@@ -254,7 +254,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({ value, onChange 
                     onClick={() => handleHourChange(h)}
                     className={`w-full py-1.5 text-xs text-center transition-colors ${
                       h === hour
-                        ? 'bg-indigo-600/20 text-indigo-400 font-medium'
+                        ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] font-medium'
                         : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
                     }`}
                   >
@@ -271,7 +271,7 @@ export const DateTimePicker: React.FC<DateTimePickerProps> = ({ value, onChange 
                     onClick={() => handleMinuteChange(m)}
                     className={`w-full py-1.5 text-xs text-center transition-colors ${
                       m === minute
-                        ? 'bg-indigo-600/20 text-indigo-400 font-medium'
+                        ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] font-medium'
                         : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
                     }`}
                   >

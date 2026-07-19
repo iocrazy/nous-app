@@ -232,7 +232,7 @@ export function TodolistPage() {
           <p className="text-sm">{selectedError ?? `Issue ${identifier} not found.`}</p>
           <button
             onClick={() => navigate(`/team/${teamId}/todolist`)}
-            className="mt-3 text-xs text-indigo-400 hover:text-indigo-300"
+            className="mt-3 text-xs text-[var(--accent-text)] hover:text-[var(--accent-text)]"
           >
             ← Back to all issues
           </button>

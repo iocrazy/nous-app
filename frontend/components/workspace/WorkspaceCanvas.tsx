@@ -155,7 +155,7 @@ export function WorkspaceCanvas({ projectId, teamId }: WorkspaceCanvasProps) {
             </div>
           <button
             onClick={() => navigate(editorPath(String(canvas.id)))}
-            className={`flex w-full flex-col overflow-hidden rounded-xl border border-ink-800 bg-ink-900 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-indigo-500/50 hover:shadow-lg hover:shadow-indigo-500/10 ${FOCUS_RING}`}
+            className={`flex w-full flex-col overflow-hidden rounded-xl border border-ink-800 bg-ink-900 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--accent-border)] hover:shadow-lg hover:shadow-indigo-500/10 ${FOCUS_RING}`}
           >
             <CanvasCardPreview
               nodes={canvas.nodes_json}
@@ -167,7 +167,7 @@ export function WorkspaceCanvas({ projectId, teamId }: WorkspaceCanvasProps) {
               </span>
               <div className="flex items-center gap-2 text-[11px] text-ink-500">
                 {canvas.kind === 'lite' ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-indigo-500/10 px-2 py-0.5 font-medium text-indigo-500">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-[var(--accent-soft)] px-2 py-0.5 font-medium text-[var(--accent-text)]">
                     <Sparkles size={10} />
                     {t('canvasList.kind.lite', 'Smart')}
                   </span>
@@ -197,9 +197,9 @@ export function WorkspaceCanvas({ projectId, teamId }: WorkspaceCanvasProps) {
         <button
           onClick={() => setDialogOpen(true)}
           disabled={creating}
-          className={`group flex min-h-[176px] flex-col items-center justify-center gap-2.5 rounded-xl border border-dashed border-ink-700 p-4 text-sm text-ink-500 transition-all duration-200 hover:border-indigo-500/50 hover:bg-indigo-500/[0.04] hover:text-ink-300 disabled:opacity-50 ${FOCUS_RING}`}
+          className={`group flex min-h-[176px] flex-col items-center justify-center gap-2.5 rounded-xl border border-dashed border-ink-700 p-4 text-sm text-ink-500 transition-all duration-200 hover:border-[var(--accent-border)] hover:bg-[var(--accent-soft)] hover:text-ink-300 disabled:opacity-50 ${FOCUS_RING}`}
         >
-          <span className="flex h-9 w-9 items-center justify-center rounded-full border border-ink-700 transition-colors group-hover:border-indigo-500/50 group-hover:text-indigo-400">
+          <span className="flex h-9 w-9 items-center justify-center rounded-full border border-ink-700 transition-colors group-hover:border-[var(--accent-border)] group-hover:text-[var(--accent-text)]">
             {creating ? (
               <Loader2 size={15} className="animate-spin" />
             ) : (

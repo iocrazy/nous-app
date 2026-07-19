@@ -269,7 +269,7 @@ export const TeamSettings: React.FC<TeamSettingsProps> = ({
                   {teamBalance !== null && (
                     <div>
                       <p className="text-xs text-ink-500 uppercase font-medium">Current Balance</p>
-                      <p className="text-2xl font-bold text-indigo-400">
+                      <p className="text-2xl font-bold text-[var(--accent-text)]">
                         {teamBalance.toLocaleString()}
                       </p>
                     </div>

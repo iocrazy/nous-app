@@ -126,8 +126,8 @@ export const ApiTokensPanel: React.FC = () => {
 
       {/* One-time plaintext reveal */}
       {created && (
-        <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 p-3">
-          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-indigo-300">
+        <div className="rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] p-3">
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--accent-text)]">
             {t('inspiration.tokens.newTokenTitle', 'New token created')}
           </div>
           <div className="flex items-center gap-2">
@@ -191,7 +191,7 @@ export const ApiTokensPanel: React.FC = () => {
       ) : (
         <button
           onClick={() => setCreating(true)}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-500/15 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/25"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"
         >
           <Plus size={13} />
           {t('inspiration.tokens.newToken', 'New Token')}

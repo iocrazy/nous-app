@@ -145,7 +145,7 @@ export function TagFilterSection({
         <button
           type="button"
           onClick={() => setShowAll((v) => !v)}
-          className="text-xs font-medium text-indigo-400 active:text-indigo-300"
+          className="text-xs font-medium text-[var(--accent-text)] active:text-[var(--accent-text)]"
         >
           {showAll
             ? t('resources.filter.showLess', 'Show less')

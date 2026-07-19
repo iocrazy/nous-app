@@ -24,7 +24,7 @@ export const CategorySidebar: React.FC<CategorySidebarProps> = ({
   const itemClass = (active: boolean) =>
     `flex items-center justify-between gap-2 px-2 py-1.5 rounded text-xs cursor-pointer transition-colors ${
       active
-        ? 'bg-indigo-500/20 text-indigo-300'
+        ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
         : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
     }`;
 

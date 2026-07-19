@@ -89,7 +89,7 @@ function MediaCard({ body }: { body: MediaCardBody }): React.ReactElement {
       <div className="flex gap-2 px-[13px] pb-3">
         <button
           type="button"
-          className="flex items-center gap-[6px] text-[12px] px-[11px] py-[5px] rounded-[9px] bg-indigo-500/[.12] border border-indigo-500/[.35] text-indigo-300 transition-colors hover:bg-indigo-500/[.2]"
+          className="flex items-center gap-[6px] text-[12px] px-[11px] py-[5px] rounded-[9px] bg-[var(--accent-soft)] border border-[var(--accent-border)] text-[var(--accent-text)] transition-colors hover:bg-[var(--accent-soft)]"
         >
           <ExternalLink size={13} />
           {t('chat.openInLibrary')}
@@ -316,7 +316,7 @@ export function MessageBubble({
               <button
                 type="button"
                 onClick={handleSave}
-                className="text-[12px] px-[10px] py-[4px] rounded-[7px] bg-indigo-500/[.18] border border-indigo-500/[.4] text-indigo-300 hover:bg-indigo-500/[.28] transition-colors"
+                className="text-[12px] px-[10px] py-[4px] rounded-[7px] bg-[var(--accent-soft)] border border-[var(--accent-border)] text-[var(--accent-text)] hover:bg-[var(--accent-soft)] transition-colors"
               >
                 {t('chat.save')}
               </button>

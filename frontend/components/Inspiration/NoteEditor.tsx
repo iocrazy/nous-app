@@ -247,7 +247,7 @@ export const NoteEditor = forwardRef<NoteEditorHandle, Props>(function NoteEdito
               key={s}
               type="button"
               onClick={() => completeTag(s)}
-              className="rounded bg-indigo-500/15 px-2 py-0.5 text-xs text-indigo-300 hover:bg-indigo-500/25"
+              className="rounded bg-[var(--accent-soft)] px-2 py-0.5 text-xs text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"
             >
               #{s}
             </button>

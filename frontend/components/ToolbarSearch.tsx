@@ -152,7 +152,7 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
         >
           <currentMode.Icon
             size={13}
-            className={isAI ? 'text-indigo-400' : ''}
+            className={isAI ? 'text-[var(--accent-text)]' : ''}
           />
           <ChevronDown size={10} />
         </button>
@@ -175,7 +175,7 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
         {/* Right side: loading / clear */}
         <div className="absolute right-2 flex items-center gap-1">
           {isSearching && (
-            <Loader2 size={12} className="animate-spin text-indigo-400" />
+            <Loader2 size={12} className="animate-spin text-[var(--accent-text)]" />
           )}
           {query && !isSearching && (
             <button
@@ -198,11 +198,11 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
               onClick={() => handleModeChange(m.id)}
               className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${
                 mode === m.id
-                  ? 'bg-indigo-600/10 text-indigo-400'
+                  ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                   : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
               }`}
             >
-              <m.Icon size={14} className={m.id !== 'keyword' ? 'text-indigo-400' : ''} />
+              <m.Icon size={14} className={m.id !== 'keyword' ? 'text-[var(--accent-text)]' : ''} />
               <div>
                 <div className="text-xs font-medium">{m.label}</div>
                 <div className="text-[10px] text-ink-500">{m.desc}</div>
@@ -233,7 +233,7 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
                     className="flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-[12px] text-ink-300 hover:bg-ink-800/60"
                   >
                     <span>{opt.i18nKey ? t(opt.i18nKey, opt.label) : opt.label}</span>
-                    {checked && <Check size={13} className="shrink-0 text-indigo-400" />}
+                    {checked && <Check size={13} className="shrink-0 text-[var(--accent-text)]" />}
                   </button>
                 );
               })}

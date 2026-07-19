@@ -30,11 +30,11 @@ export const RatingFilterDropdown: React.FC<RatingFilterDropdownProps> = ({
         type="button"
         onClick={() => onChange(0)}
         className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-3 transition-colors ${
-          minRating === 0 ? 'bg-indigo-500/10 text-indigo-300' : inactiveRow
+          minRating === 0 ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : inactiveRow
         }`}
       >
         <span className="flex-1">{t('resources.filter.anyRating', 'Any rating')}</span>
-        {minRating === 0 && <Check size={12} className="text-indigo-400 shrink-0" />}
+        {minRating === 0 && <Check size={12} className="text-[var(--accent-text)] shrink-0" />}
       </button>
       <div className="mx-2.5 my-1 border-t border-line" />
       {CHOICES.map((value) => {
@@ -45,7 +45,7 @@ export const RatingFilterDropdown: React.FC<RatingFilterDropdownProps> = ({
             type="button"
             onClick={() => onChange(value)}
             className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-3 transition-colors ${
-              active ? 'bg-indigo-500/10 text-indigo-300' : inactiveRow
+              active ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : inactiveRow
             }`}
           >
             <span className="flex items-center gap-1">
@@ -59,7 +59,7 @@ export const RatingFilterDropdown: React.FC<RatingFilterDropdownProps> = ({
                 />
               ))}
             </span>
-            {active && <Check size={12} className="text-indigo-400 shrink-0 ml-auto" />}
+            {active && <Check size={12} className="text-[var(--accent-text)] shrink-0 ml-auto" />}
           </button>
         );
       })}

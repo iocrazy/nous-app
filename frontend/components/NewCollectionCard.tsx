@@ -9,7 +9,7 @@ export const NewCollectionCard: React.FC<NewCollectionCardProps> = ({ onClick })
   return (
     <div
       className="cursor-pointer bg-ink-900/50 rounded-xl border border-dashed border-ink-700
-                 hover:border-indigo-500 hover:bg-ink-800/30 transition-all overflow-hidden"
+                 hover:border-[var(--accent-border)] hover:bg-ink-800/30 transition-all overflow-hidden"
       onClick={onClick}
     >
       {/* Thumbnail area - matches CollectionFolderCard */}

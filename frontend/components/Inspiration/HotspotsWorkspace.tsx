@@ -67,7 +67,7 @@ export const HotspotsWorkspace: React.FC<Props> = ({
     <button
       onClick={() => setViewPersist(v)}
       className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-semibold ${
-        view === v ? 'bg-island text-indigo-300' : 'text-content-4'
+        view === v ? 'bg-island text-[var(--accent-text)]' : 'text-content-4'
       }`}
     >
       <Icon size={11} /> {label}
@@ -107,10 +107,10 @@ export const HotspotsWorkspace: React.FC<Props> = ({
                 key={h.id}
                 onClick={() => setSelectedId(h.id)}
                 className={`block w-full rounded-lg px-3 py-2 text-left ${
-                  selected?.id === h.id ? 'bg-indigo-500/15' : 'hover:bg-island-2'
+                  selected?.id === h.id ? 'bg-[var(--accent-soft)]' : 'hover:bg-island-2'
                 }`}
               >
-                <div className={`text-[12.5px] leading-snug ${selected?.id === h.id ? 'text-indigo-300' : 'text-content'}`}>
+                <div className={`text-[12.5px] leading-snug ${selected?.id === h.id ? 'text-[var(--accent-text)]' : 'text-content'}`}>
                   {h.title}
                 </div>
                 <div className="mt-1 flex items-center gap-2 text-[10px] text-content-4 tabular-nums">

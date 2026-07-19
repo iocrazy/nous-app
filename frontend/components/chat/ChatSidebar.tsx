@@ -36,10 +36,10 @@ function ChannelRow({
   const label = channel.name ?? channel.id;
 
   const activeClass = isActive
-    ? 'bg-indigo-500/[0.18] text-indigo-300 font-[550]'
+    ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] font-[550]'
     : 'text-content-2 hover:bg-island-2 hover:text-content';
 
-  const glyphActiveClass = isActive ? 'text-indigo-300' : 'text-content-3';
+  const glyphActiveClass = isActive ? 'text-[var(--accent-text)]' : 'text-content-3';
 
   const glyph =
     channel.type === 'public' ? (
@@ -109,7 +109,7 @@ function AgentDmRow({
   onSelect: (slug: string) => void;
 }): React.ReactElement {
   const activeClass = isActive
-    ? 'bg-indigo-500/[0.18] text-indigo-300 font-[550]'
+    ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] font-[550]'
     : 'text-content-2 hover:bg-island-2 hover:text-content';
 
   return (

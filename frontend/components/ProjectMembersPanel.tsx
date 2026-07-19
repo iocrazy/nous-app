@@ -137,7 +137,7 @@ export const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
               {t('projects.members.owner', 'Owner')}
             </label>
             <div className="flex items-center gap-3 px-3 py-2.5 bg-ink-800/50 rounded-lg">
-              <div className="w-8 h-8 rounded-full bg-indigo-500/30 flex items-center justify-center text-xs font-bold text-indigo-300">
+              <div className="w-8 h-8 rounded-full bg-[var(--accent-soft)] flex items-center justify-center text-xs font-bold text-[var(--accent-text)]">
                 {project.owner_id.slice(0, 2).toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">

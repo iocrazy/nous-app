@@ -397,7 +397,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
               <button
                 type="button"
                 onClick={openForkModal}
-                className="inline-flex items-center gap-1.5 rounded-md bg-indigo-500/10 px-2.5 py-1.5 text-sm text-indigo-300 transition-colors hover:bg-indigo-500/20"
+                className="inline-flex items-center gap-1.5 rounded-md bg-[var(--accent-soft)] px-2.5 py-1.5 text-sm text-[var(--accent-text)] transition-colors hover:bg-[var(--accent-soft)]"
                 title={editableReason}
               >
                 <GitFork className="h-3.5 w-3.5" />
@@ -438,7 +438,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
                 {skill.agents.map((a) => (
                   <span
                     key={a.slug}
-                    className="inline-flex items-center gap-1 rounded border border-indigo-500/30 bg-indigo-500/10 px-1.5 py-0.5 text-[11px] text-indigo-300"
+                    className="inline-flex items-center gap-1 rounded border border-[var(--accent-border)] bg-[var(--accent-soft)] px-1.5 py-0.5 text-[11px] text-[var(--accent-text)]"
                     title={a.slug}
                   >
                     {a.name}

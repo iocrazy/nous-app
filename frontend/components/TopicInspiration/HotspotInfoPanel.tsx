@@ -174,7 +174,7 @@ export const HotspotInfoPanel: React.FC<Props> = ({
       )}
 
       {(h.ai_summary || h.summary) && (
-        <div className="rounded-lg border border-indigo-500/35 bg-indigo-500/[0.12] px-3 py-2 text-xs text-[var(--ind-tx,#4338ca)]">
+        <div className="rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-2 text-xs text-[var(--accent-text)]">
           <div className="font-semibold mb-0.5">{t('topic.aiSummary', 'AI Summary')}</div>
           {h.ai_summary || h.summary}
         </div>
@@ -205,7 +205,7 @@ export const HotspotInfoPanel: React.FC<Props> = ({
         <button
           disabled={busy}
           onClick={onGenerate}
-          className={`${btn} bg-indigo-500/[0.12] text-[var(--ind-tx,#4338ca)] border border-indigo-500/35`}
+          className={`${btn} bg-[var(--accent-soft)] text-[var(--accent-text)] border border-[var(--accent-border)]`}
         >
           <FileText size={14} />
           {t('topic.generateScript', 'Generate Script')}

@@ -30,7 +30,7 @@ export function VersionBadge() {
               setUpdating(true);
               resetServiceWorkerAndReload();
             }}
-            className="text-indigo-400 hover:text-indigo-300 underline underline-offset-2 disabled:opacity-60 disabled:no-underline"
+            className="text-[var(--accent-text)] hover:text-[var(--accent-text)] underline underline-offset-2 disabled:opacity-60 disabled:no-underline"
           >
             {updating ? 'updating…' : `update to v${latestVersion}`}
           </button>

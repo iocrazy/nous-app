@@ -93,7 +93,7 @@ export const CollectionPicker: React.FC<CollectionPickerProps> = ({
               </div>
               <span className="text-sm text-ink-300 truncate">{collection.name}</span>
               {collection.isShared ? (
-                <Users size={12} className="text-indigo-400 flex-shrink-0" />
+                <Users size={12} className="text-[var(--accent-text)] flex-shrink-0" />
               ) : (
                 <Lock size={12} className="text-ink-600 flex-shrink-0" />
               )}
@@ -147,7 +147,7 @@ export const CollectionPicker: React.FC<CollectionPickerProps> = ({
         ) : (
           <button
             onClick={() => setIsCreating(true)}
-            className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-indigo-400 hover:bg-indigo-500/10 transition-colors"
+            className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-[var(--accent-text)] hover:bg-[var(--accent-soft)] transition-colors"
           >
             <Plus size={16} />
             <span className="text-sm font-medium">{t('collections.create')}</span>

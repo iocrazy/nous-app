@@ -61,7 +61,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           onClick={() => onToolChange(toolItem.key)}
           className={`p-2 rounded-lg transition-colors ${
             activeTool === toolItem.key
-              ? 'bg-indigo-500/30 text-indigo-300'
+              ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
               : 'text-ink-400 hover:text-ink-50 hover:bg-ink-700'
           }`}
           title={t(toolItem.labelKey)}
@@ -100,7 +100,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             onClick={() => onStrokeWidthChange(sw.value)}
             className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-medium transition-colors ${
               strokeWidth === sw.value
-                ? 'bg-indigo-500/30 text-indigo-300'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                 : 'text-ink-400 hover:text-ink-50 hover:bg-ink-700'
             }`}
           >

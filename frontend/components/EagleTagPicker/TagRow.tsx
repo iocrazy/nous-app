@@ -30,7 +30,7 @@ export const TagRow: React.FC<TagRowProps> = ({
       onContextMenu={onContextMenu}
       className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded transition-colors w-full min-w-0 ${
         isSelected
-          ? 'bg-indigo-500/20 text-indigo-300'
+          ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
           : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
       }`}
     >

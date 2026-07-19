@@ -139,8 +139,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-ink-800">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-500/20 rounded-lg">
-              <Link2 size={20} className="text-indigo-400" />
+            <div className="p-2 bg-[var(--accent-soft)] rounded-lg">
+              <Link2 size={20} className="text-[var(--accent-text)]" />
             </div>
             <h2 className="text-lg font-semibold text-ink-50">
               {t('shares.title', 'Share')}
@@ -215,7 +215,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                       onClick={() => setShareType(type)}
                       className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-colors ${
                         shareType === type
-                          ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-400'
+                          ? 'bg-[var(--accent-soft)] border-[var(--accent-border)] text-[var(--accent-text)]'
                           : 'bg-ink-800/50 border-ink-700 text-ink-400 hover:bg-ink-800 hover:text-ink-300'
                       }`}
                     >

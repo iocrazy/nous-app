@@ -104,7 +104,7 @@ export const NotificationPanel: React.FC<NotificationPanelProps> = ({
         {hasUnread && (
           <button
             onClick={onMarkAllRead}
-            className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+            className="flex items-center gap-1 text-xs text-[var(--accent-text)] hover:text-[var(--accent-text)] transition-colors"
           >
             <CheckCheck size={14} />
             <span>{t('notifications.markAllRead')}</span>

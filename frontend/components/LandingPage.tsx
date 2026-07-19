@@ -54,7 +54,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick, onGetSta
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[500px] bg-indigo-500/20 rounded-full blur-[120px] -z-10 opacity-50 pointer-events-none" />
         
         <div className="max-w-4xl mx-auto text-center space-y-8">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs font-medium text-indigo-300 mb-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs font-medium text-[var(--accent-text)] mb-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
@@ -147,9 +147,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick, onGetSta
 };
 
 const FeatureCard = ({ icon: Icon, title, desc }: { icon: any, title: string, desc: string }) => (
-  <div className="p-8 rounded-2xl bg-ink-900/50 border border-white/5 hover:border-indigo-500/30 hover:bg-ink-900 transition-all group">
-    <div className="w-12 h-12 bg-ink-800 rounded-xl flex items-center justify-center mb-6 group-hover:bg-indigo-500/20 group-hover:text-indigo-400 transition-colors">
-      <Icon className="w-6 h-6 text-ink-400 group-hover:text-indigo-400" />
+  <div className="p-8 rounded-2xl bg-ink-900/50 border border-white/5 hover:border-[var(--accent-border)] hover:bg-ink-900 transition-all group">
+    <div className="w-12 h-12 bg-ink-800 rounded-xl flex items-center justify-center mb-6 group-hover:bg-[var(--accent-soft)] group-hover:text-[var(--accent-text)] transition-colors">
+      <Icon className="w-6 h-6 text-ink-400 group-hover:text-[var(--accent-text)]" />
     </div>
     <h3 className="text-xl font-semibold text-ink-100 mb-3">{title}</h3>
     <p className="text-ink-400 leading-relaxed">{desc}</p>

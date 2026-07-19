@@ -131,7 +131,7 @@ export const SmartCollectionsSidebar: React.FC<SmartCollectionsSidebarProps> = (
               onClick={() => onSelectCollection(null)}
               className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
                 activeCollectionId === null
-                  ? 'text-indigo-400 bg-indigo-500/5'
+                  ? 'text-[var(--accent-text)] bg-[var(--accent-soft)]'
                   : 'text-ink-500 hover:text-ink-300'
               }`}
             >
@@ -150,7 +150,7 @@ export const SmartCollectionsSidebar: React.FC<SmartCollectionsSidebarProps> = (
                   onClick={() => onSelectCollection(collection)}
                   className={`w-full text-left px-4 py-2 text-sm rounded-r-lg transition-colors ${
                     activeCollectionId === collection.id
-                      ? 'text-indigo-400 bg-indigo-500/5'
+                      ? 'text-[var(--accent-text)] bg-[var(--accent-soft)]'
                       : 'text-ink-500 hover:text-ink-300'
                   }`}
                 >
@@ -180,7 +180,7 @@ export const SmartCollectionsSidebar: React.FC<SmartCollectionsSidebarProps> = (
         className="w-full flex items-center justify-between px-4 py-3 text-xs font-semibold text-ink-400 uppercase tracking-wider hover:bg-ink-800/50 transition-colors"
       >
         <div className="flex items-center gap-2">
-          <Sparkles size={14} className="text-indigo-400" />
+          <Sparkles size={14} className="text-[var(--accent-text)]" />
           Smart Collections
         </div>
         <div className="flex items-center gap-1">
@@ -295,7 +295,7 @@ const CollectionItem: React.FC<CollectionItemProps> = ({
       onClick={onClick}
       className={`w-full flex items-center justify-between px-4 py-2.5 text-sm transition-all group ${
         isActive
-          ? 'bg-indigo-600/10 text-indigo-400 border-l-2 border-indigo-500'
+          ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] border-l-2 border-indigo-500'
           : 'text-ink-400 hover:bg-ink-800/50 hover:text-ink-200 border-l-2 border-transparent'
       }`}
     >
@@ -303,7 +303,7 @@ const CollectionItem: React.FC<CollectionItemProps> = ({
         <Icon
           size={16}
           style={{ color: isActive ? undefined : iconColor }}
-          className={isActive ? 'text-indigo-400' : ''}
+          className={isActive ? 'text-[var(--accent-text)]' : ''}
         />
         <span className="truncate">{name}</span>
       </div>

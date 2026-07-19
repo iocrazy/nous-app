@@ -152,7 +152,7 @@ export const ProjectTrashView: React.FC<ProjectTrashViewProps> = ({ projectId, o
                     <div className="flex items-center justify-end gap-2">
                       <button
                         onClick={() => handleRestoreCanvas(canvas)}
-                        className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 px-2 py-1 hover:bg-indigo-500/10 rounded-lg transition-colors"
+                        className="flex items-center gap-1 text-xs text-[var(--accent-text)] hover:text-[var(--accent-text)] px-2 py-1 hover:bg-[var(--accent-soft)] rounded-lg transition-colors"
                       >
                         <RotateCcw size={12} />
                         {t('projects.trash.restore', 'Restore')}
@@ -210,7 +210,7 @@ export const ProjectTrashView: React.FC<ProjectTrashViewProps> = ({ projectId, o
                   <div className="flex items-center justify-end gap-2">
                     <button
                       onClick={() => handleRestore(file)}
-                      className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 px-2 py-1 hover:bg-indigo-500/10 rounded-lg transition-colors"
+                      className="flex items-center gap-1 text-xs text-[var(--accent-text)] hover:text-[var(--accent-text)] px-2 py-1 hover:bg-[var(--accent-soft)] rounded-lg transition-colors"
                     >
                       <RotateCcw size={12} />
                       {t('projects.trash.restore', 'Restore')}

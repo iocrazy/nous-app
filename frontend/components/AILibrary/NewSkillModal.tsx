@@ -376,7 +376,7 @@ const ScopeRadio: React.FC<ScopeRadioProps> = ({
   <label
     className={`inline-flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
       checked
-        ? 'border-indigo-500 bg-indigo-500/10 text-indigo-200'
+        ? 'border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]'
         : 'border-ink-700 bg-ink-800 text-ink-300 hover:bg-ink-750'
     } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
   >

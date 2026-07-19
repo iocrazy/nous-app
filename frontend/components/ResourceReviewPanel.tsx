@@ -86,7 +86,7 @@ const CommentItem: React.FC<{
           {comment.timecode != null && (
             <button
               onClick={() => onSeekTo(comment.timecode!)}
-              className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono font-medium bg-indigo-500/15 text-indigo-400 rounded hover:bg-indigo-500/25 transition-colors"
+              className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono font-medium bg-[var(--accent-soft)] text-[var(--accent-text)] rounded hover:bg-[var(--accent-soft)] transition-colors"
             >
               <Clock size={10} />
               {formatTimecode(comment.timecode)}

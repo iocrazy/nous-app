@@ -42,7 +42,7 @@ const Block: React.FC<{ label: string; text: string; tone: 'plain' | 'accent' }>
     <div
       className={`text-[13px] leading-relaxed whitespace-pre-wrap break-words rounded p-3 ${
         tone === 'accent'
-          ? 'text-ink-100 bg-indigo-500/10 border-l-2 border-indigo-400'
+          ? 'text-ink-100 bg-[var(--accent-soft)] border-l-2 border-indigo-400'
           : 'text-ink-300 bg-ink-950/40 border border-ink-800'
       }`}
     >

@@ -757,7 +757,7 @@ export const TagsSettings: React.FC = () => {
               onClick={() => setSelectedGroup(null)}
               className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
                 selectedGroup === null
-                  ? 'bg-indigo-500/15 text-indigo-400'
+                  ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                   : 'text-ink-400 hover:bg-ink-800 hover:text-ink-300'
               }`}
             >
@@ -784,9 +784,9 @@ export const TagsSettings: React.FC = () => {
               onDrop={() => handleDrop('__uncategorized__')}
               className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
                 tagDropTargetGroupId === '__uncategorized__'
-                  ? 'ring-2 ring-indigo-500 bg-indigo-500/10'
+                  ? 'ring-2 ring-indigo-500 bg-[var(--accent-soft)]'
                   : selectedGroup === '__uncategorized__'
-                    ? 'bg-indigo-500/15 text-indigo-400'
+                    ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                     : 'text-ink-400 hover:bg-ink-800 hover:text-ink-300'
               }`}
             >
@@ -900,7 +900,7 @@ export const TagsSettings: React.FC = () => {
                         if (e.key === 'Escape') setRenamingGroupId(null);
                       }}
                       onBlur={() => handleRenameGroupConfirm(group.id)}
-                      className="flex-1 min-w-0 px-2 py-1 rounded-md bg-ink-800 border border-indigo-500 text-xs text-ink-200 outline-none"
+                      className="flex-1 min-w-0 px-2 py-1 rounded-md bg-ink-800 border border-[var(--accent-border)] text-xs text-ink-200 outline-none"
                     />
                   </div>
                 ) : (
@@ -916,7 +916,7 @@ export const TagsSettings: React.FC = () => {
                     dragGroupId === group.id ? 'opacity-40' : ''
                   } ${
                     selectedGroup === group.name
-                      ? 'bg-indigo-500/15 text-indigo-400'
+                      ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                       : 'text-ink-400 hover:bg-ink-800 hover:text-ink-300'
                   }`}
                 >
@@ -987,7 +987,7 @@ export const TagsSettings: React.FC = () => {
                           e.stopPropagation();
                           handlePromote(tag);
                         }}
-                        className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                        className="text-xs text-[var(--accent-text)] hover:text-[var(--accent-text)] transition-colors"
                       >
                         {t('settings.tags.promote', 'Promote')}
                       </button>
@@ -1313,7 +1313,7 @@ export const TagsSettings: React.FC = () => {
                     }
                     className={`text-[11px] px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                       forceTagNameEqEn
-                        ? 'border-indigo-500 bg-indigo-500/15 text-indigo-300'
+                        ? 'border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]'
                         : 'border-ink-700 text-ink-400 hover:text-ink-200 hover:border-ink-500'
                     }`}
                   >
@@ -1333,7 +1333,7 @@ export const TagsSettings: React.FC = () => {
                   readOnly={forceTagNameEqEn}
                   className={`w-full px-4 py-3 bg-ink-950 border rounded-lg text-ink-200 placeholder-ink-500 focus:outline-none transition-colors ${
                     forceTagNameEqEn
-                      ? 'border-indigo-500/40 cursor-not-allowed opacity-80'
+                      ? 'border-[var(--accent-border)] cursor-not-allowed opacity-80'
                       : 'border-ink-800 focus:border-indigo-500'
                   }`}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleCreateTag(); }}
@@ -1501,7 +1501,7 @@ export const TagsSettings: React.FC = () => {
                     }
                     className={`text-[11px] px-2 py-0.5 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                       forceEditTagNameEqEn
-                        ? 'border-indigo-500 bg-indigo-500/15 text-indigo-300'
+                        ? 'border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]'
                         : 'border-ink-700 text-ink-400 hover:text-ink-200 hover:border-ink-500'
                     }`}
                   >
@@ -1519,7 +1519,7 @@ export const TagsSettings: React.FC = () => {
                   readOnly={forceEditTagNameEqEn}
                   className={`w-full px-4 py-3 bg-ink-950 border rounded-lg text-ink-200 placeholder-ink-500 focus:outline-none transition-colors ${
                     forceEditTagNameEqEn
-                      ? 'border-indigo-500/40 cursor-not-allowed opacity-80'
+                      ? 'border-[var(--accent-border)] cursor-not-allowed opacity-80'
                       : 'border-ink-800 focus:border-indigo-500'
                   }`}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleSaveEdit(); }}

@@ -314,7 +314,7 @@ export const InspirationPage: React.FC = () => {
         {tag && (
           <button
             onClick={() => setTag(null)}
-            className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/15 px-2.5 py-1 text-xs text-indigo-300"
+            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs text-[var(--accent-text)]"
           >
             #{tag} <X size={10} aria-label="Clear tag filter" />
           </button>
@@ -322,7 +322,7 @@ export const InspirationPage: React.FC = () => {
         {date && (
           <button
             onClick={() => setDate(null)}
-            className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/15 px-2.5 py-1 text-xs text-indigo-300"
+            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs text-[var(--accent-text)]"
           >
             {date} <X size={10} aria-label="Clear date filter" />
           </button>
@@ -341,7 +341,7 @@ export const InspirationPage: React.FC = () => {
             setParseUrl(null);
             setParseOpen(true);
           }}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-indigo-500/15 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/25"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[var(--accent-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"
         >
           <Link2 size={13} />
           {t('inspiration.parseUrl', 'Parse URL')}
@@ -416,7 +416,7 @@ export const InspirationPage: React.FC = () => {
                         onClick={() => onCategoryClick(category)}
                         className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs transition-colors ${
                           activeCategory === category
-                            ? 'bg-indigo-500/25 text-indigo-300'
+                            ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                             : 'bg-island-2 text-content-2 hover:bg-line'
                         }`}
                       >
@@ -446,7 +446,7 @@ export const InspirationPage: React.FC = () => {
                         onClick={() => onTagFilterToggle(tg.id)}
                         className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs transition-colors ${
                           tagFilterIds.includes(tg.id)
-                            ? 'bg-indigo-500/25 text-indigo-300'
+                            ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                             : 'bg-island-2 text-content-2 hover:bg-line'
                         }`}
                       >

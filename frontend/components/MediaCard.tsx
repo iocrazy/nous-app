@@ -762,7 +762,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                             onClick={() => { setShowMoreMenu(false); onDownloadAudio(); }}
                             className="w-full px-4 py-2.5 text-left text-sm text-ink-300 hover:bg-ink-800 hover:text-ink-50 flex items-center gap-3 transition-colors"
                           >
-                            <Music size={16} className="text-indigo-400" />
+                            <Music size={16} className="text-[var(--accent-text)]" />
                             Audio
                           </button>
                         )}
@@ -999,12 +999,12 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             {rewrittenText && (
                 <div className="animate-in fade-in slide-in-from-top-2">
                     <div className="flex items-center gap-2 mb-2">
-                        <div className="p-1 rounded bg-indigo-500/10 text-indigo-400">
+                        <div className="p-1 rounded bg-[var(--accent-soft)] text-[var(--accent-text)]">
                            <PenTool size={12} />
                         </div>
                         <span className="text-xs font-semibold text-[var(--accent-text)]">AI Rewrite</span>
                     </div>
-                    <div className="p-3 rounded-lg border border-indigo-500/20 bg-indigo-500/5 text-sm text-ink-300 leading-relaxed">
+                    <div className="p-3 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] text-sm text-ink-300 leading-relaxed">
                         {rewrittenText}
                     </div>
                 </div>
@@ -1046,7 +1046,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                       onClick={() => setShowCollectionPicker(!showCollectionPicker)}
                       className={`w-11 h-11 flex items-center justify-center rounded-lg transition-colors border ${
                         videoCollectionIds.length > 0
-                          ? 'bg-indigo-600/20 text-indigo-400 border-indigo-600/50 hover:bg-indigo-600/30'
+                          ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] border-[var(--accent-border)] hover:bg-[var(--accent-soft)]'
                           : 'bg-ink-800 text-ink-300 border-ink-700 hover:bg-ink-700 hover:text-ink-50'
                       }`}
                       title="Add to Collection"

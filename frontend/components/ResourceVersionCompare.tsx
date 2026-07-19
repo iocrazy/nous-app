@@ -109,7 +109,7 @@ export const ResourceVersionCompare: React.FC<ResourceVersionCompareProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-ink-800 shrink-0">
         <div className="flex items-center gap-3">
-          <Layers size={18} className="text-indigo-400" />
+          <Layers size={18} className="text-[var(--accent-text)]" />
           <h2 className="text-sm font-semibold text-ink-50">
             {t('resources.compareVersions', 'Compare Versions')}
           </h2>

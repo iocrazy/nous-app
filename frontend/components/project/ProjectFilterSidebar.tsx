@@ -42,7 +42,7 @@ function FilterItem({
   onClick: () => void;
 }) {
   const style = active
-    ? 'bg-indigo-500/8 text-indigo-300'
+    ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
     : 'text-ink-500 hover:text-ink-300 hover:bg-ink-800/40';
 
   return (

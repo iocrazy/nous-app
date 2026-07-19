@@ -36,8 +36,8 @@ function ProjectCard({
     >
       {/* Top row: icon + title + actions */}
       <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-indigo-600/20">
-          <Layers size={18} className="text-indigo-400" />
+        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--accent-soft)]">
+          <Layers size={18} className="text-[var(--accent-text)]" />
         </div>
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-sm font-semibold text-ink-100">{project.name}</h3>

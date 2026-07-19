@@ -70,7 +70,7 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode, isS
       <div
         onClick={handleClick}
         className={`flex items-center gap-4 px-4 py-3 bg-ink-800/60 hover:bg-ink-800 border rounded-xl cursor-pointer transition-all duration-200 group ${
-          isSelected ? 'border-indigo-500 bg-indigo-500/10' : 'border-ink-700/30 hover:border-ink-600'
+          isSelected ? 'border-[var(--accent-border)] bg-[var(--accent-soft)]' : 'border-ink-700/30 hover:border-ink-600'
         }`}
       >
         {onToggleSelect && (
@@ -89,7 +89,7 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode, isS
           <IconComponent size={18} className={color} />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-ink-50 truncate group-hover:text-indigo-300 transition-colors">
+          <p className="text-sm text-ink-50 truncate group-hover:text-[var(--accent-text)] transition-colors">
             {file.filename}
           </p>
         </div>
@@ -113,7 +113,7 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode, isS
     <div
       onClick={handleClick}
       className={`bg-ink-800/80 hover:bg-ink-800 border rounded-xl cursor-pointer transition-all duration-200 group overflow-hidden relative ${
-        isSelected ? 'border-indigo-500 ring-1 ring-indigo-500/50' : 'border-ink-700/50 hover:border-ink-600'
+        isSelected ? 'border-[var(--accent-border)] ring-1 ring-indigo-500/50' : 'border-ink-700/50 hover:border-ink-600'
       }`}
     >
       {/* Selection checkbox */}
@@ -135,7 +135,7 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode, isS
       </div>
       {/* Info */}
       <div className="p-3">
-        <p className="text-sm text-ink-50 truncate group-hover:text-indigo-300 transition-colors font-medium">
+        <p className="text-sm text-ink-50 truncate group-hover:text-[var(--accent-text)] transition-colors font-medium">
           {file.filename}
         </p>
         <div className="flex items-center justify-between mt-2 text-xs text-ink-500">

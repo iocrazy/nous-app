@@ -213,7 +213,7 @@ export function WorkspaceEpisodes({
 
               <span
                 data-testid={`ws-episode-status-${ep.episode_id}`}
-                className="text-[11px] text-indigo-300 bg-indigo-500/10 rounded-full px-2 py-0.5 font-medium whitespace-nowrap shrink-0"
+                className="text-[11px] text-[var(--accent-text)] bg-[var(--accent-soft)] rounded-full px-2 py-0.5 font-medium whitespace-nowrap shrink-0"
               >
                 {t(`projects.workspace.episodeStatus.${ep.status}`, ep.status)}
               </span>

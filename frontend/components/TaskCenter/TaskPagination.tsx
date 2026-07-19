@@ -101,7 +101,7 @@ export const TaskPagination: React.FC<TaskPaginationProps> = ({
             disabled={disabled}
             className={`min-w-[1.6rem] px-1.5 py-1 rounded tabular-nums transition disabled:opacity-40 ${
               p === page
-                ? 'bg-indigo-500/20 text-indigo-200 font-medium'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] font-medium'
                 : 'text-ink-400 hover:bg-ink-800'
             }`}
           >

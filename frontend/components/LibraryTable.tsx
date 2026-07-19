@@ -215,8 +215,8 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
   const getSortIcon = (key: SortKey) => {
     if (sortConfig?.key !== key) return <ArrowUpDown size={12} className="text-ink-600 opacity-50" />;
     return sortConfig.direction === 'asc' 
-      ? <ArrowUp size={12} className="text-indigo-400" /> 
-      : <ArrowDown size={12} className="text-indigo-400" />;
+      ? <ArrowUp size={12} className="text-[var(--accent-text)]" />
+      : <ArrowDown size={12} className="text-[var(--accent-text)]" />;
   };
 
   if (data.length === 0) {
@@ -282,7 +282,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
             <span className="text-[10px] px-1.5 py-0.5 bg-ink-800 border border-ink-700 rounded text-ink-400 uppercase">
               {getAwemeTypeLabel(item.media_type)}
             </span>
-            <a href={item.original_url} target="_blank" rel="noreferrer" className="text-ink-600 hover:text-indigo-400">
+            <a href={item.original_url} target="_blank" rel="noreferrer" className="text-ink-600 hover:text-[var(--accent-text)]">
               <ExternalLink size={12} />
             </a>
           </div>
@@ -464,7 +464,7 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
 
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-[10px] px-1.5 py-0.5 bg-ink-800 border border-ink-700 rounded text-ink-400 uppercase">{getAwemeTypeLabel(item.media_type)}</span>
-                        <a href={item.original_url} target="_blank" rel="noreferrer" className="text-ink-600 hover:text-indigo-400">
+                        <a href={item.original_url} target="_blank" rel="noreferrer" className="text-ink-600 hover:text-[var(--accent-text)]">
                           <ExternalLink size={12} />
                         </a>
                       </div>

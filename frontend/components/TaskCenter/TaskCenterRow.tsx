@@ -129,7 +129,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
                   {actions.open && (
                     <button
                       onClick={(e) => { e.stopPropagation(); handleOpen(); }}
-                      className="p-0.5 rounded text-ink-500 hover:text-indigo-400 transition-colors opacity-0 group-hover:opacity-100"
+                      className="p-0.5 rounded text-ink-500 hover:text-[var(--accent-text)] transition-colors opacity-0 group-hover:opacity-100"
                       title={t('topbar.openResource')}
                     >
                       <ExternalLink size={13} />
@@ -139,7 +139,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
                     <a
                       href={getResourceFileUrl(String(task.resource_id), mediaToken ?? undefined)}
                       onClick={(e) => e.stopPropagation()}
-                      className="p-0.5 rounded text-ink-500 hover:text-indigo-400 transition-colors opacity-0 group-hover:opacity-100"
+                      className="p-0.5 rounded text-ink-500 hover:text-[var(--accent-text)] transition-colors opacity-0 group-hover:opacity-100"
                       title={t('topbar.downloadResult')}
                       download
                     >
@@ -155,7 +155,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
                   {actions.open && (
                     <button
                       onClick={(e) => { e.stopPropagation(); handleOpen(); }}
-                      className="p-0.5 rounded text-ink-500 hover:text-indigo-400 transition-colors"
+                      className="p-0.5 rounded text-ink-500 hover:text-[var(--accent-text)] transition-colors"
                       title={t('topbar.openResource')}
                     >
                       <ExternalLink size={13} />
@@ -164,7 +164,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
                   {actions.retry && (
                     <button
                       onClick={(e) => { e.stopPropagation(); onRetry(task.id); }}
-                      className="p-0.5 rounded text-ink-500 hover:text-indigo-400 transition-colors"
+                      className="p-0.5 rounded text-ink-500 hover:text-[var(--accent-text)] transition-colors"
                       title={t('common.retry')}
                     >
                       <RotateCcw size={12} />

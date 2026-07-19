@@ -16,7 +16,7 @@ const Item: React.FC<{ to?: string; icon: React.ElementType; label: string; disa
         to={to!}
         className={({ isActive }) =>
           `flex items-center gap-3 rounded-md px-3 py-2 text-[13px] transition-colors ${
-            isActive ? 'bg-indigo-500/10 text-indigo-300' : 'text-ink-400 hover:bg-ink-800/50 hover:text-ink-200'
+            isActive ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'text-ink-400 hover:bg-ink-800/50 hover:text-ink-200'
           }`
         }
       >

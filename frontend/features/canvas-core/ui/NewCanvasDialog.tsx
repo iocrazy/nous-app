@@ -112,7 +112,7 @@ export function NewCanvasDialog({
               onClick={() => setKind(option)}
               className={`flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${FOCUS_RING} ${
                 kind === option
-                  ? 'bg-indigo-500/15 text-indigo-500'
+                  ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                   : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
               }`}
             >

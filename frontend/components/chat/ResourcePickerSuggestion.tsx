@@ -70,7 +70,7 @@ export function ResourcePickerSuggestion({
             onClick={() => onKindChange(tab.key)}
             className={`text-[11px] px-2 py-0.5 rounded-full ${
               activeKind === tab.key
-                ? 'bg-indigo-900/60 text-indigo-200'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                 : 'text-ink-400 hover:text-ink-200'
             }`}
           >
@@ -93,7 +93,7 @@ export function ResourcePickerSuggestion({
                 key={item.id}
                 onClick={() => onSelect(item)}
                 className={`w-full text-left flex items-center gap-2 px-2.5 py-1.5 rounded ${
-                  active ? 'bg-indigo-900/60' : 'hover:bg-ink-800/50'
+                  active ? 'bg-[var(--accent-soft)]' : 'hover:bg-ink-800/50'
                 }`}
                 data-testid="resource-picker-row"
               >

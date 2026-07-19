@@ -128,7 +128,7 @@ export const SocialFilterDropdown: React.FC<SocialFilterDropdownProps> = ({
               key={mode}
               className={`flex items-center gap-2 text-xs cursor-pointer px-1 py-1 rounded ${
                 checked
-                  ? 'text-indigo-300'
+                  ? 'text-[var(--accent-text)]'
                   : 'text-content-2 hover:text-content'
               }`}
             >
@@ -157,7 +157,7 @@ export const SocialFilterDropdown: React.FC<SocialFilterDropdownProps> = ({
               key={metric}
               className={`flex items-center gap-2 px-2 py-1 rounded-md ${
                 entry.enabled
-                  ? 'bg-indigo-500/10'
+                  ? 'bg-[var(--accent-soft)]'
                   : 'hover:bg-island-2'
               }`}
             >
@@ -174,11 +174,11 @@ export const SocialFilterDropdown: React.FC<SocialFilterDropdownProps> = ({
                 />
                 <Icon
                   size={12}
-                  className={entry.enabled ? 'text-indigo-300' : 'text-content-3'}
+                  className={entry.enabled ? 'text-[var(--accent-text)]' : 'text-content-3'}
                   aria-hidden="true"
                 />
                 <span
-                  className={entry.enabled ? 'text-indigo-300' : 'text-content-2'}
+                  className={entry.enabled ? 'text-[var(--accent-text)]' : 'text-content-2'}
                 >
                   {labels[metric]}
                 </span>
@@ -222,7 +222,7 @@ export const SocialFilterDropdown: React.FC<SocialFilterDropdownProps> = ({
           />
           <MessageCircle
             size={12}
-            className={value.hasComments ? 'text-indigo-300' : 'text-content-3'}
+            className={value.hasComments ? 'text-[var(--accent-text)]' : 'text-content-3'}
             aria-hidden="true"
           />
           <span>

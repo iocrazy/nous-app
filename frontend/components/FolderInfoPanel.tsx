@@ -154,7 +154,7 @@ export const FolderInfoPanel: React.FC<FolderInfoPanelProps> = ({
               if (e.key === 'Enter' && !e.nativeEvent.isComposing) commitName();
               if (e.key === 'Escape') { setNameValue(folder.name); setEditingName(false); }
             }}
-            className={`w-full ${cFieldBg} border border-indigo-500/50 rounded px-2 py-1 text-sm ${cPrimary} focus:outline-none`}
+            className={`w-full ${cFieldBg} border border-[var(--accent-border)] rounded px-2 py-1 text-sm ${cPrimary} focus:outline-none`}
             autoFocus
           />
         ) : readOnly ? (

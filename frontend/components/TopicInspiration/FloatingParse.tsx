@@ -245,7 +245,7 @@ export const FloatingParse: React.FC<{
                         onClick={() => toggleAiIntent(name)}
                         className={`flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[11px] font-medium border transition-colors ${
                           active
-                            ? 'bg-indigo-500/[0.12] text-[var(--ind-tx,#4338ca)] border-indigo-500/35'
+                            ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] border-[var(--accent-border)]'
                             : 'bg-island-2 text-content-2 border-line'
                         } disabled:opacity-40`}
                       >
@@ -281,7 +281,7 @@ export const FloatingParse: React.FC<{
           <button
             disabled={busy || detection.count === 0}
             onClick={onAnalyze}
-            className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-indigo-500/[0.12] text-[var(--ind-tx,#4338ca)] border border-indigo-500/35 disabled:opacity-50"
+            className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-[var(--accent-soft)] text-[var(--accent-text)] border border-[var(--accent-border)] disabled:opacity-50"
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : null}
             {t('topic.analyze', 'Analyze')}

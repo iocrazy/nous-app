@@ -123,7 +123,7 @@ export const ProjectFileContextMenu: React.FC<ProjectFileContextMenuProps> = ({
                 onClick={() => { onSetStatus(file, s.value); onClose(); }}
                 className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors ${
                   file.review_status === s.value
-                    ? 'text-indigo-300 bg-indigo-500/10'
+                    ? 'text-[var(--accent-text)] bg-[var(--accent-soft)]'
                     : 'text-ink-300 hover:bg-ink-700/50'
                 }`}
               >

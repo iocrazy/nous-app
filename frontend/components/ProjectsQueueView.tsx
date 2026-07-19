@@ -160,7 +160,7 @@ export function ProjectsQueueView({
               )}
             </div>
             {stageName && (
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-indigo-500/15 text-indigo-300 flex-shrink-0">
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-[var(--accent-soft)] text-[var(--accent-text)] flex-shrink-0">
                 {stageName}
               </span>
             )}

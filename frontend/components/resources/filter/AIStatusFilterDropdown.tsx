@@ -58,19 +58,19 @@ export const AIStatusFilterDropdown: React.FC<AIStatusFilterDropdownProps> = ({
             onClick={() => toggle(key)}
             className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between transition-colors ${
               active
-                ? 'bg-indigo-500/10 text-indigo-300'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                 : inactiveRow
             }`}
           >
             <span className="flex items-center gap-2">
               <Icon
                 size={12}
-                className={active ? 'text-indigo-300' : inactiveIcon}
+                className={active ? 'text-[var(--accent-text)]' : inactiveIcon}
                 aria-hidden="true"
               />
               <span>{labels[key]}</span>
             </span>
-            {active && <Check size={12} className="text-indigo-400" />}
+            {active && <Check size={12} className="text-[var(--accent-text)]" />}
           </button>
         );
       })}

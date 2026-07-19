@@ -240,7 +240,7 @@ export const SystemMonitorPanel: React.FC = () => {
         {/* Queue Status */}
         <div className="p-4 bg-ink-900/50 border border-ink-800 rounded-xl">
           <div className="flex items-center gap-2 mb-3">
-            <ListVideo size={18} className="text-indigo-400" />
+            <ListVideo size={18} className="text-[var(--accent-text)]" />
             <h3 className="font-medium text-ink-200">Queue</h3>
             {queue && (
               <span className={`ml-auto px-2 py-0.5 text-xs rounded border ${getStatusBg(queue.status)} ${getStatusColor(queue.status)}`}>
@@ -348,7 +348,7 @@ export const SystemMonitorPanel: React.FC = () => {
       {breakdown.length > 0 && (
         <div className="p-4 bg-ink-900/50 border border-ink-800 rounded-xl">
           <div className="flex items-center gap-2 mb-3">
-            <ListVideo size={18} className="text-indigo-400" />
+            <ListVideo size={18} className="text-[var(--accent-text)]" />
             <h3 className="font-medium text-ink-200">Queue by Type</h3>
           </div>
           <table className="w-full text-sm">
@@ -440,7 +440,7 @@ export const SystemMonitorPanel: React.FC = () => {
                     {task.task_id}
                   </div>
                 </div>
-                <div className="px-2 py-1 text-xs rounded bg-indigo-500/10 text-indigo-400">
+                <div className="px-2 py-1 text-xs rounded bg-[var(--accent-soft)] text-[var(--accent-text)]">
                   {task.status}
                 </div>
               </div>

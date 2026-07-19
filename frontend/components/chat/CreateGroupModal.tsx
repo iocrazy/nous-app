@@ -236,7 +236,7 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
                     className={[
                       'flex-1 border rounded-[9px] p-[11px] cursor-pointer flex gap-[9px] items-start text-left transition-colors',
                       visibility === 'group'
-                        ? 'border-indigo-500 bg-indigo-500/[.08]'
+                        ? 'border-[var(--accent-border)] bg-[var(--accent-soft)]'
                         : 'border-line-strong hover:border-line-strong',
                     ].join(' ')}
                   >
@@ -245,7 +245,7 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
                       strokeWidth={2}
                       className={[
                         'mt-[1px] shrink-0',
-                        visibility === 'group' ? 'text-indigo-300' : 'text-content-3',
+                        visibility === 'group' ? 'text-[var(--accent-text)]' : 'text-content-3',
                       ].join(' ')}
                     />
                     <div>
@@ -265,7 +265,7 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
                     className={[
                       'flex-1 border rounded-[9px] p-[11px] cursor-pointer flex gap-[9px] items-start text-left transition-colors',
                       visibility === 'public'
-                        ? 'border-indigo-500 bg-indigo-500/[.08]'
+                        ? 'border-[var(--accent-border)] bg-[var(--accent-soft)]'
                         : 'border-line-strong hover:border-line-strong',
                     ].join(' ')}
                   >
@@ -274,7 +274,7 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
                       strokeWidth={2}
                       className={[
                         'mt-[1px] shrink-0',
-                        visibility === 'public' ? 'text-indigo-300' : 'text-content-3',
+                        visibility === 'public' ? 'text-[var(--accent-text)]' : 'text-content-3',
                       ].join(' ')}
                     />
                     <div>
@@ -313,7 +313,7 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
                             'flex items-center gap-[7px] rounded-[20px] pl-[5px] pr-[10px] py-[4px]',
                             'text-[12.5px] border transition-colors',
                             selected
-                              ? 'bg-indigo-500/[.15] border-indigo-500/50 text-indigo-300'
+                              ? 'bg-[var(--accent-soft)] border-[var(--accent-border)] text-[var(--accent-text)]'
                               : 'bg-island-2 border-line text-content hover:border-line-strong',
                           ].join(' ')}
                         >

@@ -156,7 +156,7 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
       <div className="w-full h-full bg-ink-950 rounded-lg flex flex-col items-center justify-center gap-3">
         {isStillDownloading ? (
           <>
-            <Loader2 size={48} className="text-indigo-500 animate-spin" />
+            <Loader2 size={48} className="text-[var(--accent-text)] animate-spin" />
             <p className="text-ink-300 text-sm font-medium">Downloading...</p>
             <p className="text-ink-500 text-xs">Images are being downloaded. Please wait.</p>
           </>

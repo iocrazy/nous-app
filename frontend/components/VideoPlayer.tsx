@@ -702,7 +702,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     onClick={() => changeSpeed(rate)}
                     className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
                       playbackRate === rate
-                        ? 'text-indigo-400 bg-indigo-500/10'
+                        ? 'text-[var(--accent-text)] bg-[var(--accent-soft)]'
                         : 'text-ink-300 hover:bg-ink-800 hover:text-white'
                     }`}
                   >
@@ -743,7 +743,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     onClick={() => changeQuality(-1)}
                     className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
                       isAutoQuality && !isOriginalMode
-                        ? 'text-indigo-400 bg-indigo-500/10'
+                        ? 'text-[var(--accent-text)] bg-[var(--accent-soft)]'
                         : 'text-ink-300 hover:bg-ink-800 hover:text-white'
                     }`}
                   >
@@ -759,7 +759,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         onClick={() => changeQuality(idx)}
                         className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
                           !isAutoQuality && !isOriginalMode && currentHlsLevel === idx
-                            ? 'text-indigo-400 bg-indigo-500/10'
+                            ? 'text-[var(--accent-text)] bg-[var(--accent-soft)]'
                             : 'text-ink-300 hover:bg-ink-800 hover:text-white'
                         }`}
                       >
@@ -771,7 +771,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       onClick={switchToOriginal}
                       className={`w-full px-3 py-1.5 text-xs text-left transition-colors ${
                         isOriginalMode
-                          ? 'text-indigo-400 bg-indigo-500/10'
+                          ? 'text-[var(--accent-text)] bg-[var(--accent-soft)]'
                           : 'text-ink-300 hover:bg-ink-800 hover:text-white'
                       }`}
                     >

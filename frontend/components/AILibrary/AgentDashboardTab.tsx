@@ -224,7 +224,7 @@ export function AgentDashboardTab({
             <button
               type="button"
               onClick={onOpenRuns}
-              className="text-xs text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-0.5"
+              className="text-xs text-[var(--accent-text)] hover:text-[var(--accent-text)] inline-flex items-center gap-0.5"
             >
               {t('aiLibrary.agents.dashboard.viewDetails', 'View details')}
               <ExternalLink size={11} />
@@ -441,7 +441,7 @@ export function AgentDashboardTab({
             <button
               type="button"
               onClick={onOpenRuns}
-              className="text-xs text-indigo-400 hover:text-indigo-300"
+              className="text-xs text-[var(--accent-text)] hover:text-[var(--accent-text)]"
             >
               {t('aiLibrary.agents.dashboard.seeAll', 'See all')} →
             </button>

@@ -71,12 +71,12 @@ export const AgentIconPicker: React.FC<AgentIconPickerProps> = ({
         className={`inline-flex items-center justify-center rounded-lg border border-ink-700 bg-ink-800 p-2 transition-colors ${
           disabled
             ? 'cursor-not-allowed opacity-60'
-            : 'hover:border-indigo-500/50 hover:bg-ink-700'
+            : 'hover:border-[var(--accent-border)] hover:bg-ink-700'
         }`}
         title={disabled ? undefined : t('aiLibrary.agents.pickIcon', 'Pick icon')}
         aria-label={t('aiLibrary.agents.pickIcon', 'Pick icon')}
       >
-        <CurrentIcon size={size} className="text-indigo-400" />
+        <CurrentIcon size={size} className="text-[var(--accent-text)]" />
       </button>
 
       {open && (
@@ -107,7 +107,7 @@ export const AgentIconPicker: React.FC<AgentIconPickerProps> = ({
                   title={slug}
                   className={`flex h-8 w-8 items-center justify-center rounded transition-colors ${
                     active
-                      ? 'bg-indigo-500/20 text-indigo-300'
+                      ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                       : 'text-ink-400 hover:bg-ink-800 hover:text-ink-100'
                   }`}
                 >

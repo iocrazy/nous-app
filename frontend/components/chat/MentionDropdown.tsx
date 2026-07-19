@@ -58,7 +58,7 @@ export function MentionDropdown({
                 'w-full text-left flex items-center gap-[10px] px-3 py-[7px]',
                 'transition-colors',
                 active
-                  ? 'bg-indigo-500/[.22]'
+                  ? 'bg-[var(--accent-soft)]'
                   : 'hover:bg-white/[.04]',
               ].join(' ')}
             >

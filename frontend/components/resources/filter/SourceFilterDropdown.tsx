@@ -112,7 +112,7 @@ export const SourceFilterDropdown: React.FC<SourceFilterDropdownProps> = ({
             onClick={() => toggle(platform)}
             className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between transition-colors ${
               active
-                ? 'bg-indigo-500/10 text-indigo-300'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                 : 'text-content-2 hover:bg-island-2'
             }`}
           >
@@ -128,7 +128,7 @@ export const SourceFilterDropdown: React.FC<SourceFilterDropdownProps> = ({
               )}
               <span className="truncate">{platformLabel(platform)}</span>
             </span>
-            {active && <Check size={12} className="text-indigo-400" />}
+            {active && <Check size={12} className="text-[var(--accent-text)]" />}
           </button>
         );
       })}

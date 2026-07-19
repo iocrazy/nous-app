@@ -50,7 +50,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
       <div
         className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-all text-sm select-none ${
           isSelected
-            ? 'bg-indigo-500/20 text-indigo-300'
+            ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
             : 'hover:bg-ink-800/80 text-ink-400 hover:text-ink-200'
         }`}
         style={{ paddingLeft: `${8 + depth * 16}px` }}
@@ -313,11 +313,11 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
                       }}
                       className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-all text-sm select-none ${
                         selectedLibraryId === lib.id && selectedFolderId === null
-                          ? 'bg-indigo-500/20 text-indigo-300'
+                          ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                           : 'hover:bg-ink-800/80 text-ink-400 hover:text-ink-200'
                       }`}
                     >
-                      <LibraryIcon size={14} className="text-indigo-400/70 flex-shrink-0" />
+                      <LibraryIcon size={14} className="text-[var(--accent-text)] flex-shrink-0" />
                       <span className="truncate">{lib.name}</span>
                     </div>
                   ))}
@@ -333,7 +333,7 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
               <div
                 className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer transition-all text-sm select-none ${
                   selectedFolderId === null && (isPersonal || libraries.length === 0)
-                    ? 'bg-indigo-500/20 text-indigo-300'
+                    ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                     : 'hover:bg-ink-800/80 text-ink-400 hover:text-ink-200'
                 }`}
                 onClick={() => setSelectedFolderId(null)}
@@ -425,7 +425,7 @@ export const FolderPickerModal: React.FC<FolderPickerModalProps> = ({
         <div className="flex items-center justify-between px-5 py-3.5 border-t border-ink-800/80 bg-ink-950/30">
           <button
             onClick={() => { setCreatingFolder(true); setNewFolderName(''); }}
-            className="flex items-center gap-1.5 text-sm text-ink-500 hover:text-indigo-400 transition-colors"
+            className="flex items-center gap-1.5 text-sm text-ink-500 hover:text-[var(--accent-text)] transition-colors"
           >
             <FolderPlus size={14} />
             New Folder

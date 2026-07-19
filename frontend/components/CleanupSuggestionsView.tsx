@@ -366,7 +366,7 @@ const FilterTab: React.FC<FilterTabProps> = ({ label, count, isActive, onClick, 
     onClick={onClick}
     className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm transition-colors ${
       isActive
-        ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30'
+        ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] border border-[var(--accent-border)]'
         : 'bg-ink-800 text-ink-400 hover:text-ink-50 border border-ink-700'
     }`}
   >
@@ -397,7 +397,7 @@ const SuggestionCard: React.FC<SuggestionCardProps> = ({
   return (
     <div
       className={`bg-ink-900 rounded-xl border transition-all ${
-        isSelected ? 'border-indigo-500/50 bg-indigo-600/5' : 'border-ink-800'
+        isSelected ? 'border-[var(--accent-border)] bg-[var(--accent-soft)]' : 'border-ink-800'
       }`}
     >
       <div className="p-4 flex items-center gap-4">

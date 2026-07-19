@@ -123,7 +123,7 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
             type="button"
             data-testid="media-node-empty"
             onClick={() => inputRef.current?.click()}
-            className="nodrag flex min-h-[96px] w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-canvas-line text-canvas-muted transition-colors hover:border-indigo-500/50 hover:text-canvas-text"
+            className="nodrag flex min-h-[96px] w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-canvas-line text-canvas-muted transition-colors hover:border-[var(--accent-border)] hover:text-canvas-text"
           >
             <UploadCloud size={18} />
             <span className="text-[11px]">

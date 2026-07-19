@@ -158,7 +158,7 @@ export function SodaPlaylistPanel({ onSubmitted }: SodaPlaylistPanelProps) {
             <button
               type="button"
               onClick={allSelected ? deselectAll : selectAll}
-              className="text-xs font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
+              className="text-xs font-medium text-[var(--accent-text)] hover:text-[var(--accent-text)] transition-colors"
             >
               {allSelected ? 'Deselect all' : 'Select all'}
             </button>

@@ -46,7 +46,7 @@ export const CollectionFolderCard: React.FC<CollectionFolderCardProps> = ({
         {/* Media count badge with icon */}
         <div className="absolute bottom-2 right-2 flex items-center gap-1 px-2 py-0.5 bg-black/70 rounded text-xs text-white">
           <span>{collection.video_count || 0}</span>
-          <Video size={12} className="text-indigo-400" />
+          <Video size={12} className="text-[var(--accent-text)]" />
         </div>
       </div>
 

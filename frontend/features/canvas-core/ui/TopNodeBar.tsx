@@ -109,7 +109,7 @@ export function TopNodeBar({ surfaceRef }: TopNodeBarProps) {
             key={chip.key}
             type="button"
             onClick={() => addAtCenter(chip)}
-            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-canvas-line bg-canvas-card/60 px-3 py-1.5 text-[11px] font-medium text-canvas-text transition-colors hover:border-indigo-500/50 hover:text-indigo-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+            className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-canvas-line bg-canvas-card/60 px-3 py-1.5 text-[11px] font-medium text-canvas-text transition-colors hover:border-[var(--accent-border)] hover:text-[var(--accent-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
           >
             <Icon size={12} />
             {chip.label}

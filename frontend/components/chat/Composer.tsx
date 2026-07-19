@@ -305,7 +305,7 @@ export function Composer({
       {/* Drag-over overlay */}
       {isDragActive && (
         <div className="absolute inset-0 z-10 rounded-[12px] border-2 border-dashed border-indigo-500/60 bg-indigo-500/[0.06] flex items-center justify-center pointer-events-none">
-          <span className="text-[13px] font-medium text-indigo-400">
+          <span className="text-[13px] font-medium text-[var(--accent-text)]">
             {t('chat.image.dropHint')}
           </span>
         </div>

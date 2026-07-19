@@ -88,7 +88,7 @@ export const ProjectCollectModal: React.FC<ProjectCollectModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-ink-800 shrink-0">
           <h3 className="text-base font-medium text-ink-100 flex items-center gap-2">
-            <Inbox size={18} className="text-indigo-400" />
+            <Inbox size={18} className="text-[var(--accent-text)]" />
             {t('projects.collect.title', 'File Collection')}
           </h3>
           <button onClick={onClose} className="p-1 text-ink-500 hover:text-ink-300 transition-colors">
@@ -200,7 +200,7 @@ export const ProjectCollectModal: React.FC<ProjectCollectModalProps> = ({
           ) : (
             <button
               onClick={() => setShowCreate(true)}
-              className="w-full py-2.5 border border-dashed border-ink-700 hover:border-indigo-500/50 rounded-xl text-sm text-ink-400 hover:text-indigo-300 transition-colors"
+              className="w-full py-2.5 border border-dashed border-ink-700 hover:border-[var(--accent-border)] rounded-xl text-sm text-ink-400 hover:text-[var(--accent-text)] transition-colors"
             >
               + {t('projects.collect.newCollection', 'New Collection Link')}
             </button>

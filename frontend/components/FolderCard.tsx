@@ -65,7 +65,7 @@ const RenameInput: React.FC<{
     }}
     onBlur={() => onCancel?.()}
     onClick={(e) => e.stopPropagation()}
-    className="w-full bg-ink-900 border border-indigo-500 rounded px-2 py-0.5 text-sm text-ink-50 focus:outline-none"
+    className="w-full bg-ink-900 border border-[var(--accent-border)] rounded px-2 py-0.5 text-sm text-ink-50 focus:outline-none"
   />
 );
 
@@ -92,7 +92,7 @@ export const FolderCard: React.FC<FolderCardProps> = ({
 }) => {
   const { t } = useTranslation();
   const [dragHover, setDragHover] = useState(false);
-  const dropRing = dragHover ? 'ring-2 ring-indigo-500 bg-indigo-500/10' : '';
+  const dropRing = dragHover ? 'ring-2 ring-indigo-500 bg-[var(--accent-soft)]' : '';
 
   // ─── Drop target handlers ─────────────────────────────
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -163,7 +163,7 @@ export const FolderCard: React.FC<FolderCardProps> = ({
         onDrop={handleDrop}
         className={`flex items-center gap-3 px-4 py-2.5 hover:bg-ink-800/60 rounded-lg cursor-pointer transition-[background-color] duration-150 group relative ${
           isChecked || isSelected
-            ? 'bg-indigo-500/10 ring-1 ring-inset ring-indigo-500/30'
+            ? 'bg-[var(--accent-soft)] ring-1 ring-inset ring-indigo-500/30'
             : ''
         } ${dropRing}`}
       >
