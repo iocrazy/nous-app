@@ -10,12 +10,21 @@ interface CreateProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
   onProjectCreated: (project: Project) => void;
+  /**
+   * Snowflake id of the collaborative team the modal should default the Team
+   * selector to (creating a project inside Team X's workspace pre-selects
+   * Team X). Empty string / undefined = personal workspace → defaults to
+   * "Personal" (a personal project is stored with team_id=NULL). Ids stay
+   * strings (Snowflake-safe).
+   */
+  defaultTeamId?: string;
 }
 
 export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   isOpen,
   onClose,
   onProjectCreated,
+  defaultTeamId = '',
 }) => {
   const { t } = useTranslation();
   const [name, setName] = useState('');
@@ -23,7 +32,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const [announcement, setAnnouncement] = useState('');
   const [projectGroup, setProjectGroup] = useState('');
   const [projectType, setProjectType] = useState<'personal' | 'internal' | 'external'>('personal');
-  const [teamId, setTeamId] = useState<string>('');
+  const [teamId, setTeamId] = useState<string>(defaultTeamId);
   const [teams, setTeams] = useState<Team[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,8 +40,11 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       loadTeams();
+      // Re-sync the pre-selected team each time the modal opens so switching
+      // workspaces between opens picks up the new default.
+      setTeamId(defaultTeamId);
     }
-  }, [isOpen]);
+  }, [isOpen, defaultTeamId]);
 
   const loadTeams = async () => {
     try {
@@ -81,7 +93,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     setAnnouncement('');
     setProjectGroup('');
     setProjectType('personal');
-    setTeamId('');
+    setTeamId(defaultTeamId);
     setError(null);
   };
 

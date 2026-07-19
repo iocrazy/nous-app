@@ -27,6 +27,7 @@ import { toAgentRef, toUiIssue, type ProjectNameMap } from '../components/Todoli
 import { fetchProjects, createProject } from '../services/projectsService';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
+import { useWorkspaceScope } from '../hooks/useWorkspaceScope';
 
 /** Which slice of the team's issues the list is showing (client-side toggle). */
 type ScopeMode = 'team' | 'my' | 'agent';
@@ -54,6 +55,7 @@ import { getSupabaseClient } from '../supabaseClient';
 
 export function TodolistPage() {
   const { identifier, teamId } = useParams<{ identifier?: string; teamId: string }>();
+  const { isPersonal: isPersonalWorkspace, effectiveTeamId } = useWorkspaceScope();
   const navigate = useNavigate();
   const { addToast } = useToast();
   const { currentUserId } = useAuth();
@@ -129,10 +131,17 @@ export function TodolistPage() {
   }, [scopeMode, scopeAgentId, currentUserId, scopeTeamId]);
 
   // Create a project inline (from the New Issue picker or the Group-by-Project
-  // header). Stamps the current team; ids stay strings (Snowflake-safe).
+  // header). Follows the projects convention: a personal workspace creates a
+  // team-less project (team_id=NULL — how the Projects page identifies personal
+  // projects), a real collaborative workspace stamps that team's snowflake. Ids
+  // stay strings (Snowflake-safe). The mirrored stage issue still resolves the
+  // owner's personal team on the backend so it stays visible in this Todolist.
   const handleCreateProject = useCallback(async (name: string) => {
     try {
-      const created = await createProject({ name, team_id: teamIdNum ?? undefined });
+      const created = await createProject({
+        name,
+        team_id: isPersonalWorkspace ? undefined : (effectiveTeamId || undefined),
+      });
       const id = String(created.id);
       setProjectsById((prev) => ({ ...prev, [id]: { name: created.name } }));
       addToast(`Created project ${created.name}`, 'success');
@@ -141,7 +150,7 @@ export function TodolistPage() {
       addToast(err instanceof Error ? err.message : 'Failed to create project', 'error');
       throw err;
     }
-  }, [teamIdNum, addToast]);
+  }, [isPersonalWorkspace, effectiveTeamId, addToast]);
 
   const refreshIssues = useCallback(async (
     agentMap: Record<string, AgentRef>,

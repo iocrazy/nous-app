@@ -273,6 +273,30 @@ class TeamRepository:
 
             return rows
 
+    async def get_personal_team_id(self, owner_id: str) -> Optional[str]:
+        """Snowflake id (as a str) of ``owner_id``'s personal team, or ``None``.
+
+        Every user has at most one personal team — the ``uq_teams_owner_personal``
+        partial unique index (``kind = 'personal'``) guarantees it. This is the
+        single shared resolver for the "personal workspace scope id" every scoped
+        subsystem needs (the target convention: personal scope = personal-team
+        snowflake, never the user UUID and never NULL). Returns the id as a STRING
+        for Snowflake-safe transport.
+
+        Never raises: a user with no personal-team row yields ``None`` so callers
+        can degrade (leave a field NULL, skip a budget gate) instead of failing.
+        ``owner_id`` is a uuid str bound against the Uuid ``owner_id`` column —
+        asyncpg's Uuid codec accepts the str form for the WHERE bind.
+        """
+        async with read_scope() as session:
+            row_id = await session.scalar(
+                select(Teams.id)
+                .where(Teams.owner_id == owner_id)
+                .where(Teams.kind == "personal")
+                .limit(1)
+            )
+            return str(row_id) if row_id is not None else None
+
     async def get_member_role(self, team_id: str, user_id: str) -> Optional[str]:
         """Return the caller's role in the team, or None if not a member."""
         async with read_scope() as session:
