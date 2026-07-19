@@ -33,7 +33,7 @@ Timer safety guards (borrowed from openclaw cron/service/timer.ts:780)
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from dbos import DBOS
@@ -41,6 +41,17 @@ from loguru import logger
 
 _MIN_REFIRE_GAP_MS = 100
 _BATCH_SIZE = 100  # don't dispatch more than this per tick
+
+# W2a autopilot hardening (mig 370)
+# --------------------------------
+# * _AUTO_PAUSE_THRESHOLD — a schedule that fails to dispatch this many times
+#   in a row (no success in between) is auto-paused (enabled=false) so a
+#   permanently broken routine stops firing every minute. Skipped fires (stale
+#   discard / skip_if_active gate) do NOT count toward this run.
+# * _DEFAULT_STALE_AFTER_MINUTES — fallback when a row predates the
+#   stale_after_minutes column (defensive; the DB default is the same).
+_AUTO_PAUSE_THRESHOLD = 5
+_DEFAULT_STALE_AFTER_MINUTES = 60
 
 
 @DBOS.step()
@@ -57,7 +68,7 @@ async def fire_due_schedules_step() -> Dict[str, Any]:
     # Skip gracefully when Supavisor isn't configured (dev/CI) instead of
     # logging a warning + errors:1 every minute on the engine's RuntimeError.
     if not db_engine.is_configured():
-        return {"due": 0, "fired": 0, "errors": 0}
+        return {"due": 0, "fired": 0, "skipped": 0, "errors": 0}
 
     now = datetime.now(timezone.utc)
 
@@ -71,70 +82,211 @@ async def fire_due_schedules_step() -> Dict[str, Any]:
         )
     except Exception as exc:
         logger.opt(exception=True).warning(f"[scheduled_master] fetch failed: {exc}")
-        return {"due": 0, "fired": 0, "errors": 1}
+        return {"due": 0, "fired": 0, "skipped": 0, "errors": 1}
 
     if not rows:
-        return {"due": 0, "fired": 0, "errors": 0}
+        return {"due": 0, "fired": 0, "skipped": 0, "errors": 0}
 
     fired = 0
+    skipped = 0
     errors = 0
+    paused = 0
     orders: List[Dict[str, Any]] = []
     for row in rows:
         try:
-            order = await _dispatch_one(row)
-            if order is not None:
-                orders.append(order)
-            fired += 1
+            result = await _dispatch_one(row)
         except Exception as exc:
             errors += 1
             logger.opt(exception=True).warning(
                 f"[scheduled_master] dispatch row {row.get('id')} failed: {exc}"
             )
+            # Failure counts toward the consecutive-failure run → maybe
+            # auto-pause. Best-effort: a bookkeeping failure must not kill the
+            # loop or the tick.
             try:
-                await db_engine.execute(
-                    "UPDATE public.user_schedules SET fail_count = :fc, "
-                    "last_error = :err WHERE id = :id",
-                    {
-                        "fc": (row.get("fail_count") or 0) + 1,
-                        "err": str(exc)[:500],
-                        "id": row["id"],
-                    },
-                )
+                if await _record_dispatch_failure(row, str(exc)):
+                    paused += 1
             except Exception:
-                pass
+                logger.opt(exception=True).warning(
+                    "[scheduled_master] failed to record dispatch failure for "
+                    f"row {row.get('id')}"
+                )
+            continue
 
-    return {"due": len(rows), "fired": fired, "errors": errors, "orders": orders}
+        if result.get("outcome") == "skipped":
+            # Stale discard or a delivery-policy gate — NOT a failure, so the
+            # consecutive-failure run is left untouched (multica: skipped
+            # excluded from the failure rate).
+            skipped += 1
+            continue
+
+        # Successful fire → clear any consecutive-failure run.
+        await _reset_consecutive_fails(row)
+        order = result.get("order")
+        if order is not None:
+            orders.append(order)
+        fired += 1
+
+    counters: Dict[str, Any] = {
+        "due": len(rows),
+        "fired": fired,
+        "skipped": skipped,
+        "errors": errors,
+    }
+    if paused:
+        counters["paused"] = paused
+    if orders:
+        counters["orders"] = orders
+    return counters
 
 
-async def _dispatch_one(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Dispatch a single due row + advance its next_fire_at. Returns a
-    dispatch order for the workflow body when the row is an agent
-    routine (workflows can't be started from inside a step), else None."""
+async def _record_dispatch_failure(row: Dict[str, Any], err: str) -> bool:
+    """Bump fail_count + consecutive_fails + last_error after a dispatch
+    failure. When the consecutive-failure run reaches _AUTO_PAUSE_THRESHOLD,
+    auto-pause the row (enabled=false, paused_at=now, pause_reason=...) so a
+    permanently broken routine stops firing every minute. Returns True when
+    the row was auto-paused."""
+    from app.db import engine as db_engine
+
+    new_consec = (row.get("consecutive_fails") or 0) + 1
+    if new_consec >= _AUTO_PAUSE_THRESHOLD:
+        reason = f"auto-paused after {new_consec} consecutive failures: {err[:200]}"
+        await db_engine.execute(
+            "UPDATE public.user_schedules SET fail_count = fail_count + 1, "
+            "consecutive_fails = :cf, last_error = :err, enabled = false, "
+            "paused_at = :now, pause_reason = :reason WHERE id = :id",
+            {
+                "cf": new_consec,
+                "err": err[:500],
+                "now": datetime.now(timezone.utc),
+                "reason": reason[:500],
+                "id": row["id"],
+            },
+        )
+        logger.warning(
+            f"[scheduled_master] schedule {row.get('id')} auto-paused after "
+            f"{new_consec} consecutive failures"
+        )
+        return True
+
+    await db_engine.execute(
+        "UPDATE public.user_schedules SET fail_count = fail_count + 1, "
+        "consecutive_fails = :cf, last_error = :err WHERE id = :id",
+        {"cf": new_consec, "err": err[:500], "id": row["id"]},
+    )
+    return False
+
+
+async def _reset_consecutive_fails(row: Dict[str, Any]) -> None:
+    """Clear the consecutive-failure run after a successful fire. Skipped when
+    already zero (the common case) to avoid a needless write every tick."""
+    if (row.get("consecutive_fails") or 0) == 0:
+        return
+    from app.db import engine as db_engine
+
+    try:
+        await db_engine.execute(
+            "UPDATE public.user_schedules SET consecutive_fails = 0 WHERE id = :id",
+            {"id": row["id"]},
+        )
+    except Exception as exc:
+        logger.warning(
+            f"[scheduled_master] reset consecutive_fails failed (non-fatal): {exc}"
+        )
+
+
+def _is_stale(
+    prev_fire_at: Optional[datetime], now: datetime, stale_after_minutes: int
+) -> bool:
+    """A due fire is stale when it's more than stale_after_minutes past its
+    scheduled next_fire_at — worker was down, or we slept through a wall-clock
+    run. stale_after_minutes<=0 disables the check."""
+    if prev_fire_at is None or not stale_after_minutes or stale_after_minutes <= 0:
+        return False
+    # asyncpg hands back tz-aware datetimes; guard a naive value just in case.
+    if prev_fire_at.tzinfo is None:
+        prev_fire_at = prev_fire_at.replace(tzinfo=timezone.utc)
+    return (now - prev_fire_at) > timedelta(minutes=stale_after_minutes)
+
+
+async def _dispatch_one(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Dispatch a single due row + advance its next_fire_at.
+
+    Returns an outcome dict:
+      * {"outcome": "fired", "order": <order>|None} — a fire happened. For an
+        agent routine `order` carries the dispatch the WORKFLOW body must start
+        (workflows can't be started from inside a step); other task types
+        dispatch inline and carry no order.
+      * {"outcome": "skipped"} — no fire: the due fire was discarded as stale,
+        gated by delivery policy, or its task_type is unknown. Skips never
+        touch the consecutive-failure run.
+    Dispatch failures raise (the caller records them + may auto-pause)."""
     task_type = row.get("task_type") or ""
     payload = row.get("payload") or {}
     user_id = row.get("user_id")
     sched_id = row["id"]
+    tz_name = row.get("timezone") or "UTC"
+    cron_expr = row.get("cron_expr") or "* * * * *"
 
-    # Compute next fire time before dispatch so a slow dispatch doesn't
-    # delay the next tick.
-    next_at = _compute_next_fire(row.get("cron_expr") or "* * * * *")
-
-    # Update the row first (advance next_fire_at + bump counters) so
-    # concurrent master ticks don't double-fire the same schedule.
-    # NOTE: this is best-effort serialization — for true cluster-wide
-    # exactly-once we'd need an advisory lock or DBOS workflow_id
-    # dedup keyed on (id, last_fired_at). Acceptable here because
-    # task_type dispatchers are themselves idempotent (PR #154 ensures
-    # DBOS workflow_id dedup) and double-firing means at most one
-    # extra task that the dispatcher will short-circuit.
     from app.db import engine as db_engine
 
+    now = datetime.now(timezone.utc)
+    prev_fire_at = row.get("next_fire_at")
+    # Compute next fire time before dispatch so a slow dispatch doesn't
+    # delay the next tick. Timezone-aware so "0 9 * * *" means 9am local.
+    next_at = _compute_next_fire(cron_expr, tz_name)
+
+    # Stale-fire discard (multica stale-plan): a due fire far past its
+    # scheduled time is dropped, not dispatched — this stops a worker restart
+    # from backfilling a flood of missed fires AND stops a 9am daily run from
+    # firing at 8pm after downtime. Advance next_fire_at + count it skipped.
+    stale_after = row.get("stale_after_minutes")
+    if stale_after is None:
+        stale_after = _DEFAULT_STALE_AFTER_MINUTES
+    if _is_stale(prev_fire_at, now, stale_after):
+        await db_engine.execute(
+            "UPDATE public.user_schedules SET next_fire_at = :next, "
+            "skipped_count = skipped_count + 1 WHERE id = :id",
+            {"next": next_at, "id": sched_id},
+        )
+        logger.info(
+            f"[scheduled_master] schedule {sched_id} fire discarded as stale "
+            f"(due {prev_fire_at}, now {now}, >{stale_after}m) — "
+            f"next {next_at.isoformat()}"
+        )
+        return {"outcome": "skipped"}
+
+    # Resolve a generic task_type's workflow up front so an unknown /
+    # misconfigured type is a quiet skip (advance so it doesn't hot-loop)
+    # rather than a hard failure that would drive the row toward auto-pause.
+    workflow_callable = None
+    if task_type != "agent_routine":
+        workflow_callable = await _resolve_workflow_callable(task_type)
+        if workflow_callable is None:
+            await db_engine.execute(
+                "UPDATE public.user_schedules SET next_fire_at = :next, "
+                "skipped_count = skipped_count + 1 WHERE id = :id",
+                {"next": next_at, "id": sched_id},
+            )
+            logger.warning(
+                f"[scheduled_master] unknown task_type={task_type!r} for "
+                f"schedule {sched_id} — skipping"
+            )
+            return {"outcome": "skipped"}
+
+    # Advance the row first (next_fire_at + fire_count) so concurrent master
+    # ticks don't double-fire the same schedule.
+    # NOTE: this is best-effort serialization — for true cluster-wide
+    # exactly-once we'd need an advisory lock or DBOS workflow_id dedup keyed
+    # on (id, next_fire_at). Acceptable here because task_type dispatchers are
+    # idempotent (agent_routine via the unique index; generic via the pinned
+    # workflow_id below) so a double-fire dedups.
     await db_engine.execute(
         "UPDATE public.user_schedules SET last_fired_at = :fired, "
         "next_fire_at = :next, fire_count = :fc, last_error = NULL "
         "WHERE id = :id",
         {
-            "fired": datetime.now(timezone.utc),
+            "fired": now,
             "next": next_at,
             "fc": (row.get("fire_count") or 0) + 1,
             "id": sched_id,
@@ -147,40 +299,43 @@ async def _dispatch_one(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # (start_workflow inside a step raises an empty AssertionError, #495).
     # Handled before the generic task_type → workflow registry below.
     if task_type == "agent_routine":
-        return await _fire_agent_routine(row)
+        order = await _fire_agent_routine(row)
+        if order is None:
+            # skip_if_active delivery gate or the DB unique gate — a quiet
+            # skip, not a fire, so it must not reset consecutive_fails.
+            return {"outcome": "skipped"}
+        return {"outcome": "fired", "order": order}
 
-    # Dispatch via the task_type → workflow registry. For now we route
-    # through start_workflow_routed so the existing routing table
-    # decides which workflow callable to fire. Unknown task_type just
-    # logs + bumps fail_count (next call up the stack).
+    # Dispatch via the task_type → workflow registry through
+    # start_workflow_routed (the routing table decides which callable fires).
     from app.services.infra.dbos_orchestrator import start_workflow_routed
-
-    # The mapping task_type → workflow callable lives in
-    # app/workflows/__init__.py + dispatch routing. For each task_type
-    # the master scheduler supports we'd add a small import + dispatch
-    # entry here. Initial supported types: parse / download / ai_summary
-    # — extend as user UX surfaces more.
-    workflow_callable = await _resolve_workflow_callable(task_type)
-    if workflow_callable is None:
-        logger.warning(
-            f"[scheduled_master] unknown task_type={task_type} for "
-            f"schedule {sched_id} — skipping"
-        )
-        return
 
     kwargs = dict(payload)
     if user_id:
         kwargs.setdefault("user_id", str(user_id))
 
+    # Fire idempotency: pin a deterministic DBOS workflow id keyed on this
+    # fire's scheduled time so two concurrent master ticks that both read the
+    # row before either advances dedup to one workflow. Keyed on the fire's
+    # OWN scheduled time (prev_fire_at), not next_at, so successive fires stay
+    # distinct. (The agent_routine path is instead idempotent via the
+    # issues_open_routine_execution_uq index.)
+    fire_key = (
+        prev_fire_at.isoformat() if prev_fire_at is not None else next_at.isoformat()
+    )
+    pinned_wf_id = f"sched:{sched_id}:{fire_key}"
+
     await start_workflow_routed(
         task_type,
         dbos_workflow_callable=workflow_callable,
         dbos_workflow_kwargs=kwargs,
+        workflow_id=pinned_wf_id,
     )
     logger.info(
         f"[scheduled_master] fired schedule={sched_id} task_type={task_type} "
-        f"user={user_id} next_at={next_at.isoformat()}"
+        f"user={user_id} wf={pinned_wf_id} next_at={next_at.isoformat()}"
     )
+    return {"outcome": "fired"}
 
 
 _ROUTINE_TERMINAL_ISSUE_STATUSES = ("done", "cancelled")
@@ -357,30 +512,57 @@ async def _resolve_workflow_callable(task_type: str):
     return None
 
 
-def _compute_next_fire(cron_expr: str) -> datetime:
-    """Return the next fire time after now() for the given 5-field cron.
-    Falls back to now+1h if the cron is invalid (operator misconfig).
-    """
+def _resolve_zone(tz_name: str):
+    """IANA tz name → tzinfo. Invalid / unknown names fall back to UTC with a
+    warning so a bad timezone can never crash the scheduler."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(tz_name)
+    except Exception as exc:
+        logger.warning(
+            f"[scheduled_master] invalid timezone {tz_name!r}: {exc} — using UTC"
+        )
+        return timezone.utc
+
+
+def _compute_next_fire(cron_expr: str, tz_name: str = "UTC") -> datetime:
+    """Return the next fire time (as UTC) after now() for the given 5-field
+    cron, interpreted in ``tz_name``.
+
+    croniter is anchored to a base localized to the schedule's timezone, so
+    "0 9 * * *" means 9am *local* and stays correct across DST transitions
+    (the UTC offset a 9am fire maps to shifts by an hour, but the wall-clock
+    hour doesn't). The result is converted back to UTC for storage.
+
+    Invalid timezone → UTC + warning. Invalid cron → now+1h (operator
+    misconfig; loud but non-fatal)."""
     try:
         from croniter import croniter
+    except Exception as exc:
+        logger.opt(exception=True).warning(
+            f"[scheduled_master] croniter unavailable: {exc} — falling back to +1h"
+        )
+        return datetime.now(timezone.utc) + timedelta(hours=1)
 
-        base = datetime.now(timezone.utc)
+    tz = _resolve_zone(tz_name)
+    try:
+        base = datetime.now(tz)
         itr = croniter(cron_expr, base)
-        next_at = itr.get_next(datetime)
-        # MIN_REFIRE_GAP_MS guard — even if cron fires immediately, push
-        # at least 100ms so we don't tight-loop.
-        if (next_at - base).total_seconds() * 1000 < _MIN_REFIRE_GAP_MS:
-            from datetime import timedelta
-
-            next_at = base + timedelta(milliseconds=_MIN_REFIRE_GAP_MS)
+        # croniter with a tz-aware base yields tz-aware datetimes in the same
+        # zone; normalize to UTC for storage.
+        next_at = itr.get_next(datetime).astimezone(timezone.utc)
+        # MIN_REFIRE_GAP_MS guard — even if cron fires immediately, push at
+        # least 100ms so we don't tight-loop on a misconfigured "* * * * *".
+        now_utc = datetime.now(timezone.utc)
+        if (next_at - now_utc).total_seconds() * 1000 < _MIN_REFIRE_GAP_MS:
+            next_at = now_utc + timedelta(milliseconds=_MIN_REFIRE_GAP_MS)
         return next_at
     except Exception as exc:
         logger.opt(exception=True).warning(
             f"[scheduled_master] invalid cron {cron_expr!r}: {exc} — "
             "falling back to +1h"
         )
-        from datetime import timedelta
-
         return datetime.now(timezone.utc) + timedelta(hours=1)
 
 
@@ -444,7 +626,7 @@ async def scheduled_master_workflow(
     orders = counters.pop("orders", None) or []
     if orders:
         await _dispatch_routine_orders(orders, counters)
-    if counters.get("fired") or counters.get("errors"):
+    if counters.get("fired") or counters.get("errors") or counters.get("paused"):
         logger.info(f"[scheduled_master] tick: {counters}")
 
 
