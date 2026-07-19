@@ -63,6 +63,7 @@ import {
   translateGenPrompt,
   generateGenPrompt,
   classifyResource,
+  GALLERY_MIME,
 } from '../services/resourceService';
 import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
 import { createTag } from '../services/unifiedTagService';
@@ -78,6 +79,7 @@ import { CometBack } from './CometBack';
 import { ShareModal } from './ShareModal';
 import { VersionManagerModal } from './VersionManagerModal';
 import { FilePreview } from './resources/FilePreview';
+import { GalleryViewer } from './resources/GalleryViewer';
 import VideoPlayer from './VideoPlayer';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { ResourceReviewPanel } from './ResourceReviewPanel';
@@ -994,6 +996,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const { icon: FileIcon, color: iconColor, bg: iconBg } = getFileIcon(resource.mime_type);
   const isVideo = resource.mime_type?.startsWith('video/');
   const isAudio = resource.mime_type?.startsWith('audio/');
+  const isGallery = resource.mime_type === GALLERY_MIME;
   const isUploadedAudio = isAudio && resource.source_type === 'upload';
   // Island audio capsule stage (unifies uploaded audio with the download-detail
   // audio layout): cover-tinted cover-side + synced lyrics column + bottom
@@ -1590,6 +1593,10 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           ) : isAudio && fileUrl ? (
             <div className="w-full h-full">
               <FilePreview resource={resource} fileUrl={fileUrl} currentUserId={currentUserId} onCoverUpdated={setResource} />
+            </div>
+          ) : isGallery ? (
+            <div className="w-full h-full p-4">
+              <GalleryViewer galleryId={String(resource.id)} mediaToken={mediaToken ?? undefined} />
             </div>
           ) : (
             <div className="p-6">

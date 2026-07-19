@@ -3,13 +3,15 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle, AlertTriangle, ArrowLeftRight, Bookmark, Calendar, Check, Folder,
-  ListOrdered, Loader2, MapPin, Plus, Radio, Search, Send, Sparkles, TrendingUp, X,
+  Images, ListOrdered, Loader2, MapPin, Plus, Radio, Search, Send, Sparkles, TrendingUp, X,
 } from 'lucide-react';
 import {
   createPublishTask, listAccounts, listGeneratedVideos, listLibraryMedia,
   promoteGeneratedVideo, GeneratedVideo,
 } from '../../services/distributionService';
-import { uploadResource } from '../../services/resourceService';
+import {
+  uploadResource, getGalleryItems, getResourceCoverUrl, GALLERY_MIME,
+} from '../../services/resourceService';
 import {
   addResourceTag, createTag, removeResourceTag,
 } from '../../services/unifiedTagService';
@@ -132,6 +134,11 @@ export const PublishPage: React.FC = () => {
   const [promotingId, setPromotingId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Gallery cards expand into their child images on pick. Cache the ordered
+  // child ids per gallery so the toggle-off path can remove the exact group
+  // without re-fetching. `expandingGalleryId` drives the card busy state.
+  const [galleryChildren, setGalleryChildren] = useState<Record<string, string[]>>({});
+  const [expandingGalleryId, setExpandingGalleryId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const mediaType = contentType === 'images' ? 'image' : 'video';
@@ -287,10 +294,10 @@ export const PublishPage: React.FC = () => {
   // Insert a synthetic Library row for a promoted generation so the selected
   // thumbs can resolve it even when the resource lives outside the current
   // workspace listing (promote targets the personal scope).
-  const ensureVideoRow = (resourceId: string, name: string) =>
+  const ensureVideoRow = (resourceId: string, name: string, thumbnailUrl: string | null = null) =>
     setVideos((prev) => (prev.some((v) => v.id === resourceId)
       ? prev
-      : [{ id: resourceId, filename: name, thumbnail_url: null }, ...prev]));
+      : [{ id: resourceId, filename: name, thumbnail_url: thumbnailUrl }, ...prev]));
 
   // Pick a generated video: promote it into the Library on first pick
   // (idempotent server-side via the promoted_resource_id backlink), then
@@ -316,6 +323,57 @@ export const PublishPage: React.FC = () => {
     } finally {
       setPromotingId(null);
     }
+  };
+
+  // ── Gallery cards (Images mode) ──
+  // A gallery is one Library row that stands in for an ordered group of child
+  // images. The gallery id itself is NEVER published — picking a gallery
+  // expands it into its child image ids (added to `selectedVideos` in position
+  // order) so the publish payload carries only image resource ids and the
+  // downstream workflow needs zero changes. Toggle semantics: every child
+  // already selected → remove the whole group; otherwise add the missing ones.
+  const isGalleryRow = useCallback(
+    (v: LibraryVideo): boolean => v.mime_type === GALLERY_MIME,
+    [],
+  );
+
+  const onPickGallery = async (v: LibraryVideo) => {
+    if (expandingGalleryId) return;
+    let childIds = galleryChildren[v.id];
+    if (!childIds) {
+      setExpandingGalleryId(v.id);
+      try {
+        const children = await getGalleryItems(v.id);
+        // Defensive sort — never trust the API to return position order.
+        const ordered = [...children].sort((a, b) => a.position - b.position);
+        childIds = ordered.map((c) => String(c.id));
+        setGalleryChildren((prev) => ({ ...prev, [v.id]: childIds as string[] }));
+        // Gallery children are hidden from the picker list (backend NOT EXISTS),
+        // so seed synthetic rows carrying each child's own cover for the
+        // selected-thumbs strip.
+        ordered.forEach((c) => {
+          const thumb = c.thumbnail_path ? getResourceCoverUrl(String(c.id)) : null;
+          ensureVideoRow(String(c.id), c.filename || 'Image', thumb);
+        });
+      } catch (err) {
+        console.error('distribution: expand gallery failed', err);
+        addToast(t('distribution.publish.galleryExpandFailed', 'Could not open gallery'), 'error');
+        return;
+      } finally {
+        setExpandingGalleryId(null);
+      }
+    }
+    if (!childIds || childIds.length === 0) {
+      addToast(t('distribution.publish.galleryEmpty', 'This gallery has no images'), 'info');
+      return;
+    }
+    const ids = childIds;
+    setSelectedVideos((s) => {
+      const allPresent = ids.every((id) => s.includes(id));
+      if (allPresent) return s.filter((id) => !ids.includes(id));
+      const set = new Set(s);
+      return [...s, ...ids.filter((id) => !set.has(id))];
+    });
   };
 
   // ── Inline image upload (Images mode only) ──
@@ -1041,6 +1099,43 @@ export const PublishPage: React.FC = () => {
             {pickerTab === 'library' && (
               <div className="picker-grid">
                 {pickerResults.map((v) => {
+                  // Gallery entity — its own card that expands into child images
+                  // on pick. `on` reflects the whole group being selected.
+                  if (isGalleryRow(v)) {
+                    const childIds = galleryChildren[v.id];
+                    const galOn = Boolean(childIds && childIds.length > 0
+                      && childIds.every((id) => selectedVideos.includes(id)));
+                    const busy = expandingGalleryId === v.id;
+                    const count = v.gallery_count ?? childIds?.length ?? 0;
+                    const galImg = Boolean(v.thumbnail_url);
+                    return (
+                      <button
+                        type="button"
+                        key={v.id}
+                        className={`picker-item ${galOn ? 'sel' : ''}`}
+                        aria-pressed={galOn}
+                        disabled={busy}
+                        onClick={() => void onPickGallery(v)}
+                      >
+                        <span
+                          className={`pi-thumb ${galImg ? '' : 'ph'} ${busy ? 'pulse' : ''}`}
+                          style={galImg ? { backgroundImage: `url(${v.thumbnail_url})` } : undefined}
+                        >
+                          <span className="pi-gallery-badge">
+                            <Images size={11} strokeWidth={2.5} />
+                            {count}
+                          </span>
+                          {busy && (
+                            <span className="pi-busy"><Loader2 size={16} className="spin" /></span>
+                          )}
+                          {galOn && !busy && (
+                            <span className="pi-check"><Check size={12} strokeWidth={3} /></span>
+                          )}
+                        </span>
+                        <span className="pi-name" title={v.filename}>{v.filename}</span>
+                      </button>
+                    );
+                  }
                   const on = selectedVideos.includes(v.id);
                   const marked = markedIds.has(v.id);
                   const hasImg = Boolean(v.thumbnail_url);

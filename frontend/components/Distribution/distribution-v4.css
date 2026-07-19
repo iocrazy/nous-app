@@ -360,6 +360,13 @@
 .dist-v4 .pi-mark.on svg { fill: currentColor; }
 .dist-v4 .pi-thumb.gen { background: radial-gradient(70px 50px at 68% 22%, rgba(167, 139, 250, .35), transparent 70%), linear-gradient(170deg, #3b2f5e 0%, #232b52 55%, #14203c 100%); }
 .dist-v4 .pi-gen-badge { position: absolute; left: 5px; bottom: 5px; width: 18px; height: 18px; border-radius: 6px; background: rgba(167, 139, 250, .25); color: var(--violet); display: flex; align-items: center; justify-content: center; }
+/* Gallery entity badge — a stacked-images glyph + child count on the picker card. */
+.dist-v4 .pi-gallery-badge { position: absolute; left: 5px; top: 5px; display: inline-flex; align-items: center; gap: 3px; padding: 2px 6px; border-radius: 7px; background: rgba(0, 0, 0, .6); color: #fff; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.dist-v4 .pi-gallery-badge svg { color: #f9a8d4; }
+.dist-v4 .pi-busy { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, .35); color: #fff; }
+.dist-v4 .pi-busy .spin { animation: dist-v4-spin 1s linear infinite; }
+@keyframes dist-v4-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .dist-v4 .pi-busy .spin { animation: none; } }
 
 /* ═══ responsive ═══ */
 @media (max-width: 900px) {

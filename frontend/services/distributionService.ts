@@ -99,6 +99,8 @@ interface ResourceItemRow {
   resource?: {
     filename?: unknown;
     thumbnail_path?: unknown;
+    mime_type?: unknown;
+    gallery_count?: unknown;
   } | null;
 }
 
@@ -110,7 +112,13 @@ export const listLibraryMedia = async (
     const tagFilter = opts?.tagId ? `&tag_ids=${encodeURIComponent(opts.tagId)}` : '';
     // `types` maps to the backend mime filter: 'video' → mime LIKE 'video/%',
     // 'image' → mime LIKE 'image/%'. Defaults to video for back-compat.
+    // In images mode we ALSO request `gallery` so first-class gallery entities
+    // (mime 'application/x-mediahub-gallery') surface as their own picker rows
+    // — FastAPI reads repeated keys as a List, so each value is its own param.
     const mediaType = opts?.mediaType ?? 'video';
+    const typeFilter = mediaType === 'image'
+      ? 'types=image&types=gallery'
+      : `types=${mediaType}`;
     // Only the user's own content is publishable: keep uploads, AI/canvas
     // `generated` promote artifacts, and `derived` resources — exclude `web`
     // (platform parse/download material). FastAPI reads repeated keys as a
@@ -118,19 +126,23 @@ export const listLibraryMedia = async (
     const ownContentFilter =
       '&source_types=upload&source_types=generated&source_types=derived';
     const res = await request<{ success: boolean; data: ResourceItemRow[] }>(
-      `/../resources?scope_id=${encodeURIComponent(scopeId)}&types=${mediaType}&all_folders=true&limit=500${ownContentFilter}${tagFilter}`,
+      `/../resources?scope_id=${encodeURIComponent(scopeId)}&${typeFilter}&all_folders=true&limit=500${ownContentFilter}${tagFilter}`,
     );
     const rows = res?.data ?? [];
     return rows.map((r) => {
       // Prefer the true resource id; fall back to the join-row id defensively.
       const resourceId = String(r.resource_id ?? r.id);
       const filename = r.resource?.filename;
+      const mimeType = r.resource?.mime_type;
+      const galleryCount = r.resource?.gallery_count;
       return {
         id: resourceId,
         filename: filename != null ? String(filename) : 'Untitled',
         thumbnail_url: r.resource?.thumbnail_path
           ? `${getApiUrl()}/api/v1/resources/${resourceId}/cover`
           : null,
+        mime_type: mimeType != null ? String(mimeType) : null,
+        gallery_count: typeof galleryCount === 'number' ? galleryCount : undefined,
       };
     });
   } catch (err) {

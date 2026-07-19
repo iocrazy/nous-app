@@ -278,6 +278,8 @@
       "generatedUntitled": "Generated video",
       "promoteFailed": "Could not add generated video",
       "markUpdateFailed": "Could not update publish mark",
+      "galleryExpandFailed": "Could not open gallery",
+      "galleryEmpty": "This gallery has no images",
       "cover": "Cover",
       "soon": "Soon",
       "notSetYet": "Not set yet",
@@ -715,6 +717,12 @@
     "galleryCreatedPartial": "Gallery created ({{count}} image(s) failed to upload)",
     "galleryUploadAllFailed": "All images failed to upload",
     "galleryCreateFailed": "Failed to create gallery",
+    "gallery": {
+      "empty": "This gallery has no images yet",
+      "prev": "Previous image",
+      "next": "Next image",
+      "goTo": "Go to image {{n}}"
+    },
     "itemCount": "{{count}} items",
     "download": "Download",
     "noPreview": "Preview not available",

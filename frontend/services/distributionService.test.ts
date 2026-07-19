@@ -81,7 +81,10 @@ describe('listLibraryVideos — real nested row shape', () => {
       }),
     );
     const videos = await listLibraryVideos('scope-1');
-    expect(videos[0]).toEqual({ id: 'b', filename: 'Untitled', thumbnail_url: null });
+    expect(videos[0]).toEqual({
+      id: 'b', filename: 'Untitled', thumbnail_url: null,
+      mime_type: null, gallery_count: undefined,
+    });
   });
 
   it('falls back to the join-row id when resource_id is absent (defensive)', async () => {
@@ -106,6 +109,55 @@ describe('listLibraryVideos — real nested row shape', () => {
     const calledUrl = errored.mock.calls[0][0] as string;
     expect(calledUrl).toContain('tag_ids=tag-42');
     consoleErr.mockRestore();
+  });
+});
+
+describe('listLibraryMedia — gallery entities in images mode', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it('requests both image and gallery types in images mode', async () => {
+    const spy = mockFetchJson({ success: true, data: [] });
+    vi.stubGlobal('fetch', spy);
+
+    await listLibraryVideos('scope-1', { mediaType: 'image' });
+
+    const url = spy.mock.calls[0][0] as string;
+    // FastAPI reads repeated keys as a List → image AND gallery both requested.
+    expect(url).toContain('types=image');
+    expect(url).toContain('types=gallery');
+  });
+
+  it('requests only the video type in video mode (no gallery)', async () => {
+    const spy = mockFetchJson({ success: true, data: [] });
+    vi.stubGlobal('fetch', spy);
+
+    await listLibraryVideos('scope-1', { mediaType: 'video' });
+
+    const url = spy.mock.calls[0][0] as string;
+    expect(url).toContain('types=video');
+    expect(url).not.toContain('types=gallery');
+  });
+
+  it('passes the gallery mime + child count through to the row', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetchJson({
+        success: true,
+        data: [{
+          id: 'j1', resource_id: 'gal-1',
+          resource: {
+            filename: 'trip', thumbnail_path: 'x.jpg',
+            mime_type: 'application/x-mediahub-gallery', gallery_count: 4,
+          },
+        }],
+      }),
+    );
+    const rows = await listLibraryVideos('scope-1', { mediaType: 'image' });
+    expect(rows[0].mime_type).toBe('application/x-mediahub-gallery');
+    expect(rows[0].gallery_count).toBe(4);
   });
 });
 

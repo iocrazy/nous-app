@@ -4,10 +4,11 @@ import { vi, describe, it, expect } from 'vitest';
 
 // vi.mock is hoisted above top-level consts, so the fns it references must be
 // hoisted too (vi.hoisted) — otherwise "Cannot access before initialization".
-const { createPublishTask, promoteGeneratedVideo, uploadResource } = vi.hoisted(() => ({
+const { createPublishTask, promoteGeneratedVideo, uploadResource, getGalleryItems } = vi.hoisted(() => ({
   createPublishTask: vi.fn().mockResolvedValue({ id: '700', accounts: [] }),
   promoteGeneratedVideo: vi.fn().mockResolvedValue('900'),
   uploadResource: vi.fn(),
+  getGalleryItems: vi.fn().mockResolvedValue([]),
 }));
 
 // Stable toast spy so the upload-failure test can assert on it.
@@ -31,6 +32,11 @@ vi.mock('../../services/distributionService', () => ({
             { id: 'img-1', filename: 'photo-a.jpg', thumbnail_url: null },
             { id: 'img-2', filename: 'photo-b.jpg', thumbnail_url: null },
             { id: 'img-3', filename: 'photo-c.jpg', thumbnail_url: null },
+            // A first-class gallery entity row (images mode also requests
+            // `types=gallery`). Its own id is never published — picking it
+            // expands into child image ids.
+            { id: 'gal-1', filename: 'my-gallery', thumbnail_url: null,
+              mime_type: 'application/x-mediahub-gallery', gallery_count: 2 },
           ]
         : [{ id: '30', filename: 'clip-a.mp4', thumbnail_url: null }],
     ),
@@ -59,8 +65,13 @@ vi.mock('react-router-dom', async (orig) => ({
 // PublishPage calls useToast — mock it so the test needn't wrap ToastProvider.
 vi.mock('../Toast', () => ({ useToast: () => ({ addToast }) }));
 
-// Inline image upload path (resourceService.uploadResource).
-vi.mock('../../services/resourceService', () => ({ uploadResource }));
+// Inline image upload path (resourceService.uploadResource) + gallery expand.
+vi.mock('../../services/resourceService', () => ({
+  uploadResource,
+  getGalleryItems,
+  getResourceCoverUrl: (id: string) => `/cover/${id}`,
+  GALLERY_MIME: 'application/x-mediahub-gallery',
+}));
 
 // PublishPage derives scope via useWorkspaceScope → useTeamContext, which throws
 // without a TeamProvider. Mock the context so the hook resolves a scope id.
@@ -192,6 +203,71 @@ describe('PublishPage', () => {
     expect(arg.resource_ids).toEqual(['img-2', 'img-1']);
     // Images always broadcast — one note per account.
     expect(arg.distribution_mode).toBe('broadcast');
+  });
+
+  it('expands a gallery card into its child images in position order', async () => {
+    // API returns the children OUT of position order — the picker must sort by
+    // position, never trust the response order.
+    getGalleryItems.mockResolvedValueOnce([
+      { id: 'c-2', filename: 'child-2.jpg', thumbnail_path: null, position: 1 },
+      { id: 'c-1', filename: 'child-1.jpg', thumbnail_path: null, position: 0 },
+    ]);
+
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('tab', { name: /^Images$/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Add from Library/i }));
+    // The gallery entity renders as its own card (badge shows the child count).
+    fireEvent.click(await screen.findByRole('button', { name: /my-gallery/ }));
+    await waitFor(() => expect(getGalleryItems).toHaveBeenCalledWith('gal-1'));
+    fireEvent.click(screen.getByRole('button', { name: /^Done$/i }));
+
+    fireEvent.click(screen.getByText('HEYGO'));
+    fireEvent.change(screen.getByPlaceholderText(/Add a title/i), {
+      target: { value: 'Gallery expand' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
+
+    await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+    const arg = createPublishTask.mock.calls.at(-1)?.[0];
+    expect(arg.content_type).toBe('images');
+    // Children are published in POSITION order (c-1 then c-2), not the API's
+    // reversed order — and the gallery entity id itself is never published.
+    expect(arg.resource_ids).toEqual(['c-1', 'c-2']);
+    expect(arg.resource_ids).not.toContain('gal-1');
+  });
+
+  it('removes the whole gallery group on a second pick (toggle)', async () => {
+    getGalleryItems.mockResolvedValueOnce([
+      { id: 'c-1', filename: 'child-1.jpg', thumbnail_path: null, position: 0 },
+      { id: 'c-2', filename: 'child-2.jpg', thumbnail_path: null, position: 1 },
+    ]);
+
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('tab', { name: /^Images$/ }));
+    fireEvent.click(screen.getByText('HEYGO'));                       // pick account
+    fireEvent.change(screen.getByPlaceholderText(/Add a title/i), {
+      target: { value: 'Toggle group' },
+    });
+    const publishBtn = screen.getByRole('button', { name: /Publish now/i });
+
+    fireEvent.click(screen.getByRole('button', { name: /Add from Library/i }));
+    const galleryCard = await screen.findByRole('button', { name: /my-gallery/ });
+
+    // First pick expands + selects the whole group → publishable.
+    fireEvent.click(galleryCard);
+    await waitFor(() => expect(getGalleryItems).toHaveBeenCalledWith('gal-1'));
+    await waitFor(() => expect(publishBtn).not.toBeDisabled());
+    const fetchesAfterExpand = getGalleryItems.mock.calls.length;
+
+    // Second pick removes every child → nothing selected → publish blocked.
+    fireEvent.click(galleryCard);
+    await waitFor(() => expect(publishBtn).toBeDisabled());
+    // Cached children mean the toggle-off never re-fetches.
+    expect(getGalleryItems.mock.calls.length).toBe(fetchesAfterExpand);
   });
 
   it('uploads picked images inline and auto-selects them in pick order', async () => {
