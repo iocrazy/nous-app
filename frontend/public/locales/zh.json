@@ -3042,6 +3042,142 @@
     "arrZoomIn": "放大",
     "arrZoomOut": "缩小",
     "arrFit": "适应视图",
+    "arrSetLength": "设置时长",
+    "arrLengthCustom": "自定义时长",
+    "arrLengthCustomPlaceholder": "如 2700 或 45:00",
+    "arrLengthSet": "设置",
+    "arrTemplateEmptySub": "从成熟的结构模板开始，或手动添加节拍。",
+    "beatTemplatesBtn": "模板",
+    "beatGuideBtn": "指南",
+    "beatTargetLengthFailed": "保存目标时长失败",
+    "beatTemplateApplyFailed": "应用模板失败",
+    "beatTplWizardTitle": "应用模板",
+    "beatTplBeatCount": "{{count}} 个节拍",
+    "beatTplTargetLength": "目标总时长",
+    "beatTplLengthHint": "将在 {{length}} 内生成 {{count}} 个节拍。",
+    "beatTplModeLabel": "当前已有节拍",
+    "beatTplModeAppend": "追加",
+    "beatTplModeAppendDesc": "在现有节拍之后追加模板节拍。",
+    "beatTplModeReplace": "替换",
+    "beatTplModeReplaceDesc": "删除所有现有节拍，再生成模板。此操作不可撤销。",
+    "beatTplBack": "上一步",
+    "beatTplNext": "下一步",
+    "beatTplGenerate": "生成",
+    "beatGuideTitle": "叙事方法",
+    "beatConformTitle": "目标时长已更改",
+    "beatConformBody": "时间轴上已有编排好的节拍。仅调整标尺，还是按比例拉伸节拍以适应新的时长？",
+    "beatConformResizeOnly": "仅调整标尺",
+    "beatConformStretch": "按比例拉伸节拍",
+    "beatTpl": {
+      "save_the_cat": {
+        "name": "救猫咪",
+        "desc": "布莱克·斯奈德为长片设计的 15 节拍结构。",
+        "opening_image": {
+          "name": "开场画面",
+          "guide": "故事改变一切之前，主角世界与基调的一个缩影。"
+        },
+        "theme_stated": {
+          "name": "主题呈现",
+          "guide": "有人点出故事真正的主题——主角必须领悟的功课。"
+        },
+        "setup": {
+          "name": "铺垫",
+          "guide": "介绍主角、他的世界，以及他生活中缺失的东西。"
+        },
+        "catalyst": {
+          "name": "催化剂",
+          "guide": "一件事打破主角的日常，推动故事启程。"
+        },
+        "debate": {
+          "name": "争执",
+          "guide": "主角犹豫是否要回应召唤，风险何在。"
+        },
+        "break_into_two": {
+          "name": "第二幕衔接",
+          "guide": "主角做出选择，踏入第二幕的新世界。"
+        },
+        "b_story": {
+          "name": "B 故事",
+          "guide": "承载主题的次要线索，通常是爱情或友情。"
+        },
+        "fun_and_games": {
+          "name": "娱乐游戏",
+          "guide": "兑现前提的承诺——观众为之而来的精彩段落。"
+        },
+        "midpoint": {
+          "name": "中点",
+          "guide": "一次假胜利或假失败抬高赌注，扭转故事走向。"
+        },
+        "bad_guys_close_in": {
+          "name": "坏蛋逼近",
+          "guide": "内外压力同时收紧，包围主角。"
+        },
+        "all_is_lost": {
+          "name": "一无所有",
+          "guide": "最低谷——主角失去最重要的东西。"
+        },
+        "dark_night_of_the_soul": {
+          "name": "灵魂黑夜",
+          "guide": "主角在失败中沉沦，随后找到新的决心。"
+        },
+        "break_into_three": {
+          "name": "第三幕衔接",
+          "guide": "往往来自 B 故事的顿悟，为主角指明出路。"
+        },
+        "finale": {
+          "name": "结局",
+          "guide": "主角运用领悟，最后一次面对反派。"
+        },
+        "final_image": {
+          "name": "终场画面",
+          "guide": "与开场画面呼应，显示主角改变了多少。"
+        }
+      },
+      "five_beats": {
+        "name": "核心五节拍",
+        "desc": "紧凑的戏剧骨架——从激励事件到结局的五个转折点。",
+        "inciting_incident": {
+          "name": "激励事件",
+          "guide": "打破平衡、启动故事的那个事件。"
+        },
+        "progressive_complications": {
+          "name": "进展纠葛",
+          "guide": "不断升级的障碍，逼主角做出越来越艰难的选择。"
+        },
+        "crisis": {
+          "name": "危机",
+          "guide": "主角陷入两难，没有轻松的出路。"
+        },
+        "climax": {
+          "name": "高潮",
+          "guide": "决定性的对决——故事张力的顶点。"
+        },
+        "resolution": {
+          "name": "结局",
+          "guide": "新的平衡落定，展现后果与改变。"
+        }
+      },
+      "kishotenketsu": {
+        "name": "起承转合",
+        "desc": "以铺陈与转折而非冲突为核心的四段式结构。",
+        "ki": {
+          "name": "起",
+          "guide": "介绍人物、场景与情境。"
+        },
+        "sho": {
+          "name": "承",
+          "guide": "延展情境，深化但不做大的改变。"
+        },
+        "ten": {
+          "name": "转",
+          "guide": "出乎意料的转折，重新诠释此前的一切。"
+        },
+        "ketsu": {
+          "name": "合",
+          "guide": "将转折与整体调和，为故事收尾。"
+        }
+      }
+    },
     "importScript": "导入剧本",
     "importTitle": "导入剧本",
     "importName": "名称",

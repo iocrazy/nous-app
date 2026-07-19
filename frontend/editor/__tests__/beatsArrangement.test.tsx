@@ -29,6 +29,12 @@ vi.mock('../../components/Toast', () => ({
   useOptionalToast: () => ({ addToast: toast.addToast }),
 }));
 
+const scriptSvc = vi.hoisted(() => ({
+  fetchScriptProject: vi.fn(),
+  updateScriptProject: vi.fn(),
+}));
+vi.mock('../../services/scriptService', () => scriptSvc);
+
 import { BeatsView } from '../beats/BeatsView';
 import { ArrangementView } from '../beats/ArrangementView';
 
@@ -49,6 +55,8 @@ beforeEach(() => {
   svc.listBeats.mockResolvedValue([]);
   svc.createBeat.mockResolvedValue(beat({ id: 'a' }));
   svc.updateBeat.mockResolvedValue(beat({ id: 'a' }));
+  scriptSvc.fetchScriptProject.mockResolvedValue({ target_duration_sec: null });
+  scriptSvc.updateScriptProject.mockResolvedValue({});
   // jsdom has no scrollIntoView — the left-rail focus calls it.
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
 });
@@ -105,10 +113,13 @@ describe('ArrangementView timeline geometry', () => {
         scriptId="1"
         beats={beats}
         scenes={noScenes}
+        targetDurationSec={null}
         onAdd={vi.fn()}
         onUpdate={onUpdate}
         onCreate={onCreate}
         onOpenScene={vi.fn()}
+        onSetTargetDuration={vi.fn()}
+        onApplyTemplate={vi.fn()}
       />,
     );
     return { onUpdate, onCreate };
@@ -247,10 +258,13 @@ describe('laper topbar + NLE drag guide', () => {
         scriptId="1"
         beats={[beat({ id: 'a', start_sec: 60, duration_sec: 30 })]}
         scenes={noScenes}
+        targetDurationSec={null}
         onAdd={vi.fn()}
         onUpdate={vi.fn()}
         onCreate={vi.fn()}
         onOpenScene={vi.fn()}
+        onSetTargetDuration={vi.fn()}
+        onApplyTemplate={vi.fn()}
       />,
     );
     const card = await screen.findByTestId('arr-card');
