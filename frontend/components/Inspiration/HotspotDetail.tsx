@@ -62,7 +62,7 @@ export const HotspotDetail: React.FC<Props> = ({ hotspot, onSaveAsNote, onParse,
             <span className="rounded bg-island-2 px-1.5 py-0.5 text-[10px] font-bold text-content-2">{h.source_label}</span>
           )}
           {h.category && (
-            <span className="rounded bg-indigo-500/15 px-1.5 py-0.5 text-[11px] text-indigo-300">#{h.category}</span>
+            <span className="rounded bg-[var(--accent-soft)] px-1.5 py-0.5 text-[11px] text-[var(--accent-text)]">#{h.category}</span>
           )}
         </div>
         <h4 className="mt-2 text-[15px] font-semibold leading-snug text-content">{h.title}</h4>

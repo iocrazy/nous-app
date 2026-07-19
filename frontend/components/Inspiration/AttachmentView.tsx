@@ -166,7 +166,7 @@ export const AttachmentView: React.FC<{ attachments: NoteAttachment[] }> = ({
             >
               <FileText size={14} className="text-content-3" />
               <span className="max-w-[180px] truncate">{a.original_name}</span>
-              <span className="rounded bg-indigo-500/15 px-1.5 py-0.5 text-[10px] font-bold text-indigo-300">
+              <span className="rounded bg-[var(--accent-soft)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--accent-text)]">
                 {extOf(a.original_name)}
               </span>
               <span className="text-content-3">{formatSize(a.size_bytes)}</span>

@@ -26,7 +26,7 @@ export const TagsPanel: React.FC<Props> = ({ tags, activeTag, onTagClick }) => {
               key={tag}
               onClick={() => onTagClick(on ? null : tag)}
               className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs ${
-                on ? 'bg-indigo-500/20 text-indigo-300' : 'bg-island-2 text-content-2 hover:bg-line'
+                on ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'bg-island-2 text-content-2 hover:bg-line'
               }`}
             >
               {`#${tag} (${cnt})`}

@@ -270,7 +270,7 @@ export const ActivityPanel: React.FC<Props> = ({ selectedDate, onSelectDate, ref
           <button
             aria-label="Clear selected day"
             onClick={() => onSelectDate(null)}
-            className="ml-2 inline-flex items-center gap-1 rounded-full bg-indigo-500/15 px-2 py-0.5 text-[10px] tabular-nums text-indigo-300 hover:bg-indigo-500/25"
+            className="ml-2 inline-flex items-center gap-1 rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] tabular-nums text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"
           >
             {selectedDate} ×
           </button>
@@ -279,14 +279,14 @@ export const ActivityPanel: React.FC<Props> = ({ selectedDate, onSelectDate, ref
           <button
             aria-label="Heatmap view"
             onClick={() => setModePersist('heatmap')}
-            className={`rounded px-1.5 py-0.5 ${mode === 'heatmap' ? 'bg-island text-indigo-300' : 'text-content-4'}`}
+            className={`rounded px-1.5 py-0.5 ${mode === 'heatmap' ? 'bg-island text-[var(--accent-text)]' : 'text-content-4'}`}
           >
             <LayoutGrid size={11} />
           </button>
           <button
             aria-label="Calendar view"
             onClick={() => setModePersist('calendar')}
-            className={`rounded px-1.5 py-0.5 ${mode === 'calendar' ? 'bg-island text-indigo-300' : 'text-content-4'}`}
+            className={`rounded px-1.5 py-0.5 ${mode === 'calendar' ? 'bg-island text-[var(--accent-text)]' : 'text-content-4'}`}
           >
             <CalendarIcon size={11} />
           </button>
@@ -317,7 +317,7 @@ export const ActivityPanel: React.FC<Props> = ({ selectedDate, onSelectDate, ref
               aria-label="Choose year and month"
               aria-expanded={pickerOpen}
               onClick={openPicker}
-              className="inline-flex items-center gap-1 rounded px-1 text-xs font-semibold tabular-nums text-content hover:bg-island-2 hover:text-indigo-300"
+              className="inline-flex items-center gap-1 rounded px-1 text-xs font-semibold tabular-nums text-content hover:bg-island-2 hover:text-[var(--accent-text)]"
             >
               {month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
               <ChevronDown
@@ -341,7 +341,7 @@ export const ActivityPanel: React.FC<Props> = ({ selectedDate, onSelectDate, ref
             </button>
             <button
               onClick={goToday}
-              className="rounded bg-island-2 px-1.5 py-0.5 text-[10px] font-semibold text-content-3 hover:text-indigo-300"
+              className="rounded bg-island-2 px-1.5 py-0.5 text-[10px] font-semibold text-content-3 hover:text-[var(--accent-text)]"
             >
               {t('inspiration.today', 'Today')}
             </button>
@@ -465,11 +465,11 @@ export const ActivityPanel: React.FC<Props> = ({ selectedDate, onSelectDate, ref
                       ? 'bg-indigo-500 font-bold text-white'
                       : `${cellTint(cnt)} ${
                           isToday
-                            ? 'font-bold text-indigo-300 shadow-[inset_0_0_0_1.5px] shadow-indigo-500'
+                            ? 'font-bold text-[var(--accent-text)] shadow-[inset_0_0_0_1.5px] shadow-indigo-500'
                             : inMonth
                               ? 'text-content-2'
                               : 'text-content-4 opacity-50'
-                        } hover:bg-indigo-500/15 hover:shadow-[inset_0_0_0_1px] hover:shadow-indigo-500/40`
+                        } hover:bg-[var(--accent-soft)] hover:shadow-[inset_0_0_0_1px] hover:shadow-indigo-500/40`
                   }`}
                 >
                   <span className="leading-none">{dayNum}</span>

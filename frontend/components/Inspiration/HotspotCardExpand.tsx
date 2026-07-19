@@ -73,7 +73,7 @@ export const HotspotCardExpand: React.FC<Props> = ({ hotspot, onSaveAsNote, onPa
               <span>{t('inspiration.sourceCount', '{{count}} sources', { count: h.source_count })}</span>
             )}
             {h.category && (
-              <span className="rounded bg-indigo-500/15 px-1.5 py-0.5 text-indigo-300">#{h.category}</span>
+              <span className="rounded bg-[var(--accent-soft)] px-1.5 py-0.5 text-[var(--accent-text)]">#{h.category}</span>
             )}
           </div>
         </>

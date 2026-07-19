@@ -144,7 +144,7 @@ export const Composer: React.FC<Props> = ({
           aria-label="Insert tag"
           title={t('inspiration.insertTag', 'Insert #tag')}
           onClick={() => editorRef.current?.insertTag()}
-          className="rounded-md p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
+          className="rounded-md p-1.5 text-content-3 hover:bg-island-2 hover:text-[var(--accent-text)]"
         >
           <Hash size={16} />
         </button>
@@ -152,7 +152,7 @@ export const Composer: React.FC<Props> = ({
           aria-label="Insert code block"
           title={t('inspiration.insertCode', 'Insert code block')}
           onClick={() => editorRef.current?.insertCodeBlock()}
-          className="rounded-md p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
+          className="rounded-md p-1.5 text-content-3 hover:bg-island-2 hover:text-[var(--accent-text)]"
         >
           <SquareCode size={16} />
         </button>
@@ -160,7 +160,7 @@ export const Composer: React.FC<Props> = ({
           aria-label="Attach file"
           title={t('inspiration.attachFile', 'Attach files')}
           onClick={() => fileRef.current?.click()}
-          className="rounded-md p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
+          className="rounded-md p-1.5 text-content-3 hover:bg-island-2 hover:text-[var(--accent-text)]"
         >
           <Paperclip size={16} />
         </button>
@@ -168,7 +168,7 @@ export const Composer: React.FC<Props> = ({
           aria-label="Insert link"
           title={t('inspiration.insertLink', 'Insert link')}
           onClick={() => editorRef.current?.insertLink()}
-          className="rounded-md p-1.5 text-content-3 hover:bg-island-2 hover:text-indigo-300"
+          className="rounded-md p-1.5 text-content-3 hover:bg-island-2 hover:text-[var(--accent-text)]"
         >
           <LinkIcon size={16} />
         </button>
@@ -199,7 +199,7 @@ export const Composer: React.FC<Props> = ({
                 <button
                   aria-label={`Retry ${item.file.name}`}
                   onClick={() => void retryUpload(item)}
-                  className="font-semibold text-indigo-300 hover:text-indigo-200"
+                  className="font-semibold text-[var(--accent-text)] hover:text-[var(--accent-text)]"
                 >
                   {t('inspiration.retry', 'Retry')}
                 </button>

@@ -42,7 +42,7 @@ export const HotspotsSidePanel: React.FC<Props> = ({ hotspots, day, onSaveAsNote
             <button
               aria-label="Save as note"
               onClick={() => onSaveAsNote(h)}
-              className="shrink-0 rounded-md bg-island-2 p-1 text-content-3 hover:bg-indigo-500/15 hover:text-indigo-300"
+              className="shrink-0 rounded-md bg-island-2 p-1 text-content-3 hover:bg-[var(--accent-soft)] hover:text-[var(--accent-text)]"
             >
               +
             </button>

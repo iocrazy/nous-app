@@ -94,7 +94,7 @@ export const NoteMarkdown: React.FC<Props> = ({ source, onToggleTask }) => {
         components={{
           input: (props: any) => <TaskCheckboxInput {...props} onToggleTask={onToggleTask} />,
           a: ({ children, href }) => (
-            <a href={href} target="_blank" rel="noreferrer" className="text-indigo-300 hover:underline">
+            <a href={href} target="_blank" rel="noreferrer" className="text-[var(--accent-text)] hover:underline">
               {children}
             </a>
           ),
@@ -142,7 +142,7 @@ export const NoteMarkdown: React.FC<Props> = ({ source, onToggleTask }) => {
           h3: ({ children }) => <h3 className="mb-1 mt-2.5 text-[14.5px] font-semibold leading-snug first:mt-0">{children}</h3>,
           h4: ({ children }) => <h4 className="mb-0.5 mt-2 text-[13.5px] font-semibold">{children}</h4>,
           blockquote: ({ children }) => (
-            <blockquote className="my-1.5 border-l-2 border-indigo-500/50 pl-3 text-content-2">{children}</blockquote>
+            <blockquote className="my-1.5 border-l-2 border-[var(--accent-border)] pl-3 text-content-2">{children}</blockquote>
           ),
           hr: () => <hr className="my-2 border-line" />,
         }}

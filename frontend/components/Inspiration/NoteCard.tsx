@@ -40,7 +40,7 @@ export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete,
     <div className="rounded-xl bg-island px-4 py-3">
       <div className="flex items-center gap-2 text-[11px] text-content-3 tabular-nums">
         <span>{timeOf(note.created_at)}</span>
-        {note.pinned && <Pin size={11} className="text-indigo-400" />}
+        {note.pinned && <Pin size={11} className="text-[var(--accent-text)]" />}
         <div className="relative ml-auto" ref={menuRef}>
           <button
             aria-label="Note actions"
@@ -87,7 +87,7 @@ export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete,
               </span>
             )}
             {note.ref_hotspot.url && (
-              <a href={note.ref_hotspot.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-indigo-300 hover:underline">
+              <a href={note.ref_hotspot.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[var(--accent-text)] hover:underline">
                 {t('inspiration.openSource', 'Open source')} <ExternalLink size={10} />
               </a>
             )}
@@ -101,7 +101,7 @@ export const NoteCard: React.FC<Props> = ({ note, onEdit, onTogglePin, onDelete,
             <button
               key={tag}
               onClick={() => onTagClick(tag)}
-              className="rounded bg-indigo-500/15 px-1.5 py-0.5 text-xs text-indigo-300 hover:bg-indigo-500/25"
+              className="rounded bg-[var(--accent-soft)] px-1.5 py-0.5 text-xs text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"
             >
               #{tag}
             </button>
