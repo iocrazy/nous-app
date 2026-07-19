@@ -1,4 +1,4 @@
--- 372_ai_usage_observability.sql
+-- 374_ai_usage_observability.sql
 --
 -- W3c: AI cost observability + per-team budget circuit-breaker.
 --

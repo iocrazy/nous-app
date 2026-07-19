@@ -1,6 +1,6 @@
 """AI usage-observability ORM models (W3c).
 
-Two tables, both introduced in migration 372:
+Two tables, both introduced in migration 374:
 
   * ``AiUsageHourly``  — ai_usage_hourly: a DERIVED hourly rollup CACHE of AI
     token spend, keyed by the attribution dimensions (team / project / agent /
