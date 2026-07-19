@@ -15,6 +15,7 @@ from app.api.ai_memory_router import router as ai_memory_router
 from app.api.ai_router import router as ai_pipeline_router
 from app.api.ai_settings_router import router as ai_settings_router
 from app.api.api_key_router import router as api_key_router
+from app.api.beat_templates_router import router as beat_templates_router
 from app.api.canvases_router import router as canvases_router
 from app.api.cleanup_router import router as cleanup_router
 from app.api.collections_router import router as collections_router
@@ -49,7 +50,6 @@ from app.api.reviews_router import router as reviews_router
 from app.api.sb_gone_router import router as sb_gone_router
 from app.api.script_ai_router import router as script_ai_router
 from app.api.script_assets_router import router as script_assets_router
-from app.api.beat_templates_router import router as beat_templates_router
 from app.api.script_beats_router import router as script_beats_router
 from app.api.script_canvas_router import router as script_canvas_router
 from app.api.script_export_router import router as script_export_router
