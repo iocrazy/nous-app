@@ -108,3 +108,42 @@ describe('listLibraryVideos — real nested row shape', () => {
     consoleErr.mockRestore();
   });
 });
+
+describe('listLibraryVideos — own-content provenance filter', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it('requests only own content (upload/generated/derived), never web downloads', async () => {
+    const spy = mockFetchJson({ success: true, data: [] });
+    vi.stubGlobal('fetch', spy);
+
+    await listLibraryVideos('scope-1');
+
+    // FastAPI reads repeated keys as a List → one `source_types=` per value.
+    const url = spy.mock.calls[0][0] as string;
+    expect(url).toContain('source_types=upload');
+    expect(url).toContain('source_types=generated');
+    expect(url).toContain('source_types=derived');
+    // Platform-downloaded material must never be requested.
+    expect(url).not.toContain('source_types=web');
+    // The scope-wide + video-typed query is preserved.
+    expect(url).toContain('all_folders=true');
+    expect(url).toContain('types=video');
+    expect(url).toContain('scope_id=scope-1');
+  });
+
+  it('keeps the own-content filter alongside a tag filter', async () => {
+    const spy = mockFetchJson({ success: true, data: [] });
+    vi.stubGlobal('fetch', spy);
+
+    await listLibraryVideos('scope-1', { tagId: 'tag-9' });
+
+    const url = spy.mock.calls[0][0] as string;
+    expect(url).toContain('source_types=upload');
+    expect(url).toContain('source_types=generated');
+    expect(url).toContain('source_types=derived');
+    expect(url).toContain('tag_ids=tag-9');
+  });
+});

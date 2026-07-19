@@ -108,8 +108,14 @@ export const listLibraryVideos = async (
 ): Promise<LibraryVideo[]> => {
   try {
     const tagFilter = opts?.tagId ? `&tag_ids=${encodeURIComponent(opts.tagId)}` : '';
+    // Only the user's own content is publishable: keep uploads, AI/canvas
+    // `generated` promote artifacts, and `derived` resources — exclude `web`
+    // (platform parse/download material). FastAPI reads repeated keys as a
+    // List, so each value is its own `source_types=` param.
+    const ownContentFilter =
+      '&source_types=upload&source_types=generated&source_types=derived';
     const res = await request<{ success: boolean; data: ResourceItemRow[] }>(
-      `/../resources?scope_id=${encodeURIComponent(scopeId)}&types=video&all_folders=true&limit=500${tagFilter}`,
+      `/../resources?scope_id=${encodeURIComponent(scopeId)}&types=video&all_folders=true&limit=500${ownContentFilter}${tagFilter}`,
     );
     const rows = res?.data ?? [];
     return rows.map((r) => {
