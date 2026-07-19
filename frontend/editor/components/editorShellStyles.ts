@@ -1820,8 +1820,6 @@ export const EDITOR_SHELL_STYLES = `
   flex:0 0 auto; padding:12px 24px 8px; display:flex; align-items:center;
   justify-content:space-between; position:relative;
 }
-.mh-beats-count{ font-size:12.5px; font-weight:600; color:var(--ink-faint); }
-.mh-beats-count b{ color:var(--ink); font-weight:700; margin-left:2px; }
 .mh-beats-add-ink{
   font-family:var(--sans); font-size:12px; font-weight:700; color:var(--pill-ink-on);
   background:var(--pill-ink-bg); border:none; border-radius:999px; padding:7px 16px;
@@ -2030,7 +2028,7 @@ export const EDITOR_SHELL_STYLES = `
 .mh-arr-len-btn.unset{ color:var(--ink-faint); }
 .mh-arr-len-icon{ font-size:11px; opacity:0.7; }
 .mh-arr-len-pop{
-  position:absolute; top:calc(100% + 6px); left:0; z-index:20; width:220px;
+  position:absolute; top:calc(100% + 6px); left:0; z-index:20; width:248px;
   display:flex; flex-direction:column; gap:10px; padding:12px;
   background:var(--surface); border:1px solid var(--surface-border);
   border-radius:var(--radius-md); box-shadow:var(--shadow-float);
@@ -2044,7 +2042,9 @@ export const EDITOR_SHELL_STYLES = `
 .mh-arr-len-preset:hover{ color:var(--ink); border-color:var(--emph-ink-border); }
 .mh-arr-len-preset.selected{ color:var(--accent-on); background:var(--indigo); border-color:transparent; }
 .mh-arr-len-custom{ display:flex; align-items:center; gap:6px; }
-.mh-arr-len-custom .mh-arr-input.narrow{ flex:1; width:auto; }
+/* min-width:0 releases the input's min-content floor — without it the fixed-
+   width popover shoves the Set button past its own right edge (超界). */
+.mh-arr-len-custom .mh-arr-input.narrow{ flex:1; width:auto; min-width:0; }
 
 /* Template wizard — reuses the arr-modal shell; wider for the three cards. */
 .mh-tpl-modal{ max-width:520px; }

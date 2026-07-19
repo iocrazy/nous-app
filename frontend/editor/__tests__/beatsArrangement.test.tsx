@@ -241,7 +241,6 @@ describe('laper topbar + NLE drag guide', () => {
     ]);
     render(<BeatsView scriptId="1" scenes={noScenes} onOpenScene={vi.fn()} />);
     await waitFor(() => expect(screen.getByTestId('beats-arrangement')).toBeInTheDocument());
-    expect(screen.getByTestId('beats-count')).toHaveTextContent('2');
     fireEvent.click(screen.getByTestId('beats-topbar-add'));
     await waitFor(() =>
       expect(svc.createBeat).toHaveBeenCalledWith('1', {
