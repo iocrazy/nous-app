@@ -193,6 +193,163 @@ async def test_update_content_change_syncs_note_tags(monkeypatch):
     assert sync_calls == [(7, [201])]
 
 
+class _RecordingUoW:
+    """Fake ``maybe_unit_of_work`` — records the ``enabled`` flag it was called
+    with, how many times it was entered, and the exception type seen on exit
+    (None on a clean exit). Yields an opaque sentinel 'session'. Does NOT
+    suppress exceptions, so a body raise still propagates — the real
+    ``unit_of_work`` rolls back on exactly that propagation."""
+
+    def __init__(self) -> None:
+        self.enabled = None
+        self.enter_count = 0
+        self.exit_exc_type = "unset"
+
+    def __call__(self, enabled):
+        self.enabled = enabled
+        return self
+
+    async def __aenter__(self):
+        self.enter_count += 1
+        return object()
+
+    async def __aexit__(self, exc_type, exc, tb):
+        self.exit_exc_type = exc_type
+        return False
+
+
+@pytest.mark.asyncio
+async def test_create_note_wraps_whole_pipeline_in_one_unit_of_work(monkeypatch):
+    """The note write + tag resolve + junction sync must run inside ONE
+    unit_of_work (single connection). Proven by: exactly one UoW entered with
+    enabled=True, all three steps recorded inside it, clean (None) exit."""
+    svc = _service()
+    uow = _RecordingUoW()
+    monkeypatch.setattr(svc_mod, "maybe_unit_of_work", uow, raising=False)
+    monkeypatch.setattr(svc_mod, "is_configured", lambda: True, raising=False)
+
+    events = []
+
+    class _Tags:
+        async def resolve_note_tags(self, user_id, names):
+            events.append("resolve")
+            return [1]
+
+    class _NoteTags:
+        async def sync_for_note(self, note_id, tag_ids):
+            events.append("sync")
+
+    monkeypatch.setattr(svc_mod, "get_tags_repository", lambda: _Tags(), raising=False)
+    monkeypatch.setattr(
+        svc_mod, "get_note_tags_repository", lambda: _NoteTags(), raising=False
+    )
+
+    async def _create(**kwargs):
+        events.append("create")
+        return {"id": 5, "tags": ["x"]}
+
+    svc._notes.create.side_effect = _create
+
+    await svc.create_note("u1", "x #x")
+
+    assert uow.enabled is True
+    assert uow.enter_count == 1  # exactly one transaction for the whole save
+    assert events == ["create", "resolve", "sync"]  # all inside the one UoW
+    assert uow.exit_exc_type is None  # clean exit → the real UoW would commit
+
+
+@pytest.mark.asyncio
+async def test_create_note_tag_sync_failure_propagates_through_uow(monkeypatch):
+    """A tag-sync failure must propagate THROUGH the UoW boundary (that
+    propagation is what makes the real unit_of_work roll the note row back).
+    Asserts the UoW saw the exception on exit and the error reached the caller."""
+    svc = _service()
+    uow = _RecordingUoW()
+    monkeypatch.setattr(svc_mod, "maybe_unit_of_work", uow, raising=False)
+    monkeypatch.setattr(svc_mod, "is_configured", lambda: True, raising=False)
+
+    class _Tags:
+        async def resolve_note_tags(self, user_id, names):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(svc_mod, "get_tags_repository", lambda: _Tags(), raising=False)
+    svc._notes.create.return_value = {"id": 5, "tags": ["x"]}
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await svc.create_note("u1", "x #x")
+
+    assert uow.enter_count == 1
+    assert uow.exit_exc_type is RuntimeError  # UoW __aexit__ sees it → rolls back
+
+
+@pytest.mark.asyncio
+async def test_create_note_returns_none_when_note_write_fails(monkeypatch):
+    """When the note row write returns None (repo swallowed a DB error), the
+    save unwinds the UoW cleanly and surfaces None (router → 502), WITHOUT
+    letting the aborted transaction attempt a commit."""
+    svc = _service()
+    uow = _RecordingUoW()
+    monkeypatch.setattr(svc_mod, "maybe_unit_of_work", uow, raising=False)
+    monkeypatch.setattr(svc_mod, "is_configured", lambda: True, raising=False)
+    svc._notes.create.return_value = None
+
+    row = await svc.create_note("u1", "x #x")
+
+    assert row is None
+    assert uow.enter_count == 1
+    # The internal _NoteWriteAborted forces the UoW to unwind via exception
+    # (rollback), never a commit of the aborted txn.
+    assert uow.exit_exc_type is not None
+    assert uow.exit_exc_type.__name__ == "_NoteWriteAborted"
+
+
+@pytest.mark.asyncio
+async def test_update_pinned_only_does_not_open_unit_of_work(monkeypatch):
+    """A pinned-only patch (content_md=None) is a single write — it must NOT
+    open a save UoW (enabled=False), keeping the legacy per-call session path."""
+    svc = _service()
+    uow = _RecordingUoW()
+    monkeypatch.setattr(svc_mod, "maybe_unit_of_work", uow, raising=False)
+    monkeypatch.setattr(svc_mod, "is_configured", lambda: True, raising=False)
+    svc._notes.get_by_id.return_value = {"id": 7, "user_id": "u1"}
+    svc._notes.update.return_value = {"id": 7}
+
+    await svc.update_note("u1", "7", pinned=True)
+
+    assert uow.enabled is False  # content unchanged → no atomic save UoW
+
+
+@pytest.mark.asyncio
+async def test_update_content_change_wraps_pipeline_in_unit_of_work(monkeypatch):
+    """A content change opens the save UoW (enabled=True) so the update +
+    resolve + sync share one connection/transaction."""
+    svc = _service()
+    uow = _RecordingUoW()
+    monkeypatch.setattr(svc_mod, "maybe_unit_of_work", uow, raising=False)
+    monkeypatch.setattr(svc_mod, "is_configured", lambda: True, raising=False)
+
+    class _Tags:
+        async def resolve_note_tags(self, user_id, names):
+            return [1]
+
+    class _NoteTags:
+        async def sync_for_note(self, note_id, tag_ids):
+            return None
+
+    monkeypatch.setattr(svc_mod, "get_tags_repository", lambda: _Tags(), raising=False)
+    monkeypatch.setattr(
+        svc_mod, "get_note_tags_repository", lambda: _NoteTags(), raising=False
+    )
+    svc._notes.get_by_id.return_value = {"id": 7, "user_id": "u1"}
+    svc._notes.update.return_value = {"id": 7, "tags": ["fresh"]}
+
+    await svc.update_note("u1", "7", content_md="now #fresh")
+
+    assert uow.enabled is True
+    assert uow.enter_count == 1
+    assert uow.exit_exc_type is None
+
+
 @pytest.mark.asyncio
 async def test_update_note_without_content_change_skips_tag_sync(monkeypatch):
     svc = _service()
