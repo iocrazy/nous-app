@@ -102,12 +102,15 @@ interface ResourceItemRow {
   } | null;
 }
 
-export const listLibraryVideos = async (
+export const listLibraryMedia = async (
   scopeId: string,
-  opts?: { tagId?: string },
+  opts?: { tagId?: string; mediaType?: 'video' | 'image' },
 ): Promise<LibraryVideo[]> => {
   try {
     const tagFilter = opts?.tagId ? `&tag_ids=${encodeURIComponent(opts.tagId)}` : '';
+    // `types` maps to the backend mime filter: 'video' → mime LIKE 'video/%',
+    // 'image' → mime LIKE 'image/%'. Defaults to video for back-compat.
+    const mediaType = opts?.mediaType ?? 'video';
     // Only the user's own content is publishable: keep uploads, AI/canvas
     // `generated` promote artifacts, and `derived` resources — exclude `web`
     // (platform parse/download material). FastAPI reads repeated keys as a
@@ -115,7 +118,7 @@ export const listLibraryVideos = async (
     const ownContentFilter =
       '&source_types=upload&source_types=generated&source_types=derived';
     const res = await request<{ success: boolean; data: ResourceItemRow[] }>(
-      `/../resources?scope_id=${encodeURIComponent(scopeId)}&types=video&all_folders=true&limit=500${ownContentFilter}${tagFilter}`,
+      `/../resources?scope_id=${encodeURIComponent(scopeId)}&types=${mediaType}&all_folders=true&limit=500${ownContentFilter}${tagFilter}`,
     );
     const rows = res?.data ?? [];
     return rows.map((r) => {
@@ -131,10 +134,16 @@ export const listLibraryVideos = async (
       };
     });
   } catch (err) {
-    console.error('distribution: list library videos failed', err);
+    console.error('distribution: list library media failed', err);
     return [];
   }
 };
+
+/**
+ * Back-compat alias — existing callers select videos. New callers that need
+ * images pass `{ mediaType: 'image' }` to `listLibraryMedia`.
+ */
+export const listLibraryVideos = listLibraryMedia;
 
 /**
  * AI/canvas-generated videos (Tier-1 `generated_media`, personal scope).

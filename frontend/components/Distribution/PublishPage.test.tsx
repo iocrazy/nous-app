@@ -18,9 +18,19 @@ vi.mock('../../services/distributionService', () => ({
       platform_user_id: 'op2', username: 'Expired One', avatar_url: null,
       token_expires_at: null, status: 'expired', created_at: '2026-07-08T00:00:00Z' },
   ]),
-  listLibraryVideos: vi.fn().mockResolvedValue([
-    { id: '30', filename: 'clip-a.mp4', thumbnail_url: null },
-  ]),
+  // Returns images when the caller asks for mediaType 'image', videos otherwise
+  // — mirrors the real backend `types=` filter so content-switch tests are real.
+  listLibraryMedia: vi.fn((_scope: string, opts?: { mediaType?: string }) =>
+    Promise.resolve(
+      opts?.mediaType === 'image'
+        ? [
+            { id: 'img-1', filename: 'photo-a.jpg', thumbnail_url: null },
+            { id: 'img-2', filename: 'photo-b.jpg', thumbnail_url: null },
+            { id: 'img-3', filename: 'photo-c.jpg', thumbnail_url: null },
+          ]
+        : [{ id: '30', filename: 'clip-a.mp4', thumbnail_url: null }],
+    ),
+  ),
   listGeneratedVideos: vi.fn().mockResolvedValue([
     { id: '77', name: 'Sunset drone shot', created_at: '2026-07-10T00:00:00Z',
       promoted_resource_id: null },
@@ -144,5 +154,52 @@ describe('PublishPage', () => {
     // The account name ("Expired One") and the status subtitle both match
     // /Expired/i, so assert on the unambiguous reauthorize prompt instead.
     expect(screen.getByText(/reauthorize/i)).toBeInTheDocument();
+  });
+
+  it('switches to Images mode and publishes a gallery in pick order', async () => {
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+
+    // Flip the content type to Images — the picker now lists image media.
+    fireEvent.click(screen.getByRole('tab', { name: /^Images$/ }));
+
+    fireEvent.click(screen.getByRole('button', { name: /Add from Library/i }));
+    // Generated media is video-only — the tab must be gone in images mode.
+    expect(screen.queryByRole('button', { name: /^Generated$/ })).toBeNull();
+    // Pick photo-b BEFORE photo-a to prove the gallery order follows the pick
+    // order, not the library list order.
+    fireEvent.click(await screen.findByRole('button', { name: /photo-b\.jpg/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /photo-a\.jpg/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Done$/i }));
+
+    fireEvent.click(screen.getByText('HEYGO'));
+    fireEvent.change(screen.getByPlaceholderText(/Add a title/i), {
+      target: { value: 'Gallery day' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
+
+    await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+    const arg = createPublishTask.mock.calls.at(-1)?.[0];
+    expect(arg.content_type).toBe('images');
+    // Order = pick order (photo-b then photo-a), never the list order.
+    expect(arg.resource_ids).toEqual(['img-2', 'img-1']);
+    // Images always broadcast — one note per account.
+    expect(arg.distribution_mode).toBe('broadcast');
+  });
+
+  it('clears the selection when toggling content type', async () => {
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+
+    // Pick a video — the content card shows a thumb labelled with its filename.
+    fireEvent.click(screen.getByRole('button', { name: /Add from Library/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /clip-a\.mp4/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Done$/i }));
+    expect(screen.getByLabelText('clip-a.mp4')).toBeInTheDocument();
+
+    // Flip to Images — the video selection must reset (thumb gone).
+    fireEvent.click(screen.getByRole('tab', { name: /^Images$/ }));
+    await waitFor(() =>
+      expect(screen.queryByLabelText('clip-a.mp4')).toBeNull());
   });
 });
