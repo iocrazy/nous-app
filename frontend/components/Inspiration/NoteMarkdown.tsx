@@ -4,12 +4,13 @@
 // GFM tables/strikethrough react-markdown already gives us. Kept separate from
 // the shared AILibrary/MarkdownBody so AI-chat rendering is untouched.
 import React, { useContext, useMemo } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github-dark.css';
 import { computeTaskOffsets } from './taskMarkers';
+import { rehypeNoteTags } from './rehypeNoteTags';
 
 /** Carries the enclosing task-list `li`'s document-order checkbox index down
  *  to the `input` renderer, however deeply GFM/remark nests it. Needed
@@ -27,7 +28,33 @@ interface Props {
   /** When given, task-list checkboxes become clickable and report their
    *  document-order index; without it they render read-only. */
   onToggleTask?: (index: number) => void;
+  /** When given, inline `#tag` chips become clickable and report the tag's
+   *  lowercased (filter) value; without it they render as read-only styled
+   *  spans (e.g. the markdown resource preview has no filter context). */
+  onTagClick?: (tag: string) => void;
 }
+
+/** Renders one `#tag` occurrence (emitted as a <notetag> node by
+ *  rehypeNoteTags). `children` is the tag body in its ORIGINAL casing; the
+ *  '#' is prepended for display. `data-tag` carries the lowercased value the
+ *  filter runs on. Visual language mirrors the former below-body chip row. */
+const TagChip: React.FC<{ children?: React.ReactNode; onTagClick?: (tag: string) => void } & Record<string, any>> = ({
+  children,
+  onTagClick,
+  ...props
+}) => {
+  const value = props['data-tag'] as string;
+  const base =
+    'mx-px inline-block rounded bg-[var(--accent-soft)] px-1 text-[0.95em] font-medium text-[var(--accent-text)] align-baseline';
+  if (!onTagClick) {
+    return <span className={base}>#{children}</span>;
+  }
+  return (
+    <button type="button" onClick={() => onTagClick(value)} className={`${base} cursor-pointer hover:underline`}>
+      #{children}
+    </button>
+  );
+};
 
 /** Find which task-offset (from computeTaskOffsets, ascending) falls inside
  *  a `li` node's [start, end) source range. Used to derive a checkbox's
@@ -71,7 +98,7 @@ const TaskCheckboxInput: React.FC<{ type?: string; checked?: boolean; onToggleTa
   );
 };
 
-export const NoteMarkdown: React.FC<Props> = ({ source, onToggleTask }) => {
+export const NoteMarkdown: React.FC<Props> = ({ source, onToggleTask, onTagClick }) => {
   // Each task checkbox's document-order index is derived purely from the
   // *source* — never from a mutable render-time counter. A per-render
   // `useRef` counter (incremented once per `input` renderer invocation) used
@@ -90,9 +117,12 @@ export const NoteMarkdown: React.FC<Props> = ({ source, onToggleTask }) => {
     <div className="text-[13.5px] leading-relaxed text-content markdown-note">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
-        rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
+        // rehypeNoteTags MUST precede rehypeHighlight — see its module comment
+        // (it skips <code>/<pre>, and only before highlight are those raw text).
+        rehypePlugins={[rehypeNoteTags, [rehypeHighlight, { detect: true, ignoreMissing: true }]]}
         components={{
           input: (props: any) => <TaskCheckboxInput {...props} onToggleTask={onToggleTask} />,
+          notetag: (props: any) => <TagChip {...props} onTagClick={onTagClick} />,
           a: ({ children, href }) => (
             <a href={href} target="_blank" rel="noreferrer" className="text-[var(--accent-text)] hover:underline">
               {children}
@@ -145,7 +175,11 @@ export const NoteMarkdown: React.FC<Props> = ({ source, onToggleTask }) => {
             <blockquote className="my-1.5 border-l-2 border-[var(--accent-border)] pl-3 text-content-2">{children}</blockquote>
           ),
           hr: () => <hr className="my-2 border-line" />,
-        }}
+          // `notetag` is a synthetic element emitted by rehypeNoteTags, not a
+          // real HTML tag, so it isn't in react-markdown's Components keys —
+          // the cast admits it (hast-util-to-jsx-runtime resolves components
+          // by tagName regardless of the type).
+        } as Components}
       >
         {source}
       </ReactMarkdown>
