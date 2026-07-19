@@ -245,30 +245,3 @@ export function layoutExtentPx(
   return max;
 }
 
-/**
- * Greedy lane packing: process beats left-to-right, drop each into the first
- * lane whose last card ends at/before this card starts, else open a new lane.
- * `minDurationSec` is the timeline-time equivalent of the min card width, so
- * two tiny/zero-length cards at the same instant land on separate lanes instead
- * of visually stacking.
- */
-export function assignLanes(beats: LaneInput[], minDurationSec: number): Map<string, number> {
-  const ordered = [...beats].sort(
-    (a, b) => a.start_sec - b.start_sec || a.id.localeCompare(b.id),
-  );
-  const laneEnds: number[] = [];
-  const result = new Map<string, number>();
-  for (const beat of ordered) {
-    const width = Math.max(beat.duration_sec ?? 0, minDurationSec);
-    const end = beat.start_sec + width;
-    let lane = laneEnds.findIndex((laneEnd) => laneEnd <= beat.start_sec);
-    if (lane === -1) {
-      lane = laneEnds.length;
-      laneEnds.push(end);
-    } else {
-      laneEnds[lane] = end;
-    }
-    result.set(beat.id, lane);
-  }
-  return result;
-}

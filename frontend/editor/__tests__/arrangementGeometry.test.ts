@@ -15,7 +15,6 @@ import {
   MIN_CARD_PX,
   MIN_PX_PER_SEC,
   anchorScrollLeft,
-  assignLanes,
   buildTicks,
   cardWidthPx,
   chooseTickUnit,
@@ -251,31 +250,3 @@ describe('layoutCards (laper sequential flow)', () => {
   });
 });
 
-describe('assignLanes', () => {
-  it('packs non-overlapping beats onto lane 0 and overlaps onto higher lanes', () => {
-    const lanes = assignLanes(
-      [
-        { id: 'a', start_sec: 0, duration_sec: 30 },
-        { id: 'b', start_sec: 40, duration_sec: 20 },
-        { id: 'c', start_sec: 10, duration_sec: 50 },
-      ],
-      0,
-    );
-    expect(lanes.get('a')).toBe(0);
-    expect(lanes.get('b')).toBe(0); // starts after a ends (30 <= 40)
-    expect(lanes.get('c')).toBe(1); // overlaps a
-  });
-
-  it('respects a minimum visual duration so tiny cards do not visually collide', () => {
-    // Two zero-length (null-duration) beats at the same instant must not share a lane.
-    const lanes = assignLanes(
-      [
-        { id: 'a', start_sec: 0, duration_sec: null },
-        { id: 'b', start_sec: 0, duration_sec: null },
-      ],
-      10,
-    );
-    expect(lanes.get('a')).toBe(0);
-    expect(lanes.get('b')).toBe(1);
-  });
-});
