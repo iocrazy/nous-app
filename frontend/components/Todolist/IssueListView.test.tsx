@@ -53,6 +53,7 @@ function renderList(issues: UiIssue[]) {
               onNewIssue={vi.fn()}
               onRefresh={vi.fn()}
               agents={[]}
+              scope={{ type: 'team', teamId: '8' }}
             />
           }
         />

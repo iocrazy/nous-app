@@ -3,11 +3,14 @@
  */
 
 import React, { useState } from 'react';
-import { X, Send, FolderKanban } from 'lucide-react';
+import { X, Send, FolderKanban, Check } from 'lucide-react';
 import type { AgentRef } from './types';
 import type { IssuePriority, IssueCreatePayload } from '../../services/issuesService';
 import { PRIORITY_LABEL, PRIORITY_ORDER, PriorityIcon } from './IssueStatusIcon';
 import { UiSelect } from '../ui';
+
+/** Sentinel option value that triggers the inline "new project" input. */
+const NEW_PROJECT_OPTION = '__new_project__';
 
 interface NewIssueDialogProps {
   agents: AgentRef[];
@@ -22,12 +25,19 @@ interface NewIssueDialogProps {
   lockedProjectName?: string;
   /** Team mode — offer a project picker. Ignored when lockedProjectId is set. */
   projects?: { id: string; name: string }[];
+  /**
+   * When provided (and not locked), the picker gains a "+ New project" row that
+   * creates a project inline via this callback and auto-selects the result.
+   * Resolves to the created project so the dialog can select it; rejects on
+   * failure (the caller is expected to surface the error, e.g. via a toast).
+   */
+  onCreateProject?: (name: string) => Promise<{ id: string; name: string }>;
   onClose: () => void;
   onSubmit: (payload: IssueCreatePayload) => Promise<void>;
 }
 
 export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({
-  agents, teamId, parentId, defaultAgentId, lockedProjectId, lockedProjectName, projects, onClose, onSubmit,
+  agents, teamId, parentId, defaultAgentId, lockedProjectId, lockedProjectName, projects, onCreateProject, onClose, onSubmit,
 }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -35,6 +45,31 @@ export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({
   const [priority, setPriority] = useState<IssuePriority>('medium');
   const [projectId, setProjectId] = useState<string | null>(lockedProjectId ?? null);
   const [submitting, setSubmitting] = useState(false);
+  // Projects created inline this session, merged ahead of the passed-in list.
+  const [extraProjects, setExtraProjects] = useState<{ id: string; name: string }[]>([]);
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [projectBusy, setProjectBusy] = useState(false);
+
+  const mergedProjects = [...(projects ?? []), ...extraProjects];
+  const showPicker = !lockedProjectId && (!!onCreateProject || mergedProjects.length > 0);
+
+  const commitNewProject = async () => {
+    const name = newProjectName.trim();
+    if (!name || projectBusy || !onCreateProject) return;
+    setProjectBusy(true);
+    try {
+      const created = await onCreateProject(name);
+      setExtraProjects((prev) => [...prev, created]);
+      setProjectId(created.id);
+      setCreatingProject(false);
+      setNewProjectName('');
+    } catch {
+      // Caller surfaces the error (toast); keep the input open to retry.
+    } finally {
+      setProjectBusy(false);
+    }
+  };
 
   const submit = async () => {
     const t = title.trim();
@@ -118,19 +153,69 @@ export const NewIssueDialog: React.FC<NewIssueDialogProps> = ({
                 <FolderKanban size={12} className="text-ink-500" />
                 {lockedProjectName ?? 'Project'}
               </span>
-            ) : projects && projects.length > 0 ? (
+            ) : showPicker ? (
               <UiSelect
-                value={projectId ?? ''}
-                onChange={(e) => setProjectId(e.target.value || null)}
+                value={creatingProject ? NEW_PROJECT_OPTION : (projectId ?? '')}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === NEW_PROJECT_OPTION) {
+                    setCreatingProject(true);
+                    return;
+                  }
+                  setCreatingProject(false);
+                  setProjectId(v || null);
+                }}
                 className="ml-auto h-8 text-xs"
               >
                 <option value="">No project</option>
-                {projects.map((p) => (
+                {mergedProjects.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
+                {onCreateProject && (
+                  <option value={NEW_PROJECT_OPTION}>+ New project</option>
+                )}
               </UiSelect>
             ) : null}
           </div>
+          {creatingProject && onCreateProject && (
+            <div className="flex items-center gap-2 pt-1">
+              <input
+                type="text"
+                autoFocus
+                value={newProjectName}
+                onChange={(e) => setNewProjectName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    void commitNewProject();
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setCreatingProject(false);
+                    setNewProjectName('');
+                  }
+                }}
+                placeholder="New project name…"
+                className="flex-1 h-8 px-2 text-xs bg-ink-900 border border-ink-800 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500/40 text-ink-200 placeholder-ink-600"
+              />
+              <button
+                type="button"
+                onClick={() => void commitNewProject()}
+                disabled={!newProjectName.trim() || projectBusy}
+                className="inline-flex items-center gap-1 px-2 h-8 text-xs rounded bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-40"
+                title="Create project"
+              >
+                <Check size={12} /> {projectBusy ? 'Creating…' : 'Add'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setCreatingProject(false); setNewProjectName(''); }}
+                className="p-1 text-ink-500 hover:text-ink-300 rounded hover:bg-ink-800"
+                title="Cancel"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
         </div>
         <footer className="flex items-center justify-end gap-2 px-4 py-2.5 border-t border-ink-800">
           <button onClick={onClose} className="px-3 py-1 text-xs rounded border border-ink-700 text-ink-300 hover:bg-ink-800">

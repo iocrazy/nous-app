@@ -10,7 +10,10 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Plus, Search, Columns, Filter, ArrowUpDown, RotateCw } from 'lucide-react';
+import {
+  Plus, Search, Columns, Filter, ArrowUpDown, RotateCw,
+  Diamond, ChevronRight, ChevronDown, Check, X,
+} from 'lucide-react';
 
 /**
  * Paperclip-exact view-mode icons. lucide's LayoutList/LayoutGrid/Grid3x3
@@ -61,8 +64,17 @@ import {
 } from './IssueSortMenu';
 import { relativeTime } from '../../utils/taskDisplay';
 import { originModule } from './issueOrigin';
+import {
+  type IssueScope,
+  scopeClientFilter,
+  scopeCreatesInLabel,
+  scopeIsReadOnly,
+} from './issueScope';
 
 export type IssueViewMode = 'list' | 'board';
+
+/** Team-scope grouping mode — status pipeline order, or project ⊃ issue tree. */
+export type IssueGroupMode = 'status' | 'project';
 
 interface IssueListViewProps {
   issues: UiIssue[];
@@ -74,6 +86,27 @@ interface IssueListViewProps {
   onRefresh: () => void;
   agents: AgentRef[];
   currentUserId?: string;
+  /**
+   * Which slice of issues this surface is showing. Every variant carries a
+   * teamId (team is a hard boundary); `my`/`agent` narrow the already-fetched
+   * team list client-side. Drives the "Creates in …" badge, the read-only lock
+   * (agent scope), the Group-by toggle (team scope), and the project context
+   * bar (project scope).
+   */
+  scope: IssueScope;
+  /** Display names for the "Creates in …" badge (resolved by the caller). */
+  teamName?: string;
+  projectName?: string;
+  /**
+   * Current SOP stage for the project context bar (project scope only). Null /
+   * undefined → no stage ring is drawn (graceful degradation).
+   */
+  projectStage?: { name: string; index: number; total: number } | null;
+  /**
+   * Create a project inline (team scope). When provided, the New Issue picker
+   * and the Group-by-Project header expose a "+ New project" affordance.
+   */
+  onCreateProject?: (name: string) => Promise<{ id: string; name: string }>;
 }
 
 const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }> = ({ initials, color = 'bg-ink-600', size = 20 }) => (
@@ -91,14 +124,41 @@ const Kbd: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   </kbd>
 );
 
+/** Circular stage-progress ring (current/total) for the project context bar. */
+const StageRing: React.FC<{ current: number; total: number }> = ({ current, total }) => {
+  const r = 9;
+  const circ = 2 * Math.PI * r;
+  const pct = total > 0 ? Math.min(1, Math.max(0, current / total)) : 0;
+  return (
+    <span
+      className="relative inline-flex items-center justify-center shrink-0"
+      style={{ width: 26, height: 26 }}
+      title={`Stage ${current} of ${total}`}
+      aria-label={`Stage ${current} of ${total}`}
+    >
+      <svg width={26} height={26} viewBox="0 0 26 26" className="-rotate-90">
+        <circle cx="13" cy="13" r={r} fill="none" stroke="currentColor" strokeWidth="2.5" className="text-ink-800" />
+        <circle
+          cx="13" cy="13" r={r} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+          strokeDasharray={circ} strokeDashoffset={circ * (1 - pct)}
+          style={{ color: 'var(--accent-text)' }}
+        />
+      </svg>
+      <span className="absolute text-[9px] font-semibold tabular-nums text-ink-300">{current}</span>
+    </span>
+  );
+};
+
 interface IssueRowProps {
   issue: UiIssue;
   teamId: string;
   visibleCols: Set<IssueColumnKey>;
   parentLookup: Map<number, UiIssue>;
+  /** In Group-by-Project mode the project is the header, so the row pill is redundant. */
+  hideProjectPill?: boolean;
 }
 
-const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentLookup }) => {
+const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentLookup, hideProjectPill }) => {
   const moduleTag = originModule(issue.raw.origin_id);
   const initials = issue.assignee?.name.slice(0, 2).toUpperCase() ?? (issue.assignee_user_label?.slice(0, 2).toUpperCase() ?? '·');
   const parent = issue.parent_id ? parentLookup.get(issue.parent_id) : null;
@@ -146,7 +206,7 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
           {moduleTag.label}
         </span>
       )}
-      {visibleCols.has('project') && issue.project && (
+      {visibleCols.has('project') && issue.project && !hideProjectPill && (
         <span
           className="hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-ink-800 text-ink-400 text-[12px]"
           title={`Project: ${issue.project.name}`}
@@ -269,7 +329,7 @@ const IssuePipeline: React.FC<{
   );
 };
 
-export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, error, viewMode, onViewModeChange, onNewIssue, onRefresh, agents, currentUserId }) => {
+export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, error, viewMode, onViewModeChange, onNewIssue, onRefresh, agents, currentUserId, scope, teamName, projectName, projectStage, onCreateProject }) => {
   const { teamId } = useParams<{ teamId: string }>();
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<IssueFilters>(EMPTY_FILTERS);
@@ -277,11 +337,21 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const [sort, setSort] = useState<IssueSort>(DEFAULT_SORT);
+  const [groupMode, setGroupMode] = useState<IssueGroupMode>('status');
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
+  const [groupNewProjectOpen, setGroupNewProjectOpen] = useState(false);
+  const [groupNewProjectName, setGroupNewProjectName] = useState('');
+  const [groupProjectBusy, setGroupProjectBusy] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  const readOnly = scopeIsReadOnly(scope);
+  const showGroupToggle = scope.type === 'team';
+  const projectGrouped = showGroupToggle && groupMode === 'project';
 
   // Keyboard: `C` opens New Issue, `/` focuses search. Guarded against typing
   // contexts (inputs/textarea/contenteditable), IME composition, modifier
   // combos, and already-handled events so it never hijacks real input.
+  // Read-only (agent) scope suppresses `C` — there is no New Issue there.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
@@ -291,14 +361,14 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
       if (e.key === '/') {
         e.preventDefault();
         searchRef.current?.focus();
-      } else if (e.key === 'c' || e.key === 'C') {
+      } else if ((e.key === 'c' || e.key === 'C') && !readOnly) {
         e.preventDefault();
         onNewIssue();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onNewIssue]);
+  }, [onNewIssue, readOnly]);
 
   const colScopeKey = teamId ?? 'global';
   const [visibleCols, setVisibleCols] = useState<Set<IssueColumnKey>>(() => loadVisibleColumns(colScopeKey));
@@ -321,17 +391,26 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
     }
   };
 
+  // Scope projection first: `my`/`agent` narrow the fetched team list to the
+  // rows this surface owns before any panel filter or search runs. `team`/
+  // `project` pass through (the backend already scoped them). The pipeline
+  // counts, project list, and issue count all read from this scoped universe.
+  const scopedIssues = useMemo(
+    () => issues.filter(scopeClientFilter(scope)),
+    [issues, scope],
+  );
+
   // Derive Project list from currently-loaded issues so filter popover
   // doesn't depend on a separate /projects fetch we don't have.
   const projectsList: ProjectRef[] = useMemo(() => {
     const seen = new Map<number, ProjectRef>();
-    for (const i of issues) {
+    for (const i of scopedIssues) {
       if (i.project && !seen.has(i.project.id)) seen.set(i.project.id, i.project);
     }
     return Array.from(seen.values());
-  }, [issues]);
+  }, [scopedIssues]);
 
-  const filteredByPanel = useMemo(() => applyFilters(issues, filters, currentUserId), [issues, filters, currentUserId]);
+  const filteredByPanel = useMemo(() => applyFilters(scopedIssues, filters, currentUserId), [scopedIssues, filters, currentUserId]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -373,7 +452,59 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
     return m;
   }, [issues]);
 
+  // Project ⊃ issue tree (team scope, Group: Project). Every project that owns a
+  // visible issue becomes a group; rows with no project fall into "No project".
+  // Sorted within a group by the active sort; groups by name (No project last).
+  const projectGroups = useMemo(() => {
+    const NONE = '__none__';
+    const map = new Map<string, { key: string; project?: ProjectRef; items: UiIssue[] }>();
+    for (const i of filtered) {
+      const key = i.project ? String(i.project.id) : NONE;
+      if (!map.has(key)) map.set(key, { key, project: i.project, items: [] });
+      map.get(key)!.items.push(i);
+    }
+    const groups = Array.from(map.values());
+    groups.forEach((g) => g.items.sort((a, b) => compareIssues(a, b, sort)));
+    groups.sort((a, b) => {
+      if (a.key === NONE) return 1;
+      if (b.key === NONE) return -1;
+      return (a.project?.name ?? '').localeCompare(b.project?.name ?? '');
+    });
+    return groups;
+  }, [filtered, sort]);
+
+  // Live (agent-running) count for the project context bar.
+  const liveCount = useMemo(
+    () => filtered.reduce((n, i) => (i.raw.dbos_workflow_id && i.status !== 'done' && i.status !== 'cancelled' ? n + 1 : n), 0),
+    [filtered],
+  );
+
+  const createsInLabel = scopeCreatesInLabel(scope, { teamName, projectName });
+
   const filterCount = activeFilterCount(filters);
+
+  const toggleProjectCollapse = (key: string) =>
+    setCollapsedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  const commitGroupNewProject = async () => {
+    const name = groupNewProjectName.trim();
+    if (!name || groupProjectBusy || !onCreateProject) return;
+    setGroupProjectBusy(true);
+    try {
+      await onCreateProject(name);
+      setGroupNewProjectOpen(false);
+      setGroupNewProjectName('');
+    } catch {
+      // Parent surfaces the error via toast; keep the input open to retry.
+    } finally {
+      setGroupProjectBusy(false);
+    }
+  };
 
   // Pipeline capsule ↔ status filter: a single-status filter lights its
   // capsule; clicking toggles that status as the sole filter.
@@ -388,15 +519,17 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   return (
     <div className={`flex flex-col bg-ink-950 h-full min-h-0`}>
       <div className="flex items-center gap-2 px-4 py-3 sticky top-0 z-10 bg-ink-950">
-        <button
-          type="button"
-          onClick={onNewIssue}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[13px] rounded border transition"
-          style={{ background: 'var(--accent-soft)', color: 'var(--accent-text)', borderColor: 'var(--accent-border)' }}
-        >
-          <Plus size={13} /> New Issue
-          <Kbd>C</Kbd>
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={onNewIssue}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[13px] rounded border transition"
+            style={{ background: 'var(--accent-soft)', color: 'var(--accent-text)', borderColor: 'var(--accent-border)' }}
+          >
+            <Plus size={13} /> New Issue
+            <Kbd>C</Kbd>
+          </button>
+        )}
         <div className="relative flex-1 max-w-md">
           <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-500" />
           <input
@@ -411,6 +544,18 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
             <Kbd>/</Kbd>
           </span>
         </div>
+        <span
+          data-testid="creates-in-badge"
+          className={`hidden sm:inline-flex items-center gap-1.5 px-2 py-1 text-[12px] rounded shrink-0 ${
+            readOnly
+              ? 'bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/30'
+              : 'bg-ink-900/80 text-ink-400 ring-1 ring-ink-800'
+          }`}
+          title={readOnly ? 'This is a filtered, read-only view' : 'Where a new issue will be created'}
+        >
+          {!readOnly && <Diamond size={11} className="text-ink-500" />}
+          {createsInLabel}
+        </span>
         <div className="ml-auto flex items-center gap-1">
           <div className="inline-flex rounded border border-ink-800 bg-ink-900/80 overflow-hidden">
             <button
@@ -547,17 +692,59 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
             );
           })}
         </div>
-        <IssuePipeline issues={issues} activeStatus={pipelineActive} onPick={pickStatus} />
-        {filterCount > 0 && (
-          <button
-            type="button"
-            onClick={() => setFilters(EMPTY_FILTERS)}
-            className="ml-auto shrink-0 text-ink-500 hover:text-ink-200"
-          >
-            Reset ({filterCount})
-          </button>
-        )}
+        <IssuePipeline issues={scopedIssues} activeStatus={pipelineActive} onPick={pickStatus} />
+        <div className="ml-auto flex items-center gap-2 shrink-0">
+          {showGroupToggle && (
+            <div className="inline-flex items-center gap-1" title="Group issues by status or by project">
+              <span className="text-ink-600">Group:</span>
+              <div className="inline-flex rounded border border-ink-800 bg-ink-900/80 overflow-hidden">
+                {(['status', 'project'] as IssueGroupMode[]).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setGroupMode(m)}
+                    className={`px-2 py-0.5 transition ${
+                      groupMode === m
+                        ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
+                        : 'text-ink-400 hover:text-ink-200'
+                    }`}
+                  >
+                    {m === 'status' ? 'Status' : 'Project'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {filterCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilters(EMPTY_FILTERS)}
+              className="text-ink-500 hover:text-ink-200"
+            >
+              Reset ({filterCount})
+            </button>
+          )}
+        </div>
       </div>
+
+      {scope.type === 'project' && (
+        <div
+          data-testid="project-context-bar"
+          className="flex items-center gap-3 px-4 py-2 border-b border-line bg-ink-900/40"
+        >
+          {projectStage && projectStage.total > 0 && (
+            <StageRing current={projectStage.index} total={projectStage.total} />
+          )}
+          <div className="min-w-0 flex items-baseline gap-2">
+            <span className="text-[13px] font-semibold text-ink-100 truncate">{projectName ?? 'Project'}</span>
+            <span className="text-[12px] text-ink-500 truncate">
+              {projectStage ? `${projectStage.name} · ` : ''}
+              {filtered.length} issue{filtered.length === 1 ? '' : 's'}
+              {liveCount > 0 && ` · ${liveCount} running`}
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto">
         {error && (
@@ -571,15 +758,130 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
           </div>
         ) : viewMode === 'board' ? (
           <IssueBoardView issues={flatSorted} />
+        ) : projectGrouped ? (
+          <div>
+            {onCreateProject && (
+              <div className="flex items-center gap-2 px-4 pt-3 pb-1">
+                {groupNewProjectOpen ? (
+                  <div className="flex items-center gap-2 flex-1 max-w-sm">
+                    <input
+                      type="text"
+                      autoFocus
+                      value={groupNewProjectName}
+                      onChange={(e) => setGroupNewProjectName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                          e.preventDefault();
+                          void commitGroupNewProject();
+                        } else if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setGroupNewProjectOpen(false);
+                          setGroupNewProjectName('');
+                        }
+                      }}
+                      placeholder="New project name…"
+                      className="flex-1 h-7 px-2 text-[12px] bg-ink-900 border border-ink-800 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500/40 text-ink-200 placeholder-ink-600"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void commitGroupNewProject()}
+                      disabled={!groupNewProjectName.trim() || groupProjectBusy}
+                      className="inline-flex items-center gap-1 px-2 h-7 text-[12px] rounded bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-40"
+                    >
+                      <Check size={11} /> {groupProjectBusy ? 'Creating…' : 'Add'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setGroupNewProjectOpen(false); setGroupNewProjectName(''); }}
+                      className="p-1 text-ink-500 hover:text-ink-300 rounded hover:bg-ink-800"
+                      title="Cancel"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setGroupNewProjectOpen(true)}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[12px] rounded text-ink-400 hover:text-ink-100 hover:bg-ink-800 ring-1 ring-ink-800"
+                  >
+                    <Plus size={12} /> New project
+                  </button>
+                )}
+              </div>
+            )}
+            {projectGroups.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-24 gap-2 text-center">
+                <span className="text-[13px] text-ink-300">No issues match your filters</span>
+              </div>
+            ) : (
+              projectGroups.map((g) => {
+                const collapsed = collapsedProjects.has(g.key);
+                return (
+                  <div key={g.key} data-testid="project-group">
+                    <button
+                      type="button"
+                      onClick={() => toggleProjectCollapse(g.key)}
+                      className="w-full flex items-center gap-2 px-4 pt-3 pb-1 text-left group/pg"
+                    >
+                      {collapsed ? (
+                        <ChevronRight size={13} className="text-ink-600 shrink-0" />
+                      ) : (
+                        <ChevronDown size={13} className="text-ink-600 shrink-0" />
+                      )}
+                      <Diamond
+                        size={11}
+                        className="shrink-0"
+                        style={{ color: g.project ? 'var(--accent-text)' : undefined }}
+                      />
+                      <span className="text-[12px] font-semibold text-ink-200 truncate">
+                        {g.project ? g.project.name : 'No project'}
+                      </span>
+                      <span className="text-[12px] text-ink-500 tabular-nums shrink-0">
+                        {g.items.length} issue{g.items.length === 1 ? '' : 's'}
+                      </span>
+                      {g.project && (
+                        <Link
+                          to={`/team/${teamId ?? ''}/projects/${g.project.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="opacity-0 group-hover/pg:opacity-100 transition text-[11px] text-ink-500 hover:text-[var(--accent-text)] shrink-0"
+                          title="Open project"
+                        >
+                          Open ↗
+                        </Link>
+                      )}
+                      <span className="flex-1 h-px bg-line ml-1" />
+                    </button>
+                    {!collapsed && (
+                      <div className="ml-[1.15rem] border-l border-line">
+                        {g.items.map((issue) => (
+                          <IssueRow
+                            key={issue.id}
+                            issue={issue}
+                            teamId={teamId ?? ''}
+                            visibleCols={visibleCols}
+                            parentLookup={parentLookup}
+                            hideProjectPill
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
         ) : grouped.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 gap-2 text-center">
             <span className="w-9 h-9 rounded-xl border border-dashed border-line-strong grid place-items-center text-ink-500">
               <Plus size={16} />
             </span>
             <span className="text-[13px] text-ink-300">No issues match your filters</span>
-            <span className="text-[12px] text-ink-500 inline-flex items-center gap-1">
-              Press <Kbd>C</Kbd> to create one, or adjust filters
-            </span>
+            {!readOnly && (
+              <span className="text-[12px] text-ink-500 inline-flex items-center gap-1">
+                Press <Kbd>C</Kbd> to create one, or adjust filters
+              </span>
+            )}
           </div>
         ) : (
           grouped.map((g) => (
@@ -591,14 +893,16 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
                 </span>
                 <span className="text-[12px] text-ink-500 tabular-nums">{g.items.length}</span>
                 <span className="flex-1 h-px bg-line ml-1" />
-                <button
-                  type="button"
-                  onClick={onNewIssue}
-                  title="New issue"
-                  className="opacity-0 group-hover/gh:opacity-100 transition w-5 h-5 grid place-items-center rounded text-ink-600 hover:text-ink-300 hover:bg-ink-800"
-                >
-                  <Plus size={12} />
-                </button>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={onNewIssue}
+                    title="New issue"
+                    className="opacity-0 group-hover/gh:opacity-100 transition w-5 h-5 grid place-items-center rounded text-ink-600 hover:text-ink-300 hover:bg-ink-800"
+                  >
+                    <Plus size={12} />
+                  </button>
+                )}
               </div>
               {g.items.map((issue) => (
                 <IssueRow
