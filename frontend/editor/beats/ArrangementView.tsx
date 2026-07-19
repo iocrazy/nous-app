@@ -24,7 +24,6 @@ import type { SceneDoc } from '../types';
 import { formatBeatDuration } from './beatColors';
 import { BeatEditModal } from './BeatEditModal';
 import { BeatsDurationControl } from './BeatsDurationControl';
-import { BeatsGuideDrawer } from './BeatsGuideDrawer';
 import { BeatsTemplateWizard } from './BeatsTemplateWizard';
 import {
   CARD_GAP_PX,
@@ -123,7 +122,6 @@ export function ArrangementView({
   // the methodology Guide drawer, and the conform prompt shown when the target
   // length changes while beats are already arranged.
   const [wizardKey, setWizardKey] = useState<string | null | undefined>(undefined);
-  const [guideKey, setGuideKey] = useState<string | null | undefined>(undefined);
   const [conform, setConform] = useState<{ next: number; old: number } | null>(null);
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -481,9 +479,6 @@ export function ArrangementView({
           onClose={() => setWizardKey(undefined)}
         />
       )}
-      {guideKey !== undefined && (
-        <BeatsGuideDrawer initialKey={guideKey} onClose={() => setGuideKey(undefined)} />
-      )}
     </>
   );
 
@@ -536,14 +531,6 @@ export function ArrangementView({
             onClick={() => setWizardKey(null)}
           >
             {t('editor.beatTemplatesBtn')}
-          </button>
-          <button
-            type="button"
-            className="mh-arr-tool-btn"
-            data-testid="arr-guide"
-            onClick={() => setGuideKey(null)}
-          >
-            {t('editor.beatGuideBtn')}
           </button>
         </div>
         <div

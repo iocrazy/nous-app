@@ -2075,37 +2075,6 @@ export const EDITOR_SHELL_STYLES = `
 /* Empty-state template guide cards — leading affordance above Add Beat. */
 .mh-tpl-empty-cards{ display:flex; flex-direction:column; gap:8px; width:100%; max-width:340px; }
 
-/* Methodology guide — a right-side reference drawer. */
-.mh-guide-overlay{
-  position:fixed; inset:0; z-index:60; display:flex; justify-content:flex-end;
-  background:color-mix(in srgb, #000 40%, transparent);
-}
-.mh-guide-panel{
-  width:100%; max-width:400px; height:100%; box-sizing:border-box; overflow-y:auto;
-  display:flex; flex-direction:column; gap:14px; padding:18px;
-  background:var(--surface); border-left:1px solid var(--surface-border); box-shadow:var(--shadow-float);
-}
-.mh-guide-head{ display:flex; align-items:center; justify-content:space-between; }
-.mh-guide-title{ font-size:15px; font-weight:800; color:var(--ink); }
-.mh-guide-tabs{ display:flex; gap:4px; border-bottom:1px solid var(--surface-border); }
-.mh-guide-tab{
-  font-family:var(--sans); font-size:12px; font-weight:700; color:var(--ink-faint);
-  background:none; border:none; border-bottom:2px solid transparent; padding:6px 10px; cursor:pointer;
-  margin-bottom:-1px;
-}
-.mh-guide-tab:hover{ color:var(--ink-soft); }
-.mh-guide-tab.active{ color:var(--ink); border-bottom-color:var(--indigo); }
-.mh-guide-body{ display:flex; flex-direction:column; gap:12px; }
-.mh-guide-desc{ margin:0; font-size:12.5px; line-height:1.6; color:var(--ink-soft); }
-.mh-guide-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:12px; counter-reset:guide; }
-.mh-guide-item{ display:flex; flex-direction:column; gap:3px; }
-.mh-guide-item-head{ display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
-.mh-guide-item-name{ font-size:13px; font-weight:700; color:var(--ink); }
-.mh-guide-item-window{
-  flex-shrink:0; font-size:10.5px; font-weight:700; color:var(--accent-text);
-  font-variant-numeric:tabular-nums;
-}
-.mh-guide-item-guide{ margin:0; font-size:12px; line-height:1.55; color:var(--ink-faint); }
 
 /* ===== FILM NUMBERING (合一终稿, 2026-07-11) =====
    Storyboard scene heads read S1/S2 (mono, neutral ink) and shot codes read 1A/1B

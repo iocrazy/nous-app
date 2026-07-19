@@ -1280,20 +1280,27 @@ export function EditorShell({
       {/* ===== CENTER PAPER COLUMN ===== */}
       <main className="mh-center-col" aria-label={t('editor.paperColumn')}>
         <div className="mh-center-topbar">
-          <div className="mh-doc-tabs" role="tablist" aria-label={t('editor.docModes')}>
-            {DOC_MODES.map((m) => (
-              <button
-                type="button"
-                key={m}
-                role="tab"
-                className="mh-doc-tab"
-                aria-selected={state.mode === m}
-                onClick={() => selectMode(m)}
-              >
-                {tabLabel[m]}
-              </button>
-            ))}
-          </div>
+          {/* Script/Outline/Cover doc tabs are meaningless inside the Beats
+              workbench (it has its own Arrangement/Beats segmented) — hide them
+              there so the pane reads as one tool, not a tool inside a doc. */}
+          {railView !== 'beats' ? (
+            <div className="mh-doc-tabs" role="tablist" aria-label={t('editor.docModes')}>
+              {DOC_MODES.map((m) => (
+                <button
+                  type="button"
+                  key={m}
+                  role="tab"
+                  className="mh-doc-tab"
+                  aria-selected={state.mode === m}
+                  onClick={() => selectMode(m)}
+                >
+                  {tabLabel[m]}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div aria-hidden="true" />
+          )}
           <div className="mh-topbar-right">
             {COLLAB_ENABLED && <PresenceAvatars users={onlineUsers} />}
             <SaveIndicator state={aggregateState} queued={offlineCount} />

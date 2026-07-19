@@ -173,18 +173,3 @@ describe('template Apply wizard', () => {
   });
 });
 
-describe('methodology Guide drawer', () => {
-  it('opens with three tabs and switches the active methodology', async () => {
-    renderArr([beat({ id: 'a', start_sec: 0, duration_sec: 30 })], null);
-    fireEvent.click(screen.getByTestId('arr-guide'));
-    const drawer = await screen.findByTestId('beats-guide-drawer');
-    expect(within(drawer).getAllByTestId('beats-guide-tab')).toHaveLength(3);
-
-    fireEvent.click(within(drawer).getAllByTestId('beats-guide-tab').find((t) => t.dataset.key === 'kishotenketsu')!);
-    // The body renders the kishotenketsu beats (ki … ketsu).
-    expect(within(drawer).getByTestId('beats-guide-body')).toHaveTextContent('kishotenketsu.ki.name');
-
-    fireEvent.click(within(drawer).getByTestId('beats-guide-close'));
-    await waitFor(() => expect(screen.queryByTestId('beats-guide-drawer')).toBeNull());
-  });
-});
