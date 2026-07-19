@@ -1518,6 +1518,9 @@ export function EditorShell({
       </main>
 
       {/* ===== RIGHT PANEL ===== */}
+      {/* Hidden in the Beats workbench — version history / pagination / stats /
+          cast are script-document concerns; the timeline gets the width. */}
+      {railView !== 'beats' && (
       <aside
         className={`mh-island mh-right-col${panelCollapsed ? ' collapsed' : ''}`}
         aria-label={t('editor.writingPanel')}
@@ -1562,6 +1565,7 @@ export function EditorShell({
           </>
         )}
       </aside>
+      )}
 
       {showImportModal && projectId && (
         <ImportScriptModal
