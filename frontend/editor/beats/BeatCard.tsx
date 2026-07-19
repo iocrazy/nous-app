@@ -19,6 +19,7 @@ import { useTranslation } from 'react-i18next';
 import type { Beat, BeatInput } from '../sceneService';
 import type { SceneDoc } from '../types';
 import { UiSelect } from '../../components/ui';
+import { BEAT_COLORS, formatBeatDuration } from './beatColors';
 
 /** `INT · Location · TIME`, empty parts dropped (mirrors OutlineView's head). */
 function sceneLabel(scene: SceneDoc, fallback: string): string {
@@ -64,9 +65,19 @@ export function BeatCard({
   const [titleDraft, setTitleDraft] = useState(beat.title);
   useEffect(() => setTitleDraft(beat.title), [beat.title]);
 
-  const [notesOpen, setNotesOpen] = useState(!!beat.summary);
+  const [notesOpen, setNotesOpen] = useState(
+    !!beat.summary || beat.duration_sec != null || !!beat.color,
+  );
   const [summaryDraft, setSummaryDraft] = useState(beat.summary ?? '');
   useEffect(() => setSummaryDraft(beat.summary ?? ''), [beat.summary]);
+
+  const [durationDraft, setDurationDraft] = useState(
+    beat.duration_sec == null ? '' : String(beat.duration_sec),
+  );
+  useEffect(
+    () => setDurationDraft(beat.duration_sec == null ? '' : String(beat.duration_sec)),
+    [beat.duration_sec],
+  );
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -91,6 +102,20 @@ export function BeatCard({
     if (next !== (beat.summary ?? '')) onUpdate({ summary: next || null });
   }, [summaryDraft, beat.summary, onUpdate]);
 
+  const commitDuration = useCallback(() => {
+    const raw = durationDraft.trim();
+    if (raw === '') {
+      if (beat.duration_sec != null) onUpdate({ duration_sec: null });
+      return;
+    }
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isNaN(parsed) || parsed < 0) {
+      setDurationDraft(beat.duration_sec == null ? '' : String(beat.duration_sec));
+      return;
+    }
+    if (parsed !== beat.duration_sec) onUpdate({ duration_sec: parsed });
+  }, [durationDraft, beat.duration_sec, onUpdate]);
+
   const handleDeleteClick = useCallback(() => {
     if (confirmingDelete) {
       if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
@@ -108,6 +133,7 @@ export function BeatCard({
 
   const linkedIds = beat.scene_ids;
   const unlinkedScenes = scenes.filter((s) => !linkedIds.includes(String(s.id)));
+  const durationLabel = formatBeatDuration(beat.duration_sec);
 
   return (
     <div
@@ -115,6 +141,14 @@ export function BeatCard({
       data-testid="beat-card"
       data-beat-id={beat.id}
     >
+      {beat.color && (
+        <span
+          className="mh-beat-color-bar"
+          data-testid="beat-color-bar"
+          aria-hidden="true"
+          style={{ background: beat.color }}
+        />
+      )}
       <div className="mh-beat-card-head">
         <span
           className="mh-beat-drag-handle"
@@ -144,6 +178,11 @@ export function BeatCard({
             }
           }}
         />
+        {durationLabel && (
+          <span className="mh-beat-duration-chip" data-testid="beat-duration-chip">
+            {durationLabel}
+          </span>
+        )}
         <button
           type="button"
           className="mh-beat-notes-toggle"
@@ -163,15 +202,66 @@ export function BeatCard({
       </div>
 
       {notesOpen && (
-        <textarea
-          className="mh-beat-summary"
-          value={summaryDraft}
-          aria-label={t('editor.beatSummary')}
-          placeholder={t('editor.beatSummaryPlaceholder')}
-          rows={2}
-          onChange={(e) => setSummaryDraft(e.target.value)}
-          onBlur={commitSummary}
-        />
+        <>
+          <textarea
+            className="mh-beat-summary"
+            value={summaryDraft}
+            aria-label={t('editor.beatSummary')}
+            placeholder={t('editor.beatSummaryPlaceholder')}
+            rows={2}
+            onChange={(e) => setSummaryDraft(e.target.value)}
+            onBlur={commitSummary}
+          />
+          <div className="mh-beat-arrange">
+            <label className="mh-beat-duration-field">
+              <span className="mh-beat-field-label">{t('editor.beatDurationLabel')}</span>
+              <input
+                type="number"
+                min={0}
+                className="mh-beat-duration-input"
+                value={durationDraft}
+                aria-label={t('editor.beatDuration')}
+                placeholder={t('editor.beatDurationPlaceholder')}
+                onChange={(e) => setDurationDraft(e.target.value)}
+                onBlur={commitDuration}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  }
+                }}
+              />
+            </label>
+            <div
+              className="mh-beat-color-swatches"
+              role="group"
+              aria-label={t('editor.beatColor')}
+            >
+              {BEAT_COLORS.map((hex) => (
+                <button
+                  key={hex}
+                  type="button"
+                  className={`mh-beat-color-swatch${beat.color === hex ? ' selected' : ''}`}
+                  data-testid="beat-color-swatch"
+                  style={{ background: hex }}
+                  aria-label={hex}
+                  aria-pressed={beat.color === hex}
+                  onClick={() => onUpdate({ color: beat.color === hex ? null : hex })}
+                />
+              ))}
+              {beat.color && (
+                <button
+                  type="button"
+                  className="mh-beat-color-clear"
+                  aria-label={t('editor.beatColorClear')}
+                  onClick={() => onUpdate({ color: null })}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          </div>
+        </>
       )}
 
       <div className="mh-beat-scenes">
