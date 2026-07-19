@@ -91,19 +91,19 @@ export const DurationFilterDropdown: React.FC<DurationFilterDropdownProps> = ({
             onClick={() => selectPreset(preset)}
             className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between transition-colors ${
               active
-                ? 'bg-indigo-500/10 text-indigo-300'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                 : 'text-content-2 hover:bg-island-2'
             }`}
           >
             <span className="flex items-center gap-2">
               <Clock
                 size={12}
-                className={active ? 'text-indigo-300' : 'text-content-3'}
+                className={active ? 'text-[var(--accent-text)]' : 'text-content-3'}
                 aria-hidden="true"
               />
               <span>{labels[preset]}</span>
             </span>
-            {active && <Check size={12} className="text-indigo-400" />}
+            {active && <Check size={12} className="text-[var(--accent-text)]" />}
           </button>
         );
       })}

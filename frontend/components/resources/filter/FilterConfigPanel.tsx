@@ -144,7 +144,7 @@ export const FilterConfigPanel: React.FC<FilterConfigPanelProps> = ({
             type="button"
             onClick={() => onPin(id)}
             aria-label={t('resources.filter.pin', 'Pin')}
-            className={`p-1 ${cActionBtn} hover:text-indigo-300`}
+            className={`p-1 ${cActionBtn} hover:text-[var(--accent-text)]`}
             title={t('resources.filter.pin', 'Pin')}
           >
             <Plus size={12} />

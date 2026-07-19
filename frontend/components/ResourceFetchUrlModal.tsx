@@ -88,7 +88,7 @@ export const ResourceFetchUrlModal: React.FC<ResourceFetchUrlModalProps> = ({
       <div className="relative bg-ink-900 border border-ink-800 rounded-2xl w-full max-w-md mx-4 shadow-2xl animate-in zoom-in-95 fade-in duration-200">
         <div className="flex items-center justify-between p-5 border-b border-ink-800">
           <h2 className="text-lg font-semibold text-ink-50 flex items-center gap-2">
-            <Globe size={20} className="text-indigo-400" />
+            <Globe size={20} className="text-[var(--accent-text)]" />
             {t('resources.fetchUrl.title') || 'Fetch from URL'}
           </h2>
           <button

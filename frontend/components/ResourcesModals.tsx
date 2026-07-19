@@ -218,7 +218,7 @@ export const ResourcesModals: React.FC<ResourcesModalsProps> = ({
           className="fixed z-[100] pointer-events-none flex items-center gap-2 bg-ink-800/90 backdrop-blur-sm border border-ink-600 rounded-lg px-3 py-2 shadow-2xl"
           style={{ left: touchDragState.dragPosition.x - 40, top: touchDragState.dragPosition.y - 20 }}
         >
-          <Move size={14} className="text-indigo-400" />
+          <Move size={14} className="text-[var(--accent-text)]" />
           <span className="text-sm text-ink-200">
             {touchDragState.dragIds.length === 1 ? 'Moving item' : `${touchDragState.dragIds.length} items`}
           </span>

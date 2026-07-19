@@ -1161,7 +1161,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           <button
             onClick={() => setShowFileList(!showFileList)}
             className={`p-1.5 rounded-lg transition-colors ${
-              showFileList ? `${cActiveBg} text-indigo-400` : `text-content-2 hover:text-content ${cHoverSurf}`
+              showFileList ? `${cActiveBg} text-[var(--accent-text)]` : `text-content-2 hover:text-content ${cHoverSurf}`
             }`}
             title={t('resources.fileListPanel')}
           >
@@ -1221,11 +1221,11 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                                 onClick={() => handleSelectVersion(ver)}
                                 className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
                                   isSelected
-                                    ? 'bg-indigo-500/10 text-indigo-300'
+                                    ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                                     : `text-content-2 ${cHoverSurf} hover:text-content`
                                 }`}
                               >
-                                <span className={`font-semibold ${isCurrentVer ? 'text-indigo-400' : ''}`}>
+                                <span className={`font-semibold ${isCurrentVer ? 'text-[var(--accent-text)]' : ''}`}>
                                   v{ver.version_number}
                                 </span>
                                 <span className="truncate flex-1 text-left">{ver.filename}</span>
@@ -1249,7 +1249,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                       <div className="border-t border-line px-2 py-1.5">
                         <button
                           onClick={() => { setShowVersionDropdown(false); setShowVersionManager(true); }}
-                          className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-indigo-400 hover:bg-indigo-500/10 rounded-md transition-colors"
+                          className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-[var(--accent-text)] hover:bg-[var(--accent-soft)] rounded-md transition-colors"
                         >
                           <Layers size={12} />
                           {t('resources.manageVersions', 'Manage Versions')}
@@ -1437,7 +1437,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     }}
                     className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-all ${
                       isActive
-                        ? 'bg-indigo-500/10 border-l-2 border-indigo-400'
+                        ? 'bg-[var(--accent-soft)] border-l-2 border-[var(--accent-border)]'
                         : `hover:bg-island-2 border-l-2 border-transparent`
                     }`}
                   >
@@ -1453,7 +1453,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                         <SibIcon size={14} className={sibColor} />
                       </div>
                     )}
-                    <span className={`text-xs truncate ${isActive ? 'text-indigo-300 font-medium' : cText400}`}>
+                    <span className={`text-xs truncate ${isActive ? 'text-[var(--accent-text)] font-medium' : cText400}`}>
                       {item.resource?.filename ?? 'Untitled'}
                     </span>
                   </button>
@@ -1618,7 +1618,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               onClick={() => setRightTab('info')}
               className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                 rightTab === 'info'
-                  ? 'border-indigo-500 text-indigo-400'
+                  ? 'border-indigo-500 text-[var(--accent-text)]'
                   : `border-transparent ${cText400} ${cHover200} ${cHoverBorder700}`
               }`}
             >
@@ -1630,7 +1630,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 onClick={() => { setRightTab('review'); setViewAnnotations(undefined); }}
                 className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                   rightTab === 'review'
-                    ? 'border-indigo-500 text-indigo-400'
+                    ? 'border-indigo-500 text-[var(--accent-text)]'
                     : `border-transparent ${cText400} ${cHover200} ${cHoverBorder700}`
                 }`}
               >
@@ -1642,7 +1642,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               <button
                 onClick={() => setRightTab('lyrics')}
                 className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
-                  rightTab === 'lyrics' ? 'border-indigo-500 text-indigo-400'
+                  rightTab === 'lyrics' ? 'border-indigo-500 text-[var(--accent-text)]'
                     : `border-transparent ${cText400} ${cHover200} ${cHoverBorder700}`}`}
               >
                 <Music size={16} />
@@ -1655,7 +1655,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   onClick={() => setRightTab('transcript')}
                   className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                     rightTab === 'transcript'
-                      ? 'border-indigo-500 text-indigo-400'
+                      ? 'border-indigo-500 text-[var(--accent-text)]'
                       : `border-transparent ${cText400} ${cHover200} ${cHoverBorder700}`
                   }`}
                 >
@@ -1667,7 +1667,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   onClick={() => setRightTab('analysis')}
                   className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                     rightTab === 'analysis'
-                      ? 'border-indigo-500 text-indigo-400'
+                      ? 'border-indigo-500 text-[var(--accent-text)]'
                       : `border-transparent ${cText400} ${cHover200} ${cHoverBorder700}`
                   }`}
                 >
@@ -1768,7 +1768,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   if (e.key === 'Enter' && !e.nativeEvent.isComposing) commitName();
                   if (e.key === 'Escape') { setNameValue(resource.filename); setEditingName(false); }
                 }}
-                className={`w-full ${cCtrlBg} border border-indigo-500/50 rounded px-2 py-1 text-lg font-bold ${cPrimary} focus:outline-none`}
+                className={`w-full ${cCtrlBg} border border-[var(--accent-border)] rounded px-2 py-1 text-lg font-bold ${cPrimary} focus:outline-none`}
                 autoFocus
               />
             ) : (
@@ -1829,7 +1829,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                         onClick={() => setPromptLang(lang)}
                         className={`px-1.5 py-0.5 text-[9px] transition-colors ${
                           promptLang === lang
-                            ? 'bg-indigo-500/30 text-indigo-200'
+                            ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                             : `${cLabel} ${cHover300}`
                         }`}
                       >
@@ -1847,7 +1847,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                         'resources.infoPanel.generatePromptHint',
                         'Reverse-engineer the prompt from this image',
                       )}
-                      className={`flex items-center gap-1 text-[10px] ${cLabel} hover:text-indigo-300 transition-colors disabled:opacity-50`}
+                      className={`flex items-center gap-1 text-[10px] ${cLabel} hover:text-[var(--accent-text)] transition-colors disabled:opacity-50`}
                     >
                       {promptGenerating ? (
                         <Loader2 size={11} className="animate-spin" />
@@ -1867,7 +1867,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                         'resources.infoPanel.translatePromptHint',
                         'Translate from the other language',
                       )}
-                      className={`flex items-center gap-1 text-[10px] ${cLabel} hover:text-indigo-300 transition-colors disabled:opacity-50`}
+                      className={`flex items-center gap-1 text-[10px] ${cLabel} hover:text-[var(--accent-text)] transition-colors disabled:opacity-50`}
                     >
                       {promptTranslating ? (
                         <Loader2 size={11} className="animate-spin" />
@@ -1882,7 +1882,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   ) && (
                     <button
                       onClick={copyPrompt}
-                      className={`flex items-center gap-1 text-[10px] ${cLabel} hover:text-indigo-300 transition-colors`}
+                      className={`flex items-center gap-1 text-[10px] ${cLabel} hover:text-[var(--accent-text)] transition-colors`}
                     >
                       <Copy size={11} /> {t('resources.infoPanel.copyPrompt', 'Copy')}
                     </button>
@@ -1902,7 +1902,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             <div className="px-4 mt-1 flex items-center gap-3">
               <button
                 onClick={() => setPromptOpen(true)}
-                className={`text-[11px] ${cFaint} hover:text-indigo-300 transition-colors`}
+                className={`text-[11px] ${cFaint} hover:text-[var(--accent-text)] transition-colors`}
               >
                 + {t('resources.infoPanel.addPrompt', 'Add Prompt')}
               </button>
@@ -1910,7 +1910,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 <button
                   onClick={handleGeneratePrompt}
                   disabled={promptGenerating}
-                  className={`flex items-center gap-1 text-[11px] ${cFaint} hover:text-indigo-300 transition-colors disabled:opacity-50`}
+                  className={`flex items-center gap-1 text-[11px] ${cFaint} hover:text-[var(--accent-text)] transition-colors disabled:opacity-50`}
                 >
                   {promptGenerating ? (
                     <Loader2 size={11} className="animate-spin" />
@@ -1945,7 +1945,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                   'resources.infoPanel.autoTagHint',
                   'Classify this image into bilingual tags across 12 dimensions',
                 )}
-                className={`flex items-center gap-1 text-[10px] ${cLabel} hover:text-indigo-300 transition-colors disabled:opacity-50`}
+                className={`flex items-center gap-1 text-[10px] ${cLabel} hover:text-[var(--accent-text)] transition-colors disabled:opacity-50`}
               >
                 {autoTagging ? (
                   <Loader2 size={11} className="animate-spin" />
@@ -2007,7 +2007,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             <div className={`px-4 mt-3 border-t ${cBorder800_60} pt-3`}>
               <a
                 href={`/resources/media/${resource.media_id}`}
-                className="inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                className="inline-flex items-center gap-1.5 text-xs text-[var(--accent-text)] hover:text-[var(--accent-text)] transition-colors"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -2047,7 +2047,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 </h4>
                 <button
                   onClick={() => setShowVersionManager(true)}
-                  className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors"
+                  className="text-[10px] text-[var(--accent-text)] hover:text-[var(--accent-text)] transition-colors"
                 >
                   {t('resources.manageVersions', 'Manage')}
                 </button>
@@ -2064,13 +2064,13 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                         onClick={() => handleSelectVersion(ver)}
                         className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors hover:bg-island-2 ${
                           isViewing
-                            ? 'bg-indigo-500/10 border border-indigo-500/20'
+                            ? 'bg-[var(--accent-soft)] border border-[var(--accent-border)]'
                             : 'bg-transparent'
                         }`}
                       >
                         <div className="flex items-center gap-1.5">
                           <span className={`font-medium ${
-                            isViewing ? 'text-indigo-400' : cText300
+                            isViewing ? 'text-[var(--accent-text)]' : cText300
                           }`}>
                             v{ver.version_number}
                           </span>
@@ -2116,7 +2116,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               {/* Processing state (from DB status or active transcription) */}
               {(resource.transcript_status === 'processing' || transcribeStatus === 'processing') && !transcript && (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
-                  <Loader2 size={32} className="animate-spin text-indigo-400 mb-4" />
+                  <Loader2 size={32} className="animate-spin text-[var(--accent-text)] mb-4" />
                   <h3 className={`text-sm font-medium ${cText200}`}>Transcribing...</h3>
                   <p className={`text-xs ${cLabel} mt-1`}>This may take a few minutes.</p>
                 </div>
@@ -2181,7 +2181,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                               className={`flex gap-2 px-3 py-2 hover:bg-island-2 transition-colors group`}
                             >
                               <button
-                                className="text-[10px] font-mono text-indigo-400/70 group-hover:text-indigo-400 shrink-0 pt-0.5 transition-colors"
+                                className="text-[10px] font-mono text-[var(--accent-text)] group-hover:text-[var(--accent-text)] shrink-0 pt-0.5 transition-colors"
                                 onClick={() => { if (videoRef.current) videoRef.current.currentTime = seg.start; }}
                               >
                                 [{formatTimestamp(seg.start)}]
@@ -2273,7 +2273,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               {/* Summary Section */}
               <section className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <div className="p-1 bg-indigo-500/10 rounded text-indigo-400">
+                  <div className="p-1 bg-[var(--accent-soft)] rounded text-[var(--accent-text)]">
                     <Sparkles size={14} />
                   </div>
                   <h3 className={`text-xs font-medium ${cText200}`}>Summary</h3>
@@ -2282,7 +2282,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
                 {resource.summary_status === 'processing' && (
                   <div className={`flex items-center gap-2 p-3 ${cCardBg} border ${cBorder800} rounded-lg`}>
-                    <Loader2 size={14} className="animate-spin text-indigo-400" />
+                    <Loader2 size={14} className="animate-spin text-[var(--accent-text)]" />
                     <span className={`text-xs ${cText400}`}>Generating summary...</span>
                   </div>
                 )}
@@ -2338,7 +2338,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                         <ul className="space-y-1">
                           {summary.key_points.map((point, i) => (
                             <li key={i} className={`flex items-start gap-1.5 text-xs ${cText300}`}>
-                              <ChevronRight size={12} className="text-indigo-400 mt-0.5 shrink-0" />
+                              <ChevronRight size={12} className="text-[var(--accent-text)] mt-0.5 shrink-0" />
                               {point}
                             </li>
                           ))}

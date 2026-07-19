@@ -99,7 +99,7 @@ export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({
                 onClick={() => setSelectedTeamId(null)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg border transition-colors ${
                   selectedTeamId === null
-                    ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-400'
+                    ? 'bg-[var(--accent-soft)] border-[var(--accent-border)] text-[var(--accent-text)]'
                     : 'border-ink-700 text-ink-400 hover:bg-ink-800'
                 }`}
               >
@@ -114,7 +114,7 @@ export const CreateCollectionModal: React.FC<CreateCollectionModalProps> = ({
                   onClick={() => setSelectedTeamId(team.id)}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg border transition-colors ${
                     selectedTeamId === team.id
-                      ? 'bg-indigo-500/10 border-indigo-500/50 text-indigo-400'
+                      ? 'bg-[var(--accent-soft)] border-[var(--accent-border)] text-[var(--accent-text)]'
                       : 'border-ink-700 text-ink-400 hover:bg-ink-800'
                   }`}
                 >

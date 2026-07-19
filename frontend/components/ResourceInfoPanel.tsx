@@ -293,7 +293,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
               if (e.key === 'Enter' && !e.nativeEvent.isComposing) commitName();
               if (e.key === 'Escape') { setNameValue(resource.filename); setEditingName(false); }
             }}
-            className={`w-full ${cFieldBg} border border-indigo-500/50 rounded px-2 py-1 text-sm ${cPrimary} focus:outline-none`}
+            className={`w-full ${cFieldBg} border border-[var(--accent-border)] rounded px-2 py-1 text-sm ${cPrimary} focus:outline-none`}
             autoFocus
           />
         ) : readOnly ? (
@@ -377,7 +377,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
       )}
       {readOnly && urlValue && (
         <div className="px-4 mt-2">
-          <a href={urlValue} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-400 hover:underline break-all">{urlValue}</a>
+          <a href={urlValue} target="_blank" rel="noopener noreferrer" className="text-xs text-[var(--accent-text)] hover:underline break-all">{urlValue}</a>
         </div>
       )}
 

@@ -472,7 +472,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
               onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                 activeTab === tab.key
-                  ? 'border-indigo-500 text-indigo-400'
+                  ? 'border-indigo-500 text-[var(--accent-text)]'
                   : `border-transparent ${cText400} ${cHoverText200} ${cHoverBorder700}`
               }`}
             >
@@ -535,7 +535,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                   <div className="w-16 h-16 rounded-full border-2 border-indigo-500/20" />
                   <div className="absolute inset-0 w-16 h-16 rounded-full border-2 border-transparent border-t-indigo-500 animate-spin" />
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <Brain size={24} className="text-indigo-400" />
+                    <Brain size={24} className="text-[var(--accent-text)]" />
                   </div>
                 </div>
                 <h3 className={`text-base font-medium ${cText200}`}>Transcribing Audio...</h3>
@@ -544,14 +544,14 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                 </p>
                 <div className="mt-4 flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-                  <span className="text-xs text-indigo-400/70">Processing</span>
+                  <span className="text-xs text-[var(--accent-text)]">Processing</span>
                 </div>
               </div>
             )}
 
             {/* Loading existing transcript from server */}
             {transcriptLoading && transcribeStatus !== 'processing' && !transcript && (
-              <div className="flex flex-col items-center justify-center py-16 text-indigo-400">
+              <div className="flex flex-col items-center justify-center py-16 text-[var(--accent-text)]">
                 <Loading center label="Loading transcript..." />
               </div>
             )}
@@ -610,7 +610,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                             className={`flex gap-3 px-4 py-3 ${island ? 'hover:bg-island-2' : 'hover:bg-ink-800/30'} transition-colors group`}
                           >
                             <button
-                              className="text-xs font-mono text-indigo-400/70 group-hover:text-indigo-400 shrink-0 pt-0.5 transition-colors"
+                              className="text-xs font-mono text-[var(--accent-text)] group-hover:text-[var(--accent-text)] shrink-0 pt-0.5 transition-colors"
                               title="Click to seek (coming soon)"
                             >
                               [{formatTimestamp(seg.start)}]
@@ -705,7 +705,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
             {/* Summary Section */}
             <section className="space-y-3">
               <div className="flex items-center gap-2">
-                <div className="p-1.5 bg-indigo-500/10 rounded-lg text-indigo-400">
+                <div className="p-1.5 bg-[var(--accent-soft)] rounded-lg text-[var(--accent-text)]">
                   <Sparkles size={16} />
                 </div>
                 <h3 className={`font-medium ${cText200}`}>Summary</h3>
@@ -715,7 +715,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
               {/* Summary processing */}
               {video.summary_status === 'processing' && (
                 <div className={`flex items-center gap-3 p-4 ${cCardBg} border ${cBorder800} rounded-lg`}>
-                  <Loader2 size={18} className="animate-spin text-indigo-400" />
+                  <Loader2 size={18} className="animate-spin text-[var(--accent-text)]" />
                   <span className={`text-sm ${cText400}`}>Generating summary...</span>
                 </div>
               )}
@@ -768,7 +768,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
 
               {/* Summary loading */}
               {summaryLoading && video.summary_status === 'completed' && (
-                <div className="flex items-center justify-center py-8 text-indigo-400">
+                <div className="flex items-center justify-center py-8 text-[var(--accent-text)]">
                   <Loading center />
                 </div>
               )}
@@ -790,7 +790,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                       <ul className="space-y-2">
                         {summary.key_points.map((point, i) => (
                           <li key={i} className={`flex items-start gap-2 text-sm ${cText300}`}>
-                            <ChevronRight size={14} className="text-indigo-400 mt-0.5 shrink-0" />
+                            <ChevronRight size={14} className="text-[var(--accent-text)] mt-0.5 shrink-0" />
                             {point}
                           </li>
                         ))}

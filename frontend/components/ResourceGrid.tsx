@@ -582,7 +582,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                 onClick={toggleFilterBar}
                 className={`p-1.5 rounded-lg transition-colors ${
                   isFilterBarVisible
-                    ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
+                    ? 'text-[var(--accent-text)] bg-[var(--accent-soft)] hover:bg-[var(--accent-soft)]'
                     : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
                 }`}
                 title={
@@ -607,7 +607,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                 onClick={() => setShowSortMenu(!showSortMenu)}
                 className={`p-1.5 rounded-lg transition-colors ${
                   sortBy !== 'newest'
-                    ? 'text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20'
+                    ? 'text-[var(--accent-text)] bg-[var(--accent-soft)] hover:bg-[var(--accent-soft)]'
                     : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
                 }`}
                 title={currentSortLabel}
@@ -624,13 +624,13 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                         onClick={() => { setSortBy(opt.value); setShowSortMenu(false); }}
                         className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center justify-between ${
                           sortBy === opt.value
-                            ? 'bg-indigo-500/10 text-indigo-400'
+                            ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                             : 'text-ink-400 hover:bg-ink-800 hover:text-ink-200'
                         }`}
                       >
                         <span>{opt.label}</span>
                         {sortBy === opt.value && (
-                          <Check size={12} className="text-indigo-400" />
+                          <Check size={12} className="text-[var(--accent-text)]" />
                         )}
                       </button>
                     ))}
@@ -671,7 +671,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                 onClick={() => setFlattenFolders((v) => !v)}
                 className={`p-1.5 rounded-lg transition-colors ${
                   flattenFolders
-                    ? 'text-indigo-400 bg-indigo-500/10'
+                    ? 'text-[var(--accent-text)] bg-[var(--accent-soft)]'
                     : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800'
                 }`}
                 title={flattenFolders ? t('resources.showFolders') : t('resources.flattenFolders')}
@@ -798,7 +798,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                         }}
                         className="w-full text-left px-3 py-1.5 text-xs text-ink-300 hover:bg-ink-800 hover:text-ink-50 transition-colors flex items-center gap-2"
                       >
-                        <Globe size={14} className="text-indigo-400" />
+                        <Globe size={14} className="text-[var(--accent-text)]" />
                         {t('resources.newWebUrl')}
                       </button>
                     </div>
@@ -873,8 +873,8 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
         {/* Drag-and-drop overlay */}
         {dragOver && canUploadDrop && (
           <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-ink-950/80 backdrop-blur-sm border-2 border-dashed border-indigo-500 rounded-xl m-2 pointer-events-none">
-            <UploadCloud size={56} className="text-indigo-400 mb-4 animate-bounce" />
-            <p className="text-lg font-medium text-indigo-300">{t('resources.dropToUpload')}</p>
+            <UploadCloud size={56} className="text-[var(--accent-text)] mb-4 animate-bounce" />
+            <p className="text-lg font-medium text-[var(--accent-text)]">{t('resources.dropToUpload')}</p>
             <p className="text-sm text-ink-400 mt-1">{t('resources.dropToUploadHint')}</p>
           </div>
         )}
