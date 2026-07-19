@@ -1807,6 +1807,112 @@ export const EDITOR_SHELL_STYLES = `
   border:1px solid var(--hairline); border-radius:999px; padding:3px 8px; cursor:pointer;
 }
 
+/* ── Beats pane (M2): sub-view toggle + Arrangement timeline ─────────────── */
+.mh-beats-pane{ height:100%; display:flex; flex-direction:column; min-height:0; }
+.mh-beats-subview{ flex:0 0 auto; padding:12px 24px 0; }
+.mh-beats-seg{ display:inline-flex; width:max-content; }
+.mh-beats-seg .mh-seg{ flex:0 0 auto; padding:6px 18px; }
+.mh-beats-pane > .mh-beats-view,
+.mh-beats-pane > .mh-arr-root{ flex:1; min-height:0; }
+
+.mh-arr-root{ position:relative; display:flex; flex-direction:column; overflow:hidden; }
+.mh-arr-root > .mh-beats-empty{ margin:auto; }
+.mh-arr-body{ flex:1; min-height:0; display:flex; }
+.mh-arr-list{
+  flex:0 0 190px; overflow-y:auto; border-right:1px solid var(--surface-border);
+  padding:12px 8px; display:flex; flex-direction:column; gap:2px;
+}
+.mh-arr-list-item{
+  display:flex; align-items:center; gap:8px; text-align:left; cursor:pointer;
+  background:none; border:1px solid transparent; border-radius:var(--radius-sm);
+  padding:6px 8px; color:var(--ink-soft); font-family:var(--sans);
+}
+.mh-arr-list-item:hover{ background:var(--hover-ink-bg); }
+.mh-arr-list-item.selected{ background:var(--sel-ink-bg); color:var(--ink); }
+.mh-arr-list-num{
+  flex-shrink:0; width:20px; height:20px; border-radius:6px; background:var(--surface-2);
+  color:var(--ink-faint); font-size:11px; font-weight:700;
+  display:flex; align-items:center; justify-content:center;
+}
+.mh-arr-list-item.selected .mh-arr-list-num{ background:var(--pill-ink-bg); color:var(--pill-ink-on); }
+.mh-arr-list-title{ font-size:12.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.mh-arr-timeline-scroll{ flex:1; min-width:0; overflow:auto; position:relative; }
+.mh-arr-canvas{ position:relative; min-width:100%; }
+.mh-arr-ruler{
+  position:sticky; top:0; height:26px; z-index:2;
+  background:var(--surface); border-bottom:1px solid var(--surface-border);
+}
+.mh-arr-tick{ position:absolute; top:0; bottom:0; width:1px; background:var(--hairline); }
+.mh-arr-tick.major{ background:var(--surface-border); }
+.mh-arr-tick-label{
+  position:absolute; top:5px; left:4px; white-space:nowrap;
+  font-size:10px; font-weight:600; color:var(--ink-faint); font-variant-numeric:tabular-nums;
+}
+.mh-arr-lanes{ position:relative; }
+
+.mh-arr-card{
+  position:absolute; height:44px; box-sizing:border-box; cursor:grab; user-select:none;
+  touch-action:none; overflow:hidden; display:flex; align-items:center; gap:6px;
+  padding:6px 10px 6px 12px; background:var(--surface); border:1px solid var(--hairline);
+  border-radius:var(--radius-sm);
+}
+.mh-arr-card.selected{ border-color:var(--emph-ink-border); }
+.mh-arr-card.dragging{ cursor:grabbing; z-index:3; box-shadow:var(--shadow-float); }
+.mh-arr-card.flash{ animation:mh-arr-flash 0.7s ease; }
+@keyframes mh-arr-flash{ 0%,100%{ box-shadow:none; } 30%{ box-shadow:0 0 0 3px var(--accent-soft); } }
+.mh-arr-card-strip{ position:absolute; left:0; top:0; bottom:0; width:4px; }
+.mh-arr-card-title{
+  flex:1; min-width:0; font-size:12.5px; font-weight:600; color:var(--ink);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.mh-arr-card-chip{
+  flex-shrink:0; font-size:10.5px; font-weight:700; color:var(--accent-text);
+  background:var(--accent-soft); border:1px solid var(--accent-border);
+  border-radius:999px; padding:1px 6px; line-height:1.4;
+}
+.mh-arr-card-resize{ position:absolute; right:0; top:0; bottom:0; width:8px; cursor:ew-resize; touch-action:none; }
+.mh-arr-card-resize:hover{ background:var(--accent-soft); }
+
+.mh-arr-tray{
+  flex:0 0 auto; border-top:1px solid var(--surface-border); padding:10px 24px 14px;
+  display:flex; align-items:flex-start; gap:12px; overflow-x:auto;
+}
+.mh-arr-tray-label{
+  flex-shrink:0; padding-top:8px; font-size:10.5px; font-weight:700; letter-spacing:0.05em;
+  text-transform:uppercase; color:var(--ink-faint);
+}
+.mh-arr-tray-cards{ display:flex; gap:8px; flex-wrap:wrap; }
+.mh-arr-tray-card{
+  position:relative; display:flex; align-items:center; gap:8px; overflow:hidden;
+  background:var(--surface); border:1px solid var(--hairline); border-radius:var(--radius-sm);
+  padding:6px 8px 6px 12px;
+}
+.mh-arr-tray-strip{ position:absolute; left:0; top:0; bottom:0; width:4px; }
+.mh-arr-tray-title{
+  font-size:12px; font-weight:600; color:var(--ink); max-width:150px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.mh-arr-tray-place{
+  flex-shrink:0; font-size:11px; font-weight:700; color:var(--accent-text);
+  background:var(--accent-soft); border:1px solid var(--accent-border);
+  border-radius:999px; padding:2px 10px; cursor:pointer; font-family:var(--sans);
+}
+.mh-arr-tray-place:hover{ filter:brightness(1.04); }
+
+.mh-arr-tools{
+  position:absolute; right:16px; top:34px; z-index:5; display:flex; gap:2px;
+  background:var(--surface); border:1px solid var(--surface-border); border-radius:10px;
+  padding:3px; box-shadow:var(--shadow-island);
+}
+.mh-arr-tool-btn{
+  min-width:30px; height:28px; display:flex; align-items:center; justify-content:center;
+  border:none; background:none; border-radius:8px; cursor:pointer; font-family:var(--sans);
+  font-size:15px; font-weight:600; color:var(--ink-soft); line-height:1;
+}
+.mh-arr-tool-btn:hover{ background:var(--hover-ink-bg); color:var(--ink); }
+.mh-arr-tool-btn.wide{ padding:0 10px; font-size:12px; font-weight:700; }
+
 /* ===== FILM NUMBERING (合一终稿, 2026-07-11) =====
    Storyboard scene heads read S1/S2 (mono, neutral ink) and shot codes read 1A/1B
    (scene number + shot letter) instead of the old plain black number squares —
