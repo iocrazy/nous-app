@@ -9,6 +9,7 @@ from typing import Optional
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
+    Date,
     DateTime,
     Double,
     ForeignKeyConstraint,
@@ -504,6 +505,8 @@ class Issues(Base):
     cancelled_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
     hidden_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
     ai_session_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    # Mirror issue inherits the workflow node's planned_due (mig 380 / PR-B).
+    due_date: Mapped[Optional[datetime.date]] = mapped_column(Date)
 
 
 class IssueMessages(Base):
