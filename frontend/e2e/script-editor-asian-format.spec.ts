@@ -316,6 +316,82 @@ test('asian ornament glyphs are not part of the editable text (doc integrity)', 
   expect(leak.characterHasColon, '： is decoration, not editable text').toBe(false);
 });
 
+test('asian line-start gutter aligns like hollywood — one margin column, never over the △/text', async ({
+  page,
+}) => {
+  // Regression for the reported misalignment CLASS: the hover gutter (block
+  // number + 4-dot grip) used to ride the per-type body indent, which Asian
+  // applies as padding-left on the `.as-row` WRAPPER — so the whole `.mh-el-row`
+  // (and its in-flow gutter) drifted right by that indent (+4ch on
+  // action/dialogue, +0.5ch on paren/comment) and overlapped the △ mark / body
+  // text. The fix anchors the Asian gutter to `.as-row`'s padding box (sheet
+  // column 0) so every type lands in the SAME margin column as hollywood.
+  await gotoAsian(page);
+
+  const rows = await page.evaluate(() => {
+    const sheet = document.querySelector<HTMLElement>('.mh-sheet');
+    if (!sheet) return null;
+    const contentLeft =
+      sheet.getBoundingClientRect().left + (parseFloat(getComputedStyle(sheet).paddingLeft) || 0);
+
+    return Array.from(document.querySelectorAll<HTMLElement>('.as-row')).map((asRow) => {
+      const editable = asRow.querySelector<HTMLElement>('.mh-el-editable[data-el-type]');
+      const gutter = asRow.querySelector<HTMLElement>('.mh-el-gutter');
+      const mark = asRow.querySelector<HTMLElement>('.as-prefix, .as-mark');
+      const gr = gutter?.getBoundingClientRect() ?? null;
+      const er = editable?.getBoundingClientRect() ?? null;
+      // Leading ink = leftmost of the △/quote-bar mark and the editable's box.
+      const markLeft = mark ? mark.getBoundingClientRect().left - contentLeft : Infinity;
+      const editableLeft = er ? er.left - contentLeft : Infinity;
+      // First glyph line vertical centre, to catch any gutter vertical drift.
+      let firstLineVCenter: number | null = null;
+      if (editable) {
+        const walker = document.createTreeWalker(editable, NodeFilter.SHOW_TEXT);
+        const n = walker.nextNode();
+        if (n && n.textContent && n.textContent.length) {
+          const range = document.createRange();
+          range.setStart(n, 0);
+          range.setEnd(n, 1);
+          const r = range.getClientRects()[0];
+          if (r) firstLineVCenter = r.top + r.height / 2;
+        }
+      }
+      return {
+        type: editable?.getAttribute('data-el-type') ?? '?',
+        gutterLeft: gr ? gr.left - contentLeft : null,
+        gutterRight: gr ? gr.right - contentLeft : null,
+        gutterVCenter: gr ? gr.top + gr.height / 2 : null,
+        leadingInk: Math.min(markLeft, editableLeft),
+        firstLineVCenter,
+      };
+    });
+  });
+
+  expect(rows, 'asian rows must render').not.toBeNull();
+  expect(rows!.length, 'every seeded element type produced a row').toBeGreaterThanOrEqual(7);
+
+  const lefts = rows!.map((r) => r.gutterLeft!).filter((v) => v != null);
+  const spread = Math.max(...lefts) - Math.min(...lefts);
+  // Same gutter system: one margin column for every type (was 32px of drift).
+  expect(spread, 'gutter column consistent across all element types').toBeLessThanOrEqual(2);
+
+  for (const r of rows!) {
+    // Gutter sits in the sheet's left margin (left of the content box), like hollywood.
+    expect(r.gutterLeft!, `${r.type}: gutter sits in the left margin`).toBeLessThan(0);
+    // Its right edge never reaches the row's leading ink (the △ / first glyph).
+    expect(r.gutterRight!, `${r.type}: gutter clears the leading △/text`).toBeLessThanOrEqual(
+      r.leadingInk + 1,
+    );
+    // No vertical drift: the gutter centres on the first text line.
+    if (r.firstLineVCenter != null && r.gutterVCenter != null) {
+      expect(
+        Math.abs(r.gutterVCenter - r.firstLineVCenter),
+        `${r.type}: gutter vertically aligned to the first line`,
+      ).toBeLessThanOrEqual(4);
+    }
+  }
+});
+
 test('asian + paged: page seams still bleed to both paper edges (8ch margins)', async ({ page }) => {
   // A tall scene so pagination inserts at least one seam.
   const tall: WireElement[] = [];
