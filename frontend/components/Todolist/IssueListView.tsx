@@ -63,7 +63,15 @@ import {
   type IssueSort,
 } from './IssueSortMenu';
 import { relativeTime } from '../../utils/taskDisplay';
-import { originModule } from './issueOrigin';
+import { originModule, originPath, parseOriginId } from './issueOrigin';
+import {
+  dueBucket,
+  parseStageMirror,
+  readDueDate,
+  useIssueFlows,
+  type IssueFlowData,
+} from './issueFlow';
+import { IssueFlowStrip } from './IssueFlowStrip';
 import {
   type IssueScope,
   scopeClientFilter,
@@ -149,6 +157,12 @@ const StageRing: React.FC<{ current: number; total: number }> = ({ current, tota
   );
 };
 
+const DUE_CLASS: Record<'normal' | 'soon' | 'overdue', string> = {
+  normal: 'text-ink-500',
+  soon: 'text-amber-400 font-semibold',
+  overdue: 'text-rose-400 font-semibold',
+};
+
 interface IssueRowProps {
   issue: UiIssue;
   teamId: string;
@@ -156,12 +170,27 @@ interface IssueRowProps {
   parentLookup: Map<number, UiIssue>;
   /** In Group-by-Project mode the project is the header, so the row pill is redundant. */
   hideProjectPill?: boolean;
+  /** Global stage catalog + current-stage-by-project for the flow strip. */
+  flow: IssueFlowData;
 }
 
-const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentLookup, hideProjectPill }) => {
+const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentLookup, hideProjectPill, flow }) => {
   const moduleTag = originModule(issue.raw.origin_id, issue.raw.origin_kind);
   const initials = issue.assignee?.name.slice(0, 2).toUpperCase() ?? (issue.assignee_user_label?.slice(0, 2).toUpperCase() ?? '·');
   const parent = issue.parent_id ? parentLookup.get(issue.parent_id) : null;
+  // Flow strip: only stage-mirror issues (origin_kind='project_stage'). Current
+  // stage from the project's current_stage, falling back to the mirror's own
+  // stage when the project has none set yet.
+  const flowRef = parseStageMirror(issue.raw.origin_kind, issue.raw.origin_id);
+  const flowPath = flowRef
+    ? originPath(parseOriginId(issue.raw.origin_id)!, teamId)
+    : null;
+  const flowCurrentStageId = flowRef
+    ? flow.currentByProject.get(flowRef.projectId)?.id ?? flowRef.stageId
+    : null;
+  // Due date is pre-baked: the column lands with the workflow session, so this
+  // is null (renders nothing) until then.
+  const due = dueBucket(readDueDate(issue.raw));
   // An agent is actively working this issue: dispatched to a DBOS workflow and
   // not yet in a terminal state. Surfaces as an amber pulse (data already on
   // the row — no extra fetch).
@@ -213,6 +242,21 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
         >
           <span className={`w-1.5 h-1.5 rounded-full ${issue.project.color ?? 'bg-ink-500'}`} />
           {issue.project.name}
+        </span>
+      )}
+      {flowRef && flowPath && flowCurrentStageId && (
+        <IssueFlowStrip
+          catalog={flow.catalog}
+          currentStageId={flowCurrentStageId}
+          to={flowPath}
+        />
+      )}
+      {due && (
+        <span
+          data-testid="issue-due"
+          className={`hidden sm:inline text-[12px] tabular-nums whitespace-nowrap shrink-0 ${DUE_CLASS[due.kind]}`}
+        >
+          {due.label}
         </span>
       )}
       {visibleCols.has('assignee') && (issue.assignee || issue.assignee_user_label) && (
@@ -331,6 +375,9 @@ const IssuePipeline: React.FC<{
 
 export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, error, viewMode, onViewModeChange, onNewIssue, onRefresh, agents, currentUserId, scope, teamName, projectName, projectStage, onCreateProject }) => {
   const { teamId } = useParams<{ teamId: string }>();
+  // Flow-progress data for stage-mirror rows: batch-loads the global catalog +
+  // each mirrored project's current stage (deduped + cached in issueFlow.ts).
+  const flow = useIssueFlows(issues);
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<IssueFilters>(EMPTY_FILTERS);
   const [columnPickerOpen, setColumnPickerOpen] = useState(false);
@@ -862,6 +909,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
                             visibleCols={visibleCols}
                             parentLookup={parentLookup}
                             hideProjectPill
+                            flow={flow}
                           />
                         ))}
                       </div>
@@ -911,6 +959,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
                   teamId={teamId ?? ''}
                   visibleCols={visibleCols}
                   parentLookup={parentLookup}
+                  flow={flow}
                 />
               ))}
             </div>
