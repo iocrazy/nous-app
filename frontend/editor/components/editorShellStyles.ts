@@ -1832,23 +1832,18 @@ export const EDITOR_SHELL_STYLES = `
    min-content width blows the column past the right island and cards paint over
    the writing panel (same class of bug as the sheet's minmax(0,1fr) fix). */
 .mh-beats-pane{ flex:1; min-width:0; display:flex; flex-direction:column; min-height:0; }
-/* laper parity: the sub-view segmented sits top-centre of the pane. */
-/* laper topbar: count left · segmented dead-centre (absolute, so the right
-   controls can't skew it) · Add right. */
-.mh-beats-subview{
-  flex:0 0 auto; padding:12px 24px 8px; display:flex; align-items:center;
-  justify-content:space-between; position:relative;
-}
+/* The Arrangement/List sub-view switch now lives in the shell top-bar tab slot
+   (shared .mh-doc-tabs), so the Beats pane no longer draws its own segmented row
+   — the old .mh-beats-subview / .mh-beats-seg rules were removed with it.
+   "+ Add beat" moved into the Arrangement toolbar's right group (see
+   .mh-arr-topbar-right); its ink pill is sized to sit level with the zoom pill. */
 .mh-beats-add-ink{
+  display:inline-flex; align-items:center; height:34px; padding:0 16px;
   font-family:var(--sans); font-size:12px; font-weight:700; color:var(--pill-ink-on);
-  background:var(--pill-ink-bg); border:none; border-radius:999px; padding:7px 16px;
-  cursor:pointer; line-height:1;
+  background:var(--pill-ink-bg); border:none; border-radius:999px;
+  cursor:pointer; line-height:1; white-space:nowrap;
 }
 .mh-beats-add-ink:hover{ opacity:0.88; }
-/* Top-LEFT, matching where the script view's doc tabs sit (user verdict
-   2026-07-20) — the space-between row puts Add on the right naturally. */
-.mh-beats-seg{ display:inline-flex; width:max-content; }
-.mh-beats-seg .mh-seg{ flex:0 0 auto; padding:6px 20px; }
 .mh-beats-pane > .mh-beats-view,
 .mh-beats-pane > .mh-arr-root{ flex:1; min-height:0; }
 
@@ -2053,6 +2048,9 @@ export const EDITOR_SHELL_STYLES = `
 /* In-flow toolbar row (absolute over the canvas covered the ruler labels).
    Left group = length + methodology tools, right group = zoom. */
 .mh-arr-topbar{ display:flex; justify-content:space-between; align-items:center; gap:8px; padding:0 6px 8px; flex:0 0 auto; }
+/* Right cluster of the Arrangement toolbar: the ink "+ Add beat" pill sits just
+   left of the Fit/zoom pill, both pushed right by the topbar's space-between. */
+.mh-arr-topbar-right{ display:flex; align-items:center; gap:8px; }
 .mh-arr-tools{
   display:flex; align-items:center; gap:2px;
   background:var(--surface); border:1px solid var(--surface-border); border-radius:10px;
