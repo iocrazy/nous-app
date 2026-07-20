@@ -6,27 +6,15 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# PG INTEGER ceiling — asyncpg binds anchor_sec strictly, so a client value
-# beyond this must be rejected at the boundary, not clipped by the DB.
-_INT4_MAX = 2_147_483_647
-
 
 class NoteCreateIn(BaseModel):
     content_md: str = Field(..., max_length=100_000)
     ref_hotspot: Optional[Dict[str, Any]] = None
-    # Beats M4 timeline anchor (both together, or neither). anchor_script_id is a
-    # Snowflake bigint carried as a string so JS never loses precision.
-    anchor_script_id: Optional[str] = None
-    anchor_sec: Optional[int] = Field(None, ge=0, le=_INT4_MAX)
 
 
 class NoteUpdateIn(BaseModel):
     content_md: Optional[str] = Field(None, max_length=100_000)
     pinned: Optional[bool] = None
-    # Explicit null clears the anchor (un-pin from the timeline); an absent field
-    # leaves it untouched (true PATCH semantics via model_fields_set in the router).
-    anchor_script_id: Optional[str] = None
-    anchor_sec: Optional[int] = Field(None, ge=0, le=_INT4_MAX)
 
 
 class AttachmentOut(BaseModel):
@@ -45,8 +33,6 @@ class NoteOut(BaseModel):
     ref_hotspot: Optional[Dict[str, Any]] = None
     pinned: bool
     note_date: str
-    anchor_script_id: Optional[str] = None
-    anchor_sec: Optional[int] = None
     created_at: str
     updated_at: str
     attachments: List[AttachmentOut] = []

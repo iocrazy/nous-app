@@ -22,7 +22,6 @@ from app.repositories.api_key_repository import get_api_key_repository
 from app.repositories.inspiration_attachments_repository import (
     get_inspiration_attachments_repository,
 )
-from app.repositories.inspiration_repository import _UNSET
 from app.schemas.inspiration import (
     ApiTokenCreated,
     ApiTokenCreateIn,
@@ -126,7 +125,6 @@ async def list_notes(
     q: Optional[str] = None,
     limit: int = 50,
     before_id: Optional[str] = None,
-    anchor_script_id: Optional[str] = None,
     current_user: dict = Depends(get_current_user),
 ):
     if limit < 1 or limit > 200:
@@ -138,7 +136,6 @@ async def list_notes(
         q=q,
         limit=limit,
         before_id=before_id,
-        anchor_script_id=anchor_script_id,
     )
 
 
@@ -157,8 +154,6 @@ async def create_note(
         _uid(current_user),
         body.content_md,
         ref_hotspot=body.ref_hotspot,
-        anchor_script_id=body.anchor_script_id,
-        anchor_sec=body.anchor_sec,
     )
     if row is None:
         raise HTTPException(status_code=502, detail="note persistence failed")
@@ -169,20 +164,12 @@ async def create_note(
 async def update_note(
     note_id: str, body: NoteUpdateIn, current_user: dict = Depends(get_current_user)
 ):
-    # True PATCH: only anchor fields the client actually sent are forwarded. An
-    # absent field leaves the column untouched; an explicit null clears it
-    # (un-pin from the timeline). _UNSET is the "not sent" marker the repo reads.
-    fields = body.model_fields_set
-    anchor_script_id = body.anchor_script_id if "anchor_script_id" in fields else _UNSET
-    anchor_sec = body.anchor_sec if "anchor_sec" in fields else _UNSET
     try:
         row = await get_notes_service().update_note(
             _uid(current_user),
             note_id,
             content_md=body.content_md,
             pinned=body.pinned,
-            anchor_script_id=anchor_script_id,
-            anchor_sec=anchor_sec,
         )
     except NoteNotFound:
         raise HTTPException(status_code=404, detail="note not found")
