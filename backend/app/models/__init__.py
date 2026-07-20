@@ -171,6 +171,7 @@ from app.models.reviews import (  # noqa: F401
     UserNotifications,
 )
 from app.models.scripts import (  # noqa: F401
+    BeatMemos,
     BeatTemplates,
     Episodes,
     ProjectWorkflows,
@@ -326,6 +327,7 @@ __all__ = [
     "ReviewStatus",
     "UserNotifications",
     # scripts
+    "BeatMemos",
     "BeatTemplates",
     "Episodes",
     "ProjectWorkflows",
