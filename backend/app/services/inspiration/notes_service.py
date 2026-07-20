@@ -16,10 +16,7 @@ from app.db.session import maybe_unit_of_work
 from app.repositories.inspiration_attachments_repository import (
     get_inspiration_attachments_repository,
 )
-from app.repositories.inspiration_repository import (
-    _UNSET,
-    get_inspiration_notes_repository,
-)
+from app.repositories.inspiration_repository import get_inspiration_notes_repository
 from app.repositories.note_tags_repository import get_note_tags_repository
 from app.repositories.tags_repository import get_tags_repository
 from app.services.inspiration.note_tags import parse_tags
@@ -72,8 +69,6 @@ class NotesService:
         user_id: str,
         content_md: str,
         ref_hotspot: Optional[Dict[str, Any]] = None,
-        anchor_script_id: Optional[str] = None,
-        anchor_sec: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         # Single-connection save pipeline: the note-row INSERT, the tag-pool
         # resolve, and the note_tags junction sync all join ONE ambient
@@ -89,8 +84,6 @@ class NotesService:
                     tags=parse_tags(content_md),
                     note_date=_today_shanghai(),
                     ref_hotspot=ref_hotspot,
-                    anchor_script_id=anchor_script_id,
-                    anchor_sec=anchor_sec,
                 )
                 if row is None:
                     raise _NoteWriteAborted()
@@ -109,7 +102,6 @@ class NotesService:
         q: Optional[str],
         limit: int,
         before_id: Optional[str],
-        anchor_script_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         rows = await self._notes.list(
             user_id,
@@ -118,7 +110,6 @@ class NotesService:
             q=q,
             limit=limit,
             before_id=before_id,
-            anchor_script_id=anchor_script_id,
         )
         atts = (
             await self._attachments.list_for_notes([r["id"] for r in rows])
@@ -139,8 +130,6 @@ class NotesService:
         *,
         content_md: Optional[str] = None,
         pinned: Optional[bool] = None,
-        anchor_script_id: Any = _UNSET,
-        anchor_sec: Any = _UNSET,
     ) -> Optional[Dict[str, Any]]:
         await self._owned(user_id, note_id)
         tags = parse_tags(content_md) if content_md is not None else None
@@ -155,8 +144,6 @@ class NotesService:
                     content_md=content_md,
                     tags=tags,
                     pinned=pinned,
-                    anchor_script_id=anchor_script_id,
-                    anchor_sec=anchor_sec,
                 )
                 if row is None:
                     raise _NoteWriteAborted()

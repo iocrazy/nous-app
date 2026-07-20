@@ -592,6 +592,46 @@ class BeatTemplates(Base):
     )
 
 
+class BeatMemos(Base):
+    __tablename__ = "beat_memos"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["script_id"],
+            ["public.script_projects.id"],
+            ondelete="CASCADE",
+            name="beat_memos_script_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="beat_memos_pkey"),
+        Index("idx_beat_memos_script", "script_id", "anchor_sec"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    script_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Whole-second offset on the script's Beats arrangement timeline.
+    anchor_sec: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''::text")
+    )
+    # ≤4 object-store path strings (beats/memos/ prefix); the image serve route
+    # bounds reads by memo id + index, so bare paths are safe to store.
+    images: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+
+
 class ScriptOps(Base):
     __tablename__ = "script_ops"
     __table_args__ = (

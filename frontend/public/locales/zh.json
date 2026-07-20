@@ -3035,6 +3035,7 @@
     "coldStartSub": "创建第一个场景并开始写作。Tab 切换元素类型，Enter 添加下一行。",
     "createStory": "创建剧本",
     "beatAdd": "添加节拍",
+    "beatEmptyOr": "或",
     "beatDefaultTitle": "新节拍",
     "beatTitle": "节拍标题",
     "beatTitlePlaceholder": "节拍标题",

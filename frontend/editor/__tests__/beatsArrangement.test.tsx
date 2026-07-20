@@ -36,16 +36,16 @@ const scriptSvc = vi.hoisted(() => ({
 vi.mock('../../services/scriptService', () => scriptSvc);
 
 import { BeatsView } from '../beats/BeatsView';
-// M4: ArrangementView now hosts MemoRail, which reads AuthContext + the
-// inspiration notes API. Stub both so the timeline tests stay geometry-focused.
+// M5: ArrangementView now hosts MemoRail, which reads AuthContext + memoService.
+// Stub both so the timeline tests stay geometry-focused.
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ mediaToken: 'tok' }) }));
-vi.mock('../../services/inspirationService', () => ({
-  listAnchoredNotes: vi.fn().mockResolvedValue([]),
-  createNote: vi.fn(),
-  updateNote: vi.fn(),
-  deleteNote: vi.fn(),
-  uploadAttachment: vi.fn(),
-  attachmentUrlWithToken: (id: string) => `att/${id}`,
+vi.mock('../beats/memoService', () => ({
+  listMemos: vi.fn().mockResolvedValue([]),
+  createMemo: vi.fn(),
+  updateMemo: vi.fn(),
+  deleteMemo: vi.fn(),
+  uploadMemoImage: vi.fn(),
+  memoImageUrl: (s: string, m: string, i: number) => `img/${s}/${m}/${i}`,
 }));
 
 import { ArrangementView } from '../beats/ArrangementView';
@@ -112,6 +112,37 @@ describe('BeatsView sub-view toggle', () => {
 
     await waitFor(() => expect(screen.getByTestId('beats-view')).toBeInTheDocument());
     expect(screen.queryByTestId('beats-arrangement')).toBeNull();
+  });
+});
+
+describe('Arrangement empty state (M5 recompose)', () => {
+  it('shows one Add construct — ghost Add + template cards, no topbar Add', async () => {
+    svc.listBeats.mockResolvedValue([]);
+    render(<BeatsView scriptId="1" scenes={noScenes} onOpenScene={vi.fn()} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('beats-arrangement-empty')).toBeInTheDocument(),
+    );
+    // The methodology cards are the leading affordance.
+    expect(screen.getByTestId('beats-template-empty-cards')).toBeInTheDocument();
+    // Exactly one Add: the ghost in the empty state, NOT the topbar Add.
+    expect(screen.queryByTestId('beats-topbar-add')).toBeNull();
+    const add = screen.getByTestId('beats-add');
+    expect(add).toHaveClass('mh-beats-add-ghost');
+  });
+
+  it('creates the first beat from the empty-state Add', async () => {
+    svc.listBeats.mockResolvedValue([]);
+    render(<BeatsView scriptId="1" scenes={noScenes} onOpenScene={vi.fn()} />);
+    await screen.findByTestId('beats-arrangement-empty');
+    fireEvent.click(screen.getByTestId('beats-add'));
+    await waitFor(() =>
+      expect(svc.createBeat).toHaveBeenCalledWith('1', {
+        title: 'editor.beatDefaultTitle',
+        start_sec: 0,
+        duration_sec: 60,
+      }),
+    );
   });
 });
 

@@ -34,15 +34,15 @@ const scriptSvc = vi.hoisted(() => ({
 }));
 vi.mock('../../services/scriptService', () => scriptSvc);
 
-// M4: ArrangementView (under BeatsView) hosts MemoRail — stub its Auth + notes deps.
+// M5: ArrangementView (under BeatsView) hosts MemoRail — stub its Auth + memo deps.
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ mediaToken: 'tok' }) }));
-vi.mock('../../services/inspirationService', () => ({
-  listAnchoredNotes: vi.fn().mockResolvedValue([]),
-  createNote: vi.fn(),
-  updateNote: vi.fn(),
-  deleteNote: vi.fn(),
-  uploadAttachment: vi.fn(),
-  attachmentUrlWithToken: (id: string) => `att/${id}`,
+vi.mock('../beats/memoService', () => ({
+  listMemos: vi.fn().mockResolvedValue([]),
+  createMemo: vi.fn(),
+  updateMemo: vi.fn(),
+  deleteMemo: vi.fn(),
+  uploadMemoImage: vi.fn(),
+  memoImageUrl: (s: string, m: string, i: number) => `img/${s}/${m}/${i}`,
 }));
 const tplSvc = vi.hoisted(() => ({
   listBeatTemplates: vi.fn(),

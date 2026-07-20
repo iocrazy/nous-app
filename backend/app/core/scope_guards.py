@@ -280,6 +280,25 @@ async def verify_beat_access(
     await _assert_script_team_access(str(beat.get("script_id")), auth.user_id)
 
 
+async def verify_memo_access(
+    memo_id: str,
+    auth: AuthContext = Depends(get_auth),
+) -> None:
+    """Guard for `/memos/{memo_id}` targets — resolves memo → script_id, then
+    applies the same team check (404 if the memo is missing).
+
+    A one-hop wrapper over the script team check for the memo-scoped routes
+    (PATCH/DELETE `/memos/{memo_id}`) that have no ``script_id`` in the path. The
+    ``str()`` coercion in ``_assert_script_team_access`` handles the #1006 trap
+    (the row's ``script_id`` is a native int, the guard compares as str)."""
+    from app.repositories.beat_memo_repository import get_beat_memo_repository
+
+    memo = await get_beat_memo_repository().get_by_id(memo_id)
+    if not memo:
+        raise HTTPException(status_code=404, detail="Memo not found")
+    await _assert_script_team_access(str(memo.get("script_id")), auth.user_id)
+
+
 async def verify_beat_template_access(
     template_id: str,
     auth: AuthContext = Depends(get_auth),

@@ -3,22 +3,16 @@
  *
  * Opened by clicking the memo rail (create) or a pin's Edit (edit). Carries an
  * auto-filled timestamp chip, a post-style body textarea, up to four images, and
- * a Publish / Save action. Image upload reuses the inspiration-library
- * attachment link (createNote → uploadAttachment) — this component only collects
- * the File objects and hands them back; the rail owns the REST writes.
- *
- * Kept a thin controlled popover so the rail can unit-test the publish payload
- * (content + anchor) without a live upload.
+ * a Publish / Save action. This component only collects the File objects and
+ * hands them back on submit; the rail owns the memo REST writes (uploadMemoImage
+ * → createMemo/updateMemo). Existing images (edit mode) arrive as pre-built,
+ * token-bearing URLs so this stays a thin controlled popover the rail can
+ * unit-test without a live upload.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ImagePlus, Trash2, X } from 'lucide-react';
 
-import { useAuth } from '../../contexts/AuthContext';
-import {
-  attachmentUrlWithToken,
-  type NoteAttachment,
-} from '../../services/inspirationService';
 import { formatAnchorSec } from './memoGeometry';
 
 /** Max images per memo (spec: ≤4). Existing + pending are counted together. */
@@ -31,22 +25,16 @@ interface Props {
   /** Left position (px) of the card within the rail. */
   x: number;
   initialContent?: string;
-  /** Existing attachments (edit mode) — shown as removable-free thumbnails. */
-  attachments?: NoteAttachment[];
+  /** Pre-built URLs for existing memo images (edit mode). */
+  existingImageUrls?: string[];
   busy?: boolean;
-  /** create: publish a brand-new anchored memo. */
+  /** create: publish a brand-new memo. */
   onPublish?: (content: string, files: File[]) => void;
   /** edit: save content + any newly added images. */
   onSave?: (content: string, files: File[]) => void;
-  /** edit: drop the timeline anchor but keep the library note. */
-  onUnpin?: () => void;
-  /** edit: delete the note outright. */
+  /** edit: delete the memo outright. */
   onDelete?: () => void;
   onClose: () => void;
-}
-
-function isImage(mime: string): boolean {
-  return mime.startsWith('image/');
 }
 
 export function MemoQuickCard({
@@ -54,25 +42,18 @@ export function MemoQuickCard({
   sec,
   x,
   initialContent = '',
-  attachments = [],
+  existingImageUrls = [],
   busy = false,
   onPublish,
   onSave,
-  onUnpin,
   onDelete,
   onClose,
 }: Props) {
   const { t } = useTranslation();
-  const { mediaToken } = useAuth();
   const [content, setContent] = useState(initialContent);
   const [files, setFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-
-  const existingImages = useMemo(
-    () => attachments.filter((a) => isImage(a.mime)),
-    [attachments],
-  );
 
   // Object URLs for pending file previews — revoked on change/unmount.
   const previews = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
@@ -87,11 +68,13 @@ export function MemoQuickCard({
     textareaRef.current?.focus();
   }, []);
 
-  const remaining = MEMO_MAX_IMAGES - existingImages.length - files.length;
+  const remaining = MEMO_MAX_IMAGES - existingImageUrls.length - files.length;
 
   const onPickFiles = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const picked = Array.from(e.target.files ?? []).filter((f) => isImage(f.type));
+      const picked = Array.from(e.target.files ?? []).filter((f) =>
+        f.type.startsWith('image/'),
+      );
       if (picked.length) setFiles((prev) => [...prev, ...picked].slice(0, MEMO_MAX_IMAGES));
       e.target.value = ''; // allow re-picking the same file
     },
@@ -141,15 +124,10 @@ export function MemoQuickCard({
         rows={3}
       />
 
-      {(existingImages.length > 0 || files.length > 0) && (
+      {(existingImageUrls.length > 0 || files.length > 0) && (
         <div className="mh-memo-quick-thumbs" data-testid="memo-quick-thumbs">
-          {existingImages.map((a) => (
-            <img
-              key={a.id}
-              className="mh-memo-quick-thumb"
-              src={attachmentUrlWithToken(a.id, mediaToken ?? undefined)}
-              alt={a.original_name}
-            />
+          {existingImageUrls.map((url) => (
+            <img key={url} className="mh-memo-quick-thumb" src={url} alt="" />
           ))}
           {previews.map((url, i) => (
             <span key={url} className="mh-memo-quick-thumb-wrap">
@@ -191,25 +169,15 @@ export function MemoQuickCard({
         </button>
         <span className="mh-memo-quick-foot-spacer" />
         {mode === 'edit' && (
-          <>
-            <button
-              type="button"
-              className="mh-memo-quick-ghost"
-              data-testid="memo-quick-delete"
-              onClick={onDelete}
-              aria-label={t('editor.memoDelete')}
-            >
-              <Trash2 size={14} />
-            </button>
-            <button
-              type="button"
-              className="mh-memo-quick-ghost"
-              data-testid="memo-quick-unpin"
-              onClick={onUnpin}
-            >
-              {t('editor.memoUnpin')}
-            </button>
-          </>
+          <button
+            type="button"
+            className="mh-memo-quick-ghost"
+            data-testid="memo-quick-delete"
+            onClick={onDelete}
+            aria-label={t('editor.memoDelete')}
+          >
+            <Trash2 size={14} />
+          </button>
         )}
         <button
           type="button"

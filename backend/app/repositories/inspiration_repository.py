@@ -24,20 +24,11 @@ from sqlalchemy import update as sa_update
 from app.db.session import read_scope, write_scope
 from app.models import InspirationNotes
 
-# Sentinel telling ``update`` a field was not supplied at all (leave the column
-# untouched) — distinct from an explicit ``None`` (clear the column).
-_UNSET: Any = object()
-
 
 def _bigint(value: Any) -> int:
     if isinstance(value, int):
         return value
     return int(str(value))
-
-
-def _bigint_or_none(value: Any) -> Optional[int]:
-    """Coerce a nullable bigint bind value; None passes through."""
-    return None if value is None else _bigint(value)
 
 
 def _date(value: Any) -> datetime.date:
@@ -77,8 +68,6 @@ class InspirationNotesRepository:
         tags: List[str],
         note_date: str,
         ref_hotspot: Optional[Dict[str, Any]] = None,
-        anchor_script_id: Optional[Any] = None,
-        anchor_sec: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         try:
             async with write_scope() as session:
@@ -87,8 +76,6 @@ class InspirationNotesRepository:
                     content_md=content_md,
                     tags=tags,
                     note_date=_date(note_date),
-                    anchor_script_id=_bigint_or_none(anchor_script_id),
-                    anchor_sec=(None if anchor_sec is None else int(anchor_sec)),
                 )
                 if ref_hotspot is not None:
                     obj.ref_hotspot = ref_hotspot
@@ -131,25 +118,12 @@ class InspirationNotesRepository:
         q: Optional[str] = None,
         limit: int = 50,
         before_id: Optional[Any] = None,
-        anchor_script_id: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         try:
             stmt = select(InspirationNotes).where(
                 InspirationNotes.user_id == user_id,
                 InspirationNotes.deleted_at.is_(None),
             )
-            if anchor_script_id is not None:
-                # Memo-rail query: every note this user has pinned to a script's
-                # beats timeline (any offset). The partial index backs this.
-                stmt = stmt.where(
-                    InspirationNotes.anchor_script_id == _bigint(anchor_script_id)
-                )
-            else:
-                # User verdict (2026-07-19): timeline memos are INTERFACE-LOCAL,
-                # laper-style — they must never surface in the inspiration
-                # library. The default (library) list therefore excludes every
-                # anchored note; only the memo-rail query above sees them.
-                stmt = stmt.where(InspirationNotes.anchor_script_id.is_(None))
             if date:
                 stmt = stmt.where(InspirationNotes.note_date == _date(date))
             if tag:
@@ -174,8 +148,6 @@ class InspirationNotesRepository:
         content_md: Optional[str] = None,
         tags: Optional[List[str]] = None,
         pinned: Optional[bool] = None,
-        anchor_script_id: Any = _UNSET,
-        anchor_sec: Any = _UNSET,
     ) -> Optional[Dict[str, Any]]:
         try:
             values: Dict[str, Any] = {"updated_at": datetime.datetime.now(timezone.utc)}
@@ -185,12 +157,6 @@ class InspirationNotesRepository:
                 values["tags"] = tags
             if pinned is not None:
                 values["pinned"] = pinned
-            # Anchor: _UNSET = leave the column; explicit None = clear it
-            # (un-pin); a value = set/move it.
-            if anchor_script_id is not _UNSET:
-                values["anchor_script_id"] = _bigint_or_none(anchor_script_id)
-            if anchor_sec is not _UNSET:
-                values["anchor_sec"] = None if anchor_sec is None else int(anchor_sec)
             async with write_scope() as session:
                 result = await session.execute(
                     sa_update(InspirationNotes)
