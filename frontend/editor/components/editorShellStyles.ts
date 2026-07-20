@@ -693,6 +693,10 @@ export const EDITOR_SHELL_STYLES = `
 .mh-el-editable:has(br.ProseMirror-trailingBreak)::before{
   content:attr(data-placeholder); color:var(--sheet-ink-soft); font-style:italic;
   position:absolute; left:0; top:0; pointer-events:none;
+  /* The asian cue shrink-wraps, so an EMPTY one is ~0 wide and the overlay
+     inherits that box — the hint wrapped letter-per-line down the margin.
+     A placeholder is one word; never let it wrap. */
+  white-space:nowrap;
 }
 .mh-el-row.focused .mh-el-editable{
   box-shadow:0 0 0 2px color-mix(in srgb, var(--indigo) 32%, transparent);
@@ -2529,6 +2533,16 @@ export const EDITOR_SHELL_STYLES = `
 .mh-el-editable[data-el-type='comment']:has(br.ProseMirror-trailingBreak)::before{ content:'Comment'; }
 .mh-el-editable[data-el-type='subtitle']:empty::before,
 .mh-el-editable[data-el-type='subtitle']:has(br.ProseMirror-trailingBreak)::before{ content:'Subtitle'; }
+/* The hollywood cue is CENTERED (text-align:center above) but the placeholder
+   overlay is pinned left:0 — an empty cue showed its caret mid-line with the
+   "Character" whisper orphaned at the page's left edge (read as "no hint at
+   all"). Stretch the overlay across the row and centre its text so the hint
+   sits under the caret, laper-style. Asian cues stay text-align:left, so the
+   base left:0 overlay already lines up there. */
+.mh-el-editable.hw-character:empty::before,
+.mh-el-editable.hw-character:has(br.ProseMirror-trailingBreak)::before{
+  left:0; right:0; text-align:center;
+}
 /* 2) Hover tints were the COOL chrome surface (--surface-2, lavender) sitting
       on the WARM paper — read as a wrong-coloured box. Warm ink-mix tints
       instead (the heading tokens carry their own hover — see .mh-scene-select). */
