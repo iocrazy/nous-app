@@ -2332,7 +2332,21 @@ export const EDITOR_SHELL_STYLES = `
 .hw-character:not(:has(br.ProseMirror-trailingBreak)) > *{
   display:inline-block; padding:2px 12px; border-radius:999px;
   background:color-mix(in srgb, var(--sheet-ink) 7%, transparent);
+  /* Clicking the pill opens the cast picker — advertise it like a link. The
+     blank space to the RIGHT of the pill (the rest of the editable) keeps the
+     text cursor: clicking there only places a caret. */
+  cursor:pointer;
 }
+/* An EMPTY cue is pure affordance (any click opens the picker — see the
+   editor's click fallback), so the whole line reads as clickable. Both
+   engines, both formats: hw-character / as-character ride the same editable. */
+.mh-el-editable[data-el-type='character']:empty,
+.mh-el-editable[data-el-type='character']:has(br.ProseMirror-trailingBreak){
+  cursor:pointer;
+}
+/* The asian cue shrink-wraps to its name, and clicking the name opens the
+   picker there too. */
+.as-character:not(:has(br.ProseMirror-trailingBreak)) > *{ cursor:pointer; }
 /* The dot rides the pill's ::before (a pseudo — never in the doc, so the caret
    can't land on it), gated on .cue-has-dot (set by the NodeView only when the
    name resolved to a rail colour) so an unknown cue wastes no leading space. */

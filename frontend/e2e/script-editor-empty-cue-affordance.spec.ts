@@ -163,6 +163,11 @@ test('hollywood: the focused empty cue shows a CENTERED "Character" whisper', as
   expect(overlay.textAlign).toBe('center');
   expect(overlay.left).toBe('0px');
   expect(overlay.right).toBe('0px');
+
+  // The empty cue is a button in disguise (click → cast picker): it must
+  // advertise with a pointer cursor, not the text caret (laper parity).
+  const cursor = await emptyRow(page).evaluate((el) => getComputedStyle(el).cursor);
+  expect(cursor).toBe('pointer');
 });
 
 test('asian: the focused empty cue keeps its LEFT-aligned whisper', async ({ page }) => {
