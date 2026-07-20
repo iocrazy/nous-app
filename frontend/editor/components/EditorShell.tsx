@@ -247,6 +247,9 @@ export function EditorShell({
   const sheetScrollRef = useRef<HTMLDivElement | null>(null);
   const cursorRef = useRef<CursorState | null>(null);
   const nonceRef = useRef(0);
+  // Guards the toolbar Scene button against rapid re-clicks minting a blank
+  // scene per click (see handleInsertScene).
+  const insertingSceneRef = useRef(false);
   const scenesRef = useRef<SceneDoc[]>(scenes);
   cursorRef.current = state.cursor;
   scenesRef.current = scenes;
@@ -685,6 +688,12 @@ export function EditorShell({
   );
 
   const handleInsertScene = useCallback(async () => {
+    // Single-flight: create→move→reload takes ~1s and the button gives no
+    // feedback, so an impatient writer clicks again — every extra click minted
+    // another empty scene (prod evidence 2026-07-15: 13 blank scenes in 19s,
+    // 4 within one second). Ignore clicks while one create is in flight.
+    if (insertingSceneRef.current) return;
+    insertingSceneRef.current = true;
     try {
       // createScene only positions by sort_order (appends), so create then move
       // the new scene to sit right AFTER the scene the cursor is in — inserting
@@ -703,6 +712,8 @@ export function EditorShell({
       await reload();
     } catch (err) {
       console.error('[EditorShell] createScene failed', err);
+    } finally {
+      insertingSceneRef.current = false;
     }
   }, [scriptId, scenes.length, state.cursor?.sceneId, state.activeSceneId, reload]);
 
@@ -710,6 +721,10 @@ export function EditorShell({
   // documented ops endpoint — createScene does not accept initial elements), so
   // the writer lands on a real, focusable, Tab-ready line.
   const handleCreateStory = useCallback(async () => {
+    // Same single-flight guard as handleInsertScene — a double-click on the
+    // empty-state button minted two first scenes.
+    if (insertingSceneRef.current) return;
+    insertingSceneRef.current = true;
     try {
       const created = await createScene(scriptId, { sort_order: 0 });
       const elementId = newElementId();
@@ -725,6 +740,8 @@ export function EditorShell({
       setPendingFocusId(elementId);
     } catch (err) {
       console.error('[EditorShell] create story failed', err);
+    } finally {
+      insertingSceneRef.current = false;
     }
   }, [scriptId, reload, setActiveScene]);
 
