@@ -326,8 +326,23 @@ export function SceneBlock({
   // Filtered candidates for the open picker; kept in a ref so the keydown
   // handler (a stable callback) reads the latest list without re-subscribing.
   // The transition preset picker rides the same pipeline with its own list.
-  const activeMentionCandidates =
-    mention?.kind === 'transition' ? TRANSITION_PRESETS : mentionCandidates;
+  const activeMentionCandidates = useMemo(() => {
+    if (mention?.kind === 'transition') return TRANSITION_PRESETS;
+    // Character cue: hoist the clicked cue's OWN name to the top so it leads the
+    // (empty-query) list and becomes the initial highlight — laper parity — with
+    // every other cast member keeping its existing order. A no-op when the cue is
+    // empty (nothing to hoist) or its name isn't in the cast yet (fall through to
+    // the plain list). Both the popup and the keyboard-nav entries read this list,
+    // so they stay in lockstep.
+    if (mention?.kind === 'character') {
+      const current = sync.elements.find((e) => e.id === mention.elementId)?.text.trim();
+      if (current) {
+        const match = mentionCandidates.find((c) => c.toUpperCase() === current.toUpperCase());
+        if (match) return [match, ...mentionCandidates.filter((c) => c !== match)];
+      }
+    }
+    return mentionCandidates;
+  }, [mention, mentionCandidates, sync.elements]);
   // The picker's navigable rows — filtered cast PLUS a synthetic "create" row
   // for a character cue whose typed name matches nothing exactly (location-field
   // parity). Enter on that row writes the new name, which IS how a character is
