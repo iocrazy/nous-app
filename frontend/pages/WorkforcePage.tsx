@@ -498,7 +498,7 @@ function stateClass(state: string): string {
     case 'idle':
       return 'bg-ink-800/60 text-ink-300';
     case 'working':
-      return 'bg-indigo-500/15 text-indigo-300';
+      return 'bg-[var(--accent-soft)] text-[var(--accent-text)]';
     case 'paused':
       return 'bg-amber-500/15 text-amber-300';
     case 'blocked':

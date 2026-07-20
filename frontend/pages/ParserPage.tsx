@@ -341,7 +341,7 @@ export function ParserPage() {
               <div className={`w-8 h-8 md:w-10 md:h-10 rounded-lg flex items-center justify-center mb-2 ${
                 systemStatus?.queue.status === 'offline'
                   ? 'bg-red-900/30 text-red-400' :
-                activeTasks.length > 0 ? 'bg-indigo-900/30 text-indigo-400' : 'bg-ink-800/50 text-ink-500'
+                activeTasks.length > 0 ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'bg-ink-800/50 text-ink-500'
               }`}>
                 <ListVideo size={16} className="md:hidden" />
                 <ListVideo size={20} className="hidden md:block" />

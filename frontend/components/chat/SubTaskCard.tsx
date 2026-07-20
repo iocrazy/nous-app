@@ -238,9 +238,9 @@ export function SubTaskCard({ call }: SubTaskCardProps): React.ReactElement {
   const accent = isError
     ? 'text-red-400 bg-red-500/10 border-red-500/30'
     : isInFlight
-      ? 'text-indigo-300 bg-indigo-500/15 border-indigo-500/40'
+      ? 'text-[var(--accent-text)] bg-[var(--accent-soft)] border-[var(--accent-border)]'
       : call.name === 'Delegate'
-        ? 'text-indigo-300 bg-indigo-500/10 border-indigo-500/30'
+        ? 'text-[var(--accent-text)] bg-[var(--accent-soft)] border-[var(--accent-border)]'
         : 'text-amber-300 bg-amber-500/10 border-amber-500/30';
 
   return (

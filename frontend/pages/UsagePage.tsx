@@ -354,7 +354,7 @@ const SummaryCards: React.FC<{ data: UsageAggregate }> = ({ data }) => {
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
       <SummaryCard
         icon={<ListChecks size={18} />}
-        tint="text-indigo-300 bg-indigo-500/10"
+        tint="text-[var(--accent-text)] bg-[var(--accent-soft)]"
         label={t('aiUsage.totalRuns', 'Total runs')}
         value={data.total_runs.toLocaleString()}
       />
@@ -512,7 +512,7 @@ const StatTiles: React.FC<{ summary: UsageDailySummary }> = ({ summary }) => {
       />
       <SummaryCard
         icon={<ListChecks size={18} />}
-        tint="text-indigo-300 bg-indigo-500/10"
+        tint="text-[var(--accent-text)] bg-[var(--accent-soft)]"
         label={t('aiUsage.statRequests', 'Requests')}
         value={summary.total_requests.toLocaleString()}
       />

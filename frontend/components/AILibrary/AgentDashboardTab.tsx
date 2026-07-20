@@ -83,7 +83,7 @@ function statusBadgeClass(status: string): string {
     case 'running':
     case 'in_progress':
     case 'assigned':
-      return 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30';
+      return 'bg-[var(--accent-soft)] text-[var(--accent-text)] border-[var(--accent-border)]';
     case 'cancelled':
       return 'bg-ink-500/15 text-ink-300 border-ink-500/30';
     case 'queued':
