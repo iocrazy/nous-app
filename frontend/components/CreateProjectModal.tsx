@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, FolderPlus, GitBranch } from 'lucide-react';
+import { X, FolderPlus, GitBranch, Target } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { createProject } from '../services/projectsService';
 import { fetchMyTeams } from '../services/teamService';
@@ -24,6 +24,12 @@ interface CreateProjectModalProps {
    * strings (Snowflake-safe).
    */
   defaultTeamId?: string;
+  /**
+   * Ideation (M1.5): when the modal is opened from a topic, its id is stamped
+   * onto the new project (projects.topic_id) and the title pre-fills the name.
+   */
+  topicId?: string;
+  topicTitle?: string;
 }
 
 export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
@@ -31,6 +37,8 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   onClose,
   onProjectCreated,
   defaultTeamId = '',
+  topicId,
+  topicTitle,
 }) => {
   const { t } = useTranslation();
   const [name, setName] = useState('');
@@ -54,8 +62,11 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
       // Re-sync the pre-selected team each time the modal opens so switching
       // workspaces between opens picks up the new default.
       setTeamId(defaultTeamId);
+      // Ideation: seed the name from the source topic's title (name is capped
+      // at 30 chars, same as the input's slice).
+      if (topicTitle) setName(topicTitle.slice(0, 30));
     }
-  }, [isOpen, defaultTeamId]);
+  }, [isOpen, defaultTeamId, topicTitle]);
 
   // Load the selected team's workflow templates; default to its Short-form
   // (the seeded is_default). Personal workspace (no team) → no templates.
@@ -112,6 +123,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         announcement: announcement.trim() || undefined,
         workflow_template_id: workflowTemplateId || null,
         workflow_method: workflowTemplateId ? workflowMethod : null,
+        topic_id: topicId || undefined,
       });
       onProjectCreated(project);
       resetForm();
@@ -171,6 +183,19 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {/* From-topic provenance chip (Ideation M1.5) */}
+          {topicId && topicTitle && (
+            <div
+              data-testid="from-topic-chip"
+              className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs text-[var(--accent-text)]"
+            >
+              <Target size={12} className="shrink-0" />
+              <span className="truncate">
+                {t('projects.ideation.fromTopic', 'From topic')}: {topicTitle}
+              </span>
+            </div>
+          )}
+
           {/* Name */}
           <div>
             <div className="flex justify-between mb-2">

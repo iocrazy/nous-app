@@ -51,6 +51,8 @@ export const createProject = async (data: {
   workflow_template_id?: string | null;
   /** Node-preset shortcut applied at instantiation. */
   workflow_method?: 'live' | 'ai' | 'hybrid' | null;
+  // Ideation (M1.5): create-from-topic stamps the source topic id.
+  topic_id?: string;
 }): Promise<Project> => {
   const response = await apiClient.post<Envelope<Project>>(
     '/api/v1/projects',

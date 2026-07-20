@@ -695,6 +695,9 @@ export interface Project {
   file_count: number;
   display_code?: string;
   modules_enabled?: string[];
+  // Ideation (M1.5): the topics.id this project was created from (soft
+  // pointer, null for a from-scratch project).
+  topic_id?: string | null;
   created_at: string;
   updated_at: string;
   // Card enrichment (Phase B B1) — batch-derived on the list endpoint;
@@ -702,6 +705,36 @@ export interface Project {
   current_stage?: ProjectCardStage | null;
   members_preview?: ProjectMembersPreview | null;
   latest_activity?: ProjectCardActivity | null;
+}
+
+// ── Ideation topic pool (M1.5) ───────────────────────────────────────────────
+
+export type TopicStatus = 'candidate' | 'shortlisted' | 'produced' | 'archived';
+
+/** Which library a topic's reference points back to (the "回源" target).
+ *  'blank' = a hand-written topic with no source. */
+export type TopicSource =
+  | 'inspiration'
+  | 'topic'
+  | 'library'
+  | 'blank';
+
+/** One ideation-pool topic = cover + title + reference (spec §1 / §9). The
+ *  reference is a soft pointer to at most one source; ids stay strings. */
+export interface Topic {
+  id: string;
+  team_id: string;
+  title: string;
+  cover_url: string | null;
+  excerpt: string | null;
+  status: TopicStatus;
+  note_id: string | null;
+  resource_id: string | null;
+  media_id: string | null;
+  inspiration_topic_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ProjectCardStage {

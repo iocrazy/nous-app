@@ -1,14 +1,15 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Project, ProjectFile, RecentItem } from '../types';
+import { Project, ProjectFile, RecentItem, Topic } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useWorkspaceScope } from '../hooks/useWorkspaceScope';
 import { fetchProjects, fetchRecentItems } from '../services/projectsService';
 import { ProjectsListView } from '../components/ProjectsListView';
-import { ProjectFilterSidebar, WORKFLOW_TEMPLATES_FILTER } from '../components/project/ProjectFilterSidebar';
+import { ProjectFilterSidebar, WORKFLOW_TEMPLATES_FILTER, IDEATION_FILTER } from '../components/project/ProjectFilterSidebar';
 import { WorkflowTemplateEditor } from '../components/workflow/WorkflowTemplateEditor';
+import { IdeationBoard } from '../components/ideation/IdeationBoard';
 import { RecentItemsList } from '../components/project/RecentItemsList';
 import { VideoReviewPage } from '../components/VideoReviewPage';
 import { CreateProjectModal } from '../components/CreateProjectModal';
@@ -30,6 +31,8 @@ export function ProjectsPage() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [reviewFile, setReviewFile] = useState<ProjectFile | null>(null);
   const [isCreateProjectModalOpen, setIsCreateProjectModalOpen] = useState(false);
+  // Ideation → Create project: the source topic seeds the modal (name + topic_id).
+  const [createFromTopic, setCreateFromTopic] = useState<Topic | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeFilter, setActiveFilter] = useState('all');
@@ -261,6 +264,14 @@ export function ProjectsPage() {
         <div className={'flex-1 min-w-0 h-full overflow-y-auto px-8 pt-3 pb-8'}>
           {activeFilter === WORKFLOW_TEMPLATES_FILTER ? (
             <WorkflowTemplateEditor teamId={effectiveTeamId} />
+          ) : activeFilter === IDEATION_FILTER ? (
+            <IdeationBoard
+              teamId={effectiveTeamId}
+              onCreateProjectFromTopic={(topic) => {
+                setCreateFromTopic(topic);
+                setIsCreateProjectModalOpen(true);
+              }}
+            />
           ) : activeFilter === 'recent' ? (
             <>
               <h2 className="text-lg font-semibold text-ink-100 mb-4">{filterTitle}</h2>
@@ -279,10 +290,16 @@ export function ProjectsPage() {
       </div>
       <CreateProjectModal
         isOpen={isCreateProjectModalOpen}
-        onClose={() => setIsCreateProjectModalOpen(false)}
+        onClose={() => {
+          setIsCreateProjectModalOpen(false);
+          setCreateFromTopic(null);
+        }}
         defaultTeamId={createDefaultTeamId}
+        topicId={createFromTopic?.id}
+        topicTitle={createFromTopic?.title}
         onProjectCreated={(project) => {
           setIsCreateProjectModalOpen(false);
+          setCreateFromTopic(null);
           setSelectedProject(project);
           refreshProjects();
           navigate(teamId ? `/team/${teamId}/projects/${project.id}` : `/projects/${project.id}`);
