@@ -353,6 +353,13 @@ class Projects(Base):
             "Supersedes current_stage_id, which is retired in M2."
         ),
     )
+    topic_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        comment=(
+            "Ideation source (mig 382): the topics.id this project was created "
+            "from. Soft pointer (no FK) — one topic may spawn many projects."
+        ),
+    )
     archived_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
 
 

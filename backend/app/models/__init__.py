@@ -90,6 +90,9 @@ from app.models.distribution import (  # noqa: F401
 from app.models.generated_media import (  # noqa: F401
     GeneratedMedia,
 )
+from app.models.ideation import (  # noqa: F401
+    Topics,
+)
 from app.models.inspiration import (  # noqa: F401
     InspirationApiTokens,
     InspirationAttachments,
@@ -409,6 +412,8 @@ __all__ = [
     "TopicGroups",
     "UserHiddenSources",
     "UserTopicInterests",
+    # ideation topic pool (mig 382)
+    "Topics",
     # users
     "UserCookies",
     "UserMcpServers",
