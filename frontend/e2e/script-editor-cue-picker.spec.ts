@@ -11,8 +11,11 @@
 //             to edit), keyboard navigation into the line, typing in a line
 //             whose picker isn't already open
 //
-// Typing while the picker IS open still filters it — that path is the query
-// bridge, not an open trigger.
+// On open the search box is EMPTY (laper parity, user 2026-07-19): the picker
+// shows the whole cast with the clicked cue's own name hoisted to the top as the
+// initial highlight, rather than pre-filtering down to the current name. Typing
+// while the picker IS open still filters it — that path is the query bridge, not
+// an open trigger.
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { SCRIPT_URL, setupScriptStubs, wireScene, type WireElement, SCENE_ID_BASE } from './helpers/script-stubs';
@@ -91,12 +94,56 @@ async function open(page: Page, format: 'hollywood' | 'asian' = 'hollywood') {
   await page.waitForTimeout(500);
 }
 
-test('clicking the cue name opens the picker', async ({ page }) => {
+test('clicking the cue name opens the picker with an EMPTY query', async ({ page }) => {
   await open(page);
   const p = await textPoint(page, 0);
   expect(p, 'fixture must render character text to click').not.toBeNull();
   await page.mouse.click(p!.x, p!.y);
   await expect(picker(page)).toBeVisible();
+  // laper parity: the search box opens blank (not pre-filled with the clicked
+  // name), so the writer sees the full cast and can switch without clearing.
+  await expect(picker(page).locator('input')).toHaveValue('');
+  // The clicked cue's own name leads the list and is the initial highlight.
+  const firstOpt = picker(page).locator('.mh-mention-opt').first();
+  await expect(firstOpt).toHaveText('LIN XIAOMAN');
+  await expect(firstOpt).toHaveAttribute('aria-selected', 'true');
+});
+
+test('with several cast members, the clicked cue leads the list; typing still filters', async ({
+  page,
+}) => {
+  // A scene with TWO distinct cues in first-seen order [BRUCE, MARCUS].
+  const multi: WireElement[] = [
+    { id: 'el_m0001', type: 'action', text: 'The vault door groans open.' },
+    { id: 'el_m0002', type: 'character', text: 'BRUCE' },
+    { id: 'el_m0003', type: 'dialogue', text: 'Stay behind me.' },
+    { id: 'el_m0004', type: 'character', text: 'MARCUS' },
+    { id: 'el_m0005', type: 'dialogue', text: 'Not a chance.' },
+  ];
+  await setupScriptStubs(page, {
+    scenes: [wireScene({ id: SCENE_ID_BASE + 1, sortOrder: 1, location: 'VAULT', elements: multi })],
+  });
+  await page.goto(SCRIPT_URL);
+  await page.waitForSelector('[data-testid="scene-block"]', { timeout: 15_000 });
+  await page.waitForTimeout(500);
+
+  // Click the SECOND cue (MARCUS) — not the first-seen one — to prove hoisting.
+  const p = await textPoint(page, 1);
+  expect(p, 'fixture must render the second cue').not.toBeNull();
+  await page.mouse.click(p!.x, p!.y);
+  await expect(picker(page)).toBeVisible();
+  await expect(picker(page).locator('input')).toHaveValue('');
+
+  // MARCUS is hoisted to the top and highlighted; BRUCE is still listed (full cast).
+  const opts = picker(page).locator('.mh-mention-opt');
+  await expect(opts.first()).toHaveText('MARCUS');
+  await expect(opts.first()).toHaveAttribute('aria-selected', 'true');
+  await expect(picker(page).locator('.mh-mention-opt', { hasText: 'BRUCE' })).toBeVisible();
+
+  // Typing in the box still filters: "BRU" narrows to BRUCE only.
+  await picker(page).locator('input').fill('BRU');
+  await expect(picker(page).locator('.mh-mention-opt', { hasText: 'BRUCE' })).toBeVisible();
+  await expect(picker(page).locator('.mh-mention-opt', { hasText: 'MARCUS' })).toHaveCount(0);
 });
 
 test('clicking the blank space after the cue name only places the caret', async ({ page }) => {

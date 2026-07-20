@@ -947,7 +947,12 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
         } else if (ctx && (ctx.node.attrs.elType as ElementType) === 'character') {
           const isEmptyCue = !ctx.node.textContent.trim();
           if (isEmptyCue || pointer?.onName) {
-            onMentionOpenRef.current?.(id as string, 'character', ctx.node.textContent);
+            // Open with an EMPTY query (laper parity): the picker shows the full
+            // cast (SceneBlock hoists this cue's own name to the top as the
+            // initial highlight), instead of pre-filtering down to the current
+            // name. Typing still filters — that's the onMentionQuery path below,
+            // deliberately left untouched.
+            onMentionOpenRef.current?.(id as string, 'character', '');
           } else if (pointer) {
             // Clicked the blank space after the name: placing a caret to edit.
             onMentionCloseRef.current?.();
