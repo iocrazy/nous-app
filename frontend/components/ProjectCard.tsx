@@ -76,6 +76,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
     : colors.border;
   const isArchived = Boolean(project.archived_at);
   const stage = project.current_stage ?? null;
+  const workflowBadge = project.workflow_badge ?? null;
   const membersPreview = project.members_preview ?? null;
   const activity = project.latest_activity ?? null;
   const hasSuggestion = Boolean(suggestion && suggestion.kind && suggestion.action);
@@ -188,6 +189,13 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
             <span className="px-2 py-0.5 rounded-full font-medium bg-ink-700/50 text-ink-400">
               {t('projects.card.archived')}
             </span>
+          ) : workflowBadge && workflowBadge.current_node_name ? (
+            <span
+              data-testid="project-workflow-stage-chip"
+              className="px-2 py-0.5 rounded-full font-medium bg-[var(--accent-soft)] text-[var(--accent-text)] truncate"
+            >
+              {workflowBadge.current_node_name}
+            </span>
           ) : stage ? (
             <span className="px-2 py-0.5 rounded-full font-medium bg-[var(--accent-soft)] text-[var(--accent-text)]">
               {stage.name}
@@ -195,6 +203,15 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
           ) : (
             <span className={`px-2 py-0.5 rounded-full font-medium ${colors.badge}`}>
               {t(`mediatrack.${project.project_type}`, colors.text)}
+            </span>
+          )}
+          {!isArchived && workflowBadge && workflowBadge.agents_active > 0 && (
+            <span
+              data-testid="project-agents-active-chip"
+              className="flex items-center gap-1 px-2 py-0.5 rounded-full font-medium bg-amber-500/15 text-amber-400"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" aria-hidden />
+              {t('projects.workflow.agentsActive', { count: workflowBadge.agents_active })}
             </span>
           )}
           {project.project_group && (

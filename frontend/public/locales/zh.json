@@ -1764,6 +1764,18 @@
         "fromIssue": "来自 {{id}}",
         "filesFiled_one": "已归档 {{count}} 个文件",
         "filesFiled_other": "已归档 {{count}} 个文件"
+      },
+      "overdue": "已逾期",
+      "addFailed": "添加阶段失败",
+      "removeFailed": "移除阶段失败",
+      "removeTitle": "移除阶段",
+      "removeBody": "从此工作流中移除“{{name}}”？此操作无法撤销。",
+      "removeConfirm": "移除",
+      "removeBlocked": {
+        "notPending": "此阶段已经开始——请跳过而非移除。",
+        "hasIssue": "此阶段已关联任务——请跳过而非移除。",
+        "active": "这是当前进行中的阶段，无法移除。",
+        "generic": "此阶段无法移除。"
       }
     }
   },

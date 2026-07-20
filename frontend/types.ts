@@ -705,6 +705,21 @@ export interface Project {
   current_stage?: ProjectCardStage | null;
   members_preview?: ProjectMembersPreview | null;
   latest_activity?: ProjectCardActivity | null;
+  // Workflow badge (M2-W3-3) — batch-derived; null/absent for a No-workflow
+  // project (no instance nodes).
+  workflow_badge?: ProjectWorkflowBadge | null;
+}
+
+/** Project-card workflow badge (M2-W3-3). Null for No-workflow projects. */
+export interface ProjectWorkflowBadge {
+  /** Name of the node at the cursor; null when no cursor is set. */
+  current_node_name: string | null;
+  /** Count of non-skipped nodes. */
+  workflow_total: number;
+  /** 1-based index of the current node among non-skipped nodes; null when no cursor. */
+  workflow_position: number | null;
+  /** Running agent_runs on this project. */
+  agents_active: number;
 }
 
 // ── Ideation topic pool (M1.5) ───────────────────────────────────────────────
@@ -1102,6 +1117,15 @@ export interface ProjectWorkflow {
   current_node_id: string | null;
   agents_active: number;
   nodes: ProjectStageNode[];
+}
+
+/** POST body to add a node to a live instance (M2-W3-1). Exactly one of
+ * `source_stage_id` (from the node bank) or `name` (blank). */
+export interface ProjectNodeCreate {
+  source_stage_id?: string | null;
+  name?: string | null;
+  sort_order: number;
+  parallel_group?: number | null;
 }
 
 /** PATCH body for an in-place node tweak. */
