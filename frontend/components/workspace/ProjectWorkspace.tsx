@@ -38,9 +38,12 @@ import type { SceneDoc } from '../../editor/types';
 import { WorkspaceSidebar, type WorkView } from './WorkspaceSidebar';
 import { WorkspaceTopBar } from './WorkspaceTopBar';
 import { WorkspaceOverview } from './WorkspaceOverview';
+import { AdvanceConfirmDialog } from '../workflow/AdvanceConfirmDialog';
+import { useProjectWorkflow } from '../../hooks/useProjectWorkflow';
+import { executeAdvance, fetchAdvancePreview } from '../../services/workflowService';
 import { episodeStorageKey, type WorkspaceModule } from './workspaceModules';
 import type { FilesChip } from './WorkspaceFiles';
-import type { EpisodeProgress, Project, ProjectStage } from '../../types';
+import type { AdvancePreview, EpisodeProgress, Project, ProjectStage } from '../../types';
 
 // Code-split the heavier / non-default modules out of the ProjectsPage chunk
 // (PR-19). Overview is the landing module so it stays eager, as do the
@@ -153,6 +156,55 @@ export function ProjectWorkspace({
   }, [project.id]);
 
   const currentIndex = catalog.findIndex((s) => s.id === currentStage?.id);
+
+  // ── Workflow instance (strip + node card + advance gate) ───────────────
+  const { workflow, reload: reloadWorkflow } = useProjectWorkflow(project.id);
+  // A node the sidebar / top-bar asked to focus on the Overview.
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  // The advance/back confirm gate — one instance, shared by the node card's
+  // Complete/Back buttons and the top-bar stepper. Holds the server preview so
+  // the dialog only ever renders what the same predicate ruled (#1400).
+  const [advance, setAdvance] = useState<{
+    direction: 'forward' | 'back';
+    preview: AdvancePreview | null;
+    confirming: boolean;
+  } | null>(null);
+
+  const requestAdvance = useCallback(
+    (direction: 'forward' | 'back') => {
+      setAdvance({ direction, preview: null, confirming: false });
+      fetchAdvancePreview(project.id, direction)
+        .then((preview) =>
+          setAdvance((cur) => (cur && cur.direction === direction ? { ...cur, preview } : cur)),
+        )
+        .catch((err) => {
+          console.error('[ProjectWorkspace] advance preview failed:', err);
+          setAdvance(null);
+          addToast(t('common.error'), 'error');
+        });
+    },
+    [project.id, addToast, t],
+  );
+
+  const confirmAdvance = useCallback(() => {
+    setAdvance((cur) => (cur ? { ...cur, confirming: true } : cur));
+    const direction = advance?.direction ?? 'forward';
+    executeAdvance(project.id, direction)
+      .then(() => {
+        setAdvance(null);
+        void reloadWorkflow();
+      })
+      .catch((err) => {
+        console.error('[ProjectWorkspace] advance failed:', err);
+        addToast(t('common.error'), 'error');
+        setAdvance((cur) => (cur ? { ...cur, confirming: false } : cur));
+      });
+  }, [advance?.direction, project.id, reloadWorkflow, addToast, t]);
+
+  const handleJumpToNode = useCallback((nodeId: string) => {
+    setActiveModule('overview');
+    setFocusNodeId(nodeId);
+  }, []);
 
   // ── Episodes (sidebar current-episode block + switcher) ────────────────
   const [episodes, setEpisodes] = useState<EpisodeProgress[]>([]);
@@ -414,6 +466,9 @@ export function ProjectWorkspace({
         currentIndex={currentIndex}
         canWrite={canWrite}
         slate={activeModule === 'script' && epNumber ? { ep: epNumber, scene: sceneNumber } : null}
+        workflow={workflow}
+        onRequestAdvance={requestAdvance}
+        onJumpToNode={handleJumpToNode}
       />
       <div className="flex-1 min-h-0 flex overflow-hidden">
       <WorkspaceSidebar
@@ -425,6 +480,9 @@ export function ProjectWorkspace({
         activeWorkView={activeModule === 'script' ? studioView : null}
         onOpenWorkView={handleOpenWorkView}
         onOpenRenders={handleOpenRenders}
+        workflowNodes={workflow?.nodes ?? []}
+        currentNodeId={workflow?.current_node_id ?? null}
+        onJumpToNode={handleJumpToNode}
       />
       <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
         <Suspense
@@ -461,6 +519,12 @@ export function ProjectWorkspace({
                 currentEpisode={currentEpisode}
                 epNumber={epNumber}
                 onOpenScript={() => void openCurrentEpisodeScript()}
+                workflow={workflow}
+                canWrite={canWrite}
+                onReloadWorkflow={() => void reloadWorkflow()}
+                onRequestAdvance={requestAdvance}
+                onOpenTodolist={() => setActiveModule('tasks')}
+                focusNodeId={focusNodeId}
               />
             )}
             {activeModule === 'episodes' && (
@@ -507,6 +571,16 @@ export function ProjectWorkspace({
         </Suspense>
       </div>
       </div>
+
+      {advance && (
+        <AdvanceConfirmDialog
+          preview={advance.preview}
+          direction={advance.direction}
+          confirming={advance.confirming}
+          onConfirm={confirmAdvance}
+          onClose={() => setAdvance(null)}
+        />
+      )}
     </div>
   );
 }

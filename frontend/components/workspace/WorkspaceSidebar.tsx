@@ -27,8 +27,9 @@ import {
   Film,
   ExternalLink,
 } from 'lucide-react';
-import type { EpisodeProgress } from '../../types';
+import type { EpisodeProgress, ProjectStageNode } from '../../types';
 import { ASSET_MODULES, MANAGE_MODULES, type WorkspaceModule } from './workspaceModules';
+import { NODE_STATUS_CONFIG } from '../workflow/nodeStatus';
 
 /** The episode-scoped work views the tree can open (maps to editor RailView). */
 export type WorkView = 'script' | 'beats' | 'storyboard' | 'nodes';
@@ -44,6 +45,11 @@ interface WorkspaceSidebarProps {
   /** Open one of the episode's work views (剧本 / 节拍 / 分镜 / 场景). */
   onOpenWorkView: (view: WorkView) => void;
   onOpenRenders: () => void;
+  /** Workflow instance nodes for the dynamic Stages group (empty = no group). */
+  workflowNodes?: ProjectStageNode[];
+  currentNodeId?: string | null;
+  /** Jump to a node — lands on the Overview node card (spec §5, M1). */
+  onJumpToNode?: (nodeId: string) => void;
 }
 
 function sideItemClass(active: boolean): string {
@@ -72,6 +78,9 @@ export function WorkspaceSidebar({
   activeWorkView,
   onOpenWorkView,
   onOpenRenders,
+  workflowNodes = [],
+  currentNodeId = null,
+  onJumpToNode,
 }: WorkspaceSidebarProps) {
   const { t } = useTranslation();
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -316,6 +325,39 @@ export function WorkspaceSidebar({
             <span className="truncate">{t('projects.workspace.modules.publish')}</span>
           </button>
         </div>
+      )}
+
+      {/* ── Stages — dynamic workflow nodes (spec §5). Clicking a node lands
+          on the Overview node card. ── */}
+      {workflowNodes.length > 0 && (
+        <>
+          <div className="mt-3 px-2.5 text-[10px] uppercase tracking-wider text-ink-600">
+            {t('projects.workflow.stages')}
+          </div>
+          {workflowNodes.map((node) => {
+            const meta = NODE_STATUS_CONFIG[node.status];
+            const isCurrent = node.id === currentNodeId;
+            return (
+              <button
+                key={node.id}
+                data-testid={`ws-stage-${node.id}`}
+                onClick={() => onJumpToNode?.(node.id)}
+                className={sideItemClass(isCurrent)}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${meta.dot}`} aria-hidden />
+                  <span
+                    className={`truncate ${
+                      node.status === 'skipped' || node.skipped ? 'line-through opacity-60' : ''
+                    }`}
+                  >
+                    {node.name}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </>
       )}
 
       <div className="mt-3 px-2.5 text-[10px] uppercase tracking-wider text-ink-600">

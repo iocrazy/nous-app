@@ -9,7 +9,8 @@
 import { useTranslation } from 'react-i18next';
 import { ArrowRight, Clock } from 'lucide-react';
 import { formatRelativeTime } from '../../utils/relativeTime';
-import type { EpisodeProgress, Project } from '../../types';
+import { WorkflowSection } from '../workflow/WorkflowSection';
+import type { EpisodeProgress, Project, ProjectWorkflow } from '../../types';
 
 interface WorkspaceOverviewProps {
   project: Project;
@@ -18,6 +19,13 @@ interface WorkspaceOverviewProps {
   epNumber: number | null;
   episodes: EpisodeProgress[];
   onOpenScript: () => void;
+  /** The project's workflow instance (null while loading / no workflow). */
+  workflow?: ProjectWorkflow | null;
+  canWrite?: boolean;
+  onReloadWorkflow?: () => void;
+  onRequestAdvance?: (direction: 'forward' | 'back') => void;
+  onOpenTodolist?: () => void;
+  focusNodeId?: string | null;
 }
 
 export function WorkspaceOverview({
@@ -26,6 +34,12 @@ export function WorkspaceOverview({
   epNumber,
   episodes,
   onOpenScript,
+  workflow = null,
+  canWrite = true,
+  onReloadWorkflow,
+  onRequestAdvance,
+  onOpenTodolist,
+  focusNodeId = null,
 }: WorkspaceOverviewProps) {
   const { t } = useTranslation();
 
@@ -36,6 +50,17 @@ export function WorkspaceOverview({
 
   return (
     <div data-testid="ws-overview" className="flex flex-col gap-3 py-3">
+      {workflow?.has_workflow && (
+        <WorkflowSection
+          projectId={project.id}
+          workflow={workflow}
+          canWrite={canWrite}
+          onReload={onReloadWorkflow ?? (() => undefined)}
+          onRequestAdvance={onRequestAdvance ?? (() => undefined)}
+          onOpenTodolist={onOpenTodolist ?? (() => undefined)}
+          focusNodeId={focusNodeId}
+        />
+      )}
       {currentEpisode && (
         <div
           data-testid="ws-continue-card"
