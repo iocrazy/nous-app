@@ -11,6 +11,8 @@ repo are faked (mirrors the repo-override pattern in test_stage_auto_derive.py).
 
 from __future__ import annotations
 
+import datetime
+
 import pytest
 
 import app.services.library.project_stage_issues as mod
@@ -360,3 +362,145 @@ async def test_advance_delegates_to_set_current_stage(patch):
 
 def test_module_exposes_origin_kind():
     assert mod.ORIGIN_KIND == "project_stage"
+
+
+# ── M1 workflow node inheritance: owner + due_date, never dispatched ────────
+
+
+@pytest.mark.asyncio
+async def test_new_node_inherits_human_owner_as_assignee(patch):
+    stages = _FakeStagesRepo(
+        current=None,
+        new_stage={
+            "id": "20",
+            "name": "Script",
+            "owner_user_id": "00000000-0000-0000-0000-0000000000aa",
+        },
+    )
+    issues = _FakeIssueRepo()
+    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
+
+    await advance_project_stage(100, 20, _USER)
+
+    payload = issues.created[0]
+    assert payload["assignee_user_id"] == "00000000-0000-0000-0000-0000000000aa"
+    assert "assignee_agent_id" not in payload
+
+
+@pytest.mark.asyncio
+async def test_new_node_inherits_agent_owner_as_assignee(patch):
+    stages = _FakeStagesRepo(
+        current=None,
+        new_stage={
+            "id": "20",
+            "name": "Canvas",
+            "owner_agent_id": "00000000-0000-0000-0000-0000000000bb",
+        },
+    )
+    issues = _FakeIssueRepo()
+    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
+
+    await advance_project_stage(100, 20, _USER)
+
+    payload = issues.created[0]
+    assert payload["assignee_agent_id"] == "00000000-0000-0000-0000-0000000000bb"
+    assert "assignee_user_id" not in payload
+
+
+@pytest.mark.asyncio
+async def test_no_owner_leaves_issue_unassigned(patch):
+    # Legacy SOP stage dicts (and un-owned nodes) carry neither owner key —
+    # automation must never silently assign.
+    stages = _FakeStagesRepo(current=None, new_stage={"id": "20", "name": "Script"})
+    issues = _FakeIssueRepo()
+    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
+
+    await advance_project_stage(100, 20, _USER)
+
+    payload = issues.created[0]
+    assert "assignee_user_id" not in payload
+    assert "assignee_agent_id" not in payload
+
+
+@pytest.mark.asyncio
+async def test_planned_due_inherited_as_real_date_object(patch):
+    due = datetime.date(2026, 8, 1)
+    stages = _FakeStagesRepo(
+        current=None,
+        new_stage={"id": "20", "name": "Script", "planned_due": due},
+    )
+    issues = _FakeIssueRepo()
+    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
+
+    await advance_project_stage(100, 20, _USER)
+
+    payload = issues.created[0]
+    assert payload["due_date"] is due
+    assert isinstance(payload["due_date"], datetime.date)
+
+
+@pytest.mark.asyncio
+async def test_planned_due_as_iso_string_raises(patch):
+    # The asyncpg DATE-bind footgun (CLAUDE.md known trap): an ISO string must
+    # never reach the issue payload silently.
+    stages = _FakeStagesRepo(
+        current=None,
+        new_stage={"id": "20", "name": "Script", "planned_due": "2026-08-01"},
+    )
+    issues = _FakeIssueRepo()
+    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
+
+    # The hook is best-effort, so the TypeError is swallowed at the sync
+    # boundary — the advance itself must still succeed, but no issue is
+    # created out of the bad payload.
+    result = await advance_project_stage(100, 20, _USER)
+
+    assert result == {"id": "20", "name": "Script", "planned_due": "2026-08-01"}
+    assert issues.created == []
+
+
+@pytest.mark.asyncio
+async def test_no_due_date_omits_the_field(patch):
+    stages = _FakeStagesRepo(current=None, new_stage={"id": "20", "name": "Script"})
+    issues = _FakeIssueRepo()
+    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
+
+    await advance_project_stage(100, 20, _USER)
+
+    assert "due_date" not in issues.created[0]
+
+
+@pytest.mark.asyncio
+async def test_agent_owner_arrival_never_dispatches(patch, monkeypatch):
+    """An agent-owner node's mirror issue is ASSIGNED only — the run-confirm
+    gate is untouched, so arrival must never reach the dispatch entry point."""
+    import importlib
+
+    # app/api/__init__.py rebinds the ``issues_router`` package attribute to
+    # the router INSTANCE (``from ... import router as issues_router``), so a
+    # plain ``import app.api.issues_router`` would resolve to the APIRouter,
+    # not the module — importlib.import_module bypasses that shadowing.
+    issues_router_mod = importlib.import_module("app.api.issues_router")
+
+    def _boom(issue_id, wf_id):
+        raise AssertionError("stage-node arrival must never dispatch an agent run")
+
+    monkeypatch.setattr(issues_router_mod, "_dispatch_execute_issue", _boom)
+
+    stages = _FakeStagesRepo(
+        current=None,
+        new_stage={
+            "id": "20",
+            "name": "Canvas",
+            "owner_agent_id": "00000000-0000-0000-0000-0000000000bb",
+        },
+    )
+    issues = _FakeIssueRepo()
+    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
+
+    result = await advance_project_stage(100, 20, _USER)
+
+    assert result is not None
+    assert (
+        issues.created[0]["assignee_agent_id"] == "00000000-0000-0000-0000-0000000000bb"
+    )

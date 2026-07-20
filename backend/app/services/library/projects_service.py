@@ -381,7 +381,11 @@ class ProjectsService:
         Returns:
             Created project dict.
         """
-        data["owner_id"] = user_id
+        data = {**data, "owner_id": user_id}
+        # Workflow selection (M1 PR-B) is not a projects column — pull it out
+        # before the insert and instantiate the nodes after the row exists.
+        workflow_template_id = data.pop("workflow_template_id", None)
+        workflow_method = data.pop("workflow_method", None)
         project = await self.repo.create_project(data)
 
         # Generate display code if project belongs to a team
@@ -461,6 +465,22 @@ class ProjectsService:
             logger.error(
                 f"[projects] default-episode init failed for {project.get('id')}: {e}"
             )
+
+        # Workflow instantiation (M1 PR-B): copy the chosen team template's nodes
+        # onto the project, set the current-node cursor, and open the first
+        # group's mirror issues. No template → No-workflow no-op. Best-effort —
+        # its own guard swallows failures so create never fails on a workflow
+        # hiccup (same discipline as the enrichment blocks above).
+        from app.services.workflow.instantiation import (
+            maybe_instantiate_project_workflow,
+        )
+
+        await maybe_instantiate_project_workflow(
+            str(project["id"]),
+            workflow_template_id,
+            method=workflow_method,
+            user_id=user_id,
+        )
 
         return project
 

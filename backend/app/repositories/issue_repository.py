@@ -157,11 +157,17 @@ class IssueRepository:
         rolls back too — no MH-N gap. ``SELECT * FROM <proc>`` expands the
         composite return into columns; write_scope() owns the surrounding txn.
         """
-        # UUIDs (and other non-JSON-native types) need str-coercion before the
-        # jsonb payload bind.
+        # UUIDs and dates (and other non-JSON-native types) need coercion before
+        # the jsonb payload bind: UUID → str, date/datetime → ISO. The DATE
+        # column (issues.due_date) then casts cleanly from the jsonb string.
         sanitized: dict[str, Any] = {}
         for k, v in payload.items():
-            sanitized[k] = str(v) if isinstance(v, _uuid.UUID) else v
+            if isinstance(v, _uuid.UUID):
+                sanitized[k] = str(v)
+            elif isinstance(v, (_dt.datetime, _dt.date)):
+                sanitized[k] = v.isoformat()
+            else:
+                sanitized[k] = v
 
         stmt = text("SELECT * FROM issue_create_atomic(CAST(:payload AS jsonb))")
         async with write_scope() as session:
@@ -374,6 +380,12 @@ class IssueRepository:
         # step. Separate best-effort call so a relay failure never affects the
         # barrier or the transition.
         await _fire_pipeline_relay(int(issue_id), prev_status, new_status)
+        # Workflow node status回流 (M1 PR-B): a project_stage mirror issue's
+        # status change projects onto its ``project_stage_nodes.status`` (issue
+        # is the fact source, node status is the projection). Same repo seam,
+        # same best-effort discipline as the two hooks above. ``result`` is the
+        # freshly-written issue row, so its origin_kind/origin_id are current.
+        await _fire_stage_node_sync(result, new_status)
         return result
 
 
@@ -391,6 +403,58 @@ async def _fire_pipeline_relay(
         logger.warning(
             f"[issue_repository] pipeline relay hook failed for issue "
             f"{issue_id}: {exc!r}"
+        )
+
+
+# issues.status → project_stage_nodes.status projection (spec §6.2). done/
+# cancelled are the two terminals; a cancelled mirror parks its node back at
+# pending (the group can be re-derived), never a node "cancelled" (not a node
+# status). Any status outside this map leaves the node untouched.
+_ISSUE_TO_NODE_STATUS: Dict[str, str] = {
+    "todo": "pending",
+    "in_progress": "in_progress",
+    "in_review": "in_review",
+    "done": "done",
+    "cancelled": "pending",
+}
+
+
+async def _fire_stage_node_sync(issue: Optional[dict], new_status: str) -> None:
+    """Best-effort issue→node status projection after a status transition.
+
+    Only fires for a ``project_stage`` mirror issue whose ``origin_id`` is the
+    NEW three-segment ``project_stage:{project_id}:{node_id}`` shape — the old
+    two-segment SOP origin (no project scope) is skipped, and a non-project_stage
+    issue never reaches ``set_node_status``. If the node id resolves to a legacy
+    SOP stage rather than a real ``project_stage_nodes`` row, ``set_node_status``
+    is a harmless no-op. Swallows its own errors so the transition is never
+    aborted by the projection.
+    """
+    try:
+        if not issue or issue.get("origin_kind") != "project_stage":
+            return
+        origin_id = issue.get("origin_id")
+        if not origin_id:
+            return
+        from app.services.library.project_stage_issues import parse_stage_origin_id
+
+        project_id, node_id = parse_stage_origin_id(str(origin_id))
+        if project_id is None:
+            # Old two-segment origin — not a workflow node, skip回流.
+            return
+        mapped = _ISSUE_TO_NODE_STATUS.get(new_status)
+        if mapped is None:
+            return
+
+        from app.repositories.project_stage_nodes_repository import (
+            get_project_stage_nodes_repository,
+        )
+
+        await get_project_stage_nodes_repository().set_node_status(node_id, mapped)
+    except Exception as exc:  # noqa: BLE001 — the transition is the primary op
+        logger.warning(
+            f"[issue_repository] stage-node sync hook failed for issue "
+            f"{(issue or {}).get('id')}: {exc!r}"
         )
 
 
