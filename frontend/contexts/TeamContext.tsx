@@ -2,7 +2,6 @@ import React, { createContext, useContext } from 'react';
 import { useAuth } from './AuthContext';
 import { useTeams } from '../hooks/useTeams';
 import { Team } from '../types';
-import { NotificationWithRead } from '../services/notificationService';
 
 interface TeamContextValue {
   teams: Team[];
@@ -11,8 +10,6 @@ interface TeamContextValue {
   teamsLoading: boolean;
   selectedTeamId: string | null;
   setSelectedTeamId: React.Dispatch<React.SetStateAction<string | null>>;
-  notifications: NotificationWithRead[];
-  setNotifications: React.Dispatch<React.SetStateAction<NotificationWithRead[]>>;
   currentTeam: Team | null;
   userPermissions: string[];
   isCreateTeamModalOpen: boolean;
@@ -29,8 +26,6 @@ interface TeamContextValue {
   handleTeamUpdated: (updatedTeam: Team) => void;
   handleTeamDeleted: (teamId: string) => void;
   handleTeamLeft: (teamId: string) => void;
-  handleMarkNotificationRead: (id: string) => Promise<void>;
-  handleMarkAllNotificationsRead: () => Promise<void>;
 }
 
 const TeamContext = createContext<TeamContextValue | null>(null);

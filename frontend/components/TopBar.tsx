@@ -41,7 +41,6 @@ import { InboxPanel } from './notifications/InboxPanel';
 
 interface TopBarProps {
   user: { name: string; email: string; avatarUrl?: string } | null;
-  unreadCount?: number;
   onNavigate?: (view: string, tab?: string) => void;
   onSignOut: () => void;
   onOpenSettings?: (tab?: string) => void;
@@ -505,7 +504,7 @@ const UserAvatar: React.FC<{
 // TopBar
 // ---------------------------------------------------------------------------
 
-export const TopBar: React.FC<TopBarProps> = ({ user, unreadCount = 0, onNavigate, onSignOut, onOpenSettings, sidebarCollapsed = false }) => {
+export const TopBar: React.FC<TopBarProps> = ({ user, onNavigate, onSignOut, onOpenSettings, sidebarCollapsed = false }) => {
   const { t } = useTranslation();
   const [openPanel, setOpenPanel] = useState<PanelType>(null);
   const upload = useUpload();

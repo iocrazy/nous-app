@@ -14,22 +14,39 @@ import {
   markAllInboxRead,
   type InboxNotification,
 } from '../services/notificationsService';
+import {
+  fetchNotifications as fetchBroadcast,
+  markAsRead as markBroadcastRead,
+  markAllAsRead as markAllBroadcastRead,
+  type NotificationWithRead,
+} from '../services/notificationService';
+import {
+  mergeNotifications,
+  countUnread,
+  type NotificationSource,
+  type UnifiedNotification,
+} from '../services/notificationMerge';
 
 /**
- * Narrow notification inbox (W3d). Loads the current user's inbox once on
- * login, then keeps the badge + list live via a Supabase Realtime subscription
- * on `inbox_notifications` (filtered to the user) — mirroring the mechanism
- * TaskManagerContext uses for `task_tracking`. The inbox carries exactly three
- * kinds (generation_result / publish_result / autopilot_output); everything
- * else stays out (see backend app/services/notifications.py).
+ * Unified notification inbox (W3d + release-notes merge). One bell, one panel,
+ * one unread count drawn from TWO backends, merged at the read layer:
+ *   - per-user `inbox_notifications` (REST /api/v1/inbox) — the narrow three
+ *     kinds (generation_result / publish_result / autopilot_output), kept live
+ *     by a Supabase Realtime subscription (mirrors TaskManagerContext).
+ *   - broadcast `notifications` (release-note / team announcements) via the
+ *     legacy junction — read straight from Supabase, refreshed on load.
+ *
+ * Read state stays per source: inbox rows POST to /api/v1/inbox, broadcast rows
+ * upsert `user_notifications`. Nothing is copied between tables and no 4th inbox
+ * kind is introduced (the backend narrowness guard stays intact).
  */
 
 interface InboxContextValue {
-  notifications: InboxNotification[];
+  notifications: UnifiedNotification[];
   unreadCount: number;
   loading: boolean;
   refresh: () => Promise<void>;
-  markRead: (id: string) => Promise<void>;
+  markRead: (id: string, source: NotificationSource) => Promise<void>;
   markAllRead: () => Promise<void>;
 }
 
@@ -37,13 +54,10 @@ const InboxContext = createContext<InboxContextValue | undefined>(undefined);
 
 const MAX_ITEMS = 100;
 
-function computeUnread(items: InboxNotification[]): number {
-  return items.filter((n) => !n.read).length;
-}
-
 export const InboxProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { currentUserId } = useAuth();
-  const [notifications, setNotifications] = useState<InboxNotification[]>([]);
+  const [inboxItems, setInboxItems] = useState<InboxNotification[]>([]);
+  const [broadcastItems, setBroadcastItems] = useState<NotificationWithRead[]>([]);
   const [loading, setLoading] = useState(false);
   const channelRef = useRef<ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null>(
     null,
@@ -52,20 +66,29 @@ export const InboxProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const refresh = useCallback(async () => {
     if (!currentUserId) return;
     setLoading(true);
-    try {
-      const result = await listInbox({ limit: MAX_ITEMS });
-      setNotifications(result.notifications);
-    } catch (err) {
-      console.error('[Inbox] refresh failed:', err);
-    } finally {
-      setLoading(false);
+    // Load both feeds independently — one failing must not blank the other.
+    const [inboxRes, broadcastRes] = await Promise.allSettled([
+      listInbox({ limit: MAX_ITEMS }),
+      fetchBroadcast(),
+    ]);
+    if (inboxRes.status === 'fulfilled') {
+      setInboxItems(inboxRes.value.notifications);
+    } else {
+      console.error('[Inbox] inbox refresh failed:', inboxRes.reason);
     }
+    if (broadcastRes.status === 'fulfilled') {
+      setBroadcastItems(broadcastRes.value);
+    } else {
+      console.error('[Inbox] broadcast refresh failed:', broadcastRes.reason);
+    }
+    setLoading(false);
   }, [currentUserId]);
 
   // Initial load on user change.
   useEffect(() => {
     if (!currentUserId) {
-      setNotifications([]);
+      setInboxItems([]);
+      setBroadcastItems([]);
       return;
     }
     void refresh();
@@ -90,7 +113,7 @@ export const InboxProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         (payload) => {
           const row = payload.new as InboxNotification & { read_at?: string | null };
           const next: InboxNotification = { ...row, read: !!row.read_at };
-          setNotifications((prev) => {
+          setInboxItems((prev) => {
             if (prev.some((n) => n.id === next.id)) return prev;
             return [next, ...prev].slice(0, MAX_ITEMS);
           });
@@ -107,7 +130,7 @@ export const InboxProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         (payload) => {
           const row = payload.new as InboxNotification & { read_at?: string | null };
           const next: InboxNotification = { ...row, read: !!row.read_at };
-          setNotifications((prev) => prev.map((n) => (n.id === next.id ? next : n)));
+          setInboxItems((prev) => prev.map((n) => (n.id === next.id ? next : n)));
         },
       )
       .subscribe();
@@ -121,31 +144,48 @@ export const InboxProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   }, [currentUserId]);
 
-  const markRead = useCallback(async (id: string) => {
-    // Optimistic — flip local state, then persist. On failure, refresh to
-    // reconcile.
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
-    );
-    try {
-      await markInboxRead(id);
-    } catch (err) {
-      console.error('[Inbox] markRead failed:', err);
+  const markRead = useCallback(async (id: string, source: NotificationSource) => {
+    // Optimistic — flip the row in its own feed, then persist to that feed's
+    // backend (inbox → REST, broadcast → user_notifications junction).
+    if (source === 'inbox') {
+      setInboxItems((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+      try {
+        await markInboxRead(id);
+      } catch (err) {
+        console.error('[Inbox] markRead (inbox) failed:', err);
+      }
+    } else {
+      setBroadcastItems((prev) =>
+        prev.map((n) => (String(n.id) === id ? { ...n, read: true } : n)),
+      );
+      try {
+        await markBroadcastRead(id);
+      } catch (err) {
+        console.error('[Inbox] markRead (broadcast) failed:', err);
+      }
     }
   }, []);
 
   const markAllRead = useCallback(async () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    try {
-      await markAllInboxRead();
-    } catch (err) {
-      console.error('[Inbox] markAllRead failed:', err);
-    }
+    // Clear both feeds locally, then persist to both backends.
+    setInboxItems((prev) => prev.map((n) => ({ ...n, read: true })));
+    setBroadcastItems((prev) => prev.map((n) => ({ ...n, read: true })));
+    const results = await Promise.allSettled([
+      markAllInboxRead(),
+      markAllBroadcastRead(),
+    ]);
+    results.forEach((r) => {
+      if (r.status === 'rejected') {
+        console.error('[Inbox] markAllRead failed:', r.reason);
+      }
+    });
   }, []);
+
+  const notifications = mergeNotifications(inboxItems, broadcastItems);
 
   const value: InboxContextValue = {
     notifications,
-    unreadCount: computeUnread(notifications),
+    unreadCount: countUnread(notifications),
     loading,
     refresh,
     markRead,
