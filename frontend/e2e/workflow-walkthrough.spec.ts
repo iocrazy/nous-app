@@ -83,6 +83,13 @@ const PROJECT = {
   file_count: 3,
   latest_activity: null,
   current_node_id: 'node-2',
+  // W3-3: batch-derived workflow badge for the list card/row.
+  workflow_badge: {
+    current_node_name: 'Storyboard',
+    workflow_total: 4,
+    workflow_position: 2,
+    agents_active: 2,
+  },
   created_at: '2026-07-01T00:00:00Z',
   updated_at: '2026-07-10T00:00:00Z',
 };
@@ -126,7 +133,8 @@ const WORKFLOW = {
       folder_id: 'folder-2',
       deliverable_file_count: 2,
     }),
-    node('node-3', 'Editing', 2, 'pending'),
+    // W3-2: a pending node past its due date → rose capsule + "Overdue" tag.
+    node('node-3', 'Editing', 2, 'pending', { planned_due: '2020-01-01' }),
     node('node-4', 'Distribution', 3, 'pending'),
   ],
 };
@@ -161,6 +169,10 @@ async function setupWorkflowStubs(page: Page): Promise<void> {
   // Per-project workflow instance + advance preview (response_model → no envelope).
   await page.route('**/api/v1/projects/*/workflow', json(WORKFLOW));
   await page.route('**/api/v1/projects/*/advance-preview*', json(ADVANCE_PREVIEW));
+  // Node collection (W3-1): POST add / DELETE remove. Distinct paths from the
+  // bare `/workflow` route above; registered last per the last-wins convention.
+  await page.route('**/api/v1/projects/*/workflow/nodes', json({ success: true, data: node('node-new', 'Voiceover', 4, 'pending') }));
+  await page.route('**/api/v1/projects/*/workflow/nodes/*', json({ success: true, data: { deleted: true } }));
 }
 
 async function forceTheme(page: Page, theme: 'dark' | 'light'): Promise<void> {
@@ -213,5 +225,57 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(page.getByTestId('workflow-advance-dialog')).toContainText('Storyboard');
     await expect(page.getByTestId('workflow-advance-dialog')).toContainText('Editing');
     await page.screenshot({ path: `${SHOTS}/03-advance-dialog-${theme}.png`, fullPage: true });
+  });
+
+  test(`${theme}: overdue node shows a rose Overdue tag (W3-2)`, async ({ page }) => {
+    await setupWorkflowStubs(page);
+    await forceTheme(page, theme);
+    await openWorkspaceOverview(page);
+    // The pending Editing node is past its due date → rose capsule + tag.
+    await expect(page.getByTestId('workflow-overdue-tag').first()).toBeVisible();
+    const editing = page.getByTestId('workflow-strip-node').filter({ hasText: 'Editing' });
+    await expect(editing).toHaveAttribute('data-overdue', 'true');
+    await page.screenshot({ path: `${SHOTS}/04-overdue-${theme}.png`, fullPage: true });
+  });
+
+  test(`${theme}: add stage opens the library picker (W3-1)`, async ({ page }) => {
+    await setupWorkflowStubs(page);
+    await forceTheme(page, theme);
+    await openWorkspaceOverview(page);
+    await page.getByTestId('workflow-add-stage').click();
+    await expect(page.getByTestId('workflow-library-picker')).toBeVisible();
+    // The bank list + the blank-stage footer are both offered on the instance path.
+    await expect(page.getByTestId('workflow-library-item').first()).toBeVisible();
+    await expect(page.getByTestId('workflow-blank-stage-input')).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/05-add-library-${theme}.png`, fullPage: true });
+  });
+
+  test(`${theme}: remove pending node opens a confirm dialog (W3-1)`, async ({ page }) => {
+    await setupWorkflowStubs(page);
+    await forceTheme(page, theme);
+    await openWorkspaceOverview(page);
+    const editing = page.getByTestId('workflow-strip-node').filter({ hasText: 'Editing' });
+    await editing.hover();
+    await page.getByTestId('workflow-remove-node').first().click();
+    await expect(page.getByTestId('workflow-remove-confirm')).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/06-remove-confirm-${theme}.png`, fullPage: true });
+  });
+
+  test(`${theme}: projects list shows the workflow badge (W3-3)`, async ({ page }) => {
+    await setupWorkflowStubs(page);
+    await forceTheme(page, theme);
+    // The grid card view is the deterministic surface for the badge (the queue
+    // view is suggestion-driven); pin it before navigation.
+    await page.addInitScript(() => {
+      try {
+        localStorage.setItem('mediahub.projects.view', 'grid');
+      } catch {
+        /* ignore */
+      }
+    });
+    await page.goto(`/team/${TEAM_ID}/projects`);
+    await expect(page.getByTestId('project-workflow-stage-chip').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('project-agents-active-chip').first()).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/07-list-badge-${theme}.png`, fullPage: true });
   });
 }

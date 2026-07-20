@@ -149,6 +149,65 @@ describe('ProjectCard', () => {
     expect(screen.queryByText('6/6')).toBeNull();
   });
 
+  // M2-W3-3 — workflow badge: current-node chip + amber agents-active chip,
+  // fed by the batch-derived `workflow_badge` field (null → nothing rendered).
+  describe('workflow badge (W3-3)', () => {
+    it('renders the current-node chip and agents-active chip when active', () => {
+      const project: Project = {
+        ...base,
+        workflow_badge: {
+          current_node_name: 'Storyboard',
+          workflow_total: 6,
+          workflow_position: 2,
+          agents_active: 3,
+        },
+      };
+      render(<ProjectCard project={project} onClick={noop} onToggleStar={noop} />);
+      expect(screen.getByTestId('project-workflow-stage-chip').textContent).toBe('Storyboard');
+      const chip = screen.getByTestId('project-agents-active-chip');
+      expect(chip).toBeTruthy();
+      // Amber pulse dot present when agents are running.
+      expect(chip.querySelector('.animate-pulse')).not.toBeNull();
+    });
+
+    it('renders the node chip but no agents chip when none are running', () => {
+      const project: Project = {
+        ...base,
+        workflow_badge: {
+          current_node_name: 'Editing',
+          workflow_total: 6,
+          workflow_position: 4,
+          agents_active: 0,
+        },
+      };
+      render(<ProjectCard project={project} onClick={noop} onToggleStar={noop} />);
+      expect(screen.getByTestId('project-workflow-stage-chip')).toBeTruthy();
+      expect(screen.queryByTestId('project-agents-active-chip')).toBeNull();
+    });
+
+    it('prefers the workflow node chip over the SOP stage chip', () => {
+      const project: Project = {
+        ...base,
+        current_stage: { slug: 'storyboard', name: 'SOP Storyboard', index: 3, total: 6 },
+        workflow_badge: {
+          current_node_name: 'Voiceover',
+          workflow_total: 5,
+          workflow_position: 3,
+          agents_active: 0,
+        },
+      };
+      render(<ProjectCard project={project} onClick={noop} onToggleStar={noop} />);
+      expect(screen.getByTestId('project-workflow-stage-chip').textContent).toBe('Voiceover');
+      expect(screen.queryByText('SOP Storyboard')).toBeNull();
+    });
+
+    it('renders no workflow chip for a No-workflow project', () => {
+      render(<ProjectCard project={base} onClick={noop} onToggleStar={noop} />);
+      expect(screen.queryByTestId('project-workflow-stage-chip')).toBeNull();
+      expect(screen.queryByTestId('project-agents-active-chip')).toBeNull();
+    });
+  });
+
   // PR-9 (G7) — grid secondary view: bottom next-action row driven by an
   // optional `suggestion` prop, absent by default (all prior tests above
   // pass no `suggestion` and must keep rendering exactly as before).
