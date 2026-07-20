@@ -184,7 +184,7 @@ export function EditorShell({
     },
     [scriptId],
   );
-  const { state, setMode, setFormat, toggleTheme, setTheme, setActiveScene, setCursor, setNextInsertType } =
+  const { state, setMode, setFormat, setTheme, setActiveScene, setCursor, setNextInsertType } =
     useEditorState({ initialFormat });
   const { addToast } = useToast();
   // Follow the app theme while mounted: ThemeContext stamps <html data-theme>,
@@ -1304,14 +1304,9 @@ export function EditorShell({
           <div className="mh-topbar-right">
             {COLLAB_ENABLED && <PresenceAvatars users={onlineUsers} />}
             <SaveIndicator state={aggregateState} queued={offlineCount} />
-            <button
-              type="button"
-              className="mh-icon-btn"
-              aria-label={t('editor.toggleTheme')}
-              onClick={toggleTheme}
-            >
-              {state.theme === 'dark' ? '☾' : '☼'}
-            </button>
+            {/* Theme is GLOBAL-ONLY (Settings → Theme). The per-shell ☾/☼
+                session override was removed by user verdict 2026-07-20 — the
+                shell still follows <html data-theme> via the observer above. */}
           </div>
         </div>
 

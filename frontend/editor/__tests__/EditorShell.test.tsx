@@ -163,7 +163,7 @@ describe('EditorShell', () => {
     expect(screen.getByTestId('save-indicator')).toHaveAttribute('data-state', 'saved');
   });
 
-  it('follows the app theme (<html data-theme>) and toggles session-only', async () => {
+  it('follows the app theme (<html data-theme>) with NO local toggle', async () => {
     document.documentElement.dataset.theme = 'light';
     svc.listScenes.mockResolvedValue(twoScenes);
     const { container } = render(<EditorShell scriptId="1" />);
@@ -172,12 +172,9 @@ describe('EditorShell', () => {
     const root = container.querySelector('.mh-editor-shell') as HTMLElement;
     expect(root.getAttribute('data-theme')).toBe('light');
 
-    fireEvent.click(screen.getByRole('button', { name: 'editor.toggleTheme' }));
-
-    expect(root.getAttribute('data-theme')).toBe('dark');
-    // Session-only override: nothing is persisted anymore (the old
-    // localStorage default made the editor come up light inside a dark app).
-    expect(localStorage.getItem('editor.theme')).toBeNull();
+    // Theme is global-only (Settings → Theme): the per-shell ☾/☼ override is
+    // gone by user verdict — no such button renders anywhere in the shell.
+    expect(screen.queryByRole('button', { name: 'editor.toggleTheme' })).toBeNull();
 
     // App theme change re-syncs the shell (MutationObserver on <html>).
     document.documentElement.dataset.theme = 'dark';
