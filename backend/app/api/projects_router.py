@@ -454,7 +454,9 @@ async def get_project_workflow(
                 if fid is not None:
                     counts[str(fid)] = counts.get(str(fid), 0) + 1
         except Exception as exc:  # noqa: BLE001 — count is decoration, not core
-            logger.warning(f"[workflow] file count scan failed for {project_id}: {exc!r}")
+            logger.warning(
+                f"[workflow] file count scan failed for {project_id}: {exc!r}"
+            )
     enriched = [
         {**n, "deliverable_file_count": counts.get(str(n.get("folder_id")), 0)}
         for n in nodes

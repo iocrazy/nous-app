@@ -1060,9 +1060,7 @@ class ProjectsService:
         try:
             from app.repositories.issue_repository import get_issue_repository
 
-            id_map = await get_issue_repository().map_identifiers(
-                [int(i) for i in ids]
-            )
+            id_map = await get_issue_repository().map_identifiers([int(i) for i in ids])
         except Exception as exc:  # noqa: BLE001 — chip is decoration
             logger.error(f"Failed to map source issue identifiers: {exc}")
             id_map = {}
