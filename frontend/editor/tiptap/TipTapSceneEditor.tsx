@@ -845,9 +845,29 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
             pointerIntentRef.current = null;
             return false;
           },
+          // A click INTO an empty cue that already holds the caret moves no
+          // selection, so onSelectionUpdate can't re-invite the picker (after
+          // Escape, or when a toolbar retype left the caret in the line and the
+          // writer clicks it again expecting the cast list). An empty cue is
+          // pure affordance — clicking it always means "show me the cast".
+          // Spurious re-opens are harmless: same open call, same state.
+          click: (_view, event) => {
+            const line = closestElement(event.target, '.mh-el-editable');
+            if (line?.dataset.elType === 'character' && !line.textContent?.trim()) {
+              const id = line.dataset.elId;
+              if (id) onMentionOpenRef.current?.(id, 'character', '');
+            }
+            return false;
+          },
         },
       },
       onUpdate: ({ editor: ed, transaction }) => {
+        // Keymap retype (Tab/Shift-Tab) flagged an empty line that just became
+        // a character cue — open the cast picker for it (see keymap.ts retype:
+        // the caret doesn't move, so onSelectionUpdate can't do it).
+        const emptyCueId = transaction.getMeta('emptyCueRetype') as string | undefined;
+        if (emptyCueId) onMentionOpenRef.current?.(emptyCueId, 'character', '');
+
         // Our own applyExternalElements/retypeElement/replaceElementText
         // transaction — never re-emit.
         if (transaction.getMeta('externalSync')) return;
@@ -1074,6 +1094,12 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
         }
         tr.setMeta('externalSync', true);
         editor.view.dispatch(tr);
+        // A toolbar/Tab retype moves no caret, so onSelectionUpdate never runs —
+        // the empty-cue picker (its whole affordance: "an empty cue has nothing
+        // to offer but the cast list") would silently not open. Invite it here.
+        if (type === 'character' && (clearText || node.textContent.trim() === '')) {
+          onMentionOpenRef.current?.(elementId, 'character', '');
+        }
       },
       [editor],
     );

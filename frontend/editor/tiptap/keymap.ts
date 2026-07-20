@@ -80,7 +80,14 @@ function childPos(doc: PMNode, index: number): number {
 /** Retype the node at `pos` in place (attrs-only change; caret unaffected). */
 function retype(editor: Editor, pos: number, node: PMNode, newType: ElementType): boolean {
   const { state, view } = editor;
-  const tr = state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, elType: newType });
+  let tr = state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, elType: newType });
+  // A Tab/Shift-Tab retype keeps the caret where it was, so onSelectionUpdate
+  // never runs and the empty-cue picker (the only affordance an empty character
+  // line offers) would not open. Flag the transaction so the editor's onUpdate
+  // can invite it.
+  if (newType === 'character' && node.textContent.trim() === '') {
+    tr = tr.setMeta('emptyCueRetype', node.attrs.id as string);
+  }
   view.dispatch(tr);
   return true;
 }
