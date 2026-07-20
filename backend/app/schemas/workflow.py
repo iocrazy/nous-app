@@ -8,7 +8,8 @@ list of user-or-agent refs. Guardrails: a template may hold at most
 
 from __future__ import annotations
 
-from typing import List, Optional
+from datetime import date
+from typing import Any, List, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -83,3 +84,105 @@ class TemplateUpdate(BaseModel):
                 f"a template may hold at most {MAX_NODES_PER_TEMPLATE} nodes"
             )
         return self
+
+
+# ── project workflow instance (PR-B) ────────────────────────────────────────
+
+
+class NodeMemberOut(BaseModel):
+    """A member ref on a live node — exactly one of user/agent is set."""
+
+    user_id: Optional[str] = None
+    agent_id: Optional[str] = None
+
+
+class NodeOut(BaseModel):
+    """One live ``project_stage_nodes`` row (ids as strings)."""
+
+    id: str
+    project_id: str
+    source_template_node_id: Optional[str] = None
+    legacy_stage_id: Optional[str] = None
+    name: str
+    sort_order: int
+    parallel_group: Optional[int] = None
+    status: str
+    owner_user_id: Optional[str] = None
+    owner_agent_id: Optional[str] = None
+    planned_start: Optional[str] = None
+    planned_due: Optional[str] = None
+    review_required: bool
+    deliverable_required: bool
+    deliverable_label: Optional[str] = None
+    skipped: bool
+    members: List[NodeMemberOut] = Field(default_factory=list)
+
+
+class ProjectWorkflowOut(BaseModel):
+    """GET /projects/{id}/workflow payload."""
+
+    has_workflow: bool
+    current_node_id: Optional[str] = None
+    agents_active: int = 0
+    nodes: List[NodeOut] = Field(default_factory=list)
+
+
+class NodePatch(BaseModel):
+    """PATCH /projects/{id}/workflow/nodes/{node_id}. Every field optional;
+    ``exclude_unset`` distinguishes "clear to null" from "leave unchanged"."""
+
+    owner_user_id: Optional[UUID] = None
+    owner_agent_id: Optional[UUID] = None
+    members: Optional[List[TemplateNodeMemberIn]] = None
+    planned_start: Optional[date] = None
+    planned_due: Optional[date] = None
+    skipped: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def _owner_xor(self) -> "NodePatch":
+        if self.owner_user_id is not None and self.owner_agent_id is not None:
+            raise ValueError("owner_user_id and owner_agent_id are mutually exclusive")
+        return self
+
+
+# ── advance preview / execute (PR-B) ────────────────────────────────────────
+
+# Blocked-reason codes the advance predicate can return (spec §7). The frontend
+# confirm dialog maps each to copy — the server never sends free text.
+BLOCK_NOT_MANAGER_OR_EDITOR = "NOT_MANAGER_OR_EDITOR"
+BLOCK_REVIEW_PENDING = "REVIEW_PENDING"
+BLOCK_DELIVERABLE_MISSING = "DELIVERABLE_MISSING"
+BLOCK_NO_NEXT = "NO_NEXT"
+
+
+class AdvanceNodeRef(BaseModel):
+    """A node named in an advance preview (closing / creating lists)."""
+
+    node_id: str
+    name: str
+    assignee_user_id: Optional[str] = None
+    assignee_agent_id: Optional[str] = None
+    due_date: Optional[str] = None
+
+
+class AdvancePreview(BaseModel):
+    """Server-computed advance ruling. ``compute_advance_preview`` and
+    ``execute_advance`` share the predicate that fills this (#1400)."""
+
+    direction: Literal["forward", "back"]
+    will_advance: bool
+    blocked_reason: Optional[str] = None
+    closing: List[AdvanceNodeRef] = Field(default_factory=list)
+    creating: List[AdvanceNodeRef] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class AdvanceRequest(BaseModel):
+    """POST /projects/{id}/advance body (direction also accepted as a query)."""
+
+    direction: Literal["forward", "back"] = "forward"
+
+
+def preview_to_dict(preview: AdvancePreview) -> dict[str, Any]:
+    """AdvancePreview → plain dict (envelope ``data``)."""
+    return preview.model_dump()
