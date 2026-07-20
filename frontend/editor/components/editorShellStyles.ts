@@ -1845,10 +1845,9 @@ export const EDITOR_SHELL_STYLES = `
   cursor:pointer; line-height:1;
 }
 .mh-beats-add-ink:hover{ opacity:0.88; }
-.mh-beats-seg{
-  display:inline-flex; width:max-content;
-  position:absolute; left:50%; transform:translateX(-50%);
-}
+/* Top-LEFT, matching where the script view's doc tabs sit (user verdict
+   2026-07-20) — the space-between row puts Add on the right naturally. */
+.mh-beats-seg{ display:inline-flex; width:max-content; }
 .mh-beats-seg .mh-seg{ flex:0 0 auto; padding:6px 20px; }
 .mh-beats-pane > .mh-beats-view,
 .mh-beats-pane > .mh-arr-root{ flex:1; min-height:0; }
