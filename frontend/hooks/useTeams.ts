@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { Team } from '../types';
-import { NotificationWithRead, fetchNotifications, markAsRead, markAllAsRead } from '../services/notificationService';
 import { fetchMyTeams, fetchPersonalTeam, fetchTeamMembers } from '../services/teamService';
 import { resolvePermissions } from '../utils/permissions';
 
@@ -10,7 +9,6 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
     const saved = localStorage.getItem('mediahub_personal_team');
     return saved || null;
   });
-  const [notifications, setNotifications] = useState<NotificationWithRead[]>([]);
   const [isCreateTeamModalOpen, setIsCreateTeamModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [settingsModalInitialTab, setSettingsModalInitialTab] = useState<string>('personal');
@@ -58,7 +56,7 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
     }
   }, [selectedTeamId]);
 
-  // Fetch teams and notifications when user logs in
+  // Fetch teams when user logs in
   useEffect(() => {
     if (isAuthenticated) {
       setTeamsLoading(true);
@@ -73,7 +71,6 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
             localStorage.setItem('mediahub_personal_team', pt.id);
           }
         }).catch(console.error),
-        fetchNotifications().then(setNotifications).catch(console.error),
       ]).finally(() => {
         // Pick the active team. A previously-selected id (from URL/localStorage)
         // is only honoured if it's STILL one of the user's teams — otherwise a
@@ -108,7 +105,6 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
     if (!isAuthenticated && !isAuthLoading) {
       setTeams([]);
       setPersonalTeamId(null);
-      setNotifications([]);
       setSelectedTeamId(null);
       setUserPermissions([]);
       setTeamsLoading(false);
@@ -136,25 +132,6 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
       setUserPermissions(resolvePermissions(me?.role || 'member'));
     }).catch(() => setUserPermissions(resolvePermissions('member')));
   }, [selectedTeamId, currentUserId, teams, personalTeamId]);
-
-  // Notification handlers
-  const handleMarkNotificationRead = async (id: string) => {
-    try {
-      await markAsRead(id);
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-    } catch (error) {
-      console.error('Failed to mark notification as read:', error);
-    }
-  };
-
-  const handleMarkAllNotificationsRead = async () => {
-    try {
-      await markAllAsRead();
-      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-    } catch (error) {
-      console.error('Failed to mark all notifications as read:', error);
-    }
-  };
 
   // Team CRUD handlers
   const handleCreateTeam = () => {
@@ -197,8 +174,6 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
     teamsLoading,
     selectedTeamId,
     setSelectedTeamId,
-    notifications,
-    setNotifications,
     currentTeam,
     userPermissions,
     isCreateTeamModalOpen,
@@ -219,7 +194,5 @@ export function useTeams(isAuthenticated: boolean, isAuthLoading: boolean, curre
     handleTeamUpdated,
     handleTeamDeleted,
     handleTeamLeft,
-    handleMarkNotificationRead,
-    handleMarkAllNotificationsRead,
   };
 }

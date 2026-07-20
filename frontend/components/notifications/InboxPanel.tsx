@@ -1,17 +1,19 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Sparkles, Send, Bot, CheckCheck } from 'lucide-react';
+import { Bell, Sparkles, Send, Bot, Megaphone, CheckCheck } from 'lucide-react';
 import { useInbox } from '../../contexts/InboxContext';
 import { useWorkspaceScope } from '../../hooks/useWorkspaceScope';
 import { resolveNotificationLink } from './notificationLink';
-import type { InboxKind, InboxNotification, InboxSeverity } from '../../services/notificationsService';
+import type { InboxKind, InboxSeverity } from '../../services/notificationsService';
+import type { UnifiedNotification } from '../../services/notificationMerge';
 
 /**
- * Compact inbox panel body (W3d) — rendered inside the TopBar bell's PanelShell.
- * Lists the three narrow notification kinds with a kind icon, a severity tint, a
- * relative timestamp; clicking a row marks it read and navigates via the typed
- * link resolver. "Mark all read" clears everything; empty state reassures.
+ * Unified notification panel (W3d + release-notes merge) — rendered inside the
+ * TopBar bell's PanelShell. One list mixing the three narrow inbox kinds
+ * (typed icon + severity tint + deep link) with broadcast release-note /
+ * announcement rows (megaphone, read-inline, no navigation). Clicking a row
+ * marks it read against its own backend; "Mark all read" clears both feeds.
  */
 
 const KIND_ICON: Record<InboxKind, React.ComponentType<{ size?: number; className?: string }>> = {
@@ -52,14 +54,20 @@ export const InboxPanel: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
   const { effectiveTeamId } = useWorkspaceScope();
   const { notifications, unreadCount, markRead, markAllRead } = useInbox();
 
-  const handleClick = (n: InboxNotification) => {
-    if (!n.read) void markRead(n.id);
-    const path = resolveNotificationLink({
-      linkKind: n.link_kind,
-      linkId: n.link_id,
-      // Prefer the notification's own team, else the current workspace scope.
-      teamId: n.team_id || effectiveTeamId,
-    });
+  // The navigation target for an inbox row (broadcast rows never navigate —
+  // their content is shown inline, matching the old release-notes panel).
+  const inboxLink = (n: UnifiedNotification): string | null =>
+    n.source === 'inbox'
+      ? resolveNotificationLink({
+          linkKind: n.link_kind,
+          linkId: n.link_id,
+          teamId: n.team_id || effectiveTeamId,
+        })
+      : null;
+
+  const handleClick = (n: UnifiedNotification) => {
+    if (!n.read) void markRead(n.id, n.source);
+    const path = inboxLink(n);
     if (path) {
       navigate(path);
       onClose?.();
@@ -91,16 +99,19 @@ export const InboxPanel: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
       ) : (
         <div className="max-h-[24rem] overflow-y-auto">
           {notifications.map((n) => {
-            const Icon = KIND_ICON[n.kind] || Bell;
-            const sev = severityClasses(n.severity);
-            const clickable = !!resolveNotificationLink({
-              linkKind: n.link_kind,
-              linkId: n.link_id,
-              teamId: n.team_id || effectiveTeamId,
-            });
+            // Broadcast (release-note / announcement) rows: megaphone, inline
+            // content, no deep link. Inbox rows: typed kind icon + severity +
+            // optional navigation.
+            const isBroadcast = n.source === 'broadcast';
+            const Icon = isBroadcast ? Megaphone : KIND_ICON[n.kind] || Bell;
+            const sev = isBroadcast
+              ? { dot: 'bg-indigo-500', icon: 'text-content-3' }
+              : severityClasses(n.severity);
+            const clickable = !!inboxLink(n);
+            const body = n.body;
             return (
               <button
-                key={n.id}
+                key={`${n.source}-${n.id}`}
                 onClick={() => handleClick(n)}
                 disabled={!clickable && n.read}
                 className={`w-full flex items-start gap-3 px-4 py-3 text-left border-b border-line/60 last:border-b-0 transition-colors ${
@@ -117,8 +128,8 @@ export const InboxPanel: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-sm text-content-2 truncate">{n.title}</div>
-                  {n.body && (
-                    <div className="text-xs text-content-3 truncate">{n.body}</div>
+                  {body && (
+                    <div className="text-xs text-content-3 truncate">{body}</div>
                   )}
                   <div className="text-[11px] text-content-4 mt-0.5">
                     {relativeTime(n.created_at)}

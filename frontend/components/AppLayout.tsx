@@ -61,12 +61,11 @@ function AppLayoutInner() {
   } = useAuth();
 
   const {
-    teams, teamsLoading, personalTeamId, selectedTeamId, setSelectedTeamId, notifications,
+    teams, teamsLoading, personalTeamId, selectedTeamId, setSelectedTeamId,
     currentTeam, userPermissions, isModuleEnabled, isViewEnabled,
     isCreateTeamModalOpen, setIsCreateTeamModalOpen,
     isSettingsModalOpen, setIsSettingsModalOpen, settingsModalInitialTab, setSettingsModalInitialTab,
     handleCreateTeam, handleTeamCreated, handleTeamUpdated, handleTeamDeleted, handleTeamLeft,
-    handleMarkNotificationRead, handleMarkAllNotificationsRead,
   } = useTeamContext();
 
   // Sync teamId from URL to context.
@@ -411,7 +410,6 @@ function AppLayoutInner() {
 
   const topBarProps: React.ComponentProps<typeof TopBar> = {
     user: userProfile ? { name: userProfile.name, email: userProfile.email, avatarUrl: userProfile.avatarUrl } : null,
-    unreadCount: notifications.filter(n => !n.read).length,
     onSignOut: handleAuthLogout,
     onOpenSettings: (tab) => {
       setSettingsModalInitialTab(tab || 'personal');
