@@ -2293,6 +2293,30 @@ export const EDITOR_SHELL_STYLES = `
   color:var(--sheet-ink); font-weight:normal; letter-spacing:0;
   padding-left:0; text-align:center;
 }
+/* Character cue marker (laper parity + rail colour dot). A centred name reads as
+   just-more-body-text (the user's report), so the cue floats as a soft grey pill
+   (same --sheet-ink token as the heading chips) prefixed by the character's rail
+   colour dot — the two cues a printed script carries by COLUMN position,
+   restored on a page whose columns we deliberately flattened.
+
+   The pill lives on the NodeViewContent's inner wrapper (.hw-character > *, the
+   same child the paren rule styles), NOT on .hw-character itself, so the cue
+   editable keeps its full 60ch column: the blank space to the RIGHT of the pill
+   still just places a caret, and the cue-picker / character-cursor specs that
+   probe that trailing space keep holding. Only a NON-empty cue gets the pill (an
+   empty line has PM's trailing-break hack node — see the placeholder rules
+   above — and should show only its type whisper + caret, not an empty chip). */
+.hw-character:not(:has(br.ProseMirror-trailingBreak)) > *{
+  display:inline-block; padding:2px 12px; border-radius:999px;
+  background:color-mix(in srgb, var(--sheet-ink) 7%, transparent);
+}
+/* The dot rides the pill's ::before (a pseudo — never in the doc, so the caret
+   can't land on it), gated on .cue-has-dot (set by the NodeView only when the
+   name resolved to a rail colour) so an unknown cue wastes no leading space. */
+.hw-character.cue-has-dot:not(:has(br.ProseMirror-trailingBreak)) > *::before{
+  content:''; display:inline-block; width:7px; height:7px; border-radius:50%;
+  margin-right:7px; vertical-align:middle; background:var(--cue-dot, transparent);
+}
 .hw-transition{ color:var(--sheet-ink); font-weight:normal; letter-spacing:0; }
 /* Parenthetical stays ITALIC + soft even on the clean page (laper reference:
    "(dry…)" renders gray italic under the cue) — position AND voice carry it. */

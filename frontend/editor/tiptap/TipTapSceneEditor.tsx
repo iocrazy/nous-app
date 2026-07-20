@@ -62,6 +62,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
   type MutableRefObject,
@@ -213,6 +214,10 @@ export interface TipTapSceneEditorProps {
    *  SAME `@name` chip decoration `MentionNamesContext` drives for the
    *  legacy engines (see `mentionDecorationPlugin.ts`). */
   mentionCandidates?: string[];
+  /** UPPERCASE character name → rail colour. A Hollywood character cue whose
+   *  name matches paints a leading colour dot (`--cue-dot`) inside its pill,
+   *  mirroring the left rail's Characters section; a miss paints no dot. */
+  castColors?: Record<string, string>;
 }
 
 export interface TipTapSceneEditorHandle {
@@ -324,6 +329,9 @@ interface ScriptElementViewRefs {
    * flag lets the selection handler skip that one picker-open.
    */
   gripPressRef: MutableRefObject<boolean>;
+  /** UPPERCASE character name → rail colour; read fresh so a cast-list edit
+   *  repaints the cue dots without a full editor remount. */
+  castColorsRef: MutableRefObject<Record<string, string> | undefined>;
 }
 
 /** The row DOM (spec D5): gutter [num + 4-dot drag handle] + tick + content. */
@@ -452,6 +460,17 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
   // per-row re-render the rest of this file works to avoid (the guard skips
   // redundant classList writes; mouseleave clears it when the row is left).
   const isCharacterRow = (attrs.elType as ElementType) === 'character';
+  // Hollywood cue colour dot: resolve THIS cue's name to its rail colour and, on
+  // a hit, tag the content line so its pill paints a leading `--cue-dot`. The
+  // name lives in the node's text (not an attr), and this view re-renders on any
+  // externalSync/propsSync/childCount change — a cast-list edit rides the
+  // propsSync dispatch (see the effect that lists `castColors`), so a newly
+  // coined cue's dot appears on the next repaint. Asian rows never opt in
+  // (`isAsian` gate) — their cue treatment is unchanged.
+  const cueColor =
+    isCharacterRow && !isAsian
+      ? refs.castColorsRef.current?.[node.textContent.trim().toUpperCase()]
+      : undefined;
   const onRowMouseMove = isCharacterRow
     ? (e: ReactMouseEvent<HTMLDivElement>) => {
         const row = e.currentTarget;
@@ -545,9 +564,13 @@ function ScriptElementView({ node, editor, getPos }: NodeViewProps, refs: Script
   const content = (
     <NodeViewContent
       as="div"
-      className={`mh-el-editable mh-el-line ${lineClass}`}
+      className={`mh-el-editable mh-el-line ${lineClass}${cueColor ? ' cue-has-dot' : ''}`}
       data-el-type={attrs.elType}
       data-el-id={attrs.id}
+      // Custom property inherits down to the pill wrapper's `::before` dot; only
+      // set when a colour resolved, so a miss renders no dot (the CSS gates the
+      // pseudo on `.cue-has-dot`, so no wasted glyph space either).
+      style={cueColor ? ({ '--cue-dot': cueColor } as CSSProperties) : undefined}
     />
   );
 
@@ -629,6 +652,7 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
       mentionMenu,
       pageSeams,
       mentionCandidates,
+      castColors,
     },
     ref,
   ) {
@@ -695,6 +719,8 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
     pageSeamsRef.current = pageSeams ?? new Map();
     const mentionCandidatesRef = useRef<string[]>(mentionCandidates ?? []);
     mentionCandidatesRef.current = mentionCandidates ?? [];
+    const castColorsRef = useRef<Record<string, string> | undefined>(castColors);
+    castColorsRef.current = castColors;
 
     // The mapper's diff base: the last element list dispatched to (or
     // adopted from, via applyExternalElements) the server. Advances on every
@@ -728,6 +754,7 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
         onElementDragEndRef,
         onElementContextMenuRef,
         gripPressRef,
+        castColorsRef,
       };
       const ViewNode = ScriptElementNode.extend({
         addNodeView() {
@@ -978,7 +1005,11 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
     useEffect(() => {
       if (!editor) return;
       editor.view.dispatch(editor.state.tr.setMeta('propsSync', true));
-    }, [editor, selectedElementIds, draggingElementId, dropElementEdge, pageSeams, mentionCandidates]);
+      // `castColors` rides here too: the cue dot is read off `castColorsRef` by
+      // the NodeView (not a React prop), so a cast-list edit needs this forced
+      // repaint to actually surface a newly resolved colour — same rationale as
+      // `mentionCandidates`.
+    }, [editor, selectedElementIds, draggingElementId, dropElementEdge, pageSeams, mentionCandidates, castColors]);
 
     // Composition end: PM defers doc sync while `view.composing` is true, so
     // the "final" onUpdate carrying the composed text may land in the SAME
