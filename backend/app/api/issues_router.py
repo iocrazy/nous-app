@@ -185,6 +185,52 @@ async def update_issue(issue_id: int, payload: IssueUpdate, auth: AuthDep) -> Is
     return Issue.model_validate(_normalise_uuid_strs(row))
 
 
+async def _assert_stage_owner_or_manager(issue: dict, auth) -> None:
+    """Owner-review guard (spec §7 — 项目 workflow M1 PR-B): a ``project_stage``
+    mirror issue moving in_review→done may only be closed by the node's own
+    owner, or by the project's manager as an override (agent-owner nodes have
+    no human owner to match, so they always require the manager path).
+
+    Applies ONLY to the NEW three-segment origin_id shape
+    (``project_stage:{project_id}:{node_id}``) — the OLD two-segment SOP-stage
+    mirror (no project scope encoded, 存量镜像 issue) is never locked, matching
+    ``_fire_stage_node_sync``'s own old-format skip. A node id that fails to
+    resolve to a live ``project_stage_nodes`` row degrades the same way (fail
+    open — there is no owner to enforce against).
+    """
+    from app.repositories.project_stage_nodes_repository import (
+        get_project_stage_nodes_repository,
+    )
+    from app.services.library.project_stage_issues import parse_stage_origin_id
+
+    origin_id = issue.get("origin_id")
+    if not origin_id:
+        return
+    project_id, node_id = parse_stage_origin_id(str(origin_id))
+    if project_id is None:
+        return  # old two-segment origin — not locked
+
+    node = await get_project_stage_nodes_repository().get_node(node_id, project_id)
+    if node is None:
+        return  # can't resolve an owner — fail open
+
+    user_id = str(auth.user_id)
+    owner_user_id = node.get("owner_user_id")
+    if owner_user_id is not None and str(owner_user_id) == user_id:
+        return
+
+    from app.core.workflow_roles import MANAGER, resolve_effective_role
+
+    role = await resolve_effective_role(user_id, project_id=project_id)
+    if role == MANAGER:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Only the stage owner or a project manager may complete this review",
+    )
+
+
 @router.post("/{issue_id}/transition", response_model=Issue)
 async def transition_status(
     issue_id: int, body: IssueStatusTransition, auth: AuthDep
@@ -196,6 +242,17 @@ async def transition_status(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"id={issue_id} not found"
         )
     await _assert_visibility(existing, auth)
+    # Owner-review guard: only a project_stage issue's node owner (or the
+    # project manager, as an override) may push it in_review→done. Every other
+    # issue — different origin_kind, different edge, or no project — is
+    # completely unaffected.
+    if (
+        body.status.value == "done"
+        and existing.get("status") == "in_review"
+        and existing.get("origin_kind") == "project_stage"
+        and existing.get("project_id") is not None
+    ):
+        await _assert_stage_owner_or_manager(existing, auth)
     try:
         row = await issue_repository.transition_status(issue_id, body.status.value)
     except Exception as e:
