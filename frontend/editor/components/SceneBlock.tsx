@@ -94,7 +94,8 @@ interface MentionState {
    *  cue; 'transition' = a focused transition line (preset picker). */
   kind: 'inline' | 'character' | 'transition';
   query: string;
-  position?: { top: number; left: number };
+  /** `centered`: `left` is the anchor's CENTER (see MentionCombobox). */
+  position?: { top: number; left: number; centered?: boolean };
 }
 
 /** Industry transition presets (laper parity) — offered whenever a transition
@@ -602,7 +603,7 @@ export function SceneBlock({
     (elementId: string, kind: 'inline' | 'character' | 'transition', query: string) => {
       const container = containerRef.current;
       const node = container?.querySelector<HTMLElement>(`[data-el-id="${elementId}"]`);
-      let position: { top: number; left: number } | undefined;
+      let position: { top: number; left: number; centered?: boolean } | undefined;
       if (node && container) {
         // The popup is absolutely positioned relative to `.mh-scene-block`
         // (containerRef). The line's own `offsetTop` is relative to its
@@ -613,24 +614,34 @@ export function SceneBlock({
         const nodeRect = node.getBoundingClientRect();
         const contRect = container.getBoundingClientRect();
         const top = nodeRect.bottom - contRect.top;
-        let left = nodeRect.left - contRect.left;
+        // Panel width bound (CSS max-width) for edge clamping.
+        const POPUP_WIDTH = 300;
         if (kind === 'character') {
           // A character cue's NAME no longer sits at the row's left edge — the
           // Hollywood cue is a centered pill and the Asian cue shrink-wraps
-          // (顶格) — so a fixed padding offset would strand the picker at the far
-          // left. Anchor it under the cue's actual rendered box: the
+          // (顶格). laper parity (user 2026-07-20): the picker hangs CENTERED
+          // directly under the cue. Hand the combobox the cue box's CENTER
+          // (`centered` → translateX(-50%), exact at any rendered width): the
           // NodeViewContent's inner wrapper (`.hw-character > *` / the asian
-          // equivalent) carries the pill/name, so measure that when present and
-          // fall back to the line box (empty cue) otherwise.
+          // equivalent) carries the pill/name; an EMPTY cue's wrapper spans the
+          // full row, whose centre is exactly where the centered "Character"
+          // whisper (and caret) sit. Clamp the centre so the panel's worst-case
+          // half-width never spills either sheet edge.
           const inner = node.firstElementChild as HTMLElement | null;
           const anchorRect = (inner ?? node).getBoundingClientRect();
-          left = anchorRect.left - contRect.left;
+          let center = anchorRect.left - contRect.left + anchorRect.width / 2;
+          center = Math.max(
+            POPUP_WIDTH / 2,
+            Math.min(center, container.clientWidth - POPUP_WIDTH / 2),
+          );
+          position = { top, left: center, centered: true };
+        } else {
+          // Clamp so the panel never spills past the sheet's right edge.
+          let left = nodeRect.left - contRect.left;
+          const maxLeft = container.clientWidth - POPUP_WIDTH;
+          if (left > maxLeft) left = Math.max(0, maxLeft);
+          position = { top, left };
         }
-        // Clamp so a ~300px panel never spills past the sheet's right edge.
-        const POPUP_WIDTH = 300;
-        const maxLeft = container.clientWidth - POPUP_WIDTH;
-        if (left > maxLeft) left = Math.max(0, maxLeft);
-        position = { top, left };
       }
       setMention({ elementId, kind, query, position });
     },

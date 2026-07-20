@@ -59,6 +59,15 @@ test('Tab-retype into an empty cue opens the cast picker without moving the care
   // laper parity: blank query, full cast on offer.
   await expect(picker(page).locator('input')).toHaveValue('');
   await expect(picker(page).locator('.mh-mention-opt', { hasText: 'LIN XIAOMAN' })).toBeVisible();
+
+  // laper parity (user 2026-07-20): the panel hangs CENTERED directly under
+  // the cue — its centre must line up with the row's centre (where the
+  // centered whisper/caret sit), not its left edge.
+  const rowBox = await emptyRow(page).boundingBox();
+  const popBox = await picker(page).boundingBox();
+  const rowCenter = rowBox!.x + rowBox!.width / 2;
+  const popCenter = popBox!.x + popBox!.width / 2;
+  expect(Math.abs(popCenter - rowCenter)).toBeLessThan(30);
 });
 
 test('re-clicking an empty cue that already holds the caret re-opens the picker', async ({
