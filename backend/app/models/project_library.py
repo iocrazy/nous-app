@@ -345,6 +345,12 @@ class ProjectStageNodes(Base):
             ondelete="CASCADE",
             name="project_stage_nodes_project_id_fkey",
         ),
+        ForeignKeyConstraint(
+            ["folder_id"],
+            ["public.project_folders.id"],
+            ondelete="SET NULL",
+            name="project_stage_nodes_folder_id_fkey",
+        ),
         PrimaryKeyConstraint("id", name="project_stage_nodes_pkey"),
         CheckConstraint(
             "status IN ('pending', 'in_progress', 'in_review', 'done', 'skipped')",

@@ -390,6 +390,12 @@ class ProjectFiles(Base):
             ondelete="CASCADE",
             name="project_files_project_id_fkey",
         ),
+        ForeignKeyConstraint(
+            ["source_issue_id"],
+            ["public.issues.id"],
+            ondelete="SET NULL",
+            name="project_files_source_issue_id_fkey",
+        ),
         PrimaryKeyConstraint("id", name="project_files_pkey"),
         Index("idx_project_files_folder", "project_id", "folder_id"),
         Index("idx_project_files_folder_id", "folder_id"),

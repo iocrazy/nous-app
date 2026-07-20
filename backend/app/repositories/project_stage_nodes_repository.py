@@ -28,10 +28,10 @@ from sqlalchemy import select, update
 from app.db.session import read_scope, write_scope
 from app.models import (
     AgentRuns,
+    Projects,
     ProjectStageNodeMembers,
     ProjectStageNodes,
     ProjectStages,
-    Projects,
     WorkflowTemplateNodeMembers,
     WorkflowTemplateNodes,
 )
