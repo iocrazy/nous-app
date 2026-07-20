@@ -436,15 +436,35 @@ async def get_project_workflow(
     from app.repositories.projects_repository import get_projects_repository
 
     repo = get_project_stage_nodes_repository()
+    projects_repo = get_projects_repository()
     nodes = await repo.list_nodes(project_id)
-    project = await get_projects_repository().get_project_by_id(int(project_id))
+    project = await projects_repo.get_project_by_id(int(project_id))
     current_node_id = (project or {}).get("current_node_id")
     agents_active = await repo.count_running_agent_runs(project_id)
+
+    # Filed-file count per node's deliverable folder — one file scan, tallied by
+    # folder_id (spec §5's "N files filed"). Best-effort: an unreadable store
+    # leaves every count at 0, never fails the workflow read.
+    counts: dict[str, int] = {}
+    if any(n.get("folder_id") for n in nodes):
+        try:
+            files = await projects_repo.get_project_files(project_id)
+            for f in files:
+                fid = f.get("folder_id")
+                if fid is not None:
+                    counts[str(fid)] = counts.get(str(fid), 0) + 1
+        except Exception as exc:  # noqa: BLE001 — count is decoration, not core
+            logger.warning(f"[workflow] file count scan failed for {project_id}: {exc!r}")
+    enriched = [
+        {**n, "deliverable_file_count": counts.get(str(n.get("folder_id")), 0)}
+        for n in nodes
+    ]
+
     return ProjectWorkflowOut(
         has_workflow=bool(nodes),
         current_node_id=(str(current_node_id) if current_node_id is not None else None),
         agents_active=agents_active,
-        nodes=nodes,
+        nodes=enriched,
     )
 
 

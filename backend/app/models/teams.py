@@ -440,6 +440,9 @@ class ProjectFiles(Base):
     review_status: Mapped[Optional[str]] = mapped_column(String(30))
     media_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     folder_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    # The mirror issue this file was filed from, via the issue-side Deliverables
+    # dropzone (mig 383). Powers the Files "from MH-xx" back-link chip.
+    source_issue_id: Mapped[Optional[int]] = mapped_column(BigInteger)
 
 
 class ProjectFileComments(Base):

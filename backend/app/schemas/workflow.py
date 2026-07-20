@@ -115,6 +115,11 @@ class NodeOut(BaseModel):
     deliverable_required: bool
     deliverable_label: Optional[str] = None
     skipped: bool
+    # Deliverable folder link + filed-file count (M2-W1). ``folder_id`` is the
+    # node's stage folder (mig 383); ``deliverable_file_count`` is the number of
+    # non-trashed files filed into it — the CurrentNodeCard's "N files filed".
+    folder_id: Optional[str] = None
+    deliverable_file_count: int = 0
     members: List[NodeMemberOut] = Field(default_factory=list)
 
 
