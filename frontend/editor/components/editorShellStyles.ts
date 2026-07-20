@@ -2428,14 +2428,27 @@ export const EDITOR_SHELL_STYLES = `
    the equivalent signal for that engine. Legacy's contentEditable never
    contains that node, so this is purely additive — zero effect on the
    legacy path. */
+/* ":focus" only ever matches on the LEGACY engine (per-line contentEditable).
+   TipTap is one contentEditable root, so its "line being edited" signal is the
+   .caret-el node decoration (caretElementPlugin.ts) — every focused-line rule
+   here carries both variants. */
 .mh-el-editable:empty:focus::before,
-.mh-el-editable:has(br.ProseMirror-trailingBreak):focus::before{ font-style:normal; opacity:0.4; }
+.mh-el-editable:has(br.ProseMirror-trailingBreak):focus::before,
+.caret-el .mh-el-editable:empty::before,
+.caret-el .mh-el-editable:has(br.ProseMirror-trailingBreak)::before{ font-style:normal; opacity:0.4; }
 .mh-el-editable[data-el-type='action']:empty:focus::before,
 .mh-el-editable[data-el-type='action']:has(br.ProseMirror-trailingBreak):focus::before{ content:'Action'; }
 .mh-el-editable[data-el-type='character']:empty:focus::before,
 .mh-el-editable[data-el-type='character']:has(br.ProseMirror-trailingBreak):focus::before{ content:'Character'; }
+/* laper: the freshly-landed dialogue line coaches the writer, not just names
+   its type — "Enter dialogue…" with a sample line (the idle whisper above
+   stays the terse 'Dialogue'; this speaks only once the caret is here). */
 .mh-el-editable[data-el-type='dialogue']:empty:focus::before,
-.mh-el-editable[data-el-type='dialogue']:has(br.ProseMirror-trailingBreak):focus::before{ content:'Dialogue'; }
+.mh-el-editable[data-el-type='dialogue']:has(br.ProseMirror-trailingBreak):focus::before,
+.caret-el .mh-el-editable[data-el-type='dialogue']:empty::before,
+.caret-el .mh-el-editable[data-el-type='dialogue']:has(br.ProseMirror-trailingBreak)::before{
+  content:'Enter dialogue… e.g. I’m back…';
+}
 .mh-el-editable[data-el-type='paren']:empty:focus::before,
 .mh-el-editable[data-el-type='paren']:has(br.ProseMirror-trailingBreak):focus::before{ content:'Parenthetical'; }
 .mh-el-editable[data-el-type='transition']:empty:focus::before,

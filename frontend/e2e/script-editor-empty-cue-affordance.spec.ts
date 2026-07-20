@@ -77,6 +77,78 @@ test('re-clicking an empty cue that already holds the caret re-opens the picker'
   await expect(picker(page)).toBeVisible();
 });
 
+test('picking a character lands the caret in a fresh dialogue line with the coaching hint', async ({
+  page,
+}) => {
+  await open(page);
+  await tabIntoEmptyCue(page);
+  await expect(picker(page)).toBeVisible();
+
+  // Pick LIN XIAOMAN from the cast list.
+  await picker(page).locator('.mh-mention-opt', { hasText: 'LIN XIAOMAN' }).click();
+  await expect(picker(page)).toBeHidden();
+  await expect(emptyRow(page)).toHaveText('LIN XIAOMAN');
+
+  // laper: a dialogue line materialises right below the cue and holds the
+  // caret, whispering its coaching hint.
+  const dialogue = await page.evaluate(() => {
+    // Document order: the element right after the cue.
+    const all = Array.from(document.querySelectorAll('[data-el-id]'));
+    const idx = all.findIndex((el) => el.getAttribute('data-el-id') === 'el_ec0004');
+    const next = all[idx + 1] as HTMLElement | undefined;
+    if (!next) return null;
+    const sel = document.getSelection();
+    return {
+      type: next.dataset.elType,
+      hint: getComputedStyle(next, '::before').content,
+      caretInside: !!sel?.anchorNode && next.contains(sel.anchorNode),
+    };
+  });
+  expect(dialogue).not.toBeNull();
+  expect(dialogue!.type).toBe('dialogue');
+  expect(dialogue!.caretInside).toBe(true);
+  expect(dialogue!.hint).toContain('Enter dialogue');
+});
+
+test('picking a character reuses an existing following dialogue instead of inserting', async ({
+  page,
+}) => {
+  // Cue directly above an existing dialogue: selecting must NOT wedge a new
+  // empty dialogue between them.
+  const paired: WireElement[] = [
+    { id: 'el_pd0001', type: 'character', text: 'LIN XIAOMAN' },
+    { id: 'el_pd0002', type: 'dialogue', text: 'We are out of time.' },
+    { id: 'el_pd0003', type: 'action', text: '' },
+  ];
+  await setupScriptStubs(page, {
+    scenes: [wireScene({ id: SCENE_ID_BASE + 1, sortOrder: 1, location: 'LAB', elements: paired })],
+  });
+  await page.goto(SCRIPT_URL);
+  await page.waitForSelector('[data-testid="scene-block"]', { timeout: 15_000 });
+  await page.waitForTimeout(500);
+
+  // Open the picker on the EXISTING cue by clicking its name.
+  const cue = page.locator('[data-el-id="el_pd0001"]');
+  await cue.click();
+  await expect(picker(page)).toBeVisible();
+  await picker(page).locator('.mh-mention-opt', { hasText: 'LIN XIAOMAN' }).first().click();
+  await expect(picker(page)).toBeHidden();
+
+  // Still exactly one dialogue, directly after the cue — caret inside it.
+  const state = await page.evaluate(() => {
+    const all = Array.from(document.querySelectorAll('[data-el-id]'));
+    const types = all.map((el) => (el as HTMLElement).dataset.elType);
+    const sel = document.getSelection();
+    const dlg = document.querySelector('[data-el-id="el_pd0002"]');
+    return {
+      types,
+      caretInExisting: !!sel?.anchorNode && !!dlg && dlg.contains(sel.anchorNode),
+    };
+  });
+  expect(state.types.filter((t) => t === 'dialogue')).toHaveLength(1);
+  expect(state.caretInExisting).toBe(true);
+});
+
 test('hollywood: the focused empty cue shows a CENTERED "Character" whisper', async ({ page }) => {
   await open(page);
   await tabIntoEmptyCue(page);
