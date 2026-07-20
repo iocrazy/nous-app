@@ -7,6 +7,7 @@ Endpoints (under /api/v1/pipelines):
     PATCH  /{id}                 — update (steps, when given, replace atomically)
     DELETE /{id}                 — delete (cascades steps + runs)
     POST   /{id}/run             — start a relay run against a parent issue
+    POST   /runs/{run_id}/cancel — cancel a running relay run (no child cascade)
 
 Team is a HARD boundary: every route validates membership server-side against
 team_members and returns 404 (never 403) on a cross-team access so existence
@@ -31,6 +32,8 @@ from app.schemas.pipeline import (
 )
 from app.services.issues.pipeline_relay import (
     PipelineRelayError,
+    RelayGateway,
+    build_origin_id,
     start_pipeline_run,
 )
 
@@ -127,6 +130,76 @@ async def run_pipeline(
     except PipelineRelayError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
     return PipelineRun.model_validate(await _enrich_run(run))
+
+
+@router.post("/runs/{run_id}/cancel", response_model=PipelineRun)
+async def cancel_pipeline_run(run_id: int, auth: AuthDep) -> PipelineRun:
+    """Cancel a RUNNING content-relay run.
+
+    Team is a HARD boundary: a run that does not exist, or that lives in a team
+    the caller is not a member of, returns 404 (never 403) so existence never
+    leaks — the same guard shape the rest of this router uses. Only a run still
+    in ``running`` can be cancelled; a run that already reached a terminal state
+    (completed / halted / cancelled) returns 409 and the caller should re-read
+    the true state. On success the run row flips to ``cancelled`` via the repo
+    compare-and-swap and one system line is posted onto the parent issue's
+    timeline.
+
+    Boundary (matches multica MUL-4113 — no status cascade): cancelling stops
+    the run's state machine ONLY. Already-dispatched step sub-issues and any
+    in-flight agent work are left exactly as they are; because the relay's
+    advance is a CAS gated on ``status = 'running'`` (see pipeline_relay), a
+    cancelled run simply can never fire the next step — no child is touched.
+    """
+    run = await pipeline_repository.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    # Resolve the owning team via the pipeline and enforce membership (404 on a
+    # cross-team run so its existence is not leaked).
+    pipeline = await pipeline_repository.get_pipeline(int(run["pipeline_id"]))
+    if not pipeline:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    await _assert_team_member(str(auth.user_id), int(pipeline["team_id"]))
+
+    if run["status"] != "running":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"run is not running (status={run['status']})",
+        )
+
+    cancelled = await pipeline_repository.cancel_run(run_id)
+    if not cancelled:
+        # Lost the race — the run went terminal between the read and the CAS.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="run is no longer running",
+        )
+
+    # Re-read for the fully string-coerced row (the CAS RETURNING row is raw).
+    fresh = await pipeline_repository.get_run(run_id) or run
+    await _post_run_cancelled_message(fresh)
+    return PipelineRun.model_validate(await _enrich_run(fresh))
+
+
+async def _post_run_cancelled_message(run: dict) -> None:
+    """Post one system line onto the parent issue's timeline noting the run was
+    cancelled by the user. Best-effort — a timeline write must never fail the
+    cancel itself (the run is already terminal)."""
+    try:
+        parent = await issue_repository.get_by_id(int(run["parent_issue_id"]))
+        if not parent:
+            return
+        step = int(run.get("current_step") or 0)
+        await RelayGateway().post_parent_message(
+            parent,
+            (
+                f"Pipeline run cancelled — stopped at step {step}. "
+                "Already-dispatched sub-issues were left running."
+            ),
+            key=build_origin_id(run["id"], step),
+        )
+    except Exception as exc:  # noqa: BLE001 — timeline is decoration only
+        logger.warning(f"[pipelines] cancel timeline post failed: {exc!r}")
 
 
 async def _enrich_run(run: dict) -> dict:

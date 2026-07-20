@@ -329,6 +329,21 @@ async def test_repeat_save_at_terminal_never_fires():
 
 
 @pytest.mark.asyncio
+async def test_cancelled_run_does_not_advance():
+    # A user cancelled the run (status='cancelled'); a step child later reaching
+    # 'done' must NOT spin up the next step — the CAS advance is gated on
+    # status='running', so the relay is inert once cancelled.
+    gw = _FakeGateway(
+        pipeline=_pipeline(steps=3), parent=_parent(), run=_run(1, status="cancelled")
+    )
+    gw.issues[9001] = _child(1)
+    out = await on_pipeline_child_terminal(9001, "in_progress", "done", gateway=gw)
+    assert not out["fired"] and out["reason"] == "run_not_running"
+    assert not gw.created_issues  # no next step was created
+    assert gw.run["status"] == "cancelled"  # unchanged
+
+
+@pytest.mark.asyncio
 async def test_stale_step_edge_ignored():
     # run is on step 2, but a step-1 child terminal arrives late → ignored
     gw = _FakeGateway(pipeline=_pipeline(steps=2), parent=_parent(), run=_run(2))

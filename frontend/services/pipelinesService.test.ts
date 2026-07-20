@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  cancelRun,
   createPipeline,
   listIssuePipelineRuns,
   listPipelines,
@@ -118,6 +119,32 @@ describe('pipelinesService', () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0].id).toBe('900');
+  });
+
+  it('cancels a run via POST to the /api/v1 prefixed runs path', async () => {
+    const cancelled: PipelineRun = {
+      id: '900',
+      pipeline_id: BIG,
+      parent_issue_id: '1000',
+      current_step: 2,
+      status: 'cancelled',
+      halted_reason: null,
+      started_by_user_id: null,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      completed_at: '2026-01-02T00:00:00Z',
+      pipeline_name: 'Relay',
+      total_steps: 3,
+      current_agent_id: 'a2',
+    };
+    const spy = stub(cancelled);
+    const out = await cancelRun('900');
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit];
+    // Full path pinned: the /api/v1 prefix must be present (a missing prefix
+    // hits the SPA fallback, not the API — #1481).
+    expect(url).toBe('https://api.test/api/v1/pipelines/runs/900/cancel');
+    expect(init.method).toBe('POST');
+    expect(out.status).toBe('cancelled');
   });
 
   it('throws on a non-ok response', async () => {

@@ -11,6 +11,7 @@ import React, { useEffect, useState } from 'react';
 import { GitBranch } from 'lucide-react';
 
 import {
+  cancelRun,
   listIssuePipelineRuns,
   type PipelineRun,
 } from '../../services/pipelinesService';
@@ -25,6 +26,11 @@ interface Props {
 
 export const PipelineRunStrip: React.FC<Props> = ({ issueId, agentsById, refreshKey }) => {
   const [run, setRun] = useState<PipelineRun | null>(null);
+  // Two-stage cancel: first click arms the confirm, second click fires.
+  const [confirming, setConfirming] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  // Local bump to re-fetch after a cancel without leaning on the parent.
+  const [localRefresh, setLocalRefresh] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,7 +39,10 @@ export const PipelineRunStrip: React.FC<Props> = ({ issueId, agentsById, refresh
         const runs = await listIssuePipelineRuns(issueId);
         // Prefer a running relay; otherwise show the newest (list is newest-first).
         const active = runs.find((r) => r.status === 'running') ?? runs[0] ?? null;
-        if (!cancelled) setRun(active);
+        if (!cancelled) {
+          setRun(active);
+          setConfirming(false);
+        }
       } catch (err) {
         console.error('[PipelineRunStrip] load failed', err);
         if (!cancelled) setRun(null);
@@ -42,7 +51,27 @@ export const PipelineRunStrip: React.FC<Props> = ({ issueId, agentsById, refresh
     return () => {
       cancelled = true;
     };
-  }, [issueId, refreshKey]);
+  }, [issueId, refreshKey, localRefresh]);
+
+  const handleCancelClick = async () => {
+    if (!run || cancelling) return;
+    if (!confirming) {
+      setConfirming(true);
+      return;
+    }
+    setCancelling(true);
+    try {
+      const updated = await cancelRun(run.id);
+      setRun(updated);
+      setConfirming(false);
+      // Re-fetch so the strip reflects the authoritative post-cancel state.
+      setLocalRefresh((n) => n + 1);
+    } catch (err) {
+      console.error('[PipelineRunStrip] cancel failed', err);
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   if (!run) return null;
 
@@ -68,10 +97,25 @@ export const PipelineRunStrip: React.FC<Props> = ({ issueId, agentsById, refresh
       <GitBranch size={13} className="shrink-0" />
       <span className="font-medium">{run.pipeline_name ?? 'Pipeline'}</span>
       {run.status === 'running' ? (
-        <span className="text-ink-300">
-          — step {run.current_step}/{total}
-          {agentName && <span className="text-ink-400"> · {agentName}</span>}
-        </span>
+        <>
+          <span className="text-ink-300">
+            — step {run.current_step}/{total}
+            {agentName && <span className="text-ink-400"> · {agentName}</span>}
+          </span>
+          <button
+            type="button"
+            data-testid="pipeline-run-cancel"
+            onClick={handleCancelClick}
+            disabled={cancelling}
+            className={`ml-auto shrink-0 rounded border px-2 py-0.5 text-[12px] transition-colors disabled:opacity-50 ${
+              confirming
+                ? 'border-rose-500/40 bg-rose-500/15 text-rose-200 hover:bg-rose-500/25'
+                : 'border-ink-700 bg-ink-800/40 text-ink-300 hover:bg-ink-800/70'
+            }`}
+          >
+            {confirming ? 'Confirm cancel?' : 'Cancel run'}
+          </button>
+        </>
       ) : run.status === 'completed' ? (
         <span className="text-ink-300">— complete ({total} steps)</span>
       ) : run.status === 'halted' ? (

@@ -186,3 +186,137 @@ def test_run_success_returns_enriched_run(client):
     assert body["pipeline_name"] == "Content Relay"
     assert body["total_steps"] == 1
     assert body["current_agent_id"] == AGENT_ID
+
+
+# ── cancel run ────────────────────────────────────────────────────────────
+
+
+def _running_run() -> dict:
+    return {
+        "id": "900",
+        "pipeline_id": "500",
+        "parent_issue_id": "1000",
+        "current_step": 1,
+        "status": "running",
+        "halted_reason": None,
+        "started_by_user_id": USER_ID,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+        "completed_at": None,
+    }
+
+
+def test_cancel_missing_run_is_404(client):
+    with patch(
+        "app.api.pipelines_router.pipeline_repository.get_run",
+        new=AsyncMock(return_value=None),
+    ):
+        res = client.post("/api/v1/pipelines/runs/900/cancel")
+    assert res.status_code == 404
+
+
+def test_cancel_cross_team_is_404(client):
+    # The run exists but its pipeline's team excludes the caller → 404, never a
+    # 403 and never a leak that the run exists.
+    with (
+        patch(
+            "app.api.pipelines_router.pipeline_repository.get_run",
+            new=AsyncMock(return_value=_running_run()),
+        ),
+        patch(
+            "app.api.pipelines_router.pipeline_repository.get_pipeline",
+            new=AsyncMock(return_value=_pipeline_row()),
+        ),
+        patch(
+            "app.api.pipelines_router.issue_repository.is_team_member",
+            new=AsyncMock(return_value=False),
+        ),
+    ):
+        res = client.post("/api/v1/pipelines/runs/900/cancel")
+    assert res.status_code == 404
+
+
+def test_cancel_non_running_returns_409(client):
+    done = {**_running_run(), "status": "completed"}
+    with (
+        patch(
+            "app.api.pipelines_router.pipeline_repository.get_run",
+            new=AsyncMock(return_value=done),
+        ),
+        patch(
+            "app.api.pipelines_router.pipeline_repository.get_pipeline",
+            new=AsyncMock(return_value=_pipeline_row()),
+        ),
+        patch(
+            "app.api.pipelines_router.issue_repository.is_team_member",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
+        res = client.post("/api/v1/pipelines/runs/900/cancel")
+    assert res.status_code == 409
+
+
+def test_cancel_lost_race_returns_409(client):
+    # The pre-check saw 'running' but the CAS returns None (another observer
+    # terminalized the run first) → 409, not a false success.
+    with (
+        patch(
+            "app.api.pipelines_router.pipeline_repository.get_run",
+            new=AsyncMock(return_value=_running_run()),
+        ),
+        patch(
+            "app.api.pipelines_router.pipeline_repository.get_pipeline",
+            new=AsyncMock(return_value=_pipeline_row()),
+        ),
+        patch(
+            "app.api.pipelines_router.issue_repository.is_team_member",
+            new=AsyncMock(return_value=True),
+        ),
+        patch(
+            "app.api.pipelines_router.pipeline_repository.cancel_run",
+            new=AsyncMock(return_value=None),
+        ),
+    ):
+        res = client.post("/api/v1/pipelines/runs/900/cancel")
+    assert res.status_code == 409
+
+
+def test_cancel_success_posts_timeline_and_returns_cancelled(client):
+    cancelled = {**_running_run(), "status": "cancelled"}
+    post_msg = AsyncMock()
+    with (
+        patch(
+            "app.api.pipelines_router.pipeline_repository.get_run",
+            # 1st read: the running run; 2nd read: the cancelled row.
+            new=AsyncMock(side_effect=[_running_run(), cancelled]),
+        ),
+        patch(
+            "app.api.pipelines_router.pipeline_repository.get_pipeline",
+            new=AsyncMock(return_value=_pipeline_row()),
+        ),
+        patch(
+            "app.api.pipelines_router.issue_repository.is_team_member",
+            new=AsyncMock(return_value=True),
+        ),
+        patch(
+            "app.api.pipelines_router.pipeline_repository.cancel_run",
+            new=AsyncMock(return_value=cancelled),
+        ),
+        patch(
+            "app.api.pipelines_router.issue_repository.get_by_id",
+            new=AsyncMock(return_value={"id": "1000", "ai_session_id": None}),
+        ),
+        patch(
+            "app.api.pipelines_router.RelayGateway.post_parent_message",
+            new=post_msg,
+        ),
+    ):
+        res = client.post("/api/v1/pipelines/runs/900/cancel")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["id"] == "900"
+    assert body["status"] == "cancelled"
+    # a system line was written onto the parent issue's timeline
+    assert post_msg.await_count == 1
+    posted_body = post_msg.await_args.args[1]
+    assert "cancelled" in posted_body.lower()
