@@ -33,25 +33,29 @@ import {
 } from './beatTemplateService';
 import { BeatsListView } from './BeatsListView';
 import type { CustomTemplateAnchor } from './templates';
-import {
-  persistBeatsSubview,
-  readStoredBeatsSubview,
-  type BeatsSubview,
-} from './beatsViewStorage';
+import { readStoredBeatsSubview, type BeatsSubview } from './beatsViewStorage';
 
 interface Props {
   scriptId: string;
   scenes: SceneDoc[];
   onOpenScene: (sceneId: string) => void;
+  /** Controlled sub-view (Arrangement / List). The host (EditorShell) owns this
+   *  and renders the switch in the shared shell top-bar tab slot, so there is no
+   *  second segmented control here. When omitted (isolated embeds / unit tests)
+   *  BeatsView falls back to the per-script stored value (read once on mount). */
+  subview?: BeatsSubview;
 }
 
-export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
+export function BeatsView({ scriptId, scenes, onOpenScene, subview: subviewProp }: Props) {
   const { t } = useTranslation();
   const { addToast } = useToast();
 
   const [beats, setBeats] = useState<Beat[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [subview, setSubview] = useState<BeatsSubview>(() => readStoredBeatsSubview(scriptId));
+  // Uncontrolled fallback (only when the host passes no `subview`): read the
+  // stored preference once. There is no in-pane switch, so it never changes here.
+  const [internalSubview] = useState<BeatsSubview>(() => readStoredBeatsSubview(scriptId));
+  const subview = subviewProp ?? internalSubview;
   // M3 target total runtime; drives the Arrangement ruler + template defaults.
   const [targetDurationSec, setTargetDurationSec] = useState<number | null>(null);
   // M3.5 user custom templates (global to the caller, not per-script).
@@ -166,13 +170,6 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
     [reloadTemplates, addToast, t],
   );
 
-  const selectSubview = useCallback(
-    (next: BeatsSubview) => {
-      setSubview(next);
-      persistBeatsSubview(scriptId, next);
-    },
-    [scriptId],
-  );
 
   const handleAdd = useCallback(async () => {
     try {
@@ -249,47 +246,10 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
 
   return (
     <div className="mh-beats-pane" data-testid="beats-pane">
-      {/* laper topbar: count left · segmented centre · Add right. */}
-      <div className="mh-beats-subview" role="group" aria-label={t('editor.beatsViewLabel')}>
-        {/* Segmented sits top-LEFT — same spot as the script view's doc tabs
-            (user verdict 2026-07-20); space-between pushes Add to the right. */}
-        <div className="mh-segmented mh-beats-seg">
-          <button
-            type="button"
-            className={`mh-seg${subview === 'arrangement' ? ' active' : ''}`}
-            data-testid="beats-subview-arrangement"
-            aria-pressed={subview === 'arrangement'}
-            onClick={() => selectSubview('arrangement')}
-          >
-            {t('editor.beatsViewArrangement')}
-          </button>
-          <button
-            type="button"
-            className={`mh-seg${subview === 'list' ? ' active' : ''}`}
-            data-testid="beats-subview-list"
-            aria-pressed={subview === 'list'}
-            onClick={() => selectSubview('list')}
-          >
-            {t('editor.beatsViewList')}
-          </button>
-        </div>
-        {/* Add lives ONLY in the empty state's single construct when there are
-            no beats yet (avoids the duplicate topbar + empty-state Add); the
-            topbar Add returns once the sheet has content. */}
-        {beats.length > 0 ? (
-          <button
-            type="button"
-            className="mh-beats-add-ink"
-            data-testid="beats-topbar-add"
-            onClick={() => void handleAdd()}
-          >
-            + {t('editor.beatAdd')}
-          </button>
-        ) : (
-          <span aria-hidden="true" />
-        )}
-      </div>
-
+      {/* The Arrangement/List switch lives in the shell top-bar tab slot (shared
+          mh-doc-tabs), NOT a second segmented control here. The "+ Add beat"
+          action moved into the Arrangement toolbar's right group; the List
+          sub-view keeps its own header Add. */}
       {!loaded ? (
         <div className="mh-beats-view" data-testid="beats-view" />
       ) : subview === 'list' ? (

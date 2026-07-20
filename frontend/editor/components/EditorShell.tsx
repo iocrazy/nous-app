@@ -70,6 +70,11 @@ import {
 import { SceneToc } from './SceneToc';
 import { RailModules, type RailView } from './RailModules';
 import { BeatsView } from '../beats/BeatsView';
+import {
+  persistBeatsSubview,
+  readStoredBeatsSubview,
+  type BeatsSubview,
+} from '../beats/beatsViewStorage';
 import { NodesView } from '../nodes/NodesView';
 import { StoryboardView } from '../storyboard/StoryboardView';
 import { VersionDiff } from '../versions/VersionDiff';
@@ -355,6 +360,23 @@ export function EditorShell({
     setDiffCommit(null);
     setRailView(view);
   }, []);
+
+  // Beats sub-view (Arrangement / List) is lifted HERE so it renders in the very
+  // same centre-topbar slot — and reuses the same `mh-doc-tabs` classes — as the
+  // Script/Outline/Cover document tabs, instead of BeatsView drawing its own
+  // segmented one row lower with its own CSS (user verdict 2026-07-20: same-class
+  // blocks share one slot + one stylesheet). BeatsView is driven controlled via
+  // the `subview`/`onSelectSubview` props below.
+  const [beatsSubview, setBeatsSubview] = useState<BeatsSubview>(() =>
+    readStoredBeatsSubview(scriptId),
+  );
+  const selectBeatsSubview = useCallback(
+    (next: BeatsSubview) => {
+      setBeatsSubview(next);
+      persistBeatsSubview(scriptId, next);
+    },
+    [scriptId],
+  );
 
   // Persist the rail view per script whenever it changes (F2). An effect covers
   // every path uniformly — the rail toggle AND the scene-node jump-back that
@@ -1293,10 +1315,35 @@ export function EditorShell({
       {/* ===== CENTER PAPER COLUMN ===== */}
       <main className="mh-center-col" aria-label={t('editor.paperColumn')}>
         <div className="mh-center-topbar">
-          {/* Script/Outline/Cover doc tabs are meaningless inside the Beats
-              workbench (it has its own Arrangement/Beats segmented) — hide them
-              there so the pane reads as one tool, not a tool inside a doc. */}
-          {railView !== 'beats' ? (
+          {/* The Beats workbench renders its Arrangement/List switch in this SAME
+              slot with the SAME mh-doc-tabs classes as the Script/Outline/Cover
+              document tabs, so the two same-class blocks sit at one position under
+              one stylesheet (user verdict 2026-07-20) instead of Beats drawing its
+              own segmented one row lower. */}
+          {railView === 'beats' ? (
+            <div className="mh-doc-tabs" role="tablist" aria-label={t('editor.beatsViewLabel')}>
+              <button
+                type="button"
+                role="tab"
+                className="mh-doc-tab"
+                aria-selected={beatsSubview === 'arrangement'}
+                data-testid="beats-subview-arrangement"
+                onClick={() => selectBeatsSubview('arrangement')}
+              >
+                {t('editor.beatsViewArrangement')}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                className="mh-doc-tab"
+                aria-selected={beatsSubview === 'list'}
+                data-testid="beats-subview-list"
+                onClick={() => selectBeatsSubview('list')}
+              >
+                {t('editor.beatsViewList')}
+              </button>
+            </div>
+          ) : (
             <div className="mh-doc-tabs" role="tablist" aria-label={t('editor.docModes')}>
               {DOC_MODES.map((m) => (
                 <button
@@ -1311,8 +1358,6 @@ export function EditorShell({
                 </button>
               ))}
             </div>
-          ) : (
-            <div aria-hidden="true" />
           )}
           <div className="mh-topbar-right">
             {COLLAB_ENABLED && <PresenceAvatars users={onlineUsers} />}
@@ -1346,7 +1391,12 @@ export function EditorShell({
           ) : railView === 'storyboard' ? (
             <StoryboardView scenes={scenes} scriptId={scriptId} />
           ) : railView === 'beats' ? (
-            <BeatsView scenes={scenes} scriptId={scriptId} onOpenScene={handleOpenScene} />
+            <BeatsView
+              scenes={scenes}
+              scriptId={scriptId}
+              onOpenScene={handleOpenScene}
+              subview={beatsSubview}
+            />
           ) : state.mode === 'cover' ? (
             <div className="mh-sheet-scroll">
               <div className="mh-cover-card" data-testid="cover-placeholder">
