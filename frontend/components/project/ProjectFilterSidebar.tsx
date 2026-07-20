@@ -1,6 +1,6 @@
 import {
   LayoutGrid, Star, Archive, Clock,
-  FolderOpen, PanelLeftClose, PanelLeftOpen,
+  FolderOpen, PanelLeftClose, PanelLeftOpen, GitBranch,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -18,7 +18,12 @@ interface ProjectFilterSidebarProps {
   onCreateProject: () => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  /** Hide the Workflow Templates entry for viewers (spec §1). Defaults to true. */
+  canManageTemplates?: boolean;
 }
+
+/** The reserved filter key that swaps the main pane to the template editor. */
+export const WORKFLOW_TEMPLATES_FILTER = 'workflow-templates';
 
 // Recent leads the Views rail — a cross-project feed of recently-edited
 // scripts / canvases (not a project filter, so the main pane swaps to a
@@ -68,6 +73,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 export function ProjectFilterSidebar({
   activeFilter, onFilterChange, folders, projectCounts,
   folderCounts, onCreateProject, collapsed, onToggleCollapse,
+  canManageTemplates = true,
 }: ProjectFilterSidebarProps) {
   const { t } = useTranslation();
 
@@ -139,6 +145,28 @@ export function ProjectFilterSidebar({
             </div>
           </div>
         </>
+      )}
+
+      {/* Global entry — workflow template editor (spec §1). Pinned to the
+          bottom with a divider; hidden for viewers. */}
+      {canManageTemplates && (
+        <div className="mt-auto px-2 pb-3 pt-2">
+          <div className="mx-1 mb-2 border-t border-ink-800/80" />
+          <button
+            data-testid="workflow-templates-entry"
+            onClick={() => onFilterChange(WORKFLOW_TEMPLATES_FILTER)}
+            className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-[13px] transition-colors ${
+              activeFilter === WORKFLOW_TEMPLATES_FILTER
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
+                : 'text-ink-500 hover:text-ink-300 hover:bg-ink-800/40'
+            }`}
+          >
+            <GitBranch size={16} className="shrink-0" />
+            <span className="flex-1 truncate text-left">
+              {t('projects.workflow.templatesEntry')}
+            </span>
+          </button>
+        </div>
       )}
     </div>
   );

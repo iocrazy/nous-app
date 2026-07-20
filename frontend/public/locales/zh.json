@@ -294,7 +294,6 @@
       "topicChip": "# 话题",
       "mentionChip": "@ 提及",
       "mentionSoon": "提及需要对方的 open_id，暂未支持",
-      "soon": "即将推出",
       "topicInputAria": "添加话题",
       "topicInputPlaceholder": "输入话题后按回车（逗号或空格也可添加）",
       "removeTopic": "移除话题 {{tag}}",
@@ -1657,6 +1656,59 @@
         "loadingMore": "加载中…"
       },
       "canvasEmpty": "还没有画布——创建一个开始为这个项目构思。"
+    },
+    "workflow": {
+      "templatesEntry": "工作流模板",
+      "title": "工作流",
+      "stages": "阶段",
+      "currentStage": "当前阶段",
+      "owner": "负责人",
+      "members": "成员",
+      "schedule": "排期",
+      "setSchedule": "设置排期",
+      "deliverable": "交付物",
+      "openInTodolist": "在待办中打开",
+      "completeStage": "完成阶段",
+      "advance": "推进",
+      "back": "回退",
+      "noWorkflow": "无工作流",
+      "agentsActive_one": "{{count}} 个智能体运行中",
+      "agentsActive_other": "{{count}} 个智能体运行中",
+      "unassigned": "未指派",
+      "days_one": "{{count}} 天",
+      "days_other": "{{count}} 天",
+      "dateRange": {
+        "cancel": "取消",
+        "done": "完成",
+        "clear": "清除"
+      },
+      "create": {
+        "title": "工作流",
+        "shortForm": "短视频",
+        "longForm": "长视频",
+        "noWorkflow": "无工作流",
+        "shortFormHint": "适用于短视频的精简流程。",
+        "longFormHint": "适用于长视频制作的完整流程。",
+        "noWorkflowHint": "先不设阶段，稍后再套用模板。",
+        "method": "制作方式",
+        "methodLive": "实拍",
+        "methodAI": "AI",
+        "methodHybrid": "混合"
+      },
+      "confirm": {
+        "advanceTitle": "推进工作流？",
+        "backTitle": "回退？",
+        "closing": "关闭",
+        "creating": "创建下一阶段",
+        "noAgentAuto": "不会自动启动任何智能体。",
+        "advance": "推进",
+        "back": "回退",
+        "cancel": "取消",
+        "blockedNotManager": "只有管理者或编辑可以推进此工作流。",
+        "blockedReviewPending": "当前阶段仍需审阅后才能推进。",
+        "blockedDeliverableMissing": "当前阶段的交付物文件夹为空，请先归档后再推进。",
+        "blockedNoNext": "这已是最后一个阶段，没有可推进的下一步。"
+      }
     }
   },
   "storyboard": {

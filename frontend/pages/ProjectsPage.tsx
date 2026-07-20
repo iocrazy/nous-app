@@ -7,7 +7,8 @@ import { useTeamContext } from '../contexts/TeamContext';
 import { useWorkspaceScope } from '../hooks/useWorkspaceScope';
 import { fetchProjects, fetchRecentItems } from '../services/projectsService';
 import { ProjectsListView } from '../components/ProjectsListView';
-import { ProjectFilterSidebar } from '../components/project/ProjectFilterSidebar';
+import { ProjectFilterSidebar, WORKFLOW_TEMPLATES_FILTER } from '../components/project/ProjectFilterSidebar';
+import { WorkflowTemplateEditor } from '../components/workflow/WorkflowTemplateEditor';
 import { RecentItemsList } from '../components/project/RecentItemsList';
 import { VideoReviewPage } from '../components/VideoReviewPage';
 import { CreateProjectModal } from '../components/CreateProjectModal';
@@ -258,7 +259,9 @@ export function ProjectsPage() {
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         />
         <div className={'flex-1 min-w-0 h-full overflow-y-auto px-8 pt-3 pb-8'}>
-          {activeFilter === 'recent' ? (
+          {activeFilter === WORKFLOW_TEMPLATES_FILTER ? (
+            <WorkflowTemplateEditor teamId={effectiveTeamId} />
+          ) : activeFilter === 'recent' ? (
             <>
               <h2 className="text-lg font-semibold text-ink-100 mb-4">{filterTitle}</h2>
               <RecentItemsList items={recentItems} onSelect={handleRecentSelect} />
