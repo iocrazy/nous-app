@@ -757,7 +757,29 @@ export const EDITOR_SHELL_STYLES = `
    light and dark are both covered without extra selectors. */
 .as-row{ display:flex; align-items:baseline; gap:6px; margin:0 0 7px; position:relative; }
 .as-row .mh-el-tick{ display:none; }
-.as-row .mh-el-row{ flex:1 1 auto; margin:0; }
+/* position:static so the abspos gutter below anchors to '.as-row' (sheet column
+   0), NOT to '.mh-el-row' — which the per-type wrapper padding shifts right. The
+   drop-edge indicator pseudos then span the full row width off '.as-row', which
+   is fine (they are full-bleed lines either way). */
+.as-row .mh-el-row{ flex:1 1 auto; margin:0; position:static; }
+/* Gutter alignment (fix-the-class): the hover gutter (block number + 4-dot grip)
+   MUST land in the SAME left-margin column for every element type, exactly like
+   Hollywood. The shared in-flow gutter (see IN-FLOW GUTTERS below) pulls itself
+   into the margin with a negative margin-left measured from its flex origin —
+   '.mh-el-row's content start. In Hollywood that origin is always sheet column 0,
+   so every type's gutter aligns. But Asian applies the per-type body indent as
+   padding-left on the '.as-row' WRAPPER, which shifts the inner '.mh-el-row' (and
+   thus the in-flow gutter) rightward by that indent — so action/dialogue drifted
+   +4ch and paren/comment +0.5ch, colliding with the △ mark and the body text (the
+   reported bug). Anchor the Asian gutter to '.as-row's padding box instead (its
+   left edge is sheet column 0 regardless of padding-left, which only insets the
+   CONTENT). left:-51px reproduces the Hollywood column exactly (42px box + the 9px
+   row gap = the same -51px the in-flow rule uses); removing it from flow leaves
+   the editable's position unchanged because the in-flow gutter's -51px margin
+   already consumed net-zero forward space. Width/height/font-size/flex-centring
+   are inherited from the base '.mh-el-gutter' rule, so vertical alignment matches
+   the first text line. */
+.as-row .mh-el-gutter{ position:absolute; left:-51px; top:0; margin-left:0; }
 .as-mark{
   font-family:var(--script-hei); font-size:13.5px; line-height:1.7;
   color:var(--sheet-ink-soft); flex-shrink:0; user-select:none;

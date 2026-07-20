@@ -1,7 +1,7 @@
 {
   "name": "mediahub",
   "private": true,
-  "version": "0.25.444",
+  "version": "0.25.445",
   "type": "module",
   "scripts": {
     "dev": "vite",
