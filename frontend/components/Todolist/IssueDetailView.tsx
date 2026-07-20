@@ -9,7 +9,7 @@
  * WebSocket (replaces polling from commit 3453a990).
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ChevronLeft, MoreHorizontal, AlignLeft, Paperclip, FileText, Plus,
@@ -27,9 +27,8 @@ import { dispatchIssue, getDispatchPreview, type DispatchPreview } from '../../s
 import { DispatchConfirmDialog } from './DispatchConfirmDialog';
 import { PipelineRunStrip } from './PipelineRunStrip';
 import { IssueCostLine } from './IssueCostLine';
-import { IssueFlowStrip } from './IssueFlowStrip';
-import { parseStageMirror, useIssueFlows } from './issueFlow';
-import { originPath, parseOriginId } from './issueOrigin';
+import { SubtaskBar } from './SubtaskBar';
+import type { SubtaskCount } from './issueFlow';
 import { RunPipelineMenu } from './RunPipelineMenu';
 import { openIssueChatSocket } from '../../services/issueChatSocket';
 import { getSupabaseClient } from '../../supabaseClient';
@@ -44,6 +43,8 @@ interface IssueDetailViewProps {
   onCreateSubIssue: (parentId: number) => void;
   /** Called after a successful dispatch so the parent can re-fetch the issue row. */
   onIssueDispatched?: () => void;
+  /** Sub-issue done/total for THIS issue, or undefined when it has no children. */
+  subtaskCount?: SubtaskCount;
 }
 
 // Chat + Activity were separate tabs over the SAME messages array (Activity
@@ -79,7 +80,7 @@ const AgentWorkingBadge: React.FC<{ startedAt: string | null; agentName?: string
   );
 };
 
-export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents, agentsById, selfUserId, onCreateSubIssue, onIssueDispatched }) => {
+export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents, agentsById, selfUserId, onCreateSubIssue, onIssueDispatched, subtaskCount }) => {
   const { teamId } = useParams<{ teamId: string }>();
   const [tab, setTab] = useState<DetailTab>('timeline');
   const [messages, setMessages] = useState<IssueMessage[]>([]);
@@ -92,14 +93,10 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   const pipelineTeamId = teamId && /^\d+$/.test(teamId) ? teamId : null;
   // A pipeline child issue should not itself be a pipeline parent.
   const isPipelineChild = issue.raw.origin_kind === 'pipeline';
-  // Flow-progress strip: only for stage-mirror issues (origin_kind='project_stage').
-  const flowIssues = useMemo(() => [issue], [issue]);
-  const flow = useIssueFlows(flowIssues);
-  const flowRef = parseStageMirror(issue.raw.origin_kind, issue.raw.origin_id);
-  const flowPath = flowRef ? originPath(parseOriginId(issue.raw.origin_id)!, teamId) : null;
-  const flowCurrentStageId = flowRef
-    ? flow.currentByProject.get(flowRef.projectId)?.id ?? flowRef.stageId
-    : null;
+  // Link to the owning project's workspace (plain project link, same shape the
+  // Group-by-Project header uses). Only numeric team ids are valid routes.
+  const projectPath =
+    issue.project && teamId ? `/team/${teamId}/projects/${issue.project.id}` : null;
   // Run-confirm gate: dispatch always goes through a confirm dialog that
   // renders the server's dispatch-preview verdict.
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -364,15 +361,23 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
             <p className="mt-2 text-[14px] text-ink-400 leading-relaxed whitespace-pre-wrap">{issue.description}</p>
           )}
 
-          {flowRef && flowPath && flowCurrentStageId && flow.catalog.length > 0 && (
-            <div data-testid="detail-flow" className="mt-3 flex items-center gap-2 text-[13px]">
-              <span className="text-[11px] uppercase tracking-wider text-ink-500">Flow</span>
-              <IssueFlowStrip
-                catalog={flow.catalog}
-                currentStageId={flowCurrentStageId}
-                to={flowPath}
-                variant="detail"
-              />
+          {((subtaskCount && subtaskCount.total > 0) || projectPath) && (
+            <div className="mt-3 flex items-center gap-4 flex-wrap text-[13px]">
+              {subtaskCount && subtaskCount.total > 0 && (
+                <div data-testid="detail-tasks" className="flex items-center gap-2">
+                  <span className="text-[11px] uppercase tracking-wider text-ink-500">Tasks</span>
+                  <SubtaskBar count={subtaskCount} size="detail" />
+                </div>
+              )}
+              {projectPath && issue.project && (
+                <Link
+                  to={projectPath}
+                  data-testid="detail-open-project"
+                  className="inline-flex items-center gap-1 text-[var(--accent-text)] hover:underline"
+                >
+                  Open in {issue.project.name} →
+                </Link>
+              )}
             </div>
           )}
 

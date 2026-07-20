@@ -16,6 +16,8 @@ export type IssueColumnKey =
   | 'assignee'
   | 'project'
   | 'parent'
+  | 'subtasks'
+  | 'due'
   | 'tags'
   | 'updated';
 
@@ -29,6 +31,8 @@ export const ISSUE_COLUMN_DEFS: Array<{
   { key: 'assignee', label: 'Assignee', hint: 'Assigned agent or board user.' },
   { key: 'project', label: 'Project', hint: 'Linked project pill with its color.' },
   { key: 'parent', label: 'Parent issue', hint: 'Parent issue identifier and title.' },
+  { key: 'subtasks', label: 'Subtasks', hint: 'Sub-issue progress (done / total).' },
+  { key: 'due', label: 'Due', hint: 'Due date, amber when soon and red when overdue.' },
   { key: 'tags', label: 'Tags', hint: 'Issue labels and tags.' },
   { key: 'updated', label: 'Last updated', hint: 'Latest visible activity time.' },
 ];
@@ -41,6 +45,8 @@ export const DEFAULT_VISIBLE_COLUMNS: IssueColumnKey[] = [
   'id',
   'assignee',
   'project',
+  'subtasks',
+  'due',
   'tags',
   'updated',
 ];

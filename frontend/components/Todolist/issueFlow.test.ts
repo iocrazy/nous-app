@@ -1,74 +1,55 @@
 /**
- * issueFlow pure-helper tests — origin parse (incl. malformed), dot/position
- * math, and due-date bucketing. No network, no React.
+ * issueFlow pure-helper tests — subtask aggregation and due-date bucketing.
+ * No network, no React.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import {
-  computeDots,
+  computeSubtaskCounts,
   dueBucket,
-  flowPosition,
-  parseStageMirror,
+  isSubtaskComplete,
   readDueDate,
-  stageIndex,
 } from './issueFlow';
-import type { ProjectStage } from '../../types';
 
-const BIG_PROJECT = '9007199254740993'; // > 2^53
-const BIG_STAGE = '9007199254740995';
-
-function stage(id: string, slug: string, order: number): ProjectStage {
-  return { id, slug, name: slug, sort_order: order, tools_recommended: [] };
+function child(parent_id: number | null, status: string) {
+  return { parent_id, status };
 }
 
-const CATALOG: ProjectStage[] = [
-  stage('10', 'planning', 1),
-  stage('20', 'script', 2),
-  stage('30', 'storyboard', 3),
-  stage('40', 'render', 4),
-];
-
-describe('parseStageMirror', () => {
-  it('extracts projectId + stageId, keeping snowflake ids as strings', () => {
-    const ref = parseStageMirror('project_stage', `project_stage:${BIG_PROJECT}:${BIG_STAGE}`);
-    expect(ref).toEqual({ projectId: BIG_PROJECT, stageId: BIG_STAGE });
-    expect(typeof ref!.projectId).toBe('string');
+describe('computeSubtaskCounts', () => {
+  it('groups children by parent and counts done (done+cancelled) / total', () => {
+    const counts = computeSubtaskCounts([
+      child(null, 'todo'), // a top-level issue — not a child
+      child(1, 'done'),
+      child(1, 'cancelled'),
+      child(1, 'in_progress'),
+      child(2, 'todo'),
+    ]);
+    expect(counts.get(1)).toEqual({ done: 2, total: 3 }); // done + cancelled
+    expect(counts.get(2)).toEqual({ done: 0, total: 1 });
   });
 
-  it('returns null for a non-mirror issue', () => {
-    expect(parseStageMirror('manual', 'canvas:123')).toBeNull();
-    expect(parseStageMirror('publish', 'publish:123')).toBeNull();
-    expect(parseStageMirror(null, null)).toBeNull();
+  it('omits parents with no children (no 0/0 placeholder)', () => {
+    const counts = computeSubtaskCounts([child(null, 'todo'), child(5, 'todo')]);
+    expect(counts.has(999)).toBe(false);
+    expect(counts.get(5)).toEqual({ done: 0, total: 1 });
   });
 
-  it('does not crash on a malformed origin_id', () => {
-    // project_stage kind but no second colon → not enough parts.
-    expect(parseStageMirror('project_stage', 'project_stage:onlyproject')).toBeNull();
-    expect(parseStageMirror('project_stage', 'project_stage:')).toBeNull();
-    expect(parseStageMirror('project_stage', 'garbage')).toBeNull();
-    expect(parseStageMirror('project_stage', undefined)).toBeNull();
+  it('returns an empty map for an empty list', () => {
+    expect(computeSubtaskCounts([]).size).toBe(0);
+  });
+
+  it('accumulates independently per parent', () => {
+    const counts = computeSubtaskCounts([child(1, 'done'), child(1, 'todo')]);
+    expect(counts.get(1)).toEqual({ done: 1, total: 2 });
   });
 });
 
-describe('stageIndex / computeDots / flowPosition', () => {
-  it('locates the stage by id (string-safe)', () => {
-    expect(stageIndex(CATALOG, '30')).toBe(2);
-    expect(stageIndex(CATALOG, '999')).toBe(-1);
-  });
-
-  it('marks done / current / future dots around the current index', () => {
-    expect(computeDots(4, 2)).toEqual(['done', 'done', 'current', 'future']);
-    expect(computeDots(4, 0)).toEqual(['current', 'future', 'future', 'future']);
-  });
-
-  it('renders all-future when the current stage is unknown (-1)', () => {
-    expect(computeDots(3, -1)).toEqual(['future', 'future', 'future']);
-  });
-
-  it('reports 1-based x / total y (0 when unknown)', () => {
-    expect(flowPosition(4, 2)).toEqual({ x: 3, y: 4 });
-    expect(flowPosition(4, -1)).toEqual({ x: 0, y: 4 });
+describe('isSubtaskComplete', () => {
+  it('is true only when every child is terminal', () => {
+    expect(isSubtaskComplete({ done: 3, total: 3 })).toBe(true);
+    expect(isSubtaskComplete({ done: 2, total: 3 })).toBe(false);
+    expect(isSubtaskComplete({ done: 0, total: 0 })).toBe(false);
   });
 });
 
@@ -84,21 +65,15 @@ describe('dueBucket', () => {
     expect(dueBucket('not-a-date', now)).toBeNull();
   });
 
-  it('buckets an overdue date as rose "Overdue · <date>"', () => {
+  it('buckets overdue / soon / normal', () => {
     expect(dueBucket('2026-07-17T12:00:00', now)).toEqual({
       kind: 'overdue',
       label: 'Overdue · Jul 17',
     });
-  });
-
-  it('buckets a within-24h date as amber "Due tomorrow"', () => {
     expect(dueBucket('2026-07-21T10:00:00', now)).toEqual({
       kind: 'soon',
       label: 'Due tomorrow',
     });
-  });
-
-  it('buckets a further-out date as normal "<Mon Day>"', () => {
     expect(dueBucket('2026-07-25T12:00:00', now)).toEqual({
       kind: 'normal',
       label: 'Jul 25',

@@ -63,15 +63,14 @@ import {
   type IssueSort,
 } from './IssueSortMenu';
 import { relativeTime } from '../../utils/taskDisplay';
-import { originModule, originPath, parseOriginId } from './issueOrigin';
+import { originModule } from './issueOrigin';
 import {
+  computeSubtaskCounts,
   dueBucket,
-  parseStageMirror,
   readDueDate,
-  useIssueFlows,
-  type IssueFlowData,
+  type SubtaskCount,
 } from './issueFlow';
-import { IssueFlowStrip } from './IssueFlowStrip';
+import { SubtaskBar } from './SubtaskBar';
 import {
   type IssueScope,
   scopeClientFilter,
@@ -170,24 +169,14 @@ interface IssueRowProps {
   parentLookup: Map<number, UiIssue>;
   /** In Group-by-Project mode the project is the header, so the row pill is redundant. */
   hideProjectPill?: boolean;
-  /** Global stage catalog + current-stage-by-project for the flow strip. */
-  flow: IssueFlowData;
+  /** Sub-issue done/total for this row, or undefined when it has no children. */
+  subtaskCount?: SubtaskCount;
 }
 
-const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentLookup, hideProjectPill, flow }) => {
+const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentLookup, hideProjectPill, subtaskCount }) => {
   const moduleTag = originModule(issue.raw.origin_id, issue.raw.origin_kind);
   const initials = issue.assignee?.name.slice(0, 2).toUpperCase() ?? (issue.assignee_user_label?.slice(0, 2).toUpperCase() ?? '·');
   const parent = issue.parent_id ? parentLookup.get(issue.parent_id) : null;
-  // Flow strip: only stage-mirror issues (origin_kind='project_stage'). Current
-  // stage from the project's current_stage, falling back to the mirror's own
-  // stage when the project has none set yet.
-  const flowRef = parseStageMirror(issue.raw.origin_kind, issue.raw.origin_id);
-  const flowPath = flowRef
-    ? originPath(parseOriginId(issue.raw.origin_id)!, teamId)
-    : null;
-  const flowCurrentStageId = flowRef
-    ? flow.currentByProject.get(flowRef.projectId)?.id ?? flowRef.stageId
-    : null;
   // Due date is pre-baked: the column lands with the workflow session, so this
   // is null (renders nothing) until then.
   const due = dueBucket(readDueDate(issue.raw));
@@ -244,14 +233,10 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
           {issue.project.name}
         </span>
       )}
-      {flowRef && flowPath && flowCurrentStageId && (
-        <IssueFlowStrip
-          catalog={flow.catalog}
-          currentStageId={flowCurrentStageId}
-          to={flowPath}
-        />
+      {visibleCols.has('subtasks') && subtaskCount && (
+        <SubtaskBar count={subtaskCount} />
       )}
-      {due && (
+      {visibleCols.has('due') && due && (
         <span
           data-testid="issue-due"
           className={`hidden sm:inline text-[12px] tabular-nums whitespace-nowrap shrink-0 ${DUE_CLASS[due.kind]}`}
@@ -375,9 +360,9 @@ const IssuePipeline: React.FC<{
 
 export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, error, viewMode, onViewModeChange, onNewIssue, onRefresh, agents, currentUserId, scope, teamName, projectName, projectStage, onCreateProject }) => {
   const { teamId } = useParams<{ teamId: string }>();
-  // Flow-progress data for stage-mirror rows: batch-loads the global catalog +
-  // each mirrored project's current stage (deduped + cached in issueFlow.ts).
-  const flow = useIssueFlows(issues);
+  // Sub-issue done/total per parent, aggregated from the FULL unfiltered list so
+  // display filters never undercount a parent's children (see issueFlow.ts).
+  const subtaskCounts = useMemo(() => computeSubtaskCounts(issues), [issues]);
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<IssueFilters>(EMPTY_FILTERS);
   const [columnPickerOpen, setColumnPickerOpen] = useState(false);
@@ -909,7 +894,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
                             visibleCols={visibleCols}
                             parentLookup={parentLookup}
                             hideProjectPill
-                            flow={flow}
+                            subtaskCount={subtaskCounts.get(issue.id)}
                           />
                         ))}
                       </div>
@@ -959,7 +944,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
                   teamId={teamId ?? ''}
                   visibleCols={visibleCols}
                   parentLookup={parentLookup}
-                  flow={flow}
+                  subtaskCount={subtaskCounts.get(issue.id)}
                 />
               ))}
             </div>
