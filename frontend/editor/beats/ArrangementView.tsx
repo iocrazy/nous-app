@@ -608,34 +608,48 @@ export function ArrangementView({
             </button>
           )}
         </div>
-        <div
-          className="mh-arr-tools"
-          data-testid="arr-tools"
-          role="group"
-          aria-label={t('editor.arrZoomTools')}
-        >
-          <button type="button" className="mh-arr-tool-btn" data-testid="arr-fit" onClick={fitView}>
-            {t('editor.arrFit')}
-          </button>
-          <span className="mh-arr-tool-sep" aria-hidden="true" />
+        {/* Right group: the "+ Add beat" ink action (moved here from the old
+            Beats topbar row when the sub-view switch was lifted to the shell)
+            sits just left of the Fit/zoom pill. Only the non-empty toolbar shows
+            it; the empty state keeps its own ghost Add. */}
+        <div className="mh-arr-topbar-right">
           <button
             type="button"
-            className="mh-arr-tool-btn"
-            data-testid="arr-zoom-out"
-            aria-label={t('editor.arrZoomOut')}
-            onClick={zoomOut}
+            className="mh-beats-add-ink"
+            data-testid="beats-topbar-add"
+            onClick={onAdd}
           >
-            − {t('editor.arrZoomOut')}
+            + {t('editor.beatAdd')}
           </button>
-          <button
-            type="button"
-            className="mh-arr-tool-btn"
-            data-testid="arr-zoom-in"
-            aria-label={t('editor.arrZoomIn')}
-            onClick={zoomIn}
+          <div
+            className="mh-arr-tools"
+            data-testid="arr-tools"
+            role="group"
+            aria-label={t('editor.arrZoomTools')}
           >
-            + {t('editor.arrZoomIn')}
-          </button>
+            <button type="button" className="mh-arr-tool-btn" data-testid="arr-fit" onClick={fitView}>
+              {t('editor.arrFit')}
+            </button>
+            <span className="mh-arr-tool-sep" aria-hidden="true" />
+            <button
+              type="button"
+              className="mh-arr-tool-btn"
+              data-testid="arr-zoom-out"
+              aria-label={t('editor.arrZoomOut')}
+              onClick={zoomOut}
+            >
+              − {t('editor.arrZoomOut')}
+            </button>
+            <button
+              type="button"
+              className="mh-arr-tool-btn"
+              data-testid="arr-zoom-in"
+              aria-label={t('editor.arrZoomIn')}
+              onClick={zoomIn}
+            >
+              + {t('editor.arrZoomIn')}
+            </button>
+          </div>
         </div>
       </div>
 

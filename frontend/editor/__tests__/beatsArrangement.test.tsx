@@ -90,19 +90,23 @@ describe('BeatsView sub-view toggle', () => {
     expect(screen.queryByTestId('beats-view')).toBeNull();
   });
 
-  it('switches to List and persists the choice per-script', async () => {
+  it('renders the sub-view the host controls it to (switch owned by the shell)', async () => {
+    // The Arrangement/List switch lives in the shell top-bar now — BeatsView is
+    // controlled via the `subview` prop and draws no in-pane segmented control.
     svc.listBeats.mockResolvedValue([beat({ id: 'a' })]);
-    render(<BeatsView scriptId="1" scenes={noScenes} onOpenScene={vi.fn()} />);
-
-    await screen.findByTestId('beats-arrangement');
-    fireEvent.click(screen.getByTestId('beats-subview-list'));
+    const { rerender } = render(
+      <BeatsView scriptId="1" scenes={noScenes} onOpenScene={vi.fn()} subview="list" />,
+    );
 
     await waitFor(() => expect(screen.getByTestId('beats-view')).toBeInTheDocument());
-    expect(localStorage.getItem('editor.beatsView.1')).toBe('list');
+    expect(screen.queryByTestId('beats-arrangement')).toBeNull();
+    // No in-pane sub-view tabs remain (they moved to the shell).
+    expect(screen.queryByTestId('beats-subview-list')).toBeNull();
+    expect(screen.queryByTestId('beats-subview-arrangement')).toBeNull();
 
-    fireEvent.click(screen.getByTestId('beats-subview-arrangement'));
+    rerender(<BeatsView scriptId="1" scenes={noScenes} onOpenScene={vi.fn()} subview="arrangement" />);
     await waitFor(() => expect(screen.getByTestId('beats-arrangement')).toBeInTheDocument());
-    expect(localStorage.getItem('editor.beatsView.1')).toBe('arrangement');
+    expect(screen.queryByTestId('beats-view')).toBeNull();
   });
 
   it('reads a persisted List choice on mount', async () => {

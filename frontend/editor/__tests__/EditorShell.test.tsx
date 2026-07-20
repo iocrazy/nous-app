@@ -66,6 +66,15 @@ vi.mock('../../components/Toast', () => ({
   useOptionalToast: () => ({ addToast: vi.fn() }),
 }));
 
+// The Beats pane's timeline internals (Auth, memo service, listBeats) are
+// irrelevant to the shell's job here — stub it to a marker that just echoes the
+// controlled `subview` prop, so a test can assert the shell top-bar tabs drive it.
+vi.mock('../beats/BeatsView', () => ({
+  BeatsView: ({ subview }: { subview?: string }) => (
+    <div data-testid="beats-stub" data-subview={subview ?? 'arrangement'} />
+  ),
+}));
+
 import { EditorShell } from '../components/EditorShell';
 
 const scene = (over: Partial<SceneDoc>): SceneDoc => ({
@@ -312,5 +321,32 @@ describe('EditorShell', () => {
     expect(container.querySelector('.hw-action')).toBeNull();
     // Choice persisted under the per-script key.
     expect(localStorage.getItem('editor.format.42')).toBe('asian');
+  });
+
+  it('renders the Beats sub-view switch in the shared doc-tabs slot and persists it', async () => {
+    localStorage.clear();
+    svc.listScenes.mockResolvedValue(twoScenes);
+    render(<EditorShell scriptId="1" />);
+
+    // Enter the Beats workbench via the left rail.
+    fireEvent.click(await screen.findByText('editor.moduleBeats'));
+
+    // The sub-view switch renders in the SAME slot with the SAME class as the
+    // Script/Outline/Cover document tabs — one block, one stylesheet.
+    const arrTab = await screen.findByTestId('beats-subview-arrangement');
+    const listTab = screen.getByTestId('beats-subview-list');
+    expect(arrTab).toHaveClass('mh-doc-tab');
+    expect(listTab).toHaveClass('mh-doc-tab');
+    expect(arrTab.closest('.mh-doc-tabs')).not.toBeNull();
+    expect(arrTab).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('beats-stub')).toHaveAttribute('data-subview', 'arrangement');
+
+    // Clicking a tab drives the pane and persists the choice per-script.
+    fireEvent.click(listTab);
+    await waitFor(() =>
+      expect(screen.getByTestId('beats-stub')).toHaveAttribute('data-subview', 'list'),
+    );
+    expect(screen.getByTestId('beats-subview-list')).toHaveAttribute('aria-selected', 'true');
+    expect(localStorage.getItem('editor.beatsView.1')).toBe('list');
   });
 });
