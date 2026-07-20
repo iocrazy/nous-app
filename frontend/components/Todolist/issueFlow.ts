@@ -1,92 +1,61 @@
 /**
- * Stage-mirror flow progress — the single data source for the per-row / detail
- * flow-progress dot strip (Issues 专题 ②).
+ * Issue row field helpers — pure data for the todo-list row/detail extra
+ * columns (Subtasks, Due). No React, no network.
  *
- * A stage-mirror issue (`origin_kind='project_stage'`, origin_id
- * `project_stage:{projectId}:{stageId}`) is a project SOP stage projected into
- * the todo list. Its row shows the *project's* flow progress — where the project
- * currently sits in the global stage catalog — NOT the issue's own status.
+ * Subtask counts are aggregated from the SAME issue list the view already
+ * loaded, grouping children by `parent_id`. That in-memory aggregate is
+ * deliberate: issue ids are 19-digit snowflakes typed as JS `number` on the
+ * REST path (a lossy boundary), while a direct Supabase read surfaces them as
+ * strings — cross-referencing the two could mismatch. Counting parent and child
+ * from the one REST-loaded set keeps the ids internally consistent (both went
+ * through the identical transform), which is why `listSubIssues` groups the
+ * same way. Callers MUST pass the UNFILTERED list so display filters never
+ * undercount.
  *
- * The flow is assembled from two existing endpoints (no backend change): the
- * GLOBAL stage catalog (`fetchStageCatalog`, one call serves every project) and
- * the per-project current stage (`fetchCurrentStage`). Both are cached at module
- * scope so a list of N mirror rows across M projects costs 1 + M requests, not
- * one per row. When the workflow session's node API lands, only the two loader
- * functions here change — the pure helpers and the components stay put.
- *
- * ⚠️ Snowflake ids are strings end-to-end — never Number() a project/stage id.
+ * Due-date bucketing is pre-baked: the `due_date` column ships with the
+ * workflow session's migration, so `readDueDate` stays blank until then.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+// ── subtask counts ────────────────────────────────────────────────────────────
 
-import type { ProjectStage } from '../../types';
-import { fetchCurrentStage, fetchStageCatalog } from '../../services/projectsService';
-import { parseOriginId } from './issueOrigin';
+export interface SubtaskCount {
+  /** Children in a terminal state (done or cancelled). */
+  done: number;
+  /** Total children. */
+  total: number;
+}
 
-// ── origin parse ────────────────────────────────────────────────────────────
+// A child is "finished" on the same terminal set the pipeline relay uses.
+const TERMINAL_STATUSES = new Set(['done', 'cancelled']);
 
-export interface StageMirrorRef {
-  /** Snowflake project id, kept as a string. */
-  projectId: string;
-  /** Snowflake id of the stage this mirror issue represents. */
-  stageId: string;
+interface ChildIssueLike {
+  parent_id: number | null;
+  status: string;
 }
 
 /**
- * Extract `{ projectId, stageId }` from a stage-mirror issue's origin, or null
- * when the issue is not a stage mirror or its origin_id is malformed. Reuses
- * the shared `parseOriginId` so the origin format lives in exactly one place.
+ * Group children by parent and count done/total. A parent with zero children
+ * is absent from the map (its row renders nothing — no `0/0`). Pass the FULL
+ * unfiltered issue list so a display filter can't hide children.
  */
-export function parseStageMirror(
-  originKind: string | null | undefined,
-  originId: string | null | undefined,
-): StageMirrorRef | null {
-  if (originKind !== 'project_stage') return null;
-  const origin = parseOriginId(originId);
-  if (!origin || origin.kind !== 'project_stage') return null;
-  // origin.id is `{projectId}:{stageId}` — split on the FIRST colon, both halves
-  // stay strings so Snowflake bigints survive intact.
-  const colon = origin.id.indexOf(':');
-  if (colon <= 0) return null;
-  const projectId = origin.id.slice(0, colon);
-  const stageId = origin.id.slice(colon + 1);
-  if (!projectId || !stageId) return null;
-  return { projectId, stageId };
+export function computeSubtaskCounts(
+  issues: ChildIssueLike[],
+): Map<number, SubtaskCount> {
+  const counts = new Map<number, SubtaskCount>();
+  for (const issue of issues) {
+    if (issue.parent_id == null) continue;
+    const prev = counts.get(issue.parent_id) ?? { done: 0, total: 0 };
+    counts.set(issue.parent_id, {
+      done: prev.done + (TERMINAL_STATUSES.has(issue.status) ? 1 : 0),
+      total: prev.total + 1,
+    });
+  }
+  return counts;
 }
 
-// ── pure flow helpers ─────────────────────────────────────────────────────────
-
-export type DotState = 'done' | 'current' | 'future';
-
-/** Index of `stageId` within the ordered catalog, or -1 when absent. */
-export function stageIndex(catalog: ProjectStage[], stageId: string): number {
-  return catalog.findIndex((s) => String(s.id) === String(stageId));
-}
-
-/**
- * The dot states for a catalog of `total` stages given the current index:
- * every stage before it is done, the current one is current, the rest future.
- * A negative `currentIndex` (unknown stage) yields all-future dots.
- */
-export function computeDots(total: number, currentIndex: number): DotState[] {
-  return Array.from({ length: Math.max(0, total) }, (_, i) =>
-    currentIndex >= 0 && i < currentIndex
-      ? 'done'
-      : i === currentIndex
-        ? 'current'
-        : 'future',
-  );
-}
-
-export interface FlowPosition {
-  /** 1-based position of the current stage (0 when unknown). */
-  x: number;
-  /** Total number of stages. */
-  y: number;
-}
-
-export function flowPosition(total: number, currentIndex: number): FlowPosition {
-  return { x: currentIndex >= 0 ? currentIndex + 1 : 0, y: Math.max(0, total) };
+/** True when every child is terminal (drives the emerald "all done" tint). */
+export function isSubtaskComplete(count: SubtaskCount): boolean {
+  return count.total > 0 && count.done >= count.total;
 }
 
 // ── due-date bucketing (pre-baked; the column lands with the workflow session) ─
@@ -137,109 +106,4 @@ export function readDueDate(raw: unknown): string | null | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const value = (raw as Record<string, unknown>).due_date;
   return typeof value === 'string' ? value : undefined;
-}
-
-// ── cached data source (swap these two when the node API lands) ────────────────
-
-let catalogPromise: Promise<ProjectStage[]> | null = null;
-const currentStagePromises = new Map<string, Promise<ProjectStage | null>>();
-
-/** Load the global stage catalog once and memoise it (retryable on failure). */
-export function loadStageCatalog(): Promise<ProjectStage[]> {
-  if (!catalogPromise) {
-    catalogPromise = fetchStageCatalog().catch((err) => {
-      catalogPromise = null; // let a later render retry
-      throw err;
-    });
-  }
-  return catalogPromise;
-}
-
-/** Load a project's current stage once per project and memoise it. */
-export function loadCurrentStage(projectId: string): Promise<ProjectStage | null> {
-  let promise = currentStagePromises.get(projectId);
-  if (!promise) {
-    promise = fetchCurrentStage(projectId).catch((err) => {
-      currentStagePromises.delete(projectId);
-      throw err;
-    });
-    currentStagePromises.set(projectId, promise);
-  }
-  return promise;
-}
-
-/** Test seam — drop all memoised flow data. */
-export function __resetFlowCaches(): void {
-  catalogPromise = null;
-  currentStagePromises.clear();
-}
-
-export interface IssueFlowData {
-  /** Global stage catalog (ordered), or empty until loaded / when no mirror rows. */
-  catalog: ProjectStage[];
-  /** Current stage per project id (null = project has no current stage set). */
-  currentByProject: Map<string, ProjectStage | null>;
-}
-
-interface FlowIssueLike {
-  raw?: { origin_kind?: string | null; origin_id?: string | null } | null;
-}
-
-/**
- * Collect the distinct projects behind the stage-mirror rows in `issues` and
- * batch-load the catalog + each project's current stage (deduped + cached).
- * Non-mirror issues contribute nothing, so a list with zero mirror rows fires
- * no requests.
- */
-export function useIssueFlows(issues: FlowIssueLike[]): IssueFlowData {
-  const [catalog, setCatalog] = useState<ProjectStage[]>([]);
-  const [currentByProject, setCurrentByProject] = useState<
-    Map<string, ProjectStage | null>
-  >(() => new Map());
-
-  const projectIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const issue of issues) {
-      const ref = parseStageMirror(issue.raw?.origin_kind, issue.raw?.origin_id);
-      if (ref) ids.add(ref.projectId);
-    }
-    return Array.from(ids).sort();
-  }, [issues]);
-
-  const projectKey = projectIds.join(',');
-
-  useEffect(() => {
-    if (projectIds.length === 0) {
-      setCatalog([]);
-      setCurrentByProject(new Map());
-      return;
-    }
-    let cancelled = false;
-
-    loadStageCatalog()
-      .then((rows) => {
-        if (!cancelled) setCatalog(rows);
-      })
-      .catch((err) => console.error('[issueFlow] catalog load failed', err));
-
-    Promise.all(
-      projectIds.map(async (projectId) => {
-        const stage = await loadCurrentStage(projectId).catch((err) => {
-          console.error('[issueFlow] current stage load failed', projectId, err);
-          return null;
-        });
-        return [projectId, stage] as const;
-      }),
-    ).then((entries) => {
-      if (!cancelled) setCurrentByProject(new Map(entries));
-    });
-
-    return () => {
-      cancelled = true;
-    };
-    // projectKey is the stable digest of projectIds.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectKey]);
-
-  return { catalog, currentByProject };
 }

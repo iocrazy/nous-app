@@ -24,6 +24,7 @@ import {
 } from '../services/issuesService';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { toAgentRef, toUiIssue, type ProjectNameMap } from '../components/Todolist/uiIssue';
+import { computeSubtaskCounts } from '../components/Todolist/issueFlow';
 import { fetchProjects, createProject } from '../services/projectsService';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
@@ -63,6 +64,9 @@ export function TodolistPage() {
   const [issues, setIssues] = useState<UiIssue[]>([]);
   const [issuesLoading, setIssuesLoading] = useState(true);
   const [issuesError, setIssuesError] = useState<string | null>(null);
+  // Sub-issue done/total per parent, from the full loaded list — shared by the
+  // list rows (recomputed inside IssueListView) and the open detail header.
+  const subtaskCounts = useMemo(() => computeSubtaskCounts(issues), [issues]);
 
   const [agents, setAgents] = useState<AgentRef[]>([]);
   const [agentsById, setAgentsById] = useState<Record<string, AgentRef>>({});
@@ -311,6 +315,7 @@ export function TodolistPage() {
           agents={agents}
           agentsById={agentsById}
           selfUserId={currentUserId ?? undefined}
+          subtaskCount={subtaskCounts.get(selectedIssue.id)}
           onCreateSubIssue={(parentId) => {
             setNewIssueParentId(parentId);
             setNewIssueOpen(true);
