@@ -345,6 +345,12 @@ class ProjectStageNodes(Base):
             ondelete="CASCADE",
             name="project_stage_nodes_project_id_fkey",
         ),
+        ForeignKeyConstraint(
+            ["folder_id"],
+            ["public.project_folders.id"],
+            ondelete="SET NULL",
+            name="project_stage_nodes_folder_id_fkey",
+        ),
         PrimaryKeyConstraint("id", name="project_stage_nodes_pkey"),
         CheckConstraint(
             "status IN ('pending', 'in_progress', 'in_review', 'done', 'skipped')",
@@ -386,6 +392,9 @@ class ProjectStageNodes(Base):
     skipped: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # The project_folders row that holds this node's filed deliverables (mig
+    # 383). Backfilled lazily on arrival; null until a folder is materialized.
+    folder_id: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )

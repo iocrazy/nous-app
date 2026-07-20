@@ -35,6 +35,7 @@ def _node(
     deliverable_required: bool = False,
     skipped: bool = False,
     owner_agent_id: Optional[str] = None,
+    folder_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     return {
         "id": node_id,
@@ -47,6 +48,7 @@ def _node(
         "owner_user_id": None,
         "owner_agent_id": owner_agent_id,
         "planned_due": None,
+        "folder_id": folder_id,
     }
 
 
@@ -142,6 +144,11 @@ def _install(
         return None
 
     monkeypatch.setattr(advance_service, "ensure_node_issues", _ensure_node_issues)
+
+    async def _ensure_node_folders(project_id, nodes, user_id):
+        return None
+
+    monkeypatch.setattr(advance_service, "ensure_node_folders", _ensure_node_folders)
 
 
 # ── NOT_MANAGER_OR_EDITOR ───────────────────────────────────────────────────
@@ -270,6 +277,86 @@ async def test_deliverable_present_allows_forward(monkeypatch):
 
     assert preview.will_advance is True
     assert preview.creating[0].node_id == "2"
+
+
+# ── DELIVERABLE via explicit folder_id (M2-W1) ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_deliverable_folder_id_with_file_allows_forward(monkeypatch):
+    """folder_id set + a non-trashed file in THAT folder → deliverable present."""
+    n1 = _node("1", sort_order=1, deliverable_required=True, folder_id="900")
+    n2 = _node("2", sort_order=2)
+    nodes_repo = _FakeNodesRepo([n1, n2])
+    # A file in a DIFFERENT folder must not count; the one in folder 900 does.
+    projects_repo = _FakeProjectsRepo(
+        "1",
+        folders=[],
+        files=[
+            {"id": "fx", "folder_id": "111"},
+            {"id": "f1", "folder_id": "900"},
+        ],
+    )
+    issue_repo = _FakeIssueRepo()
+    _install(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        issue_repo=issue_repo,
+    )
+
+    preview = await advance_service.compute_advance_preview(_PROJECT, _USER, "forward")
+
+    assert preview.will_advance is True
+    assert preview.creating[0].node_id == "2"
+
+
+@pytest.mark.asyncio
+async def test_deliverable_folder_id_empty_folder_blocks_forward(monkeypatch):
+    """folder_id set but no file lives in it → blocked, even if OTHER files exist."""
+    n1 = _node("1", sort_order=1, deliverable_required=True, folder_id="900")
+    n2 = _node("2", sort_order=2)
+    nodes_repo = _FakeNodesRepo([n1, n2])
+    projects_repo = _FakeProjectsRepo(
+        "1", folders=[], files=[{"id": "fx", "folder_id": "111"}]
+    )
+    issue_repo = _FakeIssueRepo()
+    _install(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        issue_repo=issue_repo,
+    )
+
+    preview = await advance_service.compute_advance_preview(_PROJECT, _USER, "forward")
+
+    assert preview.will_advance is False
+    assert preview.blocked_reason == BLOCK_DELIVERABLE_MISSING
+
+
+@pytest.mark.asyncio
+async def test_deliverable_fallback_name_match_folder(monkeypatch):
+    """folder_id null → fallback: a file in a folder whose name == node name."""
+    # _node names its node "Node 1"; a folder of that name holds the file.
+    n1 = _node("1", sort_order=1, deliverable_required=True)  # folder_id None
+    n2 = _node("2", sort_order=2)
+    nodes_repo = _FakeNodesRepo([n1, n2])
+    projects_repo = _FakeProjectsRepo(
+        "1",
+        folders=[{"id": "77", "name": "Node 1"}],
+        files=[{"id": "f1", "folder_id": "77"}],
+    )
+    issue_repo = _FakeIssueRepo()
+    _install(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        issue_repo=issue_repo,
+    )
+
+    preview = await advance_service.compute_advance_preview(_PROJECT, _USER, "forward")
+
+    assert preview.will_advance is True
 
 
 # ── NO_NEXT ───────────────────────────────────────────────────────────────────

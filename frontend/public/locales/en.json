@@ -1752,6 +1752,18 @@
         "blockedReviewPending": "The current stage still needs its review before you can advance.",
         "blockedDeliverableMissing": "The current stage's deliverable folder is empty — file it before advancing.",
         "blockedNoNext": "This is the last stage — there's nothing further to advance to."
+      },
+      "deliverables": {
+        "title": "Deliverables",
+        "dropHint": "Drop files here or browse — filed to {{target}} automatically",
+        "loading": "Loading files…",
+        "empty": "No files filed yet.",
+        "filedChip": "Filed ✓",
+        "filedToast": "Filed to project",
+        "uploadFailed": "Upload failed",
+        "fromIssue": "from {{id}}",
+        "filesFiled_one": "{{count}} file filed",
+        "filesFiled_other": "{{count}} files filed"
       }
     }
   },

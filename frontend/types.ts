@@ -876,6 +876,10 @@ export interface ProjectFile {
   current_version: number;
   created_at: string;
   updated_at: string;
+  // Deliverable back-link (M2-W1): the mirror issue a file was filed from, plus
+  // its human identifier (MH-N) for the Files module's "from MH-xx" chip.
+  source_issue_id?: string | null;
+  source_issue_identifier?: string | null;
 }
 
 // Share types
@@ -1086,6 +1090,9 @@ export interface ProjectStageNode {
   deliverable_required: boolean;
   deliverable_label: string | null;
   skipped: boolean;
+  // Deliverable folder link + filed-file count (M2-W1).
+  folder_id?: string | null;
+  deliverable_file_count?: number;
   members: WorkflowMemberRef[];
 }
 

@@ -667,7 +667,7 @@ class ProjectsRepository:
         try:
             values = _coerce_id_ints(
                 _known_only(data, _FILES_ATTRS, _FILES_TEMPORAL),
-                ("project_id", "folder_id", "media_id"),
+                ("project_id", "folder_id", "media_id", "source_issue_id"),
             )
             async with write_scope() as session:
                 result = await session.execute(

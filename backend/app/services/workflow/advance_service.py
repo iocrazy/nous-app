@@ -38,6 +38,7 @@ from app.services.library.project_stage_issues import (
     build_stage_origin_id,
     ensure_node_issues,
 )
+from app.services.workflow.node_folders import ensure_node_folders
 
 # Issue statuses that count as closed for a stage-mirror issue.
 _TERMINAL = frozenset({"done", "cancelled"})
@@ -122,17 +123,24 @@ async def _review_satisfied(project_id: str, node: Dict[str, Any]) -> bool:
 async def _deliverable_present(project_id: str, node: Dict[str, Any]) -> bool:
     """Whether the node's stage deliverable has been filed.
 
-    Minimal M1 implementation (no explicit stage-folder link exists in the
-    schema yet — noted in the PR report): a file counts when it lives in a
-    project folder whose name matches the node name; absent such a folder, ANY
-    non-trashed project file counts. Server-side, never trusts the client.
+    Primary path (M2-W1): the node carries an explicit ``folder_id`` (its stage
+    folder, materialized lazily on arrival, mig 383) — a non-trashed file in
+    that folder satisfies the deliverable.
+
+    Fallback (a node whose folder creation lost the race, or a legacy row): a
+    file counts when it lives in a project folder whose name matches the node
+    name; absent such a folder, ANY non-trashed project file counts. Server-
+    side, never trusts the client.
     """
     from app.repositories.projects_repository import get_projects_repository
 
     repo = get_projects_repository()
     try:
-        folders = await repo.get_folders(str(project_id))
         files = await repo.get_project_files(str(project_id))
+        folder_id = node.get("folder_id")
+        if folder_id:
+            return any(str(f.get("folder_id")) == str(folder_id) for f in files)
+        folders = await repo.get_folders(str(project_id))
     except Exception as exc:  # noqa: BLE001 — treat an unreadable store as empty
         logger.warning(
             f"[advance] deliverable file scan failed for project {project_id} "
@@ -150,8 +158,8 @@ async def _deliverable_present(project_id: str, node: Dict[str, Any]) -> bool:
         None,
     )
     if match is not None:
-        folder_id = str(match["id"])
-        return any(str(f.get("folder_id")) == folder_id for f in files)
+        matched_folder = str(match["id"])
+        return any(str(f.get("folder_id")) == matched_folder for f in files)
     return len(files) > 0
 
 
@@ -329,12 +337,14 @@ async def execute_advance(
         next_group = groups[idx + 1]
         await nodes_repo.set_current_node_id(str(project_id), str(next_group[0]["id"]))
         await ensure_node_issues(int(str(project_id)), next_group, str(user_id))
+        await ensure_node_folders(str(project_id), next_group, str(user_id))
     else:
         prev_group = groups[idx - 1]
         await nodes_repo.set_current_node_id(str(project_id), str(prev_group[0]["id"]))
         # Ensure the previous group's mirror issues exist, then reopen them
         # (transition → in_progress fires the status回流 hook → node in_progress).
         await ensure_node_issues(int(str(project_id)), prev_group, str(user_id))
+        await ensure_node_folders(str(project_id), prev_group, str(user_id))
         for node in prev_group:
             for issue in await _mirror_issues(project_id, str(node["id"])):
                 if issue.get("status") != "in_progress":

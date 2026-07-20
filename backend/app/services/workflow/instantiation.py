@@ -74,6 +74,7 @@ async def instantiate_project_workflow(
         get_project_stage_nodes_repository,
     )
     from app.services.library.project_stage_issues import ensure_node_issues
+    from app.services.workflow.node_folders import ensure_node_folders
 
     repo = get_project_stage_nodes_repository()
     nodes = await repo.instantiate_from_template(
@@ -88,8 +89,10 @@ async def instantiate_project_workflow(
         return nodes
 
     await repo.set_current_node_id(project_id, group[0]["id"])
-    # Arrival hook for the first active group (best-effort, never raises).
+    # Arrival hooks for the first active group (both best-effort, never raise):
+    # the mirror issues, then the deliverable folders.
     await ensure_node_issues(int(str(project_id)), group, user_id)
+    await ensure_node_folders(project_id, group, user_id)
     return nodes
 
 

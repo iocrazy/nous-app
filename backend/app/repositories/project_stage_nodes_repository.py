@@ -28,10 +28,10 @@ from sqlalchemy import select, update
 from app.db.session import read_scope, write_scope
 from app.models import (
     AgentRuns,
+    Projects,
     ProjectStageNodeMembers,
     ProjectStageNodes,
     ProjectStages,
-    Projects,
     WorkflowTemplateNodeMembers,
     WorkflowTemplateNodes,
 )
@@ -115,6 +115,7 @@ def _node_row(obj: ProjectStageNodes, members: List[Dict[str, Any]]) -> Dict[str
         "deliverable_required": obj.deliverable_required,
         "deliverable_label": obj.deliverable_label,
         "skipped": obj.skipped,
+        "folder_id": (str(obj.folder_id) if obj.folder_id is not None else None),
         "members": members,
     }
 
@@ -480,6 +481,27 @@ class ProjectStageNodesRepository:
             )
             row = result.first()
         return status if row is not None else None
+
+    async def set_node_folder_id(
+        self, node_id: str, folder_id: Optional[str]
+    ) -> Optional[str]:
+        """Backfill a node's ``folder_id`` (the deliverable folder link, mig
+        383). Returns the stored id, or None when the node is missing. Only the
+        lazy folder-materializer calls this — business PATCH never touches it."""
+        async with write_scope() as session:
+            result = await session.execute(
+                update(ProjectStageNodes)
+                .where(ProjectStageNodes.id == int(str(node_id)))
+                .values(
+                    folder_id=(int(str(folder_id)) if folder_id is not None else None),
+                    updated_at=datetime.datetime.now(datetime.timezone.utc),
+                )
+                .returning(ProjectStageNodes.folder_id)
+            )
+            row = result.first()
+        if row is None:
+            return None
+        return str(row[0]) if row[0] is not None else None
 
     async def get_active_group(self, project_id: str) -> List[Dict[str, Any]]:
         """The node(s) forming the project's active group.

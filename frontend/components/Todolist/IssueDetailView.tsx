@@ -26,6 +26,7 @@ import { getCommentTriggerPreview, listIssueMessages, postIssueMessage } from '.
 import { dispatchIssue, getDispatchPreview, type DispatchPreview } from '../../services/issuesService';
 import { DispatchConfirmDialog } from './DispatchConfirmDialog';
 import { PipelineRunStrip } from './PipelineRunStrip';
+import { DeliverablesZone } from './DeliverablesZone';
 import { IssueCostLine } from './IssueCostLine';
 import { SubtaskBar } from './SubtaskBar';
 import type { SubtaskCount } from './issueFlow';
@@ -97,6 +98,14 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   // Group-by-Project header uses). Only numeric team ids are valid routes.
   const projectPath =
     issue.project && teamId ? `/team/${teamId}/projects/${issue.project.id}` : null;
+  // Deliverables: any project-backed issue shows the dropzone. A workflow-node
+  // mirror (origin_kind='project_stage') routes uploads into the node's stage
+  // folder — the stage name is the title's suffix ("<Project> — <Stage>"); a
+  // plain project issue lands them in the project root (no stage).
+  const isStageMirror = issue.raw.origin_kind === 'project_stage';
+  const stageName = isStageMirror
+    ? issue.title.split(' — ').slice(1).join(' — ') || undefined
+    : undefined;
   // Run-confirm gate: dispatch always goes through a confirm dialog that
   // renders the server's dispatch-preview verdict.
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -428,6 +437,16 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               />
             )}
           </div>
+
+          {issue.project && (
+            <DeliverablesZone
+              projectId={String(issue.project.id)}
+              issueId={issue.id}
+              isStageMirror={isStageMirror}
+              projectName={issue.project.name}
+              stageName={stageName}
+            />
+          )}
 
           <div className="flex items-center border-b border-ink-800/80 mt-6">
             {(['timeline', 'related'] as DetailTab[]).map((t) => {

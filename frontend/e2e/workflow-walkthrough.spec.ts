@@ -123,6 +123,8 @@ const WORKFLOW = {
       review_required: true,
       deliverable_required: true,
       deliverable_label: 'Shot list',
+      folder_id: 'folder-2',
+      deliverable_file_count: 2,
     }),
     node('node-3', 'Editing', 2, 'pending'),
     node('node-4', 'Distribution', 3, 'pending'),
@@ -196,6 +198,8 @@ for (const theme of ['dark', 'light'] as const) {
     await setupWorkflowStubs(page);
     await forceTheme(page, theme);
     await openWorkspaceOverview(page);
+    // The deliverable row surfaces the server-computed filed-file count.
+    await expect(page.getByTestId('workflow-node-filed-count').first()).toContainText('2');
     await page.screenshot({ path: `${SHOTS}/02-overview-${theme}.png`, fullPage: true });
   });
 

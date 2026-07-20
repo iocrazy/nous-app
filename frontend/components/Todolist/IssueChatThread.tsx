@@ -99,6 +99,28 @@ const SystemStatusEvent: React.FC<{ msg: IssueMessage; selfUserId?: string }> = 
   );
 };
 
+/**
+ * A deliverable-upload line. Emitted as an authored comment (the issue_messages
+ * system_status kind requires a status transition, which an upload has none of)
+ * but rendered as a centered system-style row via its meta marker.
+ */
+const DeliverableFiledEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, AgentRef>; selfUserId?: string }> = ({ msg, agentsById, selfUserId }) => {
+  const agent = msg.author_agent_id ? agentsById[msg.author_agent_id] : null;
+  const isSelf = msg.author_user_id && msg.author_user_id === selfUserId;
+  const who = agent?.name ?? (isSelf ? 'You' : msg.author_user_id ? `User ${msg.author_user_id.slice(0, 6)}` : 'Someone');
+  const filename = (msg.meta?.filename as string | undefined) ?? '';
+  return (
+    <div
+      data-testid="deliverable-filed-row"
+      className="text-center text-[11px] text-ink-500 italic my-2"
+    >
+      <span className="text-ink-400 not-italic font-medium">{who}</span>
+      {' '}filed{' '}
+      <span className="text-ink-300 not-italic font-medium">{filename}</span>
+    </div>
+  );
+};
+
 const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, AgentRef> }> = ({ msg, agentsById }) => {
   const agent = msg.author_agent_id ? agentsById[msg.author_agent_id] : null;
   const initials = (agent?.name ?? '·').slice(0, 2).toUpperCase();
@@ -287,6 +309,7 @@ export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agen
         const m = item.message;
         if (m.kind === 'system_status') return <SystemStatusEvent key={item.key} msg={m} selfUserId={selfUserId} />;
         if (m.kind === 'agent_run')     return <AgentRunEvent key={item.key} msg={m} agentsById={agentsById} />;
+        if (m.meta?.deliverable_upload) return <DeliverableFiledEvent key={item.key} msg={m} agentsById={agentsById} selfUserId={selfUserId} />;
         return <CommentEvent key={item.key} msg={m} agentsById={agentsById} selfUserId={selfUserId} />;
       })}
       {hasStreaming && <StreamingBubble text={streamingText as string} />}
