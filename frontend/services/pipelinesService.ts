@@ -150,6 +150,20 @@ export async function runPipeline(
   return _json<PipelineRun>(res);
 }
 
+/**
+ * Cancel a running relay run. Returns the updated (cancelled) run row.
+ *
+ * The `/api/v1` prefix is mandatory — a missing prefix once shipped to prod and
+ * silently hit the SPA fallback instead of the API (see pipelinesService.test).
+ */
+export async function cancelRun(runId: string): Promise<PipelineRun> {
+  const res = await fetch(`${_base}/runs/${encodeURIComponent(runId)}/cancel`, {
+    method: 'POST',
+    headers: await getAuthHeaders(),
+  });
+  return _json<PipelineRun>(res);
+}
+
 /** List content-relay runs whose parent is the given issue (newest first). */
 export async function listIssuePipelineRuns(
   issueId: number | string,

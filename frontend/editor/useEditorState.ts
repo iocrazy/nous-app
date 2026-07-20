@@ -35,7 +35,6 @@ export interface EditorState {
 export type EditorAction =
   | { type: 'setMode'; mode: EditorMode }
   | { type: 'setFormat'; format: EditorFormat }
-  | { type: 'toggleTheme' }
   | { type: 'setTheme'; theme: EditorTheme }
   | { type: 'setCursor'; cursor: CursorState | null }
   | { type: 'setActiveScene'; sceneId: string | null }
@@ -53,8 +52,6 @@ function reducer(state: EditorState, action: EditorAction): EditorState {
       return { ...state, mode: action.mode };
     case 'setFormat':
       return { ...state, format: action.format };
-    case 'toggleTheme':
-      return { ...state, theme: state.theme === 'light' ? 'dark' : 'light' };
     case 'setTheme':
       if (state.theme === action.theme) return state;
       return { ...state, theme: action.theme };
@@ -88,7 +85,6 @@ export interface EditorStateApi {
   state: EditorState;
   setMode: (mode: EditorMode) => void;
   setFormat: (format: EditorFormat) => void;
-  toggleTheme: () => void;
   setTheme: (theme: EditorTheme) => void;
   setCursor: (cursor: CursorState | null) => void;
   setActiveScene: (sceneId: string | null) => void;
@@ -110,7 +106,6 @@ export function useEditorState(options?: UseEditorStateOptions): EditorStateApi 
     () => ({
       setMode: (mode: EditorMode) => dispatch({ type: 'setMode', mode }),
       setFormat: (format: EditorFormat) => dispatch({ type: 'setFormat', format }),
-      toggleTheme: () => dispatch({ type: 'toggleTheme' }),
       setTheme: (theme: EditorTheme) => dispatch({ type: 'setTheme', theme }),
       setCursor: (cursor: CursorState | null) => dispatch({ type: 'setCursor', cursor }),
       setActiveScene: (sceneId: string | null) => dispatch({ type: 'setActiveScene', sceneId }),
