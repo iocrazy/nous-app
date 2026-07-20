@@ -284,6 +284,23 @@ class IssueRepository:
             items = [_row(r) for r in result.scalars().all()]
         return items, total
 
+    async def map_identifiers(self, issue_ids: list[int]) -> dict[str, str]:
+        """{issue id (as str) → human identifier (MH-N)} for a set of ids.
+
+        One query; missing ids are simply absent. Ids ride as strings out
+        (bigIntSafeFetch discipline) so the caller can key file rows by the same
+        stringified ``source_issue_id`` it holds."""
+        ids = [int(i) for i in issue_ids if i is not None]
+        if not ids:
+            return {}
+        async with read_scope() as session:
+            rows = (
+                await session.execute(
+                    select(Issues.id, Issues.identifier).where(Issues.id.in_(ids))
+                )
+            ).all()
+        return {str(r[0]): r[1] for r in rows}
+
     async def list_children(
         self,
         parent_id: int,

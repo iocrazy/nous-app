@@ -605,9 +605,16 @@ class ProjectsService:
         user_id: str,
         file,
         notes: Optional[str] = None,
+        source_issue_id: Optional[str] = None,
     ) -> dict:
         """
         Upload a file to a project, extracting metadata for videos.
+
+        When ``source_issue_id`` is set (the issue-side Deliverables dropzone,
+        M2-W1) the file is back-linked to that issue and, for a workflow-node
+        mirror issue, routed into the node's stage folder; a "filed" line is
+        dropped on the issue timeline. All of that is best-effort — it never
+        blocks the upload.
 
         Steps:
         1. Validate project exists
@@ -713,6 +720,18 @@ class ProjectsService:
             # tmp file (store_local_file only reads it, never deletes it).
             tmp_path.unlink(missing_ok=True)
 
+        # Issue-side deliverable routing (best-effort): a mirror-issue upload
+        # lands in the node's stage folder and back-links to the issue.
+        deliverable_folder_id: Optional[str] = None
+        if source_issue_id:
+            from app.services.workflow.deliverable_uploads import (
+                resolve_deliverable_folder,
+            )
+
+            deliverable_folder_id = await resolve_deliverable_folder(
+                project_id, source_issue_id, user_id
+            )
+
         # Create DB record
         file_data = {
             "project_id": project_id,
@@ -725,6 +744,10 @@ class ProjectsService:
             "notes": notes,
             **metadata,
         }
+        if source_issue_id:
+            file_data["source_issue_id"] = source_issue_id
+        if deliverable_folder_id:
+            file_data["folder_id"] = deliverable_folder_id
         created_file = await self.repo.create_file(file_data)
 
         # Create V1 version record
@@ -740,6 +763,19 @@ class ProjectsService:
             **metadata,
         }
         await self.repo.create_version(version_data)
+
+        # Best-effort issue timeline line for a deliverable upload.
+        if source_issue_id:
+            from app.services.workflow.deliverable_uploads import (
+                record_deliverable_filed,
+            )
+
+            await record_deliverable_filed(
+                source_issue_id,
+                final_name,
+                str(created_file.get("id")),
+                user_id=user_id,
+            )
 
         return created_file
 
@@ -986,20 +1022,66 @@ class ProjectsService:
         project_id: str,
         include_trashed: bool = False,
         folder_id: Optional[str] = None,
+        source_issue_id: Optional[str] = None,
     ) -> list:
-        """List files in a project, optionally filtered by folder."""
+        """List files in a project, optionally filtered by folder or source issue.
+
+        A ``source_issue_id`` filter (the issue-side Deliverables list) overrides
+        the folder-scoping default and returns every file filed from that issue.
+        Each row is enriched with ``source_issue_identifier`` (MH-N) so the Files
+        module can render the "from MH-xx" back-link without a per-row fetch.
+        """
         project = await self.repo.get_project_by_id(project_id)
         if not project:
             raise ValueError("Project not found")
         files = await self.repo.get_project_files(
             project_id, include_trashed=include_trashed
         )
-        if not include_trashed:
+        if source_issue_id is not None:
+            files = [
+                f
+                for f in files
+                if str(f.get("source_issue_id")) == str(source_issue_id)
+            ]
+        elif not include_trashed:
             if folder_id is not None:
                 files = [f for f in files if f.get("folder_id") == folder_id]
             else:
                 files = [f for f in files if not f.get("folder_id")]
-        return files
+        return await self._enrich_source_issue(files)
+
+    async def _enrich_source_issue(self, files: list) -> list:
+        """Attach ``source_issue_identifier`` (MH-N) to files that carry a
+        ``source_issue_id``. Best-effort: an identifier lookup failure leaves the
+        field null (the chip just won't render), never sinks the list."""
+        ids = [f["source_issue_id"] for f in files if f.get("source_issue_id")]
+        if not ids:
+            return files
+        try:
+            from app.repositories.issue_repository import get_issue_repository
+
+            id_map = await get_issue_repository().map_identifiers(
+                [int(i) for i in ids]
+            )
+        except Exception as exc:  # noqa: BLE001 — chip is decoration
+            logger.error(f"Failed to map source issue identifiers: {exc}")
+            id_map = {}
+        return [
+            {
+                **f,
+                # Stringify the snowflake id (JSON number precision) alongside
+                # the human identifier the chip actually routes on.
+                "source_issue_id": (
+                    str(f["source_issue_id"]) if f.get("source_issue_id") else None
+                ),
+                "source_issue_identifier": (
+                    id_map.get(str(f["source_issue_id"]))
+                    if f.get("source_issue_id")
+                    else None
+                ),
+            }
+            for f in files
+        ]
 
     async def get_file_info(self, project_id: str, file_id: str) -> dict:
         """Get detailed info for a single file."""

@@ -874,12 +874,17 @@ async def list_files(
     auth: AuthDep,
     include_trashed: bool = Query(False, description="Include trashed files"),
     folder_id: Optional[str] = Query(None, description="Filter by folder ID"),
+    source_issue_id: Optional[str] = Query(
+        None, description="Filter to files filed from this mirror issue"
+    ),
     _project_guard: None = Depends(verify_project_read_access),
 ):
-    """List files in a project, optionally filtered by folder."""
+    """List files in a project, optionally filtered by folder or source issue."""
     try:
         svc = ProjectsService()
-        files = await svc.get_project_files(project_id, include_trashed, folder_id)
+        files = await svc.get_project_files(
+            project_id, include_trashed, folder_id, source_issue_id=source_issue_id
+        )
         return {"success": True, "data": files}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -894,6 +899,13 @@ async def upload_file(
     auth: AuthDep,
     file: UploadFile = File(...),
     notes: Optional[str] = Query(None, description="Optional notes for the file"),
+    source_issue_id: Optional[str] = Query(
+        None,
+        description=(
+            "Mirror issue this file is filed from (Deliverables dropzone). Routes "
+            "the file into the node's stage folder and back-links it to the issue."
+        ),
+    ),
     _project_guard: None = Depends(verify_project_write_access),
 ):
     """
@@ -916,6 +928,7 @@ async def upload_file(
             user_id=auth.user_id,
             file=file,
             notes=notes,
+            source_issue_id=source_issue_id,
         )
         return {"success": True, "data": result}
     except ValueError as e:
