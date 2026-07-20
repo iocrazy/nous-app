@@ -1709,11 +1709,30 @@ export const EDITOR_SHELL_STYLES = `
 .mh-beats-list{ display:flex; flex-direction:column; }
 .mh-beat-row{ position:relative; }
 .mh-beats-empty{
-  margin:auto; max-width:420px; text-align:center; display:flex; flex-direction:column;
-  align-items:center; gap:10px; padding:56px 24px;
+  margin:auto; max-width:440px; text-align:center; display:flex; flex-direction:column;
+  align-items:center; gap:10px; padding:48px 24px;
 }
 .mh-beats-empty-title{ font-size:16px; font-weight:800; color:var(--ink); }
-.mh-beats-empty-sub{ font-size:13px; line-height:1.6; color:var(--ink-faint); margin:0; }
+.mh-beats-empty-sub{ font-size:13px; line-height:1.6; color:var(--ink-faint); margin:0 0 2px; }
+/* Quiet "or" rule between the template cards and the ghost Add — the loud action
+   is picking a methodology, not adding a blank beat. */
+.mh-beats-empty-or{
+  display:flex; align-items:center; gap:12px; width:100%; max-width:340px; margin:2px 0;
+  color:var(--ink-faint); font-size:11px; font-weight:700; letter-spacing:.06em;
+  text-transform:uppercase;
+}
+.mh-beats-empty-or::before, .mh-beats-empty-or::after{
+  content:''; flex:1; height:1px; background:var(--hairline);
+}
+.mh-beats-add-ghost{
+  font-family:var(--sans); font-size:12.5px; font-weight:700; padding:7px 18px;
+  border-radius:999px; cursor:pointer; background:transparent; color:var(--ink);
+  border:1px solid var(--surface-border);
+}
+.mh-beats-add-ghost:hover{ border-color:var(--emph-ink-border); background:var(--surface-2); }
+/* Empty-state template cards read tighter than the wizard's (leading affordance,
+   not a full picker). */
+.mh-tpl-empty-cards .mh-tpl-empty-card{ padding:10px 12px; gap:2px; }
 
 .mh-beat-card{
   position:relative; border:1px solid var(--hairline); border-radius:var(--radius-md);

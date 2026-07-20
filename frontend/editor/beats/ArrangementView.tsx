@@ -559,7 +559,18 @@ export function ArrangementView({
               </div>
             </div>
           )}
-          <button type="button" className="mh-beats-add-btn" data-testid="beats-add" onClick={onAdd}>
+          {/* One quiet fallback below the template cards — a hairline "or" rule
+              then a ghost Add, so the loud action is picking a methodology, not a
+              blank beat. Single Add construct (topbar Add is hidden when empty). */}
+          <div className="mh-beats-empty-or" aria-hidden="true">
+            <span>{t('editor.beatEmptyOr')}</span>
+          </div>
+          <button
+            type="button"
+            className="mh-beats-add-ghost"
+            data-testid="beats-add"
+            onClick={onAdd}
+          >
             {t('editor.beatAdd')}
           </button>
         </div>

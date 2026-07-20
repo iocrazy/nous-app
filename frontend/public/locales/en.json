@@ -3035,6 +3035,7 @@
     "coldStartSub": "Create the first scene and start writing. Tab cycles element types, Enter adds the next line.",
     "createStory": "Create Story",
     "beatAdd": "Add Beat",
+    "beatEmptyOr": "or",
     "beatDefaultTitle": "New Beat",
     "beatTitle": "Beat title",
     "beatTitlePlaceholder": "Beat title",

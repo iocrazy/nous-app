@@ -273,14 +273,21 @@ export function BeatsView({ scriptId, scenes, onOpenScene }: Props) {
             {t('editor.beatsViewList')}
           </button>
         </div>
-        <button
-          type="button"
-          className="mh-beats-add-ink"
-          data-testid="beats-topbar-add"
-          onClick={() => void handleAdd()}
-        >
-          + {t('editor.beatAdd')}
-        </button>
+        {/* Add lives ONLY in the empty state's single construct when there are
+            no beats yet (avoids the duplicate topbar + empty-state Add); the
+            topbar Add returns once the sheet has content. */}
+        {beats.length > 0 ? (
+          <button
+            type="button"
+            className="mh-beats-add-ink"
+            data-testid="beats-topbar-add"
+            onClick={() => void handleAdd()}
+          >
+            + {t('editor.beatAdd')}
+          </button>
+        ) : (
+          <span aria-hidden="true" />
+        )}
       </div>
 
       {!loaded ? (
