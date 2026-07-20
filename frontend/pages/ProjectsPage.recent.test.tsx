@@ -48,6 +48,7 @@ vi.mock('../services/projectsService', () => ({
 // flips the page into the Recent view.
 vi.mock('../components/project/ProjectFilterSidebar', () => ({
   WORKFLOW_TEMPLATES_FILTER: 'workflow-templates',
+  IDEATION_FILTER: 'ideation',
   ProjectFilterSidebar: (props: any) => (
     <div>
       <span data-testid="recent-count">{props.projectCounts.recent}</span>

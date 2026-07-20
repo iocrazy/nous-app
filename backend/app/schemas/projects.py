@@ -30,6 +30,9 @@ class ProjectCreate(BaseModel):
     # the Live/AI/Hybrid preset that flips Shooting/Canvas node switches.
     workflow_template_id: Optional[str] = None
     workflow_method: Optional[Literal["live", "ai", "hybrid"]] = None
+    # Ideation (M1.5): the topics.id this project is created from. Persisted to
+    # projects.topic_id; the service best-effort marks that topic produced.
+    topic_id: Optional[str] = None
 
 
 class ProjectUpdate(BaseModel):

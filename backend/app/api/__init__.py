@@ -174,6 +174,13 @@ from app.api.workflow_templates_router import (  # noqa: E402
 
 api_router.include_router(router=workflow_templates_router, tags=["Workflow Templates"])
 
+# Ideation topic pool (Project Workflow M1.5). Mounted at /ideation/topics —
+# /topics is owned by the hotspots/signal-feed router above, so the ideation
+# surface takes a disjoint prefix.
+from app.api.ideation_router import router as ideation_router  # noqa: E402
+
+api_router.include_router(router=ideation_router, tags=["Ideation"])
+
 # Issues — top-level user-visible entity (PR-D6)
 from app.api.issues_router import router as issues_router  # noqa: E402
 

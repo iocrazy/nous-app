@@ -1,8 +1,13 @@
 import {
   LayoutGrid, Star, Archive, Clock,
-  FolderOpen, PanelLeftClose, PanelLeftOpen, GitBranch,
+  FolderOpen, PanelLeftClose, PanelLeftOpen, GitBranch, Lightbulb,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+
+// Global entry (spec §1): Ideation topic pool, pinned bottom-left, grouped with
+// the Workflow Templates entry (added by the M1 PR-C work). Not a project
+// filter — activating it swaps the main pane to the IdeationBoard.
+export const IDEATION_FILTER = 'ideation';
 
 interface ProjectFilterSidebarProps {
   activeFilter: string;
@@ -147,11 +152,24 @@ export function ProjectFilterSidebar({
         </>
       )}
 
-      {/* Global entry — workflow template editor (spec §1). Pinned to the
-          bottom with a divider; hidden for viewers. */}
-      {canManageTemplates && (
-        <div className="mt-auto px-2 pb-3 pt-2">
-          <div className="mx-1 mb-2 border-t border-ink-800/80" />
+      {/* Global entries — pinned bottom-left (spec §1). Ideation sits above the
+          Workflow Templates entry; the two form a group. Templates entry stays
+          hidden for viewers; Ideation is visible to every member. */}
+      <div className="mt-auto px-2 pb-3 pt-2">
+        <div className="mx-1 mb-2 border-t border-ink-800/80" />
+        <button
+          data-testid="ideation-entry"
+          onClick={() => onFilterChange(IDEATION_FILTER)}
+          className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-[13px] transition-colors ${
+            activeFilter === IDEATION_FILTER
+              ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
+              : 'text-ink-500 hover:text-ink-300 hover:bg-ink-800/40'
+          }`}
+        >
+          <Lightbulb size={16} className="shrink-0" />
+          <span className="flex-1 truncate text-left">{t('projects.ideation.entry')}</span>
+        </button>
+        {canManageTemplates && (
           <button
             data-testid="workflow-templates-entry"
             onClick={() => onFilterChange(WORKFLOW_TEMPLATES_FILTER)}
@@ -166,8 +184,8 @@ export function ProjectFilterSidebar({
               {t('projects.workflow.templatesEntry')}
             </span>
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

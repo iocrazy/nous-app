@@ -1361,6 +1361,50 @@
       "noGroup": "No group",
       "submit": "Create & Add Members"
     },
+    "ideation": {
+      "entry": "Ideation",
+      "title": "Ideation",
+      "empty": "No topics yet",
+      "emptyHint": "Add topics from inspiration, your library, or start from scratch",
+      "fromInspiration": "From Inspiration",
+      "fromLibrary": "From Library",
+      "newTopic": "New topic",
+      "newTopicPlaceholder": "Topic title",
+      "untitledTopic": "Untitled topic",
+      "fromTopic": "From topic",
+      "loadError": "Failed to load topics",
+      "createError": "Failed to create topic",
+      "updateError": "Failed to update topic",
+      "tab": {
+        "all": "All",
+        "candidate": "Candidate",
+        "shortlisted": "Shortlisted",
+        "produced": "Produced",
+        "archived": "Archived"
+      },
+      "status": {
+        "candidate": "Candidate",
+        "shortlisted": "Shortlisted",
+        "produced": "Produced",
+        "archived": "Archived"
+      },
+      "source": {
+        "inspiration": "Inspiration",
+        "topic": "# Topic",
+        "library": "Library",
+        "blank": "Blank"
+      },
+      "action": {
+        "shortlist": "Shortlist",
+        "createProject": "Create project",
+        "archive": "Archive"
+      },
+      "picker": {
+        "notes": "Notes",
+        "topics": "# Topics",
+        "empty": "Nothing here yet"
+      }
+    },
     "toolbar": {
       "items": "items",
       "sortUpdated": "Updated",

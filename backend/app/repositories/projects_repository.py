@@ -420,6 +420,10 @@ class ProjectsRepository:
             # path (list_projects) already does, or the INSERT 500s (DataError).
             if values.get("team_id") is not None:
                 values["team_id"] = int(values["team_id"])
+            # topic_id (ideation source, mig 382) is a snowflake that also
+            # arrives as a str — same strict-int8 coercion as team_id.
+            if values.get("topic_id") is not None:
+                values["topic_id"] = int(values["topic_id"])
             async with write_scope() as session:
                 result = await session.execute(
                     insert(Projects).values(**values).returning(Projects)

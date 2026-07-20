@@ -386,6 +386,10 @@ class ProjectsService:
         # before the insert and instantiate the nodes after the row exists.
         workflow_template_id = data.pop("workflow_template_id", None)
         workflow_method = data.pop("workflow_method", None)
+        # Ideation (M1.5): topic_id IS a projects column — leave it in `data` so
+        # the row records its source. Kept here to mark the topic produced after
+        # the project exists (best-effort, below).
+        topic_id = data.get("topic_id")
         project = await self.repo.create_project(data)
 
         # Generate display code if project belongs to a team
@@ -481,6 +485,26 @@ class ProjectsService:
             method=workflow_method,
             user_id=user_id,
         )
+
+        # Ideation (M1.5): a project born from a topic auto-marks that topic
+        # produced. Best-effort — same discipline as the enrichment blocks above,
+        # and one topic may spawn many projects (no uniqueness). Scoped to the
+        # topic's own team so it can't flip another team's topic.
+        if topic_id:
+            try:
+                from app.repositories.topics_repository import (
+                    get_topics_repository,
+                )
+
+                topics_repo = get_topics_repository()
+                topic_team_id = await topics_repo.get_topic_team_id(str(topic_id))
+                if topic_team_id is not None:
+                    await topics_repo.mark_produced(str(topic_id), topic_team_id)
+            except Exception as e:  # noqa: BLE001 — topic linkage is enrichment
+                logger.error(
+                    f"[projects] mark-topic-produced failed for "
+                    f"{project.get('id')} topic={topic_id}: {e}"
+                )
 
         return project
 
