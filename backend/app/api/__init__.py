@@ -166,6 +166,14 @@ from app.api.workflows_router import router as workflows_router  # noqa: E402
 
 api_router.include_router(router=workflows_router, tags=["DBOS Workflows"])
 
+# Workflow templates + node bank (Project Workflow M1 PR-A). Same /workflows
+# prefix as the DBOS router above; paths are disjoint (see router docstring).
+from app.api.workflow_templates_router import (  # noqa: E402
+    router as workflow_templates_router,
+)
+
+api_router.include_router(router=workflow_templates_router, tags=["Workflow Templates"])
+
 # Issues — top-level user-visible entity (PR-D6)
 from app.api.issues_router import router as issues_router  # noqa: E402
 
