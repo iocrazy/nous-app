@@ -78,7 +78,7 @@ import { EpisodePanel } from './EpisodePanel';
 import { RailEntities } from './RailEntities';
 import { deriveRailCharacters, deriveRailLocations } from '../railDerive';
 import { ElementToolbar } from './ElementToolbar';
-import { WritingPanel, deriveStatistics } from './WritingPanel';
+import { WritingPanel, deriveStatistics, CAST_COLORS } from './WritingPanel';
 import { SaveIndicator, aggregateSaveState } from './SaveIndicator';
 import { ConflictBar } from './ConflictBar';
 import { ColdStart } from './EmptyStates';
@@ -792,6 +792,19 @@ export function EditorShell({
   const railLocations = useMemo(() => deriveRailLocations(statsScenes), [statsScenes]);
   // Distinct location names for the heading's search-or-create location picker.
   const locationCandidates = useMemo(() => railLocations.map((l) => l.name), [railLocations]);
+  // Character-cue colour map (UPPERCASE name → rail colour) so each cue in the
+  // sheet can prefix its name with the SAME colour dot the left rail's
+  // Characters section paints (RailEntities uses CAST_COLORS[i % len] over this
+  // exact first-seen order — see railDerive.deriveRailCharacters). Passed down
+  // one hop to SceneBlock → TipTapSceneEditor, where the NodeView sets it as the
+  // per-cue `--cue-dot` custom property.
+  const castColors = useMemo(() => {
+    const map: Record<string, string> = {};
+    railCharacters.forEach((c, i) => {
+      map[c.name.toUpperCase()] = CAST_COLORS[i % CAST_COLORS.length];
+    });
+    return map;
+  }, [railCharacters]);
 
   // Auto-sync locations to the project Scene Library (场景库): whenever the set
   // of distinct location names changes, re-run the idempotent extract so a
@@ -1479,6 +1492,7 @@ export function EditorShell({
                             blockIndexBase={blockBases[i]}
                             format={state.format}
                             mentionCandidates={mentionCandidates}
+                            castColors={castColors}
                             locationCandidates={locationCandidates}
                             onFocusElement={handleFocusElement}
                             onSyncStateChange={handleSyncStateChange}

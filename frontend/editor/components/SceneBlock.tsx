@@ -138,6 +138,10 @@ export interface SceneBlockProps {
   format?: EditorFormat;
   /** Distinct CAST names for the @-mention / character-cue picker (script-wide). */
   mentionCandidates?: string[];
+  /** UPPERCASE character name → rail colour, so a Hollywood character cue can
+   *  prefix its name with the SAME colour dot the left rail paints. Forwarded to
+   *  TipTapSceneEditor, which resolves each cue's colour into `--cue-dot`. */
+  castColors?: Record<string, string>;
   /** Distinct location names (script-wide) for the heading's search-or-create
    *  location picker. */
   locationCandidates?: string[];
@@ -198,6 +202,7 @@ export function SceneBlock({
   typeCommand,
   format = 'hollywood',
   mentionCandidates = [],
+  castColors,
   locationCandidates = [],
   onSyncStateChange,
   reorder,
@@ -595,10 +600,16 @@ export function SceneBlock({
         const top = nodeRect.bottom - contRect.top;
         let left = nodeRect.left - contRect.left;
         if (kind === 'character') {
-          // A Hollywood character cue is indented (.hw-character padding-left:
-          // 22ch); anchor the picker under the visible cue text, not the row's
-          // left edge, by adding the line's own left padding.
-          left += parseFloat(getComputedStyle(node).paddingLeft) || 0;
+          // A character cue's NAME no longer sits at the row's left edge — the
+          // Hollywood cue is a centered pill and the Asian cue shrink-wraps
+          // (顶格) — so a fixed padding offset would strand the picker at the far
+          // left. Anchor it under the cue's actual rendered box: the
+          // NodeViewContent's inner wrapper (`.hw-character > *` / the asian
+          // equivalent) carries the pill/name, so measure that when present and
+          // fall back to the line box (empty cue) otherwise.
+          const inner = node.firstElementChild as HTMLElement | null;
+          const anchorRect = (inner ?? node).getBoundingClientRect();
+          left = anchorRect.left - contRect.left;
         }
         // Clamp so a ~300px panel never spills past the sheet's right edge.
         const POPUP_WIDTH = 300;
@@ -1410,6 +1421,7 @@ export function SceneBlock({
           mentionMenu={tiptapMentionMenu}
           pageSeams={pageSeams}
           mentionCandidates={mentionCandidates}
+          castColors={castColors}
         />
       )}
 
