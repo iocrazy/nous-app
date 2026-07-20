@@ -1,0 +1,213 @@
+import { test, expect, type Page, type Route } from '@playwright/test';
+import { setupStubbedSession, TEAM_ID, PARENT_PROJECT_ID, USER_ID } from './helpers/stubs';
+
+/**
+ * Pre-merge visual walkthrough for Project Workflow M1 PR-C (template editor +
+ * workspace strip / node card + advance gate).
+ *
+ * Full-stub harness (same contract as issue-trigger-walkthrough / the storyboard
+ * suite): no real backend, no login. The strip, node card and advance dialog
+ * render the server payloads verbatim, so the stubbed workflow endpoints stand
+ * in for the PR-A/PR-B backend tests that already pin template CRUD, the
+ * instance shape and the advance predicate.
+ *
+ * Screenshots land in test-results/workflow/ for human review.
+ */
+
+const SHOTS = 'test-results/workflow';
+
+const AGENT = {
+  id: '00000000-0000-4000-8000-0000000000a1',
+  slug: 'script-ai',
+  name: 'Script AI',
+  description: null,
+  icon: 'bot',
+  model: 'qwen-max',
+  temperature: 0.7,
+};
+
+const STAGE_LIBRARY = [
+  { id: '900001', slug: 'script', name: 'Script', sort_order: 0, phase: 'pre', default_role_label: 'Writer', deliverable_label: 'Final script', review_required: true },
+  { id: '900002', slug: 'storyboard', name: 'Storyboard', sort_order: 1, phase: 'pre', default_role_label: 'Artist', deliverable_label: 'Shot list', review_required: true },
+  { id: '900003', slug: 'voiceover', name: 'Voiceover', sort_order: 2, phase: 'pre', default_role_label: 'VO', deliverable_label: 'VO track', review_required: false },
+  { id: '900004', slug: 'canvas', name: 'Canvas', sort_order: 3, phase: 'production', default_role_label: 'Gen AI', deliverable_label: 'Generated clips', review_required: true },
+  { id: '900005', slug: 'editing', name: 'Editing', sort_order: 4, phase: 'post', default_role_label: 'Editor', deliverable_label: 'A/B copy', review_required: true },
+  { id: '900006', slug: 'distribution', name: 'Distribution', sort_order: 5, phase: 'wrap', default_role_label: 'Ops', deliverable_label: 'Published links', review_required: false },
+];
+
+function tplNode(id: string, name: string, sort: number, extra: Record<string, unknown> = {}) {
+  return {
+    id,
+    template_id: 'tpl-1',
+    name,
+    sort_order: sort,
+    parallel_group: null,
+    default_owner_user_id: null,
+    default_owner_agent_id: null,
+    skip_default: false,
+    review_required: false,
+    deliverable_required: false,
+    deliverable_label: null,
+    source_stage_id: null,
+    duration_days: null,
+    members: [],
+    ...extra,
+  };
+}
+
+const TEMPLATE_LIST = [
+  { id: 'tpl-1', team_id: TEAM_ID, name: 'Short-form', is_default: true, created_by: USER_ID, created_at: '2026-07-01T00:00:00Z', updated_at: '2026-07-01T00:00:00Z', node_count: 4 },
+  { id: 'tpl-2', team_id: TEAM_ID, name: 'Long-form', is_default: false, created_by: USER_ID, created_at: '2026-07-01T00:00:00Z', updated_at: '2026-07-01T00:00:00Z', node_count: 4 },
+];
+
+const TEMPLATE_DETAIL = {
+  ...TEMPLATE_LIST[0],
+  nodes: [
+    tplNode('tn-1', 'Script', 0, { review_required: true, deliverable_label: 'Final script', default_owner_agent_id: AGENT.id }),
+    tplNode('tn-2', 'Storyboard', 1, { review_required: true, deliverable_required: true, deliverable_label: 'Shot list' }),
+    tplNode('tn-3', 'Editing', 2, { parallel_group: 1 }),
+    tplNode('tn-4', 'Color Grading', 3, { parallel_group: 1 }),
+    tplNode('tn-5', 'Distribution', 4),
+  ],
+};
+
+const PROJECT = {
+  id: PARENT_PROJECT_ID,
+  name: 'Workflow E2E Project',
+  description: null,
+  team_id: TEAM_ID,
+  project_type: 'internal',
+  project_group: null,
+  is_starred: false,
+  is_archived: false,
+  file_count: 3,
+  latest_activity: null,
+  current_node_id: 'node-2',
+  created_at: '2026-07-01T00:00:00Z',
+  updated_at: '2026-07-10T00:00:00Z',
+};
+
+function node(id: string, name: string, sort: number, status: string, extra: Record<string, unknown> = {}) {
+  return {
+    id,
+    project_id: PARENT_PROJECT_ID,
+    source_template_node_id: null,
+    legacy_stage_id: null,
+    name,
+    sort_order: sort,
+    parallel_group: null,
+    status,
+    owner_user_id: null,
+    owner_agent_id: null,
+    planned_start: null,
+    planned_due: null,
+    review_required: false,
+    deliverable_required: false,
+    deliverable_label: null,
+    skipped: false,
+    members: [],
+    ...extra,
+  };
+}
+
+const WORKFLOW = {
+  has_workflow: true,
+  current_node_id: 'node-2',
+  agents_active: 1,
+  nodes: [
+    node('node-1', 'Script', 0, 'done'),
+    node('node-2', 'Storyboard', 1, 'in_progress', {
+      owner_agent_id: AGENT.id,
+      planned_start: '2026-07-20',
+      planned_due: '2026-07-25',
+      review_required: true,
+      deliverable_required: true,
+      deliverable_label: 'Shot list',
+    }),
+    node('node-3', 'Editing', 2, 'pending'),
+    node('node-4', 'Distribution', 3, 'pending'),
+  ],
+};
+
+const ADVANCE_PREVIEW = {
+  direction: 'forward',
+  will_advance: true,
+  blocked_reason: null,
+  closing: [{ node_id: 'node-2', name: 'Storyboard', assignee_user_id: null, assignee_agent_id: AGENT.id, due_date: '2026-07-25' }],
+  creating: [{ node_id: 'node-3', name: 'Editing', assignee_user_id: null, assignee_agent_id: null, due_date: '2026-08-01' }],
+  warnings: [],
+};
+
+function json(body: unknown) {
+  return (route: Route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+}
+
+async function setupWorkflowStubs(page: Page): Promise<void> {
+  await setupStubbedSession(page);
+  // Registered after the harness catch-alls → these win.
+  await page.route('**/api/v1/ai-library/agents', json([AGENT]));
+
+  // Team templates (list + detail + node bank).
+  await page.route('**/api/v1/workflows?*', json({ success: true, data: TEMPLATE_LIST }));
+  await page.route('**/api/v1/workflows/*', json({ success: true, data: TEMPLATE_DETAIL }));
+  // stage-library registered LAST so it wins over the `/workflows/*` glob.
+  await page.route('**/api/v1/workflows/stage-library', json({ success: true, data: STAGE_LIBRARY }));
+
+  // Project list (workspace resolves selectedProject by matching the URL id).
+  await page.route('**/api/v1/projects?*', json({ success: true, data: [PROJECT] }));
+  // Per-project workflow instance + advance preview (response_model → no envelope).
+  await page.route('**/api/v1/projects/*/workflow', json(WORKFLOW));
+  await page.route('**/api/v1/projects/*/advance-preview*', json(ADVANCE_PREVIEW));
+}
+
+async function forceTheme(page: Page, theme: 'dark' | 'light'): Promise<void> {
+  await page.addInitScript((t) => {
+    try {
+      localStorage.setItem('mediahub.theme', t as string);
+    } catch {
+      /* ignore */
+    }
+  }, theme);
+}
+
+async function openTemplateEditor(page: Page): Promise<void> {
+  await page.goto(`/team/${TEAM_ID}/projects`);
+  await page.getByTestId('workflow-templates-entry').click();
+  await expect(page.getByTestId('workflow-template-editor')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('workflow-node-capsule').first()).toBeVisible();
+}
+
+async function openWorkspaceOverview(page: Page): Promise<void> {
+  await page.goto(`/team/${TEAM_ID}/projects/${PARENT_PROJECT_ID}`);
+  await expect(page.getByTestId('workflow-strip')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('workflow-current-node-card').first()).toBeVisible();
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  test(`${theme}: template editor renders chain + inspector`, async ({ page }) => {
+    await setupWorkflowStubs(page);
+    await forceTheme(page, theme);
+    await openTemplateEditor(page);
+    await page.screenshot({ path: `${SHOTS}/01-template-editor-${theme}.png`, fullPage: true });
+  });
+
+  test(`${theme}: workspace strip + current node card`, async ({ page }) => {
+    await setupWorkflowStubs(page);
+    await forceTheme(page, theme);
+    await openWorkspaceOverview(page);
+    await page.screenshot({ path: `${SHOTS}/02-overview-${theme}.png`, fullPage: true });
+  });
+
+  test(`${theme}: advance confirm dialog renders the server preview`, async ({ page }) => {
+    await setupWorkflowStubs(page);
+    await forceTheme(page, theme);
+    await openWorkspaceOverview(page);
+    await page.getByTestId('workflow-complete-stage').click();
+    await expect(page.getByTestId('workflow-advance-dialog')).toBeVisible();
+    // The dialog renders the server ruling: closing Storyboard, creating Editing.
+    await expect(page.getByTestId('workflow-advance-dialog')).toContainText('Storyboard');
+    await expect(page.getByTestId('workflow-advance-dialog')).toContainText('Editing');
+    await page.screenshot({ path: `${SHOTS}/03-advance-dialog-${theme}.png`, fullPage: true });
+  });
+}
