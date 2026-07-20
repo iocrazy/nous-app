@@ -336,6 +336,24 @@ class ProjectStageNodesRepository:
                 members_by_node.setdefault(m.node_id, []).append(_member_row(m))
         return [_node_row(n, members_by_node.get(n.id, [])) for n in nodes]
 
+    async def has_nodes(self, project_id: str) -> bool:
+        """Whether the project owns any workflow node instance (cheap EXISTS).
+
+        The single signal the SOP-mirror suppression guard keys off (W2-1): a
+        project with live ``project_stage_nodes`` rows mirrors its node chain,
+        not the global SOP stage.
+        """
+        pid = int(str(project_id))
+        async with read_scope() as session:
+            row = (
+                await session.execute(
+                    select(ProjectStageNodes.id)
+                    .where(ProjectStageNodes.project_id == pid)
+                    .limit(1)
+                )
+            ).first()
+        return row is not None
+
     async def list_nodes(self, project_id: str) -> List[Dict[str, Any]]:
         """All of a project's nodes (+ members), ordered by sort_order."""
         async with read_scope() as session:

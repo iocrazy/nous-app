@@ -151,6 +151,16 @@ async def resolve_current_stage(project_id: int, user_id: str) -> Optional[dict]
 
     repo = get_project_stages_repository()
     current = await repo.get_current(int(project_id))
+
+    # W2-1: a workflow project's stage is a projection of its node chain, not a
+    # forward-derivation of the SOP output probes. Skip the auto-promote and its
+    # persistent side effects (history rows + current_stage_id writes) entirely;
+    # only the read-only stored stage remains for display.
+    from app.services.workflow.instantiation import project_has_workflow_nodes
+
+    if await project_has_workflow_nodes(project_id):
+        return current
+
     try:
         flags = await repo.derive_activity_flags(int(project_id))
         auto_slug = _auto_stage_slug(flags)
@@ -410,10 +420,22 @@ class ProjectsService:
         # D4 (final UI spec): every project is born on the first SOP stage so
         # the stage workbench is always present. Best-effort — a stage-machine
         # hiccup must never fail project creation.
+        #
+        # W2-1: a project born WITH a workflow template drives its stages from
+        # the instantiated node chain (below), so it must NOT also be seeded onto
+        # the global SOP first stage — that would派生 a second, duplicate mirror
+        # issue. At this point the node rows don't exist yet (instantiation runs
+        # after), so the sync_stage_issues guard can't see them — skip the SOP
+        # born block up front instead, keyed off the chosen template.
         try:
             stages_repo = self._stages_repo()
             catalog = await stages_repo.list_catalog()
-            if catalog:
+            if workflow_template_id:
+                logger.debug(
+                    f"[projects] project {project.get('id')} born with workflow "
+                    f"template {workflow_template_id} — skipping SOP first-stage seed"
+                )
+            elif catalog:
                 updated = await stages_repo.set_current_stage(
                     project["id"], int(catalog[0]["id"]), user_id
                 )

@@ -16,6 +16,30 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 
 
+async def project_has_workflow_nodes(project_id: Any) -> bool:
+    """Whether a project owns workflow node instances (W2-1 suppression signal).
+
+    A project carrying live ``project_stage_nodes`` rows mirrors its node chain
+    (``ensure_node_issues``) and drives its stage display from those nodes, so
+    the legacy global-SOP mirror / forward-derivation must stand down for it.
+
+    Fail-OPEN: if the probe itself errors (engine unconfigured in a unit test,
+    transient DB blip) this returns ``False`` so a non-workflow project keeps its
+    legacy behaviour rather than silently losing its SOP mirror.
+    """
+    try:
+        from app.repositories.project_stage_nodes_repository import (
+            get_project_stage_nodes_repository,
+        )
+
+        return await get_project_stage_nodes_repository().has_nodes(str(project_id))
+    except Exception as exc:  # noqa: BLE001 — degrade to legacy SOP behaviour
+        logger.warning(
+            f"[workflow] has-workflow probe failed for project {project_id}: {exc!r}"
+        )
+        return False
+
+
 def _first_active_group(nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """The earliest non-skipped group (by sort_order).
 

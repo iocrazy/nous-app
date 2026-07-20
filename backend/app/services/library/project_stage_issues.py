@@ -114,7 +114,22 @@ async def sync_stage_issues(
 
     The two halves are independent: a failure closing the old issue must not
     prevent opening the new one, and vice versa (each is wrapped on its own).
+
+    W2-1: a project running a workflow instance mirrors its node chain
+    (``ensure_node_issues``) — the legacy global-SOP mirror stands down entirely
+    so带 workflow 的 project 不再产生两套镜像 issue. The manual PUT and
+    ``resolve_current_stage`` auto-derivation both funnel through here, so this
+    one guard covers every live SOP-advance path.
     """
+    from app.services.workflow.instantiation import project_has_workflow_nodes
+
+    if await project_has_workflow_nodes(project_id):
+        logger.debug(
+            f"[project_stage_issues] project {project_id} has a workflow instance "
+            f"— skipping legacy SOP stage-issue mirror"
+        )
+        return
+
     from app.repositories.issue_repository import get_issue_repository
 
     issues = get_issue_repository()
