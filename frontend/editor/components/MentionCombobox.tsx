@@ -37,8 +37,11 @@ export interface MentionComboboxProps {
   onSelect: (name: string) => void;
   /** Mouse hover moves the active option so keyboard + pointer stay in sync. */
   onHover: (index: number) => void;
-  /** Optional caret-anchored position; omitted in tests (jsdom has no layout). */
-  position?: { top: number; left: number };
+  /** Optional caret-anchored position; omitted in tests (jsdom has no layout).
+   *  `centered` treats `left` as the anchor's CENTER — the panel centres
+   *  itself on it via translateX(-50%), exact whatever width it renders at
+   *  (character cues hang the picker centred under the cue, laper-style). */
+  position?: { top: number; left: number; centered?: boolean };
   /** Picker flavour: 'character' renders the embedded search input + Tab hint;
    *  'inline' keeps line-driven filtering (query typed after `@` in the line);
    *  'transition' lists the industry presets (line text filters, Enter picks).
@@ -107,7 +110,12 @@ export function MentionCombobox({
   );
 
   const style: CSSProperties = position
-    ? { position: 'absolute', top: position.top, left: position.left }
+    ? {
+        position: 'absolute',
+        top: position.top,
+        left: position.left,
+        ...(position.centered ? { transform: 'translateX(-50%)' } : {}),
+      }
     : {};
 
   // The embedded input mirrors the line's keyboard semantics so the picker
