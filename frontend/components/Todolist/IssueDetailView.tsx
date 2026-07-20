@@ -9,7 +9,7 @@
  * WebSocket (replaces polling from commit 3453a990).
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ChevronLeft, MoreHorizontal, AlignLeft, Paperclip, FileText, Plus,
@@ -27,6 +27,9 @@ import { dispatchIssue, getDispatchPreview, type DispatchPreview } from '../../s
 import { DispatchConfirmDialog } from './DispatchConfirmDialog';
 import { PipelineRunStrip } from './PipelineRunStrip';
 import { IssueCostLine } from './IssueCostLine';
+import { IssueFlowStrip } from './IssueFlowStrip';
+import { parseStageMirror, useIssueFlows } from './issueFlow';
+import { originPath, parseOriginId } from './issueOrigin';
 import { RunPipelineMenu } from './RunPipelineMenu';
 import { openIssueChatSocket } from '../../services/issueChatSocket';
 import { getSupabaseClient } from '../../supabaseClient';
@@ -89,6 +92,14 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
   const pipelineTeamId = teamId && /^\d+$/.test(teamId) ? teamId : null;
   // A pipeline child issue should not itself be a pipeline parent.
   const isPipelineChild = issue.raw.origin_kind === 'pipeline';
+  // Flow-progress strip: only for stage-mirror issues (origin_kind='project_stage').
+  const flowIssues = useMemo(() => [issue], [issue]);
+  const flow = useIssueFlows(flowIssues);
+  const flowRef = parseStageMirror(issue.raw.origin_kind, issue.raw.origin_id);
+  const flowPath = flowRef ? originPath(parseOriginId(issue.raw.origin_id)!, teamId) : null;
+  const flowCurrentStageId = flowRef
+    ? flow.currentByProject.get(flowRef.projectId)?.id ?? flowRef.stageId
+    : null;
   // Run-confirm gate: dispatch always goes through a confirm dialog that
   // renders the server's dispatch-preview verdict.
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -351,6 +362,18 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
           <h1 className="text-xl font-semibold text-ink-100 leading-tight">{issue.title}</h1>
           {issue.description && (
             <p className="mt-2 text-[14px] text-ink-400 leading-relaxed whitespace-pre-wrap">{issue.description}</p>
+          )}
+
+          {flowRef && flowPath && flowCurrentStageId && flow.catalog.length > 0 && (
+            <div data-testid="detail-flow" className="mt-3 flex items-center gap-2 text-[13px]">
+              <span className="text-[11px] uppercase tracking-wider text-ink-500">Flow</span>
+              <IssueFlowStrip
+                catalog={flow.catalog}
+                currentStageId={flowCurrentStageId}
+                to={flowPath}
+                variant="detail"
+              />
+            </div>
           )}
 
           <PipelineRunStrip
