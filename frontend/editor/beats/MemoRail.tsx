@@ -1,18 +1,18 @@
 /**
- * MemoRail — the Beats M4 timeline memo-pin rail (laper-aligned).
+ * MemoRail — the Beats timeline memo rail (M5, laper-aligned).
  *
- * A second ruler line below the arrangement cards where inspiration-library
- * notes anchored to this script hang as memo pins: a dot on the ruler, a relaxed
- * SVG curve, and a floating card. Hovering the ruler snaps a green "+" to the
- * grid; clicking it opens a quick-capture card that creates an anchored note.
- * Pins drag along the ruler to re-time (pointer capture, local-only during the
- * drag, one PATCH on pointer-up — the M2 drag discipline, #1389); a click that
- * doesn't move opens the memo for editing.
+ * A second ruler line below the arrangement cards where a script's beat memos
+ * hang as pins: a dot on the ruler, a relaxed SVG curve, and a floating card.
+ * Hovering the ruler snaps a green "+" to the grid; clicking it opens a
+ * quick-capture card that creates a memo. Pins drag along the ruler to re-time
+ * (pointer capture, local-only during the drag, one PATCH on pointer-up — the M2
+ * drag discipline, #1389); a click that doesn't move opens the memo for editing.
  *
- * Pins inherit the colour of the beat they sit within (pinColorFor); cards that
- * would overlap horizontally stagger into rows (layoutMemoPins). Both are pure
- * (memoGeometry). This component owns data + pointer wiring; it self-fetches its
- * anchored notes so the parent stays a pure timeline shell.
+ * M5: memos are their OWN entity (beat_memos), fetched + written via memoService
+ * — no longer inspiration-library notes. Pins inherit the colour of the beat they
+ * sit within (pinColorFor); cards that would overlap stagger into rows
+ * (layoutMemoPins). Both are pure (memoGeometry). This component owns data +
+ * pointer wiring; it self-fetches its memos so the parent stays a pure shell.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -20,14 +20,14 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/Toast';
 import {
-  attachmentUrlWithToken,
-  createNote,
-  deleteNote,
-  listAnchoredNotes,
-  updateNote,
-  uploadAttachment,
-  type InspirationNote,
-} from '../../services/inspirationService';
+  createMemo,
+  deleteMemo,
+  listMemos,
+  memoImageUrl,
+  updateMemo,
+  uploadMemoImage,
+  type Memo,
+} from './memoService';
 import type { Beat } from '../sceneService';
 import { pxToTime, snapSec, timeToPx } from './arrangementGeometry';
 import { formatAnchorSec, layoutMemoPins, memoPinPath, pinColorFor } from './memoGeometry';
@@ -63,7 +63,7 @@ interface DragCtx {
 
 type Panel =
   | { mode: 'create'; sec: number }
-  | { mode: 'edit'; note: InspirationNote }
+  | { mode: 'edit'; memo: Memo }
   | null;
 
 /** Crude markdown→preview: collapse whitespace, drop the commonest marks. */
@@ -87,7 +87,7 @@ export function MemoRail({
   const { addToast } = useToast();
   const { mediaToken } = useAuth();
 
-  const [memos, setMemos] = useState<InspirationNote[]>([]);
+  const [memos, setMemos] = useState<Memo[]>([]);
   const [hoverSec, setHoverSec] = useState<number | null>(null);
   const [drag, setDrag] = useState<DragCtx | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
@@ -105,8 +105,7 @@ export function MemoRail({
 
   const reload = useCallback(async () => {
     try {
-      const rows = await listAnchoredNotes(scriptId);
-      setMemos(rows.filter((r) => r.anchor_sec != null));
+      setMemos(await listMemos(scriptId));
     } catch (err) {
       console.error('[MemoRail] load failed', err);
       addToastRef.current(tRef.current('editor.memoLoadFailed'), 'error');
@@ -119,8 +118,7 @@ export function MemoRail({
 
   // Effective offset folds an in-flight drag over the stored anchor.
   const secOf = useCallback(
-    (memo: InspirationNote): number =>
-      drag && drag.id === memo.id ? drag.sec : (memo.anchor_sec ?? 0),
+    (memo: Memo): number => (drag && drag.id === memo.id ? drag.sec : memo.anchor_sec),
     [drag],
   );
 
@@ -173,15 +171,15 @@ export function MemoRail({
 
   // ── Pin drag (move) / click (edit) ─────────────────────────────────────────
   const beginDrag = useCallback(
-    (e: React.PointerEvent, memo: InspirationNote) => {
+    (e: React.PointerEvent, memo: Memo) => {
       if (e.button !== 0 || dragRef.current) return;
       (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
       const ctx: DragCtx = {
         id: memo.id,
         pointerId: e.pointerId,
         originClientX: e.clientX,
-        origSec: memo.anchor_sec ?? 0,
-        sec: memo.anchor_sec ?? 0,
+        origSec: memo.anchor_sec,
+        sec: memo.anchor_sec,
         changed: false,
       };
       dragRef.current = ctx;
@@ -207,7 +205,7 @@ export function MemoRail({
   );
 
   const endDrag = useCallback(
-    (e: React.PointerEvent, memo: InspirationNote) => {
+    (e: React.PointerEvent, memo: Memo) => {
       const ctx = dragRef.current;
       if (!ctx || e.pointerId !== ctx.pointerId) return;
       (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
@@ -216,14 +214,14 @@ export function MemoRail({
       const finalSec = ctx.sec;
       setDrag(null);
       if (!moved) {
-        setPanel({ mode: 'edit', note: memo });
+        setPanel({ mode: 'edit', memo });
         return;
       }
       // Optimistic re-time; PATCH once, re-pull on failure.
       setMemos((prev) =>
         prev.map((m) => (m.id === memo.id ? { ...m, anchor_sec: finalSec } : m)),
       );
-      updateNote(memo.id, { anchor_sec: finalSec }).catch((err) => {
+      updateMemo(memo.id, { anchor_sec: finalSec }).catch((err) => {
         console.error('[MemoRail] move failed', err);
         addToast(t('editor.memoMoveFailed'), 'error');
         void reload();
@@ -238,11 +236,9 @@ export function MemoRail({
       if (panel?.mode !== 'create') return;
       setBusy(true);
       try {
-        const note = await createNote(content, undefined, {
-          scriptId,
-          sec: panel.sec,
-        });
-        for (const f of files) await uploadAttachment(note.id, f);
+        const images: string[] = [];
+        for (const f of files) images.push(await uploadMemoImage(scriptId, f));
+        await createMemo(scriptId, { anchor_sec: panel.sec, content, images });
         setPanel(null);
         await reload();
       } catch (err) {
@@ -258,11 +254,13 @@ export function MemoRail({
   const saveEdit = useCallback(
     async (content: string, files: File[]) => {
       if (panel?.mode !== 'edit') return;
-      const id = panel.note.id;
+      const memo = panel.memo;
       setBusy(true);
       try {
-        await updateNote(id, { content_md: content });
-        for (const f of files) await uploadAttachment(id, f);
+        const added: string[] = [];
+        for (const f of files) added.push(await uploadMemoImage(scriptId, f));
+        const images = [...memo.images, ...added];
+        await updateMemo(memo.id, { content, images });
         setPanel(null);
         await reload();
       } catch (err) {
@@ -272,30 +270,16 @@ export function MemoRail({
         setBusy(false);
       }
     },
-    [panel, reload, addToast, t],
+    [panel, scriptId, reload, addToast, t],
   );
-
-  const unpin = useCallback(async () => {
-    if (panel?.mode !== 'edit') return;
-    const id = panel.note.id;
-    setPanel(null);
-    setMemos((prev) => prev.filter((m) => m.id !== id));
-    try {
-      await updateNote(id, { anchor_script_id: null, anchor_sec: null });
-    } catch (err) {
-      console.error('[MemoRail] unpin failed', err);
-      addToast(t('editor.memoUnpinFailed'), 'error');
-      void reload();
-    }
-  }, [panel, reload, addToast, t]);
 
   const removeMemo = useCallback(async () => {
     if (panel?.mode !== 'edit') return;
-    const id = panel.note.id;
+    const id = panel.memo.id;
     setPanel(null);
     setMemos((prev) => prev.filter((m) => m.id !== id));
     try {
-      await deleteNote(id);
+      await deleteMemo(id);
     } catch (err) {
       console.error('[MemoRail] delete failed', err);
       addToast(t('editor.memoDeleteFailed'), 'error');
@@ -305,10 +289,22 @@ export function MemoRail({
 
   const panelX = useMemo(() => {
     if (!panel) return 0;
-    const sec = panel.mode === 'create' ? panel.sec : (panel.note.anchor_sec ?? 0);
+    const sec = panel.mode === 'create' ? panel.sec : panel.memo.anchor_sec;
     const pinX = timeToPx(sec, pxPerSec);
     return Math.max(0, Math.min(canvasWidth - 272, pinX - 136));
   }, [panel, pxPerSec, canvasWidth]);
+
+  // Pre-built image URLs for the edit card (browser-native <img> loads; the
+  // memo image serve route bounds each read to this memo + index).
+  const editImageUrls = useMemo(
+    () =>
+      panel?.mode === 'edit'
+        ? panel.memo.images.map((_, i) =>
+            memoImageUrl(scriptId, panel.memo.id, i, mediaToken ?? undefined),
+          )
+        : [],
+    [panel, scriptId, mediaToken],
+  );
 
   return (
     <div
@@ -401,7 +397,7 @@ export function MemoRail({
         if (!box) return null;
         const row = rows.get(m.id) ?? 0;
         const cardTop = CARD_TOP + row * (CARD_H + CARD_GAP);
-        const image = m.attachments?.find((a) => a.mime.startsWith('image/'));
+        const hasImage = m.images.length > 0;
         return (
           <div
             key={m.id}
@@ -416,19 +412,19 @@ export function MemoRail({
                 type="button"
                 className="mh-memo-card-edit"
                 data-testid="memo-card-edit"
-                onClick={() => setPanel({ mode: 'edit', note: m })}
+                onClick={() => setPanel({ mode: 'edit', memo: m })}
               >
                 {t('editor.memoEdit')}
               </button>
             </div>
-            {image && (
+            {hasImage && (
               <img
                 className="mh-memo-card-thumb"
-                src={attachmentUrlWithToken(image.id, mediaToken ?? undefined)}
-                alt={image.original_name}
+                src={memoImageUrl(scriptId, m.id, 0, mediaToken ?? undefined)}
+                alt=""
               />
             )}
-            <div className="mh-memo-card-body">{previewText(m.content_md)}</div>
+            <div className="mh-memo-card-body">{previewText(m.content)}</div>
           </div>
         );
       })}
@@ -436,14 +432,13 @@ export function MemoRail({
       {panel && (
         <MemoQuickCard
           mode={panel.mode}
-          sec={panel.mode === 'create' ? panel.sec : (panel.note.anchor_sec ?? 0)}
+          sec={panel.mode === 'create' ? panel.sec : panel.memo.anchor_sec}
           x={panelX}
-          initialContent={panel.mode === 'edit' ? panel.note.content_md : ''}
-          attachments={panel.mode === 'edit' ? panel.note.attachments : []}
+          initialContent={panel.mode === 'edit' ? panel.memo.content : ''}
+          existingImageUrls={editImageUrls}
           busy={busy}
           onPublish={publishCreate}
           onSave={saveEdit}
-          onUnpin={unpin}
           onDelete={removeMemo}
           onClose={() => setPanel(null)}
         />
