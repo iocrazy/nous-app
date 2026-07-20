@@ -1,7 +1,7 @@
-// Beats M4 — the timeline memo-pin rail. Hovering the second ruler reveals a
-// "+" that opens a quick-capture card; publishing POSTs an inspiration note
-// carrying the timeline anchor. An existing anchored note renders as a draggable
-// pin; a real step-by-step drag PATCHes the snapped anchor_sec.
+// Beats M5 — the timeline memo rail (memos are their own beat_memos entity).
+// Hovering the second ruler reveals a "+" that opens a quick-capture card;
+// publishing POSTs a memo carrying the timeline anchor. An existing memo renders
+// as a draggable pin; a real step-by-step drag PATCHes the snapped anchor_sec.
 //
 // Drag is a manual mouse.down/move/up (NOT locator.dragTo): the pin is bookkept
 // by pointermove and only writes on pointer-up, so a jump-to-destination drag
@@ -18,8 +18,8 @@ import {
 
 /** Seeded zoom: 6 px per timeline second → left/width math is exact. */
 const PX_PER_SEC = 6;
-/** String ids: the backend serializes note bigints via coerce_numbers_to_str. */
-const NOTE_ID = '900000000000001';
+/** String ids: the backend serializes memo bigints via coerce_numbers_to_str. */
+const MEMO_ID = '900000000000001';
 
 const els: WireElement[] = [{ id: 'el_2000001', type: 'action', text: 'A cold open.' }];
 
@@ -37,25 +37,21 @@ const arrangedBeat = () => ({
   color: '#b8a9a0',
 });
 
-function anchoredNote(anchorSec: number) {
+function memo(anchorSec: number) {
   return {
-    id: NOTE_ID,
-    content_md: 'a captured idea',
-    tags: [],
-    ref_hotspot: null,
-    pinned: false,
-    note_date: '2026-07-19',
-    anchor_script_id: SCRIPT_ID,
+    id: MEMO_ID,
+    script_id: SCRIPT_ID,
     anchor_sec: anchorSec,
+    content: 'a captured idea',
+    images: [] as string[],
     created_at: '2026-07-19T00:00:00Z',
     updated_at: '2026-07-19T00:00:00Z',
-    attachments: [],
   };
 }
 
 async function setupBeats(
   page: import('@playwright/test').Page,
-  notes: ReturnType<typeof anchoredNote>[],
+  memos: ReturnType<typeof memo>[],
 ) {
   await setupScriptStubs(page, {
     scenes: [wireScene({ id: 323456789100000, sortOrder: 1, location: 'ROOFTOP', elements: els })],
@@ -83,10 +79,18 @@ async function setupBeats(
     }),
   );
 
-  // Memo rail list — anchored notes for this script.
-  await page.route(`**/api/v1/inspiration/notes?*anchor_script_id*`, (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(notes) }),
-  );
+  // Memo rail list — this script's memos ({ success, data } envelope).
+  await page.route(`**/api/v1/scripts/${SCRIPT_ID}/memos`, async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, data: memos }),
+      });
+    } else {
+      await route.fallback();
+    }
+  });
 }
 
 async function openArrangement(page: import('@playwright/test').Page) {
@@ -99,17 +103,20 @@ async function openArrangement(page: import('@playwright/test').Page) {
   await page.waitForSelector('[data-testid="memo-rail"]', { timeout: 15_000 });
 }
 
-test('hovering the rail reveals the "+" and publish POSTs an anchored note', async ({ page }) => {
+test('hovering the rail reveals the "+" and publish POSTs an anchored memo', async ({ page }) => {
   await setupBeats(page, []);
 
   let postBody: Record<string, unknown> | null = null;
-  await page.route(`**/api/v1/inspiration/notes`, async (route) => {
+  await page.route(`**/api/v1/scripts/${SCRIPT_ID}/memos`, async (route) => {
     if (route.request().method() === 'POST') {
       postBody = JSON.parse(route.request().postData() || '{}');
       await route.fulfill({
-        status: 201,
+        status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ...anchoredNote(30), content_md: postBody.content_md }),
+        body: JSON.stringify({
+          success: true,
+          data: { ...memo(30), content: postBody.content },
+        }),
       });
     } else {
       await route.fallback();
@@ -129,31 +136,31 @@ test('hovering the rail reveals the "+" and publish POSTs an anchored note', asy
   await page.locator('[data-testid="memo-quick-publish"]').click();
 
   await expect.poll(() => postBody).not.toBeNull();
-  expect(postBody).toMatchObject({
-    content_md: 'timeline thought',
-    anchor_script_id: SCRIPT_ID,
+  expect(postBody).toEqual({
+    content: 'timeline thought',
     anchor_sec: 30,
+    images: [],
   });
 });
 
-test('renders a pin for an anchored note', async ({ page }) => {
-  await setupBeats(page, [anchoredNote(60)]);
+test('renders a pin for a memo', async ({ page }) => {
+  await setupBeats(page, [memo(60)]);
   await openArrangement(page);
   await expect(page.locator('[data-testid="memo-dot"]')).toHaveCount(1);
   await expect(page.locator('[data-testid="memo-card"]')).toHaveCount(1);
 });
 
 test('dragging a pin PATCHes the snapped anchor_sec', async ({ page }) => {
-  await setupBeats(page, [anchoredNote(20)]);
+  await setupBeats(page, [memo(20)]);
 
   let patchBody: Record<string, unknown> | null = null;
-  await page.route(`**/api/v1/inspiration/notes/${NOTE_ID}`, async (route) => {
+  await page.route(`**/api/v1/memos/${MEMO_ID}`, async (route) => {
     if (route.request().method() === 'PATCH') {
       patchBody = JSON.parse(route.request().postData() || '{}');
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ...anchoredNote(20), ...patchBody }),
+        body: JSON.stringify({ success: true, data: { ...memo(20), ...patchBody } }),
       });
     } else {
       await route.fallback();

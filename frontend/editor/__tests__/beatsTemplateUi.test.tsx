@@ -14,16 +14,16 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string, opts?: Record<string, unknown>) => (opts ? `${k}:${JSON.stringify(opts)}` : k) }),
 }));
 
-// M4: ArrangementView hosts MemoRail — stub Toast + Auth + the notes API.
+// M5: ArrangementView hosts MemoRail — stub Toast + Auth + memoService.
 vi.mock('../../components/Toast', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
 vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ mediaToken: 'tok' }) }));
-vi.mock('../../services/inspirationService', () => ({
-  listAnchoredNotes: vi.fn().mockResolvedValue([]),
-  createNote: vi.fn(),
-  updateNote: vi.fn(),
-  deleteNote: vi.fn(),
-  uploadAttachment: vi.fn(),
-  attachmentUrlWithToken: (id: string) => `att/${id}`,
+vi.mock('../beats/memoService', () => ({
+  listMemos: vi.fn().mockResolvedValue([]),
+  createMemo: vi.fn(),
+  updateMemo: vi.fn(),
+  deleteMemo: vi.fn(),
+  uploadMemoImage: vi.fn(),
+  memoImageUrl: (s: string, m: string, i: number) => `img/${s}/${m}/${i}`,
 }));
 
 import { ArrangementView } from '../beats/ArrangementView';
