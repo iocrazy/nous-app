@@ -129,7 +129,11 @@ export function ProjectsQueueView({
         const isGenerate = item.action?.type === 'generate_missing_frames';
         const busy = busyId === item.project_id;
         const activity = item.latest_activity;
-        const stageName = project?.current_stage?.name ?? item.stage_slug ?? '';
+        // W3-3: a workflow project's current node name wins over the SOP stage.
+        const badge = project?.workflow_badge ?? null;
+        const stageName =
+          badge?.current_node_name ?? project?.current_stage?.name ?? item.stage_slug ?? '';
+        const agentsActive = badge?.agents_active ?? 0;
 
         return (
           <div
@@ -160,8 +164,20 @@ export function ProjectsQueueView({
               )}
             </div>
             {stageName && (
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-[var(--accent-soft)] text-[var(--accent-text)] flex-shrink-0">
+              <span
+                data-testid={badge?.current_node_name ? 'project-workflow-stage-chip' : undefined}
+                className="text-xs px-2 py-0.5 rounded-full font-medium bg-[var(--accent-soft)] text-[var(--accent-text)] flex-shrink-0"
+              >
                 {stageName}
+              </span>
+            )}
+            {agentsActive > 0 && (
+              <span
+                data-testid="project-agents-active-chip"
+                className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium bg-amber-500/15 text-amber-400 flex-shrink-0"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" aria-hidden />
+                {t('projects.workflow.agentsActive', { count: agentsActive })}
               </span>
             )}
             <span className="flex-1 min-w-0 text-xs text-ink-400 truncate">{message}</span>

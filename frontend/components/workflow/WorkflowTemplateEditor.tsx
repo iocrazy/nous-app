@@ -19,7 +19,6 @@ import {
   Plus,
   Star,
   Trash2,
-  X,
 } from 'lucide-react';
 import { useToast } from '../Toast';
 import { aiLibraryService } from '../../services/aiLibraryService';
@@ -39,6 +38,7 @@ import type {
   WorkflowTemplateNodeInput,
 } from '../../types';
 import { AgentOption, OwnerPicker, PersonOption } from './OwnerPicker';
+import { LibraryPickerModal } from './LibraryPickerModal';
 
 interface WorkflowTemplateEditorProps {
   teamId: string;
@@ -647,73 +647,3 @@ const RuleRow: React.FC<{ title: string; body: string }> = ({ title, body }) => 
     <div className="text-[12px] leading-relaxed text-ink-500">{body}</div>
   </div>
 );
-
-// ── library picker ───────────────────────────────────────────────────────────
-
-const LibraryPickerModal: React.FC<{
-  items: StageLibraryItem[];
-  onPick: (item: StageLibraryItem) => void;
-  onClose: () => void;
-}> = ({ items, onPick, onClose }) => {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  const byPhase = useMemo(() => {
-    const groups: Record<string, StageLibraryItem[]> = {};
-    for (const it of items) (groups[it.phase] ??= []).push(it);
-    return groups;
-  }, [items]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm pt-24"
-      onClick={onClose}
-    >
-      <div
-        role="dialog"
-        aria-label="Add node from library"
-        className="w-full max-w-md overflow-hidden rounded-xl border border-line-strong bg-island shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-        data-testid="workflow-library-picker"
-      >
-        <header className="flex items-center justify-between border-b border-line px-4 py-2.5">
-          <h2 className="text-sm font-semibold text-ink-100">Add from library</h2>
-          <button onClick={onClose} className="rounded p-1 text-ink-500 hover:bg-ink-800 hover:text-ink-300">
-            <X size={14} />
-          </button>
-        </header>
-        <div className="max-h-[60vh] overflow-y-auto p-2">
-          {Object.entries(byPhase).map(([phase, list]) => (
-            <div key={phase} className="mb-2">
-              <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-600">
-                {phase}
-              </div>
-              {list.map((it) => (
-                <button
-                  key={it.id}
-                  onClick={() => onPick(it)}
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-ink-200 hover:bg-ink-800"
-                >
-                  <span className="flex-1 truncate">{it.name}</span>
-                  {it.default_role_label && (
-                    <span className="text-[11px] text-ink-600">{it.default_role_label}</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          ))}
-          {items.length === 0 && (
-            <div className="px-2 py-4 text-center text-[13px] text-ink-500">
-              No library nodes
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};

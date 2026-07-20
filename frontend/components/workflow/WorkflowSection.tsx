@@ -5,15 +5,27 @@
  * workflow data and the advance gate itself live in the shell so a reload
  * refreshes the strip, sidebar and top bar together.
  *
- * Renders nothing for a No-workflow project (`has_workflow=false`).
+ * W3-1: when the user may write, the strip grows a "+ Add stage" affordance
+ * (opens the shared library picker; add from the node bank or a blank name) and
+ * a per-node remove affordance (server-fenced — a 409 surfaces its reason as a
+ * toast). Renders nothing for a No-workflow project (`has_workflow=false`).
  */
 
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { fetchProjectMembers } from '../../services/projectsService';
 import { aiLibraryService } from '../../services/aiLibraryService';
-import type { ProjectWorkflow } from '../../types';
+import {
+  addProjectNode,
+  deleteProjectNode,
+  fetchStageLibrary,
+} from '../../services/workflowService';
+import { ApiError } from '../../services/apiClient';
+import type { ProjectStageNode, ProjectWorkflow, StageLibraryItem } from '../../types';
+import { useToast } from '../Toast';
 import { WorkflowStrip } from './WorkflowStrip';
 import { CurrentNodeCard } from './CurrentNodeCard';
+import { LibraryPickerModal } from './LibraryPickerModal';
 import { AgentOption, PersonOption } from './OwnerPicker';
 
 interface WorkflowSectionProps {
@@ -27,6 +39,13 @@ interface WorkflowSectionProps {
   focusNodeId: string | null;
 }
 
+/** Map a delete 409 reason code to user copy (server sends the code only). */
+const REMOVE_BLOCK_KEY: Record<string, string> = {
+  NODE_NOT_PENDING: 'projects.workflow.removeBlocked.notPending',
+  NODE_HAS_ISSUE: 'projects.workflow.removeBlocked.hasIssue',
+  NODE_IN_ACTIVE_GROUP: 'projects.workflow.removeBlocked.active',
+};
+
 export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
   projectId,
   workflow,
@@ -36,8 +55,14 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
   onOpenTodolist,
   focusNodeId,
 }) => {
+  const { t } = useTranslation();
+  const { addToast } = useToast();
   const [people, setPeople] = useState<PersonOption[]>([]);
   const [agents, setAgents] = useState<AgentOption[]>([]);
+  const [library, setLibrary] = useState<StageLibraryItem[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [removing, setRemoving] = useState<ProjectStageNode | null>(null);
+  const [busy, setBusy] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -56,6 +81,20 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
     };
   }, [projectId]);
 
+  // Load the node bank lazily the first time the picker is opened.
+  useEffect(() => {
+    if (!pickerOpen || library.length > 0) return;
+    let alive = true;
+    fetchStageLibrary()
+      .then((items) => {
+        if (alive) setLibrary(items);
+      })
+      .catch((err) => console.error('[WorkflowSection] stage library failed', err));
+    return () => {
+      alive = false;
+    };
+  }, [pickerOpen, library.length]);
+
   // Scroll the requested node (its card if current, else its strip capsule)
   // into view when the sidebar / strip asks to focus it.
   useEffect(() => {
@@ -65,6 +104,45 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
       rootRef.current.querySelector(`[data-node-id="${focusNodeId}"]`);
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [focusNodeId, workflow]);
+
+  // New nodes append after the last existing node.
+  const nextSortOrder = () =>
+    workflow.nodes.reduce((max, n) => Math.max(max, n.sort_order), -1) + 1;
+
+  const doAdd = async (body: { source_stage_id?: string; name?: string }) => {
+    setBusy(true);
+    try {
+      await addProjectNode(projectId, { ...body, sort_order: nextSortOrder() });
+      setPickerOpen(false);
+      onReload();
+    } catch (err) {
+      console.error('[WorkflowSection] add node failed', err);
+      addToast(t('projects.workflow.addFailed'), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmRemove = async () => {
+    if (!removing) return;
+    setBusy(true);
+    try {
+      await deleteProjectNode(projectId, removing.id);
+      setRemoving(null);
+      onReload();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        const key = REMOVE_BLOCK_KEY[err.message] ?? 'projects.workflow.removeBlocked.generic';
+        addToast(t(key), 'error');
+      } else {
+        console.error('[WorkflowSection] remove node failed', err);
+        addToast(t('projects.workflow.removeFailed'), 'error');
+      }
+      setRemoving(null);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (!workflow.has_workflow) return null;
 
@@ -82,6 +160,9 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
         nodes={workflow.nodes}
         currentNodeId={workflow.current_node_id}
         onSelectNode={() => undefined}
+        canEdit={canWrite}
+        onAddNode={() => setPickerOpen(true)}
+        onRemoveNode={(node) => setRemoving(node)}
       />
       {groupNodes.map((node) => (
         <CurrentNodeCard
@@ -96,6 +177,53 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
           onOpenTodolist={onOpenTodolist}
         />
       ))}
+
+      {pickerOpen && (
+        <LibraryPickerModal
+          items={library}
+          onPick={(item) => void doAdd({ source_stage_id: item.id })}
+          onAddBlank={(name) => void doAdd({ name })}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
+
+      {removing && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => setRemoving(null)}
+        >
+          <div
+            role="dialog"
+            aria-label="Remove stage"
+            data-testid="workflow-remove-confirm"
+            className="w-full max-w-sm rounded-xl border border-line-strong bg-island p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-ink-100">
+              {t('projects.workflow.removeTitle')}
+            </h3>
+            <p className="mt-1.5 text-[13px] text-ink-400">
+              {t('projects.workflow.removeBody', { name: removing.name })}
+            </p>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setRemoving(null)}
+                className="rounded-md px-3 py-1.5 text-[12.5px] text-ink-400 hover:bg-ink-800 hover:text-ink-200"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={() => void confirmRemove()}
+                disabled={busy}
+                data-testid="workflow-remove-confirm-btn"
+                className="rounded-md border border-rose-500/50 bg-rose-500/10 px-3 py-1.5 text-[12.5px] text-rose-300 transition hover:bg-rose-500/20 disabled:opacity-50"
+              >
+                {t('projects.workflow.removeConfirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

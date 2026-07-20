@@ -41,6 +41,7 @@ _EMPTY_ENRICHMENT = {
     "current_stage": None,
     "members_preview": None,
     "latest_activity": None,
+    "workflow_badge": None,
 }
 
 # Stage suggestion resolver: storyboard is the only data-aware + one-click
@@ -334,18 +335,30 @@ class ProjectsService:
             merged from the latest stage transition and the latest file add
             (whichever is newer) via ``_merge_activity`` — see Task 12.
         """
+        from app.repositories.project_stage_nodes_repository import (
+            get_project_stage_nodes_repository,
+        )
         from app.repositories.project_stages_repository import (
             get_project_stages_repository,
         )
 
         stages_repo = get_project_stages_repository()
+        nodes_repo = get_project_stage_nodes_repository()
         try:
-            stage_map, activity, file_activity, members, catalog = await asyncio.gather(
+            (
+                stage_map,
+                activity,
+                file_activity,
+                members,
+                catalog,
+                workflow_badges,
+            ) = await asyncio.gather(
                 stages_repo.stages_for_projects(project_ids),
                 stages_repo.latest_activity_for_projects(project_ids),
                 stages_repo.latest_file_activity_for_projects(project_ids),
                 self.repo.get_project_members_preview(project_ids),
                 stages_repo.list_catalog(),
+                nodes_repo.workflow_badges_for_projects(project_ids),
             )
         except Exception as e:  # noqa: BLE001 — enrichment must not sink the list
             logger.error(f"[projects] card enrichment failed: {e}")
@@ -377,6 +390,7 @@ class ProjectsService:
                     file_activity.get(pid),
                     stage_slug=(stage or {}).get("slug"),
                 ),
+                "workflow_badge": workflow_badges.get(pid),
             }
         return out
 

@@ -14,7 +14,7 @@ import { updateProjectNode } from '../../services/workflowService';
 import type { ProjectNodePatch, ProjectStageNode } from '../../types';
 import { AgentOption, OwnerPicker, PersonOption } from './OwnerPicker';
 import { NodeSchedulePicker } from './NodeSchedulePicker';
-import { NODE_STATUS_CONFIG, NODE_STATUS_LABEL } from './nodeStatus';
+import { isNodeOverdue, NODE_STATUS_CONFIG, NODE_STATUS_LABEL } from './nodeStatus';
 
 interface CurrentNodeCardProps {
   projectId: string;
@@ -47,6 +47,7 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const meta = NODE_STATUS_CONFIG[node.status];
+  const overdue = isNodeOverdue(node);
 
   const patch = async (body: ProjectNodePatch) => {
     setSaving(true);
@@ -104,14 +105,24 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
       </Row>
 
       <Row label={t('projects.workflow.schedule')}>
-        <NodeSchedulePicker
-          start={node.planned_start}
-          due={node.planned_due}
-          disabled={!canWrite || saving}
-          onChange={(start, dueDate) =>
-            void patch({ planned_start: start, planned_due: dueDate })
-          }
-        />
+        <div className={overdue ? 'text-rose-400' : undefined} data-testid="workflow-card-schedule">
+          <NodeSchedulePicker
+            start={node.planned_start}
+            due={node.planned_due}
+            disabled={!canWrite || saving}
+            onChange={(start, dueDate) =>
+              void patch({ planned_start: start, planned_due: dueDate })
+            }
+          />
+          {overdue && (
+            <span
+              data-testid="workflow-card-overdue"
+              className="mt-1 inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-rose-300"
+            >
+              {t('projects.workflow.overdue')}
+            </span>
+          )}
+        </div>
       </Row>
 
       {(node.deliverable_label || node.deliverable_required) && (

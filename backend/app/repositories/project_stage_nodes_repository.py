@@ -23,7 +23,7 @@ import datetime
 import uuid
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.db.session import read_scope, write_scope
 from app.models import (
@@ -461,6 +461,100 @@ class ProjectStageNodesRepository:
 
         return await self.get_node(node_id, project_id)
 
+    async def add_node(
+        self,
+        project_id: str,
+        *,
+        source_stage_id: Optional[str] = None,
+        name: Optional[str] = None,
+        sort_order: int,
+        parallel_group: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Insert one node into a live instance (W3-1).
+
+        From the node bank (``source_stage_id`` → inherit name / deliverable
+        label / review flag) or blank (``name`` with those defaults off). The
+        insert shifts every existing node at or after ``sort_order`` down by one
+        so the new node lands at that position. Writes the instance only.
+        """
+        pid = int(str(project_id))
+        async with write_scope() as session:
+            inherited_name = name
+            legacy_stage_id: Optional[int] = None
+            review_required = False
+            deliverable_required = False
+            deliverable_label: Optional[str] = None
+
+            if source_stage_id is not None:
+                bank = (
+                    (
+                        await session.execute(
+                            select(ProjectStages).where(
+                                ProjectStages.id == int(str(source_stage_id))
+                            )
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
+                if bank is None:
+                    raise ValueError(f"unknown node-bank stage {source_stage_id!r}")
+                inherited_name = bank.name
+                legacy_stage_id = bank.id
+                review_required = bool(bank.review_required)
+                deliverable_label = bank.deliverable_label
+
+            # Make room: bump existing rows at or past the insert position.
+            await session.execute(
+                update(ProjectStageNodes)
+                .where(ProjectStageNodes.project_id == pid)
+                .where(ProjectStageNodes.sort_order >= sort_order)
+                .values(sort_order=ProjectStageNodes.sort_order + 1)
+            )
+
+            node = ProjectStageNodes(
+                project_id=pid,
+                source_template_node_id=None,
+                legacy_stage_id=legacy_stage_id,
+                name=inherited_name or "New stage",
+                sort_order=sort_order,
+                parallel_group=parallel_group,
+                status="pending",
+                owner_user_id=None,
+                owner_agent_id=None,
+                planned_start=None,
+                planned_due=None,
+                review_required=review_required,
+                deliverable_required=deliverable_required,
+                deliverable_label=deliverable_label,
+                skipped=False,
+            )
+            session.add(node)
+            await session.flush()
+            nid = node.id
+
+        created = await self.get_node(str(nid), str(project_id))
+        assert created is not None  # just written in this repo
+        return created
+
+    async def delete_node(self, node_id: str, project_id: str) -> bool:
+        """Hard-delete a node instance (+ its members via CASCADE).
+
+        Pure delete — the removal guards (pending / no mirror issue / not in the
+        active group) live in the ``node_mutations`` service so they can be unit
+        tested without a DB. Returns whether a row was removed.
+        """
+        pid = int(str(project_id))
+        nid = int(str(node_id))
+        async with write_scope() as session:
+            result = await session.execute(
+                ProjectStageNodes.__table__.delete()
+                .where(ProjectStageNodes.id == nid)
+                .where(ProjectStageNodes.project_id == pid)
+                .returning(ProjectStageNodes.id)
+            )
+            return result.first() is not None
+
     async def set_node_status(self, node_id: str, status: str) -> Optional[str]:
         """Set a node's ``status`` — the ONLY status writer (issue→node hook).
 
@@ -597,6 +691,97 @@ class ProjectStageNodesRepository:
                 )
             ).all()
         return len(rows)
+
+    async def workflow_badges_for_projects(
+        self, project_ids: List[Any]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Per-project workflow badge data for the list page in THREE queries
+        (W3-3, no N+1 regardless of the number of projects).
+
+        Returns ``{str(project_id): {current_node_name, workflow_total,
+        workflow_position, agents_active}}``. Only projects that own workflow
+        nodes are present (a No-workflow project renders no badge);
+        ``current_node_name`` / ``workflow_position`` are null when the cursor
+        is unset. Never raises — enrichment must not sink the list.
+        """
+        if not project_ids:
+            return {}
+        pids = [int(p) for p in project_ids]
+        try:
+            async with read_scope() as session:
+                cursors = {
+                    r[0]: r[1]
+                    for r in (
+                        await session.execute(
+                            select(Projects.id, Projects.current_node_id).where(
+                                Projects.id.in_(pids)
+                            )
+                        )
+                    ).all()
+                }
+                node_rows = (
+                    await session.execute(
+                        select(
+                            ProjectStageNodes.project_id,
+                            ProjectStageNodes.id,
+                            ProjectStageNodes.name,
+                            ProjectStageNodes.sort_order,
+                            ProjectStageNodes.skipped,
+                        )
+                        .where(ProjectStageNodes.project_id.in_(pids))
+                        .order_by(
+                            ProjectStageNodes.project_id, ProjectStageNodes.sort_order
+                        )
+                    )
+                ).all()
+                agent_counts = {
+                    r[0]: r[1]
+                    for r in (
+                        await session.execute(
+                            select(
+                                AgentRuns.project_id,
+                                func.count(AgentRuns.id),
+                            )
+                            .where(AgentRuns.project_id.in_(pids))
+                            .where(AgentRuns.status == "running")
+                            .group_by(AgentRuns.project_id)
+                        )
+                    ).all()
+                }
+        except Exception as e:  # noqa: BLE001 — enrichment must not sink the list
+            from loguru import logger
+
+            logger.error(f"[project_stage_nodes] batch badge lookup failed: {e}")
+            return {}
+
+        # Group non-skipped nodes per project (already ordered by sort_order).
+        active_by_pid: Dict[int, List[tuple]] = {}
+        for pid, nid, nname, _so, skipped in node_rows:
+            if skipped:
+                continue
+            active_by_pid.setdefault(pid, []).append((nid, nname))
+
+        out: Dict[str, Dict[str, Any]] = {}
+        for pid in pids:
+            active = active_by_pid.get(pid)
+            if not active:
+                continue  # No-workflow (or all-skipped) project → no badge
+            cursor = cursors.get(pid)
+            current_name: Optional[str] = None
+            position: Optional[int] = None
+            if cursor is not None:
+                for i, (nid, nname) in enumerate(active):
+                    if nid == cursor:
+                        current_name = nname
+                        position = i + 1
+                        break
+            out[str(pid)] = {
+                "current_node_name": current_name,
+                "workflow_total": len(active),
+                "workflow_position": position,
+                "agents_active": int(agent_counts.get(pid, 0)),
+            }
+        return out
 
 
 _repo: Optional[ProjectStageNodesRepository] = None

@@ -355,6 +355,23 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
                       {project.display_code && (
                         <span className="text-[11px] font-mono text-ink-500">{project.display_code}</span>
                       )}
+                      {project.workflow_badge?.current_node_name && (
+                        <span
+                          data-testid="project-workflow-stage-chip"
+                          className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-[var(--accent-soft)] text-[var(--accent-text)] truncate max-w-[10rem]"
+                        >
+                          {project.workflow_badge.current_node_name}
+                        </span>
+                      )}
+                      {(project.workflow_badge?.agents_active ?? 0) > 0 && (
+                        <span
+                          data-testid="project-agents-active-chip"
+                          className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-amber-500/15 text-amber-400"
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" aria-hidden />
+                          {t('projects.workflow.agentsActive', { count: project.workflow_badge!.agents_active })}
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="px-4 py-3">

@@ -1764,6 +1764,18 @@
         "fromIssue": "from {{id}}",
         "filesFiled_one": "{{count}} file filed",
         "filesFiled_other": "{{count}} files filed"
+      },
+      "overdue": "Overdue",
+      "addFailed": "Failed to add stage",
+      "removeFailed": "Failed to remove stage",
+      "removeTitle": "Remove stage",
+      "removeBody": "Remove \"{{name}}\" from this workflow? This cannot be undone.",
+      "removeConfirm": "Remove",
+      "removeBlocked": {
+        "notPending": "This stage has already started — skip it instead of removing.",
+        "hasIssue": "This stage has a linked task — skip it instead of removing.",
+        "active": "This is the active stage and cannot be removed.",
+        "generic": "This stage cannot be removed."
       }
     }
   },

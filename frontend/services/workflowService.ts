@@ -13,6 +13,7 @@
 
 import {
   AdvancePreview,
+  ProjectNodeCreate,
   ProjectNodePatch,
   ProjectStageNode,
   ProjectWorkflow,
@@ -110,6 +111,36 @@ export const fetchProjectWorkflow = async (
   // `{data}` envelope). Do not add a `.data` unwrap here.
   return apiClient.get<ProjectWorkflow>(
     `/api/v1/projects/${projectId}/workflow`,
+  );
+};
+
+/**
+ * Add a node to a live instance (M2-W3-1) — from the node bank
+ * (`source_stage_id`) or blank (`name`). Returns the created node.
+ */
+export const addProjectNode = async (
+  projectId: string,
+  body: ProjectNodeCreate,
+): Promise<ProjectStageNode> => {
+  const response = await apiClient.post<Envelope<ProjectStageNode>>(
+    `/api/v1/projects/${projectId}/workflow/nodes`,
+    body,
+  );
+  if (!response.data) throw new Error('Empty response from addProjectNode');
+  return response.data;
+};
+
+/**
+ * Remove a node from a live instance (M2-W3-1). The server 409s (ApiError,
+ * status 409) with a machine reason when the node is not removable (started,
+ * carries a mirror issue, or is the active group) — callers should surface it.
+ */
+export const deleteProjectNode = async (
+  projectId: string,
+  nodeId: string,
+): Promise<void> => {
+  await apiClient.delete(
+    `/api/v1/projects/${projectId}/workflow/nodes/${nodeId}`,
   );
 };
 
