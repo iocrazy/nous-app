@@ -147,8 +147,13 @@ from app.models.project_library import (  # noqa: F401
     ProjectCharacters,
     ProjectLibEntities,
     ProjectStageHistory,
+    ProjectStageNodeMembers,
+    ProjectStageNodes,
     ProjectStages,
     ProjectStyleProfile,
+    WorkflowTemplateNodeMembers,
+    WorkflowTemplateNodes,
+    WorkflowTemplates,
 )
 from app.models.provider_costs import (  # noqa: F401
     CostAuditLog,
@@ -382,8 +387,13 @@ __all__ = [
     "ProjectCharacters",
     "ProjectLibEntities",
     "ProjectStageHistory",
+    "ProjectStageNodeMembers",
+    "ProjectStageNodes",
     "ProjectStages",
     "ProjectStyleProfile",
+    "WorkflowTemplateNodeMembers",
+    "WorkflowTemplateNodes",
+    "WorkflowTemplates",
     # provider cost governance
     "CostAuditLog",
     "FxRates",

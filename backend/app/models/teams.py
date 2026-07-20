@@ -11,6 +11,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Float,
     ForeignKeyConstraint,
@@ -344,6 +345,13 @@ class Projects(Base):
     current_stage_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
         comment="Stage cursor: which pipeline stage the workspace resumes at.",
+    )
+    current_node_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        comment=(
+            "Workflow cursor (mig 380): active project_stage_nodes group. "
+            "Supersedes current_stage_id, which is retired in M2."
+        ),
     )
     archived_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
 
