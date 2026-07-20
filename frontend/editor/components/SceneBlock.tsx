@@ -667,14 +667,31 @@ export function SceneBlock({
             ? `${text.slice(0, at)}@${name} ${text.slice(at + 1 + m.query.length)}`
             : `${text}@${name} `;
       }
-      const op: ElementOp = { op: 'update', element_id: m.elementId, payload: { text: newText } };
+      const ops: ElementOp[] = [
+        { op: 'update', element_id: m.elementId, payload: { text: newText } },
+      ];
       tiptapRef.current?.replaceElementText(m.elementId, newText);
       // Selecting from the popup's embedded search input leaves focus there —
-      // focusElement reclaims the editor (caret at the line end). Its
-      // synchronous selection-update may re-open the cue picker, but the
-      // setMention(null) below runs after and wins.
-      tiptapRef.current?.focusElement(m.elementId);
-      sync.dispatchOps([op], applyLocal(elementsRef.current, [op]));
+      // focusElement reclaims the editor. Its synchronous selection-update may
+      // re-open the cue picker, but the setMention(null) below runs after and
+      // wins.
+      if (m.kind === 'character') {
+        // laper: picking a cue flows straight into writing the line — land the
+        // caret in the dialogue below, creating it when the cue has none yet.
+        const dialogue = tiptapRef.current?.ensureDialogueAfter(m.elementId, newElementId());
+        if (dialogue?.inserted) {
+          ops.push({
+            op: 'insert',
+            element_id: dialogue.id,
+            after_id: m.elementId,
+            payload: { type: 'dialogue', text: '' },
+          });
+        }
+        tiptapRef.current?.focusElement(dialogue ? dialogue.id : m.elementId, true);
+      } else {
+        tiptapRef.current?.focusElement(m.elementId);
+      }
+      sync.dispatchOps(ops, applyLocal(elementsRef.current, ops));
       setMention(null);
     },
     [sync],

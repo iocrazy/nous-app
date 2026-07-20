@@ -77,7 +77,13 @@ import {
 } from '@tiptap/react';
 import { Node as PMNode } from '@tiptap/pm/model';
 import { TextSelection, type Transaction } from '@tiptap/pm/state';
-import { ScriptDocument, ScriptElementNode, ScriptText, type ScriptElementAttrs } from './schema';
+import {
+  SCRIPT_ELEMENT_NODE_NAME,
+  ScriptDocument,
+  ScriptElementNode,
+  ScriptText,
+  type ScriptElementAttrs,
+} from './schema';
 import { docToElements, elementsToDoc } from './docModel';
 import { mapDocChange } from './opsMapper';
 import { ScriptKeymap, getElementCtx } from './keymap';
@@ -89,6 +95,7 @@ import { HOLLYWOOD_LINE_CLASS } from '../render/HollywoodLayout';
 import { ASIAN_LINE_CLASS, ASIAN_PREFIX, ASIAN_SUFFIX } from '../render/AsianLayout';
 import { createPageSeamExtension, type PageSeamMap } from './pageSeamPlugin';
 import { createMentionDecorationExtension } from './mentionDecorationPlugin';
+import { CaretElementExtension } from './caretElementPlugin';
 
 export type SceneFormat = 'hollywood' | 'asian';
 
@@ -247,6 +254,17 @@ export interface TipTapSceneEditorHandle {
    * caller contract as `retypeElement`.
    */
   replaceElementText: (elementId: string, text: string) => void;
+  /**
+   * Cue-select flow (laper): guarantee a dialogue line right after
+   * `elementId`. Reuses an existing next-sibling dialogue (`inserted:
+   * false`), else inserts an empty one under `newId` tagged `externalSync` —
+   * same caller contract as `retypeElement`: dispatch the insert op yourself
+   * when `inserted` is true, then `focusElement` the returned id.
+   */
+  ensureDialogueAfter: (
+    elementId: string,
+    newId: string,
+  ) => { id: string; inserted: boolean } | null;
   /**
    * M2 — seed focus / cross-scene drop focus: move the caret into
    * `elementId` (start when `atStart`, else end) and focus the editor. A
@@ -772,6 +790,7 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
         ScriptKeymap,
         pageSeamExtension,
         mentionDecorationExtension,
+        CaretElementExtension,
       ];
     }, []);
 
@@ -1132,10 +1151,45 @@ export const TipTapSceneEditor = forwardRef<TipTapSceneEditorHandle, TipTapScene
       [editor],
     );
 
+    /**
+     * Guarantee a dialogue line right after a cue (laper: picking a character
+     * flows straight into writing their line). If the next sibling is already
+     * a dialogue, reuse it; otherwise insert an empty one with the caller's
+     * fresh id. externalSync + caller-dispatched op, exactly like
+     * retypeElement/replaceElementText — the caller must dispatch the insert
+     * op itself when `inserted` comes back true, then focusElement the id.
+     */
+    const ensureDialogueAfter = useCallback(
+      (elementId: string, newId: string): { id: string; inserted: boolean } | null => {
+        if (!editor) return null;
+        const target = findNodeById(editor.state.doc, elementId);
+        if (!target) return null;
+        const { pos, node } = target;
+        const after = pos + node.nodeSize;
+        const next = editor.state.doc.resolve(after).nodeAfter;
+        if (next && (next.attrs.elType as ElementType) === 'dialogue') {
+          return { id: next.attrs.id as string, inserted: false };
+        }
+        const nodeType = editor.state.schema.nodes[SCRIPT_ELEMENT_NODE_NAME];
+        const newNode = nodeType.create({ id: newId, elType: 'dialogue', characterId: null });
+        const tr = editor.state.tr.insert(after, newNode);
+        tr.setMeta('externalSync', true);
+        editor.view.dispatch(tr);
+        return { id: newId, inserted: true };
+      },
+      [editor],
+    );
+
     useImperativeHandle(
       ref,
-      () => ({ applyExternalElements, retypeElement, replaceElementText, focusElement }),
-      [applyExternalElements, retypeElement, replaceElementText, focusElement],
+      () => ({
+        applyExternalElements,
+        retypeElement,
+        replaceElementText,
+        focusElement,
+        ensureDialogueAfter,
+      }),
+      [applyExternalElements, retypeElement, replaceElementText, focusElement, ensureDialogueAfter],
     );
 
     useEffect(() => {
