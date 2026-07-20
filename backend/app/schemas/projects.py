@@ -25,6 +25,11 @@ class ProjectCreate(BaseModel):
     )
     project_group: Optional[str] = Field(None, max_length=100)
     announcement: Optional[str] = Field(None, max_length=100)
+    # Workflow (M1 PR-B): choose a team template to instantiate the project's
+    # nodes. None = No workflow (Overview renders no workflow region). method is
+    # the Live/AI/Hybrid preset that flips Shooting/Canvas node switches.
+    workflow_template_id: Optional[str] = None
+    workflow_method: Optional[Literal["live", "ai", "hybrid"]] = None
 
 
 class ProjectUpdate(BaseModel):
