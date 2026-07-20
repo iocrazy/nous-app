@@ -27,7 +27,7 @@ interface DeploymentLog {
 }
 
 const TYPE_COLORS: Record<string, string> = {
-  feat: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+  feat: 'bg-[var(--accent-soft)] text-[var(--accent-text)] border-[var(--accent-border)]',
   fix: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
   perf: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
   refactor: 'bg-purple-500/20 text-purple-300 border-purple-500/30',

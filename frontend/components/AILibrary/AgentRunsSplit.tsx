@@ -92,7 +92,7 @@ function triggerBadge(trigger: string): { label: string; cls: string } {
     return { label: 'Summary', cls: 'border-sky-500/40 bg-sky-500/10 text-sky-300' };
   }
   if (trigger === 'chat') {
-    return { label: 'Chat', cls: 'border-indigo-500/40 bg-indigo-500/10 text-indigo-300' };
+    return { label: 'Chat', cls: 'border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]' };
   }
   if (trigger.startsWith('issue')) {
     return { label: 'Issue', cls: 'border-amber-500/40 bg-amber-500/10 text-amber-300' };

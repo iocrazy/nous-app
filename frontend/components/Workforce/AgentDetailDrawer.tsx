@@ -467,7 +467,7 @@ const StatusBadge: React.FC<{ value: string }> = ({ value }) => {
   const cls = (() => {
     switch (value) {
       case 'unread':
-        return 'bg-indigo-500/15 text-indigo-300';
+        return 'bg-[var(--accent-soft)] text-[var(--accent-text)]';
       case 'reading':
         return 'bg-amber-500/15 text-amber-300';
       case 'processed':
