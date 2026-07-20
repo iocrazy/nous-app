@@ -18,7 +18,7 @@ import {
   listIssues, createIssue, type IssueCreatePayload,
 } from '../../services/issuesService';
 import { aiLibraryService } from '../../services/aiLibraryService';
-import { fetchCurrentStage, fetchStageCatalog } from '../../services/projectsService';
+import { loadProjectFlow } from '../Todolist/issueFlow';
 import type { IssueScope } from '../Todolist/issueScope';
 import { useToast } from '../Toast';
 import { useAuth } from '../../contexts/AuthContext';
@@ -47,30 +47,14 @@ export function WorkspaceTasks({ projectId, projectName, teamId }: WorkspaceTask
   // Project scope — the Tasks module is pinned to this project inside its team.
   const scope: IssueScope = { type: 'project', teamId: teamId ?? '', projectId };
 
-  // Resolve the current SOP stage for the context bar's progress ring. Best
-  // effort: any failure (no stage set, endpoint down) simply hides the ring.
+  // Resolve the flow read-out for the context bar's progress ring from the ONE
+  // switch point: workflow node chain when the project has one, else the legacy
+  // SOP catalog. Best effort — any failure simply hides the ring.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const [current, catalog] = await Promise.all([
-          fetchCurrentStage(projectId),
-          fetchStageCatalog(),
-        ]);
-        if (cancelled) return;
-        if (!current || catalog.length === 0) {
-          setProjectStage(null);
-          return;
-        }
-        const idx = catalog.findIndex((s) => String(s.id) === String(current.id));
-        setProjectStage({
-          name: current.name,
-          index: idx >= 0 ? idx + 1 : 1,
-          total: catalog.length,
-        });
-      } catch {
-        if (!cancelled) setProjectStage(null);
-      }
+      const flow = await loadProjectFlow(projectId);
+      if (!cancelled) setProjectStage(flow);
     })();
     return () => { cancelled = true; };
   }, [projectId]);

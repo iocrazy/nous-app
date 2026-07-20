@@ -1,6 +1,12 @@
 /**
  * Issue row field helpers — pure data for the todo-list row/detail extra
- * columns (Subtasks, Due). No React, no network.
+ * columns (Subtasks, Due), plus the single-point project-flow source loader
+ * for the issue detail context bar (`loadProjectFlow`, at the bottom).
+ *
+ * Everything above the "project-flow source" divider is pure (no React, no
+ * network); only `loadProjectFlow` touches the network, and it is the ONE place
+ * the context bar decides between the workflow node chain and the legacy SOP
+ * catalog — consumers just render whatever `{name,index,total}` it returns.
  *
  * Subtask counts are aggregated from the SAME issue list the view already
  * loaded, grouping children by `parent_id`. That in-memory aggregate is
@@ -106,4 +112,84 @@ export function readDueDate(raw: unknown): string | null | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const value = (raw as Record<string, unknown>).due_date;
   return typeof value === 'string' ? value : undefined;
+}
+
+// ── project-flow source (issue detail context bar) ────────────────────────────
+//
+// A project that runs a workflow instance presents its flow from the node chain
+// (WorkspaceTopBar / Overview / Sidebar already do); the issue context bar's
+// progress ring must read the SAME source so带 workflow 的 project 不再有一处
+// SOP、一处 workflow 的分裂展示. `loadProjectFlow` is that single switch point:
+// workflow nodes when the project has one, the legacy SOP catalog otherwise.
+
+import { fetchProjectWorkflow } from '../../services/workflowService';
+import { fetchCurrentStage, fetchStageCatalog } from '../../services/projectsService';
+import type { ProjectWorkflow, ProjectStage } from '../../types';
+
+/** Flow read-out for the context bar's progress ring. */
+export interface ProjectFlow {
+  /** Current stage/node display name. */
+  name: string;
+  /** 1-based position of the current stage/node. */
+  index: number;
+  /** Total stages/nodes in the flow. */
+  total: number;
+}
+
+/**
+ * Derive the flow read-out from a workflow instance, or null when the project
+ * has no workflow / no resolvable current node. Nodes arrive ordered by
+ * sort_order; "current" is the node whose id matches `current_node_id` (the
+ * shape carries no per-node `current` flag).
+ */
+export function deriveWorkflowFlow(
+  workflow: ProjectWorkflow | null | undefined,
+): ProjectFlow | null {
+  if (!workflow?.has_workflow) return null;
+  const nodes = workflow.nodes ?? [];
+  if (nodes.length === 0) return null;
+  const idx = nodes.findIndex((n) => n.id === workflow.current_node_id);
+  if (idx < 0) return null;
+  return { name: nodes[idx].name, index: idx + 1, total: nodes.length };
+}
+
+/**
+ * Derive the flow read-out from the legacy SOP catalog + current stage, or null
+ * when no stage is set. Mirrors the pre-W2 inline computation exactly (index
+ * falls back to 1 when the current stage isn't found in the catalog).
+ */
+export function deriveSopFlow(
+  catalog: ProjectStage[],
+  currentStage: ProjectStage | null,
+): ProjectFlow | null {
+  if (!currentStage || catalog.length === 0) return null;
+  const idx = catalog.findIndex((s) => String(s.id) === String(currentStage.id));
+  return {
+    name: currentStage.name,
+    index: idx >= 0 ? idx + 1 : 1,
+    total: catalog.length,
+  };
+}
+
+/**
+ * Single-point loader for the issue context bar's flow ring. Workflow projects
+ * read the node chain; everyone else falls back to the SOP catalog. Best-effort
+ * — any failure resolves to null so the ring simply hides.
+ */
+export async function loadProjectFlow(
+  projectId: string,
+): Promise<ProjectFlow | null> {
+  try {
+    const workflow = await fetchProjectWorkflow(projectId).catch(() => null);
+    if (workflow?.has_workflow) {
+      return deriveWorkflowFlow(workflow);
+    }
+    const [current, catalog] = await Promise.all([
+      fetchCurrentStage(projectId),
+      fetchStageCatalog(),
+    ]);
+    return deriveSopFlow(catalog, current);
+  } catch {
+    return null;
+  }
 }
