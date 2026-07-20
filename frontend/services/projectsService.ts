@@ -86,6 +86,7 @@ export const fetchProjectFiles = async (
   projectId: string,
   includeTrashed?: boolean,
   folderId?: string | null,
+  sourceIssueId?: string | null,
 ): Promise<ProjectFile[]> => {
   const response = await apiClient.get<Envelope<ProjectFile[]>>(
     `/api/v1/projects/${projectId}/files`,
@@ -93,6 +94,7 @@ export const fetchProjectFiles = async (
       query: {
         include_trashed: includeTrashed ? 'true' : undefined,
         folder_id: folderId ?? undefined,
+        source_issue_id: sourceIssueId ?? undefined,
       },
     },
   );
@@ -103,6 +105,7 @@ export const uploadFile = async (
   projectId: string,
   file: File,
   notes?: string,
+  sourceIssueId?: string | null,
 ): Promise<ProjectFile> => {
   // FormData upload: use apiFetch directly so we can pass `raw` body.
   const formData = new FormData();
@@ -113,7 +116,7 @@ export const uploadFile = async (
     {
       method: 'POST',
       raw: formData,
-      query: { notes: notes ?? undefined },
+      query: { notes: notes ?? undefined, source_issue_id: sourceIssueId ?? undefined },
     },
   );
   const json: Envelope<ProjectFile> = await response.json();

@@ -1,5 +1,6 @@
 import React from 'react';
-import { Video, FileText, Image, File, Clock } from 'lucide-react';
+import { Link, useParams } from 'react-router-dom';
+import { Video, FileText, Image, File, Clock, CornerUpLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ProjectFile, ReviewStatus } from '../types';
 
@@ -54,6 +55,28 @@ const StatusBadge: React.FC<{ status: ReviewStatus }> = ({ status }) => {
   );
 };
 
+/** "from MH-xx" back-link — a file filed from a mirror issue's Deliverables
+ *  dropzone (M2-W1). Clicking jumps to that issue in the Todolist. */
+const SourceIssueChip: React.FC<{ file: ProjectFile }> = ({ file }) => {
+  const { t } = useTranslation();
+  const { teamId } = useParams<{ teamId: string }>();
+  const identifier = file.source_issue_identifier;
+  if (!identifier) return null;
+  const to = teamId ? `/team/${teamId}/todolist/${identifier}` : `/todolist/${identifier}`;
+  return (
+    <Link
+      to={to}
+      onClick={(e) => e.stopPropagation()}
+      data-testid="file-source-issue-chip"
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+      title={t('projects.workflow.deliverables.fromIssue', { id: identifier })}
+    >
+      <CornerUpLeft size={10} />
+      {t('projects.workflow.deliverables.fromIssue', { id: identifier })}
+    </Link>
+  );
+};
+
 export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode, isSelected, onToggleSelect }) => {
   const { icon: IconComponent, color, bg } = getFileIcon(file.file_type);
 
@@ -92,6 +115,9 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode, isS
           <p className="text-sm text-ink-50 truncate group-hover:text-[var(--accent-text)] transition-colors">
             {file.filename}
           </p>
+          {file.source_issue_identifier && (
+            <div className="mt-1"><SourceIssueChip file={file} /></div>
+          )}
         </div>
         {file.review_status && (
           <div className="flex-shrink-0">
@@ -138,6 +164,9 @@ export const FileCard: React.FC<FileCardProps> = ({ file, onClick, viewMode, isS
         <p className="text-sm text-ink-50 truncate group-hover:text-[var(--accent-text)] transition-colors font-medium">
           {file.filename}
         </p>
+        {file.source_issue_identifier && (
+          <div className="mt-1.5"><SourceIssueChip file={file} /></div>
+        )}
         <div className="flex items-center justify-between mt-2 text-xs text-ink-500">
           <span>{formatFileSize(file.file_size_bytes)}</span>
           {file.review_status ? (

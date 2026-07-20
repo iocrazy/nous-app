@@ -124,6 +124,18 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
                 Required
               </span>
             )}
+            <span
+              data-testid="workflow-node-filed-count"
+              className={`ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] ${
+                (node.deliverable_file_count ?? 0) > 0
+                  ? 'bg-emerald-500/10 text-emerald-300'
+                  : 'bg-ink-800 text-ink-500'
+              }`}
+            >
+              {t('projects.workflow.deliverables.filesFiled', {
+                count: node.deliverable_file_count ?? 0,
+              })}
+            </span>
           </div>
         </Row>
       )}
