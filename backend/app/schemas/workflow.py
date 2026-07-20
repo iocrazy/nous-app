@@ -150,6 +150,47 @@ class NodePatch(BaseModel):
         return self
 
 
+class NodeCreate(BaseModel):
+    """POST /projects/{id}/workflow/nodes (W3-1). Add a node to a live instance
+    from the node bank (``source_stage_id``) OR blank (``name``) — exactly one.
+
+    A library add inherits the bank row's name / deliverable / review defaults;
+    a blank add takes the supplied ``name`` with those defaults off. ``sort_order``
+    is the insert position (existing nodes at or after it shift down by one);
+    ``parallel_group`` optionally drops the node into a group.
+    """
+
+    # Snowflake id rides as a string at the API boundary (bigIntSafeFetch).
+    source_stage_id: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    sort_order: int
+    parallel_group: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _source_xor(self) -> "NodeCreate":
+        if (self.source_stage_id is None) == (self.name is None):
+            raise ValueError(
+                "provide exactly one of source_stage_id (from library) or name (blank)"
+            )
+        return self
+
+
+# Blocked-reason codes the node-delete guard can return (spec §5/§8, W3-1). A
+# node may only be removed while it is still ``pending``, carries no mirror
+# issue, and is not part of the current active group; each failure maps to 409.
+DELETE_BLOCK_NOT_PENDING = "NODE_NOT_PENDING"
+DELETE_BLOCK_HAS_ISSUE = "NODE_HAS_ISSUE"
+DELETE_BLOCK_ACTIVE = "NODE_IN_ACTIVE_GROUP"
+
+
+class NodeDeleteBlocked(Exception):
+    """Raised by the delete guard with a machine reason (router → 409)."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 # ── advance preview / execute (PR-B) ────────────────────────────────────────
 
 # Blocked-reason codes the advance predicate can return (spec §7). The frontend

@@ -60,6 +60,8 @@ from app.schemas.projects import (
 )
 from app.schemas.workflow import (
     AdvancePreview,
+    NodeCreate,
+    NodeDeleteBlocked,
     NodePatch,
     ProjectWorkflowOut,
 )
@@ -523,6 +525,61 @@ async def patch_workflow_node(
     if row is None:
         raise HTTPException(status_code=404, detail="Node not found")
     return {"success": True, "data": row}
+
+
+@router.post("/{project_id}/workflow/nodes")
+async def add_workflow_node(
+    project_id: str,
+    payload: NodeCreate,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    """Add a node to a live instance — from the node bank (source_stage_id) or
+    blank (name). Requires an effective role of manager/editor."""
+    from app.core.workflow_roles import WRITE_ROLES, resolve_effective_role
+    from app.services.workflow.node_mutations import add_project_node
+
+    role = await resolve_effective_role(auth.user_id, project_id=project_id)
+    if role not in WRITE_ROLES:
+        raise HTTPException(status_code=403, detail="Insufficient role")
+
+    try:
+        node = await add_project_node(
+            project_id,
+            source_stage_id=payload.source_stage_id,
+            name=payload.name,
+            sort_order=payload.sort_order,
+            parallel_group=payload.parallel_group,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"success": True, "data": node}
+
+
+@router.delete("/{project_id}/workflow/nodes/{node_id}")
+async def delete_workflow_node(
+    project_id: str,
+    node_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    """Remove a node from a live instance. Guarded: only a still-pending node
+    with no mirror issue that is not part of the active group is removable —
+    otherwise 409 with a machine reason (skip ≠ delete). manager/editor only."""
+    from app.core.workflow_roles import WRITE_ROLES, resolve_effective_role
+    from app.services.workflow.node_mutations import delete_project_node
+
+    role = await resolve_effective_role(auth.user_id, project_id=project_id)
+    if role not in WRITE_ROLES:
+        raise HTTPException(status_code=403, detail="Insufficient role")
+
+    try:
+        await delete_project_node(project_id, node_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Node not found") from exc
+    except NodeDeleteBlocked as exc:
+        raise HTTPException(status_code=409, detail=exc.reason) from exc
+    return {"success": True, "data": {"deleted": True}}
 
 
 @router.get("/{project_id}/advance-preview", response_model=AdvancePreview)
