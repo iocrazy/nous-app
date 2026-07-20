@@ -74,6 +74,20 @@ describe('mergeNotifications', () => {
     expect(mergeNotifications([], [])).toEqual([]);
   });
 
+  it('tolerates an undefined feed without throwing (malformed response guard)', () => {
+    // A backend error / envelope mismatch can deliver undefined for either
+    // list; the merge must yield [] rather than crash the app-wide InboxProvider.
+    expect(
+      mergeNotifications(
+        undefined as unknown as InboxNotification[],
+        undefined as unknown as NotificationWithRead[],
+      ),
+    ).toEqual([]);
+    expect(
+      mergeNotifications([inbox({ id: 'i1' })], undefined as unknown as NotificationWithRead[]),
+    ).toHaveLength(1);
+  });
+
   it('tolerates missing timestamps without throwing (sorts them last)', () => {
     const merged = mergeNotifications(
       [inbox({ id: 'i1', created_at: null })],
