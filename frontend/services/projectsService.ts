@@ -47,6 +47,10 @@ export const createProject = async (data: {
   project_type?: string;
   project_group?: string;
   announcement?: string;
+  /** Workflow template to instantiate (omit / null = No workflow). */
+  workflow_template_id?: string | null;
+  /** Node-preset shortcut applied at instantiation. */
+  workflow_method?: 'live' | 'ai' | 'hybrid' | null;
 }): Promise<Project> => {
   const response = await apiClient.post<Envelope<Project>>(
     '/api/v1/projects',

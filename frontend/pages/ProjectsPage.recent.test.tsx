@@ -47,6 +47,7 @@ vi.mock('../services/projectsService', () => ({
 // count" assertion can read it straight off the DOM) and a button that
 // flips the page into the Recent view.
 vi.mock('../components/project/ProjectFilterSidebar', () => ({
+  WORKFLOW_TEMPLATES_FILTER: 'workflow-templates',
   ProjectFilterSidebar: (props: any) => (
     <div>
       <span data-testid="recent-count">{props.projectCounts.recent}</span>

@@ -1,0 +1,158 @@
+/**
+ * Project Workflow API service (M1 PR-C).
+ *
+ * Team workflow templates + the node bank live under `/api/v1/workflows`;
+ * per-project instance nodes + the advance chain live under
+ * `/api/v1/projects/{id}/...`. Ids ride as strings end to end (bigIntSafeFetch).
+ *
+ * Envelope discipline is per-endpoint (mirrors projectsService.ts):
+ *   - Template CRUD, stage-library, PATCH node, POST advance → `{ data }` wrapped.
+ *   - GET /workflow and GET /advance-preview declare a FastAPI `response_model`,
+ *     so they return the model DIRECTLY — do NOT unwrap `.data` there.
+ */
+
+import {
+  AdvancePreview,
+  ProjectNodePatch,
+  ProjectStageNode,
+  ProjectWorkflow,
+  StageLibraryItem,
+  WorkflowTemplate,
+  WorkflowTemplateNodeInput,
+} from '../types';
+import { apiClient } from './apiClient';
+
+interface Envelope<T> {
+  data?: T;
+}
+
+// ============================================
+// Team workflow templates
+// ============================================
+
+/** List a team's templates (seeds the two built-ins on first access). */
+export const fetchTemplates = async (
+  teamId: string,
+): Promise<WorkflowTemplate[]> => {
+  const response = await apiClient.get<Envelope<WorkflowTemplate[]>>(
+    '/api/v1/workflows',
+    { query: { team_id: teamId } },
+  );
+  return response.data ?? [];
+};
+
+/** One template with its ordered nodes + members. */
+export const fetchTemplate = async (
+  templateId: string,
+): Promise<WorkflowTemplate> => {
+  const response = await apiClient.get<Envelope<WorkflowTemplate>>(
+    `/api/v1/workflows/${templateId}`,
+  );
+  if (!response.data) throw new Error('Empty response from fetchTemplate');
+  return response.data;
+};
+
+/** Create an empty named template (nodes are set via updateTemplate). */
+export const createTemplate = async (
+  teamId: string,
+  name: string,
+): Promise<WorkflowTemplate> => {
+  const response = await apiClient.post<Envelope<WorkflowTemplate>>(
+    '/api/v1/workflows',
+    { name },
+    { query: { team_id: teamId } },
+  );
+  if (!response.data) throw new Error('Empty response from createTemplate');
+  return response.data;
+};
+
+/**
+ * Patch a template. `nodes` (when present) FULLY replaces the node list;
+ * `is_default: true` promotes this template and demotes its siblings.
+ */
+export const updateTemplate = async (
+  templateId: string,
+  data: {
+    name?: string;
+    is_default?: boolean;
+    nodes?: WorkflowTemplateNodeInput[];
+  },
+): Promise<WorkflowTemplate> => {
+  const response = await apiClient.patch<Envelope<WorkflowTemplate>>(
+    `/api/v1/workflows/${templateId}`,
+    data,
+  );
+  if (!response.data) throw new Error('Empty response from updateTemplate');
+  return response.data;
+};
+
+export const deleteTemplate = async (templateId: string): Promise<void> => {
+  await apiClient.delete(`/api/v1/workflows/${templateId}`);
+};
+
+/** The read-only 11-node workflow node bank. */
+export const fetchStageLibrary = async (): Promise<StageLibraryItem[]> => {
+  const response = await apiClient.get<Envelope<StageLibraryItem[]>>(
+    '/api/v1/workflows/stage-library',
+  );
+  return response.data ?? [];
+};
+
+// ============================================
+// Per-project workflow instance
+// ============================================
+
+/** The project's instance nodes + cursor + running-agent count. */
+export const fetchProjectWorkflow = async (
+  projectId: string,
+): Promise<ProjectWorkflow> => {
+  // NOTE: declares a FastAPI response_model → returns the model directly (no
+  // `{data}` envelope). Do not add a `.data` unwrap here.
+  return apiClient.get<ProjectWorkflow>(
+    `/api/v1/projects/${projectId}/workflow`,
+  );
+};
+
+/** In-place tweak of a live node (owner / members / schedule / skipped). */
+export const updateProjectNode = async (
+  projectId: string,
+  nodeId: string,
+  patch: ProjectNodePatch,
+): Promise<ProjectStageNode> => {
+  const response = await apiClient.patch<Envelope<ProjectStageNode>>(
+    `/api/v1/projects/${projectId}/workflow/nodes/${nodeId}`,
+    patch,
+  );
+  if (!response.data) throw new Error('Empty response from updateProjectNode');
+  return response.data;
+};
+
+/** Pure-read advance ruling (same predicate as executeAdvance). */
+export const fetchAdvancePreview = async (
+  projectId: string,
+  direction: 'forward' | 'back' = 'forward',
+): Promise<AdvancePreview> => {
+  // response_model endpoint → returned directly, no envelope.
+  return apiClient.get<AdvancePreview>(
+    `/api/v1/projects/${projectId}/advance-preview`,
+    { query: { direction } },
+  );
+};
+
+/**
+ * Advance / retreat the workflow cursor. The server recomputes the predicate
+ * and 409s (ApiError, status 409) with the blocked reason if it no longer
+ * clears — callers should catch that and re-open the preview.
+ */
+export const executeAdvance = async (
+  projectId: string,
+  direction: 'forward' | 'back' = 'forward',
+): Promise<AdvancePreview> => {
+  const response = await apiClient.post<Envelope<AdvancePreview>>(
+    `/api/v1/projects/${projectId}/advance`,
+    undefined,
+    { query: { direction } },
+  );
+  if (!response.data) throw new Error('Empty response from executeAdvance');
+  return response.data;
+};

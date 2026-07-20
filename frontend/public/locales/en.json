@@ -294,7 +294,6 @@
       "topicChip": "# Topic",
       "mentionChip": "@ Mention",
       "mentionSoon": "Mentions need the recipient’s open_id — coming later",
-      "soon": "Soon",
       "topicInputAria": "Add a topic",
       "topicInputPlaceholder": "Type a topic, press Enter (comma or space also adds)",
       "removeTopic": "Remove topic {{tag}}",
@@ -1657,6 +1656,59 @@
         "loadingMore": "Loading…"
       },
       "canvasEmpty": "No canvases yet — create one to start sketching this project."
+    },
+    "workflow": {
+      "templatesEntry": "Workflow Templates",
+      "title": "Workflow",
+      "stages": "Stages",
+      "currentStage": "Current Stage",
+      "owner": "Owner",
+      "members": "Members",
+      "schedule": "Schedule",
+      "setSchedule": "Set schedule",
+      "deliverable": "Deliverable",
+      "openInTodolist": "Open in Todolist",
+      "completeStage": "Complete Stage",
+      "advance": "Advance",
+      "back": "Back",
+      "noWorkflow": "No workflow",
+      "agentsActive_one": "{{count}} agent active",
+      "agentsActive_other": "{{count}} agents active",
+      "unassigned": "Unassigned",
+      "days_one": "{{count}} day",
+      "days_other": "{{count}} days",
+      "dateRange": {
+        "cancel": "Cancel",
+        "done": "Done",
+        "clear": "Clear"
+      },
+      "create": {
+        "title": "Workflow",
+        "shortForm": "Short-form",
+        "longForm": "Long-form",
+        "noWorkflow": "No workflow",
+        "shortFormHint": "A lean pipeline for short videos.",
+        "longFormHint": "The full pipeline for long-form productions.",
+        "noWorkflowHint": "Start with no stages — apply a template later.",
+        "method": "Production method",
+        "methodLive": "Live",
+        "methodAI": "AI",
+        "methodHybrid": "Hybrid"
+      },
+      "confirm": {
+        "advanceTitle": "Advance workflow?",
+        "backTitle": "Move back?",
+        "closing": "Closing",
+        "creating": "Creating next",
+        "noAgentAuto": "No agent will start automatically.",
+        "advance": "Advance",
+        "back": "Move back",
+        "cancel": "Cancel",
+        "blockedNotManager": "Only a manager or editor can advance this workflow.",
+        "blockedReviewPending": "The current stage still needs its review before you can advance.",
+        "blockedDeliverableMissing": "The current stage's deliverable folder is empty — file it before advancing.",
+        "blockedNoNext": "This is the last stage — there's nothing further to advance to."
+      }
     }
   },
   "storyboard": {

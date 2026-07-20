@@ -1,10 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { X, FolderPlus } from 'lucide-react';
+import { X, FolderPlus, GitBranch } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { createProject } from '../services/projectsService';
 import { fetchMyTeams } from '../services/teamService';
-import { Project, Team } from '../types';
+import { fetchTemplates } from '../services/workflowService';
+import { Project, Team, WorkflowTemplate } from '../types';
 import { UiSelect } from './ui';
+
+type WorkflowMethod = 'live' | 'ai' | 'hybrid';
+const WORKFLOW_METHODS: WorkflowMethod[] = ['live', 'ai', 'hybrid'];
+/** Sentinel for the "No workflow" card (distinct from a real template id). */
+const NO_WORKFLOW = '';
 
 interface CreateProjectModalProps {
   isOpen: boolean;
@@ -36,6 +42,11 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const [teams, setTeams] = useState<Team[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Workflow block — only meaningful for a real team (templates are team-scoped;
+  // a personal project has team_id=NULL and no templates to instantiate).
+  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
+  const [workflowTemplateId, setWorkflowTemplateId] = useState<string>(NO_WORKFLOW);
+  const [workflowMethod, setWorkflowMethod] = useState<WorkflowMethod>('hybrid');
 
   useEffect(() => {
     if (isOpen) {
@@ -45,6 +56,30 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
       setTeamId(defaultTeamId);
     }
   }, [isOpen, defaultTeamId]);
+
+  // Load the selected team's workflow templates; default to its Short-form
+  // (the seeded is_default). Personal workspace (no team) → no templates.
+  useEffect(() => {
+    if (!isOpen || !teamId) {
+      setTemplates([]);
+      setWorkflowTemplateId(NO_WORKFLOW);
+      return;
+    }
+    let alive = true;
+    fetchTemplates(teamId)
+      .then((list) => {
+        if (!alive) return;
+        setTemplates(list);
+        setWorkflowTemplateId(list.find((tpl) => tpl.is_default)?.id ?? NO_WORKFLOW);
+      })
+      .catch((err) => {
+        console.error('Failed to load workflow templates:', err);
+        if (alive) setTemplates([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [isOpen, teamId]);
 
   const loadTeams = async () => {
     try {
@@ -75,6 +110,8 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         team_id: teamId || undefined,
         project_group: projectGroup.trim() || undefined,
         announcement: announcement.trim() || undefined,
+        workflow_template_id: workflowTemplateId || null,
+        workflow_method: workflowTemplateId ? workflowMethod : null,
       });
       onProjectCreated(project);
       resetForm();
@@ -94,6 +131,8 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     setProjectGroup('');
     setProjectType('personal');
     setTeamId(defaultTeamId);
+    setWorkflowTemplateId(NO_WORKFLOW);
+    setWorkflowMethod('hybrid');
     setError(null);
   };
 
@@ -233,6 +272,66 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             </UiSelect>
           </div>
 
+          {/* Workflow — team projects only (templates are team-scoped). */}
+          {teamId && templates.length > 0 && (
+            <div data-testid="create-project-workflow">
+              <label className="mb-2 flex items-center gap-1.5 text-sm font-medium text-ink-300">
+                <GitBranch size={14} className="text-ink-500" />
+                {t('projects.workflow.create.title')}
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {templates.map((tpl) => (
+                  <WorkflowChoiceCard
+                    key={tpl.id}
+                    title={tpl.name}
+                    hint={`${tpl.node_count} nodes`}
+                    selected={workflowTemplateId === tpl.id}
+                    onClick={() => setWorkflowTemplateId(tpl.id)}
+                    testId={`workflow-template-${tpl.id}`}
+                  />
+                ))}
+                <WorkflowChoiceCard
+                  title={t('projects.workflow.create.noWorkflow')}
+                  hint={t('projects.workflow.create.noWorkflowHint')}
+                  selected={workflowTemplateId === NO_WORKFLOW}
+                  onClick={() => setWorkflowTemplateId(NO_WORKFLOW)}
+                  testId="workflow-template-none"
+                />
+              </div>
+
+              {workflowTemplateId !== NO_WORKFLOW && (
+                <div className="mt-3">
+                  <label className="mb-1.5 block text-xs font-medium text-ink-400">
+                    {t('projects.workflow.create.method')}
+                  </label>
+                  <div className="flex gap-2">
+                    {WORKFLOW_METHODS.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setWorkflowMethod(m)}
+                        data-testid={`workflow-method-${m}`}
+                        className={`flex-1 rounded-lg border px-3 py-2 text-sm transition ${
+                          workflowMethod === m
+                            ? 'border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]'
+                            : 'border-ink-700 text-ink-400 hover:border-ink-600'
+                        }`}
+                      >
+                        {t(
+                          m === 'live'
+                            ? 'projects.workflow.create.methodLive'
+                            : m === 'ai'
+                              ? 'projects.workflow.create.methodAI'
+                              : 'projects.workflow.create.methodHybrid',
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {error && (
             <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
               {error}
@@ -260,3 +359,36 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     </div>
   );
 };
+
+/** One selectable card in the create-project Workflow block. */
+function WorkflowChoiceCard({
+  title,
+  hint,
+  selected,
+  onClick,
+  testId,
+}: {
+  title: string;
+  hint: string;
+  selected: boolean;
+  onClick: () => void;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testId}
+      className={`flex flex-col items-start gap-0.5 rounded-lg border px-3 py-2.5 text-left transition ${
+        selected
+          ? 'border-[var(--accent-border)] bg-[var(--accent-soft)]'
+          : 'border-ink-700 hover:border-ink-600'
+      }`}
+    >
+      <span className={`text-[13px] font-medium ${selected ? 'text-[var(--accent-text)]' : 'text-ink-100'}`}>
+        {title}
+      </span>
+      <span className="text-[11px] text-ink-500">{hint}</span>
+    </button>
+  );
+}

@@ -72,12 +72,14 @@ export const InboxProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       fetchBroadcast(),
     ]);
     if (inboxRes.status === 'fulfilled') {
-      setInboxItems(inboxRes.value.notifications);
+      // A malformed response (undefined body / missing field) must degrade to
+      // an empty feed, not crash the whole app shell at the merge `.map`.
+      setInboxItems(inboxRes.value?.notifications ?? []);
     } else {
       console.error('[Inbox] inbox refresh failed:', inboxRes.reason);
     }
     if (broadcastRes.status === 'fulfilled') {
-      setBroadcastItems(broadcastRes.value);
+      setBroadcastItems(broadcastRes.value ?? []);
     } else {
       console.error('[Inbox] broadcast refresh failed:', broadcastRes.reason);
     }

@@ -73,9 +73,11 @@ export function mergeNotifications(
   inbox: InboxNotification[],
   broadcast: NotificationWithRead[],
 ): UnifiedNotification[] {
+  // Defensive: a feed that arrives undefined (malformed API body) merges as
+  // empty instead of crashing the app shell — the bell renders for every page.
   const merged: UnifiedNotification[] = [
-    ...inbox.map(toInboxUnified),
-    ...broadcast.map(toBroadcastUnified),
+    ...(inbox ?? []).map(toInboxUnified),
+    ...(broadcast ?? []).map(toBroadcastUnified),
   ];
   return merged.sort((a, b) => timestamp(b.created_at) - timestamp(a.created_at));
 }

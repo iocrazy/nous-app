@@ -956,6 +956,150 @@ export interface ProjectStage {
   updated_at?: string;
 }
 
+// ============================================
+// Workflow templates + instances (Project Workflow M1, PR-C)
+// All ids ride as strings (bigIntSafeFetch); owner is a single user XOR agent,
+// members are a list of user-or-agent refs. Mirrors backend schemas/workflow.py.
+// ============================================
+
+/** A default (template) or live (instance) member — exactly one id is set. */
+export interface WorkflowMemberRef {
+  user_id?: string | null;
+  agent_id?: string | null;
+}
+
+/** One node in a team workflow template (`workflow_template_nodes`). */
+export interface WorkflowTemplateNode {
+  id: string;
+  template_id: string;
+  name: string;
+  sort_order: number;
+  parallel_group: number | null;
+  default_owner_user_id: string | null;
+  default_owner_agent_id: string | null;
+  skip_default: boolean;
+  review_required: boolean;
+  deliverable_required: boolean;
+  deliverable_label: string | null;
+  source_stage_id: string | null;
+  duration_days: number | null;
+  members: WorkflowMemberRef[];
+}
+
+/** A template node as sent on PATCH (full node-list replacement). */
+export interface WorkflowTemplateNodeInput {
+  name: string;
+  sort_order: number;
+  parallel_group?: number | null;
+  default_owner_user_id?: string | null;
+  default_owner_agent_id?: string | null;
+  skip_default?: boolean;
+  review_required?: boolean;
+  deliverable_required?: boolean;
+  deliverable_label?: string | null;
+  source_stage_id?: string | null;
+  duration_days?: number | null;
+  members?: WorkflowMemberRef[];
+}
+
+/** A team workflow template list row (`node_count` on the collection). */
+export interface WorkflowTemplate {
+  id: string;
+  team_id: string;
+  name: string;
+  is_default: boolean;
+  created_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  node_count: number;
+  /** Present on the detail (GET /{id}) payload only. */
+  nodes?: WorkflowTemplateNode[];
+}
+
+/** One row of the read-only 11-node workflow node bank. */
+export interface StageLibraryItem {
+  id: string;
+  slug: string;
+  name: string;
+  sort_order: number;
+  phase: string;
+  default_role_label: string | null;
+  deliverable_label: string | null;
+  review_required: boolean;
+}
+
+export type WorkflowNodeStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'in_review'
+  | 'done'
+  | 'skipped';
+
+/** A live workflow node on a project (`project_stage_nodes`). */
+export interface ProjectStageNode {
+  id: string;
+  project_id: string;
+  source_template_node_id: string | null;
+  legacy_stage_id: string | null;
+  name: string;
+  sort_order: number;
+  parallel_group: number | null;
+  status: WorkflowNodeStatus;
+  owner_user_id: string | null;
+  owner_agent_id: string | null;
+  planned_start: string | null;
+  planned_due: string | null;
+  review_required: boolean;
+  deliverable_required: boolean;
+  deliverable_label: string | null;
+  skipped: boolean;
+  members: WorkflowMemberRef[];
+}
+
+/** GET /projects/{id}/workflow payload. */
+export interface ProjectWorkflow {
+  has_workflow: boolean;
+  current_node_id: string | null;
+  agents_active: number;
+  nodes: ProjectStageNode[];
+}
+
+/** PATCH body for an in-place node tweak. */
+export interface ProjectNodePatch {
+  owner_user_id?: string | null;
+  owner_agent_id?: string | null;
+  members?: WorkflowMemberRef[];
+  planned_start?: string | null;
+  planned_due?: string | null;
+  skipped?: boolean;
+}
+
+/** Blocked-reason codes the advance predicate can return (spec §7). */
+export type AdvanceBlockedReason =
+  | 'NOT_MANAGER_OR_EDITOR'
+  | 'REVIEW_PENDING'
+  | 'DELIVERABLE_MISSING'
+  | 'NO_NEXT';
+
+/** A node named in an advance preview (closing / creating list). */
+export interface AdvanceNodeRef {
+  node_id: string;
+  name: string;
+  assignee_user_id: string | null;
+  assignee_agent_id: string | null;
+  due_date: string | null;
+}
+
+/** Server-computed advance ruling (shared by preview + execute, #1400). */
+export interface AdvancePreview {
+  direction: 'forward' | 'back';
+  will_advance: boolean;
+  blocked_reason: AdvanceBlockedReason | null;
+  closing: AdvanceNodeRef[];
+  creating: AdvanceNodeRef[];
+  warnings: string[];
+}
+
 /**
  * Per-episode progress row from `GET /api/v1/projects/{id}/episodes/progress`
  * (PR-10b workspace shell, spec G12) — script/scene/shot counts plus a
