@@ -107,16 +107,23 @@ test('picking a character lands the caret in a fresh dialogue line with the coac
     const next = all[idx + 1] as HTMLElement | undefined;
     if (!next) return null;
     const sel = document.getSelection();
+    const before = getComputedStyle(next, '::before');
     return {
       type: next.dataset.elType,
-      hint: getComputedStyle(next, '::before').content,
+      hint: before.content,
       caretInside: !!sel?.anchorNode && next.contains(sel.anchorNode),
+      hintIndent: before.paddingLeft,
+      lineIndent: getComputedStyle(next).paddingLeft,
     };
   });
   expect(dialogue).not.toBeNull();
   expect(dialogue!.type).toBe('dialogue');
   expect(dialogue!.caretInside).toBe(true);
   expect(dialogue!.hint).toContain('Enter dialogue');
+  // The hint must START where typing lands: the overlay inherits the line's
+  // column indent (dialogue is padding-left:10ch) instead of hugging left:0.
+  expect(dialogue!.lineIndent).not.toBe('0px');
+  expect(dialogue!.hintIndent).toBe(dialogue!.lineIndent);
 });
 
 test('picking a character reuses an existing following dialogue instead of inserting', async ({

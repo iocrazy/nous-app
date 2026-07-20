@@ -697,6 +697,12 @@ export const EDITOR_SHELL_STYLES = `
      inherits that box — the hint wrapped letter-per-line down the margin.
      A placeholder is one word; never let it wrap. */
   white-space:nowrap;
+  /* left:0 is the PADDING-box edge, but the caret sits after the element's
+     column indent (dialogue 10ch, paren 16ch) — the hint looked like it
+     started 10ch LEFT of where typing would land. Inherit the indent so the
+     whisper begins exactly at the caret. (The transition chip overrides
+     padding wholesale; the centered hollywood cue inherits 0.) */
+  padding-left:inherit;
 }
 .mh-el-row.focused .mh-el-editable{
   box-shadow:0 0 0 2px color-mix(in srgb, var(--indigo) 32%, transparent);
