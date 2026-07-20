@@ -58,6 +58,11 @@ from app.schemas.projects import (
     StyleProfileUpdate,
     UpdateMemberRoleRequest,
 )
+from app.schemas.workflow import (
+    AdvancePreview,
+    NodePatch,
+    ProjectWorkflowOut,
+)
 from app.services.library.projects_service import ProjectsService
 
 router = APIRouter(prefix="/projects")
@@ -407,6 +412,128 @@ async def generate_missing_frames(
     svc = ProjectsService()
     data = await svc.generate_missing_frames(project_id, auth.user_id)
     return GenerateMissingResponse(**data)
+
+
+# ============================================
+# Workflow nodes (M1 PR-B) — instance nodes, node tweaks, advance/retreat
+# ============================================
+
+
+@router.get("/{project_id}/workflow", response_model=ProjectWorkflowOut)
+async def get_project_workflow(
+    project_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_read_access),
+) -> ProjectWorkflowOut:
+    """The project's workflow: instance nodes (+ per-node status/members), the
+    active-group cursor, and the count of currently-running agent runs.
+
+    Empty ``nodes`` (``has_workflow=false``) for a No-workflow project — the
+    Overview renders no workflow region in that case."""
+    from app.repositories.project_stage_nodes_repository import (
+        get_project_stage_nodes_repository,
+    )
+    from app.repositories.projects_repository import get_projects_repository
+
+    repo = get_project_stage_nodes_repository()
+    nodes = await repo.list_nodes(project_id)
+    project = await get_projects_repository().get_project_by_id(int(project_id))
+    current_node_id = (project or {}).get("current_node_id")
+    agents_active = await repo.count_running_agent_runs(project_id)
+    return ProjectWorkflowOut(
+        has_workflow=bool(nodes),
+        current_node_id=(str(current_node_id) if current_node_id is not None else None),
+        agents_active=agents_active,
+        nodes=nodes,
+    )
+
+
+@router.patch("/{project_id}/workflow/nodes/{node_id}")
+async def patch_workflow_node(
+    project_id: str,
+    node_id: str,
+    payload: NodePatch,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    """In-place tweak of a live node (owner / members / schedule / skipped).
+
+    Writes the instance only — never the template. Requires an effective role of
+    manager/editor (the workflow single-source, on top of the write guard)."""
+    from app.core.workflow_roles import WRITE_ROLES, resolve_effective_role
+    from app.repositories.project_stage_nodes_repository import (
+        get_project_stage_nodes_repository,
+    )
+
+    role = await resolve_effective_role(auth.user_id, project_id=project_id)
+    if role not in WRITE_ROLES:
+        raise HTTPException(status_code=403, detail="Insufficient role")
+
+    fields = payload.model_fields_set
+    kwargs: dict = {}
+    if "owner_user_id" in fields or "owner_agent_id" in fields:
+        kwargs["_set_owner"] = True
+        kwargs["owner_user_id"] = (
+            str(payload.owner_user_id) if payload.owner_user_id else None
+        )
+        kwargs["owner_agent_id"] = (
+            str(payload.owner_agent_id) if payload.owner_agent_id else None
+        )
+    if "planned_start" in fields:
+        kwargs["_set_schedule_start"] = True
+        kwargs["planned_start"] = payload.planned_start
+    if "planned_due" in fields:
+        kwargs["_set_schedule_due"] = True
+        kwargs["planned_due"] = payload.planned_due
+    if "members" in fields and payload.members is not None:
+        kwargs["members"] = [
+            {
+                "user_id": str(m.user_id) if m.user_id else None,
+                "agent_id": str(m.agent_id) if m.agent_id else None,
+            }
+            for m in payload.members
+        ]
+    if "skipped" in fields:
+        kwargs["skipped"] = payload.skipped
+
+    repo = get_project_stage_nodes_repository()
+    row = await repo.update_node(node_id, project_id, **kwargs)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Node not found")
+    return {"success": True, "data": row}
+
+
+@router.get("/{project_id}/advance-preview", response_model=AdvancePreview)
+async def get_advance_preview(
+    project_id: str,
+    auth: AuthDep,
+    direction: str = Query("forward", pattern="^(forward|back)$"),
+    _project_guard: None = Depends(verify_project_read_access),
+) -> AdvancePreview:
+    """Pure-read ruling on a forward/back move (same predicate as /advance)."""
+    from app.services.workflow.advance_service import compute_advance_preview
+
+    return await compute_advance_preview(project_id, auth.user_id, direction)
+
+
+@router.post("/{project_id}/advance")
+async def post_advance(
+    project_id: str,
+    auth: AuthDep,
+    direction: str = Query("forward", pattern="^(forward|back)$"),
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    """Advance/retreat the workflow cursor. Recomputes the predicate server-side
+    (never trusts the client) and 409s with the blocked reason if it no longer
+    clears."""
+    from app.services.workflow.advance_service import execute_advance
+
+    preview = await execute_advance(project_id, auth.user_id, direction)
+    if not preview.will_advance:
+        raise HTTPException(
+            status_code=409, detail=preview.blocked_reason or "Advance blocked"
+        )
+    return {"success": True, "data": preview.model_dump()}
 
 
 # ============================================
