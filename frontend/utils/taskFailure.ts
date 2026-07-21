@@ -9,6 +9,8 @@
 // Unknown errors stay retryable and keep their raw text (truncated by the
 // row), so we never hide a recoverable failure behind a guess.
 
+import { humanizeTaskError } from './humanizeTaskError';
+
 export interface FailureClass {
   /** Retrying re-runs the same input and will fail identically. Hide Retry. */
   permanent: boolean;
@@ -40,8 +42,13 @@ export function classifyFailure(errorMsg?: string | null): FailureClass {
   return NONE;
 }
 
-/** Label to show in a row: the friendly label when known, else the raw text. */
+/**
+ * Compact label to show in a row. Prefers the retry-classifier's short label
+ * (Track unavailable / Timed out / …); otherwise delegates to
+ * humanizeTaskError so raw exception chains (e.g. the Volcengine ASR
+ * "Invalid audio URI" dump) never reach the user even in dense list rows.
+ */
 export function failureLabel(errorMsg?: string | null): string | null {
   if (!errorMsg) return null;
-  return classifyFailure(errorMsg).friendly ?? errorMsg;
+  return classifyFailure(errorMsg).friendly ?? humanizeTaskError(errorMsg).message;
 }

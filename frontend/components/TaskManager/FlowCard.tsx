@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { flowService, type FlowResponse, type FlowDetailResponse } from '../../services/flowService';
 import { useToast } from '../Toast';
+import { failureLabel } from '../../utils/taskFailure';
 
 interface FlowCardProps {
   flow: FlowResponse;
@@ -146,7 +147,7 @@ export const FlowCard: React.FC<FlowCardProps> = ({ flow, expandedByDefault = fa
                     )}
                     {t.error_msg && (
                       <span className="text-rose-500 truncate max-w-[160px]" title={t.error_msg}>
-                        {t.error_msg}
+                        {failureLabel(t.error_msg)}
                       </span>
                     )}
                   </li>

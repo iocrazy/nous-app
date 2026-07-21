@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { UnifiedTask } from '../../contexts/TaskManagerContext';
 import { taskTypeLabel } from '../../contexts/TaskManagerContext';
+import { humanizeTaskError } from '../../utils/humanizeTaskError';
 import { useTaskResult } from './useTaskResult';
 import { MediaResultBody } from './bodies/MediaResultBody';
 import { AgentResultBody } from './bodies/AgentResultBody';
@@ -100,9 +101,27 @@ const GenericResultBody: React.FC<{ task: UnifiedTask }> = ({ task }) => {
   const hasMeta = task.metadata && Object.keys(task.metadata).length > 0;
   return (
     <div className="p-4 space-y-3">
-      {task.error_msg && (
-        <div className="text-xs text-red-400 whitespace-pre-wrap break-words">{task.error_msg}</div>
-      )}
+      {task.error_msg && (() => {
+        const { message, hint } = humanizeTaskError(task.error_msg);
+        const raw = task.error_msg.trim();
+        const showRaw = raw.length > 0 && raw !== message;
+        return (
+          <div className="text-xs text-red-400">
+            <div className="whitespace-pre-wrap break-words">{message}</div>
+            {hint && <p className="mt-0.5 text-red-300/70">{hint}</p>}
+            {showRaw && (
+              <details className="mt-1">
+                <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-red-300/60 hover:text-red-300">
+                  Details
+                </summary>
+                <pre className="mt-1 text-[10px] text-red-300/70 whitespace-pre-wrap break-words bg-red-500/5 border border-red-500/15 rounded p-2 max-h-40 overflow-y-auto">
+                  {raw}
+                </pre>
+              </details>
+            )}
+          </div>
+        );
+      })()}
       {hasMeta ? (
         <pre className="text-[11px] text-ink-400 font-mono whitespace-pre-wrap break-words bg-ink-950/50 rounded p-3">
           {JSON.stringify(task.metadata, null, 2)}

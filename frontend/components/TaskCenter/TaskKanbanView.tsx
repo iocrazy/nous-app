@@ -10,6 +10,7 @@ import { Loader2, Circle, CheckCircle2, XCircle, Ban } from 'lucide-react';
 import type { UnifiedTask, TaskStatus } from '../../contexts/TaskManagerContext';
 import { taskTypeLabel } from '../../contexts/TaskManagerContext';
 import { taskIdLabel, relativeTime, statusVisual, type TaskGroup } from '../../utils/taskDisplay';
+import { failureLabel } from '../../utils/taskFailure';
 
 interface TaskKanbanViewProps {
   groups: TaskGroup[];
@@ -71,7 +72,7 @@ const KanbanCard: React.FC<{
       </div>
       {task.error_msg && (
         <div className="text-[9px] text-rose-400 truncate mb-1" title={task.error_msg}>
-          {task.error_msg}
+          {failureLabel(task.error_msg)}
         </div>
       )}
       <div className="flex items-center justify-between text-[9px] text-ink-500">

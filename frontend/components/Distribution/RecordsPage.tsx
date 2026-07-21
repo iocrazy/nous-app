@@ -7,6 +7,7 @@ import {
   getShareSchema, listAccounts, listPublishTasks, retryPublishTask,
 } from '../../services/distributionService';
 import { PublishTask, PublishTaskAccount, SocialAccount } from '../../types';
+import { humanizeTaskError } from '../../utils/humanizeTaskError';
 import './distribution-v4.css';
 
 type Filter = 'all' | 'needs_action' | 'publishing' | 'failed' | 'done';
@@ -360,7 +361,9 @@ export const RecordsPage: React.FC = () => {
                           )}
                           {a.status === 'failed' && (
                             <>
-                              <span className="err">{a.error_message}</span>
+                              <span className="err" title={a.error_message || undefined}>
+                                {humanizeTaskError(a.error_message).message}
+                              </span>
                               <button type="button" className="btn btn-ghost btn-sm" onClick={() => void onRetry(task.id)}>
                                 {t('distribution.records.retry', 'Retry')}
                               </button>

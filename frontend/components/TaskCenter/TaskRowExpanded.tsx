@@ -12,6 +12,7 @@ import {
 } from '../../contexts/TaskManagerContext';
 import { taskIdLabel, statusVisual, relativeTime } from '../../utils/taskDisplay';
 import { classifyFailure } from '../../utils/taskFailure';
+import { humanizeTaskError } from '../../utils/humanizeTaskError';
 
 interface TaskRowExpandedProps {
   task: UnifiedTask;
@@ -115,17 +116,35 @@ export const TaskRowExpanded: React.FC<TaskRowExpandedProps> = ({ task }) => {
         </div>
       )}
 
-      {task.error_msg && (
-        <div className="text-xs">
-          <span className="text-rose-400 font-medium">Error: </span>
-          <span className="text-rose-300">{task.error_msg}</span>
-          {task.error_code && (
-            <span className="ml-2 px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-200 text-[10px] ring-1 ring-rose-500/30 font-mono">
-              {task.error_code}
-            </span>
-          )}
-        </div>
-      )}
+      {task.error_msg && (() => {
+        const { message, hint } = humanizeTaskError(task.error_msg);
+        const raw = task.error_msg.trim();
+        const showRaw = raw.length > 0 && raw !== message;
+        return (
+          <div className="text-xs">
+            <div>
+              <span className="text-rose-400 font-medium">Error: </span>
+              <span className="text-rose-300">{message}</span>
+              {task.error_code && (
+                <span className="ml-2 px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-200 text-[10px] ring-1 ring-rose-500/30 font-mono">
+                  {task.error_code}
+                </span>
+              )}
+            </div>
+            {hint && <p className="mt-0.5 text-rose-300/70">{hint}</p>}
+            {showRaw && (
+              <details className="mt-1">
+                <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-rose-300/60 hover:text-rose-300">
+                  Details
+                </summary>
+                <pre className="mt-1 text-[10px] text-rose-300/70 whitespace-pre-wrap break-all bg-rose-500/5 border border-rose-500/15 rounded p-2 max-h-40 overflow-y-auto">
+                  {raw}
+                </pre>
+              </details>
+            )}
+          </div>
+        );
+      })()}
 
       <details className="text-xs">
         <summary className="cursor-pointer text-[10px] text-ink-500 uppercase tracking-wider hover:text-ink-300 inline-block">
