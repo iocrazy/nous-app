@@ -256,6 +256,17 @@ const COLOR_MAP: Record<string, { bg: string; text: string; border: string; badg
 
 type TaskTab = 'media' | 'storyboard';
 
+// Display order for the platform-models card: llm → asr → embedding → image,
+// with tts/video trailing. Unknown types fall to the end (99).
+const NOUS_TYPE_ORDER: Record<string, number> = {
+  llm: 0,
+  asr: 1,
+  embedding: 2,
+  image: 3,
+  tts: 4,
+  video: 5,
+};
+
 /**
  * Curated-whitelist model picker for a provider. Renders chips for the
  * already-enabled models and an "+ Add Model" affordance that drops down
@@ -1385,19 +1396,22 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                 </div>
               </div>
               <div className="px-6 pb-4 space-y-1.5">
-                {nousModels.filter((m) => m.type === 'llm').length === 0 ? (
-                  <p className="text-xs text-ink-500">No platform LLM models available.</p>
+                {nousModels.length === 0 ? (
+                  <p className="text-xs text-ink-500">No platform models available.</p>
                 ) : (
-                  nousModels
-                    .filter((m) => m.type === 'llm')
+                  [...nousModels]
+                    .sort(
+                      (a, b) =>
+                        (NOUS_TYPE_ORDER[a.type] ?? 99) - (NOUS_TYPE_ORDER[b.type] ?? 99),
+                    )
                     .map((m) => (
                       <div
                         key={m.name}
-                        className="flex items-center justify-between text-sm text-ink-200 border-t border-ink-800 pt-1.5 first:border-t-0 first:pt-0"
+                        className="flex items-center justify-between gap-3 text-sm text-ink-200 border-t border-ink-800 pt-1.5 first:border-t-0 first:pt-0"
                       >
-                        <span className="font-medium">{m.display_name}</span>
-                        <span className="text-xs text-ink-500">
-                          {m.description || m.type}
+                        <span className="font-medium truncate">{m.display_name}</span>
+                        <span className="shrink-0 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-ink-800 text-ink-400">
+                          {m.type}
                         </span>
                       </div>
                     ))

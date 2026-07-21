@@ -124,7 +124,8 @@ async def test_list_enabled_with_type_filter_applies_extra_where(
 async def test_list_enabled_hides_secret_columns(
     repo: MediahubModelRepository, fake_session: _FakeSession
 ) -> None:
-    """The public projection selects display columns only — never api_key."""
+    """The public projection selects display columns only — never api_key, and
+    never ``description`` (admin-internal ops notes: private IPs / BYOK refs)."""
     fake_session.mapping_rows = []
     await repo.list_enabled()
 
@@ -132,6 +133,7 @@ async def test_list_enabled_hides_secret_columns(
     assert "api_key" not in sql
     assert "app_id" not in sql
     assert "base_url" not in sql
+    assert "description" not in sql
 
 
 @pytest.mark.asyncio
