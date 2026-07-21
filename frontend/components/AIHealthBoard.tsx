@@ -29,8 +29,22 @@ export const AIHealthBoard: React.FC = () => {
     }
   }, []);
 
+  // Defer the initial probe to idle time so this board's (potentially slow)
+  // real health check never competes with the first paint of the AI settings
+  // page — the rest of the tab renders immediately, this section fills in once
+  // the browser is idle. The Loading skeleton covers the interim, and the
+  // manual Refresh button still triggers an immediate reload.
   useEffect(() => {
-    load();
+    const w = window as typeof window & {
+      requestIdleCallback?: (cb: () => void) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (typeof w.requestIdleCallback === 'function') {
+      const id = w.requestIdleCallback(() => load());
+      return () => w.cancelIdleCallback?.(id);
+    }
+    const id = window.setTimeout(() => load(), 0);
+    return () => window.clearTimeout(id);
   }, [load]);
 
   const warnings = rows?.filter((r) => r.status !== 'ok').length ?? 0;
