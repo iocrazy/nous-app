@@ -1,4 +1,4 @@
-"""GET /api/v1/workflows must read task_tracking, not dbos.workflow_status.
+"""GET /api/v1/workflows/runs must read task_tracking, not dbos.workflow_status.
 
 CLAUDE.md 路线 C rule 1: task_tracking is the UI source of truth. Earlier
 the list endpoint short-circuited to DBOS.list_workflows_async, which
@@ -128,7 +128,7 @@ def test_list_workflows_returns_serialized_rows() -> None:
         db_session_mod, "read_scope", _read_scope_returning([fake_row], captured)
     ):
         client = TestClient(app)
-        resp = client.get("/api/v1/workflows")
+        resp = client.get("/api/v1/workflows/runs")
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -162,7 +162,7 @@ def test_list_workflows_maps_legacy_dbos_status_filter() -> None:
         db_session_mod, "read_scope", _read_scope_returning([], captured)
     ):
         client = TestClient(app)
-        resp = client.get("/api/v1/workflows?workflow_status=SUCCESS")
+        resp = client.get("/api/v1/workflows/runs?workflow_status=SUCCESS")
 
     assert resp.status_code == 200, resp.text
     # SUCCESS (DBOS terminology) maps to task_tracking's lowercase 'completed'.

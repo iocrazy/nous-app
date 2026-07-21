@@ -39,7 +39,13 @@ export const fetchTemplates = async (
     '/api/v1/workflows',
     { query: { team_id: teamId } },
   );
-  return response.data ?? [];
+  // A missing `data` key means the wrong handler answered (this exact path
+  // was once shadowed by the DBOS runs list) — surface it, never mask it
+  // as an empty template list.
+  if (!Array.isArray(response.data)) {
+    throw new Error('Unexpected response shape from fetchTemplates');
+  }
+  return response.data;
 };
 
 /** One template with its ordered nodes + members. */
