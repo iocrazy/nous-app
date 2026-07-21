@@ -1,0 +1,87 @@
+import { describe, it, expect } from 'vitest';
+import { humanizeTaskError } from './humanizeTaskError';
+
+describe('humanizeTaskError', () => {
+  it('maps the Volcengine ASR "Invalid audio URI" chain (the reported bug)', () => {
+    const raw =
+      'DBOSMaxStepRetriesExceeded: RuntimeError: Volcengine ASR query failed: ' +
+      '45000006 [Invalid audio URI] OperatorWrapper Process failed: internal ' +
+      'error,audio download failed';
+    const r = humanizeTaskError(raw);
+    expect(r.message).toBe("Transcription couldn't read this media's audio.");
+    expect(r.hint).toMatch(/background music download to finish/i);
+  });
+
+  it('maps insufficient balance / HTTP 402', () => {
+    expect(humanizeTaskError('Insufficient Balance').message).toBe(
+      'The AI provider account is out of balance.',
+    );
+    expect(humanizeTaskError('HTTP 402 Payment Required').message).toBe(
+      'The AI provider account is out of balance.',
+    );
+  });
+
+  it('maps resource-not-granted / 45000030', () => {
+    expect(humanizeTaskError('ASR error 45000030 resource not granted').message).toBe(
+      "This model isn't enabled for the configured provider account.",
+    );
+  });
+
+  it('maps OpenAI-style 404 model_not_found / no active grant (not "source not found")', () => {
+    const raw =
+      'NotFoundError: Error code: 404 - {\'error\': {\'message\': "no active ' +
+      "grant for service 'whisper-1' on this key\", 'type': 'not_found_error', " +
+      "'code': 'model_not_found'}}";
+    expect(humanizeTaskError(raw).message).toBe(
+      "This model isn't enabled for the configured provider account.",
+    );
+  });
+
+  it('maps rate limiting (429 / SetLimitExceeded)', () => {
+    expect(humanizeTaskError('HTTP 429 Too Many Requests').message).toBe(
+      'The AI provider is rate-limiting — try again shortly.',
+    );
+    expect(humanizeTaskError('SetLimitExceeded').message).toBe(
+      'The AI provider is rate-limiting — try again shortly.',
+    );
+  });
+
+  it('maps timeouts', () => {
+    expect(humanizeTaskError('TimeoutError: request timed out').message).toBe(
+      'The task timed out — retry usually works.',
+    );
+  });
+
+  it('maps unavailable source track and missing source', () => {
+    expect(
+      humanizeTaskError('SodaApiError: track 1 returned no url_player_info').message,
+    ).toBe("This media's audio track is no longer available.");
+    expect(humanizeTaskError('HTTP 404 not found').message).toBe(
+      "The source media couldn't be found.",
+    );
+  });
+
+  it('strips the DBOSMaxStepRetriesExceeded wrapper before matching', () => {
+    // Inner text is a short clean sentence: after stripping the wrapper it is
+    // passed through verbatim, proving the prefix was removed.
+    const r = humanizeTaskError('DBOSMaxStepRetriesExceeded: queue drained cleanly');
+    expect(r.message).toBe('queue drained cleanly');
+  });
+
+  it('keeps already-clean short strings as the message (no regression)', () => {
+    // e.g. distribution publish errors are already human-readable.
+    expect(humanizeTaskError('upload rejected').message).toBe('upload rejected');
+  });
+
+  it('falls back to a neutral message for raw technical dumps, preserving detail elsewhere', () => {
+    const r = humanizeTaskError('KeyError: totally novel internal blowup 9x');
+    expect(r.message).toBe('Processing failed — see details.');
+    expect(r.hint).toBeUndefined();
+  });
+
+  it('handles empty / missing input', () => {
+    expect(humanizeTaskError(undefined).message).toBe('Processing failed.');
+    expect(humanizeTaskError('').message).toBe('Processing failed.');
+    expect(humanizeTaskError('   ').message).toBe('Processing failed.');
+  });
+});

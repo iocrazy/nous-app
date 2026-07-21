@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FileText, Sparkles, Eye, Loader2, Copy, Download, Check,
-  Clock, Tag, ChevronRight, Brain, AlertCircle, List, AlignLeft, ChevronDown, Music,
+  Clock, Tag, ChevronRight, Brain, List, AlignLeft, ChevronDown, Music,
   PanelRightClose,
 } from 'lucide-react';
 import { Video, TranscriptData, SummaryData, Collection } from '../types';
@@ -21,6 +21,7 @@ import {
 } from '../services/aiService';
 import type { VisualAnalysisData } from '../services/aiService';
 import { useTaskManager } from '../contexts/TaskManagerContext';
+import { TaskErrorNotice } from './TaskErrorNotice';
 
 interface VideoDetailPanelProps {
   video: Video;
@@ -575,10 +576,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                   Transcribe
                 </button>
                 {transcriptError && (
-                  <div className="mt-4 flex items-center gap-2 text-sm text-red-400">
-                    <AlertCircle size={14} />
-                    {transcriptError}
-                  </div>
+                  <TaskErrorNotice error={transcriptError} size="sm" className="mt-4" />
                 )}
               </div>
             )}
@@ -739,10 +737,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                     Summarize
                   </button>
                   {summaryError && (
-                    <p className="mt-2 text-xs text-red-400 flex items-center gap-1">
-                      <AlertCircle size={12} />
-                      {summaryError}
-                    </p>
+                    <TaskErrorNotice error={summaryError} size="xs" className="mt-2" />
                   )}
                 </div>
               )}
@@ -925,10 +920,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                         Trigger Visual Analysis
                       </button>
                       {visualAnalysisError && (
-                        <p className="mt-2 text-xs text-red-400 flex items-center gap-1">
-                          <AlertCircle size={12} />
-                          {visualAnalysisError}
-                        </p>
+                        <TaskErrorNotice error={visualAnalysisError} size="xs" className="mt-2" />
                       )}
                     </>
                   )}

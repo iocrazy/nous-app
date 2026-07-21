@@ -10,6 +10,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ChevronRight, ChevronDown, CircleDot, Circle, CheckCircle2, XCircle, Ban, Loader2 } from 'lucide-react';
 import type { UnifiedTask, TaskStatus } from '../../contexts/TaskManagerContext';
 import { taskTypeLabel } from '../../contexts/TaskManagerContext';
+import { failureLabel } from '../../utils/taskFailure';
 import { taskIdLabel, statusVisual, relativeTime, type TaskGroup } from '../../utils/taskDisplay';
 import { isTerminal } from '../../utils/taskSelection';
 import { TaskRowExpanded } from './TaskRowExpanded';
@@ -106,7 +107,7 @@ const TaskRow: React.FC<{
         <span className="flex-1 truncate text-ink-200">{task.title || '(no title)'}</span>
         {task.error_msg && (
           <span className="text-rose-400 truncate max-w-[160px]" title={task.error_msg}>
-            {task.error_msg}
+            {failureLabel(task.error_msg)}
           </span>
         )}
         <span className="text-[10px] text-ink-500 hidden md:inline-block">
