@@ -8,7 +8,7 @@ import { useWorkspaceScope } from '../hooks/useWorkspaceScope';
 import { fetchProjects, fetchRecentItems } from '../services/projectsService';
 import { ProjectsListView } from '../components/ProjectsListView';
 import { ProjectFilterSidebar, WORKFLOW_TEMPLATES_FILTER, IDEATION_FILTER } from '../components/project/ProjectFilterSidebar';
-import { WorkflowTemplateEditor } from '../components/workflow/WorkflowTemplateEditor';
+import { WorkflowTemplatesModal } from '../components/workflow/WorkflowTemplatesModal';
 import { IdeationBoard } from '../components/ideation/IdeationBoard';
 import { RecentItemsList } from '../components/project/RecentItemsList';
 import { VideoReviewPage } from '../components/VideoReviewPage';
@@ -34,6 +34,9 @@ export function ProjectsPage() {
   // Ideation → Create project: the source topic seeds the modal (name + topic_id).
   const [createFromTopic, setCreateFromTopic] = useState<Topic | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Workflow Templates present as a settings-style dialog, not a main-pane
+  // view — the sidebar entry toggles this instead of becoming activeFilter.
+  const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeFilter, setActiveFilter] = useState('all');
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
@@ -253,7 +256,13 @@ export function ProjectsPage() {
       >
         <ProjectFilterSidebar
           activeFilter={activeFilter}
-          onFilterChange={setActiveFilter}
+          onFilterChange={(filter) => {
+            if (filter === WORKFLOW_TEMPLATES_FILTER) {
+              setIsTemplatesModalOpen(true);
+              return;
+            }
+            setActiveFilter(filter);
+          }}
           folders={folders}
           projectCounts={projectCounts}
           folderCounts={folderCounts}
@@ -262,9 +271,7 @@ export function ProjectsPage() {
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         />
         <div className={'flex-1 min-w-0 h-full overflow-y-auto px-8 pt-3 pb-8'}>
-          {activeFilter === WORKFLOW_TEMPLATES_FILTER ? (
-            <WorkflowTemplateEditor teamId={effectiveTeamId} />
-          ) : activeFilter === IDEATION_FILTER ? (
+          {activeFilter === IDEATION_FILTER ? (
             <IdeationBoard
               teamId={effectiveTeamId}
               onCreateProjectFromTopic={(topic) => {
@@ -304,6 +311,11 @@ export function ProjectsPage() {
           refreshProjects();
           navigate(teamId ? `/team/${teamId}/projects/${project.id}` : `/projects/${project.id}`);
         }}
+      />
+      <WorkflowTemplatesModal
+        isOpen={isTemplatesModalOpen}
+        onClose={() => setIsTemplatesModalOpen(false)}
+        teamId={effectiveTeamId}
       />
     </>
   );
