@@ -410,6 +410,17 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [nousModels, setNousModels] = useState<NousModelPublic[]>([]);
   const [agents, setAgents] = useState<AILibraryAgent[]>([]);
+  // The three async option sources (platform models, agents, governance) hydrate
+  // after mount. Until ALL have settled, a task-assignment picker whose stored
+  // value isn't yet in its (still-empty) option list would silently display the
+  // first option — a wrong provider/agent that snaps to the real value once data
+  // lands. These "settled" flags gate the pickers behind a stable placeholder so
+  // they never flash a value the user didn't choose. Settled = resolved OR
+  // rejected (fail-open governance still counts as ready).
+  const [nousModelsLoaded, setNousModelsLoaded] = useState(false);
+  const [agentsLoaded, setAgentsLoaded] = useState(false);
+  const [governanceLoaded, setGovernanceLoaded] = useState(false);
+  const optionsReady = nousModelsLoaded && agentsLoaded && governanceLoaded;
   const isDirtyRef = useRef(false);
 
   // AuthContext loads AI settings asynchronously after login, so the prop
@@ -452,17 +463,39 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
   }, [settings.provider_health]);
 
   useEffect(() => {
-    getNousModels().then(setNousModels).catch(() => {});
+    let cancelled = false;
+    getNousModels()
+      .then((list) => {
+        if (!cancelled) setNousModels(list);
+      })
+      .catch((err) => {
+        console.error('[AISettings] getNousModels failed:', err);
+      })
+      .finally(() => {
+        if (!cancelled) setNousModelsLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Fetch per-module governance flags once on mount.
   // Fail-open: any error leaves governance as GOVERNANCE_ALL_ALLOWED (all true).
   useEffect(() => {
+    let cancelled = false;
     getAIGovernance()
-      .then(setGovernance)
+      .then((flags) => {
+        if (!cancelled) setGovernance(flags);
+      })
       .catch((err) => {
         console.error('[AISettings] governance fetch failed — defaulting to all-allowed:', err);
+      })
+      .finally(() => {
+        if (!cancelled) setGovernanceLoaded(true);
       });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -474,6 +507,9 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       })
       .catch((err) => {
         console.error('[AISettings] listAgents failed:', err);
+      })
+      .finally(() => {
+        if (!cancelled) setAgentsLoaded(true);
       });
     return () => {
       cancelled = true;
@@ -809,11 +845,26 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
     }));
   };
 
+  // Disabled placeholder select shown while the async option sources are still
+  // settling. Renders a single synthetic option matching the stored value so the
+  // picker echoes the user's saved choice (raw value, or "Loading…" if unset)
+  // instead of silently snapping to the first available option — the source of
+  // the "shows Volcengine bigasr then jumps to moss" flash. Swaps seamlessly to
+  // the real list once optionsReady flips.
+  const renderLoadingSelect = (currentValue: string, className = 'min-w-[220px]') => (
+    <UiSelect value={currentValue} disabled aria-busy="true" className={className}>
+      <option value={currentValue}>{currentValue || 'Loading…'}</option>
+    </UiSelect>
+  );
+
   // Render an agent <select> with optgroup (system vs mine) + legacy value fallback.
   const renderAgentSelect = (
     taskKey: keyof AISettingsType['task_assignment'],
     currentValue: string,
   ) => {
+    // Hold a stable placeholder until agents + platform models + governance
+    // have all settled, so the picker never flashes a wrong agent/legacy state.
+    if (!optionsReady) return renderLoadingSelect(currentValue);
     const options = getAgentOptions();
     const systemOptions = options.filter((o) => o.group === 'system');
     const mineOptions = options.filter((o) => o.group === 'mine');
@@ -1004,6 +1055,9 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
               <FileText size={16} className="text-ink-400" />
               <span className="text-sm font-medium text-ink-300">Transcription</span>
             </div>
+            {!optionsReady ? (
+              renderLoadingSelect(localSettings.task_assignment.transcription)
+            ) : (
             <UiSelect
               value={localSettings.task_assignment.transcription}
               onChange={(e) => updateTaskAssignment('transcription', e.target.value)}
@@ -1013,6 +1067,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </UiSelect>
+            )}
           </div>
           ) : (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
