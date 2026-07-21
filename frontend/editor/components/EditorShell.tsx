@@ -38,6 +38,7 @@ import {
   type ScriptCommit,
 } from '../sceneService';
 import { fetchScriptProject } from '../../services/scriptService';
+import { planInsertScene } from '../insertScenePlan';
 import { fetchProjectEntities } from '../../services/projectsService';
 import { extractLibEntitiesFromScript } from '../../services/libEntitiesService';
 import { useToast } from '../../components/Toast';
@@ -688,34 +689,74 @@ export function EditorShell({
   );
 
   const handleInsertScene = useCallback(async () => {
-    // Single-flight: create→move→reload takes ~1s and the button gives no
+    // Single-flight: the create pipeline takes ~1-2s and the button gives no
     // feedback, so an impatient writer clicks again — every extra click minted
     // another empty scene (prod evidence 2026-07-15: 13 blank scenes in 19s,
     // 4 within one second). Ignore clicks while one create is in flight.
     if (insertingSceneRef.current) return;
     insertingSceneRef.current = true;
     try {
-      // createScene only positions by sort_order (appends), so create then move
-      // the new scene to sit right AFTER the scene the cursor is in — inserting
-      // at the writer's position, not at the tail. Falls back to the tail when no
-      // scene is focused (createScene already put it there).
-      const created = await createScene(scriptId, { sort_order: scenes.length });
       // Anchor to the scene the CURSOR is in — state.cursor.sceneId tracks the
       // focused element and survives the toolbar button's transient focus steal
       // (blur only relaxes the editing flag, it never clears the cursor).
       // activeSceneId only follows scroll / rail-click, so it is often stale or
       // null when the writer clicks the Scene button (the v0.25.341 bug).
-      const anchor = state.cursor?.sceneId ?? state.activeSceneId;
-      if (anchor && anchor !== created.id) {
-        await moveScene(created.id, { after_scene_id: anchor });
-      }
+      // laper semantics (user 2026-07-21): the new heading lands AT the caret —
+      // see planInsertScene for the split/above/after decision table.
+      const plan = planInsertScene(scenes, state.cursor, state.activeSceneId);
+
+      // createScene only positions by sort_order (appends) — create at the
+      // tail, then place it. Placement and the split run concurrently: they
+      // touch different resources (scene order vs element content).
+      const created = await createScene(scriptId, { sort_order: scenes.length });
+      const placement = plan.anchorSceneId
+        ? moveScene(
+            created.id,
+            plan.placeBefore
+              ? { before_scene_id: plan.anchorSceneId }
+              : { after_scene_id: plan.anchorSceneId },
+          )
+        : Promise.resolve(null);
+
+      const firstMovedId = plan.tail[0]?.id ?? null;
+      const split = (async () => {
+        if (plan.tail.length === 0 || !plan.anchorSceneId) return;
+        const tail = plan.tail;
+        // Insert into the NEW scene first, delete from the source after — the
+        // cross-scene drag's ordering, so a mid-flight failure leaves
+        // recoverable duplicates, never data loss.
+        const inserts: ElementOp[] = tail.map((el, i) => ({
+          op: 'insert',
+          element_id: el.id,
+          after_id: i === 0 ? null : tail[i - 1].id,
+          payload: {
+            type: el.type,
+            text: el.text,
+            ...(el.character_id ? { character_id: el.character_id } : {}),
+          },
+        }));
+        await applyOps(created.id, inserts, created.content_version);
+        // The writer was just TYPING in the source scene, so the version in
+        // `scenes` state is stale (ops bump it server-side without flowing
+        // back here) — a state-version If-Match would 409 nearly every time.
+        // Fetch the current version right before the delete batch.
+        const fresh = await listScenes(scriptId);
+        const src = fresh.find((s) => s.id === plan.anchorSceneId);
+        if (!src) return;
+        const deletes: ElementOp[] = tail.map((el) => ({ op: 'delete', element_id: el.id }));
+        await applyOps(plan.anchorSceneId, deletes, src.content_version);
+      })();
+
+      await Promise.all([placement, split]);
       await reload();
+      setActiveScene(created.id);
+      if (firstMovedId) setPendingFocusId(firstMovedId);
     } catch (err) {
       console.error('[EditorShell] createScene failed', err);
     } finally {
       insertingSceneRef.current = false;
     }
-  }, [scriptId, scenes.length, state.cursor?.sceneId, state.activeSceneId, reload]);
+  }, [scriptId, scenes, state.cursor, state.activeSceneId, reload, setActiveScene]);
 
   // Cold start: create the first scene AND seed an empty action row (via the
   // documented ops endpoint — createScene does not accept initial elements), so
