@@ -6,11 +6,18 @@ that's been routed to a DBOS workflow. Both pipes can run side-by-side
 during the shadow window.
 
 Endpoints:
+    GET    /api/v1/workflows/runs                   — list the user's runs
     GET    /api/v1/workflows/{workflow_id}/status   — one-shot status
     GET    /api/v1/workflows/{workflow_id}/events   — SSE stream
     POST   /api/v1/workflows/{workflow_id}/cancel   — request cancel
     POST   /api/v1/workflows/{workflow_id}/resume   — resume after pause
     GET    /api/v1/workflows/{workflow_id}/steps    — step list snapshot
+
+The run list lives at /runs, NOT at the bare prefix: GET /api/v1/workflows
+belongs to workflow_templates_router (team workflow templates). A bare
+``@router.get("")`` here shadowed that list for as long as both were
+registered (FastAPI resolves collisions by registration order, silently) —
+guarded against regression by tests/test_route_uniqueness.py.
 """
 
 from __future__ import annotations
@@ -422,7 +429,7 @@ _LEGACY_DBOS_STATUS_MAP = {
 }
 
 
-@router.get("")
+@router.get("/runs")
 async def list_workflows(
     auth: AuthDep,
     name: Optional[str] = Query(

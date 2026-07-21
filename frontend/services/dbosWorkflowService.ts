@@ -132,7 +132,7 @@ export async function listWorkflows(
   if (opts.offset != null) params.set('offset', String(opts.offset));
   if (opts.sortDesc != null) params.set('sort_desc', String(opts.sortDesc));
   const qs = params.toString();
-  const url = `${getApiUrl()}/api/v1/workflows${qs ? `?${qs}` : ''}`;
+  const url = `${getApiUrl()}/api/v1/workflows/runs${qs ? `?${qs}` : ''}`;
   const res = await fetch(url, { headers: await getAuthHeaders() });
   if (!res.ok) throw new Error(`list ${res.status}: ${await res.text()}`);
   return res.json();

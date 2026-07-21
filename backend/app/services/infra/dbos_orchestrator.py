@@ -565,7 +565,7 @@ async def start_workflow_routed(
 
     kwargs = dbos_workflow_kwargs or {}
     # Set authenticated_user on the DBOS workflow_status row so
-    # GET /api/v1/workflows can filter by user. Requires user_id
+    # GET /api/v1/workflows/runs can filter by user. Requires user_id
     # in workflow kwargs.
     user_id = kwargs.get("user_id")
 

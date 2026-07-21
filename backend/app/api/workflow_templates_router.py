@@ -2,9 +2,11 @@
 
 Team-level workflow templates (mig 380) and the read-only node bank (mig 381).
 Mounted at ``/workflows`` alongside the DBOS ``workflows_router`` — their paths
-don't overlap (DBOS routes all carry a ``/{workflow_id}/<verb>`` tail; these are
-bare or ``/stage-library``), and ``stage-library`` is declared before ``{id}``
-so the literal wins.
+must stay disjoint. The DBOS run list sits at ``/workflows/runs`` because a
+bare ``GET ""`` there shadowed this router's template list until 2026-07-20
+(FastAPI keeps the first-registered route and silently drops the rest);
+``tests/test_route_uniqueness.py`` now fails on any such collision.
+``stage-library`` is declared before ``{id}`` so the literal wins.
 
 Authorization is the workflow single-source ``resolve_effective_role``: for a
 team-scoped surface a team member resolves to manager/editor (both may write);
