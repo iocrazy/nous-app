@@ -204,6 +204,37 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
     setDirty(true);
   };
 
+  /** Join/leave a parallel group with the node immediately before this one.
+   * Joining reuses the predecessor's group or mints a fresh id; leaving also
+   * dissolves the predecessor's group when it would be left alone (groupRuns
+   * only boxes consecutive same-group nodes, so adjacency is preserved). */
+  const toggleParallelWithPrev = (key: string, on: boolean) => {
+    setDrafts((prev) => {
+      const i = prev.findIndex((d) => d._key === key);
+      if (i <= 0) return prev;
+      const next = [...prev];
+      if (on) {
+        const group =
+          next[i - 1].parallel_group ??
+          Math.max(0, ...next.map((d) => d.parallel_group ?? 0)) + 1;
+        next[i - 1] = { ...next[i - 1], parallel_group: group };
+        next[i] = { ...next[i], parallel_group: group };
+      } else {
+        const group = next[i].parallel_group;
+        next[i] = { ...next[i], parallel_group: null };
+        if (
+          group != null &&
+          next.filter((d) => d.parallel_group === group).length === 1
+        ) {
+          const j = next.findIndex((d) => d.parallel_group === group);
+          next[j] = { ...next[j], parallel_group: null };
+        }
+      }
+      return next;
+    });
+    setDirty(true);
+  };
+
   const removeNode = (key: string) => {
     setDrafts((prev) => prev.filter((d) => d._key !== key));
     if (selectedNodeKey === key) setSelectedNodeKey(null);
@@ -349,6 +380,18 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
           <h2 className="text-base font-semibold text-ink-100">
             {detail?.name ?? 'Workflow Templates'}
           </h2>
+          {detail?.is_default && (
+            <span
+              className="rounded-full border px-2.5 py-0.5 text-[11px] font-medium"
+              style={{
+                background: 'var(--accent-soft)',
+                color: 'var(--accent-text)',
+                borderColor: 'var(--accent-border)',
+              }}
+            >
+              Default for new projects
+            </span>
+          )}
           {detail && !detail.is_default && (
             <button
               onClick={onSetDefault}
@@ -370,53 +413,83 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
             <button
               onClick={save}
               disabled={!dirty || saving}
-              className="rounded-md border px-3 py-1.5 text-[13px] transition disabled:opacity-40"
-              style={{
-                background: 'var(--accent-soft)',
-                color: 'var(--accent-text)',
-                borderColor: 'var(--accent-border)',
-              }}
+              className="rounded-md bg-indigo-600 px-3.5 py-1.5 text-[13px] font-medium text-white transition hover:bg-indigo-500 disabled:opacity-40"
               data-testid="workflow-save-template"
             >
-              {saving ? 'Saving…' : 'Save'}
+              {saving ? 'Saving…' : 'Save flow'}
             </button>
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-wrap content-start items-start gap-2 overflow-y-auto">
-          {runs.map((run, ri) => {
-            const capsules = run.items.map((d) => (
-              <NodeCapsule
-                key={d._key}
-                node={d}
-                active={d._key === selectedNodeKey}
-                onSelect={() => setSelectedNodeKey(d._key)}
-                onDragStart={() => setDragKey(d._key)}
-                onDrop={() => onDrop(d._key)}
-              />
-            ));
-            if (run.group != null) {
+        <div className="flex min-h-0 flex-1 flex-col">
+          {/* Flow chain — one horizontal scrolling row, Feishu-style (mockup §02) */}
+          <div className="flex items-center overflow-x-auto px-0.5 pb-4 pt-2">
+            {detail && (
+              <>
+                <span className="inline-flex shrink-0 items-center gap-2 rounded-full border border-emerald-500/40 px-3.5 py-1.5 text-[12.5px] font-medium text-emerald-500">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  Start
+                  <span className="text-[11px] font-normal text-ink-500">◎ topic</span>
+                </span>
+                <ChainLink />
+              </>
+            )}
+            {runs.map((run, ri) => {
+              const capsules = run.items.map((d) => (
+                <NodeCapsule
+                  key={d._key}
+                  node={d}
+                  active={d._key === selectedNodeKey}
+                  onSelect={() => setSelectedNodeKey(d._key)}
+                  onDragStart={() => setDragKey(d._key)}
+                  onDrop={() => onDrop(d._key)}
+                />
+              ));
               return (
-                <div
-                  key={`run${ri}`}
-                  className="flex flex-col gap-1.5 rounded-lg border border-dashed border-line-strong p-1.5"
-                  title={`Parallel group ${run.group}`}
-                >
-                  {capsules}
-                </div>
+                <React.Fragment key={`run${ri}`}>
+                  {ri > 0 && <ChainLink />}
+                  {run.group != null ? (
+                    <div
+                      className="relative mt-1.5 flex shrink-0 flex-col gap-1.5 rounded-xl border border-dashed p-2 pt-3"
+                      style={{
+                        borderColor: 'var(--accent-border)',
+                        background: 'var(--accent-soft)',
+                      }}
+                      title={`Parallel group ${run.group}`}
+                    >
+                      <span
+                        className="absolute -top-2 left-2.5 rounded px-1.5 text-[9px] font-bold uppercase tracking-wider"
+                        style={{
+                          color: 'var(--accent-text)',
+                          background: 'var(--island)',
+                        }}
+                      >
+                        parallel
+                      </span>
+                      {capsules}
+                    </div>
+                  ) : (
+                    capsules
+                  )}
+                </React.Fragment>
               );
-            }
-            return <React.Fragment key={`run${ri}`}>{capsules}</React.Fragment>;
-          })}
+            })}
+            {detail && runs.length > 0 && <ChainLink />}
+            <button
+              onClick={() => setLibraryOpen(true)}
+              disabled={!selectedId}
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-dashed border-line-strong px-3.5 py-1.5 text-[13px] text-[var(--accent-text)] transition hover:border-[var(--accent-border)] disabled:opacity-40"
+              data-testid="workflow-add-from-library"
+            >
+              <Plus size={14} /> Add from library
+            </button>
+          </div>
 
-          <button
-            onClick={() => setLibraryOpen(true)}
-            disabled={!selectedId}
-            className="inline-flex items-center gap-1 self-start rounded-full border border-dashed border-line-strong px-3 py-1.5 text-[13px] text-ink-400 transition hover:border-[var(--accent-border)] hover:text-ink-200 disabled:opacity-40"
-            data-testid="workflow-add-from-library"
-          >
-            <Plus size={14} /> Add from library
-          </button>
+          <div className="mt-auto border-t border-line pt-3 text-[12px] leading-relaxed text-ink-600">
+            Drag capsules to reorder. Group a node with its predecessor from the
+            inspector — a parallel group advances only when every node in it is
+            done. “+ Add from library” appends nodes from the bank.
+          </div>
         </div>
       </section>
 
@@ -424,6 +497,13 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
       <aside className="flex w-80 shrink-0 flex-col border-l border-line pl-4">
         {selectedNode ? (
           <>
+            <div className="mb-1 flex items-baseline gap-2">
+              <h3 className="text-[14px] font-semibold text-ink-100">{selectedNode.name}</h3>
+              <span className="ml-auto text-[11px] text-ink-500">
+                node {drafts.findIndex((d) => d._key === selectedNode._key) + 1} of{' '}
+                {drafts.length}
+              </span>
+            </div>
             <div className="mb-3 flex gap-1 border-b border-line">
               {(['info', 'flow', 'events'] as const).map((tab) => (
                 <button
@@ -444,6 +524,16 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
                 node={selectedNode}
                 people={people}
                 agents={agents}
+                isFirst={drafts[0]?._key === selectedNode._key}
+                parallelWithPrev={(() => {
+                  const i = drafts.findIndex((d) => d._key === selectedNode._key);
+                  return (
+                    i > 0 &&
+                    selectedNode.parallel_group != null &&
+                    drafts[i - 1].parallel_group === selectedNode.parallel_group
+                  );
+                })()}
+                onToggleParallel={(v) => toggleParallelWithPrev(selectedNode._key, v)}
                 onPatch={(patch) => patchNode(selectedNode._key, patch)}
                 onRemove={() => removeNode(selectedNode._key)}
               />
@@ -471,6 +561,11 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
 
 // ── capsule ────────────────────────────────────────────────────────────────
 
+/** Hairline connector between chain segments (mockup §02 .flink). */
+const ChainLink: React.FC = () => (
+  <span className="h-px w-6 shrink-0 bg-line-strong" aria-hidden />
+);
+
 const NodeCapsule: React.FC<{
   node: DraftNode;
   active: boolean;
@@ -484,13 +579,19 @@ const NodeCapsule: React.FC<{
     onDragOver={(e) => e.preventDefault()}
     onDrop={onDrop}
     onClick={onSelect}
-    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] transition ${
+    className={`inline-flex shrink-0 items-center gap-2 rounded-full border bg-transparent px-3.5 py-1.5 text-[12.5px] font-medium transition ${
       active
-        ? 'border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]'
-        : 'border-line text-ink-300 hover:border-line-strong'
-    } ${node.skip_default ? 'line-through opacity-50' : ''}`}
+        ? 'border-[var(--accent-border)] text-ink-100 shadow-[0_0_0_3px_var(--accent-soft)]'
+        : 'border-line-strong text-ink-300 hover:border-[var(--accent-border)]'
+    } ${node.skip_default ? 'border-dashed opacity-55' : ''}`}
     data-testid="workflow-node-capsule"
   >
+    <span
+      className={`h-2 w-2 rounded-full border ${
+        active ? 'border-transparent' : 'border-line-strong'
+      } ${node.skip_default ? 'border-dashed' : ''}`}
+      style={active ? { background: 'var(--accent, #6366f1)' } : undefined}
+    />
     {node.name}
     {node.review_required && <span className="text-[10px] text-purple-400">✓</span>}
   </button>
@@ -527,9 +628,12 @@ const NodeInfoTab: React.FC<{
   node: DraftNode;
   people: PersonOption[];
   agents: AgentOption[];
+  isFirst: boolean;
+  parallelWithPrev: boolean;
+  onToggleParallel: (v: boolean) => void;
   onPatch: (patch: Partial<DraftNode>) => void;
   onRemove: () => void;
-}> = ({ node, people, agents, onPatch, onRemove }) => (
+}> = ({ node, people, agents, isFirst, parallelWithPrev, onToggleParallel, onPatch, onRemove }) => (
   <div className="flex flex-col gap-3 overflow-y-auto text-[13px]">
     <div>
       <label className="mb-1 block text-[11px] uppercase tracking-wider text-ink-600">Name</label>
@@ -609,6 +713,13 @@ const NodeInfoTab: React.FC<{
         checked={node.deliverable_required}
         onChange={(v) => onPatch({ deliverable_required: v })}
       />
+      {!isFirst && (
+        <Toggle
+          label="Parallel with previous node"
+          checked={parallelWithPrev}
+          onChange={onToggleParallel}
+        />
+      )}
     </div>
 
     <button
