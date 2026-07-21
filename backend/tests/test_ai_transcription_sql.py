@@ -37,6 +37,107 @@ async def test_load_transcribe_inputs_raises_when_no_audio_path():
             await m.load_transcribe_inputs(1, "u")
 
 
+async def test_load_transcribe_inputs_gallery_uses_music_download_path():
+    """Image galleries (douyin 图文) have no video → extract_audio_path is
+    always empty. The background music at music_download_path is the only
+    on-disk audio; the selector must pick it, NOT fall back to download_path
+    (which for a gallery is a directory → ASR 45000006 Invalid audio URI)."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    import app.workflows.ai_transcription as m
+
+    media_row = {
+        "id": 1,
+        "download_path": "global/resources/web/douyin/999",  # a DIRECTORY
+        "extract_audio_path": None,
+        "music_download_path": "global/resources/web/douyin/999/audio.mp3",
+        "platform_id": "douyin",
+        "resource_id": 5,
+    }
+    cfg = SimpleNamespace(
+        origin="governance",
+        provider_key="volcengine",
+        provider_config={"api_key": "k"},
+        model="volcengine:bigasr",
+    )
+    with (
+        patch("app.db.engine.fetch_one", AsyncMock(return_value=media_row)),
+        patch(
+            "app.services.ai.providers.ai_provider_helpers."
+            "resolve_transcription_config",
+            AsyncMock(return_value=cfg),
+        ),
+    ):
+        out = await m.load_transcribe_inputs(1, "u")
+
+    assert out["audio_path"] == "global/resources/web/douyin/999/audio.mp3"
+
+
+async def test_load_transcribe_inputs_video_prefers_extract_audio_path():
+    """Video downloads have ffmpeg-extracted audio → extract_audio_path wins
+    over both music_download_path and download_path (regression guard: the
+    gallery fix must not divert the video path)."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    import app.workflows.ai_transcription as m
+
+    media_row = {
+        "id": 1,
+        "download_path": "global/resources/web/douyin/1/video.mp4",
+        "extract_audio_path": "global/resources/web/douyin/1/audio.wav",
+        "music_download_path": "global/resources/web/douyin/1/bgm.mp3",
+        "platform_id": "douyin",
+        "resource_id": 5,
+    }
+    cfg = SimpleNamespace(
+        origin="governance",
+        provider_key="volcengine",
+        provider_config={"api_key": "k"},
+        model="volcengine:bigasr",
+    )
+    with (
+        patch("app.db.engine.fetch_one", AsyncMock(return_value=media_row)),
+        patch(
+            "app.services.ai.providers.ai_provider_helpers."
+            "resolve_transcription_config",
+            AsyncMock(return_value=cfg),
+        ),
+    ):
+        out = await m.load_transcribe_inputs(1, "u")
+
+    assert out["audio_path"] == "global/resources/web/douyin/1/audio.wav"
+
+
+def test_assert_audio_present_rejects_directory(tmp_path):
+    """A directory path (gallery whose music was never downloaded, falling back
+    to download_path) must fast-fail with a directory-specific message — the
+    old os.path.exists guard let directories through to the ASR provider."""
+    import app.workflows.ai_transcription as m
+
+    with pytest.raises(RuntimeError, match="audio path is a directory"):
+        m.assert_audio_present_step(str(tmp_path))
+
+
+def test_assert_audio_present_rejects_missing(tmp_path):
+    """A missing/empty file must fail with the missing-or-empty message."""
+    import app.workflows.ai_transcription as m
+
+    missing = str(tmp_path / "nope.mp3")
+    with pytest.raises(RuntimeError, match="missing or empty"):
+        m.assert_audio_present_step(missing)
+
+
+def test_assert_audio_present_accepts_real_file(tmp_path):
+    """A non-empty real file passes through unchanged."""
+    import app.workflows.ai_transcription as m
+
+    f = tmp_path / "audio.mp3"
+    f.write_bytes(b"\x00\x01\x02")
+    assert m.assert_audio_present_step(str(f)) == str(f)
+
+
 async def test_mark_transcript_completed_uses_media_id_column():
     import app.workflows.ai_transcription as m
 

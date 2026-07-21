@@ -29,7 +29,8 @@ async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str
     from app.db import engine as db_engine
 
     media_row = await db_engine.fetch_one(
-        "SELECT pm.id, pm.download_path, pm.extract_audio_path, pm.platform_id, "
+        "SELECT pm.id, pm.download_path, pm.extract_audio_path, "
+        "pm.music_download_path, pm.platform_id, "
         "r.id AS resource_id "
         "FROM public.parsed_media pm "
         "JOIN public.resources r ON r.media_id = pm.id "
@@ -44,7 +45,21 @@ async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str
         {"uid": user_id},
     )
 
-    audio_path = media_row.get("extract_audio_path") or media_row.get("download_path")
+    # Audio-source precedence:
+    #   1. extract_audio_path — ffmpeg-extracted audio from a video (present
+    #      for the video download path).
+    #   2. music_download_path — background music fetched separately. This is
+    #      the ONLY on-disk audio for image galleries (douyin 图文, media_type
+    #      68): galleries have no video, so extract_audio_path is always empty
+    #      and the true audio lives at <dir>/audio.mp3. Dropping this fell back
+    #      to download_path, which for galleries is a DIRECTORY — the ASR then
+    #      failed with Volcengine 45000006 "Invalid audio URI".
+    #   3. download_path — last resort (single-file video downloads).
+    audio_path = (
+        media_row.get("extract_audio_path")
+        or media_row.get("music_download_path")
+        or media_row.get("download_path")
+    )
     if not audio_path:
         raise RuntimeError(f"no audio_path for parsed_media={parsed_media_id}")
 
@@ -108,8 +123,18 @@ def assert_audio_present_step(audio_path: str) -> str:
         if os.path.isabs(audio_path)
         else os.path.join(settings.DOWNLOAD_PATH, audio_path)
     )
+    # Use isfile (not exists): a gallery whose background music was never
+    # downloaded falls back to download_path, which is a DIRECTORY. exists()
+    # returns True for a directory, so the guard let it through and the ASR
+    # provider blew up later with an opaque "Invalid audio URI". isfile()
+    # fast-fails here with an actionable message instead.
     try:
-        if os.path.exists(full_path) and os.path.getsize(full_path) > 0:
+        if os.path.isdir(full_path):
+            raise RuntimeError(
+                f"audio path is a directory (gallery without downloaded "
+                f"music?): {audio_path}"
+            )
+        if os.path.isfile(full_path) and os.path.getsize(full_path) > 0:
             return audio_path
     except OSError:
         pass
