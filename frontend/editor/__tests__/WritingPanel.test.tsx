@@ -54,6 +54,18 @@ describe('deriveStatistics', () => {
     expect(stats.cast).toEqual(['CLIENT', 'DEV']);
   });
 
+  it('counts CJK text per character, mixed with Latin words', () => {
+    const stats = deriveStatistics([
+      { ...fixture[0], location_text: '', elements: [
+        // 8 hanzi + 1 Latin word = 9; punctuation is neither.
+        { id: 'a', type: 'dialogue', text: '我没有什么可说的, button' },
+        // 4 hanzi + 1 Latin word = 5.
+        { id: 'b', type: 'dialogue', text: '水电费 i 呢?' },
+      ] },
+    ]);
+    expect(stats.words).toBe(14);
+  });
+
   it('treats character cues case-insensitively as one entry', () => {
     const stats = deriveStatistics([
       { ...fixture[0], elements: [

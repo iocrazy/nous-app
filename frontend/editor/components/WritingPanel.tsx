@@ -2,7 +2,7 @@
  * WritingPanel — the right "Writing" island (spec v3 §3.2 Statistics + Format).
  *
  * Statistics are derived live and purely on the client from the loaded scenes:
- * Scenes, Words (whitespace-split across every element), Characters (distinct
+ * Scenes, Words (CJK chars + whitespace-split runs, see countWords), Characters (distinct
  * character-cue text), Locations (distinct location_text), and a CAST list with
  * colour dots. Page-count is intentionally omitted (depends on the pagination
  * engine, cut for Phase 1 per the plan).
@@ -37,6 +37,26 @@ export interface EditorStatistics {
   cast: string[];
 }
 
+/** CJK ideographs/kana/hangul — scripts that don't space-separate words. */
+const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/g;
+
+/**
+ * Word count for mixed CJK/Latin text: each CJK character counts as one word
+ * (the convention every CJK editor uses — a whitespace split saw a whole
+ * Chinese dialogue line as ONE word, so a Chinese script reported 字数 7),
+ * plus whitespace-separated runs of everything else.
+ */
+function countWords(text: string): number {
+  const cjk = text.match(CJK_RE)?.length ?? 0;
+  const latinWords = text
+    .replace(CJK_RE, ' ')
+    .split(/\s+/)
+    // A run must carry a letter or digit — stripping the hanzi out of
+    // "我说的, button" leaves a bare "," that is not a word.
+    .filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
+  return cjk + latinWords;
+}
+
 export function deriveStatistics(scenes: SceneDoc[]): EditorStatistics {
   let words = 0;
   const castSet = new Set<string>();
@@ -48,7 +68,7 @@ export function deriveStatistics(scenes: SceneDoc[]): EditorStatistics {
     if (loc) locationSet.add(loc.toUpperCase());
     for (const el of scene.elements) {
       const trimmed = el.text.trim();
-      if (trimmed) words += trimmed.split(/\s+/).length;
+      if (trimmed) words += countWords(trimmed);
       if (el.type === 'character' && trimmed) {
         const key = trimmed.toUpperCase();
         if (!castSet.has(key)) {
