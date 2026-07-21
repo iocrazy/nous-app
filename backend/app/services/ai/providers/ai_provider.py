@@ -95,6 +95,12 @@ class OpenAIProvider(AIProvider):
             file=("audio.mp3", audio_bytes),
             response_format="verbose_json",
             timestamp_granularities=["segment"],
+            # Self-hosted moss-asr ignores the two OpenAI params above and
+            # gates segment timestamps behind its own `timestamps` form field
+            # (verified against the live server: segments come back as
+            # {start, end, speaker, text}). OpenAI-compatible servers that
+            # don't know the field ignore unknown multipart parts.
+            extra_body={"timestamps": True},
             **kwargs,
         )
 
@@ -120,11 +126,23 @@ class OpenAIProvider(AIProvider):
                 )
             )
 
+        # Minimal OpenAI-compatible servers (e.g. the self-hosted moss-asr)
+        # return `duration: null` / `language: null` with the real length in
+        # `usage.seconds` — the SDK model keeps the attributes present-but-None,
+        # so getattr defaults never engage. A None duration then crashed the
+        # `:.1f` formatting downstream. Normalize both here.
+        duration = getattr(response, "duration", None)
+        if duration is None:
+            usage = getattr(response, "usage", None)
+            if isinstance(usage, dict):
+                duration = usage.get("seconds")
+            else:
+                duration = getattr(usage, "seconds", None)
         return TranscriptResult(
-            text=response.text,
+            text=response.text or "",
             segments=segments,
-            language=getattr(response, "language", "unknown"),
-            duration=getattr(response, "duration", 0.0),
+            language=getattr(response, "language", None) or "unknown",
+            duration=float(duration or 0.0),
         )
 
     async def list_models(self) -> List[str]:
