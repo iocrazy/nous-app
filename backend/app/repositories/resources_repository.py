@@ -992,6 +992,68 @@ class ResourcesRepository(AsyncpgRepository):
             logger.error(f"Failed to get gallery items for {gallery_id}: {e}")
             return []
 
+    async def get_scope_gallery_membership(self, scope_id: str) -> Dict[str, Any]:
+        """Gallery membership the frontend library list needs but cannot read
+        itself — ``gallery_items`` is a service-role-only table (RLS lockdown,
+        mig 375), so the direct supabase-js list query has no access to it.
+
+        Returns, for one workspace ``scope_id``::
+
+            {
+              "child_image_ids": [str, ...],       # resources to hide
+              "gallery_counts": {gallery_id: int}  # ▣ badge child counts
+            }
+
+        - ``child_image_ids``: resources that are a child of some gallery AND
+          have a ``resource_items`` row in this scope — the rows the direct
+          list must exclude so a gallery reads as a single tile (mirrors the
+          backend list's ``NOT EXISTS (... gallery_items ...)`` predicate).
+        - ``gallery_counts``: child count per gallery in this scope — the value
+          the backend list's computed ``gallery_count`` column provides but the
+          direct query cannot.
+
+        Both sets are small (galleries are a fraction of a scope); the frontend
+        caches this per scope and filters/annotates client-side.
+        """
+        try:
+            sid = self._bigint(scope_id)
+        except Exception:
+            return {"child_image_ids": [], "gallery_counts": {}}
+        try:
+            async with read_scope() as session:
+                child_result = await session.execute(
+                    text(
+                        "SELECT DISTINCT gi.image_id AS id "
+                        "FROM gallery_items gi "
+                        "INNER JOIN resource_items i "
+                        "  ON i.resource_id = gi.image_id "
+                        "WHERE i.scope_id = :sid"
+                    ),
+                    {"sid": sid},
+                )
+                child_ids = [str(r["id"]) for r in child_result.mappings().all()]
+
+                count_result = await session.execute(
+                    text(
+                        "SELECT gi.gallery_id AS gallery_id, "
+                        "       COUNT(*) AS n "
+                        "FROM gallery_items gi "
+                        "INNER JOIN resource_items i "
+                        "  ON i.resource_id = gi.gallery_id "
+                        "WHERE i.scope_id = :sid "
+                        "GROUP BY gi.gallery_id"
+                    ),
+                    {"sid": sid},
+                )
+                counts = {
+                    str(r["gallery_id"]): int(r["n"])
+                    for r in count_result.mappings().all()
+                }
+            return {"child_image_ids": child_ids, "gallery_counts": counts}
+        except Exception as e:
+            logger.error(f"Failed to get scope gallery membership for {scope_id}: {e}")
+            return {"child_image_ids": [], "gallery_counts": {}}
+
     # ── Listing with filters (the 22-arg behemoth) ──────────────────
 
     @staticmethod

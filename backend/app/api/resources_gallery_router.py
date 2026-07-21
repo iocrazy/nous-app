@@ -82,6 +82,38 @@ async def create_gallery(
         raise HTTPException(status_code=500, detail="Failed to create gallery")
 
 
+@router.get("/gallery-membership")
+async def get_gallery_membership(
+    auth: AuthDep,
+    scope_id: str = Query(..., description="Owning workspace scope (snowflake id)"),
+    _scope_guard: None = Depends(verify_scope_access),
+):
+    """Gallery membership for one scope, for the direct-query library list.
+
+    ``gallery_items`` is service-role only (RLS, mig 375) so the frontend's
+    supabase-js list cannot read it. This exposes the two derived bits the list
+    needs: the child image ids to hide (so a gallery reads as one tile) and the
+    per-gallery child counts (the ▣ badge). Both are small; the frontend caches
+    the result per scope and filters/annotates client-side.
+
+    Response::
+
+        {"success": true, "data": {
+            "child_image_ids": ["..."],
+            "gallery_counts": {"<gallery_id>": 3}
+        }}
+    """
+    try:
+        repo = ResourcesRepository()
+        data = await repo.get_scope_gallery_membership(scope_id)
+        return {"success": True, "data": data}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get gallery membership for scope {scope_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get gallery membership")
+
+
 @router.put("/{gallery_id}/gallery-items")
 async def set_gallery_items(
     gallery_id: str,
