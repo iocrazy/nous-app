@@ -122,6 +122,9 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  // Where the next picked library node lands: a draft index when opened from
+  // a connector's hover "+", or null for plain append from the tail capsule.
+  const [insertIndex, setInsertIndex] = useState<number | null>(null);
   const [library, setLibrary] = useState<StageLibraryItem[]>([]);
   const [people, setPeople] = useState<PersonOption[]>([]);
   const [agents, setAgents] = useState<AgentOption[]>([]);
@@ -257,7 +260,13 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
       duration_days: null,
       members: [],
     };
-    setDrafts((prev) => [...prev, draft]);
+    setDrafts((prev) => {
+      const at = insertIndex == null ? prev.length : Math.min(insertIndex, prev.length);
+      const next = [...prev];
+      next.splice(at, 0, draft);
+      return next;
+    });
+    setInsertIndex(null);
     setSelectedNodeKey(draft._key);
     setDirty(true);
     setLibraryOpen(false);
@@ -336,7 +345,9 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
   const runs = useMemo(() => groupRuns(drafts), [drafts]);
 
   return (
-    <div className="flex h-full min-h-0 gap-4" data-testid="workflow-template-editor">
+    <div className="flex h-full min-h-0 gap-3" data-testid="workflow-template-editor">
+      {/* Canvas island — templates rail + flow chain (mockup §02 .canvas) */}
+      <div className="flex min-w-0 flex-1 gap-4 rounded-xl border border-line bg-island p-4">
       {/* Templates rail */}
       <aside className="flex w-48 shrink-0 flex-col border-r border-line pr-3">
         <div className="mb-2 flex items-center justify-between">
@@ -431,7 +442,12 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
                   Start
                   <span className="text-[11px] font-normal text-ink-500">◎ topic</span>
                 </span>
-                <ChainLink />
+                <ChainLink
+                  onInsert={() => {
+                    setInsertIndex(0);
+                    setLibraryOpen(true);
+                  }}
+                />
               </>
             )}
             {runs.map((run, ri) => {
@@ -447,7 +463,16 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
               ));
               return (
                 <React.Fragment key={`run${ri}`}>
-                  {ri > 0 && <ChainLink />}
+                  {ri > 0 && (
+                    <ChainLink
+                      onInsert={() => {
+                        setInsertIndex(
+                          drafts.findIndex((d) => d._key === run.items[0]._key),
+                        );
+                        setLibraryOpen(true);
+                      }}
+                    />
+                  )}
                   {run.group != null ? (
                     <div
                       className="relative mt-1.5 flex shrink-0 flex-col gap-1.5 rounded-xl border border-dashed p-2 pt-3"
@@ -476,7 +501,10 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
             })}
             {detail && runs.length > 0 && <ChainLink />}
             <button
-              onClick={() => setLibraryOpen(true)}
+              onClick={() => {
+                setInsertIndex(null);
+                setLibraryOpen(true);
+              }}
               disabled={!selectedId}
               className="inline-flex shrink-0 items-center gap-1 rounded-full border border-dashed border-line-strong px-3.5 py-1.5 text-[13px] text-[var(--accent-text)] transition hover:border-[var(--accent-border)] disabled:opacity-40"
               data-testid="workflow-add-from-library"
@@ -492,9 +520,10 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
           </div>
         </div>
       </section>
+      </div>
 
-      {/* Inspector */}
-      <aside className="flex w-80 shrink-0 flex-col border-l border-line pl-4">
+      {/* Inspector island (mockup §02 .inspector) */}
+      <aside className="flex w-80 shrink-0 flex-col rounded-xl border border-line bg-island p-4">
         {selectedNode ? (
           <>
             <div className="mb-1 flex items-baseline gap-2">
@@ -552,7 +581,10 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
         <LibraryPickerModal
           items={library}
           onPick={addFromLibrary}
-          onClose={() => setLibraryOpen(false)}
+          onClose={() => {
+            setLibraryOpen(false);
+            setInsertIndex(null);
+          }}
         />
       )}
     </div>
@@ -561,10 +593,25 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
 
 // ── capsule ────────────────────────────────────────────────────────────────
 
-/** Hairline connector between chain segments (mockup §02 .flink). */
-const ChainLink: React.FC = () => (
-  <span className="h-px w-6 shrink-0 bg-line-strong" aria-hidden />
-);
+/** Hairline connector between chain segments (mockup §02 .flink).
+ * With onInsert, hovering reveals a "+" that inserts a library node at
+ * that position in the chain. */
+const ChainLink: React.FC<{ onInsert?: () => void }> = ({ onInsert }) =>
+  onInsert ? (
+    <span className="group relative flex h-6 w-7 shrink-0 items-center justify-center">
+      <span className="h-px w-full bg-line-strong" aria-hidden />
+      <button
+        onClick={onInsert}
+        className="absolute inline-flex h-[18px] w-[18px] items-center justify-center rounded-full border border-[var(--accent-border)] bg-island text-[var(--accent-text)] opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100"
+        title="Insert node here"
+        data-testid="workflow-insert-node"
+      >
+        <Plus size={11} />
+      </button>
+    </span>
+  ) : (
+    <span className="h-px w-6 shrink-0 bg-line-strong" aria-hidden />
+  );
 
 const NodeCapsule: React.FC<{
   node: DraftNode;
