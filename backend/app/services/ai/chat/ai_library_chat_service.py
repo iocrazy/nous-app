@@ -1090,19 +1090,29 @@ class AILibraryChatService:
             # capture by name so the asyncio.create_task dispatch is clean.
             async def _harvest_summarizer(prompt: str) -> str:
                 try:
+                    # Model-assignment fix (2026-07 audit): the commitment
+                    # harvester is a cheap maintenance-tier summarizer, the
+                    # same class as the chat compactor (_summarizer above)
+                    # and the session/agent-memory summarizers. Route through
+                    # the admin-overridable maintenance model
+                    # (system_settings.maintenance_llm_model, DB-only per
+                    # 铁律 2026-07-07) via resolve_db_adapter — NOT a hardcoded
+                    # QwenAdapter(qwen-turbo). The old hardcode ignored the
+                    # admin's maintenance-model choice AND silently no-op'd on
+                    # any deployment without a DashScope key (last-mile
+                    # hardcode class; cf. session_memory_runner Audit #17).
                     from app.schemas.ai_library import ComposedSystemPrompt
-                    from app.services.ai.providers.ai_provider import QwenAdapter
-
-                    api_key = getattr(settings, "DASHSCOPE_API_KEY", None) or getattr(
-                        settings, "QWEN_API_KEY", None
+                    from app.services.ai.providers.ai_provider_helpers import (
+                        get_maintenance_model,
+                        resolve_db_adapter,
                     )
-                    if not api_key:
-                        return ""
-                    adapter = QwenAdapter(api_key=api_key, model="qwen-turbo")
+
+                    cheap_model = await get_maintenance_model()
+                    adapter = await resolve_db_adapter(cheap_model, "chat")
                     cs = ComposedSystemPrompt(
                         agent_id=composed.agent_id,
                         agent_slug="commitment_harvester",
-                        model="qwen-turbo",
+                        model=cheap_model,
                         temperature=0.0,
                         max_tokens=512,
                         system_message="Extract commitments. Output strict JSON.",

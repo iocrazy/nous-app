@@ -35,7 +35,6 @@ from app.services.ai.memory.agent_memory import (  # noqa: F401 (re-exported for
 
 COMPACT_TRIGGER = 30  # un-summarized messages (beyond the tail) that trigger compaction
 COMPACT_KEEP_TAIL = 20  # newest messages stay verbatim (= recent_messages window)
-_SUMMARY_MODEL = "qwen-turbo"
 _SUMMARY_MAX_TOKENS = 700
 
 _SUMMARY_SYSTEM = (
@@ -64,26 +63,34 @@ async def _fresh_conversation(conversation_id: int) -> Optional[dict[str, Any]]:
     )
 
 
-async def _summarize(previous: str, transcript: str) -> str:
-    """Cheap-LLM rolling summary. '' on any failure / missing key
-    (precedent: _harvest_summarizer in ai_library_chat_service)."""
+async def _summarize(previous: str, transcript: str, model: str) -> str:
+    """Cheap-LLM rolling summary. '' on any failure.
+
+    Model-assignment fix (2026-07 audit): this rolling group-chat compactor
+    is a maintenance-tier summarizer, the same class as the chat compactor
+    and the session/agent-memory summarizers. It previously hardcoded a
+    ``QwenAdapter(model="qwen-turbo")`` behind a DashScope key check — so it
+    silently no-op'd for any deployment on a non-Qwen provider AND ignored
+    the admin's ``maintenance_llm_model`` choice (the last-mile-hardcode
+    class its old docstring cited as precedent: ``_harvest_summarizer``,
+    itself fixed in the same audit). Now routes through the caller-resolved
+    maintenance model via ``resolve_db_adapter`` (DB-only credentials,
+    铁律 2026-07-07)."""
     try:
         from uuid import uuid4
 
         from app.schemas.ai_library import ComposedSystemPrompt
-        from app.services.ai.providers.ai_provider import QwenAdapter
-
-        api_key = getattr(settings, "DASHSCOPE_API_KEY", None) or getattr(
-            settings, "QWEN_API_KEY", None
+        from app.services.ai.providers.ai_provider_helpers import (
+            get_maintenance_model,
+            resolve_db_adapter,
         )
-        if not api_key:
-            logger.info("[conv_memory] no qwen key — skipping compaction")
-            return ""
-        adapter = QwenAdapter(api_key=api_key, model=_SUMMARY_MODEL)
+
+        summary_model = (model or "").strip() or await get_maintenance_model()
+        adapter = await resolve_db_adapter(summary_model, "chat")
         cs = ComposedSystemPrompt(
             agent_id=uuid4(),
             agent_slug="conversation_compactor",
-            model=_SUMMARY_MODEL,
+            model=summary_model,
             temperature=0.0,
             max_tokens=_SUMMARY_MAX_TOKENS,
             system_message=_SUMMARY_SYSTEM,
@@ -165,14 +172,22 @@ async def maybe_compact(*, conversation: dict[str, Any]) -> None:
             return
         transcript = "\n".join(_render_line(m) for m in msgs)
         previous = (mem or {}).get("summary_md") or ""
-        summary = await _summarize(previous, transcript)
+        # Resolve the admin-overridable maintenance model once, so the
+        # summary call and the recorded ``model`` column agree (no more
+        # hardcoded "qwen-turbo" label decoupled from what actually ran).
+        from app.services.ai.providers.ai_provider_helpers import (
+            get_maintenance_model,
+        )
+
+        summary_model = await get_maintenance_model()
+        summary = await _summarize(previous, transcript, summary_model)
         if not summary:
             return
         await get_conversation_memory_repository().upsert(
             conversation_id=cid,
             summary_md=summary,
             last_seq_summarized=to_seq,
-            model=_SUMMARY_MODEL,
+            model=summary_model,
         )
         logger.info(f"[conv_memory] compacted conv={cid} through seq={to_seq}")
     except Exception as exc:  # noqa: BLE001
