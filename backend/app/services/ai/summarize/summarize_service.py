@@ -163,6 +163,24 @@ class SummarizeService:
             )
         )
 
+        # Model-assignment fix (2026-07 audit): summarization's model is
+        # resolved PER-USER by resolve_summarization_config (the provider
+        # scan's selected_model, else default_summary_model) and threaded in
+        # through provider_config["model"] -> self.model. The composed
+        # ``summarize`` agent row carries no per-user model, so the composer
+        # falls back to its hardcoded "qwen-max" default -- a non-empty value
+        # that would win ``composed.model or self.model`` and SILENTLY DROP
+        # the user's assigned summary model (the last-mile-hardcode class:
+        # cf. visual-analysis, whisper). Mirror the twin llm_analysis_service
+        # ._run_agent, whose comment already codifies the rule: the caller's
+        # per-request model takes precedence over the agent row's, because
+        # summarize's model routing is set per-user in the task-assignment
+        # UI, not in the agent row. Only override when a resolved model
+        # exists, so the no-assignment path still degrades to the agent
+        # row / composer default.
+        if self.model:
+            composed = composed.model_copy(update={"model": self.model})
+
         adapter = self._build_adapter(composed.model or self.model)
         runner = AgentRunner(
             adapter=adapter,
