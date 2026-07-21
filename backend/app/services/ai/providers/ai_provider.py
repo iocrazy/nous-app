@@ -25,6 +25,12 @@ class TranscriptSegment:
     start: float
     end: float
     text: str
+    # Speaker diarization label (e.g. "S01" / "S02"), an extension field the
+    # self-hosted moss-asr server returns on each verbose_json segment. Absent
+    # for OpenAI Whisper and the Volcengine ASR path, so it defaults to None —
+    # downstream serialization omits the key entirely when None, keeping the
+    # persisted segment shape identical for providers that don't diarize.
+    speaker: Optional[str] = None
 
 
 @dataclass
@@ -90,6 +96,21 @@ class OpenAIProvider(AIProvider):
 
         async with aiofiles.open(audio_path, "rb") as f:
             audio_bytes = await f.read()
+
+        # Transcription hotwords (人名 / 术语 domain hints). Two upstreams read
+        # them under different names, so send BOTH when present, harmlessly:
+        #   - moss-asr reads the `context` form field (extra_body).
+        #   - OpenAI Whisper reads the first-class `prompt` param — pass it as a
+        #     top-level SDK kwarg, not via extra_body.
+        # Pop it here so it never leaks into `**kwargs` (an unknown `hotwords`
+        # multipart part would confuse the upstream).
+        hotwords = (kwargs.pop("hotwords", "") or "").strip()
+        extra_body: dict = {"timestamps": True}
+        create_kwargs: dict = {}
+        if hotwords:
+            extra_body["context"] = hotwords
+            create_kwargs["prompt"] = hotwords
+
         response = await self._client.audio.transcriptions.create(
             model=kwargs.pop("model", "whisper-1"),
             file=("audio.mp3", audio_bytes),
@@ -100,7 +121,8 @@ class OpenAIProvider(AIProvider):
             # (verified against the live server: segments come back as
             # {start, end, speaker, text}). OpenAI-compatible servers that
             # don't know the field ignore unknown multipart parts.
-            extra_body={"timestamps": True},
+            extra_body=extra_body,
+            **create_kwargs,
             **kwargs,
         )
 
@@ -122,6 +144,13 @@ class OpenAIProvider(AIProvider):
                         seg.get("text", "")
                         if isinstance(seg, dict)
                         else getattr(seg, "text", "")
+                    ),
+                    # Optional diarization label from moss-asr; None (absent)
+                    # for servers that don't return it.
+                    speaker=(
+                        seg.get("speaker")
+                        if isinstance(seg, dict)
+                        else getattr(seg, "speaker", None)
                     ),
                 )
             )

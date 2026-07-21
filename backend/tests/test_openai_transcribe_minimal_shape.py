@@ -82,9 +82,61 @@ async def test_transcribe_moss_timestamps_segments(tmp_path):
     assert result.segments[0].start == 0.0
     assert result.segments[0].end == 6.62
     assert result.segments[0].text == "今天天气不错。"
+    # The diarization label is parsed onto the segment.
+    assert result.segments[0].speaker == "S01"
     # The request must carry the moss timestamps switch.
     call_kwargs = provider._client.audio.transcriptions.create.call_args.kwargs
     assert call_kwargs.get("extra_body") == {"timestamps": True}
+
+
+@pytest.mark.asyncio
+async def test_transcribe_segments_without_speaker_default_none(tmp_path):
+    # A verbose_json segment with no `speaker` key → speaker stays None (old
+    # OpenAI Whisper / non-diarizing shape is unchanged).
+    response = SimpleNamespace(
+        text="hi",
+        segments=[{"start": 0.0, "end": 1.5, "text": "hi"}],
+        language="en",
+        duration=1.5,
+        usage=None,
+    )
+    provider, audio = _provider_with_response(tmp_path, response)
+    result = await provider.transcribe(audio, model="whisper-1")
+    assert result.segments[0].speaker is None
+
+
+@pytest.mark.asyncio
+async def test_transcribe_hotwords_present_sends_context_and_prompt(tmp_path):
+    # Non-empty hotwords → moss `context` (extra_body) + OpenAI `prompt`
+    # (first-class kwarg), sent together, harmlessly. timestamps stays on.
+    response = SimpleNamespace(
+        text="hi", segments=None, language="en", duration=1.0, usage=None
+    )
+    provider, audio = _provider_with_response(tmp_path, response)
+    await provider.transcribe(audio, model="whisper-1", hotwords="Ada Lovelace, RLHF")
+    call_kwargs = provider._client.audio.transcriptions.create.call_args.kwargs
+    assert call_kwargs.get("extra_body") == {
+        "timestamps": True,
+        "context": "Ada Lovelace, RLHF",
+    }
+    assert call_kwargs.get("prompt") == "Ada Lovelace, RLHF"
+    # hotwords must never leak through as a raw multipart param.
+    assert "hotwords" not in call_kwargs
+
+
+@pytest.mark.asyncio
+async def test_transcribe_no_hotwords_omits_context_and_prompt(tmp_path):
+    # Empty / absent hotwords → request is byte-for-byte the pre-feature shape:
+    # extra_body carries only `timestamps`, and there is no `prompt`.
+    response = SimpleNamespace(
+        text="hi", segments=None, language="en", duration=1.0, usage=None
+    )
+    provider, audio = _provider_with_response(tmp_path, response)
+    await provider.transcribe(audio, model="whisper-1", hotwords="   ")
+    call_kwargs = provider._client.audio.transcriptions.create.call_args.kwargs
+    assert call_kwargs.get("extra_body") == {"timestamps": True}
+    assert "prompt" not in call_kwargs
+    assert "hotwords" not in call_kwargs
 
 
 @pytest.mark.asyncio

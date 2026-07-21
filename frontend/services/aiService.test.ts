@@ -384,3 +384,58 @@ describe('pollForResult', () => {
     expect(attempts).toBe(3);
   });
 });
+
+describe('transcription hotwords settings mapping', () => {
+  it('getAISettings maps transcription_hotwords from the backend', async () => {
+    stubJson({ transcription_hotwords: 'Ada Lovelace, RLHF' });
+    const settings = await getAISettings();
+    expect(settings.transcription_hotwords).toBe('Ada Lovelace, RLHF');
+  });
+
+  it('getAISettings defaults transcription_hotwords to empty string', async () => {
+    stubJson({});
+    const settings = await getAISettings();
+    expect(settings.transcription_hotwords).toBe('');
+  });
+
+  it('saveAISettings sends transcription_hotwords in the payload', async () => {
+    const spy = stubJson({ success: true });
+    await saveAISettings({
+      ai_enabled: true,
+      preferred_language: 'auto',
+      transcription_hotwords: 'Ada, RLHF',
+      providers: {},
+      task_assignment: {
+        transcription: '',
+        summarization: '',
+        visual_analysis: '',
+        image_generation: '',
+        script_generation: '',
+      },
+    });
+    const body = JSON.parse(
+      (spy.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body.transcription_hotwords).toBe('Ada, RLHF');
+  });
+
+  it('saveAISettings defaults transcription_hotwords to empty string when unset', async () => {
+    const spy = stubJson({ success: true });
+    await saveAISettings({
+      ai_enabled: true,
+      preferred_language: 'auto',
+      providers: {},
+      task_assignment: {
+        transcription: '',
+        summarization: '',
+        visual_analysis: '',
+        image_generation: '',
+        script_generation: '',
+      },
+    });
+    const body = JSON.parse(
+      (spy.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body.transcription_hotwords).toBe('');
+  });
+});

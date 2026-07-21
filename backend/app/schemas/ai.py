@@ -31,6 +31,15 @@ class AISettingsUpdate(BaseModel):
     # Frontend-specific fields persisted for UI state
     ai_enabled: Optional[bool] = None
     preferred_language: Optional[str] = None
+    transcription_hotwords: Optional[str] = Field(
+        default=None,
+        description=(
+            "Free-text ASR hotwords / domain hints (names, terms), comma- or "
+            "newline-separated. Passed to the transcription provider as a "
+            "prompt/context hint. Applies even under governance lock (a content "
+            "hint, not a model choice)."
+        ),
+    )
     task_assignment: Optional[Dict[str, str]] = Field(
         default=None,
         description=(
@@ -58,6 +67,7 @@ class AISettingsResponse(BaseModel):
     # Frontend-consumed fields
     ai_enabled: bool = True
     preferred_language: str = "auto"
+    transcription_hotwords: str = ""
     task_assignment: Dict[str, str] = Field(
         default_factory=lambda: {
             "transcription": "",
@@ -140,6 +150,11 @@ class TranscriptSegmentSchema(BaseModel):
     start: float
     end: float
     text: str
+    # Optional speaker-diarization label (e.g. "S01"), present only for
+    # providers that diarize (self-hosted moss-asr). Old transcripts and the
+    # OpenAI / Volcengine paths omit it, so it stays None and the field is
+    # simply absent in their responses.
+    speaker: Optional[str] = None
 
 
 class TranscriptResponse(BaseModel):

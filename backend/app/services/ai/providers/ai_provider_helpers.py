@@ -379,6 +379,41 @@ def _byok_origin(provider_config: Dict[str, Any]) -> str:
     return "byok" if (provider_config.get("api_key") or "").strip() else "env"
 
 
+def _extract_transcription_hotwords(settings_json: Optional[dict]) -> str:
+    """Pull the user's ASR hotwords string out of a raw ``settings_json`` value.
+
+    Tolerant of the same dict-or-JSON-string shape the resolver already handles.
+    Hotwords are a plain content hint (not a secret / not a model choice), so
+    there's no reveal step and no governance gate — they ride through on every
+    origin. Returns ``""`` for any missing / malformed input.
+    """
+    if not settings_json:
+        return ""
+    settings = settings_json
+    if isinstance(settings, str):
+        try:
+            settings = json.loads(settings)
+        except (ValueError, TypeError):
+            return ""
+    if not isinstance(settings, dict):
+        return ""
+    ai_settings = settings.get("ai_settings") or {}
+    if not isinstance(ai_settings, dict):
+        return ""
+    hotwords = ai_settings.get("transcription_hotwords", "")
+    return hotwords.strip() if isinstance(hotwords, str) else ""
+
+
+def _with_hotwords(provider_config: Dict[str, Any], hotwords: str) -> Dict[str, Any]:
+    """Return a copy of ``provider_config`` carrying a ``hotwords`` key, but only
+    when ``hotwords`` is non-empty. Empty hotwords leave the config object
+    untouched (identity) so existing origin shapes stay byte-for-byte the same.
+    Immutable: never mutates the input dict."""
+    if not hotwords or not isinstance(provider_config, dict):
+        return provider_config
+    return {**provider_config, "hotwords": hotwords}
+
+
 async def resolve_task_ai_config(
     user_id: Optional[str],
     task_key: str,
@@ -576,9 +611,15 @@ async def resolve_transcription_config(
         "transcription", default_provider_key="openai"
     )
     if locked is not None:
+        # Hotwords are a content hint, not a model choice, so they ride through
+        # even on the admin-locked (governance) path — a user naming people /
+        # terms improves recognition regardless of who picked the model. Only
+        # injected when non-empty so the locked config shape is otherwise
+        # untouched.
+        hotwords = _extract_transcription_hotwords(settings_json)
         return ResolvedAIConfig(
             provider_key=locked.provider_key,
-            provider_config=locked.provider_config,
+            provider_config=_with_hotwords(locked.provider_config, hotwords),
             model="",
             agent_slug="",
             origin="governance",
@@ -615,6 +656,13 @@ async def resolve_transcription_config(
     whisper_provider = ai_settings.get("whisper_provider", "openai")
     provider_cfg = providers.get(whisper_provider) or {}
 
+    # ASR hotwords (人名 / 术语 hints) — a plain content hint threaded onto the
+    # provider_config for every user origin. Non-secret, so read straight from
+    # ai_settings (no reveal step). Injected only when non-empty so the empty-
+    # config env origin stays exactly ``{}``.
+    hotwords = ai_settings.get("transcription_hotwords", "")
+    hotwords = hotwords.strip() if isinstance(hotwords, str) else ""
+
     # task_assignment.transcription carries the model selection like
     # 'volcengine:bigasr' or 'volcengine:seed-asr'. Required for the Volcengine
     # path because the API key may only have one resource granted — picking the
@@ -634,7 +682,7 @@ async def resolve_transcription_config(
         n_provider_key, n_provider_config, n_model = nous
         return ResolvedAIConfig(
             provider_key=n_provider_key,
-            provider_config=n_provider_config,
+            provider_config=_with_hotwords(n_provider_config, hotwords),
             model=f"{n_provider_key}:{n_model}",
             agent_slug="",
             origin="platform",
@@ -642,8 +690,11 @@ async def resolve_transcription_config(
 
     return ResolvedAIConfig(
         provider_key=whisper_provider,
-        provider_config=provider_cfg,
+        provider_config=_with_hotwords(provider_cfg, hotwords),
         model=task_assignment,
+        # origin classifies WHOSE credentials serve the run — key the origin off
+        # the credential config, NOT the hotwords-augmented copy (an env run
+        # with hotwords is still env, not byok).
         agent_slug="",
         origin=_byok_origin(provider_cfg),
     )

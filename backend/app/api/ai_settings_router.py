@@ -197,6 +197,7 @@ async def get_ai_settings(auth: AuthDep):
             default_analysis_model=ai_settings.get("default_analysis_model", "gpt-4o"),
             ai_enabled=ai_settings.get("ai_enabled", True),
             preferred_language=ai_settings.get("preferred_language", "auto"),
+            transcription_hotwords=ai_settings.get("transcription_hotwords", ""),
             task_assignment=ai_settings.get("task_assignment", {}),
             provider_health=provider_health,
         )
@@ -247,6 +248,8 @@ async def save_ai_settings(body: AISettingsUpdate, auth: AuthDep):
             ai_settings["ai_enabled"] = body.ai_enabled
         if body.preferred_language is not None:
             ai_settings["preferred_language"] = body.preferred_language
+        if body.transcription_hotwords is not None:
+            ai_settings["transcription_hotwords"] = body.transcription_hotwords
         if body.task_assignment is not None:
             ai_settings["task_assignment"] = body.task_assignment
 
@@ -272,6 +275,7 @@ async def save_ai_settings(body: AISettingsUpdate, auth: AuthDep):
             default_analysis_model=ai_settings.get("default_analysis_model", "gpt-4o"),
             ai_enabled=ai_settings.get("ai_enabled", True),
             preferred_language=ai_settings.get("preferred_language", "auto"),
+            transcription_hotwords=ai_settings.get("transcription_hotwords", ""),
             task_assignment=ai_settings.get("task_assignment", {}),
         )
 
