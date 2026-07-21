@@ -141,6 +141,36 @@ def assert_audio_present_step(audio_path: str) -> str:
     raise RuntimeError(f"audio file missing or empty at dispatch time: {audio_path}")
 
 
+def _assignment_model(
+    task_assignment: str, provider_config: dict[str, Any], default: str
+) -> str:
+    """Derive the concrete ASR model name from the resolver's carrier string.
+
+    ``resolve_transcription_config`` packs the transcription model selection
+    onto ``ResolvedAIConfig.model`` (threaded here as ``task_assignment``) in
+    three shapes (see that function's docstring):
+
+      - governance-locked → ``""``; the real model rides in
+        ``provider_config["model"]`` (the locked catalog config).
+      - platform / ``nous:<model>`` pick → ``"{provider_key}:{model}"`` where
+        ``<model>`` is the bare upstream ``actual_model`` (e.g. ``moss-asr``).
+      - byok / env → the user's raw assignment string (bare like ``whisper-1``
+        or prefixed like ``openai:whisper-1``).
+
+    Resolution: take the part after the first ``:`` (bare names pass through
+    unchanged — the split is idempotent for an already-bare name); if that is
+    empty fall back to ``provider_config["model"]``; if still empty use
+    ``default``. Both ASR branches share this so the user's Settings pick can
+    never be silently dropped in favour of a hardcoded default.
+    """
+    model = (
+        task_assignment.split(":", 1)[1] if ":" in task_assignment else task_assignment
+    )
+    if not model:
+        model = provider_config.get("model") or ""
+    return model or default
+
+
 @DBOS.step(retries_allowed=True, max_attempts=2)
 async def run_whisper(
     audio_path: str,
@@ -179,11 +209,19 @@ async def run_whisper(
 
     from app.services.ai.transcribe.whisper_service import WhisperService
 
+    # Honor the user's Settings → AI → Transcription model pick. Without this
+    # the branch dropped `task_assignment` on the floor and WhisperService
+    # defaulted to 'whisper-1', so a nous:<model> / BYOK pick reached the
+    # provider as 'whisper-1' → 404 "no active grant for service 'whisper-1'".
+    # Mirrors the volcengine branch's derivation via the shared helper.
+    whisper_model = _assignment_model(task_assignment, provider_config, "whisper-1")
+
     svc = WhisperService(provider_key=provider_key, provider_config=provider_config)
     result = await svc.transcribe_and_save(
         resource_id=resource_id,
         audio_path=audio_path,
         language=language,
+        whisper_model=whisper_model,
     )
     if result is None:
         raise RuntimeError("transcribe_and_save returned None")
@@ -269,9 +307,9 @@ async def _run_volcengine_asr(
     # task_assignment. Falls back to V1 (bigasr) since most accounts
     # only have that resource granted (V2 seed-asr requires a separate
     # entitlement and returns 45000030 'resource not granted' otherwise).
-    model_part = (
-        task_assignment.split(":", 1)[1] if ":" in task_assignment else task_assignment
-    ) or (provider_config.get("model") or "")
+    # Shared derivation with the whisper branch. default="" preserves the
+    # prior behavior exactly (bigasr/V1 is picked when nothing resolves).
+    model_part = _assignment_model(task_assignment, provider_config, "")
     asr_resource = (
         RESOURCE_V2
         if ("seed" in model_part.lower() or "2.0" in model_part)
