@@ -80,6 +80,7 @@ import { ShareModal } from './ShareModal';
 import { VersionManagerModal } from './VersionManagerModal';
 import { FilePreview } from './resources/FilePreview';
 import { GalleryViewer } from './resources/GalleryViewer';
+import { shouldSuppressFileArrowNav } from './resources/fileArrowNav';
 import VideoPlayer from './VideoPlayer';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { ResourceReviewPanel } from './ResourceReviewPanel';
@@ -393,11 +394,12 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex >= 0 && currentIndex < siblingFiles.length - 1;
 
-  // Keyboard ← → navigation (disabled for video — VideoPlayer uses arrows for seeking)
+  // Keyboard ← → navigation. Yields to media that owns the arrow keys itself:
+  // video (VideoPlayer seeks) and galleries (GalleryViewer pages its children).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (resource?.mime_type?.startsWith('video/')) return;
+      if (shouldSuppressFileArrowNav(resource?.mime_type)) return;
       if (e.key === 'ArrowLeft') { e.preventDefault(); navigateToSibling('prev'); }
       if (e.key === 'ArrowRight') { e.preventDefault(); navigateToSibling('next'); }
     };

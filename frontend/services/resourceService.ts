@@ -595,13 +595,18 @@ export async function fetchResources(
     return [];
   }
 
+  // Gallery membership is needed to hide child rows / stamp counts (the direct
+  // query can't; gallery_items is service-role only). Fetch it in parallel.
+  const membershipPromise = fetchGalleryScopeMembership(params.scopeId);
+
   const query = buildResourceItemsQuery(params, tagResourceIds);
   let ordered = query.order('created_at', { ascending: false });
   if (params.limit != null) ordered = ordered.limit(params.limit);
   const { data, error } = await ordered;
   if (error) throw error;
   // The query builder's return type narrows as we chain filters; cast back.
-  return (data as unknown as ResourceItem[]) ?? [];
+  const rows = (data as unknown as ResourceItem[]) ?? [];
+  return applyGalleryMembership(rows, await membershipPromise);
 }
 
 /**
@@ -806,6 +811,11 @@ export async function fetchResourcesPaginated(
     return fetchResourcesViaRpc(params, cursor, pageSize, signal);
   }
 
+  // Gallery membership (hide child rows / stamp counts) — the direct query
+  // can't reproduce it because gallery_items is service-role only. Fetch it in
+  // parallel with the page query.
+  const membershipPromise = fetchGalleryScopeMembership(params.scopeId);
+
   // Order (created_at DESC, id DESC) so the id tiebreaker keeps batch-inserted
   // rows (same created_at) from being clipped at a page boundary.
   let q = buildResourceItemsQuery(params, null)
@@ -818,12 +828,17 @@ export async function fetchResourcesPaginated(
   if (error) throw error;
 
   const rows = (data as unknown as ResourceItem[]) ?? [];
+  // Slice for keyset FIRST (hasMore / nextCursor derive from the RAW rows, so
+  // pagination progresses correctly even when a whole window is gallery
+  // children), THEN drop children from the visible page. A filtered page may be
+  // shorter than pageSize; that is fine — the loader keeps advancing.
   const page = sliceKeysetPage(rows, pageSize, (row) => {
     const r = row as { id?: string | number; created_at?: string };
     return r.created_at && r.id != null
       ? { ts: r.created_at, id: String(r.id) }
       : null;
   });
+  page.data = applyGalleryMembership(page.data, await membershipPromise);
 
   // Fast total count only on the first page (cursor === null), reusing the
   // exact filter set so the count matches what the user is paging through.
@@ -880,6 +895,8 @@ async function fetchResourcesViaRpc(
   });
   if (signal) req = req.abortSignal(signal);
 
+  const membershipPromise = fetchGalleryScopeMembership(params.scopeId);
+
   const { data, error } = await req;
   if (error) throw error;
 
@@ -888,12 +905,15 @@ async function fetchResourcesViaRpc(
     total_count: number | null;
   };
   const rows = result.rows ?? [];
+  // Slice for keyset first (cursor from raw rows), then hide gallery children —
+  // the RPC (mig 269) predates the gallery entity and has no child exclusion.
   const page = sliceKeysetPage(rows, pageSize, (row) => {
     const r = row as { id?: string | number; created_at?: string };
     return r.created_at && r.id != null
       ? { ts: r.created_at, id: String(r.id) }
       : null;
   });
+  page.data = applyGalleryMembership(page.data, await membershipPromise);
   return { ...page, totalCount: result.total_count ?? -1 };
 }
 
@@ -1982,6 +2002,9 @@ export async function setGalleryItems(
   );
   if (!response.ok) throw new Error('Failed to set gallery items');
   const json = await response.json();
+  // Children just changed → drop cached membership so the next library list
+  // reflects the new hidden-child set and badge count immediately.
+  invalidateGalleryMembership(scopeId);
   return json.data ?? [];
 }
 
@@ -1997,4 +2020,117 @@ export async function getGalleryItems(
   if (!response.ok) throw new Error('Failed to load gallery items');
   const json = await response.json();
   return json.data ?? [];
+}
+
+// ── Gallery membership (direct-query library list support) ──────────────
+//
+// The main Resources library list runs a direct supabase-js query
+// (fetchResources / fetchResourcesPaginated) — NOT the backend list endpoint —
+// so it never sees the backend's ``NOT EXISTS (... gallery_items ...)`` child
+// exclusion or its computed ``gallery_count`` column. And ``gallery_items`` is
+// a service-role-only table (RLS lockdown, mig 375), so the anon frontend
+// client cannot read it directly to reproduce that logic. This tiny backend
+// read endpoint hands the frontend exactly the two derived bits it needs; the
+// list then hides child rows and annotates gallery tiles client-side.
+
+/** Per-scope gallery membership: the child resource ids to hide from the
+ *  library list, and per-gallery child counts for the ▣ badge. */
+export interface GalleryScopeMembership {
+  /** resources.id of every image that is a child of some gallery in scope. */
+  childIds: Set<string>;
+  /** gallery resources.id → child count. */
+  counts: Map<string, number>;
+}
+
+const EMPTY_GALLERY_MEMBERSHIP: GalleryScopeMembership = {
+  childIds: new Set(),
+  counts: new Map(),
+};
+
+// Cache membership per scope so a keyset "load more" burst does not refetch on
+// every page. A short TTL keeps a freshly-created gallery's children hiding
+// within a few seconds; gallery mutations invalidate the entry explicitly.
+const GALLERY_MEMBERSHIP_TTL_MS = 5000;
+const galleryMembershipCache = new Map<
+  string,
+  { at: number; promise: Promise<GalleryScopeMembership> }
+>();
+
+/** Drop the cached membership for a scope (all scopes when omitted) so the next
+ *  list load reflects a just-created / edited / deleted gallery immediately. */
+export function invalidateGalleryMembership(scopeId?: string): void {
+  if (scopeId) galleryMembershipCache.delete(scopeId);
+  else galleryMembershipCache.clear();
+}
+
+async function requestGalleryMembership(
+  scopeId: string,
+): Promise<GalleryScopeMembership> {
+  const apiUrl = getApiUrl();
+  const params = new URLSearchParams({ scope_id: scopeId });
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/gallery-membership?${params}`,
+    { headers: await getAuthHeaders() },
+  );
+  if (!response.ok) throw new Error('Failed to load gallery membership');
+  const json = await response.json();
+  const data = (json.data ?? {}) as {
+    child_image_ids?: unknown[];
+    gallery_counts?: Record<string, unknown>;
+  };
+  return {
+    childIds: new Set<string>((data.child_image_ids ?? []).map(String)),
+    counts: new Map<string, number>(
+      Object.entries(data.gallery_counts ?? {}).map(
+        ([k, v]) => [String(k), Number(v)] as [string, number],
+      ),
+    ),
+  };
+}
+
+/** Fetch (or reuse cached) gallery membership for a scope. Fails open: any
+ *  hiccup returns empty membership so the library still renders (all rows
+ *  visible, badge 0) rather than blanking. */
+export async function fetchGalleryScopeMembership(
+  scopeId: string | undefined | null,
+): Promise<GalleryScopeMembership> {
+  if (!scopeId) return EMPTY_GALLERY_MEMBERSHIP;
+  const now = Date.now();
+  const cached = galleryMembershipCache.get(scopeId);
+  if (cached && now - cached.at < GALLERY_MEMBERSHIP_TTL_MS) {
+    return cached.promise;
+  }
+  const promise = requestGalleryMembership(scopeId).catch((err) => {
+    console.error('[gallery] membership fetch failed:', err);
+    galleryMembershipCache.delete(scopeId);
+    return EMPTY_GALLERY_MEMBERSHIP;
+  });
+  galleryMembershipCache.set(scopeId, { at: now, promise });
+  return promise;
+}
+
+/** Hide gallery-child rows and stamp gallery rows with their real child count.
+ *  Pure + immutable — used by every list path (keyset, RPC, bulk). Rows whose
+ *  embedded resource id is a known child are dropped; gallery rows get a fresh
+ *  copy carrying ``gallery_count`` (the direct query cannot compute it). */
+export function applyGalleryMembership(
+  rows: ResourceItem[],
+  membership: GalleryScopeMembership,
+): ResourceItem[] {
+  if (membership.childIds.size === 0 && membership.counts.size === 0) {
+    return rows;
+  }
+  const kept: ResourceItem[] = [];
+  for (const row of rows) {
+    const resourceId =
+      row.resource?.id != null ? String(row.resource.id) : null;
+    if (resourceId && membership.childIds.has(resourceId)) continue;
+    const count = resourceId ? membership.counts.get(resourceId) : undefined;
+    if (count !== undefined && row.resource) {
+      kept.push({ ...row, resource: { ...row.resource, gallery_count: count } });
+    } else {
+      kept.push(row);
+    }
+  }
+  return kept;
 }
