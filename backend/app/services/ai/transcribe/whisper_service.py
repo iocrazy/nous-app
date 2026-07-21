@@ -98,7 +98,7 @@ class WhisperService:
         result = await provider.transcribe(audio_path, **kwargs)
         logger.info(
             f"Transcription complete: {len(result.segments)} segments, "
-            f"language={result.language}, duration={result.duration:.1f}s"
+            f"language={result.language}, duration={(result.duration or 0.0):.1f}s"
         )
         return result
 
