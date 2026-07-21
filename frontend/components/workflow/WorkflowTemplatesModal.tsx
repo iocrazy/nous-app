@@ -67,7 +67,7 @@ export const WorkflowTemplatesModal: React.FC<WorkflowTemplatesModalProps> = ({
           </button>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-hidden p-6">
+        <div className="min-h-0 flex-1 overflow-hidden bg-app-bg p-5">
           <WorkflowTemplateEditor teamId={teamId} />
         </div>
       </div>
