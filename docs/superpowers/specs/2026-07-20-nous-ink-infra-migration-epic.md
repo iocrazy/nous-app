@@ -64,6 +64,20 @@
    └────────────────────────────────────────────────────────────┘
 ```
 
+### 4.1 源码 / 部署拓扑（勿搞混）
+
+**代码唯一真相 = GitHub**；Mac Mini 和 GPU 服务器都只是它的克隆，靠 GitHub 同步，**谁都不共享工作目录**。
+
+| 东西 | 放哪 | 说明 |
+|---|---|---|
+| 代码唯一真相 | **GitHub** | push/pull 都走它 |
+| 写代码 (dev workspace) | **Mac Mini（现状不变）** | worktree 端口隔离（`.worktree.env`）留这儿；`/ship` 照旧 |
+| 服务器上的源码 | runner **自己的一份 checkout** | 部署时 `git pull` 合并后 commit，跟 dev 工作目录互不共享 |
+| 数据/密钥 | **服务器本地持久化** | Postgres 数据、Storage 卷、`.env`(SUPABASE keys/CORS) 在 named volume/持久 `.env`，**不进 git**（同现 NAS 模型） |
+
+**原则**：源码不是"搬"到服务器，是服务器经 GitHub 自己 pull。🔴 **禁止** 把 Mac Mini 工作目录 NFS/挂载给服务器或 scp 源码过去（状态漂移温床，与 compose 漂移血泪同源）——**git 当传输层**。
+**流程零改变**：Mac Mini `/ship` → PR 绿 → 合 master → GPU 机 runner 自动 pull+build+up。落地机从 NAS 换成 GPU 机，开发姿势不变。
+
 ## 5. 现状事实（代码核验，作为迁移基线）
 
 - 前端单个 React Router SPA；`/login` = `LoginPage`（public），登录后 `/team/:teamId/...`；登录用 `signInWithPassword`（邮箱+密码），**无 OAuth / magic-link / `redirectTo` 硬编码**。
@@ -92,7 +106,7 @@
   - 数据迁移：NAS Supabase `pg_dump` → 机 restore；拷贝 Storage 卷（对齐存储统一 epic）。
   - 起 backend；`backend→AI` 配置改 localhost（去 zerotier）。
   - Tunnel 增 `api.nous.ink`→backend、`sb.nous.ink`→Kong 路由。
-  - 部署链：用 compose-up CI（SSH-over-tunnel 或机上 runner `docker compose up`）替 Watchtower。
+  - **部署机制（正式定为 P1 内容，从 §9 上提）**：在 GPU 机上装 **GitHub self-hosted runner**（`project_self_hosted_runner_plan`）。部署 = runner 本机 `git pull` 合并后的 commit → `docker compose up -d --build` **就地构建**，**不过 registry、不经 Watchtower**。runner 出站轮询 GitHub，NAT 无公网不影响。→ 部署从"分钟级 + registry 往返 + Watchtower 漂移坑"降到"十几秒级、一条命令、无漂移"（地板是 backend 冷启动：DBOS recovery + 连接池预热）。
 - **验证（关键风险）**：
   - ⚠️ **Supabase Realtime/WebSocket 经 Cloudflare Tunnel 是否通**（Task Center 靠 Realtime 监听 `task_tracking`，必验）。
   - ⚠️ **Storage 卷迁移完整性**（文件可下载、路径一致）。
@@ -157,4 +171,4 @@
 - GPU 机现有服务清单 & 资源占用（AI 现占多少，backend+Supabase 余量）。
 - Supabase 数据量级 & Storage 卷大小（定迁移窗口）。
 - 媒体文件是否继续从后端经 tunnel 出，还是接入 Cloudflare 缓存（R6）。
-- self-hosted runner / 后端 PR preview 是否纳入本 epic 还是另立（收益已计入动机，实施可延后）。
+- 后端 PR preview 是否纳入本 epic 还是另立（self-hosted runner 已上提为 P1 部署机制，见 §6 P1；PR preview 可在其上延后实施）。
