@@ -959,8 +959,16 @@ export async function checkDuplicatesBatch(
       body: JSON.stringify({ items }),
     });
     if (!response.ok) return failOpen();
-    return response.json();
-  } catch {
+    // The endpoint returns an envelope `{ results: [...] }` (CheckDuplicatesResponse).
+    // Accept a bare array too so either shape stays fail-open — a shape drift
+    // here once threw "not iterable" downstream and blocked ALL uploads.
+    const data = await response.json();
+    if (Array.isArray(data)) return data;
+    if (data && Array.isArray(data.results)) return data.results;
+    console.error('checkDuplicatesBatch: unexpected response shape', data);
+    return failOpen();
+  } catch (err) {
+    console.error('checkDuplicatesBatch failed', err);
     return failOpen();
   }
 }

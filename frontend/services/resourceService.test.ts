@@ -6,6 +6,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  checkDuplicatesBatch,
   getFolderContentCount,
   getResourceLyrics,
   restoreFolder,
@@ -173,5 +174,38 @@ describe('uploadResourceLyrics', () => {
     stubResponse({ detail: 'invalid lrc' }, 422);
     const file = new File(['lrc'], 'song.lrc', { type: 'text/plain' });
     await expect(uploadResourceLyrics('77', file)).rejects.toThrow('invalid lrc');
+  });
+});
+
+describe('checkDuplicatesBatch', () => {
+  const items = [{ file_hash: 'abc', file_size: 10 }];
+
+  it('unwraps the { results } envelope the endpoint actually returns', async () => {
+    // Real prod shape (CheckDuplicatesResponse) — the raw-array assumption
+    // once threw "not iterable" downstream and blocked ALL uploads.
+    stubResponse({
+      results: [{ file_hash: 'abc', duplicate: true, existing: { id: '1' } }],
+    });
+    const out = await checkDuplicatesBatch(items);
+    expect(out).toEqual([{ file_hash: 'abc', duplicate: true, existing: { id: '1' } }]);
+  });
+
+  it('accepts a bare array shape unchanged', async () => {
+    stubResponse([{ file_hash: 'abc', duplicate: false, existing: null }]);
+    const out = await checkDuplicatesBatch(items);
+    expect(out).toEqual([{ file_hash: 'abc', duplicate: false, existing: null }]);
+  });
+
+  it('fails open (all non-duplicate) on an unexpected shape', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    stubResponse({ success: true });
+    const out = await checkDuplicatesBatch(items);
+    expect(out).toEqual([{ file_hash: 'abc', duplicate: false, existing: null }]);
+  });
+
+  it('fails open on a non-OK response', async () => {
+    stubResponse({ detail: 'boom' }, 500);
+    const out = await checkDuplicatesBatch(items);
+    expect(out).toEqual([{ file_hash: 'abc', duplicate: false, existing: null }]);
   });
 });
