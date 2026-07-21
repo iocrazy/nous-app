@@ -397,6 +397,7 @@ export const getAISettings = async (): Promise<AISettings> => {
     auto_transcribe: data.auto_transcribe ?? false,
     auto_summarize: data.auto_summarize ?? false,
     preferred_language: data.preferred_language ?? 'auto',
+    transcription_hotwords: data.transcription_hotwords ?? '',
     providers,
     task_assignment: {
       transcription: data.task_assignment?.transcription ?? '',
@@ -452,6 +453,7 @@ export const saveAISettings = async (
     auto_transcribe: settings.auto_transcribe,
     auto_summarize: settings.auto_summarize,
     preferred_language: settings.preferred_language,
+    transcription_hotwords: settings.transcription_hotwords ?? '',
     task_assignment: settings.task_assignment,
   };
 

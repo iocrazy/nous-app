@@ -8,6 +8,7 @@ import { Video, TranscriptData, SummaryData, Collection } from '../types';
 import Loading from './common/Loading';
 import { MediaCard } from './MediaCard';
 import SodaLyricsTab from './SodaLyricsTab';
+import { SpeakerChip } from './SpeakerChip';
 import type { SodaTheme } from '../utils/sodaTheme';
 import { isAudioType } from '../utils/awemeType';
 import {
@@ -73,6 +74,7 @@ const formatTimestamp = (seconds: number): string => {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 };
 
+
 // Generate SRT content from transcript segments
 const generateSRT = (segments: TranscriptData['segments']): string => {
   return segments.map((seg, i) => {
@@ -83,7 +85,8 @@ const generateSRT = (segments: TranscriptData['segments']): string => {
       const ms = Math.round((sec % 1) * 1000);
       return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')},${ms.toString().padStart(3, '0')}`;
     };
-    return `${i + 1}\n${formatSrtTime(seg.start)} --> ${formatSrtTime(seg.end)}\n${seg.text}`;
+    const speaker = seg.speaker ? `[${seg.speaker}] ` : '';
+    return `${i + 1}\n${formatSrtTime(seg.start)} --> ${formatSrtTime(seg.end)}\n${speaker}${seg.text}`;
   }).join('\n\n');
 };
 
@@ -402,7 +405,10 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   const handleCopyTranscript = () => {
     if (!transcript) return;
     const text = transcript.segments
-      .map((s) => `[${formatTimestamp(s.start)}] ${s.text}`)
+      .map((s) => {
+        const speaker = s.speaker ? `[${s.speaker}] ` : '';
+        return `[${formatTimestamp(s.start)}] ${speaker}${s.text}`;
+      })
       .join('\n');
     navigator.clipboard.writeText(text);
     setCopied(true);
@@ -613,6 +619,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                             >
                               [{formatTimestamp(seg.start)}]
                             </button>
+                            <SpeakerChip speaker={seg.speaker} />
                             <p className={`text-sm ${cText300} leading-relaxed`}>{seg.text}</p>
                           </div>
                         ))}

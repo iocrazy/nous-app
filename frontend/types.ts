@@ -122,6 +122,10 @@ export interface TranscriptSegment {
   start: number;
   end: number;
   text: string;
+  /** Speaker-diarization label (e.g. "S01"), present only for providers that
+   *  diarize (self-hosted moss-asr). Absent on old transcripts and the
+   *  OpenAI / Volcengine paths. */
+  speaker?: string;
 }
 
 export interface TranscriptData {
@@ -564,6 +568,9 @@ export interface AISettings {
   auto_transcribe?: boolean;
   auto_summarize?: boolean;
   preferred_language: string;
+  /** Free-text ASR hotwords / domain hints (names, terms), comma- or newline-
+   *  separated. Threaded to the transcription provider as a prompt/context hint. */
+  transcription_hotwords?: string;
   // Keyed by provider slug (openai / deepseek / doubao / minimax / kimi /
   // qwen / volcengine / ollama / lmstudio / ...). Open-keyed so adding a
   // provider in PROVIDER_META doesn't require touching this type again.
