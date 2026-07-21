@@ -549,6 +549,11 @@ export interface AIProviderConfig {
   // pickers. Auto-seeded from ``selected_model`` on first read for
   // back-compat with pre-existing accounts.
   enabled_models?: string[];
+  // Inverse of enabled_models, used by the platform ("nous") pseudo-provider:
+  // a blacklist of model names the user has hidden from the pickers. Blacklist
+  // (not whitelist) semantics so any model the admin adds later is visible by
+  // default — the user only ever opts models OUT.
+  disabled_models?: string[];
   selected_model?: string;
   summary_model?: string;
   analysis_model?: string;
