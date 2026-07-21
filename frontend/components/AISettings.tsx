@@ -561,6 +561,54 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
     });
   };
 
+  // --- Platform ("nous") pseudo-provider: user-side visibility controls ---
+  // Persisted like any other provider at localSettings.providers.nous, shape
+  // { enabled: boolean; disabled_models: string[] }. Blacklist (disabled_models)
+  // semantics: a model the admin adds later stays visible until the user opts
+  // it out — never hidden by default. Master toggle defaults ON (config absent
+  // or enabled !== false).
+  const nousUserEnabled = localSettings.providers.nous?.enabled !== false;
+
+  // The set of platform models the user has hidden from the pickers.
+  const nousDisabledModels = localSettings.providers.nous?.disabled_models ?? [];
+
+  // Single derived list every user-facing picker consumes so no consumption
+  // point can drift: admin master switch on AND user master toggle on AND the
+  // model is not in the user's blacklist. Per-module governance (nous_modules)
+  // is applied on top of this at each picker.
+  const nousConfig = localSettings.providers.nous;
+  const visibleNousModels = useMemo(() => {
+    if (!governance.nous_enabled) return [];
+    if (nousConfig?.enabled === false) return [];
+    const disabled = new Set(nousConfig?.disabled_models ?? []);
+    return nousModels.filter((m) => !disabled.has(m.name));
+  }, [governance.nous_enabled, nousConfig, nousModels]);
+
+  // Flip the platform-card master switch. Absent config => currently ON, so the
+  // first toggle turns it off.
+  const toggleNousMaster = () => {
+    editLocalSettings((prev) => {
+      const providers = { ...prev.providers };
+      const current = providers.nous ?? { enabled: true };
+      providers.nous = { ...current, enabled: current.enabled === false };
+      return { ...prev, providers };
+    });
+  };
+
+  // Toggle one platform model in/out of the user's blacklist.
+  const toggleNousModel = (modelName: string) => {
+    editLocalSettings((prev) => {
+      const providers = { ...prev.providers };
+      const current = providers.nous ?? { enabled: true };
+      const disabled = current.disabled_models ?? [];
+      const next = disabled.includes(modelName)
+        ? disabled.filter((n) => n !== modelName)
+        : [...disabled, modelName];
+      providers.nous = { ...current, disabled_models: next };
+      return { ...prev, providers };
+    });
+  };
+
   // Update task assignment
   const updateTaskAssignment = (task: keyof AISettingsType['task_assignment'], provider: string) => {
     editLocalSettings((prev) => ({
@@ -722,12 +770,12 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
       }
     }
 
-    // Append Nous platform ASR models (gated by admin master control).
-    const nousAllowed =
-      governance.nous_enabled &&
-      (governance.nous_modules?.transcription ?? true);
+    // Append Nous platform ASR models. visibleNousModels already folds in the
+    // admin master switch + the user's platform-card master toggle + per-model
+    // blacklist; here we only add the per-module governance gate.
+    const nousAllowed = governance.nous_modules?.transcription ?? true;
     const matchingNousModels = nousAllowed
-      ? nousModels.filter((m) => m.type === 'asr')
+      ? visibleNousModels.filter((m) => m.type === 'asr')
       : [];
     for (const model of matchingNousModels) {
       const pricingLabel =
@@ -770,11 +818,12 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
     const systemOptions = options.filter((o) => o.group === 'system');
     const mineOptions = options.filter((o) => o.group === 'mine');
     // Platform (MediaHub) LLM models are directly selectable per task — same as
-    // the ASR picker — gated by the admin master switch + per-module nous_allowed.
-    const nousAllowed =
-      governance.nous_enabled && (governance.nous_modules?.[taskKey] ?? true);
+    // the ASR picker. visibleNousModels already folds in the admin master switch
+    // + the user's platform-card master toggle + per-model blacklist; here we
+    // only add the per-module governance gate.
+    const nousAllowed = governance.nous_modules?.[taskKey] ?? true;
     const nousLlmOptions = nousAllowed
-      ? nousModels
+      ? visibleNousModels
           .filter((m) => m.type === 'llm')
           .map((m) => ({ value: `nous:${m.name}`, label: `${m.display_name} (MediaHub)` }))
       : [];
@@ -1377,7 +1426,12 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             );
           })}
           {governance.nous_enabled && (
-            <div className="bg-ink-950 border border-[var(--accent-border)] rounded-xl overflow-hidden">
+            <div
+              className={`bg-ink-950 border rounded-xl overflow-hidden transition-all ${
+                nousUserEnabled ? 'border-[var(--accent-border)]' : 'border-ink-800'
+              }`}
+            >
+              {/* Header — master toggle mirrors the Ollama / LM Studio cards. */}
               <div className="px-6 py-4 flex items-center gap-4">
                 <div className="p-2 rounded-lg bg-[var(--accent-soft)] text-[var(--accent-text)]">
                   <Sparkles size={18} />
@@ -1394,29 +1448,47 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                     agent's model or a transcription option.
                   </p>
                 </div>
+                {renderToggle(nousUserEnabled, toggleNousMaster)}
               </div>
-              <div className="px-6 pb-4 space-y-1.5">
-                {nousModels.length === 0 ? (
-                  <p className="text-xs text-ink-500">No platform models available.</p>
-                ) : (
-                  [...nousModels]
-                    .sort(
-                      (a, b) =>
-                        (NOUS_TYPE_ORDER[a.type] ?? 99) - (NOUS_TYPE_ORDER[b.type] ?? 99),
-                    )
-                    .map((m) => (
-                      <div
-                        key={m.name}
-                        className="flex items-center justify-between gap-3 text-sm text-ink-200 border-t border-ink-800 pt-1.5 first:border-t-0 first:pt-0"
-                      >
-                        <span className="font-medium truncate">{m.display_name}</span>
-                        <span className="shrink-0 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-ink-800 text-ink-400">
-                          {m.type}
-                        </span>
-                      </div>
-                    ))
-                )}
-              </div>
+
+              {/* Body — collapses to header-only when the master toggle is off,
+                  and each row carries a per-model toggle (blacklist semantics). */}
+              {nousUserEnabled && (
+                <div className="px-6 pb-4 space-y-1.5 animate-in fade-in slide-in-from-top-2 duration-300">
+                  {nousModels.length === 0 ? (
+                    <p className="text-xs text-ink-500">No platform models available.</p>
+                  ) : (
+                    [...nousModels]
+                      .sort(
+                        (a, b) =>
+                          (NOUS_TYPE_ORDER[a.type] ?? 99) - (NOUS_TYPE_ORDER[b.type] ?? 99),
+                      )
+                      .map((m) => {
+                        const modelEnabled = !nousDisabledModels.includes(m.name);
+                        return (
+                          <div
+                            key={m.name}
+                            className="flex items-center justify-between gap-3 text-sm text-ink-200 border-t border-ink-800 pt-1.5 first:border-t-0 first:pt-0"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span
+                                className={`font-medium truncate ${
+                                  modelEnabled ? 'text-ink-200' : 'text-ink-500'
+                                }`}
+                              >
+                                {m.display_name}
+                              </span>
+                              <span className="shrink-0 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-ink-800 text-ink-400">
+                                {m.type}
+                              </span>
+                            </div>
+                            {renderToggle(modelEnabled, () => toggleNousModel(m.name))}
+                          </div>
+                        );
+                      })
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
