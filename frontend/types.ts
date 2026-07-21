@@ -605,13 +605,15 @@ export interface AIGovernanceFlags {
 }
 
 // Nous Platform Model (admin-configured, runs on the platform key)
-export type NousModelType = 'llm' | 'embedding' | 'tts' | 'asr';
+// Types mirror the DB CHECK constraint (migration 345).
+export type NousModelType = 'llm' | 'embedding' | 'tts' | 'asr' | 'image' | 'video';
 
+// NOTE: no ``description`` field — the public endpoint deliberately omits it
+// (admin-internal ops notes must not surface in the user-facing UI).
 export interface NousModelPublic {
   name: string;
   display_name: string;
   type: NousModelType;
-  description?: string | null;
   pricing_type: 'per_hour' | 'per_request' | 'per_token';
   pricing_value: number;
 }

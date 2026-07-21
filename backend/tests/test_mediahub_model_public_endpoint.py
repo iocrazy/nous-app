@@ -23,6 +23,18 @@ async def test_list_mediahub_models_passes_type_filter():
     assert result == {"models": [{"name": "nous-llm", "type": "llm"}]}
 
 
+def test_public_projection_excludes_admin_description():
+    """The public list_enabled projection must never expose ``description`` —
+    it carries admin-internal ops notes (private ZeroTier IPs, BYOK source refs)
+    that would leak into the user-facing platform-models card."""
+    from app.repositories.mediahub_model_repository import _PUBLIC_COLS
+
+    col_names = {c.key for c in _PUBLIC_COLS}
+    assert "description" not in col_names
+    assert "api_key" not in col_names
+    assert "base_url" not in col_names
+
+
 @pytest.mark.asyncio
 async def test_governance_includes_nous_enabled_and_modules():
     from app.api.ai_settings_router import get_ai_governance

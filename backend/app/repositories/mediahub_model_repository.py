@@ -66,12 +66,15 @@ _NOUS_N2A: Dict[str, str] = _name_to_attr(MediahubModels)
 _NOUS_ATTRS = {p.key for p in MediahubModels.__mapper__.column_attrs}
 
 # Public columns exposed by list_enabled (no api_key / app_id / base_url).
+# ``description`` is deliberately EXCLUDED: it holds admin-internal ops notes
+# (e.g. private ZeroTier IPs, BYOK source references) that must never surface in
+# the user-facing platform-models card. No public consumer of list_enabled reads
+# it — see test_list_enabled_hides_secret_columns.
 _PUBLIC_COLS = (
     MediahubModels.id,
     MediahubModels.name,
     MediahubModels.display_name,
     MediahubModels.type,
-    MediahubModels.description,
     MediahubModels.pricing_type,
     MediahubModels.pricing_value,
     MediahubModels.sort_order,
