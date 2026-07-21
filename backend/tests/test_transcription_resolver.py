@@ -173,6 +173,70 @@ async def test_raises_when_no_user_settings():
             await helpers.resolve_transcription_config("u", settings_json=None)
 
 
+async def test_hotwords_injected_into_byok_provider_config():
+    """A non-empty transcription_hotwords string rides onto provider_config for
+    the user (byok) origin — without changing the origin classification."""
+    settings = _settings(
+        {
+            "whisper_provider": "openai",
+            "ai_providers": {"openai": {"api_key": "sk-x", "model": "whisper-1"}},
+            "task_assignment": {"transcription": "openai:whisper-1"},
+            "transcription_hotwords": "Ada Lovelace, RLHF",
+        }
+    )
+    with patch(
+        "app.services.ai.governance.ai_governance.get_module_governance",
+        AsyncMock(return_value=_unlocked()),
+    ):
+        cfg = await helpers.resolve_transcription_config("u", settings_json=settings)
+
+    assert cfg.origin == "byok"
+    assert cfg.provider_config["hotwords"] == "Ada Lovelace, RLHF"
+    assert cfg.provider_config["api_key"] == "sk-x"
+
+
+async def test_hotwords_injected_on_governance_path():
+    """Hotwords are a content hint, not a model choice, so they apply even when
+    the module is admin-locked (governance origin)."""
+    catalog = (
+        "openai",
+        {"api_key": "cat-key", "base_url": "", "model": "moss-asr", "app_id": ""},
+        "moss-asr",
+    )
+    settings = _settings({"transcription_hotwords": "Ada, RLHF"})
+    with (
+        patch(
+            "app.services.ai.governance.ai_governance.get_module_governance",
+            AsyncMock(return_value=_locked()),
+        ),
+        patch(
+            "app.services.ai.providers.ai_provider_helpers.resolve_platform_model",
+            AsyncMock(return_value=catalog),
+        ),
+    ):
+        cfg = await helpers.resolve_transcription_config("u", settings_json=settings)
+
+    assert cfg.origin == "governance"
+    assert cfg.provider_config["hotwords"] == "Ada, RLHF"
+    assert cfg.provider_config["api_key"] == "cat-key"
+
+
+async def test_no_hotwords_leaves_env_config_untouched():
+    """Empty hotwords must not add a key — the env origin's empty config stays
+    exactly {} (shape regression guard)."""
+    settings = _settings(
+        {"whisper_provider": "openai", "task_assignment": {"transcription": ""}}
+    )
+    with patch(
+        "app.services.ai.governance.ai_governance.get_module_governance",
+        AsyncMock(return_value=_unlocked()),
+    ):
+        cfg = await helpers.resolve_transcription_config("u", settings_json=settings)
+
+    assert cfg.origin == "env"
+    assert cfg.provider_config == {}
+
+
 async def test_raises_on_unknown_mediahub_model():
     """nous:<model> that resolve_mediahub_model can't find → RuntimeError, never a
     silent BYOK fallback."""

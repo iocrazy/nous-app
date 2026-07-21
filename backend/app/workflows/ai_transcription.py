@@ -316,6 +316,10 @@ async def _run_volcengine_asr(
         else RESOURCE_V1
     )
 
+    # NOTE: volcengine hotwords use a different mechanism (a server-side
+    # boosting / hot-word table keyed to the account) — not the OpenAI
+    # prompt/context knob — so provider_config["hotwords"] (if the user set any)
+    # is intentionally NOT forwarded here. Wiring it up is a separate task.
     service = VolcengineASRService(
         app_id=provider_config.get("app_id", ""),
         access_token=provider_config.get("api_key", ""),

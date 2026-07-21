@@ -92,6 +92,18 @@ class WhisperService:
         if language and language != "auto":
             kwargs["language"] = language
 
+        # Transcription hotwords ride along on provider_config (injected by
+        # resolve_transcription_config from the user's Settings). Forward them
+        # to the provider as a call kwarg — non-empty only, so providers that
+        # don't take hotwords see the exact same call as before. AIProviderFactory
+        # ignores the extra provider_config key, so only OpenAIProvider.transcribe
+        # consumes it.
+        hotwords = ""
+        if isinstance(self._provider_config, dict):
+            hotwords = (self._provider_config.get("hotwords") or "").strip()
+        if hotwords:
+            kwargs["hotwords"] = hotwords
+
         logger.info(
             f"Transcribing {audio_path} with {self._provider_key} ({whisper_model})"
         )
@@ -120,8 +132,17 @@ class WhisperService:
         try:
             result = await self.transcribe(audio_path, language, whisper_model)
 
+            # Persist `speaker` only when the provider diarized (moss-asr) —
+            # omitting the key for non-diarizing providers keeps the stored
+            # jsonb segment shape byte-for-byte identical to pre-diarization
+            # transcripts (no migration, zero regression for old rows).
             segments_json = [
-                {"start": s.start, "end": s.end, "text": s.text}
+                {
+                    "start": s.start,
+                    "end": s.end,
+                    "text": s.text,
+                    **({"speaker": s.speaker} if s.speaker else {}),
+                }
                 for s in result.segments
             ]
 
