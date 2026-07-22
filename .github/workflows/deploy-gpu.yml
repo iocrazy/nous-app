@@ -36,7 +36,7 @@ jobs:
       - name: Smoke healthz
         run: |
           for i in $(seq 1 30); do
-            if docker exec nous-backend python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8890/healthz', timeout=3).status==200 else 1)" 2>/dev/null; then
+            if docker exec nous-backend python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/healthz', timeout=3).status==200 else 1)" 2>/dev/null; then
               echo "healthz OK"; exit 0
             fi
             sleep 3
