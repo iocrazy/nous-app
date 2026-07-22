@@ -1,0 +1,44 @@
+name: Deploy GPU
+
+# GPU 服务器部署链(P1):self-hosted runner 本机 pull+build+up,不过 ACR/Watchtower
+# NAS 链路(deploy-backend.yml)保持双轨,P4 退役
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'backend/**'
+      - 'mediahub-core/**'
+      - 'Dockerfile'
+      - 'deploy/gpu-server/**'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-gpu
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, gpu]
+    timeout-minutes: 40
+    steps:
+      - name: Sync standing checkout to origin/master
+        run: |
+          cd /media/heygo/program/projects-code/repos/nous-app
+          git fetch origin master
+          git checkout master
+          git reset --hard origin/master
+
+      - name: Build & restart backend stack
+        run: |
+          cd /media/heygo/program/projects-code/repos/nous-app/deploy/gpu-server
+          ./up.sh --build backend worker
+
+      - name: Smoke healthz
+        run: |
+          for i in $(seq 1 30); do
+            if docker exec nous-backend python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8890/healthz', timeout=3).status==200 else 1)" 2>/dev/null; then
+              echo "healthz OK"; exit 0
+            fi
+            sleep 3
+          done
+          echo "healthz FAILED"; docker logs --tail 50 nous-backend; exit 1
