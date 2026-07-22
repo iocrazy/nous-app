@@ -59,8 +59,8 @@ export default defineConfig(({ mode }) => {
         registerType: 'autoUpdate',
         includeAssets: ['favicon.svg', 'apple-touch-icon-180x180.png'],
         manifest: {
-          name: 'MediaHub',
-          short_name: 'MediaHub',
+          name: 'Nous',
+          short_name: 'Nous',
           description: 'Media library and content management',
           theme_color: '#6366f1',
           background_color: '#000000',

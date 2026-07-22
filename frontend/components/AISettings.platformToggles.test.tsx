@@ -1,5 +1,5 @@
 /**
- * Tests for the "MediaHub (Platform)" card user-side visibility controls:
+ * Tests for the "Nous (Platform)" card user-side visibility controls:
  *   1. Master toggle off → platform models vanish from every picker AND the
  *      card body collapses to header-only.
  *   2. Per-model toggle (blacklist / disabled_models) → only the opted-out
@@ -30,8 +30,8 @@ const LLM_MODEL: NousModelPublic = {
 const MODELS: NousModelPublic[] = [ASR_MODEL, LLM_MODEL];
 
 // ASR picker label (transcription <select>) and LLM picker label (agent <select>).
-const ASR_OPTION = /MOSS ASR \(MediaHub/;
-const LLM_OPTION = /Nous LLM \(MediaHub\)/;
+const ASR_OPTION = /MOSS ASR \(Platform/;
+const LLM_OPTION = /Nous LLM \(Platform\)/;
 
 vi.mock('../services/aiService', () => ({
   saveAISettings: vi.fn().mockResolvedValue(undefined),
@@ -121,7 +121,7 @@ describe('AISettings — platform card master + per-model toggles', () => {
 
     // Card header still present…
     await waitFor(() => {
-      expect(screen.getByText('MediaHub (Platform)')).toBeInTheDocument();
+      expect(screen.getByText('Nous (Platform)')).toBeInTheDocument();
     });
     // …but body collapsed: no model rows, and pickers show no platform options.
     expect(screen.queryByText('MOSS ASR')).toBeNull();
@@ -185,11 +185,11 @@ describe('AISettings — platform card master + per-model toggles', () => {
     renderSettings();
 
     await waitFor(() => {
-      expect(screen.getByText('MediaHub (Platform)')).toBeInTheDocument();
+      expect(screen.getByText('Nous (Platform)')).toBeInTheDocument();
     });
 
     // The master toggle is the button in the platform-card header row.
-    const header = screen.getByText('MediaHub (Platform)').closest('.flex.items-center.gap-4');
+    const header = screen.getByText('Nous (Platform)').closest('.flex.items-center.gap-4');
     const masterToggle = within(header as HTMLElement).getByRole('button');
     fireEvent.click(masterToggle);
     fireEvent.click(screen.getByText('Save Settings'));
