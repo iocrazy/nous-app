@@ -95,6 +95,6 @@ describe('AISettings task-assignment loading states', () => {
     // list — the point is it was never shown as the selected value.)
     resolveNousModels([MOSS_MODEL]);
 
-    expect((await screen.findAllByText(/MOSS ASR \(MediaHub/)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/MOSS ASR \(Platform/)).length).toBeGreaterThan(0);
   });
 });
