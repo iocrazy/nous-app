@@ -251,6 +251,88 @@ async def chain_transcript_summary_for_tags(
         )
 
 
+async def chain_transcription_unconditional(
+    platform_id: str,
+    user_id: str,
+    *,
+    flow_id: str | None = None,
+    video_title: str = "",
+):
+    """Dispatch ai_transcription regardless of intent tags.
+
+    Called by ``extract_audio_workflow`` when a manual /transcribe click
+    requested audio extraction as a prerequisite (the user clicked
+    Transcribe on a media that had a video file but no extracted audio
+    yet). Unlike ``chain_transcript_summary_for_tags`` this does NOT gate
+    on a Transcript/Summary tag nor probe user_settings — the click IS
+    the intent, and the direct-dispatch transcribe endpoints never gated
+    on tags/settings either. The dispatched ai_transcription_workflow
+    surfaces its own failure (e.g. missing user_settings) as a
+    task_tracking row (route-C), matching the pre-existing manual path.
+
+    Best-effort: failures are logged and swallowed so they never fail the
+    extract_audio_workflow that called this (the audio was still
+    extracted successfully — only the follow-on transcription dispatch
+    hiccuped)."""
+    try:
+        import uuid as _uuid
+
+        from app.repositories.media_repository import MediaRepository
+        from app.repositories.resources_repository import ResourcesRepository
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.unified_task_manager import get_task_manager
+        from app.workflows.ai_transcription import ai_transcription_workflow
+
+        media = await MediaRepository().get_by_platform_id(platform_id)
+        parsed_media_id = (media or {}).get("id")
+        if not parsed_media_id:
+            logger.warning(
+                f"[AI] No parsed_media row for {platform_id}, skip transcription chain"
+            )
+            return
+
+        resource = await ResourcesRepository().get_resource_by_media_id_and_creator(
+            str(parsed_media_id), user_id
+        )
+        resource_id = str(resource["id"]) if resource else None
+
+        mgr = get_task_manager()
+        title_clip = (video_title or (media or {}).get("title") or platform_id or "")[
+            :50
+        ]
+        tr_wf_id = str(_uuid.uuid4())
+        try:
+            await mgr.create(
+                user_id=user_id,
+                task_type="ai_transcription",
+                title=f"Transcript {title_clip}",
+                media_id=str(platform_id),
+                resource_id=resource_id,
+                dbos_workflow_id=tr_wf_id,
+                flow_id=flow_id,
+            )
+        except Exception as e:
+            logger.warning(f"[AI] pre-create ai_transcription row: {e}")
+        await start_workflow_routed(
+            "ai_transcription",
+            dbos_workflow_callable=ai_transcription_workflow,
+            dbos_workflow_kwargs={
+                "parsed_media_id": int(parsed_media_id),
+                "user_id": user_id,
+            },
+            workflow_id=tr_wf_id,
+        )
+        logger.info(
+            f"[AI] transcript chained (unconditional) for {platform_id} "
+            f"(resource={resource_id})"
+        )
+    except Exception as e:
+        logger.warning(
+            f"[AI] chain_transcription_unconditional failed for {platform_id}: "
+            f"{type(e).__name__}: {e!r}"
+        )
+
+
 async def chain_summary_for_tags(parsed_media_id: int, user_id: str):
     """Dispatch ai_summary_workflow IFF the resource tied to
     ``parsed_media_id`` carries the Summary tag. Called by

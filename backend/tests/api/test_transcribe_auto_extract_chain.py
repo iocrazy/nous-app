@@ -1,0 +1,374 @@
+# backend/tests/api/test_transcribe_auto_extract_chain.py
+
+"""Behavioural tests for the transcribe endpoints' audio-readiness gate.
+
+The old gate 409'd whenever a media had no extracted audio — including
+old downloads that DID have a video file on disk but never got their
+audio extracted (extract_audio_path / music_download_path both empty).
+"Wait for extraction to complete, then retry" was a dead end: nothing
+was ever going to extract it. The manual extract-audio entry point was
+buried in a detail page the user never sees.
+
+The fix makes the gate three-way:
+  1. audio on disk          → dispatch ai_transcription directly
+  2. no audio + video file  → dispatch extract_audio(chain_transcription=
+                              True), which extracts then unconditionally
+                              chains transcription
+  3. neither                → 409 with a clear "no audio track" message
+
+Plus: the dead-end 409 is now decided BEFORE points are consumed, so a
+409 never leaves the user charged.
+
+These tests call the endpoint coroutines directly with the module
+boundaries (resolver, dedup read_scope, points, task manager, workflow
+dispatch) mocked, and assert the dispatch sequence + points ordering.
+No DB, no DBOS runtime.
+"""
+
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from app.api import ai_router
+from app.core.deps import AuthContext
+
+# ─── helpers ──────────────────────────────────────────────────────
+
+
+def _auth() -> AuthContext:
+    return AuthContext(user_id="user-1", auth_type="jwt")
+
+
+class _NoActiveSession:
+    """Stands in for the ORM AsyncSession used by the dedup probe — its
+    execute().first() returns None (no in-flight transcription)."""
+
+    async def execute(self, *_a, **_k):
+        result = MagicMock()
+        result.first.return_value = None
+        return result
+
+
+@asynccontextmanager
+async def _fake_read_scope():
+    yield _NoActiveSession()
+
+
+def _patch_common(monkeypatch, dispatched: list, created: list):
+    """Patch the shared boundaries: dedup read_scope, task manager,
+    workflow dispatch. Returns the (fake) task manager + start_workflow
+    mocks with call recording."""
+    import app.db.session as dbs
+
+    monkeypatch.setattr(dbs, "read_scope", _fake_read_scope)
+
+    async def _create(**kwargs):
+        created.append(kwargs)
+        return "task-row-id"
+
+    fake_mgr = MagicMock()
+    fake_mgr.create = AsyncMock(side_effect=_create)
+    fake_mgr.fail = AsyncMock()
+
+    import app.services.infra.unified_task_manager as utm
+
+    monkeypatch.setattr(utm, "get_task_manager", lambda: fake_mgr)
+
+    async def _start(name, **kwargs):
+        dispatched.append({"name": name, **kwargs})
+
+    import app.services.infra.dbos_orchestrator as orch
+
+    monkeypatch.setattr(orch, "start_workflow_routed", AsyncMock(side_effect=_start))
+
+    return fake_mgr
+
+
+def _patch_resource_resolver(monkeypatch, media: dict):
+    resource = {"id": "res-1", "media_id": "111", "creator_id": "user-1"}
+
+    async def _resolve(_rid):
+        return resource, media["platform_id"], media
+
+    monkeypatch.setattr(ai_router, "_resolve_resource_to_platform_id", _resolve)
+    return resource
+
+
+def _patch_no_nous_billing(monkeypatch):
+    """Default (non-nous) model → the resource endpoint's billing branch is
+    skipped, but the pre-branch calls (user_settings probe, team lookup,
+    PointsService()) still run — stub them so they don't hit the DB."""
+    settings_repo = MagicMock()
+    settings_repo.get_by_user_id = AsyncMock(return_value={"settings_json": {}})
+    monkeypatch.setattr(
+        "app.repositories.user_settings_repository.UserSettingsRepository",
+        lambda: settings_repo,
+    )
+    monkeypatch.setattr(ai_router, "get_team_id_for_user", AsyncMock(return_value=None))
+    monkeypatch.setattr(ai_router, "PointsService", lambda: MagicMock())
+
+
+# ─── _has_extractable_video predicate ─────────────────────────────
+
+
+class TestHasExtractableVideo:
+    def test_video_file_is_extractable(self) -> None:
+        assert ai_router._has_extractable_video({"download_path": "d/x/video.mp4"})
+        assert ai_router._has_extractable_video({"download_path": "a/b/clip.MOV"})
+        assert ai_router._has_extractable_video({"download_path": "a/b/c.webm"})
+
+    def test_gallery_directory_not_extractable(self) -> None:
+        # 图文 gallery: download_path points at a directory, no extension.
+        assert not ai_router._has_extractable_video({"download_path": "douyin/12345"})
+
+    def test_empty_or_missing_not_extractable(self) -> None:
+        assert not ai_router._has_extractable_video({"download_path": ""})
+        assert not ai_router._has_extractable_video({})
+        assert not ai_router._has_extractable_video(None)
+
+
+# ─── resource endpoint ────────────────────────────────────────────
+
+
+class TestTranscribeByResource:
+    @pytest.mark.asyncio
+    async def test_audio_ready_dispatches_transcription_directly(
+        self, monkeypatch
+    ) -> None:
+        media = {
+            "id": "111",
+            "platform_id": "pf-1",
+            "extract_audio_path": "d/audio.m4a",
+            "download_path": "d/video.mp4",
+            "title": "T",
+        }
+        _patch_resource_resolver(monkeypatch, media)
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert len(dispatched) == 1
+        assert dispatched[0]["name"] == "ai_transcription"
+        assert created[0]["task_type"] == "ai_transcription"
+        assert res["message"] == "Transcription queued"
+        assert res["extracting_audio"] is False
+
+    @pytest.mark.asyncio
+    async def test_no_audio_but_video_dispatches_extract_chain(
+        self, monkeypatch
+    ) -> None:
+        media = {
+            "id": "111",
+            "platform_id": "pf-1",
+            "extract_audio_path": "",
+            "music_download_path": "",
+            "download_path": "bilibili/329/video.mp4",  # old B站 download
+            "title": "Old Bilibili clip",
+        }
+        _patch_resource_resolver(monkeypatch, media)
+        _patch_no_nous_billing(monkeypatch)
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+
+        res = await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert len(dispatched) == 1
+        d = dispatched[0]
+        assert d["name"] == "extract_audio"
+        # The chain flag is what makes extract_audio_workflow dispatch
+        # transcription unconditionally after extraction.
+        assert d["dbos_workflow_kwargs"]["chain_transcription"] is True
+        assert d["dbos_workflow_kwargs"]["platform_id"] == "pf-1"
+        # task_tracking row is created as extract_audio (matched wf id)
+        assert created[0]["task_type"] == "extract_audio"
+        assert created[0]["dbos_workflow_id"] == d["workflow_id"]
+        assert res["extracting_audio"] is True
+        assert "transcription will follow" in res["message"]
+
+    @pytest.mark.asyncio
+    async def test_no_audio_no_video_returns_409_without_charging(
+        self, monkeypatch
+    ) -> None:
+        media = {
+            "id": "111",
+            "platform_id": "pf-1",
+            "extract_audio_path": "",
+            "music_download_path": "",
+            "download_path": "douyin/gallery-dir",  # no video extension
+            "title": "Gallery",
+        }
+        _patch_resource_resolver(monkeypatch, media)
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+
+        # Spy PointsService — the 409 must fire BEFORE any consume.
+        consume = AsyncMock()
+        pts = MagicMock()
+        pts.check_and_consume = consume
+        monkeypatch.setattr(ai_router, "PointsService", lambda: pts)
+
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc:
+            await ai_router.trigger_transcription_by_resource("res-1", _auth(), None)
+
+        assert exc.value.status_code == 409
+        assert "no audio track available" in exc.value.detail
+        consume.assert_not_awaited()  # points ordering: gate is before billing
+        assert dispatched == []
+
+
+# ─── legacy platform_id endpoint ──────────────────────────────────
+
+
+class TestTranscribeLegacy:
+    def _patch_media(self, monkeypatch, media: dict):
+        async def _get(_pid):
+            return media
+
+        monkeypatch.setattr(ai_router, "_get_media_or_404", _get)
+
+    def _patch_owner_resource(self, monkeypatch):
+        repo = MagicMock()
+        repo.get_resource_by_media_id_and_creator = AsyncMock(
+            return_value={"id": "res-9"}
+        )
+        monkeypatch.setattr(
+            "app.repositories.resources_repository.ResourcesRepository",
+            lambda: repo,
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_audio_but_video_dispatches_extract_chain(
+        self, monkeypatch
+    ) -> None:
+        media = {
+            "id": "329",
+            "platform_id": "pf-legacy",
+            "extract_audio_path": "",
+            "music_download_path": "",
+            "download_path": "bilibili/329/video.mp4",
+            "title": "Legacy clip",
+        }
+        self._patch_media(monkeypatch, media)
+        self._patch_owner_resource(monkeypatch)
+        monkeypatch.setattr(
+            ai_router, "get_team_id_for_user", AsyncMock(return_value=None)
+        )
+        monkeypatch.setattr(ai_router, "PointsService", lambda: MagicMock())
+        dispatched: list = []
+        created: list = []
+        _patch_common(monkeypatch, dispatched, created)
+
+        res = await ai_router.trigger_transcription("pf-legacy", _auth(), None)
+
+        assert dispatched[0]["name"] == "extract_audio"
+        assert dispatched[0]["dbos_workflow_kwargs"]["chain_transcription"] is True
+        assert res["extracting_audio"] is True
+
+    @pytest.mark.asyncio
+    async def test_no_audio_no_video_returns_409_before_billing(
+        self, monkeypatch
+    ) -> None:
+        media = {
+            "id": "329",
+            "platform_id": "pf-legacy",
+            "extract_audio_path": "",
+            "music_download_path": "",
+            "download_path": "",  # nothing downloaded
+            "title": "Nothing",
+        }
+        self._patch_media(monkeypatch, media)
+
+        team_spy = AsyncMock(return_value="team-1")
+        monkeypatch.setattr(ai_router, "get_team_id_for_user", team_spy)
+        consume = AsyncMock()
+        pts = MagicMock()
+        pts.check_and_consume = consume
+        pts.ensure_team_quota = AsyncMock()
+        monkeypatch.setattr(ai_router, "PointsService", lambda: pts)
+
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc:
+            await ai_router.trigger_transcription("pf-legacy", _auth(), None)
+
+        assert exc.value.status_code == 409
+        assert "no audio track available" in exc.value.detail
+        # The classification runs before the points block is even entered.
+        consume.assert_not_awaited()
+        team_spy.assert_not_awaited()
+
+
+# ─── extract_audio_workflow chain routing ─────────────────────────
+
+
+class TestExtractAudioWorkflowChainRouting:
+    """The workflow body picks the chain helper by ``chain_transcription``:
+    True → unconditional transcription dispatch (manual click), False →
+    tag-driven (post-download auto-chain).
+
+    The body is a live ``@DBOS.workflow()`` coroutine that raises
+    "invoked before DBOS initialized" unless a DBOS runtime is up, so —
+    matching the existing convention in test_flow_id_and_extract_audio.py
+    — this pins the routing by reading the source. The behavioural half
+    (that the endpoints actually dispatch extract_audio with the flag) is
+    covered above with the fake orchestrator.
+    """
+
+    @staticmethod
+    def _wf_source() -> str:
+        import importlib
+        import inspect
+
+        mod = importlib.import_module("app.workflows.extract_audio")
+        return inspect.getsource(mod.extract_audio_workflow)
+
+    def test_signature_has_chain_transcription_flag(self) -> None:
+        import inspect
+
+        from app.workflows.extract_audio import extract_audio_workflow
+
+        sig = inspect.signature(extract_audio_workflow)
+        param = sig.parameters["chain_transcription"]
+        assert param.default is False, "flag must default False (auto-chain path)"
+
+    def test_routes_true_to_unconditional_false_to_tag_driven(self) -> None:
+        source = self._wf_source()
+        assert "if chain_transcription:" in source
+        assert "chain_transcription_unconditional(" in source
+        assert "chain_transcript_summary_for_tags(" in source
+        # The unconditional helper must sit under the chain_transcription
+        # branch, the tag-driven one under else — verify ordering.
+        true_idx = source.index("chain_transcription_unconditional(")
+        else_idx = source.index("else:", true_idx)
+        tagged_idx = source.index("chain_transcript_summary_for_tags(", else_idx)
+        assert true_idx < else_idx < tagged_idx
+
+
+class TestChainTranscriptionUnconditional:
+    """The helper dispatched by the manual chain must NOT gate on intent
+    tags (unlike chain_transcript_summary_for_tags) — the click is the
+    intent."""
+
+    def test_helper_has_no_tag_gate(self) -> None:
+        import importlib
+        import inspect
+
+        mod = importlib.import_module("app.tasks.download_helpers")
+        source = inspect.getsource(mod.chain_transcription_unconditional)
+        assert "read_resource_tag_names" not in source, (
+            "manual transcribe chain must dispatch unconditionally — no "
+            "Transcript/Summary tag gate"
+        )
+        assert "ai_transcription_workflow" in source
+        assert "dbos_workflow_id=tr_wf_id" in source
+        assert "workflow_id=tr_wf_id" in source

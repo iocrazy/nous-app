@@ -124,9 +124,18 @@ async def extract_audio_workflow(
     resource_id: Optional[str] = None,
     flow_id: Optional[str] = None,
     video_title: str = "",
+    chain_transcription: bool = False,
 ) -> dict[str, Any]:
-    """Extract audio from the downloaded video, then chain
-    transcript/summary if the resource carries those intent tags.
+    """Extract audio from the downloaded video, then chain transcription.
+
+    Two chaining modes on success:
+      - ``chain_transcription=True`` (manual /transcribe click on a media
+        that had a video but no extracted audio yet): dispatch
+        ai_transcription UNCONDITIONALLY — the click is the intent, no
+        tag gate. This is what turns the old "no audio → 409 dead end"
+        into a working extract→transcribe chain.
+      - default (post-download auto-chain): dispatch transcript/summary
+        only if the resource carries the matching intent tags.
 
     workflow_id idempotency: re-running with the same id replays the
     cached extraction result (the ffmpeg pass runs once).
@@ -168,25 +177,35 @@ async def extract_audio_workflow(
         outcome="success",
     )
 
-    # Chain transcript/summary IFF the resource carries the intent tags.
-    # Called from the workflow body (not a @DBOS.step) because it calls
+    # Chain transcription after the audio asset is on disk. Called from
+    # the workflow body (not a @DBOS.step) because it calls
     # start_workflow_routed → DBOS.start_workflow, which asserts when
     # invoked from inside a step context. Best-effort — never fails this
     # workflow. No audio-ready gate needed: we just extracted it.
     try:
         from app.db.scope import Scope, request_scope
-        from app.tasks.download_helpers import chain_transcript_summary_for_tags
+        from app.tasks.download_helpers import (
+            chain_transcript_summary_for_tags,
+            chain_transcription_unconditional,
+        )
 
-        # §2.4b: chain_transcript_summary_for_tags is now async-native and
-        # reads `resources` by awaiting the repo directly. Set the ambient USER
-        # scope HERE and await it inside — the contextvar is naturally visible
-        # to the awaited read (same async context; no copy_context thread hop).
-        # `user_id` is a required workflow arg (always present). INERT until
+        # §2.4b: the chain helpers are async-native and read `resources` by
+        # awaiting the repo directly. Set the ambient USER scope HERE and
+        # await inside — the contextvar is naturally visible to the awaited
+        # read (same async context; no copy_context thread hop). `user_id`
+        # is a required workflow arg (always present). INERT until
         # SCOPE_ENFORCE_RESOURCES flips.
         async with request_scope(Scope(user_id=user_id)):
-            await chain_transcript_summary_for_tags(
-                platform_id, user_id, flow_id=flow_id, video_title=video_title
-            )
+            if chain_transcription:
+                # Manual transcribe click: the user explicitly asked to
+                # transcribe, so dispatch it regardless of intent tags.
+                await chain_transcription_unconditional(
+                    platform_id, user_id, flow_id=flow_id, video_title=video_title
+                )
+            else:
+                await chain_transcript_summary_for_tags(
+                    platform_id, user_id, flow_id=flow_id, video_title=video_title
+                )
     except Exception as e:
         logger.warning(
             f"[extract_audio] transcript/summary chain failed for "
