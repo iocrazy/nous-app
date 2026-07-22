@@ -1,0 +1,15 @@
+# Locally-managed tunnel ingress —— 唯一真相在此文件（非 dashboard）
+# tunnel / credentials-file 由 P0 Task 3 用真实 TUNNEL_ID 回填
+# 凭证住服务器 /opt/mediahub/secrets/cloudflared/，compose 挂到容器 /etc/cloudflared/creds/
+tunnel: REPLACE_WITH_TUNNEL_ID
+credentials-file: /etc/cloudflared/creds/REPLACE_WITH_TUNNEL_ID.json
+
+ingress:
+  # P0：两个 hostname 先全部指向 health 占位源站
+  # P1：api.nous.ink 改指 backend、sb.nous.ink 改指 Kong
+  - hostname: api.nous.ink
+    service: http://health:80
+  - hostname: sb.nous.ink
+    service: http://health:80
+  # 兜底：未匹配 hostname 返回 404
+  - service: http_status:404

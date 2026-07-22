@@ -1,0 +1,4 @@
+# 保险带：凭证住 /opt/mediahub/secrets/cloudflared/（仓库树外）
+# 万一有人误放凭证进此目录也不会被提交
+cert.pem
+*.json
