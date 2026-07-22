@@ -56,6 +56,22 @@ async def _resolve_resource_to_platform_id(resource_id: str) -> tuple[dict, str,
     return resource, media["platform_id"], media
 
 
+# Video container extensions that ffmpeg can stream-copy audio from. Used
+# to tell "no audio yet but a video file is on disk" (extractable) apart
+# from "gallery / nothing downloaded" (download_path is a directory or
+# empty → NOT extractable). This is stricter than the extract-audio
+# endpoint's bare download_path truthiness so a 图文 gallery never
+# dispatches a doomed ffmpeg pass.
+_VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".flv", ".ts")
+
+
+def _has_extractable_video(media: dict | None) -> bool:
+    """True when the media has a downloaded video file we can extract
+    audio from (as opposed to a gallery directory or no download yet)."""
+    download_path = (media or {}).get("download_path") or ""
+    return bool(download_path) and download_path.lower().endswith(_VIDEO_EXTS)
+
+
 def _format_duration_short(seconds: float) -> str:
     """Format seconds into MM:SS or HH:MM:SS."""
     total = int(seconds)
@@ -100,6 +116,28 @@ async def trigger_transcription_by_resource(
             "resource_id": resource_id,
         }
     # === End dedup ===
+
+    # === Audio-readiness classification (BEFORE billing) ===
+    # Three cases, decided up-front so a dead-end never leaves points
+    # charged (the 409 used to raise AFTER check_and_consume):
+    #   1. audio already on disk            → transcribe directly
+    #   2. no audio yet but a video file    → extract audio first, then
+    #                                         chain transcription
+    #   3. neither audio nor video          → 409, nothing to transcribe
+    _has_audio = bool(
+        (media or {}).get("extract_audio_path")
+        or (media or {}).get("music_download_path")
+    )
+    _can_extract = _has_extractable_video(media)
+    if not _has_audio and not _can_extract:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This media has no audio track available — "
+                "download/extraction hasn't produced one."
+            ),
+        )
+    # === End classification ===
 
     # === Nous billing — only charge if user selected a nous-* model ===
     import math
@@ -167,54 +205,71 @@ async def trigger_transcription_by_resource(
     # pushes status changes back to the frontend.
     _orphan_task_id: str | None = None
 
-    # Audio-readiness gate: the workflow's whisper step needs an audio
-    # file on disk. Check the actual on-disk fields, not
-    # music_download_status — that one means "music URL was downloaded",
-    # which is a different concern from "ffmpeg extracted audio from a
-    # video". The MediaCard green icon already uses this same union; the
-    # gate is now consistent with what the UI reports.
-    if not (
-        (media or {}).get("extract_audio_path")
-        or (media or {}).get("music_download_path")
-    ):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Audio not yet extracted for this resource. "
-                "Wait for download/extraction to complete, then retry."
-            ),
-        )
-
     try:
-        # Manual click path = always dispatch transcription, do NOT go
-        # through tag-driven `maybe_chain_ai_pipeline` (that helper is
-        # for the post-download auto-chain).
+        # Manual click path = always dispatch, do NOT go through tag-driven
+        # `maybe_chain_ai_pipeline` (that helper is for the post-download
+        # auto-chain). Two dispatch shapes, chosen by the classification
+        # above:
+        #   - audio ready  → ai_transcription directly
+        #   - video only   → extract_audio(chain_transcription=True) which
+        #                    extracts then unconditionally chains transcribe
         import uuid as _uuid
 
         from app.services.infra.dbos_orchestrator import start_workflow_routed
         from app.services.infra.unified_task_manager import get_task_manager
-        from app.workflows.ai_transcription import ai_transcription_workflow
 
         tracker = get_task_manager()
         wf_id = str(_uuid.uuid4())
-        _orphan_task_id = await tracker.create(
-            user_id=auth.user_id,
-            task_type="ai_transcription",
-            title=f"Transcribe: {platform_id}",
-            media_id=platform_id,
-            resource_id=resource_id,
-            dbos_workflow_id=wf_id,
-        )
 
-        await start_workflow_routed(
-            "ai_transcription",
-            dbos_workflow_callable=ai_transcription_workflow,
-            dbos_workflow_kwargs={
-                "parsed_media_id": int(media["id"]),
-                "user_id": auth.user_id,
-            },
-            workflow_id=wf_id,
-        )
+        if _has_audio:
+            from app.workflows.ai_transcription import ai_transcription_workflow
+
+            _orphan_task_id = await tracker.create(
+                user_id=auth.user_id,
+                task_type="ai_transcription",
+                title=f"Transcribe: {platform_id}",
+                media_id=platform_id,
+                resource_id=resource_id,
+                dbos_workflow_id=wf_id,
+            )
+            await start_workflow_routed(
+                "ai_transcription",
+                dbos_workflow_callable=ai_transcription_workflow,
+                dbos_workflow_kwargs={
+                    "parsed_media_id": int(media["id"]),
+                    "user_id": auth.user_id,
+                },
+                workflow_id=wf_id,
+            )
+        else:
+            # No audio yet but a video file exists → extract audio first,
+            # then chain transcription unconditionally. Turns the old
+            # 409 dead-end (old B站 download, extract_audio_path empty)
+            # into a working extract→transcribe chain.
+            from app.workflows.extract_audio import extract_audio_workflow
+
+            _video_title = (media.get("title") or platform_id)[:50]
+            _orphan_task_id = await tracker.create(
+                user_id=auth.user_id,
+                task_type="extract_audio",
+                title=f"Audio {_video_title}",
+                subtitle="Extracting audio, then transcribing",
+                media_id=platform_id,
+                resource_id=resource_id,
+                dbos_workflow_id=wf_id,
+            )
+            await start_workflow_routed(
+                "extract_audio",
+                dbos_workflow_callable=extract_audio_workflow,
+                dbos_workflow_kwargs={
+                    "platform_id": platform_id,
+                    "user_id": auth.user_id,
+                    "resource_id": resource_id,
+                    "video_title": _video_title,
+                    "chain_transcription": True,
+                },
+                workflow_id=wf_id,
+            )
         _orphan_task_id = None
     except HTTPException:
         raise
@@ -252,10 +307,15 @@ async def trigger_transcription_by_resource(
         )
 
     return {
-        "message": "Transcription queued",
+        "message": (
+            "Transcription queued"
+            if _has_audio
+            else "Audio extraction started — transcription will follow"
+        ),
         "resource_id": resource_id,
         "platform_id": platform_id,
         "points_charged": _points_cost,
+        "extracting_audio": not _has_audio,
     }
 
 
@@ -521,9 +581,28 @@ async def trigger_transcription(
 ):
     """Manually trigger transcription for a video (legacy, platform_id-based).
 
-    Queues the extract_audio -> transcribe chain via Celery.
+    Audio-ready → transcribe directly. No audio yet but a video file is on
+    disk → extract audio first, then chain transcription (no more 409 dead
+    end). Neither → 409.
     """
-    await _get_media_or_404(platform_id)
+    media_row = await _get_media_or_404(platform_id)
+
+    # === Audio-readiness classification (BEFORE billing so a dead-end
+    # 409 never leaves points charged) ===
+    _has_audio = bool(
+        (media_row or {}).get("extract_audio_path")
+        or (media_row or {}).get("music_download_path")
+    )
+    _can_extract = _has_extractable_video(media_row)
+    if not _has_audio and not _can_extract:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This media has no audio track available — "
+                "download/extraction hasn't produced one."
+            ),
+        )
+    # === End classification ===
 
     # === Points check ===
     points_service = PointsService()
@@ -541,22 +620,6 @@ async def trigger_transcription(
         _points_cost = points_result.get("points_cost", 0)
     # === End points check ===
 
-    # Audio-readiness gate: same union check as the resource_id endpoint
-    # above — extract_audio_path (ffmpeg-extracted) OR music_download_path
-    # (URL-downloaded music). Matches the MediaCard green icon.
-    _media_check = await _get_media_or_404(platform_id)
-    if not (
-        (_media_check or {}).get("extract_audio_path")
-        or (_media_check or {}).get("music_download_path")
-    ):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Audio not yet extracted for this resource. "
-                "Wait for download/extraction to complete, then retry."
-            ),
-        )
-
     # Track unified_task so the Task Center sees this run + Realtime
     # pushes status changes back to the frontend (manual click would
     # otherwise be invisible — the bug behind the "I clicked but
@@ -564,19 +627,14 @@ async def trigger_transcription(
     _orphan_task_id: str | None = None
 
     try:
-        # PR-D7 phase 3b: dispatch ai_transcription_workflow directly.
-        # Workflow takes parsed_media_id (int), so look it up.
         import uuid as _uuid
 
-        from app.services.infra.dbos_orchestrator import start_workflow_routed
-        from app.services.infra.unified_task_manager import get_task_manager
-        from app.workflows.ai_transcription import ai_transcription_workflow
-
-        media_row = await _get_media_or_404(platform_id)
         # Lookup the user's resource for this platform_id (best-effort —
         # transcription can run without resource_id, the task_tracking
         # row just won't link back to a card).
         from app.repositories.resources_repository import ResourcesRepository
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.unified_task_manager import get_task_manager
 
         owner_resource = (
             await ResourcesRepository().get_resource_by_media_id_and_creator(
@@ -587,24 +645,55 @@ async def trigger_transcription(
 
         tracker = get_task_manager()
         wf_id = str(_uuid.uuid4())
-        _orphan_task_id = await tracker.create(
-            user_id=auth.user_id,
-            task_type="ai_transcription",
-            title=f"Transcribe: {platform_id}",
-            media_id=platform_id,
-            resource_id=owner_resource_id,
-            dbos_workflow_id=wf_id,
-        )
 
-        await start_workflow_routed(
-            "ai_transcription",
-            dbos_workflow_callable=ai_transcription_workflow,
-            dbos_workflow_kwargs={
-                "parsed_media_id": int(media_row["id"]),
-                "user_id": auth.user_id,
-            },
-            workflow_id=wf_id,
-        )
+        if _has_audio:
+            # PR-D7 phase 3b: dispatch ai_transcription_workflow directly.
+            from app.workflows.ai_transcription import ai_transcription_workflow
+
+            _orphan_task_id = await tracker.create(
+                user_id=auth.user_id,
+                task_type="ai_transcription",
+                title=f"Transcribe: {platform_id}",
+                media_id=platform_id,
+                resource_id=owner_resource_id,
+                dbos_workflow_id=wf_id,
+            )
+            await start_workflow_routed(
+                "ai_transcription",
+                dbos_workflow_callable=ai_transcription_workflow,
+                dbos_workflow_kwargs={
+                    "parsed_media_id": int(media_row["id"]),
+                    "user_id": auth.user_id,
+                },
+                workflow_id=wf_id,
+            )
+        else:
+            # No audio yet but a video file exists → extract audio first,
+            # then chain transcription unconditionally.
+            from app.workflows.extract_audio import extract_audio_workflow
+
+            _video_title = (media_row.get("title") or platform_id)[:50]
+            _orphan_task_id = await tracker.create(
+                user_id=auth.user_id,
+                task_type="extract_audio",
+                title=f"Audio {_video_title}",
+                subtitle="Extracting audio, then transcribing",
+                media_id=platform_id,
+                resource_id=owner_resource_id,
+                dbos_workflow_id=wf_id,
+            )
+            await start_workflow_routed(
+                "extract_audio",
+                dbos_workflow_callable=extract_audio_workflow,
+                dbos_workflow_kwargs={
+                    "platform_id": platform_id,
+                    "user_id": auth.user_id,
+                    "resource_id": owner_resource_id,
+                    "video_title": _video_title,
+                    "chain_transcription": True,
+                },
+                workflow_id=wf_id,
+            )
         _orphan_task_id = None
     except Exception as e:
         if _orphan_task_id:
@@ -639,7 +728,15 @@ async def trigger_transcription(
             status_code=500, detail=f"Failed to queue transcription: {str(e)}"
         )
 
-    return {"message": "Transcription queued", "platform_id": platform_id}
+    return {
+        "message": (
+            "Transcription queued"
+            if _has_audio
+            else "Audio extraction started — transcription will follow"
+        ),
+        "platform_id": platform_id,
+        "extracting_audio": not _has_audio,
+    }
 
 
 @router.post("/summarize/{platform_id}")
