@@ -1,5 +1,5 @@
 {
-  "name": "MediaHub",
+  "name": "Nous",
   "description": "A modern media management dashboard for parsing, downloading, and analyzing content from multiple platforms with Supabase integration.",
   "requestFramePermissions": []
 }

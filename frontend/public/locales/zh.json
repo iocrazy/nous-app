@@ -178,7 +178,7 @@
   },
   "distribution": {
     "accountsTitle": "平台账号",
-    "accountsSubtitle": "连接社交平台账号，从 MediaHub 直接发布内容",
+    "accountsSubtitle": "连接社交平台账号，从 Nous 直接发布内容",
     "connectAccount": "绑定账号",
     "connectAnother": "绑定新账号",
     "loadFailed": "加载账号失败",
@@ -2610,7 +2610,7 @@
       "filterPlaceholder": "筛选技能...",
       "noMatches": "没有匹配的技能。",
       "presetBadge": "预置",
-      "presetTooltip": "MediaHub 内置技能",
+      "presetTooltip": "Nous 内置技能",
       "selectPrompt": "从左侧选择一个技能查看和编辑。",
       "loading": "加载技能中...",
       "loadError": "技能加载失败",
@@ -2630,7 +2630,7 @@
       "back": "返回",
       "loadErrorPrefix": "加载技能失败",
       "usedByPlaceholder": "暂无关联",
-      "bundledReadOnlyHint": "MediaHub 内置技能只读，需 Fork 后编辑。",
+      "bundledReadOnlyHint": "Nous 内置技能只读，需 Fork 后编辑。",
       "savedToast": "已保存",
       "newSkillButton": "新建技能",
       "newSkillTitle": "新建技能",
@@ -3034,7 +3034,7 @@
     "backToThisMonth": "回到本月"
   },
   "editor": {
-    "brand": "MediaHub Projects",
+    "brand": "Nous Projects",
     "scenesLabel": "场景",
     "scenesNav": "场景导航",
     "sceneCount": "{{count}} 个场景 · 剧本",

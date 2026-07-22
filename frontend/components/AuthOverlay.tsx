@@ -232,7 +232,7 @@ export const AuthOverlay: React.FC<AuthOverlayProps> = ({ onLogin, onClose }) =>
           </div>
 
           {/* Brand Name */}
-          <h2 className="relative z-10 text-white text-2xl font-bold mb-2">MediaHub</h2>
+          <h2 className="relative z-10 text-white text-2xl font-bold mb-2">Nous</h2>
           <p className="relative z-10 text-white/70 text-sm mb-8">Your Media Collection Manager</p>
 
           {/* Features */}

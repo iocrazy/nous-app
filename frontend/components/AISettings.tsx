@@ -830,7 +830,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             : `${model.pricing_value} pts/1k tokens`;
       options.push({
         value: `nous:${model.name}`,
-        label: `${model.display_name} (MediaHub · ${pricingLabel})`,
+        label: `${model.display_name} (Platform · ${pricingLabel})`,
       });
     }
 
@@ -876,7 +876,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
     const options = getAgentOptions();
     const systemOptions = options.filter((o) => o.group === 'system');
     const mineOptions = options.filter((o) => o.group === 'mine');
-    // Platform (MediaHub) LLM models are directly selectable per task — same as
+    // Platform (Nous) LLM models are directly selectable per task — same as
     // the ASR picker. visibleNousModels already folds in the admin master switch
     // + the user's platform-card master toggle + per-model blacklist; here we
     // only add the per-module governance gate.
@@ -884,7 +884,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
     const nousLlmOptions = nousAllowed
       ? visibleNousModels
           .filter((m) => m.type === 'llm')
-          .map((m) => ({ value: `nous:${m.name}`, label: `${m.display_name} (MediaHub)` }))
+          .map((m) => ({ value: `nous:${m.name}`, label: `${m.display_name} (Platform)` }))
       : [];
     const knownSlugs = new Set([
       ...options.map((o) => o.value),
@@ -919,7 +919,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
             </optgroup>
           )}
           {nousLlmOptions.length > 0 && (
-            <optgroup label="MediaHub Platform">
+            <optgroup label="Nous Platform">
               {nousLlmOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
@@ -1518,7 +1518,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-ink-100">MediaHub (Platform)</span>
+                    <span className="font-medium text-ink-100">Nous (Platform)</span>
                     <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-[var(--accent-soft)] text-[var(--accent-text)]">
                       Platform-managed
                     </span>

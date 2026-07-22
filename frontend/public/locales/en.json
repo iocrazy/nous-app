@@ -178,7 +178,7 @@
   },
   "distribution": {
     "accountsTitle": "Platform Accounts",
-    "accountsSubtitle": "Connect social accounts to publish from MediaHub",
+    "accountsSubtitle": "Connect social accounts to publish from Nous",
     "connectAccount": "Connect Account",
     "connectAnother": "Connect another account",
     "loadFailed": "Failed to load accounts",
@@ -2610,7 +2610,7 @@
       "filterPlaceholder": "Filter skills...",
       "noMatches": "No skills match your filter.",
       "presetBadge": "Preset",
-      "presetTooltip": "Bundled MediaHub preset",
+      "presetTooltip": "Bundled Nous preset",
       "selectPrompt": "Select a skill on the left to view and edit.",
       "loading": "Loading skills...",
       "loadError": "Failed to load skills",
@@ -2630,7 +2630,7 @@
       "back": "Back",
       "loadErrorPrefix": "Failed to load skill",
       "usedByPlaceholder": "No agents attached",
-      "bundledReadOnlyHint": "Bundled MediaHub skills are read-only. Fork to edit.",
+      "bundledReadOnlyHint": "Bundled Nous skills are read-only. Fork to edit.",
       "savedToast": "Saved",
       "newSkillButton": "New Skill",
       "newSkillTitle": "New Skill",
@@ -3034,7 +3034,7 @@
     "backToThisMonth": "Back to this month"
   },
   "editor": {
-    "brand": "MediaHub Projects",
+    "brand": "Nous Projects",
     "scenesLabel": "Scenes",
     "scenesNav": "Scenes",
     "sceneCount": "{{count}} scenes · Script",

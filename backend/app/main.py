@@ -678,7 +678,7 @@ else:
     # 开发模式：前端独立运行
     @app.get("/")
     async def root():
-        return {"message": "MediaHub API", "docs": "/docs", "health": "/health"}
+        return {"message": "Nous API", "docs": "/docs", "health": "/health"}
 
 
 if __name__ == "__main__":
