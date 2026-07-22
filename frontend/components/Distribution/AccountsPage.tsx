@@ -104,7 +104,7 @@ export const AccountsPage: React.FC = () => {
             {t('distribution.accountsTitle', 'Platform Accounts')}
             <span className="count">{accounts.length}</span>
           </h2>
-          <p>{t('distribution.accountsSubtitle', 'Connect social accounts to publish from MediaHub')}</p>
+          <p>{t('distribution.accountsSubtitle', 'Connect social accounts to publish from Nous')}</p>
         </div>
         <button type="button" className="btn btn-tint-indigo" onClick={onConnect}>
           <Plus size={15} /> {t('distribution.connectAccount', 'Connect Account')}

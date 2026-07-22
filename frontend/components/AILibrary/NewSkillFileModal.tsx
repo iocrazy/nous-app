@@ -2,7 +2,7 @@
 //
 // Modal for creating a new file OR folder inside an existing skill.
 //
-// MediaHub skills are DB-first, so "folders" are path-derived: a file at
+// Nous skills are DB-first, so "folders" are path-derived: a file at
 // `references/notes.md` implicitly creates the `references/` folder in the
 // tree. To let users create an EMPTY folder (paperclip-style), we drop a
 // `.gitkeep` placeholder file inside it — same convention git uses.

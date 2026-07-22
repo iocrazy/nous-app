@@ -397,7 +397,7 @@ export const ApiDocsPanel: React.FC = () => {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-ink-50">API Documentation</h1>
-          <p className="text-ink-400 text-sm">Integrate with MediaHub programmatically</p>
+          <p className="text-ink-400 text-sm">Integrate with Nous programmatically</p>
         </div>
       </div>
 

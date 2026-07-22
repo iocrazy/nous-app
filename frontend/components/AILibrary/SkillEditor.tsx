@@ -1,7 +1,7 @@
 // frontend/components/AILibrary/SkillEditor.tsx
 //
 // Paperclip-style SkillPane — ported 1:1 from paperclip
-// (ui/src/pages/CompanySkills.tsx::SkillPane) while keeping MediaHub's
+// (ui/src/pages/CompanySkills.tsx::SkillPane) while keeping Nous's
 // existing data layer (aiLibraryService + skill_files table).
 //
 // Layout:
@@ -21,7 +21,7 @@
 //     code / non-md     -> <pre><code>
 //
 // Differences from paperclip:
-// - MediaHub has "Bundled preset" vs "User/Team/Project" scopes — no
+// - Nous has "Bundled preset" vs "User/Team/Project" scopes — no
 //   GitHub / skills.sh / URL source variants (and thus no "Check for
 //   updates" workflow).
 // - "Used by" not yet returned by GET /skills/:slug — shows a dash
@@ -97,8 +97,8 @@ function skillSource(skill: AILibrarySkill) {
   if (bundled) {
     return {
       icon: Package,
-      label: 'MediaHub bundled',
-      managedLabel: 'Bundled MediaHub preset (read-only)',
+      label: 'Nous bundled',
+      managedLabel: 'Bundled Nous preset (read-only)',
     };
   }
   if (skill.team_id != null) {
@@ -227,7 +227,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   const editableReason = isPreset
     ? t(
         'aiLibrary.skills.bundledReadOnlyHint',
-        'Bundled MediaHub skills are read-only. Fork to edit.',
+        'Bundled Nous skills are read-only. Fork to edit.',
       )
     : '';
   // Bundled (preset) skills are read-only for everyone in Phase 1; the
