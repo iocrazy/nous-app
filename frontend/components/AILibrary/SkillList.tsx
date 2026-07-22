@@ -373,7 +373,7 @@ export const SkillList: React.FC<SkillListProps> = ({
                         ? 'text-ink-100'
                         : 'text-ink-300 hover:text-ink-100'
                     }`}
-                    title={preset ? t('aiLibrary.skills.presetTooltip', 'Bundled MediaHub preset') : s.name}
+                    title={preset ? t('aiLibrary.skills.presetTooltip', 'Bundled Nous preset') : s.name}
                   >
                     <SrcIcon
                       size={12}

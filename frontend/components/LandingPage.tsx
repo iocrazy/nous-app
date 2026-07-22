@@ -28,7 +28,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick, onGetSta
               <Sparkles className="w-5 h-5 text-white" />
             </div>
             <span className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-ink-400">
-              MediaHub
+              Nous
             </span>
           </div>
           
@@ -133,7 +133,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLoginClick, onGetSta
       <footer className="py-12 border-t border-white/5 bg-black">
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="text-ink-500 text-sm">
-            © 2024 MediaHub. All rights reserved.
+            © 2024 Nous. All rights reserved.
           </div>
           <div className="flex gap-6 text-ink-500 text-sm">
             <a href="#" className="hover:text-ink-300">Privacy</a>
