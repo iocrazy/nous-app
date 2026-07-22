@@ -86,7 +86,7 @@ async def test_transcribe_moss_timestamps_segments(tmp_path):
     assert result.segments[0].speaker == "S01"
     # The request must carry the moss timestamps switch.
     call_kwargs = provider._client.audio.transcriptions.create.call_args.kwargs
-    assert call_kwargs.get("extra_body") == {"timestamps": True}
+    assert call_kwargs.get("extra_body") == {"timestamps": True, "merge_segments": True}
 
 
 @pytest.mark.asyncio
@@ -117,6 +117,7 @@ async def test_transcribe_hotwords_present_sends_context_and_prompt(tmp_path):
     call_kwargs = provider._client.audio.transcriptions.create.call_args.kwargs
     assert call_kwargs.get("extra_body") == {
         "timestamps": True,
+        "merge_segments": True,
         "context": "Ada Lovelace, RLHF",
     }
     assert call_kwargs.get("prompt") == "Ada Lovelace, RLHF"
@@ -134,7 +135,7 @@ async def test_transcribe_no_hotwords_omits_context_and_prompt(tmp_path):
     provider, audio = _provider_with_response(tmp_path, response)
     await provider.transcribe(audio, model="whisper-1", hotwords="   ")
     call_kwargs = provider._client.audio.transcriptions.create.call_args.kwargs
-    assert call_kwargs.get("extra_body") == {"timestamps": True}
+    assert call_kwargs.get("extra_body") == {"timestamps": True, "merge_segments": True}
     assert "prompt" not in call_kwargs
     assert "hotwords" not in call_kwargs
 
