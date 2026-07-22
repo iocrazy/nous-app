@@ -4,11 +4,10 @@ tunnel: 95222cdd-1ea0-40aa-8329-f0f6a35282bd
 credentials-file: /etc/cloudflared/creds/95222cdd-1ea0-40aa-8329-f0f6a35282bd.json
 
 ingress:
-  # P0：两个 hostname 先全部指向 health 占位源站
-  # P1：api.nous.ink 改指 backend、sb.nous.ink 改指 Kong
+  # P1：真服务 ingress —— api → backend(8890)、sb → Kong(8000)
   - hostname: api.nous.ink
-    service: http://health:80
+    service: http://nous-backend:8890
   - hostname: sb.nous.ink
-    service: http://health:80
+    service: http://nous-kong:8000
   # 兜底：未匹配 hostname 返回 404
   - service: http_status:404
