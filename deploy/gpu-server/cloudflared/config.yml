@@ -6,7 +6,7 @@ credentials-file: /etc/cloudflared/creds/95222cdd-1ea0-40aa-8329-f0f6a35282bd.js
 ingress:
   # P1：真服务 ingress —— api → backend(8890)、sb → Kong(8000)
   - hostname: api.nous.ink
-    service: http://nous-backend:8890
+    service: http://nous-backend:8080
   - hostname: sb.nous.ink
     service: http://nous-kong:8000
   # 兜底：未匹配 hostname 返回 404
