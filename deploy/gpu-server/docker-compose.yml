@@ -1,21 +1,21 @@
 # GPU 服务器 P0 骨架：health 占位源站 + cloudflared tunnel
-# 启动前置：/opt/mediahub/secrets/cloudflared/ 内已有 cert.pem 与 <TUNNEL_ID>.json（见 README）
+# 启动前置：/media/heygo/program/nous/secrets/cloudflared/ 内已有 cert.pem 与 <TUNNEL_ID>.json（见 README）
 services:
   health:
     image: nginx:alpine
-    container_name: mediahub-health
+    container_name: nous-health
     volumes:
       - ./health/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
 
   cloudflared:
     image: cloudflare/cloudflared:latest
-    container_name: mediahub-cloudflared
+    container_name: nous-cloudflared
     command: tunnel --config /etc/cloudflared/config.yml run
     volumes:
-      # 配置来自仓库（IaC），凭证来自仓库树外的服务器本地 secrets 目录
+      # 配置来自仓库（IaC），凭证来自 2T 数据盘（仓库树外、非系统盘，重装系统无损）
       - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
-      - /opt/mediahub/secrets/cloudflared:/etc/cloudflared/creds:ro
+      - /media/heygo/program/nous/secrets/cloudflared:/etc/cloudflared/creds:ro
     restart: unless-stopped
     depends_on:
       - health
