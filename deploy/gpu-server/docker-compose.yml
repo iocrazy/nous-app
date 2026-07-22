@@ -1,5 +1,6 @@
-# GPU 服务器 P0 骨架：health 占位源站 + cloudflared tunnel
-# 启动前置：/media/heygo/program/nous/secrets/cloudflared/ 内已有 cert.pem 与 <TUNNEL_ID>.json（见 README）
+# GPU 服务器栈：cloudflared tunnel + nous backend 三件
+# Supabase 全家桶在 /media/heygo/program/nous/supabase/ 单独 compose，经共享网络 nous-net 互通
+# 启动统一走 ./up.sh（含数据盘 .mounted marker 防护）
 services:
   health:
     image: nginx:alpine
@@ -19,3 +20,47 @@ services:
     restart: unless-stopped
     depends_on:
       - health
+
+  redis:
+    image: redis:7-alpine
+    container_name: nous-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - /media/heygo/program/nous/data/redis:/data
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: nous-backend:local
+    container_name: nous-backend
+    env_file: /media/heygo/program/nous/secrets/backend.env
+    environment:
+      - MEDIAHUB_ROLE=gateway
+    volumes:
+      - /mnt/heytime/Sources/nous/media:/app/downloads
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  worker:
+    image: nous-backend:local
+    container_name: nous-worker
+    env_file: /media/heygo/program/nous/secrets/backend.env
+    environment:
+      - MEDIAHUB_ROLE=worker
+    volumes:
+      - /mnt/heytime/Sources/nous/media:/app/downloads
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
+      - backend
+    restart: unless-stopped
+
+networks:
+  default:
+    name: nous-net
