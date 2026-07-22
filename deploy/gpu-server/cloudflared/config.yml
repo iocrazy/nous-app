@@ -1,8 +1,8 @@
 # Locally-managed tunnel ingress —— 唯一真相在此文件（非 dashboard）
 # tunnel / credentials-file 由 P0 Task 3 用真实 TUNNEL_ID 回填
 # 凭证住服务器 /opt/mediahub/secrets/cloudflared/，compose 挂到容器 /etc/cloudflared/creds/
-tunnel: REPLACE_WITH_TUNNEL_ID
-credentials-file: /etc/cloudflared/creds/REPLACE_WITH_TUNNEL_ID.json
+tunnel: d47ea7f0-a149-4ba8-a79f-42cfb2f0f81e
+credentials-file: /etc/cloudflared/creds/d47ea7f0-a149-4ba8-a79f-42cfb2f0f81e.json
 
 ingress:
   # P0：两个 hostname 先全部指向 health 占位源站
