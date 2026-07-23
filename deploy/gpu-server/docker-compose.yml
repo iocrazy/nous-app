@@ -1,5 +1,5 @@
 # GPU 服务器栈：cloudflared tunnel + nous backend 三件
-# Supabase 全家桶在 /media/heygo/program/nous/supabase/ 单独 compose，经共享网络 nous-net 互通
+# Supabase 全家桶在 /media/heygo/program/datahub/nous/supabase/ 单独 compose，经共享网络 nous-net 互通
 # 启动统一走 ./up.sh（含数据盘 .mounted marker 防护）
 services:
   health:
@@ -16,7 +16,7 @@ services:
     volumes:
       # 配置来自仓库（IaC），凭证来自 2T 数据盘（仓库树外、非系统盘，重装系统无损）
       - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
-      - /media/heygo/program/nous/secrets/cloudflared:/etc/cloudflared/creds:ro
+      - /media/heygo/program/datahub/nous/secrets/cloudflared:/etc/cloudflared/creds:ro
     restart: unless-stopped
     depends_on:
       - health
@@ -26,7 +26,7 @@ services:
     container_name: nous-redis
     command: redis-server --appendonly yes
     volumes:
-      - /media/heygo/program/nous/data/redis:/data
+      - /media/heygo/program/datahub/nous/data/redis:/data
     restart: unless-stopped
 
   backend:
@@ -35,7 +35,7 @@ services:
       dockerfile: Dockerfile
     image: nous-backend:local
     container_name: nous-backend
-    env_file: /media/heygo/program/nous/secrets/backend.env
+    env_file: /media/heygo/program/datahub/nous/secrets/backend.env
     environment:
       - MEDIAHUB_ROLE=gateway
     volumes:
@@ -49,7 +49,7 @@ services:
   worker:
     image: nous-backend:local
     container_name: nous-worker
-    env_file: /media/heygo/program/nous/secrets/backend.env
+    env_file: /media/heygo/program/datahub/nous/secrets/backend.env
     environment:
       - MEDIAHUB_ROLE=worker
     volumes:
