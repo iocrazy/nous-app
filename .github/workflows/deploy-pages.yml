@@ -39,6 +39,9 @@ jobs:
           VITE_SUPABASE_URL: https://sb.nous.ink
         run: npm run build
 
+      - name: Drop 404.html (Pages SPA — let _redirects+React Router own routing)
+        run: rm -f dist/404.html
+
       - name: Deploy to Cloudflare Pages (direct upload)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
