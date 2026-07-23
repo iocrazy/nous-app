@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# nous —— GPU 机上 nous app 栈的统一管理命令(对齐 nous-engine 的 UX)
+# 安装: sudo ln -sf <repo>/deploy/gpu-server/nous /usr/local/bin/nous
+set -euo pipefail
+
+REPO=/media/heygo/program/projects-code/repos/nous-app
+GPU_DIR="$REPO/deploy/gpu-server"
+SB_DIR=/media/heygo/program/datahub/nous/supabase
+MARKER=/media/heygo/program/datahub/nous/.mounted
+
+# 两个 compose 项目(应用栈 + Supabase 栈)
+app_compose() { docker compose -f "$GPU_DIR/docker-compose.yml" "$@"; }
+sb_compose()  { docker compose -f "$SB_DIR/docker-compose.yml" "$@"; }
+
+c_grn='\033[32m'; c_red='\033[31m'; c_dim='\033[2m'; c_rst='\033[0m'
+
+cmd="${1:-status}"; shift || true
+
+case "$cmd" in
+  status|st)
+    printf "${c_dim}NOUS APP STACK  (docker · GPU 10.0.0.10)${c_rst}\n\n"
+    printf "%-28s %s\n" "CONTAINER" "STATUS"
+    docker ps -a --format '{{.Names}}\t{{.Status}}' \
+      | grep -E '^(nous-|realtime-dev.nous)' | sort \
+      | while IFS=$'\t' read -r name st; do
+          if echo "$st" | grep -qiE 'Up.*healthy|Up [0-9]'; then col=$c_grn; else col=$c_red; fi
+          printf "%-28s ${col}%s${c_rst}\n" "$name" "$st"
+        done
+    up=$(docker ps --format '{{.Names}}' | grep -cE '^(nous-|realtime-dev.nous)' || true)
+    printf "\n${c_dim}%s containers up · data=%s${c_rst}\n" "$up" "$([ -f "$MARKER" ] && echo mounted || echo '⚠ NOT MOUNTED')"
+    ;;
+  logs|log)
+    svc="${1:?用法: nous logs <service> (如 backend / nous-kong)}"
+    case "$svc" in backend|worker|redis|cloudflared|health) docker logs -f --tail 100 "nous-$svc";;
+      *) docker logs -f --tail 100 "$svc";; esac
+    ;;
+  restart|rs)
+    svc="${1:-}"
+    if [ -n "$svc" ]; then docker restart "nous-$svc" 2>/dev/null || docker restart "$svc"
+    else app_compose restart; fi
+    ;;
+  up)     [ -f "$MARKER" ] || { echo "❌ 数据盘未挂载"; exit 1; }
+          docker network inspect nous-net >/dev/null 2>&1 || docker network create nous-net
+          sb_compose up -d && app_compose up -d ;;
+  down)   app_compose down && sb_compose down ;;
+  deploy) echo "→ git pull + 重建 backend/worker(本机 build)"
+          git -C "$REPO" fetch origin master --quiet && git -C "$REPO" reset --hard origin/master --quiet
+          [ -f "$MARKER" ] || { echo "❌ 数据盘未挂载"; exit 1; }
+          app_compose up -d --build backend worker
+          echo "✓ 部署完成 · $(git -C "$REPO" log --oneline -1)" ;;
+  health) curl -sS --max-time 8 -o /dev/null -w "api.nous.ink/health: %{http_code}\n" https://api.nous.ink/health
+          curl -sS --max-time 8 -o /dev/null -w "app.nous.ink/login:  %{http_code}\n" https://app.nous.ink/login ;;
+  *) echo "用法: nous <status|logs <svc>|restart [svc]|up|down|deploy|health>"; exit 1;;
+esac
