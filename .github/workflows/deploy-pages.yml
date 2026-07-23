@@ -1,0 +1,46 @@
+name: Deploy Pages
+
+# 前端 → Cloudflare Pages(app.nous.ink)。GHA 构建 + wrangler 直传预构建产物，
+# 直传不消耗 Pages 的 500 构建/月配额(epic C2)。
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-pages.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build (target GPU stack)
+        env:
+          VITE_API_URL: https://api.nous.ink
+          VITE_SUPABASE_URL: https://sb.nous.ink
+        run: npm run build
+
+      - name: Deploy to Cloudflare Pages (direct upload)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@latest pages deploy dist --project-name nous-app --branch master --commit-dirty=true
