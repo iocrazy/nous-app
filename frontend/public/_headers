@@ -1,0 +1,7 @@
+/sw.js
+  Cache-Control: public, max-age=0, must-revalidate
+/version.json
+  Cache-Control: no-cache, no-store, must-revalidate
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
