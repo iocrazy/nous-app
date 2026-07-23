@@ -64,3 +64,4 @@ services:
 networks:
   default:
     name: nous-net
+    external: true
