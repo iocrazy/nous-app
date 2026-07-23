@@ -63,6 +63,19 @@ services:
       - backend
     restart: unless-stopped
 
+  admin:
+    build:
+      context: ../../admin
+      dockerfile: Dockerfile
+      args:
+        # 直连 GPU 栈(api/sb.nous.ink),不用 nginx /api 代理;anon key 是公开的
+        VITE_API_URL: https://api.nous.ink
+        VITE_SUPABASE_URL: https://sb.nous.ink
+        VITE_SUPABASE_ANON_KEY: ${NOUS_ANON_KEY}
+    image: nous-admin:local
+    container_name: nous-admin
+    restart: unless-stopped
+
 networks:
   default:
     name: nous-net

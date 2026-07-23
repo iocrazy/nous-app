@@ -9,5 +9,7 @@ ingress:
     service: http://nous-backend:8080
   - hostname: sb.nous.ink
     service: http://nous-kong:8000
+  - hostname: admin.nous.ink
+    service: http://nous-admin:8080
   # 兜底：未匹配 hostname 返回 404
   - service: http_status:404
