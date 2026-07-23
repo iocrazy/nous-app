@@ -37,6 +37,14 @@ jobs:
         env:
           VITE_API_URL: https://api.nous.ink
           VITE_SUPABASE_URL: https://sb.nous.ink
+          # 生产 feature flags —— 必须与 Vercel prod 一致(否则 app.nous.ink 缺已上线功能)
+          VITE_FEATURE_INSPIRATION_NOTES: 'true'
+          VITE_FEATURE_CANVAS_NAV: 'true'
+          VITE_FEATURE_CONVERSATIONS: 'true'
+          VITE_FEATURE_PROJECT_WORKSPACE_V2: 'true'
+          VITE_FEATURE_PROJECT_WORKBENCH: 'true'
+          VITE_FEATURE_PROJECT_AI_SUGGEST: 'true'
+          VITE_FEATURE_COLLAB: 'true'
         run: npm run build
 
       - name: Drop 404.html (Pages SPA — let _redirects+React Router own routing)
