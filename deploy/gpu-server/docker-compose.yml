@@ -35,6 +35,8 @@ services:
       dockerfile: Dockerfile
     image: nous-backend:local
     container_name: nous-backend
+    ports:
+      - "127.0.0.1:8080:8080"
     env_file: /media/heygo/program/datahub/nous/secrets/backend.env
     environment:
       - MEDIAHUB_ROLE=gateway
