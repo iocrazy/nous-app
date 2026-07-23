@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-MARKER=/media/heygo/program/nous/.mounted
+MARKER=/media/heygo/program/datahub/nous/.mounted
 if [ ! -f "$MARKER" ]; then
   echo "❌ 数据盘未挂载（缺 $MARKER）——拒绝起栈，避免 bind mount 在系统盘生成影子目录" >&2
   exit 1
