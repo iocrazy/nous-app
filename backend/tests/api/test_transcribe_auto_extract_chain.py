@@ -354,6 +354,71 @@ class TestExtractAudioWorkflowChainRouting:
         assert true_idx < else_idx < tagged_idx
 
 
+class TestExtractAudioChainFailurePropagation:
+    """When a manual /transcribe click chains through extract_audio and the
+    extraction fails, the resource's transcript_status must flip to 'failed'
+    so the frontend Transcript tab stops its "Transcribing..." spinner.
+    Without this the row stays 'none' and the spinner never resolves (the
+    reported bug: no audio track → ffmpeg fails → forever-spinning tab)."""
+
+    @staticmethod
+    def _wf_source() -> str:
+        import importlib
+        import inspect
+
+        mod = importlib.import_module("app.workflows.extract_audio")
+        return inspect.getsource(mod.extract_audio_workflow)
+
+    @pytest.mark.asyncio
+    async def test_mark_transcript_failed_step_keys_on_resource_id(self) -> None:
+        from unittest.mock import patch
+
+        import app.workflows.extract_audio as m
+
+        cap = {}
+
+        async def fake_execute(sql, params=None):
+            cap["sql"] = sql
+            cap["params"] = params
+            return 1
+
+        with patch("app.db.engine.execute", fake_execute):
+            await m.mark_transcript_failed_step("555")
+
+        assert "WHERE id = :rid" in cap["sql"]
+        assert "transcript_status = 'failed'" in cap["sql"]
+        assert "transcript_status <> 'completed'" in cap["sql"]
+        assert cap["params"] == {"rid": 555}
+
+    @pytest.mark.asyncio
+    async def test_mark_transcript_failed_step_swallows_write_error(self) -> None:
+        from unittest.mock import patch
+
+        import app.workflows.extract_audio as m
+
+        async def boom(sql, params=None):
+            raise RuntimeError("pg down")
+
+        with patch("app.db.engine.execute", boom):
+            await m.mark_transcript_failed_step("1")  # must not raise
+
+    def test_both_failure_branches_propagate_when_chained(self) -> None:
+        source = self._wf_source()
+        # Both the exception branch and the `if not ok:` branch must flip
+        # transcript_status, gated on chain_transcription + resource_id.
+        assert (
+            source.count("await mark_transcript_failed_step(resource_id)") == 2
+        ), "both failure branches must propagate transcript_status='failed'"
+        assert "if chain_transcription and resource_id:" in source
+
+    def test_success_path_does_not_mark_failed(self) -> None:
+        source = self._wf_source()
+        # The success tail returns a success dict; the failed-mark must only
+        # live in the two failure branches (both before a raise).
+        success_idx = source.index('return {"status": "success"')
+        assert "mark_transcript_failed_step" not in source[success_idx:]
+
+
 class TestChainTranscriptionUnconditional:
     """The helper dispatched by the manual chain must NOT gate on intent
     tags (unlike chain_transcript_summary_for_tags) — the click is the
