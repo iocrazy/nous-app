@@ -63,6 +63,13 @@ services:
       - backend
     restart: unless-stopped
 
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: nous-falkordb
+    volumes:
+      - /media/heygo/program/datahub/nous/data/falkordb:/var/lib/falkordb/data
+    restart: unless-stopped
+
   newsnow:
     image: ghcr.io/ourongxing/newsnow:latest
     container_name: nous-newsnow
