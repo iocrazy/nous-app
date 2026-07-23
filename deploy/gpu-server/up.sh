@@ -10,4 +10,8 @@ if [ ! -f "$MARKER" ]; then
   exit 1
 fi
 
+# 共享网络 nous-net 由此处统一预建（supabase 与本 compose 均以 external 挂入，
+# 避免跨 compose 项目的网络标签冲突）
+docker network inspect nous-net >/dev/null 2>&1 || docker network create nous-net
+
 exec docker compose up -d "$@"
