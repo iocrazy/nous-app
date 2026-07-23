@@ -36,7 +36,9 @@ services:
     image: nous-backend:local
     container_name: nous-backend
     ports:
-      - "127.0.0.1:8080:8080"
+      # 0.0.0.0 = gpupc 所有内网网卡(LAN+ZeroTier),供 nas-A 跳板经 ZeroTier 10.0.0.10:8080 反代
+      # gpupc 无公网 IP(CGNAT),故不暴露到互联网
+      - "8080:8080"
     env_file: /media/heygo/program/datahub/nous/secrets/backend.env
     environment:
       - MEDIAHUB_ROLE=gateway
