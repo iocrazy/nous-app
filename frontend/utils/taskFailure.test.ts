@@ -8,6 +8,14 @@ describe('classifyFailure', () => {
     expect(c.friendly).toBe('Track unavailable');
   });
 
+  it('treats ffmpeg "no stream" (silent video) as permanent (No audio track)', () => {
+    const c = classifyFailure(
+      'RuntimeError: audio extraction errored for BV1xx: Output file #0 does not contain any stream',
+    );
+    expect(c.permanent).toBe(true);
+    expect(c.friendly).toBe('No audio track');
+  });
+
   it('treats 404 / not found as permanent (Source not found)', () => {
     expect(classifyFailure('HTTP 404 not found').permanent).toBe(true);
     expect(classifyFailure('HTTP 404 not found').friendly).toBe('Source not found');

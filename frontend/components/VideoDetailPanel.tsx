@@ -207,10 +207,29 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
               );
               setTranscript(result);
               setTranscribeStatus('completed');
+            } else if (video.transcript_status === 'failed') {
+              // No active task + backend flagged the last attempt failed
+              // (extract→transcribe chain or direct transcribe). Surface the
+              // failure on tab re-open instead of silently showing the
+              // Transcribe button as if nothing had happened. Pull the newest
+              // related task's error_msg for a specific, humanized message.
+              const { data: failedTasks } = await supabase
+                .from('task_tracking')
+                .select('error_msg')
+                .eq('resource_id', resourceId)
+                .in('task_type', ['ai_transcription', 'extract_audio'])
+                .in('status', ['failed', 'cancelled'])
+                .order('created_at', { ascending: false })
+                .limit(1);
+              setTranscribeStatus('failed');
+              setTranscriptError(
+                failedTasks?.[0]?.error_msg || 'Transcription failed'
+              );
             }
           }
-        } catch {
-          // ignore — just stay on empty state
+        } catch (err) {
+          // best-effort failure surfacing — stay on empty state on error
+          console.error('[VideoDetailPanel] transcript failure probe failed:', err);
         }
       }
     } finally {
@@ -261,16 +280,21 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   const [transcribeStatus, setTranscribeStatus] = useState<string | null>(null);
   const { tasks } = useTaskManager();
 
-  // Short-circuit polling when the backend ai_transcription task hits a
-  // terminal failure. Without this the UI sat on "Processing…" for the
-  // full 3-minute pollForResult window even though task_tracking
-  // already had phase='failed'. Same for summary / visual analysis.
+  // Short-circuit polling when the backend transcription hits a terminal
+  // failure. Without this the UI sat on "Processing…" for the full 3-minute
+  // pollForResult window even though task_tracking already had phase='failed'.
+  //
+  // Includes ``extract_audio``: a manual Transcribe click on a video with no
+  // extracted audio dispatches extract_audio(chain_transcription=True), so the
+  // task that FAILS (e.g. ffmpeg "no audio track") is the extract_audio one —
+  // never an ai_transcription task. Matching only ai_transcription left the
+  // spinner running the full window on exactly the no-audio case this fixes.
   useEffect(() => {
     if (!resourceId) return;
     if (transcribeStatus !== 'processing') return;
     const failed = tasks.find(
-      (t) => t.task_type === 'ai_transcription'
-        && t.resource_id === resourceId
+      (t) => (t.task_type === 'ai_transcription' || t.task_type === 'extract_audio')
+        && String(t.resource_id) === String(resourceId)
         && (t.status === 'failed' || t.status === 'cancelled')
     );
     if (failed) {

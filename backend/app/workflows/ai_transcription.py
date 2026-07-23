@@ -352,6 +352,30 @@ async def mark_transcript_completed(parsed_media_id: int) -> None:
     )
 
 
+@DBOS.step()
+async def mark_transcript_failed(parsed_media_id: int) -> None:
+    """Flip resources.transcript_status='failed' so the frontend Transcript
+    tab stops its local "Transcribing..." spinner and surfaces the failure.
+
+    Without this the workflow only marks task_tracking failed (via
+    record_workflow_failure); the resource's transcript_status stays 'none'
+    and VideoDetailPanel polls forever. Best-effort — a transient write
+    hiccup here must not mask the real error we're about to record."""
+    from app.db import engine as db_engine
+
+    try:
+        await db_engine.execute(
+            "UPDATE public.resources SET transcript_status = 'failed' "
+            "WHERE media_id = :pid AND transcript_status <> 'completed'",
+            {"pid": parsed_media_id},
+        )
+    except Exception as e:
+        logger.warning(
+            f"[ai_transcription] transcript_status='failed' write for "
+            f"parsed_media_id={parsed_media_id} failed (non-fatal): {e}"
+        )
+
+
 @DBOS.workflow()
 async def ai_transcription_workflow(
     parsed_media_id: int, user_id: str
@@ -411,6 +435,10 @@ async def ai_transcription_workflow(
             )
         return {"parsed_media_id": parsed_media_id, **summary}
     except Exception as e:  # noqa: BLE001
+        # Surface the failure on the resource so the frontend Transcript
+        # tab stops spinning. Business column (route-C rule 3), written by
+        # business code — not a trigger-owned task_tracking column.
+        await mark_transcript_failed(parsed_media_id)
         return await record_workflow_failure(
             workflow_id=DBOS.workflow_id,
             error=e,

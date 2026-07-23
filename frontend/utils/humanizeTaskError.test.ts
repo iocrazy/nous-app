@@ -12,6 +12,15 @@ describe('humanizeTaskError', () => {
     expect(r.hint).toMatch(/background music download to finish/i);
   });
 
+  it('maps the ffmpeg no-audio-stream chain (extract→transcribe on a silent video)', () => {
+    const raw =
+      'RuntimeError: audio extraction errored for BV1xx: ffmpeg rc=234 ' +
+      'Output file #0 does not contain any stream';
+    expect(humanizeTaskError(raw).message).toBe(
+      'This video has no audio track — it may have been downloaded without sound.',
+    );
+  });
+
   it('maps insufficient balance / HTTP 402', () => {
     expect(humanizeTaskError('Insufficient Balance').message).toBe(
       'The AI provider account is out of balance.',

@@ -67,6 +67,34 @@ def run_extract_audio_step(platform_id: str) -> bool:
 
 
 @DBOS.step()
+async def mark_transcript_failed_step(resource_id: str) -> None:
+    """Flip resources.transcript_status='failed' when a manual /transcribe
+    click chained through extract_audio and the extraction failed.
+
+    The extract→transcribe chain (chain_transcription=True) is dispatched
+    by the Transcribe button on a video that had no extracted audio yet.
+    The frontend Transcript tab shows a local "Transcribing..." spinner and
+    polls resources.transcript_status. If ffmpeg can't produce an audio
+    stream (e.g. a video with no audio track), extraction fails and
+    transcription never runs — so without this write transcript_status
+    stays 'none' and the spinner never resolves. Best-effort — must not
+    mask the extraction error we're about to raise."""
+    from app.db import engine as db_engine
+
+    try:
+        await db_engine.execute(
+            "UPDATE public.resources SET transcript_status = 'failed' "
+            "WHERE id = :rid AND transcript_status <> 'completed'",
+            {"rid": int(resource_id)},
+        )
+    except Exception as e:
+        logger.warning(
+            f"[extract_audio] transcript_status='failed' write for "
+            f"resource_id={resource_id} failed (non-fatal): {e}"
+        )
+
+
+@DBOS.step()
 async def mark_extract_audio_processing_step(workflow_id: str) -> None:
     """Push task_tracking.phase 'queued' → 'processing'. Same rationale as
     download.mark_extract_audio_processing_step — the mirror trigger only
@@ -147,6 +175,10 @@ async def extract_audio_workflow(
         ok = run_extract_audio_step(platform_id)
     except Exception as e:
         await mark_extract_audio_status_step(platform_id, "failed")
+        # Manual transcribe click chained through here: propagate the
+        # failure onto the resource so the Transcript tab stops spinning.
+        if chain_transcription and resource_id:
+            await mark_transcript_failed_step(resource_id)
         await log_extract_audio_outcome_step(
             user_id=user_id,
             platform_id=platform_id,
@@ -160,6 +192,8 @@ async def extract_audio_workflow(
 
     if not ok:
         await mark_extract_audio_status_step(platform_id, "failed")
+        if chain_transcription and resource_id:
+            await mark_transcript_failed_step(resource_id)
         await log_extract_audio_outcome_step(
             user_id=user_id,
             platform_id=platform_id,

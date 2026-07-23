@@ -34,6 +34,14 @@ interface ErrorPattern {
 // Order matters: earlier, more specific rows win.
 const PATTERNS: ReadonlyArray<ErrorPattern> = [
   {
+    // ffmpeg audio extraction produced no stream — the source video has no
+    // audio track (e.g. a B站 DASH clip merged without sound). The
+    // extract→transcribe chain (manual Transcribe on a no-audio video) fails
+    // here; surface WHY instead of a bare "extraction failed".
+    test: /does not contain any stream|no audio track|stream ?map.*matches/i,
+    message: 'This video has no audio track — it may have been downloaded without sound.',
+  },
+  {
     // Volcengine ASR 45000006 — the audio URI the ASR service was handed could
     // not be fetched. For image galleries this is the background-music download
     // still being in flight when transcription fired.

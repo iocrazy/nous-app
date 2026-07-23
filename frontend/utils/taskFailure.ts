@@ -25,6 +25,11 @@ export function classifyFailure(errorMsg?: string | null): FailureClass {
   const e = errorMsg;
 
   // Permanent — source unavailable; same input will fail again.
+  // A video with no audio track can never be transcribed — the extract→
+  // transcribe chain fails identically on every retry, so hide Retry.
+  if (/does not contain any stream|no audio track/i.test(e)) {
+    return { permanent: true, friendly: 'No audio track' };
+  }
   if (/no url_player_info/i.test(e)) return { permanent: true, friendly: 'Track unavailable' };
   if (/SodaApiError/i.test(e)) return { permanent: true, friendly: 'Track unavailable' };
   if (/\b404\b|not\s*found|does not exist|been removed|deleted/i.test(e)) {

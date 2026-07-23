@@ -157,6 +157,56 @@ async def test_mark_transcript_completed_uses_media_id_column():
     assert cap["params"] == {"pid": 42}
 
 
+async def test_mark_transcript_failed_uses_media_id_column():
+    """On failure the resource's transcript_status must flip to 'failed' so
+    the frontend Transcript tab stops polling. Must key on media_id (not id)
+    and never clobber an already-'completed' row."""
+    import app.workflows.ai_transcription as m
+
+    cap = {}
+
+    async def fake_execute(sql, params=None):
+        cap["sql"] = sql
+        cap["params"] = params
+        return 1
+
+    with patch("app.db.engine.execute", fake_execute):
+        await m.mark_transcript_failed(42)
+
+    assert "WHERE media_id = :pid" in cap["sql"]
+    assert "transcript_status = 'failed'" in cap["sql"]
+    assert "transcript_status <> 'completed'" in cap["sql"]
+    assert cap["params"] == {"pid": 42}
+
+
+async def test_mark_transcript_failed_swallows_write_error():
+    """Best-effort: a write hiccup here must not mask the real error the
+    workflow is about to record — the step must not raise."""
+    import app.workflows.ai_transcription as m
+
+    async def boom(sql, params=None):
+        raise RuntimeError("pg down")
+
+    with patch("app.db.engine.execute", boom):
+        await m.mark_transcript_failed(7)  # must not raise
+
+
+def test_transcription_workflow_marks_failed_before_recording():
+    """The direct-transcribe failure path must flip transcript_status='failed'
+    (via mark_transcript_failed) inside the except, before returning the
+    uniform failure dict — otherwise the resource stays 'none' and the
+    frontend spinner never resolves."""
+    import inspect
+
+    import app.workflows.ai_transcription as m
+
+    source = inspect.getsource(m.ai_transcription_workflow)
+    assert "await mark_transcript_failed(parsed_media_id)" in source
+    fail_idx = source.index("await mark_transcript_failed(parsed_media_id)")
+    record_idx = source.index("record_workflow_failure(", fail_idx)
+    assert fail_idx < record_idx, "must mark failed BEFORE record_workflow_failure"
+
+
 @pytest.mark.asyncio
 async def test_load_transcribe_inputs_locked_to_catalog_model():
     """Locked TO a platform-catalog model → provider/key/app_id come from the
