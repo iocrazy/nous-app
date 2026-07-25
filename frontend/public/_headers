@@ -1,0 +1,16 @@
+# Cloudflare Pages response headers.
+# Ported from the retired frontend/vercel.json "headers" block — keep the two
+# in sync mentally: this file is now the only place these are declared.
+
+# Service worker must never be served stale, otherwise clients pin an old
+# build and the PWA "Update Now" button has nothing newer to install.
+/sw.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Version probe used by the deploy verification step — must always hit origin.
+/version.json
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY

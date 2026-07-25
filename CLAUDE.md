@@ -481,6 +481,14 @@ Schema (schemas/)      — Pydantic 请求/响应模型
 
 **为什么后端与 migration 必须 self-hosted**：gpupc 无公网 IP（CGNAT），GitHub 云端 runner 既不能 SSH 进来也收不到 webhook，只能反过来让 gpupc 主动连出去拉任务。附带好处：省掉 ACR 跨境推拉、build 用本机 48 核、不消耗 Actions 分钟数。
 
+### 前端链的关键设计（改之前先读）
+
+- **构建期配置的唯一来源是 `frontend/.env.production`**，不在本文档里重复写域名与 flag 值。`deploy-pages.yml` 的构建 env 必须与该文件一致；CI 里 GHA 环境变量优先级高于 `.env` 文件（Vite 不覆盖已存在的环境变量），所以线上以 workflow 为准，而该文件保证**本地构建**产出同样的包。
+- **`VITE_API_URL` 不能留空**。Vercel 时代靠 `vercel.json` 的 rewrite 把相对路径 `/api/*` 代理到后端；Cloudflare Pages 没有等价机制，`public/_redirects` 的 `/* /index.html 200` 反而会把 `/api/*` 吞掉返回 HTML。必须是绝对地址。
+- **`vercel.json` 已删除，它独家承担的行为拆到两个文件**：rewrites → `frontend/public/_redirects`，响应头（`X-Frame-Options` / `nosniff`、`sw.js` 与 `version.json` 的缓存策略）→ `frontend/public/_headers`。⚠️ `.gitignore` 有 `frontend/public/*` 通配，往该目录加文件必须同时加 `!` 白名单，否则文件进不了仓库、CF Pages 永远拿不到。
+- **`version.json` 的 `commitSha` 依赖构建环境变量**。当前是 GHA 构建 + wrangler 直传（不是 Pages 的 git 集成），所以 `CF_PAGES_COMMIT_SHA` 不存在，实际取的是 `GITHUB_SHA`。只留 Vercel 那个变量会静默产出空字符串，让任何"轮询 SHA 确认部署"的校验永远等不到。
+- **应急部署**（托管 runner 不可用时）：`cd frontend && npm run build && npx wrangler pages deploy dist --project-name nous-app --branch master`。本地构建读不到 GHA 的 env，走的就是 `.env.production` —— 这也是上面第一条为什么重要。
+
 **self-hosted 仍然是 GitHub Actions**：触发、编排、日志、PR 状态全在 GitHub，只是执行机器换成本机。别把它理解成"不走 CI"。
 
 ### 后端链的关键设计（改之前先读）
@@ -544,8 +552,7 @@ bash scripts/sync-worktree.sh                   # rebase + 首次运行会启用
 ### 已知缺口
 
 - **admin 没有自动部署**。gpupc 的 `nous-admin` 是 compose 本机 build（`context: ../../admin`），但 `deploy-gpu.yml` 的 paths 不含 `admin/**`。补齐前提是先决定 build arg `NOUS_ANON_KEY` 怎么进 CI（缺了会 build 出空 anon key 的 admin）。当前只能手动：`cd deploy/gpu-server && NOUS_ANON_KEY=<key> docker compose up -d --build admin`。
-- **`deploy-frontend.yml` 验的还是已退役的 Vercel**（poll `version.json` 比对 SHA）。CF Pages 化之后应改为验 Pages 的产物，或退役。
-- **`deploy-pages.yml` 把 feature flags 硬编码在 workflow 里**。新增 flag 要改 workflow，容易漏（注释里"必须与 Vercel prod 一致"本身就说明曾经漂移过）。宜迁到 `frontend/.env.production` 之类的单一来源。
+- **`deploy-frontend.yml` 只是校验、不部署**，且它轮询的 `version.json` `commitSha` 依赖构建环境变量（见「前端链的关键设计」）。目前仅在设了 `PROD_FRONTEND_VERSION_URL` 仓库变量时才跑，未配置即 no-op。要么指向 `https://app.nous.ink/version.json` 让它真正生效，要么退役 —— 现在这样"存在但不生效"最容易误以为有守卫。
 - **migration 与代码部署无顺序保证**。`run-migration.yml` 与 `deploy-gpu.yml` 独立触发，同一个 PR 里既加 migration 又改依赖它的代码时，两者谁先完成不确定。
 
 ## Discord 通知规则

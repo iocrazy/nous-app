@@ -39,13 +39,16 @@ jobs:
           # 老的 CF 隧道入口 api/sb.nous.ink(橙云)保留作海外兜底
           VITE_API_URL: https://cn.nous.ink:88
           VITE_SUPABASE_URL: https://cn-sb.nous.ink:88
-          # 生产 feature flags —— 必须与 Vercel prod 一致(否则 app.nous.ink 缺已上线功能)
+          # 生产 feature flags —— 必须与 frontend/.env.production 一致。
+          # 本地 `npm run build` 读不到这里的 env，只读 .env.production；两边
+          # 漂移会让"本地构建 + wrangler 直传"应急路径产出功能残缺的包。
+          #
+          # 只保留真正被代码读取的 flag。原先还设了 CONVERSATIONS /
+          # PROJECT_WORKSPACE_V2 / PROJECT_WORKBENCH / PROJECT_AI_SUGGEST —
+          # 这四个功能已毕业、运行时读取已从代码删除(全仓库仅剩注释与测试
+          # stub)，设了没有任何效果，删掉以免误以为它们还在生效。
           VITE_FEATURE_INSPIRATION_NOTES: 'true'
           VITE_FEATURE_CANVAS_NAV: 'true'
-          VITE_FEATURE_CONVERSATIONS: 'true'
-          VITE_FEATURE_PROJECT_WORKSPACE_V2: 'true'
-          VITE_FEATURE_PROJECT_WORKBENCH: 'true'
-          VITE_FEATURE_PROJECT_AI_SUGGEST: 'true'
           VITE_FEATURE_COLLAB: 'true'
         run: npm run build
 

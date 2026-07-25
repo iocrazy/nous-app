@@ -2,7 +2,7 @@
 # /etc/nginx/templates/*.template → /etc/nginx/conf.d/*.conf at start).
 #
 # This container IS the app gateway (2026-07-06): the Synology reverse proxy
-# forwards mediahubserver.heygo.cn:88 → :8881 (this container), which
+# forwards cn.nous.ink:88 → :8881 (this container), which
 # path-routes:
 #   /f/       signed direct file serve (secure_link) — bytes off disk
 #   /stream/  HLS segments — bytes off disk

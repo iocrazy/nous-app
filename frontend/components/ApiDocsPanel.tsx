@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Copy, Check, ChevronDown, ChevronRight, BookOpen, Shield, AlertTriangle, Server } from 'lucide-react';
 
-const BASE_URL = 'https://mediahubserver.heygo.cn:88';
+const BASE_URL = 'https://cn.nous.ink:88';
 
 // --- Helpers ---
 

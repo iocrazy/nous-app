@@ -48,7 +48,7 @@ function showSettingsView() {
   document.getElementById('modeTabs').style.display = 'none';
   document.body.classList.remove('scan-mode');
   chrome.storage.local.get(['apiUrl', 'apiKey'], (result) => {
-    apiUrlInput.value = result.apiUrl || 'https://mediahubserver.heygo.cn:88';
+    apiUrlInput.value = result.apiUrl || 'https://cn.nous.ink:88';
     if (result.apiKey) apiKeyInput.value = result.apiKey;
   });
 }

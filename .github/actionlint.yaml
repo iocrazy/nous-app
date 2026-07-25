@@ -1,0 +1,13 @@
+# actionlint 配置。
+#
+# 声明自建 runner 的标签，否则 actionlint 把它当拼写错误报 [runner-label]：
+#   deploy-gpu.yml 的 `runs-on: [self-hosted, gpu]` 里的 `gpu`。
+#
+# 这条失败在 2026-07-25 之前一直没被发现 —— GitHub Actions 因账单停摆，
+# 所有 job 都是 2 秒 `no steps` 假失败，把这个真失败盖住了。repo 切 public
+# 恢复 runner 后才暴露出来。
+self-hosted-runner:
+  labels:
+    # gpupc(10.0.0.10)：RTX Pro 6000 + 双 3090，跑 deploy-gpu.yml 的本机
+    # build + compose up。见 deploy/gpu-server/README.md。
+    - gpu

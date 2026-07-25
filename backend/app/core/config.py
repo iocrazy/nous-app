@@ -163,7 +163,7 @@ class Settings(BaseSettings):
         "signed URLs handed to CLOUD model providers (agent vision). Empty "
         "(default) = vision inlines object-store images as base64 data URLs, "
         "which always works. Set this ONLY to a base the provider can reach "
-        "from the public internet (e.g. https://sb-mediahub.example.com:88) — "
+        "from the public internet (e.g. https://cn-sb.nous.ink:88) — "
         "our SUPABASE_URL is a LAN address, and a LAN-based signed URL "
         "silently breaks vision for object-store images.",
     )
@@ -325,8 +325,11 @@ class Settings(BaseSettings):
     )
 
     MEDIA_PUBLIC_URL: str = Field(
-        default="https://mediahubserver.heygo.cn:88",
-        description="Public URL for media file access",
+        default="https://cn.nous.ink:88",
+        description="Public URL for media file access. Defaults to the "
+        "mainland direct-connect entrypoint (nas-A :88 -> ZeroTier -> gpupc); "
+        "override to https://api.nous.ink when the consumer is an overseas "
+        "service that cannot reach a non-standard port.",
     )
     FRONTEND_URL: str = Field(
         default="http://localhost:5175",

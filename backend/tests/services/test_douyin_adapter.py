@@ -9,7 +9,7 @@ from app.services.distribution.registry import get_adapter
 CREDS = DouyinCredentials(
     client_key="ck_test",
     client_secret="cs_test",
-    redirect_uri="https://mediahubserver.heygo.cn:88/api/v1/distribution/accounts/oauth/douyin/callback",
+    redirect_uri="https://cn.nous.ink:88/api/v1/distribution/accounts/oauth/douyin/callback",
 )
 
 

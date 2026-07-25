@@ -242,6 +242,7 @@ frontend/public/*
 !frontend/public/pwa-*.png
 !frontend/public/apple-touch-icon-*.png
 !frontend/public/_redirects
+!frontend/public/_headers
 !frontend/public/404.html
 !frontend/public/500.html
 !frontend/public/offline.html
@@ -307,3 +308,6 @@ toolkit/
 # Local AI Library QA screenshots (not source)
 .ai-library-qa/
 .superpowers/
+
+# Vercel (retired 2026-07-25, frontend now on Cloudflare Pages)
+.vercel/

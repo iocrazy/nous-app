@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       host: '0.0.0.0',
-      allowedHosts: ['mediahubserver.heygo.cn', 'mediahubapi.heygo.cn', 'test.heygo.cn', '10.0.0.3'],
+      allowedHosts: ['cn.nous.ink', 'cn-sb.nous.ink', 'api.nous.ink', 'app.nous.ink', '10.0.0.3'],
       proxy: {
         '/api': {
           target: 'http://127.0.0.1:8081',
@@ -42,7 +42,16 @@ export default defineConfig(({ mode }) => {
             fileName: 'version.json',
             source: JSON.stringify({
               version: pkg.version,
-              commitSha: (env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7),
+              // CF_PAGES_COMMIT_SHA on Cloudflare Pages (current host),
+              // GITHUB_SHA for CI / local `wrangler pages deploy` builds.
+              // Leaving only the Vercel var here silently emits an empty
+              // commitSha, which makes the deploy-verify workflow poll
+              // forever for a SHA that can never appear.
+              commitSha: (
+                env.CF_PAGES_COMMIT_SHA ||
+                env.GITHUB_SHA ||
+                ''
+              ).slice(0, 7),
               buildTime: new Date().toISOString(),
             }),
           });

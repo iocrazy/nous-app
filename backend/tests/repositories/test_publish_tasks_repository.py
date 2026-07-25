@@ -60,14 +60,12 @@ def test_build_filesystem_media_url_strips_download_root_and_signs():
         url = build_filesystem_media_url(
             "/app/downloads/teams/42/video.mp4",
             "11111111-1111-1111-1111-111111111111",
-            media_public_url="https://mediahubserver.heygo.cn:88",
+            media_public_url="https://cn.nous.ink:88",
             download_path="/app/downloads",
             ttl_seconds=3600,
             now=1_700_000_000,
         )
-    assert url.startswith(
-        "https://mediahubserver.heygo.cn:88/media/teams/42/video.mp4?token="
-    )
+    assert url.startswith("https://cn.nous.ink:88/media/teams/42/video.mp4?token=")
     token = url.split("?token=", 1)[1]
     # 4-part HMAC token: user_id.issued_at.expires_at.sig
     parts = token.split(".")
@@ -84,14 +82,12 @@ def test_build_filesystem_media_url_leaves_already_relative_path_untouched():
         url = build_filesystem_media_url(
             "teams/42/video.mp4",
             "u1",
-            media_public_url="https://mediahubserver.heygo.cn:88",
+            media_public_url="https://cn.nous.ink:88",
             download_path="/app/downloads",
             ttl_seconds=3600,
             now=0,
         )
-    assert url.startswith(
-        "https://mediahubserver.heygo.cn:88/media/teams/42/video.mp4?token="
-    )
+    assert url.startswith("https://cn.nous.ink:88/media/teams/42/video.mp4?token=")
 
 
 def _read_scope_returning(row):
@@ -135,9 +131,7 @@ async def test_get_resource_media_url_filesystem_branch(monkeypatch):
         # old form depended on the container's DOWNLOAD_PATH default and
         # failed on worktrees with a different download root).
         patch.object(settings, "DOWNLOAD_PATH", "/app/downloads"),
-        patch.object(
-            settings, "MEDIA_PUBLIC_URL", "https://mediahubserver.heygo.cn:88"
-        ),
+        patch.object(settings, "MEDIA_PUBLIC_URL", "https://cn.nous.ink:88"),
     ):
         url = await PublishTasksRepository().get_resource_media_url(123)
     assert url is not None

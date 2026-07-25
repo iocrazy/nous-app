@@ -11,7 +11,7 @@ Push video URLs to MediaHub for parsing and download, and scan pages for images 
 ## Setup
 
 1. Click the extension icon in Chrome toolbar
-2. Enter your **API URL** (e.g., `https://mediahub.heygo.cn`)
+2. Enter your **API URL** (e.g., `https://cn.nous.ink:88`)
 3. Enter your **API Key** (generate one in MediaHub Settings → API Keys)
 4. Click **Save**
 
