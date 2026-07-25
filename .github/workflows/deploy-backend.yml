@@ -7,17 +7,25 @@
 
 name: Deploy Backend to ACR
 
+# ⚠️ 2026-07-25 退役:后端发布的唯一线是 deploy-gpu.yml(self-hosted runner,
+# 本机 nous 栈 nous-backend/nous-worker)。本 workflow 不再自动触发。
+#
+# 不删除的原因:NAS 旧栈(mediahub-app-backend/worker)仍是回滚锚点,真要回退时
+# 需要一个能重新推 ACR + 触发 watchtower 的扳手。手动跑:
+#   gh workflow run deploy-backend.yml
+# 恢复双轨:把下面 push: 段落取消注释。注意双轨期间 backend/** 的改动会同时
+# 部署到 NAS 和 gpupc,两边连的是不同的 Supabase。
 on:
   workflow_dispatch:
-  push:
-    branches: [master]
-    paths:
-      - 'backend/**'
-      - 'docker/**'
-      - 'Dockerfile'
-      - '.github/workflows/deploy-backend.yml'
-    tags:
-      - 'v*'
+  # push:
+  #   branches: [master]
+  #   paths:
+  #     - 'backend/**'
+  #     - 'docker/**'
+  #     - 'Dockerfile'
+  #     - '.github/workflows/deploy-backend.yml'
+  #   tags:
+  #     - 'v*'
 
 concurrency:
   # Queue successive deploys instead of cancelling the in-flight one.

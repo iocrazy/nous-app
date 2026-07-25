@@ -7,12 +7,20 @@
 
 name: Deploy Admin Panel to ACR
 
+# ⚠️ 2026-07-25 退役:同 deploy-backend.yml —— NAS 老线不再自动发布。
+#
+# 缺口提醒:gpupc 的 nous-admin 是 deploy/gpu-server/docker-compose.yml 里
+# 本机 build 的(context: ../../admin),但 deploy-gpu.yml 的 paths 不含
+# 'admin/**',所以退役本线之后 admin 改动没有任何自动部署。补齐前提是先解决
+# build arg NOUS_ANON_KEY 的来源(compose 里 VITE_SUPABASE_ANON_KEY 取自它,
+# CI 环境没有会 build 出空 anon key 的 admin)。在那之前,admin 改动请在机上
+# 手动:cd deploy/gpu-server && NOUS_ANON_KEY=<key> docker compose up -d --build admin
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'admin/**'
   workflow_dispatch:
+  # push:
+  #   branches: [master]
+  #   paths:
+  #     - 'admin/**'
 
 concurrency:
   group: deploy-admin

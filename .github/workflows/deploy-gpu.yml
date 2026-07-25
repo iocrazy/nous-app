@@ -33,12 +33,27 @@ jobs:
           cd /media/heygo/program/projects-code/repos/nous-app/deploy/gpu-server
           ./up.sh --build backend worker
 
-      - name: Smoke healthz
+      # 探 /api/v1/readyz 而不是 /health —— /health 返回硬编码
+      # {"status":"healthy"},DBOS 挂了照样 200,2026-07-22 的 3 天静默故障就是
+      # 从这里放行的。readyz 会在 DBOS 配了 DSN 却没起来时 503。
+      # 同时验 worker:worker 唯一职责是消费 DBOS 队列,原先完全不在验收范围内。
+      - name: Smoke readyz (backend + worker)
         run: |
-          for i in $(seq 1 30); do
-            if docker exec nous-backend python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health', timeout=3).status==200 else 1)" 2>/dev/null; then
-              echo "healthz OK"; exit 0
+          for c in nous-backend nous-worker; do
+            ok=0
+            for i in $(seq 1 40); do
+              if docker exec "$c" curl -fsS http://localhost:8080/api/v1/readyz >/dev/null 2>&1; then
+                echo "$c: ready"
+                docker exec "$c" curl -sS http://localhost:8080/api/v1/readyz | head -c 200; echo
+                ok=1; break
+              fi
+              sleep 3
+            done
+            if [ "$ok" != 1 ]; then
+              echo "::error::$c never reached ready — readyz kept failing"
+              docker exec "$c" curl -sS http://localhost:8080/api/v1/readyz | head -c 500 || true
+              echo ""
+              docker logs --tail 80 "$c"
+              exit 1
             fi
-            sleep 3
           done
-          echo "healthz FAILED"; docker logs --tail 50 nous-backend; exit 1
