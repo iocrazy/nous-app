@@ -298,6 +298,7 @@ supabase db push
 - **`user_id=None` 在 Celery 链路里漂**：`scheduled_tasks.retry_failed_downloads` 会拉到 `parsed_media.user_id IS NULL` 的 orphan 行（legacy / 系统发起的下载），透传到下游会触发 `user_logs` 23502 + `user_settings` 22P02 错误风暴。修复：源头 skip + repo 防御性 early-return。任何新加的 Celery 任务都要先校验 user_id 不空再继续。
 - **`libraries` 表没有 `team_id` 列**：scope 走 `scope_type` (`team`/`user`/`project`) + `scope_id` 两列。代码里 `select("..., team_id, ...")` 会拿 PG 42703 错。team 归属判断要先看 `scope_type='team'` 再用 `scope_id`。
 - **`parsed_media` 没有 `transcript_status` 列**：AI 状态字段已迁到 `videos` 表（`transcript_status` / `summary_status` / `visual_analysis_status`）。在 `parsed_media` 上查会 PG 42703。
+- **gpupc 上 PG 容器内部监听 55434，不是 5432**：自托管 Supabase 的 `POSTGRES_PORT=55434` 会同时喂给容器内的 `PGPORT`（为与同机 `sb-dev` 共存），所以 **PG 进程本身只监听 55434**。走宿主机端口时无所谓（`ports: "127.0.0.1:55436:55434"` 映射层会转换），但**走 docker 内网容器名直连会绕过映射层**，必须写 `nous-db:55434` —— 写 5432 拿 `Connection refused`。`DBOS_DATABASE_URL` 尤其要注意：DBOS 依赖 LISTEN/NOTIFY，不能走 pooler，只能直连，所以它是唯一必须硬编码这个非标准端口的地方。血泪教训见 [`deploy/gpu-server/README.md`](deploy/gpu-server/README.md) 的「DBOS 直连端口」节。
 
 ### Schema 迁移 / 代码漂移检查口径
 

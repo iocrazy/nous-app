@@ -21,11 +21,43 @@ The split lets the dev supervisor distinguish "starting up — wait" from
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict
 
 from fastapi import APIRouter, Request, Response, status
 
 router = APIRouter(tags=["Health"])
+
+
+def _dbos_readiness() -> str:
+    """Classify DBOS orchestrator state for the readiness gate.
+
+    Three states, because "not enabled" alone can't tell an intentionally
+    DBOS-less deployment from a broken one:
+
+    * ``not_configured`` — no DSN. A supported deployment shape (see
+      docker/docker-compose.yml: empty value → "DBOS disabled" warning), so
+      it must NOT degrade readiness.
+    * ``enabled`` — DSN set and the singleton/client is live.
+    * ``configured_but_disabled`` — DSN set but the engine never came up.
+      Always a real fault: every workflow dispatch 500s. The 2026-07-22 outage.
+
+    Uses ``is_launched()``, NOT ``is_enabled()``: the latter only reports that a
+    handle object exists. On the worker role ``init_dbos`` assigns the singleton
+    before any DB I/O, so a failed ``DBOS.launch()`` leaves ``is_enabled()``
+    True — verified in a throwaway container, where the first version of this
+    gate still answered 200 dbos=enabled with the DSN pointed at the dead port.
+
+    Imported lazily to keep this probe module free of service-layer imports.
+    """
+    if not os.environ.get("DBOS_DATABASE_URL", "").strip():
+        return "not_configured"
+
+    from app.services.infra import dbos_orchestrator
+
+    return (
+        "enabled" if dbos_orchestrator.is_launched() else "configured_but_disabled"
+    )
 
 
 @router.get("/healthz", summary="Liveness probe (always 200 if process is alive)")
@@ -57,15 +89,23 @@ async def readyz(request: Request, response: Response) -> Dict[str, Any]:
             "tasks": [],
         }
 
+    dbos_state = _dbos_readiness()
+    dbos_broken = dbos_state == "configured_but_disabled"
+
     snapshot = registry.status_snapshot()
-    ready = registry.all_done()
+    ready = registry.all_done() and not dbos_broken
     if not ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    if ready:
+        verdict = "ready"
+    elif registry.dead_daemons() or dbos_broken:
+        verdict = "degraded"
+    else:
+        verdict = "starting"
+
     return {
-        "status": (
-            "ready"
-            if ready
-            else ("degraded" if registry.dead_daemons() else "starting")
-        ),
+        "status": verdict,
+        "dbos": dbos_state,
         "tasks": snapshot,
     }

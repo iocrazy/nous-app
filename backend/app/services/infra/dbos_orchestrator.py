@@ -26,7 +26,15 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 # DBOS instance — set by `init_dbos`; None until lifespan startup runs.
+# NOTE: assigned BEFORE any DB connection happens, so a non-None `_dbos` says
+# nothing about whether DBOS actually works — see `_launched` below.
 _dbos = None
+# True only after `DBOS.launch()` returned successfully. `_dbos` alone is not a
+# health signal: `init_dbos` constructs the singleton without touching the DB,
+# so a launch that dies on an unreachable DSN still leaves `_dbos` set. Probes
+# must consult `is_launched()`, never `is_enabled()` (2026-07-22 outage: worker
+# had `_dbos` set + launch failed, and every health probe stayed green).
+_launched = False
 # DBOSClient — gateway-only enqueue handle, set by `init_dbos_client`; None
 # until a later task constructs it on the gateway (dormant for now). Unlike
 # the full DBOS singleton, a client only needs DB connections to enqueue
@@ -225,6 +233,7 @@ def launch_dbos(consume_queues: bool = True) -> None:
     the workflow_health_sweeper (PR #151) which respects
     do_not_auto_cancel.
     """
+    global _launched
     if _dbos is None:
         return
     from dbos import DBOS
@@ -238,6 +247,9 @@ def launch_dbos(consume_queues: bool = True) -> None:
         logger.info("[dbos] enqueue-only mode — listening to no user queues")
 
     DBOS.launch()
+    # Set only after launch() returns — an exception above must leave this
+    # False so `is_launched()` (and therefore /api/v1/readyz) reports the fault.
+    _launched = True
     logger.info("[dbos] launched (worker pool started, recovery complete)")
 
 
@@ -341,12 +353,16 @@ def shutdown_dbos(timeout_seconds: float = 5.0) -> None:
     the worker process can still exit even with the destroy still
     pending — uvicorn's reload spawns a fresh worker that opens fresh
     sockets / pools, and the orphaned thread dies with the old PID."""
-    global _dbos
+    global _dbos, _launched
     if _dbos is None:
         return
     import threading
 
     from dbos import DBOS
+
+    # Clear readiness up front: from here on the engine is going away, so
+    # probes must stop claiming it is launched even if destroy() hangs below.
+    _launched = False
 
     done = threading.Event()
     err: list[BaseException] = []
@@ -432,7 +448,25 @@ def shutdown_dbos_client() -> None:
 
 
 def is_enabled() -> bool:
+    """Whether a DBOS handle EXISTS. Not a health signal — see `is_launched`.
+
+    Kept as-is because dispatch paths use it to decide whether to raise
+    "orchestrator is not enabled"; for the gateway (`_client`) it happens to
+    coincide with health, since constructing a client connects.
+    """
     return _dbos is not None or _client is not None
+
+
+def is_launched() -> bool:
+    """Whether DBOS is actually USABLE. The signal health probes must use.
+
+    Differs from `is_enabled()` for the worker role: `init_dbos` sets `_dbos`
+    without any DB I/O, so a `launch_dbos` failure (unreachable DSN, wrong
+    port) leaves `is_enabled()` True while nothing can execute. The gateway
+    has no separate launch step — a constructed `_client` already implies a
+    successful connection — so it counts either way.
+    """
+    return _launched or _client is not None
 
 
 async def cancel_workflow(workflow_id: str) -> None:
