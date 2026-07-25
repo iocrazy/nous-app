@@ -469,61 +469,84 @@ Schema (schemas/)      — Pydantic 请求/响应模型
 
 ## CI/CD 部署
 
-### 前端部署 (Vercel)
+2026-07-25 起发布已收敛到 **nous 单线（gpupc）**，NAS/mediahub 老线退役。下面的表是唯一权威口径。
 
-**自动部署**: 推送到 `master` 分支自动触发
+### 三条活跃链
 
-| 配置项 | 值 |
-|--------|-----|
-| Framework | Vite |
-| Root Directory | `frontend` |
-| Build Command | `npm run build` |
-| Output Directory | `dist` |
+| 目标 | workflow | runner | 触发 paths | 落到哪 |
+|------|----------|--------|-----------|--------|
+| 后端 | `deploy-gpu.yml` | **self-hosted `[self-hosted, gpu]`** | `backend/**`、`Dockerfile`、`deploy/gpu-server/**`、`mediahub-core/**` | gpupc 本机 `nous-backend` + `nous-worker` |
+| 前端 | `deploy-pages.yml` | `ubuntu-latest` | `frontend/**` | Cloudflare Pages（GHA 构建 + wrangler 直传，不吃 Pages 的 500 构建/月配额） |
+| DB migration | `run-migration.yml` | **self-hosted `[self-hosted, gpu]`** | `supabase/migrations/**` | gpupc 本机 `nous-db` |
 
-**环境变量** (Vercel Dashboard 配置):
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
-- `VITE_API_URL` → `https://mediahub.heygo.cn`
+**为什么后端与 migration 必须 self-hosted**：gpupc 无公网 IP（CGNAT），GitHub 云端 runner 既不能 SSH 进来也收不到 webhook，只能反过来让 gpupc 主动连出去拉任务。附带好处：省掉 ACR 跨境推拉、build 用本机 48 核、不消耗 Actions 分钟数。
 
-### 后端部署 (GitHub Actions + ACR + Watchtower)
+**self-hosted 仍然是 GitHub Actions**：触发、编排、日志、PR 状态全在 GitHub，只是执行机器换成本机。别把它理解成"不走 CI"。
 
-**触发条件**: 推送到 `master` 且修改了 `backend/**` 或 `docker/**` 文件
+### 后端链的关键设计（改之前先读）
 
-**工作流文件**: `.github/workflows/deploy-backend.yml`
+- **`actions/checkout`，绝不 `cd` 到开发目录**。曾经是 `cd /media/.../repos/nous-app && git reset --hard origin/master`，三个后果：抹掉该目录未提交改动（触发者可能是另一台机器的 merge，人在 gpupc 上写代码毫无预警）；反过来未提交改动与 master 冲突时 `git checkout` 被 git 拒绝导致部署失败；reset 到的是"执行那一刻的 master HEAD"而非触发本 job 的 commit，两次 merge 挨得近时前一个 job 会部署后一个的代码。
+- **smoke 失败自动回滚**。`up.sh` 在 smoke 之前就换好了容器，所以 smoke 失败 == 生产此刻是坏的。`Tag current image as rollback point` 先把 `nous-backend:local` 打成 `:rollback`，smoke 失败时退回并重启（不带 `--build`）。只在 `steps.smoke.outcome == 'failure'` 时触发 —— build 阶段失败容器根本没换。
+- **验收口径必须探 `/api/v1/readyz`，不是 `/health` 也不是 `docker ps`**。见下方「验收纪律」。
 
-⚠️ **WATCHTOWER 不会应用 docker-compose 配置变更** — 详见 [`docs/runbook/compose-config-changes.md`](docs/runbook/compose-config-changes.md)
+### 已退役的 NAS 老线（保留手动扳手）
 
-任何对 `docker/docker-compose.yml` 的修改（新增 service、改 env var、改 volume、改 ports、改 depends_on）**都需要在 NAS 上手动跑 `docker compose up -d`** 才会生效。Watchtower 只会拉新 image + 用容器**已有**的 env 重启，不会读 compose 文件。
-
-血泪教训：2026-05-10 #172 加 `MEDIAHUB_ROLE=gateway` env + 新 `mediahub-worker` service，但没人去 NAS 跑 `docker compose up -d`，结果：
-- backend 还在 combined 模式（env 没生效）
-- mediahub-worker 容器从未创建
-- mediahub-admin 后续因为 compose state 漂移而打不开
-
-**实际部署链**:
-1. CI build + push image to Aliyun ACR (`mediahub-backend:latest`)
-2. CI 调用 `WATCHTOWER_URL` webhook 触发 NAS 上 watchtower
-3. Watchtower pull 新 image + 重启 `mediahub-app-backend` container（用 container 已有 env，不读 compose 文件）
-
-**GitHub Secrets 配置**:
-
-| Secret | 说明 |
-|--------|------|
-| `ACR_REGISTRY` / `ACR_USERNAME` / `ACR_PASSWORD` | Aliyun ACR 推 image |
-| `ACR_NAMESPACE` | image 命名空间（heygo） |
-| `WATCHTOWER_URL` / `WATCHTOWER_TOKEN` | NAS 上 watchtower 的 webhook 触发器 |
-
-### 手动部署
+`deploy-backend.yml`（ACR + watchtower → `mediahub-app-backend/worker`）与 `deploy-admin.yml` 已去掉 push 自动触发，只留 `workflow_dispatch`。不删除是因为 NAS 旧栈仍是回滚锚点，回退时需要一个能重推 ACR + 触发 watchtower 的扳手：
 
 ```bash
-# 前端 - 推送代码即可
-git push origin master
-
-# 后端 - SSH 到 NAS 执行
-ssh user@nas-ip -p 2222
-cd /path/to/mediahub
-git pull && docker-compose up -d --build backend
+gh workflow run deploy-backend.yml
 ```
+
+⚠️ 若要恢复双轨，注意两边连的是**不同的 Supabase**，`backend/**` 一次改动会同时部署到两套互不相干的数据库。
+
+### 验收纪律（2026-07-22 血泪）
+
+**永远不要用 `docker ps` 的 `healthy` 当发布成功的依据。** DBOS 曾整整挂 3 天而全部探针绿灯：`/health` 返回硬编码 `{"status":"healthy"}`；`/api/v1/healthz` 只探进程活着；`/api/v1/readyz` 早期只探 daemon 是否*存活*（而 reap/stall daemon 确实活着，只是每 tick 都失败，刷了 1915 条 ERROR）。最后靠人手点一次 transcribe 才发现。
+
+现在的口径：
+
+```bash
+# 唯一可信探针 —— dbos 字段有三态,configured_but_disabled 即故障
+docker exec nous-worker curl -sS http://localhost:8080/api/v1/readyz
+# 引擎侧应持续有新 workflow(scheduled 的 inbox/outbox_dispatch 每 5s 一轮)
+docker exec nous-db psql -U postgres -p 55434 -d postgres -c \
+  "SELECT status, count(*) FROM dbos.workflow_status
+   WHERE created_at > (extract(epoch from now())*1000 - 300000) GROUP BY 1"
+```
+
+加新的健康信号时：**`is_enabled()` 不能当健康依据**，它只表示句柄对象存在；worker 角色下 `init_dbos()` 在碰 DB 之前就赋值了 `_dbos`，launch 失败后它仍为 True。用 `is_launched()`。
+
+### 部署陷阱
+
+- **`env_file` 改动必须 `docker compose up -d` 重建容器**，`docker restart` 不会重读。同理 compose 的 service/env/volume/ports 改动也必须 `up -d`。
+- **self-hosted runner 会僵死**。网络抖动导致 session 失效后 runner 不会自愈（日志里刷 `broker.actions.githubusercontent.com` 500 或 `unexpected EOF`），GitHub 侧显示 `offline` 而进程还活着。修：`sudo systemctl restart actions.runner.iocrazy-nous-app.gpu-runner.service`。查状态：`gh api /repos/iocrazy/nous-app/actions/runners`。
+- **托管 runner 依赖账户付款正常**。付款失败时所有 `ubuntu-latest` job 会在 2 秒内 failure 且**零步骤执行**（`runner_name` 为空），annotation 里写着 `recent account payments have failed`。此时 `CI`/`actionlint`/`pr-behind-check` 全红、前端链也发不出去，但 **self-hosted 的后端链不受影响**（不计费）。切 public 不解决此问题。
+- **`pr-behind-check.yml` 是托管 runner**，所以上面那种情况下"落后 master ≥30 commits 拒绝 merge"这道闸门是失效的，落后检测只能靠本地 `bash scripts/branch-health.sh`。
+
+### 多机协作（gpupc + Mac mini）
+
+两台机器并行开发时按物理角色分工，能从源头消掉大部分冲突：
+
+| | gpupc | Mac mini |
+|---|---|---|
+| 角色 | 部署机（self-hosted runner + 生产栈 + GPU 推理） | 开发机 |
+| 主管 | `backend/**`、`deploy/**`、`.github/workflows/**`、`supabase/migrations/**` | `frontend/**`、`admin/**`、浏览器扩展、iOS Shortcut |
+
+铁律：**同一时刻只有一台机器往 master 推**，谁先推谁赢，另一台 `git rebase origin/master`。
+
+同机多个 Claude 会话必须各用一个 worktree，否则会互相提交到对方分支（2026-07-25 实际发生过：另一个会话的前端 commit 落进了 DBOS 修复的 PR）：
+
+```bash
+./scripts/worktree-manager.sh create feat/xxx   # 自动分配独立端口
+bash scripts/sync-worktree.sh                   # rebase + 首次运行会启用 rerere
+```
+
+### 已知缺口
+
+- **admin 没有自动部署**。gpupc 的 `nous-admin` 是 compose 本机 build（`context: ../../admin`），但 `deploy-gpu.yml` 的 paths 不含 `admin/**`。补齐前提是先决定 build arg `NOUS_ANON_KEY` 怎么进 CI（缺了会 build 出空 anon key 的 admin）。当前只能手动：`cd deploy/gpu-server && NOUS_ANON_KEY=<key> docker compose up -d --build admin`。
+- **`deploy-frontend.yml` 验的还是已退役的 Vercel**（poll `version.json` 比对 SHA）。CF Pages 化之后应改为验 Pages 的产物，或退役。
+- **`deploy-pages.yml` 把 feature flags 硬编码在 workflow 里**。新增 flag 要改 workflow，容易漏（注释里"必须与 Vercel prod 一致"本身就说明曾经漂移过）。宜迁到 `frontend/.env.production` 之类的单一来源。
+- **migration 与代码部署无顺序保证**。`run-migration.yml` 与 `deploy-gpu.yml` 独立触发，同一个 PR 里既加 migration 又改依赖它的代码时，两者谁先完成不确定。
 
 ## Discord 通知规则
 

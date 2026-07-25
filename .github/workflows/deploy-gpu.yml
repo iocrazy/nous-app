@@ -21,16 +21,29 @@ jobs:
     runs-on: [self-hosted, gpu]
     timeout-minutes: 40
     steps:
-      - name: Sync standing checkout to origin/master
-        run: |
-          cd /media/heygo/program/projects-code/repos/nous-app
-          git fetch origin master
-          git checkout master
-          git reset --hard origin/master
+      # 用 runner 自己的 workspace,不再借用开发目录(2026-07-25 改)。
+      # 旧做法是 `cd /media/.../repos/nous-app && git reset --hard origin/master`,
+      # 三个问题:
+      #  1. 抹掉那个目录里未提交的改动 —— 而触发者可能是另一台机器的 merge,
+      #     人在 gpupc 上写代码却毫无预警(reflog 没法救未提交内容)
+      #  2. 反过来,若未提交改动与 master 冲突,`git checkout master` 会被 git 拒绝
+      #     → 部署失败。等于"有人在写代码"和"能不能发版"耦合在一起
+      #  3. reset 到的是"执行那一刻的 origin/master",不是触发本 job 的 commit。
+      #     两次 merge 挨得近时,前一个 job 会部署后一个的代码,日志与现实不符
+      # actions/checkout 默认取触发 job 的确切 SHA,三个问题一起消失。
+      # 兼容性已验:compose project 名仍由目录名 `gpu-server` 决定(不变,不会
+      # 建重复容器);up.sh 用 `cd "$(dirname "$0")"`;marker/env_file/volumes
+      # 全是绝对路径;build context `../..` 在任何 checkout 下同样成立。
+      - uses: actions/checkout@v4
+
+      # smoke 失败时要能退回上一个镜像,所以先留锚点。
+      # `|| true`:首次部署时 nous-backend:local 还不存在。
+      - name: Tag current image as rollback point
+        run: docker tag nous-backend:local nous-backend:rollback || true
 
       - name: Build & restart backend stack
         run: |
-          cd /media/heygo/program/projects-code/repos/nous-app/deploy/gpu-server
+          cd "$GITHUB_WORKSPACE/deploy/gpu-server"
           ./up.sh --build backend worker
 
       # 探 /api/v1/readyz 而不是 /health —— /health 返回硬编码
@@ -38,6 +51,7 @@ jobs:
       # 从这里放行的。readyz 会在 DBOS 配了 DSN 却没起来时 503。
       # 同时验 worker:worker 唯一职责是消费 DBOS 队列,原先完全不在验收范围内。
       - name: Smoke readyz (backend + worker)
+        id: smoke
         run: |
           for c in nous-backend nous-worker; do
             ok=0
@@ -56,4 +70,27 @@ jobs:
               docker logs --tail 80 "$c"
               exit 1
             fi
+          done
+
+      # up.sh 在 smoke 之前就把容器换成了新镜像,所以 smoke 失败 == 此刻生产是坏的。
+      # 退回锚点镜像,让"发布失败"不等于"生产不可用"。只在 smoke 失败时触发:
+      # build 阶段失败的话容器根本没被替换,回滚是多余的重启。
+      - name: Rollback to previous image on smoke failure
+        if: failure() && steps.smoke.outcome == 'failure'
+        run: |
+          if ! docker image inspect nous-backend:rollback >/dev/null 2>&1; then
+            echo "::error::无回滚镜像(首次部署?) —— 生产可能仍处于失败状态,需人工介入"
+            exit 1
+          fi
+          docker tag nous-backend:rollback nous-backend:local
+          cd "$GITHUB_WORKSPACE/deploy/gpu-server"
+          ./up.sh backend worker          # 不带 --build:直接用锚点镜像
+          echo "::warning::已回滚到上一个镜像;本次 commit 的代码未生效"
+          for c in nous-backend nous-worker; do
+            for i in $(seq 1 30); do
+              if docker exec "$c" curl -fsS http://localhost:8080/api/v1/readyz >/dev/null 2>&1; then
+                echo "$c: 回滚后 ready"; break
+              fi
+              sleep 3
+            done
           done
