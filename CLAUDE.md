@@ -526,6 +526,14 @@ docker exec nous-db psql -U postgres -p 55434 -d postgres -c \
 
 ### 部署陷阱
 
+- **`secrets/backend.env` 会静默盖掉 `backend/config.yml`**（优先级见「配置系统」：环境变量 > .env > config.yml）。症状极具迷惑性：**改了 git 里的配置、PR 合了、CI 绿了、容器也重建了，但配置没生效** —— 因为真相在仓库外那个文件里。2026-07-25 实例：#1566 把 `CORS_ORIGINS` 换成 nous.ink 系并加了 `nous-app.pages.dev`，部署全绿，而 `backend.env` 里一行 `CORS_ORIGINS=["https://app.nous.ink","https://admin.nous.ink"]` 让实际生效的只有 2 个，从 `nous-app.pages.dev` 访问会被 CORS 拒绝。
+  **原则**：能放 `config.yml` 的一律不放 `backend.env`；后者只该有密钥和机器特定值（DSN、API key、路径）。发现被覆盖就删掉 env 里那行，让 `config.yml` 成为唯一来源，而不是在两处同步维护。
+  **怀疑配置没生效时这样查**（注意必须用 venv 解释器，`python` 是系统的、没装依赖）：
+  ```bash
+  docker exec nous-backend printenv | grep -E '^(CORS|MEDIA|DBOS)'      # env 层(赢的那个)
+  docker exec nous-backend /app/.venv/bin/python -c \
+    "from app.core.config import settings; print(settings.CORS_ORIGINS)"  # 实际生效值
+  ```
 - **`env_file` 改动必须 `docker compose up -d` 重建容器**，`docker restart` 不会重读。同理 compose 的 service/env/volume/ports 改动也必须 `up -d`。
 - **self-hosted runner 会僵死**。网络抖动导致 session 失效后 runner 不会自愈（日志里刷 `broker.actions.githubusercontent.com` 500 或 `unexpected EOF`），GitHub 侧显示 `offline` 而进程还活着。修：`sudo systemctl restart actions.runner.iocrazy-nous-app.gpu-runner.service`。查状态：`gh api /repos/iocrazy/nous-app/actions/runners`。
 - **托管 runner 依赖账户付款正常**。付款失败时所有 `ubuntu-latest` job 会在 2 秒内 failure 且**零步骤执行**（`runner_name` 为空），annotation 里写着 `recent account payments have failed`。此时 `CI`/`actionlint`/`pr-behind-check` 全红、前端链也发不出去，但 **self-hosted 的后端链不受影响**（不计费）。切 public 不解决此问题。
