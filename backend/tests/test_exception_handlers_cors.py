@@ -46,9 +46,7 @@ def test_http_exception_includes_cors_headers() -> None:
     client = TestClient(_make_app(), raise_server_exceptions=False)
     resp = client.get(
         "/http403",
-        headers={
-            "Origin": "https://feat-branch.nous-app.pages.dev"
-        },
+        headers={"Origin": "https://feat-branch.nous-app.pages.dev"},
     )
     assert resp.status_code == 403
     assert resp.headers.get("access-control-allow-origin") == (
