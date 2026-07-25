@@ -136,10 +136,14 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           manualChunks: {
+            // 只保留真正首屏必需的两个：react 运行时 + supabase(鉴权)。
+            //
+            // ⚠️ 不要把 tiptap / recharts / @xyflow(reactflow) 列进 manualChunks。
+            // 手动固化成独立 chunk 后，Vite 会把它们写进 index.html 的
+            // modulepreload，等于给这些重型库开首屏优先通道 —— 实测三者合计
+            // 295KB gzip 全部压在关键路径上，而它们只在编辑器/图表/画布页面用得到。
+            // 交给 Rollup 按动态 import 边界自动切，它们才会跟着 lazy 组件走。
             'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-            'vendor-tiptap': ['@tiptap/react', '@tiptap/starter-kit', '@tiptap/extension-placeholder'],
-            'vendor-reactflow': ['@xyflow/react'],
-            'vendor-charts': ['recharts'],
             'vendor-supabase': ['@supabase/supabase-js'],
           },
         },

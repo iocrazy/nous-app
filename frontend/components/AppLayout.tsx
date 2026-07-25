@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { ClockDriftBanner } from './ClockDriftBanner';
 import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
@@ -22,18 +22,42 @@ import { UploadProvider } from '../contexts/UploadContext';
 import { ExportTaskProvider } from '../contexts/ExportTaskContext';
 import { TaskManagerProvider } from '../contexts/TaskManagerContext';
 import { InboxProvider } from '../contexts/InboxContext';
-import { UserProfileModal } from './UserProfileModal';
-import { MobileProfilePage } from './MobileProfilePage';
-import { MobileTasksPage } from './MobileTasksPage';
-import { FloatingChatWidget } from './FloatingChatWidget';
+// 以下弹窗/移动页全部懒加载 + 条件挂载：它们都在 !isOpen 时 return null，
+// 常驻 eager import 只会把 SettingsModal 的图表(recharts)、画布(@xyflow)等
+// 重型依赖拖进首屏关键路径。条件挂载后 chunk 只在真正打开时才拉。
+const UserProfileModal = lazy(() =>
+  import('./UserProfileModal').then((m) => ({ default: m.UserProfileModal }))
+);
+const MobileProfilePage = lazy(() =>
+  import('./MobileProfilePage').then((m) => ({ default: m.MobileProfilePage }))
+);
+const MobileTasksPage = lazy(() =>
+  import('./MobileTasksPage').then((m) => ({ default: m.MobileTasksPage }))
+);
+// 懒加载：FloatingChatWidget → AIChatPanel → ChatInput 静态引用 @tiptap/react，
+// 曾把 133KB gzip 的富文本编辑器拖进首屏关键路径（连登录页都要下）。
+// 改 lazy 后 tiptap 只在聊天挂载时才拉。
+const FloatingChatWidget = lazy(() =>
+  import('./FloatingChatWidget').then((m) => ({ default: m.FloatingChatWidget }))
+);
 import { MobileTabBar, type MobileTab } from './MobileTabBar';
 import { useTabBarCollapse } from '../hooks/useTabBarCollapse';
 import { useIsDesktop } from '../hooks/useIsDesktop';
-import { CreateTeamModal } from './CreateTeamModal';
-import { SettingsModal } from './SettingsModal';
-import { CreateCollectionModal } from './CreateCollectionModal';
-import { CreateProjectModal } from './CreateProjectModal';
-import { PaymentModal } from './PaymentModal';
+const CreateTeamModal = lazy(() =>
+  import('./CreateTeamModal').then((m) => ({ default: m.CreateTeamModal }))
+);
+const SettingsModal = lazy(() =>
+  import('./SettingsModal').then((m) => ({ default: m.SettingsModal }))
+);
+const CreateCollectionModal = lazy(() =>
+  import('./CreateCollectionModal').then((m) => ({ default: m.CreateCollectionModal }))
+);
+const CreateProjectModal = lazy(() =>
+  import('./CreateProjectModal').then((m) => ({ default: m.CreateProjectModal }))
+);
+const PaymentModal = lazy(() =>
+  import('./PaymentModal').then((m) => ({ default: m.PaymentModal }))
+);
 import { IslandShell } from './IslandShell';
 
 // ---------------------------------------------------------------------------
@@ -435,83 +459,109 @@ function AppLayoutInner() {
       <ClockDriftBanner />
 
       {/* User Profile Modal */}
-      <UserProfileModal
-        isOpen={isProfileModalOpen}
-        onClose={() => setIsProfileModalOpen(false)}
-        user={userProfile}
-        onSave={(updated) => setUserProfile(updated)}
-        onLogout={handleAuthLogout}
-      />
+      {isProfileModalOpen && (
+        <Suspense fallback={null}>
+          <UserProfileModal
+            isOpen={isProfileModalOpen}
+            onClose={() => setIsProfileModalOpen(false)}
+            user={userProfile}
+            onSave={(updated) => setUserProfile(updated)}
+            onLogout={handleAuthLogout}
+          />
+        </Suspense>
+      )}
 
       {/* Mobile Profile Page — full-screen overlay, Me tab */}
-      <MobileProfilePage
-        isOpen={isMobileProfileOpen}
-        onClose={() => setIsMobileProfileOpen(false)}
-        userProfile={userProfile}
-        teams={teams}
-        personalTeamId={personalTeamId}
-        selectedTeamId={selectedTeamId}
-        currentView={view}
-        onSwitchTeam={handleWorkspaceSwitch}
-        onSettings={() => {
-          setSettingsModalInitialTab('personal');
-          setIsSettingsModalOpen(true);
-        }}
-        onLogout={handleAuthLogout}
-      />
+      {isMobileProfileOpen && (
+        <Suspense fallback={null}>
+          <MobileProfilePage
+            isOpen={isMobileProfileOpen}
+            onClose={() => setIsMobileProfileOpen(false)}
+            userProfile={userProfile}
+            teams={teams}
+            personalTeamId={personalTeamId}
+            selectedTeamId={selectedTeamId}
+            currentView={view}
+            onSwitchTeam={handleWorkspaceSwitch}
+            onSettings={() => {
+              setSettingsModalInitialTab('personal');
+              setIsSettingsModalOpen(true);
+            }}
+            onLogout={handleAuthLogout}
+          />
+        </Suspense>
+      )}
 
       {/* Global floating AI chat — desktop only (mobile keeps its tab bar
           clear; the fullscreen editor routes host their own instance). */}
       <div className="hidden md:block">
-        <FloatingChatWidget />
+        <Suspense fallback={null}>
+          <FloatingChatWidget />
+        </Suspense>
       </div>
 
       {/* Mobile Tasks Page — Task Center overlay (keeps the bottom tab bar visible) */}
-      <MobileTasksPage
-        isOpen={isMobileTasksOpen}
-        onClose={() => setIsMobileTasksOpen(false)}
-        onContentScroll={handleTabBarScroll}
-      />
+      {isMobileTasksOpen && (
+        <Suspense fallback={null}>
+          <MobileTasksPage
+            isOpen={isMobileTasksOpen}
+            onClose={() => setIsMobileTasksOpen(false)}
+            onContentScroll={handleTabBarScroll}
+          />
+        </Suspense>
+      )}
 
       {/* Create Team Modal */}
-      <CreateTeamModal
-        isOpen={isCreateTeamModalOpen}
-        onClose={() => setIsCreateTeamModalOpen(false)}
-        onTeamCreated={handleTeamCreated}
-      />
+      {isCreateTeamModalOpen && (
+        <Suspense fallback={null}>
+          <CreateTeamModal
+            isOpen={isCreateTeamModalOpen}
+            onClose={() => setIsCreateTeamModalOpen(false)}
+            onTeamCreated={handleTeamCreated}
+          />
+        </Suspense>
+      )}
 
       {/* Settings Modal */}
-      <SettingsModal
-        isOpen={isSettingsModalOpen}
-        onClose={() => setIsSettingsModalOpen(false)}
-        initialTab={settingsModalInitialTab as any}
-        user={{
-          id: currentUserId || '',
-          name: userProfile.name,
-          email: userProfile.email,
-          avatarUrl: userProfile.avatarUrl,
-          bio: '',
-        }}
-        onUserUpdated={() => {}}
-        settings={userSettings}
-        onUpdateSettings={handleUpdateSettings}
-        aiSettings={aiSettings}
-        onSaveAISettings={setAISettings}
-        currentTeam={currentTeam}
-        isTeamOwner={!!currentTeam && currentTeam.owner_id === currentUserId}
-        onTeamDeleted={handleTeamDeleted}
-        onTeamLeft={handleTeamLeft}
-        onTeamUpdated={handleTeamUpdated}
-      />
+      {isSettingsModalOpen && (
+        <Suspense fallback={null}>
+          <SettingsModal
+            isOpen={isSettingsModalOpen}
+            onClose={() => setIsSettingsModalOpen(false)}
+            initialTab={settingsModalInitialTab as any}
+            user={{
+              id: currentUserId || '',
+              name: userProfile.name,
+              email: userProfile.email,
+              avatarUrl: userProfile.avatarUrl,
+              bio: '',
+            }}
+            onUserUpdated={() => {}}
+            settings={userSettings}
+            onUpdateSettings={handleUpdateSettings}
+            aiSettings={aiSettings}
+            onSaveAISettings={setAISettings}
+            currentTeam={currentTeam}
+            isTeamOwner={!!currentTeam && currentTeam.owner_id === currentUserId}
+            onTeamDeleted={handleTeamDeleted}
+            onTeamLeft={handleTeamLeft}
+            onTeamUpdated={handleTeamUpdated}
+          />
+        </Suspense>
+      )}
 
       {/* Create Collection Modal */}
-      <CreateCollectionModal
-        isOpen={isCreateCollectionModalOpen}
-        onClose={() => setIsCreateCollectionModalOpen(false)}
-        onSubmit={handleCreateCollection}
-        teams={teams}
-        defaultTeamId={activeLibraryTab === 'team-library' ? selectedTeamId : null}
-      />
+      {isCreateCollectionModalOpen && (
+        <Suspense fallback={null}>
+          <CreateCollectionModal
+            isOpen={isCreateCollectionModalOpen}
+            onClose={() => setIsCreateCollectionModalOpen(false)}
+            onSubmit={handleCreateCollection}
+            teams={teams}
+            defaultTeamId={activeLibraryTab === 'team-library' ? selectedTeamId : null}
+          />
+        </Suspense>
+      )}
 
       {/* Mobile bottom navigation — collapsible pill (hidden on detail pages) */}
       {(isMobileMenuOpen || isResourcesMenuOpen || isDownloadsMenuOpen) && !isDetailPage && (
@@ -558,27 +608,33 @@ function AppLayoutInner() {
 
       {/* Payment Modal */}
       {selectedPaymentPackage && selectedTeamId && (
-        <PaymentModal
-          package={selectedPaymentPackage}
-          teamId={selectedTeamId}
-          onClose={() => setSelectedPaymentPackage(null)}
-          onSuccess={() => {
-            setSelectedPaymentPackage(null);
-          }}
-        />
+        <Suspense fallback={null}>
+          <PaymentModal
+            package={selectedPaymentPackage}
+            teamId={selectedTeamId}
+            onClose={() => setSelectedPaymentPackage(null)}
+            onSuccess={() => {
+              setSelectedPaymentPackage(null);
+            }}
+          />
+        </Suspense>
       )}
 
       {/* Create Project Modal */}
-      <CreateProjectModal
-        isOpen={isCreateProjectModalOpen}
-        onClose={() => setIsCreateProjectModalOpen(false)}
-        defaultTeamId={isPersonalWorkspace ? '' : (selectedTeamId ?? '')}
-        onProjectCreated={(project) => {
-          setIsCreateProjectModalOpen(false);
-          setSelectedProject(project);
-          navigate(teamPath('/projects/' + project.id));
-        }}
-      />
+      {isCreateProjectModalOpen && (
+        <Suspense fallback={null}>
+          <CreateProjectModal
+            isOpen={isCreateProjectModalOpen}
+            onClose={() => setIsCreateProjectModalOpen(false)}
+            defaultTeamId={isPersonalWorkspace ? '' : (selectedTeamId ?? '')}
+            onProjectCreated={(project) => {
+              setIsCreateProjectModalOpen(false);
+              setSelectedProject(project);
+              navigate(teamPath('/projects/' + project.id));
+            }}
+          />
+        </Suspense>
+      )}
     </div>
     </ExportTaskProvider>
     </UploadProvider>
