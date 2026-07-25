@@ -34,12 +34,13 @@ USER_AGENTS:
 
 # CORS 配置（结构化对象）
 # 注意：当 CORS_CREDENTIALS=true 时，不能使用 "*"，必须明确列出允许的域名
+# 双入口：大陆走 cn/cn-sb.nous.ink:88（灰云直连 nas-A），海外走 api/sb.nous.ink（CF Tunnel）
 CORS_ORIGINS:
-  - "https://mediahub.heygo.cn"
-  - "https://mediahubserver.heygo.cn:88"
-  - "https://mediahubserver.heygo.cn"
-  - "http://mediahubserver.heygo.cn:88"
-  - "http://mediahubserver.heygo.cn"
+  - "https://app.nous.ink"
+  - "https://admin.nous.ink"
+  - "https://nous-app.pages.dev"
+  - "https://cn.nous.ink:88"
+  - "https://api.nous.ink"
   - "http://localhost:3097"
   - "http://192.168.50.9:3097"
 CORS_CREDENTIALS: true

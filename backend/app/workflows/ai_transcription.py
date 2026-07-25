@@ -286,9 +286,7 @@ async def _run_volcengine_asr(
     expires_at = now + 3600
     media_token = _sign_token(user_id, now, expires_at)
 
-    media_public_url = getattr(
-        settings, "MEDIA_PUBLIC_URL", "https://mediahubserver.heygo.cn:88"
-    )
+    media_public_url = getattr(settings, "MEDIA_PUBLIC_URL", "https://cn.nous.ink:88")
     # The /media route serves files by file-path under DOWNLOAD_PATH;
     # use the path relative to download root to build the URL.
     rel_path = audio_path

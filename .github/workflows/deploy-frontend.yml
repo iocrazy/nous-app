@@ -1,21 +1,18 @@
-# Frontend deploy verification (Vercel).
+# Frontend deploy verification (Cloudflare Pages).
 #
-# Vercel auto-deploys the frontend on every push to master via its native
-# git integration — this workflow does NOT deploy. It brings that deploy
-# under CI discipline by VERIFYING it landed: it polls the live
+# Cloudflare Pages auto-deploys the frontend on every push to master via
+# its git integration — this workflow does NOT deploy. It brings that
+# deploy under CI discipline by VERIFYING it landed: it polls the live
 # /version.json for this commit's short SHA and fails loudly if the prod
 # alias never picks up the new build.
 #
 # Why: 2026-06 prod alias stuck on an old version ("force redeploy"
-# commit) — Vercel promoted the wrong/old build and nothing caught it.
+# commit) — the host promoted the wrong/old build and nothing caught it.
 # This is the frontend twin of deploy-backend.yml's "Verify deploy" step.
 #
-# Safe to add as-is: it changes NOTHING about how Vercel deploys (no
-# secrets, auto-promote untouched). The full serialized-promote (disable
-# Vercel auto-promote + CI-driven `vercel deploy --prod`) is a follow-up
-# that needs VERCEL_TOKEN/ORG_ID/PROJECT_ID — see the version-display spec
-# Part 3. The verify step is skipped unless the PROD_FRONTEND_VERSION_URL
-# repo variable is set, so it's a no-op on forks / until configured.
+# The verify step is skipped unless the PROD_FRONTEND_VERSION_URL repo
+# variable is set, so it's a no-op on forks / until configured. Point it
+# at https://app.nous.ink/version.json.
 
 name: Verify Frontend Deploy
 
@@ -43,11 +40,11 @@ jobs:
           PROD_FRONTEND_VERSION_URL: ${{ vars.PROD_FRONTEND_VERSION_URL }}
           EXPECTED_SHA_FULL: ${{ github.sha }}
         run: |
-          # version.json stamps commitSha = VERCEL_GIT_COMMIT_SHA sliced to
+          # version.json stamps commitSha = CF_PAGES_COMMIT_SHA sliced to
           # 7 chars (see frontend/vite.config.ts emit-version-json plugin).
           EXPECTED_SHA_SHORT="${EXPECTED_SHA_FULL:0:7}"
           echo "⏳ Polling $PROD_FRONTEND_VERSION_URL for commitSha=$EXPECTED_SHA_SHORT..."
-          # 15-min budget: Vercel build (~1.5min) + promote + CDN propagate,
+          # 15-min budget: Pages build (~1.5min) + promote + CDN propagate,
           # matching the backend verify step's headroom.
           DEADLINE=$(( $(date +%s) + 900 ))
           ATTEMPT=0
@@ -63,5 +60,5 @@ jobs:
             echo "  attempt $ATTEMPT: prod on '${ACTUAL_SHA:-<unreachable>}', want '$EXPECTED_SHA_SHORT'"
             sleep 15
           done
-          echo "::error::Frontend deploy verify timed out after 15 min — prod /version.json never reported $EXPECTED_SHA_SHORT. The Vercel production alias may be stuck on an older build; check the Vercel dashboard and re-promote."
+          echo "::error::Frontend deploy verify timed out after 15 min — prod /version.json never reported $EXPECTED_SHA_SHORT. The Cloudflare Pages production alias may be stuck on an older build; check the Pages dashboard and re-deploy."
           exit 1

@@ -19,7 +19,7 @@ from app.api import api_router
 from app.api.lifespan_router import router as lifespan_router
 from app.api.ws_router import router as ws_router
 from app.core.config import settings
-from app.core.exceptions import register_exception_handlers
+from app.core.exceptions import CORS_ALLOW_ORIGIN_REGEX, register_exception_handlers
 from app.core.utils import Utils
 from app.db.schema_assertions import assert_critical_schema_on_boot
 from app.middleware.request_logging import RequestLoggingMiddleware
@@ -244,11 +244,10 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # 添加CORS中间件
 # allow_origin_regex 同时覆盖:
 #   - localhost / 内网 IP 任意端口（本地开发）
-#   - Vercel preview 域名：每个 PR 一个动态子域名
-#     (mediahub-git-<branch>-heygos-projects.vercel.app 和
-#      mediahub-<hash>-heygos-projects.vercel.app)
+#   - Cloudflare Pages preview 域名：每次部署 / 每个分支一个动态子域名
+#     (<hash>.nous-app.pages.dev 和 <branch>.nous-app.pages.dev)
 #     没法穷举加到 CORS_ORIGINS，所以走 regex
-# allow_origins 保留生产域名列表 (prod .env: CORS_ORIGINS=["https://mediahub.heygo.cn"])
+# allow_origins 保留生产域名列表 (prod .env: CORS_ORIGINS=["https://app.nous.ink"])
 # Security: wildcard origins + credentials is forbidden by browsers and dangerous.
 # Auto-disable credentials and warn if misconfigured, rather than silently shipping.
 _cors_origins = settings.CORS_ORIGINS
@@ -260,12 +259,9 @@ if _cors_credentials and ("*" in _cors_origins or _cors_origins == ["*"]):
     )
     _cors_credentials = False
 
-_CORS_ALLOW_REGEX = (
-    # localhost / RFC1918 dev hosts on any port
-    r"^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+):\d+$"
-    # Vercel preview for this project (git branch or immutable deployment URL)
-    r"|^https://mediahub-(git-)?[a-z0-9-]+-heygos-projects\.vercel\.app$"
-)
+# Defined once in app/core/exceptions.py so the middleware and the exception
+# handlers can never drift apart — see the comment there.
+_CORS_ALLOW_REGEX = CORS_ALLOW_ORIGIN_REGEX
 
 app.add_middleware(
     CORSMiddleware,

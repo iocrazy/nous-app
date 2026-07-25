@@ -47,12 +47,12 @@ def test_http_exception_includes_cors_headers() -> None:
     resp = client.get(
         "/http403",
         headers={
-            "Origin": "https://mediahub-git-feat-branch-heygos-projects.vercel.app"
+            "Origin": "https://feat-branch.nous-app.pages.dev"
         },
     )
     assert resp.status_code == 403
     assert resp.headers.get("access-control-allow-origin") == (
-        "https://mediahub-git-feat-branch-heygos-projects.vercel.app"
+        "https://feat-branch.nous-app.pages.dev"
     )
 
 

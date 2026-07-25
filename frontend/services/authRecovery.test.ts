@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createAuthRecovery, shouldIntercept } from './authRecovery';
 
 describe('shouldIntercept', () => {
-  const api = 'https://mediahubserver.heygo.cn:88';
+  const api = 'https://cn.nous.ink:88';
 
   it('matches 401 responses on our backend API only', () => {
     expect(shouldIntercept(`${api}/api/v1/cw/tickets`, 401, api)).toBe(true);
@@ -11,7 +11,7 @@ describe('shouldIntercept', () => {
 
   it('ignores non-401 and foreign hosts', () => {
     expect(shouldIntercept(`${api}/api/v1/resources`, 200, api)).toBe(false);
-    expect(shouldIntercept('https://sb-mediahub.heygo.cn:88/auth/v1/token', 401, api)).toBe(false);
+    expect(shouldIntercept('https://cn-sb.nous.ink:88/auth/v1/token', 401, api)).toBe(false);
     expect(shouldIntercept('https://example.com/x', 401, api)).toBe(false);
   });
 

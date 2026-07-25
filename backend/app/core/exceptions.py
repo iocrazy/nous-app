@@ -86,15 +86,27 @@ def _request_id(request: Request) -> Optional[str]:
     return getattr(request.state, "request_id", None)
 
 
-# CORS allowlist for the exception-handler responses. Keep this regex in sync
-# with ``_CORS_ALLOW_REGEX`` in app/main.py — that's where CORSMiddleware
-# enforces the same rules for non-error responses. (If these drift, prod 500s
-# will silently look like CORS errors again.)
-_CORS_ALLOW_REGEX = re.compile(
+# Single source of truth for the dynamic-origin CORS allowlist.
+#
+# Two places need it: CORSMiddleware in app/main.py (normal responses) and the
+# exception handlers below (error responses, which bypass the middleware
+# stack). These used to be two hand-synced copies with a "keep in sync"
+# comment — exactly the invariant that drifts, and when it drifts prod 500s
+# silently look like CORS errors. app/main.py now imports this constant.
+#
+# Covers:
+#   - localhost / RFC1918 dev hosts on any explicit port
+#   - Cloudflare Pages previews for this project
+#     (<branch-alias>.nous-app.pages.dev, <deploy-hash>.nous-app.pages.dev)
+# Stable production origins (app.nous.ink, cn/api.nous.ink, ...) live in
+# ``settings.CORS_ORIGINS``, not here.
+CORS_ALLOW_ORIGIN_REGEX = (
     r"^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0"
     r"|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+):\d+$"
-    r"|^https://mediahub-(git-)?[a-z0-9-]+-heygos-projects\.vercel\.app$"
+    r"|^https://[a-z0-9-]+\.nous-app\.pages\.dev$"
 )
+
+_CORS_ALLOW_REGEX = re.compile(CORS_ALLOW_ORIGIN_REGEX)
 
 
 def _origin_is_allowed(origin: str) -> bool:

@@ -39,7 +39,7 @@ deploy_admin() {
         -f "${PROJECT_ROOT}/admin/Dockerfile" \
         --build-arg VITE_SUPABASE_URL="${ADMIN_SUPABASE_URL:-}" \
         --build-arg VITE_SUPABASE_ANON_KEY="${ADMIN_SUPABASE_ANON_KEY:-}" \
-        --build-arg VITE_API_URL="${ADMIN_API_URL:-https://mediahubserver.heygo.cn:88}" \
+        --build-arg VITE_API_URL="${ADMIN_API_URL:-https://cn.nous.ink:88}" \
         "${PROJECT_ROOT}/admin"
 
     log "Pushing to ACR..."
