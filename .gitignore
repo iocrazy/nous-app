@@ -278,6 +278,8 @@ cache/
 .worktrees/
 .worktree.env
 .worktree-registry.json
+# 本地 Supabase 密钥(worktree-manager.sh 读取);.example 模板才进 git
+.worktree-secrets.env
 backend/.celery/
 
 # Cookie files (contain sensitive session data)

@@ -24,8 +24,10 @@ KONG_YML="$SUPABASE_DIR/volumes/api/kong.yml"
 ENV_FILE="$SUPABASE_DIR/.env"
 COMPOSE_FILE="$SUPABASE_DIR/docker-compose.yml"
 
-# Default API Key
-DEFAULT_MCP_API_KEY="mcp_heygo_x7K9pL2mQ4vR8wY3"
+# Default API Key —— 不硬编码密钥(本脚本会进 git)。
+# 未提供时随机生成一个,而不是回落到固定值。
+# 也可 export MCP_API_KEY_DEFAULT=xxx 指定。
+DEFAULT_MCP_API_KEY="${MCP_API_KEY_DEFAULT:-mcp_$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 20)}"
 
 # Colors
 RED='\033[0;31m'

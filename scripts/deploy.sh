@@ -9,8 +9,10 @@ set -e
 
 ACR_REGISTRY="crpi-eat03wohif79y6f2.cn-shanghai.personal.cr.aliyuncs.com"
 ACR_NAMESPACE="heygo"
-WATCHTOWER_URL="http://192.168.50.9:8777/v1/update"
-WATCHTOWER_TOKEN="mediahub-deploy-2026"
+WATCHTOWER_URL="${WATCHTOWER_URL:-http://192.168.50.9:8777/v1/update}"
+# 部署 token 绝不硬编码(本脚本会进 git)。用法:
+#   export WATCHTOWER_TOKEN=xxx   或写进 .env(已 gitignore)后 source
+WATCHTOWER_TOKEN="${WATCHTOWER_TOKEN:?请先设置 WATCHTOWER_TOKEN 环境变量(勿写进脚本)}"
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 GREEN='\033[0;32m'
