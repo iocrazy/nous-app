@@ -32,11 +32,13 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Nous" />
     <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
-    <link rel="preconnect" href="https://sb-mediahub.heygo.cn:88" crossorigin />
-    <link rel="dns-prefetch" href="https://sb-mediahub.heygo.cn:88" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- 大陆入口：Supabase 走 cn-sb.nous.ink:88 灰云直连（旧 sb-mediahub.heygo.cn 已退役） -->
+    <link rel="preconnect" href="https://cn-sb.nous.ink:88" crossorigin />
+    <link rel="dns-prefetch" href="https://cn-sb.nous.ink:88" />
+    <!-- 字体自托管：原先的 fonts.googleapis.com stylesheet 是 render-blocking，
+         大陆实测多花 ~242ms（且随时可能被墙）。改为 @font-face 引本地 woff2，
+         见 index.css。 -->
+
   </head>
   <body>
     <div id="root"></div>

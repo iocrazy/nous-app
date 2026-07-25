@@ -88,6 +88,50 @@ touch /media/heygo/program/datahub/nous/.mounted
 - Linux bind-mount 下 uid 65532 写不进用户属主 755 目录（macOS Docker Desktop 验不出此坑）——所以一次性 CLI 用 root 写、事后 chown 65532。
 - tunnel login 轮询 `login.cloudflareaccess.org` 国内偶发 EOF（unexpected EOF）：重试即可，授权 URL 一次性作废需用新的。
 
+## ⚠️ DBOS 直连端口：必须 `nous-db:55434`，不是 5432（2026-07-25 血泪）
+
+`DBOS_DATABASE_URL`（在 `secrets/backend.env`，仓库外）必须是：
+
+```
+postgresql://postgres:<pw>@nous-db:55434/postgres
+```
+
+**为什么不是 5432**：自托管 Supabase 的 `supabase/.env` 里 `POSTGRES_PORT=55434`（为与同机 `sb-dev` 共存避端口冲突），而 compose 把它同时喂给了容器内的 `PGPORT` —— 所以 **PG 进程本身只监听 55434，5432 上没有监听者**。
+
+```
+sb-dev   supavisor=55433  PG-direct=55434
+sb-prod  supavisor=55435  PG-direct=55436   ← 本栈
+```
+
+**为什么 NAS 时代没这个问题**：NAS 上 backend 走**宿主机端口**（`127.0.0.1:5543x`），docker 的 ports 映射会做 `55436 → 55434` 转换，容器内监听哪个端口对调用方完全透明。迁到 gpupc 后 backend 进了同一个 `nous-net`，顺理成章改成容器名直连 —— 而**容器名直连绕过 ports 映射**，直接打容器 IP:端口，这时必须用真实监听端口。`5432` 这个数字在 NAS 时代是"宿主机映射口"，被当成"PG 标准口"照搬到容器名后面就断了。
+
+**为什么只有 DBOS 踩这个坑**：其它服务走 Kong（`SUPABASE_URL=http://nous-kong:8000`）或 supavisor，只有 DBOS 依赖 LISTEN/NOTIFY——任何 pooler 都不支持——必须直连 PG，所以它是唯一必须硬编码这个非标准端口的地方。
+
+**故障表现（静默 3 天）**：
+
+| | |
+|---|---|
+| 起点 | 2026-07-22 14:36（迁移当天首次起栈） |
+| 发现 | 2026-07-25 05:21，用户手点一次 transcribe 才暴露 |
+| 直接症状 | `DBOS orchestrator is not enabled (DBOS_DATABASE_URL missing or init failed)` → **所有**走 DBOS 的功能 HTTP 500 |
+| 真实影响面 | `app.startup.stall_detector` 7 天内 **1915 条 ERROR**（同一个 DSN），`_bg_reap_internal_queue` 每 2 分钟刷一次，DBOS scheduled workflow 全部停摆 |
+| 为什么没人发现 | `docker ps` 一路显示 `healthy` —— healthcheck 只探 `/healthz`，**完全不覆盖 DBOS** |
+
+**改动后必须重建容器**：`DBOS_DATABASE_URL` 在 `env_file` 里，`docker restart` 不会重读 —— 必须 `docker compose up -d backend worker`。（同 CLAUDE.md 里 Watchtower 那条教训：Watchtower 只拉新 image + 用容器已有 env 重启，不读 compose 也不重读 env_file。）
+
+**验收口径**（别只看 `docker ps` 的 healthy）：
+
+```bash
+# worker 必须出现 "DBOS launched!" 且列出 5 个队列
+docker logs nous-worker --since 3m 2>&1 | grep -E "DBOS launched|Initializing DBOS system database"
+# backend(gateway) 必须是 constructed 而不是 construction failed
+docker logs nous-backend --since 3m 2>&1 | grep -i dbos
+# 引擎侧必须有新 workflow 在跑（scheduled 的 inbox/outbox_dispatch 每 5s 一轮）
+docker exec nous-db psql -U postgres -p 55434 -d postgres -c \
+  "SELECT status, count(*) FROM dbos.workflow_status
+   WHERE created_at > (extract(epoch from now())*1000 - 300000) GROUP BY 1"
+```
+
 ## 回滚
 
 `docker compose down` + Cloudflare 删 `api`/`sb` 两条 CNAME + `tunnel delete nous-gpu`。NAS 全程未动，无需恢复。

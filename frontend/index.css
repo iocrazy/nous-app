@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Inter 自托管（可变字体，latin 子集 47KB 覆盖全部字重）。
+   原先 index.html 里的 fonts.googleapis.com <link rel="stylesheet"> 是
+   render-blocking，大陆实测多花 ~242ms 且随时可能被墙。改为同源 @font-face，
+   配 font-display:swap → 字体加载不再阻塞首屏文字渲染。 */
+@import "@fontsource-variable/inter/wght.css";
+
 /* Custom theme configuration for Tailwind 4.0 */
 @theme {
   /* Colors - keeping zinc dark theme */
@@ -7,7 +13,8 @@
   --color-foreground: #f4f4f5;
 
   /* Font family */
-  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  /* 'Inter Variable' = 自托管可变字体（见顶部 @import）；'Inter' 保留兼容本机已装字体 */
+  --font-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, sans-serif;
 
   /* ===== Storyboard Canvas Theme Colors (zinc-based, matching main app) ===== */
   --color-bg-dark: #09090b;          /* zinc-950 */

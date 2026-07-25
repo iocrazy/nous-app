@@ -36,9 +36,11 @@ services:
     image: nous-backend:local
     container_name: nous-backend
     ports:
-      # 0.0.0.0 = gpupc 所有内网网卡(LAN+ZeroTier),供 nas-A 跳板经 ZeroTier 10.0.0.10:8080 反代
-      # gpupc 无公网 IP(CGNAT),故不暴露到互联网
-      - "8080:8080"
+      # 仅绑 ZeroTier 网卡 —— nas-A 跳板经 10.0.0.10:8080 反代照常工作，
+      # 但不再暴露给 LAN(192.168.8.0/24)。公网入口是 api.nous.ink,
+      # 经 cloudflared 走 docker 网络直连 nous-backend:8080,不依赖此映射。
+      # 注意: ZeroTier 未起时 docker 会绑定失败,restart 策略会重试。
+      - "10.0.0.10:8080:8080"
     env_file: /media/heygo/program/datahub/nous/secrets/backend.env
     environment:
       - MEDIAHUB_ROLE=gateway
@@ -48,6 +50,18 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       - redis
+    # 覆盖 Dockerfile 的 /health(硬编码 {"status":"healthy"},DBOS 挂了照样 200
+    # —— 2026-07-22 起静默 3 天就是因为它)。readyz 在 DBOS_DATABASE_URL 配了
+    # 却 init 失败时返回 503 degraded。
+    # 只在本栈覆盖:gpupc 无 autoheal,unhealthy 仅标记状态;NAS 栈有
+    # mediahub-autoheal(只重启 unhealthy),继续用 Dockerfile 的 liveness 探针,
+    # 免得配置类故障引发循环重启。
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/v1/readyz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
     restart: unless-stopped
 
   worker:
@@ -63,6 +77,15 @@ services:
     depends_on:
       - redis
       - backend
+    # worker 的唯一职责就是消费 DBOS 队列,而它原先的 healthcheck 探的是
+    # /health —— 连 API router 都没挂载(实测 /api/v1/resources → 404),那个 200
+    # 完全不代表队列在跑。readyz 由 lifespan_router 无条件挂载,worker 上可用。
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/v1/readyz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
     restart: unless-stopped
 
   falkordb:

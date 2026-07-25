@@ -1,5 +1,10 @@
-name: Run SQL Migration on NAS
+name: Run SQL Migration on GPU
 
+# 2026-07-25:目标从 NAS(mediahub-sb-prod-db,经 SSH)改为 gpupc 本机
+# (nous-db,self-hosted runner)。生产库已经是 gpupc 上的自托管 Supabase,
+# 继续打 NAS 等于 migration 全部落到旧库 —— 恰好是下面 (1) 要防的那类事故的
+# 镜像版本。gpupc 无公网 IP(CGNAT)不能反向 SSH,所以走 self-hosted runner。
+#
 # Two trigger modes:
 #  (1) push to master that adds new files under supabase/migrations/** —
 #      auto-applies them in alpha-numeric order. Avoids the 2026-05-15
@@ -20,7 +25,7 @@ on:
 jobs:
   migrate:
     name: Execute SQL Migration
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, gpu]
 
     steps:
       - name: Checkout repository
@@ -91,60 +96,49 @@ jobs:
           echo "count=$count" >> "$GITHUB_OUTPUT"
           rm -f "$batch"
 
-      - name: Run migrations via SSH
+      - name: Run migrations on gpupc (nous-db)
         if: steps.collect.outputs.skip != 'true'
-        uses: appleboy/ssh-action@v1.0.3
         env:
           SQL_B64: ${{ steps.collect.outputs.sql_b64 }}
-        with:
-          host: ${{ secrets.NAS_HOST }}
-          port: ${{ secrets.NAS_PORT }}
-          username: ${{ secrets.NAS_USER }}
-          key: ${{ secrets.NAS_SSH_KEY }}
-          command_timeout: 10m
-          envs: SQL_B64
-          script: |
-            set -e
-            export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+        run: |
+          set -e
 
-            # Container names per the 2026-04 prod-supabase rename:
-            #   - DB:   mediahub-sb-prod-db (was: mediahub-sb-db)
-            #   - REST: mediahub-sb-prod-rest (was: mediahub-sb-rest)
-            # See scripts/rename-prod-supabase.sh + scripts/migrate-prod-data.sh.
-            # The PR #283 mig 218 silently "ran" against the old name and
-            # the workflow exited green because nobody verified the docker
-            # exec output — auto-trigger (PR #293) caught this when mig 219
-            # surfaced the stale name. Detect by docker ps so future
-            # renames also self-heal.
-            DB_CONTAINER=$(sudo docker ps --format '{{.Names}}' \
-              | grep -E '^mediahub-sb(-prod)?-db$' | head -1)
-            REST_CONTAINER=$(sudo docker ps --format '{{.Names}}' \
-              | grep -E '^mediahub-sb(-prod)?-rest$' | head -1)
-            if [ -z "$DB_CONTAINER" ]; then
-              echo "::error::No running container matching ^mediahub-sb(-prod)?-db$ — list:"
-              sudo docker ps --format '{{.Names}}'
-              exit 1
-            fi
-            echo "Using DB container: $DB_CONTAINER"
-            echo "Using REST container: ${REST_CONTAINER:-<none found, will skip reload>}"
+          # self-hosted runner 就在 gpupc 上,直接 docker exec,不再 SSH。
+          # heygo 已入 docker 组,无需 sudo(见 deploy/gpu-server/README.md)。
+          # 沿用按 docker ps 探测容器名的做法:重命名能自我修复,这是 2026-04
+          # NAS 改名后 mig 218 静默打空的教训(PR #283/#293)。
+          DB_CONTAINER=$(docker ps --format '{{.Names}}' \
+            | grep -E '^nous-db$' | head -1)
+          REST_CONTAINER=$(docker ps --format '{{.Names}}' \
+            | grep -E '^nous-rest$' | head -1)
+          if [ -z "$DB_CONTAINER" ]; then
+            echo "::error::No running container matching ^nous-db$ — list:"
+            docker ps --format '{{.Names}}'
+            exit 1
+          fi
+          echo "Using DB container: $DB_CONTAINER"
+          echo "Using REST container: ${REST_CONTAINER:-<none found, will skip reload>}"
 
-            TMP=$(mktemp /tmp/mediahub-migration-XXXXXX.sql)
-            trap 'rm -f "$TMP"' EXIT
+          TMP=$(mktemp /tmp/nous-migration-XXXXXX.sql)
+          trap 'rm -f "$TMP"' EXIT
 
-            printf '%s' "$SQL_B64" | base64 -d > "$TMP"
-            echo "Decoded batch SQL ($(wc -c < "$TMP") bytes, $(grep -c '^-- ==' "$TMP" | head -1) markers)"
+          printf '%s' "$SQL_B64" | base64 -d > "$TMP"
+          echo "Decoded batch SQL ($(wc -c < "$TMP") bytes, $(grep -c '^-- ==' "$TMP" | head -1) markers)"
 
-            echo ""
-            echo "Running batch via psql (\\set ON_ERROR_STOP on)..."
-            sudo docker exec -i "$DB_CONTAINER" psql -U postgres -d postgres < "$TMP"
+          echo ""
+          # -p 55434 是必须的:自托管 Supabase 的 POSTGRES_PORT 喂给了容器内
+          # PGPORT,PG 只监听 55434,5432 上没有监听者。省掉这个参数会拿
+          # Connection refused —— 同 DBOS_DATABASE_URL 那个坑(见 CLAUDE.md)。
+          echo "Running batch via psql (ON_ERROR_STOP on)..."
+          docker exec -i "$DB_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -p 55434 -d postgres < "$TMP"
 
-            echo ""
-            if [ -n "$REST_CONTAINER" ]; then
-              echo "Reloading PostgREST schema cache ($REST_CONTAINER)..."
-              sudo docker kill --signal=SIGUSR1 "$REST_CONTAINER" 2>/dev/null || true
-            else
-              echo "REST container not found, skipping schema cache reload."
-            fi
+          echo ""
+          if [ -n "$REST_CONTAINER" ]; then
+            echo "Reloading PostgREST schema cache ($REST_CONTAINER)..."
+            docker kill --signal=SIGUSR1 "$REST_CONTAINER" 2>/dev/null || true
+          else
+            echo "REST container not found, skipping schema cache reload."
+          fi
             echo "Done."
 
       - name: Skip note
