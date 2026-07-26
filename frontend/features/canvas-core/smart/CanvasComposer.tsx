@@ -222,11 +222,19 @@ export function CanvasComposer({
   // fresh Prompt node + Media node pair via the same pure builder the
   // in-canvas Library picker uses, then strip the state so a reload or
   // back-nav doesn't reinsert it.
+  // insertedRef guards against StrictMode's synchronous double-invoke of
+  // this effect (mirrors CanvasPage's seededRef pattern) — the navigate()
+  // state-clear alone doesn't help because both invocations run before
+  // either commit lands, so both would still see the same pending insert.
+  const insertedRef = useRef<string | null>(null);
   useEffect(() => {
     if (loadStatus !== 'ready') return;
     const insert = (location.state as { promptInsert?: PendingPromptInsert } | null)
       ?.promptInsert;
     if (!insert) return;
+    const insertKey = `${canvasId}:${insert.assetId}`;
+    if (insertedRef.current === insertKey) return;
+    insertedRef.current = insertKey;
 
     const position = dropPosition();
     const promptNode = createPromptNode({}, { position });
@@ -261,7 +269,7 @@ export function CanvasComposer({
     setSelection([filledPromptNode.id, mediaNode.id]);
 
     navigate(location.pathname, { replace: true });
-  }, [loadStatus, location.state, location.pathname, navigate, dropPosition, setNodes, setConnections, setSelection]);
+  }, [loadStatus, location.state, location.pathname, navigate, dropPosition, setNodes, setConnections, setSelection, canvasId]);
 
   const buildContexts = useCallback(
     (ids: string[]): RunnerContext[] => {

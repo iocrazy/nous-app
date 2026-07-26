@@ -12,6 +12,7 @@
 // re-derive the full canvas surface (surfaceRef geometry, viewport, React
 // Flow) that a true end-to-end drop-position test would need.
 
+import { StrictMode } from 'react';
 import { render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -68,6 +69,34 @@ describe('CanvasComposer — Send to Canvas consumption', () => {
     expect(selection).toEqual([promptNode.id, mediaNode.id]);
 
     expect(navigate).toHaveBeenCalledWith('/team/t1/canvas/c1', { replace: true });
+  });
+
+  it('inserts exactly once under React.StrictMode double-invoke (insertedRef guard)', async () => {
+    locationState = {
+      promptInsert: {
+        assetId: 'r1',
+        filename: 'hero.png',
+        positive: 'a cinematic hero shot',
+        negative: 'lowres',
+      },
+    };
+    useCanvasCoreStore.setState({ canvasId: 'c1', kind: 'smart', loadStatus: 'ready' });
+
+    render(
+      <StrictMode>
+        <CanvasComposer />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(useCanvasCoreStore.getState().nodes).toHaveLength(2));
+    // Give any StrictMode re-run a chance to (wrongly) insert a second pair
+    // before asserting the final counts stay put.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const { nodes, connections } = useCanvasCoreStore.getState();
+    expect(nodes).toHaveLength(2);
+    expect(connections).toHaveLength(1);
+    expect(navigate).toHaveBeenCalledTimes(1);
   });
 
   it('does nothing when there is no pending promptInsert', () => {
