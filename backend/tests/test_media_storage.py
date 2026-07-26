@@ -150,21 +150,34 @@ async def test_put_bytes_passes_content_type_and_upsert():
     assert args[2]["upsert"] == "true"
 
 
+# exists() probes with the HEAD-shaped get_size, not download(): pulling the
+# whole object just to answer "is it there" made a skip-PUT check cost the
+# object's full size (an HLS backfill would have moved ~58 GB twice). These
+# tests pin the OUTCOME — present → True, missing → False — and stub get_size
+# so they stay honest about which call does the probing.
 @pytest.mark.asyncio
-async def test_exists_true_when_download_succeeds():
+async def test_exists_true_when_object_is_present():
     store = ObjectStore(CHAT_MEDIA_BUCKET)
-    proxy = _mock_proxy(download=b"bytes")
-    with patch.object(store, "_proxy", new=AsyncMock(return_value=proxy)):
+    with patch.object(store, "get_size", new=AsyncMock(return_value=123)):
         assert await store.exists("k") is True
 
 
 @pytest.mark.asyncio
-async def test_exists_false_when_download_raises():
+async def test_exists_false_when_object_is_missing():
     store = ObjectStore(CHAT_MEDIA_BUCKET)
-    proxy = AsyncMock()
-    proxy.download.side_effect = Exception("404")
-    with patch.object(store, "_proxy", new=AsyncMock(return_value=proxy)):
+    with patch.object(store, "get_size", new=AsyncMock(side_effect=Exception("404"))):
         assert await store.exists("k") is False
+
+
+@pytest.mark.asyncio
+async def test_exists_does_not_download_the_object():
+    """Regression guard: the probe must not transfer the object's bytes."""
+    store = ObjectStore(CHAT_MEDIA_BUCKET)
+    proxy = _mock_proxy(download=b"bytes")
+    with patch.object(store, "_proxy", new=AsyncMock(return_value=proxy)):
+        with patch.object(store, "get_size", new=AsyncMock(return_value=1)):
+            await store.exists("k")
+    proxy.download.assert_not_called()
 
 
 def test_location_dataclass_is_frozen():

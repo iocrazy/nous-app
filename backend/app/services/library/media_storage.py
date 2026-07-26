@@ -23,9 +23,10 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
+import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, AsyncIterator, Optional
+from typing import TYPE_CHECKING, AsyncIterator, Callable, Optional
 
 if TYPE_CHECKING:
     # Only for the `materialize` forward-ref annotation below — pathlib is
@@ -117,6 +118,51 @@ def to_file_path(bucket: str, key: str) -> str:
     return f"{_SB_SCHEME}{bucket}/{key}"
 
 
+# ── HLS keys: path-addressed, NOT content-addressed ─────────────────────────
+#
+# Every other sb:// writer goes through content_key(): key derived from the
+# sha256 so identical bytes dedup and the original filename never lands in the
+# key. HLS cannot use that scheme — an m3u8 references its siblings by bare
+# relative path (``480p/stream.m3u8``, ``segment_000.ts``), so renaming a
+# segment to its hash breaks every playlist that points at it.
+#
+# So HLS gets a second, path-addressed namespace rooted at ``hls/``. That
+# prefix cannot collide with the content-addressed one, which always starts
+# ``t{scope_id}/``. The trade-off is losing cross-resource dedup, which costs
+# nothing here: segments of different videos are never byte-identical.
+_HLS_PREFIX = "hls"
+# resource_id / version_id reach the key from the DB, so pin their shape rather
+# than trusting the caller — this namespace is the one place a caller-supplied
+# value would otherwise flow into a key path.
+_HLS_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+# Relative parts come from walking the ffmpeg output dir; keep them to plain
+# segment/playlist names so a crafted path can never climb out of the prefix.
+_HLS_REL_RE = re.compile(
+    r"^[A-Za-z0-9_][A-Za-z0-9._-]*(/[A-Za-z0-9_][A-Za-z0-9._-]*)*$"
+)
+
+
+def hls_key_prefix(resource_id: str, version_id: str) -> str:
+    """Key prefix owning one version's HLS output: ``hls/{rid}/{vid}``."""
+    rid, vid = str(resource_id), str(version_id)
+    if not _HLS_ID_RE.match(rid) or not _HLS_ID_RE.match(vid):
+        raise ValueError(f"unsafe HLS id: resource={rid!r} version={vid!r}")
+    return f"{_HLS_PREFIX}/{rid}/{vid}"
+
+
+def hls_key(resource_id: str, version_id: str, rel_path: str) -> str:
+    """Full key for one HLS artefact, e.g. ``hls/{rid}/{vid}/480p/stream.m3u8``.
+
+    ``rel_path`` is the artefact's path relative to the playlist root — exactly
+    what the m3u8 references — so relative links keep resolving once the tree
+    lives in the object store.
+    """
+    rel = str(rel_path).strip("/")
+    if not rel or ".." in rel.split("/") or not _HLS_REL_RE.match(rel):
+        raise ValueError(f"unsafe HLS relative path: {rel_path!r}")
+    return f"{hls_key_prefix(resource_id, version_id)}/{rel}"
+
+
 # ── Object store wrapper (Supabase Storage) ─────────────────────────────────
 
 
@@ -130,6 +176,20 @@ _STORAGE_CALL_TIMEOUT_S = 15.0
 # Chunk size for streamed GETs (get_stream). 64 KiB balances syscall overhead
 # against per-chunk memory — a ranged video read never buffers the whole file.
 _STREAM_CHUNK_BYTES = 64 * 1024
+
+# Directory upload (put_dir) fan-out. An HLS version is ~300 segments and a
+# full backfill is ~31k: serial would take hours, unbounded would exhaust the
+# connection pool. 8 keeps the NAS-hosted store busy without starving the rest
+# of the app of the shared async client.
+_DIR_UPLOAD_CONCURRENCY = 8
+
+# Objects per storage-api list page. The API caps what it returns; paginating
+# explicitly means a tier with hundreds of segments is fully enumerated.
+_LIST_PAGE = 100
+
+# Keys per remove() call — the request body is a JSON list, so cap it rather
+# than posting an unbounded array.
+_REMOVE_BATCH = 100
 
 
 class ObjectStore:
@@ -164,10 +224,16 @@ class ObjectStore:
         return await asyncio.wait_for(awaitable, timeout=_STORAGE_CALL_TIMEOUT_S)
 
     async def exists(self, key: str) -> bool:
-        """True if an object already lives at ``key`` (dedup skip-PUT check)."""
-        proxy = await self._proxy()
+        """True if an object already lives at ``key`` (dedup skip-PUT check).
+
+        Probes with the HEAD-shaped ``get_size`` rather than ``download``: the
+        old implementation pulled the ENTIRE object just to learn whether it
+        was there, so a skip-PUT check on a 2 MB HLS segment cost 2 MB of
+        transfer, and an HLS migration pass (31k segments, ~58 GB) would have
+        moved that volume twice.
+        """
         try:
-            await self._capped(proxy.download(key))
+            await self.get_size(key)  # raises on 404 / missing content-length
             return True
         except Exception:
             return False
@@ -270,6 +336,104 @@ class ObjectStore:
     async def remove(self, key: str) -> None:
         proxy = await self._proxy()
         await self._capped(proxy.remove([key]))
+
+    async def remove_many(self, keys: list[str]) -> None:
+        """Delete a batch of keys in one call (storage-api takes a list).
+
+        Chunked because the request is a JSON body of key strings — an
+        unbounded list (a 1080p tier can be 300+ segments) risks the server's
+        body limit.
+        """
+        if not keys:
+            return
+        proxy = await self._proxy()
+        for i in range(0, len(keys), _REMOVE_BATCH):
+            await self._capped(proxy.remove(keys[i : i + _REMOVE_BATCH]))
+
+    async def list_prefix(self, prefix: str) -> list[str]:
+        """Every key under ``prefix``, recursively.
+
+        storage-api's ``list`` is one directory level at a time and returns
+        folders as entries with a null ``id`` — so this walks breadth-first
+        and paginates, rather than assuming one flat call sees everything.
+        Needed to clear a version's old HLS output before a re-transcode:
+        ``shutil.rmtree`` has no object-store equivalent.
+        """
+        proxy = await self._proxy()
+        out: list[str] = []
+        pending = [prefix.strip("/")]
+        while pending:
+            base = pending.pop()
+            offset = 0
+            while True:
+                page = await self._capped(
+                    proxy.list(base, {"limit": _LIST_PAGE, "offset": offset})
+                )
+                if not page:
+                    break
+                for entry in page:
+                    name = entry.get("name")
+                    if not name:
+                        continue
+                    child = f"{base}/{name}" if base else name
+                    # Null id marks a folder placeholder, not an object.
+                    if entry.get("id") is None:
+                        pending.append(child)
+                    else:
+                        out.append(child)
+                if len(page) < _LIST_PAGE:
+                    break
+                offset += _LIST_PAGE
+        return out
+
+    async def remove_prefix(self, prefix: str) -> int:
+        """Delete everything under ``prefix``. Returns the object count."""
+        keys = await self.list_prefix(prefix)
+        await self.remove_many(keys)
+        return len(keys)
+
+    async def put_dir(
+        self,
+        local_dir: str,
+        key_for: "Callable[[str], str]",
+        *,
+        concurrency: int = _DIR_UPLOAD_CONCURRENCY,
+        skip_existing: bool = False,
+    ) -> int:
+        """Upload a whole local directory tree, concurrently. Returns file count.
+
+        ``key_for`` maps a POSIX path relative to ``local_dir`` onto the object
+        key, so the caller owns the key scheme (HLS keeps its tree; other
+        callers could content-address).
+
+        Concurrency is bounded by a semaphore: an HLS version is ~300 segments
+        and a full migration is ~31k, so firing every upload at once would
+        exhaust connections, while going strictly serial would take hours.
+
+        ``skip_existing`` makes a re-run cheap after a partial failure. It
+        costs one HEAD per file, so it is opt-in — a fresh transcode knows the
+        prefix is empty and should not pay for it.
+        """
+        import asyncio
+        from pathlib import Path
+
+        root = Path(local_dir)
+        files = sorted(p for p in root.rglob("*") if p.is_file())
+        sem = asyncio.Semaphore(max(1, concurrency))
+
+        # First error wins and is re-raised; the rest are cancelled by
+        # gather(return_exceptions=False).
+        async def _one(path: Path) -> None:
+            rel = path.relative_to(root).as_posix()
+            key = key_for(rel)
+            async with sem:
+                if skip_existing and await self.exists(key):
+                    return
+                mime = mimetypes.guess_type(rel)[0] or "application/octet-stream"
+                await self.put_file(key, str(path), mime)
+
+        await asyncio.gather(*(_one(p) for p in files))
+        return len(files)
 
     async def signed_url(self, key: str, *, ttl_seconds: int = 300) -> str:
         """Short-TTL signed URL for a private object (default 5 min)."""
