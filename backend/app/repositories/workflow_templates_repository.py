@@ -80,6 +80,8 @@ def _node_row(
             str(obj.source_stage_id) if obj.source_stage_id is not None else None
         ),
         "duration_days": obj.duration_days,
+        "completion_policy": obj.completion_policy,
+        "events": obj.events,
         "members": members,
     }
 
@@ -256,7 +258,12 @@ class WorkflowTemplatesRepository:
                     )
                 )
                 for nd in nodes:
-                    node = WorkflowTemplateNodes(
+                    # completion_policy / events (mig 386): only set when the
+                    # caller supplied them — omitting the kwarg (rather than
+                    # passing an explicit None) lets the NOT NULL column fall
+                    # back to its DB server_default (template_seeder's hand-built
+                    # node dicts carry neither key and rely on exactly this).
+                    node_kwargs: Dict[str, Any] = dict(
                         template_id=tpl.id,
                         name=nd["name"],
                         sort_order=int(nd["sort_order"]),
@@ -278,6 +285,11 @@ class WorkflowTemplatesRepository:
                         ),
                         duration_days=nd.get("duration_days"),
                     )
+                    if nd.get("completion_policy") is not None:
+                        node_kwargs["completion_policy"] = nd["completion_policy"]
+                    if nd.get("events") is not None:
+                        node_kwargs["events"] = nd["events"]
+                    node = WorkflowTemplateNodes(**node_kwargs)
                     session.add(node)
                     await session.flush()
                     for m in nd.get("members", []):

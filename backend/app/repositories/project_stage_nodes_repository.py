@@ -116,6 +116,8 @@ def _node_row(obj: ProjectStageNodes, members: List[Dict[str, Any]]) -> Dict[str
         "deliverable_label": obj.deliverable_label,
         "skipped": obj.skipped,
         "folder_id": (str(obj.folder_id) if obj.folder_id is not None else None),
+        "completion_policy": obj.completion_policy,
+        "events": obj.events,
         "members": members,
     }
 
@@ -283,6 +285,11 @@ class ProjectStageNodesRepository:
                     deliverable_required=tn.deliverable_required,
                     deliverable_label=tn.deliverable_label,
                     skipped=p["skipped"],
+                    # Flow Rules / Events (mig 386) — template-layer config,
+                    # copied verbatim at instantiation; instances don't open
+                    # these for in-place tweaks (spec §5).
+                    completion_policy=tn.completion_policy,
+                    events=tn.events,
                 )
                 session.add(node)
                 await session.flush()

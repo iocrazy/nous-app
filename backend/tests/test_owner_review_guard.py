@@ -274,6 +274,74 @@ async def test_no_project_id_not_locked(monkeypatch):
     assert result.status == IssueStatus.DONE
 
 
+# ── completion_policy='any_editor' (mig 386, M2 PR-D) ───────────────────────
+
+
+@pytest.mark.asyncio
+async def test_any_editor_policy_allows_non_owner_editor(monkeypatch):
+    """A node with completion_policy='any_editor' lets any editor (not just
+    the owner or a manager override) close the review."""
+    auth = _Auth(_OTHER)
+    issue_repo = _FakeIssueRepo(_issue_row(created_by_user_id=_OTHER))
+    nodes_repo = _FakeNodesRepo(
+        {
+            "owner_user_id": _OWNER,
+            "owner_agent_id": None,
+            "completion_policy": "any_editor",
+        }
+    )
+    _install(monkeypatch, issue_repo=issue_repo, nodes_repo=nodes_repo, role="editor")
+
+    result = await router_mod.transition_status(
+        900, IssueStatusTransition(status=IssueStatus.DONE), auth
+    )
+
+    assert result.status == IssueStatus.DONE
+    assert issue_repo.transitions == [(900, "done")]
+
+
+@pytest.mark.asyncio
+async def test_any_editor_policy_still_blocks_viewer(monkeypatch):
+    """'any_editor' widens the gate to manager/editor — not to every role."""
+    auth = _Auth(_OTHER)
+    issue_repo = _FakeIssueRepo(_issue_row(created_by_user_id=_OTHER))
+    nodes_repo = _FakeNodesRepo(
+        {
+            "owner_user_id": _OWNER,
+            "owner_agent_id": None,
+            "completion_policy": "any_editor",
+        }
+    )
+    _install(monkeypatch, issue_repo=issue_repo, nodes_repo=nodes_repo, role="viewer")
+
+    with pytest.raises(HTTPException) as exc:
+        await router_mod.transition_status(
+            900, IssueStatusTransition(status=IssueStatus.DONE), auth
+        )
+
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_owner_policy_default_unaffected_by_any_editor_change(monkeypatch):
+    """Regression guard: a node with completion_policy='owner' (or the key
+    missing entirely, as legacy fixtures assume) keeps rejecting a non-owner
+    editor exactly as before this change."""
+    auth = _Auth(_OTHER)
+    issue_repo = _FakeIssueRepo(_issue_row(created_by_user_id=_OTHER))
+    nodes_repo = _FakeNodesRepo(
+        {"owner_user_id": _OWNER, "owner_agent_id": None, "completion_policy": "owner"}
+    )
+    _install(monkeypatch, issue_repo=issue_repo, nodes_repo=nodes_repo, role="editor")
+
+    with pytest.raises(HTTPException) as exc:
+        await router_mod.transition_status(
+            900, IssueStatusTransition(status=IssueStatus.DONE), auth
+        )
+
+    assert exc.value.status_code == 403
+
+
 @pytest.mark.asyncio
 async def test_node_lookup_miss_fails_open(monkeypatch):
     """The node id resolves (new-format origin) but no live row is found —
