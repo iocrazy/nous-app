@@ -93,9 +93,7 @@ async def translate_gen_prompt(
 
     plan = build_translate_plan(resource, data.target_lang)
     if not plan:
-        raise HTTPException(
-            status_code=400, detail="No prompt text to translate from"
-        )
+        raise HTTPException(status_code=400, detail="No prompt text to translate from")
 
     try:
         provider_key, provider_config, _model, agent_slug = (

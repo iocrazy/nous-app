@@ -22,7 +22,9 @@ def test_en_target_reads_zh_sides():
 
 
 def test_skips_empty_sides():
-    plan = build_translate_plan({"gen_prompt": "a cat", "gen_prompt_negative": "  "}, "zh")
+    plan = build_translate_plan(
+        {"gen_prompt": "a cat", "gen_prompt_negative": "  "}, "zh"
+    )
     assert plan == [("gen_prompt", "gen_prompt_zh", "a cat")]
 
 

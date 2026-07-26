@@ -208,10 +208,14 @@ class TestExtractPngPromptPair:
         assert pair.negative == "lowres, bad anatomy"
 
     def test_comfyui_png_has_no_negative(self, tmp_path: Path):
-        graph = json.dumps({
-            "1": {"class_type": "CLIPTextEncode",
-                  "inputs": {"text": "a long descriptive positive prompt here"}},
-        })
+        graph = json.dumps(
+            {
+                "1": {
+                    "class_type": "CLIPTextEncode",
+                    "inputs": {"text": "a long descriptive positive prompt here"},
+                },
+            }
+        )
         png = tmp_path / "c.png"
         png.write_bytes(_png_with_text_chunk("prompt", graph))
         pair = extract_png_prompt_pair(png)

@@ -141,7 +141,7 @@ def parse_a1111_pair(text: str) -> Optional[PngPromptPair]:
         if section == "positive":
             if line.startswith("Negative prompt:"):
                 section = "negative"
-                first = line[len("Negative prompt:"):].strip()
+                first = line[len("Negative prompt:") :].strip()
                 if first:
                     neg_lines.append(first)
                 continue
@@ -209,7 +209,9 @@ def extract_png_prompt_pair(file_path: str | Path) -> Optional[PngPromptPair]:
                 if pair:
                     return PngPromptPair(
                         positive=pair.positive[:MAX_PROMPT_CHARS],
-                        negative=pair.negative[:MAX_PROMPT_CHARS] if pair.negative else None,
+                        negative=(
+                            pair.negative[:MAX_PROMPT_CHARS] if pair.negative else None
+                        ),
                     )
             elif keyword == "prompt" and comfy_graph is None:
                 comfy_graph = text

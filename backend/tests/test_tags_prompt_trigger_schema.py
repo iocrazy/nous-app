@@ -19,8 +19,11 @@ def test_tag_update_optional():
 
 def test_tag_response_surfaces_flag():
     row = {
-        "id": "123", "name": "AI", "type": "user",
-        "color": "#6366f1", "prompt_trigger": True,
+        "id": "123",
+        "name": "AI",
+        "type": "user",
+        "color": "#6366f1",
+        "prompt_trigger": True,
         # created_at is a required field on TagResponse (no default) — unrelated
         # to prompt_trigger, but the fixture must include it or model_validate
         # 422s before we ever get to assert the flag.

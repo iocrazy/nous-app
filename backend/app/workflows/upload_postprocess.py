@@ -194,9 +194,10 @@ async def upload_postprocess_workflow(
                         patch: dict = {}
                         if not (current.get("gen_prompt") or "").strip():
                             patch["gen_prompt"] = pair["positive"]
-                        if pair.get("negative") and not (
-                            current.get("gen_prompt_negative") or ""
-                        ).strip():
+                        if (
+                            pair.get("negative")
+                            and not (current.get("gen_prompt_negative") or "").strip()
+                        ):
                             patch["gen_prompt_negative"] = pair["negative"]
                         if patch:
                             await svc.repo.update_resource(resource_id, patch)
