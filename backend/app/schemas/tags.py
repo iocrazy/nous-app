@@ -32,6 +32,11 @@ class TagBase(BaseModel):
 class TagCreate(TagBase):
     """Schema for creating a user tag."""
 
+    prompt_trigger: bool = Field(
+        False,
+        description="Assets with this tag surface the Prompt panel/badge",
+    )
+
 
 class TagUpdate(BaseModel):
     """Schema for updating a tag."""
@@ -56,6 +61,9 @@ class TagUpdate(BaseModel):
         description="Promote a shadow (origin='note') tag into the curated pool. "
         "Only 'curated' is settable — 'note' is never accepted (422).",
     )
+    prompt_trigger: Optional[bool] = Field(
+        None, description="Toggle the Prompt-panel trigger for this tag"
+    )
 
 
 class TagResponse(TagBase):
@@ -75,6 +83,9 @@ class TagResponse(TagBase):
     created_at: datetime
     media_count: Optional[int] = Field(
         0, description="Number of resources using this tag"
+    )
+    prompt_trigger: bool = Field(
+        False, description="Whether this tag triggers the Prompt panel"
     )
 
     model_config = {"from_attributes": True}
