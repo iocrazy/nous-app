@@ -963,6 +963,8 @@
       "prompt": "Prompt",
       "addPrompt": "Add Prompt",
       "promptPlaceholder": "Paste the AI generation prompt...",
+      "negativePrompt": "Negative",
+      "negativePromptPlaceholder": "Negative prompt (what to avoid)...",
       "promptCopied": "Prompt copied",
       "copyPrompt": "Copy",
       "translatePrompt": "Translate",

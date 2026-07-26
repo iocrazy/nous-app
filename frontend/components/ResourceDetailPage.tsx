@@ -36,7 +36,6 @@ import {
   FolderOpen,
   List,
   AlignLeft,
-  Languages,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Resource, ResourceItem, ResourceVersion, Tag } from '../types';
@@ -69,9 +68,11 @@ import { fetchAllTags as fetchTags } from '../services/unifiedTagService';
 import { createTag } from '../services/unifiedTagService';
 import { fetchResourceCanvasRefs, type CanvasBackRef } from '../services/projectAssetsService';
 import { EagleTagPicker } from './EagleTagPicker';
+import { PromptSection } from './resources/PromptSection';
 import { getSupabaseAccessToken, getSupabaseClient } from '../supabaseClient';
 import { formatDateLocalized } from '../utils/formatDate';
 import { downloadFile } from '../utils/download';
+import { ensureDefaultTriggerTag } from '../utils/promptTriggerTags';
 import { useToast } from './Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useIslandWork } from '../contexts/IslandWorkContext';
@@ -200,7 +201,7 @@ interface ResourceDetailProps {
 }
 
 export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }) => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { addToast } = useToast();
   const { mediaToken } = useAuth();
   const navigate = useNavigate();
@@ -297,9 +298,6 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
   const [notesValue, setNotesValue] = useState('');
-  const [promptValue, setPromptValue] = useState('');
-  const [promptOpen, setPromptOpen] = useState(false);
-  const [promptLang, setPromptLang] = useState<'en' | 'zh'>('en');
   const [promptTranslating, setPromptTranslating] = useState(false);
   const [promptGenerating, setPromptGenerating] = useState(false);
   const promptPollRef = useRef<number | null>(null);
@@ -412,31 +410,10 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     if (resource) {
       setNameValue(resource.filename);
       setNotesValue(resource.notes || '');
-      setPromptOpen(false);
       setUrlValue(resource.url || '');
       setEditingName(false);
     }
   }, [resource?.id, resource?.filename, resource?.notes, resource?.url]);
-
-  // Prompt language: on resource switch, land on the side with content,
-  // preferring the UI locale when both (or neither) sides have text.
-  useEffect(() => {
-    if (!resource) return;
-    const uiZh = (i18n.language || '').startsWith('zh');
-    const en = resource.gen_prompt || '';
-    const zh = resource.gen_prompt_zh || '';
-    setPromptLang(uiZh ? (zh || !en ? 'zh' : 'en') : (en || !zh ? 'en' : 'zh'));
-    // Intentionally only on resource switch — edits/commits must not flip the tab.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resource?.id]);
-
-  // Keep the prompt textarea synced with the active language side.
-  useEffect(() => {
-    if (!resource) return;
-    setPromptValue(
-      (promptLang === 'zh' ? resource.gen_prompt_zh : resource.gen_prompt) || '',
-    );
-  }, [resource?.id, resource?.gen_prompt, resource?.gen_prompt_zh, promptLang]);
 
   useEffect(() => {
     if (editingName) nameInputRef.current?.select();
@@ -469,28 +446,6 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
       handleResourceUpdate({ notes: val || null } as Partial<Resource>);
     }
   }, [notesValue, resource?.notes, handleResourceUpdate]);
-
-  const commitPrompt = useCallback(() => {
-    const val = promptValue.trim();
-    const current = (
-      (promptLang === 'zh' ? resource?.gen_prompt_zh : resource?.gen_prompt) || ''
-    ).trim();
-    if (val !== current) {
-      // Empty string (not null) so the PATCH survives exclude_none and clears.
-      const field = promptLang === 'zh' ? 'gen_prompt_zh' : 'gen_prompt';
-      handleResourceUpdate({ [field]: val } as Partial<Resource>);
-    }
-  }, [promptValue, promptLang, resource?.gen_prompt, resource?.gen_prompt_zh, handleResourceUpdate]);
-
-  const copyPrompt = useCallback(() => {
-    const text =
-      (promptLang === 'zh' ? resource?.gen_prompt_zh : resource?.gen_prompt) || '';
-    if (!text) return;
-    navigator.clipboard
-      .writeText(text)
-      .then(() => addToast(t('resources.infoPanel.promptCopied', 'Prompt copied'), 'success'))
-      .catch((err) => console.error('Failed to copy prompt:', err));
-  }, [promptLang, resource?.gen_prompt, resource?.gen_prompt_zh, addToast, t]);
 
   // Clear any in-flight prompt/tag polls on unmount.
   useEffect(() => () => {
@@ -607,11 +562,11 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
   // Fill the ACTIVE side by translating from the other side via the
   // user's assigned translation agent (Settings → AI → Translation).
-  const handleTranslatePrompt = useCallback(async () => {
+  const handleTranslatePrompt = useCallback(async (lang: 'en' | 'zh') => {
     if (!resource || promptTranslating) return;
     setPromptTranslating(true);
     try {
-      const data = await translateGenPrompt(resourceId, promptLang);
+      const data = await translateGenPrompt(resourceId, lang);
       setResource((prev) => (prev ? { ...prev, ...data } : prev));
       addToast(t('resources.infoPanel.promptTranslated', 'Prompt translated'), 'success');
     } catch (err) {
@@ -624,7 +579,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     } finally {
       setPromptTranslating(false);
     }
-  }, [resource, resourceId, promptLang, promptTranslating, addToast, t]);
+  }, [resource, resourceId, promptTranslating, addToast, t]);
 
   const commitUrl = useCallback(() => {
     const val = urlValue.trim();
@@ -1822,116 +1777,6 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             />
           </div>
 
-          {/* Prompt — AI generation prompt. Card when present (or opened);
-              a light add-entry otherwise so non-AI assets stay uncluttered. */}
-          {resource.gen_prompt || resource.gen_prompt_zh || promptOpen ? (
-            <div className="px-4 mt-2">
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2">
-                  <span className={`text-[10px] ${cLabel} uppercase tracking-wider`}>
-                    {t('resources.infoPanel.prompt', 'Prompt')}
-                  </span>
-                  <div className={`flex rounded overflow-hidden border ${cBorder700_60}`}>
-                    {(['en', 'zh'] as const).map((lang) => (
-                      <button
-                        key={lang}
-                        onClick={() => setPromptLang(lang)}
-                        className={`px-1.5 py-0.5 text-[9px] transition-colors ${
-                          promptLang === lang
-                            ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
-                            : `${cLabel} ${cHover300}`
-                        }`}
-                      >
-                        {lang === 'en' ? 'EN' : '中'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  {resource.file_type === 'image' && (
-                    <button
-                      onClick={handleGeneratePrompt}
-                      disabled={promptGenerating}
-                      title={t(
-                        'resources.infoPanel.generatePromptHint',
-                        'Reverse-engineer the prompt from this image',
-                      )}
-                      className={`flex items-center gap-1 text-[10px] ${cLabel} hover:text-[var(--accent-text)] transition-colors disabled:opacity-50`}
-                    >
-                      {promptGenerating ? (
-                        <Loader2 size={11} className="animate-spin" />
-                      ) : (
-                        <Sparkles size={11} />
-                      )}{' '}
-                      {t('resources.infoPanel.generatePrompt', 'Generate')}
-                    </button>
-                  )}
-                  {Boolean(
-                    promptLang === 'zh' ? resource.gen_prompt : resource.gen_prompt_zh,
-                  ) && (
-                    <button
-                      onClick={handleTranslatePrompt}
-                      disabled={promptTranslating}
-                      title={t(
-                        'resources.infoPanel.translatePromptHint',
-                        'Translate from the other language',
-                      )}
-                      className={`flex items-center gap-1 text-[10px] ${cLabel} hover:text-[var(--accent-text)] transition-colors disabled:opacity-50`}
-                    >
-                      {promptTranslating ? (
-                        <Loader2 size={11} className="animate-spin" />
-                      ) : (
-                        <Languages size={11} />
-                      )}{' '}
-                      {t('resources.infoPanel.translatePrompt', 'Translate')}
-                    </button>
-                  )}
-                  {Boolean(
-                    promptLang === 'zh' ? resource.gen_prompt_zh : resource.gen_prompt,
-                  ) && (
-                    <button
-                      onClick={copyPrompt}
-                      className={`flex items-center gap-1 text-[10px] ${cLabel} hover:text-[var(--accent-text)] transition-colors`}
-                    >
-                      <Copy size={11} /> {t('resources.infoPanel.copyPrompt', 'Copy')}
-                    </button>
-                  )}
-                </div>
-              </div>
-              <textarea
-                value={promptValue}
-                onChange={(e) => setPromptValue(e.target.value)}
-                onBlur={commitPrompt}
-                placeholder={t('resources.infoPanel.promptPlaceholder', 'Paste the AI generation prompt...')}
-                rows={4}
-                className={`w-full ${cInputBg} border ${cBorder700_50} rounded-lg px-2.5 py-2 text-xs font-mono ${cText300} ${cPlaceholder} focus:outline-none focus:border-indigo-500/50 resize-none`}
-              />
-            </div>
-          ) : (
-            <div className="px-4 mt-1 flex items-center gap-3">
-              <button
-                onClick={() => setPromptOpen(true)}
-                className={`text-[11px] ${cFaint} hover:text-[var(--accent-text)] transition-colors`}
-              >
-                + {t('resources.infoPanel.addPrompt', 'Add Prompt')}
-              </button>
-              {resource.file_type === 'image' && (
-                <button
-                  onClick={handleGeneratePrompt}
-                  disabled={promptGenerating}
-                  className={`flex items-center gap-1 text-[11px] ${cFaint} hover:text-[var(--accent-text)] transition-colors disabled:opacity-50`}
-                >
-                  {promptGenerating ? (
-                    <Loader2 size={11} className="animate-spin" />
-                  ) : (
-                    <Sparkles size={11} />
-                  )}{' '}
-                  {t('resources.infoPanel.generateFromImage', 'Generate from Image')}
-                </button>
-              )}
-            </div>
-          )}
-
           {/* URL */}
           <div className="px-4 mt-2">
             <input
@@ -1977,6 +1822,29 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 return tag;
               } catch { return null; }
             }}
+          />
+
+          <PromptSection
+            resource={resource}
+            onPatch={(fields) => handleResourceUpdate(fields)}
+            onMerge={(fields) => setResource((prev) => (prev ? { ...prev, ...fields } : prev))}
+            hasTriggerTag={assignedTags.some((it) => it.tag?.prompt_trigger)}
+            onEnsureTriggerTag={async () => {
+              const tag = await ensureDefaultTriggerTag(allTags);
+              if (!assignedTags.some((it) => String(it.tag?.id) === String(tag.id))) {
+                await addResourceTag(resourceId, String(tag.id));
+                const updated = await fetchResourceTags(resourceId);
+                setAssignedTags(updated);
+                if (!allTags.some((tg) => String(tg.id) === String(tag.id))) {
+                  setAllTags((prev) => [...prev, tag]);
+                }
+              }
+            }}
+            canGenerate={resource.file_type === 'image'}
+            generating={promptGenerating}
+            onGenerate={handleGeneratePrompt}
+            translating={promptTranslating}
+            onTranslate={handleTranslatePrompt}
           />
 
           {/* Properties — simple rows (Type omitted: already shown as badge above the title) */}

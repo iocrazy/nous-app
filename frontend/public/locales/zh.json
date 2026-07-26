@@ -963,6 +963,8 @@
       "prompt": "提示词",
       "addPrompt": "添加提示词",
       "promptPlaceholder": "粘贴 AI 生成提示词...",
+      "negativePrompt": "负面",
+      "negativePromptPlaceholder": "负面提示词（要避免的内容）...",
       "promptCopied": "提示词已复制",
       "copyPrompt": "复制",
       "translatePrompt": "翻译",
