@@ -8,6 +8,14 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// CanvasComposer consumes router state for the Send to Canvas hand-off
+// (Phase 2 Task 4) — none of these tests exercise that path, so a static
+// no-state location keeps the rest of the suite unaffected.
+vi.mock('react-router-dom', () => ({
+  useLocation: () => ({ pathname: '/test', state: null }),
+  useNavigate: () => vi.fn(),
+}));
+
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { CanvasComposer } from './CanvasComposer';
 import { _resetIdCounter } from './factories';

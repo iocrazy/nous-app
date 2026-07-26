@@ -7,6 +7,23 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_k: string, d?: string) => d ?? _k }),
 }));
 
+// SendToCanvasModal only mounts once the button is clicked, but its module
+// (and its transitive imports — react-router-dom, projectsService,
+// canvasService, resourceService) load eagerly with PromptSection. Stub
+// them so the un-clicked tests below stay hermetic and the clicked test
+// gets a deterministic, empty project list.
+const fetchProjects = vi.fn().mockResolvedValue([]);
+vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
+vi.mock('../../services/projectsService', () => ({
+  fetchProjects: (...a: unknown[]) => fetchProjects(...a),
+}));
+vi.mock('../../features/canvas-core/services/canvasService', () => ({
+  listCanvases: vi.fn().mockResolvedValue([]),
+}));
+vi.mock('../../services/resourceService', () => ({
+  getResourceCoverUrl: (id: string) => `https://api.test/cover/${id}`,
+}));
+
 const base = (over: Partial<Resource> = {}): Resource =>
   ({
     id: 'r1', filename: 'a.png', file_type: 'image',
@@ -87,5 +104,26 @@ describe('PromptSection', () => {
     render(<PromptSection {...props({ resource: base({ gen_prompt_zh: '杰作, 1girl' }) })} />);
     fireEvent.click(screen.getByText(/杰作, 1girl/));
     expect(await screen.findByDisplayValue('杰作, 1girl')).toBeTruthy();
+  });
+
+  it('shows the Send to Canvas button only when the expanded view has prompt data', async () => {
+    render(<PromptSection {...props({ resource: base({ gen_prompt: 'p' }) })} />);
+    fireEvent.click(screen.getByText(/^p$/));
+    expect(await screen.findByText('Send to Canvas')).toBeTruthy();
+  });
+
+  it('omits Send to Canvas when expanded with no prompt data yet (trigger-tag row)', () => {
+    render(<PromptSection {...props({ hasTriggerTag: true })} />);
+    fireEvent.click(screen.getByText(/\+ Add Prompt/));
+    expect(screen.queryByText('Send to Canvas')).toBeNull();
+  });
+
+  it('clicking Send to Canvas opens the modal with the current lang side as positive', async () => {
+    render(<PromptSection {...props({ resource: base({ gen_prompt: 'a hero shot' }) })} />);
+    fireEvent.click(screen.getByText(/a hero shot/));
+    fireEvent.click(await screen.findByText('Send to Canvas'));
+
+    expect(await screen.findByText(/No projects yet/)).toBeTruthy();
+    expect(fetchProjects).toHaveBeenCalled();
   });
 });

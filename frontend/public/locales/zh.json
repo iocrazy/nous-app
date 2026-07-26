@@ -995,7 +995,10 @@
       "author": "作者",
       "platform": "平台",
       "published": "发布时间",
-      "platformTags": "平台标签"
+      "platformTags": "平台标签",
+      "sendToCanvas": "发送到画布",
+      "sendToCanvasNoProjects": "暂无项目",
+      "sendToCanvasNoCanvases": "该项目还没有画布"
     },
     "folderInfoPanel": {
       "title": "文件夹信息",
@@ -1978,7 +1981,13 @@
     "loopLabelPlaceholder": "循环标签（可选）",
     "loopPromptPlaceholder": "本轮提示词 — {{计数}} = 当前轮次",
     "loopImageWillOutput": "将输出 {{n}} 张",
-    "loopImageEmpty": "把图片或图片组连接到左侧输入口"
+    "loopImageEmpty": "把图片或图片组连接到左侧输入口",
+    "assetPromptPicker": {
+      "title": "提示词库",
+      "searchPlaceholder": "搜索提示词或文件名…",
+      "all": "全部",
+      "noResults": "未找到带提示词的素材"
+    }
   },
   "modelParams": {
     "otherParams": "参数设置",

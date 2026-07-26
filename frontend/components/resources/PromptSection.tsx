@@ -9,11 +9,12 @@
  * Expanding auto-applies the default trigger tag (onEnsureTriggerTag).
  */
 import { useEffect, useState } from 'react';
-import { ChevronRight, ChevronUp, Copy, Languages, Loader2, Sparkles } from 'lucide-react';
+import { ChevronRight, ChevronUp, Copy, Languages, Loader2, Send, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { Resource } from '../../types';
 import { hasPromptData } from '../../utils/promptTriggerTags';
+import { SendToCanvasModal } from './SendToCanvasModal';
 
 export interface PromptSectionProps {
   resource: Resource;
@@ -42,6 +43,7 @@ export function PromptSection({
   );
   const [posValue, setPosValue] = useState('');
   const [negValue, setNegValue] = useState('');
+  const [sendToCanvasOpen, setSendToCanvasOpen] = useState(false);
 
   const posField = lang === 'zh' ? 'gen_prompt_zh' : 'gen_prompt';
   const negField = lang === 'zh' ? 'gen_prompt_negative_zh' : 'gen_prompt_negative';
@@ -182,6 +184,24 @@ export function PromptSection({
         maxLength={20000}
         className="w-full bg-red-500/[.06] border border-red-400/25 rounded-lg px-2.5 py-2 text-xs font-mono text-ink-300 placeholder-ink-600 focus:outline-none focus:border-red-400/50 resize-none"
       />
+      {dataPresent && (
+        <div className="flex justify-end mt-2">
+          <button
+            onClick={() => setSendToCanvasOpen(true)}
+            className="flex items-center gap-1.5 text-[10px] text-ink-500 hover:text-[var(--accent-text)] transition-colors"
+          >
+            <Send size={11} /> {t('resources.infoPanel.sendToCanvas', 'Send to Canvas')}
+          </button>
+        </div>
+      )}
+      {sendToCanvasOpen && (
+        <SendToCanvasModal
+          resource={resource}
+          positive={posValue}
+          negative={negValue.trim() ? negValue : null}
+          onClose={() => setSendToCanvasOpen(false)}
+        />
+      )}
     </div>
   );
 }
