@@ -159,6 +159,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Trigger Watchtower update
+        # ⚠️ 2026-07-26: 这一步现在必然打空。nas-A 的 Watchtower HTTP API
+        # (token + 8083 端口) 已整块移除、轮询改 24h、且没有任何容器带
+        # watchtower.enable 标签(日志每轮 Scanned=0)。详见
+        # docs/runbook/watchtower-config.md。
+        #
+        # 保留这一步而不删除，是为了将来恢复 NAS 双轨时不用重写；但它必须
+        # 大声失败而不是温和提示。原先的兜底是
+        #   echo "⚠️ ... (will auto-poll in 5min)"
+        # —— 那句话现在是错的(轮询已 24h 且 Scanned=0)，而且一个永远不红
+        # 的 best-effort 步骤正是 2026-05-12 那次"CI 全绿而 prod 是坏的"
+        # 事故的成因。
         run: |
           echo "🔄 Triggering Watchtower to pull new image..."
           HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
@@ -167,7 +178,8 @@ jobs:
           if [ "$HTTP_CODE" = "200" ]; then
             echo "✅ Watchtower triggered successfully"
           else
-            echo "⚠️ Watchtower trigger returned HTTP $HTTP_CODE (will auto-poll in 5min)"
+            echo "::error::Watchtower trigger returned HTTP $HTTP_CODE. The NAS Watchtower HTTP API was retired on 2026-07-26 — this deploy path does NOT work. Nothing will pull the image you just pushed to ACR. See docs/runbook/watchtower-config.md before relying on this workflow."
+            exit 1
           fi
 
       - name: Verify deploy (poll prod for new commit SHA)
