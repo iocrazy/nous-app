@@ -138,6 +138,13 @@ class NodeOut(BaseModel):
     # non-trashed files filed into it — the CurrentNodeCard's "N files filed".
     folder_id: Optional[str] = None
     deliverable_file_count: int = 0
+    # Flow Rules / Events (mig 386, M2 PR-D) — copied verbatim from the
+    # template at instantiation (see project_stage_nodes_repository); a later
+    # task (E3 suggest-agent-run chip) reads node.events.suggest_agent_run
+    # straight off this endpoint's payload, so both must actually reach the
+    # response JSON rather than being silently dropped by the response model.
+    completion_policy: Literal["owner", "any_editor"] = "owner"
+    events: WorkflowNodeEvents = Field(default_factory=WorkflowNodeEvents)
     members: List[NodeMemberOut] = Field(default_factory=list)
 
 

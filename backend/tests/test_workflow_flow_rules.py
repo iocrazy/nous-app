@@ -12,6 +12,14 @@ Three surfaces under test:
     rows (and NOT passing them at all — so the NOT NULL columns fall back to
     their DB server_default — when the caller's node dict omits them, as
     ``template_seeder.py``'s hand-built dicts do)
+  - ``GET /projects/{id}/workflow`` (``projects_router.get_project_workflow``)
+    actually surfacing both fields in the response JSON. This one is a
+    regression pin: ``NodeOut`` initially didn't declare either field, so
+    pydantic silently dropped them from ``ProjectWorkflowOut`` even though the
+    repository read path returned them — the instance read path never reached
+    the frontend. A later task (E3's suggest-agent-run chip) reads
+    ``node.events.suggest_agent_run`` straight off this endpoint's payload, so
+    it must actually be there.
 
 The repository tests are FakeSession-backed (``write_scope`` monkeypatched),
 the same house pattern as ``test_canvas_repository_persist.py``: statement
@@ -490,3 +498,96 @@ async def test_update_template_node_without_flow_rules_keys_omits_kwargs(
     written = [o for o in session.added if isinstance(o, WorkflowTemplateNodes)][0]
     assert written.completion_policy is None
     assert written.events is None
+
+
+# ── GET /projects/{id}/workflow: NodeOut must not drop the two fields ──────
+
+
+@pytest.mark.asyncio
+async def test_get_project_workflow_response_carries_completion_policy_and_events(
+    monkeypatch,
+):
+    """Regression pin: NodeOut initially had no completion_policy/events
+    fields, so pydantic silently ignored them coming out of
+    ProjectStageNodesRepository.list_nodes and the frontend never saw them
+    despite the repository read path already returning both (D2's original
+    _node_row fix). Goes through the real endpoint function end-to-end
+    (fakes only at the repository-getter seam), asserting on both the parsed
+    response object AND its serialized JSON shape."""
+    node_row = {
+        "id": "1",
+        "project_id": "100",
+        "source_template_node_id": "10",
+        "legacy_stage_id": None,
+        "name": "Script",
+        "sort_order": 1,
+        "parallel_group": None,
+        "status": "pending",
+        "owner_user_id": None,
+        "owner_agent_id": None,
+        "planned_start": None,
+        "planned_due": None,
+        "review_required": False,
+        "deliverable_required": False,
+        "deliverable_label": None,
+        "skipped": False,
+        "folder_id": None,
+        "completion_policy": "any_editor",
+        "events": {
+            "notify_on_arrival": False,
+            "notify_on_complete": True,
+            "suggest_agent_run": True,
+        },
+        "members": [],
+    }
+
+    class _NodesRepo:
+        async def list_nodes(self, project_id):
+            return [node_row]
+
+        async def count_running_agent_runs(self, project_id):
+            return 0
+
+    class _ProjectsRepo:
+        async def get_project_by_id(self, project_id):
+            return {"current_node_id": None}
+
+        async def get_project_files(self, project_id):
+            return []
+
+    monkeypatch.setattr(
+        "app.repositories.project_stage_nodes_repository."
+        "get_project_stage_nodes_repository",
+        lambda: _NodesRepo(),
+    )
+    monkeypatch.setattr(
+        "app.repositories.projects_repository.get_projects_repository",
+        lambda: _ProjectsRepo(),
+    )
+
+    # NOTE: must use importlib, not ``import app.api.projects_router as m`` —
+    # app/api/__init__.py does ``from app.api.projects_router import router as
+    # projects_router``, which shadows the submodule attribute on the ``app.api``
+    # package with the bare APIRouter instance once that package has loaded
+    # (matches the importlib pattern already used by
+    # test_workflow_node_router.py / test_owner_review_guard.py for this exact
+    # reason).
+    projects_router_mod = importlib.import_module("app.api.projects_router")
+
+    result = await projects_router_mod.get_project_workflow("100", _Auth(_OTHER), None)
+
+    assert result.has_workflow is True
+    node_out = result.nodes[0]
+    assert node_out.completion_policy == "any_editor"
+    assert node_out.events.suggest_agent_run is True
+    assert node_out.events.notify_on_arrival is False
+    assert node_out.events.notify_on_complete is True
+
+    # Pin the actual response JSON shape too — what the frontend receives.
+    payload = result.model_dump()
+    assert payload["nodes"][0]["completion_policy"] == "any_editor"
+    assert payload["nodes"][0]["events"] == {
+        "notify_on_arrival": False,
+        "notify_on_complete": True,
+        "suggest_agent_run": True,
+    }
