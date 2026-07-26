@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Library } from 'lucide-react';
 
+import type { CanvasConnection, CanvasNode } from '../../types';
 import type { PromptGenSettings, PromptNodeData, PromptResourceRef } from '../types';
 import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { useGenerationModels } from './useGenerationModels';
@@ -16,8 +18,12 @@ import {
 } from './elapsed';
 import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { CanvasMentionPicker } from './CanvasMentionPicker';
+import { AssetPromptPicker } from './AssetPromptPicker';
+import { buildPromptAssetLoad } from '../loadPromptAsset';
+import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { useResourceSearch } from '../../../../hooks/useResourceSearch';
 import type { ResourceSearchResult } from '../../../../types';
+import type { PromptAsset } from '../../../../services/resourceService';
 import { ASPECT_RATIOS } from '../aspectPresets';
 import { UiSelect } from '../../../../components/ui';
 
@@ -53,6 +59,14 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
 
   // Kind filter for the @-mention picker tabs (All / Video / Image / Doc …)
   const [activeKind, setActiveKind] = useState<ActiveKind>('');
+
+  // Library picker (Phase 2 asset library) — pulls a saved prompt + its
+  // cover into this node, wiring a fresh media node upstream of it.
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const nodes = useCanvasCoreStore((s) => s.nodes);
+  const connections = useCanvasCoreStore((s) => s.connections);
+  const setNodes = useCanvasCoreStore((s) => s.setNodes);
+  const setConnections = useCanvasCoreStore((s) => s.setConnections);
 
   // Smart nodes keep the tone's border colour but drop the whole-card
   // animate-pulse — the status badge's dot carries the motion (P1-5).
@@ -110,6 +124,29 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     mention.setItemCount(searchData.results.length);
   }, [searchData.results.length, mention.setItemCount]);
 
+  // ── Library picker handler ───────────────────────────────────────────────
+  // Applies the pure-function result: patch this node's body/negative_body,
+  // append the new media node, and wire it in as a source connection.
+  const handlePickAsset = useCallback(
+    (asset: PromptAsset, lang: 'en' | 'zh') => {
+      const selfNode = nodes.find((n) => (n as unknown as { id: string }).id === id);
+      const promptNodePosition =
+        (selfNode as unknown as { position?: { x: number; y: number } } | undefined)?.position ??
+        { x: 0, y: 0 };
+      const { promptPatch, mediaNode, connection } = buildPromptAssetLoad({
+        asset,
+        lang,
+        promptNodeId: id,
+        promptNodePosition,
+      });
+      patch(promptPatch);
+      setNodes([...nodes, mediaNode as unknown as CanvasNode]);
+      setConnections([...connections, connection as unknown as CanvasConnection]);
+      setLibraryOpen(false);
+    },
+    [id, nodes, connections, patch, setNodes, setConnections],
+  );
+
   // ────────────────────────────────────────────────────────────────────────
 
   return (
@@ -148,6 +185,15 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             <option value="image">Image</option>
             <option value="video">Video</option>
           </UiSelect>
+          <button
+            type="button"
+            className={`${CANVAS_PILL_TRIGGER} flex items-center justify-center`}
+            onClick={() => setLibraryOpen(true)}
+            aria-label="Load from library"
+            data-testid="prompt-library-button"
+          >
+            <Library size={12} />
+          </button>
           {pillText && (
             <span
               data-testid="prompt-elapsed"
@@ -189,6 +235,11 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             onSelect={mention.handleSelect}
             activeIndex={mention.activeIndex}
           />
+        )}
+
+        {/* Fixed full-screen modal — no relative positioning needed. */}
+        {libraryOpen && (
+          <AssetPromptPicker onPick={handlePickAsset} onClose={() => setLibraryOpen(false)} />
         )}
 
         {negative_body ? (
