@@ -391,12 +391,20 @@ class UnifiedTaskManager:
             "phase": TaskPhase.QUEUED.value,
             "progress": 0,
         }
+        # Coerce here, not in each caller: these are **text** columns bound as
+        # ::VARCHAR, while project-wide IDs are Snowflake BIGINT ints. asyncpg
+        # type-checks bind params strictly and raises DataError *before* the
+        # INSERT is sent ("expected str, got int"). Every caller wraps this in
+        # try/except-warning-and-continue, so the workflow keeps running and the
+        # only symptom is a task that never appears in the Task Center —
+        # exactly the 2026-07-26 retry report. Same boundary, same reasoning as
+        # the dbos_workflow_id guard below.
         if resource_id:
-            row["resource_id"] = resource_id
+            row["resource_id"] = str(resource_id)
         if media_id:
-            row["media_id"] = media_id
+            row["media_id"] = str(media_id)
         if group_id:
-            row["group_id"] = group_id
+            row["group_id"] = str(group_id)
         # task_tracking's PK is dbos_workflow_id (NOT NULL, no DB default).
         # Non-DBOS tasks (e.g. synchronous uploads) have no engine workflow
         # id, so synthesize one — without it the INSERT 23502s and the task
