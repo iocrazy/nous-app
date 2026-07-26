@@ -269,7 +269,19 @@ export function CanvasComposer({
     setSelection([filledPromptNode.id, mediaNode.id]);
 
     navigate(location.pathname + location.search + location.hash, { replace: true });
-  }, [loadStatus, location.state, location.pathname, navigate, dropPosition, setNodes, setConnections, setSelection, canvasId]);
+  }, [
+    loadStatus,
+    location.state,
+    location.pathname,
+    location.search,
+    location.hash,
+    navigate,
+    dropPosition,
+    setNodes,
+    setConnections,
+    setSelection,
+    canvasId,
+  ]);
 
   const buildContexts = useCallback(
     (ids: string[]): RunnerContext[] => {

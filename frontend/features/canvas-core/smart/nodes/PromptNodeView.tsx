@@ -139,12 +139,24 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         promptNodeId: id,
         promptNodePosition,
       });
-      patch(promptPatch);
-      setNodes([...nodes, mediaNode as unknown as CanvasNode]);
+      // One atomic setNodes call — folding the self-patch into the same
+      // array write that appends mediaNode avoids the two-write race where
+      // patch()'s set(nodes-with-patch) gets clobbered by this handler's own
+      // stale `nodes` snapshot (the bug this replaced: patch() landed, then
+      // setNodes([...nodes, mediaNode]) overwrote it right back out).
+      const nextNodes = nodes.map((n) =>
+        (n as unknown as { id: string }).id === id
+          ? ({
+              ...n,
+              data: { ...(n as unknown as { data?: object }).data, ...promptPatch },
+            } as unknown as CanvasNode)
+          : n,
+      );
+      setNodes([...nextNodes, mediaNode as unknown as CanvasNode]);
       setConnections([...connections, connection as unknown as CanvasConnection]);
       setLibraryOpen(false);
     },
-    [id, patch],
+    [id],
   );
 
   // ────────────────────────────────────────────────────────────────────────
