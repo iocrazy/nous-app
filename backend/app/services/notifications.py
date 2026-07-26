@@ -28,7 +28,9 @@ from sqlalchemy import and_, insert, select
 from app.db.session import read_scope, write_scope
 from app.models import InboxNotifications
 
-NotificationKind = Literal["generation_result", "publish_result", "autopilot_output"]
+NotificationKind = Literal[
+    "generation_result", "publish_result", "autopilot_output", "workflow_stage"
+]
 NotificationSeverity = Literal["info", "success", "error"]
 NotificationLinkKind = Literal["issue", "resource", "publish_batch"]
 
