@@ -38,6 +38,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     run_started_at = null,
     run_finished_at = null,
     resource_refs = [],   // default [] for nodes persisted before this field
+    negative_body = '',   // absent = no negative prompt (Phase 2 asset library)
     gen = null,           // absent = legacy text prompt
   } = data as unknown as PromptNodeData;
   const patch = useNodeDataPatch(id);
@@ -189,6 +190,21 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             activeIndex={mention.activeIndex}
           />
         )}
+
+        {negative_body ? (
+          <div className="mt-1.5">
+            <span className="text-[10px] uppercase tracking-wider text-rose-400/85">
+              Negative
+            </span>
+            <textarea
+              value={negative_body}
+              onChange={(e) => patch({ negative_body: e.target.value })}
+              placeholder="Negative prompt"
+              rows={2}
+              className="nodrag nowheel mt-0.5 w-full resize-y rounded-lg border border-rose-400/25 bg-rose-500/[.06] px-2 py-1 text-[11px] text-ink-300 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-rose-400/40"
+            />
+          </div>
+        ) : null}
 
         <div className="mt-2 flex items-center justify-between gap-2 text-xs">
           {!gen && (

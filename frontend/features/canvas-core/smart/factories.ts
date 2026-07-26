@@ -132,6 +132,9 @@ export function createPromptNode(
       run_finished_at: data.run_finished_at ?? null,
       run_error: data.run_error ?? null,
       resource_refs: data.resource_refs ?? [],
+      // Negative prompt (Phase 2 asset library) — only persisted when
+      // provided (absent = hand-typed prompt with no negative text).
+      ...(data.negative_body ? { negative_body: data.negative_body } : {}),
       // Generation settings (G4-F1) — only persisted when provided (absent =
       // legacy text prompt; the character template seeds image branches).
       ...(data.gen ? { gen: data.gen } : {}),

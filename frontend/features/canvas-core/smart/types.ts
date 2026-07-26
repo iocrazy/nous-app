@@ -77,6 +77,13 @@ export interface PromptNodeData {
    */
   resource_refs: PromptResourceRef[];
   /**
+   * Negative prompt text loaded from an asset's prompt library entry
+   * (Phase 2). Optional; absent for hand-typed prompts. The generation
+   * pipeline does not consume it yet — providers that support negative
+   * prompts will pick it up when the runner grows that capability.
+   */
+  negative_body?: string;
+  /**
    * Generation settings (Infinite parity G4-F1). Absent/null = a text
    * prompt (legacy behaviour). kind image/video routes Run through the
    * G4-B1 generation tasks instead of the text LLM.
