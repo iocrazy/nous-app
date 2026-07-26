@@ -1,45 +1,52 @@
-# Watchtower compose snapshot — what should be on NAS
+# Watchtower compose snapshot — what IS on NAS (nas-A)
 #
 # Live location:  /volume1/docker/portainer/data/compose/2/docker-compose.yml
 # Live stack:     `heygo_watchtower` container (managed via Portainer)
 #
-# This file is the recommended target state after the 2026-05-12
-# investigation that found:
+# ─────────────────────────────────────────────────────────────────────
+# 2026-07-26 现状：HTTP API 完全关闭，轮询 24h。Watchtower 实质休眠。
+# ─────────────────────────────────────────────────────────────────────
 #
-# 1) WATCHTOWER_POLL_INTERVAL=3600 (1 hour) — too slow, every PR has up
-#    to 1 hour deploy latency before Watchtower notices the new image.
+# 发布已收敛到 gpupc 单线（`deploy-gpu.yml` + self-hosted runner），NAS
+# 老线退役。实测三个事实：
 #
-# 2) No HTTP API token / port exposed — so the GH Actions webhook step
-#    that curl's `WATCHTOWER_URL` was hitting *something else* that
-#    returned 200/504, and reported "✅ triggered" even though the new
-#    image was never pulled. Hours of "downloads broken on prod" while
-#    CI showed every deploy as success.
+#   1. 容器日志每轮 `Failed=0 Scanned=0 Updated=0` —— `LABEL_ENABLE=true`
+#      只管带 enable 标签的容器，而那些 mediahub 容器已整体拆除
+#      （`docker ps -a` 里都不存在了）。它现在什么都不管。
+#   2. `scripts/deploy.sh` 的 `WATCHTOWER_URL` 默认值指向 8777，而 API
+#      当年映射的是 8083 —— 那条 webhook 路径本来就是死的。
+#   3. `deploy-backend.yml` 的 "Trigger Watchtower update" 步骤同样已失效。
 #
-# To apply this snapshot on NAS:
+# 为什么把 HTTP API 整块关掉，而不是只换 token：
+#   仓库 2026-07-25 切 public 后，旧版 `scripts/deploy.sh` 里硬编码的
+#   `WATCHTOWER_TOKEN` 变成世界可读（git 历史永久，从 HEAD 删掉也还在）。
+#   既然没有任何东西再调这个 webhook，最干净的做法是拆掉整条路径：
+#   三个 env + 8083 端口映射全部移除，攻击面归零。
+#   ⚠️ 只删 token 而保留 `HTTP_API_UPDATE=true` 是错的 —— 要么容器起不来，
+#   要么留下一个无鉴权的更新端点，比原状更糟。
 #
-#   1. Set WATCHTOWER_HTTP_API_TOKEN to a fresh random string in
-#      /volume1/docker/portainer/data/compose/2/.env  (create if absent)
-#   2. Replace the live compose with this file's content:
-#        ssh nas 'sudo cp /volume1/docker/portainer/data/compose/2/docker-compose.yml{,.bak-$(date +%Y%m%d)}'
-#        scp deploy/nas/watchtower-docker-compose.yml \
-#            nas:/tmp/watchtower-docker-compose.yml
-#        ssh nas 'sudo cp /tmp/watchtower-docker-compose.yml \
-#            /volume1/docker/portainer/data/compose/2/docker-compose.yml'
-#   3. Recreate the container (NOT just `restart` — env / port changes
-#      need a full recreate):
-#        ssh nas 'cd /volume1/docker/portainer/data/compose/2 && \
-#                 sudo docker compose up -d watchtower'
-#   4. Verify HTTP API is up:
-#        ssh nas 'curl -sS -o /dev/null -w "%{http_code}\n" \
-#            -H "Authorization: Bearer $WATCHTOWER_HTTP_API_TOKEN" \
-#            http://localhost:8083/v1/update'
-#      Expected: 200 (triggers a poll). Anything else means the env or
-#      port mapping didn't take — re-check step 3.
-#   5. Update GH repo secrets:
-#        WATCHTOWER_URL   → http://<nas-public-host>:8083/v1/update
-#        WATCHTOWER_TOKEN → same value as WATCHTOWER_HTTP_API_TOKEN
-#      (or a Cloudflare-tunnelled HTTPS equivalent if exposing 8083
-#      to the public internet isn't acceptable)
+# ⚠️ 下面这段是历史记录，**不要照着做**（会把洞开回来）：
+#   2026-05-12 曾因为「没有 token / 没暴露端口」，GH Actions 的 webhook
+#   步骤打到了别的东西、返回 200/504 却从没拉过新镜像 —— CI 一路报绿而
+#   prod 是坏的，排查数小时。当时的修法是「加 token + 暴露 8083 + 轮询
+#   缩到 5 分钟」。那套修法针对的是「NAS 双轨发布」，前提已不存在。
+#
+# 若将来真要重新启用 webhook（例如恢复 NAS 作为回滚锚点）：
+#   1. 生成全新随机 token：`openssl rand -hex 32`
+#   2. 写进 `/volume1/docker/portainer/data/compose/2/.env`（不入 git）
+#   3. compose 里用 `${WATCHTOWER_HTTP_API_TOKEN}` 引用，**绝不内联**
+#   4. 补回 `WATCHTOWER_HTTP_API_UPDATE` / `_PERIODIC_POLLS` 与 `ports`
+#   5. 环境/端口变更必须 `docker compose up -d`，`restart` 不重读 env
+#   6. 同步更新本文件 + `docs/runbook/watchtower-config.md`
+#
+# 应用本快照到 NAS：
+#   ssh nas 'sudo cp /volume1/docker/portainer/data/compose/2/docker-compose.yml{,.bak-$(date +%Y%m%d)}'
+#   scp deploy/nas/watchtower-docker-compose.yml nas:/tmp/wt.yml
+#   ssh nas 'sudo cp /tmp/wt.yml /volume1/docker/portainer/data/compose/2/docker-compose.yml'
+#   ssh nas 'cd /volume1/docker/portainer/data/compose/2 && sudo docker compose up -d'
+# 验证（HTTP API 应当连不上）：
+#   curl -sS -m 5 -o /dev/null -w '%{http_code}\n' http://192.168.50.9:8083/v1/update
+#   预期：curl (7) Failed to connect。返回 200 说明 API 还开着，检查上一步。
 
 services:
   watchtower:
@@ -55,26 +62,12 @@ services:
       # /config.json (the path Watchtower auto-discovers).
       - /root/.docker/config.json:/config.json:ro
     environment:
-      # 5 min poll: bounded deploy latency without burning a poll-storm.
-      # The CI verify step (deploy-backend.yml) gives this 10 min to
-      # land, so 5 min cadence has comfortable headroom (≤2 polls
-      # within the verify budget).
-      - WATCHTOWER_POLL_INTERVAL=300
+      # 24h poll. 老线退役后没有被管的容器（每轮 Scanned=0），5 分钟一轮
+      # 纯属空转。保留容器只为将来重新挂标签时可用。
+      - WATCHTOWER_POLL_INTERVAL=86400
 
-      # HTTP API for explicit webhook trigger from GH Actions. The CI
-      # workflow's "Trigger Watchtower update" step calls this; the
-      # newly-added "Verify deploy" step independently asserts the
-      # outcome by polling backend /api/version, so we get both
-      # immediate trigger + verification.
-      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_HTTP_API_TOKEN}
-      - WATCHTOWER_HTTP_API_UPDATE=true
-      # Without this, Watchtower 1.7+ treats `HTTP_API_UPDATE=true` as
-      # "HTTP only, no polling" and logs `Periodic runs are not
-      # enabled`. We want BOTH paths active: webhook from GH Actions
-      # (fast path) + 5-min poll fallback (resilience against webhook
-      # delivery failures, which is exactly the failure mode that bit
-      # us on 2026-05-12).
-      - WATCHTOWER_HTTP_API_PERIODIC_POLLS=true
+      # HTTP API（WATCHTOWER_HTTP_API_TOKEN / _UPDATE / _PERIODIC_POLLS）
+      # 与 8083 端口映射已于 2026-07-26 整块移除，原因见文件头。
 
       # Cleanup dangling old images after a successful pull. Without
       # this, /volume1 fills up over weeks of deploys.
@@ -87,26 +80,20 @@ services:
       # update.
       - WATCHTOWER_LABEL_ENABLE=true
 
-    ports:
-      # Expose HTTP API on host 8083 → container 8080. The mediahub
-      # backend uses the SAME host port number (8080 → container
-      # 8080) under a different container name, so we shift this one
-      # to 8083 to avoid conflict.
-      - "8083:8080"
+    # ports: 无。HTTP API 关闭后 8083 不需要暴露。
 
     restart: unless-stopped
     network_mode: bridge
 
-# Containers that Watchtower should auto-update need this label in
-# their own compose (not here):
+# Containers that Watchtower would auto-update need this label in their
+# own compose (not here):
 #
 #   labels:
 #     - "com.centurylinklabs.watchtower.enable=true"
 #
-# Currently expected to be on:
-#   - mediahub-app-backend  (mediahub/docker-compose.yml: `mediahub`)
-#   - mediahub-admin        (when re-deployed)
-#   - mediahub-worker       (when re-deployed)
+# 2026-07-26：**当前没有任何容器带这个标签** —— 原先带标签的
+# mediahub-app-backend / mediahub-admin / mediahub-worker 随老栈一起
+# 拆除了。所以 Watchtower 目前是空转的看门狗。
 #
 # Do NOT add this label to:
 #   - mediahub-app-redis      (data loss on accidental restart)

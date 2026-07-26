@@ -539,15 +539,22 @@ Schema (schemas/)      — Pydantic 请求/响应模型
 - **smoke 失败自动回滚**。`up.sh` 在 smoke 之前就换好了容器，所以 smoke 失败 == 生产此刻是坏的。`Tag current image as rollback point` 先把 `nous-backend:local` 打成 `:rollback`，smoke 失败时退回并重启（不带 `--build`）。只在 `steps.smoke.outcome == 'failure'` 时触发 —— build 阶段失败容器根本没换。
 - **验收口径必须探 `/api/v1/readyz`，不是 `/health` 也不是 `docker ps`**。见下方「验收纪律」。
 
-### 已退役的 NAS 老线（保留手动扳手）
+### 已退役的 NAS 老线（⚠️ 扳手当前是坏的）
 
-`deploy-backend.yml`（ACR + watchtower → `mediahub-app-backend/worker`）与 `deploy-admin.yml` 已去掉 push 自动触发，只留 `workflow_dispatch`。不删除是因为 NAS 旧栈仍是回滚锚点，回退时需要一个能重推 ACR + 触发 watchtower 的扳手：
+`deploy-backend.yml`（ACR + watchtower → `mediahub-app-backend/worker`）与 `deploy-admin.yml` 已去掉 push 自动触发，只留 `workflow_dispatch`。
 
-```bash
-gh workflow run deploy-backend.yml
-```
+⚠️ **2026-07-26 起 `gh workflow run deploy-backend.yml` 已不能真正部署**，别把它当可用的回滚扳手。它在两个层面都断了：
 
-⚠️ 若要恢复双轨，注意两边连的是**不同的 Supabase**，`backend/**` 一次改动会同时部署到两套互不相干的数据库。
+1. **落地端不存在**：NAS 老栈已整体拆除，`mediahub-app-backend` / `worker` 连 `docker ps -a` 里都没有了。
+2. **触发链已关闭**：nas-A 的 Watchtower HTTP API（token + 8083 端口）已整块移除，轮询改 24h，且没有任何容器带 `watchtower.enable` 标签（日志每轮 `Scanned=0`）。workflow 里那步 "Trigger Watchtower update" 现在必然打空，而它的兜底提示"will auto-poll in 5min"是错的。
+
+起因：仓库切 public 后，旧版 `scripts/deploy.sh` 里硬编码的 `WATCHTOWER_TOKEN` 变成世界可读（git 历史永久）。只删 token 而保留 `HTTP_API_UPDATE=true` 会留下无鉴权端点，所以整条路径拆掉。
+
+保留这两个 workflow 只是为了将来真要恢复 NAS 双轨时不用从零重写。恢复步骤见 [`docs/runbook/watchtower-config.md`](docs/runbook/watchtower-config.md) 的「若将来要恢复 NAS 作为回滚锚点」。
+
+⚠️ 若真要恢复双轨，注意两边连的是**不同的 Supabase**，`backend/**` 一次改动会同时部署到两套互不相干的数据库；且 NAS supabase 容器 force-recreate 会让烙在容器里的 legacy JWT key 失效。
+
+**当前真正的回滚手段**是 `deploy-gpu.yml` 的 smoke 失败自动回滚（`nous-backend:rollback` 镜像），见上方「后端链的关键设计」。
 
 ### 验收纪律（2026-07-22 血泪）
 

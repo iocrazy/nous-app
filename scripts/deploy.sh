@@ -47,6 +47,14 @@ deploy_admin() {
     log "Admin ✅"
 }
 
+# ⚠️ 2026-07-26: 这条路径已失效。nas-A 的 Watchtower HTTP API(token +
+# 8083 端口)整块移除、轮询改 24h、无容器带 watchtower.enable 标签。
+# 而且上面 WATCHTOWER_URL 的默认值指向 :8777 —— API 当年映射的是 :8083，
+# 所以这个默认值从来就没通过。详见 docs/runbook/watchtower-config.md。
+#
+# 保留函数是为了将来恢复 NAS 双轨时不用重写；但失败必须大声，不能像原先
+# 那样 warn 一句"will auto-poll in 5min"就当过去了(那句话现在是错的，且
+# 永不失败的 best-effort 正是 2026-05-12"CI 全绿而 prod 是坏的"的成因)。
 trigger_watchtower() {
     log "Triggering Watchtower..."
     HTTP_CODE=$(curl --noproxy '*' -sf -o /dev/null -w "%{http_code}" \
@@ -56,7 +64,10 @@ trigger_watchtower() {
     if [ "$HTTP_CODE" = "200" ]; then
         log "Watchtower triggered ✅"
     else
-        warn "Watchtower returned HTTP ${HTTP_CODE} (will auto-poll in 5min)"
+        echo -e "${YELLOW}[deploy]${NC} Watchtower returned HTTP ${HTTP_CODE}" >&2
+        echo "✖ NAS Watchtower HTTP API 已于 2026-07-26 退役 —— 没有任何东西会去拉你刚推上 ACR 的镜像。" >&2
+        echo "  当前发布走 gpupc 单线(deploy-gpu.yml)。依赖本脚本前先读 docs/runbook/watchtower-config.md。" >&2
+        return 1
     fi
 }
 
