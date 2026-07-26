@@ -16,7 +16,10 @@ import pytest
 from app.services.library.png_prompt_extractor import (
     extract_comfyui_prompt,
     extract_png_prompt,
+    extract_png_prompt_pair,
     parse_a1111_parameters,
+    parse_a1111_pair,
+    PngPromptPair,
 )
 
 A1111_BLOB = (
@@ -46,6 +49,12 @@ def _write(tmp_path: Path, payload: bytes) -> Path:
     p = tmp_path / "test.png"
     p.write_bytes(payload)
     return p
+
+
+def _png_with_text_chunk(keyword: str, text: str) -> bytes:
+    """Helper to build a PNG with a single tEXt chunk (keyword + null + text)."""
+    data = keyword.encode("latin-1") + b"\x00" + text.encode("latin-1")
+    return _png(_chunk(b"tEXt", data))
 
 
 class TestParseA1111Parameters:
@@ -150,3 +159,68 @@ class TestExtractPngPrompt:
         bomb = b"parameters\x00\x00" + zlib.compress(b"A" * (16 * 1024 * 1024))
         path = _write(tmp_path, _png(_chunk(b"zTXt", bomb)))
         assert extract_png_prompt(path) is None
+
+
+NO_NEG_BLOB = (
+    "a cat sitting on a windowsill\n"
+    "Steps: 30, Sampler: DPM++ 2M, CFG scale: 5, Seed: 42"
+)
+
+MULTILINE_NEG_BLOB = (
+    "portrait, dramatic light\n"
+    "Negative prompt: lowres, bad hands,\nextra fingers, watermark\n"
+    "Steps: 20, Sampler: Euler a, CFG scale: 7, Seed: 7"
+)
+
+
+class TestParseA1111Pair:
+    def test_pair_extracts_positive_and_negative(self):
+        pair = parse_a1111_pair(A1111_BLOB)
+        assert pair == PngPromptPair(
+            positive="masterpiece, 1girl, silver hair,\nbacklit, golden hour",
+            negative="lowres, bad anatomy",
+        )
+
+    def test_pair_without_negative(self):
+        pair = parse_a1111_pair(NO_NEG_BLOB)
+        assert pair.positive == "a cat sitting on a windowsill"
+        assert pair.negative is None
+
+    def test_multiline_negative_stops_at_settings_line(self):
+        pair = parse_a1111_pair(MULTILINE_NEG_BLOB)
+        assert pair.negative == "lowres, bad hands,\nextra fingers, watermark"
+
+    def test_empty_blob_returns_none(self):
+        assert parse_a1111_pair("") is None
+
+    def test_legacy_positive_only_helper_unchanged(self):
+        # back-compat: old callers still get the bare positive string
+        assert parse_a1111_parameters(A1111_BLOB) == (
+            "masterpiece, 1girl, silver hair,\nbacklit, golden hour"
+        )
+
+
+class TestExtractPngPromptPair:
+    def test_pair_from_a1111_png(self, tmp_path: Path):
+        png = tmp_path / "a.png"
+        png.write_bytes(_png_with_text_chunk("parameters", A1111_BLOB))
+        pair = extract_png_prompt_pair(png)
+        assert pair.negative == "lowres, bad anatomy"
+
+    def test_comfyui_png_has_no_negative(self, tmp_path: Path):
+        graph = json.dumps({
+            "1": {"class_type": "CLIPTextEncode",
+                  "inputs": {"text": "a long descriptive positive prompt here"}},
+        })
+        png = tmp_path / "c.png"
+        png.write_bytes(_png_with_text_chunk("prompt", graph))
+        pair = extract_png_prompt_pair(png)
+        assert pair.positive.startswith("a long descriptive")
+        assert pair.negative is None
+
+    def test_legacy_extract_still_positive_only(self, tmp_path: Path):
+        png = tmp_path / "b.png"
+        png.write_bytes(_png_with_text_chunk("parameters", A1111_BLOB))
+        assert extract_png_prompt(png) == (
+            "masterpiece, 1girl, silver hair,\nbacklit, golden hour"
+        )
