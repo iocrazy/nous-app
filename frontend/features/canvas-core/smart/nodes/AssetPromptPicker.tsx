@@ -19,6 +19,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Search, X } from 'lucide-react';
 
@@ -99,9 +100,13 @@ export function AssetPromptPicker({ onPick, onClose }: Props): React.ReactElemen
     if (e.target === e.currentTarget) onClose();
   }
 
-  return (
+  // Portal to <body>: this component renders inside an RF node subtree whose
+  // ancestors carry CSS transforms — a transform makes the ancestor the
+  // containing block for position:fixed, collapsing "fullscreen" to a small
+  // box inside the node.
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] grid place-items-center"
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] grid place-items-center nodrag nopan nowheel"
       onClick={handleBackdropClick}
       data-testid="asset-prompt-picker-backdrop"
     >
@@ -237,6 +242,7 @@ export function AssetPromptPicker({ onPick, onClose }: Props): React.ReactElemen
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -153,4 +153,15 @@ describe('AssetPromptPicker', () => {
     fireEvent.click(screen.getByTestId('asset-prompt-picker-backdrop'));
     expect(onClose).toHaveBeenCalled();
   });
+
+  it('renders the overlay as a portal to document.body with nodrag class', async () => {
+    render(<AssetPromptPicker onPick={vi.fn()} onClose={vi.fn()} />);
+    await screen.findByText('a cyberpunk girl');
+
+    const backdrop = screen.getByTestId('asset-prompt-picker-backdrop');
+    // Verify the backdrop is a child of document.body (portal)
+    expect(document.body.contains(backdrop)).toBe(true);
+    // Verify nodrag class is present to prevent canvas drag/pan
+    expect(backdrop.className).toContain('nodrag');
+  });
 });
