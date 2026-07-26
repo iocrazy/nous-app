@@ -14,7 +14,17 @@ Background — 2026-06-19, two drift bugs in the same queries:
    search still 500'd on `ri.is_trashed`. The AI resource-fetch / ref-resolver
    queries hit it directly (low traffic, so it went unnoticed).
 
-These pins keep both drifts from coming back across all three query sites.
+3. `owner_id::text = :user_id` — 2026-07-20, GET /api/v1/resources/search
+   500'd 22 times with `operator does not exist: text = uuid`. Not a column
+   drift but a *bind-parameter type* drift, same 500 symptom. PostgreSQL infers
+   a parameter's type from its first use: `team_members.user_id = :user_id`
+   (uuid column) pins `:user_id` to uuid, so a later `owner_id::text = :user_id`
+   asks for `text = uuid` and blows up. Both `team_members.user_id` and
+   `teams.owner_id` are uuid — the `::text` was never needed. The branch only
+   assembles when `scope_team_id is not None` (issue-scoped picker), which is
+   why it was conditional rather than every-call.
+
+These pins keep all three drifts from coming back across the query sites.
 """
 
 from __future__ import annotations
@@ -47,6 +57,26 @@ def test_no_nonexistent_file_size_column() -> None:
     assert not re.search(
         r"\br\.file_size\b(?!_bytes)", source
     ), "resources search references r.file_size — does not exist, 500s."
+
+
+def test_no_text_cast_against_uuid_user_id_bind() -> None:
+    """`:user_id` is bound against uuid columns, so it must never be compared
+    to a ::text expression in the same statement.
+
+    PostgreSQL resolves a bind parameter's type from its first use. Once
+    `team_members.user_id = :user_id` (uuid) fixes `:user_id` as uuid, any
+    `<expr>::text = :user_id` in the same query becomes `text = uuid` →
+    UndefinedFunctionError → 500. Both uuid-typed sides should compare
+    directly, with no cast.
+    """
+    for dotted in _FILES:
+        source = _module_source(dotted)
+        assert not re.search(r"::text\s*=\s*:user_id", source), (
+            f"{dotted} compares a ::text expression against :user_id, but "
+            ":user_id is bound as uuid (team_members.user_id / teams.owner_id "
+            "are both uuid) → `operator does not exist: text = uuid` (500). "
+            "Drop the ::text and compare uuid to uuid."
+        )
 
 
 def test_no_nonexistent_resource_items_is_trashed() -> None:

@@ -2329,8 +2329,12 @@ class ResourcesRepository(AsyncpgRepository):
                 "        SELECT team_id::text FROM public.team_members "
                 "          WHERE user_id = :user_id AND team_id::text = :scope_team_id "
                 "        UNION "
+                # owner_id 与 team_members.user_id 同为 uuid,而 :user_id 已被
+                # 上面那处 `user_id = :user_id` 定型为 uuid。这里再 ::text 就成了
+                # `text = uuid`,PostgreSQL 直接报 UndefinedFunctionError(500)。
+                # 两边都是 uuid,不需要任何 cast。
                 "        SELECT id::text FROM public.teams "
-                "          WHERE owner_id::text = :user_id AND kind = 'personal' "
+                "          WHERE owner_id = :user_id AND kind = 'personal' "
                 "      ) "
             )
             params["scope_team_id"] = scope_team_id
