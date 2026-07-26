@@ -27,6 +27,8 @@ import { aiLibraryService } from '../../services/aiLibraryService';
 import { fetchTeamMembers } from '../../services/teamService';
 import {
   createTemplate,
+  DEFAULT_COMPLETION_POLICY,
+  DEFAULT_EVENTS,
   deleteTemplate,
   fetchStageLibrary,
   fetchTemplate,
@@ -60,12 +62,6 @@ interface DraftNode extends WorkflowTemplateNodeInput {
   events: WorkflowNodeEvents;
 }
 
-const DEFAULT_EVENTS: WorkflowNodeEvents = {
-  notify_on_arrival: true,
-  notify_on_complete: false,
-  suggest_agent_run: false,
-};
-
 let _keySeq = 0;
 const nextKey = () => `n${Date.now()}_${_keySeq++}`;
 
@@ -84,7 +80,7 @@ function toDraft(nodes: WorkflowTemplate['nodes']): DraftNode[] {
     source_stage_id: n.source_stage_id,
     duration_days: n.duration_days,
     members: n.members ?? [],
-    completion_policy: n.completion_policy ?? 'owner',
+    completion_policy: n.completion_policy ?? DEFAULT_COMPLETION_POLICY,
     events: { ...DEFAULT_EVENTS, ...n.events },
   }));
 }
@@ -103,7 +99,7 @@ function toPayload(drafts: DraftNode[]): WorkflowTemplateNodeInput[] {
     source_stage_id: d.source_stage_id ?? null,
     duration_days: d.duration_days ?? null,
     members: d.members,
-    completion_policy: d.completion_policy ?? 'owner',
+    completion_policy: d.completion_policy ?? DEFAULT_COMPLETION_POLICY,
     events: { ...DEFAULT_EVENTS, ...d.events },
   }));
 }
@@ -275,7 +271,7 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
       source_stage_id: item.id,
       duration_days: null,
       members: [],
-      completion_policy: 'owner',
+      completion_policy: DEFAULT_COMPLETION_POLICY,
       events: { ...DEFAULT_EVENTS },
     };
     setDrafts((prev) => {
