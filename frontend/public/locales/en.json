@@ -1984,7 +1984,7 @@
     "loopImageEmpty": "Connect an image or image group to the left port",
     "assetPromptPicker": {
       "title": "Prompt Library",
-      "searchPlaceholder": "Search prompts or filename…",
+      "searchPlaceholder": "Search by filename…",
       "all": "All",
       "noResults": "No prompt assets found"
     }

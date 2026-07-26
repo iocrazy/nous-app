@@ -268,7 +268,7 @@ export function CanvasComposer({
     setConnections([...store.connections, connection as unknown as CanvasConnection]);
     setSelection([filledPromptNode.id, mediaNode.id]);
 
-    navigate(location.pathname, { replace: true });
+    navigate(location.pathname + location.search + location.hash, { replace: true });
   }, [loadStatus, location.state, location.pathname, navigate, dropPosition, setNodes, setConnections, setSelection, canvasId]);
 
   const buildContexts = useCallback(

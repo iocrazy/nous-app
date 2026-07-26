@@ -1984,7 +1984,7 @@
     "loopImageEmpty": "把图片或图片组连接到左侧输入口",
     "assetPromptPicker": {
       "title": "提示词库",
-      "searchPlaceholder": "搜索提示词或文件名…",
+      "searchPlaceholder": "按文件名搜索…",
       "all": "全部",
       "noResults": "未找到带提示词的素材"
     }

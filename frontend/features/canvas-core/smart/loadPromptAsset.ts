@@ -5,10 +5,20 @@
  * The Library picker (AssetPromptPicker) hands back a PromptAsset + the
  * lang side the user was previewing. This turns that pick into the three
  * pieces PromptNodeView needs to apply: a patch for the prompt node itself,
- * a new media node carrying the asset's cover as an i2i/i2v source, and the
- * connection wiring that media node into the prompt. No store access here —
- * PromptNodeView owns applying the result (setNodes/setConnections/patch),
- * which keeps this function trivial to unit test.
+ * a new media node carrying the asset's cover as a visual reference/
+ * thumbnail, and the connection wiring that media node into the prompt.
+ *
+ * That media node is NOT wired into the i2i/i2v pipeline: generation's
+ * source resolution (promptInputs.ts's DURABLE_PREFIX, '/api/v1/generated-media/')
+ * only accepts durable generated-media URLs, and the resource cover URL
+ * this factory uses doesn't match that prefix, so it's inert as a run
+ * input today — purely a canvas thumbnail. Wiring it up for real would
+ * need importCanvasMedia (or equivalent) to mint a durable generated-media
+ * URL for the asset's cover first; deferred.
+ *
+ * No store access here — PromptNodeView owns applying the result
+ * (setNodes/setConnections/patch), which keeps this function trivial to
+ * unit test.
  */
 
 import { createMediaNode } from './factories';

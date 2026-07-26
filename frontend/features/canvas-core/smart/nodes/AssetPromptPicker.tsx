@@ -164,7 +164,7 @@ export function AssetPromptPicker({ onPick, onClose }: Props): React.ReactElemen
               type="text"
               value={query}
               onChange={(e) => handleQueryChange(e.target.value)}
-              placeholder={t('canvas.assetPromptPicker.searchPlaceholder', 'Search prompts or filename…')}
+              placeholder={t('canvas.assetPromptPicker.searchPlaceholder', 'Search by filename…')}
               className="w-full bg-ink-800 border border-ink-700 rounded text-[12px] text-ink-100 pl-6 pr-2 py-1 outline-none focus:border-[var(--accent-border)] placeholder:text-ink-500"
             />
           </div>

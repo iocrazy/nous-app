@@ -87,6 +87,25 @@ describe('PromptNodeView negative_body', () => {
     expect(container2.querySelector('textarea[placeholder="Negative prompt"]')).toBeNull();
   });
 
+  it('keeps the negative textarea visible after it is cleared to an empty string (I3)', () => {
+    // A negative_body key that is explicitly '' (e.g. the user cleared the
+    // box) must still render the textarea — only an ABSENT key means "no
+    // negative prompt was ever set". Losing the box on clear would be a
+    // dead end with no way to type a negative prompt back in.
+    const clearedNegative = { ...BASE_DATA, negative_body: '' };
+    setNode(clearedNegative);
+    const { container } = render(
+      <ReactFlowProvider>
+        <PromptNodeView {...baseProps} id="p1" type="prompt" data={clearedNegative} />
+      </ReactFlowProvider>,
+    );
+    const negTextarea = container.querySelector(
+      'textarea[placeholder="Negative prompt"]',
+    ) as HTMLTextAreaElement | null;
+    expect(negTextarea).toBeTruthy();
+    expect(negTextarea!.value).toBe('');
+  });
+
   it('editing negative textarea patches negative_body', () => {
     const withNegative = { ...BASE_DATA, negative_body: 'lowres' };
     setNode(withNegative);

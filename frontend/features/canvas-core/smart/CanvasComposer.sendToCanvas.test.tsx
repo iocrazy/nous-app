@@ -18,8 +18,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const navigate = vi.fn();
 let locationState: unknown = null;
+let locationSearch = '';
+let locationHash = '';
 vi.mock('react-router-dom', () => ({
-  useLocation: () => ({ pathname: '/team/t1/canvas/c1', state: locationState }),
+  useLocation: () => ({
+    pathname: '/team/t1/canvas/c1',
+    search: locationSearch,
+    hash: locationHash,
+    state: locationState,
+  }),
   useNavigate: () => navigate,
 }));
 
@@ -36,6 +43,8 @@ afterEach(() => {
   useCanvasCoreStore.getState().reset();
   _resetIdCounter();
   locationState = null;
+  locationSearch = '';
+  locationHash = '';
 });
 
 describe('CanvasComposer — Send to Canvas consumption', () => {
@@ -69,6 +78,25 @@ describe('CanvasComposer — Send to Canvas consumption', () => {
     expect(selection).toEqual([promptNode.id, mediaNode.id]);
 
     expect(navigate).toHaveBeenCalledWith('/team/t1/canvas/c1', { replace: true });
+  });
+
+  it('preserves search/hash when clearing router state after consuming a promptInsert (M4)', async () => {
+    locationState = {
+      promptInsert: {
+        assetId: 'r1',
+        filename: 'hero.png',
+        positive: 'a cinematic hero shot',
+        negative: 'lowres',
+      },
+    };
+    locationSearch = '?foo=bar';
+    locationHash = '#section';
+    useCanvasCoreStore.setState({ canvasId: 'c1', kind: 'smart', loadStatus: 'ready' });
+
+    render(<CanvasComposer />);
+
+    await waitFor(() => expect(useCanvasCoreStore.getState().nodes).toHaveLength(2));
+    expect(navigate).toHaveBeenCalledWith('/team/t1/canvas/c1?foo=bar#section', { replace: true });
   });
 
   it('inserts exactly once under React.StrictMode double-invoke (insertedRef guard)', async () => {

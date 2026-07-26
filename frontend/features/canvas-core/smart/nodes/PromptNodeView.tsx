@@ -44,7 +44,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     run_started_at = null,
     run_finished_at = null,
     resource_refs = [],   // default [] for nodes persisted before this field
-    negative_body = '',   // absent = no negative prompt (Phase 2 asset library)
+    negative_body,         // absent = no negative prompt; '' = cleared but keep the box (Phase 2 asset library)
     gen = null,           // absent = legacy text prompt
   } = data as unknown as PromptNodeData;
   const patch = useNodeDataPatch(id);
@@ -63,10 +63,6 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // Library picker (Phase 2 asset library) — pulls a saved prompt + its
   // cover into this node, wiring a fresh media node upstream of it.
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const nodes = useCanvasCoreStore((s) => s.nodes);
-  const connections = useCanvasCoreStore((s) => s.connections);
-  const setNodes = useCanvasCoreStore((s) => s.setNodes);
-  const setConnections = useCanvasCoreStore((s) => s.setConnections);
 
   // Smart nodes keep the tone's border colour but drop the whole-card
   // animate-pulse — the status badge's dot carries the motion (P1-5).
@@ -129,6 +125,10 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // append the new media node, and wire it in as a source connection.
   const handlePickAsset = useCallback(
     (asset: PromptAsset, lang: 'en' | 'zh') => {
+      // Fresh reads at handler time, not render-time subscriptions — avoids
+      // inserting into a stale nodes/connections snapshot when other canvas
+      // mutations landed between this node's last render and the click (M3).
+      const { nodes, connections, setNodes, setConnections } = useCanvasCoreStore.getState();
       const selfNode = nodes.find((n) => (n as unknown as { id: string }).id === id);
       const promptNodePosition =
         (selfNode as unknown as { position?: { x: number; y: number } } | undefined)?.position ??
@@ -144,7 +144,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       setConnections([...connections, connection as unknown as CanvasConnection]);
       setLibraryOpen(false);
     },
-    [id, nodes, connections, patch, setNodes, setConnections],
+    [id, patch],
   );
 
   // ────────────────────────────────────────────────────────────────────────
@@ -242,13 +242,13 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
           <AssetPromptPicker onPick={handlePickAsset} onClose={() => setLibraryOpen(false)} />
         )}
 
-        {negative_body ? (
+        {negative_body !== undefined ? (
           <div className="mt-1.5">
             <span className="text-[10px] uppercase tracking-wider text-rose-400/85">
               Negative
             </span>
             <textarea
-              value={negative_body}
+              value={negative_body ?? ''}
               onChange={(e) => patch({ negative_body: e.target.value })}
               placeholder="Negative prompt"
               rows={2}
