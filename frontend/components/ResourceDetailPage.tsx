@@ -1825,9 +1825,9 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
           />
 
           <PromptSection
+            key={resource.id}
             resource={resource}
             onPatch={(fields) => handleResourceUpdate(fields)}
-            onMerge={(fields) => setResource((prev) => (prev ? { ...prev, ...fields } : prev))}
             hasTriggerTag={assignedTags.some((it) => it.tag?.prompt_trigger)}
             onEnsureTriggerTag={async () => {
               const tag = await ensureDefaultTriggerTag(allTags);

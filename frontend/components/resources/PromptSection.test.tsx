@@ -17,7 +17,7 @@ const base = (over: Partial<Resource> = {}): Resource =>
 
 const noop = () => {};
 const props = (over: Partial<Parameters<typeof PromptSection>[0]> = {}) => ({
-  resource: base(), onPatch: noop, onMerge: noop,
+  resource: base(), onPatch: noop,
   hasTriggerTag: false, onEnsureTriggerTag: vi.fn().mockResolvedValue(undefined),
   canGenerate: true, generating: false, onGenerate: noop,
   translating: false, onTranslate: noop,
@@ -64,5 +64,11 @@ describe('PromptSection', () => {
     fireEvent.change(neg, { target: { value: '低分辨率' } });
     fireEvent.blur(neg);
     expect(onPatch).toHaveBeenCalledWith({ gen_prompt_negative_zh: '低分辨率' });
+  });
+
+  it('defaults to zh when only gen_prompt_zh has content', async () => {
+    render(<PromptSection {...props({ resource: base({ gen_prompt_zh: '杰作, 1girl' }) })} />);
+    fireEvent.click(screen.getByText(/杰作, 1girl/));
+    expect(await screen.findByDisplayValue('杰作, 1girl')).toBeTruthy();
   });
 });

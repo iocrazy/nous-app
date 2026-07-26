@@ -19,8 +19,6 @@ export interface PromptSectionProps {
   resource: Resource;
   /** Optimistic local-merge + PATCH (page's handleResourceUpdate). */
   onPatch: (fields: Partial<Resource>) => void;
-  /** Merge already-persisted fields into page state (post-translate). */
-  onMerge: (fields: Partial<Resource>) => void;
   /** True when any assigned tag has prompt_trigger. */
   hasTriggerTag: boolean;
   /** Apply the default trigger tag to this asset (page implements). */
@@ -34,12 +32,14 @@ export interface PromptSectionProps {
 }
 
 export function PromptSection({
-  resource, onPatch, onMerge: _onMerge, hasTriggerTag, onEnsureTriggerTag,
+  resource, onPatch, hasTriggerTag, onEnsureTriggerTag,
   canGenerate, generating, onGenerate, translating, onTranslate,
 }: PromptSectionProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
-  const [lang, setLang] = useState<'en' | 'zh'>('en');
+  const [lang, setLang] = useState<'en' | 'zh'>(() =>
+    (resource.gen_prompt?.trim() ? 'en' : resource.gen_prompt_zh?.trim() ? 'zh' : 'en'),
+  );
   const [posValue, setPosValue] = useState('');
   const [negValue, setNegValue] = useState('');
 
