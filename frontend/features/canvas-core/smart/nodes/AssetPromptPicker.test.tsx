@@ -159,8 +159,10 @@ describe('AssetPromptPicker', () => {
     await screen.findByText('a cyberpunk girl');
 
     const backdrop = screen.getByTestId('asset-prompt-picker-backdrop');
-    // Verify the backdrop is a child of document.body (portal)
-    expect(document.body.contains(backdrop)).toBe(true);
+    // Verify the backdrop is a DIRECT child of document.body — a plain
+    // (non-portal) render would parent it under RTL's container div, so
+    // `document.body.contains(...)` alone cannot distinguish the two.
+    expect(backdrop.parentElement).toBe(document.body);
     // Verify nodrag class is present to prevent canvas drag/pan
     expect(backdrop.className).toContain('nodrag');
   });
