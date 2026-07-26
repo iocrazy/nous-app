@@ -25,7 +25,7 @@ else
 fi
 
 WORKTREE_NAME="$(basename "$PROJECT_DIR")"
-LOG_DIR="/tmp/mediahub-logs/$WORKTREE_NAME"
+LOG_DIR="/tmp/nous-logs/$WORKTREE_NAME"
 
 # Colors
 RED='\033[0;31m'
