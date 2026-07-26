@@ -19,7 +19,18 @@ export function hasPromptData(r: PromptFields): boolean {
 }
 
 export function pickDefaultTriggerTag(tags: Tag[]): Tag | null {
-  return tags.find((t) => t.prompt_trigger) ?? null;
+  const promptTriggerTags = tags.filter((t) => t.prompt_trigger);
+  if (promptTriggerTags.length === 0) return null;
+
+  // Sort by created_at ascending to get the earliest one (deterministic).
+  // Tags may have created_at even if not explicitly typed, so access carefully.
+  promptTriggerTags.sort((a, b) => {
+    const aTime = a.created_at ? new Date(a.created_at).getTime() : Infinity;
+    const bTime = b.created_at ? new Date(b.created_at).getTime() : Infinity;
+    return aTime - bTime;  // stable: missing created_at sorts last (Infinity)
+  });
+
+  return promptTriggerTags[0];
 }
 
 export async function ensureDefaultTriggerTag(allTags: Tag[]): Promise<Tag> {
@@ -30,5 +41,5 @@ export async function ensureDefaultTriggerTag(allTags: Tag[]): Promise<Tag> {
     color: '#6366f1',
     type: 'user',
     prompt_trigger: true,
-  } as Parameters<typeof createTag>[0]);
+  });
 }

@@ -16,10 +16,28 @@ describe('hasPromptData', () => {
 });
 
 describe('pickDefaultTriggerTag', () => {
-  it('returns first prompt_trigger tag', () => {
+  it('returns first prompt_trigger tag by array order when no created_at', () => {
     const tags = [tag({ id: 'a' }), tag({ id: 'b', prompt_trigger: true }), tag({ id: 'c', prompt_trigger: true })];
     expect(pickDefaultTriggerTag(tags)?.id).toBe('b');
   });
+
+  it('returns tag with earliest created_at when present', () => {
+    const tags = [
+      tag({ id: 'later', prompt_trigger: true, created_at: '2026-07-26T12:00:00Z' }),
+      tag({ id: 'earliest', prompt_trigger: true, created_at: '2026-07-26T10:00:00Z' }),
+      tag({ id: 'middle', prompt_trigger: true, created_at: '2026-07-26T11:00:00Z' }),
+    ];
+    expect(pickDefaultTriggerTag(tags)?.id).toBe('earliest');
+  });
+
+  it('tags without created_at sort last', () => {
+    const tags = [
+      tag({ id: 'no_date', prompt_trigger: true }),
+      tag({ id: 'has_date', prompt_trigger: true, created_at: '2026-07-26T10:00:00Z' }),
+    ];
+    expect(pickDefaultTriggerTag(tags)?.id).toBe('has_date');
+  });
+
   it('null when none', () => {
     expect(pickDefaultTriggerTag([tag({})])).toBeNull();
   });
