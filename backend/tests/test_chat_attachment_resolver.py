@@ -461,3 +461,171 @@ async def test_normalized_dict_rehydrates_to_request_and_resolves():
     assert result.failures == []
     assert len(result.attachments) == 1
     assert result.attachments[0].url == "https://x.com/a.png"
+
+
+# ─── sb:// unified-storage paths (2026-07-25 storage migration) ─────
+
+
+def _fake_get_stream(data: bytes):
+    """Replace ObjectStore.get_stream with a canned async byte stream."""
+
+    async def _gen(self, key, **kwargs):
+        yield data
+
+    return _gen
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_image_sb_path_inlined_as_data_url():
+    """Since the unified-storage switch flipped, /chat-attachments/upload
+    returns sb://library/... paths. The resolver must fetch the object
+    off the store and inline it as a base64 data URL — before this fix
+    it rejected the path as "outside chat attachment base dir"."""
+    import base64
+
+    from app.services.library.media_storage import ObjectStore
+
+    png = b"\x89PNG\r\n\x1a\n" + b"x" * 32
+    req = AttachmentRequest(
+        kind="image",
+        url="sb://library/t42/ab/cd/abcd1234.png",
+        mime="image/png",
+    )
+    with patch.object(ObjectStore, "get_stream", _fake_get_stream(png)):
+        result = await resolver.resolve_attachments([req])
+
+    assert result.failures == []
+    assert len(result.attachments) == 1
+    a = result.attachments[0]
+    assert a.data_url.startswith("data:image/png;base64,")
+    assert base64.b64decode(a.data_url.split(",", 1)[1]) == png
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_image_sb_path_unknown_bucket_rejected():
+    """Only the content-addressed media buckets (library / chat-media) may
+    be fetched — an arbitrary bucket in a crafted sb:// ref must fail
+    WITHOUT touching the object store."""
+    from app.services.library.media_storage import ObjectStore
+
+    def _must_not_fetch(self, key, **kwargs):
+        raise AssertionError("object store must not be touched")
+
+    req = AttachmentRequest(kind="image", url="sb://secrets/anything.png")
+    with patch.object(ObjectStore, "get_stream", _must_not_fetch):
+        result = await resolver.resolve_attachments([req])
+
+    assert result.attachments == []
+    assert len(result.failures) == 1
+    assert "bucket" in result.failures[0].reason.lower()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_video_sb_path_materializes_to_local_temp():
+    """sb:// video refs must be materialized to a real local file before
+    ffmpeg sees them — extract_frames must receive a temp path, never the
+    sb:// string."""
+    from app.agent_framework.multimodal import Attachment, AttachmentKind
+    from app.services.library.media_storage import ObjectStore
+    from app.services.media.render.video_frame_extractor import FrameExtractionResult
+
+    fake_result = FrameExtractionResult(
+        attachments=[
+            Attachment(
+                kind=AttachmentKind.VIDEO_THUMBNAIL,
+                data_url="data:image/jpeg;base64,frame1",
+            )
+        ],
+        duration_seconds=10.0,
+        sampled_at_seconds=[5.0],
+    )
+    seen: dict = {}
+
+    async def _extract(path, num_frames):
+        # The materialized temp file must really exist WITH the object's
+        # bytes at call time — a bogus joined path (base + "sb://...")
+        # would blow up here, not pass vacuously.
+        from pathlib import Path as _P
+
+        seen["path"] = path
+        seen["bytes"] = _P(path).read_bytes()
+        return fake_result
+
+    req = AttachmentRequest(kind="video", url="sb://library/t42/ab/cd/abcd.mp4")
+    with (
+        patch.object(ObjectStore, "get_stream", _fake_get_stream(b"vid-bytes")),
+        patch(
+            "app.services.media.render.video_frame_extractor.extract_frames",
+            AsyncMock(side_effect=_extract),
+        ),
+    ):
+        result = await resolver.resolve_attachments([req])
+
+    assert result.failures == []
+    assert len(result.attachments) == 1
+    assert not seen["path"].startswith("sb://")
+    assert seen["path"].endswith(".mp4")
+    assert seen["bytes"] == b"vid-bytes"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_pdf_sb_path_materializes_to_local_temp():
+    """Same materialize-first contract for pdf → pdfium."""
+    from app.agent_framework.multimodal import Attachment, AttachmentKind
+    from app.services.library.media_storage import ObjectStore
+    from app.services.media.render.pdf_renderer import PdfRenderResult
+
+    fake_result = PdfRenderResult(
+        attachments=[
+            Attachment(kind=AttachmentKind.PDF_PAGE, data_url="data:image/jpeg;base64,p1")
+        ],
+        page_count=1,
+        rendered_pages=[1],
+    )
+    seen: dict = {}
+
+    def _render(path, max_pages):
+        from pathlib import Path as _P
+
+        seen["path"] = path
+        seen["bytes"] = _P(path).read_bytes()
+        return fake_result
+
+    req = AttachmentRequest(kind="pdf", url="sb://library/t42/ab/cd/abcd.pdf")
+    with (
+        patch.object(ObjectStore, "get_stream", _fake_get_stream(b"%PDF-1.4")),
+        patch(
+            "app.services.media.render.pdf_renderer.render_pdf",
+            side_effect=_render,
+        ),
+    ):
+        result = await resolver.resolve_attachments([req])
+
+    assert result.failures == []
+    assert len(result.attachments) == 1
+    assert not seen["path"].startswith("sb://")
+    assert seen["path"].endswith(".pdf")
+    assert seen["bytes"] == b"%PDF-1.4"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_image_sb_path_respects_inline_size_cap(monkeypatch):
+    """The MAX_INLINE_IMAGE_BYTES guard applies to store-fetched images
+    exactly as it does to shared-volume ones."""
+    from app.services.library.media_storage import ObjectStore
+
+    monkeypatch.setattr(resolver, "MAX_INLINE_IMAGE_BYTES", 8)
+    req = AttachmentRequest(
+        kind="image", url="sb://library/t42/ab/cd/big.png", mime="image/png"
+    )
+    with patch.object(ObjectStore, "get_stream", _fake_get_stream(b"x" * 100)):
+        result = await resolver.resolve_attachments([req])
+
+    assert result.attachments == []
+    assert len(result.failures) == 1
+    assert "too large" in result.failures[0].reason.lower()
