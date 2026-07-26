@@ -31,15 +31,28 @@ VALID_STATUSES = {"pending", "processing", "completed", "failed", "null"}
 HLS_TIER_NAMES = ["480p", "720p", "1080p", "source"]
 
 
-def _scan_hls_tiers(hls_path: str) -> dict[str, bool]:
+def _scan_hls_tiers(hls_path: str) -> Optional[dict[str, bool]]:
     """Scan HLS directory to check which tier subdirectories exist.
 
     Args:
         hls_path: Relative path to master.m3u8 (e.g. "teams/.../hls/master.m3u8")
 
     Returns:
-        Dict mapping tier name to whether its stream.m3u8 exists.
+        Dict mapping tier name to whether its stream.m3u8 exists, or ``None``
+        for object-store rows — this is a synchronous filesystem probe and the
+        store needs async I/O.
+
+    ``None`` rather than all-False on purpose: an ``sb://`` value would
+    otherwise be pasted onto DOWNLOAD_PATH, produce a nonsense local path, and
+    report every tier as missing — the admin panel would confidently show a
+    fully-transcoded video as having no tiers at all. An explicit "unknown"
+    lets the caller say so.
     """
+    from app.services.library.media_storage import resolve_media_source
+
+    if resolve_media_source(hls_path).is_object_store:
+        return None
+
     base = Path(settings.DOWNLOAD_PATH)
     # hls_path points to master.m3u8; parent is the hls/ dir
     hls_dir = base / hls_path.replace("/master.m3u8", "").replace("\\master.m3u8", "")
