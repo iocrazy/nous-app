@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { PromptBadge } from './PromptBadge';
 import type { Resource } from '../../types';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (_k: string, d?: string) => d ?? _k }),
+}));
 
 const res = (over: Partial<Resource> = {}): Resource =>
   ({ id: 'r1', gen_prompt: 'masterpiece, 1girl', gen_prompt_negative: 'lowres', ...over }) as unknown as Resource;
@@ -30,7 +34,7 @@ describe('PromptBadge', () => {
     );
     fireEvent.mouseEnter(screen.getByText('Prompt'));
     // Find the popover container div
-    const popoverDiv = container.querySelector('.w-56.bg-ink-950');
+    const popoverDiv = container.querySelector('.w-40.bg-ink-950');
     expect(popoverDiv?.className).toMatch(/left-0/);
     expect(popoverDiv?.className).not.toMatch(/right-0/);
   });

@@ -361,6 +361,12 @@ class Resources(Base, UserScoped):
         Text,
         comment="Chinese-language AI generation prompt (user-entered or provider-translated)",
     )
+    gen_prompt_negative: Mapped[str | None] = mapped_column(
+        Text, comment="Negative AI generation prompt (EN side)"
+    )
+    gen_prompt_negative_zh: Mapped[str | None] = mapped_column(
+        Text, comment="Negative AI generation prompt (ZH side)"
+    )
     url: Mapped[str | None] = mapped_column(Text)
     rating: Mapped[int | None] = mapped_column(SmallInteger, server_default=text("0"))
     last_folder_id: Mapped[int | None] = mapped_column(BigInteger)

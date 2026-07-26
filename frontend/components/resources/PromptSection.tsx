@@ -159,6 +159,7 @@ export function PromptSection({
         onBlur={() => commit(posField, posValue, (resource[posField] as string | null) || '')}
         placeholder={t('resources.infoPanel.promptPlaceholder', 'Paste the AI generation prompt...')}
         rows={4}
+        maxLength={20000}
         className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2.5 py-2 text-xs font-mono text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50 resize-none"
       />
       <div className="flex items-center justify-between mt-1.5 mb-1">
@@ -178,6 +179,7 @@ export function PromptSection({
         onBlur={() => commit(negField, negValue, (resource[negField] as string | null) || '')}
         placeholder={t('resources.infoPanel.negativePromptPlaceholder', 'Negative prompt (what to avoid)...')}
         rows={2}
+        maxLength={20000}
         className="w-full bg-red-500/[.06] border border-red-400/25 rounded-lg px-2.5 py-2 text-xs font-mono text-ink-300 placeholder-ink-600 focus:outline-none focus:border-red-400/50 resize-none"
       />
     </div>

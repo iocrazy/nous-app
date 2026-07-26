@@ -400,3 +400,50 @@ async def test_png_prompt_never_clobbers_existing_negative():
 
     assert result["status"] == "success"
     update_resource.assert_any_await(_RID, {"gen_prompt": "masterpiece, 1girl"})
+
+
+async def test_png_prompt_never_clobbers_existing_positive():
+    """Symmetric to test_png_prompt_never_clobbers_existing_negative: an
+    existing gen_prompt ("user typed") must survive extraction, so the
+    patch sent to update_resource should contain only gen_prompt_negative.
+    """
+    extract_video = AsyncMock(return_value={})
+    generate_thumbnail = AsyncMock(return_value=None)
+    update_resource = AsyncMock(return_value={"id": _RID})
+    update_version = AsyncMock(return_value={"id": "v1"})
+    get_version = AsyncMock(return_value={"id": "v1"})
+    trigger_transcode = AsyncMock(return_value=None)
+    manager = _make_manager()
+    get_resource_by_id = AsyncMock(
+        return_value={"gen_prompt": "user typed", "gen_prompt_negative": ""}
+    )
+    extract_pair = MagicMock(
+        return_value=PngPromptPair(positive="masterpiece, 1girl", negative="lowres")
+    )
+
+    with (
+        _patches(
+            extract_video=extract_video,
+            generate_thumbnail=generate_thumbnail,
+            update_resource=update_resource,
+            update_version=update_version,
+            get_version=get_version,
+            trigger_transcode=trigger_transcode,
+            manager=manager,
+            get_resource_by_id=get_resource_by_id,
+        ),
+        patch(
+            "app.services.library.png_prompt_extractor.extract_png_prompt_pair",
+            extract_pair,
+        ),
+    ):
+        result = await _body()(
+            resource_id=_RID,
+            file_path="teams/t1/uploads/r1/v1/art.png",
+            file_type="image",
+            mime_type="image/png",
+            user_id=_USER,
+        )
+
+    assert result["status"] == "success"
+    update_resource.assert_any_await(_RID, {"gen_prompt_negative": "lowres"})

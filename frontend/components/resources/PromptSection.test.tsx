@@ -34,6 +34,23 @@ describe('PromptSection', () => {
   it('shows light Add Prompt entry when no data and no trigger tag', () => {
     render(<PromptSection {...props()} />);
     expect(screen.getByText(/Add Prompt/)).toBeTruthy();
+    // The light variant is a bare text button, not the collapsed row —
+    // the row's Sparkles-labeled "Prompt" caption must be absent here.
+    expect(screen.queryByText('Prompt')).toBeNull();
+  });
+
+  it('shows collapsed row (not the light variant) when no data but hasTriggerTag is true', () => {
+    render(<PromptSection {...props({ hasTriggerTag: true })} />);
+    // Collapsed row variant: Sparkles-labeled "Prompt" caption + inline
+    // "+ Add Prompt" text inside the row button.
+    expect(screen.getByText('Prompt')).toBeTruthy();
+    expect(screen.getByText(/\+ Add Prompt/)).toBeTruthy();
+    // Distinguish from the bare light-text variant, which renders
+    // "+ Add Prompt" as the button's own (only) label, not alongside a
+    // separate "Prompt" caption.
+    const row = screen.getByText('Prompt').closest('button');
+    expect(row).not.toBeNull();
+    expect(row?.className).toContain('border-ink-700/50');
   });
 
   it('expanding calls onEnsureTriggerTag and reveals both textareas', async () => {

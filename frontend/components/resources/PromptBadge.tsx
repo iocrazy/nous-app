@@ -6,11 +6,13 @@
  */
 import { useState } from 'react';
 import { Copy, Sparkles } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import type { Resource } from '../../types';
 import { hasPromptData } from '../../utils/promptTriggerTags';
 
 export function PromptBadge({ resource, shiftLeft = false }: { resource: Resource; shiftLeft?: boolean }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   if (!hasPromptData(resource)) return null;
 
@@ -25,14 +27,14 @@ export function PromptBadge({ resource, shiftLeft = false }: { resource: Resourc
       onClick={(e) => e.stopPropagation()}
     >
       {open && (
-        <div className={`absolute bottom-full mb-1.5 ${shiftLeft ? 'left-0' : 'right-0'} w-56 bg-ink-950 border border-ink-700 rounded-lg shadow-xl p-2.5 z-20 cursor-default`}>
+        <div className={`absolute bottom-full mb-1.5 ${shiftLeft ? 'left-0' : 'right-0'} w-40 bg-ink-950 border border-ink-700 rounded-lg shadow-xl p-2.5 z-20 cursor-default`}>
           <div className="flex items-center justify-between">
-            <span className="text-[9px] text-ink-500 uppercase tracking-widest">Prompt</span>
+            <span className="text-[9px] text-ink-500 uppercase tracking-widest">{t('resources.infoPanel.prompt', 'Prompt')}</span>
             <button
               onClick={() => navigator.clipboard.writeText(positive).catch((e) => console.error(e))}
               className="flex items-center gap-1 text-[9px] text-[var(--accent-text)] hover:opacity-80"
             >
-              <Copy size={10} /> Copy
+              <Copy size={10} /> {t('resources.infoPanel.copyPrompt', 'Copy')}
             </button>
           </div>
           {positive && (
@@ -40,14 +42,14 @@ export function PromptBadge({ resource, shiftLeft = false }: { resource: Resourc
           )}
           {negative && (
             <>
-              <span className="mt-1.5 block text-[9px] text-red-400/85 uppercase tracking-widest">Negative</span>
+              <span className="mt-1.5 block text-[9px] text-red-400/85 uppercase tracking-widest">{t('resources.infoPanel.negativePrompt', 'Negative')}</span>
               <p className="mt-0.5 font-mono text-[10px] leading-relaxed text-red-300/80 line-clamp-2 break-all">{negative}</p>
             </>
           )}
         </div>
       )}
       <span className="inline-flex items-center gap-1 bg-ink-950/75 backdrop-blur-sm border border-[var(--accent-border)] text-[var(--accent-text)] text-[9px] font-semibold rounded-full px-2 py-0.5 cursor-default">
-        <Sparkles size={10} /> Prompt
+        <Sparkles size={10} /> {t('resources.infoPanel.prompt', 'Prompt')}
       </span>
     </div>
   );
