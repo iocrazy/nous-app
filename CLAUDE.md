@@ -290,9 +290,51 @@ supabase db push
 - **config.yml**: 业务配置（USER_AGENTS、CORS、超时时间）
 - **.env**: 敏感配置（SUPABASE_URL、API Keys）
 
+### 部署验收纪律：必须做写入冒烟测试
+
+**读正常 ≠ 服务正常。** 存储类故障几乎都是"读得到、写不进"的单向断裂 —— 而验收如果只抽样下载/播放，会全部通过，故障静默存在数天到数月。
+
+2026-07 的 P1 迁移（NAS→gpupc，存储从群晖本地卷改为 CIFS 网络挂载）一次性埋了四个同模式故障：
+
+| 故障 | 机理 | 静默时长 |
+|------|------|----------|
+| Supabase Storage 上传全 502 | file 后端用 xattr 存元数据，CIFS 不支持 setxattr（errno 95） | 3 天 |
+| 视频下载全失败 | 容器 uid=1031 vs 目录 `755 heygo(1000)`，落到 other 无写位 | 未知 |
+| honcho 向量库写不进 | 容器 uid=100 vs 目录 `775 heygo(1000)`，同上 | 1 个月+ |
+| SeaweedFS 启动死循环 | 群晖 ACL 使 POSIX 位为空，`0200 & perm` 检查失败 | 部署当天 |
+
+共同模式：**容器身份 ≠ 目录属主 / 文件系统能力不匹配 → 写失败、读正常 → 验收只测了读**。
+
+**任何涉及存储路径、挂载、容器 user、文件系统类型变更的部署，验收清单必须包含：**
+
+```bash
+# 1) 逐容器写入探针（挂载点全覆盖，不只主要的那个）
+for c in $(docker ps --format '{{.Names}}'); do
+  for dst in $(docker inspect "$c" --format '{{range .Mounts}}{{.Destination}}{{println}}{{end}}'); do
+    docker exec "$c" sh -c "touch $dst/.wprobe && rm -f $dst/.wprobe" \
+      && echo "✅ $c $dst" || echo "❌ $c $dst"
+  done
+done
+
+# 2) 身份/权限比对（uid 落在 owner / group / other 哪一档）
+docker exec <容器> id                 # 容器实际 uid:gid
+stat -c '%a %U:%G' <宿主机目录>        # 目录权限与属主
+
+# 3) 网络文件系统额外验 xattr（CIFS/NFS 常不支持，Supabase Storage file 后端硬依赖）
+python3 -c "import os; os.setxattr('<目录>/.probe','user.t',b'1')"
+
+# 4) 端到端业务写入冒烟：真实走一遍上传/下载 API，不能只测读
+```
+
+注意事项：
+- **CIFS 上 `chmod` 无效** —— 权限位由挂载参数 `file_mode` / `dir_mode` 固定，改目录权限看似成功实则不生效，必须改 `/etc/fstab` 后重新挂载
+- **群晖共享文件夹用 ACL**，POSIX 位常显示为 `d---------`，容器只看 POSIX 位 → 新建数据目录后需显式 `chmod 755`
+- 容器以 root 运行也**不保证能过检查** —— 部分程序（如 SeaweedFS）是读权限位判断而非真尝试写入
+
 ### 已知陷阱
 
 - **Snowflake BIGINT 精度丢失**：PostgREST 返回 BIGINT 为 JSON number，JS 超过 2^53 精度丢失。已在 `supabaseClient.ts` 添加 `bigIntSafeFetch` 修复。
+- **网络文件系统不能当本地盘用**：CIFS/NFS 缺 xattr、uid 映射固定、chmod 无效、锁与 rename 语义不可靠。存储引擎应贴着磁盘跑（进程与数据同机），跨机器走协议（S3/HTTP）而非文件系统挂载。Supabase Storage 已于 2026-07-25 迁到 S3 后端（SeaweedFS on nas-B），见 [`docs/superpowers/specs/2026-07-25-storage-s3-seaweedfs-migration-design.md`](docs/superpowers/specs/2026-07-25-storage-s3-seaweedfs-migration-design.md)。
 - **catch 静默吞错**：前端 `catch { /* ignore */ }` 会隐藏错误，新代码应使用 `catch (err) { console.error(...) }`
 - **media_id vs resource_id**：`MediaTagPicker` 传入 parsed_media ID，后端自动解析为 resource_id。如果 media 没有对应 resource，标签操作返回空/404。
 - **`user_id=None` 在 Celery 链路里漂**：`scheduled_tasks.retry_failed_downloads` 会拉到 `parsed_media.user_id IS NULL` 的 orphan 行（legacy / 系统发起的下载），透传到下游会触发 `user_logs` 23502 + `user_settings` 22P02 错误风暴。修复：源头 skip + repo 防御性 early-return。任何新加的 Celery 任务都要先校验 user_id 不空再继续。
