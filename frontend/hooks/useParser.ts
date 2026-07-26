@@ -311,6 +311,21 @@ export function useParser({ loadLibraryData, setLibrary, currentResult, setCurre
           if (unifiedTaskId) {
             setParseUnifiedTaskId(unifiedTaskId);
             addLog(`Tracking parse progress: ${unifiedTaskId}`, 'info');
+          } else {
+            // Dedup short-circuit ("subscribed" / "completed") with no task to
+            // track. Before 2026-07-26 this fell through with isParsing still
+            // true: no tracking id, no completion effect, so the UI sat on
+            // "Parsing" forever while nothing appeared in the Task Center —
+            // the user had no way to tell a dedup hit from a hung backend.
+            const action = (response as any).dedup_action;
+            const label =
+              action === 'subscribed'
+                ? 'This link is already being parsed — reusing that task'
+                : 'This link was parsed recently — no new task needed';
+            addLog(label, 'info');
+            setTaskStatus(action === 'subscribed' ? 'Already parsing' : 'Already parsed');
+            setTaskProgress(100);
+            setIsParsing(false);
           }
           // Don't set isParsing=false — wait for parse completion via effect
           return;
