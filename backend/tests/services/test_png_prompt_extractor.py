@@ -14,12 +14,12 @@ from pathlib import Path
 import pytest
 
 from app.services.library.png_prompt_extractor import (
+    PngPromptPair,
     extract_comfyui_prompt,
     extract_png_prompt,
     extract_png_prompt_pair,
-    parse_a1111_parameters,
     parse_a1111_pair,
-    PngPromptPair,
+    parse_a1111_parameters,
 )
 
 A1111_BLOB = (
