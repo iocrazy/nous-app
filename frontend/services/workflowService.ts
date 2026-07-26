@@ -18,7 +18,10 @@ import {
   ProjectStageNode,
   ProjectWorkflow,
   StageLibraryItem,
+  WorkflowCompletionPolicy,
+  WorkflowNodeEvents,
   WorkflowTemplate,
+  WorkflowTemplateNode,
   WorkflowTemplateNodeInput,
 } from '../types';
 import { apiClient } from './apiClient';
@@ -26,6 +29,37 @@ import { apiClient } from './apiClient';
 interface Envelope<T> {
   data?: T;
 }
+
+/** Backend defaults (schemas/workflow.py) — applied when an older payload
+ * (pre mig 386) is missing these fields, so the editor never crashes on a
+ * legacy template/instance. */
+const DEFAULT_COMPLETION_POLICY: WorkflowCompletionPolicy = 'owner';
+const DEFAULT_EVENTS: WorkflowNodeEvents = {
+  notify_on_arrival: true,
+  notify_on_complete: false,
+  suggest_agent_run: false,
+};
+
+const normalizeEvents = (events: Partial<WorkflowNodeEvents> | null | undefined): WorkflowNodeEvents => ({
+  notify_on_arrival: events?.notify_on_arrival ?? DEFAULT_EVENTS.notify_on_arrival,
+  notify_on_complete: events?.notify_on_complete ?? DEFAULT_EVENTS.notify_on_complete,
+  suggest_agent_run: events?.suggest_agent_run ?? DEFAULT_EVENTS.suggest_agent_run,
+});
+
+/** Fill in `completion_policy`/`events` on a template node fetched from a
+ * payload that may predate mig 386 (both fields optional server-side too). */
+const normalizeTemplateNode = (
+  node: Partial<WorkflowTemplateNode> & Omit<WorkflowTemplateNode, 'completion_policy' | 'events'>,
+): WorkflowTemplateNode => ({
+  ...node,
+  completion_policy: node.completion_policy ?? DEFAULT_COMPLETION_POLICY,
+  events: normalizeEvents(node.events),
+});
+
+const normalizeTemplate = (template: WorkflowTemplate): WorkflowTemplate => ({
+  ...template,
+  nodes: template.nodes?.map(normalizeTemplateNode),
+});
 
 // ============================================
 // Team workflow templates
@@ -56,7 +90,7 @@ export const fetchTemplate = async (
     `/api/v1/workflows/${templateId}`,
   );
   if (!response.data) throw new Error('Empty response from fetchTemplate');
-  return response.data;
+  return normalizeTemplate(response.data);
 };
 
 /** Create an empty named template (nodes are set via updateTemplate). */
@@ -70,7 +104,7 @@ export const createTemplate = async (
     { query: { team_id: teamId } },
   );
   if (!response.data) throw new Error('Empty response from createTemplate');
-  return response.data;
+  return normalizeTemplate(response.data);
 };
 
 /**
@@ -90,7 +124,7 @@ export const updateTemplate = async (
     data,
   );
   if (!response.data) throw new Error('Empty response from updateTemplate');
-  return response.data;
+  return normalizeTemplate(response.data);
 };
 
 export const deleteTemplate = async (templateId: string): Promise<void> => {

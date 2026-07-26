@@ -1037,6 +1037,19 @@ export interface WorkflowMemberRef {
   agent_id?: string | null;
 }
 
+/** Who can mark a node complete (M2 PR-D Flow Rules tab). 'owner' (default)
+ * = the node owner reviews & completes; 'any_editor' = any manager/editor. */
+export type WorkflowCompletionPolicy = 'owner' | 'any_editor';
+
+/** Per-node built-in event toggles (M2 PR-D Events tab). Arrival/completion
+ * mirror-issue behavior stays hardcoded (spec §4) — these three booleans only
+ * gate notifications + the suggest-agent-run chip. */
+export interface WorkflowNodeEvents {
+  notify_on_arrival: boolean;
+  notify_on_complete: boolean;
+  suggest_agent_run: boolean;
+}
+
 /** One node in a team workflow template (`workflow_template_nodes`). */
 export interface WorkflowTemplateNode {
   id: string;
@@ -1053,6 +1066,8 @@ export interface WorkflowTemplateNode {
   source_stage_id: string | null;
   duration_days: number | null;
   members: WorkflowMemberRef[];
+  completion_policy: WorkflowCompletionPolicy;
+  events: WorkflowNodeEvents;
 }
 
 /** A template node as sent on PATCH (full node-list replacement). */
@@ -1069,6 +1084,8 @@ export interface WorkflowTemplateNodeInput {
   source_stage_id?: string | null;
   duration_days?: number | null;
   members?: WorkflowMemberRef[];
+  completion_policy?: WorkflowCompletionPolicy;
+  events?: WorkflowNodeEvents;
 }
 
 /** A team workflow template list row (`node_count` on the collection). */
@@ -1126,6 +1143,8 @@ export interface ProjectStageNode {
   folder_id?: string | null;
   deliverable_file_count?: number;
   members: WorkflowMemberRef[];
+  completion_policy: WorkflowCompletionPolicy;
+  events: WorkflowNodeEvents;
 }
 
 /** GET /projects/{id}/workflow payload. */

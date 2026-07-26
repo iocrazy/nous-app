@@ -1787,6 +1787,21 @@
         "hasIssue": "This stage has a linked task — skip it instead of removing.",
         "active": "This is the active stage and cannot be removed.",
         "generic": "This stage cannot be removed."
+      },
+      "flowRules": {
+        "intro": "Who can mark this node complete.",
+        "owner": "Owner reviews & completes (default)",
+        "anyEditor": "Any editor can complete",
+        "conditionsTitle": "Conditions",
+        "conditionsBody": "Owner assigned · owner review (when Review required) · deliverable filed (when Deliverable required, hard-checked)."
+      },
+      "events": {
+        "intro": "Notifications and agent suggestions triggered by this node.",
+        "notifyOnArrival": "Notify on arrival",
+        "notifyOnComplete": "Notify on completion",
+        "suggestAgentRun": "Suggest agent run on arrival",
+        "builtinTitle": "Built-in behavior",
+        "builtinBody": "Arrival derives the mirror issue; completion closes it. No agent starts automatically."
       }
     }
   },

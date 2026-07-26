@@ -1787,6 +1787,21 @@
         "hasIssue": "此阶段已关联任务——请跳过而非移除。",
         "active": "这是当前进行中的阶段，无法移除。",
         "generic": "此阶段无法移除。"
+      },
+      "flowRules": {
+        "intro": "谁可以将此节点标记为完成。",
+        "owner": "由节点负责人审核并完成（默认）",
+        "anyEditor": "任何编辑者均可完成",
+        "conditionsTitle": "完成条件",
+        "conditionsBody": "已指定负责人 · 负责人审核（当需要审核时）· 已提交交付物（当需要交付物时，为强制校验）。"
+      },
+      "events": {
+        "intro": "此节点触发的通知与 Agent 建议。",
+        "notifyOnArrival": "到达时通知",
+        "notifyOnComplete": "完成时通知",
+        "suggestAgentRun": "到达时建议启动 Agent",
+        "builtinTitle": "内置行为",
+        "builtinBody": "到达时会派生镜像任务，完成时会关闭它。不会自动启动任何 Agent。"
       }
     }
   },
