@@ -5,6 +5,10 @@ import { AppLayout } from './components/AppLayout';
 import { ModuleGuard } from './components/ModuleGuard';
 import { RedirectToTeam, RedirectToDefaultTeam } from './components/RedirectToTeam';
 import { useDistributionModuleStatus } from './hooks/useDistributionModuleStatus';
+import {
+  isStaleChunkError,
+  shouldReloadForStaleChunk,
+} from './utils/staleChunkReload';
 
 // Eagerly loaded (needed immediately)
 import { LoginPage } from './pages/LoginPage';
@@ -16,21 +20,18 @@ import { LoginPage } from './pages/LoginPage';
 // infinite loop on real network errors), and surface the error
 // otherwise. This makes deploys self-healing for users who don't hard
 // refresh.
-const STALE_CHUNK_RELOADED_KEY = 'mh_stale_chunk_reloaded';
 function lazyWithRetry<T extends { default: any }>(
   factory: () => Promise<T>,
 ): LazyExoticComponent<any> {
   return lazy(() =>
     factory().catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
-      const isStaleChunk =
-        /Failed to fetch dynamically imported module/i.test(msg) ||
-        /Loading chunk \d+ failed/i.test(msg) ||
-        /error loading dynamically imported module/i.test(msg);
-      if (isStaleChunk && typeof window !== 'undefined') {
-        const reloaded = sessionStorage.getItem(STALE_CHUNK_RELOADED_KEY);
-        if (!reloaded) {
-          sessionStorage.setItem(STALE_CHUNK_RELOADED_KEY, String(Date.now()));
+      if (isStaleChunkError(msg) && typeof window !== 'undefined') {
+        // Throttled by time, NOT once-per-tab. The old once-per-tab sentinel
+        // gave a tab a single self-heal for its whole lifetime, so a second
+        // deploy left every lazy route throwing — the home page still rendered
+        // (already in memory) while detail pages became unreachable.
+        if (shouldReloadForStaleChunk(sessionStorage, Date.now())) {
           window.location.reload();
           // Never-resolving promise so React stays on the loader instead
           // of flashing the error UI before the reload kicks in.
