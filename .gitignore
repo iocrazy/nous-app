@@ -311,3 +311,10 @@ toolkit/
 
 # Vercel (retired 2026-07-25, frontend now on Cloudflare Pages)
 .vercel/
+
+# 自托管 Supabase 栈：结构性配置进 git，真实密钥永不进
+# （真相在 gpupc 的 datahub/nous/supabase/，此处为版本记录副本）
+deploy/gpu-server/supabase/.env
+deploy/gpu-server/supabase/**/*.key
+deploy/gpu-server/supabase/**/*.crt
+deploy/gpu-server/supabase/**/*.pem

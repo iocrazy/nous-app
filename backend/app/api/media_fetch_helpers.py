@@ -387,12 +387,23 @@ async def handle_media_fetch_dispatch(
     # only to land on the cache_hit short-circuit downstream. L2 puts
     # the check back at the front door so the user gets an instant
     # response and we save a parse pass + a worker hop.
+    #
+    # The probe reads a UserScoped table via raw SQL, so it needs an ambient
+    # scope — without one ``scoped_sql`` fail-closes and the whole L2 path
+    # silently degrades to "never owned". That is exactly what happened from
+    # the DBOS port until 2026-07-26: every probe raised, the ``except`` below
+    # swallowed it at DEBUG level (invisible at prod INFO), and the
+    # short-circuit never fired once. Keep the scope open around the call.
     try:
+        from app.db.scope import Scope, request_scope
         from app.repositories.resources_repository import ResourcesRepository
 
-        owned = await ResourcesRepository().get_completed_resource_by_url_and_creator(
-            url=url, creator_id=auth.user_id
-        )
+        async with request_scope(Scope(user_id=auth.user_id)):
+            owned = (
+                await ResourcesRepository().get_completed_resource_by_url_and_creator(
+                    url=url, creator_id=auth.user_id
+                )
+            )
         if owned:
             background_tasks.add_task(
                 log_user_action,
@@ -411,7 +422,12 @@ async def handle_media_fetch_dispatch(
                 "media_id": str(owned.get("media_id")),
             }
     except Exception as e:
-        logger.debug(f"[L2/Dedup] probe failed (non-fatal): {e}")
+        # WARNING, not DEBUG: the probe failing is non-fatal for the request
+        # but means the dedup short-circuit is dead — worth seeing in prod
+        # logs rather than discovering months later.
+        logger.warning(
+            f"[L2/Dedup] probe failed (non-fatal, short-circuit skipped): {e}"
+        )
 
     dedup_key = None
     try:

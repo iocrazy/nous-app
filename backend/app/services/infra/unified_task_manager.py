@@ -705,7 +705,41 @@ class UnifiedTaskManager:
         await self._atomic_update(task_id, updates)
         self._last_progress.pop(task_id, None)
         self._last_progress_value.pop(task_id, None)
+        await self._release_dedup_lock(task_id)
         logger.debug(f"[TaskManager] Completed {task_id}")
+
+    async def _release_dedup_lock(self, task_id: str) -> None:
+        """Drop this task's Redis dedup lock on reaching a terminal phase.
+
+        Without this the lock lingers for the full DEDUP_LOCK_TTL (1 h) after
+        the work is done, so a user who deletes the resource and re-submits
+        the same URL is refused for up to an hour with no task created
+        (2026-07-26 incident). Only ``scheduled_recovery`` released locks, and
+        only for tasks it judged stale — the happy path never did.
+
+        Best-effort: a failure here must not turn a finished task into a
+        failed one.
+        """
+        try:
+            from sqlalchemy import select
+
+            from app.db.session import read_scope
+            from app.models import TaskTracking
+
+            async with read_scope() as session:
+                dedup_key = (
+                    await session.execute(
+                        select(TaskTracking.dedup_key)
+                        .where(TaskTracking.dbos_workflow_id == task_id)
+                        .limit(1)
+                    )
+                ).scalar()
+            if dedup_key:
+                await asyncio.to_thread(self.release_lock, dedup_key)
+        except Exception as e:
+            logger.warning(
+                f"[TaskManager] dedup lock release failed for {task_id}: {e}"
+            )
 
     # ── Lifecycle: fail ───────────────────────────────────────────────
 
@@ -758,6 +792,9 @@ class UnifiedTaskManager:
         await self._atomic_update(task_id, updates)
         self._last_progress.pop(task_id, None)
         self._last_progress_value.pop(task_id, None)
+        # Failed work especially must free the lock — otherwise a user who hit
+        # a transient error cannot retry the same URL for an hour.
+        await self._release_dedup_lock(task_id)
         logger.debug(f"[TaskManager] Failed {task_id}: {error_msg[:80]}")
 
     # ── Lifecycle: lost (orphan / system-level) ──────────────────────
@@ -1367,20 +1404,47 @@ class UnifiedTaskManager:
                 "dedup_key": dedup_key,
             }
 
+        # Recent-completion check — MUST be time-bounded.
+        #
+        # Without the window, a task that completed days ago blocks every
+        # future re-run of the same dedup_key for as long as any Redis lock
+        # is held: the user deletes the resource, re-submits the URL, and the
+        # request short-circuits to "completed" with no task ever created
+        # (2026-07-26 incident — a parse completed 5 days earlier silently
+        # swallowed a fresh submit, and the UI hung on "Parsing" forever).
+        #
+        # The window matches DEDUP_LOCK_TTL: dedup only ever meant to collapse
+        # concurrent/retried submits, and the lock is the lifetime of that
+        # intent. Anything older is a legitimately new request.
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=DEDUP_LOCK_TTL)
         async with read_scope() as session:
             completed = (
-                await session.execute(
-                    select(TaskTracking.dbos_workflow_id)
-                    .where(TaskTracking.dedup_key == dedup_key)
-                    .where(TaskTracking.phase == "completed")
-                    .order_by(TaskTracking.completed_at.desc())
-                    .limit(1)
+                (
+                    await session.execute(
+                        select(
+                            TaskTracking.dbos_workflow_id,
+                            TaskTracking.completed_at,
+                        )
+                        .where(TaskTracking.dedup_key == dedup_key)
+                        .where(TaskTracking.phase == "completed")
+                        .where(TaskTracking.completed_at >= cutoff)
+                        .order_by(TaskTracking.completed_at.desc())
+                        .limit(1)
+                    )
                 )
-            ).scalar()
+                .mappings()
+                .first()
+            )
 
         if completed:
-            logger.debug(f"[TaskManager] Dedup key already completed: {dedup_key}")
-            return {"action": "completed"}
+            task_id = str(completed["dbos_workflow_id"])
+            logger.info(
+                f"[TaskManager] Dedup hit — recently completed: {dedup_key} "
+                f"(task={task_id}, completed_at={completed['completed_at']})"
+            )
+            # Return the task id so callers can point the user at the result
+            # instead of leaving them staring at a dead progress bar.
+            return {"action": "completed", "task_id": task_id}
 
         await asyncio.to_thread(redis.set, dedup_key, "locked", ex=DEDUP_LOCK_TTL)
         logger.warning(f"[TaskManager] Force-acquired stale dedup lock: {dedup_key}")
