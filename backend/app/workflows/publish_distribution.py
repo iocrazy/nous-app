@@ -236,13 +236,21 @@ async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
 
 
 @DBOS.step()
-async def mark_publish_processing_step(workflow_id: str) -> None:
+async def mark_publish_processing_step(
+    workflow_id: str, user_id: str | None = None
+) -> None:
     """Push task_tracking.phase queued → processing (mirror trigger only writes
-    status, leaving phase stuck at 'queued' otherwise). Best-effort."""
+    status, leaving phase stuck at 'queued' otherwise). Best-effort.
+
+    ``user_id`` is threaded through so ``start()``'s self-heal can rebuild a
+    missing row — ``task_tracking.user_id`` is UUID NOT NULL, and start()'s
+    fallback of ``""`` can never satisfy it."""
     from app.services.infra.unified_task_manager import get_task_manager
 
     try:
-        await get_task_manager().start(workflow_id)
+        await get_task_manager().start(
+            workflow_id, user_id=user_id, task_type="publish_distribution"
+        )
     except Exception as e:
         logger.warning(f"[publish.mark_processing] {workflow_id}: {e}")
 
@@ -347,7 +355,7 @@ async def publish_distribution_workflow(task_id: int, user_id: str) -> dict[str,
     from app.services.infra.unified_task_manager import get_task_manager
 
     manager = get_task_manager()
-    await mark_publish_processing_step(DBOS.workflow_id)
+    await mark_publish_processing_step(DBOS.workflow_id, user_id)
 
     try:
         result = await run_publish_accounts_step(task_id)
