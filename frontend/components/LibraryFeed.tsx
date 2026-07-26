@@ -31,6 +31,60 @@ export const LibraryFeed: React.FC<LibraryFeedProps> = ({
   const sentinelRef = useRef<HTMLDivElement>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(true);
+  // Index of the item the viewport is centred on. Drives the render window.
+  const [centerIdx, setCenterIdx] = useState(0);
+
+  // ── Windowing ──────────────────────────────────────────────────────────
+  // Every item is exactly one container height (`h-full snap-center
+  // shrink-0`), so the window is pure arithmetic — no measurement pass and
+  // no virtualiser library needed.
+  //
+  // Without this the feed mounts one FeedItem per row for the whole loaded
+  // set. At ~53 DOM nodes per item a fully scrolled library (1237 rows)
+  // renders ~65k nodes, well past where browsers start dropping frames.
+  // <video> mounting was already windowed to current ±1 and covers use
+  // native lazy loading, so the DOM tree itself was the only thing growing
+  // without bound.
+  //
+  // WINDOW_RADIUS is deliberately larger than the ±1 video window: cheap
+  // poster-only items absorb fast swipes, so a flick never lands on a blank
+  // spacer before the scroll handler catches up.
+  const WINDOW_RADIUS = 4;
+  const total = data.length;
+  const windowStart = Math.max(0, centerIdx - WINDOW_RADIUS);
+  const windowEnd = Math.min(total, centerIdx + WINDOW_RADIUS + 1);
+  const visible = data.slice(windowStart, windowEnd);
+
+  // Track scroll to move the window. Reading scrollTop/clientHeight beats
+  // deriving the index from `playingId`, which only updates once an item is
+  // 60% visible — too late during a fast flick, and never for image posts
+  // that are not "playing" at all.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    let frame = 0;
+    const onScroll = () => {
+      if (frame) return; // coalesce to one read per animation frame
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const h = el.clientHeight;
+        if (!h) return;
+        const idx = Math.round(el.scrollTop / h);
+        setCenterIdx((prev) => (prev === idx ? prev : idx));
+      });
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  // A shrinking list (filter change, tag switch) can strand centerIdx past
+  // the end — the window would render nothing and the feed would look empty.
+  useEffect(() => {
+    setCenterIdx((prev) => (prev > 0 && prev >= total ? Math.max(0, total - 1) : prev));
+  }, [total]);
 
   // Intersection Observer to handle auto-play on scroll
   useEffect(() => {
@@ -54,7 +108,12 @@ export const LibraryFeed: React.FC<LibraryFeedProps> = ({
     elements?.forEach((el) => observer.observe(el));
 
     return () => observer.disconnect();
-  }, [data]);
+    // Re-observe whenever the rendered set changes. `data` alone is not
+    // enough now that the window slides: scrolling swaps which items are
+    // mounted without `data` changing identity, and a stale observer would
+    // still be watching unmounted nodes — autoplay would stop following the
+    // viewport after the first swipe.
+  }, [data, windowStart, windowEnd]);
 
   // Infinite scroll: load more pages when the sentinel enters the feed's
   // scroll container. Critically, root = containerRef so the observer fires
@@ -113,7 +172,20 @@ export const LibraryFeed: React.FC<LibraryFeedProps> = ({
         className="w-full max-w-[500px] h-full bg-black md:rounded-2xl overflow-y-scroll snap-y snap-mandatory relative scrollbar-hide md:border border-ink-800 shadow-2xl"
         style={{ scrollBehavior: 'smooth' }}
       >
-        {data.map((item, idx) => {
+        {/* Spacer standing in for the items above the window, so scrollTop
+            and the scrollbar stay honest while those rows are unmounted.
+            `snap-none` keeps it from becoming a snap target — one full-height
+            blank stop would otherwise appear before the first rendered item. */}
+        {windowStart > 0 && (
+          <div
+            aria-hidden
+            className="w-full shrink-0 snap-none"
+            style={{ height: `calc(${windowStart} * 100%)` }}
+          />
+        )}
+
+        {visible.map((item, i) => {
+          const idx = windowStart + i;
           const playingIdx = data.findIndex(d => d.platform_id === playingId);
           const shouldLoadVideo = Math.abs(idx - playingIdx) <= 1;
           return (
@@ -129,6 +201,17 @@ export const LibraryFeed: React.FC<LibraryFeedProps> = ({
             />
           );
         })}
+
+        {/* Trailing spacer — mirrors the leading one. Sits before the
+            sentinel so the sentinel still marks the true end of the list and
+            the next page keeps prefetching. */}
+        {windowEnd < total && (
+          <div
+            aria-hidden
+            className="w-full shrink-0 snap-none"
+            style={{ height: `calc(${total - windowEnd} * 100%)` }}
+          />
+        )}
         {data.length === 0 && (
            <div className="h-full flex flex-col items-center justify-center text-ink-500 gap-4">
              <p>No videos found in this feed.</p>
