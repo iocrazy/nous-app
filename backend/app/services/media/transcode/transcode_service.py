@@ -22,7 +22,14 @@ from loguru import logger
 from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.core.config import settings
 from app.repositories.resources_repository import ResourcesRepository
-from app.services.library.media_storage import materialize, resolve_media_source
+from app.services.library.media_storage import (
+    hls_key,
+    hls_key_prefix,
+    library_store,
+    materialize,
+    resolve_media_source,
+    to_file_path,
+)
 
 
 @dataclass
@@ -288,6 +295,11 @@ class TranscodeService:
                 if hls_dir.exists():
                     shutil.rmtree(hls_dir)
                 hls_dir.mkdir(parents=True, exist_ok=True)
+                # …and the published copy, which rmtree cannot reach. A shorter
+                # re-encode leaves higher-numbered segments from the previous
+                # run orphaned in the store: unreferenced by the new master so
+                # playback is fine, but they never get collected otherwise.
+                await self._clear_published_hls(str(resource_id), str(version_id))
 
                 if is_h264:
                     # ============================================================
@@ -326,9 +338,11 @@ class TranscodeService:
                             source_bitrate=source_bitrate,
                         )
 
-                        # Build relative path
-                        master_path = hls_dir / "master.m3u8"
-                        relative_hls = str(master_path.relative_to(base))
+                        # Publish phase-1 output (segments, then master) and
+                        # take the resulting fs-relative or sb:// path.
+                        relative_hls = await self._publish_hls(
+                            hls_dir, base, str(resource_id), str(version_id)
+                        )
 
                         # Mark as completed — user can play HLS immediately
                         await self.repo.update_version(
@@ -379,6 +393,13 @@ class TranscodeService:
                                         source_width=width,
                                         source_height=height,
                                         source_bitrate=source_bitrate,
+                                    )
+                                    # Republish: the new tier segments plus the
+                                    # rewritten master. Same segments-then-master
+                                    # order, so a player that reloads mid-upload
+                                    # never sees a tier it cannot fetch.
+                                    await self._publish_hls(
+                                        hls_dir, base, str(resource_id), str(version_id)
                                     )
                                     logger.info(
                                         f"[Transcode] Enhancement tiers added: "
@@ -452,9 +473,10 @@ class TranscodeService:
                     source_bitrate=source_bitrate,
                 )
 
-                # Build relative path
-                master_path = hls_dir / "master.m3u8"
-                relative_hls = str(master_path.relative_to(base))
+                # Publish (segments first, master last) and take the path.
+                relative_hls = await self._publish_hls(
+                    hls_dir, base, str(resource_id), str(version_id)
+                )
 
                 # Update DB
                 await self.repo.update_version(
@@ -973,6 +995,82 @@ class TranscodeService:
     # ------------------------------------------------------------------ #
     # Master playlist
     # ------------------------------------------------------------------ #
+
+    async def _publish_hls(
+        self,
+        hls_dir: Path,
+        base: Path,
+        resource_id: str,
+        version_id: str,
+    ) -> str:
+        """Make the freshly written HLS tree readable, return the ``hls_path``.
+
+        Filesystem mode: ffmpeg already wrote to its final home, so this only
+        computes the DOWNLOAD_PATH-relative path.
+
+        Object-store mode: ffmpeg still writes locally (it needs random-access
+        writes and an -hls_segment_filename pattern), then the tree is copied
+        up and ``hls_path`` becomes ``sb://library/hls/{rid}/{vid}/master.m3u8``.
+
+        **Upload order matters.** master.m3u8 goes up LAST, on its own, after
+        every segment and per-tier playlist has landed. The fast path marks the
+        version ``completed`` the moment phase 1 publishes, so a master that
+        became visible before its segments would hand the player a playlist
+        pointing at objects that do not exist yet. Uploading the master last
+        makes the whole publish atomic from a reader's point of view: either
+        the old master is there, or the new one plus everything it references.
+        """
+        master_rel = "master.m3u8"
+        if not settings.HLS_OBJECT_STORE:
+            return str((hls_dir / master_rel).relative_to(base))
+
+        store = library_store()
+
+        # Everything except the master, uploaded concurrently.
+        def _key(rel: str) -> str:
+            return hls_key(resource_id, version_id, rel)
+
+        master_local = hls_dir / master_rel
+        moved_master = None
+        if master_local.exists():
+            # Hold the master out of the batch by parking it outside the tree
+            # walked by put_dir, then upload it explicitly afterwards.
+            moved_master = hls_dir.parent / f".{hls_dir.name}.master.m3u8"
+            shutil.move(str(master_local), str(moved_master))
+        try:
+            await store.put_dir(str(hls_dir), _key)
+            if moved_master is not None:
+                await store.put_file(
+                    _key(master_rel), str(moved_master), "application/vnd.apple.mpegurl"
+                )
+        finally:
+            if moved_master is not None and moved_master.exists():
+                # Put it back so later phases (tier encode → master rewrite)
+                # still see a complete local tree.
+                shutil.move(str(moved_master), str(master_local))
+
+        return to_file_path(store.bucket, _key(master_rel))
+
+    async def _clear_published_hls(self, resource_id: str, version_id: str) -> None:
+        """Drop a version's previously published HLS objects.
+
+        The filesystem path uses ``shutil.rmtree``; the object store has no
+        equivalent, and stale segments from a longer previous encode would
+        otherwise linger forever (unreferenced by the new master, so harmless
+        to playback, but leaking space indefinitely).
+        """
+        if not settings.HLS_OBJECT_STORE:
+            return
+        try:
+            prefix = hls_key_prefix(resource_id, version_id)
+            removed = await library_store().remove_prefix(prefix)
+            if removed:
+                logger.info(
+                    f"[Transcode] cleared {removed} stale HLS objects: {prefix}"
+                )
+        except Exception as e:
+            # Never fail a transcode over cleanup — worst case is leaked objects.
+            logger.warning(f"[Transcode] HLS prefix cleanup failed (non-fatal): {e}")
 
     def _write_master_playlist(
         self,
