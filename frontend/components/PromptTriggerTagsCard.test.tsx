@@ -36,4 +36,23 @@ describe('PromptTriggerTagsCard', () => {
     fireEvent.click(await screen.findByLabelText('Remove AI'));
     await waitFor(() => expect(updateTag).toHaveBeenCalledWith('1', { prompt_trigger: false }));
   });
+
+  it('filters out system tags from add candidates', async () => {
+    const mixedTags = [
+      { id: '1', name: 'AI', prompt_trigger: true, type: 'user', color: '#6366f1' },
+      { id: '2', name: 'cyberpunk', prompt_trigger: false, type: 'user', color: '#818cf8' },
+      { id: '3', name: 'system-tag', prompt_trigger: false, type: 'system', color: '#888888' },
+    ];
+    fetchAllTags.mockResolvedValue(mixedTags);
+
+    render(<PromptTriggerTagsCard />);
+    fireEvent.click(screen.getByText(/Add tag/));
+
+    await waitFor(() => {
+      const select = screen.getByRole('combobox') as HTMLSelectElement;
+      const optionTexts = Array.from(select.options).map((o) => o.textContent);
+      expect(optionTexts).toContain('cyberpunk');
+      expect(optionTexts).not.toContain('system-tag');
+    });
+  });
 });

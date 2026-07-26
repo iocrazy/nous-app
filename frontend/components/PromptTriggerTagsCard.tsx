@@ -22,7 +22,7 @@ export function PromptTriggerTagsCard() {
   }, []);
 
   const triggers = allTags.filter((tg) => tg.prompt_trigger);
-  const candidates = allTags.filter((tg) => !tg.prompt_trigger);
+  const candidates = allTags.filter((tg) => !tg.prompt_trigger && tg.type === 'user');
 
   const setFlag = async (tag: Tag, value: boolean) => {
     setBusy(String(tag.id));
