@@ -599,7 +599,9 @@ async def mark_task_user_visible_complete_step(
 
 
 @DBOS.step()
-async def mark_download_processing_step(workflow_id: str) -> None:
+async def mark_download_processing_step(
+    workflow_id: str, user_id: str | None = None
+) -> None:
     """Push task_tracking.phase 'queued' → 'processing'. Same rationale
     as parse.mark_parse_processing_step — `mirror_dbos_lifecycle_to_tracking`
     only writes `status`, leaving `phase` stuck at 'queued' for the
@@ -615,7 +617,12 @@ async def mark_download_processing_step(workflow_id: str) -> None:
     from app.services.infra.unified_task_manager import get_task_manager
 
     try:
-        await get_task_manager().start(workflow_id)
+        # user_id must reach start(): if the pre-create was swallowed, its
+        # self-heal INSERT needs it (task_tracking.user_id is UUID NOT NULL,
+        # and start() falls back to "" which can never satisfy that).
+        await get_task_manager().start(
+            workflow_id, user_id=user_id, task_type="download"
+        )
     except Exception as e:
         logger.warning(f"[download.mark_processing] {workflow_id}: {e}")
 
@@ -676,7 +683,7 @@ async def download_workflow(
     # it, mirror_dbos_lifecycle_to_tracking would only update `status`
     # and `phase` stays 'queued' until terminal — which is what made
     # TaskMonitor display "WORKER Idle" mid-download.
-    await mark_download_processing_step(DBOS.workflow_id)
+    await mark_download_processing_step(DBOS.workflow_id, user_id)
 
     # Single unified strategy (PR #254). Strategy label kept on audit
     # logs so older log queries (`strategy=douyin` / `strategy=yt-dlp`)

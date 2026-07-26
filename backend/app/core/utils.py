@@ -52,6 +52,28 @@ ALLOWED_URL_DOMAINS: frozenset[str] = _load_allowed_domains()
 SERVER_CONFIG_FILE = Path(__file__).parent.parent.parent / "frontend_config.yml"
 
 
+# Container healthcheck targets. Probed every 30s per container, so at two
+# containers they alone accounted for 31.3% of application_logs (1448/4643 in
+# 6h, measured 2026-07-26) and buried real traffic during an incident.
+_PROBE_PATHS = ("/api/v1/readyz", "/api/v1/healthz", "/health")
+
+
+def is_noisy_probe_access_log(message: str) -> bool:
+    """True for a *successful* healthcheck request in a uvicorn access line.
+
+    Only 2xx probes are noise. A failing readyz is the exact signal the probe
+    exists to raise (it's what turns a silently-broken DBOS into an unhealthy
+    container), so anything non-2xx is kept.
+
+    Matching on ``<path> HTTP/`` keeps ``/health`` from swallowing
+    ``/healthz`` or ``/health-report``.
+    """
+    if not any(f"{p} HTTP/" in message for p in _PROBE_PATHS):
+        return False
+    status = message.rstrip().rpartition(" ")[2]
+    return status.startswith("2") and len(status) == 3 and status.isdigit()
+
+
 class InterceptHandler(logging.Handler):
     """Bridge stdlib logging → loguru.
 
@@ -65,6 +87,15 @@ class InterceptHandler(logging.Handler):
     """
 
     def emit(self, record: logging.LogRecord) -> None:
+        # Drop successful healthcheck probes before they reach any sink —
+        # otherwise the 30s-per-container cadence floods application_logs and
+        # makes incident triage require several rounds of filtering. Failing
+        # probes still get through (see is_noisy_probe_access_log).
+        if record.name == "uvicorn.access" and is_noisy_probe_access_log(
+            record.getMessage()
+        ):
+            return
+
         # Map stdlib level to loguru level
         try:
             level = logger.level(record.levelname).name

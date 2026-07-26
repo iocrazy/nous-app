@@ -568,7 +568,7 @@ def update_parse_subtitle_step(workflow_id: str, subtitle: str) -> None:
 
 
 @DBOS.step()
-def mark_parse_processing_step(workflow_id: str) -> None:
+def mark_parse_processing_step(workflow_id: str, user_id: str | None = None) -> None:
     """Push task_tracking.phase from 'queued' to 'processing'.
 
     Renamed from ``mark_workflow_processing_step`` (was the same name
@@ -592,7 +592,12 @@ def mark_parse_processing_step(workflow_id: str) -> None:
 
     async def _do() -> None:
         try:
-            await get_task_manager().start(workflow_id)
+            # user_id must reach start(): its self-heal INSERT needs it
+            # (task_tracking.user_id is UUID NOT NULL; start() otherwise
+            # falls back to "" and the recovery can never succeed).
+            await get_task_manager().start(
+                workflow_id, user_id=user_id, task_type="parse"
+            )
         except Exception as e:
             logger.warning(f"[parse.mark_processing] {workflow_id}: {e}")
 
@@ -622,7 +627,7 @@ def parse_workflow(
     # running (the `mirror_dbos_lifecycle_to_tracking` trigger only
     # touches `status`, not `phase`, so without this call the row
     # would stay phase='queued' for the full lifetime of the run).
-    mark_parse_processing_step(DBOS.workflow_id)
+    mark_parse_processing_step(DBOS.workflow_id, user_id)
 
     # Subtitle progression — see `update_parse_subtitle_step` docstring
     # for why we do this (failure error_msg collapses to a placeholder,
