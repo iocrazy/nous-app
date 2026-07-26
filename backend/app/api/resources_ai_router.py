@@ -36,6 +36,33 @@ from app.schemas.resources import (
     TrainingSetExportRequest,
 )
 
+_PROMPT_FIELD_PAIRS = [
+    # (en_field, zh_field)
+    ("gen_prompt", "gen_prompt_zh"),
+    ("gen_prompt_negative", "gen_prompt_negative_zh"),
+]
+
+
+def build_translate_plan(
+    resource: dict, target_lang: str
+) -> list[tuple[str, str, str]]:
+    """(source_field, target_field, source_text) per non-empty source side.
+
+    target_lang='zh' reads the EN columns; 'en' reads the ZH columns.
+    Empty/whitespace sources are skipped so a positive-only asset still
+    translates cleanly.
+    """
+    plan: list[tuple[str, str, str]] = []
+    for en_field, zh_field in _PROMPT_FIELD_PAIRS:
+        source_field, target_field = (
+            (en_field, zh_field) if target_lang == "zh" else (zh_field, en_field)
+        )
+        text = (resource.get(source_field) or "").strip()
+        if text:
+            plan.append((source_field, target_field, text))
+    return plan
+
+
 router = APIRouter(prefix="/resources", dependencies=[Depends(scoped_request)])
 
 
@@ -64,12 +91,10 @@ async def translate_gen_prompt(
     if not await check_media_access(resource_id, auth.user_id, None):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    source_field = "gen_prompt" if data.target_lang == "zh" else "gen_prompt_zh"
-    target_field = "gen_prompt_zh" if data.target_lang == "zh" else "gen_prompt"
-    source_text = (resource.get(source_field) or "").strip()
-    if not source_text:
+    plan = build_translate_plan(resource, data.target_lang)
+    if not plan:
         raise HTTPException(
-            status_code=400, detail=f"No {source_field} to translate from"
+            status_code=400, detail="No prompt text to translate from"
         )
 
     try:
@@ -81,21 +106,23 @@ async def translate_gen_prompt(
             provider_config=provider_config,
             agent_slug=agent_slug,
         )
-        translated = await svc.translate(
-            text=source_text,
-            target_lang=data.target_lang,
-            user_id=auth.user_id,
-            resource_id=str(resource_id),
-        )
+        patch: dict = {}
+        for _source_field, target_field, source_text in plan:
+            translated = await svc.translate(
+                text=source_text,
+                target_lang=data.target_lang,
+                user_id=auth.user_id,
+                resource_id=str(resource_id),
+            )
+            if translated:
+                patch[target_field] = translated
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Translate gen_prompt failed for {resource_id}: {e}")
         raise HTTPException(status_code=500, detail="Translation failed")
 
-    if not translated:
-        # The service logs the underlying cause; surface an actionable
-        # message (most common: no provider key configured for the model).
+    if not patch:
         raise HTTPException(
             status_code=502,
             detail=(
@@ -104,12 +131,14 @@ async def translate_gen_prompt(
             ),
         )
 
-    updated = await repo.update_resource(resource_id, {target_field: translated})
+    updated = await repo.update_resource(resource_id, patch)
     return {
         "success": True,
         "data": {
             "gen_prompt": (updated or {}).get("gen_prompt"),
             "gen_prompt_zh": (updated or {}).get("gen_prompt_zh"),
+            "gen_prompt_negative": (updated or {}).get("gen_prompt_negative"),
+            "gen_prompt_negative_zh": (updated or {}).get("gen_prompt_negative_zh"),
         },
     }
 
