@@ -585,8 +585,14 @@ docker exec nous-db psql -U postgres -p 55434 -d postgres -c \
   ```
 - **`env_file` 改动必须 `docker compose up -d` 重建容器**，`docker restart` 不会重读。同理 compose 的 service/env/volume/ports 改动也必须 `up -d`。
 - **self-hosted runner 会僵死**。网络抖动导致 session 失效后 runner 不会自愈（日志里刷 `broker.actions.githubusercontent.com` 500 或 `unexpected EOF`），GitHub 侧显示 `offline` 而进程还活着。修：`sudo systemctl restart actions.runner.iocrazy-nous-app.gpu-runner.service`。查状态：`gh api /repos/iocrazy/nous-app/actions/runners`。
-- **托管 runner 依赖账户付款正常**。付款失败时所有 `ubuntu-latest` job 会在 2 秒内 failure 且**零步骤执行**（`runner_name` 为空），annotation 里写着 `recent account payments have failed`。此时 `CI`/`actionlint`/`pr-behind-check` 全红、前端链也发不出去，但 **self-hosted 的后端链不受影响**（不计费）。切 public 不解决此问题。
-- **`pr-behind-check.yml` 是托管 runner**，所以上面那种情况下"落后 master ≥30 commits 拒绝 merge"这道闸门是失效的，落后检测只能靠本地 `bash scripts/branch-health.sh`。
+- **托管 runner 依赖账户付款正常**。付款失败时所有 `ubuntu-latest` job 会在 2 秒内 failure 且**零步骤执行**（`runner_name` 为空），annotation 里写着 `recent account payments have failed`。此时 `CI`/`actionlint`/`pr-behind-check` 全红、前端链也发不出去，但 **self-hosted 的后端链不受影响**（不计费）。
+  **判别法**：`gh api repos/iocrazy/nous-app/actions/runs/<id>/jobs --jq '.jobs[] | "\(.name) runner=\(.runner_name) steps=\(.steps|length)"'` —— `runner` 为空 + `steps=0` 就是这种假红，不是代码问题。
+  **切 public 是解**（2026-07-26 实测：private 下重跑两轮都被拦，切 public 后立刻拿到真实 runner，全套 6 分钟跑绿）。但 ⚠️ **repo 会自己弹回 private**（免费额度用尽时 GitHub 强制回退，2026-05-29 一天触发 5 次，见 [[reference_github_repo_visibility_revert]]），所以"CI 突然又假红"要先复查 `gh repo view --json visibility`。
+- **`pr-behind-check.yml` 两档行为不同，别一概而论**（2026-07-26 查清）：
+  - **≥30 硬拒绝档是好的** —— 只用 `echo ::error:: + exit 1`，不调 GitHub API，不依赖写权限。
+  - **≥15 软警告档曾长期是坏的** —— 它用 `peter-evans/create-or-update-comment` 发 PR 评论（写操作），但仓库 `default_workflow_permissions` 是 `read` 且该 workflow 没声明 `permissions:`，于是 403 `Resource not accessible by integration`，把提醒变成红 CI。因为触发条件是 `15 ≤ behind < 30`、平时 PR 都更新，这一步长期被 skip，所以从没成功过一次也没人发现。已加 job 级 `permissions: pull-requests: write` 修复（不动仓库全局默认，按需提权更安全）。
+  - 顺带修了 `if:` 里的字符串比较（step output 恒为字符串，`>= '15'` 边界会骗人），改用 `fromJSON()` 强制数字比较。
+  - 托管 runner 不可用时两档都发不出，落后检测只能靠本地 `bash scripts/branch-health.sh`。
 
 ### 多机协作（gpupc + Mac mini）
 

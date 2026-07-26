@@ -18,6 +18,20 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # 仓库默认 workflow token 是只读的
+    # (`default_workflow_permissions: read`)，而「软警告」那一步要往 PR
+    # 发评论 = 写操作。缺这个块会拿 403
+    # `Resource not accessible by integration`，把一个本该只是提醒的
+    # 步骤变成红 CI —— 2026-07-26 在 PR #1572 上实测到。
+    #
+    # 为什么这个 bug 一直没被发现：发评论那步的条件是
+    # `15 <= behind < 30`，平时 PR 都比这新，整步被 skip。也就是说这道
+    # 闸门的「软警告」档从来没成功过一次。
+    #
+    # 只在此 job 提权，不改仓库全局默认（保持全局只读更安全）。
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,8 +47,12 @@ jobs:
           echo "ahead=$AHEAD" >> "$GITHUB_OUTPUT"
           echo "PR is $AHEAD ahead, $BEHIND behind master"
 
+      # ⚠️ 用 fromJSON() 强制数字比较。step output 恒为字符串，直接写
+      # `>= '15'` 是字符串比较，边界会骗人（例如 '9' >= '15' 为真）。
       - name: Soft warning (>= 15 behind)
-        if: steps.counts.outputs.behind >= '15' && steps.counts.outputs.behind < '30'
+        if: >-
+          fromJSON(steps.counts.outputs.behind) >= 15 &&
+          fromJSON(steps.counts.outputs.behind) < 30
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.pull_request.number }}
@@ -50,8 +68,10 @@ jobs:
 
             (Hard limit kicks in at 30.)
 
+      # 这一档只用 echo + exit 1，不调 GitHub API，所以不依赖写权限 ——
+      # 上面 403 期间它仍然是有效的（区别于软警告档）。
       - name: Hard fail (>= 30 behind)
-        if: steps.counts.outputs.behind >= '30'
+        if: fromJSON(steps.counts.outputs.behind) >= 30
         run: |
           echo "::error::PR is ${{ steps.counts.outputs.behind }} commits behind master."
           echo "::error::Rebase required before merge: git fetch origin && git rebase origin/master && git push --force-with-lease"
