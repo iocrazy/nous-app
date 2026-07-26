@@ -473,6 +473,12 @@
       "merge": "合并",
       "merging": "合并中…"
     },
+    "promptTriggerTags": {
+      "title": "Prompt 触发标签",
+      "hint": "带这些标签的素材会显示 Prompt 面板和卡片角标。添加 prompt 时会自动打上第一个标签。",
+      "add": "添加标签",
+      "pick": "选择标签…"
+    },
     "theme": {
       "label": "主题",
       "system": "跟随系统",
