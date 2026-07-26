@@ -23,4 +23,27 @@ describe('PromptBadge', () => {
     expect(screen.getByText(/masterpiece, 1girl/)).toBeTruthy();
     expect(screen.getByText(/lowres/)).toBeTruthy();
   });
+
+  it('popover anchors left when shiftLeft is true', () => {
+    const { container } = render(
+      <PromptBadge resource={res()} shiftLeft={true} />
+    );
+    fireEvent.mouseEnter(screen.getByText('Prompt'));
+    // Find the popover container div
+    const popoverDiv = container.querySelector('.w-56.bg-ink-950');
+    expect(popoverDiv?.className).toMatch(/left-0/);
+    expect(popoverDiv?.className).not.toMatch(/right-0/);
+  });
+
+  it('negative-only resource does not render empty positive paragraph', () => {
+    const { container } = render(
+      <PromptBadge resource={res({ gen_prompt: null, gen_prompt_negative: 'lowres' })} />
+    );
+    fireEvent.mouseEnter(screen.getByText('Prompt'));
+    // Should show negative text
+    expect(screen.getByText(/lowres/)).toBeTruthy();
+    // Should NOT render an empty positive paragraph
+    const positiveParagraph = container.querySelector('p.line-clamp-3');
+    expect(positiveParagraph).toBeNull();
+  });
 });

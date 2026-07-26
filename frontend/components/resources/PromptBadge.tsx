@@ -25,7 +25,7 @@ export function PromptBadge({ resource, shiftLeft = false }: { resource: Resourc
       onClick={(e) => e.stopPropagation()}
     >
       {open && (
-        <div className="absolute bottom-full mb-1.5 right-0 w-56 bg-ink-950 border border-ink-700 rounded-lg shadow-xl p-2.5 z-20 cursor-default">
+        <div className={`absolute bottom-full mb-1.5 ${shiftLeft ? 'left-0' : 'right-0'} w-56 bg-ink-950 border border-ink-700 rounded-lg shadow-xl p-2.5 z-20 cursor-default`}>
           <div className="flex items-center justify-between">
             <span className="text-[9px] text-ink-500 uppercase tracking-widest">Prompt</span>
             <button
@@ -35,7 +35,9 @@ export function PromptBadge({ resource, shiftLeft = false }: { resource: Resourc
               <Copy size={10} /> Copy
             </button>
           </div>
-          <p className="mt-0.5 font-mono text-[10px] leading-relaxed text-ink-300 line-clamp-3 break-all">{positive}</p>
+          {positive && (
+            <p className="mt-0.5 font-mono text-[10px] leading-relaxed text-ink-300 line-clamp-3 break-all">{positive}</p>
+          )}
           {negative && (
             <>
               <span className="mt-1.5 block text-[9px] text-red-400/85 uppercase tracking-widest">Negative</span>
