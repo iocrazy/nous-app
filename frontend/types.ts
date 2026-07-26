@@ -341,6 +341,8 @@ export interface Resource {
   notes: string | null;
   gen_prompt: string | null;
   gen_prompt_zh?: string | null;
+  gen_prompt_negative?: string | null;
+  gen_prompt_negative_zh?: string | null;
   url: string | null;
   rating: number; // 0-5
   // Download status fields used to live here as mirrors of parsed_media;
@@ -442,6 +444,7 @@ export interface Tag {
   group_name?: string | null;
   group_id?: string | null;
   enabled?: boolean;
+  prompt_trigger?: boolean;
   sort_order?: number;
   user_id?: string;
   video_count?: number;
