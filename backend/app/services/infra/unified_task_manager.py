@@ -729,7 +729,9 @@ class UnifiedTaskManager:
             if dedup_key:
                 await asyncio.to_thread(self.release_lock, dedup_key)
         except Exception as e:
-            logger.warning(f"[TaskManager] dedup lock release failed for {task_id}: {e}")
+            logger.warning(
+                f"[TaskManager] dedup lock release failed for {task_id}: {e}"
+            )
 
     # ── Lifecycle: fail ───────────────────────────────────────────────
 

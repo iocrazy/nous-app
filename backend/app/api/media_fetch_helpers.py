@@ -425,7 +425,9 @@ async def handle_media_fetch_dispatch(
         # WARNING, not DEBUG: the probe failing is non-fatal for the request
         # but means the dedup short-circuit is dead — worth seeing in prod
         # logs rather than discovering months later.
-        logger.warning(f"[L2/Dedup] probe failed (non-fatal, short-circuit skipped): {e}")
+        logger.warning(
+            f"[L2/Dedup] probe failed (non-fatal, short-circuit skipped): {e}"
+        )
 
     dedup_key = None
     try:
