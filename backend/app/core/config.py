@@ -167,6 +167,15 @@ class Settings(BaseSettings):
         "our SUPABASE_URL is a LAN address, and a LAN-based signed URL "
         "silently breaks vision for object-store images.",
     )
+    HLS_OBJECT_STORE: bool = Field(
+        default=False,
+        description="Write HLS transcode output (playlists + segments) to the "
+        "object store instead of the local filesystem. Deliberately SEPARATE "
+        "from where the SOURCE video lives: a filesystem source may still "
+        "publish its HLS to the store, and vice versa. Off by default so "
+        "existing deployments keep the on-disk layout until the backfill has "
+        "run — playback reads the row's own hls_path, so both shapes coexist.",
+    )
 
     # ============================================
     # 下载设置

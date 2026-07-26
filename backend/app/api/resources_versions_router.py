@@ -20,7 +20,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 
 from app.core.deps import AuthDep
@@ -266,22 +266,14 @@ async def serve_hls_file(
             raise HTTPException(status_code=404, detail="HLS not available")
 
         from app.core.config import settings
+        from app.services.library.media_storage import (
+            ObjectStore,
+            resolve_media_source,
+        )
 
-        # hls_path points to master.m3u8, derive the hls directory
-        hls_dir = Path(settings.DOWNLOAD_PATH) / Path(hls_path).parent
-        target = hls_dir / path
-
-        # Security: ensure resolved path is within hls_dir
-        try:
-            target.resolve().relative_to(hls_dir.resolve())
-        except ValueError:
-            raise HTTPException(status_code=403, detail="Access denied")
-
-        if not target.exists():
-            raise HTTPException(status_code=404, detail="HLS file not found")
-
-        # Determine content type
-        suffix = target.suffix.lower()
+        # Content type / caching depend only on the requested suffix, so they
+        # are the same for both storage shapes.
+        suffix = Path(path).suffix.lower()
         content_types = {
             ".m3u8": "application/vnd.apple.mpegurl",
             ".ts": "video/mp2t",
@@ -303,6 +295,51 @@ async def serve_hls_file(
             "Access-Control-Allow-Methods": "GET, OPTIONS",
             "Access-Control-Allow-Headers": "Range, Origin, Accept, Authorization",
         }
+
+        loc = resolve_media_source(hls_path)
+
+        if loc.is_object_store:
+            # Object-store rows: the master's key prefix owns the whole tree,
+            # so `path` (which the m3u8 gave the player as a bare relative
+            # reference) maps straight onto a sibling key.
+            #
+            # Deliberately proxied, NOT a 302 to a signed URL: m3u8 entries are
+            # relative, so a redirect would make the player resolve the next
+            # hop against the signed URL — losing the signature and mangling
+            # the path. Proxying keeps every hop on this endpoint, which is
+            # also what keeps the frontend and the playlist bytes unchanged.
+            key_prefix = loc.key.rsplit("/", 1)[0] if "/" in loc.key else ""
+            rel = path.strip("/")
+            # Same containment guarantee as the filesystem branch: a crafted
+            # `..` must not walk out of this version's prefix.
+            if not rel or ".." in rel.split("/"):
+                raise HTTPException(status_code=403, detail="Access denied")
+            target_key = f"{key_prefix}/{rel}" if key_prefix else rel
+
+            store = ObjectStore(loc.bucket)
+            try:
+                await store.get_size(target_key)  # HEAD → 404 before streaming
+            except Exception:
+                raise HTTPException(status_code=404, detail="HLS file not found")
+
+            return StreamingResponse(
+                store.get_stream(target_key),
+                media_type=media_type,
+                headers=headers,
+            )
+
+        # hls_path points to master.m3u8, derive the hls directory
+        hls_dir = Path(settings.DOWNLOAD_PATH) / Path(hls_path).parent
+        target = hls_dir / path
+
+        # Security: ensure resolved path is within hls_dir
+        try:
+            target.resolve().relative_to(hls_dir.resolve())
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        if not target.exists():
+            raise HTTPException(status_code=404, detail="HLS file not found")
 
         return FileResponse(path=str(target), media_type=media_type, headers=headers)
     except HTTPException:
