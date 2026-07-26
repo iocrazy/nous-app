@@ -285,6 +285,17 @@ class WorkflowTemplateNodes(Base):
     deliverable_label: Mapped[str | None] = mapped_column(Text)
     source_stage_id: Mapped[int | None] = mapped_column(BigInteger)
     duration_days: Mapped[int | None] = mapped_column(Integer)
+    completion_policy: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'owner'")
+    )
+    events: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text(
+            '\'{"notify_on_arrival": true, "notify_on_complete": false, '
+            '"suggest_agent_run": false}\'::jsonb'
+        ),
+    )
 
 
 class WorkflowTemplateNodeMembers(Base):
@@ -395,6 +406,17 @@ class ProjectStageNodes(Base):
     # The project_folders row that holds this node's filed deliverables (mig
     # 383). Backfilled lazily on arrival; null until a folder is materialized.
     folder_id: Mapped[int | None] = mapped_column(BigInteger)
+    completion_policy: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'owner'")
+    )
+    events: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text(
+            '\'{"notify_on_arrival": true, "notify_on_complete": false, '
+            '"suggest_agent_run": false}\'::jsonb'
+        ),
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )

@@ -12,7 +12,7 @@ from datetime import date
 from typing import Any, List, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Soft guardrails (spec §3): keep a template from ballooning and a team from
 # hoarding templates. Both surface as 422.
@@ -34,6 +34,20 @@ class TemplateNodeMemberIn(BaseModel):
         return self
 
 
+class WorkflowNodeEvents(BaseModel):
+    """The three configurable event toggles on a node (mig 386). The two
+    built-in events (arrival → derived issue, completion → close issue) stay
+    hardcoded (spec §4, M3 territory); this only gates their notifications.
+    Unknown keys are dropped rather than rejected — forward-compatible with
+    a future toggle added here before the frontend picks it up."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    notify_on_arrival: bool = True
+    notify_on_complete: bool = False
+    suggest_agent_run: bool = False
+
+
 class TemplateNodeIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     sort_order: int
@@ -47,6 +61,10 @@ class TemplateNodeIn(BaseModel):
     # Snowflake ids ride as strings at the API boundary (bigIntSafeFetch).
     source_stage_id: Optional[str] = None
     duration_days: Optional[int] = None
+    # Flow Rules / Events (mig 386) — template-layer only; instances copy these
+    # at instantiation and do not open them for in-place tweaks (spec §5).
+    completion_policy: Literal["owner", "any_editor"] = "owner"
+    events: WorkflowNodeEvents = Field(default_factory=WorkflowNodeEvents)
     members: List[TemplateNodeMemberIn] = Field(default_factory=list)
 
     @model_validator(mode="after")
