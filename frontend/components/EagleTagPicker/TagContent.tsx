@@ -118,7 +118,10 @@ export const TagContent: React.FC<TagContentProps> = ({
         return next;
       });
 
-      // Call API to update
+      // Call API to update. The optimistic override is kept on success —
+      // dropping it here would revert the UI to the parent's stale prop
+      // until the next refetch. (Known trade-off: an external change to
+      // this tag from another tab stays masked until this picker remounts.)
       await updateTag(tagId, { prompt_trigger: newPromptTrigger });
     } catch (err) {
       console.error('Failed to update tag prompt_trigger:', err);
@@ -206,10 +209,10 @@ export const TagContent: React.FC<TagContentProps> = ({
               <button
                 onClick={() => { handleTogglePromptTrigger(contextMenu.tagId); }}
                 className={`w-full px-3 py-1.5 text-xs text-left hover:bg-ink-800 flex items-center gap-2 ${
-                  tag.prompt_trigger ? 'text-green-500' : 'text-ink-300'
+                  tag.prompt_trigger ? 'text-[var(--accent-text)]' : 'text-ink-300'
                 }`}
               >
-                <Sparkles size={10} className={tag.prompt_trigger ? 'fill-green-500' : ''} />
+                <Sparkles size={10} className={tag.prompt_trigger ? 'fill-[var(--accent-text)]' : ''} />
                 {tag.prompt_trigger && <span className="w-2">✓</span>}
                 Show Prompt Panel
               </button>

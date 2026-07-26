@@ -30,6 +30,7 @@ const baseProps = {
     sort: 'name' as const,
     showStarred: false,
     showRecently: false,
+    showRecommended: false,
     showCount: false,
   },
   selectedGroup: null,
@@ -89,7 +90,7 @@ describe('TagContent prompt trigger context menu', () => {
 
     // Menu item should have checkmark class or icon
     const menuItem = screen.getByText('Show Prompt Panel').closest('button');
-    expect(menuItem).toHaveClass('text-green-500');
+    expect(menuItem).toHaveClass('text-[var(--accent-text)]');
   });
 
   it('calls updateTag with toggled prompt_trigger when clicked', async () => {
