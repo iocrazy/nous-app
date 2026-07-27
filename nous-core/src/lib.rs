@@ -17,17 +17,22 @@ use tokio::runtime::Runtime;
 use ffmpeg::FfmpegWrapper;
 use hls::HlsSegmenter;
 
-/// 进程级共享的 multi-thread tokio runtime。
+/// 进程级共享的 multi-thread tokio runtime，`fetch_to_file` 与 `put_file`
+/// 共用同一个实例。
 ///
 /// `put_file` 在 HLS 发布场景下会被高频调用（一次发布 ~300 个 segment），
 /// 每次都 `Runtime::new()` 会在 48 核机器上起 48 个 worker 线程 —— 300
 /// 次调用就是 14,400 次线程创建，仅线程 churn 就有几百毫秒开销。
+/// `fetch_to_file` 原本每次调用单独起一个 runtime——没有正当理由维持两套
+/// 策略（隔离性论点不成立：panic 边界本来就是每次 Python 调用，两种写法
+/// 后果一样），统一成一套更简单。
 ///
 /// 用 `OnceLock` 懒加载单例代替。**不要**在外面包一层 `Mutex`：
 /// multi-thread runtime 本身支持多个调用线程各自 `block_on` 不同的
 /// future 并被 worker 池并行调度；加锁会把这些调用串行化，
 /// 且不会被死锁类测试发现（回归会体现为吞吐下降，不是挂死）。
-/// 并发释放 GIL 由 `test_put_file_releases_gil` 显式计时验证。
+/// 并发释放 GIL + runtime 未被隐性串行化，由 `test_put_file_releases_gil`
+/// 和 `test_fetch_releases_gil` 各自显式计时验证。
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
 fn shared_runtime() -> &'static Runtime {
@@ -185,9 +190,8 @@ fn fetch_to_file(
     dst: &str,
 ) -> PyResult<u64> {
     py.allow_threads(|| {
-        let rt = tokio::runtime::Runtime::new()
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-        rt.block_on(http_io::fetch_to_file(url, headers, dst))
+        shared_runtime()
+            .block_on(http_io::fetch_to_file(url, headers, dst))
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     })
 }
