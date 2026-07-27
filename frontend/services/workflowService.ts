@@ -42,12 +42,18 @@ export const DEFAULT_EVENTS: WorkflowNodeEvents = {
   notify_on_arrival: true,
   notify_on_complete: false,
   suggest_agent_run: false,
+  // mig 389 (M3 PR-H): arrival hook flag + the (unimplemented, structure-only)
+  // completion hook — see WorkflowNodeEvents in types.ts.
+  prepare_agent_run: false,
+  on_complete_workflow: null,
 };
 
 const normalizeEvents = (events: Partial<WorkflowNodeEvents> | null | undefined): WorkflowNodeEvents => ({
   notify_on_arrival: events?.notify_on_arrival ?? DEFAULT_EVENTS.notify_on_arrival,
   notify_on_complete: events?.notify_on_complete ?? DEFAULT_EVENTS.notify_on_complete,
   suggest_agent_run: events?.suggest_agent_run ?? DEFAULT_EVENTS.suggest_agent_run,
+  prepare_agent_run: events?.prepare_agent_run ?? DEFAULT_EVENTS.prepare_agent_run,
+  on_complete_workflow: events?.on_complete_workflow ?? DEFAULT_EVENTS.on_complete_workflow,
 });
 
 /** Fill in `completion_policy`/`events` on a template node fetched from a
@@ -75,6 +81,11 @@ const normalizeInstanceNode = (
   ...node,
   completion_policy: node.completion_policy ?? DEFAULT_COMPLETION_POLICY,
   events: normalizeEvents(node.events),
+  // mig 389 (M3 PR-H3): tolerate a row that predates the metadata column (or
+  // one the stage hook never touched) — the Run now chip reads
+  // `node.metadata?.run_prepared_at` and must never see `undefined` blow up
+  // into a crash, just an absent key.
+  metadata: node.metadata ?? {},
 });
 
 // ============================================

@@ -858,6 +858,16 @@ const EventsTab: React.FC<{
           checked={value.suggest_agent_run}
           onChange={(v) => onChange({ ...value, suggest_agent_run: v })}
         />
+        {/* mig 389 (M3 PR-H): arrival hook that pre-fills (never auto-starts)
+            an agent run — flips the E3 suggest chip into a solid "Run now"
+            button once it fires (H3, CurrentNodeCard/WorkspaceStageBoard).
+            `on_complete_workflow` intentionally has no toggle here — spec
+            only builds the schema structure, not the UI, for M3. */}
+        <Toggle
+          label={t('projects.workflow.events.prepareAgentRun')}
+          checked={value.prepare_agent_run ?? false}
+          onChange={(v) => onChange({ ...value, prepare_agent_run: v })}
+        />
       </div>
       <RuleRow
         title={t('projects.workflow.events.builtinTitle')}

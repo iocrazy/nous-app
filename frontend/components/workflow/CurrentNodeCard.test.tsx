@@ -139,3 +139,76 @@ describe('CurrentNodeCard — suggest-agent-run chip', () => {
     expect(onOpenTodolist).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('CurrentNodeCard — Run now chip (M3 Task H3)', () => {
+  it('renders the solid Run now button, not the suggest text chip, once metadata.run_prepared_at is set', () => {
+    renderCard({
+      owner_agent_id: 'agent-1',
+      events: {
+        notify_on_arrival: false,
+        notify_on_complete: false,
+        suggest_agent_run: true,
+        prepare_agent_run: true,
+      },
+      metadata: { run_prepared_at: '2026-07-27T00:00:00+00:00' },
+    });
+    expect(screen.getByTestId('workflow-run-now-chip')).toHaveTextContent('Run now');
+    expect(screen.queryByTestId('workflow-suggest-agent-chip')).toBeNull();
+  });
+
+  it('keeps the plain suggest text chip when suggest_agent_run is on but the hook has not fired yet (no run_prepared_at)', () => {
+    renderCard({
+      owner_agent_id: 'agent-1',
+      events: {
+        notify_on_arrival: false,
+        notify_on_complete: false,
+        suggest_agent_run: true,
+        prepare_agent_run: true,
+      },
+      // metadata omitted entirely — normalizeInstanceNode would default this to
+      // {} in real data; the raw node() fixture leaves it undefined, which the
+      // component must tolerate the same way (`node.metadata?.run_prepared_at`).
+    });
+    expect(screen.getByTestId('workflow-suggest-agent-chip')).toHaveTextContent(
+      'Suggested: run Script Bot',
+    );
+    expect(screen.queryByTestId('workflow-run-now-chip')).toBeNull();
+  });
+
+  it('never renders the Run now button when suggest_agent_run is off, even with run_prepared_at set', () => {
+    // Guards against a hook race: metadata could in principle still carry a
+    // stale run_prepared_at from before the template toggle was flipped off —
+    // the base gate (suggest_agent_run && owner_agent_id) must still win.
+    renderCard({
+      owner_agent_id: 'agent-1',
+      events: {
+        notify_on_arrival: false,
+        notify_on_complete: false,
+        suggest_agent_run: false,
+        prepare_agent_run: true,
+      },
+      metadata: { run_prepared_at: '2026-07-27T00:00:00+00:00' },
+    });
+    expect(screen.queryByTestId('workflow-run-now-chip')).toBeNull();
+    expect(screen.queryByTestId('workflow-suggest-agent-chip')).toBeNull();
+  });
+
+  it('clicking Run now fires onOpenTodolist — CurrentNodeCard has no mirror-issue id to open DispatchConfirmDialog directly, so it routes through the same handler as Open in Todolist (never calls dispatch itself)', () => {
+    const onOpenTodolist = vi.fn();
+    renderCard(
+      {
+        owner_agent_id: 'agent-1',
+        events: {
+          notify_on_arrival: false,
+          notify_on_complete: false,
+          suggest_agent_run: true,
+          prepare_agent_run: true,
+        },
+        metadata: { run_prepared_at: '2026-07-27T00:00:00+00:00' },
+      },
+      { onOpenTodolist },
+    );
+    fireEvent.click(screen.getByTestId('workflow-run-now-chip'));
+    expect(onOpenTodolist).toHaveBeenCalledTimes(1);
+  });
+});

@@ -1039,6 +1039,16 @@ export interface WorkflowNodeEvents {
   notify_on_arrival: boolean;
   notify_on_complete: boolean;
   suggest_agent_run: boolean;
+  /** M3 PR-H1/H3 (mig 389): arrival hook that pre-fills (never auto-launches)
+   * an agent run — flips the suggest chip into a solid "Run now" button once
+   * the hook has actually fired (see `ProjectStageNode.metadata.run_prepared_at`
+   * below). Optional (not `?:` on the other two booleans above) so pre-mig-389
+   * literals across the codebase keep compiling untouched; `normalizeEvents`
+   * (workflowService.ts) still fills a real `false` once data flows through it. */
+  prepare_agent_run?: boolean;
+  /** Reserved for a future "chain into another workflow on completion" hook
+   * (M3.5+) — never surfaced in the Events tab UI; always `null` today. */
+  on_complete_workflow?: string | null;
 }
 
 /** One node in a team workflow template (`workflow_template_nodes`). */
@@ -1136,6 +1146,12 @@ export interface ProjectStageNode {
   members: WorkflowMemberRef[];
   completion_policy: WorkflowCompletionPolicy;
   events: WorkflowNodeEvents;
+  /** Instance-node JSONB decoration (mig 389). Today the only key written is
+   * `run_prepared_at` — an ISO timestamp the `stage_hook_dispatch` workflow
+   * stamps when `events.prepare_agent_run` fires on arrival. Optional/tolerant
+   * of a missing key entirely (pre-mig-389 rows, or a node the hook never
+   * touched because it has no agent owner). */
+  metadata?: { run_prepared_at?: string };
 }
 
 /** GET /projects/{id}/workflow payload. */

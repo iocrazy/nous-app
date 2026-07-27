@@ -1722,6 +1722,7 @@
       "schedule": "排期",
       "setSchedule": "设置排期",
       "suggestAgentRun": "建议运行 {{agentName}}",
+      "runNow": "立即运行",
       "deliverable": "交付物",
       "openInTodolist": "在待办中打开",
       "completeStage": "完成阶段",
@@ -1802,6 +1803,7 @@
         "notifyOnArrival": "到达时通知",
         "notifyOnComplete": "完成时通知",
         "suggestAgentRun": "到达时建议启动 Agent",
+        "prepareAgentRun": "到达时预备 Agent 运行",
         "builtinTitle": "内置行为",
         "builtinBody": "到达时会派生镜像任务，完成时会关闭它。不会自动启动任何 Agent。"
       },

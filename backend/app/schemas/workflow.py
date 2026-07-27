@@ -9,7 +9,7 @@ list of user-or-agent refs. Guardrails: a template may hold at most
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -160,6 +160,17 @@ class NodeOut(BaseModel):
     completion_policy: Literal["owner", "any_editor"] = "owner"
     events: WorkflowNodeEvents = Field(default_factory=WorkflowNodeEvents)
     members: List[NodeMemberOut] = Field(default_factory=list)
+    # mig 389 (M3 PR-H1/H3): node-level metadata JSONB — today the only key
+    # written is ``run_prepared_at`` (ISO timestamp, set by the
+    # stage_hook_dispatch workflow when events.prepare_agent_run fires on
+    # arrival). ProjectStageNodesRepository._node_row already returns this key
+    # (obj.metadata_), but without a declared field here pydantic silently
+    # drops it converting the row dict → NodeOut — the exact same shape of bug
+    # completion_policy/events hit before (see the regression test above this
+    # one in tests/test_workflow_flow_rules.py). Default empty dict so a
+    # pre-mig-389 row (or NodeOut() built with a bare {} row) never crashes a
+    # consumer reading ``node.metadata.get("run_prepared_at")``.
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ProjectWorkflowOut(BaseModel):

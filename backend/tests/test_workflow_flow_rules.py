@@ -584,6 +584,10 @@ async def test_get_project_workflow_response_carries_completion_policy_and_event
     assert node_out.events.suggest_agent_run is True
     assert node_out.events.notify_on_arrival is False
     assert node_out.events.notify_on_complete is True
+    # mig 389 (M3 PR-H3): the fixture's node_row predates the metadata column
+    # entirely (no "metadata" key at all) — NodeOut must default to {} rather
+    # than raising, so a pre-mig-389 row never breaks this endpoint.
+    assert node_out.metadata == {}
 
     # Pin the actual response JSON shape too — what the frontend receives.
     payload = result.model_dump()
@@ -598,6 +602,77 @@ async def test_get_project_workflow_response_carries_completion_policy_and_event
         # per-field, per the brief's self-review note).
         "prepare_agent_run": False,
         "on_complete_workflow": None,
+    }
+    assert payload["nodes"][0]["metadata"] == {}
+
+
+@pytest.mark.asyncio
+async def test_get_project_workflow_response_carries_metadata_run_prepared_at(
+    monkeypatch,
+):
+    """Regression pin, same shape as the completion_policy/events test above:
+    ``NodeOut`` initially had no ``metadata`` field, so pydantic would silently
+    drop ``ProjectStageNodesRepository._node_row``'s ``"metadata": obj.metadata_``
+    entry converting the row dict → NodeOut, and the Run now chip (H3) would
+    never see ``run_prepared_at`` even though the repository read path already
+    returns it (H1's ``set_node_metadata`` writer)."""
+    node_row = {
+        "id": "1",
+        "project_id": "100",
+        "source_template_node_id": "10",
+        "legacy_stage_id": None,
+        "name": "Script",
+        "sort_order": 1,
+        "parallel_group": None,
+        "status": "in_progress",
+        "owner_user_id": None,
+        "owner_agent_id": "agent-1",
+        "planned_start": None,
+        "planned_due": None,
+        "review_required": False,
+        "deliverable_required": False,
+        "deliverable_label": None,
+        "skipped": False,
+        "folder_id": None,
+        "completion_policy": "owner",
+        "events": {"suggest_agent_run": True, "prepare_agent_run": True},
+        "metadata": {"run_prepared_at": "2026-07-27T00:00:00+00:00"},
+        "members": [],
+    }
+
+    class _NodesRepo:
+        async def list_nodes(self, project_id):
+            return [node_row]
+
+        async def count_running_agent_runs(self, project_id):
+            return 0
+
+    class _ProjectsRepo:
+        async def get_project_by_id(self, project_id):
+            return {"current_node_id": None}
+
+        async def get_project_files(self, project_id):
+            return []
+
+    monkeypatch.setattr(
+        "app.repositories.project_stage_nodes_repository."
+        "get_project_stage_nodes_repository",
+        lambda: _NodesRepo(),
+    )
+    monkeypatch.setattr(
+        "app.repositories.projects_repository.get_projects_repository",
+        lambda: _ProjectsRepo(),
+    )
+
+    projects_router_mod = importlib.import_module("app.api.projects_router")
+    result = await projects_router_mod.get_project_workflow("100", _Auth(_OTHER), None)
+
+    node_out = result.nodes[0]
+    assert node_out.metadata == {"run_prepared_at": "2026-07-27T00:00:00+00:00"}
+
+    payload = result.model_dump()
+    assert payload["nodes"][0]["metadata"] == {
+        "run_prepared_at": "2026-07-27T00:00:00+00:00"
     }
 
 
