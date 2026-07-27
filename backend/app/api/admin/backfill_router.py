@@ -28,9 +28,6 @@ from app.workflows.backfill_normalize_personal_project_team_ids import (
 from app.workflows.backfill_project_stage_issue_team_ids import (
     backfill_project_stage_issue_team_ids_workflow,
 )
-from app.workflows.backfill_project_stage_issues import (
-    backfill_project_stage_issues_workflow,
-)
 
 router = APIRouter()
 
@@ -38,7 +35,6 @@ router = APIRouter()
 # never drift from what actually exists.
 _BACKFILLS: dict[str, Callable[..., Any]] = {
     "issue_scope": backfill_issue_scope_workflow,
-    "project_stage_issues": backfill_project_stage_issues_workflow,
     "project_stage_issue_team_ids": backfill_project_stage_issue_team_ids_workflow,
     "normalize_personal_project_team_ids": (
         backfill_normalize_personal_project_team_ids_workflow

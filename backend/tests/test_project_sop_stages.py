@@ -144,129 +144,10 @@ async def test_history_passes_project_id(engine_calls: dict) -> None:
 
 
 # ============================================================
-# set_current_stage — transactional logic (engine.begin mocked)
+# set_current_stage was retired in M2 PR-G (current_stage_id end-to-end
+# retirement) — the transactional tests that used to live here are gone
+# along with the method. See task-G1-report.md.
 # ============================================================
-
-
-class FakeConn:
-    """Minimal async context-manager conn stub for engine.begin().
-
-    ``rows`` is an ordered queue of return values.  Each ``execute`` call pops
-    from the front.  Pass ``None`` as a placeholder for statements whose result
-    is never inspected (UPDATE / INSERT without RETURNING).
-    """
-
-    def __init__(self, rows: list) -> None:
-        self._rows = list(rows)
-        self.executed: list[dict] = []
-
-    async def execute(self, stmt, params=None):
-        sql = str(stmt)
-        self.executed.append({"sql": sql, "params": params or {}})
-
-        class _Result:
-            def __init__(self, row):
-                self._row = row
-
-            def mappings(self):
-                return self
-
-            def first(self):
-                if self._row is None:
-                    return None
-                return dict(self._row)
-
-            def scalar(self):
-                return self._row
-
-        row = self._rows.pop(0) if self._rows else None
-        return _Result(row)
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *a):
-        pass
-
-
-class FakeEngine:
-    """Session-scope stand-in: set_current_stage runs its statement sequence
-    on ONE write_scope() session now (same single-transaction semantics as
-    the old get_engine().begin() block). The ``_conn`` name is retained so
-    the assertions below read unchanged."""
-
-    def __init__(self, rows: list) -> None:
-        self._conn = FakeConn(rows)
-
-
-@pytest.fixture
-def fake_engine(monkeypatch: pytest.MonkeyPatch):
-    """Replace write_scope() (and the engine-ready guard) for txn tests."""
-    from contextlib import asynccontextmanager
-
-    def _make(rows):
-        eng = FakeEngine(rows)
-
-        @asynccontextmanager
-        async def _scope():
-            yield eng._conn
-
-        monkeypatch.setattr("app.db.session.write_scope", _scope)
-        monkeypatch.setattr("app.db.engine.get_engine", lambda: object())
-        return eng
-
-    return _make
-
-
-@pytest.mark.asyncio
-async def test_set_current_stage_no_op_when_same_stage(fake_engine) -> None:
-    """Same stage → early return, no INSERT into history."""
-    # SELECT FOR UPDATE returns current_stage_id == target stage_id (42)
-    select_row = {"current_stage_id": 42}
-    eng = fake_engine([select_row])
-    repo = ProjectStagesRepository()
-    result = await repo.set_current_stage(
-        project_id=100, stage_id=42, user_id="00000000-0000-0000-0000-000000000001"
-    )
-    # No-op → returns None
-    assert result is None
-    # Only one SQL executed: the SELECT FOR UPDATE check
-    assert len(eng._conn.executed) == 1
-
-
-@pytest.mark.asyncio
-async def test_set_current_stage_transition_runs_three_writes(fake_engine) -> None:
-    """Different stage → SELECT FOR UPDATE + UPDATE history + INSERT history + UPDATE projects + SELECT stage."""
-    # SELECT FOR UPDATE returns current_stage_id = 10 (different from target 20)
-    select_row = {"current_stage_id": 10}
-    # Stage SELECT at the end of the transaction
-    new_stage_row = {
-        "id": 20,
-        "slug": "script",
-        "name": "Script",
-        "sort_order": 20,
-        "tools_recommended": ["scripts"],
-        "created_at": None,
-        "updated_at": None,
-    }
-    # Rows consumed in order (None = placeholder, result never inspected):
-    #   1. SELECT FOR UPDATE   → select_row
-    #   2. UPDATE history      → None (not inspected)
-    #   3. INSERT history      → None (not inspected)
-    #   4. UPDATE projects     → None (not inspected)
-    #   5. SELECT stage by id  → new_stage_row
-    eng = fake_engine([select_row, None, None, None, new_stage_row])
-    repo = ProjectStagesRepository()
-    result = await repo.set_current_stage(
-        project_id=100, stage_id=20, user_id="00000000-0000-0000-0000-000000000001"
-    )
-    # Should have run 5 SQL statements
-    assert len(eng._conn.executed) >= 4
-    sqls = " ".join(e["sql"] for e in eng._conn.executed)
-    assert "FOR UPDATE" in sqls
-    assert "exited_at" in sqls or "project_stage_history" in sqls
-    assert result is not None
-    assert result["slug"] == "script"
 
 
 # ============================================================
@@ -313,19 +194,12 @@ class FakeStagePub:
             }
         ]
         self.current: dict | None = None
-        self.transition_calls: list = []
 
     async def list_catalog(self):
         return self.catalog
 
     async def get_current(self, project_id: int):
         return self.current
-
-    async def set_current_stage(self, project_id: int, stage_id: int, user_id: str):
-        self.transition_calls.append(
-            {"project_id": project_id, "stage_id": stage_id, "user_id": user_id}
-        )
-        return {"id": str(stage_id), "slug": "planning"}
 
     async def history(self, project_id: int):
         return []
@@ -348,36 +222,3 @@ def test_catalog_endpoint_returns_list(client, fake_stage_repo: FakeStagePub) ->
     assert body["success"] is True
     assert isinstance(body["data"], list)
     assert body["data"][0]["slug"] == "planning"
-
-
-def test_get_current_stage_null_when_unset(
-    client, fake_stage_repo: FakeStagePub
-) -> None:
-    response = client.get("/api/v1/projects/777/current_stage")
-    assert response.status_code == 200
-    assert response.json() == {"success": True, "data": None}
-
-
-def test_put_current_stage_calls_repo(client, fake_stage_repo: FakeStagePub) -> None:
-    response = client.put(
-        "/api/v1/projects/777/current_stage",
-        json={"stage_id": 111},
-    )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["success"] is True
-    call = fake_stage_repo.transition_calls[0]
-    assert call["project_id"] == 777
-    assert call["stage_id"] == 111
-    assert call["user_id"] == "00000000-0000-0000-0000-000000000001"
-
-
-def test_put_invalid_project_id_is_422(client, fake_stage_repo: FakeStagePub) -> None:
-    response = client.get("/api/v1/projects/abc/current_stage")
-    assert response.status_code == 422
-
-    response = client.put(
-        "/api/v1/projects/abc/current_stage",
-        json={"stage_id": 111},
-    )
-    assert response.status_code == 422

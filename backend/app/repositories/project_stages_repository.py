@@ -5,9 +5,14 @@ append-only transition history.
 
 Uses the canonical SQLAlchemy-Core helpers in ``app.db.engine`` directly —
 this table is new, so there is no legacy REST path and no USE_ORM_* dual-track
-to maintain.  The ``set_current_stage`` method needs multiple statements in one
-transaction, so it uses ``get_engine().begin()`` directly instead of the
-single-statement ``execute_returning_one`` helper.
+to maintain.
+
+``set_current_stage`` (the write side of the legacy SOP stage cursor) was
+retired in M2 PR-G (current_stage_id end-to-end retirement) — see
+``docs/superpowers/plans/2026-07-26-project-workflow-m2.md``. The read-side
+methods below (``get_current`` / ``stages_for_projects``) still join on
+``projects.current_stage_id`` and remain in place pending that column's
+removal; they are NOT part of this retirement pass (see task-G1-report.md).
 """
 
 from __future__ import annotations
@@ -44,34 +49,6 @@ _GET_HISTORY_SQL = """
     WHERE psh.project_id = :pid
     ORDER BY psh.entered_at DESC
 """
-
-# SELECT ... FOR UPDATE to lock the projects row inside set_current_stage transaction
-_SELECT_FOR_UPDATE_SQL = """
-    SELECT current_stage_id FROM public.projects
-    WHERE id = :pid FOR UPDATE
-"""
-
-_CLOSE_OPEN_HISTORY_SQL = """
-    UPDATE public.project_stage_history
-    SET exited_at = NOW()
-    WHERE project_id = :pid AND exited_at IS NULL
-"""
-
-_INSERT_HISTORY_SQL = """
-    INSERT INTO public.project_stage_history
-        (project_id, stage_id, transitioned_by)
-    VALUES (:pid, :stage_id, CAST(:user_id AS UUID))
-"""
-
-_UPDATE_PROJECT_STAGE_SQL = """
-    UPDATE public.projects
-    SET current_stage_id = :stage_id
-    WHERE id = :pid
-"""
-
-_GET_STAGE_BY_ID_SQL = (
-    f"SELECT {_CATALOG_COLUMNS} FROM public.project_stages WHERE id = :sid"
-)
 
 # Stage auto-derivation (合一终稿: the stage chip is read-only and the manual
 # advance buttons are gone — the SOP stage follows real output instead).
@@ -335,108 +312,6 @@ class ProjectStagesRepository:
         except Exception as e:  # noqa: BLE001 — enrichment must not sink the list
             logger.error(f"[project_stages] file activity lookup failed: {e}")
             return {}
-
-    async def set_current_stage(
-        self, project_id: int, stage_id: int, user_id: str
-    ) -> Optional[dict[str, Any]]:
-        """Transition the project to a new stage in one transaction.
-
-        Steps (all inside ``engine.begin()``):
-        1. SELECT current_stage_id FOR UPDATE  — concurrency guard.
-        2. If ``current_stage_id == stage_id`` → no-op, return None.
-        3. UPDATE project_stage_history SET exited_at = NOW() WHERE exited_at IS NULL.
-        4. INSERT new open history row.
-        5. UPDATE projects SET current_stage_id.
-        6. Fetch + return the new stage row.
-
-        The partial unique index ``uq_project_stage_history_open`` is the
-        database-level guard against duplicate open rows under concurrent PUTs.
-
-        Raises:
-            ValueError: if ``project_id`` is invalid or ``stage_id`` does not
-                exist in ``project_stages``.
-        """
-        from sqlalchemy import text
-
-        from app.db.engine import get_engine
-        from app.db.session import write_scope
-
-        pid = int(project_id)
-        sid = int(stage_id)
-        params_base = {"pid": pid, "stage_id": sid, "user_id": user_id}
-
-        # Preserve the legacy error contract: engine-unconfigured surfaces as
-        # ValueError (the router maps it to a 4xx), not a bare RuntimeError.
-        try:
-            get_engine()
-        except RuntimeError as exc:
-            raise ValueError(f"Database engine not configured: {exc}") from exc
-
-        # write_scope() opens ONE committing transaction — the FOR UPDATE lock
-        # in step 1 is held for the whole statement sequence, exactly as the
-        # old explicit get_engine().begin() block did. SQL bodies kept: the
-        # SELECT ... FOR UPDATE concurrency guard is the semantics.
-        async with write_scope() as session:
-            # Step 1 — lock the projects row and read current stage
-            result = await session.execute(text(_SELECT_FOR_UPDATE_SQL), {"pid": pid})
-            lock_row = result.mappings().first()
-            if lock_row is None:
-                raise ValueError(f"Project {pid} not found")
-
-            current_stage_id = lock_row["current_stage_id"]
-
-            # Step 2 — same-stage no-op
-            if current_stage_id == sid:
-                logger.debug(
-                    f"[project_stages] project {pid} already at stage {sid} — no-op"
-                )
-                return None
-
-            # Step 3 — close the currently open history row (if any)
-            await session.execute(text(_CLOSE_OPEN_HISTORY_SQL), {"pid": pid})
-
-            # Step 4 — insert new open history row
-            await session.execute(text(_INSERT_HISTORY_SQL), params_base)
-
-            # Step 5 — update projects.current_stage_id
-            await session.execute(
-                text(_UPDATE_PROJECT_STAGE_SQL), {"pid": pid, "stage_id": sid}
-            )
-
-            # Step 6 — fetch the stage row to return
-            stage_result = await session.execute(
-                text(_GET_STAGE_BY_ID_SQL), {"sid": sid}
-            )
-            stage_row = stage_result.mappings().first()
-
-        if stage_row is None:
-            raise ValueError(f"Stage {sid} not found in project_stages")
-
-        new_stage = _serialize(dict(stage_row))
-
-        # Post-commit hook: mirror the stage change into the todo list. Lives
-        # HERE (not in the service wrapper) because set_current_stage has three
-        # callers — the manual PUT, project creation ("born on the first SOP
-        # stage") and resolve_current_stage's forward-only auto-derivation —
-        # and hooking only the PUT wrapper left the other two silently
-        # mirror-less. Same repo-level post-callback precedent as
-        # IssueRepository.transition_status (#1434). Late import + best-effort:
-        # the stage transition committed above is the primary op and must never
-        # be failed by the mirror; runs OUTSIDE the write_scope block so issue
-        # writes never extend the FOR UPDATE lock window.
-        try:
-            from app.services.library.project_stage_issues import (
-                sync_stage_issues,
-            )
-
-            await sync_stage_issues(pid, current_stage_id, new_stage, user_id)
-        except Exception as exc:  # noqa: BLE001 — mirror is best-effort
-            logger.warning(
-                f"[project_stages] stage-issue mirror failed for project {pid} "
-                f"→ stage {sid}: {exc!r}"
-            )
-
-        return new_stage
 
 
 # ── Singleton ────────────────────────────────────────────────────────────────

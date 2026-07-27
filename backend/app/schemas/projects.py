@@ -258,12 +258,6 @@ class StyleProfileUpdate(BaseModel):
     reference_links: Optional[list] = Field(None, max_length=100)
 
 
-class CurrentStageUpdate(BaseModel):
-    """Request body for PUT /projects/{id}/current_stage."""
-
-    stage_id: int = Field(..., description="Target project_stages.id")
-
-
 class StoryboardProgress(BaseModel):
     total: int
     done: int

@@ -43,7 +43,6 @@ from app.schemas.projects import (
     CreateCommentRequest,
     CreateFolderRequest,
     CreateShareRequest,
-    CurrentStageUpdate,
     GenerateMissingResponse,
     LinkMediaRequest,
     MoveFileRequest,
@@ -305,60 +304,6 @@ async def list_stage_catalog(auth: AuthDep):
         "success": True,
         "data": await get_project_stages_repository().list_catalog(),
     }
-
-
-@router.get("/{project_id}/current_stage")
-async def get_current_stage(
-    project_id: str,
-    auth: AuthDep,
-    _project_guard: None = Depends(verify_project_read_access),
-):
-    """The project's current SOP stage, or null when none has been set.
-
-    Forward-only auto-derivation (合一终稿): the stage chip is read-only in
-    the workspace, so reading the stage also advances it when the project's
-    real output (scenes/shots/renders) is ahead of the stored value.
-    review/delivery still require the manual PUT below.
-    """
-    from app.services.library.projects_service import resolve_current_stage
-
-    try:
-        return {
-            "success": True,
-            "data": await resolve_current_stage(int(project_id), auth.user_id),
-        }
-    except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid project id")
-    except Exception as e:
-        logger.error(f"Failed to get current stage for project {project_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get current stage")
-
-
-@router.put("/{project_id}/current_stage")
-async def put_current_stage(
-    project_id: str,
-    data: CurrentStageUpdate,
-    auth: AuthDep,
-    _project_guard: None = Depends(verify_project_write_access),
-):
-    """Set (or advance) the project's SOP stage. Same stage → 200 no-op (data: null).
-    Closes the previous open history row and inserts a new one atomically.
-
-    A real advance also mirrors the stage into the todo list (best-effort): a new
-    ``status='todo'`` issue for the new stage, the previous stage's issue closed.
-    The issue sync never blocks the advance — see ``project_stage_issues``."""
-    from app.services.library.project_stage_issues import advance_project_stage
-
-    try:
-        stage = await advance_project_stage(
-            int(project_id), data.stage_id, auth.user_id
-        )
-        return {"success": True, "data": stage}
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    except Exception as e:
-        logger.error(f"Failed to set stage for project {project_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to set current stage")
 
 
 @router.get("/{project_id}/stage_history")

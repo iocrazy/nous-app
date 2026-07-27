@@ -431,36 +431,11 @@ class ProjectsService:
             except Exception as exc:
                 logger.warning(f"Failed to generate display_code: {exc}")
 
-        # D4 (final UI spec): every project is born on the first SOP stage so
-        # the stage workbench is always present. Best-effort — a stage-machine
-        # hiccup must never fail project creation.
-        #
-        # W2-1: a project born WITH a workflow template drives its stages from
-        # the instantiated node chain (below), so it must NOT also be seeded onto
-        # the global SOP first stage — that would派生 a second, duplicate mirror
-        # issue. At this point the node rows don't exist yet (instantiation runs
-        # after), so the sync_stage_issues guard can't see them — skip the SOP
-        # born block up front instead, keyed off the chosen template.
-        try:
-            stages_repo = self._stages_repo()
-            catalog = await stages_repo.list_catalog()
-            if workflow_template_id:
-                logger.debug(
-                    f"[projects] project {project.get('id')} born with workflow "
-                    f"template {workflow_template_id} — skipping SOP first-stage seed"
-                )
-            elif catalog:
-                updated = await stages_repo.set_current_stage(
-                    project["id"], int(catalog[0]["id"]), user_id
-                )
-                if updated is not None:
-                    project = {**project, "current_stage_id": str(catalog[0]["id"])}
-        except (
-            Exception
-        ) as e:  # noqa: BLE001 — stage init is enrichment, not core create
-            logger.error(
-                f"[projects] default-stage init failed for {project.get('id')}: {e}"
-            )
+        # M2 PR-G: the legacy "born on first SOP stage" seed (set_current_stage)
+        # was retired end-to-end — current_stage_id is no longer written here.
+        # A project born WITH a workflow template still drives its stages from
+        # the instantiated node chain (below); a No-workflow project now simply
+        # has no stage concept (spec §8).
 
         # G3 (final UI spec): every project is born with an Episode 1 + an
         # empty script attached, so Episodes/Canvas always have a target.
