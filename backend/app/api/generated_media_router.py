@@ -20,6 +20,7 @@ from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
+from pydantic import BaseModel
 
 from app.core.deps import AuthDep
 from app.repositories.generated_media_repository import GeneratedMediaRepository
@@ -224,6 +225,72 @@ async def import_generation(
                 os.unlink(tmp_path)
             except OSError:
                 pass
+
+
+class ResourceImportError(Exception):
+    def __init__(self, status_code: int, detail: str):
+        self.status_code = status_code
+        self.detail = detail
+        super().__init__(detail)
+
+
+def resolve_resource_import(resource: dict) -> dict:
+    """Map a resources row to register_generated_media source args."""
+    file_path = (resource.get("file_path") or "").strip()
+    if not file_path:
+        raise ResourceImportError(404, "Resource has no local file")
+    mime = (resource.get("mime_type") or "").lower()
+    if not (mime.startswith("image/") or mime.startswith("video/")):
+        raise ResourceImportError(400, "only image/* or video/* resources")
+    return {"source_path": file_path, "mime": mime}
+
+
+class ResourceImportRequest(BaseModel):
+    resource_id: str
+
+
+@router.post("/import-from-resource")
+async def import_from_resource(payload: ResourceImportRequest, auth: AuthDep) -> dict:
+    """Mint a durable /generated-media/ URL from an existing library resource.
+
+    The canvas i2i bridge only reads durable generated-media URLs
+    (promptInputs.ts DURABLE_PREFIX), so loading a library asset as an i2i
+    reference requires re-registering its file server-side — no client
+    download/upload round-trip.
+    """
+    from app.api.media_permissions import check_media_access
+    from app.repositories.resources_repository import ResourcesRepository
+    from app.services.library.generated_media_service import (
+        GenerationOrigin,
+        media_kind_from_mime,
+        register_generated_media,
+    )
+
+    resource = await ResourcesRepository().get_resource_by_id(payload.resource_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    if not await check_media_access(payload.resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
+    try:
+        args = resolve_resource_import(resource)
+    except ResourceImportError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    row = await register_generated_media(
+        user_id=str(auth.user_id),
+        scope_id=await _scope(auth),
+        source_path=args["source_path"],
+        mime=args["mime"],
+        origin=GenerationOrigin(kind="canvas_upload"),
+    )
+    return {
+        "data": {
+            "id": str(row["id"]),
+            "url": f"/api/v1/generated-media/{row['id']}/"
+            f"{_IMPORT_KIND_ENDPOINT.get(media_kind_from_mime(args['mime']), 'file')}",
+            "media_kind": media_kind_from_mime(args["mime"]),
+            "mime": args["mime"],
+        }
+    }
 
 
 @router.get("/{gen_id}/file")
