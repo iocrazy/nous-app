@@ -18,7 +18,7 @@ import aiofiles
 import httpx
 from loguru import logger
 
-from app.boundary import cap_aiter
+from app.boundary import MaxBytesExceededError, cap_aiter
 from app.core.config import settings
 from app.db import engine as db_engine
 from app.services.library.media_storage import (
@@ -147,10 +147,14 @@ def _read_file_capped(path: str, max_bytes: int) -> bytes:
         return fp.read()
 
 
-# Object-store caps: generated images buffer in memory (small); generated
-# short videos stream via a temp file (no memory blowup). Over-cap → filesystem.
+# Object-store buffering (NOT a filesystem gate — object store is the only
+# write path once FEATURE_CHAT_MEDIA_OBJECT_STORE is on, see
+# register_generated_media): small generated images buffer fully in memory
+# (single put_bytes). Anything bigger — generated videos, or an image that
+# overflows the memory cap — streams through a temp file and uploads from
+# disk via put_file instead (no memory blowup).
 _OBJECT_STORE_IMAGE_MAX_BYTES = 16 * 1024 * 1024
-_OBJECT_STORE_VIDEO_MAX_BYTES = 256 * 1024 * 1024
+_OBJECT_STORE_STREAM_MAX_BYTES = 256 * 1024 * 1024
 
 
 async def _write_generation_to_object_store(
@@ -158,34 +162,41 @@ async def _write_generation_to_object_store(
 ) -> tuple[str, int, str]:
     """Content-address a generated image/video into the chat-media bucket.
 
-    Returns (sb:// file_path, size_bytes, sha256). Images buffer in memory;
-    videos stream to a temp file then upload from disk (avoids memory blowup
-    and the small in-memory cap). Dedup: an already-present key skips the
-    upload. Raises on any failure so the caller falls back to the filesystem.
+    Returns (sb:// file_path, size_bytes, sha256). Small images buffer in
+    memory (single put_bytes). Videos, and images that overflow the memory
+    cap, download to a temp file first and delegate to the local-file
+    counterpart, which streams the upload (put_file) from disk instead.
+    Dedup: an already-present key skips the upload. Raises on any failure —
+    object store is the only write path while the flag is on, so the caller
+    (register_generated_media) does not catch this.
     """
-    store = chat_media_store()
-    if kind == "video":
-        fd, tmp = tempfile.mkstemp(suffix=ext_for(mime, kind))
-        os.close(fd)
+    if kind != "video":
         try:
-            size = await _download_to(
-                tmp, source_url, max_bytes=_OBJECT_STORE_VIDEO_MAX_BYTES
+            data = await _download_to_bytes(
+                source_url, max_bytes=_OBJECT_STORE_IMAGE_MAX_BYTES
             )
-            sha = await asyncio.to_thread(sha256_file, tmp)
-            key = content_key_from_sha(scope_id=scope_id, sha=sha, mime=mime)
+        except MaxBytesExceededError:
+            pass  # oversized image: fall through to the streamed temp-file path
+        else:
+            store = chat_media_store()
+            sha, key = content_key(scope_id=scope_id, data=data, mime=mime)
+            size = len(data)
             if not await store.exists(key):
-                await store.put_file(key, tmp, mime)
-        finally:
-            Path(tmp).unlink(missing_ok=True)
-    else:
-        data = await _download_to_bytes(
-            source_url, max_bytes=_OBJECT_STORE_IMAGE_MAX_BYTES
+                await store.put_bytes(key, data, mime)
+            return to_file_path(CHAT_MEDIA_BUCKET, key), size, sha
+
+    fd, tmp = tempfile.mkstemp(suffix=ext_for(mime, kind))
+    os.close(fd)
+    try:
+        max_bytes = (
+            _OBJECT_STORE_STREAM_MAX_BYTES if kind == "video" else _DEFAULT_MAX_BYTES
         )
-        sha, key = content_key(scope_id=scope_id, data=data, mime=mime)
-        size = len(data)
-        if not await store.exists(key):
-            await store.put_bytes(key, data, mime)
-    return to_file_path(CHAT_MEDIA_BUCKET, key), size, sha
+        await _download_to(tmp, source_url, max_bytes=max_bytes)
+        return await _write_local_generation_to_object_store(
+            scope_id=scope_id, source_path=tmp, mime=mime, kind=kind
+        )
+    finally:
+        Path(tmp).unlink(missing_ok=True)
 
 
 async def _write_local_generation_to_object_store(
@@ -193,14 +204,17 @@ async def _write_local_generation_to_object_store(
 ) -> tuple[str, int, str]:
     """Content-address a LOCAL generated file into the chat-media bucket.
 
-    The local-file counterpart of ``_write_generation_to_object_store`` — reads
-    the file instead of downloading a URL (video: stream-hash + put_file from
-    disk; image: read bytes + put_bytes). Same dedup + return contract."""
+    The local-file counterpart of ``_write_generation_to_object_store`` —
+    reads the file instead of downloading a URL. Videos, and images over
+    ``_OBJECT_STORE_IMAGE_MAX_BYTES``, stream-hash + put_file from disk (no
+    memory blowup); smaller images read fully into memory + put_bytes. Same
+    dedup + return contract; raises on any failure."""
     store = chat_media_store()
-    if kind == "video":
+    size_on_disk = os.path.getsize(source_path)
+    if kind == "video" or size_on_disk > _OBJECT_STORE_IMAGE_MAX_BYTES:
         sha = await asyncio.to_thread(sha256_file, source_path)
         key = content_key_from_sha(scope_id=scope_id, sha=sha, mime=mime)
-        size = os.path.getsize(source_path)
+        size = size_on_disk
         if not await store.exists(key):
             await store.put_file(key, source_path, mime)
     else:
@@ -246,45 +260,34 @@ async def register_generated_media(
     a subprocess provider already wrote, e.g. dreamina/jimeng-cli) must be given.
 
     Object-store path (flag on + generated image/video): the blob is
-    content-addressed into the chat-media bucket — images buffer in memory,
-    short videos stream via a temp file (URL) or read from disk (local). Any
-    failure (storage error OR over-cap) falls back to the filesystem path, so a
-    generation never fails to persist. NOTE: this covers only AI *generations*
-    (Tier-1 generated_media) — the media library's downloaded/uploaded videos
-    live on their own path and stay on the filesystem+nginx.
+    content-addressed into the chat-media bucket — small images buffer in
+    memory, videos and oversized images stream via a temp file. Object store
+    is the ONLY write path while the flag is on: any storage failure RAISES
+    (fail loudly), there is no filesystem fallback. Flag off: pure
+    filesystem path (dev environments without object storage configured).
+    NOTE: this covers only AI *generations* (Tier-1 generated_media) — the
+    media library's downloaded/uploaded videos live on their own path and
+    stay on the filesystem+nginx.
     """
     if bool(source_url) == bool(source_path):
         raise ValueError(
             "register_generated_media requires exactly one of source_url / source_path"
         )
     kind = media_kind_from_mime(mime)
-    file_path: Optional[str] = None
-    size: int = 0
     content_sha256: Optional[str] = None
 
     if settings.FEATURE_CHAT_MEDIA_OBJECT_STORE and kind in ("image", "video"):
-        try:
-            if source_path is not None:
-                file_path, size, content_sha256 = (
-                    await _write_local_generation_to_object_store(
-                        scope_id=scope_id, source_path=source_path, mime=mime, kind=kind
-                    )
+        if source_path is not None:
+            file_path, size, content_sha256 = (
+                await _write_local_generation_to_object_store(
+                    scope_id=scope_id, source_path=source_path, mime=mime, kind=kind
                 )
-            else:
-                file_path, size, content_sha256 = (
-                    await _write_generation_to_object_store(
-                        scope_id=scope_id, source_url=source_url, mime=mime, kind=kind
-                    )
-                )
-        except Exception as exc:
-            logger.warning(
-                f"[register_generated_media] object-store write failed, "
-                f"falling back to filesystem: scope={scope_id} "
-                f"kind={kind} error={exc!r}"
             )
-            file_path = None  # fall through
-
-    if file_path is None:
+        else:
+            file_path, size, content_sha256 = await _write_generation_to_object_store(
+                scope_id=scope_id, source_url=source_url, mime=mime, kind=kind
+            )
+    else:
         gen_uuid = _uuid.uuid4().hex
         rel = (
             f"teams/{scope_id}/generations/{_date_bucket()}/"
