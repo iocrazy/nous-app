@@ -28,6 +28,7 @@ import {
   isNodeOverdue,
   NODE_STATUS_CONFIG,
   NODE_STATUS_LABEL,
+  unmetDeps,
 } from '../workflow/nodeStatus';
 import type { AgentOption, PersonOption } from '../workflow/OwnerPicker';
 import { DeliverablesZone } from '../Todolist/DeliverablesZone';
@@ -164,6 +165,12 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
 
   const currentNode = workflow?.nodes.find((n) => n.id === workflow.current_node_id) ?? null;
   const isActiveGroup = isNodeInActiveGroup(node, currentNode);
+
+  // Dependency gate (mig 391, M3 PR-J) — local derivation, display-only (the
+  // server's DEPS_PENDING predicate is the actual advance gate; this just
+  // paints the "Waiting on" row ahead of ever calling advance, same idiom as
+  // the overdue tag above).
+  const waitingOn = unmetDeps(workflow?.nodes ?? [], node);
 
   const hasFolder = Boolean(issue && node.folder_id);
 
@@ -310,6 +317,14 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
             </span>
           )}
         </div>
+
+        {waitingOn.length > 0 && (
+          <div data-testid="stage-board-waiting-on" className="mt-2 text-[12px] text-rose-400">
+            {t('projects.workflow.deps.waitingOn', {
+              names: waitingOn.map((n) => n.name).join(', '),
+            })}
+          </div>
+        )}
       </div>
 
       {/* ── Tasks — mirror issue + sub-issues, all read-only ────────────── */}

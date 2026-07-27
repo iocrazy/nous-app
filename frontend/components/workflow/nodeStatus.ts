@@ -77,3 +77,36 @@ export function isNodeInActiveGroup(
     ? node.parallel_group === currentNode.parallel_group
     : node.id === currentNode.id;
 }
+
+/**
+ * Dependency gate (mig 391, M3 PR-J) — the subset of `node`'s declared
+ * `depends_on` targets that are NOT yet satisfied (satisfied = `done`, or
+ * `skipped` by status/flag). Pure/derived, local-only display helper: the
+ * server's advance predicate (`DEPS_PENDING` / `AdvancePreview.waiting_on`)
+ * is the actual gate for whether advance is allowed — this is only used to
+ * paint "Waiting on: X, Y" rows / lock icons ahead of ever calling advance.
+ *
+ * `nodes` is the full node list to resolve dependency ids against (a
+ * `ProjectWorkflow.nodes` array, or whatever slice a caller already has in
+ * hand — both `WorkspaceStageBoard` and `WorkflowStrip` call this with their
+ * own local nodes list so the two definitions can never silently diverge).
+ * A dependency id missing from `nodes` (its edge already CASCADE-dropped, or
+ * the caller's list is momentarily stale) is tolerated as satisfied, never
+ * surfaced as blocking.
+ */
+export function unmetDeps(
+  nodes: ProjectStageNode[],
+  node: Pick<ProjectStageNode, 'depends_on'>,
+): ProjectStageNode[] {
+  const depIds = node.depends_on ?? [];
+  if (depIds.length === 0) return [];
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const out: ProjectStageNode[] = [];
+  for (const id of depIds) {
+    const dep = byId.get(id);
+    if (!dep) continue;
+    const satisfied = dep.status === 'done' || dep.status === 'skipped' || dep.skipped;
+    if (!satisfied) out.push(dep);
+  }
+  return out;
+}

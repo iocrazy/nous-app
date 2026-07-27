@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { isNodeOverdue } from './nodeStatus';
+import { isNodeOverdue, unmetDeps } from './nodeStatus';
 import type { ProjectStageNode } from '../../types';
 
 const TODAY = '2026-07-20';
@@ -74,5 +74,61 @@ describe('isNodeOverdue', () => {
     expect(
       isNodeOverdue(node({ planned_due: '2026-07-20T00:00:00+00:00' }), TODAY),
     ).toBe(false);
+  });
+});
+
+/**
+ * unmetDeps (M3 PR-J, task J3) — pure/derived local display helper for
+ * "Waiting on: X, Y" rows / lock icons. Not the actual advance gate (the
+ * server's DEPS_PENDING predicate is), just the same status-satisfied rule
+ * mirrored locally so the strip/board can paint ahead of an advance attempt.
+ */
+describe('unmetDeps', () => {
+  it('returns [] when the node has no depends_on', () => {
+    const target = node({ id: '1', depends_on: [] });
+    expect(unmetDeps([target], target)).toEqual([]);
+  });
+
+  it('a done dependency is satisfied — not returned', () => {
+    const dep = node({ id: 'dep', status: 'done' });
+    const target = node({ id: '1', depends_on: ['dep'] });
+    expect(unmetDeps([dep, target], target)).toEqual([]);
+  });
+
+  it('a skipped dependency (by status) is satisfied — not returned', () => {
+    const dep = node({ id: 'dep', status: 'skipped' });
+    const target = node({ id: '1', depends_on: ['dep'] });
+    expect(unmetDeps([dep, target], target)).toEqual([]);
+  });
+
+  it('a skipped dependency (by flag, non-skipped status) is satisfied — not returned', () => {
+    const dep = node({ id: 'dep', status: 'pending', skipped: true });
+    const target = node({ id: '1', depends_on: ['dep'] });
+    expect(unmetDeps([dep, target], target)).toEqual([]);
+  });
+
+  it('a pending/in_progress/in_review dependency is unmet — returned', () => {
+    for (const status of ['pending', 'in_progress', 'in_review'] as const) {
+      const dep = node({ id: 'dep', status });
+      const target = node({ id: '1', depends_on: ['dep'] });
+      expect(unmetDeps([dep, target], target)).toEqual([dep]);
+    }
+  });
+
+  it('a dependency id missing from the nodes list is tolerated, never surfaced as blocking', () => {
+    const target = node({ id: '1', depends_on: ['ghost'] });
+    expect(unmetDeps([target], target)).toEqual([]);
+  });
+
+  it('returns only the unmet subset, preserving depends_on order, when some deps are satisfied', () => {
+    const done = node({ id: 'a', status: 'done' });
+    const pending = node({ id: 'b', status: 'pending' });
+    const skipped = node({ id: 'c', status: 'skipped' });
+    const inProgress = node({ id: 'd', status: 'in_progress' });
+    const target = node({ id: '1', depends_on: ['a', 'b', 'c', 'd'] });
+    expect(unmetDeps([done, pending, skipped, inProgress, target], target)).toEqual([
+      pending,
+      inProgress,
+    ]);
   });
 });

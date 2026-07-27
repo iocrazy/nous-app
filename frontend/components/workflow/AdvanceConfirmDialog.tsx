@@ -18,6 +18,7 @@ const BLOCKED_KEY: Record<AdvanceBlockedReason, string> = {
   REVIEW_PENDING: 'projects.workflow.confirm.blockedReviewPending',
   DELIVERABLE_MISSING: 'projects.workflow.confirm.blockedDeliverableMissing',
   FORM_INCOMPLETE: 'projects.workflow.confirm.blockedFormIncomplete',
+  DEPS_PENDING: 'projects.workflow.confirm.blockedDepsPending',
   NO_NEXT: 'projects.workflow.confirm.blockedNoNext',
 };
 
@@ -87,6 +88,14 @@ export const AdvanceConfirmDialog: React.FC<AdvanceConfirmDialogProps> = ({
                 <RulingRow
                   label={t('projects.workflow.confirm.missingFields')}
                   names={preview?.missing_fields ?? []}
+                />
+              )}
+              {/* DEPS_PENDING (mig 391, M3 PR-J): server-ruled list only —
+                  this dialog never derives dependency state locally (#1400). */}
+              {blocked === 'DEPS_PENDING' && (preview?.waiting_on.length ?? 0) > 0 && (
+                <RulingRow
+                  label={t('projects.workflow.confirm.waitingOn')}
+                  names={preview?.waiting_on ?? []}
                 />
               )}
             </div>

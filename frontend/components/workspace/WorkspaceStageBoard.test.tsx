@@ -299,6 +299,38 @@ describe('WorkspaceStageBoard', () => {
     expect(screen.queryByTestId('stage-board-overdue')).toBeNull();
   });
 
+  // M3 PR-J (task J3): "Waiting on" row — local derivation off the shared
+  // `workflow` instance's node list (nodeStatus.ts::unmetDeps), display-only
+  // (the server's DEPS_PENDING predicate is the actual advance gate).
+  it('shows a "Waiting on" row when a dependency is not yet done', async () => {
+    const dep = node({ id: 'dep-1', name: 'Script', status: 'pending' });
+    renderBoard(
+      board({ node: node({ id: '1', name: 'Storyboard', depends_on: ['dep-1'] }) }),
+      { workflow: workflow({ current_node_id: '1', nodes: [dep, node({ id: '1', name: 'Storyboard', depends_on: ['dep-1'] })] }) },
+    );
+
+    const row = await screen.findByTestId('stage-board-waiting-on');
+    expect(row).toHaveTextContent('Script');
+  });
+
+  it('renders no "Waiting on" row once the dependency is done', async () => {
+    const dep = node({ id: 'dep-1', name: 'Script', status: 'done' });
+    renderBoard(
+      board({ node: node({ id: '1', name: 'Storyboard', depends_on: ['dep-1'] }) }),
+      { workflow: workflow({ current_node_id: '1', nodes: [dep, node({ id: '1', name: 'Storyboard', depends_on: ['dep-1'] })] }) },
+    );
+
+    await screen.findByTestId('workspace-stage-board');
+    expect(screen.queryByTestId('stage-board-waiting-on')).toBeNull();
+  });
+
+  it('renders no "Waiting on" row when the node has no depends_on', async () => {
+    renderBoard(board({ node: node({ id: '1', name: 'Storyboard' }) }));
+
+    await screen.findByTestId('workspace-stage-board');
+    expect(screen.queryByTestId('stage-board-waiting-on')).toBeNull();
+  });
+
   it('resolves owner_agent_id / owner_user_id to display names instead of raw UUIDs', async () => {
     mockAiLibraryService.aiLibraryService.listAgents.mockResolvedValue([
       { id: 'agent-uuid-1', slug: 'script-ai', name: 'Script AI' },

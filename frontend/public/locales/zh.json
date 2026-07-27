@@ -1766,8 +1766,10 @@
         "blockedReviewPending": "当前阶段仍需审阅后才能推进。",
         "blockedDeliverableMissing": "当前阶段的交付物文件夹为空，请先归档后再推进。",
         "blockedFormIncomplete": "还有必填的表单字段尚未填写。",
+        "blockedDepsPending": "下一阶段正在等待其他阶段先完成。",
         "blockedNoNext": "这已是最后一个阶段，没有可推进的下一步。",
-        "missingFields": "缺失字段"
+        "missingFields": "缺失字段",
+        "waitingOn": "等待中"
       },
       "deliverables": {
         "title": "交付物",
@@ -1837,7 +1839,13 @@
         "selectPlaceholder": "选择一个选项"
       },
       "form": "表单",
-      "formFilled": "已填 {{filled}}/{{total}}"
+      "formFilled": "已填 {{filled}}/{{total}}",
+      "deps": {
+        "dependsOn": "依赖阶段",
+        "noCandidates": "没有更早的阶段可供依赖",
+        "waitingOn": "等待中：{{names}}",
+        "lockedTitle": "被依赖阻塞"
+      }
     }
   },
   "storyboard": {
