@@ -8,6 +8,7 @@ for image2video, and return a VideoGenResult-dict whose ``video_path`` is
 the CLI's local product (``video_url`` stays empty — no URL exists).
 """
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -18,6 +19,16 @@ from app.services.ai.media.image_generation_service import ImageGenerationServic
 
 def _cli_result(local_path: str = "/tmp/jimeng_x/clip.mp4"):
     return SimpleNamespace(local_path=local_path, mime="video/mp4", raw={"ok": 1})
+
+
+def _fake_local_path_cm(value):
+    """A ``generated_media_local_path``-shaped async contextmanager stub."""
+
+    @asynccontextmanager
+    async def _cm(url, *, media_kind="image"):
+        yield value
+
+    return _cm
 
 
 @pytest.mark.asyncio
@@ -35,8 +46,8 @@ async def test_video_falls_back_to_db_catalog_on_empty_registry():
             new=AsyncMock(return_value=(provider, "seedance2.0fast")),
         ),
         patch(
-            "app.services.library.generated_media_service.resolve_generated_media_local_path",
-            new=AsyncMock(return_value="/data/gen/42/media.png"),
+            "app.services.library.generated_media_service.generated_media_local_path",
+            new=_fake_local_path_cm("/data/gen/42/media.png"),
         ),
     ):
         result = await service.generate_video(
@@ -73,8 +84,8 @@ async def test_video_fallback_unbridgeable_source_runs_text2video():
             new=AsyncMock(return_value=(provider, "seedance2.0fast")),
         ),
         patch(
-            "app.services.library.generated_media_service.resolve_generated_media_local_path",
-            new=AsyncMock(return_value=None),
+            "app.services.library.generated_media_service.generated_media_local_path",
+            new=_fake_local_path_cm(None),
         ),
     ):
         await service.generate_video(

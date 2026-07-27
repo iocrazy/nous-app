@@ -221,14 +221,16 @@ class ImageGenerationService:
 
         Resolves the provider from ``mediahub_models`` (only jimeng-cli has a
         wired video path today) and bridges the durable ``/cover`` source URL
-        back to its local file for image2video — an unbridgeable source (raw
-        provider URL, object-store row) degrades to text2video, matching the
-        shot workflow's semantics. The CLI product is a LOCAL FILE, so the
-        result carries ``video_path`` and an empty ``video_url``; callers must
-        persist through the generated-media store to mint a servable URL.
+        back to its local file for image2video — both filesystem AND
+        object-store rows resolve now (Task 2: ``generated_media_local_path``
+        materializes sb:// rows to a temp file); only a raw/unbridgeable
+        source URL degrades to text2video. The CLI product is a LOCAL FILE,
+        so the result carries ``video_path`` and an empty ``video_url``;
+        callers must persist through the generated-media store to mint a
+        servable URL.
         """
         from app.services.library.generated_media_service import (
-            resolve_generated_media_local_path,
+            generated_media_local_path,
         )
         from app.services.media.parsers.video_providers import db_registry
 
@@ -237,23 +239,22 @@ class ImageGenerationService:
         )
         gen_model = model or actual_model
 
-        image_path = await resolve_generated_media_local_path(
+        async with generated_media_local_path(
             source_image_url, media_kind="image"
-        )
-        cli_result = await video_provider.generate_video(
-            prompt=prompt,
-            aspect="",
-            model_version=gen_model or None,
-            image_path=image_path,
-        )
-
-        logger.info(
-            "Video generated via catalog for project=%s node=%s model=%s i2v=%s",
-            project_id,
-            node_id,
-            gen_model,
-            bool(image_path),
-        )
+        ) as image_path:
+            cli_result = await video_provider.generate_video(
+                prompt=prompt,
+                aspect="",
+                model_version=gen_model or None,
+                image_path=image_path,
+            )
+            logger.info(
+                "Video generated via catalog for project=%s node=%s model=%s i2v=%s",
+                project_id,
+                node_id,
+                gen_model,
+                bool(image_path),
+            )
         result = VideoGenResult(
             video_url="",
             video_path=cli_result.local_path,

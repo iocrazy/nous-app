@@ -9,10 +9,11 @@ import os
 import re
 import tempfile
 import uuid as _uuid
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
 
 import aiofiles
 import httpx
@@ -26,6 +27,7 @@ from app.services.library.media_storage import (
     chat_media_store,
     content_key,
     content_key_from_sha,
+    materialize,
     resolve_media_source,
     sha256_file,
     to_file_path,
@@ -489,33 +491,64 @@ __all__ = [
 GENERATED_MEDIA_URL_RE = re.compile(r"/generated-media/(\d+)/(?:cover|stream|file)$")
 
 
-async def resolve_generated_media_local_path(
+@asynccontextmanager
+async def generated_media_local_path(
     url: str, *, media_kind: str = "image"
-) -> Optional[str]:
-    """Bridge a durable generated-media URL back to its local file path.
+) -> AsyncIterator[Optional[str]]:
+    """Yield a readable local path for a durable generated-media URL.
 
-    Returns the real filesystem path only when the URL matches the serving
-    pattern AND the row is of ``media_kind`` AND filesystem-backed AND the
-    file exists inside DOWNLOAD_PATH (containment guard — a corrupt/hostile
-    file_path must never escape). Object-store rows, foreign URLs, or any
-    miss → None; callers fall back (e.g. image2video → text2video).
+    filesystem row → the real path (no cleanup); sb:// row → materialize()
+    temp file (deleted on exit); any miss → None. Replaces
+    resolve_generated_media_local_path, whose object-store rows returned
+    None and silently degraded i2v to text2video — now every shape of
+    already-generated asset can seed a new generation.
     """
     match = GENERATED_MEDIA_URL_RE.search(str(url or ""))
     if not match:
-        return None
+        yield None
+        return
     gen_id = int(match.group(1))
 
     from app.repositories.generated_media_repository import GeneratedMediaRepository
 
     row = await GeneratedMediaRepository().get_by_id(gen_id)
-    if not row or row.get("media_kind") != media_kind:
-        return None
+    file_path = row.get("file_path") if row else None
+    if not row or row.get("media_kind") != media_kind or not file_path:
+        yield None
+        return
 
-    loc = resolve_media_source(row["file_path"])
-    if loc.is_object_store:
-        return None
-    base = os.path.realpath(settings.DOWNLOAD_PATH)
-    real = os.path.realpath(os.path.join(settings.DOWNLOAD_PATH, loc.rel_path or ""))
-    if not (real == base or real.startswith(base + os.sep)):
-        return None
-    return real if os.path.isfile(real) else None
+    loc = resolve_media_source(file_path)
+    if not loc.is_object_store:
+        # Containment guard: a corrupt/hostile rel_path with ".." segments
+        # or symlink tricks must never escape DOWNLOAD_PATH.
+        base = os.path.realpath(settings.DOWNLOAD_PATH)
+        real = os.path.realpath(os.path.join(base, loc.rel_path or ""))
+        if not (real == base or real.startswith(base + os.sep)):
+            yield None
+            return
+        if not os.path.isfile(real):
+            yield None
+            return
+        yield real
+        return
+
+    # Object-store row: stream it to a temp file via the shared materialize()
+    # helper. Only entry failures (bad key, storage-api down) degrade to
+    # None — once materialize() has handed us a path, any exception raised
+    # by the caller's own code (e.g. the video provider) must propagate
+    # untouched. Driving materialize() through an AsyncExitStack (rather
+    # than wrapping `async with materialize(...) as p: yield p` in a
+    # blanket try/except) keeps the try/except scoped to entry only — a
+    # downstream exception thrown back into this generator at the `yield`
+    # below never re-enters the except clause.
+    async with AsyncExitStack() as stack:
+        try:
+            tmp_path = await stack.enter_async_context(materialize(file_path))
+        except Exception as exc:
+            logger.warning(
+                f"[generated_media_local_path] materialize failed for "
+                f"gen_id={gen_id} file_path={file_path!r}: {exc!r}"
+            )
+            yield None
+            return
+        yield str(tmp_path)

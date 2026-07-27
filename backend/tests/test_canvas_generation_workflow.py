@@ -7,6 +7,7 @@ same-origin URL. Failures raise (never a failed-dict), so task_tracking
 mirrors the real outcome.
 """
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -16,6 +17,16 @@ from app.workflows.canvas_generation import (
     generate_canvas_media_step,
     persist_canvas_generation_step,
 )
+
+
+def _fake_local_path_cm(value):
+    """A ``generated_media_local_path``-shaped async contextmanager stub."""
+
+    @asynccontextmanager
+    async def _cm(url, *, media_kind="image"):
+        yield value
+
+    return _cm
 
 
 @pytest.mark.asyncio
@@ -79,8 +90,8 @@ async def test_video_step_bridges_source_and_runs_i2v():
             new=AsyncMock(return_value=(provider, "seedance2.0fast")),
         ),
         patch(
-            "app.services.library.generated_media_service.resolve_generated_media_local_path",
-            new=AsyncMock(return_value="/data/gen/9/media.png"),
+            "app.services.library.generated_media_service.generated_media_local_path",
+            new=_fake_local_path_cm("/data/gen/9/media.png"),
         ),
     ):
         out = await generate_canvas_media_step(

@@ -39,7 +39,8 @@ degrading. The jimeng ``jimeng_`` scratch dir is reaped after ingest either way
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Optional
 
 from dbos import DBOS
 from loguru import logger
@@ -56,19 +57,26 @@ _DEFAULT_ASPECT = "16:9"
 _VIDEO_MIME = "video/mp4"
 
 
-async def _resolve_local_image_for_i2v(shot: dict[str, Any]) -> Optional[str]:
+@asynccontextmanager
+async def _resolve_local_image_for_i2v(
+    shot: dict[str, Any],
+) -> AsyncIterator[Optional[str]]:
     """Resolve the shot's image to a local file path for image2video, or None.
 
     ``shot.image_url`` is a same-origin ``/cover`` URL (see decision 1).
     Delegates to the shared generated-media bridge (G4-B0 extracted it so the
     canvas video fallback shares one implementation, containment guard
-    included). Any miss → None (the caller falls back to text2video)."""
+    included). Both filesystem AND object-store images resolve now (Task 2:
+    ``generated_media_local_path`` materializes sb:// rows to a temp file,
+    deleted when this block exits); any other miss → None (the caller falls
+    back to text2video)."""
     from app.services.library.generated_media_service import (
-        resolve_generated_media_local_path,
+        generated_media_local_path,
     )
 
     image_url = str((shot or {}).get("image_url") or "")
-    return await resolve_generated_media_local_path(image_url, media_kind="image")
+    async with generated_media_local_path(image_url, media_kind="image") as path:
+        yield path
 
 
 @DBOS.step(retries_allowed=True, max_attempts=3)
@@ -95,14 +103,14 @@ async def generate_shot_video_step(
     prompt = _compose_prompt(shot, scene)
 
     provider_obj, actual_model = await resolve_video_provider(provider or model or None)
-    image_path = await _resolve_local_image_for_i2v(shot)
 
-    result = await provider_obj.generate_video(
-        prompt=prompt,
-        aspect=_DEFAULT_ASPECT,
-        model_version=actual_model or model or None,
-        image_path=image_path,
-    )
+    async with _resolve_local_image_for_i2v(shot) as image_path:
+        result = await provider_obj.generate_video(
+            prompt=prompt,
+            aspect=_DEFAULT_ASPECT,
+            model_version=actual_model or model or None,
+            image_path=image_path,
+        )
     local_path = getattr(result, "local_path", None)
     if not local_path:
         raise RuntimeError(f"Video provider returned no file for shot {shot_id}")

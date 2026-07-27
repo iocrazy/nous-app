@@ -25,6 +25,7 @@ import os
 import tempfile
 import types
 import uuid
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -32,6 +33,19 @@ import pytest
 from app.core.deps import AuthContext
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
+
+
+def _fake_resolve_local_image_cm(value):
+    """A ``_resolve_local_image_for_i2v``-shaped async contextmanager stub —
+    that helper wraps ``generated_media_local_path`` (Task 2), so patching it
+    directly requires a fake async CM rather than a plain AsyncMock."""
+
+    @asynccontextmanager
+    async def _cm(shot):
+        yield value
+
+    return _cm
+
 
 shots_router = importlib.import_module("app.api.script_shots_router")
 
@@ -877,7 +891,9 @@ async def test_video_step_text2video_when_no_image(monkeypatch):
             "resolve_video_provider",
             _resolve,
         ),
-        patch.object(m, "_resolve_local_image_for_i2v", AsyncMock(return_value=None)),
+        patch.object(
+            m, "_resolve_local_image_for_i2v", _fake_resolve_local_image_cm(None)
+        ),
     ):
         out = await m.generate_shot_video_step(_SHOT, None, None)
 
@@ -922,7 +938,7 @@ async def test_video_step_image2video_when_local_image_resolves(monkeypatch):
         patch.object(
             m,
             "_resolve_local_image_for_i2v",
-            AsyncMock(return_value="/data/img/first.png"),
+            _fake_resolve_local_image_cm("/data/img/first.png"),
         ),
     ):
         out = await m.generate_shot_video_step(_SHOT, None, None)
@@ -959,7 +975,9 @@ async def test_video_step_raises_when_no_file(monkeypatch):
             "resolve_video_provider",
             _resolve,
         ),
-        patch.object(m, "_resolve_local_image_for_i2v", AsyncMock(return_value=None)),
+        patch.object(
+            m, "_resolve_local_image_for_i2v", _fake_resolve_local_image_cm(None)
+        ),
     ):
         with pytest.raises(RuntimeError):
             await m.generate_shot_video_step(_SHOT, None, None)
@@ -1050,10 +1068,10 @@ async def test_resolve_local_image_none_when_path_escapes_download_dir(monkeypat
         "get_by_id",
         AsyncMock(return_value=row),
     ):
-        got = await m._resolve_local_image_for_i2v(
+        async with m._resolve_local_image_for_i2v(
             {"image_url": "/api/v1/generated-media/555/cover"}
-        )
-    assert got is None
+        ) as got:
+            assert got is None
 
 
 async def test_resolve_local_image_returns_none_for_non_cover_url(monkeypatch):
@@ -1061,13 +1079,22 @@ async def test_resolve_local_image_returns_none_for_non_cover_url(monkeypatch):
     None → the step falls back to text2video."""
     from app.workflows import script_shot_video as m
 
-    got = await m._resolve_local_image_for_i2v({"image_url": "http://cdn/x.png"})
-    assert got is None
+    async with m._resolve_local_image_for_i2v({"image_url": "http://cdn/x.png"}) as got:
+        assert got is None
 
 
-async def test_resolve_local_image_none_for_object_store(monkeypatch):
-    """An object-store-backed image has no local path → None."""
+async def test_resolve_local_image_object_store_now_materializes(monkeypatch):
+    """Task 2: an object-store-backed image is no longer a dead end — it
+    materializes to a real (temp) local path so i2v works for it too, fixing
+    the "reference image silently fails" bug. The temp file is cleaned up
+    once the `async with` block exits."""
+    from app.services.library import media_storage as ms
     from app.workflows import script_shot_video as m
+
+    async def _fake_get_stream(self, key, *, start=None, end=None, chunk_size=None):
+        yield b"object-store-bytes"
+
+    monkeypatch.setattr(ms.ObjectStore, "get_stream", _fake_get_stream)
 
     row = {"id": 555, "media_kind": "image", "file_path": "sb://chat-media/x.png"}
     with patch(
@@ -1075,7 +1102,11 @@ async def test_resolve_local_image_none_for_object_store(monkeypatch):
         "get_by_id",
         AsyncMock(return_value=row),
     ):
-        got = await m._resolve_local_image_for_i2v(
+        captured = None
+        async with m._resolve_local_image_for_i2v(
             {"image_url": "/api/v1/generated-media/555/cover"}
-        )
-    assert got is None
+        ) as got:
+            captured = got
+            assert got is not None
+            assert os.path.isfile(got)
+        assert not os.path.exists(captured)  # cleaned up on exit
