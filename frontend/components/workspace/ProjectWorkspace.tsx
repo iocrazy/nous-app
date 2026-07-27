@@ -516,6 +516,7 @@ export function ProjectWorkspace({
                 onReloadWorkflow={() => void reloadWorkflow()}
                 onRequestAdvance={requestAdvance}
                 onOpenTodolist={() => setActiveModule('tasks')}
+                onOpenStage={handleOpenStage}
                 focusNodeId={focusNodeId}
               />
             )}

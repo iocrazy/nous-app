@@ -36,6 +36,10 @@ interface WorkflowSectionProps {
   onReload: () => void;
   onRequestAdvance: (direction: 'forward' | 'back') => void;
   onOpenTodolist: () => void;
+  /** Navigate to a node's dedicated Stage Board (H3 Run now chip) — threaded
+   * straight through to CurrentNodeCard, which falls back to onOpenTodolist
+   * when this isn't provided. */
+  onOpenStage?: (nodeId: string) => void;
   /** A node the user asked to focus (from the sidebar / strip) — scroll to it. */
   focusNodeId: string | null;
 }
@@ -54,6 +58,7 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
   onReload,
   onRequestAdvance,
   onOpenTodolist,
+  onOpenStage,
   focusNodeId,
 }) => {
   const { t } = useTranslation();
@@ -174,6 +179,7 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
           onPatched={onReload}
           onRequestAdvance={onRequestAdvance}
           onOpenTodolist={onOpenTodolist}
+          onOpenStage={onOpenStage}
         />
       ))}
 

@@ -58,7 +58,7 @@ const agents: AgentOption[] = [{ id: 'agent-1', name: 'Script Bot' }];
 
 function renderCard(
   overrides: Partial<ProjectStageNode>,
-  opts: { onOpenTodolist?: () => void } = {},
+  opts: { onOpenTodolist?: () => void; onOpenStage?: (nodeId: string) => void } = {},
 ) {
   const onOpenTodolist = opts.onOpenTodolist ?? vi.fn();
   const utils = render(
@@ -72,6 +72,7 @@ function renderCard(
         onPatched={vi.fn()}
         onRequestAdvance={vi.fn()}
         onOpenTodolist={onOpenTodolist}
+        onOpenStage={opts.onOpenStage}
       />
     </I18nextProvider>,
   );
@@ -193,7 +194,30 @@ describe('CurrentNodeCard — Run now chip (M3 Task H3)', () => {
     expect(screen.queryByTestId('workflow-suggest-agent-chip')).toBeNull();
   });
 
-  it('clicking Run now fires onOpenTodolist — CurrentNodeCard has no mirror-issue id to open DispatchConfirmDialog directly, so it routes through the same handler as Open in Todolist (never calls dispatch itself)', () => {
+  it('clicking Run now calls onOpenStage with the node id when the host has wired the Stage Board route — never onOpenTodolist, never dispatch', () => {
+    const onOpenStage = vi.fn();
+    const onOpenTodolist = vi.fn();
+    renderCard(
+      {
+        id: 'node-42',
+        owner_agent_id: 'agent-1',
+        events: {
+          notify_on_arrival: false,
+          notify_on_complete: false,
+          suggest_agent_run: true,
+          prepare_agent_run: true,
+        },
+        metadata: { run_prepared_at: '2026-07-27T00:00:00+00:00' },
+      },
+      { onOpenTodolist, onOpenStage },
+    );
+    fireEvent.click(screen.getByTestId('workflow-run-now-chip'));
+    expect(onOpenStage).toHaveBeenCalledTimes(1);
+    expect(onOpenStage).toHaveBeenCalledWith('node-42');
+    expect(onOpenTodolist).not.toHaveBeenCalled();
+  });
+
+  it('clicking Run now falls back to onOpenTodolist when onOpenStage is not provided (card mounted standalone, no Stage Board route wired)', () => {
     const onOpenTodolist = vi.fn();
     renderCard(
       {
