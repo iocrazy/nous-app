@@ -74,6 +74,7 @@ from app.workflows.soda_download import (  # noqa: F401
     soda_download_workflow,
 )
 from app.workflows.soda_ugc_download import soda_ugc_download_workflow  # noqa: F401
+from app.workflows.stage_hook import stage_hook_dispatch  # noqa: F401
 from app.workflows.storage_migration import (  # noqa: F401
     storage_migration_workflow,
 )
