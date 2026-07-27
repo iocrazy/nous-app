@@ -44,7 +44,10 @@ jobs:
       - name: Build & restart backend stack
         run: |
           cd "$GITHUB_WORKSPACE/deploy/gpu-server"
-          ./up.sh --build backend worker
+          # gateway 必须在列:2026-07-27 事故 —— compose 加了 gateway 服务但
+          # 此处显式清单没带它,backend 让出 10.0.0.10:8080 而网关无人创建,
+          # cn.nous.ink 入口 502 约 5 分钟(手动 up -d gateway 恢复)。
+          ./up.sh --build backend worker gateway
 
       # 探 /api/v1/readyz 而不是 /health —— /health 返回硬编码
       # {"status":"healthy"},DBOS 挂了照样 200,2026-07-22 的 3 天静默故障就是
