@@ -136,11 +136,15 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       // snapshot after it (not before) ensures we build on top of whatever
       // other canvas mutations landed while the mint was in flight (M3).
       let mediaUrl: string;
+      let mediaKind: 'image' | 'video';
       try {
-        mediaUrl = (await importResourceAsCanvasMedia(asset.id)).url;
+        const imported = await importResourceAsCanvasMedia(asset.id);
+        mediaUrl = imported.url;
+        mediaKind = imported.kind;
       } catch (err) {
         console.error('[promptAsset] durable import failed, falling back to cover:', err);
         mediaUrl = getResourceCoverUrl(asset.id); // visual-only fallback, no i2i
+        mediaKind = 'image'; // cover endpoint always serves an image
       }
 
       // Fresh reads at handler time, not render-time subscriptions — avoids
@@ -157,6 +161,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         promptNodeId: id,
         promptNodePosition,
         mediaUrl,
+        mediaKind,
       });
       // One atomic setNodes call — folding the self-patch into the same
       // array write that appends mediaNode avoids the two-write race where

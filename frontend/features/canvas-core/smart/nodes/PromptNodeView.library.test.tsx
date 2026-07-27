@@ -163,6 +163,35 @@ describe('PromptNodeView Library button', () => {
     expect(mediaNodeData.data.items[0].url).toBe('/api/v1/generated-media/gm-1');
   });
 
+  // I1 (P3 final review): a video asset must produce a media node item
+  // with kind 'video' — the kind returned by importResourceAsCanvasMedia
+  // used to be discarded, hardcoding 'image' for every pick.
+  it('carries a video mediaKind through to the inserted media node item', async () => {
+    mockImportResource.mockResolvedValueOnce({ url: '/api/v1/generated-media/gm-2', kind: 'video' });
+    setNode();
+    render(
+      <ReactFlowProvider>
+        <PromptNodeView {...baseProps} id="p1" type="prompt" data={BASE_DATA} />
+      </ReactFlowProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId('prompt-library-button'));
+    await screen.findByTestId('asset-prompt-picker');
+    const row = await screen.findByTestId('asset-prompt-picker-row');
+    fireEvent.click(row);
+
+    await waitFor(() => {
+      const { nodes } = useCanvasCoreStore.getState();
+      expect(nodes).toHaveLength(2);
+    });
+
+    const { nodes } = useCanvasCoreStore.getState();
+    const mediaNode = nodes.find(
+      (n) => (n as unknown as { id: string }).id !== 'p1',
+    ) as unknown as { data: { items: Array<{ kind: string }> } };
+    expect(mediaNode.data.items[0].kind).toBe('video');
+  });
+
   // Phase 3 Task 3: when minting the durable URL fails, the pick still
   // succeeds — it just falls back to the (visual-only) resource cover URL
   // instead of blocking the Library flow on a failed network call.

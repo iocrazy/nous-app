@@ -32,12 +32,18 @@ export function buildPromptAssetLoad(args: {
   promptNodeId: string;
   promptNodePosition: { x: number; y: number };
   mediaUrl: string;
+  /** Kind of the media the picker resolved (importResourceAsCanvasMedia's
+   *  result, or 'image' for the cover-fallback path — the cover endpoint
+   *  only ever serves images). Drives the new media node's item kind so
+   *  video assets don't render as a broken <img> and don't get treated as
+   *  an image i2i source. */
+  mediaKind: 'image' | 'video';
 }): {
-  promptPatch: { body: string; negative_body?: string };
+  promptPatch: { body?: string; negative_body?: string };
   mediaNode: MediaNode;
   connection: { id: string; source: string; target: string };
 } {
-  const { asset, lang, promptNodeId, promptNodePosition, mediaUrl } = args;
+  const { asset, lang, promptNodeId, promptNodePosition, mediaUrl, mediaKind } = args;
 
   // Side-picking: prefer the chosen lang, fall back to the other side when
   // that side is empty (e.g. only an English prompt was ever written).
@@ -48,8 +54,13 @@ export function buildPromptAssetLoad(args: {
       ? asset.gen_prompt_negative_zh ?? asset.gen_prompt_negative
       : asset.gen_prompt_negative ?? asset.gen_prompt_negative_zh;
 
-  const promptPatch: { body: string; negative_body?: string } = {
-    body,
+  const promptPatch: { body?: string; negative_body?: string } = {
+    // Omit the key entirely when the asset has no positive prompt on either
+    // side (negative-only assets, now reachable via the four-column picker
+    // filter) — an empty string would blow away whatever the user already
+    // typed into the node, since promptPatch is spread over the existing
+    // body at the call site.
+    ...(body.trim() ? { body } : {}),
     // Omit the key entirely when neither side has a negative prompt — an
     // empty string would render the (empty) negative textarea for no reason.
     ...(negative ? { negative_body: negative } : {}),
@@ -57,7 +68,7 @@ export function buildPromptAssetLoad(args: {
 
   const mediaNode = createMediaNode(
     {
-      items: [{ url: mediaUrl, kind: 'image', name: asset.filename }],
+      items: [{ url: mediaUrl, kind: mediaKind, name: asset.filename }],
     },
     {
       // Sits to the left of (and slightly above) the prompt node so the

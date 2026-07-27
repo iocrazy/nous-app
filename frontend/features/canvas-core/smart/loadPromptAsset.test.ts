@@ -32,6 +32,7 @@ describe('buildPromptAssetLoad', () => {
       promptNodeId: PROMPT_NODE_ID,
       promptNodePosition: PROMPT_NODE_POSITION,
       mediaUrl: MEDIA_URL,
+      mediaKind: 'image',
     });
     expect(fallback.promptPatch.body).toBe(enOnly.gen_prompt);
     expect(fallback.promptPatch.negative_body).toBe(enOnly.gen_prompt_negative);
@@ -43,6 +44,7 @@ describe('buildPromptAssetLoad', () => {
       promptNodeId: PROMPT_NODE_ID,
       promptNodePosition: PROMPT_NODE_POSITION,
       mediaUrl: MEDIA_URL,
+      mediaKind: 'image',
     });
     expect(withZh.promptPatch.body).toBe(ASSET.gen_prompt_zh);
     expect(withZh.promptPatch.negative_body).toBe(ASSET.gen_prompt_negative_zh);
@@ -54,6 +56,7 @@ describe('buildPromptAssetLoad', () => {
       promptNodeId: PROMPT_NODE_ID,
       promptNodePosition: PROMPT_NODE_POSITION,
       mediaUrl: MEDIA_URL,
+      mediaKind: 'image',
     });
     expect(withEn.promptPatch.body).toBe(ASSET.gen_prompt);
     expect(withEn.promptPatch.negative_body).toBe(ASSET.gen_prompt_negative);
@@ -71,6 +74,7 @@ describe('buildPromptAssetLoad', () => {
       promptNodeId: PROMPT_NODE_ID,
       promptNodePosition: PROMPT_NODE_POSITION,
       mediaUrl: MEDIA_URL,
+      mediaKind: 'image',
     });
     expect('negative_body' in en.promptPatch).toBe(false);
 
@@ -80,6 +84,7 @@ describe('buildPromptAssetLoad', () => {
       promptNodeId: PROMPT_NODE_ID,
       promptNodePosition: PROMPT_NODE_POSITION,
       mediaUrl: MEDIA_URL,
+      mediaKind: 'image',
     });
     expect('negative_body' in zh.promptPatch).toBe(false);
   });
@@ -91,6 +96,7 @@ describe('buildPromptAssetLoad', () => {
       promptNodeId: PROMPT_NODE_ID,
       promptNodePosition: PROMPT_NODE_POSITION,
       mediaUrl: MEDIA_URL,
+      mediaKind: 'image',
     });
     expect(mediaNode.type).toBe('media');
     expect(mediaNode.data.items).toHaveLength(1);
@@ -112,11 +118,60 @@ describe('buildPromptAssetLoad', () => {
       promptNodeId: PROMPT_NODE_ID,
       promptNodePosition: PROMPT_NODE_POSITION,
       mediaUrl: MEDIA_URL,
+      mediaKind: 'image',
     });
     expect(connection).toEqual({
       id: `conn-${mediaNode.id}-${PROMPT_NODE_ID}`,
       source: mediaNode.id,
       target: PROMPT_NODE_ID,
     });
+  });
+
+  // I1 (P3 final review): a video asset must produce a media node item
+  // with kind 'video', not the old hardcoded 'image' — otherwise it
+  // renders as a broken <img> and gets ignored by i2i source resolution.
+  it('media node item kind follows the caller-supplied mediaKind', () => {
+    const { mediaNode } = buildPromptAssetLoad({
+      asset: ASSET,
+      lang: 'en',
+      promptNodeId: PROMPT_NODE_ID,
+      promptNodePosition: PROMPT_NODE_POSITION,
+      mediaUrl: MEDIA_URL,
+      mediaKind: 'video',
+    });
+    expect(mediaNode.data.items[0]).toMatchObject({ kind: 'video' });
+  });
+
+  // I2 (P3 final review): negative-only assets (now reachable via the
+  // four-column picker filter) must NOT wipe the prompt node's existing
+  // body — promptPatch has to omit the `body` key entirely so the spread
+  // at the call site is a no-op for it.
+  it('omits body when the asset has no positive prompt on either side (negative-only asset)', () => {
+    const negativeOnly: PromptAsset = {
+      ...ASSET,
+      gen_prompt: null,
+      gen_prompt_zh: null,
+    };
+    const en = buildPromptAssetLoad({
+      asset: negativeOnly,
+      lang: 'en',
+      promptNodeId: PROMPT_NODE_ID,
+      promptNodePosition: PROMPT_NODE_POSITION,
+      mediaUrl: MEDIA_URL,
+      mediaKind: 'image',
+    });
+    expect('body' in en.promptPatch).toBe(false);
+    expect(en.promptPatch.negative_body).toBe(negativeOnly.gen_prompt_negative);
+
+    const zh = buildPromptAssetLoad({
+      asset: negativeOnly,
+      lang: 'zh',
+      promptNodeId: PROMPT_NODE_ID,
+      promptNodePosition: PROMPT_NODE_POSITION,
+      mediaUrl: MEDIA_URL,
+      mediaKind: 'image',
+    });
+    expect('body' in zh.promptPatch).toBe(false);
+    expect(zh.promptPatch.negative_body).toBe(negativeOnly.gen_prompt_negative_zh);
   });
 });

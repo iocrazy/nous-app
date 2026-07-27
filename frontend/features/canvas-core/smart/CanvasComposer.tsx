@@ -245,11 +245,15 @@ export function CanvasComposer({
 
     void (async () => {
       let mediaUrl: string;
+      let mediaKind: 'image' | 'video';
       try {
-        mediaUrl = (await importResourceAsCanvasMedia(insert.assetId)).url;
+        const imported = await importResourceAsCanvasMedia(insert.assetId);
+        mediaUrl = imported.url;
+        mediaKind = imported.kind;
       } catch (err) {
         console.error('[promptAsset] durable import failed, falling back to cover:', err);
         mediaUrl = getResourceCoverUrl(insert.assetId); // visual-only fallback, no i2i
+        mediaKind = 'image'; // cover endpoint always serves an image
       }
 
       const position = dropPosition();
@@ -274,6 +278,7 @@ export function CanvasComposer({
         promptNodeId: promptNode.id,
         promptNodePosition: position,
         mediaUrl,
+        mediaKind,
       });
       const filledPromptNode = {
         ...promptNode,
