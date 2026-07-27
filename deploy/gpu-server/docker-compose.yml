@@ -36,11 +36,12 @@ services:
     image: nous-backend:local
     container_name: nous-backend
     ports:
-      # 仅绑 ZeroTier 网卡 —— nas-A 跳板经 10.0.0.10:8080 反代照常工作，
-      # 但不再暴露给 LAN(192.168.8.0/24)。公网入口是 api.nous.ink,
-      # 经 cloudflared 走 docker 网络直连 nous-backend:8080,不依赖此映射。
+      # 2026-07-28 起 10.0.0.10:8080 归 gateway(nginx 分流 /f/ 直出),
+      # backend 退到 8890 作内网排障口(沿 NAS 时代 APP_PORT=8890 惯例)。
+      # nas-A 反代目标不变(仍 10.0.0.10:8080),公网 api.nous.ink 经
+      # cloudflared 走 docker 网络直连 nous-backend:8080,均不受影响。
       # 注意: ZeroTier 未起时 docker 会绑定失败,restart 策略会重试。
-      - "10.0.0.10:8080:8080"
+      - "10.0.0.10:8890:8080"
     env_file: /media/heygo/program/datahub/nous/secrets/backend.env
     environment:
       - MEDIAHUB_ROLE=gateway
@@ -61,6 +62,30 @@ services:
       interval: 30s
       timeout: 10s
       start_period: 90s
+      retries: 3
+    restart: unless-stopped
+
+  gateway:
+    image: nginx:alpine
+    container_name: nous-gateway
+    ports:
+      # nas-A(cn.nous.ink:88)的反代目标。/f/ 签名直出走 sendfile,
+      # 其余全部转 nous-backend。签名公式必须与
+      # backend app/services/media/nginx_direct.py 完全一致。
+      - "10.0.0.10:8080:80"
+    # 与 backend 共用 secrets env(仅用到 NGINX_SECURE_LINK_SECRET,
+    # NAS 时代同款约定;nginx 官方镜像 entrypoint 只 envsubst 已定义
+    # 环境变量,nginx 自身的 $arg_st/$uri 等不受影响)。
+    env_file: /media/heygo/program/datahub/nous/secrets/backend.env
+    volumes:
+      - ./nginx-gateway:/etc/nginx/templates:ro
+      - /mnt/heytime/Sources/nous/media:/app/downloads:ro
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 5s
       retries: 3
     restart: unless-stopped
 
