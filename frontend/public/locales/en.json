@@ -995,7 +995,10 @@
       "author": "Author",
       "platform": "Platform",
       "published": "Published",
-      "platformTags": "Platform Tags"
+      "platformTags": "Platform Tags",
+      "sendToCanvas": "Send to Canvas",
+      "sendToCanvasNoProjects": "No projects yet",
+      "sendToCanvasNoCanvases": "This project has no canvases yet"
     },
     "folderInfoPanel": {
       "title": "Folder Info",
@@ -1978,7 +1981,13 @@
     "loopLabelPlaceholder": "Loop label (optional)",
     "loopPromptPlaceholder": "Prompt for this round — {{计数}} = round index",
     "loopImageWillOutput": "Will output {{n}} image(s)",
-    "loopImageEmpty": "Connect an image or image group to the left port"
+    "loopImageEmpty": "Connect an image or image group to the left port",
+    "assetPromptPicker": {
+      "title": "Prompt Library",
+      "searchPlaceholder": "Search by filename…",
+      "all": "All",
+      "noResults": "No prompt assets found"
+    }
   },
   "modelParams": {
     "otherParams": "Parameters",

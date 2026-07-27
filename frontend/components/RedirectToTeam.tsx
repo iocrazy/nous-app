@@ -32,7 +32,11 @@ export function RedirectToTeam({ view }: { view: string }) {
 
   // Reconstruct the sub-path from params for nested routes like /projects/:projectId
   const subPath = location.pathname.replace(/^\//, '');
-  return <Navigate to={`/team/${teamId}/${subPath}`} replace />;
+  // Forward router state through the redirect — <Navigate> does NOT do this
+  // implicitly, so any state-carrying navigation into a legacy flat route
+  // (e.g. SendToCanvasModal's promptInsert payload) would otherwise silently
+  // vanish for personal-project users who get routed through here.
+  return <Navigate to={`/team/${teamId}/${subPath}`} state={location.state} replace />;
 }
 
 /**

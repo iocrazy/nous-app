@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useCallback } from 'react';
-import { Star, Flame, FolderOpen } from 'lucide-react';
+import { Star, Flame, FolderOpen, Sparkles } from 'lucide-react';
 import { TagRow } from './TagRow';
+import { updateTag } from '../../services/unifiedTagService';
 import type { Tag } from '../../types';
 import type { PickerSettings } from '../../services/tagPreferencesService';
 
@@ -32,17 +33,26 @@ export const TagContent: React.FC<TagContentProps> = ({
   onRequestMerge,
 }) => {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tagId: string } | null>(null);
+  const [tagUpdates, setTagUpdates] = useState<Map<string, Partial<Tag>>>(new Map());
 
   const starredSet = useMemo(() => new Set(starredIds), [starredIds]);
 
+  // Merge prop tags with local updates
+  const mergedTags = useMemo(() => {
+    return allTags.map(tag => {
+      const updates = tagUpdates.get(String(tag.id));
+      return updates ? { ...tag, ...updates } : tag;
+    });
+  }, [allTags, tagUpdates]);
+
   // Filter by search
   const searchFiltered = useMemo(() => {
-    if (!search) return allTags;
+    if (!search) return mergedTags;
     const q = search.toLowerCase();
-    return allTags.filter(
+    return mergedTags.filter(
       (t) => t.name.toLowerCase().includes(q) || (t.name_zh && t.name_zh.toLowerCase().includes(q)),
     );
-  }, [allTags, search]);
+  }, [mergedTags, search]);
 
   // Filter by group
   const groupFiltered = useMemo(() => {
@@ -89,6 +99,42 @@ export const TagContent: React.FC<TagContentProps> = ({
   }, []);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  const handleTogglePromptTrigger = useCallback(async (tagId: string) => {
+    // Find the current tag (check mergedTags for latest state)
+    const currentTag = mergedTags.find((t) => String(t.id) === tagId);
+    if (!currentTag || currentTag.type !== 'user') {
+      closeContextMenu();
+      return;
+    }
+
+    const newPromptTrigger = !currentTag.prompt_trigger;
+
+    try {
+      // Optimistically update local state
+      setTagUpdates((prev) => {
+        const next = new Map(prev);
+        next.set(tagId, { prompt_trigger: newPromptTrigger });
+        return next;
+      });
+
+      // Call API to update. The optimistic override is kept on success —
+      // dropping it here would revert the UI to the parent's stale prop
+      // until the next refetch. (Known trade-off: an external change to
+      // this tag from another tab stays masked until this picker remounts.)
+      await updateTag(tagId, { prompt_trigger: newPromptTrigger });
+    } catch (err) {
+      console.error('Failed to update tag prompt_trigger:', err);
+      // Revert optimistic update on error
+      setTagUpdates((prev) => {
+        const next = new Map(prev);
+        next.delete(tagId);
+        return next;
+      });
+    } finally {
+      closeContextMenu();
+    }
+  }, [mergedTags, closeContextMenu]);
 
   const colWidthClass = settings.columnWidth === 'small' ? 'grid-cols-3' : settings.columnWidth === 'large' ? 'grid-cols-1' : 'grid-cols-2';
   const gridClass = settings.layout === 'grid' ? 'flex flex-wrap gap-1' : `grid ${colWidthClass} gap-x-1`;
@@ -147,7 +193,7 @@ export const TagContent: React.FC<TagContentProps> = ({
       {/* Right-click context menu */}
       {contextMenu && (
         <div
-          className="fixed z-[80] bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-32"
+          className="fixed z-[80] bg-ink-900 border border-ink-700 rounded-lg shadow-xl py-1 w-48"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           <button
@@ -157,6 +203,21 @@ export const TagContent: React.FC<TagContentProps> = ({
             <Star size={10} className={starredSet.has(contextMenu.tagId) ? 'fill-yellow-500 text-yellow-500' : ''} />
             {starredSet.has(contextMenu.tagId) ? 'Unstar' : 'Star'}
           </button>
+          {(() => {
+            const tag = mergedTags.find((t) => String(t.id) === contextMenu.tagId);
+            return tag && tag.type === 'user' ? (
+              <button
+                onClick={() => { handleTogglePromptTrigger(contextMenu.tagId); }}
+                className={`w-full px-3 py-1.5 text-xs text-left hover:bg-ink-800 flex items-center gap-2 ${
+                  tag.prompt_trigger ? 'text-[var(--accent-text)]' : 'text-ink-300'
+                }`}
+              >
+                <Sparkles size={10} className={tag.prompt_trigger ? 'fill-[var(--accent-text)]' : ''} />
+                {tag.prompt_trigger && <span className="w-2">✓</span>}
+                Show Prompt Panel
+              </button>
+            ) : null;
+          })()}
           {onRequestMerge && selectedUserTagCount >= 2 && (
             <button
               onClick={() => { onRequestMerge(); closeContextMenu(); }}

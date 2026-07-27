@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Library } from 'lucide-react';
 
+import type { CanvasConnection, CanvasNode } from '../../types';
 import type { PromptGenSettings, PromptNodeData, PromptResourceRef } from '../types';
 import { RUN_STATUS_TONE, SMART_NODE_DEFAULT_WIDTH } from '../types';
 import { useGenerationModels } from './useGenerationModels';
@@ -16,8 +18,12 @@ import {
 } from './elapsed';
 import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { CanvasMentionPicker } from './CanvasMentionPicker';
+import { AssetPromptPicker } from './AssetPromptPicker';
+import { buildPromptAssetLoad } from '../loadPromptAsset';
+import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { useResourceSearch } from '../../../../hooks/useResourceSearch';
 import type { ResourceSearchResult } from '../../../../types';
+import type { PromptAsset } from '../../../../services/resourceService';
 import { ASPECT_RATIOS } from '../aspectPresets';
 import { UiSelect } from '../../../../components/ui';
 
@@ -38,6 +44,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     run_started_at = null,
     run_finished_at = null,
     resource_refs = [],   // default [] for nodes persisted before this field
+    negative_body,         // absent = no negative prompt; '' = cleared but keep the box (Phase 2 asset library)
     gen = null,           // absent = legacy text prompt
   } = data as unknown as PromptNodeData;
   const patch = useNodeDataPatch(id);
@@ -52,6 +59,10 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
 
   // Kind filter for the @-mention picker tabs (All / Video / Image / Doc …)
   const [activeKind, setActiveKind] = useState<ActiveKind>('');
+
+  // Library picker (Phase 2 asset library) — pulls a saved prompt + its
+  // cover into this node, wiring a fresh media node upstream of it.
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   // Smart nodes keep the tone's border colour but drop the whole-card
   // animate-pulse — the status badge's dot carries the motion (P1-5).
@@ -109,6 +120,45 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
     mention.setItemCount(searchData.results.length);
   }, [searchData.results.length, mention.setItemCount]);
 
+  // ── Library picker handler ───────────────────────────────────────────────
+  // Applies the pure-function result: patch this node's body/negative_body,
+  // append the new media node, and wire it in as a source connection.
+  const handlePickAsset = useCallback(
+    (asset: PromptAsset, lang: 'en' | 'zh') => {
+      // Fresh reads at handler time, not render-time subscriptions — avoids
+      // inserting into a stale nodes/connections snapshot when other canvas
+      // mutations landed between this node's last render and the click (M3).
+      const { nodes, connections, setNodes, setConnections } = useCanvasCoreStore.getState();
+      const selfNode = nodes.find((n) => (n as unknown as { id: string }).id === id);
+      const promptNodePosition =
+        (selfNode as unknown as { position?: { x: number; y: number } } | undefined)?.position ??
+        { x: 0, y: 0 };
+      const { promptPatch, mediaNode, connection } = buildPromptAssetLoad({
+        asset,
+        lang,
+        promptNodeId: id,
+        promptNodePosition,
+      });
+      // One atomic setNodes call — folding the self-patch into the same
+      // array write that appends mediaNode avoids the two-write race where
+      // patch()'s set(nodes-with-patch) gets clobbered by this handler's own
+      // stale `nodes` snapshot (the bug this replaced: patch() landed, then
+      // setNodes([...nodes, mediaNode]) overwrote it right back out).
+      const nextNodes = nodes.map((n) =>
+        (n as unknown as { id: string }).id === id
+          ? ({
+              ...n,
+              data: { ...(n as unknown as { data?: object }).data, ...promptPatch },
+            } as unknown as CanvasNode)
+          : n,
+      );
+      setNodes([...nextNodes, mediaNode as unknown as CanvasNode]);
+      setConnections([...connections, connection as unknown as CanvasConnection]);
+      setLibraryOpen(false);
+    },
+    [id],
+  );
+
   // ────────────────────────────────────────────────────────────────────────
 
   return (
@@ -147,6 +197,15 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             <option value="image">Image</option>
             <option value="video">Video</option>
           </UiSelect>
+          <button
+            type="button"
+            className={`${CANVAS_PILL_TRIGGER} flex items-center justify-center`}
+            onClick={() => setLibraryOpen(true)}
+            aria-label="Load from library"
+            data-testid="prompt-library-button"
+          >
+            <Library size={12} />
+          </button>
           {pillText && (
             <span
               data-testid="prompt-elapsed"
@@ -189,6 +248,26 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
             activeIndex={mention.activeIndex}
           />
         )}
+
+        {/* Fixed full-screen modal — no relative positioning needed. */}
+        {libraryOpen && (
+          <AssetPromptPicker onPick={handlePickAsset} onClose={() => setLibraryOpen(false)} />
+        )}
+
+        {negative_body !== undefined ? (
+          <div className="mt-1.5">
+            <span className="text-[10px] uppercase tracking-wider text-rose-400/85">
+              Negative
+            </span>
+            <textarea
+              value={negative_body ?? ''}
+              onChange={(e) => patch({ negative_body: e.target.value })}
+              placeholder="Negative prompt"
+              rows={2}
+              className="nodrag nowheel mt-0.5 w-full resize-y rounded-lg border border-rose-400/25 bg-rose-500/[.06] px-2 py-1 text-[11px] text-ink-300 outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-rose-400/40"
+            />
+          </div>
+        ) : null}
 
         <div className="mt-2 flex items-center justify-between gap-2 text-xs">
           {!gen && (

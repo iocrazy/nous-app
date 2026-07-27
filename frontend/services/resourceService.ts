@@ -199,6 +199,63 @@ export async function exportTrainingSet(
   URL.revokeObjectURL(url);
 }
 
+/** A resource carrying a generation prompt, as surfaced by the canvas
+ *  Library picker (Phase 2 of spec 2026-07-26-asset-prompt-management). */
+export interface PromptAsset {
+  id: string;
+  filename: string;
+  gen_prompt: string | null;
+  gen_prompt_zh: string | null;
+  gen_prompt_negative: string | null;
+  gen_prompt_negative_zh: string | null;
+  updated_at: string;
+}
+
+/** Assets that carry any generation prompt (en or zh), for the canvas
+ *  Library picker. Optionally narrowed by filename search and/or a
+ *  prompt-trigger tag id (joins resource_tags). Trashed assets excluded. */
+export async function fetchPromptAssets(opts: {
+  query?: string;
+  tagId?: string;
+  limit?: number;
+} = {}): Promise<PromptAsset[]> {
+  const cols =
+    'id, filename, gen_prompt, gen_prompt_zh, gen_prompt_negative, gen_prompt_negative_zh, updated_at';
+  // Widen to `string` before handing it to .select() — postgrest-js infers a
+  // literal query-result type from the *literal type* of this argument, and
+  // a ternary of two different template-literal shapes makes it choke with
+  // a ParserError type instead of falling back to a generic row shape.
+  const selectCols: string = opts.tagId ? `${cols}, resource_tags!inner(tag_id)` : cols;
+  let q = supabase
+    .from('resources')
+    .select(selectCols)
+    .or('gen_prompt.not.is.null,gen_prompt_zh.not.is.null')
+    .eq('is_trashed', false)
+    .order('updated_at', { ascending: false })
+    .limit(opts.limit ?? 50);
+  if (opts.tagId) q = q.eq('resource_tags.tag_id', opts.tagId);
+  if (opts.query) q = q.ilike('filename', `%${opts.query}%`);
+
+  const { data, error } = await q;
+  if (error) {
+    console.error('[fetchPromptAssets]', error);
+    return [];
+  }
+  // The dynamic select() string (tag-join branch) defeats postgrest-js's
+  // literal-type row inference, so cast explicitly rather than relying on it
+  // (same pattern as fetchResourceItems below).
+  const rows = (data as unknown as Record<string, unknown>[]) ?? [];
+  return rows.map((r) => ({
+    id: String(r.id),
+    filename: String(r.filename ?? ''),
+    gen_prompt: (r.gen_prompt as string | null) ?? null,
+    gen_prompt_zh: (r.gen_prompt_zh as string | null) ?? null,
+    gen_prompt_negative: (r.gen_prompt_negative as string | null) ?? null,
+    gen_prompt_negative_zh: (r.gen_prompt_negative_zh as string | null) ?? null,
+    updated_at: String(r.updated_at ?? ''),
+  }));
+}
+
 /** Translate the asset's generation prompt into `targetLang` via the
  *  user's assigned translation agent. Returns both prompt sides. */
 export async function translateGenPrompt(

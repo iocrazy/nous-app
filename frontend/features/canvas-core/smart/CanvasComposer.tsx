@@ -15,6 +15,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 import { arrangeSelected } from './arrangeNodes';
 import { useKnifeStore } from '../../../canvas-kit/knifeStore';
@@ -43,6 +44,7 @@ import {
   settleGenerationSlot,
 } from './genSlots';
 import { resolveEntityRef } from './entityRef';
+import { buildPromptAssetLoad } from './loadPromptAsset';
 import { resolveSourceUrl } from './promptInputs';
 import { withGenerationRunner } from './generationRunner';
 import { createBackendRunner } from './runner.backend';
@@ -54,11 +56,27 @@ import {
   type RunnerContext,
 } from './runner';
 import { topoSortPrompts } from './topology';
+import type { CanvasConnection, CanvasNode } from '../types';
 import type { PromptNodeData } from './types';
+import type { PromptAsset } from '../../../services/resourceService';
 import { SMART_NODE_TYPES } from './nodes/registry';
 import { parseWorkflow, serializeWorkflow, workflowFilename } from './workflowIO';
 import { fetchWorkflowText, saveWorkflowToLibrary } from './workflowLibrary';
 import { WorkflowLibraryPicker } from './WorkflowLibraryPicker';
+
+/** Shape of the router state SendToCanvasModal navigates here with
+ *  (spec 2026-07-26-asset-prompt-management, Phase 2 Task 4). `coverUrl`
+ *  travels along for completeness but isn't consumed below — the adapter
+ *  re-derives the same URL from `assetId` via buildPromptAssetLoad, which
+ *  keeps the media-node construction on the one tested code path shared
+ *  with the in-canvas Library picker (PromptNodeView). */
+interface PendingPromptInsert {
+  assetId: string;
+  filename: string;
+  positive: string;
+  negative?: string;
+  coverUrl?: string;
+}
 
 const SMART_NODE_TYPE_KEYS = new Set(Object.keys(SMART_NODE_TYPES));
 /** Refuse absurd files before reading them into memory. */
@@ -89,13 +107,17 @@ export function CanvasComposer({
   // four-card create menu is their primary surface.
   const canvasKind = useCanvasCoreStore((s) => s.kind);
   const isLite = canvasKind === 'lite';
+  const loadStatus = useCanvasCoreStore((s) => s.loadStatus);
   const nodes = useCanvasCoreStore((s) => s.nodes);
   const connections = useCanvasCoreStore((s) => s.connections);
   const selection = useCanvasCoreStore((s) => s.selection);
   const canvasId = useCanvasCoreStore((s) => s.canvasId);
   const setNodes = useCanvasCoreStore((s) => s.setNodes);
+  const setConnections = useCanvasCoreStore((s) => s.setConnections);
   const setSelection = useCanvasCoreStore((s) => s.setSelection);
   const patchNode = useCanvasCoreStore((s) => s.patchNode);
+  const location = useLocation();
+  const navigate = useNavigate();
 
   // Per-node run batches (P2-9 — Infinite's node-granular running state):
   // each Run/Cascade owns an independent batch with its own cooperative
@@ -192,6 +214,74 @@ export function CanvasComposer({
     },
     [dropPosition, nodes, setNodes, setSelection],
   );
+
+  // Send-to-Canvas consumption (Phase 2 Task 4): SendToCanvasModal
+  // navigates here with `location.state.promptInsert`. Once the canvas
+  // has actually finished loading (nodes/connections are the real
+  // document, not the reset-store defaults), turn the payload into a
+  // fresh Prompt node + Media node pair via the same pure builder the
+  // in-canvas Library picker uses, then strip the state so a reload or
+  // back-nav doesn't reinsert it.
+  // insertedRef guards against StrictMode's synchronous double-invoke of
+  // this effect (mirrors CanvasPage's seededRef pattern) — the navigate()
+  // state-clear alone doesn't help because both invocations run before
+  // either commit lands, so both would still see the same pending insert.
+  const insertedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (loadStatus !== 'ready') return;
+    const insert = (location.state as { promptInsert?: PendingPromptInsert } | null)
+      ?.promptInsert;
+    if (!insert) return;
+    const insertKey = `${canvasId}:${insert.assetId}`;
+    if (insertedRef.current === insertKey) return;
+    insertedRef.current = insertKey;
+
+    const position = dropPosition();
+    const promptNode = createPromptNode({}, { position });
+    // Adapter: the payload already carries the resolved positive/negative
+    // text (PromptSection picked the lang side), so both sides of the
+    // fake asset get the same value — buildPromptAssetLoad's lang
+    // fallback logic is a no-op here, it's only used for the shared
+    // node/connection construction and cover-url derivation from assetId.
+    const asset: PromptAsset = {
+      id: insert.assetId,
+      filename: insert.filename,
+      gen_prompt: insert.positive,
+      gen_prompt_zh: insert.positive,
+      gen_prompt_negative: insert.negative ?? null,
+      gen_prompt_negative_zh: insert.negative ?? null,
+      updated_at: '',
+    };
+    const { promptPatch, mediaNode, connection } = buildPromptAssetLoad({
+      asset,
+      lang: 'en',
+      promptNodeId: promptNode.id,
+      promptNodePosition: position,
+    });
+    const filledPromptNode = {
+      ...promptNode,
+      data: { ...promptNode.data, ...promptPatch },
+    };
+
+    const store = useCanvasCoreStore.getState();
+    setNodes([...store.nodes, filledPromptNode, mediaNode as unknown as CanvasNode]);
+    setConnections([...store.connections, connection as unknown as CanvasConnection]);
+    setSelection([filledPromptNode.id, mediaNode.id]);
+
+    navigate(location.pathname + location.search + location.hash, { replace: true });
+  }, [
+    loadStatus,
+    location.state,
+    location.pathname,
+    location.search,
+    location.hash,
+    navigate,
+    dropPosition,
+    setNodes,
+    setConnections,
+    setSelection,
+    canvasId,
+  ]);
 
   const buildContexts = useCallback(
     (ids: string[]): RunnerContext[] => {
