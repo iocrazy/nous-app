@@ -8,7 +8,7 @@
  */
 
 import React, { useState } from 'react';
-import { ArrowLeft, ArrowRight, ExternalLink, FileCheck2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bot, ExternalLink, FileCheck2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { updateProjectNode } from '../../services/workflowService';
 import type { ProjectNodePatch, ProjectStageNode } from '../../types';
@@ -73,6 +73,19 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
         <span className={`text-[11px] font-medium ${meta.text}`}>
           {NODE_STATUS_LABEL[node.status]}
         </span>
+        {node.events.suggest_agent_run && node.owner_agent_id && (
+          <button
+            type="button"
+            onClick={onOpenTodolist}
+            data-testid="workflow-suggest-agent-chip"
+            className="ml-auto inline-flex items-center gap-1 rounded-full bg-amber-500/12 px-2.5 py-1 text-[11px] font-medium text-amber-400 transition hover:bg-amber-500/20"
+          >
+            <Bot size={12} />
+            {t('projects.workflow.suggestAgentRun', {
+              agentName: agents.find((a) => a.id === node.owner_agent_id)?.name ?? 'agent',
+            })}
+          </button>
+        )}
       </div>
 
       <Row label={t('projects.workflow.owner')}>

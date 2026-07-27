@@ -1721,6 +1721,7 @@
       "members": "成员",
       "schedule": "排期",
       "setSchedule": "设置排期",
+      "suggestAgentRun": "建议运行 {{agentName}}",
       "deliverable": "交付物",
       "openInTodolist": "在待办中打开",
       "completeStage": "完成阶段",
