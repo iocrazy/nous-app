@@ -6,7 +6,7 @@
 
 ## Problem
 
-MediaHub uses yt-dlp for multi-platform video parsing. Some platforms (Douyin, Bilibili, YouTube) return higher quality or restricted content when authenticated via cookies. Currently:
+Nous uses yt-dlp for multi-platform video parsing. Some platforms (Douyin, Bilibili, YouTube) return higher quality or restricted content when authenticated via cookies. Currently:
 
 - yt-dlp reads cookies from a server-side directory (`COOKIES_DIR`), not per-user
 - Douyin always attempts yt-dlp first, even though LightweightParser works without cookies

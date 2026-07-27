@@ -1,6 +1,6 @@
 # Process Supervision
 
-How MediaHub stays running across crashes, hangs, OOMs, and host
+How Nous stays running across crashes, hangs, OOMs, and host
 reboots. Five concentric layers, each catching a failure mode the
 inner one misses.
 
@@ -145,6 +145,6 @@ inside autoheal calls our app, so its scope of failure is narrow:
 worst case the supervision layer is offline temporarily, the app keeps
 running on its own restart policy.
 
-If autoheal AND mediahub both die simultaneously and stay down:
-docker daemon's restart loop picks up mediahub independently. No
+If autoheal AND nous both die simultaneously and stay down:
+docker daemon's restart loop picks up nous independently. No
 single point of failure.

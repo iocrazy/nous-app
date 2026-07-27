@@ -3,10 +3,11 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "mediahub-core"
+name = "nous-core"
 version = "0.1.0"
-description = "High-performance media processing module for MediaHub"
+description = "High-performance media processing module for Nous"
 requires-python = ">=3.10"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
+module-name = "nous_core"

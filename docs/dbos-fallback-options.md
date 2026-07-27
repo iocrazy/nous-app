@@ -20,13 +20,13 @@ This doc is the **predetermined escape route** so we don't redebate strategy und
 | OpenTelemetry / observability gap blocks operability | Medium | **F3 + manual instrumentation** OR **F2: Hatchet** |
 | Latency regression > 110% on any of 23 user-facing task_types (PR-D3 shadow) | Medium | **F3: per-task carve-out** |
 | DBOS upstream abandoned / acquired-and-killed within 6 months | Hard | **F2: Hatchet** (long-term) |
-| Cross-AZ / multi-region deployment needed before mediahub goes that scale | Out of scope today | revisit at scale, **F2: Hatchet** likely |
+| Cross-AZ / multi-region deployment needed before nous goes that scale | Out of scope today | revisit at scale, **F2: Hatchet** likely |
 
 ---
 
 ## F1 — Separate PG instance for DBOS only
 
-**What changes**: Spin a dedicated PG 17 container on NAS just for DBOS metadata + workflow state. mediahub's supabase stays untouched. DBOS uses `dbos://` connection string pointing at this dedicated PG; supabase-py operations from inside DBOS steps still go to NAS supabase via existing client.
+**What changes**: Spin a dedicated PG 17 container on NAS just for DBOS metadata + workflow state. nous's supabase stays untouched. DBOS uses `dbos://` connection string pointing at this dedicated PG; supabase-py operations from inside DBOS steps still go to NAS supabase via existing client.
 
 **When**: NAS supabase rejects DBOS schema/role/extension changes (PoC #2/#3/#5 fail), OR ops decide "don't touch the supabase cluster from DBOS at all".
 
@@ -49,7 +49,7 @@ This doc is the **predetermined escape route** so we don't redebate strategy und
 - Operational: 1 extra DB to monitor / backup / patch
 
 **Pros**:
-- Total isolation: DBOS bugs / migrations cannot touch mediahub data
+- Total isolation: DBOS bugs / migrations cannot touch nous data
 - DBOS PG can be upgraded/downgraded independently
 - Simpler RLS story (no overlap with supabase auth roles)
 
@@ -74,7 +74,7 @@ This doc is the **predetermined escape route** so we don't redebate strategy und
 |---|---|---|
 | Spike Hatchet on local docker (1 worker + 1 task) | 1d | Validate Python SDK, Postgres schema, dashboard |
 | Re-write 3-5 already-ported workflows from DBOS → Hatchet | 1w | Test syntax/semantic differences |
-| Add `hatchet-engine` (Go binary) + `hatchet-dashboard` (Next.js) + workers to docker-compose | 1w | Hatchet bundles dashboard; mediahub gets observability free |
+| Add `hatchet-engine` (Go binary) + `hatchet-dashboard` (Next.js) + workers to docker-compose | 1w | Hatchet bundles dashboard; nous gets observability free |
 | Adapt FastAPI lifespan + `start_workflow` calls (`hatchet.client.event.push(...)` instead of `DBOS.start_workflow(...)`) | 0.5w | Slightly different fan-out / await pattern |
 | Re-validate PoC #7-11 against Hatchet | 1w | Same gate criteria |
 | Re-port remaining tasks (continue from wherever DBOS port stopped) | 1.5-2w extra over DBOS pace | Hatchet syntax is more verbose |
@@ -87,7 +87,7 @@ This doc is the **predetermined escape route** so we don't redebate strategy und
 - Dashboard is a real product ([hatchet.run](https://hatchet.run)) — better than DBOS Conductor for self-host
 
 **Pros**:
-- Mature engine (Go core, used in production at companies before mediahub)
+- Mature engine (Go core, used in production at companies before nous)
 - Built-in dashboard with retry/replay UI (ops win)
 - Larger community than DBOS
 
@@ -167,7 +167,7 @@ This doc is the **predetermined escape route** so we don't redebate strategy und
 
 ## How to invoke a fallback (process)
 
-1. **Document the failure** in `~/.gstack/projects/mediahub/poc-failures-2026-04-28.md` with: which PoC item, exact error, repro steps, screenshots/logs.
+1. **Document the failure** in `~/.gstack/projects/nous/poc-failures-2026-04-28.md` with: which PoC item, exact error, repro steps, screenshots/logs.
 2. **Match against trigger matrix** above. Pick first matching row.
 3. **14-day timebox**: if fallback chosen requires >14 days to validate, escalate (i.e., we're outside PoC scope).
 4. **Update design doc** — set `Mode` to fallback path, link to this doc's chosen section.

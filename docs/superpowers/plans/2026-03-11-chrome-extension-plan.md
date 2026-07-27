@@ -1,8 +1,8 @@
-# MediaHub Push Chrome Extension — Implementation Plan
+# Nous Push Chrome Extension — Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a minimal Chrome extension (Manifest V3) that one-click pushes the current page URL to MediaHub for video parsing.
+**Goal:** Build a minimal Chrome extension (Manifest V3) that one-click pushes the current page URL to Nous for video parsing.
 
 **Architecture:** Popup for config (API URL + API Key stored in `chrome.storage.sync`), background service worker for push logic (context menu + keyboard shortcut), content script injected on demand for toast notifications.
 
@@ -51,9 +51,9 @@ Create `chrome-extension/manifest.json`:
 ```json
 {
   "manifest_version": 3,
-  "name": "MediaHub Push",
+  "name": "Nous Push",
   "version": "1.0.0",
-  "description": "One-click push video URLs to MediaHub for parsing and download.",
+  "description": "One-click push video URLs to Nous for parsing and download.",
   "permissions": [
     "storage",
     "contextMenus",
@@ -79,7 +79,7 @@ Create `chrome-extension/manifest.json`:
       "suggested_key": {
         "default": "Alt+M"
       },
-      "description": "Push current page to MediaHub"
+      "description": "Push current page to Nous"
     }
   },
   "icons": {
@@ -98,7 +98,7 @@ Generate simple colored-square PNG icons at 16x16, 48x48, 128x128. Use any metho
 - Simple canvas-generated PNGs, or
 - Copy from an icon generator
 
-The icons should use MediaHub's brand color (blue/teal) with an "M" letter.
+The icons should use Nous's brand color (blue/teal) with an "M" letter.
 
 - [ ] **Step 4: Commit**
 
@@ -129,7 +129,7 @@ Create `chrome-extension/popup.html`:
 </head>
 <body>
   <div class="container">
-    <h1>MediaHub Push</h1>
+    <h1>Nous Push</h1>
     <div class="field">
       <label for="apiUrl">API URL</label>
       <input type="url" id="apiUrl" placeholder="https://mediahub.heygo.cn">
@@ -326,7 +326,7 @@ Create `chrome-extension/background.js`:
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: 'push-to-mediahub',
-    title: 'Push to MediaHub',
+    title: 'Push to Nous',
     contexts: ['page'],
   });
 });
@@ -352,7 +352,7 @@ chrome.commands.onCommand.addListener((command) => {
 
 async function pushUrl(tabId, url) {
   // Show "pushing" toast
-  await showToast(tabId, 'Pushing to MediaHub...', 'info');
+  await showToast(tabId, 'Pushing to Nous...', 'info');
 
   // Read config
   const config = await chrome.storage.sync.get(['apiUrl', 'apiKey']);
@@ -414,7 +414,7 @@ async function showToast(tabId, message, type) {
 
 1. Reload extension in `chrome://extensions/`
 2. Navigate to any video page (e.g., douyin.com)
-3. Right-click → "Push to MediaHub" should appear
+3. Right-click → "Push to Nous" should appear
 4. Click it → should see toast (will fail if API not configured, which is expected)
 5. Test `Alt+M` shortcut
 
@@ -504,10 +504,10 @@ function showToast(message, type) {
 1. Reload extension in `chrome://extensions/`
 2. Click icon → enter API URL (`https://mediahub.heygo.cn`) + API Key → Save
 3. Navigate to a Douyin video page
-4. Press `Alt+M` or right-click → "Push to MediaHub"
-5. Should see blue "Pushing to MediaHub..." toast
+4. Press `Alt+M` or right-click → "Push to Nous"
+5. Should see blue "Pushing to Nous..." toast
 6. Then green "Pushed! Parsing started." or red error toast
-7. Check MediaHub dashboard to verify the video was added
+7. Check Nous dashboard to verify the video was added
 
 - [ ] **Step 3: Commit**
 
@@ -528,9 +528,9 @@ git commit -m "feat(extension): add content script toast notifications"
 Create `chrome-extension/README.md`:
 
 ```markdown
-# MediaHub Push — Chrome Extension
+# Nous Push — Chrome Extension
 
-One-click push video URLs to MediaHub for parsing and download.
+One-click push video URLs to Nous for parsing and download.
 
 ## Install
 
@@ -542,15 +542,15 @@ One-click push video URLs to MediaHub for parsing and download.
 
 1. Click the extension icon in Chrome toolbar
 2. Enter your **API URL** (e.g., `https://mediahub.heygo.cn`)
-3. Enter your **API Key** (generate one in MediaHub Settings → API Keys)
+3. Enter your **API Key** (generate one in Nous Settings → API Keys)
 4. Click **Save**
 
 ## Usage
 
-- **Right-click** on any page → **Push to MediaHub**
+- **Right-click** on any page → **Push to Nous**
 - **Keyboard shortcut**: `Alt+M`
 
-The extension sends the current page URL to MediaHub. If the URL is a supported video platform (Douyin, Xiaohongshu, Bilibili, etc.), MediaHub will parse and download it.
+The extension sends the current page URL to Nous. If the URL is a supported video platform (Douyin, Xiaohongshu, Bilibili, etc.), Nous will parse and download it.
 
 ## Permissions
 

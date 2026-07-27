@@ -91,7 +91,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'app.services.ai.memor
 # backend/app/services/ai/memory/provider.py
 """Memory provider abstraction (Phase 1 — Nous/Hermes pluggable-provider model).
 
-mediahub runs two memory *slots* simultaneously:
+nous runs two memory *slots* simultaneously:
 
   L2 — user model (today Honcho): "who is this user / what do they prefer".
   L3 — knowledge graph (today Graphiti): "what facts/entities were discussed".
@@ -206,7 +206,7 @@ git commit -m "refactor(memory): add MemoryProvider ABC + MemoryTurn (Phase 1)"
 
 **Interfaces:**
 - Consumes: `MemoryProvider`, `MemoryLayer`, `MemoryTurn` from Task 1; `get_graph_memory_service()` and `GraphMemoryService` from `app.services.ai.memory.graph_memory`; `_build_turn_episode` from `app.workflows.write_memory`.
-- Produces: `class GraphitiProvider(MemoryProvider)`; `name == "graphiti"`, `layer == MemoryLayer.L3`. `record_turn` mirrors `_write_graph_episode`'s service-side logic EXACTLY: `enabled()` returns `service.config.enabled`; `record_turn` builds `body = _build_turn_episode(turn.user_msgs, turn.asst_msgs)`, returns False if falsy, else `service.add_chat_episode(group_id=f"user-{turn.user_id}", name=f"chat-{turn.session_id}-{turn.run_id or turn.iteration}", body=body, source_description="mediahub chat turn")`. `get_context` wraps `service.search(query, group_ids=group_ids or [], limit=10)` and joins fact strings, or None.
+- Produces: `class GraphitiProvider(MemoryProvider)`; `name == "graphiti"`, `layer == MemoryLayer.L3`. `record_turn` mirrors `_write_graph_episode`'s service-side logic EXACTLY: `enabled()` returns `service.config.enabled`; `record_turn` builds `body = _build_turn_episode(turn.user_msgs, turn.asst_msgs)`, returns False if falsy, else `service.add_chat_episode(group_id=f"user-{turn.user_id}", name=f"chat-{turn.session_id}-{turn.run_id or turn.iteration}", body=body, source_description="nous chat turn")`. `get_context` wraps `service.search(query, group_ids=group_ids or [], limit=10)` and joins fact strings, or None.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -251,7 +251,7 @@ async def test_record_turn_calls_add_chat_episode_with_exact_args():
         group_id="user-u1",
         name="chat-s1-r1",
         body=svc.add_chat_episode.await_args.kwargs["body"],  # body built internally
-        source_description="mediahub chat turn",
+        source_description="nous chat turn",
     )
     assert svc.add_chat_episode.await_args.kwargs["body"]  # non-empty
 
@@ -346,7 +346,7 @@ class GraphitiProvider(MemoryProvider):
             group_id=f"user-{turn.user_id}",
             name=f"chat-{turn.session_id}-{turn.run_id or turn.iteration}",
             body=body,
-            source_description="mediahub chat turn",
+            source_description="nous chat turn",
         )
 
     async def get_context(

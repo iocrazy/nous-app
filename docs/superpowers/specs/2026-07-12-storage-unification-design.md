@@ -54,7 +54,7 @@ sb://library/t{scope_id}/{sha256[:2]}/{sha256[2:4]}/{sha256}{ext}
 /volume2/sources/MediaHub.library/
 ├── teams/… global/… mediatrack/…     ← 文件系统轨（容器 /app/downloads = DOWNLOAD_PATH），迁完后只剩下载链路
 └── object-storage/
-    └── nous/mediahub/                 ← GLOBAL_S3_BUCKET=nous + STORAGE_TENANT_ID=mediahub（顶层，用户定稿）
+    └── nous/nous/                 ← GLOBAL_S3_BUCKET=nous + STORAGE_TENANT_ID=nous（顶层，用户定稿）
         ├── library/t{scope}/{ab}/{cd}/{sha}.ext
         ├── chat-media/…
         └── inspiration/…

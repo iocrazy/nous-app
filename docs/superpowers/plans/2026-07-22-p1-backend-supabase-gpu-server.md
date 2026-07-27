@@ -24,7 +24,7 @@
 |---|---|
 | prod PG 体量 | 5.6G（DBOS 历史 3.5G + 日志 1.6G + 业务 ~200M） |
 | 媒体库 | `192.168.50.9:/volume2/sources/MediaHub.library` = **113G** |
-| 网络 | GPU 机(192.168.8.2/10.0.0.10) ⇄ mediahub NAS 仅 ZeroTier(10.0.0.9) **7.6MB/s**；⇄ heytime NAS(192.168.8.9) 本地 LAN **87MB/s** |
+| 网络 | GPU 机(192.168.8.2/10.0.0.10) ⇄ nous NAS 仅 ZeroTier(10.0.0.9) **7.6MB/s**；⇄ heytime NAS(192.168.8.9) 本地 LAN **87MB/s** |
 | GPU 机已挂 | `/home/heygo/mnt/nas-videos`(NFS→10.0.0.9) · `/mnt/heytime/*`(CIFS→192.168.8.9, uid=1000 可写) |
 | NAS Supabase 栈 | db/kong/auth/rest/realtime/storage/imgproxy/meta/studio/analytics/vector/pooler/edge-functions（13 容器） |
 | NAS backend 栈 | backend+worker（同镜像，`MEDIAHUB_ROLE`）+ nginx + redis(7-alpine) |
@@ -83,7 +83,7 @@ VACUUM FULL dbos.workflow_status; VACUUM FULL dbos.operation_outputs; VACUUM FUL
 ```bash
 nohup rsync -a --info=progress2 /home/heygo/mnt/nas-videos/../MediaHub.library/ /mnt/heytime/Sources/nous/media/ > /tmp/media-rsync.log 2>&1 &
 ```
-（⚠️ 源路径按 NFS 实挂点修正——现挂的是 `/video/Tutorial.Library`，需在 mediahub NAS 侧把 `/volume2/sources` 也 NFS 导出或改走 rsync-over-ssh `-e "ssh -i …" heygo@10.0.0.9:/volume2/sources/MediaHub.library/`。执行时二选一。）
+（⚠️ 源路径按 NFS 实挂点修正——现挂的是 `/video/Tutorial.Library`，需在 nous NAS 侧把 `/volume2/sources` 也 NFS 导出或改走 rsync-over-ssh `-e "ssh -i …" heygo@10.0.0.9:/volume2/sources/MediaHub.library/`。执行时二选一。）
 - [ ] Step 3：完成后校验：两侧 `du -s` 差 <1%；抽样 5 文件 md5 一致。
 
 ## Task 5: backend + worker + redis 上机

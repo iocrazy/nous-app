@@ -9,7 +9,7 @@
 
 ## 1. Design Goals
 
-Evolve MediaHub from a personal video collection tool to a full team video collaboration platform. Key principles:
+Evolve Nous from a personal video collection tool to a full team video collaboration platform. Key principles:
 
 - **Unified workspace model** ("个人即团队", inspired by Figma) — every user has a personal workspace, teams are multi-person workspaces
 - **Zero-copy philosophy** — sharing and copying resources never duplicate physical files

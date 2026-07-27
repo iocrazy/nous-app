@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a shared AI Agent framework for MediaHub — configurable agents, session management, AI Chat Panel, token tracking.
+**Goal:** Build a shared AI Agent framework for Nous — configurable agents, session management, AI Chat Panel, token tracking.
 
 **Architecture:** AgentService orchestrates LLM calls with configurable personas/rules. Sessions persist multi-turn conversations. AI Chat Panel provides in-editor chat interface. Token tracking integrates with existing points system.
 

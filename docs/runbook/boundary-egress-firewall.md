@@ -5,7 +5,7 @@
 bug, the packet still cannot leave the container to reach internal
 infrastructure.
 
-**Audience**: NAS operator (heygo) deploying mediahub on Synology DSM 7.x
+**Audience**: NAS operator (heygo) deploying nous on Synology DSM 7.x
 with Docker. Adapt to other deploy targets (Linux iptables, K8s
 NetworkPolicy, Cloudflare WARP) as needed.
 
@@ -17,7 +17,7 @@ Boundary architecture (see `docs/architecture/boundary-layer.md`).
 ## What this protects
 
 The threat model: an attacker submits a URL → boundary code accepts it
-(bug, novel bypass, or an unreviewed code path) → mediahub's container
+(bug, novel bypass, or an unreviewed code path) → nous's container
 makes an outbound TCP connection → connection lands on `192.168.50.9:9080`
 (Supabase admin) or `192.168.50.X` (other NAS services) → admin panel
 exposed.
@@ -32,7 +32,7 @@ DSM 7.x → Control Panel → Security → Firewall → Edit Rules
 (profile: "default" or per-network-interface)
 
 Add these OUTBOUND deny rules ABOVE the default allow rule. Apply to
-the Docker bridge interface (typically `docker0` or `br-mediahub`).
+the Docker bridge interface (typically `docker0` or `br-nous`).
 
 | # | Action | Source | Destination | Port | Protocol | Note |
 |---|--------|--------|-------------|------|----------|------|
@@ -55,7 +55,7 @@ Less surgical but cross-platform. Edit `docker/docker-compose.yml`:
 
 ```yaml
 networks:
-  mediahub_internal:
+  nous_internal:
     driver: bridge
     internal: false  # need outbound public internet
     ipam:
@@ -65,7 +65,7 @@ networks:
 services:
   backend:
     networks:
-      - mediahub_internal
+      - nous_internal
     # Add a sidecar firewall (e.g. ufw, nftables) that runs as
     # privileged and applies the rules above to the container's iface.
 ```
@@ -76,7 +76,7 @@ the DSM rules unless deploying off-Synology.
 ## Alternative — Cloudflare WARP / Zero Trust
 
 If using Cloudflare for ingress, also enable WARP egress for the
-mediahub container. Cloudflare can enforce destination policies
+nous container. Cloudflare can enforce destination policies
 (block private IPs at the network edge) without local firewall config.
 Trade-off: adds latency, depends on a third-party.
 

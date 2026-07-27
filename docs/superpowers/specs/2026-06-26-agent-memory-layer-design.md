@@ -2,13 +2,13 @@
 
 **Status:** Draft for review (design only — no implementation until approved)
 **Date:** 2026-06-26
-**Inspiration:** Xiaomi MiMo-Code + Nous Hermes converge on *file-curated memory + full-text recall + periodic LLM distillation* (no vector/graph) for **agent** memory. This ports that pattern to mediahub's multi-tenant server, with strict scope isolation.
+**Inspiration:** Xiaomi MiMo-Code + Nous Hermes converge on *file-curated memory + full-text recall + periodic LLM distillation* (no vector/graph) for **agent** memory. This ports that pattern to nous's multi-tenant server, with strict scope isolation.
 
 ---
 
 ## 1. Problem & Scope
 
-mediahub's durable memory today is **user memory**: Graphiti (L3 knowledge graph, `group_id=user-/project-`) + Honcho (L2 user model, `workspace=team-`). What's missing is **agent working memory** — the agent remembering *its own* curated knowledge (project facts, decisions, recurring workflows) across sessions, recalled by relevance, the way MiMo's `MEMORY.md` + FTS5 + `/dream` does.
+nous's durable memory today is **user memory**: Graphiti (L3 knowledge graph, `group_id=user-/project-`) + Honcho (L2 user model, `workspace=team-`). What's missing is **agent working memory** — the agent remembering *its own* curated knowledge (project facts, decisions, recurring workflows) across sessions, recalled by relevance, the way MiMo's `MEMORY.md` + FTS5 + `/dream` does.
 
 **In scope:** a curated, scoped `agent_memory` store + ranked full-text recall + a periodic consolidation (`/dream`) workflow + a distill→skills (`/distill`) workflow, all multi-tenant-isolated.
 
@@ -22,7 +22,7 @@ mediahub's durable memory today is **user memory**: Graphiti (L3 knowledge graph
 
 | Asset | State | Role in this design |
 |-------|-------|---------------------|
-| `ai_session_memory` (per-session 6-section MD, dual-threshold updater, consumed by compactor) | **live** | The **session checkpoint** layer. Reused unchanged — it's mediahub's `checkpoint.md`. |
+| `ai_session_memory` (per-session 6-section MD, dual-threshold updater, consumed by compactor) | **live** | The **session checkpoint** layer. Reused unchanged — it's nous's `checkpoint.md`. |
 | `agent_memories` table | **dropped (mig 301)** | Gone. The new `agent_memory` table is a fresh, cleaner design (not a revival). |
 | `ai_agents.memory_injection_top_n` (0-50) | **orphan column** | Wired as this layer's per-agent recall `top_n` cap. |
 | `prompt_composer` (`graph_facts` + `user_context`, post-cache-boundary, dynamic fingerprint) | **live** | A new `agent_memory` recall block slots in beside graph_facts/user_context, same budgeting + fingerprint discipline. |
@@ -144,4 +144,4 @@ Phase A is independently valuable (scoped recall infra). Promotion (the risk) is
 1. **Recall scope default:** should an agent turn recall `private` (owner) memory only, or `private` + the session's `project_id`/`team_id` `shared` memory? (Proposed: both, since the agent acts within a project context — but `shared` is opt-in per deployment.)
 2. **`/dream` cadence + cost:** weekly (MiMo) vs on-demand? Consolidation is an LLM job per active (user,agent) — cost scales with active agents. (Proposed: weekly scheduled + a manual admin trigger.)
 3. **Promotion authority:** auto-promote on the gates passing, or always require human review (admin approves shared rows)? (Proposed: Phase C ships review-required; auto-promote is a later toggle.)
-4. **Does mediahub want agent memory at all yet**, given the agent runtime's current usage level — or is this premature until agent traffic grows? (Honest YAGNI check.)
+4. **Does nous want agent memory at all yet**, given the agent runtime's current usage level — or is this premature until agent traffic grows? (Honest YAGNI check.)

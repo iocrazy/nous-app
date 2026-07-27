@@ -4,7 +4,7 @@
 
 ## 背景与目标
 
-IC 原版在素材管理器里有一个「画布资产」tab：扫所有画布 JSON 的 nodes 抠出素材引用，建反向索引，按画布分组浏览素材。MediaHub 已具备同构地基且更干净：
+IC 原版在素材管理器里有一个「画布资产」tab：扫所有画布 JSON 的 nodes 抠出素材引用，建反向索引，按画布分组浏览素材。Nous 已具备同构地基且更干净：
 
 - `canvases` 表（mig 280）：project 域、`nodes_json` JSONB、kind smart/classic
 - 画布节点用 **resource_id** 引用素材（非裸 URL）：`ShotNodeData.reference_resource_ids[]`（参考图）、`OutputNodeData.resource_id`（AI 产出）

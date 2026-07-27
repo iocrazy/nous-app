@@ -4,7 +4,7 @@
 
 ## 概述
 
-为 MediaHub 添加 Celery + Redis 异步任务队列，支持：
+为 Nous 添加 Celery + Redis 异步任务队列，支持：
 - 视频下载任务（异步后台下载）
 - 批量解析任务（批量处理抖音链接）
 - 定时任务（清理、统计等）
@@ -165,7 +165,7 @@ from celery import Celery
 from app.core.config import settings
 
 celery_app = Celery(
-    "mediahub",
+    "nous",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
     include=[

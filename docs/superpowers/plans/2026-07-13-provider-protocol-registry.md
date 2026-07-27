@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make MediaHub's AI provider protocols a single explicit registry — collapsing the two code-internal provider lists (chat factory + image/video db_registry) into one source, exposing it over an admin API, and turning the admin `actual_provider` free-text box into a documented dropdown.
+**Goal:** Make Nous's AI provider protocols a single explicit registry — collapsing the two code-internal provider lists (chat factory + image/video db_registry) into one source, exposing it over an admin API, and turning the admin `actual_provider` free-text box into a documented dropdown.
 
 **Architecture:** A new pure-data module `provider_protocols.py` is the single source of truth. `factory._PROVIDER_KEYS` and `db_registry._ARK_PROVIDERS`/`_JIMENG_PROVIDERS` are DERIVED from it (behavior byte-identical, only the source converges). A read-only admin endpoint serves the registry; the admin Models UI renders a Select with `allowCreate` from it. No DB migration, no data change, no new rejecting validation (dispatch already degrades safely, fail-open).
 

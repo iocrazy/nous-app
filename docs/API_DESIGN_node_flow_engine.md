@@ -1,4 +1,4 @@
-# MediaHub API 设计 — 节点流引擎
+# Nous API 设计 — 节点流引擎
 
 ## 基础约定
 

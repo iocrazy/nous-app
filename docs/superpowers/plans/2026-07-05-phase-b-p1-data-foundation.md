@@ -19,7 +19,7 @@
 - DBOS 派发端点必须 `wf_id = str(uuid4())` 串联 `mgr.create(dbos_workflow_id=wf_id)` 与 `start_workflow_routed(workflow_id=wf_id)`（#1017 坑）；AI 调用必须经 `resolve_script_provider_config(user_id)` 传 provider config（#1025/#1030 坑）。
 - 异步派发端点返回**扁平** `{"success": True, "task_id": ...}`（#1019 契约）。
 - lint gate：`uv run black <files> && uv run isort --profile black <files> && uv run flake8 <files>`；commit 无 attribution 尾注；每 PR ≤1 天，从最新 origin/master 切 worktree（`bash scripts/worktree-manager.sh create <branch>`）。
-- 真库验证用 NAS dev 库：`source /private/tmp/claude-501/-Volumes-program-project-code-repos-mediahub/7ba3e65d-49b1-47af-83b8-981d0cd018a1/scratchpad/dev_db.env` → `psql "$DEV_DSN"`（dev 有漂移史，用前先 information_schema 核表）。
+- 真库验证用 NAS dev 库：`source /private/tmp/claude-501/-Volumes-program-project-code-repos-nous/7ba3e65d-49b1-47af-83b8-981d0cd018a1/scratchpad/dev_db.env` → `psql "$DEV_DSN"`（dev 有漂移史，用前先 information_schema 核表）。
 - **DB 端点 done 前必跑一次真库 round-trip**（mocked 测试漏 asyncpg 类型坑——本仓血泪律）。
 
 ## File Structure

@@ -20,7 +20,7 @@
 - **前端门禁**：`cd frontend && npx vitest run --no-file-parallelism` 全绿 + `npm run lint`（eslint react-hooks rules-of-hooks=error）。
 - **后端门禁**：`cd backend && uv run pytest`；改动 .py 跑 black+isort+flake8。
 - **版本**：发 PR 前核 master 版本再 bump `frontend/package.json`（当前 master=0.25.254）。
-- **CI billing 坑**：private repo instant-fail；发 PR 前 `gh repo edit iocrazy/mediahub --visibility public`，合完切回 private。
+- **CI billing 坑**：private repo instant-fail；发 PR 前 `gh repo edit iocrazy/nous-app --visibility public`，合完切回 private。
 
 ## 依赖顺序
 

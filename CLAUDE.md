@@ -126,7 +126,7 @@ bash scripts/branch-health.sh           # 列出所有 worktree 落后 master �
 ## 项目结构
 
 ```
-mediahub/
+nous/
 ├── backend/                    # 后端服务（FastAPI + Supabase）
 │   ├── app/
 │   │   ├── api/              # API 路由
@@ -517,7 +517,7 @@ Schema (schemas/)      — Pydantic 请求/响应模型
 
 | 目标 | workflow | runner | 触发 paths | 落到哪 |
 |------|----------|--------|-----------|--------|
-| 后端 | `deploy-gpu.yml` | **self-hosted `[self-hosted, gpu]`** | `backend/**`、`Dockerfile`、`deploy/gpu-server/**`、`mediahub-core/**` | gpupc 本机 `nous-backend` + `nous-worker` |
+| 后端 | `deploy-gpu.yml` | **self-hosted `[self-hosted, gpu]`** | `backend/**`、`Dockerfile`、`deploy/gpu-server/**`、`nous-core/**` | gpupc 本机 `nous-backend` + `nous-worker` |
 | 前端 | `deploy-pages.yml` | `ubuntu-latest` | `frontend/**` | Cloudflare Pages（GHA 构建 + wrangler 直传，不吃 Pages 的 500 构建/月配额） |
 | DB migration | `run-migration.yml` | **self-hosted `[self-hosted, gpu]`** | `supabase/migrations/**` | gpupc 本机 `nous-db` |
 
@@ -679,14 +679,14 @@ bash scripts/sync-worktree.sh                   # rebase + 首次运行会启用
 - MCP registered: yes (Claude Code, user scope)
 - Memory sync: off
 - Current repo policy: read-write
-- Imported pages: 149 (mediahub markdown / docs)
+- Imported pages: 149 (nous markdown / docs)
 
 ## GBrain Search Guidance (configured by /setup-gbrain)
 <!-- gstack-gbrain-search-guidance:start -->
 
 GBrain is configured locally (PGLite). Prefer it over Grep when the question is
 semantic or you don't yet know the exact identifier. Two indexed corpora:
-- This repo's docs/markdown (149 pages, source registered as gstack-code-mediahub).
+- This repo's docs/markdown (149 pages, source registered as gstack-code-nous).
 - ~/.gstack/ curated memory (when artifacts accumulate).
 
 Prefer gbrain when:

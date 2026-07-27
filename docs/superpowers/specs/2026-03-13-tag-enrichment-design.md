@@ -2,11 +2,11 @@
 
 ## Goal
 
-Enrich and optimize MediaHub's tag system for short video collection, expanding from 29 tags (6 groups) to ~39 tags (7 groups) with new "Mood" and "Technique" dimensions.
+Enrich and optimize Nous's tag system for short video collection, expanding from 29 tags (6 groups) to ~39 tags (7 groups) with new "Mood" and "Technique" dimensions.
 
 ## Context
 
-MediaHub is a short video collection platform. Users save videos from various platforms (Douyin, TikTok, YouTube, Bilibili, etc.) for mixed purposes: inspiration, entertainment, learning, and creative reference.
+Nous is a short video collection platform. Users save videos from various platforms (Douyin, TikTok, YouTube, Bilibili, etc.) for mixed purposes: inspiration, entertainment, learning, and creative reference.
 
 The current tag system has 29 tags across 6 groups, but lacks:
 - Emotional/tonal dimension (healing, inspiring, etc.)

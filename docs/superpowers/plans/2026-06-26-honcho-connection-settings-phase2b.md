@@ -72,12 +72,12 @@ async def test_from_settings_falls_back_to_env_when_keys_absent():
     env = {
         "FEATURE_HONCHO_MEMORY": "true",
         "HONCHO_BASE_URL": "http://honcho:18000/",
-        "HONCHO_WORKSPACE_ID": "mediahub",
+        "HONCHO_WORKSPACE_ID": "nous",
     }
     cfg = await HonchoMemoryConfig.from_settings(reader=reader, env=env)
     assert cfg.enabled is True
     assert cfg.base_url == "http://honcho:18000"  # trailing slash stripped
-    assert cfg.workspace_id == "mediahub"
+    assert cfg.workspace_id == "nous"
 
 
 @pytest.mark.asyncio
@@ -444,7 +444,7 @@ Add this block right AFTER the "Provider Slots" section (added in Phase 2a) and 
 <SectionHeader
   icon={<IconRobot />}
   title="Honcho (L2) connection"
-  subtitle="How MediaHub reaches the Honcho service. After saving, click L2 Reload above to apply. (Honcho's own embedding/LLM live in its container — env-managed on the NAS.)"
+  subtitle="How Nous reaches the Honcho service. After saving, click L2 Reload above to apply. (Honcho's own embedding/LLM live in its container — env-managed on the NAS.)"
 />
 <Row label="Enabled" hint="Master toggle for the L2 user-model layer.">
   <Switch checked={hcEnabled} onChange={setHcEnabled} disabled={updateHoncho.isPending} />
@@ -455,7 +455,7 @@ Add this block right AFTER the "Provider Slots" section (added in Phase 2a) and 
 </Row>
 <Divider style={{ margin: 0 }} />
 <Row label="Workspace">
-  <Input value={hcWorkspace} onChange={setHcWorkspace} placeholder="mediahub" style={{ width: 260 }} />
+  <Input value={hcWorkspace} onChange={setHcWorkspace} placeholder="nous" style={{ width: 260 }} />
 </Row>
 <div style={{ textAlign: 'right', paddingTop: 12 }}>
   <Button

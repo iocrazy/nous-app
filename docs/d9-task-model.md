@@ -175,7 +175,7 @@ DBOS 必须 LISTEN/NOTIFY (queue 调度依赖) → 不能走 transaction-mode po
 | DBOS workflow 抛异常 → 拖累 FastAPI 进程 | 每个 workflow 顶层 try/except + record_workflow_failure (写 task_tracking.failed) |
 | uvicorn --reload + DBOS shutdown 卡死 | shutdown_dbos() 加 5s 超时 + daemon 线程 |
 | dev backend hang 用户无感 | scripts/dev-backend.sh watchdog: 30s probe /health, 3 次失败 → kill -9 + restart |
-| prod 容器 unhealthy 不会自启 | docker-compose 加 autoheal sidecar (willfarrell/autoheal) + mediahub 加 autoheal=true label |
+| prod 容器 unhealthy 不会自启 | docker-compose 加 autoheal sidecar (willfarrell/autoheal) + nous 加 autoheal=true label |
 | supavisor session pool 撑爆 | DBOS pool_size 20→5 + pool_pre_ping + 直连 PG 绕过 supavisor |
 
 ## 五、未实施 (Roadmap)
@@ -220,4 +220,4 @@ dbos.workflow_events          send/recv 事件
 | 进度推送 | backend/app/tasks/download_progress.py + backend/app/api/ws_router.py |
 | Frontend Realtime + WS | frontend/contexts/TaskManagerContext.tsx |
 | Dev watchdog | scripts/dev-backend.sh |
-| Prod 自启 | /Volumes/docker/mediahub/docker/docker-compose.yml (autoheal sidecar) |
+| Prod 自启 | /Volumes/docker/nous/docker/docker-compose.yml (autoheal sidecar) |

@@ -9,7 +9,7 @@ Supavisor pooler via Termius SSH tunnel: 127.0.0.1:55433 + 9081).
   `DBOS_DATABASE_URL=postgresql://mediahub_dbos.heygo-dev:***@127.0.0.1:55433/postgres`
 - Frontend: `npm run dev` (vite) at `localhost:3000`, auth/REST via
   Supabase REST tunnel `127.0.0.1:9081`
-- Test user: `d7-e2e-test@mediahub.local` (created via service_role
+- Test user: `d7-e2e-test@nous.local` (created via service_role
   admin API; user_id = 8700de22-7e9a-46af-9176-41953297ac7c)
 
 ## Sanity (Step 0)

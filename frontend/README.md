@@ -1,5 +1,5 @@
 
-# DouyinMediaHub 🎬
+# DouyinNous 🎬
 
 ![React](https://img.shields.io/badge/React-19.0-blue?style=for-the-badge&logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?style=for-the-badge&logo=typescript)
@@ -7,7 +7,7 @@
 ![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ecf8e?style=for-the-badge&logo=supabase)
 ![Vite](https://img.shields.io/badge/Vite-Build-646cff?style=for-the-badge&logo=vite)
 
-**DouyinMediaHub** is a sophisticated, mobile-first media management dashboard designed to bridge the gap between social media consumption and personal content archiving. It allows users to parse, analyze, download, and organize content from Douyin (TikTok China) in a "Cinematic Dark" interface.
+**DouyinNous** is a sophisticated, mobile-first media management dashboard designed to bridge the gap between social media consumption and personal content archiving. It allows users to parse, analyze, download, and organize content from Douyin (TikTok China) in a "Cinematic Dark" interface.
 
 > **Note:** This is a modern React frontend application. It is designed to work with a Python backend (for actual scraping) and Supabase (for data persistence), but includes a robust **Mock Mode** for instant demonstration without backend dependencies.
 

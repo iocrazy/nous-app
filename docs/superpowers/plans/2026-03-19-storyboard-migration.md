@@ -1,6 +1,6 @@
-# Storyboard Migration Plan: Copilot → MediaHub
+# Storyboard Migration Plan: Copilot → Nous
 
-> 从 Storyboard-Copilot（Tauri 桌面应用）移植核心功能到 MediaHub（Web 应用）
+> 从 Storyboard-Copilot（Tauri 桌面应用）移植核心功能到 Nous（Web 应用）
 > 日期: 2026-03-19
 > 分支: feature/storyboard
 > 源码: /Volumes/program/project-code/github-repos/Storyboard-Copilot/src
@@ -11,7 +11,7 @@
 
 ## 关键适配
 
-| Copilot (Tauri) | MediaHub (Web) |
+| Copilot (Tauri) | Nous (Web) |
 |-----------------|----------------|
 | Tauri invoke() | FastAPI REST API |
 | 本地文件系统 | NAS 存储 + API 提供文件 |
@@ -141,7 +141,7 @@ frontend/features/storyboard/
 - 图片池编码 `__img_ref__:N` 保留
 - 防抖同步保留
 
-### Task 4.3: MediaHub 独有功能重新接入
+### Task 4.3: Nous 独有功能重新接入
 - 角色系统（CharacterPanel）
 - AI Chat 面板
 - Timeline 播放器

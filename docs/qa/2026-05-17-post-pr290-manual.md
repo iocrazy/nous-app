@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-17
 **Tester:** Claude (chrome-devtools MCP + supabase MCP)
-**Test user:** `qa-claude-2026-05-17@mediahub.local` (temp, fab0ba60-05cf-4cdf-a622-33372f0cca4b)
+**Test user:** `qa-claude-2026-05-17@nous.local` (temp, fab0ba60-05cf-4cdf-a622-33372f0cca4b)
 **Test team:** `QA Temp Team` (306880671682042, personal)
 **Master HEAD at test:** `a37be0c6` (#290 FlowGroupCard)
 **Prod backend:** ACR image deployed for sha b7f949f1 (latest #289)

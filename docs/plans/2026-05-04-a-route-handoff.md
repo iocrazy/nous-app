@@ -85,7 +85,7 @@ ORDER BY count DESC LIMIT 20;
 grep "pre-launch sweep" backend logs
 
 # 4. 验 #155 Redis HASH 在写
-redis-cli -n 0 HGETALL mediahub:system:status
+redis-cli -n 0 HGETALL nous:system:status
 
 # 5. 验 #157 cancel infra（手动取消一个 task → 看是否 abort_registry 日志）
 ```
@@ -218,7 +218,7 @@ cd frontend && npm run dev  # 起 dev server (port 5176)
   ```
 - `frontend/pages/Settings/SchedulesPage.tsx` (新) — `/api/v1/schedules` CRUD UI + cron picker (用 react-cron 库)
 - `frontend/pages/Admin/LanesSnapshot.tsx` (新) — `/api/v1/lanes/snapshot` 看板
-- `frontend/pages/Admin/SystemStatus.tsx` — 改 WS push（订阅 mediahub:system:status:changed pubsub）
+- `frontend/pages/Admin/SystemStatus.tsx` — 改 WS push（订阅 nous:system:status:changed pubsub）
 
 **测试场景**：
 - 提交一个 douyin URL → TaskCenter 显示 1 个 flow card (parse → download → transcribe 折叠在内)
@@ -258,13 +258,13 @@ cd frontend && npm run dev  # 起 dev server (port 5176)
 
 - 本文档：`docs/plans/2026-05-04-a-route-handoff.md`
 - Notion Q&A: [Rust sidecar 是否值得](https://www.notion.so/35675c5fd44f811b9a12d20daf8b2656)
-- 已有相关：`docs/plans/2026-05-01-d10-d11-openclaw-borrowables.md`（mediahub 团队 5/1 写的，A 路线大部分思路从这里来）
+- 已有相关：`docs/plans/2026-05-01-d10-d11-openclaw-borrowables.md`（nous 团队 5/1 写的，A 路线大部分思路从这里来）
 
 ---
 
 ## 7. 联系上下文
 
-PR 队列：https://github.com/iocrazy/mediahub/pulls?q=is%3Aopen+author%3Aheygo+created%3A2026-05-04
+PR 队列：https://github.com/iocrazy/nous-app/pulls?q=is%3Aopen+author%3Aheygo+created%3A2026-05-04
 
 任何问题：
 - DBOS 行为不正常 → 先看 PR #154 sweep 是否生效

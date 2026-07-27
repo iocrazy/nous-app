@@ -279,7 +279,7 @@ Loop 头 + 亮暗双主题 chip。
 - zip 流式打包 / 远程 URL 打包(v1 BytesIO + 白名单)
 - Composer per-node 单独 Stop 按钮(P2-9 v1 Stop=停所有批次)
 - 时间线播放头 / WebAudio / 单段重跑(P2-1 二期挂账,非本批)
-- MediaHub 更强项全部不动:对齐辅助线/auto-pan/Task Center/重做/mod+K/@mention 导航/
+- Nous 更强项全部不动:对齐辅助线/auto-pan/Task Center/重做/mod+K/@mention 导航/
   Retry=真重跑/灯箱计数
 
 ## 五、通用坑速查

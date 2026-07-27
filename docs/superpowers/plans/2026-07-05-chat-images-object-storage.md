@@ -8,8 +8,8 @@
 - Prod flag ON (`FEATURE_CHAT_MEDIA_OBJECT_STORE=true`, host .env). Rollback = remove flag + stop-t0/start.
 - storage-api: **file backend**, both stacks. Disk location moved off volume1
   (7TB SSD) to **`/volume2/sources/MediaHub.library/object-storage`** (56TB).
-- Tenant naming de-stubbed: `STORAGE_TENANT_ID=mediahub`, `GLOBAL_S3_BUCKET: media`
-  → final object path `…/object-storage/media/mediahub/chat-media/t{scope}/{sha[:2]}/{sha[2:4]}/{sha}.ext`.
+- Tenant naming de-stubbed: `STORAGE_TENANT_ID=nous`, `GLOBAL_S3_BUCKET: media`
+  → final object path `…/object-storage/media/nous/chat-media/t{scope}/{sha[:2]}/{sha[2:4]}/{sha}.ext`.
 - `FILE_SIZE_LIMIT` raised 50MB → 5GB (both stacks, user request).
 - **Ops iron law learned:** touching ONE service in the drifted supabase stack
   requires `docker compose up -d --no-deps <svc>` — a bare `compose up` cascaded

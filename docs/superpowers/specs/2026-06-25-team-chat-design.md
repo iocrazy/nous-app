@@ -16,7 +16,7 @@
 
 | ID | 内容 | 状态 |
 |----|------|------|
-| CHAT-GOAL-01 | 在 MediaHub 内提供团队内嵌的即时沟通（频道 + DM），与现有 team/project/素材深度融合 | ☐ |
+| CHAT-GOAL-01 | 在 Nous 内提供团队内嵌的即时沟通（频道 + DM），与现有 team/project/素材深度融合 | ☐ |
 | CHAT-GOAL-02 | 让现有 AI agent（`ai_agents`/`AgentRunner`）作为"频道参与者"进驻：@召唤回话、主动播报、能引用素材/任务卡片、专属 DM | ☐ |
 | CHAT-GOAL-03 | **不**引入独立 IM 系统（Rocket.Chat/Mattermost 整套）——避免第二套基础设施/双账号/双 DB；在现有 Supabase Realtime + teams/auth 上自建 | ☐ |
 | CHAT-GOAL-04 | 安全/权限模型借鉴成熟开源已验证的设计，杜绝越权（尤其 agent 跨 team 泄露素材） | ☐ |

@@ -1,6 +1,6 @@
 # Delete Logic — Resource Lifecycle & Recycle Bin
 
-This document describes the complete delete/cleanup flow for resources in MediaHub, covering both **uploaded resources** (My Resources) and **downloaded videos** (My Downloads / Parser).
+This document describes the complete delete/cleanup flow for resources in Nous, covering both **uploaded resources** (My Resources) and **downloaded videos** (My Downloads / Parser).
 
 ## Overview
 

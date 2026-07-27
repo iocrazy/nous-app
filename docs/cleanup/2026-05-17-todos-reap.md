@@ -1,6 +1,6 @@
 # TODOS.md Reap — 2026-05-17
 
-Per Batch 2 #9 of `~/.gstack/projects/iocrazy-mediahub/ceo-plans/2026-05-17-post-pr290-hygiene-and-hotspots.md`.
+Per Batch 2 #9 of `~/.gstack/projects/iocrazy-nous/ceo-plans/2026-05-17-post-pr290-hygiene-and-hotspots.md`.
 
 20 entries audited (TODO-AI-001..019 + TODO-CLEANUP-001).
 

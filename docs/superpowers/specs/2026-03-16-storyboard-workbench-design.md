@@ -1,6 +1,6 @@
 # 分镜工作台 (Storyboard Workbench) - 设计规格
 
-> MediaHub 分镜管理子模块设计文档
+> Nous 分镜管理子模块设计文档
 > 日期: 2026-03-16
 > 分支: feature/storyboard
 > 版本: v2 (spec review 修订版)
@@ -11,7 +11,7 @@
 
 ### 1.1 目标
 
-在 MediaHub 中新增「分镜工作台」一级模块，提供基于节点画布的 AI 分镜创建、编辑、管理和导出能力。该模块作为独立功能运行，后续可挂接到飞书工作流作为某个节点的模块实例。
+在 Nous 中新增「分镜工作台」一级模块，提供基于节点画布的 AI 分镜创建、编辑、管理和导出能力。该模块作为独立功能运行，后续可挂接到飞书工作流作为某个节点的模块实例。
 
 ### 1.2 参考项目
 
@@ -26,9 +26,9 @@
 
 - **不使用 LangFlow** — 分镜模块是 CRUD + 可视化编辑功能，不需要 LLM 编排框架
 - **画布库**: @xyflow/react v12（成熟、社区活跃、可复用 Storyboard-Copilot 组件）
-- **数据存储**: 结构化存储（PostgreSQL），Snowflake BIGINT 主键（与 MediaHub 现有表一致）
+- **数据存储**: 结构化存储（PostgreSQL），Snowflake BIGINT 主键（与 Nous 现有表一致）
 - **图片存储**: 独立 NAS 目录，按需与媒体库关联
-- **AI Provider**: 复用 MediaHub 的 Celery + 积分体系，接入 Storyboard-Copilot 和麻衣画布的 provider
+- **AI Provider**: 复用 Nous 的 Celery + 积分体系，接入 Storyboard-Copilot 和麻衣画布的 provider
 - **任务状态推送**: Supabase Realtime (WebSocket)，不轮询
 - **前端状态管理**: Zustand（新增依赖，画布状态复杂度高于现有 Context 模式，Zustand 更适合高频更新场景）
 - **删除策略**: 软删除（项目 status='deleted'），定期清理
@@ -39,7 +39,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                   MediaHub Web App                   │
+│                   Nous Web App                   │
 │  ┌───────────┐  ┌────────────────────────────────┐  │
 │  │  侧边栏    │  │       分镜工作台                 │  │
 │  │           │  │                                  │  │
@@ -89,7 +89,7 @@
 
 ## 3. 数据库 Schema
 
-> 所有主键使用 Snowflake BIGINT（与 MediaHub 现有表一致），
+> 所有主键使用 Snowflake BIGINT（与 Nous 现有表一致），
 > `created_by` 引用 auth.users 保持 UUID。
 
 ### 3.1 分镜项目
@@ -650,7 +650,7 @@ ProviderRegistry.get_video_provider(name) → BaseVideoProvider
 
 ### 6.4 Repository 层
 
-遵循 MediaHub 现有的 Repository 模式：
+遵循 Nous 现有的 Repository 模式：
 - StoryboardProjectRepository
 - StoryboardNodeRepository
 - StoryboardEdgeRepository

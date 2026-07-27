@@ -1,11 +1,11 @@
 [package]
-name = "mediahub-core"
+name = "nous-core"
 version = "0.1.0"
 edition = "2021"
-description = "High-performance media processing module for MediaHub (FFmpeg wrapper, HLS segmentation)"
+description = "High-performance media processing module for Nous (FFmpeg wrapper, HLS segmentation)"
 
 [lib]
-name = "mediahub_core"
+name = "nous_core"
 crate-type = ["cdylib"]
 
 [dependencies]

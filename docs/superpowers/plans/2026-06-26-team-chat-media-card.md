@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use `- [ ]`.
 
-**Goal:** Let users drop a resource-library item into a chat as a rich media card (the MediaHub differentiator: discuss your media in chat). MessageBubble already renders `content_type === 'media_card'`; backend already accepts it. This adds the composer affordance: pick a resource → send a media_card message.
+**Goal:** Let users drop a resource-library item into a chat as a rich media card (the Nous differentiator: discuss your media in chat). MessageBubble already renders `content_type === 'media_card'`; backend already accepts it. This adds the composer affordance: pick a resource → send a media_card message.
 
 **Architecture:** The Composer's "attach media" button opens a `ResourcePicker` (lists the current team's resources, searchable). On select, the page builds a media_card body `{ resource_id, title, image_url, fields }` from the resource and sends it via `chatService.sendMessage(channelId, body, 'media_card')`, reusing the existing send/append path. Thumbnail URL reuses the existing resource-thumbnail logic (from ResourceCard / CompactMediaCard).
 

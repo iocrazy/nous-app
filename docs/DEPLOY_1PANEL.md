@@ -1,6 +1,6 @@
 # 1Panel 部署指南
 
-本文档介绍如何在 1Panel 中部署 MediaHub。
+本文档介绍如何在 1Panel 中部署 Nous。
 
 ## 前提条件
 
@@ -19,11 +19,11 @@
 ssh root@your-nas-ip
 
 # 创建项目目录
-mkdir -p /opt/mediahub
-cd /opt/mediahub
+mkdir -p /opt/nous
+cd /opt/nous
 
 # 克隆代码（或上传）
-git clone https://github.com/your-repo/mediahub.git .
+git clone https://github.com/your-repo/nous.git .
 ```
 
 ### 2. 配置环境变量
@@ -60,14 +60,14 @@ APP_PORT=8080
 2. 进入 **容器** → **Compose**
 3. 点击 **创建 Compose**
 4. 填写信息：
-   - 名称：`mediahub`
-   - 路径：`/opt/mediahub`
+   - 名称：`nous`
+   - 路径：`/opt/nous`
 5. 点击 **部署**
 
 #### 方式 2：命令行部署
 
 ```bash
-cd /opt/mediahub
+cd /opt/nous
 docker-compose up -d --build
 ```
 
@@ -78,7 +78,7 @@ docker-compose up -d --build
 1. 进入 **网站** → **创建网站**
 2. 选择 **反向代理**
 3. 填写：
-   - 域名：`mediahub.your-domain.com`
+   - 域名：`nous.your-domain.com`
    - 代理地址：`http://127.0.0.1:8080`
 4. 配置 SSL 证书（推荐）
 
@@ -86,13 +86,13 @@ docker-compose up -d --build
 
 ## 方案 B：1Panel 运行环境（需要自定义镜像）
 
-由于 MediaHub 需要 Chrome 浏览器，不能直接使用 1Panel 的 Python 运行环境。
+由于 Nous 需要 Chrome 浏览器，不能直接使用 1Panel 的 Python 运行环境。
 
 ### 1. 先构建自定义镜像
 
 ```bash
-cd /opt/mediahub
-docker build -t mediahub:latest .
+cd /opt/nous
+docker build -t nous:latest .
 ```
 
 ### 2. 在 1Panel 创建容器
@@ -102,8 +102,8 @@ docker build -t mediahub:latest .
 
 | 配置项 | 值 |
 |--------|-----|
-| 镜像 | `mediahub:latest` |
-| 容器名称 | `mediahub` |
+| 镜像 | `nous:latest` |
+| 容器名称 | `nous` |
 | 端口映射 | `8080:8080` |
 | 目录映射 | `/your/nas/downloads:/app/downloads` |
 | 环境变量 | 见下方 |
@@ -134,13 +134,13 @@ docker build -t mediahub:latest .
 ### 1. 检查容器状态
 
 ```bash
-docker ps | grep mediahub
+docker ps | grep nous
 ```
 
 ### 2. 查看日志
 
 ```bash
-docker logs -f mediahub
+docker logs -f nous
 ```
 
 ### 3. 访问服务
@@ -191,7 +191,7 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 检查容器是否有足够内存（建议 2GB+）：
 
 ```bash
-docker stats mediahub
+docker stats nous
 ```
 
 ### Q: 视频下载到哪里？
@@ -201,7 +201,7 @@ docker stats mediahub
 ### Q: 如何更新？
 
 ```bash
-cd /opt/mediahub
+cd /opt/nous
 git pull
 docker-compose up -d --build
 ```
@@ -209,10 +209,10 @@ docker-compose up -d --build
 ### Q: 如何查看实时日志？
 
 ```bash
-docker logs -f mediahub
+docker logs -f nous
 ```
 
-或在 1Panel 中：**容器** → **mediahub** → **日志**
+或在 1Panel 中：**容器** → **nous** → **日志**
 
 ---
 

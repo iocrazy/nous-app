@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Establish `app/boundary/` as MediaHub's first explicit "trust boundary" layer. All untrusted external data (user URLs, video descriptions from yt-dlp, log output containing secrets) must pass through a boundary processor before entering business logic.
+**Goal:** Establish `app/boundary/` as Nous's first explicit "trust boundary" layer. All untrusted external data (user URLs, video descriptions from yt-dlp, log output containing secrets) must pass through a boundary processor before entering business logic.
 
 **Architecture:** New `app/boundary/` package with three sibling modules — `url_guard` (SSRF + size + scheme allowlist), `external_text` (prompt-injection neutralizer + size cap), `log_redact` (sensitive-token auto-mask). All three follow the same shape: `validate_X(raw) -> ValidatedX | raises BoundaryError`. Callers retro-fit to call validators at the entry point only — service interiors trust their inputs. Loguru gets a global redaction sink so any logger statement that accidentally leaks a token gets masked at write time.
 
@@ -59,7 +59,7 @@
 Write the following content to `docs/architecture/boundary-layer.md`:
 
 ````markdown
-# Boundary Layer — MediaHub Trust Boundary Contract
+# Boundary Layer — Nous Trust Boundary Contract
 
 **Status:** Active (Sprint 1)
 **Owner:** heygo
@@ -67,13 +67,13 @@ Write the following content to `docs/architecture/boundary-layer.md`:
 
 ## What this is
 
-`app/boundary/` is MediaHub's explicit trust boundary. It is the only place that knows how to safely accept untrusted external data and convert it into something the business layer is allowed to use.
+`app/boundary/` is Nous's explicit trust boundary. It is the only place that knows how to safely accept untrusted external data and convert it into something the business layer is allowed to use.
 
 Everything outside `app/boundary/` is the **trusted interior**. The interior is allowed to assume that any data it receives has already been validated. Any module that imports from outside the worktree (network, user input, third-party API response, file content) must route the data through a `app/boundary/<X>` validator first.
 
 ## Why this exists
 
-Before Sprint 1, MediaHub had no architectural answer to "where does input validation live?". SSRF protection, prompt-injection sanitization, and log redaction were either missing or scattered into ad-hoc per-service helpers. Sprint 1 makes the trust boundary a first-class layer.
+Before Sprint 1, Nous had no architectural answer to "where does input validation live?". SSRF protection, prompt-injection sanitization, and log redaction were either missing or scattered into ad-hoc per-service helpers. Sprint 1 makes the trust boundary a first-class layer.
 
 ## The contract
 
@@ -101,7 +101,7 @@ Service interiors must:
 
 | Module | Validator | Purpose |
 |---|---|---|
-| `url_guard` | `validate_url(raw) -> ValidatedURL` | Reject SSRF (RFC1918, link-local, loopback, IPv6 ULA, MediaHub NAS subnet) + non-http(s) schemes + over-size redirects |
+| `url_guard` | `validate_url(raw) -> ValidatedURL` | Reject SSRF (RFC1918, link-local, loopback, IPv6 ULA, Nous NAS subnet) + non-http(s) schemes + over-size redirects |
 | `external_text` | `neutralize_external_text(raw, max_chars) -> str` | Strip embedded instruction-like patterns from yt-dlp `description` / external captions before they enter LLM prompts; cap size |
 | `log_redact` | `redact(text) -> str` + `make_loguru_patcher()` | Mask `sk-…`, `Bearer …`, JWT-shaped tokens, `Authorization:` headers in any logged string |
 
@@ -434,7 +434,7 @@ def test_no_scheme_rejected():
         "http://172.16.0.1/",
         "http://172.31.0.1/",
         "http://192.168.1.1/",
-        "http://192.168.50.9:9080/",  # MediaHub NAS Supabase — must be blocked
+        "http://192.168.50.9:9080/",  # Nous NAS Supabase — must be blocked
         "http://169.254.169.254/latest/meta-data/",  # AWS IMDS
         "http://0.0.0.0/",
     ],
@@ -479,7 +479,7 @@ Rejects:
 - non-http(s) schemes
 - literal private/loopback/link-local/multicast IPv4 + IPv6
 - DNS names that resolve to any of the above (DNS-rebinding safe)
-- MediaHub NAS subnet 192.168.50.0/24 (extra paranoia)
+- Nous NAS subnet 192.168.50.0/24 (extra paranoia)
 
 Returns ValidatedURL on success. Raises URLBlockedError on reject.
 """
@@ -493,7 +493,7 @@ from app.boundary.types import ValidatedURL
 
 ALLOWED_SCHEMES = {"http", "https"}
 
-# Extra MediaHub-specific blocked ranges. NAS subnet hosts Supabase (port 9080)
+# Extra Nous-specific blocked ranges. NAS subnet hosts Supabase (port 9080)
 # / Redis / Studio — must never be reachable from user-supplied URLs.
 EXTRA_BLOCKED_V4_NETWORKS = (
     ipaddress.ip_network("192.168.50.0/24"),
@@ -502,7 +502,7 @@ EXTRA_BLOCKED_V4_NETWORKS = (
 
 def _is_private_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """True if IP is in any unsafe range (RFC1918, loopback, link-local,
-    multicast, reserved, IPv6 ULA, IPv6 link-local, MediaHub NAS subnet)."""
+    multicast, reserved, IPv6 ULA, IPv6 link-local, Nous NAS subnet)."""
     if ip.is_private or ip.is_loopback or ip.is_link_local:
         return True
     if ip.is_multicast or ip.is_reserved or ip.is_unspecified:
@@ -593,7 +593,7 @@ def test_dns_resolves_to_private_rejected(monkeypatch):
     import app.boundary.url_guard as ug
 
     def fake_resolve(host: str) -> list[str]:
-        return ["192.168.50.9"]  # MediaHub NAS
+        return ["192.168.50.9"]  # Nous NAS
 
     monkeypatch.setattr(ug, "_resolve_host", fake_resolve)
 
@@ -665,7 +665,7 @@ Rejects:
 - non-http(s) schemes
 - literal private/loopback/link-local/multicast IPv4 + IPv6
 - DNS names that resolve to any of the above (DNS-rebinding safe)
-- MediaHub NAS subnet 192.168.50.0/24 (extra paranoia)
+- Nous NAS subnet 192.168.50.0/24 (extra paranoia)
 
 Returns ValidatedURL on success. Raises URLBlockedError on reject.
 """
@@ -1671,10 +1671,10 @@ git push -u origin feat/dbos-pr-d2
 gh pr create --title "feat(boundary): Sprint 1 — establish app/boundary/ trust layer" --body "$(cat <<'EOF'
 ## Summary
 
-First system layer established: `app/boundary/` becomes the explicit trust boundary for all untrusted external data entering MediaHub business logic.
+First system layer established: `app/boundary/` becomes the explicit trust boundary for all untrusted external data entering Nous business logic.
 
 Three modules:
-- **url_guard** — DNS-rebinding-safe SSRF rejector. Blocks RFC1918, loopback, link-local, IPv6 ULA, and the MediaHub NAS subnet (192.168.50.0/24). Returns `ValidatedURL` wrapper that downstream services accept instead of raw `str`.
+- **url_guard** — DNS-rebinding-safe SSRF rejector. Blocks RFC1918, loopback, link-local, IPv6 ULA, and the Nous NAS subnet (192.168.50.0/24). Returns `ValidatedURL` wrapper that downstream services accept instead of raw `str`.
 - **external_text** — defangs prompt-injection patterns in yt-dlp `description` and external captions before they reach LLM prompts. Wraps content in `<EXTERNAL_CONTENT>` markers and brackets `Ignore all prior instructions`-class strings.
 - **log_redact** — loguru sink patcher that masks `sk-…`, `Bearer …`, JWT-shaped tokens, and `KEY=value` env-style secrets at log write time.
 
@@ -1855,7 +1855,7 @@ These are decisions where my primary review and the subagent both push back on t
 - Same as Phase 1: wrap (1 day) vs document (1 paragraph)
 
 **UC4 (Eng-NEW): Dev workflow allowlist mechanism**
-- Problem: dev runs mediahub locally, internal services on `127.0.0.1:808N`. `validate_url` will reject if mediahub itself fetches them (e.g., webhook-test endpoint, internal e2e)
+- Problem: dev runs nous locally, internal services on `127.0.0.1:808N`. `validate_url` will reject if nous itself fetches them (e.g., webhook-test endpoint, internal e2e)
 - Options:
   - (a) `SSRF_ALLOW_LOOPBACK=true` env-gated bypass (one-flag, easy)
   - (b) `SSRF_DEV_ALLOWLIST=192.168.50.10/32,127.0.0.1/32` explicit allowlist (precise)
@@ -2007,7 +2007,7 @@ C1, C2, C3, C4 (CEO criticals), H2-H4 (CEO highs), E1-E14 (Eng findings) — 18 
 ## Why rewrite
 
 The original Phase B9 named "wrap yt-dlp redirect" was patch-thinking inherited
-from CEO UC3. Real problem: **every HTTP fetcher in mediahub is a SSRF surface**
+from CEO UC3. Real problem: **every HTTP fetcher in nous is a SSRF surface**
 (yt-dlp subprocess, DrissionPage browser, 8+ httpx call sites in
 downloader / download_progress / visual_analysis / notion / ai_provider /
 storyboard / volcengine / whisper). Per-site retro-fits become unmaintainable

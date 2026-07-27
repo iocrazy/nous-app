@@ -1,6 +1,6 @@
-# MediaHub Push — Chrome Extension
+# Nous Push — Chrome Extension
 
-Push video URLs to MediaHub for parsing and download, and scan pages for images to import into the resource library.
+Push video URLs to Nous for parsing and download, and scan pages for images to import into the resource library.
 
 ## Install
 
@@ -12,7 +12,7 @@ Push video URLs to MediaHub for parsing and download, and scan pages for images 
 
 1. Click the extension icon in Chrome toolbar
 2. Enter your **API URL** (e.g., `https://cn.nous.ink:88`)
-3. Enter your **API Key** (generate one in MediaHub Settings → API Keys)
+3. Enter your **API Key** (generate one in Nous Settings → API Keys)
 4. Click **Save**
 
 ### API Key scopes
@@ -26,11 +26,11 @@ Push video URLs to MediaHub for parsing and download, and scan pages for images 
 
 ### Push mode
 
-- **Right-click** on any page → **Push to MediaHub**
+- **Right-click** on any page → **Push to Nous**
 - **Keyboard shortcut**: `Alt+M`
-- Or open the popup, pick tags, and click **Push to MediaHub**
+- Or open the popup, pick tags, and click **Push to Nous**
 
-The extension sends the current page URL to MediaHub. If the URL is a supported video platform (Douyin, Xiaohongshu, Bilibili, etc.), MediaHub will parse and download it.
+The extension sends the current page URL to Nous. If the URL is a supported video platform (Douyin, Xiaohongshu, Bilibili, etc.), Nous will parse and download it.
 
 ### Scan Images mode
 

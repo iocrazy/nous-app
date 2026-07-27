@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Upgrade MediaHub with user registration, team collaboration, shared collections, notifications, and i18n support.
+**Goal:** Upgrade Nous with user registration, team collaboration, shared collections, notifications, and i18n support.
 
 **Architecture:** Add global header with user dropdown, notification panel, and language switcher. Extend Supabase with 6 new tables for teams, collections, and notifications. Use react-i18next for internationalization.
 

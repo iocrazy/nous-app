@@ -13,7 +13,7 @@
 ---
 
 ## Why (eng-review findings, verified)
-- `/chat-attachments/upload` writes `/tmp/mediahub_chat_attachments` (gateway-local). Compose mounts the shared library `${DOWNLOAD_HOST_PATH:-/volume2/sources/MediaHub.library}:/app/downloads` on **both** `mediahub-app-backend` (gateway) and `mediahub-app-worker`, but **/tmp is NOT shared**. Regular chat turns run on the gateway (can read /tmp); **issue turns run on the worker → cannot read the gateway's /tmp**. So attachments in issue replies are currently unreadable. Storing as a resource on `/app/downloads` fixes this AND makes them promotable.
+- `/chat-attachments/upload` writes `/tmp/nous_chat_attachments` (gateway-local). Compose mounts the shared library `${DOWNLOAD_HOST_PATH:-/volume2/sources/MediaHub.library}:/app/downloads` on **both** `mediahub-app-backend` (gateway) and `mediahub-app-worker`, but **/tmp is NOT shared**. Regular chat turns run on the gateway (can read /tmp); **issue turns run on the worker → cannot read the gateway's /tmp**. So attachments in issue replies are currently unreadable. Storing as a resource on `/app/downloads` fixes this AND makes them promotable.
 - Reuse: `ResourcesService` already does upload → disk-write under `DOWNLOAD_PATH` + resource-row create. `scope_type` ∈ `personal|team` (`resources_crud_router.py:53`). Resources read at `Path(settings.DOWNLOAD_PATH)/file_path` (`resources_crud_router.py:449`).
 
 ## Reuse these existing utilities (don't re-roll)
@@ -250,7 +250,7 @@ git add -A && git commit -m "feat(chat): resolve attachments from shared library
 ## Task 5: Final verification
 - [ ] `cd backend && uv run pytest tests/ -q` → all pass.
 - [ ] Chain import: `uv run python -c "import app.services.library.chat_upload, app.api.ai_library_router; print('OK')"`.
-- [ ] Grep: new uploads no longer depend on `/tmp/mediahub_chat_attachments` (the resolver reads `DOWNLOAD_PATH`).
+- [ ] Grep: new uploads no longer depend on `/tmp/nous_chat_attachments` (the resolver reads `DOWNLOAD_PATH`).
 - [ ] **Deploy note (PR body):** no migration (reuses resources + the shared `/app/downloads` volume). After deploy, an image attached in an **issue reply** (worker turn) is now readable (was broken: gateway /tmp). Watch the worker comes up (auto-handled by #350).
 
 ## Self-review checklist

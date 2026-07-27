@@ -104,7 +104,7 @@ https://mediahub.heygo.cn (Aliyun Reverse Proxy)
       ↓
 https://mediahubserver.heygo.cn:88 (Synology Reverse Proxy)
       ↓
-MediaHub Docker Services (Internal)
+Nous Docker Services (Internal)
 ```
 
 ### 5.2 CDN Decision: Not Needed ❌
@@ -135,7 +135,7 @@ MediaHub Docker Services (Internal)
 │  PostgreSQL (Supabase)                          │
 │  └─ Video metadata (title, author, path)        │
 │                                                 │
-│  NAS Disk (/volume1/mediahub/)                  │
+│  NAS Disk (/volume1/nous/)                  │
 │  ├─ /videos/  → Video files                     │
 │  └─ /covers/  → Cover images                    │
 │                                                 │
@@ -205,7 +205,7 @@ Analogy:
 
 ## 9. Multi-Tenancy Architecture
 
-Current MediaHub uses multi-tenant architecture with shared Auth:
+Current Nous uses multi-tenant architecture with shared Auth:
 
 ```
 ┌─ Single Supabase Instance ─────────────────────┐

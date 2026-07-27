@@ -1,4 +1,4 @@
-# Boundary Layer — MediaHub Trust Boundary Contract
+# Boundary Layer — Nous Trust Boundary Contract
 
 **Status:** Active (Sprint 1 v2)
 **Owner:** heygo
@@ -6,13 +6,13 @@
 
 ## What this is
 
-`app/boundary/` is MediaHub's explicit trust boundary. It is the only place that knows how to safely accept untrusted external data and convert it into something the business layer is allowed to use.
+`app/boundary/` is Nous's explicit trust boundary. It is the only place that knows how to safely accept untrusted external data and convert it into something the business layer is allowed to use.
 
 Everything outside `app/boundary/` is the **trusted interior**. The interior is allowed to assume that any data it receives has already been validated. Any module that imports from outside the worktree (network, user input, third-party API response, file content) must route the data through a `app/boundary/<X>` validator first.
 
 ## Why this exists
 
-Before Sprint 1, MediaHub had no architectural answer to "where does input validation live?". SSRF protection, prompt-injection sanitization, log redaction, and timing-safe secret comparison were either missing or scattered into ad-hoc per-service helpers. Sprint 1 makes the trust boundary a first-class layer.
+Before Sprint 1, Nous had no architectural answer to "where does input validation live?". SSRF protection, prompt-injection sanitization, log redaction, and timing-safe secret comparison were either missing or scattered into ad-hoc per-service helpers. Sprint 1 makes the trust boundary a first-class layer.
 
 ## The contract
 
@@ -56,7 +56,7 @@ When in doubt: if the value's source is the deployment operator (env var, config
 
 | Module | Validator | Purpose |
 |---|---|---|
-| `url_guard` | `validate_url(raw) -> ValidatedURL` (sync) + `validate_url_async(raw) -> ValidatedURL` (async) | Reject SSRF: RFC1918 + loopback + link-local + IPv6 ULA + decimal/octal/hex IPv4 literals + `.localhost`/`.local`/`.internal` suffixes + GCP/Azure IMDS hostnames + MediaHub NAS subnet (configurable) + non-http(s) schemes. DNS path uses async `loop.getaddrinfo()` with 2s timeout and 60s LRU cache. |
+| `url_guard` | `validate_url(raw) -> ValidatedURL` (sync) + `validate_url_async(raw) -> ValidatedURL` (async) | Reject SSRF: RFC1918 + loopback + link-local + IPv6 ULA + decimal/octal/hex IPv4 literals + `.localhost`/`.local`/`.internal` suffixes + GCP/Azure IMDS hostnames + Nous NAS subnet (configurable) + non-http(s) schemes. DNS path uses async `loop.getaddrinfo()` with 2s timeout and 60s LRU cache. |
 | `external_text` | `neutralize_external_text(raw, *, max_chars) -> str` | Defang prompt-injection patterns in yt-dlp `description` and external captions before they enter LLM prompts. Wraps content in `<EXTERNAL_CONTENT_<random>>` markers (random suffix per call to prevent forgery) and brackets known instruction-override literals. |
 | `log_redact` | `redact(value) -> value` + `make_loguru_patcher() -> Callable` | Mask `sk-…`, `Bearer …`, JWT-shaped tokens, and `KEY=value` env-style secrets at log write time. Patcher walks both `record["message"]` and `record["extra"]` dict so `logger.bind(token=…).info(…)` is also redacted. Installed in `app/core/utils.py` next to existing loguru config. |
 | `secret_compare` | `compare_secret(actual: str, candidate: str) -> bool` | Timing-safe secret comparison via `hmac.compare_digest`. Use everywhere a secret-shaped string is compared with `==` (API keys, webhook signatures, JWT HMAC). |
@@ -70,7 +70,7 @@ Setting `SSRF_DEV_ALLOWLIST` (CIDR list, comma-separated) explicitly allows addi
 SSRF_DEV_ALLOWLIST=192.168.50.10/32,127.0.0.1/32,192.168.50.20/32
 ```
 
-This unblocks "mediahub locally calls another service on the same LAN" workflows while keeping the default-deny posture. Each entry is verified at startup and logged so the operator sees what holes are open.
+This unblocks "nous locally calls another service on the same LAN" workflows while keeping the default-deny posture. Each entry is verified at startup and logged so the operator sees what holes are open.
 
 ## Errors
 
@@ -133,7 +133,7 @@ the operations-level last resort — no code, just firewall config.
 
 Recommendation: deny outbound `192.168.50.0/24` (NAS LAN) except the
 explicit Supabase + Redis ports, deny RFC1918 (`10.0.0.0/8`,
-`172.16.0.0/12`, `192.168.0.0/16` minus mediahub's own subnet), deny
+`172.16.0.0/12`, `192.168.0.0/16` minus nous's own subnet), deny
 `169.254.169.254` (cloud IMDS), allow public internet.
 
 Step-by-step Synology DSM 7.x runbook with rule table, verification

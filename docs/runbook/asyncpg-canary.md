@@ -14,7 +14,7 @@ to keep the blast radius small.
 
 ## What this validates
 
-[#194 Bug C](https://github.com/iocrazy/mediahub/issues/194) — after
+[#194 Bug C](https://github.com/iocrazy/nous-app/issues/194) — after
 ~8h of backend uptime, `supabase-py` requests start timing out or
 returning stale connections. Root cause traced to:
 
@@ -333,7 +333,7 @@ legacy classpath).
 
 ## Related
 
-- [#194 Bug C tracking issue](https://github.com/iocrazy/mediahub/issues/194)
+- [#194 Bug C tracking issue](https://github.com/iocrazy/nous-app/issues/194)
 - Phase 1 foundation: PR #211 (`pg_pool.py` + `repository_base.py`)
 - Phase 2 pilot: PR #212 (AgentRunsRepository)
 - Phase 3a-3e: PRs #213 / #219 / #220 / #221 / #222 (ResourcesRepository)

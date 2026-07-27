@@ -8,7 +8,7 @@
 
 ## 1. Design Goals
 
-MediaHub is upgrading from a personal video collection tool to a team video collaboration platform. The sidebar must:
+Nous is upgrading from a personal video collection tool to a team video collaboration platform. The sidebar must:
 
 - Support personal mode (free users) and team mode (paid users)
 - Dynamically show/hide navigation items based on role permissions
@@ -35,7 +35,7 @@ The sidebar operates in three states:
 No team selected, or user selected "Personal" in TeamSwitcher.
 
 ```
-[MediaHub Logo]
+[Nous Logo]
 [Personal ▾]              ← TeamSwitcher component
 ─────────────────────────
 Parser                    ← always visible
@@ -52,7 +52,7 @@ Settings                  ← always visible
 User selected a team. Navigation items vary by role permissions.
 
 ```
-[MediaHub Logo]
+[Nous Logo]
 [Team A ▾]                ← TeamSwitcher shows current team
 ─────────────────────────
 Projects                  ← project.view
