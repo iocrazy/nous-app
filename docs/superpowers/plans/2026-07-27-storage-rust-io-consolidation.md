@@ -206,14 +206,25 @@ git grep -il "mediahub" -- docs '*.md' \
 上一步会连带改掉文档里引用的**活表名、容器名、环境变量名**——那些必须保持原样，否则文档会与生产不符：
 
 ```bash
-git grep -il "nous_models\|nous-sb\|nous-app-backend\|nous-worker\|NOUS_ROLE\|NOUS_TOKEN" -- docs '*.md' \
+git grep -il "nous_models\|nous-sb\|nous-app-backend\|nous-worker\|NOUS_ROLE\|NOUS_TOKEN\|iocrazy/nous" -- docs '*.md' \
   | xargs -r sed -i \
       -e 's/nous_models/mediahub_models/g' \
       -e 's/nous-sb/mediahub-sb/g' \
       -e 's/nous-app-backend/mediahub-app-backend/g' \
       -e 's/NOUS_ROLE/MEDIAHUB_ROLE/g' \
-      -e 's/NOUS_TOKEN/MEDIAHUB_TOKEN/g'
+      -e 's/NOUS_TOKEN/MEDIAHUB_TOKEN/g' \
+      -e 's#github.com/iocrazy/nous\([^-]\|$\)#github.com/iocrazy/nous-app\1#g'
 ```
+
+**为什么最后一条必须有：** 3 个文档里写着 `github.com/iocrazy/mediahub`，上一步的 `s/mediahub/nous/g` 会把它变成 `iocrazy/nous` —— 而真实仓库是 `iocrazy/nous-app`。`\([^-]\|$\)` 的作用是不去动已经正确的 `nous-app`。
+
+验证：
+
+```bash
+git grep -n "github.com/iocrazy" -- docs '*.md' | grep -v "nous-app" 
+```
+
+Expected: 无输出。
 
 - [ ] **Step 5: 人工复核 diff 中所有代码块**
 
