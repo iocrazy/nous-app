@@ -18,7 +18,10 @@ import {
   ProjectStageNode,
   ProjectWorkflow,
   StageLibraryItem,
+  WorkflowCompletionPolicy,
+  WorkflowNodeEvents,
   WorkflowTemplate,
+  WorkflowTemplateNode,
   WorkflowTemplateNodeInput,
 } from '../types';
 import { apiClient } from './apiClient';
@@ -26,6 +29,52 @@ import { apiClient } from './apiClient';
 interface Envelope<T> {
   data?: T;
 }
+
+/** Backend defaults (schemas/workflow.py) — applied when an older payload
+ * (pre mig 386) is missing these fields, so neither the template editor nor
+ * any instance-node consumer (e.g. the E3 suggest-agent-run chip reading
+ * `node.events.notify_on_arrival`) ever crashes on a legacy template/instance.
+ * Exported so callers needing a fresh default object (e.g. a new draft node)
+ * don't duplicate the literal. */
+export const DEFAULT_COMPLETION_POLICY: WorkflowCompletionPolicy = 'owner';
+export const DEFAULT_EVENTS: WorkflowNodeEvents = {
+  notify_on_arrival: true,
+  notify_on_complete: false,
+  suggest_agent_run: false,
+};
+
+const normalizeEvents = (events: Partial<WorkflowNodeEvents> | null | undefined): WorkflowNodeEvents => ({
+  notify_on_arrival: events?.notify_on_arrival ?? DEFAULT_EVENTS.notify_on_arrival,
+  notify_on_complete: events?.notify_on_complete ?? DEFAULT_EVENTS.notify_on_complete,
+  suggest_agent_run: events?.suggest_agent_run ?? DEFAULT_EVENTS.suggest_agent_run,
+});
+
+/** Fill in `completion_policy`/`events` on a template node fetched from a
+ * payload that may predate mig 386 (both fields optional server-side too). */
+const normalizeTemplateNode = (
+  node: Partial<WorkflowTemplateNode> & Omit<WorkflowTemplateNode, 'completion_policy' | 'events'>,
+): WorkflowTemplateNode => ({
+  ...node,
+  completion_policy: node.completion_policy ?? DEFAULT_COMPLETION_POLICY,
+  events: normalizeEvents(node.events),
+});
+
+const normalizeTemplate = (template: WorkflowTemplate): WorkflowTemplate => ({
+  ...template,
+  nodes: template.nodes?.map(normalizeTemplateNode),
+});
+
+/** Same normalization for a live instance node (`project_stage_nodes`) —
+ * GET /projects/{id}/workflow, POST .../nodes and PATCH .../nodes/{id} all
+ * round-trip through this so a pre-mig-386 row never hands `undefined` to a
+ * consumer reading e.g. `node.events.notify_on_arrival`. */
+const normalizeInstanceNode = (
+  node: Partial<ProjectStageNode> & Omit<ProjectStageNode, 'completion_policy' | 'events'>,
+): ProjectStageNode => ({
+  ...node,
+  completion_policy: node.completion_policy ?? DEFAULT_COMPLETION_POLICY,
+  events: normalizeEvents(node.events),
+});
 
 // ============================================
 // Team workflow templates
@@ -56,7 +105,7 @@ export const fetchTemplate = async (
     `/api/v1/workflows/${templateId}`,
   );
   if (!response.data) throw new Error('Empty response from fetchTemplate');
-  return response.data;
+  return normalizeTemplate(response.data);
 };
 
 /** Create an empty named template (nodes are set via updateTemplate). */
@@ -70,7 +119,7 @@ export const createTemplate = async (
     { query: { team_id: teamId } },
   );
   if (!response.data) throw new Error('Empty response from createTemplate');
-  return response.data;
+  return normalizeTemplate(response.data);
 };
 
 /**
@@ -90,7 +139,7 @@ export const updateTemplate = async (
     data,
   );
   if (!response.data) throw new Error('Empty response from updateTemplate');
-  return response.data;
+  return normalizeTemplate(response.data);
 };
 
 export const deleteTemplate = async (templateId: string): Promise<void> => {
@@ -115,9 +164,10 @@ export const fetchProjectWorkflow = async (
 ): Promise<ProjectWorkflow> => {
   // NOTE: declares a FastAPI response_model → returns the model directly (no
   // `{data}` envelope). Do not add a `.data` unwrap here.
-  return apiClient.get<ProjectWorkflow>(
+  const workflow = await apiClient.get<ProjectWorkflow>(
     `/api/v1/projects/${projectId}/workflow`,
   );
+  return { ...workflow, nodes: (workflow.nodes ?? []).map(normalizeInstanceNode) };
 };
 
 /**
@@ -133,7 +183,7 @@ export const addProjectNode = async (
     body,
   );
   if (!response.data) throw new Error('Empty response from addProjectNode');
-  return response.data;
+  return normalizeInstanceNode(response.data);
 };
 
 /**
@@ -161,7 +211,7 @@ export const updateProjectNode = async (
     patch,
   );
   if (!response.data) throw new Error('Empty response from updateProjectNode');
-  return response.data;
+  return normalizeInstanceNode(response.data);
 };
 
 /** Pure-read advance ruling (same predicate as executeAdvance). */

@@ -191,6 +191,11 @@ async def _assert_stage_owner_or_manager(issue: dict, auth) -> None:
     owner, or by the project's manager as an override (agent-owner nodes have
     no human owner to match, so they always require the manager path).
 
+    Flow Rules (mig 386, M2 PR-D): a node's ``completion_policy`` gates this
+    further. ``'owner'`` (default) keeps the semantics above exactly. On
+    ``'any_editor'`` any effective role of manager OR editor may complete the
+    review — not just the node's own owner or a manager override.
+
     Applies ONLY to the NEW three-segment origin_id shape
     (``project_stage:{project_id}:{node_id}``) — the OLD two-segment SOP-stage
     mirror (no project scope encoded, 存量镜像 issue) is never locked, matching
@@ -219,10 +224,12 @@ async def _assert_stage_owner_or_manager(issue: dict, auth) -> None:
     if owner_user_id is not None and str(owner_user_id) == user_id:
         return
 
-    from app.core.workflow_roles import MANAGER, resolve_effective_role
+    from app.core.workflow_roles import EDITOR, MANAGER, resolve_effective_role
 
     role = await resolve_effective_role(user_id, project_id=project_id)
     if role == MANAGER:
+        return
+    if node.get("completion_policy") == "any_editor" and role == EDITOR:
         return
 
     raise HTTPException(

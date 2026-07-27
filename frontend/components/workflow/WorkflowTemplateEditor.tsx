@@ -4,8 +4,9 @@
  * Feishu-style orchestrator: a left rail of the team's templates, a middle
  * capsule chain (drag to reorder, parallel groups drawn as dashed vertical
  * boxes, "+ Add from library" to append node-bank stages) and a right
- * inspector with three tabs — Node Info (editable), Flow Rules and Events
- * (M1 fixed-convention, read-only per spec).
+ * inspector with three editable tabs — Node Info, Flow Rules
+ * (`completion_policy`) and Events (`events` booleans; the arrival/completion
+ * mirror-issue behavior itself stays hardcoded per spec §4, M2 PR-D).
  *
  * The chain edits a local draft; Save writes the whole node list back via
  * PATCH /workflows/{id} (full replacement). Owner/members go through the
@@ -20,11 +21,14 @@ import {
   Star,
   Trash2,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useToast } from '../Toast';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { fetchTeamMembers } from '../../services/teamService';
 import {
   createTemplate,
+  DEFAULT_COMPLETION_POLICY,
+  DEFAULT_EVENTS,
   deleteTemplate,
   fetchStageLibrary,
   fetchTemplate,
@@ -33,7 +37,9 @@ import {
 } from '../../services/workflowService';
 import type {
   StageLibraryItem,
+  WorkflowCompletionPolicy,
   WorkflowMemberRef,
+  WorkflowNodeEvents,
   WorkflowTemplate,
   WorkflowTemplateNodeInput,
 } from '../../types';
@@ -52,6 +58,8 @@ interface DraftNode extends WorkflowTemplateNodeInput {
   review_required: boolean;
   deliverable_required: boolean;
   members: WorkflowMemberRef[];
+  completion_policy: WorkflowCompletionPolicy;
+  events: WorkflowNodeEvents;
 }
 
 let _keySeq = 0;
@@ -72,6 +80,8 @@ function toDraft(nodes: WorkflowTemplate['nodes']): DraftNode[] {
     source_stage_id: n.source_stage_id,
     duration_days: n.duration_days,
     members: n.members ?? [],
+    completion_policy: n.completion_policy ?? DEFAULT_COMPLETION_POLICY,
+    events: { ...DEFAULT_EVENTS, ...n.events },
   }));
 }
 
@@ -89,6 +99,8 @@ function toPayload(drafts: DraftNode[]): WorkflowTemplateNodeInput[] {
     source_stage_id: d.source_stage_id ?? null,
     duration_days: d.duration_days ?? null,
     members: d.members,
+    completion_policy: d.completion_policy ?? DEFAULT_COMPLETION_POLICY,
+    events: { ...DEFAULT_EVENTS, ...d.events },
   }));
 }
 
@@ -259,6 +271,8 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
       source_stage_id: item.id,
       duration_days: null,
       members: [],
+      completion_policy: DEFAULT_COMPLETION_POLICY,
+      events: { ...DEFAULT_EVENTS },
     };
     setDrafts((prev) => {
       const at = insertIndex == null ? prev.length : Math.min(insertIndex, prev.length);
@@ -567,8 +581,20 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
                 onRemove={() => removeNode(selectedNode._key)}
               />
             )}
-            {inspectorTab === 'flow' && <FlowRulesTab />}
-            {inspectorTab === 'events' && <EventsTab />}
+            {inspectorTab === 'flow' && (
+              <FlowRulesTab
+                value={selectedNode.completion_policy}
+                onChange={(completion_policy) =>
+                  patchNode(selectedNode._key, { completion_policy })
+                }
+              />
+            )}
+            {inspectorTab === 'events' && (
+              <EventsTab
+                value={selectedNode.events}
+                onChange={(events) => patchNode(selectedNode._key, { events })}
+              />
+            )}
           </>
         ) : (
           <div className="flex h-full items-center justify-center text-center text-[13px] text-ink-600">
@@ -778,25 +804,85 @@ const NodeInfoTab: React.FC<{
   </div>
 );
 
-const FlowRulesTab: React.FC = () => (
-  <div className="flex flex-col gap-3 overflow-y-auto text-[13px] text-ink-300">
-    <p className="text-[12px] text-ink-500">
-      Fixed conventions in M1 (configurable in a later milestone).
-    </p>
-    <RuleRow title="Completed by" body="The node owner themselves (a manager may override)." />
-    <RuleRow
-      title="Conditions"
-      body="Owner assigned · owner review (when Review required) · deliverable filed (when Deliverable required, hard-checked)."
-    />
-  </div>
-);
+const FlowRulesTab: React.FC<{
+  value: WorkflowCompletionPolicy;
+  onChange: (value: WorkflowCompletionPolicy) => void;
+}> = ({ value, onChange }) => {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col gap-3 overflow-y-auto text-[13px] text-ink-300">
+      <p className="text-[12px] text-ink-500">{t('projects.workflow.flowRules.intro')}</p>
+      <div className="flex flex-col gap-1.5">
+        <RadioRow
+          name="completion_policy"
+          checked={value === 'owner'}
+          onSelect={() => onChange('owner')}
+          label={t('projects.workflow.flowRules.owner')}
+        />
+        <RadioRow
+          name="completion_policy"
+          checked={value === 'any_editor'}
+          onSelect={() => onChange('any_editor')}
+          label={t('projects.workflow.flowRules.anyEditor')}
+        />
+      </div>
+      <RuleRow
+        title={t('projects.workflow.flowRules.conditionsTitle')}
+        body={t('projects.workflow.flowRules.conditionsBody')}
+      />
+    </div>
+  );
+};
 
-const EventsTab: React.FC = () => (
-  <div className="flex flex-col gap-3 overflow-y-auto text-[13px] text-ink-300">
-    <p className="text-[12px] text-ink-500">Built-in events in M1 (configurable later).</p>
-    <RuleRow title="On arrival" body="Idempotently derive the mirror issue for this node." />
-    <RuleRow title="On completion" body="Close the mirror issue. No agent will start automatically." />
-  </div>
+const EventsTab: React.FC<{
+  value: WorkflowNodeEvents;
+  onChange: (value: WorkflowNodeEvents) => void;
+}> = ({ value, onChange }) => {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col gap-3 overflow-y-auto text-[13px] text-ink-300">
+      <p className="text-[12px] text-ink-500">{t('projects.workflow.events.intro')}</p>
+      <div className="border-t border-line pt-1">
+        <Toggle
+          label={t('projects.workflow.events.notifyOnArrival')}
+          checked={value.notify_on_arrival}
+          onChange={(v) => onChange({ ...value, notify_on_arrival: v })}
+        />
+        <Toggle
+          label={t('projects.workflow.events.notifyOnComplete')}
+          checked={value.notify_on_complete}
+          onChange={(v) => onChange({ ...value, notify_on_complete: v })}
+        />
+        <Toggle
+          label={t('projects.workflow.events.suggestAgentRun')}
+          checked={value.suggest_agent_run}
+          onChange={(v) => onChange({ ...value, suggest_agent_run: v })}
+        />
+      </div>
+      <RuleRow
+        title={t('projects.workflow.events.builtinTitle')}
+        body={t('projects.workflow.events.builtinBody')}
+      />
+    </div>
+  );
+};
+
+const RadioRow: React.FC<{
+  name: string;
+  checked: boolean;
+  onSelect: () => void;
+  label: string;
+}> = ({ name, checked, onSelect, label }) => (
+  <label className="flex cursor-pointer items-center gap-2 rounded-md border border-line px-2.5 py-2 text-[13px] text-ink-300 transition hover:border-line-strong">
+    <input
+      type="radio"
+      name={name}
+      checked={checked}
+      onChange={onSelect}
+      className="h-3.5 w-3.5 accent-[var(--accent,#6366f1)]"
+    />
+    <span>{label}</span>
+  </label>
 );
 
 const RuleRow: React.FC<{ title: string; body: string }> = ({ title, body }) => (

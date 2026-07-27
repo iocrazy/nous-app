@@ -51,6 +51,11 @@ function tplNode(id: string, name: string, sort: number, extra: Record<string, u
     source_stage_id: null,
     duration_days: null,
     members: [],
+    // D4 (mig 386): completion_policy + events are optional server-side, but a
+    // post-386 payload always carries them — stub the realistic shape rather
+    // than relying on the frontend's normalizeTemplateNode() fallback.
+    completion_policy: 'owner',
+    events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false },
     ...extra,
   };
 }
@@ -175,6 +180,35 @@ async function setupWorkflowStubs(page: Page): Promise<void> {
   await page.route('**/api/v1/projects/*/workflow/nodes/*', json({ success: true, data: { deleted: true } }));
 }
 
+/**
+ * D4: capture the body of the template Save PATCH (`PATCH /api/v1/workflows/{id}`)
+ * so a test can assert the edited completion_policy/events actually rode the
+ * wire, not just that the UI toggled visually.
+ *
+ * Registered AFTER setupWorkflowStubs → wins the last-registered-routes-first
+ * convention this file already uses (see the stage-library / node-collection
+ * comments above) for PATCH only; every other method (the plain GET list/detail
+ * fetches) falls back to the earlier catch-all so existing behavior is untouched.
+ */
+function capturePatch(page: Page): { get: () => Record<string, unknown> | null } {
+  let body: Record<string, unknown> | null = null;
+  void page.route('**/api/v1/workflows/*', async (route) => {
+    const req = route.request();
+    if (req.method() !== 'PATCH') {
+      await route.fallback();
+      return;
+    }
+    body = req.postDataJSON();
+    const nodes = (body?.nodes as unknown[] | undefined) ?? TEMPLATE_DETAIL.nodes;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, data: { ...TEMPLATE_DETAIL, nodes } }),
+    });
+  });
+  return { get: () => body };
+}
+
 async function forceTheme(page: Page, theme: 'dark' | 'light'): Promise<void> {
   await page.addInitScript((t) => {
     try {
@@ -204,6 +238,59 @@ for (const theme of ['dark', 'light'] as const) {
     await forceTheme(page, theme);
     await openTemplateEditor(page);
     await page.screenshot({ path: `${SHOTS}/01-template-editor-${theme}.png`, fullPage: true });
+  });
+
+  test(`${theme}: template editor edits Flow Rules & Events, Save PATCHes them (D4)`, async ({ page }) => {
+    await setupWorkflowStubs(page);
+    const patch = capturePatch(page);
+    await forceTheme(page, theme);
+    // This test asserts on i18n copy (tab labels / radio & toggle names), so
+    // pin the locale to English — i18n.ts defaults to 'zh' unless overridden
+    // (same idiom as e.g. e2e/projects-workspace.spec.ts).
+    await page.addInitScript(() => {
+      try {
+        localStorage.setItem('language', 'en');
+      } catch {
+        /* ignore */
+      }
+    });
+    await openTemplateEditor(page);
+
+    // First node (Script) is auto-selected on load — its stubbed defaults are
+    // completion_policy: 'owner' and events.notify_on_complete: false.
+    await expect(page.getByTestId('workflow-node-capsule').first()).toContainText('Script');
+
+    // Flow Rules tab: switch policy to "any editor".
+    await page.getByRole('button', { name: 'Flow Rules', exact: true }).click();
+    const ownerRadio = page.getByRole('radio', { name: 'Owner reviews & completes (default)' });
+    const anyEditorRadio = page.getByRole('radio', { name: 'Any editor can complete' });
+    await expect(ownerRadio).toBeChecked();
+    await anyEditorRadio.check();
+    await expect(anyEditorRadio).toBeChecked();
+    await page.screenshot({ path: `${SHOTS}/08-flow-rules-${theme}.png`, fullPage: true });
+
+    // Events tab: flip "Notify on completion" on.
+    await page.getByRole('button', { name: 'Events', exact: true }).click();
+    const notifyOnComplete = page.getByRole('switch', { name: 'Notify on completion' });
+    await expect(notifyOnComplete).toHaveAttribute('aria-checked', 'false');
+    await notifyOnComplete.click();
+    await expect(notifyOnComplete).toHaveAttribute('aria-checked', 'true');
+    await page.screenshot({ path: `${SHOTS}/09-events-${theme}.png`, fullPage: true });
+
+    // Save → PATCH payload must carry both changes for the Script node.
+    await page.getByTestId('workflow-save-template').click();
+    await expect.poll(() => patch.get()).not.toBeNull();
+    const body = patch.get() as { nodes: Array<Record<string, unknown>> };
+    const scriptNode = body.nodes.find((n) => n.name === 'Script') as
+      | { completion_policy: string; events: Record<string, boolean> }
+      | undefined;
+    expect(scriptNode).toBeDefined();
+    expect(scriptNode!.completion_policy).toBe('any_editor');
+    expect(scriptNode!.events).toMatchObject({
+      notify_on_arrival: true,
+      notify_on_complete: true,
+      suggest_agent_run: false,
+    });
   });
 
   test(`${theme}: workspace strip + current node card`, async ({ page }) => {
