@@ -276,13 +276,6 @@ class SuggestionAction(BaseModel):
     count: Optional[int] = None  # generate_missing_frames: number of empty shots
 
 
-class StageSuggestionResponse(BaseModel):
-    stage_slug: Optional[str] = None  # None when project has no current stage
-    kind: str  # see spec kind decision table; "" = render nothing
-    progress: Optional[StoryboardProgress] = None
-    action: Optional[SuggestionAction] = None
-
-
 class GenerateMissingResponse(BaseModel):
     dispatched_count: int
     task_ids: list[str]

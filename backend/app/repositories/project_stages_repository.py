@@ -1,18 +1,21 @@
 """Repository for ``project_stages`` / ``project_stage_history`` (Phase 5b).
 
-Global catalog of SOP lifecycle stages; per-project current-stage and
-append-only transition history.
+Global catalog of SOP lifecycle stages, now the workflow node-library
+dictionary; append-only stage-transition history (still readable, no new
+writes since ``set_current_stage``'s retirement).
 
 Uses the canonical SQLAlchemy-Core helpers in ``app.db.engine`` directly —
 this table is new, so there is no legacy REST path and no USE_ORM_* dual-track
 to maintain.
 
-``set_current_stage`` (the write side of the legacy SOP stage cursor) was
-retired in M2 PR-G (current_stage_id end-to-end retirement) — see
-``docs/superpowers/plans/2026-07-26-project-workflow-m2.md``. The read-side
-methods below (``get_current`` / ``stages_for_projects``) still join on
-``projects.current_stage_id`` and remain in place pending that column's
-removal; they are NOT part of this retirement pass (see task-G1-report.md).
+The legacy SOP stage cursor (``projects.current_stage_id``) was retired
+end-to-end in M2 PR-G/G1.5 (current_stage_id retirement) — see
+``docs/superpowers/plans/2026-07-26-project-workflow-m2.md`` and
+task-G1-report.md / task-G1.5-report.md. ``set_current_stage`` (write side,
+G1) and ``get_current`` / ``stages_for_projects`` (read side, G1.5) are gone;
+every project now takes the "no SOP stage" path everywhere a stage used to
+be read. ``project_stages`` itself (the catalog) is unaffected — it is now
+the workflow node-library dictionary.
 """
 
 from __future__ import annotations
@@ -32,14 +35,6 @@ _LIST_CATALOG_SQL = (
     f"SELECT {_CATALOG_COLUMNS} FROM public.project_stages ORDER BY sort_order ASC"
 )
 
-_GET_CURRENT_SQL = f"""
-    SELECT {', '.join('ps.' + c.strip() for c in _CATALOG_COLUMNS.split(','))},
-           p.current_stage_id
-    FROM public.projects p
-    JOIN public.project_stages ps ON ps.id = p.current_stage_id
-    WHERE p.id = :pid
-"""
-
 _GET_HISTORY_SQL = """
     SELECT psh.id, psh.project_id, psh.stage_id, psh.entered_at,
            psh.exited_at, psh.transitioned_by,
@@ -48,44 +43,6 @@ _GET_HISTORY_SQL = """
     JOIN public.project_stages ps ON ps.id = psh.stage_id
     WHERE psh.project_id = :pid
     ORDER BY psh.entered_at DESC
-"""
-
-# Stage auto-derivation (合一终稿: the stage chip is read-only and the manual
-# advance buttons are gone — the SOP stage follows real output instead).
-# Three EXISTS probes over the project's script tree; soft-deleted rows are
-# excluded the same way the episodes-progress aggregate does it.
-_DERIVE_ACTIVITY_SQL = """
-    SELECT
-      EXISTS(
-        SELECT 1 FROM public.script_scenes sc
-        JOIN public.script_projects sp
-          ON sc.script_id = sp.id AND sp.status != 'deleted'
-        WHERE sp.project_id = :pid
-      ) AS has_scenes,
-      EXISTS(
-        SELECT 1 FROM public.script_shots sh
-        JOIN public.script_scenes sc ON sh.scene_id = sc.id
-        JOIN public.script_projects sp
-          ON sc.script_id = sp.id AND sp.status != 'deleted'
-        WHERE sp.project_id = :pid
-      ) AS has_shots,
-      EXISTS(
-        SELECT 1 FROM public.script_shots sh
-        JOIN public.script_scenes sc ON sh.scene_id = sc.id
-        JOIN public.script_projects sp
-          ON sc.script_id = sp.id AND sp.status != 'deleted'
-        WHERE sp.project_id = :pid
-          AND (sh.image_url IS NOT NULL OR sh.video_url IS NOT NULL)
-      ) AS has_renders
-"""
-
-# Batch lookups for the project LIST page (Phase B B1) — one query for N
-# projects, mirroring get_project_file_counts' no-N+1 contract.
-_STAGES_FOR_PROJECTS_SQL = """
-    SELECT p.id AS project_id, ps.slug, ps.name, ps.sort_order
-    FROM public.projects p
-    JOIN public.project_stages ps ON ps.id = p.current_stage_id
-    WHERE p.id = ANY(:pids)
 """
 
 _LATEST_ACTIVITY_FOR_PROJECTS_SQL = """
@@ -128,7 +85,7 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
             out[key] = value.isoformat()
 
     # BIGINT ids → str (matching the Snowflake REST convention)
-    for key in ("id", "project_id", "stage_id", "current_stage_id"):
+    for key in ("id", "project_id", "stage_id"):
         value = out.get(key)
         if value is not None and not isinstance(value, str):
             out[key] = str(value)
@@ -200,53 +157,10 @@ class ProjectStagesRepository:
             )
             return [_serialize(dict(m)) for m in result.mappings().all()]
 
-    async def get_current(self, project_id: int) -> Optional[dict[str, Any]]:
-        """The project's current stage (joined from project_stages), or None."""
-        row = await _fetch_one_sql(_GET_CURRENT_SQL, {"pid": int(project_id)})
-        return _serialize(row) if row else None
-
-    async def derive_activity_flags(self, project_id: int) -> dict[str, bool]:
-        """Output probes for stage auto-derivation: does the project have any
-        scenes / shots / rendered shots (soft-deleted scripts excluded)."""
-        row = await _fetch_one_sql(_DERIVE_ACTIVITY_SQL, {"pid": int(project_id)})
-        return {
-            "has_scenes": bool(row and row["has_scenes"]),
-            "has_shots": bool(row and row["has_shots"]),
-            "has_renders": bool(row and row["has_renders"]),
-        }
-
     async def history(self, project_id: int) -> list[dict[str, Any]]:
         """Append-only transition history for the project, newest first."""
         rows = await _fetch_all_sql(_GET_HISTORY_SQL, {"pid": int(project_id)})
         return [_serialize(r) for r in rows]
-
-    async def stages_for_projects(
-        self, project_ids: list[Any]
-    ) -> dict[str, dict[str, Any]]:
-        """Current stage per project in ONE query (list-page batch, B1).
-
-        Returns ``{str(project_id): {slug, name, sort_order}}``; projects with
-        no ``current_stage_id`` are simply absent. Never raises — the list
-        page degrades to stage-less cards on failure.
-        """
-        if not project_ids:
-            return {}
-        try:
-            rows = await _fetch_all_sql(
-                _STAGES_FOR_PROJECTS_SQL,
-                {"pids": [int(p) for p in project_ids]},
-            )
-            return {
-                str(r["project_id"]): {
-                    "slug": r["slug"],
-                    "name": r["name"],
-                    "sort_order": r["sort_order"],
-                }
-                for r in rows
-            }
-        except Exception as e:  # noqa: BLE001 — enrichment must not sink the list
-            logger.error(f"[project_stages] batch stage lookup failed: {e}")
-            return {}
 
     async def latest_activity_for_projects(
         self, project_ids: list[Any]

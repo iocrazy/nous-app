@@ -1,40 +1,34 @@
+"""M2 PR-G1.5: build_stage_suggestion always degrades to "no stage" now — the
+legacy SOP stage cursor (``current_stage_id`` / ``ProjectStagesRepository.
+get_current``) is retired end-to-end, so there is nothing left to read a
+stage from. The rich kind-decision table (storyboard progress branches,
+generic navigate) still lives in the pure ``_suggestion_from`` helper — it is
+shared with the homepage batch (``get_project_suggestions``) and stays fully
+covered here by calling it directly instead of through the now-stage-less
+``build_stage_suggestion``.
+"""
+
 import pytest
 
-from app.services.library.projects_service import ProjectsService
-
-
-class _FakeStages:
-    def __init__(self, stage):
-        self._stage = stage
-
-    async def get_current(self, pid):
-        return self._stage
-
-
-class _FakeShots:
-    def __init__(self, progress):
-        self._p = progress
-
-    async def storyboard_progress_for_project(self, pid):
-        return self._p
-
-
-def _svc(stage, progress):
-    s = ProjectsService.__new__(ProjectsService)  # bypass __init__ deps
-    s._stages_repo_override = _FakeStages(stage)
-    s._shots_repo_override = _FakeShots(progress)
-    return s
+from app.services.library.projects_service import ProjectsService, _suggestion_from
 
 
 @pytest.mark.asyncio
-async def test_no_current_stage_renders_nothing():
-    out = await _svc(None, {}).build_stage_suggestion(1)
+async def test_build_stage_suggestion_always_renders_nothing():
+    """No more stage cursor to read — every project degrades to kind=""
+    regardless of project_id, exactly like a workflow project already did
+    before this retirement."""
+    svc = ProjectsService.__new__(ProjectsService)  # bypass __init__ deps
+    out = await svc.build_stage_suggestion(1)
+    assert out == {"stage_slug": None, "kind": "", "progress": None, "action": None}
+
+
+def test_suggestion_from_no_stage_renders_nothing():
+    out = _suggestion_from(None)
     assert out["kind"] == "" and out["stage_slug"] is None
 
 
-@pytest.mark.asyncio
-async def test_storyboard_with_empty_shots_is_generate():
-    stage = {"slug": "storyboard", "name": "Storyboarding"}
+def test_suggestion_from_storyboard_with_empty_shots_is_generate():
     progress = {
         "total": 12,
         "done": 9,
@@ -44,16 +38,14 @@ async def test_storyboard_with_empty_shots_is_generate():
         "script_count": 2,
         "scene_count": 5,
     }
-    out = await _svc(stage, progress).build_stage_suggestion(1)
+    out = _suggestion_from("storyboard", progress)
     assert out["kind"] == "storyboard_generate"
     assert out["action"]["type"] == "generate_missing_frames"
     assert out["action"]["count"] == 3
     assert out["progress"]["done"] == 9
 
 
-@pytest.mark.asyncio
-async def test_storyboard_no_script_navigates_to_scripts():
-    stage = {"slug": "storyboard", "name": "Storyboarding"}
+def test_suggestion_from_storyboard_no_script_navigates_to_scripts():
     progress = {
         "total": 0,
         "done": 0,
@@ -63,14 +55,12 @@ async def test_storyboard_no_script_navigates_to_scripts():
         "script_count": 0,
         "scene_count": 0,
     }
-    out = await _svc(stage, progress).build_stage_suggestion(1)
+    out = _suggestion_from("storyboard", progress)
     assert out["kind"] == "storyboard_no_script"
     assert out["action"]["type"] == "navigate" and out["action"]["tab"] == "scripts"
 
 
-@pytest.mark.asyncio
-async def test_storyboard_all_done_is_ready():
-    stage = {"slug": "storyboard", "name": "Storyboarding"}
+def test_suggestion_from_storyboard_all_done_is_ready():
     progress = {
         "total": 12,
         "done": 12,
@@ -80,14 +70,12 @@ async def test_storyboard_all_done_is_ready():
         "script_count": 1,
         "scene_count": 4,
     }
-    out = await _svc(stage, progress).build_stage_suggestion(1)
+    out = _suggestion_from("storyboard", progress)
     assert out["kind"] == "storyboard_ready"
     assert out["action"]["type"] == "navigate"
 
 
-@pytest.mark.asyncio
-async def test_storyboard_with_script_but_no_shots_navigates_to_breakdown():
-    stage = {"slug": "storyboard", "name": "Storyboarding"}
+def test_suggestion_from_storyboard_with_script_but_no_shots_navigates_to_breakdown():
     progress = {
         "total": 0,
         "done": 0,
@@ -97,15 +85,13 @@ async def test_storyboard_with_script_but_no_shots_navigates_to_breakdown():
         "script_count": 1,
         "scene_count": 2,
     }
-    out = await _svc(stage, progress).build_stage_suggestion(1)
+    out = _suggestion_from("storyboard", progress)
     assert out["kind"] == "storyboard_no_shots"
     assert out["action"]["type"] == "navigate" and out["action"]["tab"] == "scripts"
 
 
-@pytest.mark.asyncio
-async def test_non_storyboard_stage_is_nav():
-    stage = {"slug": "planning", "name": "Planning"}
-    out = await _svc(stage, {}).build_stage_suggestion(1)
+def test_suggestion_from_non_storyboard_stage_is_nav():
+    out = _suggestion_from("planning", {})
     assert out["kind"] == "planning_nav"
     assert out["action"]["type"] == "navigate"
     assert out["progress"] is None

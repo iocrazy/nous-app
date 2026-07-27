@@ -122,15 +122,12 @@ async def test_list_catalog_serializes_rows(engine_calls: dict) -> None:
     assert result[0]["tools_recommended"] == ["files"]
 
 
-@pytest.mark.asyncio
-async def test_get_current_returns_none_when_no_stage(engine_calls: dict) -> None:
-    repo = ProjectStagesRepository()
-    result = await repo.get_current(999)
-    assert result is None
-    call = engine_calls["executed"][0]
-    assert call["params"] == {"pid": 999}
-    # Must JOIN projects and project_stages
-    assert "project_stages" in str(call["stmt"])
+# ============================================================
+# get_current / stages_for_projects were retired in M2 PR-G1.5
+# (current_stage_id read-side retirement, ahead of the column drop) — the
+# tests that used to live here are gone along with the methods. See
+# task-G1-report.md / task-G1.5-report.md.
+# ============================================================
 
 
 @pytest.mark.asyncio
@@ -193,13 +190,9 @@ class FakeStagePub:
                 "tools_recommended": ["files"],
             }
         ]
-        self.current: dict | None = None
 
     async def list_catalog(self):
         return self.catalog
-
-    async def get_current(self, project_id: int):
-        return self.current
 
     async def history(self, project_id: int):
         return []

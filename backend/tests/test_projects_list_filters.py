@@ -419,49 +419,34 @@ async def test_create_project_none_team_id_stays_none():
     assert params.get("team_id") is None
 
 
-# ── service: B1 card enrichment (stage / members / activity) ─────────────
+# ── service: B1 card enrichment (members / activity / workflow badge) ─────
+#
+# M2 PR-G1.5: the legacy SOP stage cursor is retired end-to-end —
+# ``ProjectStagesRepository.stages_for_projects``/``list_catalog`` are gone
+# from the card-enrichment gather, so ``current_stage`` is now always
+# ``None`` for every project (spec §8: No-workflow projects have no stage
+# concept). members_preview / latest_activity / workflow_badge are
+# unaffected by this retirement.
 
 
-def _stages_repo_mock(stage_map=None, activity=None, file_activity=None, catalog=None):
+def _stages_repo_mock(activity=None, file_activity=None):
     repo = MagicMock()
-    repo.stages_for_projects = AsyncMock(return_value=stage_map or {})
     repo.latest_activity_for_projects = AsyncMock(return_value=activity or {})
     repo.latest_file_activity_for_projects = AsyncMock(return_value=file_activity or {})
-    repo.list_catalog = AsyncMock(
-        return_value=(
-            catalog
-            if catalog is not None
-            else [
-                {"slug": "planning", "name": "Planning", "sort_order": 10},
-                {"slug": "script", "name": "Script", "sort_order": 20},
-                {"slug": "storyboard", "name": "Storyboard", "sort_order": 30},
-                {"slug": "generation", "name": "Generation", "sort_order": 40},
-                {"slug": "review", "name": "Review", "sort_order": 50},
-                {"slug": "delivery", "name": "Delivery", "sort_order": 60},
-            ]
-        )
-    )
     return repo
 
 
 @pytest.mark.asyncio
 async def test_list_cards_carry_stage_members_activity():
-    """B1: each listed project carries current_stage {slug,name,index,total},
-    members_preview and latest_activity — assembled from FOUR batch lookups
-    (no per-project queries). latest_activity is merged (Task 12) from the
+    """B1: each listed project carries current_stage (always None now),
+    members_preview and latest_activity — assembled from batch lookups (no
+    per-project queries). latest_activity is merged (Task 12) from the
     stage-transition and file-activity batches via ``_merge_activity``."""
     from app.services.library.projects_service import ProjectsService
 
     svc = ProjectsService()
     projects = [{"id": _PROJECT_ID_1, "name": "A"}, {"id": _PROJECT_ID_2, "name": "B"}]
     stages_repo = _stages_repo_mock(
-        stage_map={
-            str(_PROJECT_ID_1): {
-                "slug": "storyboard",
-                "name": "Storyboard",
-                "sort_order": 30,
-            }
-        },
         activity={
             str(_PROJECT_ID_1): {
                 "stage_name": "Storyboard",
@@ -498,13 +483,8 @@ async def test_list_cards_carry_stage_members_activity():
 
     a = next(p for p in out if p["id"] == _PROJECT_ID_1)
     b = next(p for p in out if p["id"] == _PROJECT_ID_2)
-    # Stage index derives from catalog sort_order ranking: 30 → 3 of 6.
-    assert a["current_stage"] == {
-        "slug": "storyboard",
-        "name": "Storyboard",
-        "index": 3,
-        "total": 6,
-    }
+    # No more SOP stage cursor — current_stage is always None now.
+    assert a["current_stage"] is None
     assert a["members_preview"]["count"] == 4
     # No file activity mocked → merged activity falls back to the stage event.
     assert a["latest_activity"]["kind"] == "stage"
@@ -525,10 +505,10 @@ async def test_list_survives_enrichment_failure():
     svc = ProjectsService()
     projects = [{"id": _PROJECT_ID_1, "name": "A"}]
     stages_repo = MagicMock()
-    stages_repo.stages_for_projects = AsyncMock(side_effect=RuntimeError("db down"))
-    stages_repo.latest_activity_for_projects = AsyncMock(return_value={})
+    stages_repo.latest_activity_for_projects = AsyncMock(
+        side_effect=RuntimeError("db down")
+    )
     stages_repo.latest_file_activity_for_projects = AsyncMock(return_value={})
-    stages_repo.list_catalog = AsyncMock(return_value=[])
     with (
         patch.object(
             svc.repo, "get_user_projects", new=AsyncMock(return_value=projects)

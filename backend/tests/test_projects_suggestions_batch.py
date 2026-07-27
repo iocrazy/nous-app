@@ -1,14 +1,14 @@
 """Unit tests for PR-8 Task A — GET /projects/suggestions batch queue
 data source (final spec G7).
 
-The batch service method (``ProjectsService.get_project_suggestions``)
-reuses the exact scope call the list endpoint uses (``repo.get_user_projects``,
-non-archived) and the existing 5-way card enrichment (``_get_card_enrichment``)
-for stage/activity/stalled — it does NOT reinvent permissions or re-derive
-stage state. Only storyboard-stage projects need an extra per-project
-progress query, fanned out via ``asyncio.gather`` (capped at 8 concurrent),
-each best-effort so a single failing project degrades to a plain navigate
-suggestion instead of 500ing the whole batch.
+M2 PR-G1.5: the legacy SOP stage cursor is retired end-to-end, so every
+project now degrades to the existing "no stage" suggestion (kind="" — the
+frontend renders nothing). There is no more storyboard-stage branch, no
+per-project shot-progress fan-out, and no dependency on
+``ProjectStagesRepository.stages_for_projects``/``list_catalog`` (both
+retired). ``latest_activity``/``stalled`` still come from the existing
+``_get_card_enrichment`` batch — workflow badge / file activity are
+unaffected by this retirement.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -18,26 +18,21 @@ import pytest
 
 from app.services.library.projects_service import ProjectsService
 
-_PID_STORYBOARD = 9101
-_PID_PLANNING = 9102
-_PID_REVIEW_STALLED = 9103
-
-_CATALOG = [
-    {"slug": "planning", "name": "Planning", "sort_order": 10},
-    {"slug": "script", "name": "Script", "sort_order": 20},
-    {"slug": "storyboard", "name": "Storyboard", "sort_order": 30},
-    {"slug": "generation", "name": "Generation", "sort_order": 40},
-    {"slug": "review", "name": "Review", "sort_order": 50},
-    {"slug": "delivery", "name": "Delivery", "sort_order": 60},
-]
+_PID_A = 9101
+_PID_B = 9102
+_PID_STALLED = 9103
 
 
-def _stages_repo_mock(stage_map, activity=None):
+def _stages_repo_mock(activity=None):
     repo = MagicMock()
-    repo.stages_for_projects = AsyncMock(return_value=stage_map)
     repo.latest_activity_for_projects = AsyncMock(return_value=activity or {})
     repo.latest_file_activity_for_projects = AsyncMock(return_value={})
-    repo.list_catalog = AsyncMock(return_value=_CATALOG)
+    return repo
+
+
+def _nodes_repo_mock(badges=None):
+    repo = MagicMock()
+    repo.workflow_badges_for_projects = AsyncMock(return_value=badges or {})
     return repo
 
 
@@ -48,145 +43,80 @@ def _svc():
     return svc
 
 
+def _patched(activity=None, badges=None):
+    return (
+        patch(
+            "app.repositories.project_stages_repository.get_project_stages_repository",
+            return_value=_stages_repo_mock(activity=activity),
+        ),
+        patch(
+            "app.repositories.project_stage_nodes_repository."
+            "get_project_stage_nodes_repository",
+            return_value=_nodes_repo_mock(badges=badges),
+        ),
+    )
+
+
 @pytest.mark.asyncio
 async def test_empty_project_list_returns_empty_items():
     svc = _svc()
     svc.repo.get_user_projects = AsyncMock(return_value=[])
-    stages_repo = _stages_repo_mock({})
-    with patch(
-        "app.repositories.project_stages_repository.get_project_stages_repository",
-        return_value=stages_repo,
-    ):
+    p1, p2 = _patched()
+    with p1, p2:
         items = await svc.get_project_suggestions("user-1")
     assert items == []
 
 
 @pytest.mark.asyncio
-async def test_batch_covers_storyboard_generate_planning_and_stalled_review():
+async def test_every_project_degrades_to_no_stage_suggestion():
+    """No more current_stage to derive a suggestion kind from — every row is
+    kind="" regardless of the project's legacy stage-history activity."""
     svc = _svc()
     now = datetime.now(timezone.utc)
     recent = (now - timedelta(hours=1)).isoformat()
-    ancient = (now - timedelta(days=30)).isoformat()  # older than review's 3-day SLA
+    ancient = (now - timedelta(days=30)).isoformat()  # past the 7-day default SLA
 
     projects = [
-        {"id": _PID_STORYBOARD, "name": "Storyboard Project"},
-        {"id": _PID_PLANNING, "name": "Planning Project"},
-        {"id": _PID_REVIEW_STALLED, "name": "Stalled Review Project"},
+        {"id": _PID_A, "name": "Project A"},
+        {"id": _PID_B, "name": "Project B"},
+        {"id": _PID_STALLED, "name": "Stalled Project"},
     ]
     svc.repo.get_user_projects = AsyncMock(return_value=projects)
 
-    stages_repo = _stages_repo_mock(
-        stage_map={
-            str(_PID_STORYBOARD): {
-                "slug": "storyboard",
-                "name": "Storyboard",
-                "sort_order": 30,
-            },
-            str(_PID_PLANNING): {
-                "slug": "planning",
-                "name": "Planning",
-                "sort_order": 10,
-            },
-            str(_PID_REVIEW_STALLED): {
-                "slug": "review",
-                "name": "Review",
-                "sort_order": 50,
-            },
+    activity = {
+        str(_PID_A): {
+            "stage_name": "Storyboard",
+            "actor": "heygo",
+            "entered_at": recent,
         },
-        activity={
-            str(_PID_STORYBOARD): {
-                "stage_name": "Storyboard",
-                "actor": "heygo",
-                "entered_at": recent,
-            },
-            str(_PID_PLANNING): {
-                "stage_name": "Planning",
-                "actor": "heygo",
-                "entered_at": recent,
-            },
-            str(_PID_REVIEW_STALLED): {
-                "stage_name": "Review",
-                "actor": "heygo",
-                "entered_at": ancient,
-            },
+        str(_PID_B): {
+            "stage_name": "Planning",
+            "actor": "heygo",
+            "entered_at": recent,
         },
-    )
+        str(_PID_STALLED): {
+            "stage_name": "Review",
+            "actor": "heygo",
+            "entered_at": ancient,
+        },
+    }
 
-    shots_repo = AsyncMock()
-    shots_repo.storyboard_progress_for_project = AsyncMock(
-        return_value={
-            "total": 12,
-            "done": 9,
-            "empty": 3,
-            "generating": 0,
-            "failed": 0,
-            "script_count": 2,
-            "scene_count": 5,
-        }
-    )
-    svc._shots_repo_override = shots_repo
-
-    with patch(
-        "app.repositories.project_stages_repository.get_project_stages_repository",
-        return_value=stages_repo,
-    ):
+    p1, p2 = _patched(activity=activity)
+    with p1, p2:
         items = await svc.get_project_suggestions("user-1")
 
     by_id = {item["project_id"]: item for item in items}
     assert len(items) == 3
 
-    sb = by_id[str(_PID_STORYBOARD)]
-    assert sb["kind"] == "storyboard_generate"
-    assert sb["action"]["type"] == "generate_missing_frames"
-    assert sb["action"]["count"] == 3
-    assert sb["stalled"] is False
+    for item in items:
+        assert item["kind"] == ""
+        assert item["stage_slug"] is None
+        assert item["action"] is None
+        assert item["progress"] is None
 
-    pl = by_id[str(_PID_PLANNING)]
-    assert pl["kind"] == "planning_nav"
-    assert pl["action"]["type"] == "navigate" and pl["action"]["tab"] == "scripts"
-    assert pl["stalled"] is False
-
-    rv = by_id[str(_PID_REVIEW_STALLED)]
-    assert rv["kind"] == "review_nav"
-    assert rv["action"]["type"] == "navigate" and rv["action"]["tab"] == "files"
-    assert rv["stalled"] is True
-
-    # Progress is only fetched for the storyboard-stage project, never for
-    # planning/review (no batch N+1 across non-storyboard stages).
-    shots_repo.storyboard_progress_for_project.assert_awaited_once_with(
-        str(_PID_STORYBOARD)
-    )
-
-
-@pytest.mark.asyncio
-async def test_storyboard_progress_failure_degrades_to_navigate_not_500():
-    svc = _svc()
-    projects = [{"id": _PID_STORYBOARD, "name": "Storyboard Project"}]
-    svc.repo.get_user_projects = AsyncMock(return_value=projects)
-
-    stages_repo = _stages_repo_mock(
-        stage_map={
-            str(_PID_STORYBOARD): {
-                "slug": "storyboard",
-                "name": "Storyboard",
-                "sort_order": 30,
-            }
-        }
-    )
-
-    shots_repo = AsyncMock()
-    shots_repo.storyboard_progress_for_project = AsyncMock(
-        side_effect=RuntimeError("db down")
-    )
-    svc._shots_repo_override = shots_repo
-
-    with patch(
-        "app.repositories.project_stages_repository.get_project_stages_repository",
-        return_value=stages_repo,
-    ):
-        items = await svc.get_project_suggestions("user-1")  # must not raise
-
-    assert len(items) == 1
-    assert items[0]["kind"] == "storyboard_nav"
-    assert items[0]["action"]["type"] == "navigate"
-    assert items[0]["progress"] is None
+    # latest_activity / stalled still come through the card enrichment —
+    # there is no more per-stage SLA (no stage_slug to look up), so every
+    # row falls back to the default 7-day dwell threshold.
+    assert by_id[str(_PID_A)]["stalled"] is False
+    assert by_id[str(_PID_B)]["stalled"] is False
+    assert by_id[str(_PID_STALLED)]["stalled"] is True

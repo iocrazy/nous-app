@@ -53,7 +53,6 @@ from app.schemas.projects import (
     RecentItemsResponse,
     RenameFolderRequest,
     ReviewStatusUpdate,
-    StageSuggestionResponse,
     StyleProfileUpdate,
     UpdateMemberRoleRequest,
 )
@@ -327,18 +326,6 @@ async def get_stage_history(
     except Exception as e:
         logger.error(f"Failed to get stage history for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get stage history")
-
-
-@router.get("/{project_id}/stage-suggestion", response_model=StageSuggestionResponse)
-async def get_stage_suggestion(
-    project_id: str,
-    auth: AuthDep,
-    _guard: None = Depends(verify_project_read_access),
-) -> StageSuggestionResponse:
-    """Typed 'one next step' for the project's current SOP stage (Phase B B3)."""
-    svc = ProjectsService()
-    data = await svc.build_stage_suggestion(project_id)
-    return StageSuggestionResponse(**data)
 
 
 @router.post(

@@ -120,65 +120,18 @@ def _merge_activity(stage_act, file_act, *, stage_slug, now=None):
     return None
 
 
-def _auto_stage_slug(flags: dict) -> str:
-    """Pure output→stage decision table (合一终稿: stage follows real output).
-
-    Highest milestone wins: rendered shots → generation, any shots →
-    storyboard, any scenes → script, nothing yet → planning. review/delivery
-    are deliberately NOT derivable — they stay human decisions via the PUT
-    endpoint (the read path only ever advances up to generation).
+async def resolve_current_stage(
+    project_id: int, user_id: str  # noqa: ARG001 — kept for call-site compat
+) -> Optional[dict]:
+    """Retired (M2 PR-G1.5): the legacy SOP stage cursor (``current_stage_id``)
+    and its forward-only output-derivation were removed end-to-end —
+    ``ProjectStagesRepository.get_current`` / ``derive_activity_flags`` /
+    ``set_current_stage`` no longer exist. Every project, workflow or not,
+    now has no SOP stage to resolve; kept as a thin stub (rather than deleted
+    outright) so any lingering caller degrades to ``None`` instead of
+    crashing on the now-removed repo methods.
     """
-    if flags.get("has_renders"):
-        return "generation"
-    if flags.get("has_shots"):
-        return "storyboard"
-    if flags.get("has_scenes"):
-        return "script"
-    return "planning"
-
-
-async def resolve_current_stage(project_id: int, user_id: str) -> Optional[dict]:
-    """Current stage with forward-only auto-derivation.
-
-    Reads the manual stage, probes the project's real output, and when the
-    derived stage is AHEAD of the stored one, persists the transition (same
-    ``set_current_stage`` path as the manual PUT — history rows included) so
-    list pages / suggestions stay consistent. Derivation failures degrade to
-    the stored stage; this never raises past the stored-stage read.
-    """
-    from app.repositories.project_stages_repository import (
-        get_project_stages_repository,
-    )
-
-    repo = get_project_stages_repository()
-    current = await repo.get_current(int(project_id))
-
-    # W2-1: a workflow project's stage is a projection of its node chain, not a
-    # forward-derivation of the SOP output probes. Skip the auto-promote and its
-    # persistent side effects (history rows + current_stage_id writes) entirely;
-    # only the read-only stored stage remains for display.
-    from app.services.workflow.instantiation import project_has_workflow_nodes
-
-    if await project_has_workflow_nodes(project_id):
-        return current
-
-    try:
-        flags = await repo.derive_activity_flags(int(project_id))
-        auto_slug = _auto_stage_slug(flags)
-        catalog = await repo.list_catalog()
-        auto = next((s for s in catalog if s["slug"] == auto_slug), None)
-        if auto is None:
-            return current
-        current_sort = current["sort_order"] if current else -1
-        if auto["sort_order"] > current_sort:
-            promoted = await repo.set_current_stage(
-                int(project_id), auto["id"], user_id
-            )
-            return promoted or await repo.get_current(int(project_id))
-        return current
-    except Exception as exc:
-        logger.warning(f"[Projects] stage auto-derive failed for {project_id}: {exc}")
-        return current
+    return None
 
 
 def _suggestion_from(stage_slug: str | None, progress: dict | None = None) -> dict:
@@ -259,11 +212,6 @@ def _suggestion_from(stage_slug: str | None, progress: dict | None = None) -> di
     }
 
 
-# Batch suggestions (Task A): cap on concurrent per-project storyboard
-# progress lookups so a large queue can't fan out unbounded DB queries.
-_SUGGESTIONS_PROGRESS_CONCURRENCY = 8
-
-
 class ProjectsService:
     """MediaTrack projects business logic"""
 
@@ -320,20 +268,20 @@ class ProjectsService:
         ]
 
     async def _get_card_enrichment(self, project_ids: list) -> dict:
-        """Stage / members / activity card data for the list page (B1).
+        """Members / activity / workflow-badge card data for the list page (B1).
 
-        Three batch queries (stage join, latest history, member preview) run
-        concurrently — same no-N+1 contract as file counts. Each is
-        best-effort (returns {} on failure), so a broken enrichment degrades
-        the cards, never the list. Shapes:
+        Batch queries run concurrently — same no-N+1 contract as file counts.
+        Each is best-effort (returns {} on failure), so a broken enrichment
+        degrades the cards, never the list. Shapes:
 
-          current_stage:   {slug, name, index, total} | None
-            index/total derive from the stage catalog's sort_order ranking —
-            the card ring renders index-of-total without knowing sort_order.
+          current_stage:   always ``None`` (M2 PR-G1.5: the legacy SOP stage
+            cursor is retired end-to-end — no project has a stage badge
+            anymore; the workflow Stage Board owns per-node status now).
           members_preview: {count, members: [{user_id, username}, ...]} | None
           latest_activity: {kind, actor, at, stalled, label?} | None
             merged from the latest stage transition and the latest file add
             (whichever is newer) via ``_merge_activity`` — see Task 12.
+          workflow_badge: per-node status badge for workflow projects | None
         """
         from app.repositories.project_stage_nodes_repository import (
             get_project_stage_nodes_repository,
@@ -346,49 +294,29 @@ class ProjectsService:
         nodes_repo = get_project_stage_nodes_repository()
         try:
             (
-                stage_map,
                 activity,
                 file_activity,
                 members,
-                catalog,
                 workflow_badges,
             ) = await asyncio.gather(
-                stages_repo.stages_for_projects(project_ids),
                 stages_repo.latest_activity_for_projects(project_ids),
                 stages_repo.latest_file_activity_for_projects(project_ids),
                 self.repo.get_project_members_preview(project_ids),
-                stages_repo.list_catalog(),
                 nodes_repo.workflow_badges_for_projects(project_ids),
             )
         except Exception as e:  # noqa: BLE001 — enrichment must not sink the list
             logger.error(f"[projects] card enrichment failed: {e}")
             return {}
 
-        order = [s["sort_order"] for s in catalog]
-        total = len(order)
-
         out: dict = {}
         for pid in [str(p) for p in project_ids]:
-            stage = stage_map.get(pid)
-            current_stage = None
-            if stage is not None:
-                try:
-                    index = order.index(stage["sort_order"]) + 1
-                except ValueError:
-                    index = 0
-                current_stage = {
-                    "slug": stage["slug"],
-                    "name": stage["name"],
-                    "index": index,
-                    "total": total,
-                }
             out[pid] = {
-                "current_stage": current_stage,
+                "current_stage": None,
                 "members_preview": members.get(pid),
                 "latest_activity": _merge_activity(
                     activity.get(pid),
                     file_activity.get(pid),
-                    stage_slug=(stage or {}).get("slug"),
+                    stage_slug=None,
                 ),
                 "workflow_badge": workflow_badges.get(pid),
             }
@@ -1407,24 +1335,17 @@ class ProjectsService:
         return get_script_shot_repository()
 
     async def build_stage_suggestion(self, project_id) -> dict:
-        """Typed 'what's the one next step' for the project's current stage.
+        """Typed 'what's the one next step' for the project — always "no
+        stage" now (M2 PR-G1.5).
 
-        Storyboard stage is data-aware + one-click (generate_missing_frames);
-        every other stage is data-aware + navigation. Unknown / no stage →
-        kind="" so the frontend renders nothing. Decision table lives in the
-        module-level ``_suggestion_from`` helper, shared with the batch
-        ``get_project_suggestions`` (Task A).
+        The legacy SOP stage cursor (``current_stage_id`` /
+        ``ProjectStagesRepository.get_current``) is retired end-to-end, so
+        there is no stage left to suggest from; every project takes the
+        existing degrade path (kind="" → the frontend renders nothing).
+        Decision table lives in the module-level ``_suggestion_from`` helper,
+        shared with the batch ``get_project_suggestions`` (Task A).
         """
-        stage = await self._stages_repo().get_current(project_id)
-        slug = (stage or {}).get("slug")
-        if not slug:
-            return _suggestion_from(None)
-
-        if slug == _STORYBOARD_STAGE:
-            p = await self._shots_repo().storyboard_progress_for_project(project_id)
-            return _suggestion_from(slug, p)
-
-        return _suggestion_from(slug)
+        return _suggestion_from(None)
 
     # ------------------------------------------------------------------ #
     # Batch stage suggestions (B3 / G7 — homepage queue data source)
@@ -1435,14 +1356,16 @@ class ProjectsService:
     ) -> list[dict]:
         """Batch 'one next step' queue rows for the homepage (PR-8 Task A).
 
+        M2 PR-G1.5: the legacy SOP stage cursor is retired end-to-end, so
+        every project now degrades to the existing "no stage" suggestion
+        (kind="" — the frontend renders nothing); there is no more
+        storyboard-stage branch to fan out shot-progress queries for.
+
         Scope is the SAME visible-projects call the list endpoint uses
         (``repo.get_user_projects``, non-archived) — this never reinvents
-        permissions. Stage / activity / stalled come from the existing
-        5-way ``_get_card_enrichment`` batch; only storyboard-stage
-        projects need one more query (per-project shot progress), fanned
-        out with a concurrency cap so a big queue can't unbounded-fan-out
-        DB queries. Each progress fetch is best-effort: a failure degrades
-        that single row to a plain navigate suggestion, never a 500.
+        permissions. ``latest_activity``/``stalled`` still come from the
+        existing ``_get_card_enrichment`` batch (workflow badge / file
+        activity are unaffected by this retirement).
         """
         projects = await self.repo.get_user_projects(
             user_id, team_id=team_id, archived=False
@@ -1452,46 +1375,12 @@ class ProjectsService:
 
         ids = [p["id"] for p in projects]
         enrichment = await self._get_card_enrichment(ids)
-
-        def _slug_for(pid: str) -> str | None:
-            card = enrichment.get(pid, _EMPTY_ENRICHMENT)
-            return (card.get("current_stage") or {}).get("slug")
-
-        storyboard_pids = [
-            str(pid) for pid in ids if _slug_for(str(pid)) == _STORYBOARD_STAGE
-        ]
-
-        progress_map: dict[str, dict | None] = {}
-        if storyboard_pids:
-            sem = asyncio.Semaphore(_SUGGESTIONS_PROGRESS_CONCURRENCY)
-
-            async def _fetch_progress(pid: str):
-                async with sem:
-                    try:
-                        progress = (
-                            await self._shots_repo().storyboard_progress_for_project(
-                                pid
-                            )
-                        )
-                        return pid, progress
-                    except Exception as exc:  # noqa: BLE001 — degrade this row only
-                        logger.error(
-                            f"[projects] suggestions progress for {pid} failed: {exc}"
-                        )
-                        return pid, None
-
-            results = await asyncio.gather(
-                *(_fetch_progress(pid) for pid in storyboard_pids)
-            )
-            progress_map = dict(results)
+        suggestion = _suggestion_from(None)
 
         items: list[dict] = []
         for p in projects:
             pid = str(p["id"])
             card = enrichment.get(pid, _EMPTY_ENRICHMENT)
-            slug = (card.get("current_stage") or {}).get("slug")
-            progress = progress_map.get(pid) if slug == _STORYBOARD_STAGE else None
-            suggestion = _suggestion_from(slug, progress)
             latest_activity = card.get("latest_activity")
             items.append(
                 {
