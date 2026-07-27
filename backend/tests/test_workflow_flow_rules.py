@@ -38,6 +38,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from app.models import (
     ProjectStageNodeMembers,
@@ -52,6 +53,7 @@ from app.repositories.workflow_templates_repository import (
     WorkflowTemplatesRepository,
 )
 from app.schemas.issue import IssueStatus, IssueStatusTransition
+from app.schemas.workflow import TemplateNodeIn, WorkflowNodeEvents
 
 issues_router = importlib.import_module("app.api.issues_router")
 
@@ -590,4 +592,61 @@ async def test_get_project_workflow_response_carries_completion_policy_and_event
         "notify_on_arrival": False,
         "notify_on_complete": True,
         "suggest_agent_run": True,
+        # mig 389 (M3 PR-H1): new hook keys ride the same events blob and
+        # default in when the fixture's DB row predates them (proves the
+        # NodeOut path carries them automatically — no code change needed
+        # per-field, per the brief's self-review note).
+        "prepare_agent_run": False,
+        "on_complete_workflow": None,
     }
+
+
+# ── mig 389: WorkflowNodeEvents hook keys (prepare_agent_run / on_complete_workflow) ──
+
+
+def test_prepare_agent_run_round_trips_through_template_node_in_and_node_to_dict():
+    """New hook toggle: must validate through TemplateNodeIn, survive
+    ``events.model_dump()``, and reach ``_node_to_dict``'s payload (the same
+    seam that carries every other events key into the repo write path)."""
+    workflow_templates_router = importlib.import_module(
+        "app.api.workflow_templates_router"
+    )
+
+    node = TemplateNodeIn(
+        name="Script",
+        sort_order=1,
+        events={"prepare_agent_run": True},
+    )
+
+    assert node.events.prepare_agent_run is True
+    dumped = node.events.model_dump()
+    assert dumped["prepare_agent_run"] is True
+
+    payload = workflow_templates_router._node_to_dict(node)
+    assert payload["events"]["prepare_agent_run"] is True
+
+
+def test_on_complete_workflow_none_is_accepted():
+    """The default / explicit None must pass validation untouched."""
+    events = WorkflowNodeEvents(on_complete_workflow=None)
+    assert events.on_complete_workflow is None
+
+    node = TemplateNodeIn(name="Script", sort_order=1)
+    assert node.events.on_complete_workflow is None
+
+
+def test_on_complete_workflow_non_null_rejected_as_not_implemented():
+    """M3 does not implement on_complete_workflow yet -- any non-None value
+    must be rejected with a clear 'not implemented' message (surfaces as a
+    FastAPI 422 through TemplateNodeIn)."""
+    with pytest.raises(ValidationError) as exc:
+        WorkflowNodeEvents(on_complete_workflow="some_workflow_slug")
+
+    assert "not implemented in M3" in str(exc.value)
+
+    with pytest.raises(ValidationError):
+        TemplateNodeIn(
+            name="Script",
+            sort_order=1,
+            events={"on_complete_workflow": "x"},
+        )

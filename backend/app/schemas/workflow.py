@@ -12,7 +12,7 @@ from datetime import date
 from typing import Any, List, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # Soft guardrails (spec §3): keep a template from ballooning and a team from
 # hoarding templates. Both surface as 422.
@@ -46,6 +46,20 @@ class WorkflowNodeEvents(BaseModel):
     notify_on_arrival: bool = True
     notify_on_complete: bool = False
     suggest_agent_run: bool = False
+    # mig 389 (M3 PR-H1): arrival hook that pre-fills an agent run without
+    # auto-launching it (H2/H3 territory — this schema only carries the flag).
+    prepare_agent_run: bool = False
+    # mig 389 (M3 PR-H1): reserved for a future "chain into another workflow on
+    # completion" hook. Not implemented yet -- any non-None value is rejected
+    # rather than silently accepted and later ignored.
+    on_complete_workflow: Optional[str] = None
+
+    @field_validator("on_complete_workflow")
+    @classmethod
+    def _on_complete_workflow_not_implemented(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            raise ValueError("on_complete_workflow is not implemented in M3")
+        return v
 
 
 class TemplateNodeIn(BaseModel):

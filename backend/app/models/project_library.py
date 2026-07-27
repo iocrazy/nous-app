@@ -417,6 +417,12 @@ class ProjectStageNodes(Base):
             '"suggest_agent_run": false}\'::jsonb'
         ),
     )
+    # Free-form business decoration for a live node instance (mig 389, M3
+    # PR-H1). Nothing reads this yet -- form_schema / dependency data (H2/H3
+    # territory) will land here. Instance-only: no template-side counterpart.
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )
