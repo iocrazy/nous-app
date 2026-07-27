@@ -73,10 +73,10 @@ class ThumbnailService:
         Returns:
             Relative path to the saved thumbnail, or None on failure/skip.
         """
-        from app.services.library.media_storage import materialize, resolve_media_source
+        from app.services.library.derived_paths import DerivedArtifactPaths
+        from app.services.library.media_storage import materialize
 
         try:
-            loc = resolve_media_source(file_path)
             async with materialize(file_path) as local_path:
                 if not local_path.exists():
                     logger.warning(
@@ -84,22 +84,9 @@ class ThumbnailService:
                     )
                     return None
 
-                # Derived artifacts (thumbnail/sprite) always stay on the
-                # filesystem (storage unification: only originals go to
-                # object storage). A legacy fs source saves next to itself
-                # as before; an sb:// source has no "next to it" directory
-                # under DOWNLOAD_PATH, so it lands in a resource_id-keyed
-                # derived tree instead.
-                if loc.is_object_store:
-                    out_dir = (
-                        Path(settings.DOWNLOAD_PATH)
-                        / "derived"
-                        / "thumbnails"
-                        / str(resource_id)
-                    )
-                    out_dir.mkdir(parents=True, exist_ok=True)
-                else:
-                    out_dir = local_path.parent
+                out_dir = DerivedArtifactPaths().thumbnail_dir(
+                    file_path, str(resource_id), local_path
+                )
 
                 # Target: save thumbnail.webp alongside the source (or in the
                 # derived dir for sb:// sources).
