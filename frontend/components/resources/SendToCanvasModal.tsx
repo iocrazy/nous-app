@@ -64,7 +64,7 @@ export function SendToCanvasModal({ resource, positive, negative, onClose }: Sen
     setSelectedProject(project);
     setLoadingCanvases(true);
     listCanvases(project.id)
-      .then((rows) => setCanvases(rows))
+      .then((rows) => setCanvases(rows.filter((c) => c.kind !== 'classic')))
       .catch((err) => console.error('[SendToCanvasModal] listCanvases failed:', err))
       .finally(() => setLoadingCanvases(false));
   };

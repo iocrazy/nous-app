@@ -46,13 +46,13 @@ beforeEach(() => {
 });
 
 describe('fetchPromptAssets', () => {
-  it('queries resources with the prompt-or filter, excludes trashed, default order/limit', async () => {
+  it('queries resources with all four prompt columns in the or filter, over-fetches, excludes trashed, default order', async () => {
     await fetchPromptAssets();
 
     expect(calls[0]).toEqual({ method: 'from', args: ['resources'] });
 
     const orCall = calls.find((c) => c.method === 'or');
-    expect(orCall?.args).toEqual(['gen_prompt.not.is.null,gen_prompt_zh.not.is.null']);
+    expect(orCall?.args).toEqual(['gen_prompt.not.is.null,gen_prompt_zh.not.is.null,gen_prompt_negative.not.is.null,gen_prompt_negative_zh.not.is.null']);
 
     const eqCalls = calls.filter((c) => c.method === 'eq');
     expect(eqCalls).toContainEqual({ method: 'eq', args: ['is_trashed', false] });
@@ -61,7 +61,7 @@ describe('fetchPromptAssets', () => {
     expect(orderCall?.args).toEqual(['updated_at', { ascending: false }]);
 
     const limitCall = calls.find((c) => c.method === 'limit');
-    expect(limitCall?.args).toEqual([50]);
+    expect(limitCall?.args).toEqual([80]); // Default 50 + 30 over-fetch
 
     // No tag join / filter and no filename search when neither opt is given.
     const selectCall = calls.find((c) => c.method === 'select');
@@ -87,11 +87,11 @@ describe('fetchPromptAssets', () => {
     expect(eqCalls).toContainEqual({ method: 'eq', args: ['resource_tags.tag_id', 'tag-1'] });
   });
 
-  it('respects a custom limit', async () => {
+  it('respects a custom limit and over-fetches by 30', async () => {
     await fetchPromptAssets({ limit: 10 });
 
     const limitCall = calls.find((c) => c.method === 'limit');
-    expect(limitCall?.args).toEqual([10]);
+    expect(limitCall?.args).toEqual([40]); // 10 + 30 over-fetch
   });
 
   it('maps rows into the PromptAsset shape, stringifying id and defaulting missing fields to null', async () => {
@@ -126,6 +126,39 @@ describe('fetchPromptAssets', () => {
         updated_at: '2026-07-20T00:00:00Z',
       },
     ]);
+  });
+
+  it('filters out rows with all empty/null prompt fields, keeps rows with any non-empty prompt', async () => {
+    queryResult = {
+      data: [
+        {
+          id: '1',
+          filename: 'empty.png',
+          gen_prompt: null,
+          gen_prompt_zh: null,
+          gen_prompt_negative: '',
+          gen_prompt_negative_zh: '   ', // whitespace-only, should be ignored
+          updated_at: '2026-07-20T00:00:00Z',
+        },
+        {
+          id: '2',
+          filename: 'negative-only.png',
+          gen_prompt: null,
+          gen_prompt_zh: '',
+          gen_prompt_negative: 'bad hands',
+          gen_prompt_negative_zh: null,
+          updated_at: '2026-07-20T00:00:00Z',
+        },
+      ],
+      error: null,
+    };
+
+    const result = await fetchPromptAssets();
+
+    // Only the second row should survive (has non-empty gen_prompt_negative)
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('2');
+    expect(result[0].filename).toBe('negative-only.png');
   });
 
   it('logs and returns an empty array on query error', async () => {

@@ -107,6 +107,26 @@ describe('SendToCanvasModal', () => {
     expect(await screen.findByText(/no canvases yet/i)).toBeTruthy();
   });
 
+  it('excludes classic-kind canvases from the list', async () => {
+    fetchProjects.mockResolvedValue([{ id: 'p1', name: 'Proj', team_id: null }]);
+    listCanvases.mockResolvedValue([
+      { id: 'c1', name: 'Regular Board', kind: 'whiteboard' },
+      { id: 'c2', name: 'Classic Board', kind: 'classic' },
+      { id: 'c3', name: 'Another Board', kind: 'whiteboard' },
+    ]);
+
+    render(<SendToCanvasModal resource={resource} positive="p" negative={null} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByText('Proj'));
+    await waitFor(() => expect(listCanvases).toHaveBeenCalled());
+
+    // Should show both non-classic canvases
+    expect(await screen.findByText('Regular Board')).toBeTruthy();
+    expect(screen.getByText('Another Board')).toBeTruthy();
+    // Should NOT show the classic canvas
+    expect(screen.queryByText('Classic Board')).toBeNull();
+  });
+
   it('calls onClose on backdrop click', async () => {
     fetchProjects.mockResolvedValue([]);
     const onClose = vi.fn();

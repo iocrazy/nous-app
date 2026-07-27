@@ -30,6 +30,17 @@ vi.mock('react-router-dom', () => ({
   useNavigate: () => navigate,
 }));
 
+const mockImportResource = vi.fn();
+vi.mock('./mediaImport', () => ({
+  importResourceAsCanvasMedia: (...args: unknown[]) => mockImportResource(...args),
+}));
+// CanvasComposer only pulls the PromptAsset type + getResourceCoverUrl (the
+// mint-failure fallback) from resourceService — full mock avoids pulling in
+// supabaseClient's env-var-dependent init through the real module.
+vi.mock('../../../services/resourceService', () => ({
+  getResourceCoverUrl: (id: string) => `https://api.test/cover/${id}`,
+}));
+
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { CanvasComposer } from './CanvasComposer';
 import { _resetIdCounter } from './factories';
@@ -37,6 +48,8 @@ import { _resetIdCounter } from './factories';
 beforeEach(() => {
   navigate.mockReset();
   useCanvasCoreStore.getState().reset();
+  mockImportResource.mockReset();
+  mockImportResource.mockResolvedValue({ url: '/api/v1/generated-media/gm-1', kind: 'image' });
 });
 
 afterEach(() => {
