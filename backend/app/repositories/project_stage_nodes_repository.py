@@ -28,6 +28,7 @@ from sqlalchemy import func, select, update
 from app.db.session import read_scope, write_scope
 from app.models import (
     AgentRuns,
+    ProjectFiles,
     Projects,
     ProjectStageNodeMembers,
     ProjectStageNodes,
@@ -698,6 +699,30 @@ class ProjectStageNodesRepository:
                 )
             ).all()
         return len(rows)
+
+    async def list_folder_files(
+        self, folder_id: str, *, include_trashed: bool = False
+    ) -> List[Dict[str, Any]]:
+        """Files filed into one folder (bigint ``folder_id`` equality).
+
+        Extracted so the SAME query backs both ``_deliverable_present``
+        (advance_service.py — "has a file been filed?") and the Stage Board
+        endpoint's ``files`` section ("which files are filed?") — the two can
+        never drift about what counts as filed. Non-trashed only by default,
+        newest first (matches ``ProjectsRepository.get_project_files``'
+        ordering).
+        """
+        from app.repositories.projects_repository import _FILES_N2A, _row
+
+        async with read_scope() as session:
+            stmt = select(ProjectFiles).where(
+                ProjectFiles.folder_id == int(str(folder_id))
+            )
+            if not include_trashed:
+                stmt = stmt.where(ProjectFiles.is_trashed.is_(False))
+            stmt = stmt.order_by(ProjectFiles.created_at.desc())
+            result = await session.execute(stmt)
+            return [_row(r, _FILES_N2A) for r in result.scalars().all()]
 
     async def workflow_badges_for_projects(
         self, project_ids: List[Any]
