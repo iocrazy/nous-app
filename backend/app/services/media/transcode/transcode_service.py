@@ -14,7 +14,7 @@ import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Coroutine, List, Optional, Tuple
+from typing import Any, Callable, Coroutine, List, Optional
 
 from loguru import logger
 
@@ -57,42 +57,6 @@ class TranscodeService:
     def __init__(self):
         self.repo = ResourcesRepository()
         self._probe = TranscodeProbe()
-
-    # ------------------------------------------------------------------ #
-    # 兼容 shim — 保留原方法名入口,纯转发到 TranscodeProbe
-    # ------------------------------------------------------------------ #
-    #
-    # 实现已整体搬去 TranscodeProbe(见 transcode_probe.py),这里不重复实现。
-    # 保留这层转发而非把编排层调用点直接改成 self._probe.xxx(...),是因为
-    # tests/test_transcode_probe.py 与 tests/test_transcode_materialize.py 都
-    # 直接 monkeypatch/调用 `TranscodeService._probe_xxx`(不经 TranscodeProbe),
-    # 属于既有测试对旧类结构的实现细节耦合。搬迁不改测试,故保留这些方法名作为
-    # 类级入口,函数体只做一层转发,编排层调用点(self._probe_xxx(...))保持原样,
-    # 使既有 monkeypatch 依然生效——对编排逻辑而言零行为变化。
-    async def _detect_encoder(self) -> tuple[str, list[str], str]:
-        return await self._probe.detect_encoder()
-
-    @staticmethod
-    async def _probe_encoder(encoder_name: str) -> bool:
-        return await TranscodeProbe.probe_encoder(encoder_name)
-
-    @staticmethod
-    def _map_nvenc_preset(cpu_preset: str) -> str:
-        return TranscodeProbe.map_nvenc_preset(cpu_preset)
-
-    async def _probe_resolution(
-        self, filepath: str
-    ) -> Tuple[Optional[int], Optional[int]]:
-        return await self._probe.probe_resolution(filepath)
-
-    async def _probe_duration(self, filepath: str) -> Optional[float]:
-        return await self._probe.probe_duration(filepath)
-
-    async def _probe_codecs(self, filepath: str) -> tuple[Optional[str], Optional[str]]:
-        return await self._probe.probe_codecs(filepath)
-
-    async def _probe_bitrate(self, filepath: str) -> Optional[int]:
-        return await self._probe.probe_bitrate(filepath)
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -213,7 +177,7 @@ class TranscodeService:
                     hls_dir = source.parent / "hls"
 
                 # Probe video to get resolution and duration
-                width, height = await self._probe_resolution(str(source))
+                width, height = await self._probe.probe_resolution(str(source))
                 if not width or not height:
                     logger.warning(
                         f"Could not probe resolution for {source}, skipping transcode"
@@ -226,10 +190,10 @@ class TranscodeService:
                         "reason": "could not probe video resolution",
                     }
 
-                total_duration = await self._probe_duration(str(source))
+                total_duration = await self._probe.probe_duration(str(source))
 
                 # Detect source codecs for fast-path decision
-                video_codec, audio_codec = await self._probe_codecs(str(source))
+                video_codec, audio_codec = await self._probe.probe_codecs(str(source))
                 is_h264 = video_codec in ("h264",)
 
                 # Clean up old HLS if exists
@@ -256,7 +220,7 @@ class TranscodeService:
                     # Phase 1: Fast copy-only segmentation
                     if on_progress:
                         await on_progress(10, "Fast segmenting (copy)...")
-                    source_bitrate = await self._probe_bitrate(str(source))
+                    source_bitrate = await self._probe.probe_bitrate(str(source))
                     passthrough_ok = await self._transcode_passthrough(
                         str(source),
                         hls_dir,
@@ -395,7 +359,7 @@ class TranscodeService:
                 # Add passthrough "Original" tier (copy codec, no re-encoding)
                 if on_progress:
                     await on_progress(95, "Remuxing original...")
-                source_bitrate = await self._probe_bitrate(str(source))
+                source_bitrate = await self._probe.probe_bitrate(str(source))
                 passthrough_ok = await self._transcode_passthrough(
                     str(source),
                     hls_dir,
@@ -603,7 +567,7 @@ class TranscodeService:
         on_progress: Optional[Callable] = None,
     ) -> bool:
         """Transcode source video to a single HLS tier with progress tracking."""
-        encoder, hwaccel_args, preset = await self._detect_encoder()
+        encoder, hwaccel_args, preset = await self._probe.detect_encoder()
         success = await self._run_ffmpeg_tier(
             source,
             tier,

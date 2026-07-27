@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.services.media.transcode import transcode_service as ts_mod
+from app.services.media.transcode.transcode_probe import TranscodeProbe
 from app.services.media.transcode.transcode_service import TranscodeService
 
 pytestmark = pytest.mark.unit
@@ -93,14 +94,14 @@ async def test_hls_dir_derived_for_sb_source(monkeypatch, tmp_path):
         probe_calls.append(filepath)
         return 1920, 1080
 
-    monkeypatch.setattr(TranscodeService, "_probe_resolution", fake_probe_resolution)
+    monkeypatch.setattr(TranscodeProbe, "probe_resolution", fake_probe_resolution)
     monkeypatch.setattr(
-        TranscodeService, "_probe_duration", AsyncMock(return_value=10.0)
+        TranscodeProbe, "probe_duration", AsyncMock(return_value=10.0)
     )
     # non-h264 codec skips the fast path; empty tier selection short-circuits
     # to "skipped" right after the hls_dir mkdir — no real ffmpeg needed.
     monkeypatch.setattr(
-        TranscodeService, "_probe_codecs", AsyncMock(return_value=("hevc", "aac"))
+        TranscodeProbe, "probe_codecs", AsyncMock(return_value=("hevc", "aac"))
     )
     monkeypatch.setattr(TranscodeService, "_select_tiers", AsyncMock(return_value=[]))
 
@@ -132,15 +133,15 @@ async def test_hls_dir_legacy_fs_source_unchanged(monkeypatch, tmp_path):
     svc.repo = _FakeRepo({"file_path": rel, "file_size_bytes": 500 * _MB})
 
     monkeypatch.setattr(
-        TranscodeService,
-        "_probe_resolution",
+        TranscodeProbe,
+        "probe_resolution",
         AsyncMock(return_value=(1920, 1080)),
     )
     monkeypatch.setattr(
-        TranscodeService, "_probe_duration", AsyncMock(return_value=10.0)
+        TranscodeProbe, "probe_duration", AsyncMock(return_value=10.0)
     )
     monkeypatch.setattr(
-        TranscodeService, "_probe_codecs", AsyncMock(return_value=("hevc", "aac"))
+        TranscodeProbe, "probe_codecs", AsyncMock(return_value=("hevc", "aac"))
     )
     monkeypatch.setattr(TranscodeService, "_select_tiers", AsyncMock(return_value=[]))
 

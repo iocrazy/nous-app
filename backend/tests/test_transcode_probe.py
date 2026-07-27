@@ -1,4 +1,4 @@
-"""Unit tests for transcode encoder probing (transcode_service._probe_encoder).
+"""Unit tests for transcode encoder probing (transcode_probe.TranscodeProbe.probe_encoder).
 
 Covers the 2026-05-14 fix. The probe must reflect what actually works at
 *runtime* on this machine, not what ffmpeg was compiled with. An ffmpeg
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.media.transcode.transcode_service import TranscodeService
+from app.services.media.transcode.transcode_probe import TranscodeProbe
 
 pytestmark = pytest.mark.unit
 
@@ -40,16 +40,16 @@ def patch_subprocess(monkeypatch):
 
 async def test_probe_returns_true_when_encode_succeeds(patch_subprocess):
     patch_subprocess(returncode=0)
-    assert await TranscodeService._probe_encoder("h264_nvenc") is True
+    assert await TranscodeProbe.probe_encoder("h264_nvenc") is True
 
 
 async def test_probe_returns_false_when_encode_fails(patch_subprocess):
     # NAS case: the ffmpeg build lists h264_nvenc, but there is no GPU, so
     # a real 1-frame encode exits non-zero ("No device available").
     patch_subprocess(returncode=8)
-    assert await TranscodeService._probe_encoder("h264_nvenc") is False
+    assert await TranscodeProbe.probe_encoder("h264_nvenc") is False
 
 
 async def test_probe_returns_false_on_subprocess_error(patch_subprocess):
     patch_subprocess(raises=FileNotFoundError("ffmpeg not found"))
-    assert await TranscodeService._probe_encoder("libx264") is False
+    assert await TranscodeProbe.probe_encoder("libx264") is False
