@@ -56,8 +56,17 @@ def _node(
 
 
 class _FakeNodesRepo:
-    def __init__(self, nodes: List[Dict[str, Any]]):
+    def __init__(
+        self,
+        nodes: List[Dict[str, Any]],
+        *,
+        files: Optional[List[Dict[str, Any]]] = None,
+    ):
         self._nodes = nodes
+        # Backs list_folder_files — same shape as _FakeProjectsRepo's `files`
+        # (folder_id-tagged rows), passed separately since F1 moved the
+        # folder-file query onto this repo (project_stage_nodes_repository).
+        self._files = files or []
         self.current_node_id_calls: List[Any] = []
 
     async def list_nodes(self, project_id):
@@ -65,6 +74,9 @@ class _FakeNodesRepo:
 
     async def set_current_node_id(self, project_id, node_id):
         self.current_node_id_calls.append((project_id, node_id))
+
+    async def list_folder_files(self, folder_id):
+        return [f for f in self._files if str(f.get("folder_id")) == str(folder_id)]
 
 
 class _FakeProjectsRepo:
@@ -295,16 +307,13 @@ async def test_deliverable_folder_id_with_file_allows_forward(monkeypatch):
     """folder_id set + a non-trashed file in THAT folder → deliverable present."""
     n1 = _node("1", sort_order=1, deliverable_required=True, folder_id="900")
     n2 = _node("2", sort_order=2)
-    nodes_repo = _FakeNodesRepo([n1, n2])
     # A file in a DIFFERENT folder must not count; the one in folder 900 does.
-    projects_repo = _FakeProjectsRepo(
-        "1",
-        folders=[],
-        files=[
-            {"id": "fx", "folder_id": "111"},
-            {"id": "f1", "folder_id": "900"},
-        ],
-    )
+    files = [
+        {"id": "fx", "folder_id": "111"},
+        {"id": "f1", "folder_id": "900"},
+    ]
+    nodes_repo = _FakeNodesRepo([n1, n2], files=files)
+    projects_repo = _FakeProjectsRepo("1", folders=[], files=files)
     issue_repo = _FakeIssueRepo()
     _install(
         monkeypatch,
@@ -324,10 +333,9 @@ async def test_deliverable_folder_id_empty_folder_blocks_forward(monkeypatch):
     """folder_id set but no file lives in it → blocked, even if OTHER files exist."""
     n1 = _node("1", sort_order=1, deliverable_required=True, folder_id="900")
     n2 = _node("2", sort_order=2)
-    nodes_repo = _FakeNodesRepo([n1, n2])
-    projects_repo = _FakeProjectsRepo(
-        "1", folders=[], files=[{"id": "fx", "folder_id": "111"}]
-    )
+    files = [{"id": "fx", "folder_id": "111"}]
+    nodes_repo = _FakeNodesRepo([n1, n2], files=files)
+    projects_repo = _FakeProjectsRepo("1", folders=[], files=files)
     issue_repo = _FakeIssueRepo()
     _install(
         monkeypatch,
@@ -348,11 +356,12 @@ async def test_deliverable_fallback_name_match_folder(monkeypatch):
     # _node names its node "Node 1"; a folder of that name holds the file.
     n1 = _node("1", sort_order=1, deliverable_required=True)  # folder_id None
     n2 = _node("2", sort_order=2)
-    nodes_repo = _FakeNodesRepo([n1, n2])
+    files = [{"id": "f1", "folder_id": "77"}]
+    nodes_repo = _FakeNodesRepo([n1, n2], files=files)
     projects_repo = _FakeProjectsRepo(
         "1",
         folders=[{"id": "77", "name": "Node 1"}],
-        files=[{"id": "f1", "folder_id": "77"}],
+        files=files,
     )
     issue_repo = _FakeIssueRepo()
     _install(
