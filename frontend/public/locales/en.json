@@ -1803,6 +1803,11 @@
         "suggestAgentRun": "Suggest agent run on arrival",
         "builtinTitle": "Built-in behavior",
         "builtinBody": "Arrival derives the mirror issue; completion closes it. No agent starts automatically."
+      },
+      "stageBoard": {
+        "tasks": "Tasks",
+        "deliverables": "Deliverables",
+        "noIssue": "No mirror issue yet"
       }
     }
   },

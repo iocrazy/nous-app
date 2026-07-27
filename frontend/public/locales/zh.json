@@ -1803,6 +1803,11 @@
         "suggestAgentRun": "到达时建议启动 Agent",
         "builtinTitle": "内置行为",
         "builtinBody": "到达时会派生镜像任务，完成时会关闭它。不会自动启动任何 Agent。"
+      },
+      "stageBoard": {
+        "tasks": "任务",
+        "deliverables": "交付物",
+        "noIssue": "尚无镜像任务"
       }
     }
   },

@@ -137,21 +137,37 @@ async def _deliverable_present(project_id: str, node: Dict[str, Any]) -> bool:
 
     Primary path (M2-W1): the node carries an explicit ``folder_id`` (its stage
     folder, materialized lazily on arrival, mig 383) — a non-trashed file in
-    that folder satisfies the deliverable.
+    that folder satisfies the deliverable. Both this path and the fallback's
+    name-matched-folder path go through ``list_folder_files`` (shared with the
+    Stage Board endpoint's ``files`` section, F1) so "is something filed?" and
+    "what's filed?" can never disagree.
 
     Fallback (a node whose folder creation lost the race, or a legacy row): a
     file counts when it lives in a project folder whose name matches the node
     name; absent such a folder, ANY non-trashed project file counts. Server-
     side, never trusts the client.
     """
+    from app.repositories.project_stage_nodes_repository import (
+        get_project_stage_nodes_repository,
+    )
     from app.repositories.projects_repository import get_projects_repository
+
+    nodes_repo = get_project_stage_nodes_repository()
+    folder_id = node.get("folder_id")
+    if folder_id:
+        try:
+            folder_files = await nodes_repo.list_folder_files(str(folder_id))
+        except Exception as exc:  # noqa: BLE001 — treat an unreadable store as empty
+            logger.warning(
+                f"[advance] deliverable file scan failed for project {project_id} "
+                f"node {node.get('id')}: {exc!r}"
+            )
+            return False
+        return bool(folder_files)
 
     repo = get_projects_repository()
     try:
         files = await repo.get_project_files(str(project_id))
-        folder_id = node.get("folder_id")
-        if folder_id:
-            return any(str(f.get("folder_id")) == str(folder_id) for f in files)
         folders = await repo.get_folders(str(project_id))
     except Exception as exc:  # noqa: BLE001 — treat an unreadable store as empty
         logger.warning(
@@ -170,8 +186,15 @@ async def _deliverable_present(project_id: str, node: Dict[str, Any]) -> bool:
         None,
     )
     if match is not None:
-        matched_folder = str(match["id"])
-        return any(str(f.get("folder_id")) == matched_folder for f in files)
+        try:
+            matched_files = await nodes_repo.list_folder_files(str(match["id"]))
+        except Exception as exc:  # noqa: BLE001 — treat an unreadable store as empty
+            logger.warning(
+                f"[advance] deliverable file scan failed for project {project_id} "
+                f"node {node.get('id')}: {exc!r}"
+            )
+            return False
+        return bool(matched_files)
     return len(files) > 0
 
 

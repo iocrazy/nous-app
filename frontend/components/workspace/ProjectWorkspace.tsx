@@ -69,6 +69,9 @@ const WorkspaceCanvas = lazy(() =>
 const WorkspaceTasks = lazy(() =>
   import('./WorkspaceTasks').then((m) => ({ default: m.WorkspaceTasks })),
 );
+const WorkspaceStageBoard = lazy(() =>
+  import('./WorkspaceStageBoard').then((m) => ({ default: m.WorkspaceStageBoard })),
+);
 const ProjectTrashView = lazy(() =>
   import('../ProjectTrashView').then((m) => ({ default: m.ProjectTrashView })),
 );
@@ -110,22 +113,29 @@ export function ProjectWorkspace({
     const q = searchParams.get('module');
     const valid: WorkspaceModule[] = [
       'overview', 'canvas', 'episodes', 'tasks', 'script', 'characters',
-      'locations', 'props', 'files', 'trash', 'settings',
+      'locations', 'props', 'files', 'trash', 'settings', 'stage',
     ];
     return valid.includes(q as WorkspaceModule) ? (q as WorkspaceModule) : 'overview';
   })();
   const [activeModule, setActiveModule] = useState<WorkspaceModule>(initialModule);
+  // The node whose Stage Board is open (`?module=stage&node={id}`, M2 PR-F F2).
+  // Falls back to null (→ back to Overview) if a stage URL somehow lacks `node`.
+  const [stageNodeId, setStageNodeId] = useState<string | null>(
+    initialModule === 'stage' ? searchParams.get('node') : null,
+  );
   useEffect(() => {
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
         if (activeModule === 'overview') next.delete('module');
         else next.set('module', activeModule);
+        if (activeModule === 'stage' && stageNodeId) next.set('node', stageNodeId);
+        else next.delete('node');
         return next;
       },
       { replace: true },
     );
-  }, [activeModule, setSearchParams]);
+  }, [activeModule, stageNodeId, setSearchParams]);
 
   // ── SOP stage (catalog + current, READ-ONLY here) ─────────────────────
   const [catalog, setCatalog] = useState<ProjectStage[]>([]);
@@ -204,6 +214,13 @@ export function ProjectWorkspace({
   const handleJumpToNode = useCallback((nodeId: string) => {
     setActiveModule('overview');
     setFocusNodeId(nodeId);
+  }, []);
+
+  // Sidebar Stages block (M2 PR-F F2) — opens the dedicated Stage Board module
+  // instead of scrolling to the node's Overview card (handleJumpToNode above).
+  const handleOpenStage = useCallback((nodeId: string) => {
+    setStageNodeId(nodeId);
+    setActiveModule('stage');
   }, []);
 
   // ── Episodes (sidebar current-episode block + switcher) ────────────────
@@ -482,7 +499,8 @@ export function ProjectWorkspace({
         onOpenRenders={handleOpenRenders}
         workflowNodes={workflow?.nodes ?? []}
         currentNodeId={workflow?.current_node_id ?? null}
-        onJumpToNode={handleJumpToNode}
+        onOpenStage={handleOpenStage}
+        activeStageNodeId={activeModule === 'stage' ? stageNodeId : null}
       />
       <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
         <Suspense
@@ -565,6 +583,17 @@ export function ProjectWorkspace({
             )}
             {activeModule === 'tasks' && (
               <WorkspaceTasks projectId={project.id} projectName={project.name} teamId={teamId} />
+            )}
+            {activeModule === 'stage' && stageNodeId && (
+              <WorkspaceStageBoard
+                projectId={project.id}
+                projectName={project.name}
+                nodeId={stageNodeId}
+                workflow={workflow}
+                canWrite={canWrite}
+                onRequestAdvance={requestAdvance}
+                onOpenTodolist={() => setActiveModule('tasks')}
+              />
             )}
           </div>
         )}

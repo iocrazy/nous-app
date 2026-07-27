@@ -472,6 +472,133 @@ async def get_project_workflow(
     )
 
 
+@router.get("/{project_id}/workflow/nodes/{node_id}/board")
+async def get_stage_board(
+    project_id: str,
+    node_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_read_access),
+):
+    """Stage Board aggregate (M2 PR-F F1): one node's full row + its mirror
+    issue (with sub-issues) + the files filed into its deliverable folder —
+    the single data source the Stage Board workspace module reads from.
+
+    Auth mirrors ``GET /{project_id}/workflow`` above: project-level read
+    access only, no extra role gate (this is a pure read). 404s before any
+    role concern — a missing/foreign node 404s the same way a missing project
+    already does via the guard.
+
+    ``issue`` is ``null`` both when the node never grew a mirror issue and
+    when the project predates the three-segment origin id (a legacy
+    two-segment mirror simply doesn't match the origin this builds) — either
+    way a quiet null, never a 500.
+    """
+    from app.repositories.issue_repository import get_issue_repository
+    from app.repositories.project_stage_nodes_repository import (
+        get_project_stage_nodes_repository,
+    )
+    from app.services.library.project_stage_issues import (
+        ORIGIN_KIND,
+        build_stage_origin_id,
+    )
+
+    nodes_repo = get_project_stage_nodes_repository()
+    node = await nodes_repo.get_node(node_id, project_id)
+    if node is None:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    issues_repo = get_issue_repository()
+
+    def _issue_ref(row: dict) -> dict:
+        return {
+            "id": str(row["id"]),
+            "identifier": row.get("identifier"),
+            "title": row.get("title"),
+            "status": row.get("status"),
+            "assignee": {
+                "user_id": (
+                    str(row["assignee_user_id"])
+                    if row.get("assignee_user_id")
+                    else None
+                ),
+                "agent_id": (
+                    str(row["assignee_agent_id"])
+                    if row.get("assignee_agent_id")
+                    else None
+                ),
+            },
+        }
+
+    issue_out: Optional[dict] = None
+    try:
+        origin_id = build_stage_origin_id(project_id, node_id)
+        mirrors = await issues_repo.list_by_origin(ORIGIN_KIND, origin_id)
+    except Exception as exc:  # noqa: BLE001 — a missing/broken mirror reads as null
+        logger.warning(
+            f"[stage-board] mirror lookup failed for project {project_id} "
+            f"node {node_id}: {exc!r}"
+        )
+        mirrors = []
+    if mirrors:
+        mirror = mirrors[0]
+        try:
+            children = await issues_repo.list_children(int(mirror["id"]))
+        except Exception as exc:  # noqa: BLE001 — sub-issue list is enrichment only
+            logger.warning(
+                f"[stage-board] sub-issue lookup failed for issue "
+                f"{mirror.get('id')}: {exc!r}"
+            )
+            children = []
+        issue_out = {
+            **_issue_ref(mirror),
+            "sub_issues": [_issue_ref(c) for c in children],
+        }
+
+    files_out: list = []
+    folder_id = node.get("folder_id")
+    if folder_id:
+        try:
+            raw_files = await nodes_repo.list_folder_files(folder_id)
+        except Exception as exc:  # noqa: BLE001 — an unreadable store reads as empty
+            logger.warning(
+                f"[stage-board] file listing failed for project {project_id} "
+                f"node {node_id}: {exc!r}"
+            )
+            raw_files = []
+
+        source_ids = [
+            f["source_issue_id"] for f in raw_files if f.get("source_issue_id")
+        ]
+        id_map: dict = {}
+        if source_ids:
+            try:
+                id_map = await issues_repo.map_identifiers([int(i) for i in source_ids])
+            except Exception as exc:  # noqa: BLE001 — the back-link chip is decoration
+                logger.warning(
+                    f"[stage-board] source-issue identifier map failed for "
+                    f"project {project_id} node {node_id}: {exc!r}"
+                )
+        files_out = [
+            {
+                "id": str(f["id"]),
+                "filename": f.get("filename"),
+                "size": f.get("file_size_bytes"),
+                "created_at": f.get("created_at"),
+                "source_issue_identifier": (
+                    id_map.get(str(f["source_issue_id"]))
+                    if f.get("source_issue_id")
+                    else None
+                ),
+            }
+            for f in raw_files
+        ]
+
+    return {
+        "success": True,
+        "data": {"node": node, "issue": issue_out, "files": files_out},
+    }
+
+
 @router.patch("/{project_id}/workflow/nodes/{node_id}")
 async def patch_workflow_node(
     project_id: str,
