@@ -52,11 +52,11 @@ class MediaKeyBuilder:
     def _object_key(self, scope_id: int, sha: str, ext: str) -> str:
         return f"t{scope_id}/{sha[:2]}/{sha[2:4]}/{sha}{ext}"
 
-    def content_key(
+    def content_key_from_sha(
         self, scope_id: int, sha: str, mime: str, filename: Optional[str] = None
     ) -> str:
-        """Same key scheme as ``content_key`` but from a precomputed sha — for
-        large blobs (video) hashed by streaming a file instead of buffering bytes."""
+        """构造对象键 —— 从已算好的 sha 直接构键（调用方自行负责 sha 的
+        计算方式：整块 hash 或流式 hash 均可，本方法不关心来源）。"""
         return self._object_key(scope_id, sha, self.ext_for(mime, filename))
 
     def hls_prefix(self, resource_id: str, version_id: str) -> str:

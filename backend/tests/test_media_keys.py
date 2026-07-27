@@ -15,7 +15,7 @@ def keys():
 
 
 def test_content_key_is_scope_scoped_and_sharded(keys):
-    k = keys.content_key(
+    k = keys.content_key_from_sha(
         scope_id=310812366953241,
         sha="0bde134795d32e26fbee0100112233445566778899aabbccddeeff0011223344",
         mime="video/mp4",
@@ -32,7 +32,7 @@ def test_content_key_is_deterministic(keys):
         mime="image/webp",
         filename="x.webp",
     )
-    assert keys.content_key(**args) == keys.content_key(**args)
+    assert keys.content_key_from_sha(**args) == keys.content_key_from_sha(**args)
 
 
 def test_hls_prefix_shape(keys):

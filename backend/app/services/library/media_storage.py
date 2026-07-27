@@ -93,7 +93,7 @@ def content_key(
     key (privacy / injection / collision).
     """
     sha = hashlib.sha256(data).hexdigest()
-    return sha, _KEYS.content_key(scope_id, sha, mime, filename)
+    return sha, _KEYS.content_key_from_sha(scope_id, sha, mime, filename)
 
 
 def content_key_from_sha(
@@ -101,7 +101,7 @@ def content_key_from_sha(
 ) -> str:
     """Same key scheme as ``content_key`` but from a precomputed sha — for
     large blobs (video) hashed by streaming a file instead of buffering bytes."""
-    return _KEYS.content_key(scope_id, sha, mime, filename)
+    return _KEYS.content_key_from_sha(scope_id, sha, mime, filename)
 
 
 def to_file_path(bucket: str, key: str) -> str:
