@@ -4,9 +4,11 @@
 pub mod errors;
 pub mod ffmpeg;
 pub mod hls;
+mod http_io;
 
 use std::path::Path;
 
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -147,6 +149,25 @@ fn cleanup_segments(dir_path: &str) -> PyResult<()> {
     Ok(())
 }
 
+/// 流式拉取 `url` 并写入 `dst`，返回写入字节数。
+///
+/// 字节完全不经过 Python 解释器；Python 侧只负责算出签名 URL 与 headers。
+/// 失败路径会自动清理半成品文件（见 `http_io::fetch_to_file`）。
+#[pyfunction]
+fn fetch_to_file(
+    py: Python<'_>,
+    url: &str,
+    headers: Vec<(String, String)>,
+    dst: &str,
+) -> PyResult<u64> {
+    py.allow_threads(|| {
+        let rt = tokio::runtime::Runtime::new()
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        rt.block_on(http_io::fetch_to_file(url, headers, dst))
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    })
+}
+
 /// Nous core module — high-performance media processing via Rust + FFmpeg.
 #[pymodule]
 fn nous_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -156,5 +177,6 @@ fn nous_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(segment_video, m)?)?;
     m.add_function(wrap_pyfunction!(is_segmented, m)?)?;
     m.add_function(wrap_pyfunction!(cleanup_segments, m)?)?;
+    m.add_function(wrap_pyfunction!(fetch_to_file, m)?)?;
     Ok(())
 }

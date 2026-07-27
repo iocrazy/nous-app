@@ -27,6 +27,15 @@ pub enum MediaError {
 
     #[error("HLS segmentation failed: {0}")]
     HlsError(String),
+
+    #[error("http request failed: {0}")]
+    Http(String),
+
+    #[error("http status {0} for {1}")]
+    HttpStatus(u16, String),
+
+    #[error("io error: {0}")]
+    Io(String),
 }
 
 impl From<std::io::Error> for MediaError {
