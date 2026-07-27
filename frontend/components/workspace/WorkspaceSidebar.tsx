@@ -48,8 +48,13 @@ interface WorkspaceSidebarProps {
   /** Workflow instance nodes for the dynamic Stages group (empty = no group). */
   workflowNodes?: ProjectStageNode[];
   currentNodeId?: string | null;
-  /** Jump to a node — lands on the Overview node card (spec §5, M1). */
-  onJumpToNode?: (nodeId: string) => void;
+  /** Open a node's Stage Board (M2 PR-F F2) — the 'stage' module, not the
+   * Overview node card (that jump lived here pre-F2; the sidebar's dynamic
+   * Stages block now routes into the dedicated board instead). */
+  onOpenStage?: (nodeId: string) => void;
+  /** The node whose board is showing, while `activeModule === 'stage'` — highlights
+   * its Stages row alongside the always-on current-node highlight. */
+  activeStageNodeId?: string | null;
 }
 
 function sideItemClass(active: boolean): string {
@@ -80,7 +85,8 @@ export function WorkspaceSidebar({
   onOpenRenders,
   workflowNodes = [],
   currentNodeId = null,
-  onJumpToNode,
+  onOpenStage,
+  activeStageNodeId = null,
 }: WorkspaceSidebarProps) {
   const { t } = useTranslation();
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -337,12 +343,13 @@ export function WorkspaceSidebar({
           {workflowNodes.map((node) => {
             const meta = NODE_STATUS_CONFIG[node.status];
             const isCurrent = node.id === currentNodeId;
+            const isOpenBoard = activeModule === 'stage' && node.id === activeStageNodeId;
             return (
               <button
                 key={node.id}
                 data-testid={`ws-stage-${node.id}`}
-                onClick={() => onJumpToNode?.(node.id)}
-                className={sideItemClass(isCurrent)}
+                onClick={() => onOpenStage?.(node.id)}
+                className={sideItemClass(isCurrent || isOpenBoard)}
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <span className={`h-2 w-2 shrink-0 rounded-full ${meta.dot}`} aria-hidden />

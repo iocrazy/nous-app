@@ -1155,6 +1155,45 @@ export interface ProjectWorkflow {
   nodes: ProjectStageNode[];
 }
 
+/** Minimal read-only issue reference used by the Stage Board (mirror issue /
+ * sub-issue row) — a slice of the full `Issue` shape (services/issuesService.ts),
+ * only what `GET .../board` actually projects. */
+export interface StageBoardIssueRef {
+  id: string;
+  identifier: string | null;
+  title: string | null;
+  status: string;
+  assignee: { user_id: string | null; agent_id: string | null };
+}
+
+/** The node's mirror issue, with its sub-issues inlined (Stage Board F1). */
+export interface StageBoardIssue extends StageBoardIssueRef {
+  sub_issues: StageBoardIssueRef[];
+}
+
+/** One file filed into the node's deliverable folder (Stage Board F1). */
+export interface StageBoardFile {
+  id: string;
+  filename: string | null;
+  size: number | null;
+  created_at: string | null;
+  /** Identifier of the issue the file was uploaded from, when known. */
+  source_issue_identifier: string | null;
+}
+
+/**
+ * `GET /projects/{id}/workflow/nodes/{node_id}/board` payload (M2 PR-F F1) —
+ * the Stage Board workspace module's single data source: the node's full row,
+ * its mirror issue (or `null` — no mirror yet, or a legacy project whose
+ * mirror predates the current origin-id format), and the files filed into its
+ * deliverable folder.
+ */
+export interface StageBoardData {
+  node: ProjectStageNode;
+  issue: StageBoardIssue | null;
+  files: StageBoardFile[];
+}
+
 /** POST body to add a node to a live instance (M2-W3-1). Exactly one of
  * `source_stage_id` (from the node bank) or `name` (blank). */
 export interface ProjectNodeCreate {
