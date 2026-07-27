@@ -296,6 +296,13 @@ class WorkflowTemplateNodes(Base):
             '"suggest_agent_run": false}\'::jsonb'
         ),
     )
+    # Form-based deliverable schema (mig 390, M3 PR-I): the field defs an
+    # editor authors on the template node; copied verbatim into
+    # ProjectStageNodes.form_schema at instantiation (I2's territory — this
+    # column and its model mapping are I1's).
+    form_schema: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
 
 
 class WorkflowTemplateNodeMembers(Base):
@@ -422,6 +429,17 @@ class ProjectStageNodes(Base):
     # territory) will land here. Instance-only: no template-side counterpart.
     metadata_: Mapped[dict] = mapped_column(
         "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    # Form-based deliverables (mig 390, M3 PR-I). ``form_schema`` is copied
+    # verbatim from the template node at instantiation (same idiom as
+    # events/completion_policy, mig 386); ``form_data`` is instance-only —
+    # the actual values a user has entered into this live node's form, no
+    # template-side counterpart (same shape as ``metadata_`` above).
+    form_schema: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    form_data: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")

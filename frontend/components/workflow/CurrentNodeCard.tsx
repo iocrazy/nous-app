@@ -8,13 +8,14 @@
  */
 
 import React, { useState } from 'react';
-import { ArrowLeft, ArrowRight, Bot, ExternalLink, FileCheck2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bot, ClipboardList, ExternalLink, FileCheck2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { updateProjectNode } from '../../services/workflowService';
 import type { ProjectNodePatch, ProjectStageNode } from '../../types';
 import { AgentOption, OwnerPicker, PersonOption } from './OwnerPicker';
 import { NodeSchedulePicker } from './NodeSchedulePicker';
 import { isNodeOverdue, NODE_STATUS_CONFIG, NODE_STATUS_LABEL } from './nodeStatus';
+import { countFilledFields } from './formFieldFill';
 
 interface CurrentNodeCardProps {
   projectId: string;
@@ -69,17 +70,21 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
     }
   };
 
-  /** Run now: jump to the dedicated Stage Board where the click can actually
-   * open DispatchConfirmDialog inline (it has the mirror issue this card
-   * doesn't). Falls back to Open in Todolist when the host hasn't wired
-   * `onOpenStage` through. */
-  const handleRunNow = () => {
+  /** Navigate to this node's dedicated Stage Board, falling back to Open in
+   * Todolist when the host hasn't wired `onOpenStage` through. Shared by Run
+   * now (it needs the mirror issue this card doesn't have) and the Form
+   * completion row below (task I4) — both just want "go look at this node's
+   * full surface". */
+  const goToStageBoard = () => {
     if (onOpenStage) {
       onOpenStage(node.id);
     } else {
       onOpenTodolist();
     }
   };
+
+  const formSchema = node.form_schema ?? [];
+  const { filled: formFilled, total: formTotal } = countFilledFields(formSchema, node.form_data ?? {});
 
   return (
     <div
@@ -104,7 +109,7 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
             // the host hasn't wired that route through.
             <button
               type="button"
-              onClick={handleRunNow}
+              onClick={goToStageBoard}
               data-testid="workflow-run-now-chip"
               className="ml-auto inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium transition"
               style={{
@@ -205,6 +210,20 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
               })}
             </span>
           </div>
+        </Row>
+      )}
+
+      {formTotal > 0 && (
+        <Row label={t('projects.workflow.form')}>
+          <button
+            type="button"
+            onClick={goToStageBoard}
+            data-testid="workflow-node-form-progress"
+            className="inline-flex items-center gap-1.5 rounded-md border border-line px-2 py-1 text-[12.5px] text-ink-300 transition hover:border-line-strong hover:text-ink-100"
+          >
+            <ClipboardList size={14} className="text-ink-500" />
+            {t('projects.workflow.formFilled', { filled: formFilled, total: formTotal })}
+          </button>
         </Row>
       )}
 

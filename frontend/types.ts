@@ -1051,6 +1051,32 @@ export interface WorkflowNodeEvents {
   on_complete_workflow?: string | null;
 }
 
+/** Six-type whitelist for a node's deliverable form field (mig 390, M3 PR-I
+ * §2). Mirrors backend `FormFieldType` (schemas/workflow.py). */
+export type FormFieldType = 'text' | 'textarea' | 'number' | 'select' | 'checkbox' | 'date';
+
+export const FORM_FIELD_TYPES: FormFieldType[] = [
+  'text',
+  'textarea',
+  'number',
+  'select',
+  'checkbox',
+  'date',
+];
+
+/** One field definition in a node's deliverable form (`form_schema`, mig 390).
+ * `key` is server-generated (slugified from `label`, deduped within the node)
+ * — the editor never invents or edits it; whatever rides in on a template
+ * PATCH is harmlessly overwritten server-side. `options` only applies when
+ * `type === 'select'` and must be non-empty there (backend 422s otherwise). */
+export interface FormFieldDef {
+  key: string;
+  label: string;
+  type: FormFieldType;
+  required: boolean;
+  options?: string[];
+}
+
 /** One node in a team workflow template (`workflow_template_nodes`). */
 export interface WorkflowTemplateNode {
   id: string;
@@ -1069,6 +1095,11 @@ export interface WorkflowTemplateNode {
   members: WorkflowMemberRef[];
   completion_policy: WorkflowCompletionPolicy;
   events: WorkflowNodeEvents;
+  /** Deliverable form fields (mig 390, M3 PR-I) — template-layer config,
+   * copied verbatim into `project_stage_nodes.form_schema` at instantiation
+   * (spec §2; not open for in-place instance tweaks, same idiom as
+   * `completion_policy`/`events`). */
+  form_schema: FormFieldDef[];
 }
 
 /** A template node as sent on PATCH (full node-list replacement). */
@@ -1087,6 +1118,7 @@ export interface WorkflowTemplateNodeInput {
   members?: WorkflowMemberRef[];
   completion_policy?: WorkflowCompletionPolicy;
   events?: WorkflowNodeEvents;
+  form_schema?: FormFieldDef[];
 }
 
 /** A team workflow template list row (`node_count` on the collection). */
@@ -1152,6 +1184,18 @@ export interface ProjectStageNode {
    * of a missing key entirely (pre-mig-389 rows, or a node the hook never
    * touched because it has no agent owner). */
   metadata?: { run_prepared_at?: string };
+  /** Deliverable form fields (mig 390, M3 PR-I §2) — copied verbatim from the
+   * template node at instantiation (I2); frozen on the instance (not
+   * PATCH-able, see `ProjectNodePatch`). Optional (like `metadata` above) so
+   * pre-mig-390 literals across the codebase keep compiling untouched;
+   * `normalizeInstanceNode` (workflowService.ts) fills a real `[]` once data
+   * flows through it. */
+  form_schema?: FormFieldDef[];
+  /** Live values entered into this node's deliverable form (Stage Board,
+   * task I4) — instance-only, PATCH-able via `ProjectNodePatch.form_data`.
+   * Unknown keys (not present in this node's own `form_schema`) are dropped
+   * server-side on write. Optional/normalized the same way as `form_schema`. */
+  form_data?: Record<string, unknown>;
 }
 
 /** GET /projects/{id}/workflow payload. */
@@ -1218,6 +1262,14 @@ export interface ProjectNodePatch {
   planned_start?: string | null;
   planned_due?: string | null;
   skipped?: boolean;
+  /** Live values entered into this node's deliverable form (mig 390, M3 PR-I
+   * §2, task I4). Deliberately NOT paired with a `form_schema` field here —
+   * the form's field definitions are template-layer config, frozen at
+   * instantiation; an instance may fill in data but may not change what
+   * fields exist. Server merges this with the existing `form_data`
+   * (whitelisted to this node's own `form_schema` keys), so callers only
+   * need to send the field(s) that actually changed. */
+  form_data?: Record<string, unknown>;
 }
 
 /** Blocked-reason codes the advance predicate can return (spec §7). */
@@ -1225,6 +1277,7 @@ export type AdvanceBlockedReason =
   | 'NOT_MANAGER_OR_EDITOR'
   | 'REVIEW_PENDING'
   | 'DELIVERABLE_MISSING'
+  | 'FORM_INCOMPLETE'
   | 'NO_NEXT';
 
 /** A node named in an advance preview (closing / creating list). */
@@ -1244,6 +1297,10 @@ export interface AdvancePreview {
   closing: AdvanceNodeRef[];
   creating: AdvanceNodeRef[];
   warnings: string[];
+  /** Required form-field LABELS (never keys) missing from the target group
+   * when `blocked_reason === 'FORM_INCOMPLETE'` (mig 390, M3 PR-I §2). Empty
+   * for every other ruling. */
+  missing_fields: string[];
 }
 
 /**

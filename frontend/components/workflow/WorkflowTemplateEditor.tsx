@@ -16,6 +16,8 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ChevronDown,
+  ChevronUp,
   GitBranch,
   Plus,
   Star,
@@ -33,9 +35,12 @@ import {
   fetchStageLibrary,
   fetchTemplate,
   fetchTemplates,
+  MAX_FORM_FIELDS,
   updateTemplate,
 } from '../../services/workflowService';
 import type {
+  FormFieldDef,
+  FormFieldType,
   StageLibraryItem,
   WorkflowCompletionPolicy,
   WorkflowMemberRef,
@@ -43,6 +48,8 @@ import type {
   WorkflowTemplate,
   WorkflowTemplateNodeInput,
 } from '../../types';
+import { FORM_FIELD_TYPES } from '../../types';
+import { formatOptionsInput, parseOptionsInput } from './formFieldOptions';
 import { AgentOption, OwnerPicker, PersonOption } from './OwnerPicker';
 import { LibraryPickerModal } from './LibraryPickerModal';
 
@@ -60,6 +67,7 @@ interface DraftNode extends WorkflowTemplateNodeInput {
   members: WorkflowMemberRef[];
   completion_policy: WorkflowCompletionPolicy;
   events: WorkflowNodeEvents;
+  form_schema: FormFieldDef[];
 }
 
 let _keySeq = 0;
@@ -82,6 +90,7 @@ function toDraft(nodes: WorkflowTemplate['nodes']): DraftNode[] {
     members: n.members ?? [],
     completion_policy: n.completion_policy ?? DEFAULT_COMPLETION_POLICY,
     events: { ...DEFAULT_EVENTS, ...n.events },
+    form_schema: n.form_schema ?? [],
   }));
 }
 
@@ -101,6 +110,10 @@ function toPayload(drafts: DraftNode[]): WorkflowTemplateNodeInput[] {
     members: d.members,
     completion_policy: d.completion_policy ?? DEFAULT_COMPLETION_POLICY,
     events: { ...DEFAULT_EVENTS, ...d.events },
+    // mig 390 (M3 PR-I): `key` rides in whatever it already is (possibly '')
+    // — the server slugifies label -> key and dedupes, so the editor never
+    // manages keys itself (spec §2 / task brief).
+    form_schema: d.form_schema ?? [],
   }));
 }
 
@@ -129,7 +142,7 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
   const [detail, setDetail] = useState<WorkflowTemplate | null>(null);
   const [drafts, setDrafts] = useState<DraftNode[]>([]);
   const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null);
-  const [inspectorTab, setInspectorTab] = useState<'info' | 'flow' | 'events'>('info');
+  const [inspectorTab, setInspectorTab] = useState<'info' | 'flow' | 'events' | 'form'>('info');
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -273,6 +286,7 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
       members: [],
       completion_policy: DEFAULT_COMPLETION_POLICY,
       events: { ...DEFAULT_EVENTS },
+      form_schema: [],
     };
     setDrafts((prev) => {
       const at = insertIndex == null ? prev.length : Math.min(insertIndex, prev.length);
@@ -548,7 +562,7 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
               </span>
             </div>
             <div className="mb-3 flex gap-1 border-b border-line">
-              {(['info', 'flow', 'events'] as const).map((tab) => (
+              {(['info', 'flow', 'events', 'form'] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setInspectorTab(tab)}
@@ -558,7 +572,13 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
                       : 'border-transparent text-ink-500 hover:text-ink-300'
                   }`}
                 >
-                  {tab === 'info' ? 'Node Info' : tab === 'flow' ? 'Flow Rules' : 'Events'}
+                  {tab === 'info'
+                    ? 'Node Info'
+                    : tab === 'flow'
+                      ? 'Flow Rules'
+                      : tab === 'events'
+                        ? 'Events'
+                        : 'Form'}
                 </button>
               ))}
             </div>
@@ -593,6 +613,12 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
               <EventsTab
                 value={selectedNode.events}
                 onChange={(events) => patchNode(selectedNode._key, { events })}
+              />
+            )}
+            {inspectorTab === 'form' && (
+              <FormTab
+                value={selectedNode.form_schema}
+                onChange={(form_schema) => patchNode(selectedNode._key, { form_schema })}
               />
             )}
           </>
@@ -873,6 +899,187 @@ const EventsTab: React.FC<{
         title={t('projects.workflow.events.builtinTitle')}
         body={t('projects.workflow.events.builtinBody')}
       />
+    </div>
+  );
+};
+
+/** Deliverable form builder (mig 390, M3 PR-I §2) — a row-per-field editor.
+ * `key` is entirely server-owned (slugified from `label`, deduped within the
+ * node) so this tab never reads or writes it; whatever a fresh row's blank
+ * `key: ''` looks like on the wire is harmlessly overwritten on save. */
+const FormTab: React.FC<{
+  value: FormFieldDef[];
+  onChange: (value: FormFieldDef[]) => void;
+}> = ({ value, onChange }) => {
+  const { t } = useTranslation();
+
+  const patchField = (index: number, patch: Partial<FormFieldDef>) => {
+    onChange(value.map((f, i) => (i === index ? { ...f, ...patch } : f)));
+  };
+
+  const moveField = (index: number, dir: -1 | 1) => {
+    const target = index + dir;
+    if (target < 0 || target >= value.length) return;
+    const next = [...value];
+    [next[index], next[target]] = [next[target], next[index]];
+    onChange(next);
+  };
+
+  const removeField = (index: number) => {
+    onChange(value.filter((_, i) => i !== index));
+  };
+
+  const atMax = value.length >= MAX_FORM_FIELDS;
+
+  const addField = () => {
+    if (atMax) return;
+    onChange([...value, { key: '', label: '', type: 'text', required: false }]);
+  };
+
+  return (
+    <div className="flex flex-col gap-3 overflow-y-auto text-[13px] text-ink-300">
+      <p className="text-[12px] text-ink-500">{t('projects.workflow.formBuilder.intro')}</p>
+      <div className="flex flex-col gap-2">
+        {value.map((field, i) => (
+          <FormFieldRow
+            // Rows have no stable id of their own (`key` is server-generated
+            // and blank until save) — index is fine here because moveField
+            // reorders the *array*, not a keyed set of long-lived rows.
+            key={i}
+            field={field}
+            isFirst={i === 0}
+            isLast={i === value.length - 1}
+            onPatch={(patch) => patchField(i, patch)}
+            onMoveUp={() => moveField(i, -1)}
+            onMoveDown={() => moveField(i, 1)}
+            onRemove={() => removeField(i)}
+          />
+        ))}
+        {value.length === 0 && (
+          <p className="rounded-md border border-dashed border-line px-2.5 py-3 text-center text-[12px] text-ink-600">
+            {t('projects.workflow.formBuilder.empty')}
+          </p>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={addField}
+        disabled={atMax}
+        className="inline-flex items-center gap-1.5 self-start rounded-md border border-dashed border-line-strong px-2.5 py-1.5 text-[12px] text-[var(--accent-text)] transition hover:border-[var(--accent-border)] disabled:cursor-not-allowed disabled:opacity-40"
+        data-testid="workflow-form-add-field"
+      >
+        <Plus size={13} /> {t('projects.workflow.formBuilder.addField')}
+      </button>
+      {atMax && (
+        <p className="text-[11px] text-ink-600">{t('projects.workflow.formBuilder.maxFieldsHint')}</p>
+      )}
+    </div>
+  );
+};
+
+const FormFieldRow: React.FC<{
+  field: FormFieldDef;
+  isFirst: boolean;
+  isLast: boolean;
+  onPatch: (patch: Partial<FormFieldDef>) => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onRemove: () => void;
+}> = ({ field, isFirst, isLast, onPatch, onMoveUp, onMoveDown, onRemove }) => {
+  const { t } = useTranslation();
+  // Free-text buffer for the `select` options input — kept local so the
+  // user's in-progress "a, b," keystrokes are never reformatted mid-typing
+  // by parseOptionsInput/formatOptionsInput round-tripping through the
+  // committed array on every render. Re-synced only when the *committed*
+  // options array itself changes (switching node/template, or a fresh
+  // 'select' row) — see formFieldOptions.ts.
+  const [optionsText, setOptionsText] = useState(() => formatOptionsInput(field.options));
+
+  useEffect(() => {
+    setOptionsText(formatOptionsInput(field.options));
+  }, [field.options]);
+
+  const commitOptions = () => {
+    const parsed = parseOptionsInput(optionsText);
+    onPatch({ options: parsed.length > 0 ? parsed : undefined });
+  };
+
+  return (
+    <div
+      className="flex flex-col gap-1.5 rounded-md border border-line p-2"
+      data-testid="workflow-form-field-row"
+    >
+      <div className="flex items-center gap-1.5">
+        <input
+          value={field.label}
+          onChange={(e) => onPatch({ label: e.target.value })}
+          placeholder={t('projects.workflow.formBuilder.labelPlaceholder')}
+          className="h-8 min-w-0 flex-1 rounded-md border border-line bg-transparent px-2 text-ink-100 placeholder-ink-600 focus:border-line-strong focus:outline-none"
+        />
+        <select
+          value={field.type}
+          onChange={(e) => {
+            const type = e.target.value as FormFieldType;
+            // options is only valid for 'select' (backend model_validator) —
+            // drop it the moment the row leaves that type.
+            onPatch({ type, options: type === 'select' ? field.options : undefined });
+          }}
+          className="h-8 shrink-0 rounded-md border border-line bg-transparent px-1.5 text-[12px] text-ink-100 focus:border-line-strong focus:outline-none"
+        >
+          {FORM_FIELD_TYPES.map((ft) => (
+            <option key={ft} value={ft}>
+              {t(`projects.workflow.formBuilder.types.${ft}`)}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {field.type === 'select' && (
+        <input
+          value={optionsText}
+          onChange={(e) => setOptionsText(e.target.value)}
+          onBlur={commitOptions}
+          placeholder={t('projects.workflow.formBuilder.optionsPlaceholder')}
+          className="h-8 w-full rounded-md border border-line bg-transparent px-2 text-[12px] text-ink-100 placeholder-ink-600 focus:border-line-strong focus:outline-none"
+          data-testid="workflow-form-field-options"
+        />
+      )}
+
+      <div className="flex items-center justify-between">
+        <Toggle
+          label={t('projects.workflow.formBuilder.required')}
+          checked={field.required}
+          onChange={(v) => onPatch({ required: v })}
+        />
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={onMoveUp}
+            disabled={isFirst}
+            title={t('projects.workflow.formBuilder.moveUp')}
+            className="rounded p-1 text-ink-500 hover:bg-ink-800 hover:text-ink-200 disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            <ChevronUp size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={onMoveDown}
+            disabled={isLast}
+            title={t('projects.workflow.formBuilder.moveDown')}
+            className="rounded p-1 text-ink-500 hover:bg-ink-800 hover:text-ink-200 disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            <ChevronDown size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={onRemove}
+            title={t('projects.workflow.formBuilder.removeField')}
+            className="rounded p-1 text-rose-400 hover:bg-rose-500/10"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

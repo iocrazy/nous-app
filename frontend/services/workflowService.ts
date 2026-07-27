@@ -38,6 +38,10 @@ interface Envelope<T> {
  * Exported so callers needing a fresh default object (e.g. a new draft node)
  * don't duplicate the literal. */
 export const DEFAULT_COMPLETION_POLICY: WorkflowCompletionPolicy = 'owner';
+/** Mirrors backend `MAX_FORM_FIELDS` (schemas/workflow.py) — the template
+ * editor's Form tab disables "+ Add field" at this count so the 422 the
+ * server would throw at 21 is never reachable through the UI. */
+export const MAX_FORM_FIELDS = 20;
 export const DEFAULT_EVENTS: WorkflowNodeEvents = {
   notify_on_arrival: true,
   notify_on_complete: false,
@@ -56,14 +60,20 @@ const normalizeEvents = (events: Partial<WorkflowNodeEvents> | null | undefined)
   on_complete_workflow: events?.on_complete_workflow ?? DEFAULT_EVENTS.on_complete_workflow,
 });
 
-/** Fill in `completion_policy`/`events` on a template node fetched from a
- * payload that may predate mig 386 (both fields optional server-side too). */
+/** Fill in `completion_policy`/`events`/`form_schema` on a template node
+ * fetched from a payload that may predate mig 386/390 (all three optional
+ * server-side too). */
 const normalizeTemplateNode = (
-  node: Partial<WorkflowTemplateNode> & Omit<WorkflowTemplateNode, 'completion_policy' | 'events'>,
+  node: Partial<WorkflowTemplateNode> &
+    Omit<WorkflowTemplateNode, 'completion_policy' | 'events' | 'form_schema'>,
 ): WorkflowTemplateNode => ({
   ...node,
   completion_policy: node.completion_policy ?? DEFAULT_COMPLETION_POLICY,
   events: normalizeEvents(node.events),
+  // mig 390 (M3 PR-I): a pre-mig-390 template node has no form_schema key at
+  // all — fall back to an empty form so the Form tab (and toDraft/toPayload
+  // in WorkflowTemplateEditor.tsx) never sees `undefined`.
+  form_schema: node.form_schema ?? [],
 });
 
 const normalizeTemplate = (template: WorkflowTemplate): WorkflowTemplate => ({
@@ -86,6 +96,11 @@ const normalizeInstanceNode = (
   // `node.metadata?.run_prepared_at` and must never see `undefined` blow up
   // into a crash, just an absent key.
   metadata: node.metadata ?? {},
+  // mig 390 (M3 PR-I §2, task I4): same tolerance for a pre-mig-390 row —
+  // StageNodeForm/CurrentNodeCard's form-count row iterate these directly
+  // and must never see `undefined`.
+  form_schema: node.form_schema ?? [],
+  form_data: node.form_data ?? {},
 });
 
 // ============================================

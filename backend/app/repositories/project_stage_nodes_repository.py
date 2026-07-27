@@ -124,6 +124,8 @@ def _node_row(obj: ProjectStageNodes, members: List[Dict[str, Any]]) -> Dict[str
         "completion_policy": obj.completion_policy,
         "events": obj.events,
         "metadata": obj.metadata_,
+        "form_schema": obj.form_schema,
+        "form_data": obj.form_data,
         "members": members,
     }
 
@@ -296,6 +298,12 @@ class ProjectStageNodesRepository:
                     # these for in-place tweaks (spec §5).
                     completion_policy=tn.completion_policy,
                     events=tn.events,
+                    # Form-based deliverables (mig 390, M3 PR-I): form_schema
+                    # copied verbatim, same instantiate-then-freeze idiom as
+                    # completion_policy/events above. form_data is left unset
+                    # here (DB server_default '{}'::jsonb) — an instance
+                    # starts with no entered values.
+                    form_schema=tn.form_schema,
                 )
                 session.add(node)
                 await session.flush()
@@ -410,6 +418,7 @@ class ProjectStageNodesRepository:
         planned_start: Any = None,
         planned_due: Any = None,
         skipped: Optional[bool] = None,
+        form_data: Optional[Dict[str, Any]] = None,
         _set_owner: bool = False,
         _set_schedule_start: bool = False,
         _set_schedule_due: bool = False,
@@ -421,6 +430,13 @@ class ProjectStageNodesRepository:
         ``_set_*`` flags separate "assign None" from "leave unchanged" for the
         nullable owner/schedule fields (a bare None default cannot). Returns the
         updated node, or None when it isn't in this project.
+
+        ``form_data`` (mig 390, M3 PR-I) is merge-with-whitelist: any key not
+        declared in THIS node's own ``form_schema`` is dropped silently before
+        merging into the existing ``form_data`` (previously-set keys not
+        touched by this call are preserved) — the server never trusts a
+        client-supplied key set, and a node's form fields are frozen at
+        instantiation (spec §2).
         """
         pid = int(str(project_id))
         nid = int(str(node_id))
@@ -455,6 +471,14 @@ class ProjectStageNodesRepository:
                     node.status = "skipped"
                 elif node.status == "skipped":
                     node.status = "pending"
+            if form_data is not None:
+                allowed_keys = {
+                    f.get("key") for f in (node.form_schema or []) if f.get("key")
+                }
+                filtered = {k: v for k, v in form_data.items() if k in allowed_keys}
+                merged = dict(node.form_data or {})
+                merged.update(filtered)
+                node.form_data = merged
             node.updated_at = datetime.datetime.now(datetime.timezone.utc)
 
             if members is not None:
