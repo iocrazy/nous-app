@@ -219,6 +219,8 @@ export async function fetchPromptAssets(opts: {
   tagId?: string;
   limit?: number;
 } = {}): Promise<PromptAsset[]> {
+  const { hasPromptData } = await import('../utils/promptTriggerTags');
+
   const cols =
     'id, filename, gen_prompt, gen_prompt_zh, gen_prompt_negative, gen_prompt_negative_zh, updated_at';
   // Widen to `string` before handing it to .select() — postgrest-js infers a
@@ -226,13 +228,14 @@ export async function fetchPromptAssets(opts: {
   // a ternary of two different template-literal shapes makes it choke with
   // a ParserError type instead of falling back to a generic row shape.
   const selectCols: string = opts.tagId ? `${cols}, resource_tags!inner(tag_id)` : cols;
+  const requestedLimit = opts.limit ?? 50;
   let q = supabase
     .from('resources')
     .select(selectCols)
-    .or('gen_prompt.not.is.null,gen_prompt_zh.not.is.null')
+    .or('gen_prompt.not.is.null,gen_prompt_zh.not.is.null,gen_prompt_negative.not.is.null,gen_prompt_negative_zh.not.is.null')
     .eq('is_trashed', false)
     .order('updated_at', { ascending: false })
-    .limit(opts.limit ?? 50);
+    .limit(requestedLimit + 30);
   if (opts.tagId) q = q.eq('resource_tags.tag_id', opts.tagId);
   if (opts.query) q = q.ilike('filename', `%${opts.query}%`);
 
@@ -245,15 +248,18 @@ export async function fetchPromptAssets(opts: {
   // literal-type row inference, so cast explicitly rather than relying on it
   // (same pattern as fetchResourceItems below).
   const rows = (data as unknown as Record<string, unknown>[]) ?? [];
-  return rows.map((r) => ({
-    id: String(r.id),
-    filename: String(r.filename ?? ''),
-    gen_prompt: (r.gen_prompt as string | null) ?? null,
-    gen_prompt_zh: (r.gen_prompt_zh as string | null) ?? null,
-    gen_prompt_negative: (r.gen_prompt_negative as string | null) ?? null,
-    gen_prompt_negative_zh: (r.gen_prompt_negative_zh as string | null) ?? null,
-    updated_at: String(r.updated_at ?? ''),
-  }));
+  return rows
+    .map((r) => ({
+      id: String(r.id),
+      filename: String(r.filename ?? ''),
+      gen_prompt: (r.gen_prompt as string | null) ?? null,
+      gen_prompt_zh: (r.gen_prompt_zh as string | null) ?? null,
+      gen_prompt_negative: (r.gen_prompt_negative as string | null) ?? null,
+      gen_prompt_negative_zh: (r.gen_prompt_negative_zh as string | null) ?? null,
+      updated_at: String(r.updated_at ?? ''),
+    }))
+    .filter(hasPromptData)
+    .slice(0, requestedLimit);
 }
 
 /** Translate the asset's generation prompt into `targetLang` via the
