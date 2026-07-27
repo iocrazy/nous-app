@@ -204,7 +204,12 @@ export async function exportTrainingSet(
 export async function translateGenPrompt(
   resourceId: string,
   targetLang: 'en' | 'zh',
-): Promise<{ gen_prompt: string | null; gen_prompt_zh: string | null }> {
+): Promise<{
+  gen_prompt: string | null;
+  gen_prompt_zh: string | null;
+  gen_prompt_negative?: string | null;
+  gen_prompt_negative_zh?: string | null;
+}> {
   const apiUrl = getApiUrl();
   const response = await fetch(
     `${apiUrl}/api/v1/resources/${resourceId}/gen-prompt/translate`,

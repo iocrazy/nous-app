@@ -473,6 +473,12 @@
       "merge": "Merge",
       "merging": "Merging…"
     },
+    "promptTriggerTags": {
+      "title": "Prompt Trigger Tags",
+      "hint": "Assets with any of these tags show the Prompt panel and card badge. The first tag is applied automatically when a prompt is added.",
+      "add": "Add tag",
+      "pick": "Pick a tag…"
+    },
     "theme": {
       "label": "Theme",
       "system": "System",
@@ -963,6 +969,8 @@
       "prompt": "Prompt",
       "addPrompt": "Add Prompt",
       "promptPlaceholder": "Paste the AI generation prompt...",
+      "negativePrompt": "Negative",
+      "negativePromptPlaceholder": "Negative prompt (what to avoid)...",
       "promptCopied": "Prompt copied",
       "copyPrompt": "Copy",
       "translatePrompt": "Translate",

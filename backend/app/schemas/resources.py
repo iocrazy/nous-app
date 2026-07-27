@@ -29,6 +29,16 @@ class ResourceUpdate(BaseModel):
         max_length=20000,
         description="Chinese-language AI generation prompt for this asset",
     )
+    gen_prompt_negative: Optional[str] = Field(
+        None,
+        max_length=20000,
+        description="Negative AI generation prompt attached to this asset",
+    )
+    gen_prompt_negative_zh: Optional[str] = Field(
+        None,
+        max_length=20000,
+        description="Chinese-language negative AI generation prompt",
+    )
     url: Optional[str] = Field(None, max_length=2000)
     rating: Optional[int] = Field(None, ge=0, le=5)
     is_trashed: Optional[bool] = None

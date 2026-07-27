@@ -79,14 +79,19 @@ async def upload_postprocess_probe_step(
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
-async def upload_postprocess_png_prompt_step(file_path: str) -> Optional[str]:
-    """Extract an embedded AI generation prompt from a PNG upload
-    (A1111 ``parameters`` / ComfyUI ``prompt`` text chunks). Pure read
-    I/O — returns the prompt text or None; the body persists it."""
-    from app.services.library.png_prompt_extractor import extract_png_prompt
+async def upload_postprocess_png_prompt_step(file_path: str) -> Optional[dict]:
+    """Extract an embedded AI generation positive+negative prompt pair from
+    a PNG upload (A1111 ``parameters`` / ComfyUI ``prompt`` text chunks).
+    Pure read I/O — returns ``{"positive": str, "negative": str | None}`` or
+    None; the body persists it. A dict (not the ``PngPromptPair`` NamedTuple)
+    because DBOS step outputs are JSON-serialized."""
+    from app.services.library.png_prompt_extractor import extract_png_prompt_pair
 
     async with materialize(file_path) as local_path:
-        return extract_png_prompt(local_path)
+        pair = extract_png_prompt_pair(local_path)
+        if not pair:
+            return None
+        return {"positive": pair.positive, "negative": pair.negative}
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
@@ -175,18 +180,27 @@ async def upload_postprocess_workflow(
             )
 
         # ── Phase A2: PNG generation-prompt extraction (non-fatal) ─────
-        # AI-generated PNGs (A1111/ComfyUI) carry their prompt in text
-        # chunks — surface it into gen_prompt for free. Never clobbers a
-        # user-entered prompt (new-version uploads re-run this workflow).
+        # AI-generated PNGs (A1111/ComfyUI) carry positive+negative prompts
+        # in text chunks — surface both into gen_prompt / gen_prompt_negative
+        # for free. Never clobbers a user-entered value (new-version uploads
+        # re-run this workflow), so each side is only written when currently
+        # empty.
         if mime_type == "image/png" or file_path.lower().endswith(".png"):
             try:
-                prompt = await upload_postprocess_png_prompt_step(file_path)
-                if prompt:
+                pair = await upload_postprocess_png_prompt_step(file_path)
+                if pair and pair.get("positive"):
                     current = await svc.repo.get_resource_by_id(resource_id)
-                    if current and not (current.get("gen_prompt") or "").strip():
-                        await svc.repo.update_resource(
-                            resource_id, {"gen_prompt": prompt}
-                        )
+                    if current:
+                        patch: dict = {}
+                        if not (current.get("gen_prompt") or "").strip():
+                            patch["gen_prompt"] = pair["positive"]
+                        if (
+                            pair.get("negative")
+                            and not (current.get("gen_prompt_negative") or "").strip()
+                        ):
+                            patch["gen_prompt_negative"] = pair["negative"]
+                        if patch:
+                            await svc.repo.update_resource(resource_id, patch)
             except Exception as e:
                 logger.warning(
                     f"[upload_postprocess] png-prompt phase failed for "

@@ -13,6 +13,7 @@ import { LogsPanel } from './LogsPanel';
 import { SystemMonitorPanel } from './SystemMonitorPanel';
 import { TaskCenter } from './TaskCenter/TaskCenter';
 import { TagsSettings } from './TagsSettings';
+import { PromptTriggerTagsCard } from './PromptTriggerTagsCard';
 import { ApiDocsPanel } from './ApiDocsPanel';
 import { CookiesSettings } from './CookiesSettings';
 import * as apiKeyService from '../services/apiKeyService';
@@ -763,7 +764,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
 
       {/* Tags Tab */}
       {activeTab === 'tags' && (
-        <TagsSettings />
+        <>
+          <PromptTriggerTagsCard />
+          <TagsSettings />
+        </>
       )}
 
       {/* AI Tab */}

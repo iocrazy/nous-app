@@ -54,6 +54,7 @@ export async function createTag(data: {
   icon?: string;
   type?: 'system' | 'user';
   group_id?: string | null;
+  prompt_trigger?: boolean;
 }): Promise<Tag> {
   const apiUrl = getApiUrl();
   const res = await fetch(`${apiUrl}/api/v1/tags`, {
@@ -86,6 +87,7 @@ export interface TagUpdate {
   color?: string;
   icon?: string;
   enabled?: boolean;
+  prompt_trigger?: boolean;
   group_id?: string | null;
   sort_order?: number;
   // Promote-only: 'note' → 'curated' moves a shadow tag into the curated

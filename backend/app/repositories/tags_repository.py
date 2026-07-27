@@ -383,6 +383,7 @@ class TagsRepository:
         icon: Optional[str] = None,
         name_zh: Optional[str] = None,
         group_id: Optional[str] = None,
+        prompt_trigger: bool = False,
     ) -> dict:
         """Create a new user tag (id fires the server-default snowflake)."""
         values: Dict[str, Any] = {
@@ -391,6 +392,7 @@ class TagsRepository:
             "user_id": user_id,
             "color": color,
             "icon": icon,
+            "prompt_trigger": prompt_trigger,
         }
         if name_zh:
             values["name_zh"] = name_zh

@@ -32,6 +32,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.services.library.png_prompt_extractor import PngPromptPair
+
 pytestmark = pytest.mark.asyncio
 
 _USER = "11111111-1111-1111-1111-111111111111"
@@ -59,6 +61,7 @@ def _patches(
     get_version: AsyncMock,
     trigger_transcode: AsyncMock,
     manager: MagicMock,
+    get_resource_by_id: AsyncMock | None = None,
 ):
     from app.repositories.resources_repository import ResourcesRepository
     from app.services.library.resources_service import ResourcesService
@@ -74,6 +77,11 @@ def _patches(
         patch.object(ResourcesRepository, "update_resource", update_resource),
         patch.object(ResourcesRepository, "update_version", update_version),
         patch.object(ResourcesRepository, "get_version_by_number", get_version),
+        patch.object(
+            ResourcesRepository,
+            "get_resource_by_id",
+            get_resource_by_id or AsyncMock(return_value=None),
+        ),
         patch(
             "app.services.infra.unified_task_manager.get_task_manager",
             return_value=manager,
@@ -266,18 +274,176 @@ async def test_png_prompt_step_reads_via_materialize(tmp_path):
     fixture = tmp_path / "materialized-source.png"
     fixture.write_bytes(b"fake png bytes")
     seen: dict = {}
-    extract_prompt = MagicMock(return_value="a cat riding a bike")
+    extract_pair = MagicMock(
+        return_value=PngPromptPair(positive="masterpiece, 1girl", negative="lowres")
+    )
 
     with (
         patch.object(m, "materialize", _fake_materialize(seen, fixture)),
         patch(
-            "app.services.library.png_prompt_extractor.extract_png_prompt",
-            extract_prompt,
+            "app.services.library.png_prompt_extractor.extract_png_prompt_pair",
+            extract_pair,
         ),
     ):
         step = inspect.unwrap(m.upload_postprocess_png_prompt_step)
         result = await step("sb://library/t1/ab/cd/deadbeef.png")
 
     assert seen["file_path"] == "sb://library/t1/ab/cd/deadbeef.png"
-    extract_prompt.assert_called_once_with(fixture)
-    assert result == "a cat riding a bike"
+    extract_pair.assert_called_once_with(fixture)
+    assert result == {"positive": "masterpiece, 1girl", "negative": "lowres"}
+
+
+async def test_png_prompt_step_returns_none_when_no_prompt_found(tmp_path):
+    from app.workflows import upload_postprocess as m
+
+    fixture = tmp_path / "materialized-source.png"
+    fixture.write_bytes(b"fake png bytes")
+    seen: dict = {}
+    extract_pair = MagicMock(return_value=None)
+
+    with (
+        patch.object(m, "materialize", _fake_materialize(seen, fixture)),
+        patch(
+            "app.services.library.png_prompt_extractor.extract_png_prompt_pair",
+            extract_pair,
+        ),
+    ):
+        step = inspect.unwrap(m.upload_postprocess_png_prompt_step)
+        result = await step("sb://library/t1/ab/cd/deadbeef.png")
+
+    assert result is None
+
+
+async def test_png_prompt_writes_positive_and_negative_when_both_empty():
+    extract_video = AsyncMock(return_value={})
+    generate_thumbnail = AsyncMock(return_value=None)
+    update_resource = AsyncMock(return_value={"id": _RID})
+    update_version = AsyncMock(return_value={"id": "v1"})
+    get_version = AsyncMock(return_value={"id": "v1"})
+    trigger_transcode = AsyncMock(return_value=None)
+    manager = _make_manager()
+    get_resource_by_id = AsyncMock(
+        return_value={"gen_prompt": "", "gen_prompt_negative": ""}
+    )
+    extract_pair = MagicMock(
+        return_value=PngPromptPair(positive="masterpiece, 1girl", negative="lowres")
+    )
+
+    with (
+        _patches(
+            extract_video=extract_video,
+            generate_thumbnail=generate_thumbnail,
+            update_resource=update_resource,
+            update_version=update_version,
+            get_version=get_version,
+            trigger_transcode=trigger_transcode,
+            manager=manager,
+            get_resource_by_id=get_resource_by_id,
+        ),
+        patch(
+            "app.services.library.png_prompt_extractor.extract_png_prompt_pair",
+            extract_pair,
+        ),
+    ):
+        result = await _body()(
+            resource_id=_RID,
+            file_path="teams/t1/uploads/r1/v1/art.png",
+            file_type="image",
+            mime_type="image/png",
+            user_id=_USER,
+        )
+
+    assert result["status"] == "success"
+    update_resource.assert_any_await(
+        _RID, {"gen_prompt": "masterpiece, 1girl", "gen_prompt_negative": "lowres"}
+    )
+
+
+async def test_png_prompt_never_clobbers_existing_negative():
+    extract_video = AsyncMock(return_value={})
+    generate_thumbnail = AsyncMock(return_value=None)
+    update_resource = AsyncMock(return_value={"id": _RID})
+    update_version = AsyncMock(return_value={"id": "v1"})
+    get_version = AsyncMock(return_value={"id": "v1"})
+    trigger_transcode = AsyncMock(return_value=None)
+    manager = _make_manager()
+    get_resource_by_id = AsyncMock(
+        return_value={"gen_prompt": "", "gen_prompt_negative": "user typed"}
+    )
+    extract_pair = MagicMock(
+        return_value=PngPromptPair(positive="masterpiece, 1girl", negative="lowres")
+    )
+
+    with (
+        _patches(
+            extract_video=extract_video,
+            generate_thumbnail=generate_thumbnail,
+            update_resource=update_resource,
+            update_version=update_version,
+            get_version=get_version,
+            trigger_transcode=trigger_transcode,
+            manager=manager,
+            get_resource_by_id=get_resource_by_id,
+        ),
+        patch(
+            "app.services.library.png_prompt_extractor.extract_png_prompt_pair",
+            extract_pair,
+        ),
+    ):
+        result = await _body()(
+            resource_id=_RID,
+            file_path="teams/t1/uploads/r1/v1/art.png",
+            file_type="image",
+            mime_type="image/png",
+            user_id=_USER,
+        )
+
+    assert result["status"] == "success"
+    update_resource.assert_any_await(_RID, {"gen_prompt": "masterpiece, 1girl"})
+
+
+async def test_png_prompt_never_clobbers_existing_positive():
+    """Symmetric to test_png_prompt_never_clobbers_existing_negative: an
+    existing gen_prompt ("user typed") must survive extraction, so the
+    patch sent to update_resource should contain only gen_prompt_negative.
+    """
+    extract_video = AsyncMock(return_value={})
+    generate_thumbnail = AsyncMock(return_value=None)
+    update_resource = AsyncMock(return_value={"id": _RID})
+    update_version = AsyncMock(return_value={"id": "v1"})
+    get_version = AsyncMock(return_value={"id": "v1"})
+    trigger_transcode = AsyncMock(return_value=None)
+    manager = _make_manager()
+    get_resource_by_id = AsyncMock(
+        return_value={"gen_prompt": "user typed", "gen_prompt_negative": ""}
+    )
+    extract_pair = MagicMock(
+        return_value=PngPromptPair(positive="masterpiece, 1girl", negative="lowres")
+    )
+
+    with (
+        _patches(
+            extract_video=extract_video,
+            generate_thumbnail=generate_thumbnail,
+            update_resource=update_resource,
+            update_version=update_version,
+            get_version=get_version,
+            trigger_transcode=trigger_transcode,
+            manager=manager,
+            get_resource_by_id=get_resource_by_id,
+        ),
+        patch(
+            "app.services.library.png_prompt_extractor.extract_png_prompt_pair",
+            extract_pair,
+        ),
+    ):
+        result = await _body()(
+            resource_id=_RID,
+            file_path="teams/t1/uploads/r1/v1/art.png",
+            file_type="image",
+            mime_type="image/png",
+            user_id=_USER,
+        )
+
+    assert result["status"] == "success"
+    update_resource.assert_any_await(_RID, {"gen_prompt_negative": "lowres"})

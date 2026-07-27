@@ -326,6 +326,7 @@ async def create_tag(
         color=tag.color,
         icon=tag.icon,
         name_zh=tag.name_zh,
+        prompt_trigger=tag.prompt_trigger,
     )
 
     return created_tag
@@ -443,6 +444,7 @@ async def update_tag(
         # Promote-only: schema restricts this to "curated"; the repo's
         # _TAG_ATTRS whitelist already admits the ``origin`` column.
         origin=tag_update.origin,
+        prompt_trigger=tag_update.prompt_trigger,
     )
 
     return updated

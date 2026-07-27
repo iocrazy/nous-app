@@ -473,6 +473,12 @@
       "merge": "合并",
       "merging": "合并中…"
     },
+    "promptTriggerTags": {
+      "title": "Prompt 触发标签",
+      "hint": "带这些标签的素材会显示 Prompt 面板和卡片角标。添加 prompt 时会自动打上第一个标签。",
+      "add": "添加标签",
+      "pick": "选择标签…"
+    },
     "theme": {
       "label": "主题",
       "system": "跟随系统",
@@ -963,6 +969,8 @@
       "prompt": "提示词",
       "addPrompt": "添加提示词",
       "promptPlaceholder": "粘贴 AI 生成提示词...",
+      "negativePrompt": "负面",
+      "negativePromptPlaceholder": "负面提示词（要避免的内容）...",
       "promptCopied": "提示词已复制",
       "copyPrompt": "复制",
       "translatePrompt": "翻译",

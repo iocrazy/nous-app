@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { ResourceItem, Tag } from '../types';
 import { getResourceCoverUrl, getPreviewSpriteUrl } from '../services/resourceService';
 import { formatDateShort } from '../utils/formatDate';
+import { PromptBadge } from './resources/PromptBadge';
 
 interface ResourceCardProps {
   item: ResourceItem;
@@ -448,6 +449,15 @@ export const ResourceCard: React.FC<ResourceCardProps> = ({
           <span className="absolute bottom-1.5 right-1.5 bg-black/75 text-white text-[11px] px-1.5 py-0.5 rounded-md font-medium tabular-nums">
             {formatDuration(Math.floor(scrubPercent * resource.duration_seconds))}
           </span>
+        )}
+        {resource && (
+          <PromptBadge
+            resource={resource}
+            shiftLeft={
+              (mimeType?.startsWith('video/') || mimeType?.startsWith('audio/')) &&
+              resource?.duration_seconds != null
+            }
+          />
         )}
       </div>
       {/* Actions overlay - top right */}

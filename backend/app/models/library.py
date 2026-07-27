@@ -133,6 +133,12 @@ class Tags(Base):
         server_default=text("'curated'::character varying"),
         comment="'curated' = user-managed shelf; 'note' = auto-created from note #tags.",
     )
+    prompt_trigger: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+        comment="When true, assets tagged with this tag surface the Prompt panel/badge.",
+    )
 
 
 class Libraries(Base):

@@ -25,7 +25,7 @@ import re
 import struct
 import zlib
 from pathlib import Path
-from typing import Iterator, Optional, Tuple
+from typing import Iterator, NamedTuple, Optional, Tuple
 
 from loguru import logger
 
@@ -120,20 +120,49 @@ def _iter_text_chunks(path: Path) -> Iterator[Tuple[str, str]]:
                 f.seek(length + 4, 1)
 
 
-def parse_a1111_parameters(text: str) -> str:
-    """Extract the positive prompt from an A1111 ``parameters`` blob.
+class PngPromptPair(NamedTuple):
+    """Positive + optional negative prompt extracted from PNG metadata."""
 
-    The blob is: positive prompt (possibly multi-line), an optional
-    ``Negative prompt: ...`` block, then a ``Steps: ...`` settings line.
-    Everything before the first negative/settings marker is the prompt.
+    positive: str
+    negative: Optional[str]
+
+
+def parse_a1111_pair(text: str) -> Optional[PngPromptPair]:
+    """Split an A1111 ``parameters`` blob into positive/negative prompts.
+
+    Blob layout: positive (multi-line) → optional ``Negative prompt: ...``
+    block (multi-line) → ``Steps: ...`` settings line. ComfyUI graphs don't
+    label negative in API format, so this only applies to A1111 blobs.
     """
-    lines = text.splitlines()
-    kept: list[str] = []
-    for line in lines:
-        if line.startswith("Negative prompt:") or _SETTINGS_LINE_RE.match(line):
-            break
-        kept.append(line)
-    return "\n".join(kept).strip()
+    pos_lines: list[str] = []
+    neg_lines: list[str] = []
+    section = "positive"
+    for line in text.splitlines():
+        if section == "positive":
+            if line.startswith("Negative prompt:"):
+                section = "negative"
+                first = line[len("Negative prompt:") :].strip()
+                if first:
+                    neg_lines.append(first)
+                continue
+            if _SETTINGS_LINE_RE.match(line):
+                break
+            pos_lines.append(line)
+        else:
+            if _SETTINGS_LINE_RE.match(line):
+                break
+            neg_lines.append(line)
+    positive = "\n".join(pos_lines).strip()
+    if not positive:
+        return None
+    negative = "\n".join(neg_lines).strip() or None
+    return PngPromptPair(positive=positive, negative=negative)
+
+
+def parse_a1111_parameters(text: str) -> str:
+    """Extract the positive prompt from an A1111 ``parameters`` blob."""
+    pair = parse_a1111_pair(text)
+    return pair.positive if pair else ""
 
 
 def extract_comfyui_prompt(graph_json: str) -> Optional[str]:
@@ -165,27 +194,31 @@ def extract_comfyui_prompt(graph_json: str) -> Optional[str]:
     return max(texts, key=len)
 
 
-def extract_png_prompt(file_path: str | Path) -> Optional[str]:
-    """Extract the generation prompt from a PNG file, or None.
+def extract_png_prompt_pair(file_path: str | Path) -> Optional[PngPromptPair]:
+    """Extract positive+negative generation prompts from a PNG, or None.
 
-    Checks A1111 ``parameters`` first (explicit prompt format), then the
-    ComfyUI ``prompt`` graph. Never raises — a corrupt upload must not
-    break post-processing.
+    A1111 ``parameters`` first (labeled negative), then ComfyUI ``prompt``
+    graph (positive only — API format doesn't label negative). Never raises.
     """
     path = Path(file_path)
     try:
         comfy_graph: Optional[str] = None
         for keyword, text in _iter_text_chunks(path):
             if keyword == "parameters":
-                prompt = parse_a1111_parameters(text)
-                if prompt:
-                    return prompt[:MAX_PROMPT_CHARS]
+                pair = parse_a1111_pair(text)
+                if pair:
+                    return PngPromptPair(
+                        positive=pair.positive[:MAX_PROMPT_CHARS],
+                        negative=(
+                            pair.negative[:MAX_PROMPT_CHARS] if pair.negative else None
+                        ),
+                    )
             elif keyword == "prompt" and comfy_graph is None:
                 comfy_graph = text
         if comfy_graph:
             prompt = extract_comfyui_prompt(comfy_graph)
             if prompt:
-                return prompt[:MAX_PROMPT_CHARS]
+                return PngPromptPair(positive=prompt[:MAX_PROMPT_CHARS], negative=None)
         return None
     except OSError as e:
         logger.warning(f"[PngPrompt] cannot read {path}: {e}")
@@ -193,3 +226,9 @@ def extract_png_prompt(file_path: str | Path) -> Optional[str]:
     except Exception as e:
         logger.warning(f"[PngPrompt] unexpected parse failure for {path}: {e}")
         return None
+
+
+def extract_png_prompt(file_path: str | Path) -> Optional[str]:
+    """Back-compat: positive prompt only. See extract_png_prompt_pair."""
+    pair = extract_png_prompt_pair(file_path)
+    return pair.positive if pair else None
