@@ -16,7 +16,6 @@ import datetime
 import uuid
 from typing import Any, Dict, List, Optional
 
-from loguru import logger
 from sqlalchemy import delete, select, update
 
 from app.db.session import read_scope, write_scope
