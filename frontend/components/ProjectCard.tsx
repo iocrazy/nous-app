@@ -75,8 +75,19 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
     ? colorLabelBorders[project.color_label] || colors.border
     : colors.border;
   const isArchived = Boolean(project.archived_at);
-  const stage = project.current_stage ?? null;
   const workflowBadge = project.workflow_badge ?? null;
+  // StageRing is workflow-driven only (G3 dropped the SOP current_stage
+  // fallback) — a No-workflow project (no badge / no cursor) renders no ring.
+  const ringStage =
+    workflowBadge &&
+    workflowBadge.workflow_position != null &&
+    workflowBadge.workflow_total > 0
+      ? {
+          name: workflowBadge.current_node_name ?? '',
+          index: workflowBadge.workflow_position,
+          total: workflowBadge.workflow_total,
+        }
+      : null;
   const membersPreview = project.members_preview ?? null;
   const activity = project.latest_activity ?? null;
   const hasSuggestion = Boolean(suggestion && suggestion.kind && suggestion.action);
@@ -117,7 +128,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
     >
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          <StageRing stage={stage} archived={isArchived} />
+          <StageRing stage={ringStage} archived={isArchived} />
           <div className="min-w-0">
             <h3 className="text-ink-50 font-medium text-base truncate group-hover:text-[var(--accent-text)] transition-colors">
               {project.name}
@@ -195,10 +206,6 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
               className="px-2 py-0.5 rounded-full font-medium bg-[var(--accent-soft)] text-[var(--accent-text)] truncate"
             >
               {workflowBadge.current_node_name}
-            </span>
-          ) : stage ? (
-            <span className="px-2 py-0.5 rounded-full font-medium bg-[var(--accent-soft)] text-[var(--accent-text)]">
-              {stage.name}
             </span>
           ) : (
             <span className={`px-2 py-0.5 rounded-full font-medium ${colors.badge}`}>

@@ -1,18 +1,24 @@
 /**
- * StageRing — segmented SOP progress ring for project cards (Phase B B1).
- *
- * One arc segment per catalog stage: filled = passed, glowing = current,
- * faint = upcoming. The center shows "index/total". Segment count follows
- * `total` from the stage catalog, so adding a stage in the DB reshapes the
- * ring without a code change. Renders nothing when `stage` is null (project
- * created before the SOP machine, or enrichment degraded).
+ * StageRing — segmented workflow progress ring for project cards (Phase B B1;
+ * re-sourced from the SOP `current_stage` to the workflow badge's
+ * position/total in G3). One arc segment per node: filled = passed, glowing =
+ * current, faint = upcoming. The center shows "index/total". Segment count
+ * follows `total`, so adding a node reshapes the ring without a code change.
+ * Renders nothing when `stage` is null (No-workflow project, or enrichment
+ * degraded).
  */
 
 import React from 'react';
-import type { ProjectCardStage } from '../../types';
+
+interface RingStage {
+  name: string;
+  /** 1-based position among the ring's segments. */
+  index: number;
+  total: number;
+}
 
 interface StageRingProps {
-  stage: ProjectCardStage | null | undefined;
+  stage: RingStage | null | undefined;
   /** Ring diameter in px. */
   size?: number;
   /**

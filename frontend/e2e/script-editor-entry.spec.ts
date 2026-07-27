@@ -22,7 +22,6 @@ const CATALOG = [
   { id: '2', slug: 'writing', name: 'Writing', sort_order: 2, tools_recommended: [] },
   { id: '3', slug: 'storyboard', name: 'Storyboard', sort_order: 3, tools_recommended: [] },
 ];
-const CURRENT_STAGE = CATALOG[2];
 
 const PROJECT = {
   id: '1', name: 'Spring Campaign 2026', description: '', owner_id: 'u1', team_id: TEAM_ID,
@@ -60,7 +59,6 @@ async function routeWorkspaceApi(page: Page): Promise<void> {
     const { pathname } = new URL(route.request().url());
     if (pathname === '/api/v1/projects') return route.fulfill({ json: { data: [PROJECT] } });
     if (pathname === '/api/v1/projects/stages/catalog') return route.fulfill({ json: { data: CATALOG } });
-    if (pathname.endsWith('/current_stage')) return route.fulfill({ json: { data: CURRENT_STAGE } });
     if (pathname.endsWith('/episodes/progress')) return route.fulfill({ json: { success: true, data: EPISODES } });
     if (pathname.endsWith('/entities')) return route.fulfill({ json: { success: true, data: { characters: [], locations: [] } } });
     if (pathname.endsWith('/episodes')) return route.fulfill({ json: { success: true, data: EPISODES } });

@@ -718,8 +718,7 @@ export interface Project {
   created_at: string;
   updated_at: string;
   // Card enrichment (Phase B B1) — batch-derived on the list endpoint;
-  // null/absent when the project has no stage/members/history rows.
-  current_stage?: ProjectCardStage | null;
+  // null/absent when the project has no members/history rows.
   members_preview?: ProjectMembersPreview | null;
   latest_activity?: ProjectCardActivity | null;
   // Workflow badge (M2-W3-3) — batch-derived; null/absent for a No-workflow
@@ -767,14 +766,6 @@ export interface Topic {
   created_by: string | null;
   created_at: string;
   updated_at: string;
-}
-
-export interface ProjectCardStage {
-  slug: string;
-  name: string;
-  /** 1-based position in the stage catalog (sort_order ranking). */
-  index: number;
-  total: number;
 }
 
 export interface ProjectMembersPreview {
@@ -1314,7 +1305,7 @@ export interface StoryboardProgress {
   scene_count: number;
 }
 
-/** The action a stage-suggestion CTA performs: fire the one-click batch, or navigate a tab. */
+/** The action a work-queue suggestion CTA performs: fire the one-click batch, or navigate a tab. */
 export interface SuggestionAction {
   type: 'generate_missing_frames' | 'navigate';
   label_key: string;

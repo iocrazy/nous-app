@@ -19,12 +19,15 @@ import { useTranslation } from 'react-i18next';
 import { ArrowRight, Bot, ExternalLink, FileCheck2, User } from 'lucide-react';
 import { Loading } from '../common/Loading';
 import { fetchStageBoard } from '../../services/workflowService';
+import { fetchProjectMembers } from '../../services/projectsService';
+import { aiLibraryService } from '../../services/aiLibraryService';
 import {
   isNodeInActiveGroup,
   isNodeOverdue,
   NODE_STATUS_CONFIG,
   NODE_STATUS_LABEL,
 } from '../workflow/nodeStatus';
+import type { AgentOption, PersonOption } from '../workflow/OwnerPicker';
 import { DeliverablesZone } from '../Todolist/DeliverablesZone';
 import type { ProjectWorkflow, StageBoardData, StageBoardIssueRef } from '../../types';
 
@@ -72,6 +75,27 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
   const [board, setBoard] = useState<StageBoardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  // Candidate pools for resolving owner_user_id / owner_agent_id to display
+  // names — same lists CurrentNodeCard's OwnerPicker uses (#final-review E-item:
+  // this component used to render the raw UUIDs straight from the board fetch).
+  const [people, setPeople] = useState<PersonOption[]>([]);
+  const [agents, setAgents] = useState<AgentOption[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const [mem, ag] = await Promise.all([
+        fetchProjectMembers(projectId).catch(() => []),
+        aiLibraryService.listAgents().catch(() => []),
+      ]);
+      if (!alive) return;
+      setPeople(mem.map((m) => ({ id: m.user_id, name: m.email || 'Member' })));
+      setAgents(ag.map((a) => ({ id: a.id, name: a.name, slug: a.slug })));
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [projectId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,7 +116,11 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [projectId, nodeId]);
+    // `workflow` is included so a Complete-stage advance (which reloads the
+    // shared workflow instance) also refetches THIS board — otherwise the
+    // header/status/tasks kept showing the pre-advance snapshot until the user
+    // navigated away and back (#final-review item: board refresh on advance).
+  }, [projectId, nodeId, workflow]);
 
   if (loading) {
     return (
@@ -140,7 +168,11 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
               className="ml-auto inline-flex items-center gap-1 rounded-full bg-amber-500/12 px-2.5 py-1 text-[11px] font-medium text-amber-400 transition hover:bg-amber-500/20"
             >
               <Bot size={12} />
-              {t('projects.workflow.suggestAgentRun', { agentName: node.owner_agent_id })}
+              {t('projects.workflow.suggestAgentRun', {
+                agentName:
+                  agents.find((a) => a.id === node.owner_agent_id)?.name ??
+                  t('projects.workflow.genericAgent'),
+              })}
             </button>
           )}
         </div>
@@ -152,11 +184,11 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
             </span>
             {node.owner_agent_id ? (
               <span className="inline-flex items-center gap-1 text-ink-200">
-                <Bot size={12} /> {node.owner_agent_id}
+                <Bot size={12} /> {agents.find((a) => a.id === node.owner_agent_id)?.name ?? 'Agent'}
               </span>
             ) : node.owner_user_id ? (
               <span className="inline-flex items-center gap-1 text-ink-200">
-                <User size={12} /> {node.owner_user_id}
+                <User size={12} /> {people.find((p) => p.id === node.owner_user_id)?.name ?? 'Member'}
               </span>
             ) : (
               <span className="text-ink-500">{t('projects.workflow.unassigned')}</span>

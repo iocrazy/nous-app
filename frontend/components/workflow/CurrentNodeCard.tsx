@@ -82,7 +82,9 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
           >
             <Bot size={12} />
             {t('projects.workflow.suggestAgentRun', {
-              agentName: agents.find((a) => a.id === node.owner_agent_id)?.name ?? 'agent',
+              agentName:
+                agents.find((a) => a.id === node.owner_agent_id)?.name ??
+                t('projects.workflow.genericAgent'),
             })}
           </button>
         )}

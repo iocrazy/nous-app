@@ -10,19 +10,17 @@
  * mount `EditorShell` INLINE. The embedded editor drops its own left rail
  * (EditorShell `embedded`), so this tree is the single side navigation: the
  * episode's work views (剧本/节拍/分镜/场景) hang off the 剧集 node, and the
- * editor's scene list is lifted up into a SCENES sub-section. The SOP stage is
- * a read-only read-out in the top bar; advancing stages happens elsewhere.
+ * editor's scene list is lifted up into a SCENES sub-section. A workflow
+ * project's node stepper is a read-only read-out in the top bar (G3 dropped
+ * the legacy SOP `current_stage` read-out for No-workflow projects); advancing
+ * stages happens elsewhere.
  */
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Loading } from '../common/Loading';
-import {
-  fetchCurrentStage,
-  fetchEpisodesProgress,
-  fetchStageCatalog,
-} from '../../services/projectsService';
+import { fetchEpisodesProgress } from '../../services/projectsService';
 import {
   createScriptProject,
   fetchScriptProjects,
@@ -43,7 +41,7 @@ import { useProjectWorkflow } from '../../hooks/useProjectWorkflow';
 import { executeAdvance, fetchAdvancePreview } from '../../services/workflowService';
 import { episodeStorageKey, type WorkspaceModule } from './workspaceModules';
 import type { FilesChip } from './WorkspaceFiles';
-import type { AdvancePreview, EpisodeProgress, Project, ProjectStage } from '../../types';
+import type { AdvancePreview, EpisodeProgress, Project } from '../../types';
 
 // Code-split the heavier / non-default modules out of the ProjectsPage chunk
 // (PR-19). Overview is the landing module so it stays eager, as do the
@@ -136,36 +134,6 @@ export function ProjectWorkspace({
       { replace: true },
     );
   }, [activeModule, stageNodeId, setSearchParams]);
-
-  // ── SOP stage (catalog + current, READ-ONLY here) ─────────────────────
-  const [catalog, setCatalog] = useState<ProjectStage[]>([]);
-  const [currentStage, setCurrentStageState] = useState<ProjectStage | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchStageCatalog()
-      .then((stages) => {
-        if (!cancelled) setCatalog(stages);
-      })
-      .catch((err) => console.error('[ProjectWorkspace] failed to load stage catalog:', err));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchCurrentStage(project.id)
-      .then((stage) => {
-        if (!cancelled) setCurrentStageState(stage);
-      })
-      .catch((err) => console.error('[ProjectWorkspace] failed to load current stage:', err));
-    return () => {
-      cancelled = true;
-    };
-  }, [project.id]);
-
-  const currentIndex = catalog.findIndex((s) => s.id === currentStage?.id);
 
   // ── Workflow instance (strip + node card + advance gate) ───────────────
   const { workflow, reload: reloadWorkflow } = useProjectWorkflow(project.id);
@@ -464,6 +432,15 @@ export function ProjectWorkspace({
 
   const studioMode = activeModule === 'script' && resolvedScriptId != null;
 
+  // `?module=stage` without a `node` param has nothing to render (stageNodeId
+  // fell back to null, see the useState initializer above) — the module
+  // comment promised a fallback to Overview, but the render switch below only
+  // ever matched a plain 'overview' module, leaving the content area blank.
+  // Route THIS content render to Overview without touching `activeModule`
+  // itself (URL/module state stays 'stage' so a later `onOpenStage` re-entry
+  // still behaves as expected).
+  const showOverview = activeModule === 'overview' || (activeModule === 'stage' && !stageNodeId);
+
   // Film slate read-out (studio only): 1-based episode + active-scene numbers.
   const epIdx = episodes.findIndex((e) => e.episode_id === currentEpisode?.episode_id);
   const epNumber = epIdx >= 0 ? epIdx + 1 : null;
@@ -478,9 +455,6 @@ export function ProjectWorkspace({
       <WorkspaceTopBar
         projectName={project.name}
         onBack={onBack}
-        catalog={catalog}
-        currentStage={currentStage}
-        currentIndex={currentIndex}
         canWrite={canWrite}
         slate={activeModule === 'script' && epNumber ? { ep: epNumber, scene: sceneNumber } : null}
         workflow={workflow}
@@ -530,7 +504,7 @@ export function ProjectWorkspace({
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto px-6 pb-8">
-            {activeModule === 'overview' && (
+            {showOverview && (
               <WorkspaceOverview
                 project={project}
                 episodes={episodes}

@@ -294,12 +294,6 @@ class Projects(Base):
             name="projects_workflow_id_fkey",
         ),
         # current_canvas_id has no FK in the DB — deliberately unconstrained.
-        ForeignKeyConstraint(
-            ["current_stage_id"],
-            ["public.project_stages.id"],
-            ondelete="SET NULL",
-            name="projects_current_stage_id_fkey",
-        ),
         PrimaryKeyConstraint("id", name="projects_pkey"),
         Index("idx_projects_owner", "owner_id"),
         Index("idx_projects_team", "team_id"),
@@ -340,10 +334,6 @@ class Projects(Base):
     current_canvas_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
         comment="Canvas cursor: which canvas this project reopens on (projects-as-workspace).",
-    )
-    current_stage_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger,
-        comment="Stage cursor: which pipeline stage the workspace resumes at.",
     )
     current_node_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,

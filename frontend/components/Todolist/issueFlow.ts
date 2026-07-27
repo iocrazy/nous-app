@@ -118,13 +118,13 @@ export function readDueDate(raw: unknown): string | null | undefined {
 //
 // A project that runs a workflow instance presents its flow from the node chain
 // (WorkspaceTopBar / Overview / Sidebar already do); the issue context bar's
-// progress ring must read the SAME source so带 workflow 的 project 不再有一处
-// SOP、一处 workflow 的分裂展示. `loadProjectFlow` is that single switch point:
-// workflow nodes when the project has one, the legacy SOP catalog otherwise.
+// progress ring must read the SAME source. `loadProjectFlow` is that single
+// switch point: workflow nodes when the project has one, null otherwise (the
+// legacy SOP catalog fallback was retired in G3 — a No-workflow project's ring
+// simply hides).
 
 import { fetchProjectWorkflow } from '../../services/workflowService';
-import { fetchCurrentStage, fetchStageCatalog } from '../../services/projectsService';
-import type { ProjectWorkflow, ProjectStage } from '../../types';
+import type { ProjectWorkflow } from '../../types';
 
 /** Flow read-out for the context bar's progress ring. */
 export interface ProjectFlow {
@@ -154,41 +154,17 @@ export function deriveWorkflowFlow(
 }
 
 /**
- * Derive the flow read-out from the legacy SOP catalog + current stage, or null
- * when no stage is set. Mirrors the pre-W2 inline computation exactly (index
- * falls back to 1 when the current stage isn't found in the catalog).
- */
-export function deriveSopFlow(
-  catalog: ProjectStage[],
-  currentStage: ProjectStage | null,
-): ProjectFlow | null {
-  if (!currentStage || catalog.length === 0) return null;
-  const idx = catalog.findIndex((s) => String(s.id) === String(currentStage.id));
-  return {
-    name: currentStage.name,
-    index: idx >= 0 ? idx + 1 : 1,
-    total: catalog.length,
-  };
-}
-
-/**
  * Single-point loader for the issue context bar's flow ring. Workflow projects
- * read the node chain; everyone else falls back to the SOP catalog. Best-effort
- * — any failure resolves to null so the ring simply hides.
+ * read the node chain; a No-workflow project resolves to null (the legacy SOP
+ * catalog fallback was retired in G3 — the ring simply hides). Best-effort —
+ * any failure also resolves to null.
  */
 export async function loadProjectFlow(
   projectId: string,
 ): Promise<ProjectFlow | null> {
   try {
     const workflow = await fetchProjectWorkflow(projectId).catch(() => null);
-    if (workflow?.has_workflow) {
-      return deriveWorkflowFlow(workflow);
-    }
-    const [current, catalog] = await Promise.all([
-      fetchCurrentStage(projectId),
-      fetchStageCatalog(),
-    ]);
-    return deriveSopFlow(catalog, current);
+    return deriveWorkflowFlow(workflow);
   } catch {
     return null;
   }

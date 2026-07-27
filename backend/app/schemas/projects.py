@@ -258,12 +258,6 @@ class StyleProfileUpdate(BaseModel):
     reference_links: Optional[list] = Field(None, max_length=100)
 
 
-class CurrentStageUpdate(BaseModel):
-    """Request body for PUT /projects/{id}/current_stage."""
-
-    stage_id: int = Field(..., description="Target project_stages.id")
-
-
 class StoryboardProgress(BaseModel):
     total: int
     done: int
@@ -280,13 +274,6 @@ class SuggestionAction(BaseModel):
     label_key: str
     tab: Optional[str] = None  # navigate target: scripts|output|files
     count: Optional[int] = None  # generate_missing_frames: number of empty shots
-
-
-class StageSuggestionResponse(BaseModel):
-    stage_slug: Optional[str] = None  # None when project has no current stage
-    kind: str  # see spec kind decision table; "" = render nothing
-    progress: Optional[StoryboardProgress] = None
-    action: Optional[SuggestionAction] = None
 
 
 class GenerateMissingResponse(BaseModel):

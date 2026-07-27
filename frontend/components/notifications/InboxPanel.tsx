@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Sparkles, Send, Bot, Megaphone, CheckCheck } from 'lucide-react';
+import { Bell, Sparkles, Send, Bot, Megaphone, CheckCheck, Workflow } from 'lucide-react';
 import { useInbox } from '../../contexts/InboxContext';
 import { useWorkspaceScope } from '../../hooks/useWorkspaceScope';
 import { resolveNotificationLink } from './notificationLink';
@@ -20,6 +20,7 @@ const KIND_ICON: Record<InboxKind, React.ComponentType<{ size?: number; classNam
   generation_result: Sparkles,
   publish_result: Send,
   autopilot_output: Bot,
+  workflow_stage: Workflow,
 };
 
 function severityClasses(severity: InboxSeverity): { dot: string; icon: string } {

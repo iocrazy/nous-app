@@ -74,17 +74,6 @@ def _has_write_guard(route) -> bool:
     return _has_dependency(route, "verify_project_write_access")
 
 
-def test_stage_suggestion_has_read_guard():
-    # NB: `from app.api import projects_router` would resolve to the APIRouter
-    # instance, not the module — app/api/__init__.py does
-    # `from app.api.projects_router import router as projects_router`, which
-    # shadows the submodule name in the `app.api` package namespace. Use the
-    # `router` object already imported at module scope instead.
-    route = _find_route(router, "/{project_id}/stage-suggestion", "GET")
-    assert route is not None
-    assert _has_dependency(route, "verify_project_read_access")
-
-
 def test_generate_missing_has_write_guard():
     route = _find_route(router, "/{project_id}/storyboard/generate-missing", "POST")
     assert route is not None

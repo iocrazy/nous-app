@@ -14,6 +14,11 @@ import { setupStubbedSession, TEAM_ID } from './helpers/stubs';
  * deterministic fixtures. `setupStubbedSession` seeds the Supabase auth
  * session + team resolution the same way `storyboard.spec.ts` does; this spec
  * only adds the projects-specific routes on top.
+ *
+ * G3: the Stage Ring's data source moved from the legacy SOP `current_stage`
+ * to the workflow badge's position/total (`workflow_badge`) — fixtures below
+ * carry `workflow_badge` instead, keeping the same index/total/name values so
+ * the visual assertions are unchanged.
  */
 
 const PROJECTS_URL = `/team/${TEAM_ID}/projects`;
@@ -26,14 +31,6 @@ const CATALOG = [
   { id: '5', slug: 'review', name: 'Review', sort_order: 5, tools_recommended: [] },
   { id: '6', slug: 'delivery', name: 'Delivery', sort_order: 6, tools_recommended: [] },
 ];
-
-const CURRENT_STAGE_STORYBOARD = {
-  id: '3',
-  slug: 'storyboard',
-  name: 'Storyboard',
-  sort_order: 3,
-  tools_recommended: [],
-};
 
 /** The three A-mockup card states: active w/ file activity, stalled-in-stage, archived. */
 const PROJECTS = [
@@ -52,7 +49,13 @@ const PROJECTS = [
     file_count: 128,
     created_at: '2026-06-01T00:00:00Z',
     updated_at: '2026-07-08T10:00:00Z',
-    current_stage: { slug: 'storyboard', name: 'Storyboarding', index: 3, total: 6 },
+    // G3: the Stage Ring is workflow-driven only (SOP current_stage retired).
+    workflow_badge: {
+      current_node_name: 'Storyboarding',
+      workflow_total: 6,
+      workflow_position: 3,
+      agents_active: 0,
+    },
     latest_activity: { kind: 'file', actor: 'HG', at: '2026-07-08T10:00:00Z', stalled: false },
     members_preview: { count: 4, members: [{ user_id: 'u1', username: 'HG' }] },
   },
@@ -71,7 +74,12 @@ const PROJECTS = [
     file_count: 64,
     created_at: '2026-05-01T00:00:00Z',
     updated_at: '2026-07-05T00:00:00Z',
-    current_stage: { slug: 'review', name: 'Review', index: 5, total: 6 },
+    workflow_badge: {
+      current_node_name: 'Review',
+      workflow_total: 6,
+      workflow_position: 5,
+      agents_active: 0,
+    },
     latest_activity: { kind: 'stage', label: 'Review', at: '2026-07-05T00:00:00Z', stalled: true },
   },
   {
@@ -122,9 +130,9 @@ const PROJECT_SUGGESTIONS = [
 
 /**
  * Installs the single `**\/api/v1/projects*` handler that dispatches on
- * pathname to the list / suggestions / stage-catalog / current-stage
- * fixtures. Registered after `setupStubbedSession`'s catch-alls, so it wins
- * (Playwright resolves the most-recently-registered matching route first).
+ * pathname to the list / suggestions / stage-catalog fixtures. Registered
+ * after `setupStubbedSession`'s catch-alls, so it wins (Playwright resolves
+ * the most-recently-registered matching route first).
  */
 async function routeProjectsApi(
   page: Page,
@@ -132,9 +140,9 @@ async function routeProjectsApi(
 ): Promise<void> {
   // A glob's trailing `*` does not cross `/` boundaries, so `**/api/v1/projects*`
   // matches the bare list endpoint but silently misses nested paths like
-  // `/1/current_stage` or `/stages/catalog` (they'd fall through to the real
-  // network / SPA server instead of this stub). A RegExp on the pathname
-  // substring matches every depth uniformly.
+  // `/stages/catalog` (it'd fall through to the real network / SPA server
+  // instead of this stub). A RegExp on the pathname substring matches every
+  // depth uniformly.
   await page.route(/\/api\/v1\/projects(\/|\?|$)/, (route: Route) => {
     const { pathname } = new URL(route.request().url());
 
@@ -146,9 +154,6 @@ async function routeProjectsApi(
     }
     if (opts.withWorkbench && pathname === '/api/v1/projects/stages/catalog') {
       return route.fulfill({ json: { data: CATALOG } });
-    }
-    if (opts.withWorkbench && pathname.endsWith('/current_stage')) {
-      return route.fulfill({ json: { data: CURRENT_STAGE_STORYBOARD } });
     }
     return route.fallback();
   });
@@ -240,23 +245,23 @@ test.describe('Projects Phase B — Stage Ring alignment', () => {
   // The detail pane at `${PROJECTS_URL}/1` is the ProjectWorkspace shell — now
   // the only project detail implementation (the legacy StageWorkbench surface
   // this test originally drove, and its VITE_FEATURE_PROJECT_WORKSPACE_V2 flag,
-  // were retired in PR-18). This smoke asserts the shell's top bar + mini
-  // stepper; the richer Wave 2 module coverage lives in projects-workspace.spec.ts.
-  test('workspace shell top bar renders for the storyboard stage', async ({ page }) => {
+  // were retired in PR-18). This smoke asserts the shell's top bar; the richer
+  // Wave 2 module coverage lives in projects-workspace.spec.ts.
+  test('workspace shell top bar renders — no SOP mini stepper without a workflow (G3)', async ({ page }) => {
     await routeProjectsApi(page, { withWorkbench: true });
     // Deep-link straight into project 1's detail view — ProjectsPage
     // auto-selects the matching row from the (stubbed) list on mount once
     // `:projectId` is present, so this skips a fragile click-through.
     await page.goto(`${PROJECTS_URL}/1`);
 
-    // The workspace shell's top bar renders once the stage catalog +
-    // current stage resolve.
+    // The workspace shell's top bar renders regardless of workflow state.
     await expect(page.getByTestId('workspace-topbar')).toBeVisible({ timeout: 10_000 });
 
-    // D2 — the mini stepper (one dot per catalog stage) renders top-right
-    // of the top bar (WorkspaceTopBar reuses MiniStepper verbatim).
-    await expect(page.getByTestId('stage-ministep')).toBeVisible();
-    await expect(page.getByTestId(`ministep-dot-${CURRENT_STAGE_STORYBOARD.slug}`)).toBeVisible();
+    // G3 retired the legacy SOP `current_stage` read-out — project 1 has no
+    // stubbed workflow instance here, so the top bar's mini stepper (D2,
+    // WorkspaceTopBar reuses MiniStepper) renders nothing at all rather than
+    // falling back to the old stage-catalog dots.
+    await expect(page.getByTestId('stage-ministep')).toHaveCount(0);
 
     await page.screenshot({
       path: 'e2e-artifacts/projects-workbench-phase-b.png',

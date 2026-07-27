@@ -1,19 +1,22 @@
-"""W2-1: create_project + resolve_current_stage stand down the SOP path for
-workflow projects.
+"""W2-1 / M2 PR-G + PR-G1.5: create_project + resolve_current_stage and the
+legacy SOP stage path.
 
-- Born WITH a workflow template → the SOP first-stage seed is skipped (the node
-  chain, instantiated afterwards, is the stage source); the workflow
-  instantiation still runs.
-- Born WITHOUT a template → the SOP first-stage seed runs, unchanged.
-- resolve_current_stage on a workflow project → no forward auto-promote, no
-  persistence side effects; the stored stage is returned read-only.
+- Born WITH a workflow template → no SOP first-stage seed (the node chain,
+  instantiated afterwards, is the stage source); the workflow instantiation
+  still runs.
+- Born WITHOUT a template → ALSO no SOP first-stage seed anymore (M2 PR-G
+  retired ``set_current_stage`` end to end — create_project no longer calls
+  it for any project, workflow or not).
+- resolve_current_stage → always ``None`` now, for every project (M2 PR-G1.5
+  retired the read side too: ``get_current`` / ``derive_activity_flags`` /
+  ``set_current_stage`` no longer exist on ``ProjectStagesRepository``, so
+  there is nothing left to resolve, workflow project or not).
 """
 
 from __future__ import annotations
 
 import pytest
 
-import app.repositories.project_stages_repository as stages_module
 from app.services.library.projects_service import (
     ProjectsService,
     resolve_current_stage,
@@ -26,10 +29,6 @@ class _FakeStages:
 
     async def list_catalog(self):
         return [{"id": "31", "slug": "planning", "name": "Planning", "sort_order": 10}]
-
-    async def set_current_stage(self, project_id, stage_id, user_id):
-        self.set_calls.append((project_id, stage_id, user_id))
-        return {"id": str(stage_id), "slug": "planning", "name": "Planning"}
 
 
 class _FakeRepo:
@@ -69,7 +68,7 @@ async def test_workflow_template_skips_sop_first_stage_seed(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_no_template_still_seeds_sop_first_stage(monkeypatch):
+async def test_no_template_also_skips_sop_first_stage_seed(monkeypatch):
     svc = ProjectsService.__new__(ProjectsService)
     svc.repo = _FakeRepo()
     fake = _FakeStages()
@@ -85,54 +84,19 @@ async def test_no_template_still_seeds_sop_first_stage(monkeypatch):
 
     out = await svc.create_project("user-1", {"name": "Plain Project"})
 
-    # Legacy born-on-first-stage untouched for a No-workflow project.
-    assert fake.set_calls == [(9001, 31, "user-1")]
-    assert out["current_stage_id"] == "31"
+    # M2 PR-G: the legacy born-on-first-stage seed is retired for EVERY
+    # project now, not just workflow ones — a No-workflow project has no
+    # stage concept anymore (spec §8).
+    assert fake.set_calls == []
+    assert "current_stage_id" not in out
 
 
-# ── resolve_current_stage: workflow project skips persistence ─────────────────
-
-
-class _ResolveStagesRepo:
-    def __init__(self, current):
-        self._current = current
-        self.set_calls = []
-        self.derive_calls = 0
-
-    async def get_current(self, pid):
-        return self._current
-
-    async def derive_activity_flags(self, pid):
-        self.derive_calls += 1
-        return {"has_scenes": True, "has_shots": True, "has_renders": True}
-
-    async def list_catalog(self):
-        return [
-            {"id": 1, "slug": "planning", "name": "Planning", "sort_order": 10},
-            {"id": 4, "slug": "generation", "name": "Generation", "sort_order": 40},
-        ]
-
-    async def set_current_stage(self, pid, stage_id, user_id):
-        self.set_calls.append((pid, stage_id, user_id))
-        return {"id": stage_id, "slug": "generation", "sort_order": 40}
+# ── resolve_current_stage: always None now (M2 PR-G1.5) ───────────────────────
 
 
 @pytest.mark.asyncio
-async def test_resolve_current_stage_workflow_project_no_side_effects(monkeypatch):
-    repo = _ResolveStagesRepo(current={"id": 1, "slug": "planning", "sort_order": 10})
-    monkeypatch.setattr(stages_module, "get_project_stages_repository", lambda: repo)
-
-    async def _has_workflow(project_id):
-        return True
-
-    monkeypatch.setattr(
-        "app.services.workflow.instantiation.project_has_workflow_nodes",
-        _has_workflow,
-    )
-
-    out = await resolve_current_stage(1, "u1")
-
-    # Read-only stored stage; no derivation probe, no promote, no persistence.
-    assert out == {"id": 1, "slug": "planning", "sort_order": 10}
-    assert repo.derive_calls == 0
-    assert repo.set_calls == []
+async def test_resolve_current_stage_always_returns_none():
+    """The legacy SOP stage cursor is retired end-to-end — there is no more
+    repo call to make, workflow project or not; the function is a thin stub
+    that degrades any lingering caller to ``None`` instead of crashing."""
+    assert await resolve_current_stage(1, "u1") is None

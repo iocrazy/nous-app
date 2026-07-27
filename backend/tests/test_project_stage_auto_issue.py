@@ -1,12 +1,19 @@
-"""Project SOP stage → auto todo (issue) sync.
+"""``ensure_stage_issue`` — the idempotent per-node/stage mirror issue creator.
 
-The manual stage-advance entry point mirrors each advance into the todo list:
-a new ``status='todo'`` issue for the new stage (idempotent, never assigned),
-the previous stage's issue closed. The hook is best-effort — it must never block
-the advance itself, and same-stage no-ops take no issue action.
+M2 PR-G/G1.5/fix-round retired the legacy SOP stage cursor end to end,
+including ``advance_project_stage`` and ``sync_stage_issues`` (the
+``set_current_stage`` post-commit callback that used to wrap
+``ensure_stage_issue`` with open/close-old-issue logic). Both are gone — this
+file used to drive ``ensure_stage_issue`` indirectly through
+``advance_project_stage``; it now calls it directly, since that's exactly how
+the live production caller (``ensure_node_issues``, used by
+``instantiation.py`` / ``advance_service.py`` for workflow nodes) invokes it.
 
-These are service-layer unit tests: the stage repo, issue repo, and projects
-repo are faked (mirrors the repo-override pattern in test_stage_auto_derive.py).
+These are service-layer unit tests: the issue repo and projects repo are
+faked; ``ensure_stage_issue`` itself never touches
+``ProjectStagesRepository`` or the workflow-instance probe (those belonged
+to the now-deleted SOP wrapper), so there is nothing stage-repo-shaped left
+to fake here.
 """
 
 from __future__ import annotations
@@ -18,39 +25,14 @@ import pytest
 import app.services.library.project_stage_issues as mod
 from app.services.library.project_stage_issues import (
     ORIGIN_KIND,
-    advance_project_stage,
     build_stage_origin_id,
+    ensure_stage_issue,
 )
 
 _USER = "00000000-0000-0000-0000-000000000001"
 
 
 # ── fakes ─────────────────────────────────────────────────────────────────────
-
-
-class _FakeStagesRepo:
-    """Mimics the REAL repo's contract: the issue mirror fires inside
-    ``set_current_stage`` as a post-commit callback (covering the manual PUT,
-    project creation and auto-derivation uniformly), and a same-stage no-op
-    (``new_stage=None``) returns None WITHOUT syncing."""
-
-    def __init__(self, current, new_stage):
-        self._current = current
-        self._new_stage = new_stage
-        self.set_calls = []
-
-    async def get_current(self, pid):
-        return self._current
-
-    async def set_current_stage(self, pid, stage_id, user_id):
-        self.set_calls.append((pid, stage_id, user_id))
-        if self._new_stage is None:
-            return None
-        from app.services.library.project_stage_issues import sync_stage_issues
-
-        old_id = (self._current or {}).get("id")
-        await sync_stage_issues(int(pid), old_id, self._new_stage, user_id)
-        return self._new_stage
 
 
 class _FakeIssueRepo:
@@ -85,12 +67,7 @@ class _FakeProjectsRepo:
 
 @pytest.fixture
 def patch(monkeypatch):
-    def _install(*, stages, issues, project):
-        monkeypatch.setattr(
-            "app.repositories.project_stages_repository."
-            "get_project_stages_repository",
-            lambda: stages,
-        )
+    def _install(*, issues, project):
         monkeypatch.setattr(
             "app.repositories.issue_repository.get_issue_repository",
             lambda: issues,
@@ -113,20 +90,8 @@ def test_origin_id_shape():
     assert build_stage_origin_id(big, "123") == f"project_stage:{big}:123"
 
 
-# ── same-stage no-op ──────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_same_stage_no_op_takes_no_issue_action(patch):
-    stages = _FakeStagesRepo(current={"id": "10"}, new_stage=None)  # no-op
-    issues = _FakeIssueRepo()
-    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
-
-    result = await advance_project_stage(100, 10, _USER)
-
-    assert result is None
-    assert issues.created == []
-    assert issues.transitions == []
+def test_module_exposes_origin_kind():
+    assert mod.ORIGIN_KIND == "project_stage"
 
 
 # ── create new-stage issue ────────────────────────────────────────────────────
@@ -134,20 +99,11 @@ async def test_same_stage_no_op_takes_no_issue_action(patch):
 
 @pytest.mark.asyncio
 async def test_new_stage_creates_unassigned_todo_issue(patch):
-    stages = _FakeStagesRepo(
-        current=None,  # project had no prior stage → nothing to close
-        new_stage={"id": "20", "name": "Script"},
-    )
     issues = _FakeIssueRepo()
-    patch(
-        stages=stages,
-        issues=issues,
-        project={"name": "My Film", "team_id": 42},
-    )
+    patch(issues=issues, project={"name": "My Film", "team_id": 42})
 
-    result = await advance_project_stage(100, 20, _USER)
+    await ensure_stage_issue(issues, 100, {"id": "20", "name": "Script"}, _USER)
 
-    assert result == {"id": "20", "name": "Script"}
     assert len(issues.created) == 1
     payload = issues.created[0]
     assert payload["title"] == "My Film — Script"
@@ -160,19 +116,16 @@ async def test_new_stage_creates_unassigned_todo_issue(patch):
     # Automation NEVER assigns — no silent指派/计费.
     assert "assignee_user_id" not in payload
     assert "assignee_agent_id" not in payload
-    # No prior stage → no close.
-    assert issues.transitions == []
 
 
 @pytest.mark.asyncio
 async def test_personal_project_omits_team_id(patch):
     # No owner_id on the project → the personal-team resolve short-circuits
     # before touching the repo, so the issue stays team-less.
-    stages = _FakeStagesRepo(current=None, new_stage={"id": "20", "name": "Script"})
     issues = _FakeIssueRepo()
-    patch(stages=stages, issues=issues, project={"name": "Solo", "team_id": None})
+    patch(issues=issues, project={"name": "Solo", "team_id": None})
 
-    await advance_project_stage(100, 20, _USER)
+    await ensure_stage_issue(issues, 100, {"id": "20", "name": "Script"}, _USER)
 
     assert "team_id" not in issues.created[0]
 
@@ -192,10 +145,8 @@ async def test_personal_project_stamps_owner_personal_team(patch, monkeypatch):
     # team_id boundary translation: a NULL-team (personal) project resolves the
     # OWNER's personal team so the mirror issue is visible in the team-scoped
     # Todolist (the project row itself stays NULL).
-    stages = _FakeStagesRepo(current=None, new_stage={"id": "20", "name": "Script"})
     issues = _FakeIssueRepo()
     patch(
-        stages=stages,
         issues=issues,
         project={"name": "Solo", "team_id": None, "owner_id": "owner-x"},
     )
@@ -205,7 +156,7 @@ async def test_personal_project_stamps_owner_personal_team(patch, monkeypatch):
         lambda: team_repo,
     )
 
-    await advance_project_stage(100, 20, _USER)
+    await ensure_stage_issue(issues, 100, {"id": "20", "name": "Script"}, _USER)
 
     assert team_repo.resolved_for == ["owner-x"]
     # Snowflake resolved as a str → int-coerced onto the issue payload.
@@ -216,10 +167,8 @@ async def test_personal_project_stamps_owner_personal_team(patch, monkeypatch):
 async def test_personal_project_owner_without_personal_team_omits_team_id(
     patch, monkeypatch
 ):
-    stages = _FakeStagesRepo(current=None, new_stage={"id": "20", "name": "Script"})
     issues = _FakeIssueRepo()
     patch(
-        stages=stages,
         issues=issues,
         project={"name": "Solo", "team_id": None, "owner_id": "owner-x"},
     )
@@ -228,7 +177,7 @@ async def test_personal_project_owner_without_personal_team_omits_team_id(
         lambda: _FakeTeamRepo(None),  # owner has no personal team
     )
 
-    await advance_project_stage(100, 20, _USER)
+    await ensure_stage_issue(issues, 100, {"id": "20", "name": "Script"}, _USER)
 
     assert "team_id" not in issues.created[0]
 
@@ -237,10 +186,8 @@ async def test_personal_project_owner_without_personal_team_omits_team_id(
 async def test_team_project_keeps_explicit_team_without_resolving(patch, monkeypatch):
     # A project that already carries a team_id never triggers the personal-team
     # resolve (the fast path returns the explicit team).
-    stages = _FakeStagesRepo(current=None, new_stage={"id": "20", "name": "Script"})
     issues = _FakeIssueRepo()
     patch(
-        stages=stages,
         issues=issues,
         project={"name": "Team Film", "team_id": 42, "owner_id": "owner-x"},
     )
@@ -250,7 +197,7 @@ async def test_team_project_keeps_explicit_team_without_resolving(patch, monkeyp
         lambda: team_repo,
     )
 
-    await advance_project_stage(100, 20, _USER)
+    await ensure_stage_issue(issues, 100, {"id": "20", "name": "Script"}, _USER)
 
     assert issues.created[0]["team_id"] == 42
     assert team_repo.resolved_for == []
@@ -262,106 +209,13 @@ async def test_team_project_keeps_explicit_team_without_resolving(patch, monkeyp
 @pytest.mark.asyncio
 async def test_idempotent_reentry_skips_create(patch):
     new_origin = build_stage_origin_id(100, 20)
-    stages = _FakeStagesRepo(current=None, new_stage={"id": "20", "name": "Script"})
     issues = _FakeIssueRepo(existing={new_origin: [{"id": 555, "status": "todo"}]})
-    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
+    patch(issues=issues, project={"name": "P", "team_id": None})
 
-    await advance_project_stage(100, 20, _USER)
+    await ensure_stage_issue(issues, 100, {"id": "20", "name": "Script"}, _USER)
 
     # Existing issue for this exact origin → no duplicate created.
     assert issues.created == []
-
-
-# ── close old-stage issue ─────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_closes_previous_stage_open_issue(patch):
-    old_origin = build_stage_origin_id(100, 10)
-    stages = _FakeStagesRepo(
-        current={"id": "10", "name": "Planning"},
-        new_stage={"id": "20", "name": "Script"},
-    )
-    issues = _FakeIssueRepo(
-        existing={old_origin: [{"id": 111, "status": "in_progress"}]}
-    )
-    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
-
-    await advance_project_stage(100, 20, _USER)
-
-    # Old-stage issue transitioned to done; new-stage issue created.
-    assert issues.transitions == [(111, "done")]
-    assert len(issues.created) == 1
-
-
-@pytest.mark.asyncio
-async def test_already_terminal_old_issue_not_reclosed(patch):
-    old_origin = build_stage_origin_id(100, 10)
-    stages = _FakeStagesRepo(
-        current={"id": "10", "name": "Planning"},
-        new_stage={"id": "20", "name": "Script"},
-    )
-    issues = _FakeIssueRepo(existing={old_origin: [{"id": 111, "status": "done"}]})
-    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
-
-    await advance_project_stage(100, 20, _USER)
-
-    assert issues.transitions == []
-
-
-# ── best-effort: hook never blocks the advance ────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_hook_failure_does_not_block_advance(patch, monkeypatch):
-    stages = _FakeStagesRepo(current=None, new_stage={"id": "20", "name": "Script"})
-    issues = _FakeIssueRepo(create_error=True)  # atomic_create raises
-    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
-
-    # The advance still succeeds and returns the new stage.
-    result = await advance_project_stage(100, 20, _USER)
-    assert result == {"id": "20", "name": "Script"}
-    assert issues.created == []  # create failed, swallowed
-
-
-@pytest.mark.asyncio
-async def test_project_fetch_failure_does_not_block_advance(patch, monkeypatch):
-    stages = _FakeStagesRepo(current=None, new_stage={"id": "20", "name": "Script"})
-    issues = _FakeIssueRepo()
-    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
-
-    # Make the projects repo raise from inside the hook.
-    class _Boom:
-        async def get_project_by_id(self, pid):
-            raise RuntimeError("boom")
-
-    monkeypatch.setattr(
-        "app.repositories.projects_repository.get_projects_repository",
-        lambda: _Boom(),
-    )
-
-    result = await advance_project_stage(100, 20, _USER)
-    assert result == {"id": "20", "name": "Script"}
-    # Create never reached (project load blew up first), but advance is intact.
-    assert issues.created == []
-
-
-# ── advance delegates to the stage machine ────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_advance_delegates_to_set_current_stage(patch):
-    stages = _FakeStagesRepo(current=None, new_stage={"id": "20", "name": "Script"})
-    issues = _FakeIssueRepo()
-    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
-
-    await advance_project_stage(100, 20, _USER)
-
-    assert stages.set_calls == [(100, 20, _USER)]
-
-
-def test_module_exposes_origin_kind():
-    assert mod.ORIGIN_KIND == "project_stage"
 
 
 # ── M1 workflow node inheritance: owner + due_date, never dispatched ────────
@@ -369,18 +223,19 @@ def test_module_exposes_origin_kind():
 
 @pytest.mark.asyncio
 async def test_new_node_inherits_human_owner_as_assignee(patch):
-    stages = _FakeStagesRepo(
-        current=None,
-        new_stage={
+    issues = _FakeIssueRepo()
+    patch(issues=issues, project={"name": "P", "team_id": None})
+
+    await ensure_stage_issue(
+        issues,
+        100,
+        {
             "id": "20",
             "name": "Script",
             "owner_user_id": "00000000-0000-0000-0000-0000000000aa",
         },
+        _USER,
     )
-    issues = _FakeIssueRepo()
-    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
-
-    await advance_project_stage(100, 20, _USER)
 
     payload = issues.created[0]
     assert payload["assignee_user_id"] == "00000000-0000-0000-0000-0000000000aa"
@@ -389,18 +244,19 @@ async def test_new_node_inherits_human_owner_as_assignee(patch):
 
 @pytest.mark.asyncio
 async def test_new_node_inherits_agent_owner_as_assignee(patch):
-    stages = _FakeStagesRepo(
-        current=None,
-        new_stage={
+    issues = _FakeIssueRepo()
+    patch(issues=issues, project={"name": "P", "team_id": None})
+
+    await ensure_stage_issue(
+        issues,
+        100,
+        {
             "id": "20",
             "name": "Canvas",
             "owner_agent_id": "00000000-0000-0000-0000-0000000000bb",
         },
+        _USER,
     )
-    issues = _FakeIssueRepo()
-    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
-
-    await advance_project_stage(100, 20, _USER)
 
     payload = issues.created[0]
     assert payload["assignee_agent_id"] == "00000000-0000-0000-0000-0000000000bb"
@@ -411,11 +267,10 @@ async def test_new_node_inherits_agent_owner_as_assignee(patch):
 async def test_no_owner_leaves_issue_unassigned(patch):
     # Legacy SOP stage dicts (and un-owned nodes) carry neither owner key —
     # automation must never silently assign.
-    stages = _FakeStagesRepo(current=None, new_stage={"id": "20", "name": "Script"})
     issues = _FakeIssueRepo()
-    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
+    patch(issues=issues, project={"name": "P", "team_id": None})
 
-    await advance_project_stage(100, 20, _USER)
+    await ensure_stage_issue(issues, 100, {"id": "20", "name": "Script"}, _USER)
 
     payload = issues.created[0]
     assert "assignee_user_id" not in payload
@@ -425,14 +280,12 @@ async def test_no_owner_leaves_issue_unassigned(patch):
 @pytest.mark.asyncio
 async def test_planned_due_inherited_as_real_date_object(patch):
     due = datetime.date(2026, 8, 1)
-    stages = _FakeStagesRepo(
-        current=None,
-        new_stage={"id": "20", "name": "Script", "planned_due": due},
-    )
     issues = _FakeIssueRepo()
-    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
+    patch(issues=issues, project={"name": "P", "team_id": None})
 
-    await advance_project_stage(100, 20, _USER)
+    await ensure_stage_issue(
+        issues, 100, {"id": "20", "name": "Script", "planned_due": due}, _USER
+    )
 
     payload = issues.created[0]
     assert payload["due_date"] is due
@@ -442,30 +295,29 @@ async def test_planned_due_inherited_as_real_date_object(patch):
 @pytest.mark.asyncio
 async def test_planned_due_as_iso_string_raises(patch):
     # The asyncpg DATE-bind footgun (CLAUDE.md known trap): an ISO string must
-    # never reach the issue payload silently.
-    stages = _FakeStagesRepo(
-        current=None,
-        new_stage={"id": "20", "name": "Script", "planned_due": "2026-08-01"},
-    )
+    # never reach the issue payload silently. Unlike the old sync_stage_issues
+    # wrapper (deleted), ensure_stage_issue itself does NOT swallow this — the
+    # caller (ensure_node_issues) is what wraps it best-effort.
     issues = _FakeIssueRepo()
-    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
+    patch(issues=issues, project={"name": "P", "team_id": None})
 
-    # The hook is best-effort, so the TypeError is swallowed at the sync
-    # boundary — the advance itself must still succeed, but no issue is
-    # created out of the bad payload.
-    result = await advance_project_stage(100, 20, _USER)
+    with pytest.raises(TypeError):
+        await ensure_stage_issue(
+            issues,
+            100,
+            {"id": "20", "name": "Script", "planned_due": "2026-08-01"},
+            _USER,
+        )
 
-    assert result == {"id": "20", "name": "Script", "planned_due": "2026-08-01"}
     assert issues.created == []
 
 
 @pytest.mark.asyncio
 async def test_no_due_date_omits_the_field(patch):
-    stages = _FakeStagesRepo(current=None, new_stage={"id": "20", "name": "Script"})
     issues = _FakeIssueRepo()
-    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
+    patch(issues=issues, project={"name": "P", "team_id": None})
 
-    await advance_project_stage(100, 20, _USER)
+    await ensure_stage_issue(issues, 100, {"id": "20", "name": "Script"}, _USER)
 
     assert "due_date" not in issues.created[0]
 
@@ -487,20 +339,20 @@ async def test_agent_owner_arrival_never_dispatches(patch, monkeypatch):
 
     monkeypatch.setattr(issues_router_mod, "_dispatch_execute_issue", _boom)
 
-    stages = _FakeStagesRepo(
-        current=None,
-        new_stage={
+    issues = _FakeIssueRepo()
+    patch(issues=issues, project={"name": "P", "team_id": None})
+
+    await ensure_stage_issue(
+        issues,
+        100,
+        {
             "id": "20",
             "name": "Canvas",
             "owner_agent_id": "00000000-0000-0000-0000-0000000000bb",
         },
+        _USER,
     )
-    issues = _FakeIssueRepo()
-    patch(stages=stages, issues=issues, project={"name": "P", "team_id": None})
 
-    result = await advance_project_stage(100, 20, _USER)
-
-    assert result is not None
     assert (
         issues.created[0]["assignee_agent_id"] == "00000000-0000-0000-0000-0000000000bb"
     )

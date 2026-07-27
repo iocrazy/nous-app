@@ -1,9 +1,10 @@
 /**
  * WorkspaceTopBar — the project-condition strip (spec frame: 顶部项目条). Project
- * identity on the left; a read-only stage read-out on the right (the SOP stage
- * is informational here — advancing/jumping stages happens elsewhere, not from
- * this bar). When the studio editor is open it also carries a film "场记板"
- * (slate) read-out — EP·S — so the writer always knows where they are.
+ * identity on the left; a read-only workflow node stepper on the right (G3
+ * dropped the legacy SOP `current_stage` read-out — a No-workflow project
+ * shows no stepper here at all). When the studio editor is open it also
+ * carries a film "场记板" (slate) read-out — EP·S — so the writer always
+ * knows where they are.
  */
 
 import { useTranslation } from 'react-i18next';
@@ -14,9 +15,6 @@ import type { ProjectStage, ProjectWorkflow } from '../../types';
 interface WorkspaceTopBarProps {
   projectName: string;
   onBack: () => void;
-  catalog: ProjectStage[];
-  currentStage: ProjectStage | null;
-  currentIndex: number;
   canWrite?: boolean;
   /** Film slate read-out (studio only): the current episode + scene numbers. */
   slate?: { ep: number; scene?: number | null } | null;
@@ -28,14 +26,9 @@ interface WorkspaceTopBarProps {
   onJumpToNode?: (nodeId: string) => void;
 }
 
-const noopJump = () => {};
-
 export function WorkspaceTopBar({
   projectName,
   onBack,
-  catalog,
-  currentStage,
-  currentIndex,
   canWrite = true,
   slate,
   workflow,
@@ -44,9 +37,9 @@ export function WorkspaceTopBar({
 }: WorkspaceTopBarProps) {
   const { t } = useTranslation();
 
-  // Workflow supersedes the SOP read-out when the project has one. Map its
-  // nodes onto the MiniStepper's stage shape; adjacent dots run the advance /
-  // back gate, non-adjacent dots navigate to the node card.
+  // Map the workflow's nodes onto the MiniStepper's stage shape; adjacent
+  // dots run the advance / back gate, non-adjacent dots navigate to the node
+  // card. No workflow → hasWorkflow is false and the stepper renders nothing.
   const hasWorkflow = !!workflow?.has_workflow && workflow.nodes.length > 0;
   const wfNodes = workflow?.nodes ?? [];
   const wfCurrentIndex = hasWorkflow
@@ -114,32 +107,13 @@ export function WorkspaceTopBar({
         </span>
       )}
 
-      {hasWorkflow ? (
+      {hasWorkflow && (
         <MiniStepper
           catalog={wfCatalog}
           currentIndex={wfCurrentIndex}
           canWrite={canWrite}
           onJump={handleWorkflowJump}
         />
-      ) : (
-        catalog.length > 0 &&
-        currentStage && (
-          <>
-            {/* Read-only: the dots show progress but cannot be jumped from here. */}
-            <MiniStepper
-              catalog={catalog}
-              currentIndex={currentIndex}
-              canWrite={false}
-              onJump={noopJump}
-            />
-            <span
-              data-testid="workspace-stage-chip"
-              className="font-mono text-[10px] uppercase tracking-wider text-[var(--stall)] bg-[color-mix(in_srgb,var(--stall)_12%,transparent)] rounded-full px-2.5 py-1 font-semibold whitespace-nowrap"
-            >
-              {(currentStage.slug || currentStage.name).toUpperCase()} {currentIndex + 1}/{catalog.length}
-            </span>
-          </>
-        )
       )}
     </div>
   );
