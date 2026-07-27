@@ -39,6 +39,7 @@ from app.services.library.project_stage_issues import (
     ensure_node_issues,
 )
 from app.services.workflow.node_folders import ensure_node_folders
+from app.services.workflow.stage_notifications import notify_stage_event
 
 # Issue statuses that count as closed for a stage-mirror issue.
 _TERMINAL = frozenset({"done", "cancelled"})
@@ -112,6 +113,17 @@ async def _mirror_issues(project_id: str, node_id: str) -> List[Dict[str, Any]]:
             f"{node_id}: {exc!r}"
         )
         return []
+
+
+async def _first_issue_identifier(project_id: str, node_id: str) -> Optional[str]:
+    """The human identifier (e.g. ``MH-42``) of a node's mirror issue, or
+    ``None`` (best-effort — ``_mirror_issues`` already degrades to [] on
+    error, so this never raises)."""
+    for issue in await _mirror_issues(project_id, node_id):
+        identifier = issue.get("identifier")
+        if identifier:
+            return str(identifier)
+    return None
 
 
 async def _review_satisfied(project_id: str, node: Dict[str, Any]) -> bool:
@@ -326,11 +338,15 @@ async def execute_advance(
     project = await get_projects_repository().get_project_by_id(int(str(project_id)))
     idx = _active_index(groups, (project or {}).get("current_node_id"))
 
+    project_name = (project or {}).get("name") or "Project"
+    team_id = (project or {}).get("team_id")
+
     if preview.direction == "forward":
         # Close the current group's mirror issues (open sub-issues stay open —
         # already flagged in the preview). Status回流 hook flips those nodes to
         # done.
-        for node in groups[idx]:
+        closing_group = groups[idx]
+        for node in closing_group:
             for issue in await _mirror_issues(project_id, str(node["id"])):
                 if issue.get("status") not in _TERMINAL:
                     await issues_repo.transition_status(int(issue["id"]), "done")
@@ -338,6 +354,34 @@ async def execute_advance(
         await nodes_repo.set_current_node_id(str(project_id), str(next_group[0]["id"]))
         await ensure_node_issues(int(str(project_id)), next_group, str(user_id))
         await ensure_node_folders(str(project_id), next_group, str(user_id))
+
+        # Best-effort stage notifications (E2): the closing group gets
+        # "completion", the newly-arrived group gets "arrival". Never blocks
+        # the advance — notify_stage_event() itself never raises.
+        for node in closing_group:
+            await notify_stage_event(
+                event="completion",
+                project_id=str(project_id),
+                project_name=project_name,
+                node=node,
+                issue_identifier=await _first_issue_identifier(
+                    project_id, str(node["id"])
+                ),
+                team_id=team_id,
+                actor_user_id=str(user_id),
+            )
+        for node in next_group:
+            await notify_stage_event(
+                event="arrival",
+                project_id=str(project_id),
+                project_name=project_name,
+                node=node,
+                issue_identifier=await _first_issue_identifier(
+                    project_id, str(node["id"])
+                ),
+                team_id=team_id,
+                actor_user_id=str(user_id),
+            )
     else:
         prev_group = groups[idx - 1]
         await nodes_repo.set_current_node_id(str(project_id), str(prev_group[0]["id"]))
@@ -349,5 +393,19 @@ async def execute_advance(
             for issue in await _mirror_issues(project_id, str(node["id"])):
                 if issue.get("status") != "in_progress":
                     await issues_repo.transition_status(int(issue["id"]), "in_progress")
+
+        # Best-effort reopen notification (E2) — same recipients as arrival.
+        for node in prev_group:
+            await notify_stage_event(
+                event="reopen",
+                project_id=str(project_id),
+                project_name=project_name,
+                node=node,
+                issue_identifier=await _first_issue_identifier(
+                    project_id, str(node["id"])
+                ),
+                team_id=team_id,
+                actor_user_id=str(user_id),
+            )
 
     return preview

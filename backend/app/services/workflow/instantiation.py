@@ -73,8 +73,13 @@ async def instantiate_project_workflow(
     from app.repositories.project_stage_nodes_repository import (
         get_project_stage_nodes_repository,
     )
-    from app.services.library.project_stage_issues import ensure_node_issues
+    from app.services.library.project_stage_issues import (
+        ORIGIN_KIND,
+        build_stage_origin_id,
+        ensure_node_issues,
+    )
     from app.services.workflow.node_folders import ensure_node_folders
+    from app.services.workflow.stage_notifications import notify_stage_event
 
     repo = get_project_stage_nodes_repository()
     nodes = await repo.instantiate_from_template(
@@ -93,6 +98,46 @@ async def instantiate_project_workflow(
     # the mirror issues, then the deliverable folders.
     await ensure_node_issues(int(str(project_id)), group, user_id)
     await ensure_node_folders(project_id, group, user_id)
+
+    # Best-effort arrival notification (E2) for the project's first active
+    # group — same discipline as the two hooks above; a hiccup here must never
+    # fail project creation.
+    try:
+        from app.repositories.issue_repository import get_issue_repository
+        from app.repositories.projects_repository import get_projects_repository
+
+        project = await get_projects_repository().get_project_by_id(str(project_id))
+        project_name = (project or {}).get("name") or "Project"
+        team_id = (project or {}).get("team_id")
+        issues_repo = get_issue_repository()
+        for node in group:
+            issue_identifier: Optional[str] = None
+            try:
+                origin_id = build_stage_origin_id(project_id, node["id"])
+                for issue in await issues_repo.list_by_origin(ORIGIN_KIND, origin_id):
+                    if issue.get("identifier"):
+                        issue_identifier = str(issue["identifier"])
+                        break
+            except Exception as exc:  # noqa: BLE001 — link is enrichment only
+                logger.warning(
+                    f"[workflow] mirror-issue lookup failed for project "
+                    f"{project_id} node {node.get('id')}: {exc!r}"
+                )
+            await notify_stage_event(
+                event="arrival",
+                project_id=str(project_id),
+                project_name=project_name,
+                node=node,
+                issue_identifier=issue_identifier,
+                team_id=team_id,
+                actor_user_id=str(user_id),
+            )
+    except Exception as exc:  # noqa: BLE001 — notification is enrichment only
+        logger.warning(
+            f"[workflow] first-group arrival notification failed for project "
+            f"{project_id}: {exc!r}"
+        )
+
     return nodes
 
 
