@@ -138,7 +138,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: mediahub-core
+        working-directory: nous-core
 
     steps:
       - uses: actions/checkout@v4
@@ -149,7 +149,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: mediahub-core
+          workspaces: nous-core
 
       - name: Check compilation
         run: cargo check

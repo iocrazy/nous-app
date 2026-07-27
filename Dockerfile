@@ -2,7 +2,7 @@
 # Frontend is deployed separately to Vercel
 
 # ============================================
-# Stage 1: Build Rust mediahub-core module
+# Stage 1: Build Rust nous-core module
 # Use python:3.13 as base so maturin builds cp313 wheels
 # ============================================
 FROM python:3.13-slim AS rust-builder
@@ -19,7 +19,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN pip install maturin
 
 WORKDIR /rust
-COPY mediahub-core/ .
+COPY nous-core/ .
 RUN maturin build --release
 
 # ============================================
@@ -73,9 +73,9 @@ RUN DREAMINA_INSTALL_DIR=/usr/local/bin bash -c 'curl -fsSL https://jimeng.jiany
 # Install uv package manager
 RUN pip install uv
 
-# Install mediahub-core Rust module from build stage
+# Install nous-core Rust module from build stage
 COPY --from=rust-builder /rust/target/wheels/*.whl /tmp/
-RUN pip install /tmp/mediahub_core*.whl && rm -f /tmp/mediahub_core*.whl
+RUN pip install /tmp/nous_core*.whl && rm -f /tmp/nous_core*.whl
 
 # Install yt-dlp and faster-whisper
 RUN pip install yt-dlp==2024.12.23 faster-whisper==1.1.0

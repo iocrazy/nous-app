@@ -517,7 +517,7 @@ Schema (schemas/)      — Pydantic 请求/响应模型
 
 | 目标 | workflow | runner | 触发 paths | 落到哪 |
 |------|----------|--------|-----------|--------|
-| 后端 | `deploy-gpu.yml` | **self-hosted `[self-hosted, gpu]`** | `backend/**`、`Dockerfile`、`deploy/gpu-server/**`、`mediahub-core/**` | gpupc 本机 `nous-backend` + `nous-worker` |
+| 后端 | `deploy-gpu.yml` | **self-hosted `[self-hosted, gpu]`** | `backend/**`、`Dockerfile`、`deploy/gpu-server/**`、`nous-core/**` | gpupc 本机 `nous-backend` + `nous-worker` |
 | 前端 | `deploy-pages.yml` | `ubuntu-latest` | `frontend/**` | Cloudflare Pages（GHA 构建 + wrangler 直传，不吃 Pages 的 500 构建/月配额） |
 | DB migration | `run-migration.yml` | **self-hosted `[self-hosted, gpu]`** | `supabase/migrations/**` | gpupc 本机 `nous-db` |
 

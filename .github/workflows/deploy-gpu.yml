@@ -7,7 +7,7 @@ on:
     branches: [master]
     paths:
       - 'backend/**'
-      - 'mediahub-core/**'
+      - 'nous-core/**'
       - 'Dockerfile'
       - 'deploy/gpu-server/**'
   workflow_dispatch:
