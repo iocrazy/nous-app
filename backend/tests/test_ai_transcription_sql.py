@@ -225,8 +225,7 @@ async def test_run_volcengine_asr_raises_when_audio_missing(tmp_path, monkeypatc
 
     async def unreachable(sql, params=None):
         raise AssertionError(
-            "db_engine.fetch_one must not be reached — resolve() has to "
-            "fail first"
+            "db_engine.fetch_one must not be reached — resolve() has to " "fail first"
         )
 
     with patch("app.db.engine.fetch_one", unreachable):

@@ -26,9 +26,7 @@ from pathlib import Path
 class DerivedArtifactPaths:
     """决定缩略图 / sprite 落在哪个目录。"""
 
-    def thumbnail_dir(
-        self, file_path: str, resource_id: str, local_path: Path
-    ) -> Path:
+    def thumbnail_dir(self, file_path: str, resource_id: str, local_path: Path) -> Path:
         """返回派生产物目录（已创建）。
 
         Args:

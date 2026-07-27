@@ -74,7 +74,9 @@ class AudioSourceResolver:
                 return audio_path
         except OSError:
             pass
-        raise RuntimeError(f"audio file missing or empty at dispatch time: {audio_path}")
+        raise RuntimeError(
+            f"audio file missing or empty at dispatch time: {audio_path}"
+        )
 
     def to_relative(self, abs_path: str) -> str:
         """去掉 DOWNLOAD_PATH 前缀 —— /media 路由按相对路径提供文件。"""

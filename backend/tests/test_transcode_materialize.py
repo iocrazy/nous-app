@@ -95,9 +95,7 @@ async def test_hls_dir_derived_for_sb_source(monkeypatch, tmp_path):
         return 1920, 1080
 
     monkeypatch.setattr(TranscodeProbe, "probe_resolution", fake_probe_resolution)
-    monkeypatch.setattr(
-        TranscodeProbe, "probe_duration", AsyncMock(return_value=10.0)
-    )
+    monkeypatch.setattr(TranscodeProbe, "probe_duration", AsyncMock(return_value=10.0))
     # non-h264 codec skips the fast path; empty tier selection short-circuits
     # to "skipped" right after the hls_dir mkdir — no real ffmpeg needed.
     monkeypatch.setattr(
@@ -137,9 +135,7 @@ async def test_hls_dir_legacy_fs_source_unchanged(monkeypatch, tmp_path):
         "probe_resolution",
         AsyncMock(return_value=(1920, 1080)),
     )
-    monkeypatch.setattr(
-        TranscodeProbe, "probe_duration", AsyncMock(return_value=10.0)
-    )
+    monkeypatch.setattr(TranscodeProbe, "probe_duration", AsyncMock(return_value=10.0))
     monkeypatch.setattr(
         TranscodeProbe, "probe_codecs", AsyncMock(return_value=("hevc", "aac"))
     )

@@ -773,4 +773,3 @@ class TranscodeService:
             logger.warning(f"Passthrough execution error: {e}")
             shutil.rmtree(out_dir, ignore_errors=True)
             return False
-
