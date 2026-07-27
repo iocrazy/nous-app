@@ -20,10 +20,11 @@ import { useCanvasMentionPicker } from './useCanvasMentionPicker';
 import { CanvasMentionPicker } from './CanvasMentionPicker';
 import { AssetPromptPicker } from './AssetPromptPicker';
 import { buildPromptAssetLoad } from '../loadPromptAsset';
+import { importResourceAsCanvasMedia } from '../mediaImport';
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { useResourceSearch } from '../../../../hooks/useResourceSearch';
 import type { ResourceSearchResult } from '../../../../types';
-import type { PromptAsset } from '../../../../services/resourceService';
+import { getResourceCoverUrl, type PromptAsset } from '../../../../services/resourceService';
 import { ASPECT_RATIOS } from '../aspectPresets';
 import { UiSelect } from '../../../../components/ui';
 
@@ -124,7 +125,19 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // Applies the pure-function result: patch this node's body/negative_body,
   // append the new media node, and wire it in as a source connection.
   const handlePickAsset = useCallback(
-    (asset: PromptAsset, lang: 'en' | 'zh') => {
+    async (asset: PromptAsset, lang: 'en' | 'zh') => {
+      // Mint the durable URL BEFORE reading getState() below — the await
+      // here is the only async gap in this handler, so grabbing the store
+      // snapshot after it (not before) ensures we build on top of whatever
+      // other canvas mutations landed while the mint was in flight (M3).
+      let mediaUrl: string;
+      try {
+        mediaUrl = (await importResourceAsCanvasMedia(asset.id)).url;
+      } catch (err) {
+        console.error('[promptAsset] durable import failed, falling back to cover:', err);
+        mediaUrl = getResourceCoverUrl(asset.id); // visual-only fallback, no i2i
+      }
+
       // Fresh reads at handler time, not render-time subscriptions — avoids
       // inserting into a stale nodes/connections snapshot when other canvas
       // mutations landed between this node's last render and the click (M3).
@@ -138,6 +151,7 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
         lang,
         promptNodeId: id,
         promptNodePosition,
+        mediaUrl,
       });
       // One atomic setNodes call — folding the self-patch into the same
       // array write that appends mediaNode avoids the two-write race where

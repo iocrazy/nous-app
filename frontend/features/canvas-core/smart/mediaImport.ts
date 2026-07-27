@@ -44,3 +44,31 @@ export async function importCanvasMedia(
     name: file.name,
   };
 }
+
+/**
+ * Library-asset ingest: mint a durable /generated-media/ URL for an
+ * already-uploaded resource-library asset via
+ * POST /generated-media/import-from-resource. Resource-library file URLs
+ * are auth-gated and the i2i bridge (promptInputs.ts's DURABLE_PREFIX)
+ * can't fetch them directly, so a Library pick needs this same durable
+ * detour importCanvasMedia does for local uploads.
+ */
+export async function importResourceAsCanvasMedia(
+  resourceId: string,
+): Promise<{ url: string; kind: 'image' | 'video' }> {
+  const response = await apiFetch('/api/v1/generated-media/import-from-resource', {
+    method: 'POST',
+    json: { resource_id: resourceId },
+  });
+  const json = (await response.json()) as {
+    data?: { url?: string; media_kind?: string };
+  };
+  const data = json?.data;
+  if (!data?.url) {
+    throw new Error('import-from-resource returned no url');
+  }
+  return {
+    url: data.url,
+    kind: data.media_kind === 'video' ? 'video' : 'image',
+  };
+}

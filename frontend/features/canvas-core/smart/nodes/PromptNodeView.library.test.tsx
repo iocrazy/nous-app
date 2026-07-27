@@ -7,7 +7,7 @@
 
 import { ReactFlowProvider } from '@xyflow/react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../../hooks/useResourceSearch', () => ({
   useResourceSearch: vi.fn().mockReturnValue({
@@ -44,6 +44,11 @@ vi.mock('../../../../services/unifiedTagService', () => ({
   fetchAllTags: vi.fn().mockResolvedValue([]),
 }));
 
+const mockImportResource = vi.fn();
+vi.mock('../mediaImport', () => ({
+  importResourceAsCanvasMedia: (...args: unknown[]) => mockImportResource(...args),
+}));
+
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
 import { PromptNodeView } from './PromptNodeView';
 
@@ -78,6 +83,11 @@ function setNode() {
     selection: [],
   });
 }
+
+beforeEach(() => {
+  mockImportResource.mockReset();
+  mockImportResource.mockResolvedValue({ url: '/api/v1/generated-media/gm-1', kind: 'image' });
+});
 
 afterEach(() => {
   useCanvasCoreStore.getState().reset();
@@ -145,5 +155,40 @@ describe('PromptNodeView Library button', () => {
     expect(mediaNode).toBeTruthy();
     expect(connections).toHaveLength(1);
     expect((connections[0] as unknown as { id: string }).id).toBe(`conn-${mediaNode.id}-p1`);
+
+    expect(mockImportResource).toHaveBeenCalledWith(mockPromptAsset.id);
+    const mediaNodeData = nodes.find(
+      (n) => (n as unknown as { id: string }).id !== 'p1',
+    ) as unknown as { data: { items: Array<{ url: string }> } };
+    expect(mediaNodeData.data.items[0].url).toBe('/api/v1/generated-media/gm-1');
+  });
+
+  // Phase 3 Task 3: when minting the durable URL fails, the pick still
+  // succeeds — it just falls back to the (visual-only) resource cover URL
+  // instead of blocking the Library flow on a failed network call.
+  it('falls back to the cover URL when the durable import rejects, and still inserts', async () => {
+    mockImportResource.mockRejectedValueOnce(new Error('network down'));
+    setNode();
+    render(
+      <ReactFlowProvider>
+        <PromptNodeView {...baseProps} id="p1" type="prompt" data={BASE_DATA} />
+      </ReactFlowProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId('prompt-library-button'));
+    await screen.findByTestId('asset-prompt-picker');
+    const row = await screen.findByTestId('asset-prompt-picker-row');
+    fireEvent.click(row);
+
+    await waitFor(() => {
+      const { nodes } = useCanvasCoreStore.getState();
+      expect(nodes).toHaveLength(2);
+    });
+
+    const { nodes } = useCanvasCoreStore.getState();
+    const mediaNode = nodes.find(
+      (n) => (n as unknown as { id: string }).id !== 'p1',
+    ) as unknown as { data: { items: Array<{ url: string }> } };
+    expect(mediaNode.data.items[0].url).toBe(`https://api.test/cover/${mockPromptAsset.id}`);
   });
 });

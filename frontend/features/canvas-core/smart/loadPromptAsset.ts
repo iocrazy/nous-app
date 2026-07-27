@@ -8,13 +8,14 @@
  * a new media node carrying the asset's cover as a visual reference/
  * thumbnail, and the connection wiring that media node into the prompt.
  *
- * That media node is NOT wired into the i2i/i2v pipeline: generation's
- * source resolution (promptInputs.ts's DURABLE_PREFIX, '/api/v1/generated-media/')
- * only accepts durable generated-media URLs, and the resource cover URL
- * this factory uses doesn't match that prefix, so it's inert as a run
- * input today — purely a canvas thumbnail. Wiring it up for real would
- * need importCanvasMedia (or equivalent) to mint a durable generated-media
- * URL for the asset's cover first; deferred.
+ * The media node's `items[0].url` is caller-supplied (`mediaUrl`) rather
+ * than derived here: when the caller has minted a durable
+ * /api/v1/generated-media/ URL (via importResourceAsCanvasMedia) that URL
+ * makes the node a real i2i/i2v source (promptInputs.ts's DURABLE_PREFIX
+ * accepts it). When minting fails, the caller falls back to the resource
+ * cover URL instead — that fallback is visual-only (not a matching prefix,
+ * so it's inert as a run input), but keeps the picked asset visible on
+ * the canvas.
  *
  * No store access here — PromptNodeView owns applying the result
  * (setNodes/setConnections/patch), which keeps this function trivial to
@@ -23,19 +24,20 @@
 
 import { createMediaNode } from './factories';
 import type { MediaNode } from './types';
-import { getResourceCoverUrl, type PromptAsset } from '../../../services/resourceService';
+import type { PromptAsset } from '../../../services/resourceService';
 
 export function buildPromptAssetLoad(args: {
   asset: PromptAsset;
   lang: 'en' | 'zh';
   promptNodeId: string;
   promptNodePosition: { x: number; y: number };
+  mediaUrl: string;
 }): {
   promptPatch: { body: string; negative_body?: string };
   mediaNode: MediaNode;
   connection: { id: string; source: string; target: string };
 } {
-  const { asset, lang, promptNodeId, promptNodePosition } = args;
+  const { asset, lang, promptNodeId, promptNodePosition, mediaUrl } = args;
 
   // Side-picking: prefer the chosen lang, fall back to the other side when
   // that side is empty (e.g. only an English prompt was ever written).
@@ -55,7 +57,7 @@ export function buildPromptAssetLoad(args: {
 
   const mediaNode = createMediaNode(
     {
-      items: [{ url: getResourceCoverUrl(asset.id), kind: 'image', name: asset.filename }],
+      items: [{ url: mediaUrl, kind: 'image', name: asset.filename }],
     },
     {
       // Sits to the left of (and slightly above) the prompt node so the

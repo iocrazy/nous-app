@@ -5,7 +5,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildPromptAssetLoad } from './loadPromptAsset';
-import { getResourceCoverUrl, type PromptAsset } from '../../../services/resourceService';
+import type { PromptAsset } from '../../../services/resourceService';
+
+const MEDIA_URL = '/api/v1/generated-media/gm-1';
 
 const ASSET: PromptAsset = {
   id: 'res-1',
@@ -29,6 +31,7 @@ describe('buildPromptAssetLoad', () => {
       lang: 'zh',
       promptNodeId: PROMPT_NODE_ID,
       promptNodePosition: PROMPT_NODE_POSITION,
+      mediaUrl: MEDIA_URL,
     });
     expect(fallback.promptPatch.body).toBe(enOnly.gen_prompt);
     expect(fallback.promptPatch.negative_body).toBe(enOnly.gen_prompt_negative);
@@ -39,6 +42,7 @@ describe('buildPromptAssetLoad', () => {
       lang: 'zh',
       promptNodeId: PROMPT_NODE_ID,
       promptNodePosition: PROMPT_NODE_POSITION,
+      mediaUrl: MEDIA_URL,
     });
     expect(withZh.promptPatch.body).toBe(ASSET.gen_prompt_zh);
     expect(withZh.promptPatch.negative_body).toBe(ASSET.gen_prompt_negative_zh);
@@ -49,6 +53,7 @@ describe('buildPromptAssetLoad', () => {
       lang: 'en',
       promptNodeId: PROMPT_NODE_ID,
       promptNodePosition: PROMPT_NODE_POSITION,
+      mediaUrl: MEDIA_URL,
     });
     expect(withEn.promptPatch.body).toBe(ASSET.gen_prompt);
     expect(withEn.promptPatch.negative_body).toBe(ASSET.gen_prompt_negative);
@@ -65,6 +70,7 @@ describe('buildPromptAssetLoad', () => {
       lang: 'en',
       promptNodeId: PROMPT_NODE_ID,
       promptNodePosition: PROMPT_NODE_POSITION,
+      mediaUrl: MEDIA_URL,
     });
     expect('negative_body' in en.promptPatch).toBe(false);
 
@@ -73,21 +79,23 @@ describe('buildPromptAssetLoad', () => {
       lang: 'zh',
       promptNodeId: PROMPT_NODE_ID,
       promptNodePosition: PROMPT_NODE_POSITION,
+      mediaUrl: MEDIA_URL,
     });
     expect('negative_body' in zh.promptPatch).toBe(false);
   });
 
-  it('media node carries cover url + filename and sits left of the prompt node', () => {
+  it('media node carries the caller-supplied mediaUrl + filename and sits left of the prompt node', () => {
     const { mediaNode } = buildPromptAssetLoad({
       asset: ASSET,
       lang: 'en',
       promptNodeId: PROMPT_NODE_ID,
       promptNodePosition: PROMPT_NODE_POSITION,
+      mediaUrl: MEDIA_URL,
     });
     expect(mediaNode.type).toBe('media');
     expect(mediaNode.data.items).toHaveLength(1);
     expect(mediaNode.data.items[0]).toMatchObject({
-      url: getResourceCoverUrl(ASSET.id),
+      url: MEDIA_URL,
       kind: 'image',
       name: ASSET.filename,
     });
@@ -103,6 +111,7 @@ describe('buildPromptAssetLoad', () => {
       lang: 'en',
       promptNodeId: PROMPT_NODE_ID,
       promptNodePosition: PROMPT_NODE_POSITION,
+      mediaUrl: MEDIA_URL,
     });
     expect(connection).toEqual({
       id: `conn-${mediaNode.id}-${PROMPT_NODE_ID}`,

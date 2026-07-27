@@ -45,6 +45,7 @@ import {
 } from './genSlots';
 import { resolveEntityRef } from './entityRef';
 import { buildPromptAssetLoad } from './loadPromptAsset';
+import { importResourceAsCanvasMedia } from './mediaImport';
 import { resolveSourceUrl } from './promptInputs';
 import { withGenerationRunner } from './generationRunner';
 import { createBackendRunner } from './runner.backend';
@@ -58,18 +59,20 @@ import {
 import { topoSortPrompts } from './topology';
 import type { CanvasConnection, CanvasNode } from '../types';
 import type { PromptNodeData } from './types';
-import type { PromptAsset } from '../../../services/resourceService';
+import { getResourceCoverUrl, type PromptAsset } from '../../../services/resourceService';
 import { SMART_NODE_TYPES } from './nodes/registry';
 import { parseWorkflow, serializeWorkflow, workflowFilename } from './workflowIO';
 import { fetchWorkflowText, saveWorkflowToLibrary } from './workflowLibrary';
 import { WorkflowLibraryPicker } from './WorkflowLibraryPicker';
 
 /** Shape of the router state SendToCanvasModal navigates here with
- *  (spec 2026-07-26-asset-prompt-management, Phase 2 Task 4). `coverUrl`
- *  travels along for completeness but isn't consumed below — the adapter
- *  re-derives the same URL from `assetId` via buildPromptAssetLoad, which
- *  keeps the media-node construction on the one tested code path shared
- *  with the in-canvas Library picker (PromptNodeView). */
+ *  (spec 2026-07-26-asset-prompt-management, Phase 2 Task 4 / Phase 3 Task
+ *  3). `coverUrl` travels along for completeness but isn't consumed below —
+ *  the adapter mints a fresh durable URL from `assetId` via
+ *  importResourceAsCanvasMedia (falling back to the cover URL only if that
+ *  mint fails), then hands it to buildPromptAssetLoad, which keeps the
+ *  media-node construction on the one tested code path shared with the
+ *  in-canvas Library picker (PromptNodeView). */
 interface PendingPromptInsert {
   assetId: string;
   filename: string;
@@ -233,42 +236,57 @@ export function CanvasComposer({
       ?.promptInsert;
     if (!insert) return;
     const insertKey = `${canvasId}:${insert.assetId}`;
+    // Guard is check-and-set BEFORE the mint's await below so StrictMode's
+    // synchronous double-invoke can't both pass the check and each mint/
+    // insert their own pair — both invocations run before either commit
+    // lands, so the guard has to win the race at the top, not after.
     if (insertedRef.current === insertKey) return;
     insertedRef.current = insertKey;
 
-    const position = dropPosition();
-    const promptNode = createPromptNode({}, { position });
-    // Adapter: the payload already carries the resolved positive/negative
-    // text (PromptSection picked the lang side), so both sides of the
-    // fake asset get the same value — buildPromptAssetLoad's lang
-    // fallback logic is a no-op here, it's only used for the shared
-    // node/connection construction and cover-url derivation from assetId.
-    const asset: PromptAsset = {
-      id: insert.assetId,
-      filename: insert.filename,
-      gen_prompt: insert.positive,
-      gen_prompt_zh: insert.positive,
-      gen_prompt_negative: insert.negative ?? null,
-      gen_prompt_negative_zh: insert.negative ?? null,
-      updated_at: '',
-    };
-    const { promptPatch, mediaNode, connection } = buildPromptAssetLoad({
-      asset,
-      lang: 'en',
-      promptNodeId: promptNode.id,
-      promptNodePosition: position,
-    });
-    const filledPromptNode = {
-      ...promptNode,
-      data: { ...promptNode.data, ...promptPatch },
-    };
+    void (async () => {
+      let mediaUrl: string;
+      try {
+        mediaUrl = (await importResourceAsCanvasMedia(insert.assetId)).url;
+      } catch (err) {
+        console.error('[promptAsset] durable import failed, falling back to cover:', err);
+        mediaUrl = getResourceCoverUrl(insert.assetId); // visual-only fallback, no i2i
+      }
 
-    const store = useCanvasCoreStore.getState();
-    setNodes([...store.nodes, filledPromptNode, mediaNode as unknown as CanvasNode]);
-    setConnections([...store.connections, connection as unknown as CanvasConnection]);
-    setSelection([filledPromptNode.id, mediaNode.id]);
+      const position = dropPosition();
+      const promptNode = createPromptNode({}, { position });
+      // Adapter: the payload already carries the resolved positive/negative
+      // text (PromptSection picked the lang side), so both sides of the
+      // fake asset get the same value — buildPromptAssetLoad's lang
+      // fallback logic is a no-op here, it's only used for the shared
+      // node/connection construction.
+      const asset: PromptAsset = {
+        id: insert.assetId,
+        filename: insert.filename,
+        gen_prompt: insert.positive,
+        gen_prompt_zh: insert.positive,
+        gen_prompt_negative: insert.negative ?? null,
+        gen_prompt_negative_zh: insert.negative ?? null,
+        updated_at: '',
+      };
+      const { promptPatch, mediaNode, connection } = buildPromptAssetLoad({
+        asset,
+        lang: 'en',
+        promptNodeId: promptNode.id,
+        promptNodePosition: position,
+        mediaUrl,
+      });
+      const filledPromptNode = {
+        ...promptNode,
+        data: { ...promptNode.data, ...promptPatch },
+      };
 
-    navigate(location.pathname + location.search + location.hash, { replace: true });
+      const store = useCanvasCoreStore.getState();
+      setNodes([...store.nodes, filledPromptNode, mediaNode as unknown as CanvasNode]);
+      setConnections([...store.connections, connection as unknown as CanvasConnection]);
+      setSelection([filledPromptNode.id, mediaNode.id]);
+
+      navigate(location.pathname + location.search + location.hash, { replace: true });
+    })();
   }, [
     loadStatus,
     location.state,
