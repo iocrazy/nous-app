@@ -489,7 +489,7 @@ async def materialize(file_path: str) -> AsyncIterator["Path"]:
 
     loc = resolve_media_source(file_path)
     if not loc.is_object_store:
-        # Containment guard (mirrors resolve_generated_media_local_path): a
+        # Containment guard (mirrors generated_media_local_path): a
         # corrupt/hostile rel_path with ".." segments or symlink tricks must
         # never escape DOWNLOAD_PATH.
         base = os.path.realpath(settings.DOWNLOAD_PATH)

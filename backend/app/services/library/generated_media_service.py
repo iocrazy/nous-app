@@ -156,6 +156,9 @@ def _read_file_capped(path: str, max_bytes: int) -> bytes:
 # overflows the memory cap — streams through a temp file and uploads from
 # disk via put_file instead (no memory blowup).
 _OBJECT_STORE_IMAGE_MAX_BYTES = 16 * 1024 * 1024
+# NOTE: only gates VIDEO url-downloads. The oversized-image retry path
+# re-downloads with _DEFAULT_MAX_BYTES (512 MiB), preserving the pre-refactor
+# effective ceiling for big images.
 _OBJECT_STORE_STREAM_MAX_BYTES = 256 * 1024 * 1024
 
 
