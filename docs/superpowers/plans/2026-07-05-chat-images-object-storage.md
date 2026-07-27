@@ -7,9 +7,9 @@
 
 - Prod flag ON (`FEATURE_CHAT_MEDIA_OBJECT_STORE=true`, host .env). Rollback = remove flag + stop-t0/start.
 - storage-api: **file backend**, both stacks. Disk location moved off volume1
-  (7TB SSD) to **`/volume2/sources/MediaHub.library/object-storage`** (56TB).
-- Tenant naming de-stubbed: `STORAGE_TENANT_ID=mediahub`, `GLOBAL_S3_BUCKET: media`
-  → final object path `…/object-storage/media/mediahub/chat-media/t{scope}/{sha[:2]}/{sha[2:4]}/{sha}.ext`.
+  (7TB SSD) to **`/volume2/sources/Nous.library/object-storage`** (56TB).
+- Tenant naming de-stubbed: `STORAGE_TENANT_ID=nous`, `GLOBAL_S3_BUCKET: media`
+  → final object path `…/object-storage/media/nous/chat-media/t{scope}/{sha[:2]}/{sha[2:4]}/{sha}.ext`.
 - `FILE_SIZE_LIMIT` raised 50MB → 5GB (both stacks, user request).
 - **Ops iron law learned:** touching ONE service in the drifted supabase stack
   requires `docker compose up -d --no-deps <svc>` — a bare `compose up` cascaded
@@ -155,7 +155,7 @@ Findings from the 2026-07-05 recon (settle the prerequisites):
   bucket. It's now DORMANT — local dev has 1 bucket / 0 objects; the thumbnail
   workload moved to filesystem+nginx. So storage-api existed at some point but
   may have been removed since.
-- The NAS `MediaHub.library` (SMB-mounted `/volume2/sources/…`) has an empty
+- The NAS `Nous.library` (SMB-mounted `/volume2/sources/…`) has an empty
   `s3/` subdir created 2026-07-05 — strongly suggests the NAS Supabase Storage
   was recently pointed here, but nothing has landed yet. Empty dir can't tell
   file-backend from s3-backend.
@@ -175,7 +175,7 @@ Steps:
      file backend. Either is transparent to our code (we PUT/GET by key).
    - nothing / no container → storage-api not deployed; deploy it first (add to
      the NAS supabase compose, then `docker compose up -d` — Watchtower does
-     NOT read compose, standing lesson #172). If it lands on `MediaHub.library`,
+     NOT read compose, standing lesson #172). If it lands on `Nous.library`,
      give it a DEDICATED subdir it owns exclusively (opaque internal layout —
      don't mix with the existing `teams/` tree). macOS local dev: use a named
      Docker volume, NOT a bind mount to `/Volumes/...` (Supabase docs: bind

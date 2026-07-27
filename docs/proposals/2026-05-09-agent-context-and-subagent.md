@@ -11,7 +11,7 @@ User-reported pains, real, repeatable:
 1. **Context overflow** — long conversations 撞 context window，agent 失忆 / 异常截断 / API 报错。
 2. **Sub-agent 缺失** — 当前 `agent_runner.py` 是单层 loop，遇到大块工作（research / 多步骤代码生成 / 多文档比对）只能塞进主 agent 自己跑，污染主 context、拖慢响应。
 
-Anthropic 在 [Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) 给出解法：planning + sub-agents + filesystem + detailed prompt 四件套。mediahub 已有前三件、缺的是把这两个 pattern 落到 agent_runner。
+Anthropic 在 [Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) 给出解法：planning + sub-agents + filesystem + detailed prompt 四件套。nous 已有前三件、缺的是把这两个 pattern 落到 agent_runner。
 
 ## Goals
 

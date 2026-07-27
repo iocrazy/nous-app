@@ -704,7 +704,7 @@ Trigger a douyin video + music + cover download. Verify:
 ssh user@nas
 
 # Dry run first
-cd /path/to/mediahub/scripts
+cd /path/to/nous/scripts
 python migrate_nas_paths.py --dry-run
 
 # Review migration_log.json

@@ -225,7 +225,7 @@ Import `Sparkles` from lucide-react (add to the existing import block). Inside t
           <span className="w-6 h-6 rounded-[7px] grid place-items-center bg-gradient-to-br from-indigo-400 to-indigo-500 shadow-[0_0_16px_rgba(99,102,241,0.4)]">
             <Sparkles size={13} className="text-white" />
           </span>
-          <span>MediaHub</span>
+          <span>Nous</span>
         </div>
       )}
 ```

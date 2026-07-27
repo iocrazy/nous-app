@@ -4,7 +4,7 @@
 
 ## 1. Overview
 
-将 MediaHub 的 Script 编辑器从当前的基础 ReactFlow 画布升级为功能完整的剧本创作工具，对标参考应用 Storyboard Copilot v0.2.1 的 UI/UX 和功能集。
+将 Nous 的 Script 编辑器从当前的基础 ReactFlow 画布升级为功能完整的剧本创作工具，对标参考应用 Storyboard Copilot v0.2.1 的 UI/UX 和功能集。
 
 ### 1.1 Goals
 

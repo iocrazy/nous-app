@@ -18,7 +18,7 @@ Status: Draft v1 · 2026-06-20
 > - **主闭环 = 生成脚本/内容**(news/topic → 创作灵感),所有条目都有。
 > - **解析下载是次要、有条件的**——**仅当**某条热点带**可解析的媒体链接**(如热榜里一条抖音/B站/YouTube 视频)才出"解析下载"按钮。纯文本新闻不显示。
 
-参考：`aihot.virxact.com`（TrendRadar 血统的托管增强版）。**借设计与逻辑,不嵌代码**——TrendRadar 是为 GitHub Actions + 文件输出设计的批处理工具,与 mediahub 栈（DBOS / Supabase / React / AgentRunner）不合。
+参考：`aihot.virxact.com`（TrendRadar 血统的托管增强版）。**借设计与逻辑,不嵌代码**——TrendRadar 是为 GitHub Actions + 文件输出设计的批处理工具,与 nous 栈（DBOS / Supabase / React / AgentRunner）不合。
 
 ## 2. 范围
 
@@ -148,7 +148,7 @@ fetch(source: SignalSource) -> list[HotspotCandidate]   # {title,url,content,sou
 
 ## 6. 抓取流水线（DBOS scheduled workflow）
 
-复用 mediahub 现有 DBOS 调度（同 liveness/sweeper 模式,**不引外部 broker**）:
+复用 nous 现有 DBOS 调度（同 liveness/sweeper 模式,**不引外部 broker**）:
 
 ```
 @DBOS.scheduled("*/N min")  topic_fetch_workflow:
@@ -160,7 +160,7 @@ fetch(source: SignalSource) -> list[HotspotCandidate]   # {title,url,content,sou
   → 写 hotspots + 更新 topic_groups
 ```
 
-NewsNow 自托管 = 数据引擎;mediahub 只编排 + 评分 + 存储 + 呈现。
+NewsNow 自托管 = 数据引擎;nous 只编排 + 评分 + 存储 + 呈现。
 
 ### 6.5 信源健康：检测 + 提示（本期范围）
 
@@ -174,7 +174,7 @@ NewsNow 自托管 = 数据引擎;mediahub 只编排 + 评分 + 存储 + 呈现�
 - **不动 `task_tracking`**——这是信源元数据,不是任务;遵守"task_tracking 单一数据源"纪律(信源健康是独立的 `signal_sources` 自有列)。
 
 **提示**：
-- **Settings → 信源管理**列表每行显健康 badge:`ok` 灰/`degraded` amber/`dead` 红 + `last_error` + 相对时间。**死源显红,绝不静默产出 0 条**(避开 mediahub 踩过的"以为在跑其实早死"陷阱)。
+- **Settings → 信源管理**列表每行显健康 badge:`ok` 灰/`degraded` amber/`dead` 红 + `last_error` + 相对时间。**死源显红,绝不静默产出 0 条**(避开 nous 踩过的"以为在跑其实早死"陷阱)。
 - 某源从非 dead **翻转**到 `dead`(穿过阈值那一刻,只触发一次,不每轮刷屏)→ 复用现有 **discord-notify** 发告警:源名 + 连续失败次数 + last_error。
 - 模块页右上 health 自检指示(已定的 topbar badge)聚合:存在任一 `dead` 源 → 指示降级,点开跳信源管理。
 
@@ -182,7 +182,7 @@ NewsNow 自托管 = 数据引擎;mediahub 只编排 + 评分 + 存储 + 呈现�
 
 ## 7. 特调 Scoring Agent（核心,复用 AgentRunner）
 
-**这是 mediahub 比 TrendRadar 高级的地方**。TrendRadar 的 AI 是 3 个散装 prompt 调用(筛选打分/整批简报/翻译),无 agent、无 per-item 理由、无跨源聚类。我们用**一个特调 Agent**(AI Library 里建,复用 AgentRunner + Skill + RunRecorder + ai_provider)承担:
+**这是 nous 比 TrendRadar 高级的地方**。TrendRadar 的 AI 是 3 个散装 prompt 调用(筛选打分/整批简报/翻译),无 agent、无 per-item 理由、无跨源聚类。我们用**一个特调 Agent**(AI Library 里建,复用 AgentRunner + Skill + RunRecorder + ai_provider)承担:
 
 ### 7.1 Per-item（每条幸存候选,一次产出全部）
 - **相关度分** `score` 0~1（按用户兴趣描述,类似 TrendRadar ai_interests,但同一次调用顺带产理由）
@@ -194,7 +194,7 @@ NewsNow 自托管 = 数据引擎;mediahub 只编排 + 评分 + 存储 + 呈现�
 低于 `min_score` 丢弃。**混合**:关键词粗筛在前(workflow 层),只把幸存少量喂 Agent,压 token。
 
 ### 7.2 Per-batch（跨源聚类 = 多信源当前热点）
-- 对一批 hotspots 做**语义聚类**(用 mediahub 已有 **ModelScope embedding** 基建:embed 标题 → 聚相似 → 一个 cluster 跨 N 个去重 source = 热)。
+- 对一批 hotspots 做**语义聚类**(用 nous 已有 **ModelScope embedding** 基建:embed 标题 → 聚相似 → 一个 cluster 跨 N 个去重 source = 热)。
 - 写/更新 `topic_groups`:`source_count` + `heat = f(source_count, 时间衰减)`。
 - 这是 **TrendRadar 完全没有、aihot 的核心价值**,自建。
 

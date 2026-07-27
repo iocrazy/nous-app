@@ -42,7 +42,7 @@
 
 **约束 C1（决定性）**：Vercel Hobby 禁商用 → 有 billing/points/Nous Models 计费模块，对外即违 TOS。→ Cloudflare Pages 为必然终态。
 **约束 C2（P3 必须处理）**：本仓库发版极频繁，Cloudflare 500 构建/月 比 Vercel 100/天 更易撞顶。**缓解**：GitHub Actions 内构建 + `wrangler pages deploy` **直传预构建产物**（direct upload 不消耗 Pages 构建配额）。
-**约束 C3**：媒体文件（视频/图片）从后端 `mediahubserver` 出、不走前端源站；前端托管只发 SPA bundle，带宽压力小。
+**约束 C3**：媒体文件（视频/图片）从后端 `nousserver` 出、不走前端源站；前端托管只发 SPA bundle，带宽压力小。
 
 来源：[Vercel Hobby docs](https://vercel.com/docs/plans/hobby) · [Cloudflare Pages limits](https://developers.cloudflare.com/pages/platform/limits/)
 

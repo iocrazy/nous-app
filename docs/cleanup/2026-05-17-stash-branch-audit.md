@@ -1,6 +1,6 @@
 # Stash + Branch Cleanup Audit — 2026-05-17
 
-Per Batch 1 of `~/.gstack/projects/iocrazy-mediahub/ceo-plans/2026-05-17-post-pr290-hygiene-and-hotspots.md`.
+Per Batch 1 of `~/.gstack/projects/iocrazy-nous/ceo-plans/2026-05-17-post-pr290-hygiene-and-hotspots.md`.
 
 ## Part 1: Stash audit
 

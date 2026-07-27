@@ -21,11 +21,11 @@ sudo -i  # 切换到 root
 
 ```bash
 # 在 docker 共享文件夹中创建目录
-mkdir -p /volume1/docker/mediahub
-cd /volume1/docker/mediahub
+mkdir -p /volume1/docker/nous
+cd /volume1/docker/nous
 
 # 克隆代码
-git clone https://github.com/your-repo/mediahub.git .
+git clone https://github.com/your-repo/nous.git .
 
 # 或者通过 File Station 上传代码
 ```
@@ -77,7 +77,7 @@ docker-compose up -d
 docker ps
 
 # 查看日志
-docker logs -f mediahub-backend
+docker logs -f nous-backend
 ```
 
 ---
@@ -90,19 +90,19 @@ docker logs -f mediahub-backend
 
 先在命令行构建：
 ```bash
-cd /volume1/docker/mediahub
-docker build -t mediahub:latest .
+cd /volume1/docker/nous
+docker build -t nous:latest .
 ```
 
 ### 2. 在 Container Manager 创建容器
 
 1. 打开 **Container Manager** → **容器** → **新增**
-2. 选择镜像 `mediahub:latest`
+2. 选择镜像 `nous:latest`
 3. 配置：
 
 | 设置 | 值 |
 |------|-----|
-| 容器名称 | `mediahub-backend` |
+| 容器名称 | `nous-backend` |
 | 自动重启 | ✅ 启用 |
 | 端口 | 本地 `8080` → 容器 `8080` |
 
@@ -110,8 +110,8 @@ docker build -t mediahub:latest .
 
 | 本地路径 | 容器路径 | 说明 |
 |---------|---------|------|
-| `/volume1/docker/mediahub/downloads` | `/app/downloads` | 下载目录 |
-| `/volume1/docker/mediahub/backend/.env` | `/app/.env` | 环境变量 |
+| `/volume1/docker/nous/downloads` | `/app/downloads` | 下载目录 |
+| `/volume1/docker/nous/backend/.env` | `/app/.env` | 环境变量 |
 
 5. 环境变量：
    - `TZ` = `Asia/Shanghai`
@@ -135,15 +135,15 @@ docker build -t mediahub:latest .
 前端会自动部署到 3000 端口，但需要先构建：
 
 ```bash
-cd /volume1/docker/mediahub/frontend
+cd /volume1/docker/nous/frontend
 npm install
 npm run build
 ```
 
 然后启动：
 ```bash
-cd /volume1/docker/mediahub
-docker-compose up -d mediahub-frontend
+cd /volume1/docker/nous
+docker-compose up -d nous-frontend
 ```
 
 ### 方式 B：使用 Web Station
@@ -163,7 +163,7 @@ docker-compose up -d mediahub-frontend
 ## 更新部署
 
 ```bash
-cd /volume1/docker/mediahub
+cd /volume1/docker/nous
 
 # 拉取最新代码
 git pull
@@ -182,14 +182,14 @@ docker-compose up -d
 
 群晖 Docker 默认可能限制了内存，尝试：
 ```bash
-docker build --memory=2g -t mediahub:latest .
+docker build --memory=2g -t nous:latest .
 ```
 
 ### Q: Chrome 启动失败？
 
 检查容器日志：
 ```bash
-docker logs mediahub-backend
+docker logs nous-backend
 ```
 
 常见原因：
@@ -198,12 +198,12 @@ docker logs mediahub-backend
 
 ### Q: 下载的视频在哪里？
 
-在 NAS 上的 `/volume1/docker/mediahub/downloads` 目录。
+在 NAS 上的 `/volume1/docker/nous/downloads` 目录。
 
 ### Q: 如何查看实时日志？
 
 ```bash
-docker logs -f mediahub-backend
+docker logs -f nous-backend
 ```
 
 或在 Container Manager GUI 中查看。

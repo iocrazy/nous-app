@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把 MediaHub 硬编码的 AI prompt（首发 `script_ai_service`）迁移到数据库驱动的 "AI Library" — agent + prompt + 多文件 skill 统一管理，Settings 页加全局入口，参照 OpenClaw 架构并保留 MediaHub 独有的 4 级 scope。
+**Goal:** 把 Nous 硬编码的 AI prompt（首发 `script_ai_service`）迁移到数据库驱动的 "AI Library" — agent + prompt + 多文件 skill 统一管理，Settings 页加全局入口，参照 OpenClaw 架构并保留 Nous 独有的 4 级 scope。
 
 **Architecture:**
 - **Backend**: 新增 `prompt_composer` 服务 + `qwen_adapter`，复用现有 `ai_agents` 表（migration 121 已建）+ 扩展 `skills` 表（多文件）+ 新增 `skill_files`、`agent_skills`、`ai_sessions.agent_id` 字段。`Skill` tool lazy-readable 注入（参照 nous-center 设计，读 DB 返回 body）。
@@ -1477,7 +1477,7 @@ git commit -m "feat(ai): seed loader for agents/skills from filesystem"
 - [ ] **Step 10.1: Write `backend/seeds/agents/script_ai/IDENTITY.md`**
 
 ```markdown
-I am the MediaHub Script AI — a professional screenwriter inside the user's media studio.
+I am the Nous Script AI — a professional screenwriter inside the user's media studio.
 I know the user's library of parsed media, their scripts, and their storyboard drafts.
 My job is to help create, expand, and refactor scripts with cinematic rigor.
 ```
@@ -1495,7 +1495,7 @@ When stuck, ask one pointed question rather than guess.
 - [ ] **Step 10.3: Write `AGENT.md`**
 
 ```markdown
-You generate script content for MediaHub's script editor. Three primary tasks:
+You generate script content for Nous's script editor. Three primary tasks:
 
 1. **Outline**: given a premise, produce a 3-act outline with beats.
 2. **Expand**: given an outline and a selected scene, produce full scene prose (action + dialogue).

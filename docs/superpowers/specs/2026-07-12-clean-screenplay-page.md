@@ -15,7 +15,7 @@ script, cluttered format. Earlier fixes were piecemeal CSS patches that didn't
 converge.
 
 Key finding: **laper.ai has an A4 pagination engine (its "Paged" mode with page
-breaks + page numbers); mediahub does not** (WritingPanel comment: "page-count …
+breaks + page numbers); nous does not** (WritingPanel comment: "page-count …
 depends on the pagination engine, cut for Phase 1"). So "look like laper's A4
 page" is two layers: (1) a clean screenplay format, (2) a real pagination engine.
 Per the user, do the format/cleanup first (Phase A here); pagination is Phase B.

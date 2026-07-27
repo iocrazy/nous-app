@@ -8,7 +8,7 @@
 
 ## Summary in one paragraph
 
-Built mediahub's first explicit **trust boundary layer** (`app/boundary/`)
+Built nous's first explicit **trust boundary layer** (`app/boundary/`)
 covering SSRF defense, prompt-injection neutralization, and secret
 log-redaction across 5 architectural layers. Then took the OpenClaw
 research further and built **Agent Harness primitives**
@@ -103,7 +103,7 @@ DrissionPage routes via Chromium `set_proxy` + bypass override (B9-F).
 
 - `app/boundary/log_redact.py` — auto-mask secret-shaped tokens at log
   write time. Patterns calibrated to AVOID false positives on UUIDs,
-  Snowflake BIGINTs (mediahub uses these as IDs), git commit SHAs:
+  Snowflake BIGINTs (nous uses these as IDs), git commit SHAs:
   - Authorization: Bearer XXX (≥20 chars after prefix)
   - Bearer XXX (anywhere, ≥20 chars)
   - JWT 3-segment (each ≥16 chars — eliminates version.module.commit)
@@ -162,7 +162,7 @@ infra changes.
 
 - `app/agent_framework/workflow_timeout_policy.py` — per-workflow-type
   ceilings. parse=5min, ai_visual_analysis=60min, scheduled_sweep=2min,
-  default 10min. 14 known types calibrated against actual mediahub
+  default 10min. 14 known types calibrated against actual nous
   workload patterns.
 - `scheduled_recovery.recover_stale_orchestrator_locks_step` rewritten
   to use `is_stuck(task_type, elapsed)` instead of one-size 1h cutoff.

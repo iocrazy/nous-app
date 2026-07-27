@@ -5,7 +5,7 @@
 
 ## Overview
 
-Add a points-based monetization system to MediaHub:
+Add a points-based monetization system to Nous:
 
 - **Points System**: Unified currency for all consumable actions
 - **Team Management Enhancement**: Team points pool, roles (owner/admin/member), member quotas

@@ -87,8 +87,8 @@ If we ever change this calculus, the place to wire it is
 
 - [`watchtower-config.md`](./watchtower-config.md) — Watchtower poll
   interval / HTTP API config + the 2026-05-12 假成功-deploy incident
-- [#172 PR — gateway/worker split](https://github.com/iocrazy/mediahub/pull/172)
-- [#176 PR — workflow health classifier](https://github.com/iocrazy/mediahub/pull/176)
+- [#172 PR — gateway/worker split](https://github.com/iocrazy/nous-app/pull/172)
+- [#176 PR — workflow health classifier](https://github.com/iocrazy/nous-app/pull/176)
   (this is what triggered the executor cascade that masked the
   config-drift issue)
 - [`docker/docker-compose.yml` ⚠️ DEPLOYMENT GOTCHA section](../docker/docker-compose.yml)

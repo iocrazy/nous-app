@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Establish `app/boundary/` as MediaHub's first explicit "trust boundary" layer. All untrusted external data (user URLs, video descriptions from yt-dlp, log output containing secrets) must pass through a boundary processor before entering business logic.
+**Goal:** Establish `app/boundary/` as Nous's first explicit "trust boundary" layer. All untrusted external data (user URLs, video descriptions from yt-dlp, log output containing secrets) must pass through a boundary processor before entering business logic.
 
 **Architecture:** New `app/boundary/` package with three sibling modules — `url_guard` (SSRF + size + scheme allowlist), `external_text` (prompt-injection neutralizer + size cap), `log_redact` (sensitive-token auto-mask). All three follow the same shape: `validate_X(raw) -> ValidatedX | raises BoundaryError`. Callers retro-fit to call validators at the entry point only — service interiors trust their inputs. Loguru gets a global redaction sink so any logger statement that accidentally leaks a token gets masked at write time.
 
 **Tech Stack:** Python 3.13, pydantic v2, httpx (async), loguru, pytest with `asyncio_mode=auto`, ipaddress stdlib (no new deps).
 
-**Worktree:** `/Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2` (branch `feat/dbos-pr-d2`)
+**Worktree:** `/Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2` (branch `feat/dbos-pr-d2`)
 
 **Out of scope (deferred to Sprint 2+):**
 - `secret_compare` (timing-safe) — temp_token uses Redis lookup, not string compare; api_key_router has no compare yet
@@ -59,7 +59,7 @@
 Write the following content to `docs/architecture/boundary-layer.md`:
 
 ````markdown
-# Boundary Layer — MediaHub Trust Boundary Contract
+# Boundary Layer — Nous Trust Boundary Contract
 
 **Status:** Active (Sprint 1)
 **Owner:** heygo
@@ -67,13 +67,13 @@ Write the following content to `docs/architecture/boundary-layer.md`:
 
 ## What this is
 
-`app/boundary/` is MediaHub's explicit trust boundary. It is the only place that knows how to safely accept untrusted external data and convert it into something the business layer is allowed to use.
+`app/boundary/` is Nous's explicit trust boundary. It is the only place that knows how to safely accept untrusted external data and convert it into something the business layer is allowed to use.
 
 Everything outside `app/boundary/` is the **trusted interior**. The interior is allowed to assume that any data it receives has already been validated. Any module that imports from outside the worktree (network, user input, third-party API response, file content) must route the data through a `app/boundary/<X>` validator first.
 
 ## Why this exists
 
-Before Sprint 1, MediaHub had no architectural answer to "where does input validation live?". SSRF protection, prompt-injection sanitization, and log redaction were either missing or scattered into ad-hoc per-service helpers. Sprint 1 makes the trust boundary a first-class layer.
+Before Sprint 1, Nous had no architectural answer to "where does input validation live?". SSRF protection, prompt-injection sanitization, and log redaction were either missing or scattered into ad-hoc per-service helpers. Sprint 1 makes the trust boundary a first-class layer.
 
 ## The contract
 
@@ -101,7 +101,7 @@ Service interiors must:
 
 | Module | Validator | Purpose |
 |---|---|---|
-| `url_guard` | `validate_url(raw) -> ValidatedURL` | Reject SSRF (RFC1918, link-local, loopback, IPv6 ULA, MediaHub NAS subnet) + non-http(s) schemes + over-size redirects |
+| `url_guard` | `validate_url(raw) -> ValidatedURL` | Reject SSRF (RFC1918, link-local, loopback, IPv6 ULA, Nous NAS subnet) + non-http(s) schemes + over-size redirects |
 | `external_text` | `neutralize_external_text(raw, max_chars) -> str` | Strip embedded instruction-like patterns from yt-dlp `description` / external captions before they enter LLM prompts; cap size |
 | `log_redact` | `redact(text) -> str` + `make_loguru_patcher()` | Mask `sk-…`, `Bearer …`, JWT-shaped tokens, `Authorization:` headers in any logged string |
 
@@ -136,7 +136,7 @@ Sprint 1 = type-checker enforcement only (mypy/pyright will complain if a servic
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
 git add docs/architecture/boundary-layer.md
 git commit -m "docs(boundary): RFC for app/boundary/ trust layer"
 ```
@@ -190,7 +190,7 @@ def test_subclasses_distinct():
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_errors.py -v
 ```
 Expected: FAIL with `ModuleNotFoundError: No module named 'app.boundary'`
@@ -249,7 +249,7 @@ Create `backend/tests/boundary/__init__.py` (empty file):
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_errors.py -v
 ```
 Expected: 3 passed
@@ -257,7 +257,7 @@ Expected: 3 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
 git add backend/app/boundary/__init__.py backend/app/boundary/errors.py backend/tests/boundary/
 git commit -m "feat(boundary): add error hierarchy"
 ```
@@ -302,7 +302,7 @@ def test_validated_url_repr_marks_as_validated():
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_types.py -v
 ```
 Expected: FAIL with `ImportError`
@@ -339,7 +339,7 @@ class ValidatedURL(str):
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_types.py -v
 ```
 Expected: 2 passed
@@ -347,7 +347,7 @@ Expected: 2 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
 git add backend/app/boundary/types.py backend/tests/boundary/test_types.py
 git commit -m "feat(boundary): add ValidatedURL wrapper type"
 ```
@@ -434,7 +434,7 @@ def test_no_scheme_rejected():
         "http://172.16.0.1/",
         "http://172.31.0.1/",
         "http://192.168.1.1/",
-        "http://192.168.50.9:9080/",  # MediaHub NAS Supabase — must be blocked
+        "http://192.168.50.9:9080/",  # Nous NAS Supabase — must be blocked
         "http://169.254.169.254/latest/meta-data/",  # AWS IMDS
         "http://0.0.0.0/",
     ],
@@ -463,7 +463,7 @@ def test_private_ipv6_rejected(url: str):
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_url_guard.py -v
 ```
 Expected: ImportError on `validate_url`
@@ -479,7 +479,7 @@ Rejects:
 - non-http(s) schemes
 - literal private/loopback/link-local/multicast IPv4 + IPv6
 - DNS names that resolve to any of the above (DNS-rebinding safe)
-- MediaHub NAS subnet 192.168.50.0/24 (extra paranoia)
+- Nous NAS subnet 192.168.50.0/24 (extra paranoia)
 
 Returns ValidatedURL on success. Raises URLBlockedError on reject.
 """
@@ -493,7 +493,7 @@ from app.boundary.types import ValidatedURL
 
 ALLOWED_SCHEMES = {"http", "https"}
 
-# Extra MediaHub-specific blocked ranges. NAS subnet hosts Supabase (port 9080)
+# Extra Nous-specific blocked ranges. NAS subnet hosts Supabase (port 9080)
 # / Redis / Studio — must never be reachable from user-supplied URLs.
 EXTRA_BLOCKED_V4_NETWORKS = (
     ipaddress.ip_network("192.168.50.0/24"),
@@ -502,7 +502,7 @@ EXTRA_BLOCKED_V4_NETWORKS = (
 
 def _is_private_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """True if IP is in any unsafe range (RFC1918, loopback, link-local,
-    multicast, reserved, IPv6 ULA, IPv6 link-local, MediaHub NAS subnet)."""
+    multicast, reserved, IPv6 ULA, IPv6 link-local, Nous NAS subnet)."""
     if ip.is_private or ip.is_loopback or ip.is_link_local:
         return True
     if ip.is_multicast or ip.is_reserved or ip.is_unspecified:
@@ -559,7 +559,7 @@ def validate_url(raw: str) -> ValidatedURL:
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_url_guard.py -v
 ```
 Expected: all parametrized cases pass
@@ -567,7 +567,7 @@ Expected: all parametrized cases pass
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
 git add backend/app/boundary/url_guard.py backend/tests/boundary/test_url_guard.py
 git commit -m "feat(boundary): url_guard with scheme + literal-IP SSRF rejection"
 ```
@@ -593,7 +593,7 @@ def test_dns_resolves_to_private_rejected(monkeypatch):
     import app.boundary.url_guard as ug
 
     def fake_resolve(host: str) -> list[str]:
-        return ["192.168.50.9"]  # MediaHub NAS
+        return ["192.168.50.9"]  # Nous NAS
 
     monkeypatch.setattr(ug, "_resolve_host", fake_resolve)
 
@@ -649,7 +649,7 @@ def test_dns_public_passes(monkeypatch):
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_url_guard.py -v
 ```
 Expected: 5 new test failures (DNS path not implemented)
@@ -665,7 +665,7 @@ Rejects:
 - non-http(s) schemes
 - literal private/loopback/link-local/multicast IPv4 + IPv6
 - DNS names that resolve to any of the above (DNS-rebinding safe)
-- MediaHub NAS subnet 192.168.50.0/24 (extra paranoia)
+- Nous NAS subnet 192.168.50.0/24 (extra paranoia)
 
 Returns ValidatedURL on success. Raises URLBlockedError on reject.
 """
@@ -764,7 +764,7 @@ def validate_url(raw: str) -> ValidatedURL:
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_url_guard.py -v
 ```
 Expected: all tests pass
@@ -772,7 +772,7 @@ Expected: all tests pass
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
 git add backend/app/boundary/url_guard.py backend/tests/boundary/test_url_guard.py
 git commit -m "feat(boundary): DNS-rebinding-safe url_guard"
 ```
@@ -791,7 +791,7 @@ git commit -m "feat(boundary): DNS-rebinding-safe url_guard"
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 grep -n "url:\s*str\|url: Optional\[str\]" app/services/ytdlp_service.py
 ```
 
@@ -830,7 +830,7 @@ def test_fetch_metadata_requires_validated_url():
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_integration.py -v
 ```
 Expected: FAIL — annotation is `str`
@@ -854,7 +854,7 @@ Internal helpers like `_get_proxy_args(url: str)` may stay `str` — they take t
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_integration.py -v
 ```
 Expected: PASS
@@ -863,7 +863,7 @@ Expected: PASS
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest -x --ignore=tests/integration
 ```
 Expected: any test that calls `YtdlpService.fetch_metadata("http://...")` directly with a raw str fails — fix each call site by wrapping with `validate_url()` or marking as test-only fixture.
@@ -871,7 +871,7 @@ Expected: any test that calls `YtdlpService.fetch_metadata("http://...")` direct
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
 git add backend/app/services/ytdlp_service.py backend/tests/boundary/test_integration.py
 git commit -m "refactor(ytdlp_service): require ValidatedURL at all entrypoints"
 ```
@@ -950,7 +950,7 @@ def test_fetch_video_rejects_internal_url():
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_integration.py -v
 ```
 Expected: PASS
@@ -958,7 +958,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
 git add backend/app/api/media_fetch_router.py backend/app/api/media_fetch_helpers.py backend/tests/boundary/test_integration.py
 git commit -m "refactor(media_fetch): validate URL at API edge, propagate ValidatedURL"
 ```
@@ -1062,7 +1062,7 @@ def test_excessive_newlines_collapsed():
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_external_text.py -v
 ```
 Expected: ImportError
@@ -1158,7 +1158,7 @@ def neutralize_external_text(raw: str, *, max_chars: int) -> str:
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_external_text.py -v
 ```
 Expected: all tests pass
@@ -1166,7 +1166,7 @@ Expected: all tests pass
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
 git add backend/app/boundary/external_text.py backend/tests/boundary/test_external_text.py
 git commit -m "feat(boundary): external_text — defang LLM prompt injection"
 ```
@@ -1217,7 +1217,7 @@ git commit -m "feat(boundary): re-export public api from package init"
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 grep -n "description\|video_info\|metadata\[\|prompt" app/services/summarize_service.py
 ```
 
@@ -1244,7 +1244,7 @@ If the description flows through pydantic schema, add the neutralization in the 
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 grep -n "visual_description\|caption" app/services/visual_analysis_service.py
 ```
 
@@ -1273,7 +1273,7 @@ def test_summarize_neutralizes_description():
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/ -v
 ```
 Expected: all pass
@@ -1281,7 +1281,7 @@ Expected: all pass
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
 git add backend/app/services/summarize_service.py backend/app/services/visual_analysis_service.py backend/tests/boundary/test_integration.py
 git commit -m "refactor(ai): neutralize external description before LLM prompt composition"
 ```
@@ -1359,7 +1359,7 @@ def test_short_alphanumeric_not_redacted():
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_log_redact.py -v
 ```
 Expected: ImportError
@@ -1443,7 +1443,7 @@ def make_loguru_patcher():
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_log_redact.py -v
 ```
 Expected: all tests pass
@@ -1451,7 +1451,7 @@ Expected: all tests pass
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
 git add backend/app/boundary/log_redact.py backend/tests/boundary/test_log_redact.py
 git commit -m "feat(boundary): log_redact — auto-mask secret-shaped tokens"
 ```
@@ -1467,7 +1467,7 @@ git commit -m "feat(boundary): log_redact — auto-mask secret-shaped tokens"
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 grep -n "logger\|loguru\|configure" app/main.py
 ```
 
@@ -1518,7 +1518,7 @@ def test_loguru_patcher_installed_at_startup(caplog):
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_integration.py::test_loguru_patcher_installed_at_startup -v
 ```
 Expected: PASS
@@ -1526,7 +1526,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
 git add backend/app/main.py backend/tests/boundary/test_integration.py
 git commit -m "feat(boundary): install log_redact loguru patcher at startup"
 ```
@@ -1546,7 +1546,7 @@ git commit -m "feat(boundary): install log_redact loguru patcher at startup"
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 grep -rn "Celery\|celery\b\|\.delay()" app/ --include="*.py" --include="*.md" \
   | grep -v "__pycache__" | grep -v "_DEFERRED_TASKS.md" | grep -v "was Celery\|was via celery_app\|was @celery_app\|PR-D7"
 ```
@@ -1585,7 +1585,7 @@ If no result, mark the corresponding checklist items as done in the markdown (e.
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest -x --ignore=tests/integration
 ```
 Expected: pass (these were doc-only changes, no behavior change)
@@ -1593,7 +1593,7 @@ Expected: pass (these were doc-only changes, no behavior change)
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
 git add backend/app/services/agent_runner.py backend/app/services/hooks/__init__.py \
         backend/app/workflows/transcode.py backend/app/workflows/download.py \
         backend/app/workflows/_DEFERRED_TASKS.md
@@ -1608,7 +1608,7 @@ git commit -m "docs: drop Celery references in docstrings (Celery removed in PR-
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest --ignore=tests/integration -v
 ```
 Expected: all unit tests pass; if any non-boundary test broke from retro-fits, fix at the call site (wrap with `validate_url`) before continuing.
@@ -1617,7 +1617,7 @@ Expected: all unit tests pass; if any non-boundary test broke from retro-fits, f
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run python -c "
 from app.boundary import (
     BoundaryError, URLBlockedError, ExternalTextRejectedError,
@@ -1647,7 +1647,7 @@ Expected: HTTP 400 with body containing "URL not allowed".
 In a Python shell within the backend env:
 
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
 uv run python -c "
 from app.boundary import neutralize_external_text
 print(neutralize_external_text(
@@ -1661,7 +1661,7 @@ Expected: output wrapped in `<EXTERNAL_CONTENT>...</EXTERNAL_CONTENT>` with `[ex
 - [ ] **Step 5: Push branch**
 
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
 git push -u origin feat/dbos-pr-d2
 ```
 
@@ -1671,10 +1671,10 @@ git push -u origin feat/dbos-pr-d2
 gh pr create --title "feat(boundary): Sprint 1 — establish app/boundary/ trust layer" --body "$(cat <<'EOF'
 ## Summary
 
-First system layer established: `app/boundary/` becomes the explicit trust boundary for all untrusted external data entering MediaHub business logic.
+First system layer established: `app/boundary/` becomes the explicit trust boundary for all untrusted external data entering Nous business logic.
 
 Three modules:
-- **url_guard** — DNS-rebinding-safe SSRF rejector. Blocks RFC1918, loopback, link-local, IPv6 ULA, and the MediaHub NAS subnet (192.168.50.0/24). Returns `ValidatedURL` wrapper that downstream services accept instead of raw `str`.
+- **url_guard** — DNS-rebinding-safe SSRF rejector. Blocks RFC1918, loopback, link-local, IPv6 ULA, and the Nous NAS subnet (192.168.50.0/24). Returns `ValidatedURL` wrapper that downstream services accept instead of raw `str`.
 - **external_text** — defangs prompt-injection patterns in yt-dlp `description` and external captions before they reach LLM prompts. Wraps content in `<EXTERNAL_CONTENT>` markers and brackets `Ignore all prior instructions`-class strings.
 - **log_redact** — loguru sink patcher that masks `sk-…`, `Bearer …`, JWT-shaped tokens, and `KEY=value` env-style secrets at log write time.
 
@@ -1727,7 +1727,7 @@ Items I checked before finalizing:
 - `neutralize_external_text(raw, *, max_chars: int) -> str` — matches Task 8 implementation and Task 9 caller usage.
 - `redact(value: Any) -> Any` and `make_loguru_patcher()` — matches Task 10 implementation and Task 11 caller usage.
 
-**4. Worktree paths** — all `cd` commands use absolute path `/Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2`. No relative paths that would break if execution shell resets cwd.
+**4. Worktree paths** — all `cd` commands use absolute path `/Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2`. No relative paths that would break if execution shell resets cwd.
 
 ---
 
@@ -1855,7 +1855,7 @@ These are decisions where my primary review and the subagent both push back on t
 - Same as Phase 1: wrap (1 day) vs document (1 paragraph)
 
 **UC4 (Eng-NEW): Dev workflow allowlist mechanism**
-- Problem: dev runs mediahub locally, internal services on `127.0.0.1:808N`. `validate_url` will reject if mediahub itself fetches them (e.g., webhook-test endpoint, internal e2e)
+- Problem: dev runs nous locally, internal services on `127.0.0.1:808N`. `validate_url` will reject if nous itself fetches them (e.g., webhook-test endpoint, internal e2e)
 - Options:
   - (a) `SSRF_ALLOW_LOOPBACK=true` env-gated bypass (one-flag, easy)
   - (b) `SSRF_DEV_ALLOWLIST=192.168.50.10/32,127.0.0.1/32` explicit allowlist (precise)
@@ -2007,7 +2007,7 @@ C1, C2, C3, C4 (CEO criticals), H2-H4 (CEO highs), E1-E14 (Eng findings) — 18 
 ## Why rewrite
 
 The original Phase B9 named "wrap yt-dlp redirect" was patch-thinking inherited
-from CEO UC3. Real problem: **every HTTP fetcher in mediahub is a SSRF surface**
+from CEO UC3. Real problem: **every HTTP fetcher in nous is a SSRF surface**
 (yt-dlp subprocess, DrissionPage browser, 8+ httpx call sites in
 downloader / download_progress / visual_analysis / notion / ai_provider /
 storyboard / volcengine / whisper). Per-site retro-fits become unmaintainable

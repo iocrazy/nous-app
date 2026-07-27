@@ -4,12 +4,12 @@ Date: 2026-06-21
 Status: approved (brainstorming) → next = writing-plans
 Scope owner: media-context epic, sub-plan 5
 
-> Note: `docs/superpowers/` is gitignored in mediahub — this spec is a local
+> Note: `docs/superpowers/` is gitignored in nous — this spec is a local
 > working doc, not committed to git (per repo convention).
 
 ## 1. Problem & Intent
 
-AI-generated media (images / videos) produced inside mediahub is not captured
+AI-generated media (images / videos) produced inside nous is not captured
 anywhere reusable. The 25-day-old sub-plan-5 sketch ("when an agent tool returns
 a file, register it as a resource") **does not hold today**: the agent runtime
 has NO media-producing tool (only `Skill`/`ResourceFetch`/`Delegate`/
@@ -201,7 +201,7 @@ experiments stay in cheap Tier-1.
 - B tool failure → clean tool error to the agent.
 - A canvas failure → best-effort capture; never crashes the canvas run (log).
 - P failure → does not lose the Tier-1 row (it stays in generated_media).
-- Generation is synchronous within the agent turn / canvas run (mediahub's
+- Generation is synchronous within the agent turn / canvas run (nous's
   settled sync model; async/DBOS = Phase 6). No `task_tracking` rows; agent-side
   telemetry via `RunRecorder`.
 
@@ -253,5 +253,5 @@ experiments stay in cheap Tier-1.
   include it as columns. ✅
 - **Classification as optional post-processing** → auto-tag on promote, interface
   only. ✅ (deferred build)
-- **Task-based async + polling** — IC is async; mediahub generation is sync by
+- **Task-based async + polling** — IC is async; nous generation is sync by
   design (Phase 6 defers async). ❌ skip.

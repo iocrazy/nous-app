@@ -1,23 +1,23 @@
 # MCP Servers (Outbound)
 
 This document explains how to register an external MCP (Model Context
-Protocol) server so your MediaHub agents can call its tools — and what
+Protocol) server so your Nous agents can call its tools — and what
 the security model is.
 
 ## What is "outbound MCP"?
 
 MCP is JSON-RPC over HTTP. An MCP server advertises a list of `tools`
-(name + JSON-Schema params). MediaHub's agents can call those tools
+(name + JSON-Schema params). Nous's agents can call those tools
 during a chat turn, mixing them in with the built-in `Skill` and
 `Delegate` tools.
 
 When you register a server in **Settings → AI → MCP Servers**:
 
-1. MediaHub's chat backend lists your enabled servers at chat-start
+1. Nous's chat backend lists your enabled servers at chat-start
 2. Calls `tools/list` against each (cached 5 min)
 3. Injects each tool into the LLM's `tools` array as
    `{server_name}.{tool_name}` (e.g. `notion.create_page`)
-4. When the LLM calls `notion.create_page`, MediaHub routes the
+4. When the LLM calls `notion.create_page`, Nous routes the
    `tools/call` JSON-RPC request to your server
 5. Returns the response as the tool result for the next LLM iteration
 
@@ -45,13 +45,13 @@ These ship MCP HTTP transport that works with our outbound client:
 - **Linear MCP** — query issues, create issues, transition state
 
 > ⚠️ Many community MCP servers ship **stdio transport only** (designed
-> for Claude Desktop). MediaHub's outbound client is **HTTP only**
+> for Claude Desktop). Nous's outbound client is **HTTP only**
 > right now. If a server only does stdio, you'll need to wrap it in
 > an HTTP adapter (e.g. `mcp-proxy`).
 
 ## Security model
 
-### What MediaHub trusts the server to do
+### What Nous trusts the server to do
 
 When the LLM calls `srv.create_page`, that call **executes immediately
 on your MCP server with whatever credentials the server was configured
@@ -84,7 +84,7 @@ enabling if you're testing a new server.
 - ❌ MCP tool descriptors are passed to the LLM as-is. A malicious
    server could advertise misleading descriptions to trick the LLM
    into calling the wrong tool.
-- ❌ MCP `tools/call` happens inside MediaHub's request — a slow MCP
+- ❌ MCP `tools/call` happens inside Nous's request — a slow MCP
    server eats your chat-turn timeout (default 30s per request).
 - ❌ No per-tool rate limiting (yet). A spammy LLM could call your
    `create_issue` tool 50 times in a row.

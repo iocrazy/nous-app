@@ -12,8 +12,8 @@ The two memory subsystems embed text with separately-configured embedders:
   `graph_embedder_model`), editable in the Admin → Memory panel. But there is **no
   `dimensions` field**: the index dimension is implicit (Graphiti's 1536 default).
 - **Honcho** (user-model service, pgvector backend) — embedder config is **not managed
-  by mediahub at all**. Honcho reads its own container `.env`
-  (`EMBEDDING_*` / `VECTOR_STORE_DIMENSIONS`). mediahub only knows Honcho's
+  by nous at all**. Honcho reads its own container `.env`
+  (`EMBEDDING_*` / `VECTOR_STORE_DIMENSIONS`). nous only knows Honcho's
   `base_url` / `workspace` / feature flag.
 
 This means the embedder is configured in two unrelated places with no single source of
@@ -43,7 +43,7 @@ returned 503 under test), not the dimension ceiling.
 
 ## Scope
 
-### In scope (this iteration — pure mediahub code, no NAS mutation)
+### In scope (this iteration — pure nous code, no NAS mutation)
 
 1. **`dimensions` field on the Graphiti embedder config.** Added to
    `GraphMemoryConfig`, `_SETTINGS_MAP`, the admin schema/endpoint, and the panel.

@@ -11,10 +11,10 @@
 
 - **laper.ai**（截图 9 张，2026-07-05 收）— Script/Beats/Storyboard/Scenes/Characters/Locations/Props 的成熟形态
 - **Infinite-Canvas**（`/Volumes/program/project-code/github-repos/Infinite-Canvas`）— 节点式智能画布：ComfyUI/即梦CLI/多模型（OpenAI/Gemini/方舟/Modelscope/火山）文生图·图生图·文生视频·图生视频；扩图/全景/抽帧/循环节点。
-  - ⚠️ **LICENSE 明文禁商用**：「禁止用于任何形式的修改封装成商业产品，商用须取得授权」「二次开发必须保持开源并注明来源」。MediaHub 是商业产品（计费/积分/套餐）→ **不可全量搬、不可二次开发闭源**。
-  - ✅ **用户拍板：clean-room 重写**（2026-07-05）。把它当**功能/交互参考**（节点类型、连线语义、生成流程、多模型编排思路——思路不受版权保护），在 MediaHub 现有 `canvas-core` + `@xyflow/react`(MIT) 上**干净重写，一行代码不抄**。跟现有栈无缝，完全合法。
+  - ⚠️ **LICENSE 明文禁商用**：「禁止用于任何形式的修改封装成商业产品，商用须取得授权」「二次开发必须保持开源并注明来源」。Nous 是商业产品（计费/积分/套餐）→ **不可全量搬、不可二次开发闭源**。
+  - ✅ **用户拍板：clean-room 重写**（2026-07-05）。把它当**功能/交互参考**（节点类型、连线语义、生成流程、多模型编排思路——思路不受版权保护），在 Nous 现有 `canvas-core` + `@xyflow/react`(MIT) 上**干净重写，一行代码不抄**。跟现有栈无缝，完全合法。
 
-## MediaHub 现有地基（Phase B 是提升不是从零）
+## Nous 现有地基（Phase B 是提升不是从零）
 
 后端：`script_*`（ai / canvas / outline·projects / import / export / assets）、`sb_*`（分镜 ai / canvas / characters / projects / export）、`canvases_router`、`generated_media_router`。CLAUDE.md：script_ai agent（script-outline/expand/branch skills）、Storyboard AI、Canvas 系统（Infinite-Canvas port，见 project_infinite_canvas_port）、project_style_profile 注入 AI。
 
@@ -22,7 +22,7 @@
 
 ### Script 剧本编辑器【首个深挖】
 
-**⭐ 架构定调（用户明确）**：laper 的 "screenwriting/project" **就等于 MediaHub 的 project**。整个 laper 结构（Episodes → Script/Beats/Storyboard/Scenes/Characters/Props/Locations/Assets）直接映射到 MediaHub 项目详情。脚本创作与 storyboard 必须有关联性（scene 流向 storyboard 列）。
+**⭐ 架构定调（用户明确）**：laper 的 "screenwriting/project" **就等于 Nous 的 project**。整个 laper 结构（Episodes → Script/Beats/Storyboard/Scenes/Characters/Props/Locations/Assets）直接映射到 Nous 项目详情。脚本创作与 storyboard 必须有关联性（scene 流向 storyboard 列）。
 
 - 顶部 tab：**Script / Outline / Cover**
 - 左栏：Episodes（Ep 1）→ Script/Beats/Storyboard/Scenes/Characters/Props/Locations/Assets；下方 Scenes 列表（1. INT Blank Studio NIGHT …）
@@ -54,7 +54,7 @@
 - 右侧 Writing 面板：**Info / Collaboration 两 tab**；Collaborators（头像 + `+` 邀请）/ Pagination（Minimal）/ Format（Hollywood ↔ Asian）/ AI Usage（This month·Plan）/ Statistics（Scenes/Words/Characters/Locations/Beats/Shots/Relations 实时计数）
 
 **⭐ 用户明确要加的新需求（超越 laper）**：
-1. **版本管理 = 类 git**：Script 内容支持 commit 等操作、版本历史。laper 无此功能，用户要加。（MediaHub 已有 file_versions/resource_versions 可借鉴，但"git 式 commit 剧本内容"是独立特性，需定义 commit 粒度/diff/回滚/分支？）
+1. **版本管理 = 类 git**：Script 内容支持 commit 等操作、版本历史。laper 无此功能，用户要加。（Nous 已有 file_versions/resource_versions 可借鉴，但"git 式 commit 剧本内容"是独立特性，需定义 commit 粒度/diff/回滚/分支？）
 2. **Outline ↔ Script 联动**：laper **缺失**这个（用户吐槽「Beats 和 Script 没有对应，Outline↔Script 联动性有点缺乏」）。用户要做得比 laper 好——改 Outline 回写 Script、Beats↔Script scene 对应、右下 Summarize outline 双向关联。
 3. **多人共同编辑**：拉团队成员进来一起编辑（Collaboration tab + Collaborators）。实时协同。
 4. **Script ↔ Storyboard 关联**：scene 流向 storyboard 分列（Auto Storyboard 按 scene 生成）。
@@ -92,7 +92,7 @@
                                                           ↓ Auto Storyboard(AI 读 scene+实体)
                                                         Shot(镜头:参数标签+描述+@实体) → Generate 真图
   ```
-- ⚠️ **现有断层**：MediaHub 现 script 生成的是**章节节点**，缺明确 **Scene 层**（章节直跳分镜）。落地 B 必须补「章节→场景」拆分层——这也是 outline↔script 联动、拖场景换序、Beats↔scene 锚定的共同作用层。
+- ⚠️ **现有断层**：Nous 现 script 生成的是**章节节点**，缺明确 **Scene 层**（章节直跳分镜）。落地 B 必须补「章节→场景」拆分层——这也是 outline↔script 联动、拖场景换序、Beats↔scene 锚定的共同作用层。
 - **「不照搬 laper」**：laper 的 shot 拆分（参数标签+散文+@实体+逐个 Generate）作为**能力基线**（分镜该有的信息），但**具体视觉/交互（列式 vs 画布、shot 卡形态）用户保留推翻权**，届时 design-shotgun 出稿。
 
 ### Characters / Locations / Props 实体模块
@@ -108,11 +108,11 @@
 - **Beats ↔ Script 关联悬浮**（图 39）：Beats 卡（Enter VOID · 10'-20' · 描述 + ✎）悬浮在 script 左侧空白处——但**用户说「目前没看到怎么关联」，让我思考**。→ 设计空间：Beats 应锚定到 script 的 scene/节点上（时间轴节拍 ↔ 剧本场景双向定位）。
 - **Ep 多集**（图 45）：Episodes 可 `+` 加 Ep（Ep1/2/3），路由 `laper.ai/app/project/<projectId>/EPISODE_<id>/script`。→ **Episode 是路由层级**，切 Ep 换整套 Script/Beats/Storyboard/Scenes。**关注路由设计**。
 
-### ⭐ 用户对 MediaHub 现有实现的批评（Phase B 要改的）
+### ⭐ 用户对 Nous 现有实现的批评（Phase B 要改的）
 1. **阶段条做成了 tab（图 42）——错**。「上面应该是流程节点，但做成了 tab，应该类似节点样式的上下游关联」。参考 laper Production 画布（图 40）：Scene → Performance Description → Text Storyboard → Storyboard Frame 是**画布上左→右连线的上下游流程节点**，不是顶部 tab 条。→ 阶段/流程要节点化、有连线、体现上下游。
 2. **现有 script 模块很乱（图 43）+ 报错（图 44 已修，见下）**。Script Assets 侧栏（Story Outline/Worldview/Characters/Locations/Props/Plot Points）+ Import Script / Create Story 空态 + AI Chat 抽屉（Execute/Plan First/Dry Run 模式）——用户觉得整体乱，让我看怎么调整。
 3. **⭐ 核心设计澄清（节点式 vs 文字式）**：用户原话「我记得之前是节点式的剧本，应该是显示文字样式的剧本，可以节点化，对吧（节点就方便预览和调整顺序）」。
-   → **主视图 = laper 那种文字剧本样式**（好莱坞/亚洲格式化文本，图 6/32），**不是** MediaHub 现在的纯节点画布。
+   → **主视图 = laper 那种文字剧本样式**（好莱坞/亚洲格式化文本，图 6/32），**不是** Nous 现在的纯节点画布。
    → **但底层节点化保留**，用于「预览 + 调顺序」（拖场景换序、AI 按 node 操作）。
    → 结论：**文字为主视图、节点为结构与操作层**。二者是同一份数据的两种呈现（就像 Hollywood/Asian 是渲染层）。这统一了之前所有观察：scene 容器块、拖动换序、AI replace node、版本 diff 到 node。
 
@@ -124,7 +124,7 @@
 
 ## ⭐ 节点视图定位（用户 2026-07-05 补充洞察）
 
-看现有 MediaHub 节点式 script（章节节点，带 Expand/Branch/Storyboard）后，用户提出：节点式作为「**另一种形式，等剧本定稿后**」用来和下阶段分镜做关联。→ 彻底理顺「文字 vs 节点」：**同一份剧本在生命周期不同阶段的两张脸**。
+看现有 Nous 节点式 script（章节节点，带 Expand/Branch/Storyboard）后，用户提出：节点式作为「**另一种形式，等剧本定稿后**」用来和下阶段分镜做关联。→ 彻底理顺「文字 vs 节点」：**同一份剧本在生命周期不同阶段的两张脸**。
 - **写作阶段** = 文字剧本主视图（laper 自动格式化，写 scene/对白）
 - **定稿后** = 节点视图，干文字视图干不了的两件事：
   1. **分支叙事**（Character Choice / Condition × 2-4 支）——多路径故事本质是 DAG，节点是天然形态，线性文字表达不了，**节点视图不可替代的价值**。
@@ -132,7 +132,7 @@
 - 现有节点动作实测：**Expand**(章节 summary→AI 3-5 段 prose，可给 expansion request)、**Branch**(从某章分叉)、**Storyboard**(章→分镜)。
 
 ### ⚠️ 待用户定：脚本→分镜粒度（影响数据模型层数）
-现节点=**章节**粒度；分镜按**场景**分列。点章节「Storyboard」时：A) 章→直接分镜(两层)；B) 章→拆场景→每场景→分镜(三层，laper 是这个，scene=剧本&分镜共同基本单元)。现 MediaHub Expand 是章节级 prose，无 scene 拆分层。
+现节点=**章节**粒度；分镜按**场景**分列。点章节「Storyboard」时：A) 章→直接分镜(两层)；B) 章→拆场景→每场景→分镜(三层，laper 是这个，scene=剧本&分镜共同基本单元)。现 Nous Expand 是章节级 prose，无 scene 拆分层。
 
 ## 已定（用户拍板）
 - **UI 重新设计**：现有前端腐坏 + 旧节点画布优先设计错位 → Phase B **重做主视图**。**laper 设计图（已收全批截图）作为基线，目标超过它**。用 design-shotgun / design-consultation 出稿（超 laper，不照搬）。
@@ -140,7 +140,7 @@
   - ⚠️ **现状 delta**：现有 storyboard/generated media 存 **NAS 本地文件系统**（`storyboard_service.py` `NAS_BASE_PATH=/app/downloads`，DB 存相对路径 + `/file` token 端点取），**无任何 Supabase Storage 封装**（grep `storage.from_`/`.upload` 零命中）。
   - 需新建：Supabase Storage 客户端封装 + bucket 结构设计 + 公开/签名 URL 处理（替代 NAS 相对路径 + mediaToken）。self-hosted sb-prod 栈需确认 storage service 已启用。
 - **PC 端优先**，移动端以后再说
-- laper screenwriting = MediaHub project（结构直接映射）
+- laper screenwriting = Nous project（结构直接映射）
 - 首个深挖模块 = Script
 - **文字剧本=写作主视图；节点视图=定稿后的结构/分支/推进-分镜形态**（两张脸，非二选一）
 - **阶段/流程节点化**（画布上下游连线，不是 tab 条）；章节节点→分镜节点=阶段接缝

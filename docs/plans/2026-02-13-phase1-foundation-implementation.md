@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Restructure MediaHub navigation from three-mode sidebar to workspace-based architecture with TopBar, WorkspaceSwitcher, and basic ResourcesView.
+**Goal:** Restructure Nous navigation from three-mode sidebar to workspace-based architecture with TopBar, WorkspaceSwitcher, and basic ResourcesView.
 
 **Architecture:** Replace current TeamSwitcher + Sidebar with WorkspaceSwitcher (sidebar top) + TopBar (right icons) + workspace-aware navigation. Settings moves from sidebar to avatar menu. ResourcesView gets folder tree. All changes are frontend-only in Phase 1; backend API for resources/folders is minimal (Supabase direct queries via dataService).
 

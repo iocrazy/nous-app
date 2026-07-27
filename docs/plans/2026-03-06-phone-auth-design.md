@@ -12,7 +12,7 @@ Frontend has phone login UI shell but no real auth logic. Need phone+password lo
 Convert phone number to a deterministic email address and use standard Supabase email auth.
 
 ```
-Phone: 13800138000 → Email: 86_13800138000@phone.mediahub.internal
+Phone: 13800138000 → Email: 86_13800138000@phone.nous.internal
 ```
 
 ### Why This Approach
@@ -25,7 +25,7 @@ Phone: 13800138000 → Email: 86_13800138000@phone.mediahub.internal
 ### Phone-to-Email Format
 
 ```
-{country_code}_{phone_number}@phone.mediahub.internal
+{country_code}_{phone_number}@phone.nous.internal
 ```
 
 - Country code default: `86` (China)
@@ -54,14 +54,14 @@ Add to `supabase_auth_router.py`:
 ```
 Register:
   User enters phone=13800138000, password=xxx
-  → Frontend: email = "86_13800138000@phone.mediahub.internal"
+  → Frontend: email = "86_13800138000@phone.nous.internal"
   → supabase.auth.signUp({ email, password, data: { phone: "+8613800138000", login_type: "phone" } })
   → Supabase creates user with auto-confirm (email confirm disabled for self-hosted)
   → Returns JWT session
 
 Login:
   User enters phone=13800138000, password=xxx
-  → Frontend: email = "86_13800138000@phone.mediahub.internal"
+  → Frontend: email = "86_13800138000@phone.nous.internal"
   → supabase.auth.signInWithPassword({ email, password })
   → Returns JWT session
 

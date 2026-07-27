@@ -24,9 +24,9 @@ The insight that drives the architecture: the media the agent should reference (
 - Self-hosted Supabase Storage is *also* on the NAS (file-backed) → no capacity advantage, but adds hops (storage container + Kong + `storage.objects` metadata), inherits the self-hosted Supabase reliability wobble, is worse for large-video streaming than the existing nginx/HLS + `/media` path, and couples assets to Supabase (portability cost vs the planned migrations).
 - Trade-off accepted: upload + access-control plumbing is hand-rolled (but the media-token machinery already exists to reuse).
 
-**Storage layout** (confirmed against the live NAS `MediaHub.library`):
+**Storage layout** (confirmed against the live NAS `Nous.library`):
 ```
-MediaHub.library/
+Nous.library/
   global/resources/web/...            (existing)
   teams/{teamid}/uploads/...          (permanent user uploads — existing)
   teams/{teamid}/temp/...             (NEW — chat/issue temp uploads)
@@ -38,7 +38,7 @@ MediaHub.library/
 ## Components
 
 ### C1 — Temp uploads as resources (UPGRADE the existing endpoint, D2)
-- **Reuse, don't rebuild:** `/api/v1/ai-library/chat-attachments/upload` already exists (`ai_library_router.py:2090+`) — it does per-user temp upload with magic-byte anti-spoofing, a 50MB cap, image/video/pdf allow-list, and is already consumed by `run_session_turn(attachments=…)`. Today it writes to ephemeral `/tmp/mediahub_chat_attachments` with a hardcoded 24h reap.
+- **Reuse, don't rebuild:** `/api/v1/ai-library/chat-attachments/upload` already exists (`ai_library_router.py:2090+`) — it does per-user temp upload with magic-byte anti-spoofing, a 50MB cap, image/video/pdf allow-list, and is already consumed by `run_session_turn(attachments=…)`. Today it writes to ephemeral `/tmp/nous_chat_attachments` with a hardcoded 24h reap.
 - **Upgrade it (D2):** redirect its writes to a **temp resource** at `teams/{teamid}/temp/` (reuse the validation + the turn-consumption wiring untouched). Returns the resource id + media-token URL.
 - Temp flag: `is_temp` boolean **or** a reserved `temp` folder under the team's uploads (decide in plan).
 - Issue-description paste/drag uses the same endpoint/flow.

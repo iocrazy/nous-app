@@ -742,7 +742,7 @@ Run on NAS (user's terminal — you cannot do this for them, print the commands 
 
 ```bash
 ssh user@nas-host -p 2222
-cd /volume1/docker/mediahub/docker
+cd /volume1/docker/nous/docker
 sudo docker compose logs --tail=200 backend | grep -i seed_loader
 ```
 

@@ -88,9 +88,9 @@ markers = [
 mediahub = "app.main:main"
 
 [project.urls]
-Homepage = "https://github.com/iocrazy/mediahub"
-Repository = "https://github.com/iocrazy/mediahub"
-Issues = "https://github.com/iocrazy/mediahub/issues"
+Homepage = "https://github.com/iocrazy/nous-app"
+Repository = "https://github.com/iocrazy/nous-app"
+Issues = "https://github.com/iocrazy/nous-app/issues"
 
 [build-system]
 requires = ["hatchling"]

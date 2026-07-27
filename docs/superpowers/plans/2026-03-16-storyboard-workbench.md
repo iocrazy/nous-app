@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a full-featured storyboard workbench module for MediaHub with node-based canvas, AI image/video generation, character consistency, script-to-storyboard, and animatic playback.
+**Goal:** Build a full-featured storyboard workbench module for Nous with node-based canvas, AI image/video generation, character consistency, script-to-storyboard, and animatic playback.
 
 **Architecture:** FastAPI backend (5 routers, 4 services, repository pattern) + React 19 frontend (@xyflow/react canvas, Zustand store, Konva annotations) + Supabase PostgreSQL (8 tables, Snowflake BIGINT IDs, RLS) + Celery async tasks + NAS file storage.
 
@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-03-16-storyboard-workbench-design.md`
 
-**Working Directory:** `/Volumes/program/project-code/repos/mediahub/.worktrees/storyboard/`
+**Working Directory:** `/Volumes/program/project-code/repos/nous/.worktrees/storyboard/`
 
 ---
 

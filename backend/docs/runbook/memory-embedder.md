@@ -26,7 +26,7 @@ with the **same logical embedder**. Its configuration lives in **one place** —
   cold start.
 
 - **Honcho** is a third-party service that reads its **own container `.env`**
-  (`EMBEDDING_*`, `VECTOR_STORE_*`); it cannot read mediahub's database. Its `.env` is
+  (`EMBEDDING_*`, `VECTOR_STORE_*`); it cannot read nous's database. Its `.env` is
   therefore a **materialization** of the same values above. When the embedder
   model/dimension changes, the Honcho env must be re-synced **manually** (procedure
   below). This is deliberate — auto-syncing from the app would mean the backend
@@ -79,7 +79,7 @@ ALTER TABLE message_embeddings ALTER COLUMN embedding TYPE vector(4096) USING NU
 
 Synology networking note: the NAS **host shell** cannot curl Honcho's published port
 (`192.168.50.9:18000` → 503 "Unable to connect", a host↔docker-bridge hairpin quirk),
-but **containers can** — the mediahub backend container reaches it at 200. Test Honcho
+but **containers can** — the nous backend container reaches it at 200. Test Honcho
 connectivity from a container, not the host shell.
 
 ## Procedure: change the embedder (incl. dimension)
@@ -89,7 +89,7 @@ connectivity from a container, not the host shell.
    config on its next cold start.
 
 2. **Sync Honcho's env** (only if the model/dimension changed). On the NAS, in the
-   Honcho compose dir (`/volume1/docker/mediahub/honcho-dev/` on dev):
+   Honcho compose dir (`/volume1/docker/nous/honcho-dev/` on dev):
    - Update the embedder vars in Honcho's `.env`
      (`EMBEDDING_OPENAI_BASE_URL`, `EMBEDDING_OPENAI_API_KEY`,
      `EMBEDDING_MODEL`, `EMBEDDING_VECTOR_DIMENSIONS`) to match the values above.

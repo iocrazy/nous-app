@@ -4,7 +4,7 @@
 
 **Goal:** 在 GPU 服务器（NAT 后、无公网）建立一个 Cloudflare Tunnel，把 `api.nous.ink` / `sb.nous.ink` 经干净 443 打通到机上一个 health 容器；产出一套可提交的 IaC 骨架（compose + cloudflared ingress + health + runbook），为 P1 迁 backend/Supabase 铺地基。
 
-**Architecture:** cloudflared 以 Docker 容器跑**本地管理式（locally-managed）** tunnel，ingress 规则写在仓库 `deploy/gpu-server/cloudflared/config.yml`（IaC，避免 dashboard 漂移）；tunnel 凭证（cert.pem + `<id>.json`）住**仓库树外** `/opt/mediahub/secrets/cloudflared/`（物理隔离于 git，`.gitignore` 仅作保险带）。P0 阶段 ingress 先全部指向一个 `nginx:alpine` health 容器，P1 再把 hostname 重映射到 backend/Kong。
+**Architecture:** cloudflared 以 Docker 容器跑**本地管理式（locally-managed）** tunnel，ingress 规则写在仓库 `deploy/gpu-server/cloudflared/config.yml`（IaC，避免 dashboard 漂移）；tunnel 凭证（cert.pem + `<id>.json`）住**仓库树外** `/opt/nous/secrets/cloudflared/`（物理隔离于 git，`.gitignore` 仅作保险带）。P0 阶段 ingress 先全部指向一个 `nginx:alpine` health 容器，P1 再把 hostname 重映射到 backend/Kong。
 **⚠️ 镜像事实（review 修正）**：官方 `cloudflare/cloudflared` 镜像以 nonroot(uid 65532) 运行，CLI 子命令（login/create/route）默认读写 `~/.cloudflared`；本计划的一次性 CLI 容器统一用 `--user root` + 把 secrets 目录挂到 `/root/.cloudflared`，规避 Linux bind-mount 写权限坑（macOS Docker Desktop 验不出此坑，Linux 真机会爆）。
 
 **Tech Stack:** Docker Compose · `cloudflare/cloudflared` 容器 · `nginx:alpine` · Cloudflare Zero Trust Tunnel · Cloudflare DNS（zone `nous.ink`）
@@ -13,7 +13,7 @@
 
 - **纯增量、零触碰 NAS**：P0 不改动 NAS 上任何在跑的服务；NAS 仍为唯一权威。回滚 = 删 tunnel + DNS 记录。
 - **无 `:88`**：所有对外端点走 Cloudflare 443 + 自动证书；计划里任何 URL 不得出现 `:88`。
-- **密钥不进仓库树**：tunnel 凭证 `cert.pem`、`<TUNNEL_ID>.json` 住服务器 `/opt/mediahub/secrets/cloudflared/`（仓库树外，物理不可能被 commit）；仅 `config.yml`（含非敏感 tunnel ID）+ compose + nginx.conf 进仓库；`cloudflared/.gitignore` 仅作有人误放文件时的保险带。
+- **密钥不进仓库树**：tunnel 凭证 `cert.pem`、`<TUNNEL_ID>.json` 住服务器 `/opt/nous/secrets/cloudflared/`（仓库树外，物理不可能被 commit）；仅 `config.yml`（含非敏感 tunnel ID）+ compose + nginx.conf 进仓库；`cloudflared/.gitignore` 仅作有人误放文件时的保险带。
 - **执行分工**：repo 产物（compose/config/nginx/runbook）由本计划提交；标注 `【在 GPU 机执行】` / `【在 Cloudflare 执行】` 的命令由用户在对应环境运行。
 - **一切在 Docker 内**：不往 GPU 机宿主装 cloudflared 二进制，用官方容器完成 login/create/run。
 - **仓库新目录**：所有 P0 产物落在 `deploy/gpu-server/`，不碰现有 `docker/`、`backend/`、`frontend/`。
@@ -29,7 +29,7 @@ deploy/gpu-server/
 │   ├── config.yml              # tunnel ingress 规则（提交，含非敏感 tunnel ID）
 │   └── .gitignore              # 保险带：万一有人误放凭证进此目录也不会被提交
 （服务器本地，不在仓库树内）
-/opt/mediahub/secrets/cloudflared/   # cert.pem + <TUNNEL_ID>.json 凭证常驻处
+/opt/nous/secrets/cloudflared/   # cert.pem + <TUNNEL_ID>.json 凭证常驻处
 ├── health/
 │   └── nginx.conf              # /healthz → 200 "ok"，其余 → 404
 └── README.md                   # P0 runbook（recon + tunnel 创建 + 验证 + 回滚）
@@ -122,7 +122,7 @@ Create `deploy/gpu-server/cloudflared/config.yml`:
 ```yaml
 # Locally-managed tunnel ingress —— 唯一真相在此文件（非 dashboard）
 # tunnel / credentials-file 由 Task 3 用真实 TUNNEL_ID 回填
-# 凭证住服务器 /opt/mediahub/secrets/cloudflared/，compose 挂到容器 /etc/cloudflared/creds/
+# 凭证住服务器 /opt/nous/secrets/cloudflared/，compose 挂到容器 /etc/cloudflared/creds/
 tunnel: REPLACE_WITH_TUNNEL_ID
 credentials-file: /etc/cloudflared/creds/REPLACE_WITH_TUNNEL_ID.json
 
@@ -142,23 +142,23 @@ ingress:
 Create `deploy/gpu-server/docker-compose.yml`:
 ```yaml
 # GPU 服务器 P0 骨架：health 占位源站 + cloudflared tunnel
-# 启动前置：/opt/mediahub/secrets/cloudflared/ 内已有 cert.pem 与 <TUNNEL_ID>.json（Task 3 产生）
+# 启动前置：/opt/nous/secrets/cloudflared/ 内已有 cert.pem 与 <TUNNEL_ID>.json（Task 3 产生）
 services:
   health:
     image: nginx:alpine
-    container_name: mediahub-health
+    container_name: nous-health
     volumes:
       - ./health/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
 
   cloudflared:
     image: cloudflare/cloudflared:latest
-    container_name: mediahub-cloudflared
+    container_name: nous-cloudflared
     command: tunnel --config /etc/cloudflared/config.yml run
     volumes:
       # 配置来自仓库（IaC），凭证来自仓库树外的服务器本地 secrets 目录
       - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
-      - /opt/mediahub/secrets/cloudflared:/etc/cloudflared/creds:ro
+      - /opt/nous/secrets/cloudflared:/etc/cloudflared/creds:ro
     restart: unless-stopped
     depends_on:
       - health
@@ -188,13 +188,13 @@ git commit -m "feat(deploy): P0 GPU 服务器 IaC 骨架 — health 容器 + clo
 
 **Files:**
 - Modify: `deploy/gpu-server/cloudflared/config.yml`（回填 `tunnel` / `credentials-file` 的真实 ID，**在 Mac Mini 上改 + commit，服务器 pull**——不在服务器上手改仓库文件，避免两份拷贝漂移）
-- 服务器本地（仓库树外）：`/opt/mediahub/secrets/cloudflared/cert.pem`、`/opt/mediahub/secrets/cloudflared/<TUNNEL_ID>.json`
+- 服务器本地（仓库树外）：`/opt/nous/secrets/cloudflared/cert.pem`、`/opt/nous/secrets/cloudflared/<TUNNEL_ID>.json`
 
 **⚠️ 挂载路径纪律（review 修正 F1/F2）**：cloudflared 的 CLI 子命令（login/create/route dns）读写 `~/.cloudflared`，官方镜像默认 nonroot(65532) 时是 `/home/nonroot/.cloudflared`——挂到 `/etc/cloudflared` 会导致 cert.pem 写进未挂载路径、容器退出即丢。且 Linux 上 uid 65532 写不进属主为你的 755 目录。**统一解法：一次性 CLI 容器全部 `--user root` + 挂 secrets 目录到 `/root/.cloudflared`**；最后把凭证 chown 给 65532 供常驻 nonroot 容器读。
 
 **Interfaces:**
 - Consumes: Task 2 的 `config.yml` 占位。
-- Produces: 一个名为 `mediahub-gpu` 的 tunnel + 其凭证；`config.yml` 内含真实 tunnel ID。
+- Produces: 一个名为 `nous-gpu` 的 tunnel + 其凭证；`config.yml` 内含真实 tunnel ID。
 
 - [ ] **Step 1：【在 GPU 机执行】将仓库该目录同步到服务器**
 
@@ -209,24 +209,24 @@ Expected: 目录含 Task 2 提交的 compose/config/nginx。
 
 Run:
 ```bash
-sudo mkdir -p /opt/mediahub/secrets/cloudflared
+sudo mkdir -p /opt/nous/secrets/cloudflared
 docker run -it --rm --user root \
-  -v /opt/mediahub/secrets/cloudflared:/root/.cloudflared \
+  -v /opt/nous/secrets/cloudflared:/root/.cloudflared \
   cloudflare/cloudflared:latest tunnel login
 ```
-Expected: 终端打印一个授权 URL → 在任意浏览器（Mac 上即可）打开、选择 `nous.ink` zone 授权 → 容器把 `cert.pem` 写入 `/opt/mediahub/secrets/cloudflared/`。
-Verify: `sudo ls -l /opt/mediahub/secrets/cloudflared/cert.pem` 存在。
+Expected: 终端打印一个授权 URL → 在任意浏览器（Mac 上即可）打开、选择 `nous.ink` zone 授权 → 容器把 `cert.pem` 写入 `/opt/nous/secrets/cloudflared/`。
+Verify: `sudo ls -l /opt/nous/secrets/cloudflared/cert.pem` 存在。
 
 - [ ] **Step 3：【在 GPU 机执行】创建 tunnel 并记录 TUNNEL_ID**
 
 Run:
 ```bash
 docker run -it --rm --user root \
-  -v /opt/mediahub/secrets/cloudflared:/root/.cloudflared \
-  cloudflare/cloudflared:latest tunnel create mediahub-gpu
+  -v /opt/nous/secrets/cloudflared:/root/.cloudflared \
+  cloudflare/cloudflared:latest tunnel create nous-gpu
 ```
-Expected: 打印 `Created tunnel mediahub-gpu with id <TUNNEL_ID>`，并在 `/opt/mediahub/secrets/cloudflared/` 生成 `<TUNNEL_ID>.json`。
-Verify: `sudo ls /opt/mediahub/secrets/cloudflared/*.json` 存在；记下 `<TUNNEL_ID>`。
+Expected: 打印 `Created tunnel nous-gpu with id <TUNNEL_ID>`，并在 `/opt/nous/secrets/cloudflared/` 生成 `<TUNNEL_ID>.json`。
+Verify: `sudo ls /opt/nous/secrets/cloudflared/*.json` 存在；记下 `<TUNNEL_ID>`。
 
 - [ ] **Step 4：【在 GPU 机执行】凭证 chown 给 nonroot 常驻容器**
 
@@ -234,10 +234,10 @@ Verify: `sudo ls /opt/mediahub/secrets/cloudflared/*.json` 存在；记下 `<TUN
 
 Run:
 ```bash
-sudo chown -R 65532:65532 /opt/mediahub/secrets/cloudflared
-sudo chmod 600 /opt/mediahub/secrets/cloudflared/cert.pem /opt/mediahub/secrets/cloudflared/*.json
+sudo chown -R 65532:65532 /opt/nous/secrets/cloudflared
+sudo chmod 600 /opt/nous/secrets/cloudflared/cert.pem /opt/nous/secrets/cloudflared/*.json
 ```
-Verify: `sudo ls -ln /opt/mediahub/secrets/cloudflared/` 显示属主 uid `65532`、权限 `600`。
+Verify: `sudo ls -ln /opt/nous/secrets/cloudflared/` 显示属主 uid `65532`、权限 `600`。
 
 - [ ] **Step 5：【在 Mac Mini 执行】回填 config.yml 的真实 tunnel ID 并 commit，服务器 pull**
 
@@ -250,7 +250,7 @@ credentials-file: /etc/cloudflared/creds/<TUNNEL_ID>.json
 Run（Mac Mini）:
 ```bash
 git add deploy/gpu-server/cloudflared/config.yml
-git commit -m "feat(deploy): 回填 mediahub-gpu tunnel ID 到 ingress config"
+git commit -m "feat(deploy): 回填 nous-gpu tunnel ID 到 ingress config"
 git push
 ```
 Run（GPU 机）: `git pull`
@@ -271,11 +271,11 @@ Verify: `! grep -q REPLACE_WITH_TUNNEL_ID deploy/gpu-server/cloudflared/config.y
 Run（`route dns` 需读 cert.pem，沿用 Task 3 的 `--user root` + secrets 挂载；凭证已 chown 65532 但 root 不受权限限制，可正常读）:
 ```bash
 docker run -it --rm --user root \
-  -v /opt/mediahub/secrets/cloudflared:/root/.cloudflared \
-  cloudflare/cloudflared:latest tunnel route dns mediahub-gpu api.nous.ink
+  -v /opt/nous/secrets/cloudflared:/root/.cloudflared \
+  cloudflare/cloudflared:latest tunnel route dns nous-gpu api.nous.ink
 docker run -it --rm --user root \
-  -v /opt/mediahub/secrets/cloudflared:/root/.cloudflared \
-  cloudflare/cloudflared:latest tunnel route dns mediahub-gpu sb.nous.ink
+  -v /opt/nous/secrets/cloudflared:/root/.cloudflared \
+  cloudflare/cloudflared:latest tunnel route dns nous-gpu sb.nous.ink
 ```
 Expected: 各打印 `Added CNAME api.nous.ink / sb.nous.ink which will route to this tunnel`。
 Verify:【在 Cloudflare 执行】DNS 页出现 `api` / `sb` 两条 CNAME → `<TUNNEL_ID>.cfargotunnel.com`（橙云代理）。
@@ -287,13 +287,13 @@ Run:
 docker compose -f deploy/gpu-server/docker-compose.yml up -d
 docker compose -f deploy/gpu-server/docker-compose.yml ps
 ```
-Expected: `mediahub-health` 与 `mediahub-cloudflared` 均 `Up`。
+Expected: `nous-health` 与 `nous-cloudflared` 均 `Up`。
 
 - [ ] **Step 3：【在 GPU 机执行】看 cloudflared 是否已注册连接**
 
 Run:
 ```bash
-docker logs mediahub-cloudflared 2>&1 | grep -iE "Registered tunnel connection|Connection .* registered" | head
+docker logs nous-cloudflared 2>&1 | grep -iE "Registered tunnel connection|Connection .* registered" | head
 ```
 Expected: 出现 `Registered tunnel connection`（通常 4 条到不同 Cloudflare 边缘）。
 
@@ -314,7 +314,7 @@ Expected:
 
 - [ ] **Step 5：回滚演练确认（不实际回滚，仅记录命令到 README）**
 
-回滚 = `docker compose -f deploy/gpu-server/docker-compose.yml down` +【Cloudflare】删 `api`/`sb` 两条 CNAME + 删 tunnel（`tunnel delete mediahub-gpu`）。NAS 全程未动，无需恢复。
+回滚 = `docker compose -f deploy/gpu-server/docker-compose.yml down` +【Cloudflare】删 `api`/`sb` 两条 CNAME + 删 tunnel（`tunnel delete nous-gpu`）。NAS 全程未动，无需恢复。
 
 ---
 
@@ -344,9 +344,9 @@ Create `deploy/gpu-server/README.md`，内容至少覆盖：
 - Cloudflare zone `nous.ink` active + Zero Trust 权限
 
 ## 首次搭建（照抄 Task 3-4 命令）
-1. `sudo mkdir -p /opt/mediahub/secrets/cloudflared`
+1. `sudo mkdir -p /opt/nous/secrets/cloudflared`
 2. tunnel login（`--user root`，挂 secrets 目录到 `/root/.cloudflared`，授权 nous.ink）
-3. tunnel create mediahub-gpu → 记 TUNNEL_ID
+3. tunnel create nous-gpu → 记 TUNNEL_ID
 4. `sudo chown -R 65532:65532` secrets 目录 + `chmod 600` 凭证（常驻容器是 nonroot）
 5. Mac Mini 回填 config.yml 的 TUNNEL_ID 并 commit+push，服务器 git pull
 6. tunnel route dns：api.nous.ink / sb.nous.ink（同 --user root 挂载）
@@ -354,16 +354,16 @@ Create `deploy/gpu-server/README.md`，内容至少覆盖：
 8. 验收：curl https://api.nous.ink/healthz → ok（200，无 :88）
 
 ## ⚠️ cloudflared 挂载纪律（血泪预防）
-- CLI 子命令（login/create/route dns）读写 `~/.cloudflared`：一次性容器统一 `--user root` + 挂 `/opt/mediahub/secrets/cloudflared:/root/.cloudflared`。挂 `/etc/cloudflared` 会让 cert.pem 丢在容器里。
+- CLI 子命令（login/create/route dns）读写 `~/.cloudflared`：一次性容器统一 `--user root` + 挂 `/opt/nous/secrets/cloudflared:/root/.cloudflared`。挂 `/etc/cloudflared` 会让 cert.pem 丢在容器里。
 - 常驻 tunnel run：config 从仓库挂单文件，凭证从 secrets 目录挂 `/etc/cloudflared/creds`（均 :ro）。
 
 ## 回滚
-docker compose down + 删两条 CNAME + tunnel delete mediahub-gpu；NAS 未动。
+docker compose down + 删两条 CNAME + tunnel delete nous-gpu；NAS 未动。
 
 ## P1 衔接
 - ingress `api.nous.ink` 改指 backend、`sb.nous.ink` 改指 Kong
 - 部署机制换 self-hosted runner（见 epic spec §6 P1 与 §4.1 拓扑）
-- 凭证常驻 /opt/mediahub/secrets/cloudflared/（仓库树外），物理不可能进 git
+- 凭证常驻 /opt/nous/secrets/cloudflared/（仓库树外），物理不可能进 git
 ```
 
 - [ ] **Step 2：Commit**
@@ -379,13 +379,13 @@ git commit -m "docs(deploy): P0 GPU 服务器 + Cloudflare Tunnel runbook"
 
 - **Spec coverage（对 epic §6 P0）**：目标"compose 骨架 + Tunnel + health 经 tunnel 可达"→ Task 2（骨架）/Task 3（tunnel）/Task 4（DNS+验收）；验证"curl api.nous.ink/healthz 200、无 :88、证书有效"→ Task 4 Step 4；回滚"纯增量 NAS 不动"→ Global Constraints + Task 4 Step 5。全覆盖。
 - **Placeholder scan**：`config.yml` 的 `REPLACE_WITH_TUNNEL_ID` 是**有意占位**，Task 3 Step 5 显式回填并以 `! grep -q … && echo OK` 验证；非计划漏洞。无 TBD/TODO。
-- **Type/命名一致**：service 名 `health` / `cloudflared`、容器名 `mediahub-health` / `mediahub-cloudflared`、tunnel 名 `mediahub-gpu`、hostname `api.nous.ink` / `sb.nous.ink`、secrets 路径 `/opt/mediahub/secrets/cloudflared`（容器内 `/etc/cloudflared/creds`）全计划一致。
+- **Type/命名一致**：service 名 `health` / `cloudflared`、容器名 `nous-health` / `nous-cloudflared`、tunnel 名 `nous-gpu`、hostname `api.nous.ink` / `sb.nous.ink`、secrets 路径 `/opt/nous/secrets/cloudflared`（容器内 `/etc/cloudflared/creds`）全计划一致。
 - **约束一致**：全文无 `:88`；凭证住仓库树外（`.gitignore` 仅保险带）；NAS 零触碰。
 
 ### Review 修正记录（2026-07-20 对抗性复审）
 - **F1(blocker)**：CLI 子命令挂载 `/etc/cloudflared` → cert.pem 实际写 `~/.cloudflared`（官方镜像 nonroot 时为 `/home/nonroot/.cloudflared`），容器退出即丢。修正：一次性 CLI 容器 `--user root` + 挂 `/root/.cloudflared`。
 - **F2**：Linux bind-mount 下 uid 65532 写不进属主为用户的 755 目录（macOS Docker Desktop 验不出，真机会爆）。修正：同 F1（root 写）+ 事后 chown 65532 供常驻 nonroot 容器读。
-- **F3(设计)**：凭证从"仓库树内靠 .gitignore"改为"仓库树外 /opt/mediahub/secrets/"，物理隔离；compose 分挂 config（repo）与 creds（本地）。
+- **F3(设计)**：凭证从"仓库树内靠 .gitignore"改为"仓库树外 /opt/nous/secrets/"，物理隔离；compose 分挂 config（repo）与 creds（本地）。
 - **F4(流程)**：回填 tunnel ID 改为 Mac Mini 改+commit → 服务器 pull，消除双拷贝漂移。
 - **F5(小)**：verify 从 `grep -c` 改 `! grep -q`（匹配为零时 grep -c exit 1，会误导链式执行）。
 

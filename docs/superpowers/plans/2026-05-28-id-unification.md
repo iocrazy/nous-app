@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement Spec 1 (`docs/superpowers/specs/2026-05-28-id-unification-design.md`) in five sequenced PRs, ending with all self-owned mediahub tables on BIGINT Snowflake, personal scope abstracted into single-member teams, and storage paths uniformly under `teams/{snowflake}/uploads/...`.
+**Goal:** Implement Spec 1 (`docs/superpowers/specs/2026-05-28-id-unification-design.md`) in five sequenced PRs, ending with all self-owned nous tables on BIGINT Snowflake, personal scope abstracted into single-member teams, and storage paths uniformly under `teams/{snowflake}/uploads/...`.
 
 **Architecture:** Five separately revertable PRs. PR-A adds the `teams.kind` column and backfills personal teams for existing users without changing any application behavior. PR-B migrates `ai_sessions`, `agent_runs`, `issue_messages` from UUID to Snowflake (mirroring mig 051's column-rename pattern). PR-C remaps `scope_type='personal'` rows in `resource_items`/`folders`/`tags`/`smart_collections` to point at personal team snowflakes (data only, code still handles both shapes). PR-D moves files on disk from `teams/{user_uuid}/` to `teams/{personal_team_snowflake}/` and updates `resources.file_path` accordingly. PR-E simplifies application code (deletes personal-scope branches) and RLS policies (removes the `OR scope_type='personal'` arms).
 
@@ -17,7 +17,7 @@
 - [ ] **Branch base off latest master.**
 
 ```bash
-cd /Volumes/program/project-code/repos/mediahub
+cd /Volumes/program/project-code/repos/nous
 git fetch origin
 git checkout master && git pull
 ```
@@ -316,13 +316,13 @@ teams, but the DB-level trigger is the authoritative gate so no path
 
 - [ ] **Step 1 — Investigate existing auth hook pattern.**
 
-Spec § 3 notes mediahub may already mirror `auth.users` into `public.users`. Confirm:
+Spec § 3 notes nous may already mirror `auth.users` into `public.users`. Confirm:
 
 ```bash
 grep -rn "ON auth.users\|FOR EACH ROW EXECUTE FUNCTION.*user" supabase/migrations/ | head -10
 ```
 
-If mediahub has a trigger on `auth.users` insert that mirrors into `public.users`, attach the personal-team creation as a sibling trigger or extend the existing function. Otherwise attach to `public.users` (whatever profile table the project uses).
+If nous has a trigger on `auth.users` insert that mirrors into `public.users`, attach the personal-team creation as a sibling trigger or extend the existing function. Otherwise attach to `public.users` (whatever profile table the project uses).
 
 - [ ] **Step 2 — Write the migration.**
 
@@ -1297,7 +1297,7 @@ git checkout -b id-unify/pr-d-storage-paths
 set -euo pipefail
 
 MODE="${1:-DRY_RUN}"
-STORAGE_ROOT="${STORAGE_ROOT:-/volume2/sources/MediaHub.library}"
+STORAGE_ROOT="${STORAGE_ROOT:-/volume2/sources/Nous.library}"
 DB_HOST="${DB_HOST:-127.0.0.1}"
 DB_PORT="${DB_PORT:-55436}"
 
@@ -1432,7 +1432,7 @@ Coordinate offline. Operator first runs DRY_RUN, reviews output, then runs APPLY
 ```bash
 # On NAS:
 ssh -p 1122 heygo@192.168.50.9
-cd /volume1/docker/mediahub
+cd /volume1/docker/nous
 git pull
 bash scripts/migrations/2026-05-28-storage-path-personal-team.sh DRY_RUN
 # Review output

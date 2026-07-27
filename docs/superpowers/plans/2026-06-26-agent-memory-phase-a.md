@@ -184,7 +184,7 @@ class AgentMemory(Base):
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-orm-2-migration
+cd /Volumes/program/project-code/repos/nous/.worktrees/feature-orm-2-migration
 cd backend && uv run black app/models/ai.py && uv run isort app/models/ai.py && uv run flake8 app/models/ai.py
 cd .. && git add supabase/migrations/323_agent_memory.sql backend/app/models/ai.py backend/app/models/__init__.py
 git commit -m "feat(memory): agent_memory table (scoped, tsvector FTS, RLS) + ORM (Phase A)"

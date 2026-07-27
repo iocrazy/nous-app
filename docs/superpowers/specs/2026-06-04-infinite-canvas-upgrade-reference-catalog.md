@@ -1,15 +1,15 @@
 # Infinite Canvas Upgrade — Reference Catalog & Adoption Plan
 
 > **Goal:** comprehensively catalog the open-source `Infinite-Canvas` tool, map every
-> feature/detail against MediaHub's current Storyboard Workbench, and form a phased
+> feature/detail against Nous's current Storyboard Workbench, and form a phased
 > adoption plan. Target: **100k users, commercial product**.
 >
 > **License guardrail:** the reference repo is **non-commercial / no repackaging**
 > → we take **ideas & architecture only, never port its code**. Everything below is
-> re-implemented cleanly in MediaHub's stack (React 19 + @xyflow + FastAPI + DBOS +
+> re-implemented cleanly in Nous's stack (React 19 + @xyflow + FastAPI + DBOS +
 > Supabase), billed through the existing **Nous platform-model + credits** system.
 >
-> **Status legend:** ✅ MediaHub already has · 🔶 partial · ❌ gap (candidate to introduce)
+> **Status legend:** ✅ Nous already has · 🔶 partial · ❌ gap (candidate to introduce)
 >
 > _Draft for review — not yet committed. Sources: 3 exploration passes over the
 > reference repo (docs / static frontend / main.py backend)._
@@ -18,7 +18,7 @@
 
 ## Part 0 — The two products side by side
 
-| | Reference `Infinite-Canvas` | MediaHub Storyboard Workbench |
+| | Reference `Infinite-Canvas` | Nous Storyboard Workbench |
 |---|---|---|
 | Stack | Python monolith (`main.py` 509KB) + vanilla JS frontend | React 19 + @xyflow + FastAPI + DBOS + Supabase |
 | Canvas modes | **TWO**: 普通无限画布 (node editor) + **智能画布 Smart Canvas** (card-based beginner mode) | ONE (node editor only) |
@@ -30,10 +30,10 @@
 | Billing | none (single-user) | **Nous credits** ✅ better |
 | Scale | single machine | designed for 100k ✅ |
 
-**Takeaway:** MediaHub has the better *foundation* (DB, billing, scale, DBOS). The
+**Takeaway:** Nous has the better *foundation* (DB, billing, scale, DBOS). The
 reference has the better *creative surface* (more providers, Smart Canvas, global
 asset library, image editor, consistency presets, theming, UX polish). The plan =
-graft the reference's creative surface onto MediaHub's foundation.
+graft the reference's creative surface onto Nous's foundation.
 
 ---
 
@@ -51,9 +51,9 @@ graft the reference's creative surface onto MediaHub's foundation.
 | Canvas gate / gallery (cards w/ color markers ×9, pin star, emoji icon, owner chip) | 🔶 | P2 (project browser polish) |
 | Knife/cut mode (slice edges) | ❌ | P4 |
 
-### B. Node types (reference → MediaHub)
+### B. Node types (reference → Nous)
 
-| Reference node | MediaHub equiv | Introduce? |
+| Reference node | Nous equiv | Introduce? |
 |---|---|---|
 | Image (upload/paste/drag) | ✅ UploadNode | — |
 | Prompt node (+ prompt library) | 🔶 inline | **P2** — dedicated prompt node + reusable prompt library |

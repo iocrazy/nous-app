@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Click a completed task in the Task Center → open a detail modal that renders the task's RESULT by type (media preview, agent LLM output + tokens, transcript text, summary + key points), mirroring the reference app's image/tts/llm/vision cards but adapted to mediahub's external-API data sources.
+**Goal:** Click a completed task in the Task Center → open a detail modal that renders the task's RESULT by type (media preview, agent LLM output + tokens, transcript text, summary + key points), mirroring the reference app's image/tts/llm/vision cards but adapted to nous's external-API data sources.
 
 **Architecture:** A portal `TaskDetailModal` (Esc / backdrop close) opened from a `detailTaskId` state in `TaskCenter`. A pure `taskResultKind(task)` selector maps `task_type` → which body to render. Each typed body pulls from the source it needs: media from `resourceService.fetchResourceById` (+ reuse `AudioWaveformPlayer` for audio, link to `ResourceDetailPage` for video), transcript/summary from `aiService.get*ByResource`, agent LLM stats from the `agent_runs` row already streamed by `useAgentRunTasks` (extended to carry token/cost). Vision (`ai_extract`) is **out of scope** here — it has no read endpoint yet (only a trigger); see Prerequisites.
 
@@ -13,7 +13,7 @@
 ## Prerequisites / Out of scope
 
 - **`ai_extract` (vision) is deferred.** `aiService.ts` has `triggerVisualAnalysisByResource` but **no `getVisualAnalysisByResource`** read fn, and no analysis result type. Rendering a vision card needs that backend binding first (separate small task: add `GET /api/v1/ai/analysis/resource/{id}` + `aiService.getVisualAnalysisByResource` + a result type). Until then `ai_extract` falls through to the generic body. This plan does NOT build the vision card.
-- This plan does NOT embed a video player in the modal — mediahub already has `ResourceDetailPage` for full playback; the media body previews + links there. Audio DOES embed `AudioWaveformPlayer` (high value, component exists, no separate need).
+- This plan does NOT embed a video player in the modal — nous already has `ResourceDetailPage` for full playback; the media body previews + links there. Audio DOES embed `AudioWaveformPlayer` (high value, component exists, no separate need).
 
 ## File Structure
 

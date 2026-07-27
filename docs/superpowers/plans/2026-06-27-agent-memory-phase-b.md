@@ -4,7 +4,7 @@
 
 **Goal:** Build the `/dream`-style **consolidation write path** — a weekly DBOS workflow that reviews each active (user, agent)'s recent sessions, distils durable knowledge via a governed LLM, and writes **`private`** curated `agent_memory` rows with fingerprint dedup. **No promotion to shared** (that's Phase C) → zero cross-tenant risk. Plus a manual admin trigger so the path is validatable without waiting a week.
 
-**Architecture:** Mirrors MiMo's `/dream` (consolidate recent trajectory → compact curated memory) + reuses mediahub's proven primitives: the `session_memory` injected-summarizer pattern (LLM via `get_adapter`), the `agent_cost_anomaly` DBOS-scheduled enumerate→process pattern, and the Phase-A `agent_memory` table. Everything written is `visibility='private'`, `scope='agent_user'` (the agent's memory about one user) — owner-only by the Phase-A isolation model.
+**Architecture:** Mirrors MiMo's `/dream` (consolidate recent trajectory → compact curated memory) + reuses nous's proven primitives: the `session_memory` injected-summarizer pattern (LLM via `get_adapter`), the `agent_cost_anomaly` DBOS-scheduled enumerate→process pattern, and the Phase-A `agent_memory` table. Everything written is `visibility='private'`, `scope='agent_user'` (the agent's memory about one user) — owner-only by the Phase-A isolation model.
 
 **Tech Stack:** DBOS scheduled workflows + SQLAlchemy/asyncpg + the AI adapter factory + FastAPI admin; pytest. Backend lint = black + isort + flake8 (NOT ruff); loguru `{}`/f-strings.
 

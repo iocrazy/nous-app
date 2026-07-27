@@ -1,4 +1,4 @@
-# MediaHub Scripts
+# Nous Scripts
 
 Utility scripts for development and deployment.
 

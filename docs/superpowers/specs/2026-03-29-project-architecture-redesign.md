@@ -6,7 +6,7 @@
 
 ## Overview
 
-Restructure MediaHub's project system from isolated modules (Projects + Storyboard Workbench) into a unified project container architecture. Each project becomes a creative workspace containing Files, Scripts, Storyboard, and Output as sub-modules. Add a new Script Editor module with AI-powered story generation, chapter editing, branching, and storyboard linkage.
+Restructure Nous's project system from isolated modules (Projects + Storyboard Workbench) into a unified project container architecture. Each project becomes a creative workspace containing Files, Scripts, Storyboard, and Output as sub-modules. Add a new Script Editor module with AI-powered story generation, chapter editing, branching, and storyboard linkage.
 
 ## Key Decisions
 

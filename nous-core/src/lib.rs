@@ -147,7 +147,7 @@ fn cleanup_segments(dir_path: &str) -> PyResult<()> {
     Ok(())
 }
 
-/// MediaHub core module — high-performance media processing via Rust + FFmpeg.
+/// Nous core module — high-performance media processing via Rust + FFmpeg.
 #[pymodule]
 fn nous_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(extract_audio, m)?)?;

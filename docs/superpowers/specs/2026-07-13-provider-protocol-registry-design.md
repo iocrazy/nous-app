@@ -70,7 +70,7 @@ class ProviderProtocol:
 ### 3. API
 
 `GET /api/v1/admin/mediahub-models/protocols`(挂在现有
-`app/api/admin/mediahub_model_router.py`,admin-gated,只读):
+`app/api/admin/nous_model_router.py`,admin-gated,只读):
 
 ```json
 { "protocols": [ {"key", "label", "aliases", "model_types", "description", "is_default"} ] }

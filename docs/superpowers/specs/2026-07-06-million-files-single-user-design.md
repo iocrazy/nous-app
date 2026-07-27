@@ -54,7 +54,7 @@
 
 ## Phase 2 — 本地 Sideload 导入(纯代码;Eagle 迁移的正解)
 
-**场景:素材文件反正要先拷到 NAS 卷上。既然字节已经在 `/volume2/sources/MediaHub.library` 同卷,就不该再走百万次 HTTP POST。**
+**场景:素材文件反正要先拷到 NAS 卷上。既然字节已经在 `/volume2/sources/Nous.library` 同卷,就不该再走百万次 HTTP POST。**
 
 ### 设计
 

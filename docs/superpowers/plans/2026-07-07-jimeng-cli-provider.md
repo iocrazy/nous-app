@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把官方 `dreamina` CLI（即梦，订阅额度）接成 MediaHub 的图像+视频生成 provider——生图为 shot Generate 主力（解 Seedream 未开通阻塞），生视频给 shot 卡新增 Generate Video 能力（flag-dark）。用户三裁决（2026-07-07）：图+视频一起 / 容器装 CLI+NAS 一次登录 / **CLI 为主力，Ark 行保留备份**。
+**Goal:** 把官方 `dreamina` CLI（即梦，订阅额度）接成 Nous 的图像+视频生成 provider——生图为 shot Generate 主力（解 Seedream 未开通阻塞），生视频给 shot 卡新增 Generate Video 能力（flag-dark）。用户三裁决（2026-07-07）：图+视频一起 / 容器装 CLI+NAS 一次登录 / **CLI 为主力，Ark 行保留备份**。
 
 **Architecture:** 与 ArkImageProvider 平行的 `JimengCliProvider`（subprocess 驱动）：`asyncio.create_subprocess_exec` 调 `dreamina text2image|text2video|image2video`（off-loop + `wait_for` 硬超时 + kill——backend freeze 血泪约束），robust 提取混合 stdout 里的 JSON（submit_id/gen_status），产物经 `--download_dir` 落本地临时目录 → `register_generated_media` 新增 `source_path` 本地文件直采（跳过 URL 下载）。DB catalog 照旧驱动：`mediahub_models` 加 `provider='jimeng-cli'` 行（无 api_key），解析扩展到按 provider 字段分派。
 

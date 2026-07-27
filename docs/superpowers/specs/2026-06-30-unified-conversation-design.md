@@ -2,11 +2,11 @@
 
 **Status:** Approved design (2026-06-30). Next: per-phase implementation plans via writing-plans.
 
-**Goal:** Collapse MediaHub's two parallel conversation systems (team chat `channels`/`channel_messages` + 1:1 AI chat `ai_sessions`/`ai_messages`) into ONE canonical timeline — `conversations` + `messages` + `conversation_members` — so human↔human, human↔agent, group, and task-derived conversations all share one store, one runner, one media tier. Retire the legacy tables. No history migration.
+**Goal:** Collapse Nous's two parallel conversation systems (team chat `channels`/`channel_messages` + 1:1 AI chat `ai_sessions`/`ai_messages`) into ONE canonical timeline — `conversations` + `messages` + `conversation_members` — so human↔human, human↔agent, group, and task-derived conversations all share one store, one runner, one media tier. Retire the legacy tables. No history migration.
 
 **Architecture (one line):** A conversation is a room; a message is a footprint in the room; an agent is just a member; everything that happens (text, image, system notice, status) is a typed message on one seq-ordered timeline; the rich 1:1 features (memory, compaction, run accounting) hang off the conversation as sidecars.
 
-**Reference basis (battle-tested):** the model = **Mattermost** (Channels / Posts / ChannelMembers, threads via root) fused with the **OpenAI Assistants API** (thread / message / run / tool-call), with one idea from **Matrix** (everything is a typed event on one timeline) and one from **Rocket.Chat** (a bot/agent is just a member). MediaHub already mirrors both Mattermost (channels) and Assistants (`agent_runs`); the execution engine (`build_agent_runner_stack` / `AgentRunner` / `PromptComposer` / `RunRecorder`) is ALREADY shared by both surfaces — only the storage shells and the 1:1 memory wiring are forked.
+**Reference basis (battle-tested):** the model = **Mattermost** (Channels / Posts / ChannelMembers, threads via root) fused with the **OpenAI Assistants API** (thread / message / run / tool-call), with one idea from **Matrix** (everything is a typed event on one timeline) and one from **Rocket.Chat** (a bot/agent is just a member). Nous already mirrors both Mattermost (channels) and Assistants (`agent_runs`); the execution engine (`build_agent_runner_stack` / `AgentRunner` / `PromptComposer` / `RunRecorder`) is ALREADY shared by both surfaces — only the storage shells and the 1:1 memory wiring are forked.
 
 ---
 

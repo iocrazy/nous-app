@@ -347,7 +347,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 // prefers-color-scheme; resolved value is written to <html data-theme>.
 export type ThemePreference = 'system' | 'light' | 'dark';
 
-const STORAGE_KEY = 'mediahub.theme';
+const STORAGE_KEY = 'nous.theme';
 
 interface ThemeContextValue {
   preference: ThemePreference;
@@ -442,7 +442,7 @@ describe('ThemeContext', () => {
   it('setPreference(light) persists and flips data-theme', () => {
     render(<ThemeProvider><Probe /></ThemeProvider>);
     fireEvent.click(screen.getByText('go-light'));
-    expect(localStorage.getItem('mediahub.theme')).toBe('light');
+    expect(localStorage.getItem('nous.theme')).toBe('light');
     expect(document.documentElement.dataset.theme).toBe('light');
   });
 });

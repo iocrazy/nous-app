@@ -9,7 +9,7 @@
 
 ## 1. Design Goals
 
-Evolve MediaHub from a personal video collection tool to a full team video collaboration platform. Key principles:
+Evolve Nous from a personal video collection tool to a full team video collaboration platform. Key principles:
 
 - **Unified workspace model** ("个人即团队", inspired by Figma) — every user has a personal workspace, teams are multi-person workspaces
 - **Zero-copy philosophy** — sharing and copying resources never duplicate physical files
@@ -220,7 +220,7 @@ CREATE TABLE resource_versions (
 Paths use **only immutable IDs**. All mutable info (names, folders, tags) is database-only.
 
 ```
-MediaHub.library/
+Nous.library/
 ├── resources/
 │   ├── web/{platform}/{external_id}/        ← Parser shared pool (dedup'd)
 │   ├── users/{user_id}/upload/2026-02/      ← personal uploads (versioned)

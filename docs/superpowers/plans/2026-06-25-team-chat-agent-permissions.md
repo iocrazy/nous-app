@@ -85,8 +85,8 @@ CREATE INDEX IF NOT EXISTS idx_ai_agents_chat_enabled
 
 Run (NAS dev DB per `reference_nas_dev_db`; substitute your dev DSN):
 ```bash
-psql "$MEDIAHUB_DEV_DSN" -f supabase/migrations/316_agent_chat_permissions.sql
-psql "$MEDIAHUB_DEV_DSN" -c "SELECT indexname FROM pg_indexes WHERE indexname='idx_ai_agents_chat_enabled';"
+psql "$NOUS_DEV_DSN" -f supabase/migrations/316_agent_chat_permissions.sql
+psql "$NOUS_DEV_DSN" -c "SELECT indexname FROM pg_indexes WHERE indexname='idx_ai_agents_chat_enabled';"
 ```
 Expected: `CREATE INDEX` then a row `idx_ai_agents_chat_enabled`.
 

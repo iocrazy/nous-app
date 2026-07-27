@@ -1,9 +1,9 @@
 # 汽水音乐(Soda / Luna)接入设计
 
-> 在 mediahub 后端新增「汽水音乐」(字节跳动,`qishui.douyin.com` / `music.douyin.com`)的解析与下载能力:
+> 在 nous 后端新增「汽水音乐」(字节跳动,`qishui.douyin.com` / `music.douyin.com`)的解析与下载能力:
 > 单曲 / 歌单 / 「我喜欢的音乐」批量下载,支持无损 FLAC 与各档 AAC;并兼顾汽水的 UGC 视频。
 >
-> Part A 技术原理(逆向要点,语言无关)+ Part B mediahub 接入设计(模块、路由、数据模型、cookie、实施计划)。
+> Part A 技术原理(逆向要点,语言无关)+ Part B nous 接入设计(模块、路由、数据模型、cookie、实施计划)。
 
 ---
 
@@ -11,7 +11,7 @@
 
 - yt-dlp **不支持**汽水音乐,且音乐音频**加密** → 需自定义 parser + 解密下载器(对标 `douyin_parse/`)。
 - 汽水有**两类内容**:音乐 track(加密 m4a/flac)与 UGC 视频(普通 mp4,不加密)。见 §A.2.1。
-- mediahub 后端是 **Python**,实测验证的 API + 解密代码**可直接移植**。
+- nous 后端是 **Python**,实测验证的 API + 解密代码**可直接移植**。
 - 参考实现(均实测):
   - ✅ `music-lib`(Go,**当前可用**):`soda/{soda,download,crypto,login,playlist,user_playlist}.go` —— 行为蓝本。
   - ⚠️ `musicdl`(Python):`soda.py` 签名失效(只能 30s 试听),但 `utils/sodautils.py::AudioDecryptor` **解密器可直接移植**。
@@ -155,7 +155,7 @@ GET https://music.douyin.com/qishui/share/ugc_video?ugc_video_id=<id>
 
 ---
 
-# Part B · mediahub 接入设计
+# Part B · nous 接入设计
 
 ## B.1 现状链路
 
@@ -241,7 +241,7 @@ PLATFORM_PATTERNS = {
 
 ## B.7 Cookie 存储 — **复用现有 `user_cookies` 表(无需新表 / 无需 migration)**
 
-> mediahub 已内置 per-user / per-platform Cookie Management(migration `108_user_cookies.sql`,即 Settings → Cookies,现支持 douyin/bilibili/youtube)。汽水**直接复用**,新增 `platform='qishui'`。**不再建 `soda_credentials` 表。**
+> nous 已内置 per-user / per-platform Cookie Management(migration `108_user_cookies.sql`,即 Settings → Cookies,现支持 douyin/bilibili/youtube)。汽水**直接复用**,新增 `platform='qishui'`。**不再建 `soda_credentials` 表。**
 
 ```
 user_cookies(id, user_id, platform, cookie_text, cookie_file, is_valid, error_message, created_at, updated_at)

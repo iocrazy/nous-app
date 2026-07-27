@@ -10,7 +10,7 @@
 
 The issue→agent executor shipped in #343/#344 runs a **stripped** runtime: `issue_agent_executor.run_issue_agent` builds `AgentRunner(adapter, skill_tool)` directly with a single-turn message and `hooks=None`. It has **no session, no conversation history, no compression, no memory (read or write), no sub-agents, no delegation, no budget guard, no fallback**.
 
-Meanwhile mediahub's **chat stack already has all of these** (verified):
+Meanwhile nous's **chat stack already has all of these** (verified):
 - Session history (`ai_sessions`/`ai_messages`, `get_messages(limit=200)`).
 - Two-layer compaction: `AILibraryChatService._maybe_compact` (100k-token threshold, uses `ai_session_memory` cached summary) + `ContextCompactor.maybe_compact` inside every `AgentRunner.run_turn` (4-tier).
 - Memory write (`MemoryHarvesterHook` → `write_memory_workflow`) + recall (`MemoryRetriever` pgvector+salience → injected into the prompt).
@@ -26,7 +26,7 @@ Make an issue (with an assigned agent) a first-class **conversation backed by an
 ## Non-goals (this spec)
 - Liveness classification / automatic status transitions from agent output → **Spec-2**.
 - Periodic monitor wakeups, stranded recovery, wakeup coalescing → later roadmap (see `project_issue_agent_executor` memory).
-- Provider-side LLM session continuity (mediahub re-sends compacted history each turn; unchanged).
+- Provider-side LLM session continuity (nous re-sends compacted history each turn; unchanged).
 - Changing the agent-runs telemetry / Runs tab.
 
 ---

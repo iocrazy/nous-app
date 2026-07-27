@@ -6,7 +6,7 @@
 
 ## Overview
 
-Extend MediaHub to support multi-source video downloading (via yt-dlp), automatic speech-to-text transcription (via Whisper), and AI-powered video analysis/summarization (via LLM). Introduce Rust components for high-performance media processing and HLS streaming.
+Extend Nous to support multi-source video downloading (via yt-dlp), automatic speech-to-text transcription (via Whisper), and AI-powered video analysis/summarization (via LLM). Introduce Rust components for high-performance media processing and HLS streaming.
 
 ## Design Decisions
 
@@ -146,12 +146,12 @@ All backend and frontend references to `douyin_videos` → `videos`:
 - Frontend: dataService.ts, types.ts, components
 - API path: `/douyin/` → `/videos/` (with legacy redirect)
 
-### 1.2 Rust Core Module: `mediahub-core`
+### 1.2 Rust Core Module: `nous-core`
 
 #### Project Structure
 
 ```
-mediahub-core/
+nous-core/
 ├── Cargo.toml
 ├── src/
 │   ├── lib.rs              # PyO3 module entry
@@ -206,10 +206,10 @@ pub fn segment_video(
 #### Python Binding (PyO3)
 
 ```python
-import mediahub_core
+import nous_core
 
 # HLS segmentation
-result = mediahub_core.segment_video(
+result = nous_core.segment_video(
     input_path="/downloads/video.mp4",
     output_dir="/downloads/video_hls/",
     segment_duration=6,
@@ -217,14 +217,14 @@ result = mediahub_core.segment_video(
 )
 
 # Audio extraction for Whisper
-result = mediahub_core.extract_audio(
+result = nous_core.extract_audio(
     input_path="/downloads/video.mp4",
     output_path="/tmp/audio.wav",
     sample_rate=16000,
 )
 
 # Video metadata
-meta = mediahub_core.get_video_metadata("/downloads/video.mp4")
+meta = nous_core.get_video_metadata("/downloads/video.mp4")
 ```
 
 #### Docker Multi-stage Build
@@ -234,13 +234,13 @@ meta = mediahub_core.get_video_metadata("/downloads/video.mp4")
 FROM rust:1.77-slim AS rust-builder
 RUN pip install maturin
 WORKDIR /rust
-COPY mediahub-core/ .
+COPY nous-core/ .
 RUN maturin build --release
 
 # Stage 2: Final image
 FROM python:3.12-slim AS final
 COPY --from=rust-builder /rust/target/wheels/*.whl /tmp/
-RUN pip install /tmp/mediahub_core*.whl
+RUN pip install /tmp/nous_core*.whl
 # ... rest unchanged
 ```
 
@@ -601,7 +601,7 @@ if (video.media_format === 'hls') {
 
 ```yaml
 services:
-  mediahub:
+  nous:
     build: .
     ports:
       - "8080:8080"
@@ -643,14 +643,14 @@ services:
 FROM rust:1.77-slim AS rust-builder
 RUN pip install maturin
 WORKDIR /rust
-COPY mediahub-core/ .
+COPY nous-core/ .
 RUN maturin build --release
 
 # Stage 2: Python app
 FROM python:3.12-slim
 RUN apt-get update && apt-get install -y ffmpeg
 COPY --from=rust-builder /rust/target/wheels/*.whl /tmp/
-RUN pip install /tmp/mediahub_core*.whl
+RUN pip install /tmp/nous_core*.whl
 RUN pip install yt-dlp faster-whisper
 # ... rest unchanged
 ```
@@ -663,7 +663,7 @@ RUN pip install yt-dlp faster-whisper
 # pyproject.toml additions
 yt-dlp = ">=2024.1.0"
 faster-whisper = ">=1.0.0"          # Optional: local Whisper
-mediahub-core = {path = "../mediahub-core"}  # Rust PyO3 module
+nous-core = {path = "../nous-core"}  # Rust PyO3 module
 hls.js = "^1.5.0"                   # Frontend: HLS playback
 ```
 
@@ -672,7 +672,7 @@ hls.js = "^1.5.0"                   # Frontend: HLS playback
 ## Implementation Order
 
 ### Phase 1: Database Refactoring + Rust Core
-1. Create `mediahub-core` Rust crate with PyO3
+1. Create `nous-core` Rust crate with PyO3
 2. Implement `extract_audio()`, `get_video_metadata()`, `segment_video()`
 3. Write database migration: rename table, fields, UUID primary key
 4. Update all backend code references (Repository → Service → API)

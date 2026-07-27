@@ -87,7 +87,7 @@ async def list_resources(
 
 **Step 3: 验证**
 
-Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.resources_router import router; print('Router OK')"`
+Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.resources_router import router; print('Router OK')"`
 Expected: `Router OK`
 
 **Step 4: Commit**
@@ -164,7 +164,7 @@ async def list_resources(
 
 **Step 3: 验证**
 
-Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.resources_router import router; print('Router OK')"`
+Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.resources_router import router; print('Router OK')"`
 Expected: `Router OK`
 
 **Step 4: Commit**
@@ -210,7 +210,7 @@ media: MediaMetadata | null;  // Populated when include_media=true
 
 **Step 2: 验证**
 
-Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npx tsc --noEmit 2>&1 | head -20`
+Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npx tsc --noEmit 2>&1 | head -20`
 Expected: No new errors (existing errors OK)
 
 **Step 3: Commit**
@@ -261,7 +261,7 @@ export async function fetchResources(
 
 **Step 2: 验证**
 
-Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npx tsc --noEmit 2>&1 | head -20`
+Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npx tsc --noEmit 2>&1 | head -20`
 
 **Step 3: Commit**
 
@@ -314,7 +314,7 @@ useEffect(() => {
 
 **Step 3: 验证**
 
-Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
+Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
 Expected: Build success
 
 **Step 4: Commit**
@@ -390,7 +390,7 @@ const items = await fetchResources(scopeType, scopeId, currentFolderId, {
 
 **Step 6: 验证**
 
-Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
+Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
 
 **Step 7: Commit**
 
@@ -473,7 +473,7 @@ function formatNumber(num: number): string {
 
 **Step 3: 验证**
 
-Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
+Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
 
 **Step 4: Commit**
 
@@ -555,7 +555,7 @@ rm frontend/components/RipVaultView.tsx
 
 **Step 6: 验证**
 
-Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
+Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
 
 **Step 7: Commit**
 
@@ -588,8 +588,8 @@ Run: `grep -r "trashResourceByPlatformId\|by-platform-id" frontend/ --include="*
 
 **Step 4: 验证**
 
-Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
-Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.resources_router import router; print('Router OK')"`
+Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
+Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.resources_router import router; print('Router OK')"`
 
 **Step 5: Commit**
 
@@ -648,7 +648,7 @@ git commit -m "refactor: remove deprecated by-platform-id/trash endpoint"
 
 **Step 3: 验证**
 
-Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
+Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
 
 **Step 4: Commit**
 

@@ -6,7 +6,7 @@
 
 ## Overview
 
-User-creatable AI Skill system for MediaHub. Skills are Markdown-formatted rule packages stored in the database, injected into AI prompts when creating content (scripts, storyboards, copywriting, etc.).
+User-creatable AI Skill system for Nous. Skills are Markdown-formatted rule packages stored in the database, injected into AI prompts when creating content (scripts, storyboards, copywriting, etc.).
 
 ## Migration Strategy: `style_templates` → `skills`
 

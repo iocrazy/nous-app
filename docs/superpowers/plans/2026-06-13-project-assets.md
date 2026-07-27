@@ -8,7 +8,7 @@
 
 **Tech Stack:** FastAPI + supabase-py + `app.db.engine` (raw SQL for aggregates/joins), Postgres (snowflake BIGINT ids), DBOS (scheduled sweeper being disabled), React 19 + TypeScript + Vite, i18next.
 
-**Working directory:** `/Volumes/program/project-code/repos/mediahub/.worktrees/feature-project-assets-p4` (branch `feature/project-assets-p4`, ports FE 5176 / BE 8081).
+**Working directory:** `/Volumes/program/project-code/repos/nous/.worktrees/feature-project-assets-p4` (branch `feature/project-assets-p4`, ports FE 5176 / BE 8081).
 
 **Spec:** `docs/superpowers/specs/2026-06-13-project-assets-design.md`
 

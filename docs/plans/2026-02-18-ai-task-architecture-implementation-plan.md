@@ -261,7 +261,7 @@ Expected: All statements succeed. Verify:
 **Step 1: Rename file and update class name**
 
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system
+cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system
 mv backend/app/repositories/video_repository.py backend/app/repositories/media_repository.py
 ```
 
@@ -513,7 +513,7 @@ Fix all remaining references.
 **Step 2: Verify backend starts**
 
 ```bash
-cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend
+cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend
 uv run uvicorn app.main:app --reload --port 8081
 ```
 

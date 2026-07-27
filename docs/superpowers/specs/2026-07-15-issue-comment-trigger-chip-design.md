@@ -22,7 +22,7 @@
 
 - **不加新守卫**。评论在 `done` 状态的 issue 上照样唤醒 agent —— 这与 multica 的刻意设计一致（`issue.go:2770`：*"comments are conversational and can happen at any stage, including after completion"*）。本方案只做**披露 + 可选抑制**，不改变默认触发语义。
 - **不做 `/note` 前缀**。它只是 suppress 的另一种输入方式（键盘流），后端能力共用，可后续单独加。
-- **不做 multica 的多 agent 设施**：头像堆叠、`+N` 溢出、popover 逐个勾选、来源标签（assignee/@mention/squad）、squad 自触发抑制、per-agent 在线状态。**MediaHub 一条 issue 最多一个 `assignee_agent_id`，没有 @提及 agent、没有 squad**，这些全部无指称对象。
+- **不做 multica 的多 agent 设施**：头像堆叠、`+N` 溢出、popover 逐个勾选、来源标签（assignee/@mention/squad）、squad 自触发抑制、per-agent 在线状态。**Nous 一条 issue 最多一个 `assignee_agent_id`，没有 @提及 agent、没有 squad**，这些全部无指称对象。
 - **不删 `payload.agent_id` 字段**。它是 vestigial（见 §7），删除属于 API 契约变更，另案。
 
 ## 3. 核心设计决策
@@ -84,7 +84,7 @@ else:
 
 **客户端永远无法凭空「加」一个触发**，只能从服务端自己算出的结果里减。这是 multica `filterSuppressedCommentAgentTriggers`（`comment.go:1446`）的语义。
 
-**为何用 ID 列表而非 bool**（MediaHub 最多一个 agent，bool 也够）：preview 与 send 之间指派人若变更（A→B），ID 列表天然 no-op（B 不在名单里 → B 被唤醒，符合服务端真相）；bool 会静默抑制掉用户从没见过的 B。且 ID 列表与 multica 形状一致，未来加 @提及时无需改契约。
+**为何用 ID 列表而非 bool**（Nous 最多一个 agent，bool 也够）：preview 与 send 之间指派人若变更（A→B），ID 列表天然 no-op（B 不在名单里 → B 被唤醒，符合服务端真相）；bool 会静默抑制掉用户从没见过的 B。且 ID 列表与 multica 形状一致，未来加 @提及时无需改契约。
 
 ### 3.4 suppress 路径 = `run_session_turn` 减去模型调用
 
@@ -122,9 +122,9 @@ GET /api/v1/issues/{issue_id}/comment-trigger-preview
 → 404 若 issue 不可见
 ```
 
-**纯读、零副作用**，与 `dispatch-preview` 同构。不接受草稿内容 —— 判据不看正文（MediaHub 无 @提及解析），故无需 POST、无需 debounce 请求正文。
+**纯读、零副作用**，与 `dispatch-preview` 同构。不接受草稿内容 —— 判据不看正文（Nous 无 @提及解析），故无需 POST、无需 debounce 请求正文。
 
-> 与 multica 的差异：multica 的 preview 是 `POST` 且带 `content`，因为它要解析 @提及和 `/note`。MediaHub 判据只看 issue 行 → `GET` 足够，且可随 issue 数据一起缓存。加 `/note` 或 @提及时**必须**改成带正文的 POST。
+> 与 multica 的差异：multica 的 preview 是 `POST` 且带 `content`，因为它要解析 @提及和 `/note`。Nous 判据只看 issue 行 → `GET` 足够，且可随 issue 数据一起缓存。加 `/note` 或 @提及时**必须**改成带正文的 POST。
 
 ## 5. 前端
 

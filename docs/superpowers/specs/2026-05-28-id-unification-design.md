@@ -8,7 +8,7 @@
 
 ## Goal
 
-Unify the ID systems across mediahub so that **every self-owned table uses BIGINT Snowflake** (the sole exception being `auth.users.id`, which Supabase Auth pins to UUID). Concurrent with that, **abstract "personal workspace" into a special single-member `team`** so that all scope-aware code paths converge on the same model (`team_members`-based authz instead of `(scope_type='personal' OR scope_type='team')` branches). Storage paths converge to a single naming convention with no asymmetry.
+Unify the ID systems across nous so that **every self-owned table uses BIGINT Snowflake** (the sole exception being `auth.users.id`, which Supabase Auth pins to UUID). Concurrent with that, **abstract "personal workspace" into a special single-member `team`** so that all scope-aware code paths converge on the same model (`team_members`-based authz instead of `(scope_type='personal' OR scope_type='team')` branches). Storage paths converge to a single naming convention with no asymmetry.
 
 Three observable wins on the other side:
 
@@ -83,7 +83,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Trigger location depends on whether mediahub mirrors auth.users into
+-- Trigger location depends on whether nous mirrors auth.users into
 -- public.users. If it does, attach the trigger to public.users; otherwise
 -- create a Supabase Edge Function or hook the existing signup path.
 ```
@@ -175,7 +175,7 @@ For Supabase, `auth.users` is owned by the auth schema; project triggers can't a
 1. Use Supabase's `on_auth_user_created` trigger pattern (a project-defined trigger on `auth.users` via `SECURITY DEFINER` function in the `public` schema, granted by Supabase superuser). Mediahub may already have this for `users` profile mirror.
 2. Or: hook the application's `signUp` path (`backend/app/api/auth_router.py::signup`) to call `create_personal_team()` after the user row is committed.
 
-**Recommended:** approach (1) (DB-side trigger) because it covers all signup paths uniformly including admin user creation, Supabase studio inserts, and migrations. Approach (2) leaves gaps. Concrete implementation will reuse whatever pattern mediahub uses today for the `users` profile auto-create (look in `supabase/migrations/001_initial_schema.sql` and onwards).
+**Recommended:** approach (1) (DB-side trigger) because it covers all signup paths uniformly including admin user creation, Supabase studio inserts, and migrations. Approach (2) leaves gaps. Concrete implementation will reuse whatever pattern nous uses today for the `users` profile auto-create (look in `supabase/migrations/001_initial_schema.sql` and onwards).
 
 ## ID Migration: 3 Tables UUID → Snowflake
 
@@ -284,7 +284,7 @@ This script lives at `scripts/migrations/2026-05-28-storage-path-personal-team.s
 - **(A) Accept token failure:** old tokens 404 after the migration completes; clients re-fetch via a fresh `/media-token` call. Simple, acceptable for the 5-minute TTL window.
 - **(B) Dual-path support:** for 24h after migration, the media file server tries the new path first then falls back to the old. Add minor complexity, eliminates user-visible breakage.
 
-**Recommendation: (A).** The 5-minute token TTL bounds the breakage to a brief window and is consistent with mediahub's other "token failure → client retries" patterns.
+**Recommendation: (A).** The 5-minute token TTL bounds the breakage to a brief window and is consistent with nous's other "token failure → client retries" patterns.
 
 Share links (`shares` table) embed `resource_id`, not file path — they're unaffected.
 
@@ -363,12 +363,12 @@ Practical rollback for PR-D requires file-system snapshot of `teams/` on NAS (Sy
 
 ## Out of Scope
 
-- `users` profile table refactor (if mediahub has one for displayName / avatar)
+- `users` profile table refactor (if nous has one for displayName / avatar)
 - Reverse migration (team → personal) — not supported (one-way only)
 - Multi-tenant resource sharing (cross-team file visibility) — orthogonal, future spec
 - `share` link old-format compat beyond what already exists
 - Removing `scope_type` column entirely (kept for future-proof; plan-stage may reverse this)
-- mediahub mobile app — frontend changes ride along, no app-specific work needed
+- nous mobile app — frontend changes ride along, no app-specific work needed
 
 ## Spec Self-Review (2026-05-28)
 

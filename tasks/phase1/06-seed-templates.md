@@ -20,7 +20,7 @@ supabase/migrations/085_seed_workflow_templates.sql
 INSERT INTO capabilities (id, name, slug, type, description, icon, action_type, is_builtin, is_active) VALUES
 (1, 'Topic Analysis',    'topic-analysis',  'ai_agent', 'Analyze trending topics and generate content ideas', '🔍', 'ai_topic_analysis', true, true),
 (2, 'Copywriting',       'copywriting',     'ai_agent', 'Generate titles, descriptions, and hashtags', '✍️', 'ai_copywriting', true, true),
-(3, 'Media Collection',  'media-collect',   'internal', 'Parse and download reference media via MediaHub', '📦', NULL, true, true),
+(3, 'Media Collection',  'media-collect',   'internal', 'Parse and download reference media via Nous', '📦', NULL, true, true),
 (4, 'Cover Generation',  'cover-gen',       'ai_agent', 'AI-generate cover images for content', '🎨', 'ai_cover_gen', true, true),
 (5, 'Compliance Check',  'compliance',      'ai_agent', 'Check content for sensitive words and platform rules', '🛡️', 'ai_compliance', true, true),
 (6, 'Multi-Platform Publish', 'multi-publish', 'api',   'Publish content to Douyin, Xiaohongshu, Bilibili', '📤', NULL, true, true),

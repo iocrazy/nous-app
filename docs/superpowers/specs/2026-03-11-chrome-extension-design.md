@@ -1,8 +1,8 @@
-# MediaHub Push — Chrome Extension Design
+# Nous Push — Chrome Extension Design
 
 ## Overview
 
-A minimal Chrome extension (Manifest V3) that lets users push the current page's URL to MediaHub for video parsing/download with one click. Configuration via popup, feedback via toast notification.
+A minimal Chrome extension (Manifest V3) that lets users push the current page's URL to Nous for video parsing/download with one click. Configuration via popup, feedback via toast notification.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ manifest.json        ← Manifest V3 configuration
 ## User Flow
 
 1. **First use**: Click extension icon → popup opens → enter API URL + API Key → Save
-2. **Daily use**: Navigate to a video page → right-click "Push to MediaHub" or press `Alt+M` → toast shows result
+2. **Daily use**: Navigate to a video page → right-click "Push to Nous" or press `Alt+M` → toast shows result
 
 ## Components
 
@@ -29,7 +29,7 @@ manifest.json        ← Manifest V3 configuration
 
 ### Background Service Worker
 
-- Registers context menu item "Push to MediaHub" on install
+- Registers context menu item "Push to Nous" on install
 - Registers keyboard shortcut `Alt+M`
 - On trigger: reads current tab URL + saved config from `chrome.storage.sync`
 - Calls backend API:
@@ -44,7 +44,7 @@ manifest.json        ← Manifest V3 configuration
 
 - Injected on demand (not on every page)
 - Shows toast notification in top-right corner:
-  - Pushing: "Pushing to MediaHub..."
+  - Pushing: "Pushing to Nous..."
   - Success: "Pushed! Parsing started." (auto-dismiss 3s)
   - Error: "Push failed: {error}" (auto-dismiss 5s)
 - Toast styled with fixed positioning, z-index high enough to overlay page content
@@ -81,7 +81,7 @@ Total: ~280 lines of code.
 
 ## API Integration
 
-Uses existing MediaHub endpoint:
+Uses existing Nous endpoint:
 - **Endpoint**: `POST /api/v1/videos/fetch`
 - **Auth**: `X-API-Key` header (requires `videos:fetch` scope)
 - **Request**: `{ "url": "...", "video_bool": true, "cover_bool": true }`
@@ -95,4 +95,4 @@ No new backend changes needed — the existing API and API Key auth system fully
 2. **Manifest V3**: Required for new Chrome extensions, uses service workers instead of background pages.
 3. **chrome.storage.sync**: Config syncs across user's Chrome instances.
 4. **Content script injected on demand**: Only injected when user triggers a push, not on every page load — minimal performance impact.
-5. **No state tracking**: Extension doesn't poll for parse status. User checks MediaHub dashboard for results. Keeps extension simple.
+5. **No state tracking**: Extension doesn't poll for parse status. User checks Nous dashboard for results. Keeps extension simple.

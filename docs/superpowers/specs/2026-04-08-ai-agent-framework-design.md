@@ -1,10 +1,10 @@
 # AI Agent Framework Design Spec
 
-> MediaHub 项目级 AI Agent 框架 — 基于远程 LLM API 的多 Agent 创作系统
+> Nous 项目级 AI Agent 框架 — 基于远程 LLM API 的多 Agent 创作系统
 
 ## 1. Overview
 
-构建一个通用的 AI Agent 框架，让 MediaHub 的任何模块（Script Editor、Storyboard、Skills 等）都能通过配置化的 Agent 调用远程 LLM API 进行内容创作。
+构建一个通用的 AI Agent 框架，让 Nous 的任何模块（Script Editor、Storyboard、Skills 等）都能通过配置化的 Agent 调用远程 LLM API 进行内容创作。
 
 参考 Forge 项目的配置文件体系，但不依赖 Claude Agent SDK，而是直接调用 OpenAI 兼容 API（通义千问 qwen 等）。
 

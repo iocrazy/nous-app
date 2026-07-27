@@ -16,7 +16,7 @@ CEO 双声一致的 5 项架构修正全部采纳（定日期 cutover、新建 s
 
 ## 1. 目标与背景
 
-把 MediaHub 项目详情从「阶段 tab 条 + 腐坏的节点画布」重做成创作工作台：文字剧本为写作主视图，节点为随时可用的结构投影，脚本 scene 顺流到分镜 shot。laper.ai 为设计基线，差异化主张 = **媒资采集→剧本→生成的一体化** + Outline↔Beats↔Script 联动（laper 缺失）。
+把 Nous 项目详情从「阶段 tab 条 + 腐坏的节点画布」重做成创作工作台：文字剧本为写作主视图，节点为随时可用的结构投影，脚本 scene 顺流到分镜 shot。laper.ai 为设计基线，差异化主张 = **媒资采集→剧本→生成的一体化** + Outline↔Beats↔Script 联动（laper 缺失）。
 
 **为什么现在做**：Phase A 后审查发现现有 script/storyboard 前端整链腐坏（六连环 bug 才端到端跑通），且是「旧节点画布优先」的错位设计。后端数据层活着但缺 Scene 层。
 

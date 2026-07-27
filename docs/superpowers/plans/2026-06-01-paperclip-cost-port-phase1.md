@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
 
-**Goal:** Capture cached input tokens from provider usage and price them at a cheaper cached rate, fixing the cost over-estimation mediahub currently has (it treats every prompt token at full rate, ignoring provider prompt-caching). Borrowed from paperclip's `cost_events.cached_input_tokens` model.
+**Goal:** Capture cached input tokens from provider usage and price them at a cheaper cached rate, fixing the cost over-estimation nous currently has (it treats every prompt token at full rate, ignoring provider prompt-caching). Borrowed from paperclip's `cost_events.cached_input_tokens` model.
 
-**Architecture:** Purely additive. mediahub keeps its per-run `agent_runs` accounting (the per-call `cost_events` ledger + `budget_policies` are later phases). We add a `cached_input_tokens` column + a nullable `cached_input_cents_per_1k` price column. The cost formula discounts cached tokens **only when a cached rate is configured** — when it's null, cached tokens are priced at the prompt rate exactly as today, so there is **zero billing regression** until rates are deliberately filled in.
+**Architecture:** Purely additive. nous keeps its per-run `agent_runs` accounting (the per-call `cost_events` ledger + `budget_policies` are later phases). We add a `cached_input_tokens` column + a nullable `cached_input_cents_per_1k` price column. The cost formula discounts cached tokens **only when a cached rate is configured** — when it's null, cached tokens are priced at the prompt rate exactly as today, so there is **zero billing regression** until rates are deliberately filled in.
 
 **Tech Stack:** FastAPI + Supabase (Postgres), `supabase/migrations/NNN_*.sql`, `RunRecorder`, pytest.
 

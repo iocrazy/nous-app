@@ -8,7 +8,7 @@
 
 ## ⚠️ 执行期决策（2026-06-14）：改为「全 stub」，删除真后端依赖
 
-原设计（下文「已拍板决策」第 2 条）是 **真 dev 后端 + 测试账号**，只 stub AI 生成/拆分两个端点。执行时确认 MediaHub **没有可跑的 dev 后端**（FastAPI 仅 prod），真后端方案需现搭 uvicorn + 连 dev Supabase + 建测试账号，环境太重且不可进 CI。
+原设计（下文「已拍板决策」第 2 条）是 **真 dev 后端 + 测试账号**，只 stub AI 生成/拆分两个端点。执行时确认 Nous **没有可跑的 dev 后端**（FastAPI 仅 prod），真后端方案需现搭 uvicorn + 连 dev Supabase + 建测试账号，环境太重且不可进 CI。
 
 **改为全 stub**：用 `page.route` 在网络层拦截整个后端（`/rest/v1/*` + `/api/v1/*` + `/auth/v1/*`），并用 `page.addInitScript` 把一个已认证的 Supabase session 直接种进 `localStorage`。零后端、零账号、亚秒、可进 CI。
 
