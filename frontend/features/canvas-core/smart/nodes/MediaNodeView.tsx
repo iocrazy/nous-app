@@ -21,7 +21,16 @@ import {
 } from '../mediaImport';
 import type { GeneratedImageRef, MediaNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
+import { OutputLightbox, type LightboxItem } from './OutputLightbox';
 import { useNodeDataPatch } from './useNodeDataPatch';
+
+/** Which lightbox is open — a kind + the index within that kind's own
+ *  item list (OutputLightbox navigates a single kind at a time, so a
+ *  mixed image/video grid needs to route to the matching sub-list). */
+interface LightboxState {
+  kind: 'image' | 'video';
+  index: number;
+}
 
 export function MediaNodeView({ id, data, selected }: NodeProps) {
   const { t } = useTranslation();
@@ -31,6 +40,7 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<LightboxState | null>(null);
 
   const uploadFiles = useCallback(
     async (files: File[]) => {
@@ -80,6 +90,17 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
 
   const pendingCells = Math.max(0, uploading ?? 0);
   const isEmpty = (items?.length ?? 0) === 0 && pendingCells === 0;
+
+  // Split by kind so OutputLightbox (single-kind navigation) gets a
+  // clean list to page through — clicking an image never lands the
+  // lightbox on a video slot and vice versa.
+  const imageItems: LightboxItem[] = (items ?? [])
+    .filter((item) => item.kind !== 'video')
+    .map((item) => ({ url: item.url, name: item.name }));
+  const videoItems: LightboxItem[] = (items ?? [])
+    .filter((item) => item.kind === 'video')
+    .map((item) => ({ url: item.url, name: item.name }));
+  const lightboxItems = lightbox?.kind === 'video' ? videoItems : imageItems;
 
   return (
     <div
@@ -132,28 +153,46 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
           </button>
         ) : (
           <div className="grid grid-cols-2 gap-1" data-testid="media-node-grid">
-            {(items ?? []).map((item, i) => (
-              <div
-                key={`${item.url}-${i}`}
-                className="overflow-hidden rounded-md bg-canvas-card"
-              >
-                {item.kind === 'video' ? (
-                  <video
-                    src={item.url}
-                    preload="metadata"
-                    muted
-                    className="aspect-square w-full object-cover"
-                  />
-                ) : (
-                  <img
-                    src={item.url}
-                    alt={item.name ?? ''}
-                    loading="lazy"
-                    className="aspect-square w-full object-cover"
-                  />
-                )}
-              </div>
-            ))}
+            {(() => {
+              let imgSeen = 0;
+              let vidSeen = 0;
+              return (items ?? []).map((item, i) => {
+                const isVideo = item.kind === 'video';
+                const kindIndex = isVideo ? vidSeen++ : imgSeen++;
+                return (
+                  <div
+                    key={`${item.url}-${i}`}
+                    className="overflow-hidden rounded-md bg-canvas-card"
+                  >
+                    <button
+                      type="button"
+                      data-testid={`media-node-thumb-${i}`}
+                      className="nodrag block w-full cursor-zoom-in"
+                      onClick={() =>
+                        setLightbox({ kind: isVideo ? 'video' : 'image', index: kindIndex })
+                      }
+                    >
+                      {isVideo ? (
+                        <video
+                          data-testid={`media-node-video-${i}`}
+                          src={item.url}
+                          preload="metadata"
+                          muted
+                          className="aspect-square w-full object-cover"
+                        />
+                      ) : (
+                        <img
+                          src={item.url}
+                          alt={item.name ?? ''}
+                          loading="lazy"
+                          className="aspect-square w-full object-cover"
+                        />
+                      )}
+                    </button>
+                  </div>
+                );
+              });
+            })()}
             {Array.from({ length: pendingCells }).map((_, i) => (
               <div
                 key={`pending-${i}`}
@@ -180,6 +219,15 @@ export function MediaNodeView({ id, data, selected }: NodeProps) {
         }}
       />
       <Handle type="source" position={Position.Right} />
+      {lightbox !== null && lightboxItems.length > 0 && (
+        <OutputLightbox
+          items={lightboxItems}
+          index={Math.min(lightbox.index, lightboxItems.length - 1)}
+          kind={lightbox.kind}
+          onIndexChange={(next) => setLightbox({ kind: lightbox.kind, index: next })}
+          onClose={() => setLightbox(null)}
+        />
+      )}
     </div>
   );
 }
