@@ -207,6 +207,38 @@ def test_transcription_workflow_marks_failed_before_recording():
     assert fail_idx < record_idx, "must mark failed BEFORE record_workflow_failure"
 
 
+async def test_run_volcengine_asr_raises_when_audio_missing(tmp_path, monkeypatch):
+    """volcengine 分支的路径解析失败必须立即抛 FileNotFoundError,不能像
+    合并 AudioSourceResolver 之前那样静默把无法解析的相对路径继续传给远端
+    ASR API —— 那样产生的是不可诊断的失败,还会白白花掉一次付费调用(且被
+    DBOS 的 max_attempts=2 重试策略再打一次)。
+
+    ``_run_volcengine_asr`` 现在在函数体最开头就调用
+    ``AudioSourceResolver.resolve()``,早于任何 DB 查询 / HMAC 签名 /
+    VolcengineASRService 构造。这里让 ``db_engine.fetch_one`` 断言不可达,
+    以证明失败确实发生在触达远端之前,而不是侥幸经过 DB 层才失败。"""
+    from app.core import config
+
+    monkeypatch.setattr(config.settings, "DOWNLOAD_PATH", str(tmp_path))
+
+    import app.workflows.ai_transcription as m
+
+    async def unreachable(sql, params=None):
+        raise AssertionError(
+            "db_engine.fetch_one must not be reached — resolve() has to "
+            "fail first"
+        )
+
+    with patch("app.db.engine.fetch_one", unreachable):
+        with pytest.raises(FileNotFoundError):
+            await m._run_volcengine_asr(
+                audio_path="web/missing.m4a",
+                resource_id="5",
+                provider_config={},
+                language="auto",
+            )
+
+
 @pytest.mark.asyncio
 async def test_load_transcribe_inputs_locked_to_catalog_model():
     """Locked TO a platform-catalog model → provider/key/app_id come from the
