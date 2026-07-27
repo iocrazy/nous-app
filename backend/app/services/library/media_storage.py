@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
-import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, AsyncIterator, Callable, Optional
+
+from app.services.library.media_keys import MediaKeyBuilder
 
 if TYPE_CHECKING:
     # Only for the `materialize` forward-ref annotation below — pathlib is
@@ -76,19 +77,9 @@ def resolve_media_source(file_path: str) -> MediaLocation:
 # ── Content-addressed key derivation ────────────────────────────────────────
 
 
-def _ext_for(mime: str, filename: Optional[str]) -> str:
-    """Pick a file extension: prefer the original filename's, else sniff mime."""
-    if filename and "." in filename:
-        ext = filename.rsplit(".", 1)[-1].lower()
-        # keep it sane (letters/digits, ≤5 chars) so a weird name can't inject
-        if ext.isalnum() and len(ext) <= 5:
-            return f".{ext}"
-    guessed = mimetypes.guess_extension((mime or "").split(";")[0].strip() or "")
-    return guessed or ".bin"
-
-
-def _object_key(scope_id: int, sha: str, ext: str) -> str:
-    return f"t{scope_id}/{sha[:2]}/{sha[2:4]}/{sha}{ext}"
+# 键构造已抽到 MediaKeyBuilder(media_keys.py);以下均为薄转发,签名与原实现
+# 逐字保持一致(含关键字专用 `*`),避免 12 个既有调用方受影响。
+_KEYS = MediaKeyBuilder()
 
 
 def content_key(
@@ -102,7 +93,7 @@ def content_key(
     key (privacy / injection / collision).
     """
     sha = hashlib.sha256(data).hexdigest()
-    return sha, _object_key(scope_id, sha, _ext_for(mime, filename))
+    return sha, _KEYS.content_key(scope_id, sha, mime, filename)
 
 
 def content_key_from_sha(
@@ -110,44 +101,17 @@ def content_key_from_sha(
 ) -> str:
     """Same key scheme as ``content_key`` but from a precomputed sha — for
     large blobs (video) hashed by streaming a file instead of buffering bytes."""
-    return _object_key(scope_id, sha, _ext_for(mime, filename))
+    return _KEYS.content_key(scope_id, sha, mime, filename)
 
 
 def to_file_path(bucket: str, key: str) -> str:
     """Compose the ``sb://`` value stored in generated_media.file_path."""
-    return f"{_SB_SCHEME}{bucket}/{key}"
-
-
-# ── HLS keys: path-addressed, NOT content-addressed ─────────────────────────
-#
-# Every other sb:// writer goes through content_key(): key derived from the
-# sha256 so identical bytes dedup and the original filename never lands in the
-# key. HLS cannot use that scheme — an m3u8 references its siblings by bare
-# relative path (``480p/stream.m3u8``, ``segment_000.ts``), so renaming a
-# segment to its hash breaks every playlist that points at it.
-#
-# So HLS gets a second, path-addressed namespace rooted at ``hls/``. That
-# prefix cannot collide with the content-addressed one, which always starts
-# ``t{scope_id}/``. The trade-off is losing cross-resource dedup, which costs
-# nothing here: segments of different videos are never byte-identical.
-_HLS_PREFIX = "hls"
-# resource_id / version_id reach the key from the DB, so pin their shape rather
-# than trusting the caller — this namespace is the one place a caller-supplied
-# value would otherwise flow into a key path.
-_HLS_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-# Relative parts come from walking the ffmpeg output dir; keep them to plain
-# segment/playlist names so a crafted path can never climb out of the prefix.
-_HLS_REL_RE = re.compile(
-    r"^[A-Za-z0-9_][A-Za-z0-9._-]*(/[A-Za-z0-9_][A-Za-z0-9._-]*)*$"
-)
+    return _KEYS.to_file_path(bucket, key)
 
 
 def hls_key_prefix(resource_id: str, version_id: str) -> str:
     """Key prefix owning one version's HLS output: ``hls/{rid}/{vid}``."""
-    rid, vid = str(resource_id), str(version_id)
-    if not _HLS_ID_RE.match(rid) or not _HLS_ID_RE.match(vid):
-        raise ValueError(f"unsafe HLS id: resource={rid!r} version={vid!r}")
-    return f"{_HLS_PREFIX}/{rid}/{vid}"
+    return _KEYS.hls_prefix(resource_id, version_id)
 
 
 def hls_key(resource_id: str, version_id: str, rel_path: str) -> str:
@@ -157,10 +121,7 @@ def hls_key(resource_id: str, version_id: str, rel_path: str) -> str:
     what the m3u8 references — so relative links keep resolving once the tree
     lives in the object store.
     """
-    rel = str(rel_path).strip("/")
-    if not rel or ".." in rel.split("/") or not _HLS_REL_RE.match(rel):
-        raise ValueError(f"unsafe HLS relative path: {rel_path!r}")
-    return f"{hls_key_prefix(resource_id, version_id)}/{rel}"
+    return _KEYS.hls_key(resource_id, version_id, rel_path)
 
 
 # ── Object store wrapper (Supabase Storage) ─────────────────────────────────
