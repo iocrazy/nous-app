@@ -68,6 +68,19 @@ def test_assert_playable_returns_original_arg(resolver, tmp_path):
     assert resolver.assert_playable("ok.m4a") == "ok.m4a"
 
 
+def test_assert_playable_accepts_glob_match(resolver, tmp_path):
+    """DB 记 .m4a 而磁盘是 .mp3 时,闸门放行 —— 这是合并解析链带来的
+    行为变化(原 assert_audio_present_step 没有 glob 兜底,此处会拒绝)。
+
+    放行是安全的:下游 whisper 与 volcengine 现在都会 glob 到同一个候选,
+    所以闸门不该比它保护的下游更严格。但这是行为变化,故显式钉住。
+    """
+    (tmp_path / "web").mkdir()
+    actual = tmp_path / "web" / "audio.mp3"
+    actual.write_bytes(b"x" * 16)
+    assert resolver.assert_playable("web/audio.m4a") == "web/audio.m4a"
+
+
 def test_to_relative_strips_download_root(resolver, tmp_path):
     assert resolver.to_relative(str(tmp_path / "web" / "a.m4a")) == "web/a.m4a"
 
