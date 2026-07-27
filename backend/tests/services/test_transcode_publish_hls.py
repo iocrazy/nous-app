@@ -74,15 +74,15 @@ class TestFilesystemMode:
 
         with (
             patch(
-                "app.services.media.transcode.transcode_service.settings.HLS_OBJECT_STORE",
+                "app.services.media.transcode.hls_publisher.settings.HLS_OBJECT_STORE",
                 False,
             ),
             patch(
-                "app.services.media.transcode.transcode_service.library_store",
+                "app.services.media.transcode.hls_publisher.library_store",
                 return_value=store,
             ),
         ):
-            out = await svc._publish_hls(hls_dir, tmp_path, "r1", "v1")
+            out = await svc._hls.publish(hls_dir, tmp_path, "r1", "v1")
 
         assert out == "res/hls/master.m3u8"
         assert store.events == [], "filesystem mode must not touch the store"
@@ -98,15 +98,15 @@ class TestObjectStoreMode:
 
         with (
             patch(
-                "app.services.media.transcode.transcode_service.settings.HLS_OBJECT_STORE",
+                "app.services.media.transcode.hls_publisher.settings.HLS_OBJECT_STORE",
                 True,
             ),
             patch(
-                "app.services.media.transcode.transcode_service.library_store",
+                "app.services.media.transcode.hls_publisher.library_store",
                 return_value=store,
             ),
         ):
-            await svc._publish_hls(hls_dir, tmp_path, "r1", "v1")
+            await svc._hls.publish(hls_dir, tmp_path, "r1", "v1")
 
         master_key = "hls/r1/v1/master.m3u8"
         assert master_key in store.keys
@@ -125,15 +125,15 @@ class TestObjectStoreMode:
 
         with (
             patch(
-                "app.services.media.transcode.transcode_service.settings.HLS_OBJECT_STORE",
+                "app.services.media.transcode.hls_publisher.settings.HLS_OBJECT_STORE",
                 True,
             ),
             patch(
-                "app.services.media.transcode.transcode_service.library_store",
+                "app.services.media.transcode.hls_publisher.library_store",
                 return_value=store,
             ),
         ):
-            out = await svc._publish_hls(hls_dir, tmp_path, "r1", "v1")
+            out = await svc._hls.publish(hls_dir, tmp_path, "r1", "v1")
 
         assert out == "sb://library/hls/r1/v1/master.m3u8"
         # m3u8 files reference siblings by bare relative path — the keys must
@@ -151,15 +151,15 @@ class TestObjectStoreMode:
 
         with (
             patch(
-                "app.services.media.transcode.transcode_service.settings.HLS_OBJECT_STORE",
+                "app.services.media.transcode.hls_publisher.settings.HLS_OBJECT_STORE",
                 True,
             ),
             patch(
-                "app.services.media.transcode.transcode_service.library_store",
+                "app.services.media.transcode.hls_publisher.library_store",
                 return_value=store,
             ),
         ):
-            await svc._publish_hls(hls_dir, tmp_path, "r1", "v1")
+            await svc._hls.publish(hls_dir, tmp_path, "r1", "v1")
 
         assert (hls_dir / "master.m3u8").exists(), "master not restored locally"
         assert (hls_dir / "480p" / "segment_000.ts").exists()
@@ -175,17 +175,17 @@ class TestObjectStoreMode:
 
         with (
             patch(
-                "app.services.media.transcode.transcode_service.settings.HLS_OBJECT_STORE",
+                "app.services.media.transcode.hls_publisher.settings.HLS_OBJECT_STORE",
                 True,
             ),
             patch(
-                "app.services.media.transcode.transcode_service.library_store",
+                "app.services.media.transcode.hls_publisher.library_store",
                 return_value=store,
             ),
         ):
-            await svc._publish_hls(hls_dir, tmp_path, "r1", "v1")
+            await svc._hls.publish(hls_dir, tmp_path, "r1", "v1")
             store.events.clear()
-            await svc._publish_hls(hls_dir, tmp_path, "r1", "v1")
+            await svc._hls.publish(hls_dir, tmp_path, "r1", "v1")
 
         assert store.keys[-1] == "hls/r1/v1/master.m3u8"
 
@@ -196,15 +196,15 @@ class TestClearPublished:
         store = _RecordingStore()
         with (
             patch(
-                "app.services.media.transcode.transcode_service.settings.HLS_OBJECT_STORE",
+                "app.services.media.transcode.hls_publisher.settings.HLS_OBJECT_STORE",
                 True,
             ),
             patch(
-                "app.services.media.transcode.transcode_service.library_store",
+                "app.services.media.transcode.hls_publisher.library_store",
                 return_value=store,
             ),
         ):
-            await svc._clear_published_hls("r1", "v1")
+            await svc._hls.clear("r1", "v1")
         assert store.removed_prefixes == ["hls/r1/v1"]
 
     @pytest.mark.asyncio
@@ -212,15 +212,15 @@ class TestClearPublished:
         store = _RecordingStore()
         with (
             patch(
-                "app.services.media.transcode.transcode_service.settings.HLS_OBJECT_STORE",
+                "app.services.media.transcode.hls_publisher.settings.HLS_OBJECT_STORE",
                 False,
             ),
             patch(
-                "app.services.media.transcode.transcode_service.library_store",
+                "app.services.media.transcode.hls_publisher.library_store",
                 return_value=store,
             ),
         ):
-            await svc._clear_published_hls("r1", "v1")
+            await svc._hls.clear("r1", "v1")
         assert store.removed_prefixes == []
 
     @pytest.mark.asyncio
@@ -233,12 +233,12 @@ class TestClearPublished:
 
         with (
             patch(
-                "app.services.media.transcode.transcode_service.settings.HLS_OBJECT_STORE",
+                "app.services.media.transcode.hls_publisher.settings.HLS_OBJECT_STORE",
                 True,
             ),
             patch(
-                "app.services.media.transcode.transcode_service.library_store",
+                "app.services.media.transcode.hls_publisher.library_store",
                 return_value=_Broken(),
             ),
         ):
-            await svc._clear_published_hls("r1", "v1")  # must not raise
+            await svc._hls.clear("r1", "v1")  # must not raise

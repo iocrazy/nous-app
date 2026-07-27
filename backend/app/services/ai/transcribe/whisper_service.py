@@ -8,7 +8,6 @@ Supports two backends:
 - 'local': Uses faster-whisper for local transcription.
 """
 
-import os
 from typing import Optional
 
 from loguru import logger
@@ -50,39 +49,9 @@ class WhisperService:
             FileNotFoundError: If audio_path doesn't exist.
             NotImplementedError: If the provider doesn't support transcription.
         """
-        # Path resolution chain — DB stores `extract_audio_path` as a
-        # relative path like `global/resources/web/douyin/<id>/audio.m4a`,
-        # which `os.path.exists()` resolves against process CWD (not the
-        # download root) and so usually fails. Try, in order:
-        #   1. as-is (already absolute)
-        #   2. joined with settings.DOWNLOAD_PATH
-        #   3. glob the directory for any `<stem>.*` (handles the case
-        #      where extract_audio_from_video wrote audio.m4a but the
-        #      platform downloader saved audio.mp3, or vice versa)
-        if not os.path.exists(audio_path):
-            from app.core.config import settings as _settings
+        from app.services.media.audio_source import AudioSourceResolver
 
-            joined = os.path.join(_settings.DOWNLOAD_PATH, audio_path)
-            if os.path.exists(joined):
-                logger.info(f"Audio path {audio_path} relative; resolved to {joined}")
-                audio_path = joined
-            else:
-                import glob
-
-                parent = os.path.dirname(joined) or "."
-                stem = os.path.basename(audio_path).rsplit(".", 1)[0]
-                candidates = sorted(glob.glob(os.path.join(parent, f"{stem}.*")))
-                if candidates:
-                    logger.info(
-                        f"Audio file at {audio_path} missing, falling back to "
-                        f"{candidates[0]}"
-                    )
-                    audio_path = candidates[0]
-                else:
-                    raise FileNotFoundError(
-                        f"Audio file not found: {audio_path} "
-                        f"(also tried {joined} and {parent}/{stem}.*)"
-                    )
+        audio_path = AudioSourceResolver().resolve(audio_path)
 
         provider = AIProviderFactory.get_provider(
             self._provider_key, self._provider_config

@@ -1,4 +1,4 @@
-# app/services/transcode_service.py
+# app/services/media/transcode/transcode_service.py
 
 """
 HLS Transcode Service
@@ -9,27 +9,20 @@ Skips tiers above the original video resolution.
 """
 
 import asyncio
-import json
 import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Coroutine, List, Optional, Tuple
+from typing import Any, Callable, Coroutine, List, Optional
 
 from loguru import logger
 
 from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.core.config import settings
 from app.repositories.resources_repository import ResourcesRepository
-from app.services.library.media_storage import (
-    hls_key,
-    hls_key_prefix,
-    library_store,
-    materialize,
-    resolve_media_source,
-    to_file_path,
-)
+from app.services.library.media_storage import materialize, resolve_media_source
+from app.services.media.transcode.transcode_probe import TranscodeProbe
 
 
 @dataclass
@@ -54,104 +47,12 @@ TIERS = [
 class TranscodeService:
     """HLS multi-bitrate transcoding service."""
 
-    # GPU encoder priority order: (codec_name, hwaccel_input_args)
-    _GPU_ENCODERS = [
-        ("h264_nvenc", ["-hwaccel", "cuda"]),  # NVIDIA
-        ("h264_videotoolbox", []),  # macOS
-        ("h264_qsv", ["-hwaccel", "qsv"]),  # Intel
-    ]
-
     def __init__(self):
+        from app.services.media.transcode.hls_publisher import HlsPublisher
+
         self.repo = ResourcesRepository()
-        self._encoder: Optional[str] = None  # lazy-init
-        self._hwaccel_args: List[str] = []
-        self._preset: str = settings.FFMPEG_PRESET
-
-    # ------------------------------------------------------------------ #
-    # GPU encoder detection
-    # ------------------------------------------------------------------ #
-
-    async def _detect_encoder(self) -> tuple[str, list[str], str]:
-        """Detect best available encoder. Returns (codec, hwaccel_args, preset)."""
-        if self._encoder:
-            return self._encoder, self._hwaccel_args, self._preset
-
-        configured = settings.FFMPEG_ENCODER
-        if configured != "auto":
-            # Explicit config — trust it
-            self._encoder = configured
-            for name, args in self._GPU_ENCODERS:
-                if name == configured:
-                    self._hwaccel_args = args
-                    break
-            return self._encoder, self._hwaccel_args, self._preset
-
-        # Auto-detect: probe each GPU encoder
-        for name, hwaccel_args in self._GPU_ENCODERS:
-            if await self._probe_encoder(name):
-                logger.info(f"[Transcode] GPU encoder detected: {name}")
-                self._encoder = name
-                self._hwaccel_args = hwaccel_args
-                if "nvenc" in name:
-                    self._preset = self._map_nvenc_preset(settings.FFMPEG_PRESET)
-                return self._encoder, self._hwaccel_args, self._preset
-
-        # Fallback to CPU
-        logger.info("[Transcode] No GPU encoder found, using libx264 (CPU)")
-        self._encoder = "libx264"
-        return self._encoder, self._hwaccel_args, self._preset
-
-    @staticmethod
-    async def _probe_encoder(encoder_name: str) -> bool:
-        """Test if the given encoder actually works on THIS machine.
-
-        `ffmpeg -encoders` only reflects what ffmpeg was *compiled* with —
-        a build with nvenc support lists `h264_nvenc` even on a box with no
-        GPU. Probing that way made the NAS pick `h264_nvenc`, fail every
-        tier with "No device available", and only then fall back to
-        libx264 — one wasted failed attempt per tier plus ERROR-level log
-        spam on every transcode. Instead, actually run a 1-frame encode and
-        check the return code: a missing GPU / CUDA driver makes this fail
-        fast, so the encoder is correctly skipped.
-        """
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "ffmpeg",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-f",
-                "lavfi",
-                "-i",
-                "nullsrc=s=64x64:d=0.1",
-                "-c:v",
-                encoder_name,
-                "-frames:v",
-                "1",
-                "-f",
-                "null",
-                "-",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                **safe_popen_kwargs(),
-            )
-            await proc.communicate()
-            return proc.returncode == 0
-        except Exception:
-            return False
-
-    @staticmethod
-    def _map_nvenc_preset(cpu_preset: str) -> str:
-        """Map CPU preset names to NVENC p1-p7 presets."""
-        mapping = {
-            "ultrafast": "p1",
-            "veryfast": "p2",
-            "fast": "p3",
-            "medium": "p4",
-            "slow": "p5",
-            "veryslow": "p6",
-        }
-        return mapping.get(cpu_preset, "p4")
+        self._probe = TranscodeProbe()
+        self._hls = HlsPublisher()
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -272,7 +173,7 @@ class TranscodeService:
                     hls_dir = source.parent / "hls"
 
                 # Probe video to get resolution and duration
-                width, height = await self._probe_resolution(str(source))
+                width, height = await self._probe.probe_resolution(str(source))
                 if not width or not height:
                     logger.warning(
                         f"Could not probe resolution for {source}, skipping transcode"
@@ -285,10 +186,10 @@ class TranscodeService:
                         "reason": "could not probe video resolution",
                     }
 
-                total_duration = await self._probe_duration(str(source))
+                total_duration = await self._probe.probe_duration(str(source))
 
                 # Detect source codecs for fast-path decision
-                video_codec, audio_codec = await self._probe_codecs(str(source))
+                video_codec, audio_codec = await self._probe.probe_codecs(str(source))
                 is_h264 = video_codec in ("h264",)
 
                 # Clean up old HLS if exists
@@ -299,7 +200,7 @@ class TranscodeService:
                 # re-encode leaves higher-numbered segments from the previous
                 # run orphaned in the store: unreferenced by the new master so
                 # playback is fine, but they never get collected otherwise.
-                await self._clear_published_hls(str(resource_id), str(version_id))
+                await self._hls.clear(str(resource_id), str(version_id))
 
                 if is_h264:
                     # ============================================================
@@ -315,7 +216,7 @@ class TranscodeService:
                     # Phase 1: Fast copy-only segmentation
                     if on_progress:
                         await on_progress(10, "Fast segmenting (copy)...")
-                    source_bitrate = await self._probe_bitrate(str(source))
+                    source_bitrate = await self._probe.probe_bitrate(str(source))
                     passthrough_ok = await self._transcode_passthrough(
                         str(source),
                         hls_dir,
@@ -329,7 +230,7 @@ class TranscodeService:
                         # Fall through to standard encoding path below
                     else:
                         # Write initial master.m3u8 with source-only tier
-                        self._write_master_playlist(
+                        self._hls.write_master_playlist(
                             hls_dir,
                             [],
                             passthrough=True,
@@ -340,7 +241,7 @@ class TranscodeService:
 
                         # Publish phase-1 output (segments, then master) and
                         # take the resulting fs-relative or sb:// path.
-                        relative_hls = await self._publish_hls(
+                        relative_hls = await self._hls.publish(
                             hls_dir, base, str(resource_id), str(version_id)
                         )
 
@@ -386,7 +287,7 @@ class TranscodeService:
 
                                 if encoded_tiers:
                                     # Rewrite master.m3u8 with all tiers
-                                    self._write_master_playlist(
+                                    self._hls.write_master_playlist(
                                         hls_dir,
                                         encoded_tiers,
                                         passthrough=True,
@@ -398,7 +299,7 @@ class TranscodeService:
                                     # rewritten master. Same segments-then-master
                                     # order, so a player that reloads mid-upload
                                     # never sees a tier it cannot fetch.
-                                    await self._publish_hls(
+                                    await self._hls.publish(
                                         hls_dir, base, str(resource_id), str(version_id)
                                     )
                                     logger.info(
@@ -454,7 +355,7 @@ class TranscodeService:
                 # Add passthrough "Original" tier (copy codec, no re-encoding)
                 if on_progress:
                     await on_progress(95, "Remuxing original...")
-                source_bitrate = await self._probe_bitrate(str(source))
+                source_bitrate = await self._probe.probe_bitrate(str(source))
                 passthrough_ok = await self._transcode_passthrough(
                     str(source),
                     hls_dir,
@@ -464,7 +365,7 @@ class TranscodeService:
                 # Generate master playlist
                 if on_progress:
                     await on_progress(98, "Writing playlist...")
-                self._write_master_playlist(
+                self._hls.write_master_playlist(
                     hls_dir,
                     encoded_tiers,
                     passthrough=passthrough_ok,
@@ -474,7 +375,7 @@ class TranscodeService:
                 )
 
                 # Publish (segments first, master last) and take the path.
-                relative_hls = await self._publish_hls(
+                relative_hls = await self._hls.publish(
                     hls_dir, base, str(resource_id), str(version_id)
                 )
 
@@ -597,125 +498,6 @@ class TranscodeService:
             return applicable
 
     # ------------------------------------------------------------------ #
-    # ffprobe
-    # ------------------------------------------------------------------ #
-
-    async def _probe_resolution(
-        self, filepath: str
-    ) -> Tuple[Optional[int], Optional[int]]:
-        """Probe video file for width and height."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "ffprobe",
-                "-v",
-                "quiet",
-                "-print_format",
-                "json",
-                "-show_streams",
-                "-select_streams",
-                "v:0",
-                filepath,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                **safe_popen_kwargs(),
-            )
-            stdout, _ = await proc.communicate()
-            if proc.returncode != 0:
-                return None, None
-
-            info = json.loads(stdout)
-            for stream in info.get("streams", []):
-                w = stream.get("width")
-                h = stream.get("height")
-                if w and h:
-                    return int(w), int(h)
-            return None, None
-        except Exception as e:
-            logger.warning(f"ffprobe failed for {filepath}: {e}")
-            return None, None
-
-    async def _probe_duration(self, filepath: str) -> Optional[float]:
-        """Probe video file for duration in seconds."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "ffprobe",
-                "-v",
-                "quiet",
-                "-print_format",
-                "json",
-                "-show_format",
-                filepath,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                **safe_popen_kwargs(),
-            )
-            stdout, _ = await proc.communicate()
-            if proc.returncode != 0:
-                return None
-            info = json.loads(stdout)
-            dur = info.get("format", {}).get("duration")
-            return float(dur) if dur else None
-        except Exception as e:
-            logger.warning(f"ffprobe duration failed for {filepath}: {e}")
-            return None
-
-    async def _probe_codecs(self, filepath: str) -> tuple[Optional[str], Optional[str]]:
-        """Probe video and audio codec names. Returns (video_codec, audio_codec)."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "ffprobe",
-                "-v",
-                "quiet",
-                "-print_format",
-                "json",
-                "-show_streams",
-                filepath,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                **safe_popen_kwargs(),
-            )
-            stdout, _ = await proc.communicate()
-            if proc.returncode != 0:
-                return None, None
-            info = json.loads(stdout)
-            video_codec, audio_codec = None, None
-            for stream in info.get("streams", []):
-                ct = stream.get("codec_type")
-                if ct == "video" and not video_codec:
-                    video_codec = stream.get("codec_name")
-                elif ct == "audio" and not audio_codec:
-                    audio_codec = stream.get("codec_name")
-            return video_codec, audio_codec
-        except Exception as e:
-            logger.warning(f"ffprobe codec detection failed for {filepath}: {e}")
-            return None, None
-
-    async def _probe_bitrate(self, filepath: str) -> Optional[int]:
-        """Probe video file for overall bitrate (bps)."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "ffprobe",
-                "-v",
-                "quiet",
-                "-print_format",
-                "json",
-                "-show_format",
-                filepath,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                **safe_popen_kwargs(),
-            )
-            stdout, _ = await proc.communicate()
-            if proc.returncode != 0:
-                return None
-            info = json.loads(stdout)
-            br = info.get("format", {}).get("bit_rate")
-            return int(br) if br else None
-        except Exception as e:
-            logger.warning(f"ffprobe bitrate failed for {filepath}: {e}")
-            return None
-
-    # ------------------------------------------------------------------ #
     # Tier selection
     # ------------------------------------------------------------------ #
 
@@ -781,7 +563,7 @@ class TranscodeService:
         on_progress: Optional[Callable] = None,
     ) -> bool:
         """Transcode source video to a single HLS tier with progress tracking."""
-        encoder, hwaccel_args, preset = await self._detect_encoder()
+        encoder, hwaccel_args, preset = await self._probe.detect_encoder()
         success = await self._run_ffmpeg_tier(
             source,
             tier,
@@ -991,122 +773,3 @@ class TranscodeService:
             logger.warning(f"Passthrough execution error: {e}")
             shutil.rmtree(out_dir, ignore_errors=True)
             return False
-
-    # ------------------------------------------------------------------ #
-    # Master playlist
-    # ------------------------------------------------------------------ #
-
-    async def _publish_hls(
-        self,
-        hls_dir: Path,
-        base: Path,
-        resource_id: str,
-        version_id: str,
-    ) -> str:
-        """Make the freshly written HLS tree readable, return the ``hls_path``.
-
-        Filesystem mode: ffmpeg already wrote to its final home, so this only
-        computes the DOWNLOAD_PATH-relative path.
-
-        Object-store mode: ffmpeg still writes locally (it needs random-access
-        writes and an -hls_segment_filename pattern), then the tree is copied
-        up and ``hls_path`` becomes ``sb://library/hls/{rid}/{vid}/master.m3u8``.
-
-        **Upload order matters.** master.m3u8 goes up LAST, on its own, after
-        every segment and per-tier playlist has landed. The fast path marks the
-        version ``completed`` the moment phase 1 publishes, so a master that
-        became visible before its segments would hand the player a playlist
-        pointing at objects that do not exist yet. Uploading the master last
-        makes the whole publish atomic from a reader's point of view: either
-        the old master is there, or the new one plus everything it references.
-        """
-        master_rel = "master.m3u8"
-        if not settings.HLS_OBJECT_STORE:
-            return str((hls_dir / master_rel).relative_to(base))
-
-        store = library_store()
-
-        # Everything except the master, uploaded concurrently.
-        def _key(rel: str) -> str:
-            return hls_key(resource_id, version_id, rel)
-
-        master_local = hls_dir / master_rel
-        moved_master = None
-        if master_local.exists():
-            # Hold the master out of the batch by parking it outside the tree
-            # walked by put_dir, then upload it explicitly afterwards.
-            moved_master = hls_dir.parent / f".{hls_dir.name}.master.m3u8"
-            shutil.move(str(master_local), str(moved_master))
-        try:
-            await store.put_dir(str(hls_dir), _key)
-            if moved_master is not None:
-                await store.put_file(
-                    _key(master_rel), str(moved_master), "application/vnd.apple.mpegurl"
-                )
-        finally:
-            if moved_master is not None and moved_master.exists():
-                # Put it back so later phases (tier encode → master rewrite)
-                # still see a complete local tree.
-                shutil.move(str(moved_master), str(master_local))
-
-        return to_file_path(store.bucket, _key(master_rel))
-
-    async def _clear_published_hls(self, resource_id: str, version_id: str) -> None:
-        """Drop a version's previously published HLS objects.
-
-        The filesystem path uses ``shutil.rmtree``; the object store has no
-        equivalent, and stale segments from a longer previous encode would
-        otherwise linger forever (unreferenced by the new master, so harmless
-        to playback, but leaking space indefinitely).
-        """
-        if not settings.HLS_OBJECT_STORE:
-            return
-        try:
-            prefix = hls_key_prefix(resource_id, version_id)
-            removed = await library_store().remove_prefix(prefix)
-            if removed:
-                logger.info(
-                    f"[Transcode] cleared {removed} stale HLS objects: {prefix}"
-                )
-        except Exception as e:
-            # Never fail a transcode over cleanup — worst case is leaked objects.
-            logger.warning(f"[Transcode] HLS prefix cleanup failed (non-fatal): {e}")
-
-    def _write_master_playlist(
-        self,
-        hls_dir: Path,
-        tiers: List[TranscodeTier],
-        *,
-        passthrough: bool = False,
-        source_width: Optional[int] = None,
-        source_height: Optional[int] = None,
-        source_bitrate: Optional[int] = None,
-    ) -> None:
-        """Write the multi-bitrate master.m3u8 playlist."""
-        lines = ["#EXTM3U"]
-        for tier in tiers:
-            bandwidth = tier.bitrate * 1000  # kbps → bps
-            lines.append(
-                f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},"
-                f"RESOLUTION={tier.width}x{tier.height},"
-                f'NAME="{tier.name}"'
-            )
-            lines.append(f"{tier.name}/stream.m3u8")
-
-        # Passthrough tier — original quality, highest bandwidth
-        if passthrough and source_width and source_height:
-            # Use probed bitrate or a generous fallback
-            bw = source_bitrate if source_bitrate else 20_000_000
-            lines.append(
-                f"#EXT-X-STREAM-INF:BANDWIDTH={bw},"
-                f"RESOLUTION={source_width}x{source_height},"
-                f'NAME="Original"'
-            )
-            lines.append("source/stream.m3u8")
-
-        master = hls_dir / "master.m3u8"
-        # Atomic write: write to temp file then rename to prevent race with active readers
-        tmp = master.with_suffix(".m3u8.tmp")
-        tmp.write_text("\n".join(lines) + "\n")
-        tmp.rename(master)
-        logger.info(f"Master playlist written: {master}")
