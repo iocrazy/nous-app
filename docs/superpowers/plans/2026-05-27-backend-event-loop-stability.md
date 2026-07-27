@@ -923,7 +923,7 @@ Also add `8090` to the container's `expose:` (or `ports:` if accessed from host)
       - "8090"   # healthz-lite (used by docker healthcheck only)
 ```
 
-> **Note:** Watchtower does NOT apply docker-compose changes (per CLAUDE.md). After this PR merges, SSH to the NAS and run `cd /volume1/docker/mediahub/docker && sudo docker-compose up -d nous` to apply.
+> **Note:** Watchtower does NOT apply docker-compose changes (per CLAUDE.md). After this PR merges, SSH to the NAS and run `cd /volume1/docker/mediahub/docker && sudo docker-compose up -d mediahub` to apply.
 
 - [ ] **Step 8 — Commit.**
 
@@ -944,7 +944,7 @@ answers; if the process is dead, it doesn't. A blocked main event
 loop is now diagnosed separately (via app-level metrics) instead of
 being conflated with 'whole process dead' by docker.
 
-⚠️ docker-compose change requires manual \`docker-compose up -d nous\`
+⚠️ docker-compose change requires manual \`docker-compose up -d mediahub\`
 on the NAS — Watchtower does not apply compose changes."
 ```
 
@@ -957,7 +957,7 @@ on the NAS — Watchtower does not apply compose changes."
 ```bash
 git push
 gh pr create --base master --title "feat(infra): independent healthz on dedicated port (P2)" \
-  --body "Decouples docker's liveness probe from the main FastAPI event loop. Requires a manual \`docker-compose up -d nous\` on the NAS after merge — see PR body for steps."
+  --body "Decouples docker's liveness probe from the main FastAPI event loop. Requires a manual \`docker-compose up -d mediahub\` on the NAS after merge — see PR body for steps."
 gh pr checks --watch
 gh pr merge --squash --auto
 ```
@@ -968,7 +968,7 @@ gh pr merge --squash --auto
 sleep 180   # let CI build + push image
 ssh -o BatchMode=yes -i ~/.ssh/nas_deploy_key -p 1122 heygo@192.168.50.9 '
   cd /volume1/docker/mediahub/docker && \
-  sudo /usr/local/bin/docker-compose up -d nous
+  sudo /usr/local/bin/docker-compose up -d mediahub
 '
 ```
 
