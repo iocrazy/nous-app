@@ -72,3 +72,19 @@ url_allowlist:
   - instagram.com
   - twitter.com
   - x.com
+
+# HLS 产物（播放列表 + 分片）写对象存储而非本地文件系统。
+#
+# 与「源视频存在哪」是**独立**的两件事:文件系统上的源仍可把 HLS 发到
+# 对象存储,反之亦然。
+#
+# 2026-07-27 实测（分片平均 ~2MB,方法学见 scripts/bench-storage.py）:
+#   CIFS 串行 68.4 ms/分片   6 并发 37.6 ms
+#   S3   串行  8.1 ms/分片   6 并发  1.5 ms   ← 快 25×
+# 一个 730 分片的视频,一次完整播放的 IO 从 27.4s 降到 1.1s。
+# 原因是 CIFS 在这个尺寸被每文件 SMB 往返开销主导（单连接瓶颈）,
+# 而 HTTP 对中等对象的每请求成本低且随并发线性扩展。
+#
+# 服务端双轨:resources_versions_router 用 resolve_media_source 分发,
+# sb:// 走 StreamingResponse、文件系统走 FileResponse,新旧产物都能播。
+HLS_OBJECT_STORE: true
