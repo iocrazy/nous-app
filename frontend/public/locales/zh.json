@@ -1807,6 +1807,26 @@
         "builtinTitle": "内置行为",
         "builtinBody": "到达时会派生镜像任务，完成时会关闭它。不会自动启动任何 Agent。"
       },
+      "formBuilder": {
+        "intro": "该节点交付表单收集的自定义字段。",
+        "empty": "还没有字段 — 添加一个开始构建表单。",
+        "addField": "添加字段",
+        "maxFieldsHint": "单个节点的表单最多可容纳 20 个字段。",
+        "labelPlaceholder": "字段标签",
+        "optionsPlaceholder": "选项一, 选项二, 选项三",
+        "required": "必填",
+        "moveUp": "上移",
+        "moveDown": "下移",
+        "removeField": "删除字段",
+        "types": {
+          "text": "文本",
+          "textarea": "多行文本",
+          "number": "数字",
+          "select": "下拉选择",
+          "checkbox": "复选框",
+          "date": "日期"
+        }
+      },
       "stageBoard": {
         "tasks": "任务",
         "deliverables": "交付物",

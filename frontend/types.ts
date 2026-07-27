@@ -1051,6 +1051,32 @@ export interface WorkflowNodeEvents {
   on_complete_workflow?: string | null;
 }
 
+/** Six-type whitelist for a node's deliverable form field (mig 390, M3 PR-I
+ * §2). Mirrors backend `FormFieldType` (schemas/workflow.py). */
+export type FormFieldType = 'text' | 'textarea' | 'number' | 'select' | 'checkbox' | 'date';
+
+export const FORM_FIELD_TYPES: FormFieldType[] = [
+  'text',
+  'textarea',
+  'number',
+  'select',
+  'checkbox',
+  'date',
+];
+
+/** One field definition in a node's deliverable form (`form_schema`, mig 390).
+ * `key` is server-generated (slugified from `label`, deduped within the node)
+ * — the editor never invents or edits it; whatever rides in on a template
+ * PATCH is harmlessly overwritten server-side. `options` only applies when
+ * `type === 'select'` and must be non-empty there (backend 422s otherwise). */
+export interface FormFieldDef {
+  key: string;
+  label: string;
+  type: FormFieldType;
+  required: boolean;
+  options?: string[];
+}
+
 /** One node in a team workflow template (`workflow_template_nodes`). */
 export interface WorkflowTemplateNode {
   id: string;
@@ -1069,6 +1095,11 @@ export interface WorkflowTemplateNode {
   members: WorkflowMemberRef[];
   completion_policy: WorkflowCompletionPolicy;
   events: WorkflowNodeEvents;
+  /** Deliverable form fields (mig 390, M3 PR-I) — template-layer config,
+   * copied verbatim into `project_stage_nodes.form_schema` at instantiation
+   * (spec §2; not open for in-place instance tweaks, same idiom as
+   * `completion_policy`/`events`). */
+  form_schema: FormFieldDef[];
 }
 
 /** A template node as sent on PATCH (full node-list replacement). */
@@ -1087,6 +1118,7 @@ export interface WorkflowTemplateNodeInput {
   members?: WorkflowMemberRef[];
   completion_policy?: WorkflowCompletionPolicy;
   events?: WorkflowNodeEvents;
+  form_schema?: FormFieldDef[];
 }
 
 /** A team workflow template list row (`node_count` on the collection). */

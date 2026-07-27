@@ -1807,6 +1807,26 @@
         "builtinTitle": "Built-in behavior",
         "builtinBody": "Arrival derives the mirror issue; completion closes it. No agent starts automatically."
       },
+      "formBuilder": {
+        "intro": "Custom fields the deliverable form collects for this node.",
+        "empty": "No fields yet — add one to start building the form.",
+        "addField": "Add field",
+        "maxFieldsHint": "A node's form can hold at most 20 fields.",
+        "labelPlaceholder": "Field label",
+        "optionsPlaceholder": "Option one, option two, option three",
+        "required": "Required",
+        "moveUp": "Move up",
+        "moveDown": "Move down",
+        "removeField": "Remove field",
+        "types": {
+          "text": "Text",
+          "textarea": "Textarea",
+          "number": "Number",
+          "select": "Select",
+          "checkbox": "Checkbox",
+          "date": "Date"
+        }
+      },
       "stageBoard": {
         "tasks": "Tasks",
         "deliverables": "Deliverables",
