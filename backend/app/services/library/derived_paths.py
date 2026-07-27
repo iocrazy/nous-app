@@ -1,11 +1,21 @@
-"""派生产物（缩略图 / sprite / 未来的 HLS）落位的唯一入口。
+"""缩略图 / sprite 写侧落位的收拢点（尚非全量唯一入口，见下）。
 
 当前规则:派生产物一律留在文件系统,只有原件进对象存储
 （gallery PR #1491 定下的 "storage unification: only originals go to
 object storage"）。实测支持这个选择 —— 小文件读取 CIFS 0.6 ms/个
 优于 S3 1.4 ms/个。
 
-spec #2 若要把派生产物改写 S3,只改这个类即可,调用方无需变动。
+**当前只收拢了缩略图 / sprite 的写侧。** 同一条 fs-vs-对象存储分支规则
+在以下三处仍是内联拷贝,spec #2 把派生产物改写 S3 时需一并收编,否则
+只改本类会在这三处各断一次:
+
+- ``transcode_service.py:168-171`` —— HLS 目录落位
+  （base/"derived"/"hls"/{resource_id}/{version_id} vs source.parent/"hls"）
+- ``resources_crud_router.py:817-825`` —— sprite 的**读**路径,硬编码
+  ``DOWNLOAD_PATH/derived/thumbnails/{resource_id}/preview_sprite.jpg``
+- ``resources_crud_router.py:918-926`` —— cover 上传的**写**路径,
+  ``derived/covers/{resource_id}/cover.{ext}``（其自身 docstring 承认是
+  复制 thumbnail_service 的选择）
 """
 
 from __future__ import annotations
