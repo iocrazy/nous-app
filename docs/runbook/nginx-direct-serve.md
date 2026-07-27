@@ -1,4 +1,34 @@
-# nginx 静态直出(signed direct serve)— NAS 启用 Runbook
+# nginx 静态直出(signed direct serve)— Runbook
+
+> ⚠️ **2026-07-28 更新:NAS 老栈已退役,本文下半部分(NAS Runbook)仅存档。**
+> 当前生效的是 gpupc 栈,见下节。
+
+## gpupc 栈(2026-07-28 起,当前形态)
+
+- 拓扑:nas-A 反代 `cn.nous.ink:88` → `10.0.0.10:8080` = **`nous-gateway`**(nginx,
+  `deploy/gpu-server/nginx-gateway/default.conf.template`):`/f/` secure_link 直出
+  `/mnt/heytime/Sources/nous/media`(ro),其余转 `nous-backend`。backend 宿主口退到
+  `10.0.0.10:8890`(排障用)。公网 `api.nous.ink` 走 cloudflared→docker 网络,不经网关。
+- secret:`secrets/backend.env` 的 `NGINX_SECURE_LINK_SECRET`,backend(签名)与
+  gateway(验签)共用同一 env_file。
+- DB 开关(base_url 必须是新入口):
+
+  ```sql
+  UPDATE public.system_settings
+  SET value = '{"enabled": true, "base_url": "https://cn.nous.ink:88",
+                "ttl_seconds": 86400}'::json
+  WHERE key = 'nginx_direct_serve';
+  ```
+
+- 验证:坏签名 `curl 'https://cn.nous.ink:88/f/x?st=a&e=1'` → **403**(打到 FastAPI
+  会是 JSON 404,说明网关没接管);cover 端点 302 后 200 且 `Server: nginx`。
+- 事故存档(2026-07-27):品牌迁移只改了 env/config.yml,漏了这条 **DB 里的
+  base_url**——老域名入口拆除后,302 全部指向死地址,`ERR_EMPTY_RESPONSE` 刷屏。
+  DB 存的配置也要进迁移 checklist。
+
+---
+
+# 以下为 NAS 老栈存档(2026-07-06)
 
 > 背景:百万文件 P3(设计:`docs/superpowers/specs/2026-07-06-million-files-single-user-design.md`)。
 > 启用后 cover(后续 file)字节由既有 HLS nginx 容器(:8081)sendfile 直发,
