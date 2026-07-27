@@ -1,5 +1,6 @@
 import { supabase } from '../supabaseClient';
 import { fetchAllRows } from '../utils/pgAllRows';
+import { hasPromptData } from '../utils/promptTriggerTags';
 import { Folder, Resource, ResourceItem, ResourceVersion, SmartCollection } from '../types';
 import {
   applyKeysetCursor,
@@ -219,8 +220,6 @@ export async function fetchPromptAssets(opts: {
   tagId?: string;
   limit?: number;
 } = {}): Promise<PromptAsset[]> {
-  const { hasPromptData } = await import('../utils/promptTriggerTags');
-
   const cols =
     'id, filename, gen_prompt, gen_prompt_zh, gen_prompt_negative, gen_prompt_negative_zh, updated_at';
   // Widen to `string` before handing it to .select() — postgrest-js infers a
