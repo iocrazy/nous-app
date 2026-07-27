@@ -294,6 +294,33 @@ class ObjectStore:
         to buffer in memory (generated video). Larger cap: 4× the standard one
         (a multi-hundred-MB video legitimately takes longer than 15s)."""
         import asyncio
+
+        from app.core.config import settings as _s
+
+        if _s.FEATURE_RUST_STREAM_IO and upsert:
+            # 与 materialize 同构:Python 只算 URL + headers,字节交给 Rust。
+            #
+            # 仅在 upsert=True 时启用。实测(2026-07-27,针对本仓库使用的
+            # storage-api 版本):裸 PUT 到 object 端点无论带不带 x-upsert
+            # 头都会无条件覆盖已存在对象 —— 这版本的 PUT 没有"仅当不存在
+            # 才写入"的原生语义,与现行 SDK 路径（POST,upsert=False 时故意
+            # 不带 x-upsert 头,由 storage-api 在对象已存在时拒绝)不同。
+            # 若也让 upsert=False 走 Rust,会静默破坏这个方法签名承诺的
+            # "拒绝覆盖"契约。目前代码库里没有调用方传 upsert=False,但
+            # 签名允许,不能因为换字节路径就悄悄改变外部可见行为 —— 因此
+            # upsert=False 落到下面原有的 SDK 路径。
+            import nous_core
+
+            proxy = await self._proxy()
+            url, headers = self._object_target(proxy, key)
+            headers = dict(headers)
+            headers["content-type"] = mime or "application/octet-stream"
+            headers["x-upsert"] = "true"
+            await asyncio.to_thread(
+                nous_core.put_file, file_path, url, list(headers.items())
+            )
+            return
+
         from pathlib import Path
 
         proxy = await self._proxy()
@@ -554,6 +581,7 @@ async def materialize(file_path: str) -> AsyncIterator["Path"]:
     HLS transcode, thumbnails, promote) uses this instead of touching
     DOWNLOAD_PATH directly, so it works for both shapes.
     """
+    import asyncio
     import os
     import tempfile
     from pathlib import Path
@@ -635,11 +663,22 @@ async def materialize(file_path: str) -> AsyncIterator["Path"]:
     fd, tmp = tempfile.mkstemp(suffix=Path(loc.key).suffix)
     os.close(fd)
     try:
-        import aiofiles
+        if settings.FEATURE_RUST_STREAM_IO:
+            # 字节路径交给 Rust:Python 只算 URL + headers（鉴权决策）。
+            # 失败时 nous_core 自己删半成品,不依赖这里的 finally。
+            import nous_core
 
-        async with aiofiles.open(tmp, "wb") as out:
-            async for chunk in store.get_stream(loc.key):
-                await out.write(chunk)
+            proxy = await store._proxy()
+            url, headers = store._object_target(proxy, loc.key)
+            await asyncio.to_thread(
+                nous_core.fetch_to_file, url, list(headers.items()), tmp
+            )
+        else:
+            import aiofiles
+
+            async with aiofiles.open(tmp, "wb") as out:
+                async for chunk in store.get_stream(loc.key):
+                    await out.write(chunk)
         yield Path(tmp)
     finally:
         Path(tmp).unlink(missing_ok=True)

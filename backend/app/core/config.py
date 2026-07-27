@@ -176,6 +176,14 @@ class Settings(BaseSettings):
         "existing deployments keep the on-disk layout until the backfill has "
         "run — playback reads the row's own hls_path, so both shapes coexist.",
     )
+    FEATURE_RUST_STREAM_IO: bool = Field(
+        default=False,
+        description=(
+            "把 materialize / put_file 的字节搬运交给 nous_core（Rust）。"
+            "关掉即回退纯 Python 路径。这是实现替换而非业务能力,故用 env "
+            "flag 而不进 Module Control Center。"
+        ),
+    )
 
     # ============================================
     # 下载设置
