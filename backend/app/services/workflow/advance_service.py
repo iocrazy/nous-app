@@ -237,15 +237,40 @@ def _form_incomplete(node: Dict[str, Any]) -> List[str]:
 
 
 def _unmet_dependency_names(
-    target_group: List[Dict[str, Any]], node_by_id: Dict[str, Dict[str, Any]]
+    target_group: List[Dict[str, Any]],
+    node_by_id: Dict[str, Dict[str, Any]],
+    exempt_ids: Optional[set] = None,
 ) -> List[str]:
     """Names of unmet-dependency nodes for ``target_group`` (mig 391, M3 PR-J).
 
     A dependency is satisfied when the depended-on node's ``status`` is
-    ``done`` OR it is ``skipped`` (skipped counts as satisfied per spec §3).
-    A ``depends_on`` id absent from ``node_by_id`` (the depended-on node was
-    deleted — FK CASCADE already dropped the edge row, but defend anyway)
-    is treated as already resolved, never as unmet.
+    ``done`` OR it is ``skipped`` (skipped counts as satisfied per spec §3),
+    OR its id is a member of ``exempt_ids`` (see below). A ``depends_on`` id
+    absent from ``node_by_id`` (the depended-on node was deleted — FK CASCADE
+    already dropped the edge row, but defend anyway) is treated as already
+    resolved, never as unmet.
+
+    ``exempt_ids`` (M3 final review, two exemptions folded into one set by
+    the call site so this predicate only has to check membership):
+      - CO-ARRIVAL: a dependency whose target is itself a member of
+        ``target_group`` (parallel siblings arriving together — e.g. C
+        depends_on B, both in the group that would become next). Without
+        this, B can never be "done" before the group arrives (they arrive
+        together) and the group can never arrive until B is done — a
+        permanent deadlock. Same-group deps are "start together", not
+        "finish before".
+      - CLOSING CURRENT GROUP: a dependency whose target is a member of the
+        CURRENT group that this very advance is closing. The most natural
+        template config is "next group depends on current group", but during
+        preview the current group's nodes are still in_progress (their
+        mirror issues close during execute, not before) — without this
+        exemption that obvious config would DEPS_PENDING forever. Ruling:
+        gates 1-3 already own the current group's completion bar, so a dep
+        edge naming the group this advance is already declaring done is
+        redundant, not a real blocker.
+    Callers build ``exempt_ids`` from ``next_group`` (co-arrival half) union
+    the closing current group (closing half); this function itself has no
+    opinion on which ids belong there.
 
     Every node in ``target_group`` is by construction non-skipped
     (``_build_groups`` drops skipped nodes before grouping), so no
@@ -256,10 +281,14 @@ def _unmet_dependency_names(
     ``sort_order`` (stable, matches the Stage Board's node ordering) —
     never dict/set iteration order.
     """
+    exempt = exempt_ids or set()
     unmet_by_id: Dict[str, Dict[str, Any]] = {}
     for node in target_group:
         for dep_id in node.get("depends_on") or []:
-            dep_node = node_by_id.get(str(dep_id))
+            dep_id_str = str(dep_id)
+            if dep_id_str in exempt:
+                continue
+            dep_node = node_by_id.get(dep_id_str)
             if dep_node is None:
                 continue
             if dep_node.get("status") == "done" or dep_node.get("skipped"):
@@ -412,7 +441,17 @@ async def _preview_forward(
     # target group is known to exist. Every non-skipped node in ``next_group``
     # must have every ``depends_on`` node done or skipped; back (retreat)
     # never runs this check (spec §3).
-    waiting_on = _unmet_dependency_names(next_group, node_by_id)
+    #
+    # ``exempt_ids`` (M3 final review #1 + #2): next_group's own ids (a dep on
+    # a parallel sibling arriving in the SAME group is co-arrival, not a real
+    # ordering — see ``_unmet_dependency_names`` docstring) union ``active``'s
+    # ids (the current group this advance is closing — its nodes are still
+    # in_progress at preview time, so a dep naming it would otherwise
+    # DEPS_PENDING forever on the most natural "next depends on current"
+    # config). ``waiting_on`` therefore only ever lists genuinely-earlier,
+    # unrelated, unfinished nodes.
+    exempt_ids = {str(n["id"]) for n in next_group} | {str(n["id"]) for n in active}
+    waiting_on = _unmet_dependency_names(next_group, node_by_id, exempt_ids)
     if waiting_on:
         return AdvancePreview(
             direction="forward",

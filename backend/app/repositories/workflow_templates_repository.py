@@ -128,6 +128,26 @@ def _slugify_field_keys(fields: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def _dedupe_depends_on(nodes: List[Dict[str, Any]]) -> None:
+    """De-duplicate each node's ``depends_on`` list IN PLACE, preserving
+    first-seen order (M3 final review #3).
+
+    A payload like ``depends_on: ["0", "0"]`` would otherwise survive
+    ``_validate_deps_backward`` (duplicates don't violate backward-only) and
+    reach the second insert pass in ``update_template``, which would add two
+    ``WorkflowTemplateNodeDeps`` rows sharing the same composite PK
+    ``(node_id, depends_on_node_id)`` — an IntegrityError the router surfaces
+    as a bare 500, not the 422 ``DepsBackwardOnly`` callers expect. Mutating
+    ``nodes`` here (before validation) means both the validation pass and the
+    later insert pass see the same deduped list, so a duplicate collapses to
+    a single edge instead of erroring.
+    """
+    for node in nodes:
+        deps = node.get("depends_on")
+        if deps:
+            node["depends_on"] = list(dict.fromkeys(str(d) for d in deps))
+
+
 def _validate_deps_backward(nodes: List[Dict[str, Any]]) -> None:
     """Enforce backward-only dependency edges within one full-replace payload
     (mig 391, M3 PR-J).
@@ -142,7 +162,8 @@ def _validate_deps_backward(nodes: List[Dict[str, Any]]) -> None:
     own position) always fails this because a node's own sort_order is never
     smaller than itself — same violation, same code (spec §3: "自依赖同罪").
     Pure/no DB access — runs before any write so a bad payload never touches
-    the table.
+    the table. Callers should run ``_dedupe_depends_on`` first so a
+    duplicate-index payload never reaches the insert pass either.
     """
     n = len(nodes)
     for i, node in enumerate(nodes):
@@ -341,9 +362,14 @@ class WorkflowTemplatesRepository:
                 tpl.is_default = is_default
 
             if nodes is not None:
-                # Dependency edges (mig 391, M3 PR-J): validate BEFORE touching
-                # any row — a bad payload must never partially clobber the
-                # existing node list. Pure/no DB access (see docstring).
+                # Dependency edges (mig 391, M3 PR-J): dedupe THEN validate,
+                # both BEFORE touching any row — a bad payload must never
+                # partially clobber the existing node list. Dedupe first (M3
+                # final review #3) so a duplicate-index payload (e.g.
+                # ["0","0"]) collapses to one edge instead of reaching the
+                # insert pass and hitting the composite-PK IntegrityError.
+                # Both helpers are pure/no DB access (see their docstrings).
+                _dedupe_depends_on(nodes)
                 _validate_deps_backward(nodes)
 
                 await session.execute(

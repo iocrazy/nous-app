@@ -129,6 +129,47 @@ def test_dependency_missing_from_node_map_treated_as_satisfied():
     assert _unmet_dependency_names([target_node], node_by_id) == []
 
 
+# ── exempt_ids: co-arrival + closing-current-group exemptions (M3 final
+#    review #1/#2) ────────────────────────────────────────────────────────
+
+
+def test_same_group_dependency_is_satisfied_when_target_group_is_exempt():
+    """C depends_on B, both siblings in the SAME target group — B can never
+    be 'done' before the group arrives (they arrive together), so this is
+    satisfied ONLY when the call site passes the group's own ids as
+    exempt_ids (the co-arrival half)."""
+    node_b = _node_row("1", sort_order=1, status="pending")
+    node_c = _node_row("2", sort_order=1, depends_on=["1"], status="pending")
+    target = [node_b, node_c]
+    node_by_id = {"1": node_b, "2": node_c}
+    exempt_ids = {"1", "2"}
+    assert _unmet_dependency_names(target, node_by_id, exempt_ids) == []
+
+
+def test_closing_current_group_dependency_is_satisfied_when_exempt():
+    """A dep target that is a member of the CLOSING current group (still
+    in_progress, not yet 'done' at preview time) is satisfied ONLY when the
+    call site includes that group's ids in exempt_ids (the closing-group
+    half)."""
+    closing_node = _node_row("1", sort_order=1, status="in_progress")
+    target_node = _node_row("2", sort_order=2, depends_on=["1"])
+    node_by_id = {"1": closing_node, "2": target_node}
+    exempt_ids = {"1", "2"}
+    assert _unmet_dependency_names([target_node], node_by_id, exempt_ids) == []
+
+
+def test_same_group_dependency_without_exempt_ids_is_still_unmet():
+    """The pure predicate does NOT auto-exempt same-group deps on its own —
+    the exemption only applies when the call site explicitly builds
+    exempt_ids from the relevant groups. Documents that the co-arrival/
+    closing-group rulings live at the call site, not as an implicit
+    assumption baked into this function."""
+    node_b = _node_row("1", sort_order=1, status="pending")
+    node_c = _node_row("2", sort_order=1, depends_on=["1"], status="pending")
+    node_by_id = {"1": node_b, "2": node_c}
+    assert _unmet_dependency_names([node_b, node_c], node_by_id) == ["Node 1"]
+
+
 # ── preview/execute integration — fake-repo pattern (mirrors
 #    test_form_incomplete_predicate.py, trimmed to what the deps gate needs) ──
 
@@ -321,6 +362,88 @@ async def test_back_direction_is_never_gated_by_dependencies(monkeypatch):
 
     assert preview.will_advance is True
     assert preview.creating[0].node_id == "1"
+
+
+@pytest.mark.asyncio
+async def test_preview_advances_when_next_group_dep_is_same_group_sibling(monkeypatch):
+    """Regression for the Gate 5 same-group deadlock (M3 final review #1): C
+    depends_on B, both B and C are parallel siblings in the group that would
+    become next. Before the fix this deadlocked forever — B can't be 'done'
+    before the group arrives (they arrive together), and the group can't
+    arrive until B is done."""
+    n1 = _node_row("1", sort_order=1, status="in_progress")  # active/closing
+    n2 = _node_row("2", sort_order=2, parallel_group=1, status="pending")  # B
+    n3 = _node_row(
+        "3", sort_order=3, parallel_group=1, depends_on=["2"], status="pending"
+    )  # C depends on B, same parallel_group as B
+    nodes_repo = _FakeNodesRepo([n1, n2, n3])
+    projects_repo = _FakeProjectsRepo("1")
+    issue_repo = _FakeIssueRepo()
+    _install(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        issue_repo=issue_repo,
+    )
+
+    preview = await advance_service.compute_advance_preview("100", "user-1", "forward")
+
+    assert preview.will_advance is True
+    assert preview.waiting_on == []
+
+
+@pytest.mark.asyncio
+async def test_preview_advances_when_next_group_depends_on_closing_current_group(
+    monkeypatch,
+):
+    """Regression for the closing-current-group friction (M3 final review
+    #2, controller ruling): the next group declares a dependency on the
+    CURRENT (closing) group — the most natural template config — which must
+    not DEPS_PENDING forever just because the current group's mirror issues
+    haven't closed yet at preview time (they close during execute)."""
+    n1 = _node_row("1", sort_order=1, status="in_progress")  # active/closing
+    n2 = _node_row("2", sort_order=2, depends_on=["1"], status="pending")  # next
+    nodes_repo = _FakeNodesRepo([n1, n2])
+    projects_repo = _FakeProjectsRepo("1")
+    issue_repo = _FakeIssueRepo()
+    _install(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        issue_repo=issue_repo,
+    )
+
+    preview = await advance_service.compute_advance_preview("100", "user-1", "forward")
+
+    assert preview.will_advance is True
+    assert preview.waiting_on == []
+
+
+@pytest.mark.asyncio
+async def test_preview_still_blocks_on_earlier_unrelated_unfinished_dependency(
+    monkeypatch,
+):
+    """The exemption set is narrow (next_group ∪ closing current group
+    only) — a dependency on a genuinely earlier, unrelated, unfinished node
+    must still block, with the correct name in waiting_on."""
+    n0 = _node_row("0", sort_order=1, status="pending", name="Earlier Node")
+    n1 = _node_row("1", sort_order=2, status="in_progress")  # active/closing
+    n2 = _node_row("2", sort_order=3, depends_on=["0"], status="pending")  # next
+    nodes_repo = _FakeNodesRepo([n0, n1, n2])
+    projects_repo = _FakeProjectsRepo("1")
+    issue_repo = _FakeIssueRepo()
+    _install(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        issue_repo=issue_repo,
+    )
+
+    preview = await advance_service.compute_advance_preview("100", "user-1", "forward")
+
+    assert preview.will_advance is False
+    assert preview.blocked_reason == BLOCK_DEPS_PENDING
+    assert preview.waiting_on == ["Earlier Node"]
 
 
 @pytest.mark.asyncio

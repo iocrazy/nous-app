@@ -402,7 +402,10 @@ class AdvancePreview(BaseModel):
     creating: List[AdvanceNodeRef] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     # mig 390 (M3 PR-I): required form-field LABELS (never keys) missing from
-    # the target group when blocked_reason == BLOCK_FORM_INCOMPLETE.
+    # the ACTIVE (current) group when blocked_reason == BLOCK_FORM_INCOMPLETE
+    # — Gate 3 checks the group that's about to close, not the target group
+    # Gate 5 (deps) checks (fixed M3 final review #4: this comment previously
+    # said "target group", which is Gate 5's language, not Gate 3's).
     missing_fields: List[str] = Field(default_factory=list)
     # mig 391 (M3 PR-J): names of unmet-dependency nodes (deduped, sort_order
     # order) when blocked_reason == BLOCK_DEPS_PENDING.

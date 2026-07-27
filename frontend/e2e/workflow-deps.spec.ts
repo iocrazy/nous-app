@@ -256,6 +256,69 @@ for (const theme of ['dark', 'light'] as const) {
     expect(storyboardNode!.depends_on).toEqual(['0']);
   });
 
+  test(`${theme}: editor "Depends on" excludes same-parallel-group siblings from candidates (M3 final review defense-in-depth)`, async ({ page }) => {
+    // Regression for the depCandidates half of the Gate 5 same-group-deadlock
+    // fix: Storyboard and Shotlist are parallel siblings (same
+    // parallel_group) — Storyboard must never be offered as a dep candidate
+    // for Shotlist even though it's positioned earlier in the draft array.
+    // The backend now tolerates a same-group edge server-side (co-arrival
+    // exemption), but the editor should still steer authors away from it —
+    // offering it here is exactly what produced the deadlocking config.
+    await setupTemplateEditorStubs(page);
+    await useEnglishLocale(page);
+    await forceTheme(page, theme);
+
+    const PARALLEL_TEMPLATE_DETAIL = {
+      ...TEMPLATE_DETAIL,
+      nodes: [
+        tplNode('tn-1', 'Script', 0),
+        tplNode('tn-2', 'Storyboard', 1, { parallel_group: 1 }),
+        tplNode('tn-2b', 'Shotlist', 2, { parallel_group: 1 }),
+        tplNode('tn-3', 'Editing', 3),
+      ],
+    };
+    await page.route(
+      '**/api/v1/workflows/*',
+      json({ success: true, data: PARALLEL_TEMPLATE_DETAIL }),
+    );
+
+    await openTemplateEditor(page);
+
+    // Select Editing (last node, not part of the parallel group) — Script,
+    // Storyboard, AND Shotlist are all valid candidates for it (none of them
+    // share Editing's — null — parallel_group).
+    await page.getByTestId('workflow-node-capsule').nth(3).click();
+    const editingCandidates = page.getByTestId('workflow-dep-candidates');
+    await expect(editingCandidates).toBeVisible();
+    await expect(
+      editingCandidates.getByTestId('workflow-dep-candidate').filter({ hasText: 'Script' }),
+    ).toBeVisible();
+    await expect(
+      editingCandidates.getByTestId('workflow-dep-candidate').filter({ hasText: 'Storyboard' }),
+    ).toBeVisible();
+    await expect(
+      editingCandidates.getByTestId('workflow-dep-candidate').filter({ hasText: 'Shotlist' }),
+    ).toBeVisible();
+
+    // Select Shotlist (parallel_group 1) — Storyboard shares its
+    // parallel_group and must be EXCLUDED even though it's positioned
+    // earlier in the draft array; Script (no parallel_group) still appears.
+    await page.getByTestId('workflow-node-capsule').nth(2).click();
+    const shotlistCandidates = page.getByTestId('workflow-dep-candidates');
+    await expect(shotlistCandidates).toBeVisible();
+    await expect(
+      shotlistCandidates.getByTestId('workflow-dep-candidate').filter({ hasText: 'Script' }),
+    ).toBeVisible();
+    await expect(
+      shotlistCandidates.getByTestId('workflow-dep-candidate').filter({ hasText: 'Storyboard' }),
+    ).toHaveCount(0);
+
+    await page.screenshot({
+      path: `${SHOTS}/18-deps-editor-parallel-exclusion-${theme}.png`,
+      fullPage: true,
+    });
+  });
+
   test(`${theme}: WorkflowStrip locks the current node while its dependency is unmet`, async ({ page }) => {
     await setupWorkspaceStubs(page);
     await useEnglishLocale(page);

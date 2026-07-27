@@ -55,6 +55,7 @@ from app.repositories.workflow_templates_repository import (
 )
 from app.repositories.workflow_templates_repository import _node_row as _tpl_node_row
 from app.repositories.workflow_templates_repository import (
+    _dedupe_depends_on,
     _validate_deps_backward,
 )
 from app.schemas.workflow import (
@@ -193,6 +194,38 @@ def test_validate_deps_backward_no_deps_is_a_noop():
     _validate_deps_backward(nodes)  # must not raise
 
 
+# ── _dedupe_depends_on: collapses duplicate ids before validation/insert
+#    (M3 final review #3) ──────────────────────────────────────────────────
+
+
+def test_dedupe_depends_on_collapses_duplicates_preserving_order():
+    nodes = [_n(1), _n(2), _n(3, depends_on=["0", "1", "0", "1", "0"])]
+    _dedupe_depends_on(nodes)
+    assert nodes[2]["depends_on"] == ["0", "1"]
+
+
+def test_dedupe_depends_on_leaves_no_dup_list_untouched():
+    nodes = [_n(1), _n(2, depends_on=["0"])]
+    _dedupe_depends_on(nodes)
+    assert nodes[1]["depends_on"] == ["0"]
+
+
+def test_dedupe_depends_on_is_a_noop_on_empty_lists():
+    nodes = [_n(1), _n(2), _n(3)]
+    _dedupe_depends_on(nodes)
+    assert all(n["depends_on"] == [] for n in nodes)
+
+
+def test_validate_deps_backward_accepts_duplicate_index_after_dedupe():
+    """A duplicate-index payload (['0','0']) is legal backward-only content
+    once deduped — proves the two helpers compose the way the repo wires
+    them (dedupe THEN validate)."""
+    nodes = [_n(1), _n(2, depends_on=["0", "0"])]
+    _dedupe_depends_on(nodes)
+    _validate_deps_backward(nodes)  # must not raise
+    assert nodes[1]["depends_on"] == ["0"]
+
+
 # ── update_template: full-replace writes resolved edges ─────────────────────
 
 
@@ -276,6 +309,43 @@ async def test_update_template_writes_deps_resolved_to_fresh_ids(monkeypatch):
     storyboard_id = written_nodes[1].id
     assert written_deps[0].node_id == storyboard_id
     assert written_deps[0].depends_on_node_id == script_id
+
+
+@pytest.mark.asyncio
+async def test_update_template_dedupes_duplicate_dep_indices_into_one_edge(
+    monkeypatch,
+):
+    """A payload with a duplicate dep index (['0','0']) must collapse to a
+    SINGLE edge row, not two rows colliding on the composite PK
+    (node_id, depends_on_node_id) — the pre-fix behavior would have hit an
+    IntegrityError here (M3 final review #3)."""
+    session = _TemplateFakeSession(_fake_tpl())
+
+    import app.repositories.workflow_templates_repository as mod
+
+    monkeypatch.setattr(mod, "write_scope", _write_scope_with(session))
+
+    repo = WorkflowTemplatesRepository()
+
+    async def _fake_get_template(template_id, team_id):
+        return {"id": str(template_id), "sentinel": True}
+
+    monkeypatch.setattr(repo, "get_template", _fake_get_template)
+
+    nodes = [
+        {"name": "Script", "sort_order": 1, "members": [], "depends_on": []},
+        {
+            "name": "Storyboard",
+            "sort_order": 2,
+            "members": [],
+            "depends_on": ["0", "0"],  # duplicate payload index
+        },
+    ]
+    result = await repo.update_template("1", "2", nodes=nodes)
+
+    assert result == {"id": "1", "sentinel": True}
+    written_deps = [o for o in session.added if isinstance(o, WorkflowTemplateNodeDeps)]
+    assert len(written_deps) == 1
 
 
 @pytest.mark.asyncio
@@ -608,6 +678,28 @@ async def test_update_node_depends_on_legit_backward_writes_edge(monkeypatch):
     result = await repo.update_node("10", "50", depends_on=["30"])
 
     assert result == {"sentinel": True}  # proves get_node's return ships through
+    written = [o for o in session.added if isinstance(o, ProjectStageNodeDeps)]
+    assert len(written) == 1
+    assert written[0].node_id == 10
+    assert written[0].depends_on_node_id == 30
+
+
+@pytest.mark.asyncio
+async def test_update_node_depends_on_dedupes_duplicate_ids_into_one_edge(
+    monkeypatch,
+):
+    """A payload with a duplicate dep id (['30','30']) must collapse to a
+    SINGLE edge row — the pre-fix behavior would have hit an IntegrityError
+    on the composite PK (node_id, depends_on_node_id) (M3 final review #3)."""
+    node = _live_node(node_id=10, sort_order=5)
+    # Target has a SMALLER sort_order (2 < 5) -> legit; sibling lookup only
+    # needs to resolve the deduped id once.
+    session = _UpdateNodeFakeSession(node, sibling_rows=[(30, 2)])
+    repo = _install_update_node(monkeypatch, session)
+
+    result = await repo.update_node("10", "50", depends_on=["30", "30"])
+
+    assert result == {"sentinel": True}
     written = [o for o in session.added if isinstance(o, ProjectStageNodeDeps)]
     assert len(written) == 1
     assert written[0].node_id == 10

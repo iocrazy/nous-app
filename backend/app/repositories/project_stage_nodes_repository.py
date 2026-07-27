@@ -528,6 +528,10 @@ class ProjectStageNodesRepository:
         ``DepsBackwardOnly`` and the whole write rolls back (validated before
         the delete+insert, and the surrounding ``write_scope`` transaction
         would roll back the rest of this call's edits too either way).
+        Duplicate ids in the payload are deduped (order-preserving) before
+        validation/insert (M3 final review #3) — a repeated id is not a
+        backward-only violation, so without the dedupe it would reach the
+        insert loop and hit the composite-PK IntegrityError instead.
         """
         pid = int(str(project_id))
         nid = int(str(node_id))
@@ -554,12 +558,21 @@ class ProjectStageNodesRepository:
             # by the delete+insert pass further down.
             dep_ids: Optional[List[int]] = None
             if depends_on is not None:
-                dep_ids = []
+                # Dedupe first, preserving first-seen order (M3 final review
+                # #3): a payload like ``["30", "30"]`` would otherwise survive
+                # the backward-only check below (duplicates aren't a backward
+                # violation) and reach the insert loop further down, adding
+                # two ``ProjectStageNodeDeps`` rows sharing the same
+                # composite PK (node_id, depends_on_node_id) — an
+                # IntegrityError the router surfaces as a bare 500 instead of
+                # the 422 ``DepsBackwardOnly`` callers expect.
+                raw_dep_ids: List[int] = []
                 for dep in depends_on:
                     try:
-                        dep_ids.append(int(str(dep)))
+                        raw_dep_ids.append(int(str(dep)))
                     except (TypeError, ValueError):
                         raise DepsBackwardOnly() from None
+                dep_ids = list(dict.fromkeys(raw_dep_ids))
                 sort_order_by_id: Dict[int, int] = {}
                 if dep_ids:
                     srows = (

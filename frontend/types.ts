@@ -1320,9 +1320,10 @@ export interface AdvancePreview {
   closing: AdvanceNodeRef[];
   creating: AdvanceNodeRef[];
   warnings: string[];
-  /** Required form-field LABELS (never keys) missing from the target group
-   * when `blocked_reason === 'FORM_INCOMPLETE'` (mig 390, M3 PR-I §2). Empty
-   * for every other ruling. */
+  /** Required form-field LABELS (never keys) missing from the ACTIVE
+   * (current) group when `blocked_reason === 'FORM_INCOMPLETE'` (mig 390,
+   * M3 PR-I §2) — Gate 3 checks the group that's about to close, not the
+   * target group Gate 5 (deps) checks. Empty for every other ruling. */
   missing_fields: string[];
   /** Names of target-group nodes whose dependencies aren't yet done/skipped
    * when `blocked_reason === 'DEPS_PENDING'` (mig 391, M3 PR-J). Server-ruled

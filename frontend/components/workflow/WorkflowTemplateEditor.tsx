@@ -655,10 +655,26 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
                 // position each node will hold on save, not its stale
                 // loaded sort_order, so this must read off `drafts` (live
                 // array order), not `node.sort_order`.
-                depCandidates={drafts.slice(
-                  0,
-                  drafts.findIndex((d) => d._key === selectedNode._key),
-                )}
+                //
+                // Same-parallel-group siblings are excluded even though
+                // they can be "earlier" in array order (M3 final review
+                // defense-in-depth for #1): a dependency between two nodes
+                // that arrive together in the same parallel group is a
+                // same-group co-arrival, not a real ordering constraint —
+                // offering it as a candidate here is what produces the
+                // "obvious" config that used to deadlock Gate 5 forever.
+                // The backend now tolerates it (co-arrival exemption in
+                // `_unmet_dependency_names`), but the editor should still
+                // steer authors away from a meaningless edge; the
+                // serialize-time drop in `toPayload` (self/forward only)
+                // stays as a backstop, it doesn't cover this case.
+                depCandidates={drafts
+                  .slice(0, drafts.findIndex((d) => d._key === selectedNode._key))
+                  .filter(
+                    (d) =>
+                      selectedNode.parallel_group == null ||
+                      d.parallel_group !== selectedNode.parallel_group,
+                  )}
                 onToggleDep={(depKey, on) =>
                   patchNode(selectedNode._key, {
                     depends_on: on
