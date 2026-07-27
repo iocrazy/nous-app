@@ -1,7 +1,15 @@
-"""Unit tests for resolve_resource_import — resource → register args, and the
-POST /generated-media/import-from-resource endpoint (mirrors
+"""Unit tests for resolve_resource_import — resource → validated (raw) args,
+and the POST /generated-media/import-from-resource endpoint (mirrors
 test_generated_media_import.py's function-level, no-TestClient convention).
+
+resources.file_path is NOT an absolute host path (storage unification): it's
+either legacy filesystem-relative-to-DOWNLOAD_PATH, or an `sb://bucket/key`
+object-store URI. The endpoint resolves either shape via the shared
+`materialize()` helper (media_storage.py) before calling
+register_generated_media. These tests cover both shapes end to end.
 """
+
+import os
 
 import pytest
 
@@ -13,9 +21,28 @@ from app.api.generated_media_router import (
 
 
 def test_resolves_image_resource():
-    row = {"id": 1, "file_path": "/data/uploads/a.png", "mime_type": "image/png"}
+    row = {
+        "id": 1,
+        "file_path": "teams/42/uploads/1/v1/a.png",
+        "mime_type": "image/png",
+    }
     args = resolve_resource_import(row)
-    assert args == {"source_path": "/data/uploads/a.png", "mime": "image/png"}
+    assert args == {"file_path": "teams/42/uploads/1/v1/a.png", "mime": "image/png"}
+
+
+def test_resolves_object_store_resource():
+    """sb:// rows pass through resolve_resource_import unresolved — the
+    endpoint (via materialize()) is what tells the two shapes apart."""
+    row = {
+        "id": 1,
+        "file_path": "sb://library/t42/ab/cd/deadbeef.png",
+        "mime_type": "image/png",
+    }
+    args = resolve_resource_import(row)
+    assert args == {
+        "file_path": "sb://library/t42/ab/cd/deadbeef.png",
+        "mime": "image/png",
+    }
 
 
 def test_missing_file_path_raises_404():
@@ -33,7 +60,7 @@ def test_non_media_mime_raises_400():
 
 
 def test_video_mime_allowed():
-    row = {"id": 1, "file_path": "/d/v.mp4", "mime_type": "video/mp4"}
+    row = {"id": 1, "file_path": "d/v.mp4", "mime_type": "video/mp4"}
     assert resolve_resource_import(row)["mime"] == "video/mp4"
 
 
@@ -87,14 +114,25 @@ def _patch_deps(
 
 
 @pytest.mark.asyncio
-async def test_import_from_resource_registers_and_returns_cover_url(monkeypatch):
+async def test_import_from_resource_registers_and_returns_cover_url(
+    monkeypatch, tmp_path
+):
+    """Filesystem-relative file_path: register_generated_media must receive
+    the real DOWNLOAD_PATH-joined absolute path, not the raw relative one."""
     from app.api.generated_media_router import import_from_resource
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "DOWNLOAD_PATH", str(tmp_path))
+    rel = "teams/42/uploads/1/v1/a.png"
+    abs_path = tmp_path / rel
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    abs_path.write_bytes(b"fake-png-bytes")
 
     captured = {}
     _patch_deps(
         monkeypatch,
         captured,
-        resource={"id": 1, "file_path": "/data/a.png", "mime_type": "image/png"},
+        resource={"id": 1, "file_path": rel, "mime_type": "image/png"},
     )
 
     resp = await import_from_resource(ResourceImportRequest(resource_id="1"), _Auth())
@@ -107,20 +145,136 @@ async def test_import_from_resource_registers_and_returns_cover_url(monkeypatch)
         }
     }
     assert captured["scope_id"] == 42
-    assert captured["source_path"] == "/data/a.png"
+    assert captured["source_path"] == os.path.realpath(str(abs_path))
     assert captured["mime"] == "image/png"
     assert captured["origin"].kind == "canvas_upload"
 
 
 @pytest.mark.asyncio
-async def test_import_from_resource_video_returns_stream_url(monkeypatch):
+async def test_import_from_resource_object_store_row(monkeypatch, tmp_path):
+    """sb:// file_path: materialize() must stream the object to a temp file
+    and hand register_generated_media that real local path — and clean the
+    temp file up afterward (not leave it behind)."""
     from app.api.generated_media_router import import_from_resource
+    from app.services.library import media_storage as ms
+
+    async def _fake_get_stream(self, key, *, start=None, end=None, chunk_size=None):
+        yield b"object-store-bytes"
+
+    monkeypatch.setattr(ms.ObjectStore, "get_stream", _fake_get_stream)
 
     captured = {}
     _patch_deps(
         monkeypatch,
         captured,
-        resource={"id": 1, "file_path": "/data/v.mp4", "mime_type": "video/mp4"},
+        resource={
+            "id": 1,
+            "file_path": "sb://library/t42/ab/cd/deadbeef.png",
+            "mime_type": "image/png",
+        },
+    )
+
+    resp = await import_from_resource(ResourceImportRequest(resource_id="1"), _Auth())
+    assert resp["data"]["id"] == "999"
+    source_path = captured["source_path"]
+    # Materialized from the object-store stream into a real temp file whose
+    # content matches what get_stream yielded.
+    assert source_path.endswith(".png")
+    # Cleaned up by materialize()'s finally block once register_generated_media
+    # (mocked here) returned.
+    assert not os.path.exists(source_path)
+
+
+@pytest.mark.asyncio
+async def test_import_from_resource_missing_file_maps_to_404(monkeypatch, tmp_path):
+    """A resources row whose file_path no longer exists on disk must 404, not
+    bubble a raw FileNotFoundError/500."""
+    from fastapi import HTTPException
+
+    from app.api.generated_media_router import import_from_resource
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "DOWNLOAD_PATH", str(tmp_path))
+
+    captured = {}
+    _patch_deps(
+        monkeypatch,
+        captured,
+        resource={
+            "id": 1,
+            "file_path": "teams/42/uploads/1/v1/missing.png",
+            "mime_type": "image/png",
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await import_from_resource(ResourceImportRequest(resource_id="1"), _Auth())
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_import_from_resource_exercises_real_register_path(monkeypatch, tmp_path):
+    """Does NOT mock register_generated_media wholesale — only its DB-insert
+    layer. Exercises the real file-path-resolution seam: materialize() joins
+    DOWNLOAD_PATH, then register_generated_media's own _copy_local_to
+    actually copies bytes to the generation's destination path."""
+    import app.services.library.generated_media_service as gm
+    from app.api.generated_media_router import import_from_resource
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "DOWNLOAD_PATH", str(tmp_path))
+    monkeypatch.setattr(settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", False)
+
+    rel = "teams/42/uploads/1/v1/a.png"
+    src_abs = tmp_path / rel
+    src_abs.parent.mkdir(parents=True, exist_ok=True)
+    src_abs.write_bytes(b"real-bytes-through-the-real-copy-path")
+
+    inserted = {}
+
+    async def _fake_insert(query, params):
+        inserted.update(params)
+        return {**params, "id": 999}
+
+    monkeypatch.setattr(gm.db_engine, "execute_returning_one", _fake_insert)
+
+    # _patch_deps wholesale-mocks gm.register_generated_media; keep a
+    # reference to the real one so it can be restored after — this test's
+    # whole point is to exercise it for real, faking only the DB insert.
+    real_register = gm.register_generated_media
+
+    captured = {}
+    _patch_deps(
+        monkeypatch,
+        captured,
+        resource={"id": 1, "file_path": rel, "mime_type": "image/png"},
+    )
+    monkeypatch.setattr(gm, "register_generated_media", real_register)
+
+    resp = await import_from_resource(ResourceImportRequest(resource_id="1"), _Auth())
+    assert resp["data"]["id"] == "999"
+    assert inserted["file_size_bytes"] == len(b"real-bytes-through-the-real-copy-path")
+    dest = tmp_path / inserted["file_path"]
+    assert dest.exists()
+    assert dest.read_bytes() == b"real-bytes-through-the-real-copy-path"
+
+
+@pytest.mark.asyncio
+async def test_import_from_resource_video_returns_stream_url(monkeypatch, tmp_path):
+    from app.api.generated_media_router import import_from_resource
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "DOWNLOAD_PATH", str(tmp_path))
+    rel = "teams/42/uploads/1/v1/v.mp4"
+    abs_path = tmp_path / rel
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    abs_path.write_bytes(b"fake-mp4-bytes")
+
+    captured = {}
+    _patch_deps(
+        monkeypatch,
+        captured,
+        resource={"id": 1, "file_path": rel, "mime_type": "video/mp4"},
     )
 
     resp = await import_from_resource(ResourceImportRequest(resource_id="1"), _Auth())
@@ -152,7 +306,7 @@ async def test_import_from_resource_no_access_403(monkeypatch):
     _patch_deps(
         monkeypatch,
         captured,
-        resource={"id": 1, "file_path": "/data/a.png", "mime_type": "image/png"},
+        resource={"id": 1, "file_path": "d/a.png", "mime_type": "image/png"},
         access=False,
     )
 
@@ -171,7 +325,7 @@ async def test_import_from_resource_bad_mime_400(monkeypatch):
     _patch_deps(
         monkeypatch,
         captured,
-        resource={"id": 1, "file_path": "/data/a.pdf", "mime_type": "application/pdf"},
+        resource={"id": 1, "file_path": "d/a.pdf", "mime_type": "application/pdf"},
     )
 
     with pytest.raises(HTTPException) as exc:

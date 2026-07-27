@@ -235,14 +235,24 @@ class ResourceImportError(Exception):
 
 
 def resolve_resource_import(resource: dict) -> dict:
-    """Map a resources row to register_generated_media source args."""
+    """Validate a resources row for import; return its RAW (unresolved) file_path.
+
+    Pure/sync (no I/O), so it stays testable without mocking. The returned
+    file_path is NOT an absolute host path — storage unification means it's
+    either a legacy filesystem-relative-to-DOWNLOAD_PATH path or an
+    `sb://bucket/key` object-store URI (see resources_service.py /
+    resources_crud_router.py "Storage unification" comments and
+    media_storage.resolve_media_source). The endpoint resolves it to real
+    bytes via `materialize()` — the same shared reader ffprobe/HLS/promote
+    already use for either shape.
+    """
     file_path = (resource.get("file_path") or "").strip()
     if not file_path:
         raise ResourceImportError(404, "Resource has no local file")
     mime = (resource.get("mime_type") or "").lower()
     if not (mime.startswith("image/") or mime.startswith("video/")):
         raise ResourceImportError(400, "only image/* or video/* resources")
-    return {"source_path": file_path, "mime": mime}
+    return {"file_path": file_path, "mime": mime}
 
 
 class ResourceImportRequest(BaseModel):
@@ -265,6 +275,7 @@ async def import_from_resource(payload: ResourceImportRequest, auth: AuthDep) ->
         media_kind_from_mime,
         register_generated_media,
     )
+    from app.services.library.media_storage import materialize
 
     resource = await ResourcesRepository().get_resource_by_id(payload.resource_id)
     if not resource:
@@ -275,13 +286,36 @@ async def import_from_resource(payload: ResourceImportRequest, auth: AuthDep) ->
         args = resolve_resource_import(resource)
     except ResourceImportError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
-    row = await register_generated_media(
-        user_id=str(auth.user_id),
-        scope_id=await _scope(auth),
-        source_path=args["source_path"],
-        mime=args["mime"],
-        origin=GenerationOrigin(kind="canvas_upload"),
-    )
+
+    # materialize() resolves both file_path shapes (filesystem-relative-to-
+    # DOWNLOAD_PATH or sb://) to a real local file, streaming object-store
+    # rows to a temp file that's cleaned up on exit. Entry/exit are driven
+    # manually rather than a plain `async with` so a resolution failure
+    # (missing file, bad sb:// key) maps to 404 without also catching
+    # unrelated errors register_generated_media might raise later (e.g. its
+    # own oversized-copy ValueError).
+    loc_cm = materialize(args["file_path"])
+    try:
+        local_path = await loc_cm.__aenter__()
+    except Exception as e:
+        raise HTTPException(status_code=404, detail="Resource file missing") from e
+    if not os.path.isfile(local_path):
+        # materialize()'s filesystem branch doesn't check existence itself
+        # (it only guards containment) — a row whose file was since deleted
+        # would otherwise surface as a raw FileNotFoundError from
+        # register_generated_media's copy step instead of a clean 404.
+        await loc_cm.__aexit__(None, None, None)
+        raise HTTPException(status_code=404, detail="Resource file missing")
+    try:
+        row = await register_generated_media(
+            user_id=str(auth.user_id),
+            scope_id=await _scope(auth),
+            source_path=str(local_path),
+            mime=args["mime"],
+            origin=GenerationOrigin(kind="canvas_upload"),
+        )
+    finally:
+        await loc_cm.__aexit__(None, None, None)
     return {
         "data": {
             "id": str(row["id"]),
