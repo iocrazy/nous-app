@@ -62,10 +62,13 @@ ALTER TABLE public.tags
 ```ts
 supabase.from('resources')
   .select('id, filename, thumbnail_path, cover_image_path, gen_prompt, gen_prompt_zh, gen_prompt_negative, gen_prompt_negative_zh, updated_at')
-  .or('gen_prompt.not.is.null,gen_prompt_zh.not.is.null')
+  .or('gen_prompt.not.is.null,gen_prompt_zh.not.is.null,gen_prompt_negative.not.is.null,gen_prompt_negative_zh.not.is.null')
   .ilike(...)   // 搜索
-  .limit(50)
+  .limit(50 + 超采余量)
 ```
+
+**过滤口径 = `hasPromptData` 四列语义**：gen_prompt / gen_prompt_zh / gen_prompt_negative / gen_prompt_negative_zh 任一 trim 后非空。实现分两层——Supabase 用 4 列 `.or(not.is.null)` 粗筛，客户端用 `hasPromptData` 精筛（PostgREST 不便表达 trim/空串组合）。负面-only 素材因此也进 Library；被清空成 `''` 的不再误列。
+（修订记录：2026-07-27 Phase 3 统一；原口径只查正向两列，导致负面-only 缺席、空串误列——见 P2 终审 M2。）
 
 按触发标签筛选复用现有 `resource_tags` 过滤路径（`fetchResourcesByTag` 同款 join）。scope 权限由 RLS 兜底。
 
