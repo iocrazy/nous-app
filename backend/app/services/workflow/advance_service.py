@@ -27,6 +27,7 @@ from loguru import logger
 from app.core.workflow_roles import WRITE_ROLES, resolve_effective_role
 from app.schemas.workflow import (
     BLOCK_DELIVERABLE_MISSING,
+    BLOCK_DEPS_PENDING,
     BLOCK_FORM_INCOMPLETE,
     BLOCK_NO_NEXT,
     BLOCK_NOT_MANAGER_OR_EDITOR,
@@ -235,6 +236,48 @@ def _form_incomplete(node: Dict[str, Any]) -> List[str]:
     return missing
 
 
+def _unmet_dependency_names(
+    target_group: List[Dict[str, Any]], node_by_id: Dict[str, Dict[str, Any]]
+) -> List[str]:
+    """Names of unmet-dependency nodes for ``target_group`` (mig 391, M3 PR-J).
+
+    A dependency is satisfied when the depended-on node's ``status`` is
+    ``done`` OR it is ``skipped`` (skipped counts as satisfied per spec §3).
+    A ``depends_on`` id absent from ``node_by_id`` (the depended-on node was
+    deleted — FK CASCADE already dropped the edge row, but defend anyway)
+    is treated as already resolved, never as unmet.
+
+    Every node in ``target_group`` is by construction non-skipped
+    (``_build_groups`` drops skipped nodes before grouping), so no
+    skipped-target-node exemption is needed here — the group itself already
+    excludes those.
+
+    Returned names are deduped and ordered by the unmet node's
+    ``sort_order`` (stable, matches the Stage Board's node ordering) —
+    never dict/set iteration order.
+    """
+    unmet_by_id: Dict[str, Dict[str, Any]] = {}
+    for node in target_group:
+        for dep_id in node.get("depends_on") or []:
+            dep_node = node_by_id.get(str(dep_id))
+            if dep_node is None:
+                continue
+            if dep_node.get("status") == "done" or dep_node.get("skipped"):
+                continue
+            unmet_by_id[str(dep_node["id"])] = dep_node
+
+    ordered = sorted(unmet_by_id.values(), key=lambda n: n.get("sort_order", 0))
+    names: List[str] = []
+    seen: set = set()
+    for n in ordered:
+        name = n.get("name") or ""
+        if name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return names
+
+
 async def _open_subissue_warnings(
     project_id: str, group: List[Dict[str, Any]]
 ) -> List[str]:
@@ -294,11 +337,15 @@ async def compute_advance_preview(
 
     if direction == "back":
         return await _preview_back(project_id, groups, idx)
-    return await _preview_forward(project_id, groups, idx)
+    node_by_id = {str(n["id"]): n for n in nodes}
+    return await _preview_forward(project_id, groups, idx, node_by_id)
 
 
 async def _preview_forward(
-    project_id: str, groups: List[List[Dict[str, Any]]], idx: int
+    project_id: str,
+    groups: List[List[Dict[str, Any]]],
+    idx: int,
+    node_by_id: Dict[str, Dict[str, Any]],
 ) -> AdvancePreview:
     active = groups[idx]
 
@@ -355,6 +402,26 @@ async def _preview_forward(
         )
 
     next_group = groups[idx + 1]
+
+    # Gate 5: dependency gate (mig 391, M3 PR-J). Gates 1-3 above all gate the
+    # CURRENT group's own completion (review/deliverable/form); this one is
+    # different in kind — it gates the TARGET group's readiness to START, so
+    # it can only be evaluated once Gate 4 has resolved which group that is.
+    # Placed here (after NO_NEXT, before the success path) rather than as
+    # Gate 1 because "can the target group start" is meaningless until a
+    # target group is known to exist. Every non-skipped node in ``next_group``
+    # must have every ``depends_on`` node done or skipped; back (retreat)
+    # never runs this check (spec §3).
+    waiting_on = _unmet_dependency_names(next_group, node_by_id)
+    if waiting_on:
+        return AdvancePreview(
+            direction="forward",
+            will_advance=False,
+            blocked_reason=BLOCK_DEPS_PENDING,
+            closing=[_node_ref(n) for n in active],
+            waiting_on=waiting_on,
+        )
+
     warnings = await _open_subissue_warnings(project_id, active)
     if any(n.get("owner_agent_id") for n in next_group):
         warnings.append("No agent will start automatically.")

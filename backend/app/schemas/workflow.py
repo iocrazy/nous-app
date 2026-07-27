@@ -373,6 +373,12 @@ BLOCK_NO_NEXT = "NO_NEXT"
 # Parallel to (never confused with) BLOCK_DELIVERABLE_MISSING — a deliverable
 # is a filed file, a form field is a typed value (spec §2).
 BLOCK_FORM_INCOMPLETE = "FORM_INCOMPLETE"
+# mig 391 (M3 PR-J): the TARGET group (the one forward would land on) has a
+# node whose declared dependency is not yet done/skipped. Unlike
+# REVIEW_PENDING/DELIVERABLE_MISSING/FORM_INCOMPLETE above — which all gate
+# the CURRENT group's own completion — this gates the NEXT group's readiness
+# to start (spec §3). Back (retreat) is never gated by dependencies.
+BLOCK_DEPS_PENDING = "DEPS_PENDING"
 
 
 class AdvanceNodeRef(BaseModel):
@@ -398,6 +404,9 @@ class AdvancePreview(BaseModel):
     # mig 390 (M3 PR-I): required form-field LABELS (never keys) missing from
     # the target group when blocked_reason == BLOCK_FORM_INCOMPLETE.
     missing_fields: List[str] = Field(default_factory=list)
+    # mig 391 (M3 PR-J): names of unmet-dependency nodes (deduped, sort_order
+    # order) when blocked_reason == BLOCK_DEPS_PENDING.
+    waiting_on: List[str] = Field(default_factory=list)
 
 
 class AdvanceRequest(BaseModel):
