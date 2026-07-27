@@ -19,6 +19,50 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 MAX_NODES_PER_TEMPLATE = 30
 MAX_TEMPLATES_PER_TEAM = 20
 
+# Form-based deliverables (mig 390, M3 PR-I §2). Six-type whitelist; a node's
+# form may hold at most MAX_FORM_FIELDS fields (same "soft guardrail → 422"
+# idiom as the two constants above).
+FormFieldType = Literal["text", "textarea", "number", "select", "checkbox", "date"]
+FORM_FIELD_TYPES = ("text", "textarea", "number", "select", "checkbox", "date")
+MAX_FORM_FIELDS = 20
+
+
+class FormFieldDef(BaseModel):
+    """One field definition in a node's deliverable form (mig 390, M3 PR-I).
+
+    ``key`` rides in empty at the API boundary — the repo write path (I2)
+    generates it from ``label`` (slugify, deduped with a ``-2`` suffix within
+    the node) since only the server can guarantee uniqueness across a node's
+    field list. ``options`` only makes sense for ``type == "select"`` and, when
+    present there, must be a non-empty list — an empty options list would
+    render a picker with nothing to pick.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    key: str = ""
+    label: str
+    type: FormFieldType
+    required: bool = False
+    options: Optional[List[str]] = None
+
+    @field_validator("label")
+    @classmethod
+    def _label_stripped_nonempty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("label must not be blank")
+        return stripped
+
+    @model_validator(mode="after")
+    def _options_only_for_select(self) -> "FormFieldDef":
+        if self.type == "select":
+            if not self.options:
+                raise ValueError("a 'select' field requires a non-empty options list")
+        elif self.options is not None:
+            raise ValueError("options is only allowed when type is 'select'")
+        return self
+
 
 class TemplateNodeMemberIn(BaseModel):
     """A default member of a template node — exactly one of user/agent."""
@@ -80,6 +124,10 @@ class TemplateNodeIn(BaseModel):
     completion_policy: Literal["owner", "any_editor"] = "owner"
     events: WorkflowNodeEvents = Field(default_factory=WorkflowNodeEvents)
     members: List[TemplateNodeMemberIn] = Field(default_factory=list)
+    # Form-based deliverables (mig 390, M3 PR-I) — template-layer only, same
+    # instantiate-then-freeze idiom as completion_policy/events above. ``key``
+    # dedup/slugify happens in the repo write path (I2), not here.
+    form_schema: List[FormFieldDef] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _owner_xor(self) -> "TemplateNodeIn":
@@ -91,6 +139,12 @@ class TemplateNodeIn(BaseModel):
                 "default_owner_user_id and default_owner_agent_id are "
                 "mutually exclusive"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _max_form_fields(self) -> "TemplateNodeIn":
+        if len(self.form_schema) > MAX_FORM_FIELDS:
+            raise ValueError(f"a node's form may hold at most {MAX_FORM_FIELDS} fields")
         return self
 
 
@@ -171,6 +225,14 @@ class NodeOut(BaseModel):
     # pre-mig-389 row (or NodeOut() built with a bare {} row) never crashes a
     # consumer reading ``node.metadata.get("run_prepared_at")``.
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    # mig 390 (M3 PR-I): form-based deliverables. ``form_schema`` is copied
+    # verbatim from the template node at instantiation (I2); ``form_data`` is
+    # the live values entered into this node's form — instance-only, no
+    # template-side counterpart. Declared here for the same reason
+    # ``metadata`` was above: without a declared field pydantic silently
+    # drops it converting the repo row dict → NodeOut.
+    form_schema: List[FormFieldDef] = Field(default_factory=list)
+    form_data: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ProjectWorkflowOut(BaseModel):
@@ -192,6 +254,13 @@ class NodePatch(BaseModel):
     planned_start: Optional[date] = None
     planned_due: Optional[date] = None
     skipped: Optional[bool] = None
+    # mig 390 (M3 PR-I): the live values entered into this node's deliverable
+    # form. Deliberately NOT paired with a ``form_schema`` field here — the
+    # form's field definitions are template-layer config, copied at
+    # instantiation and frozen; an instance may fill in data but may not
+    # change what fields exist. ``form_schema`` therefore has no place on this
+    # patch model at all (see test_workflow_form_schema.py).
+    form_data: Optional[Dict[str, Any]] = None
 
     @model_validator(mode="after")
     def _owner_xor(self) -> "NodePatch":
