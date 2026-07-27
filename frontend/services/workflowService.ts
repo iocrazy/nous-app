@@ -65,7 +65,7 @@ const normalizeEvents = (events: Partial<WorkflowNodeEvents> | null | undefined)
  * server-side too). */
 const normalizeTemplateNode = (
   node: Partial<WorkflowTemplateNode> &
-    Omit<WorkflowTemplateNode, 'completion_policy' | 'events' | 'form_schema'>,
+    Omit<WorkflowTemplateNode, 'completion_policy' | 'events' | 'form_schema' | 'depends_on'>,
 ): WorkflowTemplateNode => ({
   ...node,
   completion_policy: node.completion_policy ?? DEFAULT_COMPLETION_POLICY,
@@ -74,6 +74,9 @@ const normalizeTemplateNode = (
   // all — fall back to an empty form so the Form tab (and toDraft/toPayload
   // in WorkflowTemplateEditor.tsx) never sees `undefined`.
   form_schema: node.form_schema ?? [],
+  // mig 391 (M3 PR-J): dependency edges — real node ids on this GET response.
+  // A pre-mig-391 template row has no depends_on key at all.
+  depends_on: node.depends_on ?? [],
 });
 
 const normalizeTemplate = (template: WorkflowTemplate): WorkflowTemplate => ({
@@ -101,6 +104,9 @@ const normalizeInstanceNode = (
   // and must never see `undefined`.
   form_schema: node.form_schema ?? [],
   form_data: node.form_data ?? {},
+  // mig 391 (M3 PR-J): dependency edges — real, stable instance node ids.
+  // Tolerate a pre-mig-391 row the same way as the fields above.
+  depends_on: node.depends_on ?? [],
 });
 
 // ============================================

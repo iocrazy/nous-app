@@ -12,9 +12,10 @@
  */
 
 import React, { useMemo } from 'react';
-import { Check, Plus, X } from 'lucide-react';
+import { Check, Lock, Plus, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { ProjectStageNode } from '../../types';
-import { isNodeOverdue, NODE_STATUS_CONFIG } from './nodeStatus';
+import { isNodeInActiveGroup, isNodeOverdue, NODE_STATUS_CONFIG, unmetDeps } from './nodeStatus';
 
 interface WorkflowStripProps {
   nodes: ProjectStageNode[];
@@ -50,6 +51,13 @@ export const WorkflowStrip: React.FC<WorkflowStripProps> = ({
   const grouped = useMemo(() => runs(nodes), [nodes]);
   if (nodes.length === 0) return null;
 
+  // Dependency gate (mig 391, M3 PR-J) — local derivation, display-only (see
+  // nodeStatus.ts::unmetDeps). Only the CURRENT active group (current node ±
+  // its parallel-group siblings) ever needs the lock: every earlier node is
+  // already done/skipped (deps trivially satisfied) and every later node
+  // isn't reachable yet, so painting a lock there would be noise.
+  const currentNode = nodes.find((n) => n.id === currentNodeId) ?? null;
+
   return (
     <div
       data-testid="workflow-strip"
@@ -61,6 +69,9 @@ export const WorkflowStrip: React.FC<WorkflowStripProps> = ({
             key={n.id}
             node={n}
             current={n.id === currentNodeId}
+            locked={
+              isNodeInActiveGroup(n, currentNode) && unmetDeps(nodes, n).length > 0
+            }
             onClick={onSelectNode ? () => onSelectNode(n.id) : undefined}
             canEdit={canEdit}
             onRemove={onRemoveNode ? () => onRemoveNode(n) : undefined}
@@ -102,10 +113,14 @@ export const WorkflowStrip: React.FC<WorkflowStripProps> = ({
 const NodeCapsule: React.FC<{
   node: ProjectStageNode;
   current: boolean;
+  /** Dependency gate (mig 391, M3 PR-J) — this node is in the active group
+   * but has an unmet dependency, so advance can't reach it yet. */
+  locked?: boolean;
   onClick?: () => void;
   canEdit?: boolean;
   onRemove?: () => void;
-}> = ({ node, current, onClick, canEdit, onRemove }) => {
+}> = ({ node, current, locked = false, onClick, canEdit, onRemove }) => {
+  const { t } = useTranslation();
   const meta = NODE_STATUS_CONFIG[node.status];
   const isDone = node.status === 'done';
   const isSkipped = node.status === 'skipped' || node.skipped;
@@ -123,6 +138,8 @@ const NodeCapsule: React.FC<{
         data-node-id={node.id}
         data-current={current ? 'true' : undefined}
         data-overdue={overdue ? 'true' : undefined}
+        data-locked={locked ? 'true' : undefined}
+        title={locked ? t('projects.workflow.deps.lockedTitle') : undefined}
         className={`relative inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12.5px] transition ${
           current
             ? 'border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]'
@@ -146,6 +163,13 @@ const NodeCapsule: React.FC<{
           />
         )}
         <span className="truncate">{node.name}</span>
+        {locked && (
+          <Lock
+            size={11}
+            data-testid="workflow-node-locked"
+            className="shrink-0 text-rose-400"
+          />
+        )}
         {overdue && (
           <span
             data-testid="workflow-overdue-tag"

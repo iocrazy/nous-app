@@ -268,11 +268,14 @@ class _InstantiateFakeSession:
       1. existing-nodes check         -> empty (not yet instantiated)
       2. template nodes select        -> canned tpl_nodes
       3. template node-members select -> empty (no members in this fixture)
-      4. node-bank slug map select    -> empty (fixture nodes carry no
+      4. template node-deps select    -> empty (mig 391, M3 PR-J — no deps in
+                                          this fixture)
+      5. node-bank slug map select    -> empty (fixture nodes carry no
                                           source_stage_id, so it's never
                                           consulted)
-      5. final node listing           -> whatever was committed via add()
-      6. final member listing         -> whatever was committed via add()
+      6. final node listing           -> whatever was committed via add()
+      7. final member listing         -> whatever was committed via add()
+      8. final deps listing           -> empty (mig 391, M3 PR-J)
     """
 
     def __init__(self, tpl_nodes: List[WorkflowTemplateNodes]):
@@ -300,14 +303,18 @@ class _InstantiateFakeSession:
         if self._calls == 3:
             return _Result([])
         if self._calls == 4:
-            return _Result([])
+            return _Result([])  # template node-deps select (mig 391, M3 PR-J)
         if self._calls == 5:
+            return _Result([])
+        if self._calls == 6:
             nodes = [o for o in self.added if isinstance(o, ProjectStageNodes)]
             nodes.sort(key=lambda n: n.sort_order)
             return _Result(nodes)
-        if self._calls == 6:
+        if self._calls == 7:
             members = [o for o in self.added if isinstance(o, ProjectStageNodeMembers)]
             return _Result(members)
+        if self._calls == 8:
+            return _Result([])  # final deps listing (mig 391, M3 PR-J)
         raise AssertionError(f"unexpected extra session.execute call #{self._calls}")
 
 

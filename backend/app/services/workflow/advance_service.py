@@ -27,6 +27,7 @@ from loguru import logger
 from app.core.workflow_roles import WRITE_ROLES, resolve_effective_role
 from app.schemas.workflow import (
     BLOCK_DELIVERABLE_MISSING,
+    BLOCK_DEPS_PENDING,
     BLOCK_FORM_INCOMPLETE,
     BLOCK_NO_NEXT,
     BLOCK_NOT_MANAGER_OR_EDITOR,
@@ -235,6 +236,77 @@ def _form_incomplete(node: Dict[str, Any]) -> List[str]:
     return missing
 
 
+def _unmet_dependency_names(
+    target_group: List[Dict[str, Any]],
+    node_by_id: Dict[str, Dict[str, Any]],
+    exempt_ids: Optional[set] = None,
+) -> List[str]:
+    """Names of unmet-dependency nodes for ``target_group`` (mig 391, M3 PR-J).
+
+    A dependency is satisfied when the depended-on node's ``status`` is
+    ``done`` OR it is ``skipped`` (skipped counts as satisfied per spec §3),
+    OR its id is a member of ``exempt_ids`` (see below). A ``depends_on`` id
+    absent from ``node_by_id`` (the depended-on node was deleted — FK CASCADE
+    already dropped the edge row, but defend anyway) is treated as already
+    resolved, never as unmet.
+
+    ``exempt_ids`` (M3 final review, two exemptions folded into one set by
+    the call site so this predicate only has to check membership):
+      - CO-ARRIVAL: a dependency whose target is itself a member of
+        ``target_group`` (parallel siblings arriving together — e.g. C
+        depends_on B, both in the group that would become next). Without
+        this, B can never be "done" before the group arrives (they arrive
+        together) and the group can never arrive until B is done — a
+        permanent deadlock. Same-group deps are "start together", not
+        "finish before".
+      - CLOSING CURRENT GROUP: a dependency whose target is a member of the
+        CURRENT group that this very advance is closing. The most natural
+        template config is "next group depends on current group", but during
+        preview the current group's nodes are still in_progress (their
+        mirror issues close during execute, not before) — without this
+        exemption that obvious config would DEPS_PENDING forever. Ruling:
+        gates 1-3 already own the current group's completion bar, so a dep
+        edge naming the group this advance is already declaring done is
+        redundant, not a real blocker.
+    Callers build ``exempt_ids`` from ``next_group`` (co-arrival half) union
+    the closing current group (closing half); this function itself has no
+    opinion on which ids belong there.
+
+    Every node in ``target_group`` is by construction non-skipped
+    (``_build_groups`` drops skipped nodes before grouping), so no
+    skipped-target-node exemption is needed here — the group itself already
+    excludes those.
+
+    Returned names are deduped and ordered by the unmet node's
+    ``sort_order`` (stable, matches the Stage Board's node ordering) —
+    never dict/set iteration order.
+    """
+    exempt = exempt_ids or set()
+    unmet_by_id: Dict[str, Dict[str, Any]] = {}
+    for node in target_group:
+        for dep_id in node.get("depends_on") or []:
+            dep_id_str = str(dep_id)
+            if dep_id_str in exempt:
+                continue
+            dep_node = node_by_id.get(dep_id_str)
+            if dep_node is None:
+                continue
+            if dep_node.get("status") == "done" or dep_node.get("skipped"):
+                continue
+            unmet_by_id[str(dep_node["id"])] = dep_node
+
+    ordered = sorted(unmet_by_id.values(), key=lambda n: n.get("sort_order", 0))
+    names: List[str] = []
+    seen: set = set()
+    for n in ordered:
+        name = n.get("name") or ""
+        if name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return names
+
+
 async def _open_subissue_warnings(
     project_id: str, group: List[Dict[str, Any]]
 ) -> List[str]:
@@ -294,11 +366,15 @@ async def compute_advance_preview(
 
     if direction == "back":
         return await _preview_back(project_id, groups, idx)
-    return await _preview_forward(project_id, groups, idx)
+    node_by_id = {str(n["id"]): n for n in nodes}
+    return await _preview_forward(project_id, groups, idx, node_by_id)
 
 
 async def _preview_forward(
-    project_id: str, groups: List[List[Dict[str, Any]]], idx: int
+    project_id: str,
+    groups: List[List[Dict[str, Any]]],
+    idx: int,
+    node_by_id: Dict[str, Dict[str, Any]],
 ) -> AdvancePreview:
     active = groups[idx]
 
@@ -355,6 +431,36 @@ async def _preview_forward(
         )
 
     next_group = groups[idx + 1]
+
+    # Gate 5: dependency gate (mig 391, M3 PR-J). Gates 1-3 above all gate the
+    # CURRENT group's own completion (review/deliverable/form); this one is
+    # different in kind — it gates the TARGET group's readiness to START, so
+    # it can only be evaluated once Gate 4 has resolved which group that is.
+    # Placed here (after NO_NEXT, before the success path) rather than as
+    # Gate 1 because "can the target group start" is meaningless until a
+    # target group is known to exist. Every non-skipped node in ``next_group``
+    # must have every ``depends_on`` node done or skipped; back (retreat)
+    # never runs this check (spec §3).
+    #
+    # ``exempt_ids`` (M3 final review #1 + #2): next_group's own ids (a dep on
+    # a parallel sibling arriving in the SAME group is co-arrival, not a real
+    # ordering — see ``_unmet_dependency_names`` docstring) union ``active``'s
+    # ids (the current group this advance is closing — its nodes are still
+    # in_progress at preview time, so a dep naming it would otherwise
+    # DEPS_PENDING forever on the most natural "next depends on current"
+    # config). ``waiting_on`` therefore only ever lists genuinely-earlier,
+    # unrelated, unfinished nodes.
+    exempt_ids = {str(n["id"]) for n in next_group} | {str(n["id"]) for n in active}
+    waiting_on = _unmet_dependency_names(next_group, node_by_id, exempt_ids)
+    if waiting_on:
+        return AdvancePreview(
+            direction="forward",
+            will_advance=False,
+            blocked_reason=BLOCK_DEPS_PENDING,
+            closing=[_node_ref(n) for n in active],
+            waiting_on=waiting_on,
+        )
+
     warnings = await _open_subissue_warnings(project_id, active)
     if any(n.get("owner_agent_id") for n in next_group):
         warnings.append("No agent will start automatically.")

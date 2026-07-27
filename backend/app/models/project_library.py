@@ -350,6 +350,39 @@ class WorkflowTemplateNodeMembers(Base):
     agent_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
 
 
+class WorkflowTemplateNodeDeps(Base):
+    """Dependency edge between two nodes of the SAME template (mig 391, M3
+    PR-J). Both columns are NOT NULL so the composite PK needs no surrogate
+    ``id`` (unlike the nullable-XOR member tables above) — same idiom as
+    ``canvas_resource_refs``. Backward-only (``depends_on_node_id`` must have
+    a strictly smaller ``sort_order`` than ``node_id``) is an application-
+    layer invariant enforced by ``workflow_templates_repository
+    ._validate_deps_backward`` — never assume it holds from the schema alone."""
+
+    __tablename__ = "workflow_template_node_deps"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["node_id"],
+            ["public.workflow_template_nodes.id"],
+            ondelete="CASCADE",
+            name="workflow_template_node_deps_node_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["depends_on_node_id"],
+            ["public.workflow_template_nodes.id"],
+            ondelete="CASCADE",
+            name="workflow_template_node_deps_depends_on_node_id_fkey",
+        ),
+        PrimaryKeyConstraint(
+            "node_id", "depends_on_node_id", name="workflow_template_node_deps_pkey"
+        ),
+        {"schema": "public"},
+    )
+
+    node_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    depends_on_node_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+
+
 class ProjectStageNodes(Base):
     """Per-project workflow node instance (mig 380). Copied from a template at
     project creation (PR-B), then independent. Each node has its own status;
@@ -491,6 +524,40 @@ class ProjectStageNodeMembers(Base):
     node_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     agent_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+
+
+class ProjectStageNodeDeps(Base):
+    """Dependency edge between two nodes of the SAME project instance (mig
+    391, M3 PR-J). Copied from ``workflow_template_node_deps`` at
+    instantiation (template node id -> instance node id, the same map
+    ``instantiate_from_template`` already builds for ``source_template_node_
+    id``); independent of the template thereafter, same as every other
+    instance-side table. Backward-only is enforced by ``project_stage_nodes_
+    repository.update_node`` against the node's LIVE project siblings, not by
+    any DB constraint."""
+
+    __tablename__ = "project_stage_node_deps"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["node_id"],
+            ["public.project_stage_nodes.id"],
+            ondelete="CASCADE",
+            name="project_stage_node_deps_node_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["depends_on_node_id"],
+            ["public.project_stage_nodes.id"],
+            ondelete="CASCADE",
+            name="project_stage_node_deps_depends_on_node_id_fkey",
+        ),
+        PrimaryKeyConstraint(
+            "node_id", "depends_on_node_id", name="project_stage_node_deps_pkey"
+        ),
+        {"schema": "public"},
+    )
+
+    node_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    depends_on_node_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
 
 
 class ProjectLibEntities(Base):

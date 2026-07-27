@@ -25,6 +25,7 @@ from app.repositories.workflow_templates_repository import (
 )
 from app.schemas.workflow import (
     MAX_TEMPLATES_PER_TEAM,
+    DepsBackwardOnly,
     TemplateCreate,
     TemplateUpdate,
 )
@@ -56,6 +57,9 @@ def _node_to_dict(node) -> dict:
         # repo write path, not here — this only flattens the validated
         # FormFieldDef list into plain dicts.
         "form_schema": [f.model_dump() for f in node.form_schema],
+        # mig 391 (M3 PR-J): payload-index refs (see TemplateNodeIn.depends_on
+        # docstring) — flattened as-is, resolved by the repo.
+        "depends_on": node.depends_on,
     }
 
 
@@ -144,13 +148,26 @@ async def update_template(template_id: str, data: TemplateUpdate, auth: AuthDep)
 
     repo = get_workflow_templates_repository()
     nodes = None if data.nodes is None else [_node_to_dict(n) for n in data.nodes]
-    tpl = await repo.update_template(
-        template_id,
-        team_id,
-        name=data.name,
-        is_default=data.is_default,
-        nodes=nodes,
-    )
+    try:
+        tpl = await repo.update_template(
+            template_id,
+            team_id,
+            name=data.name,
+            is_default=data.is_default,
+            nodes=nodes,
+        )
+    except DepsBackwardOnly as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": exc.reason,
+                "message": (
+                    "A node's dependency must point at another node earlier "
+                    "in the list (self-dependencies and forward references "
+                    "are both rejected)"
+                ),
+            },
+        ) from exc
     if tpl is None:
         raise HTTPException(status_code=404, detail="Template not found")
     return {"success": True, "data": tpl}

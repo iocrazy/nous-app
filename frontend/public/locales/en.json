@@ -1766,8 +1766,10 @@
         "blockedReviewPending": "The current stage still needs its review before you can advance.",
         "blockedDeliverableMissing": "The current stage's deliverable folder is empty — file it before advancing.",
         "blockedFormIncomplete": "Some required form fields aren't filled in yet.",
+        "blockedDepsPending": "The next stage is waiting on other stages to finish first.",
         "blockedNoNext": "This is the last stage — there's nothing further to advance to.",
-        "missingFields": "Missing fields"
+        "missingFields": "Missing fields",
+        "waitingOn": "Waiting on"
       },
       "deliverables": {
         "title": "Deliverables",
@@ -1837,7 +1839,13 @@
         "selectPlaceholder": "Select an option"
       },
       "form": "Form",
-      "formFilled": "{{filled}}/{{total}} filled"
+      "formFilled": "{{filled}}/{{total}} filled",
+      "deps": {
+        "dependsOn": "Depends on",
+        "noCandidates": "No earlier stages to depend on",
+        "waitingOn": "Waiting on: {{names}}",
+        "lockedTitle": "Blocked by dependencies"
+      }
     }
   },
   "storyboard": {

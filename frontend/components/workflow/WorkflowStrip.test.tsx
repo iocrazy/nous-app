@@ -4,7 +4,7 @@
  * button (never on the current or started nodes); an overdue node carries the
  * "Overdue" micro-tag. Selection/remove callbacks fire with the right node.
  */
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { WorkflowStrip } from './WorkflowStrip';
@@ -100,5 +100,56 @@ describe('WorkflowStrip', () => {
     expect(tags).toHaveLength(1);
     const late = screen.getByText('Late').closest('[data-testid="workflow-strip-node"]');
     expect(late?.getAttribute('data-overdue')).toBe('true');
+  });
+
+  // M3 PR-J (task J3): a lock icon on a current-active-group capsule blocked
+  // by an unmet dependency — local derivation (nodeStatus.ts::unmetDeps),
+  // display-only (the server's DEPS_PENDING predicate is the real gate).
+  describe('dependency lock (M3 PR-J)', () => {
+    it('locks the current node when its dependency is not yet done', () => {
+      render(
+        <WorkflowStrip
+          nodes={[
+            node({ id: 'script', name: 'Script', status: 'pending' }),
+            node({ id: 'storyboard', name: 'Storyboard', status: 'pending', depends_on: ['script'] }),
+          ]}
+          currentNodeId="storyboard"
+        />,
+      );
+      const storyboard = screen.getByText('Storyboard').closest('[data-testid="workflow-strip-node"]');
+      expect(storyboard?.getAttribute('data-locked')).toBe('true');
+      expect(within(storyboard as HTMLElement).getByTestId('workflow-node-locked')).toBeInTheDocument();
+    });
+
+    it('does not lock the current node once its dependency is done', () => {
+      render(
+        <WorkflowStrip
+          nodes={[
+            node({ id: 'script', name: 'Script', status: 'done' }),
+            node({ id: 'storyboard', name: 'Storyboard', status: 'pending', depends_on: ['script'] }),
+          ]}
+          currentNodeId="storyboard"
+        />,
+      );
+      const storyboard = screen.getByText('Storyboard').closest('[data-testid="workflow-strip-node"]');
+      expect(storyboard?.getAttribute('data-locked')).toBeNull();
+      expect(screen.queryByTestId('workflow-node-locked')).toBeNull();
+    });
+
+    it('never locks a node outside the active group, even with an unmet dependency', () => {
+      render(
+        <WorkflowStrip
+          nodes={[
+            node({ id: 'script', name: 'Script', status: 'pending' }),
+            node({ id: 'storyboard', name: 'Storyboard', status: 'pending' }),
+            node({ id: 'editing', name: 'Editing', status: 'pending', depends_on: ['script'] }),
+          ]}
+          currentNodeId="storyboard"
+        />,
+      );
+      // "Editing" isn't the current node (nor a parallel-group sibling of
+      // it), so its unmet dep on "Script" is never painted.
+      expect(screen.queryByTestId('workflow-node-locked')).toBeNull();
+    });
   });
 });

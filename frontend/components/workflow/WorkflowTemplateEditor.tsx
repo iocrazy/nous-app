@@ -16,6 +16,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Check,
   ChevronDown,
   ChevronUp,
   GitBranch,
@@ -68,6 +69,17 @@ interface DraftNode extends WorkflowTemplateNodeInput {
   completion_policy: WorkflowCompletionPolicy;
   events: WorkflowNodeEvents;
   form_schema: FormFieldDef[];
+  /** Dependency edges (mig 391, M3 PR-J) — draft-local identity: each entry
+   * is another draft node's `_key`, NOT a real id and NOT a payload index.
+   * On load, `_key` is set to the real node id (see `toDraft`) so a loaded
+   * template's real `depends_on` ids double as valid `_key` references
+   * as-is; on Save, `toPayload` resolves each `_key` to that node's POSITION
+   * within the array about to be submitted (the server's payload-index
+   * contract — see `WorkflowTemplateNodeInput.depends_on`). Tracking by
+   * `_key` (not position) is what lets a drag-reorder keep every dependency
+   * pointing at the same logical node instead of silently repointing at
+   * whatever now sits at the old index. */
+  depends_on: string[];
 }
 
 let _keySeq = 0;
@@ -91,30 +103,67 @@ function toDraft(nodes: WorkflowTemplate['nodes']): DraftNode[] {
     completion_policy: n.completion_policy ?? DEFAULT_COMPLETION_POLICY,
     events: { ...DEFAULT_EVENTS, ...n.events },
     form_schema: n.form_schema ?? [],
+    // mig 391 (M3 PR-J): `_key` above is the real node id for every
+    // already-loaded node (see the `_key: n.id` line), and `n.depends_on`
+    // (GET) is real node ids too — so a freshly loaded node's dep ids double
+    // as valid draft `_key` references with zero translation needed here.
+    depends_on: n.depends_on ?? [],
   }));
 }
 
 function toPayload(drafts: DraftNode[]): WorkflowTemplateNodeInput[] {
-  return drafts.map((d, i) => ({
-    name: d.name,
-    sort_order: i,
-    parallel_group: d.parallel_group,
-    default_owner_user_id: d.default_owner_user_id ?? null,
-    default_owner_agent_id: d.default_owner_agent_id ?? null,
-    skip_default: d.skip_default,
-    review_required: d.review_required,
-    deliverable_required: d.deliverable_required,
-    deliverable_label: d.deliverable_label ?? null,
-    source_stage_id: d.source_stage_id ?? null,
-    duration_days: d.duration_days ?? null,
-    members: d.members,
-    completion_policy: d.completion_policy ?? DEFAULT_COMPLETION_POLICY,
-    events: { ...DEFAULT_EVENTS, ...d.events },
-    // mig 390 (M3 PR-I): `key` rides in whatever it already is (possibly '')
-    // — the server slugifies label -> key and dedupes, so the editor never
-    // manages keys itself (spec §2 / task brief).
-    form_schema: d.form_schema ?? [],
-  }));
+  // `_key` -> position within THIS array, resolved once up front so the
+  // per-node loop below is a plain lookup.
+  const keyToIndex = new Map(drafts.map((d, i) => [d._key, i]));
+  return drafts.map((d, i) => {
+    const depends_on: string[] = [];
+    for (const depKey of d.depends_on) {
+      const targetIndex = keyToIndex.get(depKey);
+      if (targetIndex === undefined) {
+        // The depended-on node was removed from the draft (removeNode also
+        // strips it from every other node's depends_on, so this should be
+        // unreachable in practice — kept as a defensive fallback).
+        console.warn(
+          `[WorkflowTemplateEditor] dropping dependency on save: target node no longer exists in the draft (node "${d.name}")`,
+        );
+        continue;
+      }
+      if (targetIndex >= i) {
+        // Backward-only (server 422 DEP_BACKWARD_ONLY): a reorder can turn a
+        // once-valid dependency into a same-position or forward one. Dropped
+        // here rather than sent and 422'd — the editor self-corrects on the
+        // next load (Save re-fetches the template, and the dropped edge is
+        // simply absent from the server's response).
+        console.warn(
+          `[WorkflowTemplateEditor] dropping forward/self dependency on save: node "${d.name}" (position ${i}) cannot depend on a node at position ${targetIndex}`,
+        );
+        continue;
+      }
+      depends_on.push(String(targetIndex));
+    }
+    return {
+      name: d.name,
+      sort_order: i,
+      parallel_group: d.parallel_group,
+      default_owner_user_id: d.default_owner_user_id ?? null,
+      default_owner_agent_id: d.default_owner_agent_id ?? null,
+      skip_default: d.skip_default,
+      review_required: d.review_required,
+      deliverable_required: d.deliverable_required,
+      deliverable_label: d.deliverable_label ?? null,
+      source_stage_id: d.source_stage_id ?? null,
+      duration_days: d.duration_days ?? null,
+      members: d.members,
+      completion_policy: d.completion_policy ?? DEFAULT_COMPLETION_POLICY,
+      events: { ...DEFAULT_EVENTS, ...d.events },
+      // mig 390 (M3 PR-I): `key` rides in whatever it already is (possibly '')
+      // — the server slugifies label -> key and dedupes, so the editor never
+      // manages keys itself (spec §2 / task brief).
+      form_schema: d.form_schema ?? [],
+      // mig 391 (M3 PR-J): payload-index contract — see the loop above.
+      depends_on,
+    };
+  });
 }
 
 /** Group consecutive drafts sharing a non-null parallel_group into runs. */
@@ -264,7 +313,18 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
   };
 
   const removeNode = (key: string) => {
-    setDrafts((prev) => prev.filter((d) => d._key !== key));
+    setDrafts((prev) =>
+      prev
+        .filter((d) => d._key !== key)
+        // Strip the removed node from every remaining node's depends_on so
+        // no draft carries a dangling reference (rather than leaving it for
+        // toPayload's defensive drop-with-warn to catch at save time).
+        .map((d) =>
+          d.depends_on.includes(key)
+            ? { ...d, depends_on: d.depends_on.filter((k) => k !== key) }
+            : d,
+        ),
+    );
     if (selectedNodeKey === key) setSelectedNodeKey(null);
     setDirty(true);
   };
@@ -287,6 +347,7 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
       completion_policy: DEFAULT_COMPLETION_POLICY,
       events: { ...DEFAULT_EVENTS },
       form_schema: [],
+      depends_on: [],
     };
     setDrafts((prev) => {
       const at = insertIndex == null ? prev.length : Math.min(insertIndex, prev.length);
@@ -588,6 +649,39 @@ export const WorkflowTemplateEditor: React.FC<WorkflowTemplateEditorProps> = ({
                 people={people}
                 agents={agents}
                 isFirst={drafts[0]?._key === selectedNode._key}
+                // Dependency candidates (mig 391, M3 PR-J): only nodes
+                // positioned earlier in the CURRENT draft order — the
+                // server's backward-only rule is enforced against the
+                // position each node will hold on save, not its stale
+                // loaded sort_order, so this must read off `drafts` (live
+                // array order), not `node.sort_order`.
+                //
+                // Same-parallel-group siblings are excluded even though
+                // they can be "earlier" in array order (M3 final review
+                // defense-in-depth for #1): a dependency between two nodes
+                // that arrive together in the same parallel group is a
+                // same-group co-arrival, not a real ordering constraint —
+                // offering it as a candidate here is what produces the
+                // "obvious" config that used to deadlock Gate 5 forever.
+                // The backend now tolerates it (co-arrival exemption in
+                // `_unmet_dependency_names`), but the editor should still
+                // steer authors away from a meaningless edge; the
+                // serialize-time drop in `toPayload` (self/forward only)
+                // stays as a backstop, it doesn't cover this case.
+                depCandidates={drafts
+                  .slice(0, drafts.findIndex((d) => d._key === selectedNode._key))
+                  .filter(
+                    (d) =>
+                      selectedNode.parallel_group == null ||
+                      d.parallel_group !== selectedNode.parallel_group,
+                  )}
+                onToggleDep={(depKey, on) =>
+                  patchNode(selectedNode._key, {
+                    depends_on: on
+                      ? [...selectedNode.depends_on, depKey]
+                      : selectedNode.depends_on.filter((k) => k !== depKey),
+                  })
+                }
                 parallelWithPrev={(() => {
                   const i = drafts.findIndex((d) => d._key === selectedNode._key);
                   return (
@@ -728,11 +822,29 @@ const NodeInfoTab: React.FC<{
   people: PersonOption[];
   agents: AgentOption[];
   isFirst: boolean;
+  /** Dependency candidates (mig 391, M3 PR-J) — draft nodes positioned
+   * earlier than this one in the CURRENT chain order (parent computes this
+   * as `drafts.slice(0, index)`, live array order, not stale sort_order). */
+  depCandidates: DraftNode[];
+  onToggleDep: (depKey: string, on: boolean) => void;
   parallelWithPrev: boolean;
   onToggleParallel: (v: boolean) => void;
   onPatch: (patch: Partial<DraftNode>) => void;
   onRemove: () => void;
-}> = ({ node, people, agents, isFirst, parallelWithPrev, onToggleParallel, onPatch, onRemove }) => (
+}> = ({
+  node,
+  people,
+  agents,
+  isFirst,
+  depCandidates,
+  onToggleDep,
+  parallelWithPrev,
+  onToggleParallel,
+  onPatch,
+  onRemove,
+}) => {
+  const { t } = useTranslation();
+  return (
   <div className="flex flex-col gap-3 overflow-y-auto text-[13px]">
     <div>
       <label className="mb-1 block text-[11px] uppercase tracking-wider text-ink-600">Name</label>
@@ -796,6 +908,48 @@ const NodeInfoTab: React.FC<{
       />
     </div>
 
+    {/* Dependency gate (mig 391, M3 PR-J) — candidates are only nodes earlier
+        in the CURRENT chain order (backward-only, spec §3); toggling a pill
+        adds/removes this node's _key from the target's depends_on draft. */}
+    <div>
+      <label className="mb-1 block text-[11px] uppercase tracking-wider text-ink-600">
+        {t('projects.workflow.deps.dependsOn')}
+      </label>
+      {depCandidates.length === 0 ? (
+        <p
+          data-testid="workflow-dep-no-candidates"
+          className="rounded-md border border-dashed border-line px-2.5 py-2 text-center text-[12px] text-ink-600"
+        >
+          {t('projects.workflow.deps.noCandidates')}
+        </p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5" data-testid="workflow-dep-candidates">
+          {depCandidates.map((c) => {
+            const checked = node.depends_on.includes(c._key);
+            return (
+              <button
+                key={c._key}
+                type="button"
+                onClick={() => onToggleDep(c._key, !checked)}
+                aria-pressed={checked}
+                data-testid="workflow-dep-candidate"
+                data-node-key={c._key}
+                data-checked={checked ? 'true' : undefined}
+                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[12px] transition ${
+                  checked
+                    ? 'border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]'
+                    : 'border-line text-ink-400 hover:border-line-strong'
+                }`}
+              >
+                {checked && <Check size={11} />}
+                {c.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+
     <div className="border-t border-line pt-1">
       <Toggle
         label="Skip by default"
@@ -828,7 +982,8 @@ const NodeInfoTab: React.FC<{
       <Trash2 size={13} /> Remove node
     </button>
   </div>
-);
+  );
+};
 
 const FlowRulesTab: React.FC<{
   value: WorkflowCompletionPolicy;

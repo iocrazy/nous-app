@@ -1100,6 +1100,11 @@ export interface WorkflowTemplateNode {
    * (spec §2; not open for in-place instance tweaks, same idiom as
    * `completion_policy`/`events`). */
   form_schema: FormFieldDef[];
+  /** Dependency edges (mig 391, M3 PR-J) — REAL node ids on this GET response
+   * (contrast `WorkflowTemplateNodeInput.depends_on`, which is a
+   * payload-index contract on PATCH). Stable only until the *next* save —
+   * see the editor's toDraft/toPayload for the id → position conversion. */
+  depends_on: string[];
 }
 
 /** A template node as sent on PATCH (full node-list replacement). */
@@ -1119,6 +1124,12 @@ export interface WorkflowTemplateNodeInput {
   completion_policy?: WorkflowCompletionPolicy;
   events?: WorkflowNodeEvents;
   form_schema?: FormFieldDef[];
+  /** ⚠️ PAYLOAD-INDEX CONTRACT (mig 391, M3 PR-J): each string MUST be the
+   * stringified 0-based position of another node within THIS SAME submitted
+   * `nodes` array — never a node id (a template PATCH full-replaces every
+   * node, so no id survives across two saves). Backend: `TemplateNodeIn.
+   * depends_on` (backend/app/schemas/workflow.py). */
+  depends_on?: string[];
 }
 
 /** A team workflow template list row (`node_count` on the collection). */
@@ -1196,6 +1207,11 @@ export interface ProjectStageNode {
    * Unknown keys (not present in this node's own `form_schema`) are dropped
    * server-side on write. Optional/normalized the same way as `form_schema`. */
   form_data?: Record<string, unknown>;
+  /** Dependency edges (mig 391, M3 PR-J) — REAL, stable instance node ids
+   * (contrast the template-side payload-index contract) this node depends
+   * on. Optional/normalized the same way as `form_schema`/`form_data` so a
+   * pre-mig-391 row never hands `undefined` to a consumer. */
+  depends_on?: string[];
 }
 
 /** GET /projects/{id}/workflow payload. */
@@ -1270,6 +1286,12 @@ export interface ProjectNodePatch {
    * (whitelisted to this node's own `form_schema` keys), so callers only
    * need to send the field(s) that actually changed. */
   form_data?: Record<string, unknown>;
+  /** Dependency edges (mig 391, M3 PR-J) — full-replace, real instance node
+   * ids (this node's live project siblings). Instance structure (like
+   * members), not template config — unlike `form_schema` this may be edited
+   * on the instance directly. Backward-only (target sort_order strictly
+   * smaller) is validated server-side. */
+  depends_on?: string[];
 }
 
 /** Blocked-reason codes the advance predicate can return (spec §7). */
@@ -1278,7 +1300,8 @@ export type AdvanceBlockedReason =
   | 'REVIEW_PENDING'
   | 'DELIVERABLE_MISSING'
   | 'FORM_INCOMPLETE'
-  | 'NO_NEXT';
+  | 'NO_NEXT'
+  | 'DEPS_PENDING';
 
 /** A node named in an advance preview (closing / creating list). */
 export interface AdvanceNodeRef {
@@ -1297,10 +1320,16 @@ export interface AdvancePreview {
   closing: AdvanceNodeRef[];
   creating: AdvanceNodeRef[];
   warnings: string[];
-  /** Required form-field LABELS (never keys) missing from the target group
-   * when `blocked_reason === 'FORM_INCOMPLETE'` (mig 390, M3 PR-I §2). Empty
-   * for every other ruling. */
+  /** Required form-field LABELS (never keys) missing from the ACTIVE
+   * (current) group when `blocked_reason === 'FORM_INCOMPLETE'` (mig 390,
+   * M3 PR-I §2) — Gate 3 checks the group that's about to close, not the
+   * target group Gate 5 (deps) checks. Empty for every other ruling. */
   missing_fields: string[];
+  /** Names of target-group nodes whose dependencies aren't yet done/skipped
+   * when `blocked_reason === 'DEPS_PENDING'` (mig 391, M3 PR-J). Server-ruled
+   * — the confirm dialog renders this verbatim, never a local derivation.
+   * Empty for every other ruling. */
+  waiting_on: string[];
 }
 
 /**

@@ -58,6 +58,7 @@ from app.schemas.projects import (
 )
 from app.schemas.workflow import (
     AdvancePreview,
+    DepsBackwardOnly,
     NodeCreate,
     NodeDeleteBlocked,
     NodePatch,
@@ -580,9 +581,24 @@ async def patch_workflow_node(
         kwargs["skipped"] = payload.skipped
     if "form_data" in fields and payload.form_data is not None:
         kwargs["form_data"] = payload.form_data
+    if "depends_on" in fields and payload.depends_on is not None:
+        kwargs["depends_on"] = payload.depends_on
 
     repo = get_project_stage_nodes_repository()
-    row = await repo.update_node(node_id, project_id, **kwargs)
+    try:
+        row = await repo.update_node(node_id, project_id, **kwargs)
+    except DepsBackwardOnly as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": exc.reason,
+                "message": (
+                    "A node's dependency must point at another node earlier "
+                    "in the workflow (self-dependencies and forward "
+                    "references are both rejected)"
+                ),
+            },
+        ) from exc
     if row is None:
         raise HTTPException(status_code=404, detail="Node not found")
     return {"success": True, "data": row}

@@ -34,12 +34,15 @@ from app.models import (
     AgentRuns,
     ProjectFiles,
     Projects,
+    ProjectStageNodeDeps,
     ProjectStageNodeMembers,
     ProjectStageNodes,
     ProjectStages,
+    WorkflowTemplateNodeDeps,
     WorkflowTemplateNodeMembers,
     WorkflowTemplateNodes,
 )
+from app.schemas.workflow import DepsBackwardOnly
 
 # Node-bank slugs whose skip state the method shortcut overrides (spec §2/§3):
 # Canvas is always on (常驻不可关); Shooting is on for live/hybrid, off for ai.
@@ -87,6 +90,29 @@ def _require_date(val: Any, field: str) -> Optional[datetime.date]:
     raise TypeError(f"{field} must be a datetime.date, got {type(val)!r}")
 
 
+async def _deps_by_node(session, node_ids: List[int]) -> Dict[int, List[str]]:
+    """{node_id -> [depends_on instance ids as str]} for a set of live nodes
+    (mig 391, M3 PR-J). Mirrors the members-lookup shape used everywhere else
+    in this module. Empty dict (no query) when ``node_ids`` is empty."""
+    out: Dict[int, List[str]] = {nid: [] for nid in node_ids}
+    if not node_ids:
+        return out
+    drows = (
+        (
+            await session.execute(
+                select(ProjectStageNodeDeps).where(
+                    ProjectStageNodeDeps.node_id.in_(node_ids)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for d in drows:
+        out.setdefault(d.node_id, []).append(str(d.depends_on_node_id))
+    return out
+
+
 def _member_row(obj: ProjectStageNodeMembers) -> Dict[str, Any]:
     return {
         "id": str(obj.id),
@@ -96,7 +122,11 @@ def _member_row(obj: ProjectStageNodeMembers) -> Dict[str, Any]:
     }
 
 
-def _node_row(obj: ProjectStageNodes, members: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _node_row(
+    obj: ProjectStageNodes,
+    members: List[Dict[str, Any]],
+    depends_on: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     return {
         "id": str(obj.id),
         "project_id": str(obj.project_id),
@@ -127,6 +157,11 @@ def _node_row(obj: ProjectStageNodes, members: List[Dict[str, Any]]) -> Dict[str
         "form_schema": obj.form_schema,
         "form_data": obj.form_data,
         "members": members,
+        # Dependency edges (mig 391, M3 PR-J): the OTHER live nodes in this
+        # project this node depends on (real instance ids). A node removed by
+        # CASCADE (project_stage_node_deps FKs both ON DELETE CASCADE) simply
+        # stops appearing here — no dangling reference ever surfaces.
+        "depends_on": depends_on or [],
     }
 
 
@@ -228,6 +263,22 @@ class ProjectStageNodesRepository:
             for m in tpl_members:
                 members_by_tpl.setdefault(m.node_id, []).append(m)
 
+            # Dependency edges (mig 391, M3 PR-J): loaded once here, resolved
+            # to instance ids AFTER the instance nodes below are created (the
+            # tpl-id -> instance-id map only exists once every node has been
+            # flushed).
+            tpl_deps = (
+                (
+                    await session.execute(
+                        select(WorkflowTemplateNodeDeps).where(
+                            WorkflowTemplateNodeDeps.node_id.in_(tpl_ids)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
             slug_map = await self._load_slug_map(session)
 
             # Build instance rows (skip/parallel resolved) before inserting so we
@@ -264,6 +315,11 @@ class ProjectStageNodesRepository:
                     if p["slug"] in (_SLUG_SHOOTING, _SLUG_CANVAS):
                         p["parallel_group"] = fresh_group
 
+            # Dependency edges (mig 391, M3 PR-J): template node id -> the
+            # instance node id created for it below, so the copied edges below
+            # can be re-pointed at the new rows (same idiom as
+            # ``source_template_node_id`` on the node itself).
+            tpl_to_instance: Dict[int, int] = {}
             for p in planned:
                 tn = p["tpl_node"]
                 ov = p["override"]
@@ -307,6 +363,7 @@ class ProjectStageNodesRepository:
                 )
                 session.add(node)
                 await session.flush()
+                tpl_to_instance[tn.id] = node.id
 
                 # Members: template defaults, unless the override supplies a list.
                 if "members" in ov:
@@ -323,6 +380,23 @@ class ProjectStageNodesRepository:
                             node_id=node.id,
                             user_id=_as_uuid(user_id),
                             agent_id=_as_uuid(agent_id),
+                        )
+                    )
+
+            # Copy dependency edges last, now that every template node id has
+            # a resolved instance id. A dep whose endpoint fell outside this
+            # template's own node set (should never happen — edges are
+            # created FK-scoped to one template) is skipped defensively
+            # rather than raising: instantiation must never fail because of a
+            # data shape a repo-level guard already prevents.
+            for d in tpl_deps:
+                inst_node_id = tpl_to_instance.get(d.node_id)
+                inst_dep_id = tpl_to_instance.get(d.depends_on_node_id)
+                if inst_node_id is not None and inst_dep_id is not None:
+                    session.add(
+                        ProjectStageNodeDeps(
+                            node_id=inst_node_id,
+                            depends_on_node_id=inst_dep_id,
                         )
                     )
 
@@ -356,7 +430,11 @@ class ProjectStageNodesRepository:
             )
             for m in mrows:
                 members_by_node.setdefault(m.node_id, []).append(_member_row(m))
-        return [_node_row(n, members_by_node.get(n.id, [])) for n in nodes]
+        deps_by_node = await _deps_by_node(session, node_ids)
+        return [
+            _node_row(n, members_by_node.get(n.id, []), deps_by_node.get(n.id, []))
+            for n in nodes
+        ]
 
     async def has_nodes(self, project_id: str) -> bool:
         """Whether the project owns any workflow node instance (cheap EXISTS).
@@ -405,7 +483,10 @@ class ProjectStageNodesRepository:
                 .scalars()
                 .all()
             )
-            return _node_row(node, [_member_row(m) for m in mrows])
+            deps_by_node = await _deps_by_node(session, [node.id])
+            return _node_row(
+                node, [_member_row(m) for m in mrows], deps_by_node.get(node.id, [])
+            )
 
     async def update_node(
         self,
@@ -419,6 +500,7 @@ class ProjectStageNodesRepository:
         planned_due: Any = None,
         skipped: Optional[bool] = None,
         form_data: Optional[Dict[str, Any]] = None,
+        depends_on: Optional[List[str]] = None,
         _set_owner: bool = False,
         _set_schedule_start: bool = False,
         _set_schedule_due: bool = False,
@@ -437,6 +519,19 @@ class ProjectStageNodesRepository:
         touched by this call are preserved) — the server never trusts a
         client-supplied key set, and a node's form fields are frozen at
         instantiation (spec §2).
+
+        ``depends_on`` (mig 391, M3 PR-J) is FULL-REPLACE, same shape as
+        ``members`` — dependencies are instance STRUCTURE, not frozen
+        template config. Each id must belong to THIS project and have a
+        strictly smaller ``sort_order`` than this node (backward-only,
+        self-deps included — spec §3); any violation raises
+        ``DepsBackwardOnly`` and the whole write rolls back (validated before
+        the delete+insert, and the surrounding ``write_scope`` transaction
+        would roll back the rest of this call's edits too either way).
+        Duplicate ids in the payload are deduped (order-preserving) before
+        validation/insert (M3 final review #3) — a repeated id is not a
+        backward-only violation, so without the dedupe it would reach the
+        insert loop and hit the composite-PK IntegrityError instead.
         """
         pid = int(str(project_id))
         nid = int(str(node_id))
@@ -455,6 +550,43 @@ class ProjectStageNodesRepository:
             )
             if node is None:
                 return None
+
+            # Dependency edges (mig 391, M3 PR-J): validate BEFORE any mutation
+            # below actually persists (the write_scope transaction would roll
+            # everything back on a raise regardless, but failing fast here
+            # keeps the intent obvious). ``dep_ids`` is resolved once and reused
+            # by the delete+insert pass further down.
+            dep_ids: Optional[List[int]] = None
+            if depends_on is not None:
+                # Dedupe first, preserving first-seen order (M3 final review
+                # #3): a payload like ``["30", "30"]`` would otherwise survive
+                # the backward-only check below (duplicates aren't a backward
+                # violation) and reach the insert loop further down, adding
+                # two ``ProjectStageNodeDeps`` rows sharing the same
+                # composite PK (node_id, depends_on_node_id) — an
+                # IntegrityError the router surfaces as a bare 500 instead of
+                # the 422 ``DepsBackwardOnly`` callers expect.
+                raw_dep_ids: List[int] = []
+                for dep in depends_on:
+                    try:
+                        raw_dep_ids.append(int(str(dep)))
+                    except (TypeError, ValueError):
+                        raise DepsBackwardOnly() from None
+                dep_ids = list(dict.fromkeys(raw_dep_ids))
+                sort_order_by_id: Dict[int, int] = {}
+                if dep_ids:
+                    srows = (
+                        await session.execute(
+                            select(ProjectStageNodes.id, ProjectStageNodes.sort_order)
+                            .where(ProjectStageNodes.project_id == pid)
+                            .where(ProjectStageNodes.id.in_(dep_ids))
+                        )
+                    ).all()
+                    sort_order_by_id = {r[0]: r[1] for r in srows}
+                for dep_id in dep_ids:
+                    dep_sort = sort_order_by_id.get(dep_id)
+                    if dep_sort is None or dep_sort >= node.sort_order:
+                        raise DepsBackwardOnly()
 
             if _set_owner:
                 node.owner_user_id = _as_uuid(owner_user_id)
@@ -494,6 +626,17 @@ class ProjectStageNodesRepository:
                             user_id=_as_uuid(m.get("user_id")),
                             agent_id=_as_uuid(m.get("agent_id")),
                         )
+                    )
+
+            if dep_ids is not None:
+                await session.execute(
+                    ProjectStageNodeDeps.__table__.delete().where(
+                        ProjectStageNodeDeps.node_id == nid
+                    )
+                )
+                for dep_id in dep_ids:
+                    session.add(
+                        ProjectStageNodeDeps(node_id=nid, depends_on_node_id=dep_id)
                     )
 
         return await self.get_node(node_id, project_id)
@@ -734,7 +877,11 @@ class ProjectStageNodesRepository:
                 )
                 for m in mrows:
                     members_by_node.setdefault(m.node_id, []).append(_member_row(m))
-            return [_node_row(n, members_by_node.get(n.id, [])) for n in group]
+            deps_by_node = await _deps_by_node(session, group_ids)
+            return [
+                _node_row(n, members_by_node.get(n.id, []), deps_by_node.get(n.id, []))
+                for n in group
+            ]
 
     async def set_current_node_id(
         self, project_id: str, node_id: Optional[str]
