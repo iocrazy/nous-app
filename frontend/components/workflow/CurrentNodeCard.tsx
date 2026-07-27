@@ -25,6 +25,13 @@ interface CurrentNodeCardProps {
   onPatched: () => void;
   onRequestAdvance: (direction: 'forward' | 'back') => void;
   onOpenTodolist: () => void;
+  /** Navigate to this node's dedicated Stage Board (sidebar's Stages block —
+   * see ProjectWorkspace.tsx's `handleOpenStage`), where Run now can actually
+   * open DispatchConfirmDialog inline (WorkspaceStageBoard has the mirror
+   * issue this card doesn't). Optional so the card stays safe standalone
+   * (e.g. in a host that hasn't wired the Stage Board route yet) — falls back
+   * to `onOpenTodolist` when absent. */
+  onOpenStage?: (nodeId: string) => void;
 }
 
 const Row: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
@@ -43,6 +50,7 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
   onPatched,
   onRequestAdvance,
   onOpenTodolist,
+  onOpenStage,
 }) => {
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
@@ -61,6 +69,18 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
     }
   };
 
+  /** Run now: jump to the dedicated Stage Board where the click can actually
+   * open DispatchConfirmDialog inline (it has the mirror issue this card
+   * doesn't). Falls back to Open in Todolist when the host hasn't wired
+   * `onOpenStage` through. */
+  const handleRunNow = () => {
+    if (onOpenStage) {
+      onOpenStage(node.id);
+    } else {
+      onOpenTodolist();
+    }
+  };
+
   return (
     <div
       data-testid="workflow-current-node-card"
@@ -74,19 +94,41 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
           {NODE_STATUS_LABEL[node.status]}
         </span>
         {node.events.suggest_agent_run && node.owner_agent_id && (
-          <button
-            type="button"
-            onClick={onOpenTodolist}
-            data-testid="workflow-suggest-agent-chip"
-            className="ml-auto inline-flex items-center gap-1 rounded-full bg-amber-500/12 px-2.5 py-1 text-[11px] font-medium text-amber-400 transition hover:bg-amber-500/20"
-          >
-            <Bot size={12} />
-            {t('projects.workflow.suggestAgentRun', {
-              agentName:
-                agents.find((a) => a.id === node.owner_agent_id)?.name ??
-                t('projects.workflow.genericAgent'),
-            })}
-          </button>
+          node.metadata?.run_prepared_at ? (
+            // H3: the stage hook already prepared this run (metadata.run_prepared_at
+            // is set) — solid "Run now" button instead of the plain suggest text.
+            // This card has no mirror-issue id to prefill DispatchConfirmDialog with
+            // directly, so a click navigates to the node's Stage Board (which does
+            // have the issue and opens the dialog inline — see WorkspaceStageBoard)
+            // via the optional onOpenStage prop; falls back to Open in Todolist when
+            // the host hasn't wired that route through.
+            <button
+              type="button"
+              onClick={handleRunNow}
+              data-testid="workflow-run-now-chip"
+              className="ml-auto inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium transition"
+              style={{
+                background: 'var(--accent-soft)',
+                color: 'var(--accent-text)',
+              }}
+            >
+              <Bot size={12} /> {t('projects.workflow.runNow')}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onOpenTodolist}
+              data-testid="workflow-suggest-agent-chip"
+              className="ml-auto inline-flex items-center gap-1 rounded-full bg-amber-500/12 px-2.5 py-1 text-[11px] font-medium text-amber-400 transition hover:bg-amber-500/20"
+            >
+              <Bot size={12} />
+              {t('projects.workflow.suggestAgentRun', {
+                agentName:
+                  agents.find((a) => a.id === node.owner_agent_id)?.name ??
+                  t('projects.workflow.genericAgent'),
+              })}
+            </button>
+          )
         )}
       </div>
 

@@ -114,6 +114,14 @@ async def instantiate_project_workflow(
             f"{project_id}: {exc!r}"
         )
 
+    # Best-effort stage-hook prepare (M3 PR-H2) for the project's first active
+    # group — same discipline as the arrival notification above.
+    # enqueue_stage_hook_dispatch() never raises (per-node try/except), so a
+    # hiccup here must never fail project creation.
+    from app.workflows.stage_hook import enqueue_stage_hook_dispatch
+
+    await enqueue_stage_hook_dispatch(str(project_id), group)
+
     return nodes
 
 

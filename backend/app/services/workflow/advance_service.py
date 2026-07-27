@@ -349,6 +349,7 @@ async def execute_advance(
         get_project_stage_nodes_repository,
     )
     from app.repositories.projects_repository import get_projects_repository
+    from app.workflows.stage_hook import enqueue_stage_hook_dispatch
 
     preview = await compute_advance_preview(project_id, user_id, direction)
     if not preview.will_advance:
@@ -405,6 +406,13 @@ async def execute_advance(
                 team_id=team_id,
                 actor_user_id=str(user_id),
             )
+
+        # Best-effort stage-hook prepare (M3 PR-H2): agent-owned nodes in the
+        # newly-arrived group with events.prepare_agent_run get a "run ready"
+        # notification queued behind the confirm gate — never a dispatch.
+        # enqueue_stage_hook_dispatch() never raises (per-node try/except), so
+        # this can never affect the advance's return value or mutations.
+        await enqueue_stage_hook_dispatch(str(project_id), next_group)
     else:
         prev_group = groups[idx - 1]
         await nodes_repo.set_current_node_id(str(project_id), str(prev_group[0]["id"]))

@@ -1722,6 +1722,7 @@
       "schedule": "Schedule",
       "setSchedule": "Set schedule",
       "suggestAgentRun": "Suggested: run {{agentName}}",
+      "runNow": "Run now",
       "deliverable": "Deliverable",
       "openInTodolist": "Open in Todolist",
       "completeStage": "Complete Stage",
@@ -1802,6 +1803,7 @@
         "notifyOnArrival": "Notify on arrival",
         "notifyOnComplete": "Notify on completion",
         "suggestAgentRun": "Suggest agent run on arrival",
+        "prepareAgentRun": "Prepare agent run on arrival",
         "builtinTitle": "Built-in behavior",
         "builtinBody": "Arrival derives the mirror issue; completion closes it. No agent starts automatically."
       },

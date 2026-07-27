@@ -125,6 +125,43 @@ const ADVANCE_PREVIEW = {
   warnings: [],
 };
 
+// Run now (H3/H4) fixtures — node-2 with the stage hook already fired
+// (`metadata.run_prepared_at` set) and `suggest_agent_run` enabled, so the
+// header renders the solid "Run now" button instead of the plain suggest
+// chip. Kept separate from `WORKFLOW`/`STAGE_BOARD_DATA` above (rather than
+// mutating node-2 in place) so the Complete Stage tests keep their original
+// `suggest_agent_run: false` node untouched.
+const RUN_PREPARED_WORKFLOW = {
+  ...WORKFLOW,
+  nodes: [
+    WORKFLOW.nodes[0],
+    node('node-2', 'Storyboard', 1, 'in_progress', {
+      owner_agent_id: AGENT_ID,
+      planned_start: '2026-07-20',
+      planned_due: '2026-07-25',
+      review_required: true,
+      deliverable_required: true,
+      deliverable_label: 'Shot list',
+      folder_id: null,
+      events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+      metadata: { run_prepared_at: '2026-07-24T00:00:00Z' },
+    }),
+    WORKFLOW.nodes[2],
+    WORKFLOW.nodes[3],
+  ],
+};
+
+const RUN_PREPARED_STAGE_BOARD_DATA = {
+  ...STAGE_BOARD_DATA,
+  node: RUN_PREPARED_WORKFLOW.nodes[1],
+};
+
+const DISPATCH_PREVIEW = {
+  will_start: true,
+  agent_id: AGENT_ID,
+  blocked_reason: null,
+};
+
 function json(body: unknown) {
   return (route: Route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
@@ -227,5 +264,52 @@ for (const theme of ['dark', 'light'] as const) {
     await expect(page.getByTestId('workflow-advance-dialog')).toContainText('Editing');
 
     await page.screenshot({ path: `${SHOTS}/11-stage-board-advance-${theme}.png`, fullPage: true });
+  });
+
+  test(`${theme}: Stage Board Run now opens the dispatch confirm dialog, never dispatches`, async ({ page }) => {
+    await setupStageBoardStubs(page);
+    await useEnglishLocale(page);
+    await forceTheme(page, theme);
+
+    // Override the generic workflow/board routes with the run-prepared
+    // node-2 payload — registered after setupStageBoardStubs's routes, so
+    // (same last-registered-wins convention as the rest of this file) these
+    // win for this test only.
+    await page.route('**/api/v1/projects/*/workflow', json(RUN_PREPARED_WORKFLOW));
+    await page.route(
+      '**/api/v1/projects/*/workflow/nodes/*/board',
+      json({ success: true, data: RUN_PREPARED_STAGE_BOARD_DATA }),
+    );
+    await page.route('**/api/v1/issues/*/dispatch-preview', json(DISPATCH_PREVIEW));
+
+    // Registered BEFORE any interaction below — fails the assertion at the
+    // end if the real dispatch POST ever fires. This test only opens the
+    // confirm dialog; it must never click "Start working".
+    let dispatchCalls = 0;
+    await page.route('**/api/v1/issues/*/dispatch', (route) => {
+      dispatchCalls += 1;
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
+    });
+
+    await openWorkspace(page);
+    await page.getByTestId('ws-stage-node-2').click();
+    await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
+
+    // The stage hook already prepared a run → solid "Run now" button, not
+    // the plain suggest chip.
+    const runNowButton = page.getByTestId('stage-board-run-now');
+    await expect(runNowButton).toBeVisible();
+    await expect(page.getByTestId('stage-board-suggest-chip')).toHaveCount(0);
+    await runNowButton.click();
+
+    // DispatchConfirmDialog renders the server-ruled preview; assert it
+    // opened, never confirm it.
+    const dialog = page.getByRole('dialog', { name: 'Confirm dispatch' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('will start working on this issue');
+
+    await page.screenshot({ path: `${SHOTS}/12-stage-board-run-now-${theme}.png`, fullPage: true });
+
+    expect(dispatchCalls).toBe(0);
   });
 }

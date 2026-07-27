@@ -21,6 +21,8 @@ import { Loading } from '../common/Loading';
 import { fetchStageBoard } from '../../services/workflowService';
 import { fetchProjectMembers } from '../../services/projectsService';
 import { aiLibraryService } from '../../services/aiLibraryService';
+import { dispatchIssue, getDispatchPreview, type DispatchPreview } from '../../services/issuesService';
+import { useOptionalToast } from '../Toast';
 import {
   isNodeInActiveGroup,
   isNodeOverdue,
@@ -29,6 +31,7 @@ import {
 } from '../workflow/nodeStatus';
 import type { AgentOption, PersonOption } from '../workflow/OwnerPicker';
 import { DeliverablesZone } from '../Todolist/DeliverablesZone';
+import { DispatchConfirmDialog } from '../Todolist/DispatchConfirmDialog';
 import type { ProjectWorkflow, StageBoardData, StageBoardIssueRef } from '../../types';
 
 interface WorkspaceStageBoardProps {
@@ -72,6 +75,10 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
   onOpenTodolist,
 }) => {
   const { t } = useTranslation();
+  // Optional, not required: this module also mounts in provider-less test
+  // harnesses (WorkspaceStageBoard.test.tsx renders it bare) — a toast on
+  // dispatch failure is a nice-to-have, never a hard dependency.
+  const toast = useOptionalToast();
   const [board, setBoard] = useState<StageBoardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -80,6 +87,14 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
   // this component used to render the raw UUIDs straight from the board fetch).
   const [people, setPeople] = useState<PersonOption[]>([]);
   const [agents, setAgents] = useState<AgentOption[]>([]);
+  // Run now (H3): the stage hook already prepared the run (metadata.run_prepared_at
+  // is set) — clicking opens the SAME dispatch-confirm gate the Todolist uses
+  // (DispatchConfirmDialog), prefilled with this node's mirror issue. Nothing
+  // ever dispatches without the user pressing "Start working" in that dialog.
+  const [dispatchOpen, setDispatchOpen] = useState(false);
+  const [dispatchPreview, setDispatchPreview] = useState<DispatchPreview | null>(null);
+  const [dispatching, setDispatching] = useState(false);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -120,7 +135,11 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
     // shared workflow instance) also refetches THIS board — otherwise the
     // header/status/tasks kept showing the pre-advance snapshot until the user
     // navigated away and back (#final-review item: board refresh on advance).
-  }, [projectId, nodeId, workflow]);
+    // `refreshTick` does the same after a Run now dispatch (H3) — a dispatched
+    // agent run doesn't touch `workflow` at all, so without this the board
+    // would keep showing the pre-dispatch state until the user left and came
+    // back.
+  }, [projectId, nodeId, workflow, refreshTick]);
 
   if (loading) {
     return (
@@ -147,6 +166,50 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
 
   const hasFolder = Boolean(issue && node.folder_id);
 
+  // Run now (H3): only a solid button once the stage hook actually prepared a
+  // run (`metadata.run_prepared_at` set) — before that it's still the plain
+  // E3 suggest text chip (unchanged). Both share the same base gate
+  // (suggest_agent_run && an agent owner); this only decides the chip's look
+  // and what a click does.
+  const runPrepared = Boolean(node.metadata?.run_prepared_at);
+
+  /** Open the confirm gate and ask the server what a dispatch would start —
+   * mirrors IssueDetailView's openDispatchConfirm exactly, just fed from the
+   * board's mirror issue instead of the Todolist's selected issue. Falls back
+   * to "Open in Todolist" when there's no mirror issue to dispatch (a node
+   * whose hook fired before any mirror issue existed, or the lookup failed). */
+  const openRunNow = () => {
+    if (!issue) {
+      onOpenTodolist();
+      return;
+    }
+    setDispatchPreview(null);
+    setDispatchOpen(true);
+    getDispatchPreview(Number(issue.id))
+      .then(setDispatchPreview)
+      .catch((err) => {
+        console.error('[WorkspaceStageBoard] dispatch preview failed', err);
+        toast?.addToast(err instanceof Error ? err.message : t('common.error'), 'error');
+        setDispatchOpen(false);
+      });
+  };
+
+  const confirmRunNow = async () => {
+    if (!issue) return;
+    setDispatching(true);
+    try {
+      await dispatchIssue(Number(issue.id));
+      setDispatchOpen(false);
+      setRefreshTick((v) => v + 1);
+      toast?.addToast('Agent dispatched', 'success');
+    } catch (err) {
+      console.error('[WorkspaceStageBoard] dispatch failed', err);
+      toast?.addToast(err instanceof Error ? err.message : 'Dispatch failed', 'error');
+    } finally {
+      setDispatching(false);
+    }
+  };
+
   return (
     <div data-testid="workspace-stage-board" className="flex flex-col gap-4 py-3">
       {/* ── Node header ──────────────────────────────────────────────────── */}
@@ -161,19 +224,34 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
             {NODE_STATUS_LABEL[node.status]}
           </span>
           {node.events.suggest_agent_run && node.owner_agent_id && (
-            <button
-              type="button"
-              onClick={onOpenTodolist}
-              data-testid="stage-board-suggest-chip"
-              className="ml-auto inline-flex items-center gap-1 rounded-full bg-amber-500/12 px-2.5 py-1 text-[11px] font-medium text-amber-400 transition hover:bg-amber-500/20"
-            >
-              <Bot size={12} />
-              {t('projects.workflow.suggestAgentRun', {
-                agentName:
-                  agents.find((a) => a.id === node.owner_agent_id)?.name ??
-                  t('projects.workflow.genericAgent'),
-              })}
-            </button>
+            runPrepared ? (
+              <button
+                type="button"
+                onClick={openRunNow}
+                data-testid="stage-board-run-now"
+                className="ml-auto inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium transition"
+                style={{
+                  background: 'var(--accent-soft)',
+                  color: 'var(--accent-text)',
+                }}
+              >
+                <Bot size={12} /> {t('projects.workflow.runNow')}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onOpenTodolist}
+                data-testid="stage-board-suggest-chip"
+                className="ml-auto inline-flex items-center gap-1 rounded-full bg-amber-500/12 px-2.5 py-1 text-[11px] font-medium text-amber-400 transition hover:bg-amber-500/20"
+              >
+                <Bot size={12} />
+                {t('projects.workflow.suggestAgentRun', {
+                  agentName:
+                    agents.find((a) => a.id === node.owner_agent_id)?.name ??
+                    t('projects.workflow.genericAgent'),
+                })}
+              </button>
+            )
           )}
         </div>
 
@@ -302,6 +380,20 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
             {t('projects.workflow.completeStage')} <ArrowRight size={13} />
           </button>
         </div>
+      )}
+
+      {dispatchOpen && (
+        <DispatchConfirmDialog
+          preview={dispatchPreview}
+          agentName={
+            (dispatchPreview?.agent_id
+              ? agents.find((a) => a.id === dispatchPreview.agent_id)?.name
+              : undefined) ?? agents.find((a) => a.id === node.owner_agent_id)?.name
+          }
+          confirming={dispatching}
+          onConfirm={() => void confirmRunNow()}
+          onClose={() => setDispatchOpen(false)}
+        />
       )}
     </div>
   );

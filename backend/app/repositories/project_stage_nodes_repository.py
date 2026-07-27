@@ -15,6 +15,10 @@ Discipline:
     (status is a projection of the mirror issue, per spec §6).
   * ``instantiate_from_template`` is idempotent: a project that already owns any
     node is left untouched (returns its existing nodes).
+  * ``set_node_metadata`` is the ONE writer of ``metadata`` (mig 389) — a
+    shallow JSONB merge, never touching ``status``/``events``/schedule
+    columns. The stage-hook workflow (M3 PR-H2) uses it to stamp
+    ``run_prepared_at`` for idempotency.
 """
 
 from __future__ import annotations
@@ -119,6 +123,7 @@ def _node_row(obj: ProjectStageNodes, members: List[Dict[str, Any]]) -> Dict[str
         "folder_id": (str(obj.folder_id) if obj.folder_id is not None else None),
         "completion_policy": obj.completion_policy,
         "events": obj.events,
+        "metadata": obj.metadata_,
         "members": members,
     }
 
@@ -604,6 +609,39 @@ class ProjectStageNodesRepository:
         if row is None:
             return None
         return str(row[0]) if row[0] is not None else None
+
+    async def set_node_metadata(
+        self, node_id: str, patch: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Shallow-merge ``patch`` into a node's ``metadata`` JSONB (mig 389,
+        M3 PR-H2). Free-form business decoration — never touches
+        ``status``/``events``/schedule or any other trigger-/template-owned
+        column. Existing keys not present in ``patch`` are preserved (one
+        level deep — a nested dict value is replaced wholesale, not merged
+        recursively). Returns the merged metadata dict, or None when the node
+        is missing.
+        """
+        nid = int(str(node_id))
+        async with write_scope() as session:
+            node = (
+                (
+                    await session.execute(
+                        select(ProjectStageNodes)
+                        .where(ProjectStageNodes.id == nid)
+                        .limit(1)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if node is None:
+                return None
+            merged = dict(node.metadata_ or {})
+            merged.update(patch)
+            node.metadata_ = merged
+            node.updated_at = datetime.datetime.now(datetime.timezone.utc)
+            await session.flush()
+            return dict(merged)
 
     async def get_active_group(self, project_id: str) -> List[Dict[str, Any]]:
         """The node(s) forming the project's active group.

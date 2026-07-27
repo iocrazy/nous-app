@@ -25,6 +25,9 @@ interface WorkspaceOverviewProps {
   onReloadWorkflow?: () => void;
   onRequestAdvance?: (direction: 'forward' | 'back') => void;
   onOpenTodolist?: () => void;
+  /** Navigate to a node's dedicated Stage Board (H3 Run now chip) — threaded
+   * through to WorkflowSection → CurrentNodeCard. */
+  onOpenStage?: (nodeId: string) => void;
   focusNodeId?: string | null;
 }
 
@@ -39,6 +42,7 @@ export function WorkspaceOverview({
   onReloadWorkflow,
   onRequestAdvance,
   onOpenTodolist,
+  onOpenStage,
   focusNodeId = null,
 }: WorkspaceOverviewProps) {
   const { t } = useTranslation();
@@ -58,6 +62,7 @@ export function WorkspaceOverview({
           onReload={onReloadWorkflow ?? (() => undefined)}
           onRequestAdvance={onRequestAdvance ?? (() => undefined)}
           onOpenTodolist={onOpenTodolist ?? (() => undefined)}
+          onOpenStage={onOpenStage}
           focusNodeId={focusNodeId}
         />
       )}

@@ -9,7 +9,7 @@
  * action bar at all, never a disabled one; an overdue node (past `planned_due`,
  * not done/skipped) gets the same rose "Overdue" mark as CurrentNodeCard.
  */
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { createInstance, type i18n as I18n } from 'i18next';
@@ -60,6 +60,15 @@ vi.mock('../Todolist/DeliverablesZone', () => ({
     return <div data-testid="deliverables-zone-stub" />;
   },
 }));
+
+// H3: Run now opens the real DispatchConfirmDialog, prefetching a preview and
+// (on confirm) dispatching — both hit issuesService, which must be mocked out
+// here the same way it is in IssueDetailView's own test suite.
+const mockIssuesService = vi.hoisted(() => ({
+  getDispatchPreview: vi.fn(),
+  dispatchIssue: vi.fn(),
+}));
+vi.mock('../../services/issuesService', () => mockIssuesService);
 
 function node(over: Partial<ProjectStageNode>): ProjectStageNode {
   return {
@@ -140,6 +149,8 @@ beforeEach(() => {
   mockDeliverablesZone.mockClear();
   mockProjectsService.fetchProjectMembers.mockReset().mockResolvedValue([]);
   mockAiLibraryService.aiLibraryService.listAgents.mockReset().mockResolvedValue([]);
+  mockIssuesService.getDispatchPreview.mockReset();
+  mockIssuesService.dispatchIssue.mockReset();
 });
 
 afterEach(() => {
@@ -375,5 +386,107 @@ describe('WorkspaceStageBoard', () => {
     );
 
     await waitFor(() => expect(mockWorkflowService.fetchStageBoard).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('WorkspaceStageBoard — Run now chip (M3 Task H3)', () => {
+  const issue = {
+    id: '100',
+    identifier: 'ENG-42',
+    title: 'Storyboard mirror issue',
+    status: 'in_progress',
+    assignee: { user_id: null, agent_id: null },
+    sub_issues: [],
+  };
+
+  it('renders the solid Run now button instead of the suggest chip once metadata.run_prepared_at is set', async () => {
+    renderBoard(
+      board({
+        node: node({
+          owner_agent_id: 'agent-1',
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+          metadata: { run_prepared_at: '2026-07-27T00:00:00+00:00' },
+        }),
+        issue,
+      }),
+    );
+
+    expect(await screen.findByTestId('stage-board-run-now')).toHaveTextContent('Run now');
+    expect(screen.queryByTestId('stage-board-suggest-chip')).toBeNull();
+  });
+
+  it('keeps the plain suggest chip when the hook has not fired yet (no run_prepared_at)', async () => {
+    renderBoard(
+      board({
+        node: node({
+          owner_agent_id: 'agent-1',
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+        }),
+        issue,
+      }),
+    );
+
+    expect(await screen.findByTestId('stage-board-suggest-chip')).toBeInTheDocument();
+    expect(screen.queryByTestId('stage-board-run-now')).toBeNull();
+  });
+
+  it('clicking Run now opens DispatchConfirmDialog prefetched with a preview, and confirming calls dispatchIssue — never dispatches on click alone', async () => {
+    mockIssuesService.getDispatchPreview.mockResolvedValue({
+      will_start: true,
+      agent_id: 'agent-1',
+      blocked_reason: null,
+    });
+    mockIssuesService.dispatchIssue.mockResolvedValue({});
+    mockAiLibraryService.aiLibraryService.listAgents.mockResolvedValue([
+      { id: 'agent-1', slug: 'script-ai', name: 'Script Bot' },
+    ]);
+
+    renderBoard(
+      board({
+        node: node({
+          owner_agent_id: 'agent-1',
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+          metadata: { run_prepared_at: '2026-07-27T00:00:00+00:00' },
+        }),
+        issue,
+      }),
+    );
+
+    fireEvent.click(await screen.findByTestId('stage-board-run-now'));
+
+    // The dialog is open and asking the server what a dispatch would start —
+    // dispatch itself must NOT have been called yet.
+    const dialog = await screen.findByRole('dialog', { name: 'Confirm dispatch' });
+    await waitFor(() => expect(mockIssuesService.getDispatchPreview).toHaveBeenCalledWith(100));
+    expect(mockIssuesService.dispatchIssue).not.toHaveBeenCalled();
+    // "Script Bot" also appears in the header's Owner line — scope to the
+    // dialog so this doesn't collide with that other, unrelated match.
+    await within(dialog).findByText(/Script Bot/);
+
+    fireEvent.click(within(dialog).getByText('Start working'));
+
+    await waitFor(() => expect(mockIssuesService.dispatchIssue).toHaveBeenCalledWith(100));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Confirm dispatch' })).toBeNull());
+  });
+
+  it('falls back to Open in Todolist when Run now is clicked but there is no mirror issue to dispatch', async () => {
+    const onOpenTodolist = vi.fn();
+    renderBoard(
+      board({
+        node: node({
+          owner_agent_id: 'agent-1',
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+          metadata: { run_prepared_at: '2026-07-27T00:00:00+00:00' },
+        }),
+        issue: null,
+      }),
+      { onOpenTodolist },
+    );
+
+    fireEvent.click(await screen.findByTestId('stage-board-run-now'));
+
+    expect(onOpenTodolist).toHaveBeenCalledTimes(1);
+    expect(mockIssuesService.getDispatchPreview).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Confirm dispatch' })).toBeNull();
   });
 });

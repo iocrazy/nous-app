@@ -9,10 +9,10 @@ list of user-or-agent refs. Guardrails: a template may hold at most
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # Soft guardrails (spec §3): keep a template from ballooning and a team from
 # hoarding templates. Both surface as 422.
@@ -46,6 +46,20 @@ class WorkflowNodeEvents(BaseModel):
     notify_on_arrival: bool = True
     notify_on_complete: bool = False
     suggest_agent_run: bool = False
+    # mig 389 (M3 PR-H1): arrival hook that pre-fills an agent run without
+    # auto-launching it (H2/H3 territory — this schema only carries the flag).
+    prepare_agent_run: bool = False
+    # mig 389 (M3 PR-H1): reserved for a future "chain into another workflow on
+    # completion" hook. Not implemented yet -- any non-None value is rejected
+    # rather than silently accepted and later ignored.
+    on_complete_workflow: Optional[str] = None
+
+    @field_validator("on_complete_workflow")
+    @classmethod
+    def _on_complete_workflow_not_implemented(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            raise ValueError("on_complete_workflow is not implemented in M3")
+        return v
 
 
 class TemplateNodeIn(BaseModel):
@@ -146,6 +160,17 @@ class NodeOut(BaseModel):
     completion_policy: Literal["owner", "any_editor"] = "owner"
     events: WorkflowNodeEvents = Field(default_factory=WorkflowNodeEvents)
     members: List[NodeMemberOut] = Field(default_factory=list)
+    # mig 389 (M3 PR-H1/H3): node-level metadata JSONB — today the only key
+    # written is ``run_prepared_at`` (ISO timestamp, set by the
+    # stage_hook_dispatch workflow when events.prepare_agent_run fires on
+    # arrival). ProjectStageNodesRepository._node_row already returns this key
+    # (obj.metadata_), but without a declared field here pydantic silently
+    # drops it converting the row dict → NodeOut — the exact same shape of bug
+    # completion_policy/events hit before (see the regression test above this
+    # one in tests/test_workflow_flow_rules.py). Default empty dict so a
+    # pre-mig-389 row (or NodeOut() built with a bare {} row) never crashes a
+    # consumer reading ``node.metadata.get("run_prepared_at")``.
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ProjectWorkflowOut(BaseModel):

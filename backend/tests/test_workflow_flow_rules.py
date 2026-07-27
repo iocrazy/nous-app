@@ -38,6 +38,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from app.models import (
     ProjectStageNodeMembers,
@@ -52,6 +53,7 @@ from app.repositories.workflow_templates_repository import (
     WorkflowTemplatesRepository,
 )
 from app.schemas.issue import IssueStatus, IssueStatusTransition
+from app.schemas.workflow import TemplateNodeIn, WorkflowNodeEvents
 
 issues_router = importlib.import_module("app.api.issues_router")
 
@@ -582,6 +584,10 @@ async def test_get_project_workflow_response_carries_completion_policy_and_event
     assert node_out.events.suggest_agent_run is True
     assert node_out.events.notify_on_arrival is False
     assert node_out.events.notify_on_complete is True
+    # mig 389 (M3 PR-H3): the fixture's node_row predates the metadata column
+    # entirely (no "metadata" key at all) — NodeOut must default to {} rather
+    # than raising, so a pre-mig-389 row never breaks this endpoint.
+    assert node_out.metadata == {}
 
     # Pin the actual response JSON shape too — what the frontend receives.
     payload = result.model_dump()
@@ -590,4 +596,132 @@ async def test_get_project_workflow_response_carries_completion_policy_and_event
         "notify_on_arrival": False,
         "notify_on_complete": True,
         "suggest_agent_run": True,
+        # mig 389 (M3 PR-H1): new hook keys ride the same events blob and
+        # default in when the fixture's DB row predates them (proves the
+        # NodeOut path carries them automatically — no code change needed
+        # per-field, per the brief's self-review note).
+        "prepare_agent_run": False,
+        "on_complete_workflow": None,
     }
+    assert payload["nodes"][0]["metadata"] == {}
+
+
+@pytest.mark.asyncio
+async def test_get_project_workflow_response_carries_metadata_run_prepared_at(
+    monkeypatch,
+):
+    """Regression pin, same shape as the completion_policy/events test above:
+    ``NodeOut`` initially had no ``metadata`` field, so pydantic would silently
+    drop ``ProjectStageNodesRepository._node_row``'s ``"metadata": obj.metadata_``
+    entry converting the row dict → NodeOut, and the Run now chip (H3) would
+    never see ``run_prepared_at`` even though the repository read path already
+    returns it (H1's ``set_node_metadata`` writer)."""
+    node_row = {
+        "id": "1",
+        "project_id": "100",
+        "source_template_node_id": "10",
+        "legacy_stage_id": None,
+        "name": "Script",
+        "sort_order": 1,
+        "parallel_group": None,
+        "status": "in_progress",
+        "owner_user_id": None,
+        "owner_agent_id": "agent-1",
+        "planned_start": None,
+        "planned_due": None,
+        "review_required": False,
+        "deliverable_required": False,
+        "deliverable_label": None,
+        "skipped": False,
+        "folder_id": None,
+        "completion_policy": "owner",
+        "events": {"suggest_agent_run": True, "prepare_agent_run": True},
+        "metadata": {"run_prepared_at": "2026-07-27T00:00:00+00:00"},
+        "members": [],
+    }
+
+    class _NodesRepo:
+        async def list_nodes(self, project_id):
+            return [node_row]
+
+        async def count_running_agent_runs(self, project_id):
+            return 0
+
+    class _ProjectsRepo:
+        async def get_project_by_id(self, project_id):
+            return {"current_node_id": None}
+
+        async def get_project_files(self, project_id):
+            return []
+
+    monkeypatch.setattr(
+        "app.repositories.project_stage_nodes_repository."
+        "get_project_stage_nodes_repository",
+        lambda: _NodesRepo(),
+    )
+    monkeypatch.setattr(
+        "app.repositories.projects_repository.get_projects_repository",
+        lambda: _ProjectsRepo(),
+    )
+
+    projects_router_mod = importlib.import_module("app.api.projects_router")
+    result = await projects_router_mod.get_project_workflow("100", _Auth(_OTHER), None)
+
+    node_out = result.nodes[0]
+    assert node_out.metadata == {"run_prepared_at": "2026-07-27T00:00:00+00:00"}
+
+    payload = result.model_dump()
+    assert payload["nodes"][0]["metadata"] == {
+        "run_prepared_at": "2026-07-27T00:00:00+00:00"
+    }
+
+
+# ── mig 389: WorkflowNodeEvents hook keys (prepare_agent_run / on_complete_workflow) ──
+
+
+def test_prepare_agent_run_round_trips_through_template_node_in_and_node_to_dict():
+    """New hook toggle: must validate through TemplateNodeIn, survive
+    ``events.model_dump()``, and reach ``_node_to_dict``'s payload (the same
+    seam that carries every other events key into the repo write path)."""
+    workflow_templates_router = importlib.import_module(
+        "app.api.workflow_templates_router"
+    )
+
+    node = TemplateNodeIn(
+        name="Script",
+        sort_order=1,
+        events={"prepare_agent_run": True},
+    )
+
+    assert node.events.prepare_agent_run is True
+    dumped = node.events.model_dump()
+    assert dumped["prepare_agent_run"] is True
+
+    payload = workflow_templates_router._node_to_dict(node)
+    assert payload["events"]["prepare_agent_run"] is True
+
+
+def test_on_complete_workflow_none_is_accepted():
+    """The default / explicit None must pass validation untouched."""
+    events = WorkflowNodeEvents(on_complete_workflow=None)
+    assert events.on_complete_workflow is None
+
+    node = TemplateNodeIn(name="Script", sort_order=1)
+    assert node.events.on_complete_workflow is None
+
+
+def test_on_complete_workflow_non_null_rejected_as_not_implemented():
+    """M3 does not implement on_complete_workflow yet -- any non-None value
+    must be rejected with a clear 'not implemented' message (surfaces as a
+    FastAPI 422 through TemplateNodeIn)."""
+    with pytest.raises(ValidationError) as exc:
+        WorkflowNodeEvents(on_complete_workflow="some_workflow_slug")
+
+    assert "not implemented in M3" in str(exc.value)
+
+    with pytest.raises(ValidationError):
+        TemplateNodeIn(
+            name="Script",
+            sort_order=1,
+            events={"on_complete_workflow": "x"},
+        )
