@@ -318,6 +318,10 @@ BLOCK_NOT_MANAGER_OR_EDITOR = "NOT_MANAGER_OR_EDITOR"
 BLOCK_REVIEW_PENDING = "REVIEW_PENDING"
 BLOCK_DELIVERABLE_MISSING = "DELIVERABLE_MISSING"
 BLOCK_NO_NEXT = "NO_NEXT"
+# mig 390 (M3 PR-I): a required form field on a target-group node is unfilled.
+# Parallel to (never confused with) BLOCK_DELIVERABLE_MISSING — a deliverable
+# is a filed file, a form field is a typed value (spec §2).
+BLOCK_FORM_INCOMPLETE = "FORM_INCOMPLETE"
 
 
 class AdvanceNodeRef(BaseModel):
@@ -340,6 +344,9 @@ class AdvancePreview(BaseModel):
     closing: List[AdvanceNodeRef] = Field(default_factory=list)
     creating: List[AdvanceNodeRef] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+    # mig 390 (M3 PR-I): required form-field LABELS (never keys) missing from
+    # the target group when blocked_reason == BLOCK_FORM_INCOMPLETE.
+    missing_fields: List[str] = Field(default_factory=list)
 
 
 class AdvanceRequest(BaseModel):

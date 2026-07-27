@@ -13,6 +13,7 @@ single write transaction; CASCADE removes the old nodes' members.
 from __future__ import annotations
 
 import datetime
+import re
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -81,8 +82,43 @@ def _node_row(
         "duration_days": obj.duration_days,
         "completion_policy": obj.completion_policy,
         "events": obj.events,
+        "form_schema": obj.form_schema,
         "members": members,
     }
+
+
+def _slugify_label(label: str) -> str:
+    """kebab-case a form field's label for use as its ``key``.
+
+    Lowercases, collapses any run of non-alphanumeric characters to a single
+    hyphen, and trims leading/trailing hyphens. A label with no alphanumeric
+    content at all (paranoia — ``FormFieldDef.label`` already rejects a
+    blank/whitespace-only label) falls back to ``"field"`` so a key is never
+    empty.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", label.strip().lower()).strip("-")
+    return slug or "field"
+
+
+def _slugify_field_keys(fields: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Generate each field's ``key`` from its ``label`` (mig 390, M3 PR-I).
+
+    Slugify-then-dedupe WITHIN one node's field list: the first field to claim
+    a slug keeps it bare; each subsequent collision gets a ``-2``, ``-3``, ...
+    suffix (spec: "重复加 -2 序号"). Only the repo write path can guarantee
+    uniqueness across the whole list, so this always regenerates the key from
+    the label rather than trusting whatever (possibly blank) ``key`` rode in
+    on the request.
+    """
+    seen: Dict[str, int] = {}
+    out: List[Dict[str, Any]] = []
+    for field in fields:
+        base = _slugify_label(str(field.get("label", "")))
+        count = seen.get(base, 0) + 1
+        seen[base] = count
+        key = base if count == 1 else f"{base}-{count}"
+        out.append({**field, "key": key})
+    return out
 
 
 def _member_row(obj: WorkflowTemplateNodeMembers) -> Dict[str, Any]:
@@ -288,6 +324,10 @@ class WorkflowTemplatesRepository:
                         node_kwargs["completion_policy"] = nd["completion_policy"]
                     if nd.get("events") is not None:
                         node_kwargs["events"] = nd["events"]
+                    if nd.get("form_schema") is not None:
+                        node_kwargs["form_schema"] = _slugify_field_keys(
+                            nd["form_schema"]
+                        )
                     node = WorkflowTemplateNodes(**node_kwargs)
                     session.add(node)
                     await session.flush()

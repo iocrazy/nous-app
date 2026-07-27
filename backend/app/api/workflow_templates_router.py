@@ -52,6 +52,10 @@ def _node_to_dict(node) -> dict:
         "members": [
             {"user_id": m.user_id, "agent_id": m.agent_id} for m in node.members
         ],
+        # mig 390 (M3 PR-I): key generation (slugify + dedupe) happens in the
+        # repo write path, not here — this only flattens the validated
+        # FormFieldDef list into plain dicts.
+        "form_schema": [f.model_dump() for f in node.form_schema],
     }
 
 

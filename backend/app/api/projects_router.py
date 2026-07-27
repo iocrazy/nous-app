@@ -578,6 +578,8 @@ async def patch_workflow_node(
         ]
     if "skipped" in fields:
         kwargs["skipped"] = payload.skipped
+    if "form_data" in fields and payload.form_data is not None:
+        kwargs["form_data"] = payload.form_data
 
     repo = get_project_stage_nodes_repository()
     row = await repo.update_node(node_id, project_id, **kwargs)

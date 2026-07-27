@@ -27,6 +27,7 @@ from loguru import logger
 from app.core.workflow_roles import WRITE_ROLES, resolve_effective_role
 from app.schemas.workflow import (
     BLOCK_DELIVERABLE_MISSING,
+    BLOCK_FORM_INCOMPLETE,
     BLOCK_NO_NEXT,
     BLOCK_NOT_MANAGER_OR_EDITOR,
     BLOCK_REVIEW_PENDING,
@@ -198,6 +199,42 @@ async def _deliverable_present(project_id: str, node: Dict[str, Any]) -> bool:
     return len(files) > 0
 
 
+def _form_incomplete(node: Dict[str, Any]) -> List[str]:
+    """Missing REQUIRED form-field LABELS for one node (mig 390, M3 PR-I).
+
+    Required-fill rules by field type (spec §2):
+      - text/textarea/select/date: the value must be a non-empty string
+        (missing key counts as empty)
+      - number: the KEY must be present in ``form_data`` — ``0`` counts as
+        filled, so this is a presence check, not a truthiness check
+      - checkbox: the value must be exactly ``True`` — ``False`` (or a
+        missing key) does not satisfy a required checkbox
+
+    A field with ``required`` falsy is never checked. A node with no
+    ``form_schema`` (or an empty one — e.g. every pre-mig-390 node) always
+    returns ``[]``, so this is zero-impact for the existing workflow.
+    """
+    schema = node.get("form_schema") or []
+    data = node.get("form_data") or {}
+    missing: List[str] = []
+    for field in schema:
+        if not field.get("required"):
+            continue
+        key = field.get("key")
+        label = field.get("label") or key or ""
+        ftype = field.get("type")
+        if ftype == "number":
+            filled = key in data
+        elif ftype == "checkbox":
+            filled = data.get(key) is True
+        else:  # text, textarea, select, date
+            value = data.get(key)
+            filled = isinstance(value, str) and bool(value.strip())
+        if not filled:
+            missing.append(label)
+    return missing
+
+
 async def _open_subissue_warnings(
     project_id: str, group: List[Dict[str, Any]]
 ) -> List[str]:
@@ -294,7 +331,21 @@ async def _preview_forward(
             closing=[_node_ref(n) for n in active],
         )
 
-    # Gate 3: a next group must exist.
+    # Gate 3: required form fields must be filled (mig 390, M3 PR-I) — parallel
+    # to (never confused with) gate 2's deliverable-file check.
+    missing_fields: List[str] = []
+    for n in active:
+        missing_fields.extend(_form_incomplete(n))
+    if missing_fields:
+        return AdvancePreview(
+            direction="forward",
+            will_advance=False,
+            blocked_reason=BLOCK_FORM_INCOMPLETE,
+            closing=[_node_ref(n) for n in active],
+            missing_fields=missing_fields,
+        )
+
+    # Gate 4: a next group must exist.
     if idx + 1 >= len(groups):
         return AdvancePreview(
             direction="forward",

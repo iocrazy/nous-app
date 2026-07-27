@@ -21,13 +21,25 @@ Five surfaces under test (per the task brief):
      default, which is ``extra="ignore"``): passing ``form_schema`` to the
      constructor does not raise, but it is dropped, not stored — proven by
      checking both ``model_fields`` (declared) and ``model_dump()`` (dumped).
+
+A sixth surface (mig 390, M3 PR-I task I2, FakeSession-backed — same house
+pattern as ``test_workflow_flow_rules.py``): ``ProjectStageNodesRepository.
+update_node``'s ``form_data`` merge is WHITELIST-filtered against the node's
+OWN ``form_schema`` before merging — a key the client sends that the node's
+schema doesn't declare is dropped silently, never persisted, and never
+clobbers a previously-set key it doesn't mention.
 """
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from typing import Any, List
+
 import pytest
 from pydantic import ValidationError
 
+from app.models import ProjectStageNodes
+from app.repositories.project_stage_nodes_repository import ProjectStageNodesRepository
 from app.schemas.workflow import (
     MAX_FORM_FIELDS,
     FormFieldDef,
@@ -199,3 +211,152 @@ def test_node_patch_ignores_form_schema_kwarg_silently():
 def test_node_patch_form_data_optional_defaults_none():
     patch = NodePatch()
     assert patch.form_data is None
+
+
+# ── update_node: form_data merge is whitelist-filtered against form_schema ──
+
+
+class _Result:
+    """Wraps a canned row list for the ``.scalars().first()`` access pattern
+    ``update_node`` uses to fetch the node — same tiny helper duplicated
+    across the FakeSession-backed test modules (test_workflow_flow_rules.py,
+    test_workflow_instantiation.py)."""
+
+    def __init__(self, rows: List[Any]):
+        self._rows = list(rows)
+
+    def scalars(self) -> "_Result":
+        return self
+
+    def first(self) -> Any:
+        return self._rows[0] if self._rows else None
+
+
+def _write_scope_with(session: Any):
+    @asynccontextmanager
+    async def _scope():
+        yield session
+
+    return _scope
+
+
+class _NodeFakeSession:
+    """Just enough to drive ``update_node``'s single node-select — no
+    members/schedule branch is exercised by these tests, so exactly one
+    ``execute`` call happens."""
+
+    def __init__(self, node: ProjectStageNodes):
+        self._node = node
+
+    async def execute(self, stmt: Any) -> _Result:
+        return _Result([self._node])
+
+
+def _live_node(*, form_schema, form_data) -> ProjectStageNodes:
+    return ProjectStageNodes(
+        id=10,
+        project_id=50,
+        source_template_node_id=None,
+        legacy_stage_id=None,
+        name="Draft",
+        sort_order=1,
+        parallel_group=None,
+        status="pending",
+        owner_user_id=None,
+        owner_agent_id=None,
+        planned_start=None,
+        planned_due=None,
+        review_required=False,
+        deliverable_required=False,
+        deliverable_label=None,
+        skipped=False,
+        completion_policy="owner",
+        events={
+            "notify_on_arrival": True,
+            "notify_on_complete": False,
+            "suggest_agent_run": False,
+        },
+        form_schema=form_schema,
+        form_data=form_data,
+    )
+
+
+async def _install_and_call(monkeypatch, node: ProjectStageNodes, **update_kwargs):
+    import app.repositories.project_stage_nodes_repository as mod
+
+    monkeypatch.setattr(mod, "write_scope", _write_scope_with(_NodeFakeSession(node)))
+
+    repo = ProjectStageNodesRepository()
+
+    async def _fake_get_node(node_id, project_id):
+        return {"sentinel": True}
+
+    monkeypatch.setattr(repo, "get_node", _fake_get_node)
+
+    result = await repo.update_node("10", "50", **update_kwargs)
+    assert result == {"sentinel": True}  # proves get_node's return value ships through
+    return node
+
+
+@pytest.mark.asyncio
+async def test_update_node_drops_unknown_form_data_key(monkeypatch):
+    node = _live_node(
+        form_schema=[
+            {"key": "notes", "label": "Notes", "type": "text", "required": True}
+        ],
+        form_data={},
+    )
+
+    await _install_and_call(
+        monkeypatch, node, form_data={"notes": "hello", "bogus_key": "dropped"}
+    )
+
+    assert node.form_data == {"notes": "hello"}
+
+
+@pytest.mark.asyncio
+async def test_update_node_merges_without_clobbering_untouched_keys(monkeypatch):
+    node = _live_node(
+        form_schema=[
+            {"key": "notes", "label": "Notes", "type": "text", "required": True},
+            {"key": "count", "label": "Count", "type": "number", "required": False},
+        ],
+        form_data={"notes": "old", "count": 3},
+    )
+
+    await _install_and_call(monkeypatch, node, form_data={"notes": "new"})
+
+    # notes updated; count (not mentioned in this patch) survives untouched.
+    assert node.form_data == {"notes": "new", "count": 3}
+
+
+@pytest.mark.asyncio
+async def test_update_node_no_form_schema_drops_every_key(monkeypatch):
+    """A node with an empty form_schema (e.g. pre-mig-390, or simply a node
+    with no form configured) has no allowed keys at all — any form_data patch
+    is entirely dropped, never persisted. Zero impact on a workflow that
+    never touches this feature."""
+    node = _live_node(form_schema=[], form_data={})
+
+    await _install_and_call(monkeypatch, node, form_data={"anything": "value"})
+
+    assert node.form_data == {}
+
+
+@pytest.mark.asyncio
+async def test_update_node_without_form_data_kwarg_leaves_form_data_untouched(
+    monkeypatch,
+):
+    """form_data=None (the default — caller didn't touch it) must not run the
+    merge at all, so a node's existing form_data survives a PATCH that only
+    changes e.g. skipped."""
+    node = _live_node(
+        form_schema=[
+            {"key": "notes", "label": "Notes", "type": "text", "required": True}
+        ],
+        form_data={"notes": "existing"},
+    )
+
+    await _install_and_call(monkeypatch, node, skipped=True)
+
+    assert node.form_data == {"notes": "existing"}

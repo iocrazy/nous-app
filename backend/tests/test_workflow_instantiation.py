@@ -13,18 +13,33 @@ plan calls the "method matrix" (spec §2/§3, team-lead B1 note in
 Canvas/Shooting's skip state over a template's ``skip_default``, plus the
 date/uuid/serialization boundary helpers that guard the isoformat-string and
 UUID-coercion footguns documented in CLAUDE.md.
+
+Also covered here (mig 390, M3 PR-I task I2): a FakeSession-backed test that
+``instantiate_from_template`` copies ``form_schema`` verbatim from the
+template node onto the instance, while ``form_data`` starts empty — the same
+FakeSession house pattern (statement construction/add/flush really run, only
+SQL execution is faked) already used for completion_policy/events in
+``test_workflow_flow_rules.py``'s ``test_instantiate_copies_completion_policy_and_events``.
 """
 
 from __future__ import annotations
 
 import datetime
 import uuid
+from contextlib import asynccontextmanager
+from typing import Any, Dict, List
 
 import pytest
 
+from app.models import (
+    ProjectStageNodeMembers,
+    ProjectStageNodes,
+    WorkflowTemplateNodes,
+)
 from app.repositories.project_stage_nodes_repository import (
     _SLUG_CANVAS,
     _SLUG_SHOOTING,
+    ProjectStageNodesRepository,
     _as_uuid,
     _require_date,
     _resolve_skip,
@@ -131,3 +146,144 @@ def test_require_date_rejects_iso_string():
 def test_require_date_rejects_other_types():
     with pytest.raises(TypeError):
         _require_date(1721433600, "planned_due")
+
+
+# ── FakeSession-backed: instantiate copies form_schema (mig 390, M3 PR-I) ───
+
+
+class _Result:
+    """Wraps a canned/dynamic row list — same tiny helper as
+    ``test_workflow_flow_rules.py``'s ``_Result``, duplicated here so this
+    module stays self-contained."""
+
+    def __init__(self, rows: List[Any]):
+        self._rows = list(rows)
+
+    def scalars(self) -> "_Result":
+        return self
+
+    def all(self) -> List[Any]:
+        return list(self._rows)
+
+    def first(self) -> Any:
+        return self._rows[0] if self._rows else None
+
+
+def _write_scope_with(session: Any):
+    @asynccontextmanager
+    async def _scope():
+        yield session
+
+    return _scope
+
+
+class _InstantiateFakeSession:
+    """Deterministic, call-order-based fake for one full
+    ``instantiate_from_template`` pass (method=None, non-empty template, no
+    overrides). See ``test_workflow_flow_rules.py``'s class of the same name
+    for the full call-order rationale — duplicated here (not imported) so this
+    module keeps its documented "pure-unit, no cross-file coupling" shape."""
+
+    def __init__(self, tpl_nodes: List[WorkflowTemplateNodes]):
+        self._tpl_nodes = tpl_nodes
+        self.added: List[Any] = []
+        self._next_id = 9500
+        self._calls = 0
+
+    def add(self, obj: Any) -> None:
+        self.added.append(obj)
+
+    async def flush(self) -> None:
+        for obj in self.added:
+            if getattr(obj, "id", None) is None:
+                obj.id = self._next_id
+                self._next_id += 1
+
+    async def execute(self, stmt: Any) -> _Result:
+        await self.flush()
+        self._calls += 1
+        if self._calls == 1:
+            return _Result([])  # existing-nodes check -> not yet instantiated
+        if self._calls == 2:
+            return _Result(self._tpl_nodes)  # template nodes select
+        if self._calls == 3:
+            return _Result([])  # template node-members select
+        if self._calls == 4:
+            return _Result([])  # node-bank slug map select
+        if self._calls == 5:
+            nodes = [o for o in self.added if isinstance(o, ProjectStageNodes)]
+            nodes.sort(key=lambda n: n.sort_order)
+            return _Result(nodes)
+        if self._calls == 6:
+            members = [o for o in self.added if isinstance(o, ProjectStageNodeMembers)]
+            return _Result(members)
+        raise AssertionError(f"unexpected extra session.execute call #{self._calls}")
+
+
+def _tpl_node_with_form_schema(
+    *, node_id: int, sort_order: int, form_schema: List[Dict[str, Any]]
+) -> WorkflowTemplateNodes:
+    return WorkflowTemplateNodes(
+        id=node_id,
+        template_id=1,
+        name=f"node-{node_id}",
+        sort_order=sort_order,
+        parallel_group=None,
+        default_owner_user_id=None,
+        default_owner_agent_id=None,
+        skip_default=False,
+        review_required=False,
+        deliverable_required=False,
+        deliverable_label=None,
+        source_stage_id=None,
+        duration_days=None,
+        completion_policy="owner",
+        events={
+            "notify_on_arrival": True,
+            "notify_on_complete": False,
+            "suggest_agent_run": False,
+        },
+        form_schema=form_schema,
+    )
+
+
+@pytest.mark.asyncio
+async def test_instantiate_copies_form_schema_verbatim_and_form_data_starts_empty(
+    monkeypatch,
+):
+    schema = [
+        {"key": "notes", "label": "Notes", "type": "text", "required": True},
+        {
+            "key": "approved",
+            "label": "Approved",
+            "type": "checkbox",
+            "required": True,
+        },
+    ]
+    tpl_nodes = [
+        _tpl_node_with_form_schema(node_id=1, sort_order=1, form_schema=schema),
+        _tpl_node_with_form_schema(node_id=2, sort_order=2, form_schema=[]),
+    ]
+    session = _InstantiateFakeSession(tpl_nodes)
+
+    import app.repositories.project_stage_nodes_repository as mod
+
+    monkeypatch.setattr(mod, "write_scope", _write_scope_with(session))
+
+    repo = ProjectStageNodesRepository()
+    result = await repo.instantiate_from_template("50", "1")
+
+    assert len(result) == 2
+    by_sort = {n["sort_order"]: n for n in result}
+    # form_schema copied verbatim from the template node...
+    assert by_sort[1]["form_schema"] == schema
+    # ...while form_data is never passed as a constructor kwarg at all (same
+    # "omit, don't pass an explicit None/{}" idiom as completion_policy/events
+    # in test_workflow_flow_rules.py's *_omits_kwargs test) — the transient
+    # ORM object reads back None here, proving reliance on the DB
+    # server_default ('{}'::jsonb) rather than a Python-side default.
+    assert by_sort[1]["form_data"] is None
+    # A template node with an empty form_schema copies an empty list, not None
+    # or some other falsy sentinel — proving the copy is unconditional, not
+    # gated on "only when non-empty".
+    assert by_sort[2]["form_schema"] == []
