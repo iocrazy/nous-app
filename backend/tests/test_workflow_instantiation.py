@@ -46,7 +46,6 @@ from app.repositories.project_stage_nodes_repository import (
     _s,
 )
 
-
 # ── method matrix: _resolve_skip (spec §2 — Canvas 常驻不可关, Shooting 按 method) ──
 
 
@@ -181,8 +180,10 @@ class _InstantiateFakeSession:
     """Deterministic, call-order-based fake for one full
     ``instantiate_from_template`` pass (method=None, non-empty template, no
     overrides). See ``test_workflow_flow_rules.py``'s class of the same name
-    for the full call-order rationale — duplicated here (not imported) so this
-    module keeps its documented "pure-unit, no cross-file coupling" shape."""
+    for the full call-order rationale (now 8 calls — mig 391, M3 PR-J added a
+    template-deps read and a final-deps read) — duplicated here (not
+    imported) so this module keeps its documented "pure-unit, no cross-file
+    coupling" shape."""
 
     def __init__(self, tpl_nodes: List[WorkflowTemplateNodes]):
         self._tpl_nodes = tpl_nodes
@@ -209,14 +210,18 @@ class _InstantiateFakeSession:
         if self._calls == 3:
             return _Result([])  # template node-members select
         if self._calls == 4:
-            return _Result([])  # node-bank slug map select
+            return _Result([])  # template node-deps select (mig 391, M3 PR-J)
         if self._calls == 5:
+            return _Result([])  # node-bank slug map select
+        if self._calls == 6:
             nodes = [o for o in self.added if isinstance(o, ProjectStageNodes)]
             nodes.sort(key=lambda n: n.sort_order)
             return _Result(nodes)
-        if self._calls == 6:
+        if self._calls == 7:
             members = [o for o in self.added if isinstance(o, ProjectStageNodeMembers)]
             return _Result(members)
+        if self._calls == 8:
+            return _Result([])  # final deps listing (mig 391, M3 PR-J)
         raise AssertionError(f"unexpected extra session.execute call #{self._calls}")
 
 

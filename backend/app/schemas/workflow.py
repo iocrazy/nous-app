@@ -128,6 +128,20 @@ class TemplateNodeIn(BaseModel):
     # instantiate-then-freeze idiom as completion_policy/events above. ``key``
     # dedup/slugify happens in the repo write path (I2), not here.
     form_schema: List[FormFieldDef] = Field(default_factory=list)
+    # Dependency edges (mig 391, M3 PR-J). ⚠️ PAYLOAD-INDEX CONTRACT, not node
+    # ids: ``TemplateUpdate.nodes`` is a FULL replacement on every save
+    # (workflow_templates_repository.update_template deletes every existing
+    # node and reinserts the whole list — see that method), so a node's real
+    # DB id is never stable across two saves and TemplateNodeIn carries no
+    # ``id`` field for the caller to reference in the first place. Each string
+    # here MUST be the stringified 0-based INDEX of another node within THIS
+    # SAME ``nodes`` list (e.g. "0", "1", ...) — never a previously-returned
+    # node id. The repo resolves indices to freshly-created ids after insert
+    # (see ``_validate_deps_backward`` / the id_by_index map in
+    # ``update_template``). A caller loading an existing template for editing
+    # must convert the ids it got back from GET into positions within the
+    # array it is about to submit before populating this field.
+    depends_on: List[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _owner_xor(self) -> "TemplateNodeIn":
@@ -233,6 +247,14 @@ class NodeOut(BaseModel):
     # drops it converting the repo row dict → NodeOut.
     form_schema: List[FormFieldDef] = Field(default_factory=list)
     form_data: Dict[str, Any] = Field(default_factory=dict)
+    # mig 391 (M3 PR-J): dependency edges — instance node ids (real snowflake
+    # ids, NOT payload indices; unlike the template side, an instance node's
+    # id is stable once created) this node depends on. Same "declare it or
+    # pydantic silently drops it" reason as metadata/form_schema above.
+    # Instance-node-field convention (controller ruling, J-wave): optional +
+    # default-empty so a pre-mig-391 row (or a bare-dict NodeOut) never
+    # crashes a consumer reading ``node.depends_on``.
+    depends_on: List[str] = Field(default_factory=list)
 
 
 class ProjectWorkflowOut(BaseModel):
@@ -261,6 +283,15 @@ class NodePatch(BaseModel):
     # change what fields exist. ``form_schema`` therefore has no place on this
     # patch model at all (see test_workflow_form_schema.py).
     form_data: Optional[Dict[str, Any]] = None
+    # mig 391 (M3 PR-J): dependency edges are instance STRUCTURE (like members/
+    # add/delete), not template config, so they full-replace on an instance
+    # PATCH — unlike form_schema, which is frozen at instantiation. Values are
+    # real instance node ids (this node's live project siblings), never
+    # payload indices (contrast TemplateNodeIn.depends_on). Backward-only
+    # (sort_order strictly smaller) is validated against the DB in
+    # ProjectStageNodesRepository.update_node — a schema-level check can't see
+    # sibling sort_order values.
+    depends_on: Optional[List[str]] = None
 
     @model_validator(mode="after")
     def _owner_xor(self) -> "NodePatch":
@@ -306,6 +337,26 @@ class NodeDeleteBlocked(Exception):
     """Raised by the delete guard with a machine reason (router → 409)."""
 
     def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+# Dependency-edge validation (mig 391, M3 PR-J). Shared by BOTH the template
+# full-replace path (workflow_templates_repository._validate_deps_backward)
+# and the instance PATCH path (project_stage_nodes_repository.update_node) —
+# a depends_on target must exist and have a strictly smaller sort_order than
+# the dependent node; a self-reference always fails this (its own sort_order
+# is never smaller than itself) and shares the same code (spec §3: "自依赖同
+# 罪"). Router maps this to 422, code envelope matches the existing
+# {"code": ..., "message": ...} shape (see episodes_router.delete_episode).
+DEP_BACKWARD_ONLY = "DEP_BACKWARD_ONLY"
+
+
+class DepsBackwardOnly(Exception):
+    """Raised by the deps validator (repo layer) on any backward-only
+    violation (missing target / self-dep / forward dep). Router → 422."""
+
+    def __init__(self, reason: str = DEP_BACKWARD_ONLY) -> None:
         super().__init__(reason)
         self.reason = reason
 
