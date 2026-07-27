@@ -17,6 +17,7 @@ const BLOCKED_KEY: Record<AdvanceBlockedReason, string> = {
   NOT_MANAGER_OR_EDITOR: 'projects.workflow.confirm.blockedNotManager',
   REVIEW_PENDING: 'projects.workflow.confirm.blockedReviewPending',
   DELIVERABLE_MISSING: 'projects.workflow.confirm.blockedDeliverableMissing',
+  FORM_INCOMPLETE: 'projects.workflow.confirm.blockedFormIncomplete',
   NO_NEXT: 'projects.workflow.confirm.blockedNoNext',
 };
 
@@ -77,10 +78,18 @@ export const AdvanceConfirmDialog: React.FC<AdvanceConfirmDialogProps> = ({
           {preview === null ? (
             <p className="text-ink-500">Checking what this would do…</p>
           ) : blocked ? (
-            <p className="flex items-start gap-2 text-ink-300">
-              <TriangleAlert size={15} className="mt-px shrink-0 text-amber-400" />
-              {t(BLOCKED_KEY[blocked])}
-            </p>
+            <div className="flex flex-col gap-3">
+              <p className="flex items-start gap-2 text-ink-300">
+                <TriangleAlert size={15} className="mt-px shrink-0 text-amber-400" />
+                {t(BLOCKED_KEY[blocked])}
+              </p>
+              {blocked === 'FORM_INCOMPLETE' && (preview?.missing_fields.length ?? 0) > 0 && (
+                <RulingRow
+                  label={t('projects.workflow.confirm.missingFields')}
+                  names={preview?.missing_fields ?? []}
+                />
+              )}
+            </div>
           ) : (
             <div className="flex flex-col gap-3">
               {preview.closing.length > 0 && (

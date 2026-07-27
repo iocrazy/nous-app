@@ -1765,7 +1765,9 @@
         "blockedNotManager": "只有管理者或编辑可以推进此工作流。",
         "blockedReviewPending": "当前阶段仍需审阅后才能推进。",
         "blockedDeliverableMissing": "当前阶段的交付物文件夹为空，请先归档后再推进。",
-        "blockedNoNext": "这已是最后一个阶段，没有可推进的下一步。"
+        "blockedFormIncomplete": "还有必填的表单字段尚未填写。",
+        "blockedNoNext": "这已是最后一个阶段，没有可推进的下一步。",
+        "missingFields": "缺失字段"
       },
       "deliverables": {
         "title": "交付物",
@@ -1830,8 +1832,12 @@
       "stageBoard": {
         "tasks": "任务",
         "deliverables": "交付物",
-        "noIssue": "尚无镜像任务"
-      }
+        "noIssue": "尚无镜像任务",
+        "form": "表单",
+        "selectPlaceholder": "选择一个选项"
+      },
+      "form": "表单",
+      "formFilled": "已填 {{filled}}/{{total}}"
     }
   },
   "storyboard": {

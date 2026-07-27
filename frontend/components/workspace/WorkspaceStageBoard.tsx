@@ -18,7 +18,7 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowRight, Bot, ExternalLink, FileCheck2, User } from 'lucide-react';
 import { Loading } from '../common/Loading';
-import { fetchStageBoard } from '../../services/workflowService';
+import { fetchStageBoard, updateProjectNode } from '../../services/workflowService';
 import { fetchProjectMembers } from '../../services/projectsService';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { dispatchIssue, getDispatchPreview, type DispatchPreview } from '../../services/issuesService';
@@ -32,6 +32,7 @@ import {
 import type { AgentOption, PersonOption } from '../workflow/OwnerPicker';
 import { DeliverablesZone } from '../Todolist/DeliverablesZone';
 import { DispatchConfirmDialog } from '../Todolist/DispatchConfirmDialog';
+import { StageNodeForm } from './StageNodeForm';
 import type { ProjectWorkflow, StageBoardData, StageBoardIssueRef } from '../../types';
 
 interface WorkspaceStageBoardProps {
@@ -194,6 +195,24 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
       });
   };
 
+  /** Deliverable-form field save (task I4, spec §2) — a single-key PATCH
+   * (`{ form_data: { [key]: value } }`); the server merges it into the
+   * node's existing form_data (whitelisted to this node's own form_schema),
+   * so this never clobbers a sibling field. The response carries the FULL
+   * updated node — swapped into `board` directly, same idiom as the header's
+   * owner/schedule edits elsewhere in this workflow (#1400: nothing here
+   * decides the advance gate, it only feeds `form_data` for the server's
+   * FORM_INCOMPLETE predicate to read). */
+  const handleFormSave = async (patch: Record<string, unknown>) => {
+    try {
+      const updated = await updateProjectNode(projectId, node.id, { form_data: patch });
+      setBoard((prev) => (prev ? { ...prev, node: updated } : prev));
+    } catch (err) {
+      console.error('[WorkspaceStageBoard] form save failed', err);
+      toast?.addToast(err instanceof Error ? err.message : t('common.error'), 'error');
+    }
+  };
+
   const confirmRunNow = async () => {
     if (!issue) return;
     setDispatching(true);
@@ -319,6 +338,14 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
           <ExternalLink size={13} /> {t('projects.workflow.openInTodolist')}
         </button>
       </div>
+
+      {/* ── Deliverable form — schema empty (pre-mig-390 / no Form tab) → absent ── */}
+      <StageNodeForm
+        schema={node.form_schema ?? []}
+        data={node.form_data ?? {}}
+        disabled={!canWrite}
+        onSave={handleFormSave}
+      />
 
       {/* ── Deliverables ─────────────────────────────────────────────────── */}
       <div data-testid="stage-board-deliverables" className="rounded-xl border border-line bg-island p-4">

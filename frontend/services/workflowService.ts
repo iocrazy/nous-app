@@ -96,6 +96,11 @@ const normalizeInstanceNode = (
   // `node.metadata?.run_prepared_at` and must never see `undefined` blow up
   // into a crash, just an absent key.
   metadata: node.metadata ?? {},
+  // mig 390 (M3 PR-I §2, task I4): same tolerance for a pre-mig-390 row —
+  // StageNodeForm/CurrentNodeCard's form-count row iterate these directly
+  // and must never see `undefined`.
+  form_schema: node.form_schema ?? [],
+  form_data: node.form_data ?? {},
 });
 
 // ============================================

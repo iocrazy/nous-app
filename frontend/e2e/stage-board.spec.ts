@@ -162,6 +162,21 @@ const DISPATCH_PREVIEW = {
   blocked_reason: null,
 };
 
+// Deliverable-form fixtures (mig 390, M3 PR-I §2, task I4) — node-2 with a
+// two-field form_schema (one required, unfilled), kept separate from
+// STAGE_BOARD_DATA/WORKFLOW above (rather than mutating node-2 in place) so
+// the Complete Stage / Run now tests keep their original schema-less node
+// untouched (spec §2: schema empty → StageNodeForm renders nothing at all).
+const FORM_SCHEMA = [
+  { key: 'summary', label: 'Summary', type: 'text', required: true },
+  { key: 'notes', label: 'Notes', type: 'textarea', required: false },
+];
+
+const FORM_STAGE_BOARD_DATA = {
+  ...STAGE_BOARD_DATA,
+  node: { ...STAGE_BOARD_DATA.node, form_schema: FORM_SCHEMA, form_data: {} },
+};
+
 function json(body: unknown) {
   return (route: Route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
@@ -311,5 +326,95 @@ for (const theme of ['dark', 'light'] as const) {
     await page.screenshot({ path: `${SHOTS}/12-stage-board-run-now-${theme}.png`, fullPage: true });
 
     expect(dispatchCalls).toBe(0);
+  });
+
+  test(`${theme}: Stage Board form — filling a field PATCHes only that key (task I4)`, async ({ page }) => {
+    await setupStageBoardStubs(page);
+    await useEnglishLocale(page);
+    await forceTheme(page, theme);
+
+    // Override the board fetch with the form-bearing node — registered after
+    // setupStageBoardStubs's routes (last-registered-wins convention).
+    await page.route(
+      '**/api/v1/projects/*/workflow/nodes/*/board',
+      json({ success: true, data: FORM_STAGE_BOARD_DATA }),
+    );
+
+    // Capture the node PATCH — distinct path from `.../board` above (glob
+    // `*` doesn't cross `/`), so registration order between the two doesn't
+    // matter; every non-PATCH method falls back untouched.
+    let patchBody: Record<string, unknown> | null = null;
+    await page.route('**/api/v1/projects/*/workflow/nodes/*', async (route) => {
+      const req = route.request();
+      if (req.method() !== 'PATCH') {
+        await route.fallback();
+        return;
+      }
+      patchBody = req.postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: { ...FORM_STAGE_BOARD_DATA.node, form_data: patchBody?.form_data ?? {} },
+        }),
+      });
+    });
+
+    await openWorkspace(page);
+    await page.getByTestId('ws-stage-node-2').click();
+    await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
+
+    const form = page.getByTestId('stage-node-form');
+    await expect(form).toBeVisible();
+    // Required, unfilled field — badge marks it before any input.
+    await expect(page.getByTestId('stage-form-required-summary')).toHaveAttribute('data-filled', 'false');
+
+    const summaryField = page.getByTestId('stage-form-field-summary');
+    await summaryField.fill('Q3 recap');
+    await summaryField.blur();
+
+    await expect.poll(() => patchBody).toEqual({ form_data: { summary: 'Q3 recap' } });
+    // Badge flips once the server echoes the saved value back into the node.
+    await expect(page.getByTestId('stage-form-required-summary')).toHaveAttribute('data-filled', 'true');
+
+    await page.screenshot({ path: `${SHOTS}/13-stage-board-form-${theme}.png`, fullPage: true });
+  });
+
+  test(`${theme}: Stage Board Complete Stage surfaces FORM_INCOMPLETE with the missing field labels (task I4)`, async ({ page }) => {
+    await setupStageBoardStubs(page);
+    await useEnglishLocale(page);
+    await forceTheme(page, theme);
+
+    await page.route(
+      '**/api/v1/projects/*/advance-preview*',
+      json({
+        direction: 'forward',
+        will_advance: false,
+        blocked_reason: 'FORM_INCOMPLETE',
+        closing: [],
+        creating: [],
+        warnings: [],
+        missing_fields: ['Summary'],
+      }),
+    );
+
+    await openWorkspace(page);
+    await page.getByTestId('ws-stage-node-2').click();
+    await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
+
+    const completeButton = page.getByTestId('stage-board-complete');
+    await expect(completeButton).toBeVisible();
+    await completeButton.click();
+
+    const dialog = page.getByTestId('workflow-advance-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("Some required form fields aren't filled in yet.");
+    await expect(dialog).toContainText('Summary');
+    // Blocked ruling never renders a confirm button (#1400: no path forward
+    // until the server's own predicate clears).
+    await expect(page.getByTestId('workflow-advance-confirm')).toHaveCount(0);
+
+    await page.screenshot({ path: `${SHOTS}/14-stage-board-form-incomplete-${theme}.png`, fullPage: true });
   });
 }
