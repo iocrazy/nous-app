@@ -7,6 +7,7 @@ finished segments concat through ffmpeg into one film, registered through the
 generated-media store. Failures raise (route C).
 """
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -17,6 +18,16 @@ from app.workflows.canvas_timeline import (
     extract_tail_frame_step,
     generate_segment_step,
 )
+
+
+def _fake_local_path_cm(value):
+    """A ``generated_media_local_path``-shaped async contextmanager stub."""
+
+    @asynccontextmanager
+    async def _cm(url, *, media_kind="image"):
+        yield value
+
+    return _cm
 
 
 @pytest.mark.asyncio
@@ -32,8 +43,8 @@ async def test_segment_step_passes_duration_and_tail_guide():
             new=AsyncMock(return_value=(provider, "jimeng-video-3")),
         ),
         patch(
-            "app.services.library.generated_media_service.resolve_generated_media_local_path",
-            new=AsyncMock(return_value="/tmp/tail0.png"),
+            "app.services.library.generated_media_service.generated_media_local_path",
+            new=_fake_local_path_cm("/tmp/tail0.png"),
         ),
     ):
         out = await generate_segment_step(

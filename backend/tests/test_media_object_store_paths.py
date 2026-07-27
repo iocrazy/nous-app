@@ -277,13 +277,10 @@ async def test_generated_video_streams_to_object_store(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_generated_video_falls_back_to_filesystem_on_error(tmp_path, monkeypatch):
-    """Storage failure on a generated video → streamed-to-disk filesystem."""
-    captured = {}
-
-    async def fake_returning_one(sql, params):
-        captured.update(params)
-        return {"id": 5, **params}
+async def test_generated_video_raises_on_storage_error(tmp_path, monkeypatch):
+    """Storage failure on a generated video RAISES — object store is the only
+    write path while the flag is on (Task 1: no filesystem fallback)."""
+    insert_mock = AsyncMock()
 
     async def fake_download(dest_path, source_url, **k):
         from pathlib import Path
@@ -297,48 +294,38 @@ async def test_generated_video_falls_back_to_filesystem_on_error(tmp_path, monke
     monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
     monkeypatch.setattr(gm_svc.settings, "DOWNLOAD_PATH", str(tmp_path))
     monkeypatch.setattr(gm_svc, "_download_to", fake_download)
-    monkeypatch.setattr(gm_svc.db_engine, "execute_returning_one", fake_returning_one)
+    monkeypatch.setattr(gm_svc.db_engine, "execute_returning_one", insert_mock)
     with patch.object(gm_svc, "chat_media_store", return_value=store):
-        await gm_svc.register_generated_media(
-            user_id="u",
-            scope_id=9,
-            source_url="http://x/y.mp4",
-            mime="video/mp4",
-            origin=gm_svc.GenerationOrigin(kind="canvas_run"),
-        )
-    assert "generations/" in captured["file_path"]
-    assert "sb://" not in captured["file_path"]
+        with pytest.raises(RuntimeError, match="storage down"):
+            await gm_svc.register_generated_media(
+                user_id="u",
+                scope_id=9,
+                source_url="http://x/y.mp4",
+                mime="video/mp4",
+                origin=gm_svc.GenerationOrigin(kind="canvas_run"),
+            )
+    insert_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_generated_image_falls_back_on_storage_error(tmp_path, monkeypatch):
-    captured = {}
-
-    async def fake_returning_one(sql, params):
-        captured.update(params)
-        return {"id": 5, **params}
-
-    async def fake_download(dest_path, source_url, **k):
-        from pathlib import Path
-
-        Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(dest_path).write_bytes(b"IMG")
-        return 3
+async def test_generated_image_raises_on_storage_error(tmp_path, monkeypatch):
+    """Storage failure on a generated image RAISES — object store is the only
+    write path while the flag is on (Task 1: no filesystem fallback)."""
+    insert_mock = AsyncMock()
 
     store = AsyncMock()
     store.exists.side_effect = RuntimeError("storage down")
     monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
     monkeypatch.setattr(gm_svc.settings, "DOWNLOAD_PATH", str(tmp_path))
     monkeypatch.setattr(gm_svc, "_download_to_bytes", AsyncMock(return_value=b"IMG"))
-    monkeypatch.setattr(gm_svc, "_download_to", fake_download)
-    monkeypatch.setattr(gm_svc.db_engine, "execute_returning_one", fake_returning_one)
+    monkeypatch.setattr(gm_svc.db_engine, "execute_returning_one", insert_mock)
     with patch.object(gm_svc, "chat_media_store", return_value=store):
-        await gm_svc.register_generated_media(
-            user_id="u",
-            scope_id=9,
-            source_url="http://x/y.png",
-            mime="image/png",
-            origin=gm_svc.GenerationOrigin(kind="canvas_run"),
-        )
-    assert "generations/" in captured["file_path"]
-    assert "sb://" not in captured["file_path"]
+        with pytest.raises(RuntimeError, match="storage down"):
+            await gm_svc.register_generated_media(
+                user_id="u",
+                scope_id=9,
+                source_url="http://x/y.png",
+                mime="image/png",
+                origin=gm_svc.GenerationOrigin(kind="canvas_run"),
+            )
+    insert_mock.assert_not_awaited()

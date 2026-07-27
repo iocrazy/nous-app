@@ -58,22 +58,20 @@ async def generate_canvas_media_step(
 
     if kind == "video":
         from app.services.library.generated_media_service import (
-            resolve_generated_media_local_path,
+            generated_media_local_path,
         )
 
         provider, actual_model = await db_registry.resolve_video_provider(model or None)
         gen_model = model or actual_model
-        image_path = (
-            await resolve_generated_media_local_path(source_url, media_kind="image")
-            if source_url
-            else None
-        )
-        result = await provider.generate_video(
-            prompt=prompt,
-            aspect=str(params.get("aspect") or ""),
-            model_version=gen_model or None,
-            image_path=image_path,
-        )
+        async with generated_media_local_path(
+            source_url, media_kind="image"
+        ) as image_path:
+            result = await provider.generate_video(
+                prompt=prompt,
+                aspect=str(params.get("aspect") or ""),
+                model_version=gen_model or None,
+                image_path=image_path,
+            )
         local_path = getattr(result, "local_path", None)
         if not local_path:
             raise RuntimeError("video provider returned no file")

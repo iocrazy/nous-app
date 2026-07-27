@@ -72,23 +72,18 @@ async def generate_segment_step(
     provider, actual_model = await db_registry.resolve_video_provider(model or None)
     gen_model = model or actual_model
 
-    image_path: Optional[str] = None
-    if guide_url:
-        from app.services.library.generated_media_service import (
-            resolve_generated_media_local_path,
-        )
-
-        image_path = await resolve_generated_media_local_path(
-            guide_url, media_kind="image"
-        )
-
-    result = await provider.generate_video(
-        prompt=prompt,
-        aspect=aspect or "",
-        model_version=gen_model or None,
-        image_path=image_path,
-        duration_seconds=min(max(int(seconds), 1), _MAX_SEGMENT_SECONDS),
+    from app.services.library.generated_media_service import (
+        generated_media_local_path,
     )
+
+    async with generated_media_local_path(guide_url, media_kind="image") as image_path:
+        result = await provider.generate_video(
+            prompt=prompt,
+            aspect=aspect or "",
+            model_version=gen_model or None,
+            image_path=image_path,
+            duration_seconds=min(max(int(seconds), 1), _MAX_SEGMENT_SECONDS),
+        )
     local_path = getattr(result, "local_path", None)
     if not local_path:
         raise RuntimeError("video provider returned no file for timeline segment")
