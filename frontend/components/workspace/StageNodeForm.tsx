@@ -77,12 +77,20 @@ const StageNodeFormField: React.FC<{
   const [local, setLocal] = useState<unknown>(() => defaultLocal(field.type, value));
   // The last value actually pushed to (or seeded from) the server — commit()
   // only fires onSave when the field genuinely changed, so a blur with no
-  // edit (e.g. tabbing through) never manufactures a spurious PATCH.
-  const lastSaved = useRef<unknown>(value);
+  // edit (e.g. tabbing through) never manufactures a spurious PATCH. Seeded
+  // with the DEFAULTED value (not the raw `value` prop) — `commit()` always
+  // compares against `local`, which is itself defaulted (`''`/`false` when
+  // the key is absent from form_data), so the baseline it's compared to must
+  // go through the same defaulting or a fresh node (form_data `{}`, raw
+  // value `undefined`) would see `'' !== undefined` on the very first blur
+  // and fire a phantom save (caught by code review — reproduced for every
+  // type except number, which happened to be masked by its own `''` guard).
+  const lastSaved = useRef<unknown>(defaultLocal(field.type, value));
 
   useEffect(() => {
-    setLocal(defaultLocal(field.type, value));
-    lastSaved.current = value;
+    const next = defaultLocal(field.type, value);
+    setLocal(next);
+    lastSaved.current = next;
   }, [value, field.key, field.type]);
 
   const commit = (next: unknown) => {

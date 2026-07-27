@@ -198,6 +198,75 @@ describe('StageNodeForm — blur-save fires onSave with only the changed key', (
   });
 });
 
+describe('StageNodeForm — fresh node (key absent from form_data): focus+blur without editing never fires a phantom save', () => {
+  // Regression (code review): `lastSaved.current` used to be seeded from the
+  // RAW `value` prop (`undefined` when the key is absent, as on every brand
+  // new node) while `commit()` compares against the DEFAULTED `local` state
+  // (`''`/`false`) — so `'' !== undefined` on the very first blur, even with
+  // no edit, fired a phantom `onSave({ key: '' })` / `onSave({ key: false })`.
+  // number was accidentally immune (its own `local === ''` guard skips the
+  // commit call entirely), but text/textarea/select/checkbox/date were not.
+  it('text field', () => {
+    const onSave = vi.fn();
+    renderForm([{ key: 'summary', label: 'Summary', type: 'text', required: false }], {}, { onSave });
+    const field = screen.getByTestId('stage-form-field-summary');
+    fireEvent.focus(field);
+    fireEvent.blur(field);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('textarea field', () => {
+    const onSave = vi.fn();
+    renderForm([{ key: 'notes', label: 'Notes', type: 'textarea', required: false }], {}, { onSave });
+    const field = screen.getByTestId('stage-form-field-notes');
+    fireEvent.focus(field);
+    fireEvent.blur(field);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('select field', () => {
+    const onSave = vi.fn();
+    renderForm(
+      [{ key: 'category', label: 'Category', type: 'select', required: false, options: ['A', 'B'] }],
+      {},
+      { onSave },
+    );
+    const field = screen.getByTestId('stage-form-field-category');
+    fireEvent.focus(field);
+    fireEvent.blur(field);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('checkbox field', () => {
+    const onSave = vi.fn();
+    renderForm([{ key: 'approved', label: 'Approved', type: 'checkbox', required: false }], {}, { onSave });
+    const field = screen.getByTestId('stage-form-field-approved');
+    fireEvent.focus(field);
+    fireEvent.blur(field);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('date field', () => {
+    const onSave = vi.fn();
+    renderForm([{ key: 'due', label: 'Due', type: 'date', required: false }], {}, { onSave });
+    const field = screen.getByTestId('stage-form-field-due');
+    fireEvent.focus(field);
+    fireEvent.blur(field);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('positive control: editing then blurring still fires exactly once (the fix must not over-suppress real edits)', () => {
+    const onSave = vi.fn();
+    renderForm([{ key: 'summary', label: 'Summary', type: 'text', required: false }], {}, { onSave });
+    const field = screen.getByTestId('stage-form-field-summary');
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: 'Q3 recap' } });
+    fireEvent.blur(field);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledWith({ summary: 'Q3 recap' });
+  });
+});
+
 describe('StageNodeForm — required badge (mirrors backend _form_incomplete)', () => {
   it('shows the required badge only on required fields', () => {
     renderForm([
