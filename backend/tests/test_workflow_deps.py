@@ -52,10 +52,10 @@ from app.models import (
 from app.repositories.project_stage_nodes_repository import ProjectStageNodesRepository
 from app.repositories.workflow_templates_repository import (
     WorkflowTemplatesRepository,
+    _dedupe_depends_on,
 )
 from app.repositories.workflow_templates_repository import _node_row as _tpl_node_row
 from app.repositories.workflow_templates_repository import (
-    _dedupe_depends_on,
     _validate_deps_backward,
 )
 from app.schemas.workflow import (
