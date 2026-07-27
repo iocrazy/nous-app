@@ -19,7 +19,12 @@ import { useTranslation } from 'react-i18next';
 import { ArrowRight, Bot, ExternalLink, FileCheck2, User } from 'lucide-react';
 import { Loading } from '../common/Loading';
 import { fetchStageBoard } from '../../services/workflowService';
-import { isNodeOverdue, NODE_STATUS_CONFIG, NODE_STATUS_LABEL } from '../workflow/nodeStatus';
+import {
+  isNodeInActiveGroup,
+  isNodeOverdue,
+  NODE_STATUS_CONFIG,
+  NODE_STATUS_LABEL,
+} from '../workflow/nodeStatus';
 import { DeliverablesZone } from '../Todolist/DeliverablesZone';
 import type { ProjectWorkflow, StageBoardData, StageBoardIssueRef } from '../../types';
 
@@ -110,11 +115,7 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
   const overdue = isNodeOverdue(node);
 
   const currentNode = workflow?.nodes.find((n) => n.id === workflow.current_node_id) ?? null;
-  const isActiveGroup = currentNode
-    ? currentNode.parallel_group != null
-      ? node.parallel_group === currentNode.parallel_group
-      : node.id === currentNode.id
-    : false;
+  const isActiveGroup = isNodeInActiveGroup(node, currentNode);
 
   const hasFolder = Boolean(issue && node.folder_id);
 

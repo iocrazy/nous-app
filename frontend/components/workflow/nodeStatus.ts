@@ -54,3 +54,26 @@ export function isNodeOverdue(
   // planned_due may carry a time component from the API — compare the date part.
   return node.planned_due.slice(0, 10) < today;
 }
+
+/**
+ * Whether `node` belongs to the workflow's active group: the current node
+ * itself, or — when the current node runs in a parallel group — any other
+ * node sharing its `parallel_group`. `currentNode` is the already-resolved
+ * `workflow.nodes.find(n => n.id === workflow.current_node_id)` (or `null`
+ * for a workflow with no cursor yet); pass `null` and this always reads
+ * false, never throws.
+ *
+ * Single source of truth for "is this node currently actionable" — shared by
+ * `WorkflowSection` (which groups the Overview's node cards) and
+ * `WorkspaceStageBoard` (which gates the Stage Board's "Complete stage"
+ * action bar) so the two can never silently diverge on the definition.
+ */
+export function isNodeInActiveGroup(
+  node: Pick<ProjectStageNode, 'id' | 'parallel_group'>,
+  currentNode: Pick<ProjectStageNode, 'id' | 'parallel_group'> | null,
+): boolean {
+  if (!currentNode) return false;
+  return currentNode.parallel_group != null
+    ? node.parallel_group === currentNode.parallel_group
+    : node.id === currentNode.id;
+}
