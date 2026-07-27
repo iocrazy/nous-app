@@ -4,7 +4,7 @@
  * PR-18); the workspace top bar (WorkspaceTopBar) is now its only consumer.
  *
  * Pure rendering + a single "jump to this stage" callback; the caller owns
- * the busy guard and the actual `setCurrentStage` request.
+ * the busy guard and the actual advance/back request.
  */
 
 import { useTranslation } from 'react-i18next';

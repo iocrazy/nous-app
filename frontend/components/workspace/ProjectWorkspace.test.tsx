@@ -90,9 +90,6 @@ vi.mock('react-i18next', () => ({
 }));
 
 const mockProjectsService = vi.hoisted(() => ({
-  fetchStageCatalog: vi.fn(),
-  fetchCurrentStage: vi.fn(),
-  setCurrentStage: vi.fn(),
   generateMissingFrames: vi.fn(),
   fetchEpisodesProgress: vi.fn(),
 }));
@@ -161,9 +158,6 @@ beforeEach(() => {
   addToast.mockClear();
   mockEditorShell.mockClear();
   mockSelectScene.mockClear();
-  mockProjectsService.fetchStageCatalog.mockReset().mockResolvedValue([]);
-  mockProjectsService.fetchCurrentStage.mockReset().mockResolvedValue(null);
-  mockProjectsService.setCurrentStage.mockReset();
   mockProjectsService.generateMissingFrames.mockReset();
   mockProjectsService.fetchEpisodesProgress.mockReset().mockResolvedValue(EPISODES);
   mockScriptService.fetchScriptProjects.mockReset().mockResolvedValue({ data: [], total: 0 });

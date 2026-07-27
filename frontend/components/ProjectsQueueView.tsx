@@ -129,11 +129,21 @@ export function ProjectsQueueView({
         const isGenerate = item.action?.type === 'generate_missing_frames';
         const busy = busyId === item.project_id;
         const activity = item.latest_activity;
-        // W3-3: a workflow project's current node name wins over the SOP stage.
+        // W3-3: the workflow badge is the only stage source (G3 dropped the SOP
+        // current_stage fallback) — falls back to the suggestion's stage_slug.
         const badge = project?.workflow_badge ?? null;
-        const stageName =
-          badge?.current_node_name ?? project?.current_stage?.name ?? item.stage_slug ?? '';
+        const stageName = badge?.current_node_name ?? item.stage_slug ?? '';
         const agentsActive = badge?.agents_active ?? 0;
+        // StageRing is workflow-driven only — a No-workflow project (no badge /
+        // no cursor) renders no ring.
+        const ringStage =
+          badge && badge.workflow_position != null && badge.workflow_total > 0
+            ? {
+                name: badge.current_node_name ?? '',
+                index: badge.workflow_position,
+                total: badge.workflow_total,
+              }
+            : null;
 
         return (
           <div
@@ -143,7 +153,7 @@ export function ProjectsQueueView({
             className="flex items-center gap-3.5 px-4 py-3 border-t border-ink-700/50 first:border-t-0 bg-ink-800/40 hover:bg-ink-800/70 transition-colors cursor-pointer"
           >
             <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotClass(item)}`} data-testid="queue-attn-dot" />
-            {project && <StageRing stage={project.current_stage} size={34} />}
+            {project && ringStage && <StageRing stage={ringStage} size={34} />}
             <div className="min-w-0 w-44 flex-shrink-0">
               <div className="text-sm font-medium text-ink-50 truncate flex items-center gap-1">
                 {item.name}

@@ -22,8 +22,6 @@ const CATALOG = [
   { id: '3', slug: 'storyboard', name: 'Storyboard', sort_order: 3, tools_recommended: [] },
 ];
 
-const CURRENT_STAGE = { id: '3', slug: 'storyboard', name: 'Storyboard', sort_order: 3, tools_recommended: [] };
-
 const PROJECT = {
   id: '1',
   name: 'Spring Campaign 2026',
@@ -39,15 +37,7 @@ const PROJECT = {
   file_count: 128,
   created_at: '2026-06-01T00:00:00Z',
   updated_at: '2026-07-08T10:00:00Z',
-  current_stage: { slug: 'storyboard', name: 'Storyboarding', index: 3, total: 3 },
   latest_activity: { kind: 'file', actor: 'HG', at: '2026-07-08T10:00:00Z', stalled: false },
-};
-
-const SUGGESTION = {
-  stage_slug: 'storyboard',
-  kind: 'storyboard_generate',
-  progress: { total: 12, done: 9, empty: 3, generating: 0, failed: 0, script_count: 2, scene_count: 5 },
-  action: { type: 'generate_missing_frames', label_key: 'projects.suggest.ctaGenerate', count: 3 },
 };
 
 const EPISODES = [
@@ -152,8 +142,6 @@ async function routeWorkspaceApi(page: Page): Promise<void> {
 
     if (pathname === '/api/v1/projects') return route.fulfill({ json: { data: [PROJECT] } });
     if (pathname === '/api/v1/projects/stages/catalog') return route.fulfill({ json: { data: CATALOG } });
-    if (pathname.endsWith('/current_stage')) return route.fulfill({ json: { data: CURRENT_STAGE } });
-    if (pathname.endsWith('/stage-suggestion')) return route.fulfill({ json: SUGGESTION });
     if (pathname.endsWith('/episodes/progress')) return route.fulfill({ json: { success: true, data: EPISODES } });
     if (pathname.endsWith('/entities')) return route.fulfill({ json: { success: true, data: ENTITIES } });
     if (pathname.endsWith('/characters')) return route.fulfill({ json: { success: true, data: CHARACTERS } });

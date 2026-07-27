@@ -464,31 +464,6 @@ export const fetchStageCatalog = async (): Promise<ProjectStage[]> => {
   return response.data ?? [];
 };
 
-/** Fetch the current SOP stage for a project, or null when unset. */
-export const fetchCurrentStage = async (
-  projectId: string,
-): Promise<ProjectStage | null> => {
-  const response = await apiClient.get<Envelope<ProjectStage | null>>(
-    `/api/v1/projects/${projectId}/current_stage`,
-  );
-  return response.data ?? null;
-};
-
-/**
- * Set the project's current SOP stage. Returns the new stage row, or null
- * when the project was already on the requested stage (server-side no-op).
- */
-export const setCurrentStage = async (
-  projectId: string,
-  stageId: string,
-): Promise<ProjectStage | null> => {
-  const response = await apiClient.put<Envelope<ProjectStage | null>>(
-    `/api/v1/projects/${projectId}/current_stage`,
-    { stage_id: Number(stageId) },
-  );
-  return response.data ?? null;
-};
-
 /**
  * Per-episode progress feed for the workspace shell's Episodes sidebar
  * (PR-10b, spec G12) — script/scene/shot counts + derived status, ordered

@@ -1,9 +1,11 @@
 /**
  * ProjectCard (Phase B B1 — Stage Ring layout).
  *
- * The enrichment fields (current_stage / members_preview / latest_activity)
+ * The enrichment fields (workflow_badge / members_preview / latest_activity)
  * are all optional: a legacy project renders the base card, an enriched one
- * gains ring + activity + member stack. Both paths are pinned here.
+ * gains ring + activity + member stack. The Stage Ring is workflow-driven only
+ * (G3 dropped the legacy SOP `current_stage` source — a No-workflow project
+ * renders no ring). Both paths are pinned here.
  */
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -66,7 +68,12 @@ describe('ProjectCard', () => {
   it('renders ring, stage chip, activity line and member stack when enriched', () => {
     const project: Project = {
       ...base,
-      current_stage: { slug: 'storyboard', name: 'Storyboard', index: 3, total: 6 },
+      workflow_badge: {
+        current_node_name: 'Storyboard',
+        workflow_total: 6,
+        workflow_position: 3,
+        agents_active: 0,
+      },
       members_preview: {
         count: 5,
         members: [
@@ -138,7 +145,12 @@ describe('ProjectCard', () => {
     const project: Project = {
       ...base,
       archived_at: '2026-07-01T00:00:00+00:00',
-      current_stage: { slug: 'delivery', name: 'Delivery', index: 6, total: 6 },
+      workflow_badge: {
+        current_node_name: 'Delivery',
+        workflow_total: 6,
+        workflow_position: 6,
+        agents_active: 0,
+      },
     };
     render(<ProjectCard project={project} onClick={noop} onToggleStar={noop} />);
     expect(screen.getByText('projects.card.archived')).toBeTruthy();
@@ -183,22 +195,6 @@ describe('ProjectCard', () => {
       render(<ProjectCard project={project} onClick={noop} onToggleStar={noop} />);
       expect(screen.getByTestId('project-workflow-stage-chip')).toBeTruthy();
       expect(screen.queryByTestId('project-agents-active-chip')).toBeNull();
-    });
-
-    it('prefers the workflow node chip over the SOP stage chip', () => {
-      const project: Project = {
-        ...base,
-        current_stage: { slug: 'storyboard', name: 'SOP Storyboard', index: 3, total: 6 },
-        workflow_badge: {
-          current_node_name: 'Voiceover',
-          workflow_total: 5,
-          workflow_position: 3,
-          agents_active: 0,
-        },
-      };
-      render(<ProjectCard project={project} onClick={noop} onToggleStar={noop} />);
-      expect(screen.getByTestId('project-workflow-stage-chip').textContent).toBe('Voiceover');
-      expect(screen.queryByText('SOP Storyboard')).toBeNull();
     });
 
     it('renders no workflow chip for a No-workflow project', () => {

@@ -157,7 +157,6 @@ async function routeWorkspaceApi(page: Page): Promise<void> {
     const { pathname } = new URL(route.request().url());
     if (pathname === '/api/v1/projects') return route.fulfill({ json: { data: [PROJECT] } });
     if (pathname === '/api/v1/projects/stages/catalog') return route.fulfill({ json: { data: CATALOG } });
-    if (pathname.endsWith('/current_stage')) return route.fulfill({ json: { data: CATALOG[1] } });
     if (pathname.endsWith('/episodes/progress')) return route.fulfill({ json: { success: true, data: EPISODES } });
     if (pathname.endsWith('/entities')) return route.fulfill({ json: { success: true, data: { characters: [], locations: [] } } });
     if (pathname.endsWith('/episodes')) return route.fulfill({ json: { success: true, data: EPISODES } });
