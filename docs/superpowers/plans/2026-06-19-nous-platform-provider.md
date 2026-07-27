@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.13 / FastAPI / SQLAlchemy 2.0 ORM (asyncpg) / DBOS workflows / Pydantic v2 / pytest. React 19 + TypeScript + Vite (`frontend/`). Arco Design + React Query (`admin/`). Backend lint = **black + isort + flake8** (NOT ruff); loguru uses f-strings (no `%s`).
 
-**Branch:** `feature/nous-platform-provider` · **Worktree:** `/Volumes/program/project-code/repos/nous/.worktrees/feature-orm-2-migration` (current).
+**Branch:** `feature/nous-platform-provider` · **Worktree:** `/Volumes/program/project-code/repos/mediahub/.worktrees/feature-orm-2-migration` (current).
 
 **Run backend tests:** `cd backend && uv run pytest tests/<file> -v` · **Lint:** `cd backend && uv run black <files> && uv run isort <files> && uv run flake8 <files>`
 **Frontend typecheck/build:** `cd frontend && npx tsc --noEmit && npm run build` · **Admin:** `cd admin && npx tsc --noEmit && npm run build`
@@ -42,7 +42,7 @@
 - `backend/app/services/ai/governance/ai_governance.py` — add `is_nous_globally_enabled` + `is_nous_allowed`.
 - `backend/app/services/ai/providers/ai_provider_helpers.py` — add `resolve_nous_model`, wire into both branches of `resolve_task_provider_config`.
 - `backend/app/workflows/ai_transcription.py:97-122` — `nous:` branch in `load_transcribe_inputs`.
-- `backend/app/api/ai_settings_router.py:184-215` — `GET /mediahub-models` `?type=` + `GET /governance` nous extension.
+- `backend/app/api/ai_settings_router.py:184-215` — `GET /nous-models` `?type=` + `GET /governance` nous extension.
 - `backend/app/schemas/admin.py:273-327` — governance schemas: `nous_allowed` per module + global `nous_user_enabled`.
 - `backend/app/api/admin/settings_router.py:195-319` — read/write nous governance keys.
 - `backend/tests/test_ai_governance_user_endpoint.py:106-146` — accommodate new nous keys.
@@ -1128,7 +1128,7 @@ git commit -m "feat(nous): transcription resolves nous:<name> to platform ASR co
 
 # Phase 4 — Public endpoints
 
-### Task 9: `GET /ai/mediahub-models ?type=` + `GET /ai/governance` nous extension
+### Task 9: `GET /ai/nous-models ?type=` + `GET /ai/governance` nous extension
 
 **Files:**
 - Modify: `backend/app/api/ai_settings_router.py:184-215`
@@ -1139,7 +1139,7 @@ git commit -m "feat(nous): transcription resolves nous:<name> to platform ASR co
 
 ```python
 # backend/tests/test_nous_public_endpoint.py
-"""Public mediahub-models endpoint honors ?type=; governance exposes nous gates."""
+"""Public nous-models endpoint honors ?type=; governance exposes nous gates."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1228,7 +1228,7 @@ async def get_ai_governance(auth: AuthDep):
 Replace `list_nous_models` (lines 204-215):
 
 ```python
-@router.get("/mediahub-models")
+@router.get("/nous-models")
 async def list_nous_models(type: str = None):
     """List enabled Nous models (public, no API keys), optionally filtered by
     model type (``llm`` / ``embedding`` / ``tts`` / ``asr``).
@@ -1321,7 +1321,7 @@ Expected: PASS
 ```bash
 cd backend && uv run black app/api/ai_settings_router.py tests/test_nous_public_endpoint.py tests/test_ai_governance_user_endpoint.py && uv run isort app/api/ai_settings_router.py tests/test_nous_public_endpoint.py tests/test_ai_governance_user_endpoint.py && uv run flake8 app/api/ai_settings_router.py tests/test_nous_public_endpoint.py tests/test_ai_governance_user_endpoint.py
 cd .. && git add backend/app/api/ai_settings_router.py backend/tests/test_nous_public_endpoint.py backend/tests/test_ai_governance_user_endpoint.py
-git commit -m "feat(nous): public mediahub-models ?type= + governance nous gates"
+git commit -m "feat(nous): public nous-models ?type= + governance nous gates"
 ```
 
 ---
@@ -1583,7 +1583,7 @@ Rename the `getNousModels` param `category` → `type` (lines 439-448):
 export const getNousModels = async (type?: string): Promise<NousModelPublic[]> => {
   const apiUrl = getApiUrl();
   const params = type ? `?type=${type}` : '';
-  const response = await fetch(`${apiUrl}/api/v1/ai/mediahub-models${params}`, {
+  const response = await fetch(`${apiUrl}/api/v1/ai/nous-models${params}`, {
     headers: await getAuthHeaders(),
   });
   if (!response.ok) return [];

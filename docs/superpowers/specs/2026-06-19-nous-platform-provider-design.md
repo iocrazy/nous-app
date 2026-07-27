@@ -11,8 +11,8 @@ Surface admin-configured platform AI models (the `nous_models` registry) on the 
 
 ## Background (current state)
 
-- **Admin** configures platform models in the `nous_models` table (`name`, `display_name`, `category`, `actual_provider`, `actual_model`, `api_key` [masked], `base_url`, `is_enabled`, `sort_order`, pricing fields). Admin API: `/admin/mediahub-models`. Admin UI: `admin/src/pages/settings/` nous config.
-- A **public endpoint already exists** — `GET /api/v1/ai/mediahub-models` (returns enabled models, no keys) — **but no frontend UI consumes it.**
+- **Admin** configures platform models in the `nous_models` table (`name`, `display_name`, `category`, `actual_provider`, `actual_model`, `api_key` [masked], `base_url`, `is_enabled`, `sort_order`, pricing fields). Admin API: `/admin/nous-models`. Admin UI: `admin/src/pages/settings/` nous config.
+- A **public endpoint already exists** — `GET /api/v1/ai/nous-models` (returns enabled models, no keys) — **but no frontend UI consumes it.**
 - **User-side selection is agent-centric:** `user_settings.settings_json.ai_settings.task_assignment[module]` holds an **agent slug** for LLM modules (summarization/visual_analysis/translation/caption/classification) and a `provider:model` string for **transcription**. Agents (`ai_agents`) carry a `model` field; the resolver derives the provider from the model and reads the user's BYOK key.
 - **Resolution:** `backend/app/services/ai/providers/ai_provider_helpers.py::resolve_task_provider_config()` gates on governance, then resolves agent → `agent.model` → provider → user BYOK.
 - **Governance** (`ai_module.<module>.user_allowed` in `system_settings`): locked → admin platform config; unlocked → user BYOK + agent. **Unchanged by this feature.**
@@ -49,7 +49,7 @@ Three focused changes; **no new tables**, reuse the existing `nous_models` + age
 
 ```
 admin nous_models (enabled)            ← type: llm | embedding | tts | asr  (+ description)
-        │  GET /api/v1/ai/mediahub-models?type=llm|asr  (enabled only, no keys)
+        │  GET /api/v1/ai/nous-models?type=llm|asr  (enabled only, no keys)
         ▼
 ① User AI Settings: "Nous" provider card
    - no api_key input (platform-managed)
@@ -74,7 +74,7 @@ admin nous_models (enabled)            ← type: llm | embedding | tts | asr  (+
 - `nous_models` model + migration: rename `category → type`, swap its CHECK constraint to `('llm','embedding','tts','asr')` (no data remap — table is empty in prod), add nullable `description text`.
 - `schemas/nous.py`, `schemas/admin.py`: type enum + `description`.
 - `api/admin/nous_router.py`: accept/return type enum + `description` (api_key stays masked/write-only).
-- `api/ai_settings_router.py`: `GET /api/v1/ai/mediahub-models` returns `name, display_name, type, description, sort_order`; supports `?type=` filter (replaces `?category=`). Enabled-only, no keys. `GET /api/v1/ai/governance` extended to also return the global `nous.user_enabled` + per-module `nous_allowed`.
+- `api/ai_settings_router.py`: `GET /api/v1/ai/nous-models` returns `name, display_name, type, description, sort_order`; supports `?type=` filter (replaces `?category=`). Enabled-only, no keys. `GET /api/v1/ai/governance` extended to also return the global `nous.user_enabled` + per-module `nous_allowed`.
 - `services/ai/governance/ai_governance.py` + `api/admin/settings_router.py`: read/write the global `nous.user_enabled` and per-module `ai_module.<module>.nous_allowed`; the resolver consults them (fail-closed gate above).
 - `services/ai/providers/ai_provider_helpers.py`: add a **shared Nous-resolution step** applied to whichever model name the resolver lands on. `resolve_task_provider_config` derives the model name in two places — the governance-**locked** path (`governance.model`, ~line 99/115) and the **unlocked** agent path (`agent.model`, ~line 144). The Nous lookup must run for **both** (admin may lock a module directly to a Nous model name), so factor it into one helper called before `provider_key_for_model(...)` in each branch. Lookup by `name`; fail-closed on disabled/missing.
 - Adapter factory: construct an adapter from a nous platform config (provider/model/key/base_url).
@@ -107,7 +107,7 @@ admin nous_models (enabled)            ← type: llm | embedding | tts | asr  (+
 
 ### Testing
 
-- **Backend unit:** resolver returns platform config when `agent.model` matches an enabled Nous model; fail-closed when disabled/missing; unchanged BYOK path when the model is not a Nous name. Migration swaps the CHECK constraint to the `type` enum (no data remap — table is empty). `mediahub-models` endpoint returns `type` + `description` and honors `?type=` filter.
+- **Backend unit:** resolver returns platform config when `agent.model` matches an enabled Nous model; fail-closed when disabled/missing; unchanged BYOK path when the model is not a Nous name. Migration swaps the CHECK constraint to the `type` enum (no data remap — table is empty). `nous-models` endpoint returns `type` + `description` and honors `?type=` filter.
 - **Frontend:** Nous provider card renders enabled models with badges/descriptions and no key field; agent picker shows only `llm` Nous models; transcription dropdown shows `asr` Nous models.
 
 ## Accepted risks (v1)

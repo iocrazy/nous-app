@@ -305,7 +305,7 @@ Watchtower does NOT apply `environment:` changes — it only pulls the new image
 and restarts with the container's EXISTING env. To activate `DBOS__VMID`, run
 on the NAS:
 
-    cd /volume1/docker/nous/docker && sudo docker compose up -d
+    cd /volume1/docker/mediahub/docker && sudo docker compose up -d
 
 Verify after apply:
 - `sudo docker exec mediahub-app-backend printenv DBOS__VMID` → `gateway`

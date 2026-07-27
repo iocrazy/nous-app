@@ -21,8 +21,8 @@ sudo -i  # 切换到 root
 
 ```bash
 # 在 docker 共享文件夹中创建目录
-mkdir -p /volume1/docker/nous
-cd /volume1/docker/nous
+mkdir -p /volume1/docker/mediahub
+cd /volume1/docker/mediahub
 
 # 克隆代码
 git clone https://github.com/your-repo/nous.git .
@@ -90,7 +90,7 @@ docker logs -f nous-backend
 
 先在命令行构建：
 ```bash
-cd /volume1/docker/nous
+cd /volume1/docker/mediahub
 docker build -t nous:latest .
 ```
 
@@ -110,8 +110,8 @@ docker build -t nous:latest .
 
 | 本地路径 | 容器路径 | 说明 |
 |---------|---------|------|
-| `/volume1/docker/nous/downloads` | `/app/downloads` | 下载目录 |
-| `/volume1/docker/nous/backend/.env` | `/app/.env` | 环境变量 |
+| `/volume1/docker/mediahub/downloads` | `/app/downloads` | 下载目录 |
+| `/volume1/docker/mediahub/backend/.env` | `/app/.env` | 环境变量 |
 
 5. 环境变量：
    - `TZ` = `Asia/Shanghai`
@@ -135,14 +135,14 @@ docker build -t nous:latest .
 前端会自动部署到 3000 端口，但需要先构建：
 
 ```bash
-cd /volume1/docker/nous/frontend
+cd /volume1/docker/mediahub/frontend
 npm install
 npm run build
 ```
 
 然后启动：
 ```bash
-cd /volume1/docker/nous
+cd /volume1/docker/mediahub
 docker-compose up -d nous-frontend
 ```
 
@@ -163,7 +163,7 @@ docker-compose up -d nous-frontend
 ## 更新部署
 
 ```bash
-cd /volume1/docker/nous
+cd /volume1/docker/mediahub
 
 # 拉取最新代码
 git pull
@@ -198,7 +198,7 @@ docker logs nous-backend
 
 ### Q: 下载的视频在哪里？
 
-在 NAS 上的 `/volume1/docker/nous/downloads` 目录。
+在 NAS 上的 `/volume1/docker/mediahub/downloads` 目录。
 
 ### Q: 如何查看实时日志？
 

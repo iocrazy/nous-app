@@ -20,7 +20,7 @@
 - **前端门禁**：`cd frontend && npx vitest run --no-file-parallelism` 全绿 + `npm run lint`（eslint react-hooks rules-of-hooks=error）。
 - **后端门禁**：`cd backend && uv run pytest`；改动 .py 跑 black+isort+flake8。
 - **版本**：发 PR 前核 master 版本再 bump `frontend/package.json`（当前 master=0.25.254）。
-- **CI billing 坑**：private repo instant-fail；发 PR 前 `gh repo edit iocrazy/nous --visibility public`，合完切回 private。
+- **CI billing 坑**：private repo instant-fail；发 PR 前 `gh repo edit iocrazy/nous-app --visibility public`，合完切回 private。
 
 ## 依赖顺序
 
@@ -39,13 +39,13 @@ PR-P2    注释漂移 + aspect 预设统一（chore）← 最后顺手
 - `frontend/features/canvas-core/smart/nodes/PromptNodeView.tsx:28-34` 硬编码 `PROVIDER_OPTIONS`，默认项 `{ slug:'', label:'Default (qwen-plus)' }` + 假 slug `nous/storyboard`。
 - 链路：下拉 `provider_slug` → `backend/app/services/canvas/canvas_run_service.py:60-67 _resolve_model`（空→`DEFAULT_MODEL="qwen-plus"`）→ `run_prompt`:238 → `_get_adapter`:209-214 → `resolve_db_adapter(model,"canvas")`（`backend/app/services/ai/providers/ai_provider_helpers.py:331-365`）→ 命中 `mediahub_models.name` 否则 `raise ProviderNotConfiguredError`。
 - `qwen-plus` 不在平台 `mediahub_models`（env 凭证已退役）→ 默认点 Run 报错；`nous/storyboard` 是编造 slug → 404。
-- repo `list_enabled(type_filter)`（`backend/app/repositories/nous_model_repository.py:139-153`）已支持 `WHERE type == type_filter`——干净接入点。
+- repo `list_enabled(type_filter)`（`backend/app/repositories/mediahub_model_repository.py:139-153`）已支持 `WHERE type == type_filter`——干净接入点。
 - governed 默认范式已有：`ai_provider_helpers.py::get_maintenance_model()` 读 `system_settings.maintenance_llm_model`，fallback `DEFAULT_MAINTENANCE_MODEL="mediahub-doubao-seed-2-0-lite"`（真实目录条目）。
 
 **步骤**
-- [ ] **RED（后端 resolve 真测）**：`backend/tests/` 新增 `test_canvas_text_model_resolution.py`——fixture 里放一个 enabled `type='llm'` 的 `mediahub_models` 行；断言：(a) 空 provider_slug 解析到该目录默认模型并成功 `resolve_db_adapter`（不 mock）；(b) 目录里不存在的 model → `ProviderNotConfiguredError`。**严禁 mock `_get_adapter`/`resolve_db_adapter`**，走真 resolve 对照 fixture 目录（参考现有 nous_model repo 的 test fixture 装配方式）。先跑，红。
+- [ ] **RED（后端 resolve 真测）**：`backend/tests/` 新增 `test_canvas_text_model_resolution.py`——fixture 里放一个 enabled `type='llm'` 的 `mediahub_models` 行；断言：(a) 空 provider_slug 解析到该目录默认模型并成功 `resolve_db_adapter`（不 mock）；(b) 目录里不存在的 model → `ProviderNotConfiguredError`。**严禁 mock `_get_adapter`/`resolve_db_adapter`**，走真 resolve 对照 fixture 目录（参考现有 mediahub_model repo 的 test fixture 装配方式）。先跑，红。
 - [ ] **GREEN 后端 · 默认值修正**：加 helper `get_canvas_default_text_model()`（放 `ai_provider_helpers.py` 或 canvas service）：读 `system_settings.canvas_default_text_model` → fallback 首个 enabled llm 行 `name` → 再 fallback `get_maintenance_model()`。改 `canvas_run_service.py` 让空 `provider_slug` 走这个 async 默认（评估 `_resolve_model` 变 async 的改动面：`run_prompt` 已是 async，把 `_resolve_model` 内联/改成 `await _resolve_model_async(provider_slug)`；`run_classic_node` 的 llm 分支同步跟进）。**删除硬编码 `DEFAULT_MODEL="qwen-plus"` 常量的误导性使用**（或改注释指明它只是最末兜底）。
-- [ ] **GREEN 后端 · 文本目录读接口**：`canvases_router.py` 加 `GET /api/v1/canvases/text-models`，复用 `get_nous_model_repository().list_enabled('llm')`，只出公开列（复用/仿 `_GENERATION_MODEL_PUBLIC_FIELDS`，**绝不出 api_key/base_url**）。返回 `{success, data}`。加 endpoint 单测（TestClient + fixture 目录，断言只有公开列、只有 llm 行）。
+- [ ] **GREEN 后端 · 文本目录读接口**：`canvases_router.py` 加 `GET /api/v1/canvases/text-models`，复用 `get_mediahub_model_repository().list_enabled('llm')`，只出公开列（复用/仿 `_GENERATION_MODEL_PUBLIC_FIELDS`，**绝不出 api_key/base_url**）。返回 `{success, data}`。加 endpoint 单测（TestClient + fixture 目录，断言只有公开列、只有 llm 行）。
 - [ ] **RED/GREEN 前端 · 新 hook + service**：`canvasGenerationService.ts` 加 `listTextModels()`（仿 `listGenerationModels`，打 `/canvases/text-models`）；`smart/nodes/useTextModels.ts`（仿 `useGenerationModels`，模块缓存 + 失败降级空表 + `console.error`）。加 hook 测试。
 - [ ] **RED/GREEN 前端 · PromptNodeView 替换硬编码**：删 `PROVIDER_OPTIONS` 常量（含 `nous/storyboard` 假项）；文本模式的 provider `<select>` 用 `useTextModels()` 渲染，value = 目录行 `name`（bare model id），首项 = "Catalog default"（value `''` → 后端选默认）。测试：mock service 返回若干 llm 行，断言下拉渲染的是目录行、默认项为空、选中回写 `provider_slug`。
 - [ ] **i18n**：新增文案（如 "Catalog default"）进 `en.json`/`zh.json`，键集全等。

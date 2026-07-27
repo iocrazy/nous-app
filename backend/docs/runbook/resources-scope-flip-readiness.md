@@ -106,7 +106,7 @@ regressions, just not-yet-covered:
 
 1. Confirm `USE_ORM_RESOURCES=true` is live + verified (prerequisite).
 2. Set `SCOPE_ENFORCE_RESOURCES=true` on the NAS backend env
-   (`/volume1/docker/nous/docker/.env`, then `stop -t0` / `start` — see
+   (`/volume1/docker/mediahub/docker/.env`, then `stop -t0` / `start` — see
    `reference_nas_backend_env`). This is the persistent bind-mounted `.env`, not
    a compose `environment:` (Watchtower won't apply compose changes).
 3. Smoke-verify (a single user account):

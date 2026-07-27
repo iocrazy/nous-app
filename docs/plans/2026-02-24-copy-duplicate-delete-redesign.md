@@ -200,7 +200,7 @@ async def trash_resource_by_platform_id(
 
 **Step 5: Verify backend starts**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.resources_router import router; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.resources_router import router; print('OK')"`
 Expected: `OK`
 
 **Step 6: Commit**
@@ -273,7 +273,7 @@ async def restore_resource(self, resource_id: str, user_id: str) -> dict:
 
 **Step 2: Verify backend starts**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.services.resources_service import ResourcesService; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.services.resources_service import ResourcesService; print('OK')"`
 Expected: `OK`
 
 **Step 3: Commit**
@@ -450,7 +450,7 @@ await trashResources(resourceIds, scopeType, scopeId, selectedFolderId);
 
 **Step 4: Verify frontend compiles**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npx tsc --noEmit 2>&1 | head -20`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npx tsc --noEmit 2>&1 | head -20`
 Expected: No new errors related to trashResource/trashResources
 
 **Step 5: Commit**

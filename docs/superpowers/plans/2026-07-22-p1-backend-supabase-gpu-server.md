@@ -13,7 +13,7 @@
 - **NAS 零改动**：不 stop/不改 NAS 上任何容器与数据；P1 期间生产（Vercel 前端）继续打 NAS。
 - **数据双跑窗口**：P1 的 dump/restore 是**演练性迁移**——NAS 侧数据会继续变化；**P2 切换日做最终重同步**（re-dump/restore 后立即切前端）。P1 不追求数据零漂移。
 - **JWT/keys 与 NAS prod 完全一致**（`JWT_SECRET`/`ANON_KEY`/`SERVICE_ROLE_KEY` 原样复制），保证 P2 切换时已登录用户/前端 key 零失效。
-- **命名全用 nous-***：容器 `nous-db`/`nous-kong`/`nous-backend`…；禁止新增 nous 字样。
+- **命名全用 nous-***：容器 `nous-db`/`nous-kong`/`nous-backend`…；禁止新增 mediahub 字样。
 - **密钥不进 git**：`secrets/supabase.env`、`secrets/backend.env` 住 `/media/heygo/program/nous/secrets/`；repo 只放 `*.env.example` 模板。
 - **起栈防护**：任何 `compose up` 前必须确认 `/media/heygo/program/nous/.mounted` 存在（nofail 影子目录坑），封装进 `deploy/gpu-server/up.sh`。
 - **sudo 步骤**（heytime 挂载点无需 sudo，CIFS 已 uid=1000）标注【用户】；其余全部远程执行。
@@ -23,7 +23,7 @@
 | 项 | 值 |
 |---|---|
 | prod PG 体量 | 5.6G（DBOS 历史 3.5G + 日志 1.6G + 业务 ~200M） |
-| 媒体库 | `192.168.50.9:/volume2/sources/Nous.library` = **113G** |
+| 媒体库 | `192.168.50.9:/volume2/sources/MediaHub.library` = **113G** |
 | 网络 | GPU 机(192.168.8.2/10.0.0.10) ⇄ nous NAS 仅 ZeroTier(10.0.0.9) **7.6MB/s**；⇄ heytime NAS(192.168.8.9) 本地 LAN **87MB/s** |
 | GPU 机已挂 | `/home/heygo/mnt/nas-videos`(NFS→10.0.0.9) · `/mnt/heytime/*`(CIFS→192.168.8.9, uid=1000 可写) |
 | NAS Supabase 栈 | db/kong/auth/rest/realtime/storage/imgproxy/meta/studio/analytics/vector/pooler/edge-functions（13 容器） |
@@ -81,16 +81,16 @@ VACUUM FULL dbos.workflow_status; VACUUM FULL dbos.operation_outputs; VACUUM FUL
 - [ ] Step 1：`mkdir -p /mnt/heytime/Sources/nous/media`
 - [ ] Step 2：GPU 机后台 rsync（两侧都已挂载，瓶颈 ZeroTier 7.6MB/s ≈ 4.5h）：
 ```bash
-nohup rsync -a --info=progress2 /home/heygo/mnt/nas-videos/../Nous.library/ /mnt/heytime/Sources/nous/media/ > /tmp/media-rsync.log 2>&1 &
+nohup rsync -a --info=progress2 /home/heygo/mnt/nas-videos/../MediaHub.library/ /mnt/heytime/Sources/nous/media/ > /tmp/media-rsync.log 2>&1 &
 ```
-（⚠️ 源路径按 NFS 实挂点修正——现挂的是 `/video/Tutorial.Library`，需在 nous NAS 侧把 `/volume2/sources` 也 NFS 导出或改走 rsync-over-ssh `-e "ssh -i …" heygo@10.0.0.9:/volume2/sources/Nous.library/`。执行时二选一。）
+（⚠️ 源路径按 NFS 实挂点修正——现挂的是 `/video/Tutorial.Library`，需在 nous NAS 侧把 `/volume2/sources` 也 NFS 导出或改走 rsync-over-ssh `-e "ssh -i …" heygo@10.0.0.9:/volume2/sources/MediaHub.library/`。执行时二选一。）
 - [ ] Step 3：完成后校验：两侧 `du -s` 差 <1%；抽样 5 文件 md5 一致。
 
 ## Task 5: backend + worker + redis 上机
 
 **Files:** compose 增 `nous-backend`/`nous-worker`/`nous-redis`；`secrets/backend.env`
 
-- [ ] Step 1：`backend.env` 基于 NAS `/volume1/docker/nous/docker/.env` 改四类值：
+- [ ] Step 1：`backend.env` 基于 NAS `/volume1/docker/mediahub/docker/.env` 改四类值：
   - `SUPABASE_URL=http://nous-kong:8000`（栈内直连）；keys 同 NAS
   - AI 端点 → `http://host.docker.internal:8000`（nous-center 原生进程；compose 加 `extra_hosts: host-gateway`）
   - `REDIS_URL=redis://nous-redis:6379`

@@ -438,7 +438,7 @@ And update `get_videos_needing_transcription` and `get_videos_needing_summary` (
 
 **Step 2: Verify backend starts**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.repositories.ai_repository import AIRepository; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.repositories.ai_repository import AIRepository; print('OK')"`
 Expected: `OK`
 
 **Step 3: Commit**
@@ -479,7 +479,7 @@ Also rename Python method parameters from `media_id` to `resource_id` for clarit
 
 **Step 2: Verify import works**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.repositories.tags_repository import TagsRepository; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.repositories.tags_repository import TagsRepository; print('OK')"`
 Expected: `OK`
 
 **Step 3: Commit**
@@ -506,7 +506,7 @@ Also update any `media_id` column references to `resource_id`:
 
 **Step 2: Verify import works**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.repositories.analysis_repository import AnalysisRepository; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.repositories.analysis_repository import AnalysisRepository; print('OK')"`
 Expected: `OK`
 
 **Step 3: Commit**
@@ -535,7 +535,7 @@ git commit -m "refactor: update analysis_repository to use resource_analysis tab
 
 **Step 2: Verify import works**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.services.search_service import SearchService; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.services.search_service import SearchService; print('OK')"`
 Expected: `OK`
 
 **Step 3: Commit**
@@ -584,7 +584,7 @@ git commit -m "refactor: update search_service to use resource_* tables"
 
 **Step 6: Verify backend starts**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run uvicorn app.main:app --port 8081 &; sleep 3; curl -s http://localhost:8081/docs | head -5; kill %1`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run uvicorn app.main:app --port 8081 &; sleep 3; curl -s http://localhost:8081/docs | head -5; kill %1`
 Expected: FastAPI docs HTML, no import errors.
 
 **Step 7: Commit**
@@ -611,7 +611,7 @@ Note: The view previously joined tags into an array. Now tags are on `resource_t
 
 **Step 2: Verify frontend builds**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
 Expected: Build succeeds.
 
 **Step 3: Commit**
@@ -645,7 +645,7 @@ git commit -m "refactor: update dataService to use parsed_media directly (view d
 
 **Step 4: Verify frontend builds**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
 Expected: Build succeeds.
 
 **Step 5: Commit**
@@ -677,7 +677,7 @@ Given the complexity, the simplest approach: since this is legacy code and the n
 
 **Step 2: Verify frontend builds**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
 Expected: Build succeeds.
 
 **Step 3: Commit**
@@ -693,12 +693,12 @@ git commit -m "refactor: update collectionService for dropped media_collections 
 
 **Step 1: Run full frontend build**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
 Expected: Build succeeds with no errors.
 
 **Step 2: Start backend and verify no import errors**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && timeout 10 uv run uvicorn app.main:app --port 8081 2>&1 || true`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && timeout 10 uv run uvicorn app.main:app --port 8081 2>&1 || true`
 Expected: `Uvicorn running on http://0.0.0.0:8081`, no import errors.
 
 **Step 3: Verify database integrity**

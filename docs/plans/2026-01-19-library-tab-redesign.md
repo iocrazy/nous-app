@@ -278,7 +278,7 @@ Return to folder view
 
 ```typescript
 // localStorage - All UI preferences
-const STORAGE_KEY = 'nous_library_preferences';
+const STORAGE_KEY = 'mediahub_library_preferences';
 
 // Save
 localStorage.setItem(STORAGE_KEY, JSON.stringify({

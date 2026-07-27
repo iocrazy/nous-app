@@ -40,7 +40,7 @@ class MediaTypeFetchRequest(BaseModel):
 
 **Step 2: Verify backend starts**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.schemas.media import MediaTypeFetchRequest; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.schemas.media import MediaTypeFetchRequest; print('OK')"`
 
 Expected: `OK`
 
@@ -191,7 +191,7 @@ async def _dedup_and_dispatch(
 
 **Step 2: Verify import compiles**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.media_router import _dedup_and_dispatch; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.media_router import _dedup_and_dispatch; print('OK')"`
 
 Expected: `OK`
 
@@ -360,7 +360,7 @@ from app.schemas.media import MediaFetchRequest, MediaTypeFetchRequest
 
 **Step 3: Verify backend starts**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.media_router import router; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.media_router import router; print('OK')"`
 
 Expected: `OK`
 
@@ -411,7 +411,7 @@ Keep the rest of the response unchanged (the log_user_action and return block).
 
 **Step 2: Verify backend starts and existing parse flow works**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.media_router import router; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.media_router import router; print('OK')"`
 
 Expected: `OK`
 
@@ -453,7 +453,7 @@ Also remove the hardcoded `request.cover_bool = True` on line 1031.
 
 **Step 2: Verify**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.media_router import router; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.media_router import router; print('OK')"`
 
 **Step 3: Commit**
 
@@ -569,7 +569,7 @@ At the start of `_do_douyin_download` (line ~236, after `results = {...}`), add:
 
 **Step 3: Verify backend starts**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.tasks.download_tasks import download_unified_task; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.tasks.download_tasks import download_unified_task; print('OK')"`
 
 Expected: `OK`
 
@@ -675,7 +675,7 @@ export const fetchMediaByType = async (
 
 **Step 2: Verify frontend builds**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
 
 Expected: Build succeeds (new function is exported but not yet called).
 
@@ -748,7 +748,7 @@ Replace lines 126-158 with:
 
 **Step 3: Verify frontend builds**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
 
 Expected: Build succeeds.
 
@@ -766,7 +766,7 @@ git commit -m "feat: PlayerPage uses new per-type fetch endpoint"
 **Step 1: Restart backend + celery**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system
 ./scripts/start-dev.sh restart-backend
 ```
 

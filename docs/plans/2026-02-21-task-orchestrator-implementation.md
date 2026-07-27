@@ -475,7 +475,7 @@ def get_orchestrator() -> TaskOrchestrator:
 
 **Step 2: Verify import works**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.services.task_orchestrator import TaskOrchestrator, TaskPhase, get_orchestrator; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.services.task_orchestrator import TaskOrchestrator, TaskPhase, get_orchestrator; print('OK')"`
 Expected: `OK`
 
 **Step 3: Commit**
@@ -610,7 +610,7 @@ import app.tasks.signals  # noqa: F401, E402
 
 **Step 3: Verify import works**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.tasks.signals import on_task_prerun; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.tasks.signals import on_task_prerun; print('OK')"`
 Expected: `OK`
 
 **Step 4: Commit**
@@ -740,7 +740,7 @@ Note: Since `download_unified_task` uses `run_async()` for async calls, the dedu
 
 **Step 3: Verify backend starts without errors**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.media_router import router; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.api.media_router import router; print('OK')"`
 Expected: `OK`
 
 **Step 4: Commit**
@@ -815,7 +815,7 @@ export function errorCodeMessage(errorCode?: string): string {
 
 **Step 3: Verify frontend build**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
 Expected: Build succeeds
 
 **Step 4: Commit**
@@ -844,7 +844,7 @@ Key changes:
 
 **Step 2: Verify frontend build**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
 Expected: Build succeeds
 
 **Step 3: Commit**
@@ -863,11 +863,11 @@ git commit -m "feat: display task phase and structured error codes in TaskCenter
 
 **Step 1: Start backend**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run uvicorn app.main:app --reload --port 8081`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run uvicorn app.main:app --reload --port 8081`
 
 **Step 2: Start frontend**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npm run dev -- --port 5176`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npm run dev -- --port 5176`
 
 **Step 3: Verify new columns in DB**
 
@@ -876,12 +876,12 @@ Expected: New columns visible (all null/default for existing rows)
 
 **Step 4: Verify frontend build passes**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
 Expected: Build succeeds with 0 TypeScript errors
 
 **Step 5: Verify backend imports**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.services.task_orchestrator import get_orchestrator; from app.tasks.signals import on_task_prerun; print('All imports OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.services.task_orchestrator import get_orchestrator; from app.tasks.signals import on_task_prerun; print('All imports OK')"`
 Expected: `All imports OK`
 
 ---
@@ -932,7 +932,7 @@ For each AI task in the chain, add `_dedup_key` kwarg so signals can manage lock
 
 **Step 3: Verify backend import**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.tasks.ai_tasks import chain_ai_pipeline; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.tasks.ai_tasks import chain_ai_pipeline; print('OK')"`
 Expected: `OK`
 
 **Step 4: Commit**
@@ -983,7 +983,7 @@ def maybe_trigger_transcode(resource_id: str, version_id: str, mime_type: str, u
 
 **Step 2: Verify backend import**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.tasks.transcode_tasks import maybe_trigger_transcode; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.tasks.transcode_tasks import maybe_trigger_transcode; print('OK')"`
 Expected: `OK`
 
 **Step 3: Commit**
@@ -1059,7 +1059,7 @@ In `backend/app/celery_app.py`, add to `beat_schedule` dict (after line 83):
 
 **Step 3: Verify**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.tasks.scheduled_tasks import recover_stale_orchestrator_locks; print('OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.tasks.scheduled_tasks import recover_stale_orchestrator_locks; print('OK')"`
 Expected: `OK`
 
 **Step 4: Commit**
@@ -1075,12 +1075,12 @@ git commit -m "feat: add scheduled recovery for stale orchestrator locks"
 
 **Step 1: Full frontend build**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/frontend && npm run build`
 Expected: Build succeeds
 
 **Step 2: Full backend import check**
 
-Run: `cd /Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.services.task_orchestrator import get_orchestrator, TaskPhase, VALID_TRANSITIONS, ERROR_CODES; from app.tasks.signals import on_task_prerun, on_task_success, on_task_failure; print('All OK')"`
+Run: `cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend && uv run python -c "from app.services.task_orchestrator import get_orchestrator, TaskPhase, VALID_TRANSITIONS, ERROR_CODES; from app.tasks.signals import on_task_prerun, on_task_success, on_task_failure; print('All OK')"`
 Expected: `All OK`
 
 **Step 3: Verify DB schema**

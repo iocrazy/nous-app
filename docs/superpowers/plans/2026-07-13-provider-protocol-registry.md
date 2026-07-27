@@ -1171,9 +1171,9 @@ git commit -m "refactor(media): image/video construction moves into ark + jimeng
 ### Task 4: Admin `protocols` endpoint
 
 **Files:**
-- Modify: `backend/app/api/admin/nous_model_router.py` (add one route + one response schema)
-- Modify: `backend/app/schemas/nous_model.py` (add response schema)
-- Test: `backend/tests/test_nous_model_protocols_endpoint.py`
+- Modify: `backend/app/api/admin/mediahub_model_router.py` (add one route + one response schema)
+- Modify: `backend/app/schemas/mediahub_model.py` (add response schema)
+- Test: `backend/tests/test_mediahub_model_protocols_endpoint.py`
 
 **Interfaces:**
 - Consumes: `provider_protocols.all_protocols()` (Task 1); `AdminAuthDep`.
@@ -1182,7 +1182,7 @@ git commit -m "refactor(media): image/video construction moves into ark + jimeng
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# backend/tests/test_nous_model_protocols_endpoint.py
+# backend/tests/test_mediahub_model_protocols_endpoint.py
 """GET protocols endpoint returns the registry. Called directly (admin
 endpoint convention), not via TestClient."""
 
@@ -1190,7 +1190,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.api.admin.nous_model_router import list_provider_protocols
+from app.api.admin.mediahub_model_router import list_provider_protocols
 
 
 @pytest.mark.asyncio
@@ -1210,12 +1210,12 @@ async def test_protocols_endpoint_returns_registry():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd backend && uv run pytest tests/test_nous_model_protocols_endpoint.py -q`
+Run: `cd backend && uv run pytest tests/test_mediahub_model_protocols_endpoint.py -q`
 Expected: FAIL — `ImportError: cannot import name 'list_provider_protocols'`
 
 - [ ] **Step 3: Add the response schema**
 
-Append to `backend/app/schemas/nous_model.py`:
+Append to `backend/app/schemas/mediahub_model.py`:
 
 ```python
 class ProviderProtocolItem(BaseModel):
@@ -1237,10 +1237,10 @@ Ensure `from typing import List` (or `list[...]`) is imported at the top of the 
 
 - [ ] **Step 4: Add the route**
 
-In `backend/app/api/admin/nous_model_router.py`, add the import and route. Add to the schema import block (lines 15-21):
+In `backend/app/api/admin/mediahub_model_router.py`, add the import and route. Add to the schema import block (lines 15-21):
 
 ```python
-from app.schemas.nous_model import (
+from app.schemas.mediahub_model import (
     MediahubModelCreate,
     MediahubModelProbeRequest,
     MediahubModelResponse,
@@ -1279,14 +1279,14 @@ Route-ordering check: FastAPI matches in declaration order, but `/protocols` (st
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `cd backend && uv run pytest tests/test_nous_model_protocols_endpoint.py -q`
+Run: `cd backend && uv run pytest tests/test_mediahub_model_protocols_endpoint.py -q`
 Expected: PASS
 
 - [ ] **Step 6: Lint + commit**
 
 ```bash
-cd backend && uv run black app/api/admin/nous_model_router.py app/schemas/nous_model.py tests/test_nous_model_protocols_endpoint.py && uv run isort app/api/admin/nous_model_router.py app/schemas/nous_model.py tests/test_nous_model_protocols_endpoint.py && uv run flake8 app/api/admin/nous_model_router.py app/schemas/nous_model.py tests/test_nous_model_protocols_endpoint.py
-git add backend/app/api/admin/nous_model_router.py backend/app/schemas/nous_model.py backend/tests/test_nous_model_protocols_endpoint.py
+cd backend && uv run black app/api/admin/mediahub_model_router.py app/schemas/mediahub_model.py tests/test_mediahub_model_protocols_endpoint.py && uv run isort app/api/admin/mediahub_model_router.py app/schemas/mediahub_model.py tests/test_mediahub_model_protocols_endpoint.py && uv run flake8 app/api/admin/mediahub_model_router.py app/schemas/mediahub_model.py tests/test_mediahub_model_protocols_endpoint.py
+git add backend/app/api/admin/mediahub_model_router.py backend/app/schemas/mediahub_model.py backend/tests/test_mediahub_model_protocols_endpoint.py
 git commit -m "feat(admin): GET /mediahub-models/protocols endpoint"
 ```
 
@@ -1420,14 +1420,14 @@ Set `frontend/package.json` `"version"` to the next patch above whatever master 
 - [ ] **Step 2: Full changed-file lint gate**
 
 ```bash
-cd backend && uv run flake8 app/services/ai/provider_protocols.py app/services/ai/adapters/factory.py app/services/media/parsers/video_providers/db_registry.py app/api/admin/nous_model_router.py app/schemas/nous_model.py
+cd backend && uv run flake8 app/services/ai/provider_protocols.py app/services/ai/adapters/factory.py app/services/media/parsers/video_providers/db_registry.py app/api/admin/mediahub_model_router.py app/schemas/mediahub_model.py
 ```
 Expected: no output (clean).
 
 - [ ] **Step 3: Run the full affected test set**
 
 ```bash
-cd backend && uv run pytest tests/test_provider_protocols.py tests/test_provider_protocols_contract.py tests/test_nous_model_protocols_endpoint.py tests/test_catalog_provider_dispatch.py tests/test_adapter_factory_byo.py -q
+cd backend && uv run pytest tests/test_provider_protocols.py tests/test_provider_protocols_contract.py tests/test_mediahub_model_protocols_endpoint.py tests/test_catalog_provider_dispatch.py tests/test_adapter_factory_byo.py -q
 ```
 Expected: all PASS.
 

@@ -19,9 +19,9 @@ For NAS-single-process deployments: keep combined mode.
 
 ## Steps
 
-### 1. Set `MEDIAHUB_ROLE=gateway` on the existing `nous` service
+### 1. Set `MEDIAHUB_ROLE=gateway` on the existing `mediahub` service
 
-In `docker/docker-compose.yml`, find the `nous` service `environment:`
+In `docker/docker-compose.yml`, find the `mediahub` service `environment:`
 block and add:
 
 ```yaml
@@ -32,14 +32,14 @@ block and add:
       ...
 ```
 
-After this, the `nous` container will:
+After this, the `mediahub` container will:
 - Serve HTTP API as before
 - Init DBOS so dispatch (`start_workflow_routed`) still works
 - **NOT** call `DBOS.launch()` — workflows queue but won't execute
 
-### 2. Uncomment the `nous-worker` service block
+### 2. Uncomment the `mediahub-worker` service block
 
-In the same file, lines 66-90 contain a commented `nous-worker:`
+In the same file, lines 66-90 contain a commented `mediahub-worker:`
 template. Remove the `# ` prefix from each line.
 
 After uncommenting, the worker container will:
@@ -58,8 +58,8 @@ advertises the requested workflow.
 ### 4. Restart
 
 ```bash
-cd /volume1/docker/nous
-sudo docker compose up -d --force-recreate nous nous-worker
+cd /volume1/docker/mediahub
+sudo docker compose up -d --force-recreate mediahub mediahub-worker
 ```
 
 ## Verification
@@ -76,7 +76,7 @@ curl http://gateway-host/api/v1/health/deep   # gateway view of bounds
 ## Scaling out workers
 
 ```yaml
-nous-worker:
+mediahub-worker:
   deploy:
     replicas: 3   # spawn 3 worker containers
 ```
@@ -89,7 +89,7 @@ If something misbehaves:
 
 1. Set `MEDIAHUB_ROLE=combined` on gateway (or unset)
 2. Stop worker container(s)
-3. `docker compose up -d --force-recreate nous`
+3. `docker compose up -d --force-recreate mediahub`
 
 (After R1 there is no env flag to flip — the gate self-disables when
 the registry only contains the combined-mode self-bound, which by

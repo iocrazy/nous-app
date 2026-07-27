@@ -17,7 +17,7 @@
 - [ ] **Branch base off latest master.**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous
+cd /Volumes/program/project-code/repos/mediahub
 git fetch origin
 git checkout master && git pull
 ```
@@ -1297,7 +1297,7 @@ git checkout -b id-unify/pr-d-storage-paths
 set -euo pipefail
 
 MODE="${1:-DRY_RUN}"
-STORAGE_ROOT="${STORAGE_ROOT:-/volume2/sources/Nous.library}"
+STORAGE_ROOT="${STORAGE_ROOT:-/volume2/sources/MediaHub.library}"
 DB_HOST="${DB_HOST:-127.0.0.1}"
 DB_PORT="${DB_PORT:-55436}"
 
@@ -1432,7 +1432,7 @@ Coordinate offline. Operator first runs DRY_RUN, reviews output, then runs APPLY
 ```bash
 # On NAS:
 ssh -p 1122 heygo@192.168.50.9
-cd /volume1/docker/nous
+cd /volume1/docker/mediahub
 git pull
 bash scripts/migrations/2026-05-28-storage-path-personal-team.sh DRY_RUN
 # Review output

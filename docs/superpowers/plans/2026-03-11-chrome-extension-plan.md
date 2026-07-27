@@ -75,7 +75,7 @@ Create `chrome-extension/manifest.json`:
     "service_worker": "background.js"
   },
   "commands": {
-    "push-to-nous": {
+    "push-to-mediahub": {
       "suggested_key": {
         "default": "Alt+M"
       },
@@ -325,7 +325,7 @@ Create `chrome-extension/background.js`:
 // Register context menu on install
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
-    id: 'push-to-nous',
+    id: 'push-to-mediahub',
     title: 'Push to Nous',
     contexts: ['page'],
   });
@@ -333,14 +333,14 @@ chrome.runtime.onInstalled.addListener(() => {
 
 // Handle context menu click
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId === 'push-to-nous' && tab?.url) {
+  if (info.menuItemId === 'push-to-mediahub' && tab?.url) {
     pushUrl(tab.id, tab.url);
   }
 });
 
 // Handle keyboard shortcut
 chrome.commands.onCommand.addListener((command) => {
-  if (command === 'push-to-nous') {
+  if (command === 'push-to-mediahub') {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const tab = tabs[0];
       if (tab?.url) {
@@ -438,8 +438,8 @@ Create `chrome-extension/content.js`:
 
 ```js
 // Avoid duplicate injection
-if (!window.__nousToastInjected) {
-  window.__nousToastInjected = true;
+if (!window.__mediahubToastInjected) {
+  window.__mediahubToastInjected = true;
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.action === 'showToast') {

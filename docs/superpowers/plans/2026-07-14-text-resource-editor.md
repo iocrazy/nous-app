@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Work in worktree `/Volumes/program/project-code/repos/nous/.worktrees/ops1-smoke`, branch `feat/text-resource-editor` (already branched from `origin/master`).
+- Work in worktree `/Volumes/program/project-code/repos/mediahub/.worktrees/ops1-smoke`, branch `feat/text-resource-editor` (already branched from `origin/master`).
 - Frontend tests: `cd frontend && npx vitest run <path>`. Backend tests: `cd backend && uv run pytest <path> -q` (run with `backend/.env` **moved aside** if it contains `SUPAVISOR_DATABASE_URL`, else integration tests wake up — but the tests here are pure unit tests with mocked repos, so they pass either way).
 - UI text is English; user-facing strings go through i18n `t('...')` with an English fallback literal.
 - No new npm/pip dependencies — every library used here is already in `frontend/package.json`.
@@ -560,7 +560,7 @@ Expected: PASS. (The authz-wiring test confirms the guard wiring for versions ro
 
 ```bash
 cd backend && uv run black --quiet app/services/library/resources_service.py app/api/resources_versions_router.py tests/test_version_overwrite_content.py && uv run flake8 app/services/library/resources_service.py app/api/resources_versions_router.py tests/test_version_overwrite_content.py
-cd /Volumes/program/project-code/repos/nous/.worktrees/ops1-smoke
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/ops1-smoke
 git add backend/app/services/library/resources_service.py backend/app/api/resources_versions_router.py backend/tests/test_version_overwrite_content.py
 git commit -m "feat(resources): overwrite-current-version content endpoint"
 ```

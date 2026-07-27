@@ -269,7 +269,7 @@ Only after the dev soak shows clean for 24+ hours:
 ```bash
 # On the NAS (where prod backend runs):
 ssh nas
-cd /volume1/docker/nous
+cd /volume1/docker/mediahub
 sudo docker compose exec backend bash -c '
   echo "SUPAVISOR_DATABASE_URL=postgresql://postgres.heygo-prod:<PWD>@192.168.50.9:6545/postgres" >> .env
   echo "USE_ASYNCPG_RESOURCES=true" >> .env

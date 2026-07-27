@@ -116,7 +116,7 @@ redis-cli -n 0 KEYS 'ws_ticket:*' | wc -l
 
 ### 起步检查
 ```bash
-cd /Volumes/program/project-code/repos/nous
+cd /Volumes/program/project-code/repos/mediahub
 gh pr list --search "is:open author:@me created:2026-05-04" --json number,title,state
 ```
 

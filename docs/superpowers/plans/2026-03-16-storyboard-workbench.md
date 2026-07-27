@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-03-16-storyboard-workbench-design.md`
 
-**Working Directory:** `/Volumes/program/project-code/repos/nous/.worktrees/storyboard/`
+**Working Directory:** `/Volumes/program/project-code/repos/mediahub/.worktrees/storyboard/`
 
 ---
 

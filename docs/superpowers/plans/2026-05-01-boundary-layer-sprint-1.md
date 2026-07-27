@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.13, pydantic v2, httpx (async), loguru, pytest with `asyncio_mode=auto`, ipaddress stdlib (no new deps).
 
-**Worktree:** `/Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2` (branch `feat/dbos-pr-d2`)
+**Worktree:** `/Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2` (branch `feat/dbos-pr-d2`)
 
 **Out of scope (deferred to Sprint 2+):**
 - `secret_compare` (timing-safe) — temp_token uses Redis lookup, not string compare; api_key_router has no compare yet
@@ -136,7 +136,7 @@ Sprint 1 = type-checker enforcement only (mypy/pyright will complain if a servic
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
 git add docs/architecture/boundary-layer.md
 git commit -m "docs(boundary): RFC for app/boundary/ trust layer"
 ```
@@ -190,7 +190,7 @@ def test_subclasses_distinct():
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_errors.py -v
 ```
 Expected: FAIL with `ModuleNotFoundError: No module named 'app.boundary'`
@@ -249,7 +249,7 @@ Create `backend/tests/boundary/__init__.py` (empty file):
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_errors.py -v
 ```
 Expected: 3 passed
@@ -257,7 +257,7 @@ Expected: 3 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
 git add backend/app/boundary/__init__.py backend/app/boundary/errors.py backend/tests/boundary/
 git commit -m "feat(boundary): add error hierarchy"
 ```
@@ -302,7 +302,7 @@ def test_validated_url_repr_marks_as_validated():
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_types.py -v
 ```
 Expected: FAIL with `ImportError`
@@ -339,7 +339,7 @@ class ValidatedURL(str):
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_types.py -v
 ```
 Expected: 2 passed
@@ -347,7 +347,7 @@ Expected: 2 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
 git add backend/app/boundary/types.py backend/tests/boundary/test_types.py
 git commit -m "feat(boundary): add ValidatedURL wrapper type"
 ```
@@ -463,7 +463,7 @@ def test_private_ipv6_rejected(url: str):
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_url_guard.py -v
 ```
 Expected: ImportError on `validate_url`
@@ -559,7 +559,7 @@ def validate_url(raw: str) -> ValidatedURL:
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_url_guard.py -v
 ```
 Expected: all parametrized cases pass
@@ -567,7 +567,7 @@ Expected: all parametrized cases pass
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
 git add backend/app/boundary/url_guard.py backend/tests/boundary/test_url_guard.py
 git commit -m "feat(boundary): url_guard with scheme + literal-IP SSRF rejection"
 ```
@@ -649,7 +649,7 @@ def test_dns_public_passes(monkeypatch):
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_url_guard.py -v
 ```
 Expected: 5 new test failures (DNS path not implemented)
@@ -764,7 +764,7 @@ def validate_url(raw: str) -> ValidatedURL:
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_url_guard.py -v
 ```
 Expected: all tests pass
@@ -772,7 +772,7 @@ Expected: all tests pass
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
 git add backend/app/boundary/url_guard.py backend/tests/boundary/test_url_guard.py
 git commit -m "feat(boundary): DNS-rebinding-safe url_guard"
 ```
@@ -791,7 +791,7 @@ git commit -m "feat(boundary): DNS-rebinding-safe url_guard"
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 grep -n "url:\s*str\|url: Optional\[str\]" app/services/ytdlp_service.py
 ```
 
@@ -830,7 +830,7 @@ def test_fetch_metadata_requires_validated_url():
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_integration.py -v
 ```
 Expected: FAIL — annotation is `str`
@@ -854,7 +854,7 @@ Internal helpers like `_get_proxy_args(url: str)` may stay `str` — they take t
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_integration.py -v
 ```
 Expected: PASS
@@ -863,7 +863,7 @@ Expected: PASS
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest -x --ignore=tests/integration
 ```
 Expected: any test that calls `YtdlpService.fetch_metadata("http://...")` directly with a raw str fails — fix each call site by wrapping with `validate_url()` or marking as test-only fixture.
@@ -871,7 +871,7 @@ Expected: any test that calls `YtdlpService.fetch_metadata("http://...")` direct
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
 git add backend/app/services/ytdlp_service.py backend/tests/boundary/test_integration.py
 git commit -m "refactor(ytdlp_service): require ValidatedURL at all entrypoints"
 ```
@@ -950,7 +950,7 @@ def test_fetch_video_rejects_internal_url():
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_integration.py -v
 ```
 Expected: PASS
@@ -958,7 +958,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
 git add backend/app/api/media_fetch_router.py backend/app/api/media_fetch_helpers.py backend/tests/boundary/test_integration.py
 git commit -m "refactor(media_fetch): validate URL at API edge, propagate ValidatedURL"
 ```
@@ -1062,7 +1062,7 @@ def test_excessive_newlines_collapsed():
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_external_text.py -v
 ```
 Expected: ImportError
@@ -1158,7 +1158,7 @@ def neutralize_external_text(raw: str, *, max_chars: int) -> str:
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_external_text.py -v
 ```
 Expected: all tests pass
@@ -1166,7 +1166,7 @@ Expected: all tests pass
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
 git add backend/app/boundary/external_text.py backend/tests/boundary/test_external_text.py
 git commit -m "feat(boundary): external_text — defang LLM prompt injection"
 ```
@@ -1217,7 +1217,7 @@ git commit -m "feat(boundary): re-export public api from package init"
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 grep -n "description\|video_info\|metadata\[\|prompt" app/services/summarize_service.py
 ```
 
@@ -1244,7 +1244,7 @@ If the description flows through pydantic schema, add the neutralization in the 
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 grep -n "visual_description\|caption" app/services/visual_analysis_service.py
 ```
 
@@ -1273,7 +1273,7 @@ def test_summarize_neutralizes_description():
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/ -v
 ```
 Expected: all pass
@@ -1281,7 +1281,7 @@ Expected: all pass
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
 git add backend/app/services/summarize_service.py backend/app/services/visual_analysis_service.py backend/tests/boundary/test_integration.py
 git commit -m "refactor(ai): neutralize external description before LLM prompt composition"
 ```
@@ -1359,7 +1359,7 @@ def test_short_alphanumeric_not_redacted():
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_log_redact.py -v
 ```
 Expected: ImportError
@@ -1443,7 +1443,7 @@ def make_loguru_patcher():
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_log_redact.py -v
 ```
 Expected: all tests pass
@@ -1451,7 +1451,7 @@ Expected: all tests pass
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
 git add backend/app/boundary/log_redact.py backend/tests/boundary/test_log_redact.py
 git commit -m "feat(boundary): log_redact — auto-mask secret-shaped tokens"
 ```
@@ -1467,7 +1467,7 @@ git commit -m "feat(boundary): log_redact — auto-mask secret-shaped tokens"
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 grep -n "logger\|loguru\|configure" app/main.py
 ```
 
@@ -1518,7 +1518,7 @@ def test_loguru_patcher_installed_at_startup(caplog):
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest tests/boundary/test_integration.py::test_loguru_patcher_installed_at_startup -v
 ```
 Expected: PASS
@@ -1526,7 +1526,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
 git add backend/app/main.py backend/tests/boundary/test_integration.py
 git commit -m "feat(boundary): install log_redact loguru patcher at startup"
 ```
@@ -1546,7 +1546,7 @@ git commit -m "feat(boundary): install log_redact loguru patcher at startup"
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 grep -rn "Celery\|celery\b\|\.delay()" app/ --include="*.py" --include="*.md" \
   | grep -v "__pycache__" | grep -v "_DEFERRED_TASKS.md" | grep -v "was Celery\|was via celery_app\|was @celery_app\|PR-D7"
 ```
@@ -1585,7 +1585,7 @@ If no result, mark the corresponding checklist items as done in the markdown (e.
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest -x --ignore=tests/integration
 ```
 Expected: pass (these were doc-only changes, no behavior change)
@@ -1593,7 +1593,7 @@ Expected: pass (these were doc-only changes, no behavior change)
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
 git add backend/app/services/agent_runner.py backend/app/services/hooks/__init__.py \
         backend/app/workflows/transcode.py backend/app/workflows/download.py \
         backend/app/workflows/_DEFERRED_TASKS.md
@@ -1608,7 +1608,7 @@ git commit -m "docs: drop Celery references in docstrings (Celery removed in PR-
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run pytest --ignore=tests/integration -v
 ```
 Expected: all unit tests pass; if any non-boundary test broke from retro-fits, fix at the call site (wrap with `validate_url`) before continuing.
@@ -1617,7 +1617,7 @@ Expected: all unit tests pass; if any non-boundary test broke from retro-fits, f
 
 Run:
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run python -c "
 from app.boundary import (
     BoundaryError, URLBlockedError, ExternalTextRejectedError,
@@ -1647,7 +1647,7 @@ Expected: HTTP 400 with body containing "URL not allowed".
 In a Python shell within the backend env:
 
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2/backend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2/backend
 uv run python -c "
 from app.boundary import neutralize_external_text
 print(neutralize_external_text(
@@ -1661,7 +1661,7 @@ Expected: output wrapped in `<EXTERNAL_CONTENT>...</EXTERNAL_CONTENT>` with `[ex
 - [ ] **Step 5: Push branch**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2
 git push -u origin feat/dbos-pr-d2
 ```
 
@@ -1727,7 +1727,7 @@ Items I checked before finalizing:
 - `neutralize_external_text(raw, *, max_chars: int) -> str` — matches Task 8 implementation and Task 9 caller usage.
 - `redact(value: Any) -> Any` and `make_loguru_patcher()` — matches Task 10 implementation and Task 11 caller usage.
 
-**4. Worktree paths** — all `cd` commands use absolute path `/Volumes/program/project-code/repos/nous/.worktrees/feat-dbos-pr-d2`. No relative paths that would break if execution shell resets cwd.
+**4. Worktree paths** — all `cd` commands use absolute path `/Volumes/program/project-code/repos/mediahub/.worktrees/feat-dbos-pr-d2`. No relative paths that would break if execution shell resets cwd.
 
 ---
 

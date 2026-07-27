@@ -35,7 +35,7 @@ This doc is the **predetermined escape route** so we don't redebate strategy und
 | Item | Effort | Note |
 |---|---|---|
 | Add `dbos-pg` service to `docker-compose.yml` (image `postgres:17-alpine`, volume mount, healthcheck) | 0.5d | Port 55434 to avoid clash with sb-dev (55433) and sb-prod (55434 — pick free) |
-| `nous_dbos` role / pwd in `dbos-pg` (no supabase migration needed) | 0.5d | Single CREATE ROLE; no Supavisor pooler involved |
+| `mediahub_dbos` role / pwd in `dbos-pg` (no supabase migration needed) | 0.5d | Single CREATE ROLE; no Supavisor pooler involved |
 | Update `backend/app/main.py` lifespan: `DBOSConfig(database_url=os.environ['DBOS_DATABASE_URL'])` pointing at `dbos-pg` | 0.5d | `.env` adds `DBOS_DATABASE_URL=postgresql://...@dbos-pg:5432/postgres` |
 | Backup/snapshot strategy: nightly `pg_dump` of `dbos-pg` to `/volume1/backup/dbos/` | 1d | Disaster recovery story |
 | Failover plan: stale `dbos-pg` data == lost in-flight workflows; document RTO | 0.5d | Spell out user-visible impact |

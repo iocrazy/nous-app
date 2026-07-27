@@ -15,7 +15,7 @@
 
 **Config surfaces today:**
 - Admin: `GET/PUT /admin/settings/ai-governance` (keys `ai_module.<m>.{user_allowed,nous_allowed,base_url,model,api_key}` + `nous.user_enabled`), `nous_models` CRUD, `GET/PUT /admin/settings/graph-memory` (keys `graph_*`). UI: `admin/src/pages/settings/AIGovernance.tsx`, `admin/src/pages/ai/index.tsx`.
-- User: `GET/PUT /ai/settings`, `GET /ai/governance`, `GET /ai/mediahub-models`. UI: `frontend/components/AISettings.tsx`.
+- User: `GET/PUT /ai/settings`, `GET /ai/governance`, `GET /ai/nous-models`. UI: `frontend/components/AISettings.tsx`.
 
 **Gaps (non-governed AI consumers reading env/file/agent-composed):**
 | Consumer | Reads from | Target |

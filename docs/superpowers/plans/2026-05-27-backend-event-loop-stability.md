@@ -21,7 +21,7 @@
 - [ ] **Branch off master.**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous
+cd /Volumes/program/project-code/repos/mediahub
 git fetch origin
 git checkout -b fix/backend-event-loop-stability origin/master
 bash scripts/sync-worktree.sh   # rebase on master, enable rerere
@@ -923,7 +923,7 @@ Also add `8090` to the container's `expose:` (or `ports:` if accessed from host)
       - "8090"   # healthz-lite (used by docker healthcheck only)
 ```
 
-> **Note:** Watchtower does NOT apply docker-compose changes (per CLAUDE.md). After this PR merges, SSH to the NAS and run `cd /volume1/docker/nous/docker && sudo docker-compose up -d nous` to apply.
+> **Note:** Watchtower does NOT apply docker-compose changes (per CLAUDE.md). After this PR merges, SSH to the NAS and run `cd /volume1/docker/mediahub/docker && sudo docker-compose up -d nous` to apply.
 
 - [ ] **Step 8 — Commit.**
 
@@ -967,7 +967,7 @@ gh pr merge --squash --auto
 ```bash
 sleep 180   # let CI build + push image
 ssh -o BatchMode=yes -i ~/.ssh/nas_deploy_key -p 1122 heygo@192.168.50.9 '
-  cd /volume1/docker/nous/docker && \
+  cd /volume1/docker/mediahub/docker && \
   sudo /usr/local/bin/docker-compose up -d nous
 '
 ```

@@ -131,7 +131,7 @@ touch backend/config/cookies/.gitkeep
 **Step 2: Add to .env**
 
 ```
-COOKIES_DIR=/Volumes/program/project-code/repos/nous/.worktrees/feature-Points-capacity-payment-system/backend/config/cookies
+COOKIES_DIR=/Volumes/program/project-code/repos/mediahub/.worktrees/feature-Points-capacity-payment-system/backend/config/cookies
 ```
 
 **Step 3: Add gitignore rule**

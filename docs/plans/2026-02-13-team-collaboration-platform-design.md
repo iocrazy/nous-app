@@ -220,7 +220,7 @@ CREATE TABLE resource_versions (
 Paths use **only immutable IDs**. All mutable info (names, folders, tags) is database-only.
 
 ```
-Nous.library/
+MediaHub.library/
 ├── resources/
 │   ├── web/{platform}/{external_id}/        ← Parser shared pool (dedup'd)
 │   ├── users/{user_id}/upload/2026-02/      ← personal uploads (versioned)

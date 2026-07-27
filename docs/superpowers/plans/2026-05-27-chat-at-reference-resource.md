@@ -17,7 +17,7 @@
 - [ ] **Branch off latest master.**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous
+cd /Volumes/program/project-code/repos/mediahub
 git fetch origin
 git checkout master && git pull
 git checkout -b feature/chat-at-reference-resource

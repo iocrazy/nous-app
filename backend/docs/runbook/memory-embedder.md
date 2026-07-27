@@ -89,7 +89,7 @@ connectivity from a container, not the host shell.
    config on its next cold start.
 
 2. **Sync Honcho's env** (only if the model/dimension changed). On the NAS, in the
-   Honcho compose dir (`/volume1/docker/nous/honcho-dev/` on dev):
+   Honcho compose dir (`/volume1/docker/mediahub/honcho-dev/` on dev):
    - Update the embedder vars in Honcho's `.env`
      (`EMBEDDING_OPENAI_BASE_URL`, `EMBEDDING_OPENAI_API_KEY`,
      `EMBEDDING_MODEL`, `EMBEDDING_VECTOR_DIMENSIONS`) to match the values above.

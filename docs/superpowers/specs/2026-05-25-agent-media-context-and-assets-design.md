@@ -24,9 +24,9 @@ The insight that drives the architecture: the media the agent should reference (
 - Self-hosted Supabase Storage is *also* on the NAS (file-backed) → no capacity advantage, but adds hops (storage container + Kong + `storage.objects` metadata), inherits the self-hosted Supabase reliability wobble, is worse for large-video streaming than the existing nginx/HLS + `/media` path, and couples assets to Supabase (portability cost vs the planned migrations).
 - Trade-off accepted: upload + access-control plumbing is hand-rolled (but the media-token machinery already exists to reuse).
 
-**Storage layout** (confirmed against the live NAS `Nous.library`):
+**Storage layout** (confirmed against the live NAS `MediaHub.library`):
 ```
-Nous.library/
+MediaHub.library/
   global/resources/web/...            (existing)
   teams/{teamid}/uploads/...          (permanent user uploads — existing)
   teams/{teamid}/temp/...             (NEW — chat/issue temp uploads)

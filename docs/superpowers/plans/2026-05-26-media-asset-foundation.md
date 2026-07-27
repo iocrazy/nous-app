@@ -13,7 +13,7 @@
 ---
 
 ## Why (eng-review findings, verified)
-- `/chat-attachments/upload` writes `/tmp/nous_chat_attachments` (gateway-local). Compose mounts the shared library `${DOWNLOAD_HOST_PATH:-/volume2/sources/Nous.library}:/app/downloads` on **both** `mediahub-app-backend` (gateway) and `mediahub-app-worker`, but **/tmp is NOT shared**. Regular chat turns run on the gateway (can read /tmp); **issue turns run on the worker → cannot read the gateway's /tmp**. So attachments in issue replies are currently unreadable. Storing as a resource on `/app/downloads` fixes this AND makes them promotable.
+- `/chat-attachments/upload` writes `/tmp/nous_chat_attachments` (gateway-local). Compose mounts the shared library `${DOWNLOAD_HOST_PATH:-/volume2/sources/MediaHub.library}:/app/downloads` on **both** `mediahub-app-backend` (gateway) and `mediahub-app-worker`, but **/tmp is NOT shared**. Regular chat turns run on the gateway (can read /tmp); **issue turns run on the worker → cannot read the gateway's /tmp**. So attachments in issue replies are currently unreadable. Storing as a resource on `/app/downloads` fixes this AND makes them promotable.
 - Reuse: `ResourcesService` already does upload → disk-write under `DOWNLOAD_PATH` + resource-row create. `scope_type` ∈ `personal|team` (`resources_crud_router.py:53`). Resources read at `Path(settings.DOWNLOAD_PATH)/file_path` (`resources_crud_router.py:449`).
 
 ## Reuse these existing utilities (don't re-roll)

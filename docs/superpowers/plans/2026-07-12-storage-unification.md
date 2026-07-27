@@ -42,8 +42,8 @@
 
 ```bash
 sudo docker stop $(sudo docker ps -qf name=storage)          # 短暂停写；chat 上传有 fs 回落兜底
-mv /volume2/sources/Nous.library/object-storage/media \
-   /volume2/sources/Nous.library/object-storage/nous
+mv /volume2/sources/MediaHub.library/object-storage/media \
+   /volume2/sources/MediaHub.library/object-storage/nous
 # Portainer/compose 中 storage 服务 env 改 GLOBAL_S3_BUCKET: nous
 sudo docker compose up -d --no-deps storage                   # 铁律 --no-deps，别级联漂移栈
 ```

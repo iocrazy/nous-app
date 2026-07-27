@@ -123,9 +123,9 @@ docker build -t nous:latest .
 
 | 容器内路径 | NAS 路径（示例） | 说明 |
 |-----------|-----------------|------|
-| `/app/downloads` | `/volume1/docker/nous/downloads` | 视频下载目录 |
-| `/app/.env` | `/volume1/docker/nous/.env` | 环境变量 |
-| `/app/frontend_config.yml` | `/volume1/docker/nous/frontend_config.yml` | 前端配置 |
+| `/app/downloads` | `/volume1/docker/mediahub/downloads` | 视频下载目录 |
+| `/app/.env` | `/volume1/docker/mediahub/.env` | 环境变量 |
+| `/app/frontend_config.yml` | `/volume1/docker/mediahub/frontend_config.yml` | 前端配置 |
 
 ---
 

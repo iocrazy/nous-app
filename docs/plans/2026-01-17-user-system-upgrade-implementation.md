@@ -364,7 +364,7 @@ git commit -m "feat(db): add notifications and user_notifications tables"
 **Step 1: Install dependencies**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/user-system-upgrade/frontend
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/user-system-upgrade/frontend
 npm install i18next react-i18next
 ```
 

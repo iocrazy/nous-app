@@ -6,7 +6,7 @@ Supavisor pooler via Termius SSH tunnel: 127.0.0.1:55433 + 9081).
 ## Environment
 
 - Backend: `uv run uvicorn app.main:app --port 8082` against
-  `DBOS_DATABASE_URL=postgresql://nous_dbos.heygo-dev:***@127.0.0.1:55433/postgres`
+  `DBOS_DATABASE_URL=postgresql://mediahub_dbos.heygo-dev:***@127.0.0.1:55433/postgres`
 - Frontend: `npm run dev` (vite) at `localhost:3000`, auth/REST via
   Supabase REST tunnel `127.0.0.1:9081`
 - Test user: `d7-e2e-test@nous.local` (created via service_role
@@ -14,7 +14,7 @@ Supavisor pooler via Termius SSH tunnel: 127.0.0.1:55433 + 9081).
 
 ## Sanity (Step 0)
 
-- ✅ PG tunnel up, nous_dbos.heygo-dev role auth OK
+- ✅ PG tunnel up, mediahub_dbos.heygo-dev role auth OK
 - ✅ Supabase REST tunnel up (HTTP 401 without apikey, expected)
 - ✅ Backend lifespan: DBOS init + launch + 32 workflows registered
 - ✅ `agent_workforce` queue listening (concurrency=8, partitioned)

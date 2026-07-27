@@ -130,7 +130,7 @@ Expected: factory tests PASS; the grep prints either nothing or the compile site
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Volumes/program/project-code/repos/nous/.worktrees/feature-loop-node-ic-parity
+cd /Volumes/program/project-code/repos/mediahub/.worktrees/feature-loop-node-ic-parity
 git add frontend/features/canvas-core/smart/types.ts frontend/features/canvas-core/smart/factories.ts frontend/features/canvas-core/smart/factories.test.ts
 git commit -m "feat(canvas): loop node data model — drop batch mode, add image/prompt/batch fields"
 ```
