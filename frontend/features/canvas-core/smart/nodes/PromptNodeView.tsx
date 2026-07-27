@@ -126,6 +126,11 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
   // append the new media node, and wire it in as a source connection.
   const handlePickAsset = useCallback(
     async (asset: PromptAsset, lang: 'en' | 'zh') => {
+      // Close the picker FIRST: the mint await below leaves an interactive
+      // window — with the picker still open, rapid clicks on rows would fire
+      // concurrent handlePickAsset runs (duplicate POSTs + duplicate node
+      // pairs). Unmounting the rows up front removes the window entirely.
+      setLibraryOpen(false);
       // Mint the durable URL BEFORE reading getState() below — the await
       // here is the only async gap in this handler, so grabbing the store
       // snapshot after it (not before) ensures we build on top of whatever
@@ -168,7 +173,6 @@ export function PromptNodeView({ id, data, selected }: NodeProps) {
       );
       setNodes([...nextNodes, mediaNode as unknown as CanvasNode]);
       setConnections([...connections, connection as unknown as CanvasConnection]);
-      setLibraryOpen(false);
     },
     [id],
   );
