@@ -153,3 +153,175 @@ def test_fetch_releases_gil(slow_server, tmp_path):
     # 真正并行:接近单次请求的延迟(~0.2-0.3s)。
     # 串行(GIL 未释放):接近 8 * 0.2s = 1.6s。留够 CI 抖动余量。
     assert elapsed < 1.0
+
+
+# ─── put_file ───────────────────────────────────────────────────────────────
+#
+# 与 fetch_to_file 同样的教训:每条断言都要问"这个断言在实现被破坏时
+# 会不会真的变红"。下面每条测试都做过反向验证,记录在 task-10-report.md。
+
+
+def test_put_file_uploads_bytes(tmp_path):
+    """PUT 收到的字节必须与源文件逐字节一致。"""
+    payload = os.urandom(512 * 1024)
+    src = tmp_path / "in.bin"
+    src.write_bytes(payload)
+
+    received = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_PUT(self):
+            n = int(self.headers["Content-Length"])
+            received["body"] = self.rfile.read(n)
+            received["auth"] = self.headers.get("Authorization")
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        nous_core.put_file(
+            str(src),
+            f"http://127.0.0.1:{srv.server_port}/k",
+            [("Authorization", "Bearer t")],
+        )
+    finally:
+        srv.shutdown()
+
+    assert received["body"] == payload
+    assert received["auth"] == "Bearer t"
+
+
+def test_put_file_raises_on_error_status(tmp_path):
+    """服务端返回 5xx 必须抛异常,不能被静默吞掉当成功处理。
+
+    覆盖缺口:brief 只给了成功路径的测试。若 Rust 侧漏掉
+    `status.is_success()` 检查,调用方(Task 11 的 materialize)会把
+    上传失败误判为完成。
+    """
+    src = tmp_path / "in.bin"
+    src.write_bytes(b"x" * 100)
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_PUT(self):
+            # 先把 body 读完再回 500,否则连接会在客户端还没发完时被
+            # reset,报的是连接错误而不是我们要验证的状态码错误。
+            n = int(self.headers.get("Content-Length", 0))
+            if n:
+                self.rfile.read(n)
+            self.send_response(500)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with pytest.raises(RuntimeError):
+            nous_core.put_file(str(src), f"http://127.0.0.1:{srv.server_port}/k", [])
+    finally:
+        srv.shutdown()
+
+
+def test_put_file_releases_gil(tmp_path):
+    """8 并发上传必须真正并行。
+
+    与 fetch 侧同样的陷阱:必须用 `ThreadingHTTPServer` + 人为延迟,
+    否则普通单线程 `HTTPServer` 本身就串行处理连接,区分不出
+    allow_threads 是否生效。另外这条也覆盖了 runtime 方案本身的风险
+    ——若把共享 runtime 包了一层 Mutex,或换成 current_thread runtime,
+    请求会被串行化,时间断言会抓到(死锁类测试抓不到这种回归)。
+    """
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    payload = os.urandom(256 * 1024)
+    srcs = []
+    for i in range(8):
+        p = tmp_path / f"in{i}.bin"
+        p.write_bytes(payload)
+        srcs.append(str(p))
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_PUT(self):
+            time.sleep(0.2)
+            n = int(self.headers["Content-Length"])
+            self.rfile.read(n)
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    def one(i: int) -> None:
+        nous_core.put_file(srcs[i], f"http://127.0.0.1:{srv.server_port}/k", [])
+
+    try:
+        start = time.perf_counter()
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(one, range(8)))
+        elapsed = time.perf_counter() - start
+    finally:
+        srv.shutdown()
+
+    # 真正并行:接近单次请求延迟(~0.2-0.3s)。
+    # 串行(GIL 未释放,或 runtime 被隐性串行化):接近 8 * 0.2s = 1.6s。
+    assert elapsed < 1.0
+
+
+def test_put_file_streams_without_buffering_whole_file(tmp_path):
+    """put_file 必须流式发送,不能把整个源文件先读进内存。
+
+    512KB 的载荷区分不出流式还是缓冲(brief 里没覆盖这条)。用 150MB
+    文件 + 进程 RSS 峰值前后差值断言:若 Rust 侧改成先
+    `tokio::fs::read()` 整个文件再塞进 body,增量会逼近文件大小
+    (150MB);流式实现的增量应远小于此。反向验证时把生产代码换成
+    `tokio::fs::read` 整读,这条测试确实由绿转红(见 task-10-report.md),
+    证明这个阈值真的卡住了非流式实现。
+    """
+    import resource
+
+    size_mb = 150
+    chunk = os.urandom(1024 * 1024)  # 复用同一个 1MB 块,避免生成 150MB 随机数拖慢测试
+    src = tmp_path / "big.bin"
+    with open(src, "wb") as f:
+        for _ in range(size_mb):
+            f.write(chunk)
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_PUT(self):
+            n = int(self.headers["Content-Length"])
+            total = 0
+            while total < n:
+                buf = self.rfile.read(min(1024 * 1024, n - total))
+                if not buf:
+                    break
+                total += len(buf)
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        nous_core.put_file(str(src), f"http://127.0.0.1:{srv.server_port}/k", [])
+        after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    finally:
+        srv.shutdown()
+
+    delta_kb = after - before
+    half_file_kb = (size_mb * 1024 * 1024) // 1024 // 2
+    assert delta_kb < half_file_kb, (
+        f"进程 RSS 峰值增量 {delta_kb}KB,超过文件大小一半"
+        f"({half_file_kb}KB),疑似整份读入内存而非流式发送"
+    )
