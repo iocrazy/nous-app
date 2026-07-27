@@ -27,6 +27,7 @@ import { WorkflowStrip } from './WorkflowStrip';
 import { CurrentNodeCard } from './CurrentNodeCard';
 import { LibraryPickerModal } from './LibraryPickerModal';
 import { AgentOption, PersonOption } from './OwnerPicker';
+import { isNodeInActiveGroup } from './nodeStatus';
 
 interface WorkflowSectionProps {
   projectId: string;
@@ -146,13 +147,11 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
 
   if (!workflow.has_workflow) return null;
 
-  // The active group: the current node plus any siblings in its parallel group.
+  // The active group: the current node plus any siblings in its parallel group
+  // (shared predicate — see nodeStatus.ts::isNodeInActiveGroup — so this and
+  // WorkspaceStageBoard's "Complete stage" gate can't silently diverge).
   const current = workflow.nodes.find((n) => n.id === workflow.current_node_id) ?? null;
-  const groupNodes = current
-    ? current.parallel_group != null
-      ? workflow.nodes.filter((n) => n.parallel_group === current.parallel_group)
-      : [current]
-    : [];
+  const groupNodes = workflow.nodes.filter((n) => isNodeInActiveGroup(n, current));
 
   return (
     <div ref={rootRef} data-testid="workflow-section" className="flex flex-col gap-3">
