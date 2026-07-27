@@ -116,29 +116,9 @@ def assert_audio_present_step(audio_path: str) -> str:
     and execution); it raises immediately rather than sleep-waiting, and
     the workflow's top-level try/except converts the failure into a
     task_tracking row with status='failed' instead of a hung worker."""
-    from app.core.config import settings
+    from app.services.media.audio_source import AudioSourceResolver
 
-    full_path = (
-        audio_path
-        if os.path.isabs(audio_path)
-        else os.path.join(settings.DOWNLOAD_PATH, audio_path)
-    )
-    # Use isfile (not exists): a gallery whose background music was never
-    # downloaded falls back to download_path, which is a DIRECTORY. exists()
-    # returns True for a directory, so the guard let it through and the ASR
-    # provider blew up later with an opaque "Invalid audio URI". isfile()
-    # fast-fails here with an actionable message instead.
-    try:
-        if os.path.isdir(full_path):
-            raise RuntimeError(
-                f"audio path is a directory (gallery without downloaded "
-                f"music?): {audio_path}"
-            )
-        if os.path.isfile(full_path) and os.path.getsize(full_path) > 0:
-            return audio_path
-    except OSError:
-        pass
-    raise RuntimeError(f"audio file missing or empty at dispatch time: {audio_path}")
+    return AudioSourceResolver().assert_playable(audio_path)
 
 
 def _assignment_model(
@@ -259,13 +239,11 @@ async def _run_volcengine_asr(
         VolcengineASRService,
     )
 
-    # Resolve audio_path to disk so we can derive the public URL path.
-    # whisper_service has the same resolution chain; mirror it here so
-    # both providers behave identically wrt path.
-    if not os.path.exists(audio_path):
-        joined = os.path.join(settings.DOWNLOAD_PATH, audio_path)
-        if os.path.exists(joined):
-            audio_path = joined
+    # 解析到磁盘路径,以便下面推导对外 URL。
+    from app.services.media.audio_source import AudioSourceResolver
+
+    _resolver = AudioSourceResolver()
+    audio_path = _resolver.resolve(audio_path)
 
     # Pull the bound user id from the provider_config caller (load_transcribe_inputs
     # passes provider_config without user_id; we need to recover it from the
@@ -287,12 +265,8 @@ async def _run_volcengine_asr(
     media_token = _sign_token(user_id, now, expires_at)
 
     media_public_url = getattr(settings, "MEDIA_PUBLIC_URL", "https://cn.nous.ink:88")
-    # The /media route serves files by file-path under DOWNLOAD_PATH;
-    # use the path relative to download root to build the URL.
-    rel_path = audio_path
-    download_root = settings.DOWNLOAD_PATH.rstrip("/")
-    if audio_path.startswith(download_root + "/"):
-        rel_path = audio_path[len(download_root) + 1 :]
+    # The /media route serves files by path relative to the download root.
+    rel_path = _resolver.to_relative(audio_path)
     audio_url = f"{media_public_url}/media/{rel_path}?token={media_token}"
 
     ext = os.path.splitext(audio_path)[1].lstrip(".").lower()
