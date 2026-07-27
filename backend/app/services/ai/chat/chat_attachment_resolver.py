@@ -71,6 +71,37 @@ def _is_public_url(value: str) -> bool:
     return v.startswith(("http://", "https://", "data:"))
 
 
+# Unified-storage refs (2026-07-25 migration): once the admin flips
+# ``storage.unified_storage`` on, /chat-attachments/upload persists to the
+# object store and hands back ``sb://library/...`` instead of a shared-volume
+# relative path. Only the content-addressed media buckets may be fetched —
+# their keys embed a sha256, so a crafted ref can't probe foreign objects
+# the way a guessable key in an arbitrary bucket could.
+_SB_SCHEME = "sb://"
+
+
+def _sb_materialize(ref: str):
+    """Validated ``materialize()`` for an ``sb://`` attachment ref.
+
+    Returns the async context manager yielding a real local temp Path
+    (deleted on exit). Raises ValueError for a malformed ref or a bucket
+    outside the allow-list — the object store is never touched in either
+    case."""
+    from app.services.library.media_storage import (
+        CHAT_MEDIA_BUCKET,
+        LIBRARY_BUCKET,
+        materialize,
+        resolve_media_source,
+    )
+
+    loc = resolve_media_source(ref)
+    if not loc.is_object_store:
+        raise ValueError(f"malformed sb:// attachment path: {ref!r}")
+    if loc.bucket not in (LIBRARY_BUCKET, CHAT_MEDIA_BUCKET):
+        raise ValueError(f"attachment bucket not allowed: {loc.bucket!r}")
+    return materialize(ref)
+
+
 def _resolve_under_base(ref: str, base: Path) -> Optional[Path]:
     """Resolve a stored attachment ``ref`` to an absolute path strictly
     under ``base`` (the shared library). ``ref`` is normally relative to
@@ -191,22 +222,31 @@ async def _resolve_one(req: AttachmentRequest) -> List[Attachment]:
     if kind == "video":
         if not req.url:
             return []
-        # C1: the url is a path on the shared library → resolve it under
-        # CHAT_ATTACHMENT_BASE_DIR and reject anything that escapes the
-        # base (traversal / arbitrary file probing).
-        abs_path = _resolve_under_base(req.url, CHAT_ATTACHMENT_BASE_DIR)
-        if abs_path is None:
-            raise ValueError(
-                f"video path outside chat attachment base dir: {req.url!r}"
-            )
-        # Run frame extraction in a thread (ffmpeg is blocking via
-        # subprocess.communicate)
         from app.services.media.render.video_frame_extractor import extract_frames
 
-        result = await extract_frames(
-            str(abs_path),
-            num_frames=MAX_VIDEO_FRAMES_PER_ATTACHMENT,
-        )
+        if req.url.startswith(_SB_SCHEME):
+            # Object-store ref → stream to a temp file so ffmpeg gets a
+            # real path (deleted when the context exits).
+            async with _sb_materialize(req.url) as tmp_path:
+                result = await extract_frames(
+                    str(tmp_path),
+                    num_frames=MAX_VIDEO_FRAMES_PER_ATTACHMENT,
+                )
+        else:
+            # C1: the url is a path on the shared library → resolve it under
+            # CHAT_ATTACHMENT_BASE_DIR and reject anything that escapes the
+            # base (traversal / arbitrary file probing).
+            abs_path = _resolve_under_base(req.url, CHAT_ATTACHMENT_BASE_DIR)
+            if abs_path is None:
+                raise ValueError(
+                    f"video path outside chat attachment base dir: {req.url!r}"
+                )
+            # Run frame extraction in a thread (ffmpeg is blocking via
+            # subprocess.communicate)
+            result = await extract_frames(
+                str(abs_path),
+                num_frames=MAX_VIDEO_FRAMES_PER_ATTACHMENT,
+            )
         if result.error:
             raise RuntimeError(result.error)
         return list(result.attachments)
@@ -214,18 +254,28 @@ async def _resolve_one(req: AttachmentRequest) -> List[Attachment]:
     if kind == "pdf":
         if not req.url:
             return []
-        # C1: same path-traversal defense for pdf
-        abs_path = _resolve_under_base(req.url, CHAT_ATTACHMENT_BASE_DIR)
-        if abs_path is None:
-            raise ValueError(f"pdf path outside chat attachment base dir: {req.url!r}")
         from app.services.media.render.pdf_renderer import render_pdf
 
-        # Sync (CPU-bound pdfium decode); thread-pool offload
-        result = await asyncio.to_thread(
-            render_pdf,
-            str(abs_path),
-            max_pages=MAX_PDF_PAGES_PER_ATTACHMENT,
-        )
+        if req.url.startswith(_SB_SCHEME):
+            async with _sb_materialize(req.url) as tmp_path:
+                result = await asyncio.to_thread(
+                    render_pdf,
+                    str(tmp_path),
+                    max_pages=MAX_PDF_PAGES_PER_ATTACHMENT,
+                )
+        else:
+            # C1: same path-traversal defense for pdf
+            abs_path = _resolve_under_base(req.url, CHAT_ATTACHMENT_BASE_DIR)
+            if abs_path is None:
+                raise ValueError(
+                    f"pdf path outside chat attachment base dir: {req.url!r}"
+                )
+            # Sync (CPU-bound pdfium decode); thread-pool offload
+            result = await asyncio.to_thread(
+                render_pdf,
+                str(abs_path),
+                max_pages=MAX_PDF_PAGES_PER_ATTACHMENT,
+            )
         if result.error:
             raise RuntimeError(result.error)
         return list(result.attachments)
@@ -259,6 +309,25 @@ async def _resolve_image(req: AttachmentRequest) -> List[Attachment]:
             Attachment(
                 kind=AttachmentKind.IMAGE,
                 url=req.url,
+                mime=req.mime,
+                alt_text=req.alt_text,
+            )
+        ]
+    if req.url.startswith(_SB_SCHEME):
+        # Object-store ref → fetch off the store and inline as a data URL
+        # (same size cap as the shared-volume path below).
+        async with _sb_materialize(req.url) as tmp_path:
+            data_url, size_bytes = await asyncio.to_thread(
+                _file_to_data_url, tmp_path, req.mime
+            )
+        logger.debug(
+            f"[chat_attachment_resolver] inlined sb:// image {req.url!r} "
+            f"({size_bytes} bytes) as data URL"
+        )
+        return [
+            Attachment(
+                kind=AttachmentKind.IMAGE,
+                data_url=data_url,
                 mime=req.mime,
                 alt_text=req.alt_text,
             )
