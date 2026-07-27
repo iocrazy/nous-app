@@ -1721,6 +1721,7 @@
       "members": "Members",
       "schedule": "Schedule",
       "setSchedule": "Set schedule",
+      "suggestAgentRun": "Suggested: run {{agentName}}",
       "deliverable": "Deliverable",
       "openInTodolist": "Open in Todolist",
       "completeStage": "Complete Stage",

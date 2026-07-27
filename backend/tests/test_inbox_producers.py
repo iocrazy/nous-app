@@ -1,10 +1,15 @@
 """Producer-wiring tests for the narrow inbox (W3d).
 
-The inbox has EXACTLY three producers, and no more. These static-source checks
-assert each producer is wired with the correct kind + typed link, and — as a
-guardrail on the narrowness contract — that the ``notify()`` call graph doesn't
-sprout a fourth producer kind. Mirrors the inspect.getsource style already used
-by test_download_workflow_raise_on_error.py (no DBOS runtime needed).
+The original W3d inbox had EXACTLY three producers. M2 PR-E (E1) deliberately
+widened ``NotificationKind`` with a fourth, ``workflow_stage``, for the
+best-effort stage arrival/completion/reopen notifications
+(``services/workflow/stage_notifications.py``) — a narrow, spec'd exception to
+the "no more producers" rule, not a drift. These static-source checks assert
+each of the original three producers is still wired with the correct kind +
+typed link, and — as a guardrail against a FIFTH kind sneaking in — that the
+``notify()`` call graph's allowed kinds match exactly this set of four.
+Mirrors the inspect.getsource style already used by
+test_download_workflow_raise_on_error.py (no DBOS runtime needed).
 """
 
 from __future__ import annotations
@@ -47,9 +52,10 @@ def test_generation_producer_step_kind_and_link() -> None:
     assert wf_src.count("emit_download_notification_step(") == 4
 
 
-def test_no_fourth_producer_kind_leaks_in() -> None:
-    """The three allowed kinds are the only ones the notify Literal admits.
-    A drift here means someone widened the inbox beyond the narrow contract."""
+def test_no_fifth_producer_kind_leaks_in() -> None:
+    """The four allowed kinds are the only ones the notify Literal admits (the
+    original three plus M2 PR-E's spec'd ``workflow_stage`` addition). A drift
+    here means someone widened the inbox beyond the (now four-kind) contract."""
     from app.services.notifications import NotificationKind
 
     # typing.Literal args carry the exact allowed set.
@@ -58,4 +64,5 @@ def test_no_fourth_producer_kind_leaks_in() -> None:
         "generation_result",
         "publish_result",
         "autopilot_output",
+        "workflow_stage",
     }

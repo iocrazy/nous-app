@@ -150,6 +150,14 @@ def _install(
 
     monkeypatch.setattr(advance_service, "ensure_node_folders", _ensure_node_folders)
 
+    # Stage notifications (E2) are a separate concern from the predicate/
+    # mutation mechanics this file exercises — keep them a silent no-op here.
+    # test_stage_notifications.py owns the notify_stage_event behavior itself.
+    async def _notify_stage_event(**kwargs):
+        return None
+
+    monkeypatch.setattr(advance_service, "notify_stage_event", _notify_stage_event)
+
 
 # ── NOT_MANAGER_OR_EDITOR ───────────────────────────────────────────────────
 

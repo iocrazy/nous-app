@@ -243,7 +243,7 @@ class InboxNotifications(Base):
     __table_args__ = (
         CheckConstraint(
             "kind = ANY (ARRAY['generation_result'::text, 'publish_result'::text, "
-            "'autopilot_output'::text])",
+            "'autopilot_output'::text, 'workflow_stage'::text])",
             name="inbox_notifications_kind_check",
         ),
         CheckConstraint(
