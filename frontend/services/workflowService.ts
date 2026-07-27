@@ -17,6 +17,7 @@ import {
   ProjectNodePatch,
   ProjectStageNode,
   ProjectWorkflow,
+  StageBoardData,
   StageLibraryItem,
   WorkflowCompletionPolicy,
   WorkflowNodeEvents,
@@ -242,4 +243,22 @@ export const executeAdvance = async (
   );
   if (!response.data) throw new Error('Empty response from executeAdvance');
   return response.data;
+};
+
+/**
+ * Stage Board aggregate (M2 PR-F F1/F2) — one node's full row + its mirror
+ * issue (with sub-issues) + the files filed into its deliverable folder. The
+ * instance-node segment rides through the same `normalizeInstanceNode` fixup
+ * as every other node payload so a pre-mig-386 row never hands `undefined` to
+ * a consumer reading `node.events.notify_on_arrival`.
+ */
+export const fetchStageBoard = async (
+  projectId: string,
+  nodeId: string,
+): Promise<StageBoardData> => {
+  const response = await apiClient.get<Envelope<StageBoardData>>(
+    `/api/v1/projects/${projectId}/workflow/nodes/${nodeId}/board`,
+  );
+  if (!response.data) throw new Error('Empty response from fetchStageBoard');
+  return { ...response.data, node: normalizeInstanceNode(response.data.node) };
 };

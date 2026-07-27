@@ -20,7 +20,11 @@ export type WorkspaceModule =
   | 'props'
   | 'files'
   | 'trash'
-  | 'settings';
+  | 'settings'
+  // Stage Board (M2 PR-F F2) — NOT in TOP_MODULES/ASSET_MODULES/MANAGE_MODULES:
+  // it never appears in the fixed sidebar menu, only reachable from clicking a
+  // node in the dynamic Stages block (WorkspaceSidebar ~:332).
+  | 'stage';
 
 export interface WorkspaceModuleDef {
   key: WorkspaceModule;
