@@ -89,13 +89,18 @@ describe('CurrentNodeCard — suggest-agent-run chip', () => {
     );
   });
 
-  it('falls back to generic copy when the agent owner is not in the known agents list', () => {
+  it('falls back to the i18n generic-agent copy when the agent owner is not in the known agents list', () => {
+    // Regression guard (#final-review E3): this fallback used to be a hardcoded
+    // English literal ('agent') interpolated straight into the (possibly
+    // Chinese) translated sentence — now it comes from
+    // projects.workflow.genericAgent so a zh locale gets a real translation
+    // instead of a stray English word.
     renderCard({
       owner_agent_id: 'agent-unknown',
       events: { notify_on_arrival: false, notify_on_complete: false, suggest_agent_run: true },
     });
     expect(screen.getByTestId('workflow-suggest-agent-chip')).toHaveTextContent(
-      'Suggested: run agent',
+      'Suggested: run Agent',
     );
   });
 

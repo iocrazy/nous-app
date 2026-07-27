@@ -7,7 +7,11 @@
 import { getApiUrl } from '../utils/apiConfig';
 import { getAuthHeaders } from './parserService';
 
-export type InboxKind = 'generation_result' | 'publish_result' | 'autopilot_output';
+export type InboxKind =
+  | 'generation_result'
+  | 'publish_result'
+  | 'autopilot_output'
+  | 'workflow_stage';
 export type InboxSeverity = 'info' | 'success' | 'error';
 export type InboxLinkKind = 'issue' | 'resource' | 'publish_batch';
 

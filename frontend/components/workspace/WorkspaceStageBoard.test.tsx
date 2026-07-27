@@ -34,6 +34,19 @@ const mockWorkflowService = vi.hoisted(() => ({
 }));
 vi.mock('../../services/workflowService', () => mockWorkflowService);
 
+// Owner/agent name resolution pools — same shape WorkflowSection fetches for
+// CurrentNodeCard's OwnerPicker (#final-review: WorkspaceStageBoard used to
+// render the raw owner_user_id/owner_agent_id UUIDs instead of resolving them).
+const mockProjectsService = vi.hoisted(() => ({
+  fetchProjectMembers: vi.fn(),
+}));
+vi.mock('../../services/projectsService', () => mockProjectsService);
+
+const mockAiLibraryService = vi.hoisted(() => ({
+  aiLibraryService: { listAgents: vi.fn() },
+}));
+vi.mock('../../services/aiLibraryService', () => mockAiLibraryService);
+
 const mockDeliverablesZone = vi.hoisted(() => vi.fn());
 vi.mock('../Todolist/DeliverablesZone', () => ({
   DeliverablesZone: (props: {
@@ -125,6 +138,8 @@ function renderBoard(
 beforeEach(() => {
   mockWorkflowService.fetchStageBoard.mockReset();
   mockDeliverablesZone.mockClear();
+  mockProjectsService.fetchProjectMembers.mockReset().mockResolvedValue([]);
+  mockAiLibraryService.aiLibraryService.listAgents.mockReset().mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -271,5 +286,94 @@ describe('WorkspaceStageBoard', () => {
 
     await screen.findByTestId('workspace-stage-board');
     expect(screen.queryByTestId('stage-board-overdue')).toBeNull();
+  });
+
+  it('resolves owner_agent_id / owner_user_id to display names instead of raw UUIDs', async () => {
+    mockAiLibraryService.aiLibraryService.listAgents.mockResolvedValue([
+      { id: 'agent-uuid-1', slug: 'script-ai', name: 'Script AI' },
+    ]);
+
+    renderBoard(
+      board({
+        node: node({
+          owner_agent_id: 'agent-uuid-1',
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+        }),
+      }),
+    );
+
+    const owner = await screen.findByTestId('stage-board-owner');
+    await waitFor(() => expect(owner).toHaveTextContent('Script AI'));
+    expect(owner).not.toHaveTextContent('agent-uuid-1');
+
+    const chip = screen.getByTestId('stage-board-suggest-chip');
+    expect(chip).toHaveTextContent('Script AI');
+    expect(chip).not.toHaveTextContent('agent-uuid-1');
+  });
+
+  it('resolves owner_user_id to the project member name', async () => {
+    mockProjectsService.fetchProjectMembers.mockResolvedValue([
+      {
+        project_id: '10',
+        user_id: 'user-uuid-1',
+        email: 'jamie@example.com',
+        role: 'editor',
+        invited_by: null,
+        joined_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+
+    renderBoard(board({ node: node({ owner_user_id: 'user-uuid-1' }) }));
+
+    const owner = await screen.findByTestId('stage-board-owner');
+    await waitFor(() => expect(owner).toHaveTextContent('jamie@example.com'));
+    expect(owner).not.toHaveTextContent('user-uuid-1');
+  });
+
+  it('falls back to a generic label — never the raw id — when the agent is not in the candidate pool', async () => {
+    renderBoard(
+      board({
+        node: node({
+          owner_agent_id: 'agent-unknown',
+          events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: true },
+        }),
+      }),
+    );
+
+    const chip = await screen.findByTestId('stage-board-suggest-chip');
+    expect(chip).not.toHaveTextContent('agent-unknown');
+    expect(chip).toHaveTextContent('Agent');
+  });
+
+  it('refetches the board when the workflow instance changes (e.g. after a Complete Stage advance)', async () => {
+    const wf1 = workflow({ current_node_id: '1' });
+    const { rerender } = renderBoard(board({ node: node({ id: '1', status: 'in_progress' }) }), {
+      workflow: wf1,
+    });
+
+    await waitFor(() => expect(mockWorkflowService.fetchStageBoard).toHaveBeenCalledTimes(1));
+
+    // Same projectId/nodeId, but a NEW workflow object (as reloadWorkflow()
+    // would produce post-advance) — must trigger a refetch so stale
+    // header/status/tasks don't linger (#final-review board-refresh item).
+    mockWorkflowService.fetchStageBoard.mockResolvedValue(
+      board({ node: node({ id: '1', status: 'done' }) }),
+    );
+    const wf2 = workflow({ current_node_id: '2', nodes: [node({ id: '1', status: 'done' }), node({ id: '2' })] });
+    rerender(
+      <I18nextProvider i18n={makeI18n()}>
+        <WorkspaceStageBoard
+          projectId="10"
+          projectName="Spring Campaign"
+          nodeId="1"
+          workflow={wf2}
+          canWrite
+          onRequestAdvance={vi.fn()}
+          onOpenTodolist={vi.fn()}
+        />
+      </I18nextProvider>,
+    );
+
+    await waitFor(() => expect(mockWorkflowService.fetchStageBoard).toHaveBeenCalledTimes(2));
   });
 });

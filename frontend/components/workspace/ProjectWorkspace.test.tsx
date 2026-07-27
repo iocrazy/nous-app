@@ -18,12 +18,16 @@ import { ProjectWorkspace } from './ProjectWorkspace';
 import type { EpisodeProgress, Project } from '../../types';
 
 const navigate = vi.fn();
+// Mutable so a single test can seed the initial URL (e.g. `?module=stage`
+// with no `node`) without needing a real router — read once per render via
+// the initializer in ProjectWorkspace, so tests set it BEFORE calling render().
+const mockSearchParams = vi.hoisted(() => ({ current: new URLSearchParams() }));
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
     useNavigate: () => navigate,
-    useSearchParams: () => [new URLSearchParams(), vi.fn()],
+    useSearchParams: () => [mockSearchParams.current, vi.fn()],
   };
 });
 
@@ -165,6 +169,7 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ id: 'created-1', name: 'Episode 1' });
   mockScriptService.updateScriptProject.mockReset().mockResolvedValue({ id: 'created-1' });
+  mockSearchParams.current = new URLSearchParams();
   localStorage.clear();
 });
 
@@ -416,5 +421,19 @@ describe('ProjectWorkspace', () => {
     await expandEpisodesTree();
     const publishBtn = await screen.findByTestId('ws-ep-publish');
     expect(publishBtn).toBeDisabled();
+  });
+
+  it('falls back to Overview when ?module=stage is loaded without a node id (#final-review)', async () => {
+    // A `stage` module URL with no `node` param is invalid (nothing to open a
+    // board for) — stageNodeId's initializer falls back to null, and the
+    // content switch used to match neither 'overview' nor a stage-with-node,
+    // leaving the content area blank despite the module comment promising an
+    // Overview fallback.
+    mockSearchParams.current = new URLSearchParams('module=stage');
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    expect(await screen.findByTestId('ws-overview')).toBeInTheDocument();
+    expect(screen.queryByTestId('workspace-stage-board')).toBeNull();
+    expect(screen.queryByTestId('stage-board-loading')).toBeNull();
   });
 });

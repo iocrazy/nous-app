@@ -1731,6 +1731,7 @@
       "agentsActive_one": "{{count}} agent active",
       "agentsActive_other": "{{count}} agents active",
       "unassigned": "Unassigned",
+      "genericAgent": "Agent",
       "days_one": "{{count}} day",
       "days_other": "{{count}} days",
       "dateRange": {

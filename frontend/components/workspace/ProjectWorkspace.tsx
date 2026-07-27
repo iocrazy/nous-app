@@ -432,6 +432,15 @@ export function ProjectWorkspace({
 
   const studioMode = activeModule === 'script' && resolvedScriptId != null;
 
+  // `?module=stage` without a `node` param has nothing to render (stageNodeId
+  // fell back to null, see the useState initializer above) — the module
+  // comment promised a fallback to Overview, but the render switch below only
+  // ever matched a plain 'overview' module, leaving the content area blank.
+  // Route THIS content render to Overview without touching `activeModule`
+  // itself (URL/module state stays 'stage' so a later `onOpenStage` re-entry
+  // still behaves as expected).
+  const showOverview = activeModule === 'overview' || (activeModule === 'stage' && !stageNodeId);
+
   // Film slate read-out (studio only): 1-based episode + active-scene numbers.
   const epIdx = episodes.findIndex((e) => e.episode_id === currentEpisode?.episode_id);
   const epNumber = epIdx >= 0 ? epIdx + 1 : null;
@@ -495,7 +504,7 @@ export function ProjectWorkspace({
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto px-6 pb-8">
-            {activeModule === 'overview' && (
+            {showOverview && (
               <WorkspaceOverview
                 project={project}
                 episodes={episodes}

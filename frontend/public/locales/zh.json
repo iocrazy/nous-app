@@ -1731,6 +1731,7 @@
       "agentsActive_one": "{{count}} 个智能体运行中",
       "agentsActive_other": "{{count}} 个智能体运行中",
       "unassigned": "未指派",
+      "genericAgent": "智能体",
       "days_one": "{{count}} 天",
       "days_other": "{{count}} 天",
       "dateRange": {
