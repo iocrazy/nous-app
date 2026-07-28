@@ -984,8 +984,9 @@
       "generateFromImage": "从图片反推",
       "promptGenerating": "正在从图片反推提示词...",
       "promptGenerated": "提示词已生成",
-      "promptGenerateSlow": "仍在生成中 — 请到任务中心查看",
+      "promptAnalyzing": "分析中...",
       "promptGenerateFailed": "提示词生成失败",
+      "promptGenerateSlow": "仍在生成中 — 请到任务中心查看",
       "autoTag": "智能打标",
       "autoTagHint": "按 12 个维度为图片智能生成双语标签",
       "autoTagging": "正在智能打标...",
@@ -1000,7 +1001,21 @@
       "platformTags": "平台标签",
       "sendToCanvas": "发送到画布",
       "sendToCanvasNoProjects": "暂无项目",
-      "sendToCanvasNoCanvases": "该项目还没有画布"
+      "sendToCanvasNoCanvases": "该项目还没有画布",
+      "generateSimilar": "生成同款",
+      "generateSimilarEmptyHint": "请先填写正向提示词"
+    },
+    "slidePrompt": {
+      "addPrompt": "为这张图添加提示词",
+      "loadFailed": "加载这张图的提示词失败",
+      "expand": "展开",
+      "copy": "复制",
+      "save": "保存",
+      "saveFailed": "保存失败",
+      "positivePlaceholder": "这张图的提示词...",
+      "negative": "负面",
+      "negativePlaceholder": "负面提示词（要避免的内容）...",
+      "close": "关闭"
     },
     "folderInfoPanel": {
       "title": "文件夹信息",

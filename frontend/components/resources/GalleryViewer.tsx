@@ -6,13 +6,14 @@
 // through the token'd /media/{id} URL the rest of the detail page already uses.
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronLeft, ChevronRight, ImageOff } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ImageOff, Sparkles } from 'lucide-react';
 import Loading from '../common/Loading';
 import {
   getGalleryItems,
   getResourceMediaUrl,
   type GalleryChildItem,
 } from '../../services/resourceService';
+import { ResourcePromptSection } from './ResourcePromptSection';
 
 interface GalleryViewerProps {
   galleryId: string;
@@ -27,6 +28,7 @@ export const GalleryViewer: React.FC<GalleryViewerProps> = ({ galleryId, mediaTo
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [promptOpen, setPromptOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +86,12 @@ export const GalleryViewer: React.FC<GalleryViewerProps> = ({ galleryId, mediaTo
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [goNext, goPrev]);
+
+  // An open prompt drawer refers to the previous child's resourceId — close
+  // it on navigation instead of silently re-pointing at the new one.
+  useEffect(() => {
+    setPromptOpen(false);
+  }, [currentIndex]);
 
   if (isLoading) {
     return (
@@ -171,6 +179,47 @@ export const GalleryViewer: React.FC<GalleryViewerProps> = ({ galleryId, mediaTo
           {currentIndex + 1} / {items.length}
         </p>
       </div>
+
+      {/* Per-child prompt — the current child IS a real resource, so its
+          per-image prompt is just that child's own gen_prompt* columns via
+          the existing ResourcePromptSection (spec 2026-07-28-prompt-dataline
+          §2: "zero new storage" for upload galleries). Floats OVER the image
+          (same pattern as SlidePlayer's SlidePromptStrip) instead of
+          reserving permanent layout height: `absolute`, so the pager keeps
+          its full-bleed image area for everyone who never touches prompts.
+          Collapsed = a small corner pill (no layout cost either way);
+          expanded = a bottom-anchored overlay card, `inset-x-3 bottom-3`
+          inside this same `relative overflow-hidden` container — mirrors
+          SlidePlayer's expanded editor card, which was checked against the
+          same clipping concern (stays within bounds by construction: it's
+          anchored to the edges of the container that clips it, never sized
+          past them). Lazy-mounted (only while `promptOpen`) so browsing the
+          gallery never pays for the resource fetch unless requested. */}
+      {promptOpen ? (
+        <div className="absolute inset-x-3 bottom-3 z-20 max-h-[70%] overflow-y-auto bg-ink-900/95 backdrop-blur border border-ink-700 rounded-xl shadow-lg">
+          <div className="flex justify-end px-2 pt-1.5">
+            <button
+              type="button"
+              onClick={() => setPromptOpen(false)}
+              className="text-ink-500 hover:text-ink-300 transition-colors"
+              aria-label={t('resources.slidePrompt.close', 'Close')}
+            >
+              <ChevronDown size={13} />
+            </button>
+          </div>
+          <ResourcePromptSection resourceId={String(current.id)} />
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setPromptOpen(true)}
+          className="absolute right-3 bottom-3 z-10 flex items-center gap-1 bg-black/55 backdrop-blur-sm rounded-full px-2.5 py-1 text-[10px] text-white/70 hover:text-white transition-colors"
+        >
+          <Sparkles size={11} />
+          {t('resources.infoPanel.promptSection', 'Prompt')}
+          <ChevronUp size={11} />
+        </button>
+      )}
     </div>
   );
 };

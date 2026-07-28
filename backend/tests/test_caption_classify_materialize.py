@@ -98,9 +98,12 @@ async def test_caption_sb_row_calls_llm_with_materialized_path(tmp_path):
     call.assert_awaited_once()
     assert call.await_args.kwargs["abs_path"] == str(local)
     repo.update_resource.assert_awaited_once()
+    # I3: gen_prompt_json is always included (NULL when the structured
+    # contract wasn't met) so a degraded re-run clears stale JSON.
     assert repo.update_resource.await_args.args[1] == {
         "gen_prompt": "an english prompt",
         "gen_prompt_zh": "a zh prompt",
+        "gen_prompt_json": None,
     }
 
 

@@ -7,6 +7,7 @@ import json
 from app.services.ai.caption.caption_service import (
     _encode_image_sync,
     parse_caption_json,
+    parse_caption_result,
 )
 
 
@@ -38,6 +39,114 @@ class TestParseCaptionJson:
         assert parse_caption_json('["a", "list"]') == {}
 
 
+class TestParseCaptionResult:
+    def test_full_structured_json(self):
+        payload = {
+            "prompt_en": "a cat, masterpiece",
+            "prompt_zh": "一只猫, masterpiece",
+            "prompt_json": {
+                "subject": "a cat",
+                "style": "photorealistic",
+                "composition": "centered",
+                "lighting": "soft studio light",
+                "color": "warm tones",
+                "aspect_ratio": "1:1",
+            },
+            "tags": [
+                {"en": "cat", "zh": "猫"},
+                {"en": "studio", "zh": "影棚"},
+            ],
+            "category": "Photography",
+            "aspect_ratio": "1:1",
+        }
+        out = parse_caption_result(json.dumps(payload))
+        assert out["en"] == "a cat, masterpiece"
+        assert out["zh"] == "一只猫, masterpiece"
+        assert out["prompt_json"] == {
+            "subject": "a cat",
+            "style": "photorealistic",
+            "composition": "centered",
+            "lighting": "soft studio light",
+            "color": "warm tones",
+            "aspect_ratio": "1:1",
+            # category is folded into prompt_json so gen_prompt_json
+            # carries it for the result card.
+            "category": "Photography",
+        }
+        assert out["tags"] == [
+            {"en": "cat", "zh": "猫"},
+            {"en": "studio", "zh": "影棚"},
+        ]
+        assert out["category"] == "Photography"
+
+    def test_fenced_full_json(self):
+        payload = (
+            '```json\n{"prompt_en": "a dog", "prompt_zh": "一只狗", '
+            '"prompt_json": {"subject": "a dog"}, "tags": [], '
+            '"category": "Pets"}\n```'
+        )
+        out = parse_caption_result(payload)
+        assert out["en"] == "a dog"
+        assert out["zh"] == "一只狗"
+        assert out["prompt_json"] == {"subject": "a dog", "category": "Pets"}
+        assert "tags" not in out  # empty list dropped
+        assert out["category"] == "Pets"
+
+    def test_missing_prompt_json_fields_tolerated(self):
+        payload = {
+            "prompt_en": "a fox",
+            "prompt_zh": "一只狐狸",
+            "prompt_json": {"subject": "a fox", "style": "watercolor"},
+        }
+        out = parse_caption_result(json.dumps(payload))
+        assert out["prompt_json"] == {"subject": "a fox", "style": "watercolor"}
+
+    def test_top_level_aspect_ratio_backfills_prompt_json(self):
+        payload = {
+            "prompt_en": "a mountain",
+            "prompt_json": {"subject": "a mountain"},
+            "aspect_ratio": "16:9",
+        }
+        out = parse_caption_result(json.dumps(payload))
+        assert out["prompt_json"]["aspect_ratio"] == "16:9"
+
+    def test_tags_deduped_and_capped(self):
+        payload = {
+            "prompt_en": "x",
+            "tags": [{"en": f"tag-{i}"} for i in range(10)]
+            + [{"en": "tag-0"}],  # duplicate, case-sensitive-equal
+        }
+        out = parse_caption_result(json.dumps(payload))
+        assert len(out["tags"]) == 6
+
+    def test_tags_require_non_empty_en(self):
+        payload = {"prompt_en": "x", "tags": [{"zh": "无英文"}, {"en": "  "}]}
+        out = parse_caption_result(json.dumps(payload))
+        assert "tags" not in out
+
+    def test_missing_both_prompt_sides_falls_back_to_legacy_shape(self):
+        # Structured envelope present but agent used the OLD field names —
+        # parse_caption_result should recover via parse_caption_json.
+        payload = '{"en": "a plain fallback prompt", "zh": "一个后备提示词"}'
+        out = parse_caption_result(payload)
+        assert out == {"en": "a plain fallback prompt", "zh": "一个后备提示词"}
+
+    def test_garbage_json_falls_back_to_legacy_parser(self):
+        assert parse_caption_result("not json at all") == {}
+        assert parse_caption_result("") == {}
+
+    def test_non_dict_json_falls_back(self):
+        assert parse_caption_result('["a", "list"]') == {}
+
+    def test_completely_empty_falls_back_to_empty(self):
+        assert parse_caption_result("{}") == {}
+
+    def test_category_ignored_when_blank(self):
+        payload = {"prompt_en": "x", "category": "   "}
+        out = parse_caption_result(json.dumps(payload))
+        assert "category" not in out
+
+
 class TestEncodeImageSync:
     def test_downscales_and_returns_data_url(self, tmp_path):
         from PIL import Image
@@ -55,3 +164,32 @@ class TestEncodeImageSync:
         bad = tmp_path / "bad.png"
         bad.write_bytes(b"definitely not an image")
         assert _encode_image_sync(str(bad)) is None
+
+
+def test_category_folded_into_prompt_json():
+    """category must land inside prompt_json — the result card reads it there."""
+    import json as _json
+
+    from app.services.ai.caption.caption_service import parse_caption_result
+
+    raw = _json.dumps(
+        {
+            "prompt_en": "a poster",
+            "prompt_json": {"subject": "poster"},
+            "category": "Graphic Poster",
+        }
+    )
+    out = parse_caption_result(raw)
+    assert out["category"] == "Graphic Poster"
+    assert out["prompt_json"]["category"] == "Graphic Poster"
+
+
+def test_category_creates_prompt_json_when_absent():
+    import json as _json
+
+    from app.services.ai.caption.caption_service import parse_caption_result
+
+    out = parse_caption_result(
+        _json.dumps({"prompt_en": "a poster", "category": "Poster"})
+    )
+    assert out["prompt_json"] == {"category": "Poster"}

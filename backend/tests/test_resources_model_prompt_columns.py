@@ -12,3 +12,13 @@ def test_negative_prompt_columns_are_mapped():
     cols = {c.key for c in Resources.__mapper__.column_attrs}
     assert "gen_prompt_negative" in cols
     assert "gen_prompt_negative_zh" in cols
+
+
+def test_prompt_dataline_columns_are_mapped():
+    """spec 2026-07-28-prompt-dataline (mig 392): slide_prompts (JSONB) +
+    gen_prompt_json (TEXT) must be ORM-mapped, same rationale as above —
+    the mapper is the whitelist for repository reads/writes.
+    """
+    cols = {c.key for c in Resources.__mapper__.column_attrs}
+    assert "slide_prompts" in cols
+    assert "gen_prompt_json" in cols

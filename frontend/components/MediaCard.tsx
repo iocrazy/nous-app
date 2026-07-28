@@ -23,6 +23,7 @@ import {
 } from '../services/aiService';
 import { fetchResourceTags, addResourceTag, removeResourceTag } from '../services/resourceService';
 import { fetchAllTags, createTag } from '../services/unifiedTagService';
+import { mergeAssignedTagsIntoAllTags } from '../utils/tagMerge';
 import { getSupabaseClient } from '../supabaseClient';
 import { EagleTagPicker } from './EagleTagPicker';
 import { ResourcePromptSection } from './resources/ResourcePromptSection';
@@ -253,14 +254,9 @@ export const MediaCard: React.FC<MediaCardProps> = ({
       setResourceTags(tags);
       // The trigger tag may have just been created on-demand and not yet be
       // in this card's allTags snapshot — append it so the picker's "all
-      // tags" list stays in sync without a full refetch.
-      setAllTags(prev => {
-        const missing = tags
-          .map(t => t.tag)
-          .filter((tag): tag is import('../types').Tag =>
-            !!tag && !prev.some(p => String(p.id) === String(tag.id)));
-        return missing.length ? [...prev, ...missing] : prev;
-      });
+      // tags" list stays in sync without a full refetch (R1, shared with
+      // ResourcesContext / useDownloadsData via mergeAssignedTagsIntoAllTags).
+      setAllTags(prev => mergeAssignedTagsIntoAllTags(prev, tags));
     } catch (err) {
       console.error('Failed to refetch tags:', err);
     }

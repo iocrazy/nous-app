@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Volume2, VolumeX, Loader2, ImageOff } from '
 import Loading from './common/Loading';
 import { getApiUrl } from '../utils/apiConfig';
 import { getAuthHeaders } from '../services/parserService';
+import { SlidePromptStrip } from './SlidePromptStrip';
 
 interface Slide {
   name: string;
@@ -17,9 +18,13 @@ interface SlidePlayerProps {
   mediaId: string;
   mediaToken?: string;
   downloadStatus?: string; // 'pending' | 'downloading' | 'completed' | 'failed'
+  /** resources.id for this album (parsed_media→resources link). The
+   *  per-slide prompt strip only mounts when this is present — SharePage's
+   *  unauthenticated preview doesn't pass it, so it stays edit-free there. */
+  resourceId?: string;
 }
 
-export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, downloadStatus }) => {
+export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, downloadStatus, resourceId }) => {
   const [slides, setSlides] = useState<Slide[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -284,6 +289,12 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
           {currentIndex + 1} / {slides.length}
         </p>
       </div>
+
+      {/* Per-slide prompt strip — sibling of the bottom bar above, not
+          nested in it, so it doesn't disturb the dots/mute/counter layout. */}
+      {resourceId && (
+        <SlidePromptStrip resourceId={resourceId} slideName={currentSlide.name} />
+      )}
 
       {/* Background music audio element */}
       <audio

@@ -38,6 +38,7 @@ import { useAuth } from './AuthContext';
 import { usePermission } from '../hooks/usePermission';
 import { useToast } from '../components/Toast';
 import { getSupabaseClient } from '../supabaseClient';
+import { mergeAssignedTagsIntoAllTags } from '../utils/tagMerge';
 import type { Resource } from '../types';
 
 // ─── Types ─────────────────────────────────────────────
@@ -1038,6 +1039,11 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     try {
       const updated = await fetchResourceTags(selectedResource.resource.id);
       setSelectedResourceTags(updated);
+      // The refetch may include a tag that was just created on-demand (e.g.
+      // PromptSection's ensure-trigger-tag flow) and not yet be in this
+      // panel's allTags snapshot — append it so the picker stays in sync
+      // without a full refetch (R1, mirrors MediaCard.refetchResourceTags).
+      setAllTags((prev) => mergeAssignedTagsIntoAllTags(prev, updated));
     } catch (err) {
       console.error('[ResourcesContext] refetchSelectedResourceTags failed:', err);
     }

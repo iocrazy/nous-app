@@ -39,6 +39,18 @@ class ResourceUpdate(BaseModel):
         max_length=20000,
         description="Chinese-language negative AI generation prompt",
     )
+    slide_prompts: Optional[dict] = Field(
+        None,
+        description=(
+            "Per-slide prompts for download albums, keyed by slide filename: "
+            '{"<name>": {en, zh, neg_en, neg_zh}}'
+        ),
+    )
+    gen_prompt_json: Optional[str] = Field(
+        None,
+        max_length=20000,
+        description="Structured JSON prompt (subject/style/composition/lighting/color/text/aspect_ratio)",
+    )
     url: Optional[str] = Field(None, max_length=2000)
     rating: Optional[int] = Field(None, ge=0, le=5)
     is_trashed: Optional[bool] = None

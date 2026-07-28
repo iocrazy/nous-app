@@ -343,6 +343,8 @@ export interface Resource {
   gen_prompt_zh?: string | null;
   gen_prompt_negative?: string | null;
   gen_prompt_negative_zh?: string | null;
+  slide_prompts?: Record<string, { en?: string; zh?: string; neg_en?: string; neg_zh?: string }> | null;
+  gen_prompt_json?: string | null;
   url: string | null;
   rating: number; // 0-5
   // Download status fields used to live here as mirrors of parsed_media;

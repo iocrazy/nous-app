@@ -84,6 +84,7 @@ export async function updateResource(
     notes?: string;
     gen_prompt?: string;
     gen_prompt_zh?: string;
+    slide_prompts?: Resource['slide_prompts'];
     url?: string;
     rating?: number;
   },
