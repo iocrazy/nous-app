@@ -1000,7 +1000,8 @@
       "platformTags": "Platform Tags",
       "sendToCanvas": "Send to Canvas",
       "sendToCanvasNoProjects": "No projects yet",
-      "sendToCanvasNoCanvases": "This project has no canvases yet"
+      "sendToCanvasNoCanvases": "This project has no canvases yet",
+      "generateSimilar": "Generate Similar"
     },
     "slidePrompt": {
       "addPrompt": "+ Add prompt for this slide",

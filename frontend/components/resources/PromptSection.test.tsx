@@ -15,12 +15,17 @@ vi.mock('react-i18next', () => ({
 // them so the un-clicked tests below stay hermetic and the clicked test
 // gets a deterministic, empty project list.
 const fetchProjects = vi.fn().mockResolvedValue([]);
-vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
+const listCanvases = vi.fn().mockResolvedValue([]);
+// A shared mock (not a fresh vi.fn() per render) so tests can assert on
+// the actual navigate call SendToCanvasModal fires — Generate Similar's
+// autoRun/ratio wiring is only observable end-to-end through it.
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', () => ({ useNavigate: () => mockNavigate }));
 vi.mock('../../services/projectsService', () => ({
   fetchProjects: (...a: unknown[]) => fetchProjects(...a),
 }));
 vi.mock('../../features/canvas-core/services/canvasService', () => ({
-  listCanvases: vi.fn().mockResolvedValue([]),
+  listCanvases: (...a: unknown[]) => listCanvases(...a),
 }));
 
 const generateGenPrompt = vi.fn();
@@ -71,6 +76,9 @@ const props = (over: Partial<Parameters<typeof PromptSection>[0]> = {}) => ({
 beforeEach(() => {
   mockTasks.mockReset().mockReturnValue([]);
   generateGenPrompt.mockReset();
+  fetchProjects.mockReset().mockResolvedValue([]);
+  listCanvases.mockReset().mockResolvedValue([]);
+  mockNavigate.mockReset();
 });
 
 describe('PromptSection', () => {
@@ -153,6 +161,70 @@ describe('PromptSection', () => {
 
     expect(await screen.findByText(/No projects yet/)).toBeTruthy();
     expect(fetchProjects).toHaveBeenCalled();
+  });
+
+  // ─── ⚡ Generate Similar (spec 2026-07-28-prompt-dataline, Task 5) ────
+
+  const jsonResourceForSimilar = () =>
+    base({
+      gen_prompt: 'a cat, anime style',
+      gen_prompt_json: JSON.stringify({
+        subject: 'a cat', style: 'anime', composition: 'centered',
+        lighting: 'soft', color: 'pastel', aspect_ratio: '16:9', category: 'portrait',
+      }),
+    });
+
+  it('shows Generate Similar only when the analysis JSON result is present', async () => {
+    render(<PromptSection {...props({ resource: base({ gen_prompt: 'p' }) })} />);
+    fireEvent.click(screen.getByText(/^p$/));
+    expect(screen.queryByText('Generate Similar')).toBeNull();
+  });
+
+  it('shows Generate Similar next to Send to Canvas once gen_prompt_json exists', async () => {
+    render(<PromptSection {...props({ resource: jsonResourceForSimilar() })} />);
+    fireEvent.click(screen.getByText(/a cat, anime style/));
+    expect(await screen.findByText('Generate Similar')).toBeTruthy();
+    expect(screen.getByText('Send to Canvas')).toBeTruthy();
+  });
+
+  it('clicking Generate Similar sends autoRun + the analysis aspect_ratio through to the canvas navigate call', async () => {
+    fetchProjects.mockResolvedValue([{ id: 'p1', name: 'Proj', team_id: null }]);
+    listCanvases.mockResolvedValue([{ id: 'c1', name: 'Board' }]);
+
+    render(<PromptSection {...props({ resource: jsonResourceForSimilar() })} />);
+    fireEvent.click(screen.getByText(/a cat, anime style/));
+    fireEvent.click(await screen.findByText('Generate Similar'));
+
+    fireEvent.click(await screen.findByText('Proj'));
+    fireEvent.click(await screen.findByText('Board'));
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      '/canvas/c1',
+      expect.objectContaining({
+        state: {
+          promptInsert: expect.objectContaining({ autoRun: true, ratio: '16:9' }),
+        },
+      }),
+    );
+  });
+
+  it('clicking the plain Send to Canvas action (not Generate Similar) omits autoRun/ratio', async () => {
+    fetchProjects.mockResolvedValue([{ id: 'p1', name: 'Proj', team_id: null }]);
+    listCanvases.mockResolvedValue([{ id: 'c1', name: 'Board' }]);
+
+    render(<PromptSection {...props({ resource: jsonResourceForSimilar() })} />);
+    fireEvent.click(screen.getByText(/a cat, anime style/));
+    fireEvent.click(await screen.findByText('Send to Canvas'));
+
+    fireEvent.click(await screen.findByText('Proj'));
+    fireEvent.click(await screen.findByText('Board'));
+
+    const [, options] = mockNavigate.mock.calls[0] as [
+      string,
+      { state: { promptInsert: Record<string, unknown> } },
+    ];
+    expect(options.state.promptInsert).not.toHaveProperty('autoRun');
+    expect(options.state.promptInsert).not.toHaveProperty('ratio');
   });
 
   // ─── Generate — self-managed dispatch + realtime progress ───────

@@ -34,6 +34,13 @@ const mockImportResource = vi.fn();
 vi.mock('./mediaImport', () => ({
   importResourceAsCanvasMedia: (...args: unknown[]) => mockImportResource(...args),
 }));
+// ⚡ Generate Similar (spec 2026-07-28-prompt-dataline, Task 5): the
+// autoRun path calls rerunPrompt(id) after the node lands — mocked so
+// these tests stay store-only, same as the rest of this file.
+const mockRerunPrompt = vi.fn();
+vi.mock('./regenerate', () => ({
+  rerunPrompt: (...args: unknown[]) => mockRerunPrompt(...args),
+}));
 // CanvasComposer only pulls the PromptAsset type + getResourceCoverUrl (the
 // mint-failure fallback) from resourceService — full mock avoids pulling in
 // supabaseClient's env-var-dependent init through the real module.
@@ -50,6 +57,7 @@ beforeEach(() => {
   useCanvasCoreStore.getState().reset();
   mockImportResource.mockReset();
   mockImportResource.mockResolvedValue({ url: '/api/v1/generated-media/gm-1', kind: 'image' });
+  mockRerunPrompt.mockReset().mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -156,5 +164,82 @@ describe('CanvasComposer — Send to Canvas consumption', () => {
     render(<CanvasComposer />);
     expect(useCanvasCoreStore.getState().nodes).toHaveLength(0);
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  // ─── ⚡ Generate Similar (spec 2026-07-28-prompt-dataline, Task 5) ────
+
+  describe('autoRun payload', () => {
+    it('merges gen settings into the inserted prompt node and reruns it exactly once', async () => {
+      locationState = {
+        promptInsert: {
+          assetId: 'r1',
+          filename: 'hero.png',
+          positive: 'a cinematic hero shot',
+          autoRun: true,
+          ratio: '16:9',
+        },
+      };
+      useCanvasCoreStore.setState({ canvasId: 'c1', kind: 'smart', loadStatus: 'ready' });
+
+      render(<CanvasComposer />);
+
+      await waitFor(() => expect(useCanvasCoreStore.getState().nodes).toHaveLength(2));
+      const promptNode = useCanvasCoreStore
+        .getState()
+        .nodes.find((n) => (n as Record<string, unknown>).type === 'prompt') as Record<string, unknown>;
+      const data = promptNode.data as Record<string, unknown>;
+      expect(data.gen).toEqual({ kind: 'image', model: '', ratio: '16:9' });
+
+      expect(mockRerunPrompt).toHaveBeenCalledTimes(1);
+      expect(mockRerunPrompt).toHaveBeenCalledWith(promptNode.id);
+    });
+
+    it('inserts exactly once and reruns exactly once under React.StrictMode double-invoke', async () => {
+      locationState = {
+        promptInsert: {
+          assetId: 'r1',
+          filename: 'hero.png',
+          positive: 'a cinematic hero shot',
+          autoRun: true,
+          ratio: '3:4',
+        },
+      };
+      useCanvasCoreStore.setState({ canvasId: 'c1', kind: 'smart', loadStatus: 'ready' });
+
+      render(
+        <StrictMode>
+          <CanvasComposer />
+        </StrictMode>,
+      );
+
+      await waitFor(() => expect(useCanvasCoreStore.getState().nodes).toHaveLength(2));
+      // Give any StrictMode re-run a chance to (wrongly) fire a second rerun
+      // before asserting the final count stays put.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(useCanvasCoreStore.getState().nodes).toHaveLength(2);
+      expect(mockRerunPrompt).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not merge gen or call rerunPrompt when autoRun is absent (non-autoRun flow unchanged)', async () => {
+      locationState = {
+        promptInsert: {
+          assetId: 'r1',
+          filename: 'hero.png',
+          positive: 'a cinematic hero shot',
+        },
+      };
+      useCanvasCoreStore.setState({ canvasId: 'c1', kind: 'smart', loadStatus: 'ready' });
+
+      render(<CanvasComposer />);
+
+      await waitFor(() => expect(useCanvasCoreStore.getState().nodes).toHaveLength(2));
+      const promptNode = useCanvasCoreStore
+        .getState()
+        .nodes.find((n) => (n as Record<string, unknown>).type === 'prompt') as Record<string, unknown>;
+      const data = promptNode.data as Record<string, unknown>;
+      expect(data.gen).toBeUndefined();
+      expect(mockRerunPrompt).not.toHaveBeenCalled();
+    });
   });
 });

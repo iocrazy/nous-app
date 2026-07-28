@@ -17,9 +17,15 @@
  * callback once the workflow completes (to refetch resource + tags, since
  * the workflow may also write new AI tags). Patch/translate/ensure-trigger-
  * tag stay callback-based — hosts differ in how they hold that state.
+ *
+ * ⚡ Generate Similar (Task 5): when the analysis JSON result is present,
+ * a second action sits next to Send to Canvas. It opens the same
+ * SendToCanvasModal, just flagged `autoRun` with the analysis result's
+ * `aspect_ratio` — CanvasComposer's promptInsert consumer merges that into
+ * a `gen` block and reruns the freshly-inserted prompt node once it lands.
  */
 import { useEffect, useState } from 'react';
-import { ChevronUp, Copy, Languages, Loader2, Send, Sparkles } from 'lucide-react';
+import { ChevronUp, Copy, Languages, Loader2, Send, Sparkles, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { Resource } from '../../types';
@@ -67,6 +73,10 @@ export function PromptSection({
   const [posValue, setPosValue] = useState('');
   const [negValue, setNegValue] = useState('');
   const [sendToCanvasOpen, setSendToCanvasOpen] = useState(false);
+  // ⚡ Generate Similar (spec 2026-07-28-prompt-dataline, Task 5): reuses
+  // the same modal as plain Send to Canvas, just flagged to auto-run the
+  // inserted prompt node once it lands.
+  const [autoRunTarget, setAutoRunTarget] = useState(false);
 
   // ─── Generate — self-managed dispatch + realtime progress ───────
   const [dispatching, setDispatching] = useState(false);
@@ -356,9 +366,23 @@ export function PromptSection({
         </>
       )}
       {dataPresent && (
-        <div className="flex justify-end mt-2">
+        <div className="flex justify-end items-center gap-3 mt-2">
+          {hasJson && (
+            <button
+              onClick={() => {
+                setAutoRunTarget(true);
+                setSendToCanvasOpen(true);
+              }}
+              className="flex items-center gap-1.5 text-[10px] text-ink-500 hover:text-[var(--accent-text)] transition-colors"
+            >
+              <Zap size={11} /> {t('resources.infoPanel.generateSimilar', 'Generate Similar')}
+            </button>
+          )}
           <button
-            onClick={() => setSendToCanvasOpen(true)}
+            onClick={() => {
+              setAutoRunTarget(false);
+              setSendToCanvasOpen(true);
+            }}
             className="flex items-center gap-1.5 text-[10px] text-ink-500 hover:text-[var(--accent-text)] transition-colors"
           >
             <Send size={11} /> {t('resources.infoPanel.sendToCanvas', 'Send to Canvas')}
@@ -371,6 +395,8 @@ export function PromptSection({
           positive={posValue}
           negative={negValue.trim() ? negValue : null}
           onClose={() => setSendToCanvasOpen(false)}
+          autoRun={autoRunTarget || undefined}
+          ratio={autoRunTarget ? (aspectRatio || undefined) : undefined}
         />
       )}
     </div>

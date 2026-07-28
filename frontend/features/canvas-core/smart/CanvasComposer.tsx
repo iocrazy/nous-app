@@ -47,6 +47,7 @@ import { resolveEntityRef } from './entityRef';
 import { buildPromptAssetLoad } from './loadPromptAsset';
 import { importResourceAsCanvasMedia } from './mediaImport';
 import { resolveSourceUrl } from './promptInputs';
+import { rerunPrompt } from './regenerate';
 import { withGenerationRunner } from './generationRunner';
 import { createBackendRunner } from './runner.backend';
 import {
@@ -67,18 +68,26 @@ import { WorkflowLibraryPicker } from './WorkflowLibraryPicker';
 
 /** Shape of the router state SendToCanvasModal navigates here with
  *  (spec 2026-07-26-asset-prompt-management, Phase 2 Task 4 / Phase 3 Task
- *  3). `coverUrl` travels along for completeness but isn't consumed below —
+ *  3; `autoRun`/`ratio` added by spec 2026-07-28-prompt-dataline, Task 5).
+ *  `coverUrl` travels along for completeness but isn't consumed below —
  *  the adapter mints a fresh durable URL from `assetId` via
  *  importResourceAsCanvasMedia (falling back to the cover URL only if that
  *  mint fails), then hands it to buildPromptAssetLoad, which keeps the
  *  media-node construction on the one tested code path shared with the
- *  in-canvas Library picker (PromptNodeView). */
+ *  in-canvas Library picker (PromptNodeView). When `autoRun` is set, the
+ *  inserted prompt node gets `gen: {kind:'image', model:'', ratio}` merged
+ *  in before the commit, then `rerunPrompt(id)` fires once — this is the
+ *  "⚡ Generate Similar" one-click flow from a resource's result card. */
 interface PendingPromptInsert {
   assetId: string;
   filename: string;
   positive: string;
   negative?: string;
   coverUrl?: string;
+  /** Generate Similar (Task 5): auto-run the inserted prompt node right
+   *  after it lands, seeded with the source asset's aspect ratio. */
+  autoRun?: boolean;
+  ratio?: string;
 }
 
 const SMART_NODE_TYPE_KEYS = new Set(Object.keys(SMART_NODE_TYPES));
@@ -282,13 +291,28 @@ export function CanvasComposer({
       });
       const filledPromptNode = {
         ...promptNode,
-        data: { ...promptNode.data, ...promptPatch },
+        data: {
+          ...promptNode.data,
+          ...promptPatch,
+          // Generate Similar (Task 5): seed gen settings BEFORE the commit
+          // below so rerunPrompt (which reads node data from the store at
+          // call time) sees them on its very first read.
+          ...(insert.autoRun
+            ? { gen: { kind: 'image' as const, model: '', ratio: insert.ratio } }
+            : {}),
+        },
       };
 
       const store = useCanvasCoreStore.getState();
       setNodes([...store.nodes, filledPromptNode, mediaNode as unknown as CanvasNode]);
       setConnections([...store.connections, connection as unknown as CanvasConnection]);
       setSelection([filledPromptNode.id, mediaNode.id]);
+
+      if (insert.autoRun) {
+        rerunPrompt(filledPromptNode.id).catch((err) =>
+          console.error('[promptAsset] autoRun rerunPrompt failed:', err),
+        );
+      }
 
       navigate(location.pathname + location.search + location.hash, { replace: true });
     })();

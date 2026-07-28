@@ -1000,7 +1000,8 @@
       "platformTags": "平台标签",
       "sendToCanvas": "发送到画布",
       "sendToCanvasNoProjects": "暂无项目",
-      "sendToCanvasNoCanvases": "该项目还没有画布"
+      "sendToCanvasNoCanvases": "该项目还没有画布",
+      "generateSimilar": "生成同款"
     },
     "slidePrompt": {
       "addPrompt": "+ 为这张图添加提示词",

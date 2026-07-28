@@ -14,6 +14,11 @@
  *
  * Styling follows ShareModal's dark card convention (bg-ink-900 +
  * backdrop), sized down to a picker list since there's no form here.
+ *
+ * Optional `autoRun`/`ratio` props (spec 2026-07-28-prompt-dataline, Task
+ * 5 — "⚡ Generate Similar") flow straight through into the promptInsert
+ * payload; CanvasComposer's consumer merges them into a `gen` block and
+ * reruns the node once it lands. Absent, the payload is unchanged.
  */
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -33,9 +38,21 @@ export interface SendToCanvasModalProps {
   /** May be empty/absent — canvas insert omits the negative field then. */
   negative: string | null;
   onClose: () => void;
+  /** ⚡ Generate Similar (Task 5 of spec 2026-07-28-prompt-dataline): when
+   *  set, the picked canvas auto-runs the inserted prompt node instead of
+   *  leaving it idle. Omitted for the plain Send to Canvas flow — the
+   *  promptInsert payload then carries no autoRun/ratio keys at all, so
+   *  that flow's router state stays byte-identical to before this prop
+   *  existed. */
+  autoRun?: boolean;
+  /** Aspect ratio to seed the auto-run with (from the source asset's
+   *  gen_prompt_json.aspect_ratio). Only meaningful when autoRun is set. */
+  ratio?: string;
 }
 
-export function SendToCanvasModal({ resource, positive, negative, onClose }: SendToCanvasModalProps) {
+export function SendToCanvasModal({
+  resource, positive, negative, onClose, autoRun, ratio,
+}: SendToCanvasModalProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
 
@@ -81,6 +98,7 @@ export function SendToCanvasModal({ resource, positive, negative, onClose }: Sen
           positive,
           negative: negative || undefined,
           coverUrl: getResourceCoverUrl(resource.id),
+          ...(autoRun ? { autoRun: true as const, ratio } : {}),
         },
       },
     });

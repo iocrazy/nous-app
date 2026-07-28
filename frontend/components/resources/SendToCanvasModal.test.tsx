@@ -127,6 +127,57 @@ describe('SendToCanvasModal', () => {
     expect(screen.queryByText('Classic Board')).toBeNull();
   });
 
+  // ─── ⚡ Generate Similar (spec 2026-07-28-prompt-dataline, Task 5) ────
+
+  it('includes autoRun + ratio in the promptInsert payload when requested', async () => {
+    fetchProjects.mockResolvedValue([{ id: 'p1', name: 'Project One', team_id: 't1' }]);
+    listCanvases.mockResolvedValue([{ id: 'c1', name: 'Board One' }]);
+
+    render(
+      <SendToCanvasModal
+        resource={resource}
+        positive="a cinematic hero shot"
+        negative={null}
+        onClose={vi.fn()}
+        autoRun
+        ratio="16:9"
+      />,
+    );
+
+    fireEvent.click(await screen.findByText('Project One'));
+    fireEvent.click(await screen.findByText('Board One'));
+
+    expect(navigate).toHaveBeenCalledWith('/team/t1/canvas/c1', {
+      state: {
+        promptInsert: {
+          assetId: 'r1',
+          filename: 'hero.png',
+          positive: 'a cinematic hero shot',
+          negative: undefined,
+          coverUrl: 'https://api.test/cover/r1',
+          autoRun: true,
+          ratio: '16:9',
+        },
+      },
+    });
+  });
+
+  it('omits autoRun/ratio entirely when autoRun is not set (byte-identical to the plain flow)', async () => {
+    fetchProjects.mockResolvedValue([{ id: 'p1', name: 'Project One', team_id: 't1' }]);
+    listCanvases.mockResolvedValue([{ id: 'c1', name: 'Board One' }]);
+
+    render(
+      <SendToCanvasModal resource={resource} positive="p" negative={null} onClose={vi.fn()} ratio="16:9" />,
+    );
+
+    fireEvent.click(await screen.findByText('Project One'));
+    fireEvent.click(await screen.findByText('Board One'));
+
+    const [, options] = navigate.mock.calls[0] as [string, { state: { promptInsert: Record<string, unknown> } }];
+    expect(options.state.promptInsert).not.toHaveProperty('autoRun');
+    expect(options.state.promptInsert).not.toHaveProperty('ratio');
+  });
+
   it('calls onClose on backdrop click', async () => {
     fetchProjects.mockResolvedValue([]);
     const onClose = vi.fn();
