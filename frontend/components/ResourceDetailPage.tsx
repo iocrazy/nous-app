@@ -85,7 +85,7 @@ import { shouldSuppressFileArrowNav } from './resources/fileArrowNav';
 import VideoPlayer from './VideoPlayer';
 import { KeyboardShortcutsDialog } from './KeyboardShortcutsDialog';
 import { ResourceReviewPanel } from './ResourceReviewPanel';
-import { useResizablePanel, ResizeHandle, detailCardClass, DetailBadge, RatingStars, AiIntentBadges } from './detail/DetailCardKit';
+import { useResizablePanel, ResizeHandle, detailCardClass, DetailBadge, RatingStars, AiIntentBadges, DEFAULT_PANEL_WIDTH } from './detail/DetailCardKit';
 import { ResourceAnnotationOverlay, NormalizedAnnotation } from './ResourceAnnotationOverlay';
 import { AudioWaveformPlayer } from './AudioWaveformPlayer';
 import { AudioOverviewSide } from './AudioOverviewSide';
@@ -228,7 +228,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
 
   // Resizable inspector panel — drag handle is invisible until hover (no
   // persistent divider line); shared with the download detail via DetailCardKit.
-  const { panelWidth, handleResizeStart } = useResizablePanel();
+  const { panelWidth, handleResizeStart } = useResizablePanel(DEFAULT_PANEL_WIDTH, 'resource-detail');
   const [isDesktop, setIsDesktop] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches,
   );

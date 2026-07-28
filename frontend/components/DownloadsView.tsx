@@ -17,6 +17,7 @@ import { useNavigate } from 'react-router-dom';
 import { useLibraryContext } from '../contexts/LibraryContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useIslandWork } from '../contexts/IslandWorkContext';
+import { loadPanelWidth, savePanelWidth } from './detail/DetailCardKit';
 import { Video } from '../types';
 import { FilterBar } from './resources/filter/FilterBar';
 import { useFilterBarConfig } from '../hooks/useFilterBarConfig';
@@ -409,11 +410,13 @@ export const DownloadsView: React.FC = () => {
   const [multiSelectMode, setMultiSelectMode] = useState(false);
   const [lastClickedId, setLastClickedId] = useState<string | null>(null);
   const [showInfoPanel, setShowInfoPanel] = useState(true);
-  const [infoPanelWidth, setInfoPanelWidth] = useState(320);
+  const [infoPanelWidth, setInfoPanelWidth] = useState(() => loadPanelWidth('downloads-info', 320, 280, 600));
   const [panelNotes, setPanelNotes] = useState('');
   const [panelRating, setPanelRating] = useState(0);
   const [panelHoverRating, setPanelHoverRating] = useState(0);
   const resizeStartRef = useRef<{ x: number; width: number } | null>(null);
+  const infoPanelWidthRef = useRef(infoPanelWidth);
+  infoPanelWidthRef.current = infoPanelWidth;
 
   // ─── Island info-island integration ────────────────────
   // In island mode the My Downloads info panel renders INSIDE the shell's info
@@ -692,12 +695,14 @@ export const DownloadsView: React.FC = () => {
       if (!resizeStartRef.current) return;
       const delta = resizeStartRef.current.x - me.clientX;
       const newWidth = Math.max(280, Math.min(600, resizeStartRef.current.width + delta));
+      infoPanelWidthRef.current = newWidth;
       setInfoPanelWidth(newWidth);
     };
     const handleUp = () => {
       resizeStartRef.current = null;
       document.removeEventListener('mousemove', handleMove);
       document.removeEventListener('mouseup', handleUp);
+      savePanelWidth('downloads-info', infoPanelWidthRef.current);
     };
     document.addEventListener('mousemove', handleMove);
     document.addEventListener('mouseup', handleUp);

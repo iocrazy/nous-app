@@ -1,4 +1,12 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { loadPanelWidth } from '../components/detail/DetailCardKit';
+
+/** Clamp range shared by `setInfoWidth` (context) and the drag handler (IslandShell). */
+export const INFO_WIDTH_MIN = 250;
+export const INFO_WIDTH_MAX = 640;
+/** Persistence key — this info island is shared by the uploads (ResourceInfoPanel)
+ *  and downloads (DownloadInfoPanel, island mode) sidebars, so one key covers both. */
+export const INFO_WIDTH_STORAGE_KEY = 'resources-info';
 
 export interface IslandWorkValue {
   /** The attached info-island portal target (null until mounted). Pages portal into this. */
@@ -33,11 +41,13 @@ const Ctx = createContext<IslandWorkValue>(INERT);
 export const IslandWorkProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [infoIslandEl, setInfoIslandElState] = useState<HTMLDivElement | null>(null);
   const [infoVisible, setInfoVisible] = useState(false);
-  const [infoWidth, setInfoWidthState] = useState(360);
+  const [infoWidth, setInfoWidthState] = useState(() =>
+    loadPanelWidth(INFO_WIDTH_STORAGE_KEY, 360, INFO_WIDTH_MIN, INFO_WIDTH_MAX),
+  );
   const [infoAvailable, setInfoAvailableState] = useState(false);
   const setInfoIslandEl = useCallback((el: HTMLDivElement | null) => setInfoIslandElState(el), []);
   const setInfoWidth = useCallback(
-    (w: number) => setInfoWidthState(Math.min(640, Math.max(250, w))),
+    (w: number) => setInfoWidthState(Math.min(INFO_WIDTH_MAX, Math.max(INFO_WIDTH_MIN, w))),
     [],
   );
   const setInfoAvailable = useCallback((v: boolean) => setInfoAvailableState(v), []);

@@ -18,11 +18,58 @@ export const MIN_PANEL_WIDTH = 380;
 export const MAX_PANEL_WIDTH = 800;
 export const DEFAULT_PANEL_WIDTH = 420;
 
-/** Drag-to-resize state for a right-hand detail panel. */
-export function useResizablePanel(initial: number = DEFAULT_PANEL_WIDTH) {
-  const [panelWidth, setPanelWidth] = useState(initial);
+const PANEL_WIDTH_STORAGE_PREFIX = 'nous.panelWidth.';
+
+/**
+ * Read a persisted panel width for `key` (see `nous.panelWidth.<name>`
+ * convention), clamped to [min, max] to defend against a stale/garbage value
+ * (e.g. a range change across a deploy). Falls back to `initial` when unset,
+ * unparsable, or when storage is unavailable (SSR / privacy mode) — the
+ * try/catch keeps that last case a silent no-op rather than a thrown error.
+ */
+export function loadPanelWidth(
+  key: string,
+  initial: number,
+  min: number = MIN_PANEL_WIDTH,
+  max: number = MAX_PANEL_WIDTH,
+): number {
+  try {
+    const raw = window.localStorage.getItem(PANEL_WIDTH_STORAGE_PREFIX + key);
+    if (raw === null) return initial;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return initial;
+    return Math.min(max, Math.max(min, parsed));
+  } catch {
+    return initial;
+  }
+}
+
+/** Persist a panel width for `key`. Silently no-ops when storage is unavailable. */
+export function savePanelWidth(key: string, width: number): void {
+  try {
+    window.localStorage.setItem(PANEL_WIDTH_STORAGE_PREFIX + key, String(width));
+  } catch {
+    // SSR / privacy mode — fall back to in-memory-only state.
+  }
+}
+
+/**
+ * Drag-to-resize state for a right-hand detail panel.
+ *
+ * Pass `storageKey` to persist the user's last dragged width across sessions
+ * (`nous.panelWidth.<storageKey>`). The stored value is read once on init and
+ * written once per drag, on mouseup — never during mousemove, to avoid
+ * hammering localStorage on every pixel of movement. Omitting `storageKey`
+ * keeps the hook's behavior exactly as before (in-memory width only).
+ */
+export function useResizablePanel(initial: number = DEFAULT_PANEL_WIDTH, storageKey?: string) {
+  const [panelWidth, setPanelWidth] = useState(() =>
+    storageKey ? loadPanelWidth(storageKey, initial) : initial,
+  );
   const dragStartX = useRef(0);
   const dragStartWidth = useRef(initial);
+  const latestWidth = useRef(panelWidth);
+  latestWidth.current = panelWidth;
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -32,6 +79,7 @@ export function useResizablePanel(initial: number = DEFAULT_PANEL_WIDTH) {
       // Panel sits on the RIGHT, so dragging left (smaller clientX) widens it.
       const delta = dragStartX.current - ev.clientX;
       const newWidth = Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, dragStartWidth.current + delta));
+      latestWidth.current = newWidth;
       setPanelWidth(newWidth);
     };
     const onUp = () => {
@@ -39,12 +87,13 @@ export function useResizablePanel(initial: number = DEFAULT_PANEL_WIDTH) {
       window.removeEventListener('mouseup', onUp);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      if (storageKey) savePanelWidth(storageKey, latestWidth.current);
     };
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [panelWidth]);
+  }, [panelWidth, storageKey]);
 
   return { panelWidth, handleResizeStart, setPanelWidth };
 }
