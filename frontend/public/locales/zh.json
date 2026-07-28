@@ -967,6 +967,8 @@
       "sourceUpload": "上传",
       "aiStatus": "AI 状态",
       "prompt": "提示词",
+      "promptSection": "提示词",
+      "promptExpandHint": "点击展开",
       "addPrompt": "添加提示词",
       "promptPlaceholder": "粘贴 AI 生成提示词...",
       "negativePrompt": "负面",

@@ -42,32 +42,38 @@ const props = (over: Partial<Parameters<typeof PromptSection>[0]> = {}) => ({
 });
 
 describe('PromptSection', () => {
-  it('shows collapsed preview when prompt data exists', () => {
+  it('shows collapsed preview card when prompt data exists', () => {
     render(<PromptSection {...props({ resource: base({ gen_prompt: 'masterpiece, 1girl' }) })} />);
+    // Section header (Sparkles + "Prompt" caption) is always present.
+    expect(screen.getByText('Prompt')).toBeTruthy();
     expect(screen.getByText(/masterpiece, 1girl/)).toBeTruthy();
     expect(screen.queryByPlaceholderText(/negative/i)).toBeNull(); // not expanded yet
   });
 
-  it('shows light Add Prompt entry when no data and no trigger tag', () => {
+  it('shows section header + Add Prompt pill when no data and no trigger tag', () => {
     render(<PromptSection {...props()} />);
-    expect(screen.getByText(/Add Prompt/)).toBeTruthy();
-    // The light variant is a bare text button, not the collapsed row —
-    // the row's Sparkles-labeled "Prompt" caption must be absent here.
-    expect(screen.queryByText('Prompt')).toBeNull();
+    expect(screen.getByText('Prompt')).toBeTruthy();
+    const pill = screen.getByText(/\+ Add Prompt/).closest('button');
+    expect(pill).not.toBeNull();
+    expect(pill?.className).toContain('border-dashed');
   });
 
-  it('shows collapsed row (not the light variant) when no data but hasTriggerTag is true', () => {
+  it('shows the same section header + pill when no data but hasTriggerTag is true', () => {
     render(<PromptSection {...props({ hasTriggerTag: true })} />);
-    // Collapsed row variant: Sparkles-labeled "Prompt" caption + inline
-    // "+ Add Prompt" text inside the row button.
+    // Both empty states (with/without a trigger tag already assigned)
+    // render identically — merged per v6.1 mockup.
     expect(screen.getByText('Prompt')).toBeTruthy();
-    expect(screen.getByText(/\+ Add Prompt/)).toBeTruthy();
-    // Distinguish from the bare light-text variant, which renders
-    // "+ Add Prompt" as the button's own (only) label, not alongside a
-    // separate "Prompt" caption.
-    const row = screen.getByText('Prompt').closest('button');
-    expect(row).not.toBeNull();
-    expect(row?.className).toContain('border-ink-700/50');
+    const pill = screen.getByText(/\+ Add Prompt/).closest('button');
+    expect(pill).not.toBeNull();
+    expect(pill?.className).toContain('border-dashed');
+  });
+
+  it('collapsed preview card shows only the negative row when only negative data exists', () => {
+    render(<PromptSection {...props({ resource: base({ gen_prompt_negative: 'lowres, bad hands' }) })} />);
+    expect(screen.getByText('Prompt')).toBeTruthy();
+    expect(screen.getByText(/lowres, bad hands/)).toBeTruthy();
+    // No positive text was supplied, so no font-mono positive line renders.
+    expect(document.querySelector('.font-mono.text-\\[11px\\]')).toBeNull();
   });
 
   it('expanding calls onEnsureTriggerTag and reveals both textareas', async () => {
