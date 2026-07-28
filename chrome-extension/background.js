@@ -360,11 +360,10 @@ async function showToast(tabId, message, type) {
 // ============================================================
 
 async function openPromptPanel(tabId, imageUrl, pageUrl) {
-  try {
-    await chrome.scripting.insertCSS({ target: { tabId }, files: ['prompt-panel.css'] });
-  } catch {
-    // stylesheet may already be inserted
-  }
+  // prompt-panel.js renders into its own Shadow DOM and clones
+  // prompt-panel.css's rules into an internal <style> tag (see PANEL_CSS in
+  // that file), so there's no longer a light-DOM stylesheet to insertCSS —
+  // it would only pollute the host page's <head> for no benefit.
   try {
     await chrome.scripting.executeScript({ target: { tabId }, files: ['prompt-panel.js'] });
   } catch (err) {

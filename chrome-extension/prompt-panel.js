@@ -16,6 +16,214 @@ if (!window.__nousPromptPanelInjected) {
   const POLL_INTERVAL_MS = 2000;
   const POLL_TIMEOUT_MS = 90000;
 
+  // Cloned from prompt-panel.css and rendered into a <style> inside the
+  // panel's shadow root (see ensurePanel()) instead of relying on
+  // background.js's insertCSS into the host page's <head>. A light-DOM
+  // stylesheet can be clobbered by the host page's own CSS resets/globals
+  // (e.g. `* { all: unset }`, `button { all: initial }` kits) — the panel
+  // lives inside <all_urls>-injected content, so we can't assume the host
+  // page plays nice. Shadow DOM + :host{all:initial} makes the panel immune
+  // to that instead of hoping no host page ever collides with `.nous-pp-*`.
+  const PANEL_CSS = `
+    :host {
+      all: initial;
+    }
+
+    .nous-prompt-panel {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      width: 380px;
+      max-height: calc(100vh - 32px);
+      overflow-y: auto;
+      z-index: 2147483647;
+      background: #18181b;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      color: #d4d4d8;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .nous-prompt-panel * {
+      box-sizing: border-box;
+    }
+
+    .nous-pp-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .nous-pp-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #ffffff;
+    }
+
+    .nous-pp-close {
+      background: transparent;
+      border: none;
+      color: #a1a1aa;
+      font-size: 16px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .nous-pp-close:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: #ffffff;
+    }
+
+    .nous-pp-body {
+      padding: 14px;
+    }
+
+    /* Progress state */
+    .nous-pp-progress-track {
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+      margin-bottom: 8px;
+    }
+
+    .nous-pp-progress-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 3px;
+      background: #a5b4fc;
+      transition: width 0.3s ease;
+    }
+
+    .nous-pp-subtitle {
+      font-size: 12px;
+      color: #a1a1aa;
+    }
+
+    /* Error state */
+    .nous-pp-error {
+      font-size: 12px;
+      color: #f87171;
+      margin-bottom: 10px;
+      line-height: 1.6;
+    }
+
+    /* Tabs */
+    .nous-pp-tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .nous-pp-tab {
+      padding: 6px 10px;
+      font-size: 12px;
+      color: #a1a1aa;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+    }
+
+    .nous-pp-tab:hover {
+      color: #d4d4d8;
+    }
+
+    .nous-pp-tab.active {
+      color: #a5b4fc;
+      border-bottom-color: #a5b4fc;
+    }
+
+    .nous-pp-tab-content {
+      font-size: 12px;
+      line-height: 1.6;
+      color: #d4d4d8;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 220px;
+      overflow-y: auto;
+      margin-bottom: 10px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 10px;
+    }
+
+    /* Chips (category / aspect ratio) */
+    .nous-pp-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .nous-pp-chip {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 99px;
+      background: rgba(165, 180, 252, 0.12);
+      color: #a5b4fc;
+      border: 1px solid rgba(165, 180, 252, 0.3);
+    }
+
+    /* Tags-saved line */
+    .nous-pp-tags-line {
+      font-size: 11px;
+      color: #71717a;
+      margin-bottom: 10px;
+    }
+
+    /* Action buttons */
+    .nous-pp-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .nous-pp-btn {
+      flex: 1;
+      min-width: 96px;
+      padding: 7px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.04);
+      color: #d4d4d8;
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .nous-pp-btn:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.09);
+    }
+
+    .nous-pp-btn.primary {
+      background: #a5b4fc;
+      color: #18181b;
+      border-color: #a5b4fc;
+      font-weight: 600;
+    }
+
+    .nous-pp-btn.primary:hover:not(:disabled) {
+      background: #c7d2fe;
+    }
+
+    .nous-pp-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  `;
+
   // Maps a task_tracking `status` value (queued/in_progress/completed/
   // failed/cancelled/lost — see CLAUDE.md's Task Center section) to the
   // panel phase + subtitle text to show while polling.
@@ -68,7 +276,8 @@ if (!window.__nousPromptPanelInjected) {
   // Panel state + controller
   // ============================================================
 
-  let panelEl = null;
+  let hostEl = null; // light-DOM anchor, appended to <body>
+  let panelEl = null; // .nous-prompt-panel, lives inside hostEl's shadow root
   let state = null;
 
   chrome.runtime.onMessage.addListener((msg) => {
@@ -91,6 +300,19 @@ if (!window.__nousPromptPanelInjected) {
 
   function ensurePanel() {
     if (panelEl) return panelEl;
+
+    // Shadow DOM keeps the panel's DOM/CSS isolated from the host page:
+    // host-page CSS resets/globals can't reach in (selectors don't cross the
+    // shadow boundary), and the host page's own scripts can't accidentally
+    // querySelector into our markup either.
+    hostEl = document.createElement('div');
+    hostEl.id = 'nous-prompt-panel-host';
+    const shadowRoot = hostEl.attachShadow({ mode: 'open' });
+
+    const style = document.createElement('style');
+    style.textContent = PANEL_CSS;
+    shadowRoot.appendChild(style);
+
     panelEl = document.createElement('div');
     panelEl.className = 'nous-prompt-panel';
     panelEl.innerHTML =
@@ -100,14 +322,17 @@ if (!window.__nousPromptPanelInjected) {
       '</div>' +
       '<div class="nous-pp-body"></div>';
     panelEl.querySelector('.nous-pp-close').addEventListener('click', closePanel);
-    document.body.appendChild(panelEl);
+    shadowRoot.appendChild(panelEl);
+
+    document.body.appendChild(hostEl);
     return panelEl;
   }
 
   function closePanel() {
     clearTimer();
-    if (panelEl) {
-      panelEl.remove();
+    if (hostEl) {
+      hostEl.remove();
+      hostEl = null;
       panelEl = null;
     }
     state = null;
@@ -211,6 +436,19 @@ if (!window.__nousPromptPanelInjected) {
       if (res?.status === 404) {
         clearTimer();
         setPhase('task-failed', `Analysis failed: ${res.error || 'task not found'}`);
+        return;
+      }
+      if (res?.status === 403) {
+        // Terminal, not transient: a 403 here means the key is missing
+        // tasks:read (or scopes changed mid-flow) and every future poll
+        // will fail the same way — retrying into the same 403 for 90s
+        // just delays telling the user what's actually wrong.
+        clearTimer();
+        setPhase(
+          'task-failed',
+          'API key missing tasks:read scope — add it in Settings → API Keys'
+        );
+        return;
       }
       // Any other error (network blip, 5xx) is treated as transient — keep
       // polling until the 90s timeout instead of failing on one bad tick.
@@ -225,7 +463,15 @@ if (!window.__nousPromptPanelInjected) {
       clearTimer();
       setPhase('task-failed', `Analysis failed${res.data?.error ? `: ${res.data.error}` : '.'}`);
     } else {
-      setPhase('polling', mapped.subtitle, Math.max(40, res.data?.percent || 0));
+      // Prefer the backend's real stage text (task_tracking.subtitle, written
+      // by the caption-stage workflow) over the synthesized generic copy —
+      // falls back to progressToPhase()'s mapping when the backend hasn't
+      // written one yet (e.g. still queued).
+      const subtitle =
+        typeof res.data?.subtitle === 'string' && res.data.subtitle.trim()
+          ? res.data.subtitle
+          : mapped.subtitle;
+      setPhase('polling', subtitle, Math.max(40, res.data?.percent || 0));
     }
   }
 

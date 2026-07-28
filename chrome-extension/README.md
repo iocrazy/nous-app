@@ -22,7 +22,7 @@ Push video URLs to Nous for parsing and download, and scan pages for images to i
 |---------|----------------|
 | Push (video URL) | `videos:fetch`, `tags:read` (+ `tags:write` for tag creation) |
 | Scan Images | `teams:read`, `resources:read`, `resources:write` |
-| Analyze Prompt | `teams:read`, `resources:write`, `tags:read`, `tasks:read` |
+| Analyze Prompt | `teams:read`, `resources:read`, `resources:write`, `tags:read`, `tasks:read` |
 
 ## Usage
 
