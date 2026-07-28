@@ -1617,6 +1617,8 @@
       "cta_generation": "Open output",
       "cta_review": "Review files",
       "cta_delivery": "Prepare delivery",
+      "workflow_stage": "Pick up the current stage — open the workspace to continue.",
+      "open_project": "No workflow yet — open the project to get started.",
       "storyboard_no_script": "No script yet — write one, then storyboard it.",
       "storyboard_no_shots": "Script ready — break {{scene_count}} scenes into shots.",
       "storyboard_generate": "{{done}} of {{total}} shots have frames — generate the {{count}} missing frames, then this stage is ready to advance.",

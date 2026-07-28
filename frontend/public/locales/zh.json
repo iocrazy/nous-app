@@ -1617,6 +1617,8 @@
       "cta_generation": "打开成片",
       "cta_review": "审阅文件",
       "cta_delivery": "准备交付",
+      "workflow_stage": "继续当前阶段 — 打开工作区推进。",
+      "open_project": "还没有工作流 — 打开项目开始。",
       "storyboard_no_script": "还没有脚本 — 先写一个，再拆分镜。",
       "storyboard_no_shots": "脚本已就绪 — 把 {{scene_count}} 个场景拆成镜头。",
       "storyboard_generate": "{{total}} 个镜头已生成 {{done}} 个 — 生成缺的 {{count}} 帧，即可推进本阶段。",

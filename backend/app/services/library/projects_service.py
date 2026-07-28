@@ -1375,13 +1375,33 @@ class ProjectsService:
 
         ids = [p["id"] for p in projects]
         enrichment = await self._get_card_enrichment(ids)
-        suggestion = _suggestion_from(None)
 
         items: list[dict] = []
         for p in projects:
             pid = str(p["id"])
             card = enrichment.get(pid, _EMPTY_ENRICHMENT)
             latest_activity = card.get("latest_activity")
+            # 2026-07-28: the queue went silently empty after the SOP stage
+            # retirement (every row was kind="" and the frontend filters
+            # those out). Suggestions are workflow-driven now: a project with
+            # an active workflow node suggests continuing that stage; every
+            # other project still gets a generic open row so the queue keeps
+            # its original contract of one row per active project.
+            badge = card.get("workflow_badge")
+            if badge and badge.get("current_node_name"):
+                suggestion = {
+                    "stage_slug": None,
+                    "kind": "workflow_stage",
+                    "progress": None,
+                    "action": None,
+                }
+            else:
+                suggestion = {
+                    "stage_slug": None,
+                    "kind": "open_project",
+                    "progress": None,
+                    "action": None,
+                }
             items.append(
                 {
                     "project_id": pid,

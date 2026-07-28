@@ -68,9 +68,37 @@ async def test_empty_project_list_returns_empty_items():
 
 
 @pytest.mark.asyncio
-async def test_every_project_degrades_to_no_stage_suggestion():
-    """No more current_stage to derive a suggestion kind from — every row is
-    kind="" regardless of the project's legacy stage-history activity."""
+async def test_workflow_project_suggests_its_active_stage():
+    """2026-07-28 queue revival: a project whose workflow badge carries an
+    active node suggests continuing that stage (kind="workflow_stage")."""
+    svc = _svc()
+    projects = [{"id": _PID_A, "name": "Workflow Project"}]
+    svc.repo.get_user_projects = AsyncMock(return_value=projects)
+
+    badges = {
+        str(_PID_A): {
+            "current_node_name": "Storyboard",
+            "workflow_position": 2,
+            "workflow_total": 6,
+            "agents_active": 0,
+        }
+    }
+    p1, p2 = _patched(badges=badges)
+    with p1, p2:
+        items = await svc.get_project_suggestions("user-1")
+
+    assert len(items) == 1
+    assert items[0]["kind"] == "workflow_stage"
+    assert items[0]["stage_slug"] is None
+    assert items[0]["action"] is None
+    assert items[0]["progress"] is None
+
+
+@pytest.mark.asyncio
+async def test_every_project_without_workflow_gets_open_row():
+    """A project with no workflow badge still gets one queue row
+    (kind="open_project") — the queue keeps its one-row-per-active-project
+    contract instead of going silently empty (2026-07-27 regression)."""
     svc = _svc()
     now = datetime.now(timezone.utc)
     recent = (now - timedelta(hours=1)).isoformat()
@@ -109,7 +137,7 @@ async def test_every_project_degrades_to_no_stage_suggestion():
     assert len(items) == 3
 
     for item in items:
-        assert item["kind"] == ""
+        assert item["kind"] == "open_project"
         assert item["stage_slug"] is None
         assert item["action"] is None
         assert item["progress"] is None

@@ -34,18 +34,21 @@ interface QueueRow {
   index: number;
 }
 
-/** Group priority: stalled first, then one-click generate, then navigate, delivery last. */
+/** Group priority: stalled first, then one-click generate, then navigate,
+ *  delivery late, generic open-project rows last. */
 function groupRank(item: ProjectSuggestionItem): number {
   if (item.stalled) return 0;
   if (item.action?.type === 'generate_missing_frames') return 1;
   if (item.kind === 'delivery_nav') return 3;
+  if (item.kind === 'open_project') return 4;
   return 2;
 }
 
 function dotClass(item: ProjectSuggestionItem): string {
   if (item.stalled) return 'bg-[var(--stall)]';
   if (item.action?.type === 'generate_missing_frames') return 'bg-indigo-500';
-  if (item.kind === 'delivery_nav') return 'bg-ink-500';
+  if (item.kind === 'delivery_nav' || item.kind === 'open_project')
+    return 'bg-ink-500';
   return 'bg-emerald-400';
 }
 
