@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { hasPromptData, pickDefaultTriggerTag } from './promptTriggerTags';
 import type { Tag } from '../types';
 
+vi.mock('../services/unifiedTagService', () => ({
+  createTag: vi.fn(),
+  updateTag: vi.fn(),
+}));
+
 const tag = (over: Partial<Tag>): Tag =>
   ({ id: '1', name: 't', color: null, icon: null, type: 'user', ...over }) as Tag;
 
@@ -40,5 +45,30 @@ describe('pickDefaultTriggerTag', () => {
 
   it('null when none', () => {
     expect(pickDefaultTriggerTag([tag({})])).toBeNull();
+  });
+});
+
+describe('ensureDefaultTriggerTag with pre-existing AI tag', () => {
+  it('promotes an existing user tag named AI instead of creating (409 guard)', async () => {
+    const { updateTag } = await import('../services/unifiedTagService');
+    const { ensureDefaultTriggerTag } = await import('./promptTriggerTags');
+    const aiNoFlag = tag({ id: 'ai1', name: 'AI', prompt_trigger: false });
+    (updateTag as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ...aiNoFlag,
+      prompt_trigger: true,
+    });
+    const result = await ensureDefaultTriggerTag([tag({ id: 'x' }), aiNoFlag]);
+    expect(updateTag).toHaveBeenCalledWith('ai1', { prompt_trigger: true });
+    expect(result.prompt_trigger).toBe(true);
+  });
+
+  it('matches case-insensitively (ai / Ai)', async () => {
+    const { updateTag } = await import('../services/unifiedTagService');
+    const { ensureDefaultTriggerTag } = await import('./promptTriggerTags');
+    (updateTag as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      tag({ id: 'ai2', name: 'ai', prompt_trigger: true }),
+    );
+    await ensureDefaultTriggerTag([tag({ id: 'ai2', name: 'ai' })]);
+    expect(updateTag).toHaveBeenCalledWith('ai2', { prompt_trigger: true });
   });
 });
