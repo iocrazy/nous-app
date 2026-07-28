@@ -20,7 +20,7 @@ const selectMock = vi.fn(() => ({ eq: eqMock }));
 const fromMock = vi.fn(() => ({ select: selectMock }));
 
 vi.mock('../../supabaseClient', () => ({
-  supabase: { from: (...a: unknown[]) => fromMock(...a) },
+  supabase: { from: () => fromMock() },
 }));
 
 const tagNoTrigger: Tag = {
