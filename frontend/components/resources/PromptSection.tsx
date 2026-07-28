@@ -49,6 +49,20 @@ export interface PromptSectionProps {
   onGenerated?: () => void;
   translating: boolean;
   onTranslate: (lang: 'en' | 'zh') => void;
+  /** One-shot signal (spec 2026-07-28-extension-prompt-analyze, Task 1):
+   *  the `?generateSimilar=1` deep link — opened from the Chrome
+   *  extension's result card ("Generate Similar in nous"), or the same
+   *  URL shared elsewhere. On the first render where this flips true,
+   *  auto-expand the section and, if an analysis result already exists
+   *  (gen_prompt_json + a non-empty positive prompt for the current lang
+   *  side — mirroring the Generate Similar button's own disabled gate),
+   *  open the canvas picker immediately. Otherwise just expand and toast
+   *  a hint to run Generate first. The host is responsible for stripping
+   *  the query param once this prop turns true; this component only
+   *  guards against firing the effect more than once (ref-guarded,
+   *  StrictMode double-invoke safe — mirrors CanvasComposer's
+   *  insertedRef). */
+  autoOpenGenerateSimilar?: boolean;
 }
 
 function ResultChip({ children }: { children: React.ReactNode }) {
@@ -62,6 +76,7 @@ function ResultChip({ children }: { children: React.ReactNode }) {
 export function PromptSection({
   resource, onPatch, onEnsureTriggerTag,
   canGenerate, onGenerated, translating, onTranslate,
+  autoOpenGenerateSimilar,
 }: PromptSectionProps) {
   const { t } = useTranslation();
   const toast = useOptionalToast();
@@ -171,6 +186,32 @@ export function PromptSection({
     // Fire-and-forget: tag failure must not block editing.
     onEnsureTriggerTag().catch((err) => console.error('ensureTriggerTag:', err));
   };
+
+  // ─── generateSimilar deep link (Task 1, spec 2026-07-28-extension-prompt-analyze) ───
+  // Ref-guarded to fire exactly once per prop transition to true — the host
+  // (ResourceDetailPage) keys this component on resource.id, so a fresh
+  // mount already resets the guard per resource; this only protects against
+  // StrictMode's synchronous double-invoke within a single mount.
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (!autoOpenGenerateSimilar || autoOpenedRef.current) return;
+    autoOpenedRef.current = true;
+    expand();
+    // Mirror the Generate Similar button's own disabled gate (M3): only
+    // auto-open the picker when there's an analysis result AND a non-empty
+    // positive prompt for the current lang side — an empty prompt would
+    // reach the canvas as an empty node and 422 the autoRun silently.
+    if (hasJson && posPreview) {
+      setAutoRunTarget(true);
+      setSendToCanvasOpen(true);
+    } else {
+      toast?.addToast(
+        t('resources.infoPanel.generateSimilarNeedsPrompt', 'Generate a prompt first, then try Generate Similar'),
+        'info',
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenGenerateSimilar]);
 
   const commit = (field: string, value: string, current: string) => {
     if (value.trim() !== current.trim()) onPatch({ [field]: value.trim() } as Partial<Resource>);

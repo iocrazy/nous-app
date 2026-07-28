@@ -1003,7 +1003,8 @@
       "sendToCanvasNoProjects": "No projects yet",
       "sendToCanvasNoCanvases": "This project has no canvases yet",
       "generateSimilar": "Generate Similar",
-      "generateSimilarEmptyHint": "Add a positive prompt first"
+      "generateSimilarEmptyHint": "Add a positive prompt first",
+      "generateSimilarNeedsPrompt": "Generate a prompt first, then try Generate Similar"
     },
     "slidePrompt": {
       "addPrompt": "Add prompt for this slide",
