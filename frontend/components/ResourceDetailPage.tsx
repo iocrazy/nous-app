@@ -60,7 +60,6 @@ import {
   setResourceChorus,
   trashResource,
   translateGenPrompt,
-  generateGenPrompt,
   classifyResource,
   GALLERY_MIME,
 } from '../services/resourceService';
@@ -299,8 +298,6 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const [nameValue, setNameValue] = useState('');
   const [notesValue, setNotesValue] = useState('');
   const [promptTranslating, setPromptTranslating] = useState(false);
-  const [promptGenerating, setPromptGenerating] = useState(false);
-  const promptPollRef = useRef<number | null>(null);
   const [autoTagging, setAutoTagging] = useState(false);
   const tagPollRef = useRef<number | null>(null);
   const [urlValue, setUrlValue] = useState('');
@@ -447,9 +444,9 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     }
   }, [notesValue, resource?.notes, handleResourceUpdate]);
 
-  // Clear any in-flight prompt/tag polls on unmount.
+  // Clear any in-flight tag poll on unmount (prompt generation is now a
+  // realtime task subscription inside PromptSection, no local poll to clear).
   useEffect(() => () => {
-    if (promptPollRef.current) window.clearInterval(promptPollRef.current);
     if (tagPollRef.current) window.clearInterval(tagPollRef.current);
   }, []);
 
@@ -507,58 +504,24 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     }
   }, [resource, resourceId, autoTagging, assignedTags.length, addToast, t]);
 
-  // Reverse-engineer a bilingual prompt from the image via the assigned
-  // caption agent. Async workflow — poll the resource until the prompt
-  // lands (or hand off to Task Center after ~90s).
-  const handleGeneratePrompt = useCallback(async () => {
-    if (!resource || promptGenerating) return;
-    setPromptGenerating(true);
+  // PromptSection self-manages the Generate dispatch + realtime task
+  // subscription; this fires once that workflow completes — refetch the
+  // full resource (new gen_prompt* + gen_prompt_json) and tags (the
+  // workflow may attach new AI tags too), mirroring handleAutoTag below.
+  const handlePromptGenerated = useCallback(async () => {
     try {
-      await generateGenPrompt(resourceId);
-      addToast(
-        t('resources.infoPanel.promptGenerating', 'Generating prompt from image...'),
-        'info',
-      );
-      const before = `${resource.gen_prompt || ''}|${resource.gen_prompt_zh || ''}`;
-      let tries = 0;
-      promptPollRef.current = window.setInterval(async () => {
-        tries += 1;
-        try {
-          const fresh = await fetchResourceById(resourceId);
-          const now = `${fresh?.gen_prompt || ''}|${fresh?.gen_prompt_zh || ''}`;
-          if (fresh && now !== before && now !== '|') {
-            if (promptPollRef.current) window.clearInterval(promptPollRef.current);
-            promptPollRef.current = null;
-            setResource((prev) =>
-              prev
-                ? { ...prev, gen_prompt: fresh.gen_prompt, gen_prompt_zh: fresh.gen_prompt_zh }
-                : prev,
-            );
-            setPromptGenerating(false);
-            addToast(t('resources.infoPanel.promptGenerated', 'Prompt generated'), 'success');
-          } else if (tries >= 30) {
-            if (promptPollRef.current) window.clearInterval(promptPollRef.current);
-            promptPollRef.current = null;
-            setPromptGenerating(false);
-            addToast(
-              t('resources.infoPanel.promptGenerateSlow', 'Still generating — check Task Center'),
-              'info',
-            );
-          }
-        } catch (err) {
-          console.error('Failed to poll for generated prompt:', err);
-        }
-      }, 3000);
+      const [fresh, tags] = await Promise.all([
+        fetchResourceById(resourceId),
+        fetchResourceTags(resourceId),
+      ]);
+      setResource(fresh);
+      setAssignedTags(tags);
+      fetchTags().then(setAllTags).catch((err) => console.error('Failed to refresh tags:', err));
+      addToast(t('resources.infoPanel.promptGenerated', 'Prompt generated'), 'success');
     } catch (err) {
-      console.error('Failed to start prompt generation:', err);
-      setPromptGenerating(false);
-      const msg =
-        err instanceof Error && err.message
-          ? err.message
-          : t('resources.infoPanel.promptGenerateFailed', 'Failed to generate prompt');
-      addToast(msg, 'error');
+      console.error('Failed to refresh after prompt generation:', err);
     }
-  }, [resource, resourceId, promptGenerating, addToast, t]);
+  }, [resourceId, addToast, t]);
 
   // Fill the ACTIVE side by translating from the other side via the
   // user's assigned translation agent (Settings → AI → Translation).
@@ -1840,8 +1803,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
               }
             }}
             canGenerate={resource.file_type === 'image'}
-            generating={promptGenerating}
-            onGenerate={handleGeneratePrompt}
+            onGenerated={handlePromptGenerated}
             translating={promptTranslating}
             onTranslate={handleTranslatePrompt}
           />

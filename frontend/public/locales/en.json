@@ -984,7 +984,7 @@
       "generateFromImage": "Generate from Image",
       "promptGenerating": "Generating prompt from image...",
       "promptGenerated": "Prompt generated",
-      "promptGenerateSlow": "Still generating — check Task Center",
+      "promptAnalyzing": "Analyzing...",
       "promptGenerateFailed": "Failed to generate prompt",
       "autoTag": "Auto Tag",
       "autoTagHint": "Classify this image into bilingual tags across 12 dimensions",

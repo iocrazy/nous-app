@@ -12,6 +12,7 @@ const resourceRow = {
   gen_prompt_zh: null,
   gen_prompt_negative: null,
   gen_prompt_negative_zh: null,
+  gen_prompt_json: null,
 };
 
 const singleMock = vi.fn().mockResolvedValue({ data: resourceRow, error: null });
@@ -95,13 +96,26 @@ describe('ResourcePromptSection', () => {
     expect(selectMock).toHaveBeenCalledWith(
       expect.stringContaining('gen_prompt_negative_zh'),
     );
+    expect(selectMock).toHaveBeenCalledWith(
+      expect.stringContaining('gen_prompt_json'),
+    );
     expect(eqMock).toHaveBeenCalledWith('id', 'r1');
     expect(fetchResourceTags).toHaveBeenCalledWith('r1');
 
     expect(capturedProps.resource.id).toBe('r1');
     expect(capturedProps.resource.gen_prompt).toBe('masterpiece');
+    // Reverse-engineer is on for images (data-line PR, 2026-07-28) — the
+    // wrapper self-manages Generate via PromptSection's own dispatch flow.
+    expect(capturedProps.canGenerate).toBe(true);
+    expect(typeof capturedProps.onGenerated).toBe('function');
+  });
+
+  it('canGenerate is false for non-image resources', async () => {
+    singleMock.mockResolvedValueOnce({ data: { ...resourceRow, file_type: 'video' }, error: null });
+    render(<ResourcePromptSection resourceId="r1" />);
+    await screen.findByTestId('prompt-section');
+
     expect(capturedProps.canGenerate).toBe(false);
-    expect(capturedProps.generating).toBe(false);
   });
 
   it('onPatch PATCHes via updateResource and merges the field locally', async () => {
@@ -171,6 +185,45 @@ describe('ResourcePromptSection', () => {
 
     expect(addResourceTag).toHaveBeenCalledWith('r1', 't2');
     expect(onTagsChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('onGenerated refetches the resource + tags and notifies onTagsChanged', async () => {
+    const onTagsChanged = vi.fn();
+    render(<ResourcePromptSection resourceId="r1" onTagsChanged={onTagsChanged} />);
+    await screen.findByTestId('prompt-section');
+    fromMock.mockClear();
+    selectMock.mockClear();
+    eqMock.mockClear();
+
+    singleMock.mockResolvedValueOnce({
+      data: { ...resourceRow, gen_prompt: 'masterpiece', gen_prompt_json: '{"subject":"cat"}' },
+      error: null,
+    });
+    fetchResourceTags.mockResolvedValueOnce([{ tag: tagNoTrigger }, { tag: triggerTag }]);
+
+    await act(async () => {
+      await capturedProps.onGenerated();
+    });
+
+    expect(fromMock).toHaveBeenCalledWith('resources');
+    expect(fetchResourceTags).toHaveBeenCalledWith('r1');
+    expect(capturedProps.resource.gen_prompt_json).toBe('{"subject":"cat"}');
+    expect(onTagsChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('onGenerated logs and bails when the refetch errors', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<ResourcePromptSection resourceId="r1" />);
+    await screen.findByTestId('prompt-section');
+
+    singleMock.mockResolvedValueOnce({ data: null, error: new Error('boom') });
+
+    await act(async () => {
+      await capturedProps.onGenerated();
+    });
+
+    expect(consoleSpy).toHaveBeenCalled();
+    consoleSpy.mockRestore();
   });
 
   it('does not call onTagsChanged when the tag was already present', async () => {

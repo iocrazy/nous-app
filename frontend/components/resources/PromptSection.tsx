@@ -1,13 +1,22 @@
 /**
  * PromptSection — bilingual positive/negative AI-generation prompt block.
  *
- * Extracted from ResourceDetailPage (spec 2026-07-26-asset-prompt-management).
- * Sits AFTER the Tags picker, BEFORE Properties. A first-class block matching
- * the Tags section, with three states (v6.1 mockup):
+ * Extracted from ResourceDetailPage (spec 2026-07-26-asset-prompt-management),
+ * upgraded to the three-format result card + self-managed Generate flow
+ * (spec 2026-07-28-prompt-dataline). Sits AFTER the Tags picker, BEFORE
+ * Properties. A first-class block matching the Tags section, with three
+ * states (v6.1 mockup):
  *   - no data (trigger tag or not) → section header + dashed "+ Add Prompt" pill
  *   - data present, collapsed      → section header + bordered preview card
- *   - expanded                     → section header + positive/negative editors
+ *   - expanded                     → section header + result card + editors
  * Expanding auto-applies the default trigger tag (onEnsureTriggerTag).
+ *
+ * Generate is self-managed: this component dispatches the caption workflow
+ * directly, tracks the returned task via `useTaskCompletion`, and renders
+ * the "analyzing" progress card itself — hosts just get an `onGenerated()`
+ * callback once the workflow completes (to refetch resource + tags, since
+ * the workflow may also write new AI tags). Patch/translate/ensure-trigger-
+ * tag stay callback-based — hosts differ in how they hold that state.
  */
 import { useEffect, useState } from 'react';
 import { ChevronUp, Copy, Languages, Loader2, Send, Sparkles } from 'lucide-react';
@@ -15,6 +24,9 @@ import { useTranslation } from 'react-i18next';
 
 import type { Resource } from '../../types';
 import { hasPromptData } from '../../utils/promptTriggerTags';
+import { generateGenPrompt } from '../../services/resourceService';
+import { useTaskCompletion } from '../../hooks/useTaskCompletion';
+import { useOptionalToast } from '../Toast';
 import { SendToCanvasModal } from './SendToCanvasModal';
 
 export interface PromptSectionProps {
@@ -25,24 +37,73 @@ export interface PromptSectionProps {
   onEnsureTriggerTag: () => Promise<void>;
   /** Image assets get the Generate (reverse-engineer) button. */
   canGenerate: boolean;
-  generating: boolean;
-  onGenerate: () => void;
+  /** Fired once the self-managed Generate flow completes successfully —
+   *  the host should refetch the resource (new gen_prompt* / gen_prompt_json)
+   *  and its tags (the workflow may attach new AI tags too). */
+  onGenerated?: () => void;
   translating: boolean;
   onTranslate: (lang: 'en' | 'zh') => void;
 }
 
+function ResultChip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="px-1.5 py-0.5 rounded-full bg-ink-800 border border-ink-700 text-[9.5px] text-ink-400">
+      {children}
+    </span>
+  );
+}
+
 export function PromptSection({
   resource, onPatch, onEnsureTriggerTag,
-  canGenerate, generating, onGenerate, translating, onTranslate,
+  canGenerate, onGenerated, translating, onTranslate,
 }: PromptSectionProps) {
   const { t } = useTranslation();
+  const toast = useOptionalToast();
   const [expanded, setExpanded] = useState(false);
   const [lang, setLang] = useState<'en' | 'zh'>(() =>
     (resource.gen_prompt?.trim() ? 'en' : resource.gen_prompt_zh?.trim() ? 'zh' : 'en'),
   );
+  const [showJson, setShowJson] = useState(false);
   const [posValue, setPosValue] = useState('');
   const [negValue, setNegValue] = useState('');
   const [sendToCanvasOpen, setSendToCanvasOpen] = useState(false);
+
+  // ─── Generate — self-managed dispatch + realtime progress ───────
+  const [dispatching, setDispatching] = useState(false);
+  const [taskId, setTaskId] = useState<string | null>(null);
+
+  const { task: genTask } = useTaskCompletion(taskId, {
+    onComplete: () => {
+      setTaskId(null);
+      onGenerated?.();
+    },
+    onError: (task) => {
+      setTaskId(null);
+      toast?.addToast(
+        task.error_msg || t('resources.infoPanel.promptGenerateFailed', 'Failed to generate prompt'),
+        'error',
+      );
+    },
+  });
+  const generating = dispatching || Boolean(taskId);
+
+  const handleGenerate = async () => {
+    if (generating) return;
+    setDispatching(true);
+    try {
+      const id = await generateGenPrompt(resource.id);
+      setTaskId(id);
+    } catch (err) {
+      console.error('Failed to start prompt generation:', err);
+      const msg =
+        err instanceof Error && err.message
+          ? err.message
+          : t('resources.infoPanel.promptGenerateFailed', 'Failed to generate prompt');
+      toast?.addToast(msg, 'error');
+    } finally {
+      setDispatching(false);
+    }
+  };
 
   const posField = lang === 'zh' ? 'gen_prompt_zh' : 'gen_prompt';
   const negField = lang === 'zh' ? 'gen_prompt_negative_zh' : 'gen_prompt_negative';
@@ -56,6 +117,21 @@ export function PromptSection({
   const dataPresent = hasPromptData(resource);
   const posPreview = ((resource[posField] as string | null) || '').trim();
   const negPreview = ((resource[negField] as string | null) || '').trim();
+
+  const hasJson = Boolean(resource.gen_prompt_json?.trim());
+  let parsedJson: Record<string, unknown> | null = null;
+  let jsonPretty = '';
+  if (hasJson) {
+    try {
+      parsedJson = JSON.parse(resource.gen_prompt_json as string);
+      jsonPretty = JSON.stringify(parsedJson, null, 2);
+    } catch (err) {
+      console.error('Failed to parse gen_prompt_json:', err);
+      jsonPretty = resource.gen_prompt_json as string;
+    }
+  }
+  const category = typeof parsedJson?.category === 'string' ? parsedJson.category : '';
+  const aspectRatio = typeof parsedJson?.aspect_ratio === 'string' ? parsedJson.aspect_ratio : '';
 
   const expand = () => {
     setExpanded(true);
@@ -95,6 +171,40 @@ export function PromptSection({
           {l === 'en' ? 'EN' : '中'}
         </button>
       ))}
+    </div>
+  );
+
+  // With a structured JSON result present, the expanded view's toggle grows
+  // a third tab. 中文/EN keep the existing lang-toggle semantics; JSON shows
+  // the parsed structured prompt read-only, with the positive/negative
+  // editors underneath hidden while it's active.
+  const resultTabs = (
+    <div className="flex rounded overflow-hidden border border-ink-700/60">
+      {([
+        { key: 'zh', label: '中文' },
+        { key: 'en', label: 'EN' },
+        { key: 'json', label: 'JSON' },
+      ] as const).map(({ key, label }) => {
+        const active = key === 'json' ? showJson : !showJson && lang === key;
+        return (
+          <button
+            key={key}
+            onClick={() => {
+              if (key === 'json') {
+                setShowJson(true);
+              } else {
+                setShowJson(false);
+                setLang(key);
+              }
+            }}
+            className={`px-1.5 py-0.5 text-[9px] transition-colors ${
+              active ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'text-ink-500 hover:text-ink-300'
+            }`}
+          >
+            {label}
+          </button>
+        );
+      })}
     </div>
   );
 
@@ -142,17 +252,18 @@ export function PromptSection({
 
   const otherSidePos = lang === 'zh' ? resource.gen_prompt : resource.gen_prompt_zh;
   const otherSideNeg = lang === 'zh' ? resource.gen_prompt_negative : resource.gen_prompt_negative_zh;
+  const copyValue = showJson ? (resource.gen_prompt_json || '') : posValue;
 
   return (
     <div className="px-4 mt-3">
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
           {sectionHeader}
-          {langToggle}
+          {hasJson ? resultTabs : langToggle}
         </div>
         <div className="flex items-center gap-2.5">
           {canGenerate && (
-            <button onClick={onGenerate} disabled={generating}
+            <button onClick={handleGenerate} disabled={generating}
               title={t('resources.infoPanel.generatePromptHint', 'Reverse-engineer the prompt from this image')}
               className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-[var(--accent-text)] transition-colors disabled:opacity-50">
               {generating ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}{' '}
@@ -167,8 +278,8 @@ export function PromptSection({
               {t('resources.infoPanel.translatePrompt', 'Translate')}
             </button>
           )}
-          {Boolean(posValue) && (
-            <button onClick={() => copyText(posValue)}
+          {Boolean(copyValue) && (
+            <button onClick={() => copyText(copyValue)}
               className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-[var(--accent-text)] transition-colors">
               <Copy size={11} /> {t('resources.infoPanel.copyPrompt', 'Copy')}
             </button>
@@ -179,35 +290,71 @@ export function PromptSection({
           </button>
         </div>
       </div>
-      <textarea
-        value={posValue}
-        onChange={(e) => setPosValue(e.target.value)}
-        onBlur={() => commit(posField, posValue, (resource[posField] as string | null) || '')}
-        placeholder={t('resources.infoPanel.promptPlaceholder', 'Paste the AI generation prompt...')}
-        rows={4}
-        maxLength={20000}
-        className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2.5 py-2 text-xs font-mono text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50 resize-none"
-      />
-      <div className="flex items-center justify-between mt-1.5 mb-1">
-        <span className="text-[10px] text-red-400/85 uppercase tracking-wider">
-          {t('resources.infoPanel.negativePrompt', 'Negative')}
-        </span>
-        {Boolean(negValue) && (
-          <button onClick={() => copyText(negValue)}
-            className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-[var(--accent-text)] transition-colors">
-            <Copy size={11} /> {t('resources.infoPanel.copyPrompt', 'Copy')}
-          </button>
-        )}
-      </div>
-      <textarea
-        value={negValue}
-        onChange={(e) => setNegValue(e.target.value)}
-        onBlur={() => commit(negField, negValue, (resource[negField] as string | null) || '')}
-        placeholder={t('resources.infoPanel.negativePromptPlaceholder', 'Negative prompt (what to avoid)...')}
-        rows={2}
-        maxLength={20000}
-        className="w-full bg-red-500/[.06] border border-red-400/25 rounded-lg px-2.5 py-2 text-xs font-mono text-ink-300 placeholder-ink-600 focus:outline-none focus:border-red-400/50 resize-none"
-      />
+
+      {generating ? (
+        <div className="border border-ink-700 rounded-[10px] bg-ink-800/40 px-3 py-2.5">
+          <div className="flex items-center gap-1.5 text-[11px] text-ink-300">
+            <Loader2 size={12} className="animate-spin text-[var(--accent-text)]" />
+            {t('resources.infoPanel.promptAnalyzing', 'Analyzing...')}
+            {genTask?.progress ? (
+              <span className="ml-auto text-[10px] text-ink-500">{genTask.progress}%</span>
+            ) : null}
+          </div>
+          <div className="mt-2 h-1 bg-ink-800 rounded-full overflow-hidden">
+            <div
+              className="h-full rounded-full bg-indigo-500 transition-all duration-300"
+              style={{ width: `${Math.max(genTask?.progress ?? 0, 4)}%` }}
+            />
+          </div>
+          {genTask?.subtitle && (
+            <div className="mt-1 text-[10px] text-ink-600">{genTask.subtitle}</div>
+          )}
+        </div>
+      ) : showJson ? (
+        <div>
+          {Boolean(category || aspectRatio) && (
+            <div className="flex items-center gap-1.5 mb-1.5">
+              {Boolean(category) && <ResultChip>{category}</ResultChip>}
+              {Boolean(aspectRatio) && <ResultChip>{aspectRatio}</ResultChip>}
+            </div>
+          )}
+          <pre className="w-full max-h-64 overflow-y-auto overflow-x-auto bg-ink-800/50 border border-ink-700/50 rounded-lg px-2.5 py-2 text-[11px] font-mono text-ink-300 whitespace-pre-wrap break-words">
+            {jsonPretty}
+          </pre>
+        </div>
+      ) : (
+        <>
+          <textarea
+            value={posValue}
+            onChange={(e) => setPosValue(e.target.value)}
+            onBlur={() => commit(posField, posValue, (resource[posField] as string | null) || '')}
+            placeholder={t('resources.infoPanel.promptPlaceholder', 'Paste the AI generation prompt...')}
+            rows={4}
+            maxLength={20000}
+            className="w-full bg-ink-800/50 border border-ink-700/50 rounded-lg px-2.5 py-2 text-xs font-mono text-ink-300 placeholder-ink-600 focus:outline-none focus:border-indigo-500/50 resize-none"
+          />
+          <div className="flex items-center justify-between mt-1.5 mb-1">
+            <span className="text-[10px] text-red-400/85 uppercase tracking-wider">
+              {t('resources.infoPanel.negativePrompt', 'Negative')}
+            </span>
+            {Boolean(negValue) && (
+              <button onClick={() => copyText(negValue)}
+                className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-[var(--accent-text)] transition-colors">
+                <Copy size={11} /> {t('resources.infoPanel.copyPrompt', 'Copy')}
+              </button>
+            )}
+          </div>
+          <textarea
+            value={negValue}
+            onChange={(e) => setNegValue(e.target.value)}
+            onBlur={() => commit(negField, negValue, (resource[negField] as string | null) || '')}
+            placeholder={t('resources.infoPanel.negativePromptPlaceholder', 'Negative prompt (what to avoid)...')}
+            rows={2}
+            maxLength={20000}
+            className="w-full bg-red-500/[.06] border border-red-400/25 rounded-lg px-2.5 py-2 text-xs font-mono text-ink-300 placeholder-ink-600 focus:outline-none focus:border-red-400/50 resize-none"
+          />
+        </>
+      )}
       {dataPresent && (
         <div className="flex justify-end mt-2">
           <button

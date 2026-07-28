@@ -18,7 +18,9 @@ interface ResourceInfoPanelProps {
   onCreate?: (name: string, color: string) => Promise<Tag | null>;
   onUpdate: (data: Partial<Resource>) => void;
   /** Notified when ResourcePromptSection's ensure-trigger-tag flow assigns a
-   *  new tag, so the Tags block above (fed by the wrapper's own state) refreshes. */
+   *  new tag, or its self-managed Generate flow completes (the caption
+   *  workflow may attach AI tags too) — so the Tags block above (fed by
+   *  the wrapper's own state) refreshes. */
   onTagsChanged?: () => void;
 }
 

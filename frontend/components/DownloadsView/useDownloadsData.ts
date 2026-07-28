@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, type Dispatch, type SetStateAction } from 'react';
 import { fetchAllTags, createTag } from '../../services/unifiedTagService';
 import { fetchResourceTags, addResourceTag, removeResourceTag } from '../../services/resourceService';
 import { getSupabaseClient } from '../../supabaseClient';
 import { chunked, PG_IN_CHUNK } from '../../utils/chunk';
+import { mergeAssignedTagsIntoAllTags } from '../../utils/tagMerge';
 import { Tag } from '../../types';
 
 export interface ResourceData {
@@ -147,7 +148,15 @@ export function useAllTags() {
   return { allTags, setAllTags };
 }
 
-export function useSelectedVideoTags(resourceId: string | undefined) {
+/** `setAllTags` is optional — pass the setter from `useAllTags()` (as
+ *  DownloadsView does) so a tag created on-demand by a downstream flow
+ *  (e.g. PromptSection's ensure-trigger-tag) lands in the shared catalog
+ *  too, not just this hook's own `selectedVideoTags` (R1, mirrors
+ *  MediaCard.refetchResourceTags). */
+export function useSelectedVideoTags(
+  resourceId: string | undefined,
+  setAllTags?: Dispatch<SetStateAction<Tag[]>>,
+) {
   const [selectedVideoTags, setSelectedVideoTags] = useState<
     Array<{ tag: { id: string; name: string; color?: string } }>
   >([]);
@@ -189,6 +198,7 @@ export function useSelectedVideoTags(resourceId: string | undefined) {
     try {
       const updated = await fetchResourceTags(resourceId);
       setSelectedVideoTags(updated);
+      setAllTags?.((prev) => mergeAssignedTagsIntoAllTags(prev, updated));
     } catch (err) {
       console.error('Failed to refetch tags:', err);
     }

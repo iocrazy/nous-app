@@ -45,7 +45,9 @@ interface DownloadInfoPanelProps {
   onNotesChange: (notes: string) => void;
   onNotesBlur: () => void;
   /** Notified when ResourcePromptSection's ensure-trigger-tag flow assigns a
-   *  new tag, so the Tags block above (fed by selectedVideoTags) refreshes. */
+   *  new tag, or its self-managed Generate flow completes (the caption
+   *  workflow may attach AI tags too) — so the Tags block above (fed by
+   *  selectedVideoTags) refreshes. */
   onTagsChanged?: () => void;
   /** Island shell: render as a bare integrated column (no fixed overlay / resize
    *  handle / expand tab) to be portaled into the shell's info island — mirrors

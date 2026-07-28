@@ -984,7 +984,7 @@
       "generateFromImage": "从图片反推",
       "promptGenerating": "正在从图片反推提示词...",
       "promptGenerated": "提示词已生成",
-      "promptGenerateSlow": "仍在生成中 — 请到任务中心查看",
+      "promptAnalyzing": "分析中...",
       "promptGenerateFailed": "提示词生成失败",
       "autoTag": "智能打标",
       "autoTagHint": "按 12 个维度为图片智能生成双语标签",

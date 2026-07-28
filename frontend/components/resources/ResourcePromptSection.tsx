@@ -1,17 +1,15 @@
 /**
  * ResourcePromptSection — self-contained mount wrapper around PromptSection.
  *
- * PromptSection itself is "dumb": it takes a Resource plus a handful of
- * callbacks and has no data access of its own (spec 2026-07-26-asset-prompt-
- * management). ResourceDetailPage wires those callbacks against page-level
- * state it already owns. The other three surfaces (upload list sidebar,
- * download list sidebar, download detail card) don't have that state lying
- * around, so this wrapper fetches/owns it itself — mount it with just a
- * `resourceId` and it takes care of the rest.
- *
- * Reverse-engineer ("Generate") is intentionally left off (canGenerate=false)
- * — these surfaces don't yet have the entry-point data line wired; that
- * lands in the follow-up data-line PR.
+ * PromptSection takes a Resource plus a handful of callbacks and has no data
+ * access of its own for patch/translate/ensure-trigger-tag (spec 2026-07-26-
+ * asset-prompt-management) — but it self-manages the Generate dispatch and
+ * progress tracking (spec 2026-07-28-prompt-dataline). ResourceDetailPage
+ * wires the callbacks against page-level state it already owns. The other
+ * three surfaces (upload list sidebar, download list sidebar, download
+ * detail card) don't have that state lying around, so this wrapper
+ * fetches/owns it itself — mount it with just a `resourceId` and it takes
+ * care of the rest, including Generate for image resources.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../supabaseClient';
@@ -22,11 +20,12 @@ import type { Resource, Tag } from '../../types';
 import { PromptSection } from './PromptSection';
 
 const PROMPT_FIELDS =
-  'id, filename, file_type, gen_prompt, gen_prompt_zh, gen_prompt_negative, gen_prompt_negative_zh';
+  'id, filename, file_type, gen_prompt, gen_prompt_zh, gen_prompt_negative, gen_prompt_negative_zh, gen_prompt_json';
 
 type PromptResource = Pick<
   Resource,
-  'id' | 'filename' | 'file_type' | 'gen_prompt' | 'gen_prompt_zh' | 'gen_prompt_negative' | 'gen_prompt_negative_zh'
+  | 'id' | 'filename' | 'file_type' | 'gen_prompt' | 'gen_prompt_zh'
+  | 'gen_prompt_negative' | 'gen_prompt_negative_zh' | 'gen_prompt_json'
 >;
 
 export function ResourcePromptSection({
@@ -99,6 +98,27 @@ export function ResourcePromptSection({
     }
   }, [resourceId, assignedTags, onTagsChanged]);
 
+  // PromptSection's self-managed Generate flow calls this once the caption
+  // workflow completes — re-pull the full prompt data line (gen_prompt* +
+  // gen_prompt_json) plus tags (the workflow may attach new AI tags too).
+  const handleGenerated = useCallback(async () => {
+    try {
+      const [{ data: row, error }, tags] = await Promise.all([
+        supabase.from('resources').select(PROMPT_FIELDS).eq('id', resourceId).single(),
+        fetchResourceTags(resourceId).catch(() => []),
+      ]);
+      if (error || !row) {
+        console.error('Failed to refetch resource after prompt generation:', error);
+        return;
+      }
+      setResource(row as unknown as PromptResource);
+      setAssignedTags(tags);
+      onTagsChanged?.();
+    } catch (err) {
+      console.error('Failed to refetch resource after prompt generation:', err);
+    }
+  }, [resourceId, onTagsChanged]);
+
   if (loading || !resource) return null;
 
   return (
@@ -107,9 +127,8 @@ export function ResourcePromptSection({
       resource={resource as unknown as Resource}
       onPatch={handlePatch}
       onEnsureTriggerTag={handleEnsureTriggerTag}
-      canGenerate={false}
-      generating={false}
-      onGenerate={() => {}}
+      canGenerate={resource.file_type === 'image'}
+      onGenerated={handleGenerated}
       translating={translating}
       onTranslate={handleTranslate}
     />
