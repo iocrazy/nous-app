@@ -1038,7 +1038,9 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     try {
       const updated = await fetchResourceTags(selectedResource.resource.id);
       setSelectedResourceTags(updated);
-    } catch { /* ignore */ }
+    } catch (err) {
+      console.error('[ResourcesContext] refetchSelectedResourceTags failed:', err);
+    }
   }, [selectedResource]);
 
   const handleCreateTag = useCallback(async (name: string, color: string): Promise<Tag | null> => {
