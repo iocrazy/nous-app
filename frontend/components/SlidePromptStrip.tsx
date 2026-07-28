@@ -50,6 +50,9 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
   // save can never PATCH an empty `{}` over every other slide's real
   // entries (the map here never actually held the real data).
   const [loadFailed, setLoadFailed] = useState(false);
+  // Bumping this re-runs the fetch effect — a transient read failure would
+  // otherwise leave the whole album stuck in the error state (M5).
+  const [reloadKey, setReloadKey] = useState(0);
   const [expanded, setExpanded] = useState(false);
   const [lang, setLang] = useState<'en' | 'zh'>('en');
   const [posValue, setPosValue] = useState('');
@@ -84,7 +87,7 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
       }
     })();
     return () => { cancelled = true; };
-  }, [resourceId]);
+  }, [resourceId, reloadKey]);
 
   // Collapse the editor whenever the user browses to a different slide —
   // an open editor should never silently keep editing the previous slide.
@@ -97,8 +100,14 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
   if (loadFailed) {
     return (
       <div className="absolute bottom-16 left-0 right-0 px-3 z-10">
-        <div className="bg-black/55 backdrop-blur-sm rounded-lg px-3 py-1.5 text-[10px] text-red-400/85">
-          {t('resources.slidePrompt.loadFailed', 'Failed to load prompt for this slide')}
+        <div className="bg-black/55 backdrop-blur-sm rounded-lg px-3 py-1.5 text-[10px] text-red-400/85 flex items-center justify-between gap-2">
+          <span>{t('resources.slidePrompt.loadFailed', 'Failed to load prompt for this slide')}</span>
+          <button
+            onClick={() => setReloadKey((k) => k + 1)}
+            className="shrink-0 text-ink-300 hover:text-white transition-colors"
+          >
+            {t('common.retry', 'Retry')}
+          </button>
         </div>
       </div>
     );
