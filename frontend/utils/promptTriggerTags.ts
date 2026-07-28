@@ -5,7 +5,7 @@
  * prompt_trigger tag in fetchAllTags order; when none exists we create a
  * user-scoped 'AI' tag on demand.
  */
-import { createTag } from '../services/unifiedTagService';
+import { createTag, updateTag } from '../services/unifiedTagService';
 import type { Resource, Tag } from '../types';
 
 type PromptFields = Pick<
@@ -36,6 +36,16 @@ export function pickDefaultTriggerTag(tags: Tag[]): Tag | null {
 export async function ensureDefaultTriggerTag(allTags: Tag[]): Promise<Tag> {
   const existing = pickDefaultTriggerTag(allTags);
   if (existing) return existing;
+  // A user tag named 'AI' may already exist WITHOUT the trigger flag
+  // (pre-existing tag, or created before prompt_trigger shipped). Blindly
+  // creating hits the (name, type, user_id) unique constraint with a 409 —
+  // promote the existing tag instead.
+  const named = allTags.find(
+    (t) => t.type === 'user' && t.name.trim().toLowerCase() === 'ai',
+  );
+  if (named) {
+    return updateTag(String(named.id), { prompt_trigger: true });
+  }
   return createTag({
     name: 'AI',
     color: '#6366f1',
