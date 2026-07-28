@@ -17,10 +17,10 @@ const resourceRow = {
 const singleMock = vi.fn().mockResolvedValue({ data: resourceRow, error: null });
 const eqMock = vi.fn(() => ({ single: singleMock }));
 const selectMock = vi.fn(() => ({ eq: eqMock }));
-const fromMock = vi.fn(() => ({ select: selectMock }));
+const fromMock = vi.fn((..._args: unknown[]) => ({ select: selectMock }));
 
 vi.mock('../../supabaseClient', () => ({
-  supabase: { from: () => fromMock() },
+  supabase: { from: (...a: unknown[]) => fromMock(...a) },
 }));
 
 const tagNoTrigger: Tag = {
