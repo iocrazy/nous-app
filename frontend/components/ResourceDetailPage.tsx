@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
   ChevronDown,
@@ -204,10 +204,17 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
   const { addToast } = useToast();
   const { mediaToken } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { teamId } = useParams();
 
   // State
   const [resource, setResource] = useState<Resource | null>(null);
+  // generateSimilar deep link (Task 1, spec 2026-07-28-extension-prompt-analyze):
+  // `/resources/file/{id}?generateSimilar=1` — the Chrome extension's result
+  // card ("Generate Similar in nous") opens this. Once resource data is
+  // ready, flip this to signal PromptSection to auto-expand + open the
+  // canvas picker, then strip the flag from the URL.
+  const [autoOpenGenerateSimilar, setAutoOpenGenerateSimilar] = useState(false);
   const [versions, setVersions] = useState<ResourceVersion[]>([]);
   const [assignedTags, setAssignedTags] = useState<Array<{ tag: Tag }>>([]);
   const [allTags, setAllTags] = useState<Tag[]>([]);
@@ -699,6 +706,27 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
     loadData();
     return () => { cancelled = true; };
   }, [resourceId]);
+
+  // generateSimilar deep link — consume the `?generateSimilar=1` flag once
+  // resource data is ready, then strip it from the URL (replace nav,
+  // preserving any other params/hash) so a reload or back-nav doesn't
+  // replay it. Ref-guarded so StrictMode's double-invoke can't fire this
+  // twice or double-navigate (mirrors CanvasComposer's insertedRef —
+  // check-and-set the ref synchronously before any side effect).
+  const generateSimilarConsumedRef = useRef(false);
+  useEffect(() => {
+    if (!resource || generateSimilarConsumedRef.current) return;
+    const params = new URLSearchParams(location.search);
+    if (params.get('generateSimilar') !== '1') return;
+    generateSimilarConsumedRef.current = true;
+    setAutoOpenGenerateSimilar(true);
+    params.delete('generateSimilar');
+    const nextSearch = params.toString();
+    navigate(
+      { pathname: location.pathname, search: nextSearch ? `?${nextSearch}` : '', hash: location.hash },
+      { replace: true },
+    );
+  }, [resource, location.pathname, location.search, location.hash, navigate]);
 
   // Tag handlers
   const handleAddTag = useCallback(async (tagId: string) => {
@@ -1806,6 +1834,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             onGenerated={handlePromptGenerated}
             translating={promptTranslating}
             onTranslate={handleTranslatePrompt}
+            autoOpenGenerateSimilar={autoOpenGenerateSimilar}
           />
 
           {/* Properties — simple rows (Type omitted: already shown as badge above the title) */}

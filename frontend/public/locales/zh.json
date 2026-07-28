@@ -1003,7 +1003,8 @@
       "sendToCanvasNoProjects": "暂无项目",
       "sendToCanvasNoCanvases": "该项目还没有画布",
       "generateSimilar": "生成同款",
-      "generateSimilarEmptyHint": "请先填写正向提示词"
+      "generateSimilarEmptyHint": "请先填写正向提示词",
+      "generateSimilarNeedsPrompt": "请先反推生成提示词，再试一次生成同款"
     },
     "slidePrompt": {
       "addPrompt": "为这张图添加提示词",

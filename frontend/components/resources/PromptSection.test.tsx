@@ -250,6 +250,70 @@ describe('PromptSection', () => {
     expect(options.state.promptInsert).not.toHaveProperty('ratio');
   });
 
+  // ─── generateSimilar deep link (Task 1, spec 2026-07-28-extension-prompt-analyze) ───
+
+  it('autoOpenGenerateSimilar expands and opens the picker immediately when analysis JSON + a positive prompt already exist', async () => {
+    fetchProjects.mockResolvedValue([]);
+    const p = props({ resource: jsonResourceForSimilar(), autoOpenGenerateSimilar: true });
+    render(<PromptSection {...p} />);
+
+    // Auto-expanded (no click needed) and the trigger-tag hook fired, same as manual expand().
+    expect(await screen.findByDisplayValue('a cat, anime style')).toBeTruthy();
+    expect(p.onEnsureTriggerTag).toHaveBeenCalledOnce();
+    // Picker opened automatically — its content loads via fetchProjects.
+    expect(await screen.findByText(/No projects yet/)).toBeTruthy();
+    expect(fetchProjects).toHaveBeenCalled();
+  });
+
+  it('autoOpenGenerateSimilar just expands + toasts when no analysis JSON exists yet (no picker)', async () => {
+    render(
+      <ToastProvider>
+        <PromptSection {...props({ resource: base({ gen_prompt: 'p' }), autoOpenGenerateSimilar: true })} />
+      </ToastProvider>,
+    );
+
+    expect(await screen.findByDisplayValue('p')).toBeTruthy(); // expanded without a click
+    expect(await screen.findByText('Generate a prompt first, then try Generate Similar')).toBeTruthy();
+    expect(screen.queryByText(/No projects yet/)).toBeNull();
+    expect(fetchProjects).not.toHaveBeenCalled();
+  });
+
+  it('autoOpenGenerateSimilar with JSON but an empty positive prompt (M3) falls back to the toast, not the picker', async () => {
+    const resource = base({
+      gen_prompt: '',
+      gen_prompt_zh: '',
+      gen_prompt_negative: 'blurry',
+      gen_prompt_json: JSON.stringify({ subject: 'x', aspect_ratio: '16:9' }),
+    });
+    render(
+      <ToastProvider>
+        <PromptSection {...props({ resource, autoOpenGenerateSimilar: true })} />
+      </ToastProvider>,
+    );
+
+    expect(await screen.findByDisplayValue('blurry')).toBeTruthy(); // expanded
+    expect(await screen.findByText('Generate a prompt first, then try Generate Similar')).toBeTruthy();
+    expect(fetchProjects).not.toHaveBeenCalled();
+  });
+
+  it('does not re-trigger the auto-open flow across rerenders once already fired (StrictMode double-invoke safe)', async () => {
+    fetchProjects.mockResolvedValue([]);
+    const p = props({ resource: jsonResourceForSimilar(), autoOpenGenerateSimilar: true });
+    const { rerender } = render(<PromptSection {...p} />);
+    await screen.findByText(/No projects yet/);
+    expect(fetchProjects).toHaveBeenCalledOnce();
+
+    rerender(<PromptSection {...p} />);
+    rerender(<PromptSection {...p} />);
+    expect(fetchProjects).toHaveBeenCalledOnce();
+  });
+
+  it('omits the auto-open behavior entirely when the prop is absent (default host usage)', () => {
+    render(<PromptSection {...props({ resource: jsonResourceForSimilar() })} />);
+    expect(screen.queryByPlaceholderText(/negative/i)).toBeNull(); // still collapsed
+    expect(fetchProjects).not.toHaveBeenCalled();
+  });
+
   // ─── Generate — self-managed dispatch + realtime progress ───────
 
   it('clicking Generate dispatches generateGenPrompt(resource.id) and shows the analyzing card', async () => {

@@ -2,6 +2,7 @@
 const settingsView = document.getElementById('settingsView');
 const apiUrlInput = document.getElementById('apiUrl');
 const apiKeyInput = document.getElementById('apiKey');
+const webUrlInput = document.getElementById('webUrl');
 const saveBtn = document.getElementById('saveBtn');
 const statusEl = document.getElementById('status');
 
@@ -47,20 +48,25 @@ function showSettingsView() {
   document.getElementById('scanView').style.display = 'none';
   document.getElementById('modeTabs').style.display = 'none';
   document.body.classList.remove('scan-mode');
-  chrome.storage.local.get(['apiUrl', 'apiKey'], (result) => {
+  chrome.storage.local.get(['apiUrl', 'apiKey', 'webUrl'], (result) => {
     apiUrlInput.value = result.apiUrl || 'https://cn.nous.ink:88';
     if (result.apiKey) apiKeyInput.value = result.apiKey;
+    webUrlInput.value = result.webUrl || 'https://app.nous.ink';
   });
 }
 
 saveBtn.addEventListener('click', () => {
   const apiUrl = apiUrlInput.value.trim().replace(/\/+$/, '');
   const apiKey = apiKeyInput.value.trim();
+  // Optional — used only for the "Open in nous" / "Generate Similar" deep
+  // links from the prompt-analyze panel, so it falls back rather than
+  // blocking Save the way apiUrl/apiKey do.
+  const webUrl = (webUrlInput.value.trim() || 'https://app.nous.ink').replace(/\/+$/, '');
 
   if (!apiUrl) { showMessage('API URL is required', 'error'); return; }
   if (!apiKey) { showMessage('API Key is required', 'error'); return; }
 
-  chrome.storage.local.set({ apiUrl, apiKey }, () => {
+  chrome.storage.local.set({ apiUrl, apiKey, webUrl }, () => {
     showMessage('Saved!', 'success');
     setTimeout(() => showPushView({ apiUrl, apiKey }), 800);
   });

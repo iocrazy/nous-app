@@ -39,6 +39,10 @@ class ApiKeyScope(str, Enum):
     # upload scope; teams listing only returns the caller's own teams)
     TEAMS_READ = "teams:read"
 
+    # Task manager (read-only — used by the browser extension to poll
+    # gen-prompt / other async task progress after dispatch)
+    TASKS_READ = "tasks:read"
+
     # User related
     USER_PROFILE_READ = "user:profile:read"
     USER_PROFILE_WRITE = "user:profile:write"
@@ -212,9 +216,21 @@ ENDPOINT_SCOPE_MAP: Dict[Tuple[str, str], List[str]] = {
         ApiKeyScope.RESOURCES_WRITE.value,
         ApiKeyScope.RESOURCES_ALL.value,
     ],
+    # Extension prompt-analyze flow: reverse-engineer a gen-prompt from a
+    # single image (writes gen_prompt/gen_prompt_zh/gen_prompt_json + AI
+    # tags on the resource — same write surface as /resources/ai/batch).
+    ("POST", "/resources/{id}/gen-prompt/generate"): [
+        ApiKeyScope.RESOURCES_WRITE.value,
+        ApiKeyScope.RESOURCES_ALL.value,
+    ],
     # Teams (scope picker — list is already filtered to the caller's teams)
     ("GET", "/teams"): [
         ApiKeyScope.TEAMS_READ.value,
+    ],
+    # Task manager (read-only progress poll — extension prompt-analyze flow
+    # watches the gen-prompt task after dispatch)
+    ("GET", "/task-manager/tasks/{task_id}/progress"): [
+        ApiKeyScope.TASKS_READ.value,
     ],
 }
 
@@ -313,6 +329,13 @@ AVAILABLE_SCOPES = [
         "name": "Read Teams",
         "description": "List your teams (scope picker for uploads)",
         "category": "Teams",
+    },
+    # Tasks
+    {
+        "scope": ApiKeyScope.TASKS_READ.value,
+        "name": "Read Task Progress",
+        "description": "Poll the progress of a dispatched async task",
+        "category": "Tasks",
     },
     # Inspiration
     {

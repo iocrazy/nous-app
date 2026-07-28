@@ -493,6 +493,7 @@ async def get_task_progress(task_id: str, auth: AuthDep):
                         TaskTracking.speed,
                         TaskTracking.total_bytes,
                         TaskTracking.error_msg,
+                        TaskTracking.subtitle,
                     )
                     .where(TaskTracking.dbos_workflow_id == task_id)
                     .where(TaskTracking.user_id == auth.user_id)
@@ -525,6 +526,7 @@ async def get_task_progress(task_id: str, auth: AuthDep):
                     "total": data.get("total", 0),
                     "speed": data.get("speed", "0 B/s"),
                     "error": data.get("error"),
+                    "subtitle": task_row.get("subtitle"),
                 }
         except Exception as e:
             logger.debug(f"Redis progress lookup failed: {e}")
@@ -538,4 +540,5 @@ async def get_task_progress(task_id: str, auth: AuthDep):
         "speed": task_row.get("speed"),
         "total": task_row.get("total_bytes"),
         "error": task_row.get("error_msg"),
+        "subtitle": task_row.get("subtitle"),
     }
