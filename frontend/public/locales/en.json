@@ -986,6 +986,7 @@
       "promptGenerated": "Prompt generated",
       "promptAnalyzing": "Analyzing...",
       "promptGenerateFailed": "Failed to generate prompt",
+      "promptGenerateSlow": "Still generating — check Task Center",
       "autoTag": "Auto Tag",
       "autoTagHint": "Classify this image into bilingual tags across 12 dimensions",
       "autoTagging": "Auto-tagging image...",
@@ -1001,10 +1002,12 @@
       "sendToCanvas": "Send to Canvas",
       "sendToCanvasNoProjects": "No projects yet",
       "sendToCanvasNoCanvases": "This project has no canvases yet",
-      "generateSimilar": "Generate Similar"
+      "generateSimilar": "Generate Similar",
+      "generateSimilarEmptyHint": "Add a positive prompt first"
     },
     "slidePrompt": {
-      "addPrompt": "+ Add prompt for this slide",
+      "addPrompt": "Add prompt for this slide",
+      "loadFailed": "Failed to load prompt for this slide",
       "expand": "Expand",
       "copy": "Copy",
       "save": "Save",

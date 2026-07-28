@@ -19,13 +19,18 @@
  *
  * Save always PATCHes the WHOLE `slide_prompts` object (`{...map, [slideName]:
  * entry}`) — never a bare `{[slideName]: entry}` — so other slides' entries
- * are never clobbered by a partial write.
+ * are never clobbered by a partial write. That promise only holds if the
+ * initial fetch actually landed: on a read failure the component renders an
+ * error state (loadFailed) instead of defaulting the map to `{}`, so a
+ * save can never PATCH an empty object over every other slide's real
+ * entries.
  */
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, Copy, Loader2 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { updateResource } from '../services/resourceService';
+import { useOptionalToast } from './Toast';
 import type { Resource } from '../types';
 
 type SlidePromptEntry = NonNullable<Resource['slide_prompts']>[string];
@@ -38,8 +43,13 @@ export interface SlidePromptStripProps {
 
 export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProps) {
   const { t } = useTranslation();
+  const toast = useOptionalToast();
   const [slidePrompts, setSlidePrompts] = useState<SlidePromptsMap>({});
   const [loading, setLoading] = useState(true);
+  // Set only on a read failure — while true, expand/save stay disabled so a
+  // save can never PATCH an empty `{}` over every other slide's real
+  // entries (the map here never actually held the real data).
+  const [loadFailed, setLoadFailed] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [lang, setLang] = useState<'en' | 'zh'>('en');
   const [posValue, setPosValue] = useState('');
@@ -49,6 +59,7 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setLoadFailed(false);
     (async () => {
       try {
         const { data, error } = await supabase
@@ -59,14 +70,14 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
         if (cancelled) return;
         if (error) {
           console.error('Failed to load slide_prompts:', error);
-          setSlidePrompts({});
+          setLoadFailed(true);
           return;
         }
         setSlidePrompts((data?.slide_prompts as SlidePromptsMap | null) || {});
       } catch (err) {
         if (!cancelled) {
           console.error('Failed to load slide_prompts:', err);
-          setSlidePrompts({});
+          setLoadFailed(true);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -82,6 +93,16 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
   }, [slideName]);
 
   if (loading) return null;
+
+  if (loadFailed) {
+    return (
+      <div className="absolute bottom-16 left-0 right-0 px-3 z-10">
+        <div className="bg-black/55 backdrop-blur-sm rounded-lg px-3 py-1.5 text-[10px] text-red-400/85">
+          {t('resources.slidePrompt.loadFailed', 'Failed to load prompt for this slide')}
+        </div>
+      </div>
+    );
+  }
 
   const entry: SlidePromptEntry = slidePrompts[slideName] || {};
   const hasEntry = Boolean(entry.en?.trim() || entry.zh?.trim());
@@ -124,6 +145,7 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
       setExpanded(false);
     } catch (err) {
       console.error('Failed to save slide prompt:', err);
+      toast?.addToast(t('resources.slidePrompt.saveFailed', 'Failed to save'), 'error');
     } finally {
       setSaving(false);
     }

@@ -24,7 +24,7 @@
  * `aspect_ratio` — CanvasComposer's promptInsert consumer merges that into
  * a `gen` block and reruns the freshly-inserted prompt node once it lands.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronUp, Copy, Languages, Loader2, Send, Sparkles, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -81,13 +81,27 @@ export function PromptSection({
   // ─── Generate — self-managed dispatch + realtime progress ───────
   const [dispatching, setDispatching] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
+  // Escape hatch for a task_tracking row that never got created (backend's
+  // manager.create() is warn-and-continue, not a hard failure) — without
+  // this, useTaskCompletion never sees a matching row and the analyzing
+  // spinner + locked Generate button would spin forever.
+  const genTimeoutRef = useRef<number | null>(null);
+  const clearGenTimeout = () => {
+    if (genTimeoutRef.current !== null) {
+      window.clearTimeout(genTimeoutRef.current);
+      genTimeoutRef.current = null;
+    }
+  };
+  useEffect(() => () => clearGenTimeout(), []);
 
   const { task: genTask } = useTaskCompletion(taskId, {
     onComplete: () => {
+      clearGenTimeout();
       setTaskId(null);
       onGenerated?.();
     },
     onError: (task) => {
+      clearGenTimeout();
       setTaskId(null);
       toast?.addToast(
         task.error_msg || t('resources.infoPanel.promptGenerateFailed', 'Failed to generate prompt'),
@@ -103,6 +117,15 @@ export function PromptSection({
     try {
       const id = await generateGenPrompt(resource.id);
       setTaskId(id);
+      clearGenTimeout();
+      genTimeoutRef.current = window.setTimeout(() => {
+        genTimeoutRef.current = null;
+        setTaskId(null);
+        toast?.addToast(
+          t('resources.infoPanel.promptGenerateSlow', 'Still generating — check Task Center'),
+          'info',
+        );
+      }, 90000);
     } catch (err) {
       console.error('Failed to start prompt generation:', err);
       const msg =
@@ -373,7 +396,13 @@ export function PromptSection({
                 setAutoRunTarget(true);
                 setSendToCanvasOpen(true);
               }}
-              className="flex items-center gap-1.5 text-[10px] text-ink-500 hover:text-[var(--accent-text)] transition-colors"
+              disabled={!posValue.trim()}
+              title={
+                posValue.trim()
+                  ? undefined
+                  : t('resources.infoPanel.generateSimilarEmptyHint', 'Add a positive prompt first')
+              }
+              className="flex items-center gap-1.5 text-[10px] text-ink-500 hover:text-[var(--accent-text)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-ink-500"
             >
               <Zap size={11} /> {t('resources.infoPanel.generateSimilar', 'Generate Similar')}
             </button>

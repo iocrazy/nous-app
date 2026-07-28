@@ -221,6 +221,49 @@ describe('CanvasComposer — Send to Canvas consumption', () => {
       expect(mockRerunPrompt).toHaveBeenCalledTimes(1);
     });
 
+    it('omits an invalid ratio instead of passing it through to gen (M4)', async () => {
+      locationState = {
+        promptInsert: {
+          assetId: 'r1',
+          filename: 'hero.png',
+          positive: 'a cinematic hero shot',
+          autoRun: true,
+          ratio: 'not-a-ratio',
+        },
+      };
+      useCanvasCoreStore.setState({ canvasId: 'c1', kind: 'smart', loadStatus: 'ready' });
+
+      render(<CanvasComposer />);
+
+      await waitFor(() => expect(useCanvasCoreStore.getState().nodes).toHaveLength(2));
+      const promptNode = useCanvasCoreStore
+        .getState()
+        .nodes.find((n) => (n as Record<string, unknown>).type === 'prompt') as Record<string, unknown>;
+      const data = promptNode.data as Record<string, unknown>;
+      expect(data.gen).toEqual({ kind: 'image', model: '', ratio: undefined });
+    });
+
+    it('omits a missing ratio the same way (M4)', async () => {
+      locationState = {
+        promptInsert: {
+          assetId: 'r1',
+          filename: 'hero.png',
+          positive: 'a cinematic hero shot',
+          autoRun: true,
+        },
+      };
+      useCanvasCoreStore.setState({ canvasId: 'c1', kind: 'smart', loadStatus: 'ready' });
+
+      render(<CanvasComposer />);
+
+      await waitFor(() => expect(useCanvasCoreStore.getState().nodes).toHaveLength(2));
+      const promptNode = useCanvasCoreStore
+        .getState()
+        .nodes.find((n) => (n as Record<string, unknown>).type === 'prompt') as Record<string, unknown>;
+      const data = promptNode.data as Record<string, unknown>;
+      expect(data.gen).toEqual({ kind: 'image', model: '', ratio: undefined });
+    });
+
     it('does not merge gen or call rerunPrompt when autoRun is absent (non-autoRun flow unchanged)', async () => {
       locationState = {
         promptInsert: {

@@ -129,9 +129,12 @@ class TestCaptionAssetWorkflowStructuredResult:
         assert kwargs["scope_name"] == "ai-caption-tags"
         assert kwargs["log_prefix"] == "[CaptionAsset]"
         entries = list(kwargs["entries"])
+        # I1: group name is the FIXED constant "Prompt", never the LLM's
+        # free-form `category` — tag_groups is shared/unscoped, so a
+        # per-call category string would grow it without bound.
         assert entries == [
-            {"group": "Photography", "en": "cat", "zh": "猫"},
-            {"group": "Photography", "en": "studio", "zh": "影棚"},
+            {"group": "Prompt", "en": "cat", "zh": "猫"},
+            {"group": "Prompt", "en": "studio", "zh": "影棚"},
         ]
 
     async def test_progress_stages_in_order(self, tmp_path):
@@ -154,13 +157,62 @@ class TestCaptionAssetWorkflowStructuredResult:
             (100, "Prompt & tags generated"),
         ]
 
-    async def test_category_defaults_to_prompt_group_when_absent(self, tmp_path):
+    async def test_group_name_is_fixed_constant_regardless_of_category(self, tmp_path):
         call_result = {"en": "x", "tags": [{"en": "solo-tag"}]}
         _, _, _, write_tags = await _run_workflow(
             call_result=call_result, tags_attached=1, tmp_path=tmp_path
         )
         entries = list(write_tags.await_args.kwargs["entries"])
         assert entries == [{"group": "Prompt", "en": "solo-tag", "zh": ""}]
+
+    async def test_tag_write_failure_does_not_fail_the_task(self, tmp_path):
+        # I2: gen_prompt/gen_prompt_zh/gen_prompt_json already committed by
+        # the time tags are written — a tag-write exception must not turn
+        # the whole workflow into a failure, or the frontend never gets its
+        # onGenerated() callback despite the prompt having saved fine.
+        call_result = {"en": "x", "tags": [{"en": "solo-tag"}]}
+        from app.workflows import caption_asset as m
+
+        local = tmp_path / "materialized.png"
+        local.write_bytes(b"png-bytes")
+        resource = {"id": _RID, "file_path": _FS_PATH, "file_type": "image"}
+        repo = _resource_repo(resource)
+        manager = _make_manager()
+        call = AsyncMock(return_value=call_result)
+        write_tags = AsyncMock(side_effect=RuntimeError("tags_repo unavailable"))
+
+        with (
+            patch.object(m, "materialize", _fake_materialize(local)),
+            patch.object(
+                m,
+                "resolve_caption_provider",
+                AsyncMock(
+                    return_value={
+                        "provider_key": "qwen",
+                        "provider_config": {},
+                        "agent_model": "m",
+                        "agent_slug": "caption",
+                    }
+                ),
+            ),
+            patch.object(m, "call_caption", call),
+            patch(
+                "app.repositories.resources_repository.ResourcesRepository",
+                return_value=repo,
+            ),
+            patch(
+                "app.services.infra.unified_task_manager.get_task_manager",
+                return_value=manager,
+            ),
+            patch("app.workflows._ai_tags.write_ai_tags", write_tags),
+        ):
+            result = await inspect.unwrap(m.caption_asset_workflow)(
+                resource_id=_RID, user_id=_USER
+            )
+
+        assert result["status"] == "ok"
+        assert result["tags_added"] == 0
+        repo.update_resource.assert_awaited_once()
 
 
 class TestCaptionAssetWorkflowLegacyResult:
@@ -173,8 +225,27 @@ class TestCaptionAssetWorkflowLegacyResult:
         assert result["status"] == "ok"
         assert result["tags_added"] == 0
         written = repo.update_resource.await_args.args[1]
-        assert written == {"gen_prompt": "a fox", "gen_prompt_zh": "一只狐狸"}
+        # I3: gen_prompt_json is ALWAYS included (NULL when the structured
+        # contract wasn't met this run) so a degraded re-run clears any
+        # stale JSON left by a previous structured run.
+        assert written == {
+            "gen_prompt": "a fox",
+            "gen_prompt_zh": "一只狐狸",
+            "gen_prompt_json": None,
+        }
         write_tags.assert_not_awaited()
+
+    async def test_degraded_rerun_clears_stale_gen_prompt_json(self, tmp_path):
+        # I3: a resource with a PREVIOUS structured-run's gen_prompt_json
+        # must not keep showing it once a re-run degrades to the two-field
+        # shape — the write must NULL the column, not omit the key.
+        call_result = {"en": "a fox", "zh": "一只狐狸"}
+        result, repo, _, _ = await _run_workflow(
+            call_result=call_result, tmp_path=tmp_path
+        )
+        assert result["status"] == "ok"
+        written = repo.update_resource.await_args.args[1]
+        assert written["gen_prompt_json"] is None
 
     async def test_no_tags_key_skips_tag_write(self, tmp_path):
         call_result = {"en": "x", "zh": "y", "tags": []}

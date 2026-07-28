@@ -986,6 +986,7 @@
       "promptGenerated": "提示词已生成",
       "promptAnalyzing": "分析中...",
       "promptGenerateFailed": "提示词生成失败",
+      "promptGenerateSlow": "仍在生成中 — 请到任务中心查看",
       "autoTag": "智能打标",
       "autoTagHint": "按 12 个维度为图片智能生成双语标签",
       "autoTagging": "正在智能打标...",
@@ -1001,10 +1002,12 @@
       "sendToCanvas": "发送到画布",
       "sendToCanvasNoProjects": "暂无项目",
       "sendToCanvasNoCanvases": "该项目还没有画布",
-      "generateSimilar": "生成同款"
+      "generateSimilar": "生成同款",
+      "generateSimilarEmptyHint": "请先填写正向提示词"
     },
     "slidePrompt": {
-      "addPrompt": "+ 为这张图添加提示词",
+      "addPrompt": "为这张图添加提示词",
+      "loadFailed": "加载这张图的提示词失败",
       "expand": "展开",
       "copy": "复制",
       "save": "保存",

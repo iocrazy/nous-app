@@ -5,6 +5,11 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_k: string, d?: string) => d ?? _k }),
 }));
 
+const addToast = vi.fn();
+vi.mock('./Toast', () => ({
+  useOptionalToast: () => ({ addToast }),
+}));
+
 const resourceRow = {
   slide_prompts: {
     'a.jpg': { en: 'a cat sitting on a couch', neg_en: 'blurry' },
@@ -35,6 +40,7 @@ describe('SlidePromptStrip', () => {
     fromMock.mockClear();
     selectMock.mockClear();
     eqMock.mockClear();
+    addToast.mockReset();
   });
 
   it('shows the "+ Add prompt" pill when there is no entry for this slide', async () => {
@@ -42,6 +48,40 @@ describe('SlidePromptStrip', () => {
     await screen.findByText(/Add prompt for this slide/i);
     expect(fromMock).toHaveBeenCalledWith('resources');
     expect(eqMock).toHaveBeenCalledWith('id', 'r1');
+  });
+
+  // M1: the locale value used to start with "+ " while the component ALSO
+  // rendered a literal "+ " before it, producing a visible "++". The pill's
+  // text node must be exactly one "+ " followed by the translated label.
+  it('renders exactly one "+" before the add-prompt label (M1 — no double plus)', async () => {
+    render(<SlidePromptStrip resourceId="r1" slideName="b.jpg" />);
+    const pill = await screen.findByText(/Add prompt for this slide/i);
+    expect(pill.textContent).toBe('+ Add prompt for this slide');
+  });
+
+  // I4: a read failure must not silently default the map to `{}` — a
+  // later save would then PATCH an empty object over every other slide's
+  // real entries. Instead the component shows an error state and disables
+  // expand/save entirely.
+  it('shows an error state and disables expand/save on a read failure (I4)', async () => {
+    singleMock.mockResolvedValueOnce({ data: null, error: { message: 'boom' } });
+    render(<SlidePromptStrip resourceId="r1" slideName="a.jpg" />);
+
+    await screen.findByText(/Failed to load prompt/i);
+    expect(screen.queryByText('Expand')).toBeNull();
+    expect(screen.queryByText(/Add prompt for this slide/i)).toBeNull();
+    expect(screen.queryByPlaceholderText('Prompt for this slide...')).toBeNull();
+    // A save is structurally impossible: there is no Save button to click.
+    expect(screen.queryByText('Save')).toBeNull();
+    expect(updateResource).not.toHaveBeenCalled();
+  });
+
+  it('shows an error state on a thrown read error too (I4)', async () => {
+    singleMock.mockRejectedValueOnce(new Error('network down'));
+    render(<SlidePromptStrip resourceId="r1" slideName="a.jpg" />);
+
+    await screen.findByText(/Failed to load prompt/i);
+    expect(screen.queryByText('Expand')).toBeNull();
   });
 
   it('shows the first line + Expand/Copy when an entry exists for this slide', async () => {
@@ -72,6 +112,22 @@ describe('SlidePromptStrip', () => {
       neg_en: 'blurry',
     });
     expect(calledData.slide_prompts['c.jpg']).toEqual({ zh: '一只狗' });
+  });
+
+  // I5: resources.slidePrompt.saveFailed exists in both locales but was
+  // unreferenced — a failed PATCH only logged to console, no user-visible
+  // feedback. Wire it to a toast, same as sibling components.
+  it('shows a toast when the save PATCH fails (I5)', async () => {
+    updateResource.mockRejectedValueOnce(new Error('network down'));
+    render(<SlidePromptStrip resourceId="r1" slideName="a.jpg" />);
+    await screen.findByText('a cat sitting on a couch');
+
+    fireEvent.click(screen.getByText('Expand'));
+    fireEvent.click(screen.getByText('Save'));
+
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith('Failed to save', 'error'));
+    // The editor stays open — nothing was actually saved.
+    expect(screen.getByPlaceholderText('Prompt for this slide...')).toBeInTheDocument();
   });
 
   it('switching slideName re-derives the displayed entry from the already-fetched map (no refetch)', async () => {

@@ -145,18 +145,26 @@ async def caption_asset_workflow(
                 )
 
             await manager.update_progress(wf_id, 70, subtitle="Parsing result")
-            update: dict[str, str] = {}
+            update: dict[str, Any] = {}
             if result.get("en"):
                 update["gen_prompt"] = result["en"]
             if result.get("zh"):
                 update["gen_prompt_zh"] = result["zh"]
-            prompt_json = result.get("prompt_json")
-            if isinstance(prompt_json, dict) and prompt_json:
-                update["gen_prompt_json"] = json.dumps(prompt_json, ensure_ascii=False)
             if not update:
                 raise RuntimeError(
                     "caption agent returned neither an EN nor a ZH prompt"
                 )
+            # Always write gen_prompt_json (even as NULL) so a degraded
+            # re-run (structured contract missed this time) clears the
+            # PREVIOUS run's stale JSON instead of leaving it behind —
+            # repo.update_resource is load-then-setattr, so None clears the
+            # column correctly.
+            prompt_json = result.get("prompt_json")
+            update["gen_prompt_json"] = (
+                json.dumps(prompt_json, ensure_ascii=False)
+                if isinstance(prompt_json, dict) and prompt_json
+                else None
+            )
 
             await manager.update_progress(wf_id, 85, subtitle="Saving prompt & tags")
             await repo.update_resource(resource_id, update)
@@ -164,23 +172,39 @@ async def caption_asset_workflow(
         # Tags/tag_groups are shared vocabulary tables — write them under
         # the system scope (#608 precedent, same as classify_asset), after
         # the user request_scope above has exited (non-nesting pattern).
+        #
+        # Group name is a FIXED constant, not the LLM's free-form
+        # `category` — tag_groups is a shared, unscoped table, so an
+        # unbounded, unwhitelisted string from the model would grow it
+        # without limit. `category` is still surfaced to the UI via
+        # gen_prompt_json (already folded in above).
         attached = 0
         tags = result.get("tags") or []
         if tags:
-            group_name = result.get("category") or "Prompt"
             entries = [
-                {"group": group_name, "en": t["en"], "zh": t.get("zh", "")}
+                {"group": "Prompt", "en": t["en"], "zh": t.get("zh", "")}
                 for t in tags
                 if isinstance(t, dict) and t.get("en")
             ]
             if entries:
-                attached = await write_ai_tags(
-                    resource_id=resource_id,
-                    user_id=user_id,
-                    entries=entries,
-                    scope_name="ai-caption-tags",
-                    log_prefix="[CaptionAsset]",
-                )
+                # A tag-write failure must NOT fail the whole task — the
+                # prompt (gen_prompt/gen_prompt_zh/gen_prompt_json) already
+                # committed above, and the frontend's onGenerated() callback
+                # depends on this workflow completing to refetch it.
+                try:
+                    attached = await write_ai_tags(
+                        resource_id=resource_id,
+                        user_id=user_id,
+                        entries=entries,
+                        scope_name="ai-caption-tags",
+                        log_prefix="[CaptionAsset]",
+                    )
+                except Exception as tag_err:  # noqa: BLE001
+                    logger.warning(
+                        f"[CaptionAsset] tag write failed for resource "
+                        f"{resource_id}: {tag_err}"
+                    )
+                    attached = 0
 
         await manager.update_progress(wf_id, 100, subtitle="Prompt & tags generated")
         logger.info(

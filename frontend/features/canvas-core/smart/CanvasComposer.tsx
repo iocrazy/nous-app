@@ -90,6 +90,13 @@ interface PendingPromptInsert {
   ratio?: string;
 }
 
+/** M4: `insert.ratio` comes from the LLM-produced `aspect_ratio` field in
+ *  gen_prompt_json (via PromptSection's "Generate Similar") — an
+ *  unvalidated free-form string. A malformed value merged straight into
+ *  `gen.ratio` reaches the generation backend and 422s the autoRun call
+ *  silently; validate the shape here and omit the field instead. */
+const VALID_RATIO_RE = /^\d{1,2}:\d{1,2}$/;
+
 const SMART_NODE_TYPE_KEYS = new Set(Object.keys(SMART_NODE_TYPES));
 /** Refuse absurd files before reading them into memory. */
 const MAX_WORKFLOW_FILE_BYTES = 5 * 1024 * 1024;
@@ -298,7 +305,13 @@ export function CanvasComposer({
           // below so rerunPrompt (which reads node data from the store at
           // call time) sees them on its very first read.
           ...(insert.autoRun
-            ? { gen: { kind: 'image' as const, model: '', ratio: insert.ratio } }
+            ? {
+                gen: {
+                  kind: 'image' as const,
+                  model: '',
+                  ratio: insert.ratio && VALID_RATIO_RE.test(insert.ratio) ? insert.ratio : undefined,
+                },
+              }
             : {}),
         },
       };

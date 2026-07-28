@@ -187,6 +187,29 @@ describe('PromptSection', () => {
     expect(screen.getByText('Send to Canvas')).toBeTruthy();
   });
 
+  // M3: Generate Similar must not fire with an empty positive prompt for
+  // the current lang side — an empty prompt reaches the canvas as an empty
+  // node and autoRun 422s the backend silently.
+  it('disables Generate Similar when the current lang side has no positive prompt (M3)', async () => {
+    const resource = base({
+      gen_prompt: '',
+      gen_prompt_zh: '',
+      gen_prompt_negative: 'blurry',
+      gen_prompt_json: JSON.stringify({ subject: 'x', aspect_ratio: '16:9' }),
+    });
+    render(<PromptSection {...props({ resource })} />);
+    fireEvent.click(screen.getByText(/blurry/));
+    const btn = await screen.findByText('Generate Similar');
+    expect(btn.closest('button')).toBeDisabled();
+  });
+
+  it('enables Generate Similar once the current lang side has a positive prompt (M3)', async () => {
+    render(<PromptSection {...props({ resource: jsonResourceForSimilar() })} />);
+    fireEvent.click(screen.getByText(/a cat, anime style/));
+    const btn = await screen.findByText('Generate Similar');
+    expect(btn.closest('button')).not.toBeDisabled();
+  });
+
   it('clicking Generate Similar sends autoRun + the analysis aspect_ratio through to the canvas navigate call', async () => {
     fetchProjects.mockResolvedValue([{ id: 'p1', name: 'Proj', team_id: null }]);
     listCanvases.mockResolvedValue([{ id: 'c1', name: 'Board' }]);
@@ -311,6 +334,74 @@ describe('PromptSection', () => {
 
     expect(await screen.findByText('network down')).toBeTruthy();
     expect(screen.queryByText('Analyzing...')).toBeNull();
+  });
+
+  // I6: manager.create() on the backend is warn-and-continue — if the
+  // task_tracking row never lands, useTaskCompletion never sees a matching
+  // task and the analyzing card would spin forever with Generate locked.
+  // A ~90s fallback timer is the escape hatch.
+  it('resets state and shows a toast if the task never completes within the fallback timeout (I6)', async () => {
+    vi.useFakeTimers();
+    try {
+      generateGenPrompt.mockResolvedValue('task-1');
+      render(
+        <ToastProvider>
+          <PromptSection {...props()} />
+        </ToastProvider>,
+      );
+      fireEvent.click(screen.getByText(/\+ Add Prompt/));
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Generate'));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByText('Analyzing...')).toBeTruthy();
+
+      // mockTasks stays [] the whole time — the task row never showed up.
+      act(() => {
+        vi.advanceTimersByTime(90000);
+      });
+
+      expect(screen.queryByText('Analyzing...')).toBeNull();
+      expect(screen.getByText('Still generating — check Task Center')).toBeTruthy();
+      // Generate is clickable again, not stuck.
+      const generateBtn = screen.getByText('Generate').closest('button');
+      expect(generateBtn).not.toBeDisabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not fire the fallback timeout once the task completes first (I6)', async () => {
+    vi.useFakeTimers();
+    try {
+      generateGenPrompt.mockResolvedValue('task-1');
+      const onGenerated = vi.fn();
+      const { rerender } = render(<PromptSection {...props({ onGenerated })} />);
+      fireEvent.click(screen.getByText(/\+ Add Prompt/));
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Generate'));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      mockTasks.mockReturnValue([makeTask('task-1', 'completed', { progress: 100 })]);
+      act(() => {
+        rerender(<PromptSection {...props({ onGenerated })} />);
+      });
+      expect(onGenerated).toHaveBeenCalledOnce();
+
+      // Advancing past the fallback window must not re-toast/reset anything
+      // now that the task already completed and the timer was cleared.
+      act(() => {
+        vi.advanceTimersByTime(90000);
+      });
+      expect(screen.queryByText('Still generating — check Task Center')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('omits the Generate button when canGenerate is false', () => {
