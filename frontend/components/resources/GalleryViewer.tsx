@@ -124,94 +124,102 @@ export const GalleryViewer: React.FC<GalleryViewerProps> = ({ galleryId, mediaTo
   const current = items[currentIndex];
 
   return (
-    <div className="w-full h-full min-h-[16rem] bg-ink-950 rounded-lg overflow-hidden flex flex-col">
-      {/* Pager — image + arrows + the existing dots/counter overlay. */}
-      <div className="relative flex-1 min-w-0 min-h-0 select-none">
-        <div className="absolute inset-0 flex items-center justify-center">
-          <img
-            key={current.id}
-            src={getResourceMediaUrl(String(current.id), mediaToken)}
-            alt={current.filename || `Image ${currentIndex + 1}`}
-            className="max-w-full max-h-full object-contain"
-            draggable={false}
-          />
-        </div>
-
-        {currentIndex > 0 && (
-          <button
-            type="button"
-            onClick={goPrev}
-            className="absolute left-2 top-1/2 -translate-y-1/2 p-2 bg-black/50 hover:bg-black/70 text-white/80 hover:text-white rounded-full transition-colors backdrop-blur-sm"
-            aria-label={t('resources.gallery.prev', 'Previous image')}
-          >
-            <ChevronLeft size={24} />
-          </button>
-        )}
-
-        {currentIndex < items.length - 1 && (
-          <button
-            type="button"
-            onClick={goNext}
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-black/50 hover:bg-black/70 text-white/80 hover:text-white rounded-full transition-colors backdrop-blur-sm"
-            aria-label={t('resources.gallery.next', 'Next image')}
-          >
-            <ChevronRight size={24} />
-          </button>
-        )}
-
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent pt-8 pb-3 px-4">
-          {items.length > 1 && (
-            <div className="flex items-center justify-center gap-1.5 flex-wrap">
-              {items.map((it, idx) => (
-                <button
-                  type="button"
-                  key={it.id}
-                  onClick={() => goTo(idx)}
-                  className={`rounded-full transition-all ${
-                    idx === currentIndex
-                      ? 'w-2.5 h-2.5 bg-white'
-                      : 'w-1.5 h-1.5 bg-white/40 hover:bg-white/60'
-                  }`}
-                  aria-label={t('resources.gallery.goTo', 'Go to image {{n}}', { n: idx + 1 })}
-                />
-              ))}
-            </div>
-          )}
-          <p className="text-center text-xs text-white/60 mt-1.5 tabular-nums">
-            {currentIndex + 1} / {items.length}
-          </p>
-        </div>
+    <div className="relative w-full h-full min-h-[16rem] bg-ink-950 rounded-lg overflow-hidden select-none">
+      <div className="absolute inset-0 flex items-center justify-center">
+        <img
+          key={current.id}
+          src={getResourceMediaUrl(String(current.id), mediaToken)}
+          alt={current.filename || `Image ${currentIndex + 1}`}
+          className="max-w-full max-h-full object-contain"
+          draggable={false}
+        />
       </div>
 
-      {/* Bottom info area — the current child IS a real resource, so its
-          per-image prompt is just that child's own gen_prompt* columns via
-          the existing ResourcePromptSection (spec 2026-07-28-prompt-dataline
-          §2: "zero new storage" for upload galleries). Rendered here
-          collapsed-by-default behind a compact toggle rather than always-on:
-          the full section (header + Generate + Send-to-Canvas) is sized for
-          a sidebar panel and reads as too heavy stacked under every gallery
-          view, and lazy-mounting it also skips the resource fetch entirely
-          until the user actually wants it. */}
-      <div className="shrink-0 border-t border-ink-800 bg-ink-900">
+      {currentIndex > 0 && (
         <button
           type="button"
-          onClick={() => setPromptOpen((v) => !v)}
-          className="w-full flex items-center gap-1.5 px-4 py-2 text-ink-500 hover:text-ink-300 transition-colors"
+          onClick={goPrev}
+          className="absolute left-2 top-1/2 -translate-y-1/2 p-2 bg-black/50 hover:bg-black/70 text-white/80 hover:text-white rounded-full transition-colors backdrop-blur-sm"
+          aria-label={t('resources.gallery.prev', 'Previous image')}
         >
-          <Sparkles size={11} />
-          <span className="text-[11px] font-semibold uppercase tracking-widest">
-            {t('resources.infoPanel.promptSection', 'Prompt')}
-          </span>
-          <span className="ml-auto">
-            {promptOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-          </span>
+          <ChevronLeft size={24} />
         </button>
-        {promptOpen && (
-          <div className="max-h-64 overflow-y-auto pb-2">
-            <ResourcePromptSection resourceId={String(current.id)} />
+      )}
+
+      {currentIndex < items.length - 1 && (
+        <button
+          type="button"
+          onClick={goNext}
+          className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-black/50 hover:bg-black/70 text-white/80 hover:text-white rounded-full transition-colors backdrop-blur-sm"
+          aria-label={t('resources.gallery.next', 'Next image')}
+        >
+          <ChevronRight size={24} />
+        </button>
+      )}
+
+      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent pt-8 pb-3 px-4">
+        {items.length > 1 && (
+          <div className="flex items-center justify-center gap-1.5 flex-wrap">
+            {items.map((it, idx) => (
+              <button
+                type="button"
+                key={it.id}
+                onClick={() => goTo(idx)}
+                className={`rounded-full transition-all ${
+                  idx === currentIndex
+                    ? 'w-2.5 h-2.5 bg-white'
+                    : 'w-1.5 h-1.5 bg-white/40 hover:bg-white/60'
+                }`}
+                aria-label={t('resources.gallery.goTo', 'Go to image {{n}}', { n: idx + 1 })}
+              />
+            ))}
           </div>
         )}
+        <p className="text-center text-xs text-white/60 mt-1.5 tabular-nums">
+          {currentIndex + 1} / {items.length}
+        </p>
       </div>
+
+      {/* Per-child prompt — the current child IS a real resource, so its
+          per-image prompt is just that child's own gen_prompt* columns via
+          the existing ResourcePromptSection (spec 2026-07-28-prompt-dataline
+          §2: "zero new storage" for upload galleries). Floats OVER the image
+          (same pattern as SlidePlayer's SlidePromptStrip) instead of
+          reserving permanent layout height: `absolute`, so the pager keeps
+          its full-bleed image area for everyone who never touches prompts.
+          Collapsed = a small corner pill (no layout cost either way);
+          expanded = a bottom-anchored overlay card, `inset-x-3 bottom-3`
+          inside this same `relative overflow-hidden` container — mirrors
+          SlidePlayer's expanded editor card, which was checked against the
+          same clipping concern (stays within bounds by construction: it's
+          anchored to the edges of the container that clips it, never sized
+          past them). Lazy-mounted (only while `promptOpen`) so browsing the
+          gallery never pays for the resource fetch unless requested. */}
+      {promptOpen ? (
+        <div className="absolute inset-x-3 bottom-3 z-20 max-h-[70%] overflow-y-auto bg-ink-900/95 backdrop-blur border border-ink-700 rounded-xl shadow-lg">
+          <div className="flex justify-end px-2 pt-1.5">
+            <button
+              type="button"
+              onClick={() => setPromptOpen(false)}
+              className="text-ink-500 hover:text-ink-300 transition-colors"
+              aria-label={t('resources.slidePrompt.close', 'Close')}
+            >
+              <ChevronDown size={13} />
+            </button>
+          </div>
+          <ResourcePromptSection resourceId={String(current.id)} />
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setPromptOpen(true)}
+          className="absolute right-3 bottom-3 z-10 flex items-center gap-1 bg-black/55 backdrop-blur-sm rounded-full px-2.5 py-1 text-[10px] text-white/70 hover:text-white transition-colors"
+        >
+          <Sparkles size={11} />
+          {t('resources.infoPanel.promptSection', 'Prompt')}
+          <ChevronUp size={11} />
+        </button>
+      )}
     </div>
   );
 };

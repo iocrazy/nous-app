@@ -113,5 +113,18 @@ describe('GalleryViewer', () => {
       fireEvent.click(screen.getByText('Prompt'));
       expect(screen.getByTestId('resource-prompt-section')).toHaveTextContent('child-2');
     });
+
+    it('closes via the drawer\'s own close button, restoring the corner toggle pill', async () => {
+      render(<GalleryViewer galleryId="gal-1" mediaToken="tok" />);
+      await waitFor(() => expect(screen.getByText('1 / 2')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByText('Prompt'));
+      expect(screen.getByTestId('resource-prompt-section')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByLabelText('Close'));
+
+      expect(screen.queryByTestId('resource-prompt-section')).toBeNull();
+      expect(screen.getByText('Prompt')).toBeInTheDocument();
+    });
   });
 });
