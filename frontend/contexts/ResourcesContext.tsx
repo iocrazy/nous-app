@@ -195,6 +195,7 @@ export interface ResourcesContextType {
   confirmPermanentDelete: () => Promise<void>;
   handleAddTag: (tagId: string) => Promise<void>;
   handleRemoveTag: (tagId: string) => Promise<void>;
+  refetchSelectedResourceTags: () => Promise<void>;
   handleCreateTag: (name: string, color: string) => Promise<Tag | null>;
   handleResourceUpdate: (data: Partial<Resource>) => Promise<void>;
 
@@ -1032,6 +1033,14 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     } catch { /* ignore */ }
   }, [selectedResource]);
 
+  const refetchSelectedResourceTags = useCallback(async () => {
+    if (!selectedResource?.resource?.id) return;
+    try {
+      const updated = await fetchResourceTags(selectedResource.resource.id);
+      setSelectedResourceTags(updated);
+    } catch { /* ignore */ }
+  }, [selectedResource]);
+
   const handleCreateTag = useCallback(async (name: string, color: string): Promise<Tag | null> => {
     try {
       const tag = await createTag({ name, color, type: 'user' });
@@ -1197,6 +1206,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     confirmPermanentDelete,
     handleAddTag,
     handleRemoveTag,
+    refetchSelectedResourceTags,
     handleCreateTag,
     handleResourceUpdate,
 
@@ -1219,7 +1229,7 @@ export const ResourcesProvider: React.FC<ResourcesProviderProps> = ({
     loadMoreTrashed, hasMoreTrashed, isLoadingMoreTrashed,
     loadFolders, loadChildFolders, loadTrashedResources, loadDownloadedResources,
     handleTrashResource, handleRestoreResource, handlePermanentDelete, confirmPermanentDelete,
-    handleAddTag, handleRemoveTag, handleCreateTag, handleResourceUpdate,
+    handleAddTag, handleRemoveTag, refetchSelectedResourceTags, handleCreateTag, handleResourceUpdate,
     canDo, addToast, transcodingResourceIds,
   ]);
 

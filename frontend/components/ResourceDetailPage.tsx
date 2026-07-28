@@ -1828,7 +1828,6 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
             key={resource.id}
             resource={resource}
             onPatch={(fields) => handleResourceUpdate(fields)}
-            hasTriggerTag={assignedTags.some((it) => it.tag?.prompt_trigger)}
             onEnsureTriggerTag={async () => {
               const tag = await ensureDefaultTriggerTag(allTags);
               if (!assignedTags.some((it) => String(it.tag?.id) === String(tag.id))) {

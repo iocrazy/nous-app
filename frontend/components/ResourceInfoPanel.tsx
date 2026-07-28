@@ -17,6 +17,9 @@ interface ResourceInfoPanelProps {
   onRemoveTag: (tagId: string) => void;
   onCreate?: (name: string, color: string) => Promise<Tag | null>;
   onUpdate: (data: Partial<Resource>) => void;
+  /** Notified when ResourcePromptSection's ensure-trigger-tag flow assigns a
+   *  new tag, so the Tags block above (fed by the wrapper's own state) refreshes. */
+  onTagsChanged?: () => void;
 }
 
 function formatFileSize(bytes: number | null | undefined): string {
@@ -141,6 +144,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
   onRemoveTag,
   onCreate,
   onUpdate,
+  onTagsChanged,
 }) => {
   const { t } = useTranslation();
   const { icon: IconComponent, color, bg } = getFileIcon(resource.mime_type);
@@ -392,7 +396,7 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
         onCreate={onCreate}
       />
 
-      <ResourcePromptSection resourceId={resource.id} />
+      {!readOnly && <ResourcePromptSection resourceId={resource.id} onTagsChanged={onTagsChanged} />}
 
       {/* Folders */}
       {folderName && (

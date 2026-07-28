@@ -184,5 +184,15 @@ export function useSelectedVideoTags(resourceId: string | undefined) {
     }
   };
 
-  return { selectedVideoTags, setSelectedVideoTags, handleAddTag, handleRemoveTag };
+  const refetchTags = async () => {
+    if (!resourceId) return;
+    try {
+      const updated = await fetchResourceTags(resourceId);
+      setSelectedVideoTags(updated);
+    } catch (err) {
+      console.error('Failed to refetch tags:', err);
+    }
+  };
+
+  return { selectedVideoTags, setSelectedVideoTags, handleAddTag, handleRemoveTag, refetchTags };
 }

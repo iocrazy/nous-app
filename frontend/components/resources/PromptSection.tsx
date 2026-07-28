@@ -21,8 +21,6 @@ export interface PromptSectionProps {
   resource: Resource;
   /** Optimistic local-merge + PATCH (page's handleResourceUpdate). */
   onPatch: (fields: Partial<Resource>) => void;
-  /** True when any assigned tag has prompt_trigger. */
-  hasTriggerTag: boolean;
   /** Apply the default trigger tag to this asset (page implements). */
   onEnsureTriggerTag: () => Promise<void>;
   /** Image assets get the Generate (reverse-engineer) button. */
@@ -34,7 +32,7 @@ export interface PromptSectionProps {
 }
 
 export function PromptSection({
-  resource, onPatch, hasTriggerTag, onEnsureTriggerTag,
+  resource, onPatch, onEnsureTriggerTag,
   canGenerate, generating, onGenerate, translating, onTranslate,
 }: PromptSectionProps) {
   const { t } = useTranslation();
@@ -136,9 +134,6 @@ export function PromptSection({
           )}
           <div className="mt-1.5 text-[9.5px] text-ink-600">
             {t('resources.infoPanel.promptExpandHint', 'Click to expand')}
-            {' · '}{t('resources.infoPanel.translatePrompt', 'Translate')}
-            {' · '}{t('resources.infoPanel.copyPrompt', 'Copy')}
-            {' · '}{t('resources.infoPanel.sendToCanvas', 'Send to Canvas')}
           </div>
         </button>
       </div>

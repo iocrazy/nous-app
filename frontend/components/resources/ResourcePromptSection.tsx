@@ -29,7 +29,16 @@ type PromptResource = Pick<
   'id' | 'filename' | 'file_type' | 'gen_prompt' | 'gen_prompt_zh' | 'gen_prompt_negative' | 'gen_prompt_negative_zh'
 >;
 
-export function ResourcePromptSection({ resourceId }: { resourceId: string }) {
+export function ResourcePromptSection({
+  resourceId,
+  onTagsChanged,
+}: {
+  resourceId: string;
+  /** Notified after the ensure-trigger-tag flow actually writes a new tag
+   *  assignment, so hosts that keep their own separate Tags-block state
+   *  (ResourceInfoPanel / DownloadInfoPanel / MediaCard) can refresh it. */
+  onTagsChanged?: () => void;
+}) {
   const [resource, setResource] = useState<PromptResource | null>(null);
   const [assignedTags, setAssignedTags] = useState<Array<{ tag: Tag }>>([]);
   const [loading, setLoading] = useState(true);
@@ -86,8 +95,9 @@ export function ResourcePromptSection({ resourceId }: { resourceId: string }) {
       await addResourceTag(resourceId, String(tag.id));
       const updated = await fetchResourceTags(resourceId);
       setAssignedTags(updated);
+      onTagsChanged?.();
     }
-  }, [resourceId, assignedTags]);
+  }, [resourceId, assignedTags, onTagsChanged]);
 
   if (loading || !resource) return null;
 
@@ -96,7 +106,6 @@ export function ResourcePromptSection({ resourceId }: { resourceId: string }) {
       key={resourceId}
       resource={resource as unknown as Resource}
       onPatch={handlePatch}
-      hasTriggerTag={assignedTags.some((it) => it.tag?.prompt_trigger)}
       onEnsureTriggerTag={handleEnsureTriggerTag}
       canGenerate={false}
       generating={false}

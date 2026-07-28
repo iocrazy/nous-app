@@ -243,6 +243,29 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     }
   }, []);
 
+  // Refetches this card's own tag-assignment state — used both by
+  // ResourcePromptSection's onTagsChanged (after the ensure-trigger-tag flow
+  // writes a new assignment) and available for other tag-mutation call sites.
+  const refetchResourceTags = useCallback(async () => {
+    if (!resourceId) return;
+    try {
+      const tags = await fetchResourceTags(resourceId);
+      setResourceTags(tags);
+      // The trigger tag may have just been created on-demand and not yet be
+      // in this card's allTags snapshot — append it so the picker's "all
+      // tags" list stays in sync without a full refetch.
+      setAllTags(prev => {
+        const missing = tags
+          .map(t => t.tag)
+          .filter((tag): tag is import('../types').Tag =>
+            !!tag && !prev.some(p => String(p.id) === String(tag.id)));
+        return missing.length ? [...prev, ...missing] : prev;
+      });
+    } catch (err) {
+      console.error('Failed to refetch tags:', err);
+    }
+  }, [resourceId]);
+
   // Track fetch submissions (optimistic UI: hide menu items after submit)
   const [fetchSubmitted, setFetchSubmitted] = useState({ video: false, cover: false });
 
@@ -891,7 +914,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             </div>
           )}
 
-          {resourceId && <ResourcePromptSection resourceId={resourceId} />}
+          {resourceId && <ResourcePromptSection resourceId={resourceId} onTagsChanged={refetchResourceTags} />}
 
           {/* Platform hashtags (read-only, for analytics) */}
           {data.hashtags && (

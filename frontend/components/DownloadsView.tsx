@@ -442,7 +442,7 @@ export const DownloadsView: React.FC = () => {
 
   // ─── Selected video tag / resource data ───────────────
   const selectedResourceData = selectedVideo?.id ? resourceDataMap[selectedVideo.id] : undefined;
-  const { selectedVideoTags, handleAddTag, handleRemoveTag } = useSelectedVideoTags(
+  const { selectedVideoTags, handleAddTag, handleRemoveTag, refetchTags } = useSelectedVideoTags(
     selectedResourceData?.id
   );
 
@@ -1228,6 +1228,7 @@ export const DownloadsView: React.FC = () => {
             onHoverRating={setPanelHoverRating}
             onNotesChange={setPanelNotes}
             onNotesBlur={handlePanelNotesBlur}
+            onTagsChanged={refetchTags}
           />
         );
         return useIsland ? createPortal(panel, infoIslandEl) : panel;

@@ -100,7 +100,6 @@ describe('ResourcePromptSection', () => {
 
     expect(capturedProps.resource.id).toBe('r1');
     expect(capturedProps.resource.gen_prompt).toBe('masterpiece');
-    expect(capturedProps.hasTriggerTag).toBe(false); // tagNoTrigger only
     expect(capturedProps.canGenerate).toBe(false);
     expect(capturedProps.generating).toBe(false);
   });
@@ -134,7 +133,6 @@ describe('ResourcePromptSection', () => {
   it('onEnsureTriggerTag applies the default trigger tag via addResourceTag and refetches tags', async () => {
     render(<ResourcePromptSection resourceId="r1" />);
     await screen.findByTestId('prompt-section');
-    expect(capturedProps.hasTriggerTag).toBe(false);
 
     fetchResourceTags.mockResolvedValueOnce([{ tag: tagNoTrigger }, { tag: triggerTag }]);
 
@@ -146,19 +144,46 @@ describe('ResourcePromptSection', () => {
     expect(ensureDefaultTriggerTag).toHaveBeenCalled();
     expect(addResourceTag).toHaveBeenCalledWith('r1', 't2');
     expect(fetchResourceTags).toHaveBeenCalledTimes(2); // initial load + refetch
-    await waitFor(() => expect(capturedProps.hasTriggerTag).toBe(true));
   });
 
   it('does not re-add the trigger tag when the asset already carries it', async () => {
     fetchResourceTags.mockResolvedValueOnce([{ tag: triggerTag }]);
     render(<ResourcePromptSection resourceId="r1" />);
     await screen.findByTestId('prompt-section');
-    expect(capturedProps.hasTriggerTag).toBe(true);
 
     await act(async () => {
       await capturedProps.onEnsureTriggerTag();
     });
 
     expect(addResourceTag).not.toHaveBeenCalled();
+  });
+
+  it('calls onTagsChanged after the ensure flow actually writes a new tag', async () => {
+    const onTagsChanged = vi.fn();
+    fetchResourceTags.mockResolvedValueOnce([{ tag: tagNoTrigger }]); // initial load
+    fetchResourceTags.mockResolvedValueOnce([{ tag: tagNoTrigger }, { tag: triggerTag }]); // refetch
+    render(<ResourcePromptSection resourceId="r1" onTagsChanged={onTagsChanged} />);
+    await screen.findByTestId('prompt-section');
+
+    await act(async () => {
+      await capturedProps.onEnsureTriggerTag();
+    });
+
+    expect(addResourceTag).toHaveBeenCalledWith('r1', 't2');
+    expect(onTagsChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call onTagsChanged when the tag was already present', async () => {
+    const onTagsChanged = vi.fn();
+    fetchResourceTags.mockResolvedValueOnce([{ tag: triggerTag }]);
+    render(<ResourcePromptSection resourceId="r1" onTagsChanged={onTagsChanged} />);
+    await screen.findByTestId('prompt-section');
+
+    await act(async () => {
+      await capturedProps.onEnsureTriggerTag();
+    });
+
+    expect(addResourceTag).not.toHaveBeenCalled();
+    expect(onTagsChanged).not.toHaveBeenCalled();
   });
 });
