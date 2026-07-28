@@ -250,6 +250,13 @@ def parse_caption_result(text: str) -> Dict[str, Any]:
     category = data.get("category")
     if isinstance(category, str) and category.strip():
         out["category"] = category.strip()
+        # Also fold category INTO prompt_json so the persisted
+        # gen_prompt_json carries it — the result card reads category from
+        # there (tags/groups are not a reliable read path for it).
+        if "prompt_json" in out:
+            out["prompt_json"].setdefault("category", category.strip())
+        else:
+            out["prompt_json"] = {"category": category.strip()}
 
     return out
 

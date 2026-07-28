@@ -69,6 +69,9 @@ class TestParseCaptionResult:
             "lighting": "soft studio light",
             "color": "warm tones",
             "aspect_ratio": "1:1",
+            # category is folded into prompt_json so gen_prompt_json
+            # carries it for the result card.
+            "category": "Photography",
         }
         assert out["tags"] == [
             {"en": "cat", "zh": "猫"},
@@ -85,7 +88,7 @@ class TestParseCaptionResult:
         out = parse_caption_result(payload)
         assert out["en"] == "a dog"
         assert out["zh"] == "一只狗"
-        assert out["prompt_json"] == {"subject": "a dog"}
+        assert out["prompt_json"] == {"subject": "a dog", "category": "Pets"}
         assert "tags" not in out  # empty list dropped
         assert out["category"] == "Pets"
 
@@ -161,3 +164,32 @@ class TestEncodeImageSync:
         bad = tmp_path / "bad.png"
         bad.write_bytes(b"definitely not an image")
         assert _encode_image_sync(str(bad)) is None
+
+
+def test_category_folded_into_prompt_json():
+    """category must land inside prompt_json — the result card reads it there."""
+    import json as _json
+
+    from app.services.ai.caption.caption_service import parse_caption_result
+
+    raw = _json.dumps(
+        {
+            "prompt_en": "a poster",
+            "prompt_json": {"subject": "poster"},
+            "category": "Graphic Poster",
+        }
+    )
+    out = parse_caption_result(raw)
+    assert out["category"] == "Graphic Poster"
+    assert out["prompt_json"]["category"] == "Graphic Poster"
+
+
+def test_category_creates_prompt_json_when_absent():
+    import json as _json
+
+    from app.services.ai.caption.caption_service import parse_caption_result
+
+    out = parse_caption_result(
+        _json.dumps({"prompt_en": "a poster", "category": "Poster"})
+    )
+    assert out["prompt_json"] == {"category": "Poster"}
