@@ -367,6 +367,17 @@ class Resources(Base, UserScoped):
     gen_prompt_negative_zh: Mapped[str | None] = mapped_column(
         Text, comment="Negative AI generation prompt (ZH side)"
     )
+    slide_prompts: Mapped[dict | None] = mapped_column(
+        JSONB,
+        comment=(
+            "Per-slide prompts for download albums, keyed by slide filename: "
+            '{"<name>": {en, zh, neg_en, neg_zh}}'
+        ),
+    )
+    gen_prompt_json: Mapped[str | None] = mapped_column(
+        Text,
+        comment="Structured JSON prompt (subject/style/composition/lighting/color/text/aspect_ratio)",
+    )
     url: Mapped[str | None] = mapped_column(Text)
     rating: Mapped[int | None] = mapped_column(SmallInteger, server_default=text("0"))
     last_folder_id: Mapped[int | None] = mapped_column(BigInteger)
