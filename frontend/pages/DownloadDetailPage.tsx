@@ -404,7 +404,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       </div>
     )
   ) : video.media_type && isAlbumType(video.media_type) ? (
-    <SlidePlayer mediaId={String(video.id)} mediaToken={mediaToken ?? undefined} downloadStatus={video.image_download_status || video.video_download_status || undefined} />
+    <SlidePlayer mediaId={String(video.id)} mediaToken={mediaToken ?? undefined} downloadStatus={video.image_download_status || video.video_download_status || undefined} resourceId={resourceId || undefined} />
   ) : (hlsUrl || getVideoUrl(video, mediaToken ?? undefined)) ? (
     <VideoPlayer
       src={hlsUrl || getVideoUrl(video, mediaToken ?? undefined)!}

@@ -1002,6 +1002,17 @@
       "sendToCanvasNoProjects": "暂无项目",
       "sendToCanvasNoCanvases": "该项目还没有画布"
     },
+    "slidePrompt": {
+      "addPrompt": "+ 为这张图添加提示词",
+      "expand": "展开",
+      "copy": "复制",
+      "save": "保存",
+      "saveFailed": "保存失败",
+      "positivePlaceholder": "这张图的提示词...",
+      "negative": "负面",
+      "negativePlaceholder": "负面提示词（要避免的内容）...",
+      "close": "关闭"
+    },
     "folderInfoPanel": {
       "title": "文件夹信息",
       "itemCount": "项目数",

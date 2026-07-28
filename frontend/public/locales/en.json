@@ -1002,6 +1002,17 @@
       "sendToCanvasNoProjects": "No projects yet",
       "sendToCanvasNoCanvases": "This project has no canvases yet"
     },
+    "slidePrompt": {
+      "addPrompt": "+ Add prompt for this slide",
+      "expand": "Expand",
+      "copy": "Copy",
+      "save": "Save",
+      "saveFailed": "Failed to save",
+      "positivePlaceholder": "Prompt for this slide...",
+      "negative": "Negative",
+      "negativePlaceholder": "Negative prompt (what to avoid)...",
+      "close": "Close"
+    },
     "folderInfoPanel": {
       "title": "Folder Info",
       "itemCount": "Items",
