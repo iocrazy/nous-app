@@ -1,8 +1,12 @@
 """caption_asset (prompt_caption) DBOS workflow — IC-port P1-2.
 
-Reverse-engineers a bilingual generation prompt for an image resource via
-the user's assigned ``caption`` vision agent and writes it to
-``resources.gen_prompt`` / ``gen_prompt_zh``.
+Reverse-engineers a generation prompt for an image resource via the
+user's assigned ``caption`` vision agent and writes it to
+``resources.gen_prompt`` / ``gen_prompt_zh`` / ``gen_prompt_json``
+(upgraded to the three-format contract 2026-07-28), plus 3-6 semantic
+tags written through to the tags system (``source='ai'`` — same
+find-or-create sequence ``classify_asset`` uses, via the shared
+``write_ai_tags`` helper).
 
 Dispatched by ``POST /resources/{id}/gen-prompt/generate`` with a
 pre-created task_tracking row whose ``dbos_workflow_id`` matches this
@@ -12,13 +16,17 @@ Design (mirrors analyze_l1 / upload_postprocess conventions):
   - Provider resolution and the multimodal LLM call are ``@DBOS.step``s
     (primitives in/out, memoized on replay; the LLM call retries once).
   - The resource read/write happens in the workflow body inside the
-    user's ambient scope (same as upload_postprocess).
+    user's ambient scope (same as upload_postprocess); the tags
+    write-through happens AFTER that scope exits, under
+    ``system_request_scope`` (mirrors classify_asset's non-nesting
+    pattern — tags/tag_groups are shared vocabulary, not tenant rows).
   - Failure paths RAISE (CLAUDE.md 路线 C rule 4) so task_tracking shows
     the real reason instead of a phantom "completed".
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any, Optional
 
 from dbos import DBOS
@@ -58,8 +66,14 @@ async def call_caption(
     provider_config: dict[str, Any],
     agent_slug: str,
     wf_id: Optional[str] = None,
-) -> dict[str, str]:
-    """Run the multimodal caption call. Returns ``{"en", "zh"}``.
+) -> dict[str, Any]:
+    """Run the multimodal caption call.
+
+    Returns ``CaptionService.caption()``'s result dict — always has
+    ``en``/``zh`` when usable, and may additionally carry
+    ``prompt_json`` / ``tags`` / ``category`` when the model's reply
+    matched the strict structured contract (degrades to the two-field
+    shape otherwise; see ``parse_caption_result``).
 
     Raises on no-result so the workflow is marked FAILED with the actual
     reason (rule 4) instead of completing with nothing written.
@@ -91,13 +105,15 @@ async def caption_asset_workflow(
     resource_id: str,
     user_id: str,
 ) -> dict[str, Any]:
-    """Generate gen_prompt / gen_prompt_zh for an image resource.
+    """Generate gen_prompt / gen_prompt_zh / gen_prompt_json + AI tags for
+    an image resource.
 
     workflow_id idempotency: re-running with the same id replays the
     cached LLM result instead of paying for a second vision call.
     """
     from app.repositories.resources_repository import ResourcesRepository
     from app.services.infra.unified_task_manager import get_task_manager
+    from app.workflows._ai_tags import write_ai_tags
     from app.workflows._failure_handler import record_workflow_failure
 
     manager = get_task_manager()
@@ -113,9 +129,10 @@ async def caption_asset_workflow(
             if not file_path:
                 raise RuntimeError("resource has no stored file to caption")
 
+            await manager.update_progress(wf_id, 10, subtitle="Resolving provider")
             cfg = await resolve_caption_provider(user_id)
-            await manager.update_progress(wf_id, 20, subtitle="Provider resolved")
 
+            await manager.update_progress(wf_id, 30, subtitle="Analyzing image...")
             async with materialize(file_path) as local_path:
                 result = await call_caption(
                     abs_path=str(local_path),
@@ -127,24 +144,54 @@ async def caption_asset_workflow(
                     wf_id=wf_id,
                 )
 
-            await manager.update_progress(wf_id, 85, subtitle="Saving prompt...")
+            await manager.update_progress(wf_id, 70, subtitle="Parsing result")
             update: dict[str, str] = {}
             if result.get("en"):
                 update["gen_prompt"] = result["en"]
             if result.get("zh"):
                 update["gen_prompt_zh"] = result["zh"]
+            prompt_json = result.get("prompt_json")
+            if isinstance(prompt_json, dict) and prompt_json:
+                update["gen_prompt_json"] = json.dumps(prompt_json, ensure_ascii=False)
             if not update:
                 raise RuntimeError(
                     "caption agent returned neither an EN nor a ZH prompt"
                 )
+
+            await manager.update_progress(wf_id, 85, subtitle="Saving prompt & tags")
             await repo.update_resource(resource_id, update)
 
-        await manager.update_progress(wf_id, 100, subtitle="Prompt generated")
-        logger.info(f"[CaptionAsset] generated prompt for resource {resource_id}")
+        # Tags/tag_groups are shared vocabulary tables — write them under
+        # the system scope (#608 precedent, same as classify_asset), after
+        # the user request_scope above has exited (non-nesting pattern).
+        attached = 0
+        tags = result.get("tags") or []
+        if tags:
+            group_name = result.get("category") or "Prompt"
+            entries = [
+                {"group": group_name, "en": t["en"], "zh": t.get("zh", "")}
+                for t in tags
+                if isinstance(t, dict) and t.get("en")
+            ]
+            if entries:
+                attached = await write_ai_tags(
+                    resource_id=resource_id,
+                    user_id=user_id,
+                    entries=entries,
+                    scope_name="ai-caption-tags",
+                    log_prefix="[CaptionAsset]",
+                )
+
+        await manager.update_progress(wf_id, 100, subtitle="Prompt & tags generated")
+        logger.info(
+            f"[CaptionAsset] generated prompt for resource {resource_id} "
+            f"({attached} AI tags attached)"
+        )
         return {
             "status": "ok",
             "resource_id": resource_id,
             "sides": sorted(update.keys()),
+            "tags_added": attached,
         }
     except Exception as e:  # noqa: BLE001
         return await record_workflow_failure(

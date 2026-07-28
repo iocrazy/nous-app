@@ -1,10 +1,19 @@
 """CaptionService — runs the `caption` agent via AgentRunner.
 
-Reverse-engineers a bilingual generation prompt (EN SD-style + ZH
-rendering) from a local image file (IC-port P1-2, 2026-06-12). Mirrors
-the multimodal half of VisualAnalysisService: encode the image as a
-data-URL content block, compose the agent's IDENTITY/SOUL/AGENT prompt,
-run one turn, parse the ``{"en", "zh"}`` JSON.
+Reverse-engineers a generation prompt from a local image file (IC-port
+P1-2, 2026-06-12; upgraded to the three-format contract 2026-07-28).
+Mirrors the multimodal half of VisualAnalysisService: encode the image
+as a data-URL content block, compose the agent's IDENTITY/SOUL/AGENT
+prompt, run one turn, parse the structured JSON.
+
+The strict-JSON contract asks the agent for, in one call:
+``{prompt_en, prompt_zh, prompt_json: {subject, style, composition,
+lighting, color, text?, aspect_ratio}, tags: [{en, zh}, ...],
+category, aspect_ratio}``. Parsing is tolerant — a response that fails
+the structured shape (bad JSON, wrong type, or a legacy ``{"en","zh"}``
+reply) degrades to the plain two-field prompt instead of failing the
+caller; ``parse_caption_json`` is kept as that legacy/fallback parser
+(also still covers pre-upgrade agent configs).
 
 The agent slug is resolved by ``resolve_caption_provider_config``
 (``task_assignment.caption``), so users pick the vision model/provider
@@ -18,7 +27,7 @@ import asyncio
 import base64
 import io
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from loguru import logger
@@ -45,10 +54,33 @@ DEFAULT_AGENT_SLUG = "caption"
 MAX_IMAGE_SIDE = 1024
 JPEG_QUALITY = 85
 
+# The six-dim structured-prompt keys (``text`` is the optional 7th slot —
+# only present when the image contains rendered text worth calling out).
+PROMPT_JSON_KEYS = (
+    "subject",
+    "style",
+    "composition",
+    "lighting",
+    "color",
+    "text",
+    "aspect_ratio",
+)
+# Semantic tags per caption call — mirrors classify's per-dimension cap,
+# kept small since these are a flat unstructured set, not 12 dimensions.
+MAX_CAPTION_TAGS = 6
+
 _INSTRUCTION = (
     "Reverse-engineer the generation prompt for the attached image per "
-    'your AGENT spec. Return ONLY the {"en", "zh"} JSON with no markdown '
-    "fences."
+    "your AGENT spec. Return ONLY strict JSON — no markdown fences, no "
+    "commentary — matching exactly this shape: "
+    '{"prompt_en": "<EN SD-style prompt>", '
+    '"prompt_zh": "<ZH rendering of the same prompt>", '
+    '"prompt_json": {"subject": "...", "style": "...", '
+    '"composition": "...", "lighting": "...", "color": "...", '
+    '"text": "... (omit if none)", "aspect_ratio": "e.g. 16:9"}, '
+    '"tags": [{"en": "...", "zh": "..."}, ...] (3-6 short semantic '
+    'tags), "category": "<one short category label>", '
+    '"aspect_ratio": "same as prompt_json.aspect_ratio"}.'
 )
 
 
@@ -98,6 +130,127 @@ def parse_caption_json(text: str) -> Dict[str, str]:
         value = data.get(key)
         if isinstance(value, str) and value.strip():
             out[key] = value.strip()
+    return out
+
+
+def _strip_fences(text: str) -> str:
+    cleaned = (text or "").strip()
+    if not cleaned.startswith("```"):
+        return cleaned
+    lines = cleaned.split("\n")
+    if lines[-1].strip() == "```":
+        return "\n".join(lines[1:-1])
+    return "\n".join(lines[1:])
+
+
+def _parse_prompt_json(raw: Any) -> Dict[str, str]:
+    """Keep only the known six-dim keys with non-empty string values.
+
+    Missing keys are simply absent from the result (tolerant — a
+    partially-filled structured prompt is still useful), unknown keys
+    are dropped.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, str] = {}
+    for key in PROMPT_JSON_KEYS:
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            out[key] = value.strip()
+    return out
+
+
+def _parse_caption_tags(raw: Any) -> List[Dict[str, str]]:
+    """Normalize the ``tags`` list: non-empty ``en`` required, dedup
+    case-insensitively, capped at ``MAX_CAPTION_TAGS``."""
+    if not isinstance(raw, list):
+        return []
+    out: List[Dict[str, str]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        en_raw = item.get("en")
+        zh_raw = item.get("zh")
+        en = en_raw.strip() if isinstance(en_raw, str) else ""
+        zh = zh_raw.strip() if isinstance(zh_raw, str) else ""
+        if not en:
+            continue
+        dedup_key = en.lower()
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+        out.append({"en": en, "zh": zh} if zh else {"en": en})
+        if len(out) >= MAX_CAPTION_TAGS:
+            break
+    return out
+
+
+def parse_caption_result(text: str) -> Dict[str, Any]:
+    """Parse the caption agent's structured three-format payload.
+
+    Happy path returns a dict that may carry:
+      ``en`` / ``zh``       — bilingual prompt strings (from
+                               ``prompt_en`` / ``prompt_zh``)
+      ``prompt_json``       — dict with whichever of the six-dim keys
+                               the model filled in
+      ``tags``              — list[{"en", "zh"}], 0-6 entries
+      ``category``          — str, used by the caller to bucket the
+                               tags above under one tag_groups row
+
+    Degrades to the legacy two-field parser (``parse_caption_json``) —
+    and therefore to its same ``{"en", ...}`` / ``{}`` shape — when the
+    response isn't valid JSON, isn't an object, or the structured
+    envelope carries neither prompt side (an older/simpler agent reply
+    using the bare ``{"en", "zh"}`` shape still round-trips through
+    here). Never raises — the workflow treats an empty dict as "nothing
+    usable" and fails there instead.
+    """
+    cleaned = _strip_fences(text)
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        logger.warning(
+            "[Caption] structured JSON parse failed — falling back to "
+            "legacy two-field parse"
+        )
+        return parse_caption_json(text)
+
+    if not isinstance(data, dict):
+        return parse_caption_json(text)
+
+    out: Dict[str, Any] = {}
+    en_raw = data.get("prompt_en")
+    zh_raw = data.get("prompt_zh")
+    if isinstance(en_raw, str) and en_raw.strip():
+        out["en"] = en_raw.strip()
+    if isinstance(zh_raw, str) and zh_raw.strip():
+        out["zh"] = zh_raw.strip()
+
+    if not out:
+        # Structured envelope, but neither prompt_en nor prompt_zh was
+        # usable — try the legacy {"en", "zh"} shape on the same
+        # payload before giving up (covers a model that ignored the
+        # new field names but still answered sensibly).
+        out = parse_caption_json(text)
+        if not out:
+            return {}
+
+    prompt_json = _parse_prompt_json(data.get("prompt_json"))
+    aspect_ratio = data.get("aspect_ratio")
+    if isinstance(aspect_ratio, str) and aspect_ratio.strip():
+        prompt_json.setdefault("aspect_ratio", aspect_ratio.strip())
+    if prompt_json:
+        out["prompt_json"] = prompt_json
+
+    tags = _parse_caption_tags(data.get("tags"))
+    if tags:
+        out["tags"] = tags
+
+    category = data.get("category")
+    if isinstance(category, str) and category.strip():
+        out["category"] = category.strip()
+
     return out
 
 
@@ -159,10 +312,14 @@ class CaptionService:
         resource_id: Optional[str] = None,
         task_id: Optional[str] = None,
     ) -> Optional[Dict[str, str]]:
-        """Generate a bilingual prompt from a local image.
+        """Generate a bilingual/structured prompt from a local image.
 
-        Returns ``{"en": ..., "zh": ...}`` (either side may be absent if
-        the model omitted it), or None on failure.
+        Returns ``parse_caption_result``'s dict — ``{"en"?, "zh"?,
+        "prompt_json"?, "tags"?, "category"?}`` (the two-field legacy
+        shape when the structured contract didn't parse), or None on
+        failure. Signature is unchanged from the pre-upgrade version;
+        only the return dict grew optional keys, so existing callers
+        that only read ``en``/``zh`` keep working unmodified.
         """
         data_url = await asyncio.to_thread(_encode_image_sync, file_path)
         if not data_url:
@@ -201,7 +358,7 @@ class CaptionService:
                 if result.get("error"):
                     logger.warning(f"[Caption] runner error: {result.get('error')}")
                     return None
-                return parse_caption_json(result.get("content") or "") or None
+                return parse_caption_result(result.get("content") or "") or None
             except Exception as e:
                 logger.error(f"[Caption] bare run failed: {e}")
                 return None
@@ -237,7 +394,7 @@ class CaptionService:
                 if result.get("error"):
                     logger.warning(f"[Caption] runner error: {result.get('error')}")
                     return None
-                return parse_caption_json(content) or None
+                return parse_caption_result(content) or None
         except AgentPausedError as err:
             logger.warning(f"[Caption] agent paused: {err}")
             return None

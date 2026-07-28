@@ -15,10 +15,12 @@ Conventions (mirrors caption_asset / analyze_l1):
   - Provider resolution + the multimodal LLM call are ``@DBOS.step``s
     returning plain dicts (memoized on replay; LLM call retries once).
   - The resource read runs under the user's ambient scope; the tags
-    write-through runs under ``system_request_scope`` — the same fix
-    #608 applied to keyword auto-tagging (tags/tag_groups are shared
-    vocabulary tables, not tenant rows; a USER scope would reject or
-    mis-filter the find-or-create paths).
+    write-through runs under ``system_request_scope`` (via the shared
+    ``write_ai_tags`` helper — same sequence ``caption_asset`` now
+    reuses for its own semantic tags) — the same fix #608 applied to
+    keyword auto-tagging (tags/tag_groups are shared vocabulary tables,
+    not tenant rows; a USER scope would reject or mis-filter the
+    find-or-create paths).
   - Failure paths RAISE (路线 C rule 4).
 """
 
@@ -29,10 +31,16 @@ from typing import Any, Optional
 from dbos import DBOS
 from loguru import logger
 
-from app.db.scope import Scope, request_scope, system_request_scope
+from app.db.scope import Scope, request_scope
 from app.services.library.media_storage import materialize
+from app.workflows._ai_tags import AI_TAG_CONFIDENCE, write_ai_tags
 
-AI_TAG_CONFIDENCE = 0.8
+__all__ = [
+    "AI_TAG_CONFIDENCE",
+    "resolve_classify_provider",
+    "call_classify",
+    "classify_asset_workflow",
+]
 
 
 @DBOS.step()
@@ -106,7 +114,6 @@ async def classify_asset_workflow(
     (find-or-create + ON CONFLICT junction upsert) so replays are safe.
     """
     from app.repositories.resources_repository import ResourcesRepository
-    from app.repositories.tags_repository import get_tags_repository
     from app.services.infra.unified_task_manager import get_task_manager
     from app.workflows._failure_handler import record_workflow_failure
 
@@ -142,41 +149,13 @@ async def classify_asset_workflow(
 
         # Tags/tag_groups are shared vocabulary tables — write them under
         # the system scope (#608 precedent), not the user scope.
-        tags_repo = get_tags_repository()
-        attached = 0
-        async with system_request_scope("ai-classify-tags"):
-            group_cache: dict[str, Optional[str]] = {}
-            for entry in entries:
-                group_name = entry["group"]
-                if group_name not in group_cache:
-                    group = await tags_repo.get_or_create_group(group_name)
-                    group_cache[group_name] = (
-                        str(group["id"]) if group and group.get("id") else None
-                    )
-
-                tag = await tags_repo.get_tag_by_name(entry["en"], user_id)
-                if not tag and entry.get("zh"):
-                    tag = await tags_repo.get_tag_by_name(entry["zh"], user_id)
-                if not tag:
-                    tag = await tags_repo.create_tag(
-                        name=entry["en"],
-                        user_id=user_id,
-                        name_zh=entry.get("zh") or None,
-                        group_id=group_cache[group_name],
-                    )
-                if not tag or not tag.get("id"):
-                    logger.warning(
-                        f"[ClassifyAsset] could not resolve tag "
-                        f"'{entry['en']}' — skipped"
-                    )
-                    continue
-                await tags_repo.add_tag_to_resource(
-                    resource_id=str(resource_id),
-                    tag_id=str(tag["id"]),
-                    confidence=AI_TAG_CONFIDENCE,
-                    source="ai",
-                )
-                attached += 1
+        attached = await write_ai_tags(
+            resource_id=resource_id,
+            user_id=user_id,
+            entries=entries,
+            scope_name="ai-classify-tags",
+            log_prefix="[ClassifyAsset]",
+        )
 
         if attached == 0:
             raise RuntimeError(
