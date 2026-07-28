@@ -25,6 +25,7 @@ import { fetchResourceTags, addResourceTag, removeResourceTag } from '../service
 import { fetchAllTags, createTag } from '../services/unifiedTagService';
 import { getSupabaseClient } from '../supabaseClient';
 import { EagleTagPicker } from './EagleTagPicker';
+import { ResourcePromptSection } from './resources/ResourcePromptSection';
 import { useAuth } from '../contexts/AuthContext';
 
 interface MediaCardProps {
@@ -889,6 +890,8 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               />
             </div>
           )}
+
+          {resourceId && <ResourcePromptSection resourceId={resourceId} />}
 
           {/* Platform hashtags (read-only, for analytics) */}
           {data.hashtags && (

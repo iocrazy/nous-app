@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Resource, Tag } from '../types';
 import { getResourceCoverUrl } from '../services/resourceService';
 import { EagleTagPicker } from './EagleTagPicker';
+import { ResourcePromptSection } from './resources/ResourcePromptSection';
 
 interface ResourceInfoPanelProps {
   resource: Resource;
@@ -390,6 +391,8 @@ export const ResourceInfoPanel: React.FC<ResourceInfoPanelProps> = ({
         onRemove={onRemoveTag}
         onCreate={onCreate}
       />
+
+      <ResourcePromptSection resourceId={resource.id} />
 
       {/* Folders */}
       {folderName && (

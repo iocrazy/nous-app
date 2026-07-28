@@ -13,6 +13,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { Video, Tag } from '../../types';
 import { EagleTagPicker } from '../EagleTagPicker';
+import { ResourcePromptSection } from '../resources/ResourcePromptSection';
 import { AIStatusBadge } from './AIStatusBadge';
 import { getCoverUrl, formatResolution } from '../../utils/awemeType';
 
@@ -184,6 +185,10 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
               onRemove={onRemoveTag}
               onCreate={onCreateTag}
             />
+          )}
+
+          {selectedResourceData?.id && (
+            <ResourcePromptSection resourceId={selectedResourceData.id} />
           )}
 
           {/* Platform hashtags (read-only) */}
