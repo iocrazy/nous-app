@@ -5,12 +5,20 @@ chrome.runtime.onInstalled.addListener(() => {
     title: 'Push to MediaHub',
     contexts: ['page'],
   });
+  chrome.contextMenus.create({
+    id: 'analyze-prompt-nous',
+    title: 'Analyze Prompt (nous)',
+    contexts: ['image'],
+  });
 });
 
 // Handle context menu click
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'push-to-mediahub' && tab?.url) {
     pushUrl(tab.id, tab.url);
+  }
+  if (info.menuItemId === 'analyze-prompt-nous' && tab?.id && info.srcUrl) {
+    openPromptPanel(tab.id, info.srcUrl, tab.url || '');
   }
 });
 
@@ -100,6 +108,35 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.action === 'getImageImportState') {
     sendResponse({ job: importJob });
     return false;
+  }
+
+  // Prompt-analyze panel: the panel (content-script context) has no direct
+  // network access to speak of scope-checked auth, so every request routes
+  // through here — same "network stays in background" pattern as the
+  // scan-import pipeline above.
+  if (msg.action === 'promptPanelUpload') {
+    handlePromptPanelUpload(msg.payload).then(sendResponse);
+    return true;
+  }
+  if (msg.action === 'promptPanelDispatch') {
+    handlePromptPanelDispatch(msg.payload).then(sendResponse);
+    return true;
+  }
+  if (msg.action === 'promptPanelProgress') {
+    handlePromptPanelProgress(msg.payload).then(sendResponse);
+    return true;
+  }
+  if (msg.action === 'promptPanelResource') {
+    handlePromptPanelResource(msg.payload).then(sendResponse);
+    return true;
+  }
+  if (msg.action === 'promptPanelTags') {
+    handlePromptPanelTags(msg.payload).then(sendResponse);
+    return true;
+  }
+  if (msg.action === 'promptPanelOpen') {
+    handlePromptPanelOpen(msg.payload).then(sendResponse);
+    return true;
   }
   return false;
 });
@@ -311,4 +348,173 @@ async function showToast(tabId, message, type) {
   } catch {
     // tab may not be scriptable (chrome:// pages)
   }
+}
+
+// ============================================================
+// Prompt-analyze pipeline (right-click "Analyze Prompt (nous)")
+//
+// Injects prompt-panel.{js,css} into the tab and drives it via messages.
+// All network calls happen here (not in the panel) so the API key never
+// needs to be readable from a content-script context, and so retries reuse
+// the same X-API-Key / referer-rule plumbing as the scan-import pipeline.
+// ============================================================
+
+async function openPromptPanel(tabId, imageUrl, pageUrl) {
+  try {
+    await chrome.scripting.insertCSS({ target: { tabId }, files: ['prompt-panel.css'] });
+  } catch {
+    // stylesheet may already be inserted
+  }
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['prompt-panel.js'] });
+  } catch (err) {
+    console.error('Failed to inject prompt panel:', err);
+    return;
+  }
+  try {
+    await chrome.tabs.sendMessage(tabId, { action: 'nousAnalyzePrompt', imageUrl, pageUrl });
+  } catch (err) {
+    console.error('Failed to start prompt panel:', err);
+  }
+}
+
+// Per-apiUrl cache of the caller's personal team id — /resources/upload
+// requires scope_id but the panel has no scope picker UI (unlike Scan
+// Images), so we resolve it once via the same GET /teams lookup scan.js
+// uses and reuse it for subsequent analyses in this service worker's life.
+let cachedPersonalScope = null; // { apiUrl, scopeId }
+
+async function resolvePersonalScopeId(apiUrl, apiKey) {
+  if (cachedPersonalScope && cachedPersonalScope.apiUrl === apiUrl) {
+    return cachedPersonalScope.scopeId;
+  }
+  const res = await fetch(`${apiUrl}/api/v1/teams`, {
+    headers: { 'X-API-Key': apiKey },
+  });
+  if (!res.ok) {
+    throw new Error(
+      res.status === 403 ? 'API key missing teams:read scope' : `HTTP ${res.status}`
+    );
+  }
+  const data = await res.json();
+  const teams = data.teams || [];
+  const personal = teams.find((t) => t.kind === 'personal');
+  if (!personal) throw new Error('No personal scope found for this account');
+  cachedPersonalScope = { apiUrl, scopeId: personal.id };
+  return personal.id;
+}
+
+// Best-effort extraction of the backend's ErrorResponse envelope
+// ({success:false, error, code, request_id, details} — see
+// backend/app/core/exceptions.py) with a couple of fallbacks for shapes
+// that don't go through that handler.
+async function readErrorDetail(res) {
+  const body = await res.json().catch(() => ({}));
+  if (typeof body.error === 'string') return body.error;
+  if (typeof body.detail === 'string') return body.detail;
+  return `HTTP ${res.status}`;
+}
+
+async function handlePromptPanelUpload({ imageUrl, pageUrl }) {
+  const config = await chrome.storage.local.get(['apiUrl', 'apiKey']);
+  if (!config.apiUrl || !config.apiKey) {
+    return { ok: false, error: 'Not configured. Click the extension icon to set up.' };
+  }
+  try {
+    const scopeId = await resolvePersonalScopeId(config.apiUrl, config.apiKey);
+    await setRefererRule([{ url: imageUrl }], pageUrl);
+    try {
+      const resourceId = await importOneImage(
+        { url: imageUrl },
+        { apiUrl: config.apiUrl, apiKey: config.apiKey, scopeId, folderId: null }
+      );
+      if (!resourceId) throw new Error('Upload returned no resource id');
+      return { ok: true, resourceId };
+    } finally {
+      await clearRefererRule();
+    }
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+}
+
+async function handlePromptPanelDispatch({ resourceId }) {
+  const config = await chrome.storage.local.get(['apiUrl', 'apiKey']);
+  if (!config.apiUrl || !config.apiKey) {
+    return { ok: false, error: 'Not configured. Click the extension icon to set up.' };
+  }
+  try {
+    const res = await fetch(
+      `${config.apiUrl}/api/v1/resources/${resourceId}/gen-prompt/generate`,
+      { method: 'POST', headers: { 'X-API-Key': config.apiKey } }
+    );
+    if (!res.ok) throw new Error(await readErrorDetail(res));
+    const data = await res.json();
+    if (!data.task_id) throw new Error('No task_id returned');
+    return { ok: true, taskId: data.task_id };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+}
+
+async function handlePromptPanelProgress({ taskId }) {
+  const config = await chrome.storage.local.get(['apiUrl', 'apiKey']);
+  if (!config.apiUrl || !config.apiKey) {
+    return { ok: false, error: 'Not configured. Click the extension icon to set up.' };
+  }
+  try {
+    const res = await fetch(
+      `${config.apiUrl}/api/v1/task-manager/tasks/${taskId}/progress`,
+      { headers: { 'X-API-Key': config.apiKey } }
+    );
+    if (!res.ok) {
+      return { ok: false, error: await readErrorDetail(res), status: res.status };
+    }
+    const data = await res.json();
+    return { ok: true, data };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+}
+
+async function handlePromptPanelResource({ resourceId }) {
+  const config = await chrome.storage.local.get(['apiUrl', 'apiKey']);
+  if (!config.apiUrl || !config.apiKey) {
+    return { ok: false, error: 'Not configured. Click the extension icon to set up.' };
+  }
+  try {
+    const res = await fetch(`${config.apiUrl}/api/v1/resources/${resourceId}`, {
+      headers: { 'X-API-Key': config.apiKey },
+    });
+    if (!res.ok) throw new Error(await readErrorDetail(res));
+    const json = await res.json();
+    return { ok: true, data: json.data };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+}
+
+async function handlePromptPanelTags({ resourceId }) {
+  const config = await chrome.storage.local.get(['apiUrl', 'apiKey']);
+  if (!config.apiUrl || !config.apiKey) {
+    return { ok: false, error: 'Not configured. Click the extension icon to set up.' };
+  }
+  try {
+    const res = await fetch(`${config.apiUrl}/api/v1/resources/${resourceId}/tags`, {
+      headers: { 'X-API-Key': config.apiKey },
+    });
+    if (!res.ok) throw new Error(await readErrorDetail(res));
+    const json = await res.json();
+    return { ok: true, data: json.data || [] };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+}
+
+async function handlePromptPanelOpen({ resourceId, generateSimilar }) {
+  const config = await chrome.storage.local.get(['webUrl']);
+  const webUrl = (config.webUrl || 'https://app.nous.ink').replace(/\/+$/, '');
+  const url = `${webUrl}/resources/file/${resourceId}${generateSimilar ? '?generateSimilar=1' : ''}`;
+  await chrome.tabs.create({ url });
+  return { ok: true };
 }

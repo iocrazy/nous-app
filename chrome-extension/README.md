@@ -13,7 +13,8 @@ Push video URLs to Nous for parsing and download, and scan pages for images to i
 1. Click the extension icon in Chrome toolbar
 2. Enter your **API URL** (e.g., `https://cn.nous.ink:88`)
 3. Enter your **API Key** (generate one in Nous Settings → API Keys)
-4. Click **Save**
+4. Enter your **Web URL** (e.g., `https://app.nous.ink`) — used for the "Open in nous" / "Generate Similar" deep links from the Prompt Analysis panel
+5. Click **Save**
 
 ### API Key scopes
 
@@ -21,6 +22,7 @@ Push video URLs to Nous for parsing and download, and scan pages for images to i
 |---------|----------------|
 | Push (video URL) | `videos:fetch`, `tags:read` (+ `tags:write` for tag creation) |
 | Scan Images | `teams:read`, `resources:read`, `resources:write` |
+| Analyze Prompt | `teams:read`, `resources:write`, `tags:read`, `tasks:read` |
 
 ## Usage
 
@@ -43,10 +45,47 @@ The extension sends the current page URL to Nous. If the URL is a supported vide
 
 The import runs in the background service worker, so closing the popup does not interrupt it. Thumbnails and PNG prompt extraction happen automatically server-side after upload.
 
+### Analyze Prompt mode
+
+1. **Right-click any image** on a page → **Analyze Prompt (nous)**
+2. A dark floating panel opens in the top-right corner and walks through:
+   - Uploading the image to your personal resource library
+   - Dispatching the reverse-prompt (gen-prompt) AI task
+   - Polling progress every 2s (gives up watching — not cancelling — after 90s; the task keeps running server-side, check Task Center if it's still going)
+3. On completion, the panel shows a result card:
+   - **中文 / EN / JSON** tabs (JSON is pretty-printed, read-only)
+   - Category / aspect-ratio chips (when the model returned structured data)
+   - "N tags saved to library" (only shown when the workflow's auto-tags exist)
+   - **Copy Prompt** (copies whichever tab is active), **⚡ Generate Similar**, **Open in nous** — the last two open the resource's detail page in a new tab (`Generate Similar` adds `?generateSimilar=1` to auto-open the same-flow modal there)
+4. Right-clicking another image on the same page reuses the same panel instance instead of stacking a new one
+5. Upload / dispatch / task-failed / timeout each show a distinct message with a **Retry** button
+
 ## Permissions
 
-- `storage` — save your API URL and key
+- `storage` — save your API URL, API key, and web URL
 - `contextMenus` — right-click menu
 - `activeTab` — read current tab URL
-- `scripting` — show toast notifications, scan page images
+- `scripting` — show toast notifications, scan page images, inject the prompt-analyze panel
 - `declarativeNetRequest` — set the page Referer on image fetches (referer-gated CDNs)
+
+## Manual test checklist
+
+No automated test harness exists for this vanilla-JS extension (no build step) — verify with `node --check <file>.js` on every touched file, then walk through this checklist against a real backend:
+
+- [ ] `chrome://extensions` → reload the unpacked extension, confirm version shows `1.3.0` in the popup header
+- [ ] Settings: enter API URL / API Key / Web URL, Save, reopen popup → all three persist
+- [ ] Right-click an image on any page → **Analyze Prompt (nous)** appears in the context menu and only for images (not on plain page right-click)
+- [ ] Click it → panel opens top-right, dark card, progress bar animates through "Uploading image…" → "Starting analysis…" → "Analyzing image…"
+- [ ] On completion: 中文/EN/JSON tabs all populated and switchable; JSON tab is pretty-printed and read-only; category/aspect-ratio chips show when present
+- [ ] If the resource has AI tags: "N tags saved to library" line appears; if not, the line is omitted (not "0 tags")
+- [ ] **Copy Prompt** copies the currently active tab's text (verify by pasting) — switching tabs then copying copies the new tab's content
+- [ ] **⚡ Generate Similar** opens `{webUrl}/resources/file/{id}?generateSimilar=1` in a new tab
+- [ ] **Open in nous** opens `{webUrl}/resources/file/{id}` (no query) in a new tab
+- [ ] Right-click a second image on the same page → same panel instance is reused (no duplicate panel stacked)
+- [ ] Close panel (×), verify no leftover polling network requests (check the service worker's Network/console)
+- [ ] Failure paths (simulate by pointing API URL at a broken/unreachable host, or a key missing scopes):
+  - [ ] Upload failure → "Upload failed: …" + Retry
+  - [ ] Dispatch failure (e.g. API key missing `resources:write`) → "Couldn't start analysis: …" + Retry
+  - [ ] Task failure (image resource that the backend rejects, e.g. non-image) → "Analysis failed…" + Retry
+  - [ ] Timeout (simulate with a very slow backend, or temporarily lower `POLL_TIMEOUT_MS`) → "Still analyzing…" + Retry
+  - [ ] Retry from any failure state resumes correctly (re-uploads only if no resource was created yet; otherwise re-dispatches on the existing resource)
