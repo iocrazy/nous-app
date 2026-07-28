@@ -2,7 +2,14 @@ import React, { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { TopBar } from './TopBar';
 import { Sidebar } from './Sidebar';
-import { IslandWorkProvider, useIslandWork } from '../contexts/IslandWorkContext';
+import {
+  IslandWorkProvider,
+  useIslandWork,
+  INFO_WIDTH_MIN,
+  INFO_WIDTH_MAX,
+  INFO_WIDTH_STORAGE_KEY,
+} from '../contexts/IslandWorkContext';
+import { savePanelWidth } from './detail/DetailCardKit';
 
 // Island redesign v2 P1b — desktop app shell. Background micro-glow + a
 // full-width global topbar strip, then a content row with a floating nav
@@ -55,11 +62,17 @@ function IslandShellFrame({ isDetailPage, topBarProps, sidebarProps, children }:
     const handle = e.currentTarget as HTMLElement;
     const pointerId = e.pointerId;
     handle.setPointerCapture?.(pointerId);
-    const onMove = (ev: PointerEvent) => setInfoWidth(window.innerWidth - ev.clientX - 12);
+    let latestWidth = infoWidth;
+    const onMove = (ev: PointerEvent) => {
+      const raw = window.innerWidth - ev.clientX - 12;
+      latestWidth = Math.min(INFO_WIDTH_MAX, Math.max(INFO_WIDTH_MIN, raw));
+      setInfoWidth(raw);
+    };
     const onUp = () => {
       handle.releasePointerCapture?.(pointerId);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      savePanelWidth(INFO_WIDTH_STORAGE_KEY, latestWidth);
     };
     // Window-level listeners are removed on pointerup; the island-frame shell does not unmount mid-drag, so no separate effect cleanup is needed.
     window.addEventListener('pointermove', onMove);

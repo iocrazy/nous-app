@@ -967,6 +967,8 @@
       "sourceUpload": "Upload",
       "aiStatus": "AI Status",
       "prompt": "Prompt",
+      "promptSection": "Prompt",
+      "promptExpandHint": "Click to expand",
       "addPrompt": "Add Prompt",
       "promptPlaceholder": "Paste the AI generation prompt...",
       "negativePrompt": "Negative",

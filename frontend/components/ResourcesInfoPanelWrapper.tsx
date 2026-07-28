@@ -45,6 +45,7 @@ export const ResourcesInfoPanelWrapper: React.FC<ResourcesInfoPanelWrapperProps>
     handleRemoveTag,
     handleCreateTag,
     handleResourceUpdate,
+    refetchSelectedResourceTags,
   } = useResourcesContext();
 
   // Nothing to render when downloads view or no selection
@@ -93,6 +94,7 @@ export const ResourcesInfoPanelWrapper: React.FC<ResourcesInfoPanelWrapperProps>
               onRemoveTag={handleRemoveTag}
               onCreate={handleCreateTag}
               onUpdate={handleResourceUpdate}
+              onTagsChanged={refetchSelectedResourceTags}
             />
           ) : null}
         </div>
