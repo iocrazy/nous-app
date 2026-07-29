@@ -110,32 +110,99 @@ async def test_load_transcribe_inputs_video_prefers_extract_audio_path():
     assert out["audio_path"] == "global/resources/web/douyin/1/audio.wav"
 
 
-def test_assert_audio_present_rejects_directory(tmp_path):
+async def test_assert_audio_present_rejects_directory(tmp_path):
     """A directory path (gallery whose music was never downloaded, falling back
     to download_path) must fast-fail with a directory-specific message — the
     old os.path.exists guard let directories through to the ASR provider."""
     import app.workflows.ai_transcription as m
 
     with pytest.raises(RuntimeError, match="audio path is a directory"):
-        m.assert_audio_present_step(str(tmp_path))
+        await m.assert_audio_present_step(str(tmp_path))
 
 
-def test_assert_audio_present_rejects_missing(tmp_path):
+async def test_assert_audio_present_rejects_missing(tmp_path):
     """A missing/empty file must fail with the missing-or-empty message."""
     import app.workflows.ai_transcription as m
 
     missing = str(tmp_path / "nope.mp3")
     with pytest.raises(RuntimeError, match="missing or empty"):
-        m.assert_audio_present_step(missing)
+        await m.assert_audio_present_step(missing)
 
 
-def test_assert_audio_present_accepts_real_file(tmp_path):
+async def test_assert_audio_present_accepts_real_file(tmp_path):
     """A non-empty real file passes through unchanged."""
     import app.workflows.ai_transcription as m
 
     f = tmp_path / "audio.mp3"
     f.write_bytes(b"\x00\x01\x02")
-    assert m.assert_audio_present_step(str(f)) == str(f)
+    assert await m.assert_audio_present_step(str(f)) == str(f)
+
+
+async def test_assert_audio_present_sb_source_exists_and_nonempty_passes():
+    """sb:// audio (Task C3+) must not be routed through the filesystem
+    resolver — it should short-circuit via ObjectStore.exists/get_size and
+    return the ORIGINAL sb:// path unchanged (the caller re-threads it into
+    run_whisper's materialize()/ _run_volcengine_asr's resolve_media_source
+    dispatch, both of which expect the sb:// form, not a resolved local
+    path)."""
+    from unittest.mock import AsyncMock, patch
+
+    import app.workflows.ai_transcription as m
+
+    audio_path = "sb://media-bucket/global/resources/web/douyin/1/audio.wav"
+    with (
+        patch(
+            "app.services.library.media_storage.ObjectStore.exists",
+            AsyncMock(return_value=True),
+        ),
+        patch(
+            "app.services.library.media_storage.ObjectStore.get_size",
+            AsyncMock(return_value=1234),
+        ),
+    ):
+        result = await m.assert_audio_present_step(audio_path)
+
+    assert result == audio_path
+
+
+async def test_assert_audio_present_sb_source_missing_raises():
+    """sb:// object absent at dispatch time → RuntimeError, same diagnosable
+    'missing or empty' semantics as the filesystem branch, audio_path
+    included for diagnosability."""
+    from unittest.mock import AsyncMock, patch
+
+    import app.workflows.ai_transcription as m
+
+    audio_path = "sb://media-bucket/global/resources/web/douyin/2/audio.wav"
+    with patch(
+        "app.services.library.media_storage.ObjectStore.exists",
+        AsyncMock(return_value=False),
+    ):
+        with pytest.raises(RuntimeError, match="missing or empty"):
+            await m.assert_audio_present_step(audio_path)
+
+
+async def test_assert_audio_present_sb_source_zero_size_raises():
+    """sb:// object exists but is a zero-byte object (aborted/partial upload)
+    → must be treated the same as missing, not passed through to the
+    (expensive, network-bound) ASR call."""
+    from unittest.mock import AsyncMock, patch
+
+    import app.workflows.ai_transcription as m
+
+    audio_path = "sb://media-bucket/global/resources/web/douyin/3/audio.wav"
+    with (
+        patch(
+            "app.services.library.media_storage.ObjectStore.exists",
+            AsyncMock(return_value=True),
+        ),
+        patch(
+            "app.services.library.media_storage.ObjectStore.get_size",
+            AsyncMock(return_value=0),
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="missing or empty"):
+            await m.assert_audio_present_step(audio_path)
 
 
 async def test_mark_transcript_completed_uses_media_id_column():
@@ -205,6 +272,19 @@ def test_transcription_workflow_marks_failed_before_recording():
     fail_idx = source.index("await mark_transcript_failed(parsed_media_id)")
     record_idx = source.index("record_workflow_failure(", fail_idx)
     assert fail_idx < record_idx, "must mark failed BEFORE record_workflow_failure"
+
+
+def test_transcription_workflow_awaits_assert_audio_present():
+    """assert_audio_present_step is now an async @DBOS.step() (object-store
+    dispatch needs await ObjectStore.exists/get_size) — the workflow body
+    call site must await it, or a sync call would hand run_whisper a bare
+    coroutine instead of the resolved audio_path (Task C7)."""
+    import inspect
+
+    import app.workflows.ai_transcription as m
+
+    source = inspect.getsource(m.ai_transcription_workflow)
+    assert "await assert_audio_present_step(" in source
 
 
 async def test_run_volcengine_asr_raises_when_audio_missing(tmp_path, monkeypatch):

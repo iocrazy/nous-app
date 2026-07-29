@@ -436,7 +436,7 @@ async def test_ai_transcription_workflow_body_wraps_chain_in_user_scope():
             "task_assignment": "",
         }
 
-    def _fake_assert(audio_path):
+    async def _fake_assert(audio_path):
         return audio_path
 
     async def _fake_whisper(*_a, **_k):

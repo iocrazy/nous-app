@@ -102,8 +102,8 @@ async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str
 
 
 @DBOS.step()
-def assert_audio_present_step(audio_path: str) -> str:
-    """Defensive guard — confirm the audio file exists on disk before
+async def assert_audio_present_step(audio_path: str) -> str:
+    """Defensive guard — confirm the audio is actually present before
     invoking the (expensive + network-bound) whisper call.
 
     Replaces the previous wait_for_audio_step which polled inside the
@@ -111,11 +111,37 @@ def assert_audio_present_step(audio_path: str) -> str:
     extract_audio_workflow runs first, only chains this workflow on its
     success, and the manual-trigger endpoints in ai_router gate on
     extract_audio_path / music_download_path being on disk. By the time
-    we arrive here the file should already exist. This step is a one-shot
-    assertion that catches the rare desync (file deleted between dispatch
-    and execution); it raises immediately rather than sleep-waiting, and
-    the workflow's top-level try/except converts the failure into a
-    task_tracking row with status='failed' instead of a hung worker."""
+    we arrive here the audio should already exist. This step is a one-shot
+    assertion that catches the rare desync (file/object deleted between
+    dispatch and execution); it raises immediately rather than
+    sleep-waiting, and the workflow's top-level try/except converts the
+    failure into a task_tracking row with status='failed' instead of a
+    hung worker.
+
+    Object-store dispatch (Task C7, storage-full-s3-migration PR-1): C3
+    made extract_audio_path/music_download_path routinely sb:// after
+    migration, and the plain-filesystem AudioSourceResolver would raise on
+    those before this workflow ever reached C4's object-store-aware ASR
+    branches. Dispatch on the resolved source: sb:// short-circuits via
+    ObjectStore.exists()/get_size() (no on-disk isdir concept for a single
+    object — nothing to glob), returning the ORIGINAL audio_path unchanged
+    so run_whisper/_run_volcengine_asr keep receiving the sb:// form they
+    already know how to handle. Filesystem sources keep going through the
+    shared AudioSourceResolver unchanged (still owns isdir / glob-fallback
+    semantics for whisper_service.py too — not duplicated here)."""
+    from app.services.library.media_storage import ObjectStore, resolve_media_source
+
+    loc = resolve_media_source(audio_path)
+    if loc.is_object_store:
+        store = ObjectStore(loc.bucket)
+        # exists() before get_size() is the short-circuit — get_size() raises
+        # on a missing key, so the `and` must never evaluate get_size() first.
+        if await store.exists(loc.key) and await store.get_size(loc.key) > 0:
+            return audio_path
+        raise RuntimeError(
+            f"audio object missing or empty at dispatch time: {audio_path}"
+        )
+
     from app.services.media.audio_source import AudioSourceResolver
 
     return AudioSourceResolver().assert_playable(audio_path)
@@ -407,7 +433,7 @@ async def ai_transcription_workflow(
         # only fires us after extract_audio_workflow succeeds, and the
         # manual trigger gate checks extract_audio_path/music_download_path
         # on disk, so this is a defense-in-depth check, not a wait loop.
-        audio_path = assert_audio_present_step(inputs["audio_path"])
+        audio_path = await assert_audio_present_step(inputs["audio_path"])
         await manager.update_progress(wf_id, 40, subtitle="Transcribing audio...")
         summary = await run_whisper(
             audio_path=audio_path,
