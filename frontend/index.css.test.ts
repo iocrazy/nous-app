@@ -112,3 +112,59 @@ describe('btn-tint contrast', () => {
     });
   }
 });
+
+/**
+ * K1 (2026-07-29) recolor regression guard — 全站配色重构 W1
+ * (docs/superpowers/specs/2026-07-29-warm-paper-palette-design.md §2.1).
+ *
+ * `@theme` now overrides Tailwind v4's default indigo/violet/purple/emerald/
+ * green/amber/red/rose/blue/sky 50-950 ladders with 5 new low-saturation
+ * anchors. These assertions pin the exact anchor hex (@600) so any future
+ * edit that accidentally reverts a hue back to its stock Tailwind value (or
+ * silently drifts off the approved mockup) fails CI instead of shipping.
+ */
+describe('K1 hue-ladder remap', () => {
+  const HUE_TO_ANCHOR: Record<string, string> = {
+    indigo: '#1E7A5B',
+    violet: '#1E7A5B',
+    emerald: '#1E7A5B',
+    green: '#1E7A5B',
+    purple: '#7A5E8F',
+    amber: '#A87B2B',
+    red: '#AD5147',
+    rose: '#AD5147',
+    blue: '#46708E',
+    sky: '#46708E',
+  };
+
+  for (const [hue, anchor] of Object.entries(HUE_TO_ANCHOR)) {
+    it(`--color-${hue}-600 is the new anchor (${anchor}), not the stock Tailwind hue`, () => {
+      const m = CSS.match(new RegExp(`--color-${hue}-600:\\s*([^;]+);`));
+      expect(m, `--color-${hue}-600 not found in @theme`).toBeTruthy();
+      expect(m![1].trim().toUpperCase()).toBe(anchor.toUpperCase());
+    });
+  }
+
+  it('old indigo-500 stock hex (#6366f1) is gone from --color-accent', () => {
+    const m = CSS.match(/--color-accent:\s*([^;]+);/);
+    expect(m).toBeTruthy();
+    expect(m![1].trim().toLowerCase()).not.toBe('#6366f1');
+    expect(m![1].trim().toUpperCase()).toBe('#1E7A5B');
+  });
+
+  it('semantic tokens (ok/warn/danger/info/agent) are declared in the light theme block', () => {
+    const lightBlock = CSS.split('[data-theme="light"] {')[1];
+    expect(lightBlock, 'no [data-theme="light"] block found').toBeTruthy();
+    for (const token of ['--ok', '--warn', '--danger', '--info', '--agent']) {
+      expect(lightBlock!.includes(`${token}:`), `${token} missing from light block`).toBe(true);
+      expect(lightBlock!.includes(`${token}-soft:`), `${token}-soft missing from light block`).toBe(true);
+      expect(lightBlock!.includes(`${token}-line:`), `${token}-line missing from light block`).toBe(true);
+    }
+  });
+
+  it('semantic tokens are aliased into Tailwind utilities via @theme inline', () => {
+    for (const token of ['ok', 'warn', 'danger', 'info', 'agent']) {
+      expect(CSS.includes(`--color-${token}: var(--${token});`), `--color-${token} not aliased`).toBe(true);
+    }
+  });
+});

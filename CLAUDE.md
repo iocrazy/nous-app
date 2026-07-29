@@ -96,6 +96,8 @@ bash scripts/branch-health.sh           # 列出所有 worktree 落后 master �
 | 提示文字 | Loading..., No data found |
 | 导航 | Home, Back, Next |
 
+新代码用语义色 token（ok/warn/danger/info/agent，见 `frontend/index.css` `@theme`）表达状态色，不再引入旧色相类名（indigo/amber/red/emerald 等已在 K1 全站配色重映射中失去原本语义，见 `docs/superpowers/specs/2026-07-29-warm-paper-palette-design.md`）。
+
 ### 多语言支持（i18n）
 
 - 界面文案通过 i18n 实现多语言
