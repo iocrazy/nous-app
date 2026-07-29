@@ -147,6 +147,8 @@
     "unlimited": "无限制"
   },
   "common": {
+    "details": "详情",
+    "dismiss": "关闭",
     "confirm": "确认",
     "cancel": "取消",
     "retry": "重试",
@@ -3634,6 +3636,39 @@
       "untitled": "New Prop",
       "emptyTitle": "还没有道具",
       "add": "添加道具"
+    }
+  },
+  "errors": {
+    "PROVIDER_AUTH": {
+      "title": "AI 服务商拒绝了凭据",
+      "hint": "请到 Settings → AI 检查该任务所用模型的 API Key 是否有效。"
+    },
+    "PROVIDER_RATE_LIMIT": {
+      "title": "AI 服务商限流了",
+      "hint": "稍后重试，或到 Settings → AI 把该任务换成另一个模型。"
+    },
+    "PROVIDER_UNREACHABLE": {
+      "title": "连不上 AI 服务商",
+      "hint": "请到 Settings → AI 核对服务地址；如果是自托管模型，确认服务已启动。"
+    },
+    "PROVIDER_BAD_MODEL": {
+      "title": "当前配置的模型不可用",
+      "hint": "模型名可能写错，或该账号未开通。请到 Settings → AI 换一个模型。"
+    },
+    "OUTPUT_PARSE": {
+      "title": "模型返回的内容无法解析",
+      "hint": "请重试；若反复出现，说明该模型不遵守要求的输出格式，换一个模型。"
+    },
+    "TASK_TIMEOUT": {
+      "title": "任务超时了",
+      "hint": "重试通常就能成功。若持续超时，请换更小的文件或更快的模型。"
+    },
+    "INTERNAL": {
+      "title": "我们这边出了点问题",
+      "hint": "请重试；若持续失败，可在 Task Center 查看详情。"
+    },
+    "UNKNOWN": {
+      "title": "任务失败"
     }
   }
 }

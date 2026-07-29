@@ -361,7 +361,11 @@ describe('PromptSection', () => {
     await waitFor(() => expect(screen.queryByText('Analyzing...')).toBeNull());
   });
 
-  it('task failure shows a toast with the error and resets the Generate button', async () => {
+  // The failure surface is an in-section card, not a toast: the point of the
+  // error catalog is that the user can act on the message, and a notification
+  // that disappears after a few seconds can't be re-read. See
+  // utils/errorCatalog.ts.
+  it('task failure without an error_code shows the raw error and resets the Generate button', async () => {
     generateGenPrompt.mockResolvedValue('task-1');
     const { rerender } = render(
       <ToastProvider>
@@ -386,7 +390,67 @@ describe('PromptSection', () => {
     expect(generateBtn).not.toBeDisabled();
   });
 
-  it('dispatch-time failure (before a task exists) shows a toast and resets', async () => {
+  it('task failure with an error_code shows actionable copy instead of the DBOS retry string', async () => {
+    generateGenPrompt.mockResolvedValue('task-1');
+    const raw =
+      'DBOSMaxStepRetriesExceeded: Step ai_caption_via_provider has exceeded its maximum of 3 retries';
+    const { rerender } = render(
+      <ToastProvider>
+        <PromptSection {...props()} />
+      </ToastProvider>,
+    );
+    fireEvent.click(screen.getByText(/\+ Add Prompt/));
+    fireEvent.click(screen.getByText('Generate'));
+    await screen.findByText('Analyzing...');
+
+    mockTasks.mockReturnValue([
+      makeTask('task-1', 'failed', {
+        error_msg: raw,
+        metadata: { error_code: 'PROVIDER_AUTH' },
+      }),
+    ]);
+    rerender(
+      <ToastProvider>
+        <PromptSection {...props()} />
+      </ToastProvider>,
+    );
+
+    const card = await screen.findByRole('alert');
+    expect(card.textContent).toContain('The AI provider rejected the credentials');
+    expect(card.textContent).toContain('Settings → AI');
+    // The engine string is kept, but tucked behind the Details disclosure so
+    // it isn't the first thing the user reads. (jsdom doesn't collapse
+    // <details>, so assert on the element's placement rather than visibility.)
+    expect(screen.getByText('Details')).toBeTruthy();
+    expect(screen.getByText(raw).closest('details')).not.toBeNull();
+  });
+
+  it('the failure card is dismissible and clears on the next Generate', async () => {
+    generateGenPrompt.mockResolvedValue('task-1');
+    const { rerender } = render(
+      <ToastProvider>
+        <PromptSection {...props()} />
+      </ToastProvider>,
+    );
+    fireEvent.click(screen.getByText(/\+ Add Prompt/));
+    fireEvent.click(screen.getByText('Generate'));
+    await screen.findByText('Analyzing...');
+
+    mockTasks.mockReturnValue([
+      makeTask('task-1', 'failed', { error_msg: 'x', metadata: { error_code: 'TASK_TIMEOUT' } }),
+    ]);
+    rerender(
+      <ToastProvider>
+        <PromptSection {...props()} />
+      </ToastProvider>,
+    );
+    await screen.findByRole('alert');
+
+    fireEvent.click(screen.getByLabelText('Dismiss'));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('dispatch-time failure (before a task exists) shows the error and resets', async () => {
     generateGenPrompt.mockRejectedValue(new Error('network down'));
     render(
       <ToastProvider>

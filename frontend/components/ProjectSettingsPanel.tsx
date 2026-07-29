@@ -93,14 +93,16 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <div className="fixed inset-0 z-50 flex items-start justify-end p-4">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/40" />
 
-      {/* Panel */}
+      {/* Panel — floating island (global idiom, cf. WorkflowTemplatesModal),
+          not an edge-docked drawer: inset from the viewport, rounded, shadowed,
+          height follows content up to the viewport. */}
       <div
         ref={panelRef}
-        className="relative w-96 bg-ink-900 border-l border-ink-800 h-full overflow-y-auto animate-in slide-in-from-right duration-200"
+        className="relative w-96 max-h-[calc(100dvh-2rem)] bg-ink-900 border border-ink-800 rounded-2xl shadow-2xl overflow-y-auto animate-in slide-in-from-right duration-200"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-ink-800">

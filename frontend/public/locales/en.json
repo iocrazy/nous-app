@@ -147,6 +147,8 @@
     "unlimited": "Unlimited"
   },
   "common": {
+    "details": "Details",
+    "dismiss": "Dismiss",
     "confirm": "Confirm",
     "cancel": "Cancel",
     "retry": "Retry",
@@ -3634,6 +3636,39 @@
       "untitled": "New Prop",
       "emptyTitle": "No props yet",
       "add": "Add Prop"
+    }
+  },
+  "errors": {
+    "PROVIDER_AUTH": {
+      "title": "The AI provider rejected the credentials",
+      "hint": "Open Settings → AI and check the API key for the model assigned to this task."
+    },
+    "PROVIDER_RATE_LIMIT": {
+      "title": "The AI provider is rate-limiting",
+      "hint": "Wait a moment and retry, or switch this task to a different model in Settings → AI."
+    },
+    "PROVIDER_UNREACHABLE": {
+      "title": "Couldn't reach the AI provider",
+      "hint": "Check the provider endpoint in Settings → AI — if it is self-hosted, make sure it is running."
+    },
+    "PROVIDER_BAD_MODEL": {
+      "title": "The configured model is unavailable",
+      "hint": "The model name may be wrong or not enabled for this account. Pick another model in Settings → AI."
+    },
+    "OUTPUT_PARSE": {
+      "title": "The model's reply could not be used",
+      "hint": "Retry — if it keeps happening, this model may not follow the required output format. Try a different one."
+    },
+    "TASK_TIMEOUT": {
+      "title": "The task timed out",
+      "hint": "Retry usually works. A smaller file or a faster model helps if it keeps timing out."
+    },
+    "INTERNAL": {
+      "title": "Something went wrong on our side",
+      "hint": "Retry — if it persists, the details are in Task Center."
+    },
+    "UNKNOWN": {
+      "title": "The task failed"
     }
   }
 }
