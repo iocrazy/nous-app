@@ -12,6 +12,7 @@
  * care of the rest, including Generate for image resources.
  */
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabaseClient';
 import { addResourceTag, fetchResourceTags, translateGenPrompt, updateResource } from '../../services/resourceService';
 import { fetchAllTags } from '../../services/unifiedTagService';
@@ -70,6 +71,7 @@ export function ResourcePromptSection({
    *  so the block lines up with its neighbours. */
   sectionClassName?: string;
 }) {
+  const { t } = useTranslation();
   const [resource, setResource] = useState<PromptResource | null>(null);
   const [assignedTags, setAssignedTags] = useState<Array<{ tag: Tag }>>([]);
   const [loading, setLoading] = useState(true);
@@ -153,13 +155,26 @@ export function ResourcePromptSection({
 
   if (loading || !resource) return null;
 
+  const canGenerate = canGenerateForResource(resource);
+  // A downloaded row that can't generate here but has a linked parsed_media
+  // is a gallery — its Generate is per-slide, in the detail viewer's strip.
+  // Say so instead of silently omitting the button.
+  const galleryHint =
+    !canGenerate && resource.media_id
+      ? t(
+          'resources.infoPanel.generatePerSlideHint',
+          'Galleries: open the item and generate per slide',
+        )
+      : undefined;
+
   return (
     <PromptSection
       key={resourceId}
       resource={resource as unknown as Resource}
       onPatch={handlePatch}
       onEnsureTriggerTag={handleEnsureTriggerTag}
-      canGenerate={canGenerateForResource(resource)}
+      canGenerate={canGenerate}
+      generateUnavailableHint={galleryHint}
       onGenerated={handleGenerated}
       translating={translating}
       onTranslate={handleTranslate}

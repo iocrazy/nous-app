@@ -273,3 +273,36 @@ describe('ResourcePromptSection', () => {
     expect(onTagsChanged).not.toHaveBeenCalled();
   });
 });
+
+describe('ResourcePromptSection — gallery generate hint', () => {
+  const galleryRow = {
+    ...resourceRow,
+    id: 'g1',
+    file_type: '68',
+    mime_type: 'image/jpeg',
+    media_id: 'm9',
+  };
+  const videoRow = {
+    ...resourceRow,
+    id: 'v1',
+    file_type: '0',
+    mime_type: 'video/mp4',
+    media_id: 'm10',
+  };
+
+  it('passes a per-slide hint for gallery rows (no Generate here by design)', async () => {
+    singleMock.mockResolvedValue({ data: galleryRow, error: null });
+    render(<ResourcePromptSection resourceId="g1" />);
+    await screen.findByTestId('prompt-section');
+    expect(capturedProps.canGenerate).toBe(false);
+    expect(capturedProps.generateUnavailableHint).toBeTruthy();
+  });
+
+  it('passes no hint for video rows — they get the real Generate button', async () => {
+    singleMock.mockResolvedValue({ data: videoRow, error: null });
+    render(<ResourcePromptSection resourceId="v1" />);
+    await screen.findByTestId('prompt-section');
+    expect(capturedProps.canGenerate).toBe(true);
+    expect(capturedProps.generateUnavailableHint).toBeUndefined();
+  });
+});

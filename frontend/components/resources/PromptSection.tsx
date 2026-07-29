@@ -50,6 +50,11 @@ export interface PromptSectionProps {
   onEnsureTriggerTag: () => Promise<void>;
   /** Image assets get the Generate (reverse-engineer) button. */
   canGenerate: boolean;
+  /** Shown in the Generate button's place when `canGenerate` is false but
+   *  generation exists elsewhere for this asset — e.g. galleries, whose
+   *  per-slide Generate lives in the detail viewer's slide strip. Without
+   *  it the block renders two bare textareas and reads as "not built". */
+  generateUnavailableHint?: string;
   /** Fired once the self-managed Generate flow completes successfully —
    *  the host should refetch the resource (new gen_prompt* / gen_prompt_json)
    *  and its tags (the workflow may attach new AI tags too). */
@@ -91,7 +96,7 @@ function ResultChip({ children }: { children: React.ReactNode }) {
 
 export function PromptSection({
   resource, onPatch, onEnsureTriggerTag,
-  canGenerate, onGenerated, translating, onTranslate,
+  canGenerate, generateUnavailableHint, onGenerated, translating, onTranslate,
   autoOpenGenerateSimilar, sectionClassName = 'px-4 mt-3',
 }: PromptSectionProps) {
   const { t } = useTranslation();
@@ -409,6 +414,11 @@ export function PromptSection({
               {generating ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}{' '}
               {t('resources.infoPanel.generatePrompt', 'Generate')}
             </button>
+          )}
+          {!canGenerate && generateUnavailableHint && (
+            <span className="text-[10px] text-ink-500" data-testid="generate-unavailable-hint">
+              {generateUnavailableHint}
+            </span>
           )}
           {Boolean(otherSidePos || otherSideNeg) && (
             <button onClick={() => onTranslate(lang)} disabled={translating}

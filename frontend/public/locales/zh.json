@@ -983,6 +983,7 @@
       "promptTranslateFailed": "翻译失败",
       "generatePrompt": "反推",
       "generatePromptHint": "从素材反推生成提示词（视频使用封面图）",
+      "generatePerSlideHint": "图集：打开详情后逐张反推",
       "generateFromImage": "从图片反推",
       "promptGenerating": "正在从图片反推提示词...",
       "promptGenerated": "提示词已生成",
