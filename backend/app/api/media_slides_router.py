@@ -10,7 +10,7 @@ Uses media_id (parsed_media Snowflake ID) — consistent with /media/{media_id}.
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from loguru import logger
 
@@ -50,20 +50,35 @@ async def _get_media_row(media_id: str) -> dict:
     return media
 
 
-def _resolve_audio_file(media: dict, base_path: str) -> Optional[Path]:
-    """Resolve the on-disk audio file for a media row, tolerating a missing
-    video download_path. Order: music_download_path → extract_audio_path →
-    download_path/audio.mp3 (only if a video download_path exists)."""
+async def _resolve_audio_source(media: dict, base_path: str) -> Optional[str]:
+    """Resolve the audio source for a media row (rel path or sb:// value),
+    tolerating a missing video download_path. Order: music_download_path →
+    extract_audio_path → download_path/audio.mp3 (only if download_path
+    exists AND is a filesystem-relative value — an sb:// download_path has
+    no meaningful "/audio.mp3" sibling; same reasoning as C6's dropped
+    .parent fallback).
+
+    Backend-aware existence check (mirrors C6 download_music_file):
+    sb:// candidates are probed via ObjectStore.exists, filesystem
+    candidates via Path.exists(). Returns the selected candidate's raw
+    value (rel path or sb:// string), not a materialized Path — the
+    caller hands it straight to serve_stored_file."""
+    from app.services.library.media_storage import ObjectStore, resolve_media_source
+
     candidates = [media.get("music_download_path"), media.get("extract_audio_path")]
     dl = media.get("download_path")
-    if dl:
+    if dl and not resolve_media_source(dl).is_object_store:
         candidates.append(f"{dl}/audio.mp3")
     for rel in candidates:
         if not rel:
             continue
-        candidate = Path(base_path) / rel
-        if candidate.exists():
-            return candidate
+        loc = resolve_media_source(rel)
+        if loc.is_object_store:
+            if await ObjectStore(loc.bucket).exists(loc.key):
+                return rel
+        else:
+            if (Path(base_path) / rel).exists():
+                return rel
     return None
 
 
@@ -163,7 +178,10 @@ async def serve_slide_file(
 
 @router.get("/{media_id}/audio", tags=TAGS_MEDIA_CONTENT)
 async def serve_audio_file(
-    media_id: str, auth: OptionalAuthDep = None, token: str = None
+    media_id: str,
+    request: Request,
+    auth: OptionalAuthDep = None,
+    token: str = None,
 ):
     """
     Serve standalone background audio for carousel content.
@@ -184,16 +202,19 @@ async def serve_audio_file(
         media = await _get_media_row(media_id)
         base_path = Utils.get_download_base_path()
 
-        audio_file = _resolve_audio_file(media, base_path)
-        if not audio_file:
+        chosen = await _resolve_audio_source(media, base_path)
+        if not chosen:
             raise HTTPException(status_code=404, detail="Audio file not found")
 
         from app.api.media_download_router import audio_content_type
+        from app.services.library.media_serving import serve_stored_file
 
-        return FileResponse(
-            path=str(audio_file),
-            media_type=audio_content_type(audio_file.suffix.lower()),
-            content_disposition_type="inline",
+        suffix = Path(chosen).suffix.lower()
+        return await serve_stored_file(
+            chosen,
+            mime=audio_content_type(suffix),
+            request=request,
+            disposition="inline",
         )
     except HTTPException:
         raise

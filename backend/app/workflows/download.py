@@ -95,9 +95,21 @@ async def check_global_cache_step(
     from app.core.config import settings
     from app.repositories.media_repository import get_media_repository
 
-    def _file_present(rel_or_abs_path: str | None) -> bool:
+    async def _file_present(rel_or_abs_path: str | None) -> bool:
         if not rel_or_abs_path:
             return False
+        from app.services.library.media_storage import ObjectStore, resolve_media_source
+
+        loc = resolve_media_source(rel_or_abs_path)
+        if loc.is_object_store:
+            store = ObjectStore(loc.bucket)
+            try:
+                return await store.exists(loc.key) and await store.get_size(loc.key) > 0
+            except Exception:
+                # 探测失败(网络抖动/storage-api 挂了)保守当没缓存,继续下载
+                # 而不是让整个 step 炸掉。
+                return False
+        # filesystem 分支:完全保留原逻辑
         p = (
             rel_or_abs_path
             if os.path.isabs(rel_or_abs_path)
@@ -129,14 +141,14 @@ async def check_global_cache_step(
             all_cached
             and video_status_ok
             and has_video_path
-            and _file_present(video_path)
+            and await _file_present(video_path)
         )
     if download_cover:
         all_cached = (
             all_cached
             and global_media.get("cover_download_status") == "completed"
             and has_cover_path
-            and _file_present(cover_path)
+            and await _file_present(cover_path)
         )
     return {"cache_hit": bool(all_cached)}
 
