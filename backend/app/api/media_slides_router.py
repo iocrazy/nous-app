@@ -50,25 +50,41 @@ async def _get_media_row(media_id: str) -> dict:
     return media
 
 
+_ALBUM_LOCATION_SQL = """
+    SELECT rv.file_path
+    FROM resources r
+    JOIN resource_versions rv
+      ON rv.resource_id = r.id AND rv.version_number = r.current_version
+    WHERE r.media_id = :media_id
+    LIMIT 1
+"""
+
+
 async def _resolve_album_location(media_id: str):
     """图集当前存储位置:已迁移(sb:// 前缀)返回 MediaLocation,否则 None。
 
     桥接 media_id(parsed_media)→ resources.media_id 反查 resource → 该
     resource 当前 version 的 file_path(album 迁移写的是 resource_versions
-    这一列,不是 parsed_media.download_path)。resource 不存在 / 没有对应
-    version / file_path 为空或非 sb:// 前缀,一律返回 None —— 调用方零回退到
-    原文件系统读取逻辑,保证迁移前后都能读。"""
-    from app.repositories.resources_repository import ResourcesRepository
+    这一列,不是 parsed_media.download_path)。
+
+    用非 scoped 的 db_engine 直查(而不是 ResourcesRepository 的 scoped 方法)
+    —— list_slides/serve_slide_file 这两个端点上下文没有打开 scope session
+    (user_session/system_session),调 get_resource_by_media_id 会因
+    "no scope is set" 报错并被其内部 except 吞成 None,导致已迁图集永远走
+    不到这条分支、误判成未迁移。db_engine.fetch_one 不需要 scope。
+
+    resource 不存在 / 没有对应 version / file_path 为空或非 sb:// 前缀,
+    一律返回 None —— 调用方零回退到原文件系统读取逻辑,保证迁移前后都能读。"""
+    from app.db import engine as db_engine
     from app.services.library.media_storage import resolve_media_source
 
-    repo = ResourcesRepository()
-    resource = await repo.get_resource_by_media_id(media_id)
-    if not resource:
+    try:
+        mid = int(media_id)
+    except (TypeError, ValueError):
         return None
-    version = await repo.get_version_by_number(
-        resource["id"], resource["current_version"]
-    )
-    file_path = (version or {}).get("file_path")
+
+    row = await db_engine.fetch_one(_ALBUM_LOCATION_SQL, {"media_id": mid})
+    file_path = (row or {}).get("file_path") if row else None
     if not file_path:
         return None
     loc = resolve_media_source(file_path)
