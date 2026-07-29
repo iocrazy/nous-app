@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import Hls from 'hls.js';
 import { Video, DownloadStatus, Collection } from '../types';
 import {
@@ -152,6 +153,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   compact = false,
   bare = false,
 }) => {
+  const { t } = useTranslation();
   const { mediaToken } = useAuth();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [copied, setCopied] = useState(false);
@@ -953,6 +955,10 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 resourceId={resourceId}
                 onTagsChanged={refetchResourceTags}
                 sectionClassName="px-4"
+                galleryHint={t(
+                  'resources.infoPanel.generatePerSlideHintDetail',
+                  'Per-slide ⚡ Generate is on the image, below each slide',
+                )}
               />
             </div>
           )}

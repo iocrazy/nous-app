@@ -60,6 +60,7 @@ export function ResourcePromptSection({
   resourceId,
   onTagsChanged,
   sectionClassName,
+  galleryHint,
 }: {
   resourceId: string;
   /** Notified after the ensure-trigger-tag flow actually writes a new tag
@@ -70,6 +71,11 @@ export function ResourcePromptSection({
    *  container already pads its children override the default `px-4 mt-3`
    *  so the block lines up with its neighbours. */
   sectionClassName?: string;
+  /** Override for the gallery "generate lives elsewhere" hint. The default
+   *  says "open the item" — correct in the list sidebars, circular on the
+   *  detail page (the user IS in the item), so that host points at the
+   *  on-image strip instead. */
+  galleryHint?: string;
 }) {
   const { t } = useTranslation();
   const [resource, setResource] = useState<PromptResource | null>(null);
@@ -159,9 +165,10 @@ export function ResourcePromptSection({
   // A downloaded row that can't generate here but has a linked parsed_media
   // is a gallery — its Generate is per-slide, in the detail viewer's strip.
   // Say so instead of silently omitting the button.
-  const galleryHint =
+  const effectiveGalleryHint =
     !canGenerate && resource.media_id
-      ? t(
+      ? galleryHint ??
+        t(
           'resources.infoPanel.generatePerSlideHint',
           'Galleries: open the item and generate per slide',
         )
@@ -174,7 +181,7 @@ export function ResourcePromptSection({
       onPatch={handlePatch}
       onEnsureTriggerTag={handleEnsureTriggerTag}
       canGenerate={canGenerate}
-      generateUnavailableHint={galleryHint}
+      generateUnavailableHint={effectiveGalleryHint}
       onGenerated={handleGenerated}
       translating={translating}
       onTranslate={handleTranslate}

@@ -348,6 +348,18 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
           // deliberate — it keeps the M1 double-plus guard meaningful and
           // matches PromptSection's own pill.
           <div className="flex items-center gap-2">
+            {/* Labeled + accent-colored on purpose: the icon-only ⚡ in a dark
+                pill read as decoration on top of a busy slide, and users
+                couldn't find the per-slide Generate at all. */}
+            <button
+              type="button"
+              onClick={handleGenerate}
+              title={t('resources.slidePrompt.generateHint', 'Reverse-engineer the prompt from this slide')}
+              aria-label={t('resources.slidePrompt.generate', 'Generate')}
+              className="shrink-0 flex items-center gap-1.5 bg-indigo-600/90 hover:bg-indigo-500 text-white rounded-full px-3 py-1 text-xs font-medium shadow-lg backdrop-blur-sm transition-colors"
+            >
+              <Zap size={12} /> {t('resources.slidePrompt.generate', 'Generate')}
+            </button>
             <button
               type="button"
               onClick={openEditor}
@@ -355,9 +367,6 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
             >
               + {t('resources.slidePrompt.addPrompt', 'Add prompt for this slide')}
             </button>
-            <div className="bg-black/60 backdrop-blur-sm rounded-full px-2.5 py-1.5 flex items-center">
-              {generateButton}
-            </div>
           </div>
         )}
       </div>
