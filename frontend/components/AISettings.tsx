@@ -853,6 +853,40 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
     }));
   };
 
+  // Backend default agent slug per task — the agent the backend resolver falls
+  // back to when task_assignment[taskKey] is unset. Source of truth is
+  // backend/app/services/ai/providers/ai_provider_helpers.py: the
+  // DEFAULT_*_AGENT_SLUG constants (L368-372) and the resolve_*_provider_config
+  // wrappers that pass them (L974-1030). Both sides must be kept in sync — a
+  // wrong entry here mislabels what actually runs.
+  // `summarization` is absent on purpose: it resolves no agent at all (its
+  // workflow scans a hardcoded provider priority — resolve_summarization_config,
+  // same file L703), so it degrades to the generic "Default (system)" label.
+  const TASK_DEFAULT_AGENT_SLUG: Partial<
+    Record<keyof AISettingsType['task_assignment'], string>
+  > = {
+    visual_analysis: 'analyze',
+    translation: 'translate',
+    caption: 'caption',
+    classification: 'classify',
+    script_generation: 'script_ai',
+  };
+
+  // Label for the explicit "unset" option. Without it the picker renders no
+  // option matching value='' and UiSelect falls through to the first option in
+  // the list, so an unassigned task looked assigned to whatever agent happened
+  // to sort first — and picking that agent fired no change event, making the
+  // phantom assignment unsavable.
+  const getDefaultAgentLabel = (
+    taskKey: keyof AISettingsType['task_assignment'],
+  ): string => {
+    const slug = TASK_DEFAULT_AGENT_SLUG[taskKey];
+    if (!slug) return 'Default (system)';
+    const agent = agents.find((a) => a.slug === slug);
+    if (!agent) return `Default — ${slug}`;
+    return `Default — ${agent.is_system_preset ? `[System] ${agent.name}` : agent.name}`;
+  };
+
   // Disabled placeholder select shown while the async option sources are still
   // settling. Renders a single synthetic option matching the stored value so the
   // picker echoes the user's saved choice (raw value, or "Loading…" if unset)
@@ -898,8 +932,10 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
         onChange={(e) => updateTaskAssignment(taskKey, e.target.value)}
         className="min-w-[220px]"
       >
-          {options.length === 0 && (
+          {options.length === 0 && nousLlmOptions.length === 0 ? (
             <option value="">No Agents Available</option>
+          ) : (
+            <option value="">{getDefaultAgentLabel(taskKey)}</option>
           )}
           {isLegacy && (
             <option value={currentValue}>{currentValue} (legacy — please reselect)</option>
