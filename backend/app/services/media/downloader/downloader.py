@@ -32,6 +32,23 @@ from app.schemas.media import (
 )
 
 
+def _file_type_from_mime(mime: Optional[str]) -> str:
+    """Derive the semantic ``resources.file_type`` enum from a MIME type.
+
+    Task 8: the platform's numeric ``media_type`` code (0/4/68/2/51...) is
+    NOT a valid file_type — it must never be written to this column
+    directly. mime_type is the reliable source to derive from.
+    """
+    m = (mime or "").lower()
+    if m.startswith("video/"):
+        return "video"
+    if m.startswith("image/"):
+        return "image"
+    if m.startswith("audio/"):
+        return "audio"
+    return "document"
+
+
 async def persist_video_download(
     repo: MediaRepository,
     *,
@@ -930,14 +947,20 @@ class DownloaderService:
             # row, so this one stays as a per-user file pointer (matches the
             # shared dir, but written via a different lifecycle than the
             # mirror writes we removed elsewhere).
+            # Carousel slides default to image/jpeg unless the platform
+            # payload carries its own mime_type (e.g. a video slide).
+            # file_type is derived from mime, NOT from the platform's
+            # numeric media_type code (0/4/68/2/51...) — that code is not
+            # a valid resources.file_type value (task 8 fix).
+            mime_type = video_data.get("mime_type") or "image/jpeg"
             resource_data = {
                 "creator_id": user_id,
                 "media_id": media_id,
                 "source_type": "web",
                 "file_path": resource_dir_relative,
-                "mime_type": "image/jpeg",
+                "mime_type": mime_type,
                 "filename": f"{platform_id}_slides",
-                "file_type": video_data.get("media_type", "2"),
+                "file_type": _file_type_from_mime(mime_type),
             }
             try:
                 resource = await resources_repo.create_resource(resource_data)
