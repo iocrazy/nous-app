@@ -334,9 +334,15 @@
   /* Stalled-activity semantic token (PR-7 D5) — darker amber for light bg. */
   --stall: #d97706;
 
-  /* Accent trio — light theme: K1 re-hued from indigo to 绿(主角):
-     saturated 600 anchor text on the 100 soft-tint fill. */
-  --accent-text: #1E7A5B;
+  /* Accent trio — light theme: K1 re-hued from indigo to 绿(主角). K1.6
+     (2026-07-29) fix: --accent-text standardized at the 700 tier, not the
+     600 anchor — 600-text-on-100-soft-bg measured 4.456:1 for this exact
+     pairing (below the 4.5 hard line, task-K1-report.md K1.5-review-fix
+     §Fix 2), a shortfall shared by all four hues (this default + the 3
+     module overrides below). 700-on-100 clears comfortably (5.630:1 here,
+     full matrix in task-K1-report.md §K1.6) — same soft/line fill,
+     darker text only. */
+  --accent-text: #14694D;
   --accent-soft: #E3EFE8;
   --accent-border: #BFDACE;
 
@@ -452,19 +458,23 @@
    mechanism here rather than inventing a new one: compound
    `[data-theme][data-module]` selectors (both attributes land on <html>)
    override --accent-text/-soft/-border per module.
-   Tier choice (K1.5 review fix #2): light uses the 600 anchor (NOT 700) —
-   matches the global default (`--accent-text: #1E7A5B` in the
-   `[data-theme="light"]` block above is the 600 green anchor), so module
-   scoping doesn't silently deepen the tier as a side effect. Dark keeps the
-   400 tier, already matching the global default's dark tier. Re-verified
-   600-text-on-100-soft-bg contrast for all three (task-K1-report.md K1.5
-   fix section has the full writeup): plum 4.485, steel 4.389, module-ochre
-   3.944 — all sit under the nominal 4.5 hard line (as does the pre-existing
-   global green default itself, 4.456) by a small margin. Matching the
-   established global-default tier takes priority per this fix's explicit
-   instruction; the shortfall is documented, not silently absorbed. */
+   Tier choice — K1.6 (2026-07-29) supersedes K1.5 review fix #2: light now
+   uses the 700 tier (NOT the 600 anchor). K1.5 review fix #2 had matched
+   600 to the (then-current) global default for consistency, but precise
+   measurement showed 600-text-on-100-soft-bg fails 4.5:1 for all four hues
+   including that global default (green 4.456, plum 4.485, steel 4.389,
+   module-ochre 3.944 — task-K1-report.md K1.5-review-fix §Fix 2). K1.6
+   fixes the shipped gap at the root instead of re-matching a broken
+   baseline: standardize on 700 for all four (this + the global default
+   above), which clears comfortably everywhere (green 5.630, plum 5.654,
+   steel 5.558, module-ochre 5.066 — full precision in task-K1-report.md
+   §K1.6). Dark keeps the 400 tier — verified against the actual composited
+   background (rgba(anchor-600, .14) over `--island` dark #15151a, the real
+   backdrop the Sidebar/TopBar pills render on, not a flat swatch): all four
+   already clear 4.5:1 by a wide margin (6.34-6.89, §K1.6), so no dark
+   change was needed. */
 [data-theme="light"][data-module="ai"] {
-  --accent-text: #7A5E8F;   /* plum-600 (anchor) */
+  --accent-text: #69507B;   /* plum-700 */
   --accent-soft: #ECE6F1;   /* plum-100 */
   --accent-border: #D5C8E0; /* plum-300 */
 }
@@ -474,7 +484,7 @@
   --accent-border: rgba(122, 94, 143, 0.35);
 }
 [data-theme="light"][data-module="inspiration"] {
-  --accent-text: #956C25;   /* module ochre-600 (darkened anchor, see block above) */
+  --accent-text: #805C1B;   /* module ochre-700 (darkened anchor, see block above) */
   --accent-soft: #F3EAD6;   /* ochre-100, unchanged mockup tone */
   --accent-border: #E2D2AC; /* ochre-300, unchanged mockup tone */
 }
@@ -484,7 +494,7 @@
   --accent-border: rgba(149, 108, 37, 0.35);
 }
 [data-theme="light"][data-module="resources"] {
-  --accent-text: #46708E;   /* steel-600 (anchor) */
+  --accent-text: #3A607A;   /* steel-700 */
   --accent-soft: #E3EBF1;   /* steel-100 */
   --accent-border: #C2D2DE; /* steel-300 */
 }

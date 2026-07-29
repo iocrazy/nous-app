@@ -237,20 +237,35 @@ describe('K1.5 per-module accent scoping', () => {
   });
 
   /**
-   * Review fix #2 (2026-07-29): the module `[data-theme="light"][data-module]`
-   * blocks originally used each ladder's 700 step for `--accent-text`, one
-   * tier darker than the global default's 600 (`--accent-text: #1E7A5B` is
-   * the green anchor, not green-700). Pin the fix: light text-tier == the
-   * module's own 600 anchor, dark stays 400 (already matched the default).
+   * K1.6 (2026-07-29) supersedes review fix #2: precise measurement showed
+   * 600-text-on-100-soft-bg fails 4.5:1 for ALL FOUR hues, including the
+   * global default itself (green 4.456, plum 4.485, steel 4.389, module-ochre
+   * 3.944 — task-K1-report.md K1.5-review-fix §Fix 2). K1.6 standardizes
+   * light `--accent-text` at the 700 tier for all four (this default +
+   * the 3 module overrides), which clears comfortably everywhere (green
+   * 5.630, plum 5.654, steel 5.558, module-ochre 5.066 — full precision in
+   * task-K1-report.md §K1.6). Dark stays at 400 (already verified >=4.5:1
+   * against the real composited background, see §K1.6).
    */
-  it('module --accent-text (light) uses the 600 anchor tier, matching the global default convention', () => {
-    for (const [module, anchor] of Object.entries(MODULE_ANCHOR)) {
+  it('module --accent-text (light) uses the 700 tier, clearing 4.5:1 on the 100-soft-bg', () => {
+    const MODULE_ACCENT_TEXT_700: Record<string, string> = {
+      ai: '#69507B', inspiration: '#805C1B', resources: '#3A607A',
+    };
+    for (const [module, expected] of Object.entries(MODULE_ACCENT_TEXT_700)) {
       const m = CSS.match(new RegExp(`\\[data-theme="light"\\]\\[data-module="${module}"\\]\\s*\\{([^}]*)\\}`));
       expect(m, `[data-theme="light"][data-module="${module}"] block not found`).toBeTruthy();
       const accentText = m![1].match(/--accent-text:\s*([^;]+);/);
       expect(accentText, `--accent-text missing in light/${module}`).toBeTruthy();
-      expect(accentText![1].trim().toUpperCase()).toBe(anchor.toUpperCase());
+      expect(accentText![1].trim().toUpperCase()).toBe(expected.toUpperCase());
     }
+  });
+
+  it('global default --accent-text (light) uses the 700 tier (#14694D), not the 600 anchor', () => {
+    const lightBlock = CSS.split('[data-theme="light"] {')[1];
+    expect(lightBlock, 'no [data-theme="light"] block found').toBeTruthy();
+    const accentText = lightBlock!.match(/--accent-text:\s*([^;]+);/);
+    expect(accentText, '--accent-text missing in [data-theme="light"]').toBeTruthy();
+    expect(accentText![1].trim().toUpperCase()).toBe('#14694D');
   });
 
   it('module --accent-text (dark) uses the 400 tier, matching the global default convention', () => {

@@ -86,12 +86,14 @@ function hexToRgb(hex: string): string {
 }
 
 // Expected --accent-text per module × theme, mirroring the index.css
-// [data-theme][data-module] blocks (K1.5 fix #2: light now uses the 600
-// anchor tier, dark stays the 400 tier — same as the global default).
+// [data-theme][data-module] blocks (K1.6: light now uses the 700 tier for
+// all four hues — 600-on-100-soft-bg measured below 4.5:1 for every hue
+// including the global default, task-K1-report.md §K1.6 — dark stays the
+// 400 tier, verified against the actual composited --island background).
 const MODULE_ACCENT_TEXT: Record<string, { light: string; dark: string }> = {
-  ai: { light: hexToRgb('#7A5E8F'), dark: hexToRgb('#AF9BBF') },
-  inspiration: { light: hexToRgb('#956C25'), dark: hexToRgb('#C6A675') },
-  resources: { light: hexToRgb('#46708E'), dark: hexToRgb('#8DA9BE') },
+  ai: { light: hexToRgb('#69507B'), dark: hexToRgb('#AF9BBF') },
+  inspiration: { light: hexToRgb('#805C1B'), dark: hexToRgb('#C6A675') },
+  resources: { light: hexToRgb('#3A607A'), dark: hexToRgb('#8DA9BE') },
 };
 
 for (const theme of ['dark', 'light'] as const) {
