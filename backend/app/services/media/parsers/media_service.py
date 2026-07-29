@@ -16,6 +16,33 @@ from app.repositories.media_repository import MediaRepository
 from app.schemas.media import MediaCreate
 from app.services.media.downloader.downloader import DownloaderService
 
+# media_type values a parser may already emit as a semantic string (e.g.
+# qishui/soda: "audio" for standalone tracks, "video" for UGC clips — see
+# soda_music/formatter.py + ugc_formatter.py). These pass through unchanged
+# in _ensure_user_resource rather than being re-derived from mime_type.
+_SEMANTIC_FILE_TYPES = frozenset({"video", "image", "audio", "document"})
+
+
+def _file_type_from_mime(mime: str | None) -> str:
+    """Derive the semantic ``resources.file_type`` enum from a MIME type.
+
+    Task 8: the platform's numeric ``media_type`` code (0/4/68/2/51...) is
+    NOT a valid file_type — it must never be written to this column
+    directly. Kept as a local copy (not shared with
+    ``downloader.py::_file_type_from_mime`` / ``sideload.py::_classify`` /
+    ``resources_service.py::_classify_file_type``) — three near-identical
+    5-line classifiers is an acceptable cost to avoid cross-module import
+    coupling for this task; consolidating them is a follow-up refactor.
+    """
+    m = (mime or "").lower()
+    if m.startswith("video/"):
+        return "video"
+    if m.startswith("image/"):
+        return "image"
+    if m.startswith("audio/"):
+        return "audio"
+    return "document"
+
 
 class MediaService:
     """Media service, integrates data fetching, parsing, storage and download functionality"""
@@ -640,6 +667,21 @@ class MediaService:
             else:
                 mime_type = "video/mp4"
 
+            # file_type is a semantic enum (video/image/audio/document), NOT
+            # the platform's raw numeric media_type code (0/4/68/2/51...) —
+            # that code is not a valid resources.file_type value (task 8
+            # fix; this is the dominant resource-creation path, so this bug
+            # is the main source of the ~796 bad rows in production).
+            # Some parsers (qishui/soda) already emit a semantic string
+            # directly — passthrough those unchanged instead of re-deriving
+            # from the mime_type computed above, which has no audio/document
+            # branch and would mis-classify "audio" as "video" (a pre-
+            # existing gap in that 2-value calc, out of scope for this task).
+            if media_type in _SEMANTIC_FILE_TYPES:
+                file_type = media_type
+            else:
+                file_type = _file_type_from_mime(mime_type)
+
             # Shared assets — file_path / cover_image_path / resolution
             # / *_download_status — live on parsed_media. The resources
             # row is the per-user envelope (filename / notes / tags /
@@ -651,7 +693,7 @@ class MediaService:
                 "media_id": media_id,
                 "source_type": "web",
                 "filename": parsed_data.get("title") or "Untitled",
-                "file_type": media_type,
+                "file_type": file_type,
                 "mime_type": mime_type,
                 "file_size_bytes": parsed_data.get("datasize_bytes"),
                 "duration_seconds": duration_seconds,
