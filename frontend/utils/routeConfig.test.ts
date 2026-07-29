@@ -28,33 +28,45 @@ describe('routeConfig canvas mapping', () => {
 
 // K1.5 (2026-07-29) — per-module accent scoping (docs/superpowers/specs/
 // 2026-07-29-warm-paper-palette-design.md §5). AppLayout stamps
-// data-module from viewToModule(pathnameToView(...)); pin the mapping here
-// so a future ViewState reshuffle can't silently detach a module from its
-// accent (or worse, leak an accent onto an unrelated view).
+// data-module from viewToModule(pathnameToView(...), location.pathname); pin
+// the mapping here so a future ViewState reshuffle can't silently detach a
+// module from its accent (or worse, leak an accent onto an unrelated view).
 describe('viewToModule (K1.5 per-module accent)', () => {
   it('maps the AI Library / Agent surface to "ai"', () => {
-    expect(viewToModule('ailibrary')).toBe('ai');
-    expect(viewToModule('agents')).toBe('ai');
-    expect(viewToModule('skills')).toBe('ai');
-    expect(viewToModule('chat')).toBe('ai');
+    expect(viewToModule('ailibrary', '/team/t1/ai-library/agents')).toBe('ai');
+    expect(viewToModule('agents', '/team/t1/agents')).toBe('ai');
+    expect(viewToModule('skills', '/team/t1/skills')).toBe('ai');
+    expect(viewToModule('chat', '/team/t1/chat')).toBe('ai');
   });
 
   it('maps Topic Inspiration (/parser) to "inspiration"', () => {
-    expect(viewToModule('parser')).toBe('inspiration');
+    expect(viewToModule('parser', '/team/t1/parser')).toBe('inspiration');
+    expect(viewToModule('parser', '/parser')).toBe('inspiration'); // legacy no-team-prefix form
   });
 
   it('maps Resources + Distribution to "resources"', () => {
-    expect(viewToModule('resources')).toBe('resources');
-    expect(viewToModule('distribution')).toBe('resources');
+    expect(viewToModule('resources', '/team/t1/resources')).toBe('resources');
+    expect(viewToModule('distribution', '/team/t1/distribution/accounts')).toBe('resources');
   });
 
   it('maps Projects (mediatrack) and other small modules to null (global default green)', () => {
-    expect(viewToModule('mediatrack')).toBeNull();
-    expect(viewToModule('dashboard')).toBeNull();
-    expect(viewToModule('settings')).toBeNull();
-    expect(viewToModule('todolist')).toBeNull();
-    expect(viewToModule('shared')).toBeNull();
-    expect(viewToModule('points')).toBeNull();
-    expect(viewToModule('canvas')).toBeNull();
+    expect(viewToModule('mediatrack', '/team/t1/projects')).toBeNull();
+    expect(viewToModule('dashboard', '/team/t1/dashboard')).toBeNull();
+    expect(viewToModule('settings', '/team/t1/settings')).toBeNull();
+    expect(viewToModule('todolist', '/team/t1/todolist')).toBeNull();
+    expect(viewToModule('shared', '/team/t1/shared')).toBeNull();
+    expect(viewToModule('points', '/team/t1/points')).toBeNull();
+    expect(viewToModule('canvas', '/team/t1/canvas')).toBeNull();
+  });
+
+  it('minor fix: a genuinely unrecognized route must NOT inherit the inspiration accent', () => {
+    // pathnameToView's trailing `return 'parser'` is a catch-all for ANY
+    // unmatched path, not just the real /parser route (see its own comment).
+    // Before this fix, viewToModule('parser') unconditionally returned
+    // 'inspiration', so an unrecognized route would silently paint itself
+    // ochre. It must fall back to the global default (null) instead.
+    const unknownPath = '/team/t1/some-totally-unknown-route';
+    expect(pathnameToView(unknownPath)).toBe('parser'); // confirms the fallback actually fires
+    expect(viewToModule('parser', unknownPath)).toBeNull();
   });
 });

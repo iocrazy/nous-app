@@ -235,4 +235,34 @@ describe('K1.5 per-module accent scoping', () => {
       expect(m![1].trim().toUpperCase()).toBe(hex.toUpperCase());
     }
   });
+
+  /**
+   * Review fix #2 (2026-07-29): the module `[data-theme="light"][data-module]`
+   * blocks originally used each ladder's 700 step for `--accent-text`, one
+   * tier darker than the global default's 600 (`--accent-text: #1E7A5B` is
+   * the green anchor, not green-700). Pin the fix: light text-tier == the
+   * module's own 600 anchor, dark stays 400 (already matched the default).
+   */
+  it('module --accent-text (light) uses the 600 anchor tier, matching the global default convention', () => {
+    for (const [module, anchor] of Object.entries(MODULE_ANCHOR)) {
+      const m = CSS.match(new RegExp(`\\[data-theme="light"\\]\\[data-module="${module}"\\]\\s*\\{([^}]*)\\}`));
+      expect(m, `[data-theme="light"][data-module="${module}"] block not found`).toBeTruthy();
+      const accentText = m![1].match(/--accent-text:\s*([^;]+);/);
+      expect(accentText, `--accent-text missing in light/${module}`).toBeTruthy();
+      expect(accentText![1].trim().toUpperCase()).toBe(anchor.toUpperCase());
+    }
+  });
+
+  it('module --accent-text (dark) uses the 400 tier, matching the global default convention', () => {
+    const DARK_400: Record<string, string> = {
+      ai: '#AF9BBF', inspiration: '#C6A675', resources: '#8DA9BE',
+    };
+    for (const [module, expected] of Object.entries(DARK_400)) {
+      const m = CSS.match(new RegExp(`\\[data-theme="dark"\\]\\[data-module="${module}"\\]\\s*\\{([^}]*)\\}`));
+      expect(m, `[data-theme="dark"][data-module="${module}"] block not found`).toBeTruthy();
+      const accentText = m![1].match(/--accent-text:\s*([^;]+);/);
+      expect(accentText, `--accent-text missing in dark/${module}`).toBeTruthy();
+      expect(accentText![1].trim().toUpperCase()).toBe(expected.toUpperCase());
+    }
+  });
 });

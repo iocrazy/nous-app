@@ -451,11 +451,20 @@
    override alone left it green in every module). Extending the SAME
    mechanism here rather than inventing a new one: compound
    `[data-theme][data-module]` selectors (both attributes land on <html>)
-   override --accent-text/-soft/-border per module, reusing each module's
-   already-verified ladder values (700 for light text-on-soft-bg contrast —
-   K1/K1.5 matrices; 400 for dark, verified >=4.5:1 against #18181b). */
+   override --accent-text/-soft/-border per module.
+   Tier choice (K1.5 review fix #2): light uses the 600 anchor (NOT 700) —
+   matches the global default (`--accent-text: #1E7A5B` in the
+   `[data-theme="light"]` block above is the 600 green anchor), so module
+   scoping doesn't silently deepen the tier as a side effect. Dark keeps the
+   400 tier, already matching the global default's dark tier. Re-verified
+   600-text-on-100-soft-bg contrast for all three (task-K1-report.md K1.5
+   fix section has the full writeup): plum 4.485, steel 4.389, module-ochre
+   3.944 — all sit under the nominal 4.5 hard line (as does the pre-existing
+   global green default itself, 4.456) by a small margin. Matching the
+   established global-default tier takes priority per this fix's explicit
+   instruction; the shortfall is documented, not silently absorbed. */
 [data-theme="light"][data-module="ai"] {
-  --accent-text: #69507B;   /* plum-700 */
+  --accent-text: #7A5E8F;   /* plum-600 (anchor) */
   --accent-soft: #ECE6F1;   /* plum-100 */
   --accent-border: #D5C8E0; /* plum-300 */
 }
@@ -465,7 +474,7 @@
   --accent-border: rgba(122, 94, 143, 0.35);
 }
 [data-theme="light"][data-module="inspiration"] {
-  --accent-text: #805C1B;   /* module ochre-700 (darkened anchor tier) */
+  --accent-text: #956C25;   /* module ochre-600 (darkened anchor, see block above) */
   --accent-soft: #F3EAD6;   /* ochre-100, unchanged mockup tone */
   --accent-border: #E2D2AC; /* ochre-300, unchanged mockup tone */
 }
@@ -475,7 +484,7 @@
   --accent-border: rgba(149, 108, 37, 0.35);
 }
 [data-theme="light"][data-module="resources"] {
-  --accent-text: #3A607A;   /* steel-700 */
+  --accent-text: #46708E;   /* steel-600 (anchor) */
   --accent-soft: #E3EBF1;   /* steel-100 */
   --accent-border: #C2D2DE; /* steel-300 */
 }

@@ -132,7 +132,7 @@ function AppLayoutInner() {
   // is guaranteed to descend from. Mirrors the existing
   // `document.documentElement.dataset.theme` pattern in ThemeContext.tsx.
   useEffect(() => {
-    const module = viewToModule(view);
+    const module = viewToModule(view, location.pathname);
     if (module) {
       document.documentElement.dataset.module = module;
     } else {
@@ -141,7 +141,7 @@ function AppLayoutInner() {
     return () => {
       delete document.documentElement.dataset.module;
     };
-  }, [view]);
+  }, [view, location.pathname]);
 
   const isDownloadsRoute = location.pathname.includes('/resources/downloads');
   const isDetailPage = location.pathname.includes('/resources/file/') || location.pathname.includes('/player/');
