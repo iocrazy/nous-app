@@ -30,11 +30,13 @@ from app.api.media_soda_router import router as soda_router
 from app.core.deps import AuthDep
 from app.core.enums import DownloadStatus
 from app.core.scope_dep import ScopedRequestDep
+from app.core.utils import Utils
 from app.repositories.media_repository import MediaRepository
 from app.repositories.user_logs_repository import (
     get_user_logs_repository,
     log_user_action,
 )
+from app.services.library.media_storage import ObjectStore, resolve_media_source
 
 router = APIRouter(prefix="/media")
 
@@ -189,23 +191,52 @@ async def delete_video(
         if delete_files:
             import shutil
 
+            async def _delete_stored_file(raw_path: str, label: str) -> None:
+                """删除单个存储对象/文件，感知 sb:// 对象存储 vs 本地文件系统。
+
+                任何一种删除失败都只记警告、不让整个删除端点 500——DB 记录
+                删除仍要继续（对象/文件泄漏比"删不掉记录"轻，且可重试）。
+                """
+                loc = resolve_media_source(raw_path)
+                if loc.is_object_store:
+                    try:
+                        await ObjectStore(loc.bucket).remove(loc.key)
+                        files_deleted.append(f"object: {loc.key}")
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to delete object store {label} "
+                            f"{loc.bucket}/{loc.key}: {e}"
+                        )
+                    return
+
+                # 补 base_path join：旧代码 `Path(download_path)` 完全没 join
+                # base_path，长期删的大概率是错的相对路径（除非 CWD 恰好等于
+                # DOWNLOAD_PATH）。get_download_base_path 在未配置下载路径时
+                # 会抛 ValueError——全 S3 化之后这完全可能发生，不能让它 500。
+                try:
+                    base_path = Utils.get_download_base_path()
+                except ValueError as e:
+                    logger.warning(
+                        f"Skip filesystem delete for {label} {raw_path!r}: {e}"
+                    )
+                    return
+
+                full = Path(base_path) / (loc.rel_path or raw_path)
+                if full.exists():
+                    if full.is_dir():
+                        shutil.rmtree(full)
+                        files_deleted.append(f"directory: {full.name}")
+                    else:
+                        full.unlink()
+                        files_deleted.append(f"{label}: {full.name}")
+
             download_path = video.get("download_path")
             if download_path:
-                path = Path(download_path)
-                if path.exists():
-                    if path.is_dir():
-                        shutil.rmtree(path)
-                        files_deleted.append(f"directory: {path.name}")
-                    else:
-                        path.unlink()
-                        files_deleted.append(f"file: {path.name}")
+                await _delete_stored_file(download_path, "file")
 
             cover_path = video.get("cover_download_path")
             if cover_path:
-                path = Path(cover_path)
-                if path.exists():
-                    path.unlink()
-                    files_deleted.append(f"cover: {path.name}")
+                await _delete_stored_file(cover_path, "cover")
 
         result = await repo.delete(platform_id)
 
