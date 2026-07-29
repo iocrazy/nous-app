@@ -119,6 +119,11 @@ def hls_key_prefix(resource_id: str, version_id: str) -> str:
     return _KEYS.hls_prefix(resource_id, version_id)
 
 
+def album_key_prefix(scope_id: int, resource_id) -> str:
+    """Prefix owning an album's flattened objects: ``t{scope}/album/{rid}/``."""
+    return _KEYS.album_prefix(scope_id, resource_id)
+
+
 def hls_key(resource_id: str, version_id: str, rel_path: str) -> str:
     """Full key for one HLS artefact, e.g. ``hls/{rid}/{vid}/480p/stream.m3u8``.
 

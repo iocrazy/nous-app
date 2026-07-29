@@ -450,17 +450,23 @@ def test_update_sql_compiles_with_expected_binds():
 
     from app.workflows import storage_migration as sm
 
-    for sql in (sm._UPLOADS_UPDATE_SQL, sm._PROJECT_FILES_UPDATE_SQL):
+    for sql in (
+        sm._UPLOADS_UPDATE_SQL,
+        sm._PROJECT_FILES_UPDATE_SQL,
+        sm._DOWNLOADS_UPDATE_SQL,
+    ):
         compiled = _compilable(sql)
         stray = re.findall(r"(?<!:):[a-z_]+", compiled)
         assert not stray, f"unparsed binds {stray} in\n{compiled}"
 
 
 def test_uploads_select_excludes_download_pipeline():
-    """Spec decision (2026-07-12): the download pipeline (source_type='web')
-    does NOT migrate — its files are shared/deduped on POSIX and album rows
-    point at directories. The first prod dry-run missed this filter and 70
-    rows failed with IsADirectoryError."""
+    """Spec decision (2026-07-12): ``uploads`` does NOT touch the download
+    pipeline (source_type='web') — its files are shared/deduped on POSIX and
+    album rows point at directories, which broke this module's single-object
+    assumptions (70/880 rows IsADirectoryError on the first prod dry-run).
+    source_type='web' is instead handled by the sibling ``downloads`` module,
+    which branches on is_album — see test_storage_migration_downloads.py."""
     from app.workflows import storage_migration as sm
 
     sql = sm._UPLOADS_SELECT_SQL

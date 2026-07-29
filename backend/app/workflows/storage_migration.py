@@ -2,7 +2,8 @@
 
 Task 4.1 of the storage-unification epic (PR-4). Moves existing files that
 still live on the local filesystem into the ``library`` object-store bucket,
-row by row, for one module at a time (``uploads`` / ``project_files``).
+row by row, for one module at a time (``uploads`` / ``project_files`` /
+``downloads``).
 
 Design
 ------
@@ -31,6 +32,14 @@ unmutated — the caller's per-row try/except counts it "failed" and the
 batch continues; only the final failed>0 check aborts the workflow (raise,
 never a returned failed dict — CLAUDE.md 路线 C rule 4).
 
+``downloads`` (source_type='web') rows can point at a DIRECTORY instead of a
+file — an album (``douyin/{pm_id}/`` full of ``{aweme}_0.jpg`` + cover.jpg).
+``_migrate_album_row`` follows the same 4-step ordering, but swaps the
+per-object sha256/size check for a file-COUNT check (local rglob vs. what
+``put_dir`` left under the prefix) since a directory has no single content
+hash to verify against. The row's ``file_path`` becomes the PREFIX itself
+(trailing slash — ``MediaLocation.is_prefix``), not a path to one object.
+
 Module registry
 ----------------
 Each module supplies: a SELECT that coarse-filters ``file_path NOT LIKE
@@ -49,6 +58,7 @@ to migrate; wiring it up would just be dead SQL against renamed tables.
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
@@ -81,6 +91,10 @@ class RowExtract:
     scope_id: int
     mime: str
     filename: Optional[str]
+    # Album directory (downloads module only) — ``mime``/``filename`` are
+    # meaningless in this case (multiple files, each with its own) and go
+    # unused; default False keeps every existing extract() call unaffected.
+    is_album: bool = False
 
 
 @dataclass(frozen=True)
@@ -126,10 +140,11 @@ _UPLOADS_SELECT_SQL = """
       AND rv.file_path NOT LIKE 'sb://%'
       -- Library assets only. source_type='web' rows are the DOWNLOAD
       -- pipeline (global/resources/web/... and the legacy date-bucket
-      -- layout) — explicitly out of migration scope per the spec decision
-      -- (2026-07-12 "下载先不动"): their files are shared/deduped on POSIX
-      -- and some are album DIRECTORIES, not files. The first prod dry-run
-      -- pulled them in and 70/880 rows failed with IsADirectoryError.
+      -- layout) — handled by the sibling ``downloads`` module below, not
+      -- here. The first prod dry-run (2026-07-12) pulled them into THIS
+      -- module and 70/880 rows failed with IsADirectoryError: some are
+      -- album DIRECTORIES, not files, which this module's extract/
+      -- update_row never accounted for.
       AND r.source_type IN ('upload', 'generated', 'derived')
       AND (CAST(:scope_id AS bigint) IS NULL OR ri.scope_id = :scope_id)
     ORDER BY rv.id
@@ -265,6 +280,92 @@ async def _project_files_update_row(
     )
 
 
+# ── downloads: resource_versions where source_type='web' ───────────────
+#
+# The DOWNLOAD pipeline's counterpart to ``uploads`` above — same two
+# tables, opposite ``source_type`` filter. The wrinkle uploads/project_files
+# don't have: a download's ``file_path`` can point at a DIRECTORY (an album
+# of slides, e.g. ``global/resources/web/douyin/{pm_id}/`` full of
+# ``{aweme}_0.jpg`` + ``cover.jpg``), not a single file. ``_downloads_extract``
+# calls out that case via ``is_album`` so ``_migrate_row`` can branch to
+# ``_migrate_album_row`` instead of treating it as one content-addressed
+# object (which is exactly the IsADirectoryError the first prod dry-run hit
+# — see the ``uploads`` SELECT comment above).
+
+_DOWNLOADS_SELECT_SQL = """
+    SELECT rv.id, rv.resource_id, rv.version_number, rv.file_path,
+           rv.filename, rv.mime_type, r.current_version, ri.scope_id,
+           pm.id AS parsed_media_id
+    FROM resource_versions rv
+    JOIN resources r ON r.id = rv.resource_id
+    LEFT JOIN LATERAL (
+      SELECT scope_id FROM resource_items WHERE resource_id = r.id
+      ORDER BY id LIMIT 1
+    ) ri ON true
+    LEFT JOIN LATERAL (
+      SELECT id FROM parsed_media pm2
+      WHERE rv.file_path LIKE '%'||pm2.id||'%' LIMIT 1
+    ) pm ON true
+    WHERE rv.file_path IS NOT NULL
+      AND rv.file_path NOT LIKE 'sb://%'
+      AND rv.storage_status = 'ok'
+      AND r.source_type = 'web'
+      AND (CAST(:scope_id AS bigint) IS NULL OR ri.scope_id = :scope_id)
+    ORDER BY rv.id LIMIT :limit
+"""
+
+
+def _downloads_extract(row: dict) -> RowExtract:
+    """Classify a download row: single video file, or an album directory.
+
+    ``os.path.isdir`` needs the file to actually be there at extract time —
+    fine here because ``_migrate_row`` only calls ``extract()`` after its own
+    ``local.exists()`` check has already passed (see call site).
+    """
+    full = os.path.join(settings.DOWNLOAD_PATH, row["file_path"])
+    return RowExtract(
+        scope_id=int(row.get("scope_id") or 0),
+        mime=row.get("mime_type") or "application/octet-stream",
+        filename=row.get("filename"),
+        is_album=os.path.isdir(full),
+    )
+
+
+# Same single-statement CTE atomicity rationale as _UPLOADS_UPDATE_SQL.
+# ``sha256`` is None for an album (no single content hash applies — see
+# ``_migrate_album_row``), so COALESCE leaves any existing file_hash alone
+# instead of clobbering it with NULL.
+_DOWNLOADS_UPDATE_SQL = """
+    WITH v AS (
+        UPDATE resource_versions
+        SET file_path = :file_path,
+            file_hash = COALESCE(:sha256, file_hash)
+        WHERE id = :id
+        RETURNING resource_id
+    )
+    UPDATE resources r
+    SET file_path = :file_path,
+        file_hash = COALESCE(:sha256, r.file_hash)
+    FROM v
+    WHERE r.id = v.resource_id
+      AND CAST(:sync_parent AS boolean)
+"""
+
+
+async def _downloads_update_row(
+    row: dict, file_path: str, sha256: Optional[str]
+) -> None:
+    await db_engine.execute(
+        _DOWNLOADS_UPDATE_SQL,
+        {
+            "file_path": file_path,
+            "sha256": sha256,
+            "id": row["id"],
+            "sync_parent": row.get("version_number") == row.get("current_version"),
+        },
+    )
+
+
 # storyboard: SKIPPED — see module docstring above. Do not add an entry.
 
 _MODULES: dict[str, ModuleConfig] = {
@@ -279,6 +380,12 @@ _MODULES: dict[str, ModuleConfig] = {
         select_sql=_PROJECT_FILES_SELECT_SQL,
         extract=_project_files_extract,
         update_row=_project_files_update_row,
+    ),
+    "downloads": ModuleConfig(
+        name="downloads",
+        select_sql=_DOWNLOADS_SELECT_SQL,
+        extract=_downloads_extract,
+        update_row=_downloads_update_row,
     ),
 }
 
@@ -317,6 +424,17 @@ async def _migrate_row(
         return "missing"
 
     extract = module_cfg.extract(row)
+
+    if extract.is_album:
+        return await _migrate_album_row(
+            row,
+            local,
+            extract,
+            module_cfg,
+            dry_run=dry_run,
+            delete_source=delete_source,
+        )
+
     local_size = local.stat().st_size
 
     stored = await media_storage.store_local_file(
@@ -344,6 +462,64 @@ async def _migrate_row(
 
     if delete_source:
         local.unlink(missing_ok=True)
+
+    return "migrated"
+
+
+async def _migrate_album_row(
+    row: dict,
+    local: Path,
+    extract: RowExtract,
+    module_cfg: ModuleConfig,
+    *,
+    dry_run: bool,
+    delete_source: bool,
+) -> str:
+    """Album directory → prefix-form ``sb://`` object (many files, one row).
+
+    Same 4-step ordering as ``_migrate_row``, adapted for a directory: there
+    is no single sha256/size to check, so the verify step is a file-COUNT
+    comparison (local rglob vs. what ``put_dir`` left listed under the
+    prefix) instead — it still catches a partial/aborted upload the same way
+    the single-object size check catches a truncated PUT.
+    """
+    if not local.is_dir():
+        # extract() already branched on os.path.isdir, so this would only
+        # fire on a TOCTOU race (deleted/replaced between extract and here).
+        raise RuntimeError(f"expected album directory, got a file: {local}")
+
+    local_files = [p for p in local.rglob("*") if p.is_file()]
+    if not local_files:
+        raise RuntimeError(f"album directory is empty, nothing to migrate: {local}")
+
+    store = media_storage.library_store()
+    prefix = media_storage.album_key_prefix(extract.scope_id, row["id"])
+
+    def _key(rel: str) -> str:
+        return f"{prefix}{rel}"
+
+    # skip_existing=True: a replayed batch after a partial failure shouldn't
+    # re-PUT files that already landed (mirrors store_local_file's dedup-PUT
+    # for the single-object path).
+    await store.put_dir(str(local), _key, skip_existing=True)
+
+    # Verify BEFORE touching the DB row — same ordering guarantee as the
+    # single-object path's get_size check.
+    remote_keys = await store.list_prefix(prefix)
+    if len(remote_keys) != len(local_files):
+        raise RuntimeError(
+            f"album file count mismatch after put_dir: id={row.get('id')} "
+            f"local={len(local_files)} remote={len(remote_keys)}"
+        )
+
+    if dry_run:
+        return "dry_run_ok"
+
+    file_path = media_storage.to_file_path(store.bucket, prefix)
+    await module_cfg.update_row(row, file_path, None)
+
+    if delete_source:
+        shutil.rmtree(str(local), ignore_errors=True)
 
     return "migrated"
 

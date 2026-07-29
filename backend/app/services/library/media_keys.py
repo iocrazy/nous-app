@@ -81,3 +81,16 @@ class MediaKeyBuilder:
     def to_file_path(self, bucket: str, key: str) -> str:
         """Compose the ``sb://`` value stored in generated_media.file_path."""
         return f"{_SB_SCHEME}{bucket}/{key}"
+
+    def album_prefix(self, scope_id: int, resource_id) -> str:
+        """Prefix owning an album's flattened objects: ``t{scope}/album/{rid}/``.
+
+        Deliberately shares the content-addressed ``t{scope_id}/`` root (not a
+        dedicated namespace like HLS's ``hls/``) — a two-hex-char sha shard can
+        never literally read ``al`` (``l`` is not a hex digit), so this cannot
+        collide with a content-addressed key under the same scope. The
+        trailing slash is load-bearing: it is what makes
+        ``MediaLocation.is_prefix`` true, telling the reader "list everything
+        under this key" instead of "GET this one object".
+        """
+        return f"t{scope_id}/album/{resource_id}/"
