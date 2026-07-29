@@ -81,3 +81,40 @@ class MediaKeyBuilder:
     def to_file_path(self, bucket: str, key: str) -> str:
         """Compose the ``sb://`` value stored in generated_media.file_path."""
         return f"{_SB_SCHEME}{bucket}/{key}"
+
+    def album_prefix(self, scope_id: int, rid) -> str:
+        """Prefix owning an album's flattened objects: ``t{scope}/album/{rid}/``.
+
+        ``rid`` is whatever ID the caller treats as the album's stable
+        identity within its scope — this builder is agnostic to what table it
+        came from. The ``downloads`` migration module (the only caller today)
+        passes ``resource_versions.id`` (a version id), not ``resources.id``:
+        source_type='web' rows are effectively never re-versioned, and the
+        prefix is self-referential (stored right back into that same row's
+        ``file_path``), so any stable-per-row id works — it does not need to
+        be the parent resource's id.
+
+        Deliberately shares the content-addressed ``t{scope_id}/`` root (not a
+        dedicated namespace like HLS's ``hls/``) — a two-hex-char sha shard can
+        never literally read ``al`` (``l`` is not a hex digit), so this cannot
+        collide with a content-addressed key under the same scope. The
+        trailing slash is load-bearing: it is what makes
+        ``MediaLocation.is_prefix`` true, telling the reader "list everything
+        under this key" instead of "GET this one object".
+        """
+        return f"t{scope_id}/album/{rid}/"
+
+    def derived_prefix(self, resource_id) -> str:
+        """Prefix owning one resource's derived assets: ``derived/{rid}/``.
+
+        Thumbnails / preview sprites / covers are keyed purely by
+        resource_id — deliberately NOT content-addressed like
+        ``content_key_from_sha`` (there is no scope_id concept for a derived
+        asset, and the reader must be able to locate it from resource_id
+        alone, with no DB lookup — see resources_crud_router.py's
+        ``serve_preview_sprite``, which has no DB column to consult for
+        preview_sprite.jpg at all). Own top-level namespace (not nested under
+        ``t{scope}/`` like albums) since derived assets don't belong to any
+        one scope's content pool.
+        """
+        return f"derived/{resource_id}/"
