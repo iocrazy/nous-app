@@ -1823,9 +1823,7 @@ async def get_agent_usage(slug: str, auth: AuthDep) -> Dict[str, Any]:
         )
         conversation_count = (
             await session.execute(
-                select(func.count()).where(
-                    ConversationAiMeta.agent_id == agent_uuid
-                )
+                select(func.count()).where(ConversationAiMeta.agent_id == agent_uuid)
             )
         ).scalar() or 0
         routine_count = (
