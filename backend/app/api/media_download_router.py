@@ -8,7 +8,7 @@ Endpoints for downloading video/cover/music files, managing pending/retry downlo
 
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel
@@ -167,12 +167,18 @@ async def retry_download(
 
 
 @router.get("/download/{platform_id}", tags=TAGS_DOWNLOAD)
-async def download_video_file(platform_id: str, auth: AuthDep):
+async def download_video_file(platform_id: str, request: Request, auth: AuthDep):
     """
     Download video file
 
-    Return video file for browser download.
+    Return video file for browser download. Storage unification: routes
+    through ``serve_stored_file`` — ``download_path`` may be a legacy
+    filesystem-relative path or an ``sb://`` object-store row (post
+    downloader S3 migration), and the router never special-cases the
+    shape. Mirrors ``projects_router.py::download_file``.
     """
+    from app.services.library.media_serving import serve_stored_file
+
     try:
         repo = MediaRepository()
         video = await repo.get_by_platform_id(platform_id)
@@ -184,26 +190,22 @@ async def download_video_file(platform_id: str, auth: AuthDep):
         if not download_path:
             raise HTTPException(status_code=404, detail="Video file path not found")
 
-        try:
-            base_path = Utils.get_download_base_path()
-        except ValueError:
-            raise HTTPException(status_code=404, detail="Download path not configured")
-        file_path = Path(base_path) / download_path
-        if not file_path.exists():
-            raise HTTPException(status_code=404, detail="Video file not found")
-
         video_title = video.get("title", platform_id)
         safe_title = "".join(
             c for c in video_title if c.isalnum() or c in (" ", "-", "_", ".")
         ).strip()
         if not safe_title:
             safe_title = platform_id
-        filename = f"{safe_title}.mp4"
+        # safe_title is already restricted to alnum/space/-_. so it can't
+        # contain a quote, but strip defensively before it lands in a header.
+        safe_title = safe_title.replace('"', "")
+        disposition = f'attachment; filename="{safe_title}.mp4"'
 
-        return FileResponse(
-            path=str(file_path),
-            filename=filename,
-            media_type="video/mp4",
+        return await serve_stored_file(
+            download_path,
+            mime="video/mp4",
+            request=request,
+            disposition=disposition,
         )
     except HTTPException:
         raise
@@ -259,12 +261,20 @@ async def download_cover_file(platform_id: str, auth: AuthDep):
 
 
 @router.get("/download/{platform_id}/music", tags=TAGS_DOWNLOAD)
-async def download_music_file(platform_id: str, auth: AuthDep):
+async def download_music_file(platform_id: str, request: Request, auth: AuthDep):
     """
     Download music/audio file
 
-    Return audio file for browser download.
+    Return audio file for browser download. Storage unification (Task C6):
+    audio extraction (Task C3) now writes ``extract_audio_path`` as an
+    ``sb://`` object-store row, so existence must be checked per-backend
+    (``ObjectStore.exists`` vs filesystem ``.exists()``) and the chosen path
+    served through ``serve_stored_file`` — mirrors ``download_video_file``
+    (Task C2).
     """
+    from app.services.library.media_serving import serve_stored_file
+    from app.services.library.media_storage import ObjectStore, resolve_media_source
+
     try:
         repo = MediaRepository()
         video = await repo.get_by_platform_id(platform_id)
@@ -287,17 +297,22 @@ async def download_music_file(platform_id: str, auth: AuthDep):
         # to status + disk scan.
         extract_audio_path = video.get("extract_audio_path", "")
         music_download_path = video.get("music_download_path", "")
-        audio_file = None
+        chosen_rel = None
 
         for rel in (extract_audio_path, music_download_path):
             if not rel:
                 continue
-            candidate = Path(base_path) / rel
-            if candidate.exists():
-                audio_file = candidate
-                break
+            loc = resolve_media_source(rel)
+            if loc.is_object_store:
+                if await ObjectStore(loc.bucket).exists(loc.key):
+                    chosen_rel = rel
+                    break
+            else:
+                if (Path(base_path) / rel).exists():
+                    chosen_rel = rel
+                    break
 
-        if not audio_file:
+        if not chosen_rel:
             music_status = video.get("music_download_status", "").lower()
             if music_status not in ("completed", "skipped"):
                 raise HTTPException(
@@ -305,38 +320,11 @@ async def download_music_file(platform_id: str, auth: AuthDep):
                     detail="Audio file has not been prepared (no extracted or downloaded audio)",
                 )
 
-        if not audio_file:
-            storage_dir = None
-            download_path = video.get("download_path", "")
-            if download_path:
-                storage_dir = Path(base_path) / Path(download_path).parent
-            else:
-                for pattern in [
-                    f"global/resources/web/*/{platform_id}",
-                    f"*/{platform_id}",
-                ]:
-                    matches = list(Path(base_path).glob(pattern))
-                    if matches:
-                        storage_dir = matches[0]
-                        break
-
-            if storage_dir and storage_dir.exists():
-                for name in [
-                    f"{platform_id}_audio",
-                    "music",
-                    f"{platform_id}_music",
-                    "audio",
-                ]:
-                    for ext in ["mp3", "m4a", "opus", "ogg", "wav", "aac"]:
-                        candidate = storage_dir / f"{name}.{ext}"
-                        if candidate.exists():
-                            audio_file = candidate
-                            break
-                    if audio_file:
-                        break
-
-        if not audio_file:
-            raise HTTPException(status_code=404, detail="Music file not found on disk")
+            # 曾有一段基于 download_path.parent 枚举视频同目录找音乐文件的死兜底：
+            # 假设"音乐和视频在磁盘同目录"，对象存储(sb://)下 Path(sb://...).parent
+            # 算出垃圾路径、静默 False。已删除——音频统一走 extract_audio_path /
+            # music_download_path 两列的值判定，不再靠目录枚举。
+            raise HTTPException(status_code=404, detail="Music file not found")
 
         video_title = video.get("title", platform_id)
         safe_title = "".join(
@@ -344,15 +332,17 @@ async def download_music_file(platform_id: str, auth: AuthDep):
         ).strip()
         if not safe_title:
             safe_title = platform_id
-        suffix = audio_file.suffix or ".mp3"
+        # suffix comes from the stored path string, not a materialized
+        # Path — chosen_rel may be an sb:// key with no on-disk file object.
+        suffix = Path(chosen_rel).suffix or ".mp3"
         filename = f"{safe_title}_audio{suffix}"
-
         content_type = audio_content_type(suffix)
 
-        return FileResponse(
-            path=str(audio_file),
-            filename=filename,
-            media_type=content_type,
+        return await serve_stored_file(
+            chosen_rel,
+            mime=content_type,
+            request=request,
+            disposition=f'attachment; filename="{filename}"',
         )
     except HTTPException:
         raise

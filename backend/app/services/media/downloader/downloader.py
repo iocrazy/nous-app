@@ -10,7 +10,7 @@ async downloads.
 
 import asyncio
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import aiofiles
 import httpx
@@ -70,6 +70,45 @@ async def persist_video_download(
         except Exception as mark_err:
             logger.error(f"Also failed to mark {platform_id} as failed: {mark_err}")
         return False
+
+
+async def _upload_downloaded_video_to_s3(
+    *,
+    user_id: Optional[str],
+    local_path: str,
+    relative_path: str,
+) -> str:
+    """成品落盘后补传对象存储(止血,新下载不再增长文件系统债务)。
+
+    只做「接线」不做「迁移」——存量文件本函数不碰。开关关闭、或
+    ``user_id`` 缺失(系统/孤儿触发的下载,无法解析 scope,参见 CLAUDE.md
+    的 user_id=None 陷阱)时原样返回 ``relative_path``,保持旧的文件系统
+    落盘行为,方便随时回退。
+
+    上传失败故意不吞掉、直接上抛:调用方(download_video_by_platform_id）
+    外层已有"写失败即报 FAILED,不留幽灵态"的语义（对齐 persist_video_download
+    的 2026-07-05 教训），存储写失败理应同等对待,而不是静默留在本地却让
+    UI 看见指向对象存储、实际并不存在的 sb:// 路径。
+    """
+    from app.services.library.storage_flag import unified_storage_enabled
+
+    if not user_id or not await unified_storage_enabled():
+        return relative_path
+
+    from app.services.library.media_storage import library_store, store_local_file
+    from app.services.library.resources_service import _resolve_personal_team_id
+
+    scope_id = int(await _resolve_personal_team_id(user_id))
+    stored = await store_local_file(
+        scope_id=scope_id,
+        source_path=local_path,
+        mime="video/mp4",
+        filename=os.path.basename(relative_path),
+        store=library_store(),
+    )
+    # 成品已在 S3;本地文件留给转码链路 materialize 读取,回收统一由后续
+    # 迁移 PR 的 delete_source 阶段处理,这里绝不删除本地文件。
+    return stored.file_path
 
 
 class DownloaderService:
@@ -630,6 +669,14 @@ class DownloaderService:
                         os.path.getsize(video_full_path)
                         if os.path.exists(video_full_path)
                         else 0
+                    )
+
+                    # 存储分层:新下载的成品直接补传 S3(止血,存量不动)。开关
+                    # 关闭 / user_id 缺失时原样返回本地相对路径,行为不变。
+                    video_relative_path = await _upload_downloaded_video_to_s3(
+                        user_id=user_id,
+                        local_path=video_full_path,
+                        relative_path=video_relative_path,
                     )
 
                     # Store relative path and file size to database. If this

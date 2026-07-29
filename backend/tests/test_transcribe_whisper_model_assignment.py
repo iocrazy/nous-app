@@ -8,10 +8,27 @@ model pick (nous:<model> / BYOK) reached the provider as 'whisper-1' →
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+
+
+@asynccontextmanager
+async def _passthrough_materialize(file_path: str):
+    """Stand-in for app.services.library.media_storage.materialize.
+
+    Task C4 wrapped run_whisper's transcribe call in `materialize()` so sb://
+    audio sources get streamed to a temp file first. These tests are only
+    about model-assignment forwarding (orthogonal concern), so the real
+    materialize() — which validates the path lives under DOWNLOAD_PATH — is
+    stubbed out with a plain passthrough rather than pulled into scope here.
+    Object-store-source materialize behavior is covered by
+    test_transcribe_audio_source_storage.py.
+    """
+    yield Path(file_path)
 
 
 class _FakeWhisperService:
@@ -49,9 +66,15 @@ async def _run(task_assignment: str, provider_config: dict) -> str:
     # exposed via __wrapped__; call it directly (no workflow context needed)
     # with a patched WhisperService import.
     fn = getattr(m.run_whisper, "__wrapped__", m.run_whisper)
-    with patch(
-        "app.services.ai.transcribe.whisper_service.WhisperService",
-        _FakeWhisperService,
+    with (
+        patch(
+            "app.services.ai.transcribe.whisper_service.WhisperService",
+            _FakeWhisperService,
+        ),
+        patch(
+            "app.services.library.media_storage.materialize",
+            _passthrough_materialize,
+        ),
     ):
         await fn(
             audio_path="/tmp/audio.mp3",

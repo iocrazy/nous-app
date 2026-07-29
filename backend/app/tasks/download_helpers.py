@@ -8,6 +8,7 @@ pipeline chaining (transcode, AI).
 """
 
 import os
+import re
 
 from loguru import logger
 
@@ -816,11 +817,120 @@ class AudioExtractError(RuntimeError):
     observability bug, 2026-06-07)."""
 
 
+# sb:// 对象键形如 t{scope_id}/{sha[:2]}/{sha[2:4]}/{sha}{ext}（media_keys.py
+# ::_object_key）—— scope 段就在键的第一段，直接解析即可，不必查库。
+_SCOPE_SEGMENT_RE = re.compile(r"^t(\d+)$")
+
+
+def _scope_id_from_object_key(key: str) -> int:
+    """从对象键的 t{scope_id}/... 段解析 scope_id。
+
+    优先于 media.get("user_id") → _resolve_personal_team_id 查库解析——
+    user_id 在 orphan/系统触发的下载里可能为 None（CLAUDE.md 已知陷阱），
+    而对象键本身自带 scope，无需绕一次查库。畸形键（缺 t{n} 段）直接报错，
+    不静默猜一个 scope。
+    """
+    for part in key.split("/"):
+        m = _SCOPE_SEGMENT_RE.match(part)
+        if m:
+            return int(m.group(1))
+    raise AudioExtractError(f"cannot resolve scope_id from object key: {key!r}")
+
+
+def _extract_audio_object_store(
+    platform_id: str, repo, video_rel_path: str, object_key: str
+) -> bool:
+    """sb:// 源分支：materialize 拉视频到本地临时文件喂 ffmpeg，输出音频落
+    本地 tempfile，再经 store_local_file 传 S3，把 sb:// 写回
+    extract_audio_path。对象存储没有"目录"概念，原逻辑"写视频同目录"在
+    这里不成立——只有最终的 sb:// key 落库，本地临时文件全程 finally 清理。
+    """
+    import asyncio
+    import subprocess
+    import tempfile
+
+    from app.services.library.media_storage import materialize, store_local_file
+
+    # scope 解析放在任何 I/O 之前：键畸形应该快速失败，而不是白白拉一次视频。
+    scope_id = _scope_id_from_object_key(object_key)
+
+    async def _do() -> None:
+        fd, tmp_audio = tempfile.mkstemp(suffix=".m4a")
+        os.close(fd)
+        try:
+            async with materialize(video_rel_path) as video_path:
+                # to_thread 而非直接 subprocess.run —— 这段跑在 run_async 专用的
+                # 一次性事件循环里,没有并发对手,阻塞本身无害,但 to_thread 零成本
+                # 地避免了 ASYNC221(阻塞调用堵在 async 函数里)这类 lint 噪音。
+                result = await asyncio.to_thread(
+                    subprocess.run,
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-i",
+                        str(video_path),
+                        "-vn",  # No video
+                        "-c:a",
+                        "copy",  # Copy audio codec (no re-encoding)
+                        tmp_audio,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,  # Should be < 1s for stream copy
+                    check=False,
+                    **safe_popen_kwargs(),
+                )
+
+            if result.returncode != 0:
+                stderr_clip = (result.stderr or "").strip()[-300:]
+                raise AudioExtractError(f"ffmpeg rc={result.returncode}: {stderr_clip}")
+
+            if not os.path.exists(tmp_audio) or os.path.getsize(tmp_audio) == 0:
+                raise AudioExtractError(
+                    "ffmpeg succeeded but output audio.m4a is missing/empty "
+                    "(source video likely has no audio stream)"
+                )
+
+            file_size = os.path.getsize(tmp_audio)
+            logger.info(
+                f"[Audio/Extract] Success for {platform_id}: "
+                f"{Utils.format_file_size(file_size)}"
+            )
+
+            stored = await store_local_file(
+                scope_id=scope_id,
+                source_path=tmp_audio,
+                mime="audio/mp4",
+                filename="audio.m4a",
+            )
+
+            await repo.update(platform_id, {"extract_audio_path": stored.file_path})
+        finally:
+            if os.path.exists(tmp_audio):
+                os.remove(tmp_audio)
+
+    try:
+        run_async(_do())
+        return True
+    except AudioExtractError:
+        raise
+    except subprocess.TimeoutExpired:
+        raise AudioExtractError("ffmpeg timed out after 30s") from None
+    except FileNotFoundError:
+        raise AudioExtractError("ffmpeg binary not found in PATH") from None
+    except Exception as e:
+        raise AudioExtractError(f"{type(e).__name__}: {e}") from e
+
+
 def extract_audio_from_video(platform_id: str) -> bool:
     """Extract audio from downloaded video using ffmpeg stream copy (zero-transcode).
 
-    Looks up the video file path from DB, extracts audio to audio.m4a
-    in the same directory, and updates music_download_path in DB.
+    Dispatches on the storage backend of the source video (looking at
+    ``download_path`` itself, not a global flag, so unmigrated legacy
+    videos keep working while migrated ones route through S3):
+      - filesystem source → original behavior: audio.m4a written next to
+        the video, relative path recorded in extract_audio_path.
+      - sb:// (object store) source → see ``_extract_audio_object_store``.
 
     This is ~100x faster than downloading music separately via URL
     because it's a pure I/O operation with no network or re-encoding.
@@ -831,6 +941,7 @@ def extract_audio_from_video(platform_id: str) -> bool:
     import subprocess
 
     from app.repositories.media_repository import MediaRepository as _MR_extract
+    from app.services.library.media_storage import resolve_media_source
 
     repo = _MR_extract()
     media = run_async(repo.get_by_platform_id(platform_id))
@@ -842,6 +953,10 @@ def extract_audio_from_video(platform_id: str) -> bool:
         raise AudioExtractError(
             f"media {platform_id} has no download_path (video not downloaded)"
         )
+
+    loc = resolve_media_source(video_rel_path)
+    if loc.is_object_store:
+        return _extract_audio_object_store(platform_id, repo, video_rel_path, loc.key)
 
     base_path = Utils.get_download_base_path()
     video_full_path = os.path.join(base_path, video_rel_path)
