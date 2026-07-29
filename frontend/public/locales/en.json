@@ -982,7 +982,7 @@
       "promptTranslated": "Prompt translated",
       "promptTranslateFailed": "Translation failed",
       "generatePrompt": "Generate",
-      "generatePromptHint": "Reverse-engineer the prompt from this image",
+      "generatePromptHint": "Reverse-engineer the prompt from this asset (a video uses its cover)",
       "generateFromImage": "Generate from Image",
       "promptGenerating": "Generating prompt from image...",
       "promptGenerated": "Prompt generated",
@@ -1018,7 +1018,12 @@
       "positivePlaceholder": "Prompt for this slide...",
       "negative": "Negative",
       "negativePlaceholder": "Negative prompt (what to avoid)...",
-      "close": "Close"
+      "close": "Close",
+      "generate": "Generate",
+      "generateHint": "Reverse-engineer the prompt from this slide",
+      "regenerateHint": "Regenerate — replaces this slide’s prompt",
+      "generating": "Analyzing slide...",
+      "generateFailed": "Failed to generate prompt"
     },
     "folderInfoPanel": {
       "title": "Folder Info",

@@ -20,8 +20,13 @@ export type TaskType =
   | 'ai_extract'
   | 'ai_transcription'
   | 'ai_summary'
-  // Image → generation-prompt reverse-engineering (caption_asset workflow).
+  // Image (or a video's cover still) → generation-prompt
+  // reverse-engineering (caption_asset workflow).
   | 'prompt_caption'
+  // One album slide → its own prompt, merged into resources.slide_prompts
+  // (caption_slide workflow). Separate from prompt_caption because an album
+  // fans out into one row PER SLIDE and they should read as such.
+  | 'prompt_caption_slide'
   // 12-dimension bilingual auto-tagging (classify_asset workflow).
   | 'asset_classify'
   // Smart-canvas image/video generation (canvas_generation_workflow, G4-B1)
@@ -109,6 +114,7 @@ export function getTaskCategory(type: TaskType): TaskCategory {
     case 'ai_transcription':
     case 'ai_summary':
     case 'prompt_caption':
+    case 'prompt_caption_slide':
     case 'asset_classify':
     case 'agent':
     case 'canvas_gen':
@@ -800,6 +806,7 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     ai_transcription: 0,
     ai_summary: 0,
     prompt_caption: 0,
+    prompt_caption_slide: 0,
     asset_classify: 0,
     agent: 0,
     agent_routine: 0,
@@ -894,6 +901,7 @@ export function taskTypeLabel(type: TaskType): string {
     case 'ai_transcription': return 'Transcription';
     case 'ai_summary': return 'Summary';
     case 'prompt_caption': return 'Prompt';
+    case 'prompt_caption_slide': return 'Slide Prompt';
     case 'asset_classify': return 'Auto Tag';
     case 'agent': return 'Agent';
     case 'canvas_gen': return 'Canvas Generate';

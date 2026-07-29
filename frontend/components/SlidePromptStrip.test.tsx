@@ -27,11 +27,39 @@ vi.mock('../supabaseClient', () => ({
 }));
 
 const updateResource = vi.fn().mockResolvedValue({});
+const generateSlidePrompt = vi.fn().mockResolvedValue('task-1');
 vi.mock('../services/resourceService', () => ({
   updateResource: (...a: unknown[]) => updateResource(...a),
+  generateSlidePrompt: (...a: unknown[]) => generateSlidePrompt(...a),
 }));
 
+// The ⚡ Generate flow watches one task via useTaskCompletion, which only
+// reads `.tasks` off the manager.
+const mockTasks = vi.fn<() => UnifiedTask[]>(() => []);
+vi.mock('../contexts/TaskManagerContext', () => ({
+  useTaskManager: () => ({ tasks: mockTasks() }),
+}));
+
+import type { UnifiedTask } from '../contexts/TaskManagerContext';
 import { SlidePromptStrip } from './SlidePromptStrip';
+
+function makeTask(
+  id: string,
+  status: UnifiedTask['status'],
+  extra: Partial<UnifiedTask> = {},
+): UnifiedTask {
+  return {
+    id,
+    user_id: 'u1',
+    task_type: 'prompt_caption_slide',
+    status,
+    title: 'Prompt b.jpg',
+    progress: 100,
+    metadata: {},
+    created_at: '2026-07-29T00:00:00Z',
+    ...extra,
+  };
+}
 
 describe('SlidePromptStrip', () => {
   beforeEach(() => {
@@ -41,6 +69,8 @@ describe('SlidePromptStrip', () => {
     selectMock.mockClear();
     eqMock.mockClear();
     addToast.mockReset();
+    generateSlidePrompt.mockReset().mockResolvedValue('task-1');
+    mockTasks.mockReturnValue([]);
   });
 
   it('shows the "+ Add prompt" pill when there is no entry for this slide', async () => {
@@ -192,5 +222,93 @@ describe('SlidePromptStrip — clears SlidePlayer\'s bottom bar', () => {
     const pill = await screen.findByText(/Add prompt for this slide/i);
     expect(pill.className).toContain('border-dashed');
     expect(pill.className).not.toContain('text-white/60');
+  });
+});
+
+describe('SlidePromptStrip — ⚡ Generate', () => {
+  beforeEach(() => {
+    singleMock.mockReset().mockResolvedValue({ data: resourceRow, error: null });
+    generateSlidePrompt.mockReset().mockResolvedValue('task-1');
+    mockTasks.mockReturnValue([]);
+  });
+
+  const clickGenerate = async () => {
+    const btn = await screen.findByLabelText('Generate');
+    await act(async () => { fireEvent.click(btn); });
+    return btn;
+  };
+
+  it('offers Generate on an EMPTY slide and dispatches for that slide', async () => {
+    render(<SlidePromptStrip resourceId="r1" slideName="b.jpg" />);
+    await screen.findByText(/Add prompt for this slide/i);
+    await clickGenerate();
+    expect(generateSlidePrompt).toHaveBeenCalledWith('r1', 'b.jpg');
+  });
+
+  it('offers Generate on a slide that ALREADY has a prompt (regenerate)', async () => {
+    render(<SlidePromptStrip resourceId="r1" slideName="a.jpg" />);
+    await screen.findByText(/a cat sitting on a couch/i);
+    await clickGenerate();
+    expect(generateSlidePrompt).toHaveBeenCalledWith('r1', 'a.jpg');
+  });
+
+  it('re-reads slide_prompts when the task completes, without blanking the strip', async () => {
+    const { rerender } = render(<SlidePromptStrip resourceId="r1" slideName="b.jpg" />);
+    await screen.findByText(/Add prompt for this slide/i);
+    await clickGenerate();
+
+    singleMock.mockResolvedValue({
+      data: { slide_prompts: { ...resourceRow.slide_prompts, 'b.jpg': { en: 'a generated prompt' } } },
+      error: null,
+    });
+    // The realtime row lands; a re-render is what lets useTaskCompletion see it.
+    mockTasks.mockReturnValue([makeTask('task-1', 'completed')]);
+    await act(async () => { rerender(<SlidePromptStrip resourceId="r1" slideName="b.jpg" />); });
+
+    await waitFor(() => expect(screen.getByText('a generated prompt')).toBeTruthy());
+    // The refresh is silent — the strip never fell back to its loading (null) render.
+    expect(screen.queryByText(/Add prompt for this slide/i)).toBeNull();
+  });
+
+  it('renders the resolved error copy inline when the task fails', async () => {
+    const { rerender } = render(<SlidePromptStrip resourceId="r1" slideName="b.jpg" />);
+    await screen.findByText(/Add prompt for this slide/i);
+    await clickGenerate();
+
+    mockTasks.mockReturnValue([
+      makeTask('task-1', 'failed', {
+        metadata: { error_code: 'PROVIDER_AUTH' },
+        error_msg: 'DBOSMaxStepRetriesExceeded: Step ai_caption_via_provider …',
+      }),
+    ]);
+    await act(async () => { rerender(<SlidePromptStrip resourceId="r1" slideName="b.jpg" />); });
+
+    const alert = await screen.findByRole('alert');
+    // The catalog copy REPLACES the raw engine text — that is the whole point.
+    expect(alert.textContent).toContain('The AI provider rejected the credentials');
+    expect(alert.textContent).toContain('Settings');
+    expect(alert.textContent).not.toContain('DBOSMaxStepRetriesExceeded');
+  });
+
+  it('surfaces the endpoint\'s reason when the dispatch itself is rejected', async () => {
+    generateSlidePrompt.mockRejectedValue(new Error('Only image slides can be reverse-engineered'));
+    render(<SlidePromptStrip resourceId="r1" slideName="b.jpg" />);
+    await screen.findByText(/Add prompt for this slide/i);
+    await clickGenerate();
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Only image slides can be reverse-engineered');
+  });
+
+  it('keeps an in-flight run pinned to its own slide', async () => {
+    const { rerender } = render(<SlidePromptStrip resourceId="r1" slideName="b.jpg" />);
+    await screen.findByText(/Add prompt for this slide/i);
+    await clickGenerate();
+    expect(screen.getByText('Analyzing slide...')).toBeTruthy();
+
+    // Browsing to another slide must not decorate IT with slide b's spinner.
+    rerender(<SlidePromptStrip resourceId="r1" slideName="a.jpg" />);
+    await waitFor(() => expect(screen.queryByText('Analyzing slide...')).toBeNull());
+    expect(screen.getByText(/a cat sitting on a couch/i)).toBeTruthy();
   });
 });

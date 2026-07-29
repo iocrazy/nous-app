@@ -110,8 +110,41 @@ describe('ResourcePromptSection', () => {
     expect(typeof capturedProps.onGenerated).toBe('function');
   });
 
-  it('canGenerate is false for non-image resources', async () => {
-    singleMock.mockResolvedValueOnce({ data: { ...resourceRow, file_type: 'video' }, error: null });
+  // Videos joined the flow on 2026-07-29 — they are reverse-engineered from
+  // their downloaded cover still, so the download surfaces stop showing a
+  // Prompt block with no way to fill it.
+  it('canGenerate is true for videos (captioned from their cover)', async () => {
+    singleMock.mockResolvedValueOnce({
+      // file_type '0' is douyin's raw type code — the shape most of the
+      // library's videos actually have, which is why mime_type is the gate.
+      data: { ...resourceRow, file_type: '0', mime_type: 'video/mp4', media_id: '77' },
+      error: null,
+    });
+    render(<ResourcePromptSection resourceId="r1" />);
+    await screen.findByTestId('prompt-section');
+
+    expect(capturedProps.canGenerate).toBe(true);
+  });
+
+  // An album's file_path is a DIRECTORY of slides — there is no single image
+  // to caption, so the resource-level action stays off and the per-slide ⚡
+  // in SlidePromptStrip is the way in.
+  it('canGenerate is false for a downloaded album', async () => {
+    singleMock.mockResolvedValueOnce({
+      data: { ...resourceRow, file_type: '68', mime_type: 'image/jpeg', media_id: '88' },
+      error: null,
+    });
+    render(<ResourcePromptSection resourceId="r1" />);
+    await screen.findByTestId('prompt-section');
+
+    expect(capturedProps.canGenerate).toBe(false);
+  });
+
+  it('canGenerate is false for resources with nothing to look at', async () => {
+    singleMock.mockResolvedValueOnce({
+      data: { ...resourceRow, file_type: 'audio', mime_type: 'audio/mpeg' },
+      error: null,
+    });
     render(<ResourcePromptSection resourceId="r1" />);
     await screen.findByTestId('prompt-section');
 

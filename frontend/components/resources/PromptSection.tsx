@@ -404,7 +404,7 @@ export function PromptSection({
         <div className="flex items-center gap-2.5">
           {canGenerate && (
             <button onClick={handleGenerate} disabled={generating}
-              title={t('resources.infoPanel.generatePromptHint', 'Reverse-engineer the prompt from this image')}
+              title={t('resources.infoPanel.generatePromptHint', 'Reverse-engineer the prompt from this asset (a video uses its cover)')}
               className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-[var(--accent-text)] transition-colors disabled:opacity-50">
               {generating ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}{' '}
               {t('resources.infoPanel.generatePrompt', 'Generate')}

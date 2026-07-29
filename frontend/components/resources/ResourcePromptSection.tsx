@@ -20,13 +20,40 @@ import type { Resource, Tag } from '../../types';
 import { PromptSection } from './PromptSection';
 
 const PROMPT_FIELDS =
-  'id, filename, file_type, gen_prompt, gen_prompt_zh, gen_prompt_negative, gen_prompt_negative_zh, gen_prompt_json';
+  'id, filename, file_type, mime_type, media_id, gen_prompt, gen_prompt_zh, gen_prompt_negative, gen_prompt_negative_zh, gen_prompt_json';
 
 type PromptResource = Pick<
   Resource,
-  | 'id' | 'filename' | 'file_type' | 'gen_prompt' | 'gen_prompt_zh'
+  | 'id' | 'filename' | 'file_type' | 'mime_type' | 'media_id' | 'gen_prompt' | 'gen_prompt_zh'
   | 'gen_prompt_negative' | 'gen_prompt_negative_zh' | 'gen_prompt_json'
 >;
+
+/**
+ * Can this resource be reverse-engineered as a WHOLE? Mirrors the backend's
+ * `caption_gate_reason` (`app/services/ai/caption_source.py`) — keep the two
+ * in step, or the button offers something the endpoint rejects.
+ *
+ * - image → yes, it captions its own bytes
+ * - video → yes, it captions its downloaded cover still
+ * - download-backed image → NO: that's an album, whose `file_path` is a
+ *   directory of slides. It captions per slide, through SlidePromptStrip's ⚡.
+ * - anything else (audio, documents) → no
+ *
+ * Gated on `mime_type`, not `file_type`: for downloaded rows `file_type`
+ * holds the raw platform type code ('0', '4', '68', …), so `file_type ===
+ * 'video'` would miss most of the video library.
+ */
+export function canGenerateForResource(
+  resource: Pick<PromptResource, 'file_type' | 'mime_type' | 'media_id'>,
+): boolean {
+  const mime = (resource.mime_type || '').toLowerCase();
+  const fileType = (resource.file_type || '').toLowerCase();
+  if (mime.startsWith('video/') || (!mime && fileType === 'video')) return true;
+  if (mime.startsWith('image/') || (!mime && fileType === 'image')) {
+    return !resource.media_id;
+  }
+  return false;
+}
 
 export function ResourcePromptSection({
   resourceId,
@@ -132,7 +159,7 @@ export function ResourcePromptSection({
       resource={resource as unknown as Resource}
       onPatch={handlePatch}
       onEnsureTriggerTag={handleEnsureTriggerTag}
-      canGenerate={resource.file_type === 'image'}
+      canGenerate={canGenerateForResource(resource)}
       onGenerated={handleGenerated}
       translating={translating}
       onTranslate={handleTranslate}

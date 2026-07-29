@@ -120,6 +120,30 @@ export async function generateGenPrompt(resourceId: string): Promise<string> {
   return json.task_id;
 }
 
+/** Reverse-engineer the prompt for ONE slide of a downloaded album.
+ *  Async — returns the task id; the workflow merges the result into
+ *  `resources.slide_prompts[slideName]` (other slides untouched) when it
+ *  finishes, so the caller should refetch that map on completion. */
+export async function generateSlidePrompt(
+  resourceId: string,
+  slideName: string,
+): Promise<string> {
+  const apiUrl = getApiUrl();
+  const response = await fetch(
+    `${apiUrl}/api/v1/resources/${resourceId}/slides/${encodeURIComponent(slideName)}/generate-prompt`,
+    { method: 'POST', headers: await getAuthHeaders() },
+  );
+  if (!response.ok) {
+    const detail = await response
+      .json()
+      .then((j) => j?.detail)
+      .catch(() => null);
+    throw new Error(detail || 'Failed to start slide prompt generation');
+  }
+  const json = await response.json();
+  return json.task_id;
+}
+
 /** 12-dimension bilingual auto-tagging via the user's assigned classify
  *  agent. Async — returns the task id; the workflow attaches
  *  resource_tags (source='ai') when it finishes. */

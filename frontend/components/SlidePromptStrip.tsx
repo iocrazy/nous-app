@@ -24,12 +24,26 @@
  * error state (loadFailed) instead of defaulting the map to `{}`, so a
  * save can never PATCH an empty object over every other slide's real
  * entries.
+ *
+ * ⚡ Generate (2026-07-29): the same reverse-engineering the resource-level
+ * PromptSection offers, scoped to one slide — an album's `file_path` is a
+ * DIRECTORY, so there is no single image to caption and the whole-resource
+ * Generate can't work on it. Dispatch → track the task via `useTaskCompletion`
+ * → refetch the map on completion. The backend merges server-side (see
+ * `merge_slide_prompt_map`), so this component only has to re-read.
+ *
+ * Regenerating over an existing entry OVERWRITES it without a confirm. Two
+ * things make that acceptable rather than destructive: the merge is per-FIELD,
+ * so a hand-written negative prompt survives (the caption contract has no
+ * negative side), and the action is one explicit click on a per-slide control.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, Copy, Loader2 } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Copy, Loader2, X, Zap } from 'lucide-react';
 import { supabase } from '../supabaseClient';
-import { updateResource } from '../services/resourceService';
+import { generateSlidePrompt, updateResource } from '../services/resourceService';
+import { useTaskCompletion } from '../hooks/useTaskCompletion';
+import { resolveTaskError, type ResolvedTaskError } from '../utils/errorCatalog';
 import { useOptionalToast } from './Toast';
 import type { Resource } from '../types';
 
@@ -39,6 +53,19 @@ type SlidePromptsMap = NonNullable<Resource['slide_prompts']>;
 export interface SlidePromptStripProps {
   resourceId: string;
   slideName: string;
+}
+
+/** The one read of the column, shared by the initial load and the
+ *  post-Generate refresh so the two can never drift apart. Throws — the
+ *  two callers want different failure handling (block vs. log). */
+async function fetchSlidePrompts(resourceId: string): Promise<SlidePromptsMap> {
+  const { data, error } = await supabase
+    .from('resources')
+    .select('slide_prompts')
+    .eq('id', resourceId)
+    .single();
+  if (error) throw error;
+  return (data?.slide_prompts as SlidePromptsMap | null) || {};
 }
 
 /**
@@ -71,24 +98,33 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
   const [negValue, setNegValue] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // ─── Generate — self-managed dispatch + realtime completion ─────
+  // Mirrors PromptSection's flow, minus the progress card: a slide strip is
+  // ~28px of chrome over the image, so it shows a spinner and stays out of
+  // the way rather than growing a progress bar over the artwork.
+  const [dispatching, setDispatching] = useState(false);
+  const [taskId, setTaskId] = useState<string | null>(null);
+  // Which slide the in-flight run belongs to. The watch deliberately SURVIVES
+  // browsing to another slide — the user starts a caption and keeps swiping,
+  // and dropping the watch there would mean the finished prompt never lands
+  // in the map until the component remounts. Both the spinner and the error
+  // card are gated on this matching the visible slide instead, so a run for
+  // slide 1 never decorates slide 2's strip.
+  const [pendingSlide, setPendingSlide] = useState<string | null>(null);
+  const [genError, setGenError] = useState<
+    { slide: string; resolved: ResolvedTaskError; raw: string } | null
+  >(null);
+  const generating = (dispatching || Boolean(taskId)) && pendingSlide === slideName;
+  const slideError = genError && genError.slide === slideName ? genError : null;
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setLoadFailed(false);
     (async () => {
       try {
-        const { data, error } = await supabase
-          .from('resources')
-          .select('slide_prompts')
-          .eq('id', resourceId)
-          .single();
-        if (cancelled) return;
-        if (error) {
-          console.error('Failed to load slide_prompts:', error);
-          setLoadFailed(true);
-          return;
-        }
-        setSlidePrompts((data?.slide_prompts as SlidePromptsMap | null) || {});
+        const map = await fetchSlidePrompts(resourceId);
+        if (!cancelled) setSlidePrompts(map);
       } catch (err) {
         if (!cancelled) {
           console.error('Failed to load slide_prompts:', err);
@@ -100,6 +136,59 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
     })();
     return () => { cancelled = true; };
   }, [resourceId, reloadKey]);
+
+  // Silent re-read after a successful Generate. Deliberately NOT a reloadKey
+  // bump: that path flips `loading`, and `loading` unmounts the whole strip,
+  // so the control the user just clicked would blink out at the exact moment
+  // its result arrives.
+  const refreshPrompts = useCallback(async () => {
+    try {
+      setSlidePrompts(await fetchSlidePrompts(resourceId));
+    } catch (err) {
+      console.error('Failed to refresh slide_prompts after generation:', err);
+    }
+  }, [resourceId]);
+
+  useTaskCompletion(taskId, {
+    onComplete: () => {
+      setTaskId(null);
+      refreshPrompts();
+    },
+    onError: (task) => {
+      setTaskId(null);
+      // metadata.error_code is the backend's classification; error_msg is the
+      // trigger-owned raw text and only the fallback (see utils/errorCatalog).
+      setGenError({
+        slide: pendingSlide || slideName,
+        resolved: resolveTaskError(task.metadata, task.error_msg, t),
+        raw: task.error_msg || '',
+      });
+    },
+  });
+
+  const handleGenerate = async () => {
+    if (generating || dispatching) return;
+    setGenError(null);
+    setPendingSlide(slideName);
+    setDispatching(true);
+    const target = slideName;
+    try {
+      setTaskId(await generateSlidePrompt(resourceId, target));
+    } catch (err) {
+      console.error('Failed to start slide prompt generation:', err);
+      // Dispatch-time failure — no task row exists, so there is no error_code
+      // to resolve and the catalog falls back to the raw text. That text is
+      // the endpoint's `detail`, which is where the actionable gate reasons
+      // ("Only image slides…", "…not found") live.
+      const msg =
+        err instanceof Error && err.message
+          ? err.message
+          : t('resources.slidePrompt.generateFailed', 'Failed to generate prompt');
+      setGenError({ slide: target, resolved: resolveTaskError(null, msg, t), raw: msg });
+    } finally {
+      setDispatching(false);
+    }
+  };
 
   // Collapse the editor whenever the user browses to a different slide —
   // an open editor should never silently keep editing the previous slide.
@@ -172,14 +261,64 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
     }
   };
 
+  // ⚡ — present in BOTH collapsed states. On an empty slide it is the whole
+  // point of the strip; on a filled one it regenerates (overwriting the
+  // positive sides, keeping any hand-written negative — see the header).
+  const generateButton = (
+    <button
+      type="button"
+      onClick={handleGenerate}
+      disabled={generating}
+      title={
+        hasEntry
+          ? t('resources.slidePrompt.regenerateHint', 'Regenerate — replaces this slide’s prompt')
+          : t('resources.slidePrompt.generateHint', 'Reverse-engineer the prompt from this slide')
+      }
+      aria-label={t('resources.slidePrompt.generate', 'Generate')}
+      className="shrink-0 flex items-center gap-1 text-[10px] text-white/70 hover:text-white transition-colors disabled:opacity-50"
+    >
+      {generating ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+    </button>
+  );
+
+  // Failure copy sits IN the strip rather than in a toast: the whole point of
+  // the error catalog is that the user can act on it, and a notification that
+  // disappears in a few seconds can't be read twice.
+  const errorRow = slideError ? (
+    <div
+      role="alert"
+      className="mb-1 flex items-start gap-1.5 bg-black/70 backdrop-blur-sm border border-red-400/30 rounded-lg px-2.5 py-1.5"
+    >
+      <AlertTriangle size={11} className="mt-0.5 shrink-0 text-red-400" />
+      <div className="min-w-0 flex-1">
+        <div className="text-[10px] text-red-300">{slideError.resolved.title}</div>
+        {Boolean(slideError.resolved.hint) && (
+          <div className="mt-0.5 text-[9.5px] text-white/60">{slideError.resolved.hint}</div>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => setGenError(null)}
+        aria-label={t('common.dismiss', 'Dismiss')}
+        className="shrink-0 text-white/50 hover:text-white transition-colors"
+      >
+        <X size={11} />
+      </button>
+    </div>
+  ) : null;
+
   if (!expanded) {
     return (
       <div className={`${STRIP_ANCHOR} z-10`}>
+        {errorRow}
         {hasEntry ? (
           <div className="flex items-center gap-2 bg-black/55 backdrop-blur-sm rounded-lg px-3 py-1.5">
             <span className="flex-1 min-w-0 truncate text-xs text-white/85 font-mono">
-              {previewText}
+              {generating
+                ? t('resources.slidePrompt.generating', 'Analyzing slide...')
+                : previewText}
             </span>
+            {generateButton}
             <button
               type="button"
               onClick={openEditor}
@@ -196,6 +335,11 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
               <Copy size={12} />
             </button>
           </div>
+        ) : generating ? (
+          <div className="inline-flex items-center gap-1.5 bg-black/60 backdrop-blur-sm rounded-full px-3 py-1 text-xs text-white/85">
+            <Loader2 size={12} className="animate-spin" />
+            {t('resources.slidePrompt.generating', 'Analyzing slide...')}
+          </div>
         ) : (
           // Dashed pill + full-strength label, mirroring PromptSection's
           // "+ Add Prompt" empty state. The previous `text-white/60` with no
@@ -203,13 +347,18 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
           // control at all. The literal "+ " (rather than a Plus icon) is
           // deliberate — it keeps the M1 double-plus guard meaningful and
           // matches PromptSection's own pill.
-          <button
-            type="button"
-            onClick={openEditor}
-            className="bg-black/60 backdrop-blur-sm border border-dashed border-white/35 rounded-full px-3 py-1 text-xs text-white/85 hover:text-white hover:border-white/60 transition-colors"
-          >
-            + {t('resources.slidePrompt.addPrompt', 'Add prompt for this slide')}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={openEditor}
+              className="bg-black/60 backdrop-blur-sm border border-dashed border-white/35 rounded-full px-3 py-1 text-xs text-white/85 hover:text-white hover:border-white/60 transition-colors"
+            >
+              + {t('resources.slidePrompt.addPrompt', 'Add prompt for this slide')}
+            </button>
+            <div className="bg-black/60 backdrop-blur-sm rounded-full px-2.5 py-1.5 flex items-center">
+              {generateButton}
+            </div>
+          </div>
         )}
       </div>
     );

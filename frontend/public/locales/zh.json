@@ -982,7 +982,7 @@
       "promptTranslated": "提示词已翻译",
       "promptTranslateFailed": "翻译失败",
       "generatePrompt": "反推",
-      "generatePromptHint": "从图片反推生成提示词",
+      "generatePromptHint": "从素材反推生成提示词（视频使用封面图）",
       "generateFromImage": "从图片反推",
       "promptGenerating": "正在从图片反推提示词...",
       "promptGenerated": "提示词已生成",
@@ -1018,7 +1018,12 @@
       "positivePlaceholder": "这张图的提示词...",
       "negative": "负面",
       "negativePlaceholder": "负面提示词（要避免的内容）...",
-      "close": "关闭"
+      "close": "关闭",
+      "generate": "反推",
+      "generateHint": "从这张图反推生成提示词",
+      "regenerateHint": "重新反推 — 会覆盖这张图现有的提示词",
+      "generating": "正在分析这张图...",
+      "generateFailed": "提示词生成失败"
     },
     "folderInfoPanel": {
       "title": "文件夹信息",
