@@ -307,35 +307,10 @@ async def download_music_file(platform_id: str, auth: AuthDep):
                     detail="Audio file has not been prepared (no extracted or downloaded audio)",
                 )
 
-        if not audio_file:
-            storage_dir = None
-            download_path = video.get("download_path", "")
-            if download_path:
-                storage_dir = Path(base_path) / Path(download_path).parent
-            else:
-                for pattern in [
-                    f"global/resources/web/*/{platform_id}",
-                    f"*/{platform_id}",
-                ]:
-                    matches = list(Path(base_path).glob(pattern))
-                    if matches:
-                        storage_dir = matches[0]
-                        break
-
-            if storage_dir and storage_dir.exists():
-                for name in [
-                    f"{platform_id}_audio",
-                    "music",
-                    f"{platform_id}_music",
-                    "audio",
-                ]:
-                    for ext in ["mp3", "m4a", "opus", "ogg", "wav", "aac"]:
-                        candidate = storage_dir / f"{name}.{ext}"
-                        if candidate.exists():
-                            audio_file = candidate
-                            break
-                    if audio_file:
-                        break
+        # 曾有一段基于 download_path.parent 枚举视频同目录找音乐文件的死兜底：
+        # 假设"音乐和视频在磁盘同目录"，对象存储(sb://)下 Path(sb://...).parent
+        # 算出垃圾路径、静默 False。已删除——音频统一走 extract_audio_path /
+        # music_download_path 两列的值判定，不再靠目录枚举。
 
         if not audio_file:
             raise HTTPException(status_code=404, detail="Music file not found on disk")
