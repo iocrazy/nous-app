@@ -116,12 +116,23 @@ class RowExtract:
 
 @dataclass(frozen=True)
 class ModuleConfig:
-    """Per-module SELECT + row semantics for the legacy → sb:// migration."""
+    """Per-module SELECT + row semantics for the legacy → sb:// migration.
+
+    ``list_rows`` is the escape hatch for ``derived`` (see that module's
+    comment below): its "rows" come from walking a filesystem directory, not
+    a SQL SELECT — ``preview_sprite.jpg`` has no DB column anywhere, so there
+    is nothing to SELECT it FROM. When ``list_rows`` is set,
+    ``storage_migration_workflow`` calls it instead of
+    ``db_engine.fetch_all(select_sql, ...)`` to produce the batch; ``extract``/
+    ``update_row`` are unused in that case (the module's own migrate function
+    handles both directly) and are given no-op/raising placeholders.
+    """
 
     name: str
     select_sql: str
     extract: Callable[[dict], RowExtract]
     update_row: Callable[[dict, str, Optional[str]], Awaitable[None]]
+    list_rows: Optional[Callable[[Optional[int], int], Awaitable[list[dict]]]] = None
 
 
 # ── uploads: resource_versions (+ resources.file_path sync) ────────────
@@ -460,6 +471,205 @@ async def _hls_update_row(row: dict, file_path: str, sha256: Optional[str]) -> N
     await db_engine.execute(_HLS_UPDATE_SQL, {"file_path": file_path, "id": row["id"]})
 
 
+# ── derived: thumbnails/sprites/covers (filesystem walk, NOT a DB SELECT) ──
+#
+# Runtime survey (2026-07-29, prod nous-backend container):
+#   DOWNLOAD_PATH/derived/
+#     thumbnails/{resource_id}/thumbnail.{webp,png} [+ preview_sprite.jpg]
+#     hls/{resource_id}/{version_id}/...             ← NOT this module's job,
+#                                                       already owned by the
+#                                                       ``hls`` module above
+#                                                       via resource_versions
+#                                                       .hls_path
+#     covers/                                        ← doesn't exist yet in
+#                                                       prod (upload_resource_
+#                                                       cover only recently
+#                                                       started writing here
+#                                                       for sb:// original
+#                                                       rows) but the same
+#                                                       shape once it does
+#
+# Only 10 thumbnails/{rid}/ directories existed in prod at survey time (small
+# — most thumbnails are generated post-Task-1, when the source was already
+# sb://, so DerivedArtifactPaths routes new ones straight to this layout;
+# legacy pre-migration thumbnails still sit next to their source file and are
+# NOT covered by this module — same "unchanged for legacy fs rows" contract
+# every other module in this file keeps).
+#
+# Why this can't be a SQL SELECT like the other four modules: resources DOES
+# have thumbnail_path / cover_image_path columns (thumbnail_service.py sets
+# thumbnail_path after generating; upload_resource_cover sets
+# cover_image_path), so THOSE two are DB-addressable. preview_sprite.jpg is
+# NOT — neither thumbnail_service.py nor resources_crud_router.py ever
+# persists its location anywhere; resources_crud_router.py's
+# serve_preview_sprite finds it purely by resource_id + a fixed filename
+# convention. There is no column to SELECT it FROM, so ``list_rows`` walks
+# the directories instead of the DB.
+#
+# ⚠️ Tension worth flagging before this module is ever dry-run for real
+# (PR-4): derived_paths.py's docstring documents a DELIBERATE architecture
+# call from gallery PR #1491 — "只有原件进对象存储" (derived assets
+# deliberately stay on the filesystem; measured CIFS-small-file reads as
+# faster than S3 for this case). This module exists to support the OPPOSITE
+# — moving derived assets into sb://library/derived/ too — which may
+# contradict that decision depending on whether the storage backend behind
+# DOWNLOAD_PATH is still network-mounted today. Confirm/update that decision
+# before actually running this module's migration, not just before writing
+# the code for it.
+
+_DERIVED_KINDS = ("thumbnails", "covers")
+
+# thumbnail_path / cover_image_path ARE real DB columns (unlike
+# preview_sprite.jpg) — synced best-effort after a successful put_dir so the
+# normal reader (resources_crud_router.py's thumbnail_path > cover_image_path
+# priority chain) also picks up the sb:// value. Matched by basename against
+# whatever the column currently holds, since the column stores a full
+# relative path (e.g. "derived/thumbnails/{rid}/thumbnail.webp") while the
+# migrated key only reuses the FILENAME under the new derived/{rid}/ prefix.
+_DERIVED_RESOURCE_SELECT_SQL = (
+    "SELECT thumbnail_path, cover_image_path FROM resources WHERE id = :resource_id"
+)
+_DERIVED_COLUMN_UPDATE_SQL = {
+    "thumbnail_path": "UPDATE resources SET thumbnail_path = :path WHERE id = :resource_id",
+    "cover_image_path": "UPDATE resources SET cover_image_path = :path WHERE id = :resource_id",
+}
+
+
+async def _list_derived_rows(scope_id: Optional[int], limit: int) -> list[dict]:
+    """Discover legacy derived-asset directories on disk.
+
+    Not a DB SELECT — see the module comment above for why. ``scope_id``
+    scoping is NOT supported here (derived assets carry no scope of their
+    own, unlike the content-addressed modules): a non-None value raises
+    rather than silently returning an unscoped batch when the caller asked
+    to restrict one.
+    """
+    if scope_id is not None:
+        raise ValueError(
+            "storage-migration module 'derived' does not support scope_id "
+            "filtering — derived assets are keyed by resource_id only"
+        )
+    base = Path(settings.DOWNLOAD_PATH) / "derived"
+    rows: list[dict] = []
+    for kind in _DERIVED_KINDS:
+        kind_dir = base / kind
+        if not kind_dir.is_dir():
+            continue
+        for rid_dir in sorted(kind_dir.iterdir()):
+            if not rid_dir.is_dir():
+                continue
+            if any(p.is_file() for p in rid_dir.iterdir()):
+                rows.append(
+                    {"resource_id": rid_dir.name, "kind": kind, "dir": str(rid_dir)}
+                )
+                if len(rows) >= limit:
+                    return rows
+    return rows
+
+
+def _derived_extract(row: dict) -> RowExtract:
+    # Never actually called — ``derived`` bypasses the generic single-object/
+    # album/hls dispatch entirely (see storage_migration_workflow's
+    # module-name branch). Raises loudly if some future refactor accidentally
+    # routes it through _migrate_row anyway, instead of silently
+    # content-addressing a derived asset into the wrong key scheme.
+    raise RuntimeError(
+        "derived module rows are handled by _migrate_derived_row directly, "
+        "not the generic extract()/_migrate_row path"
+    )
+
+
+async def _derived_update_row(row: dict, file_path: str, sha256: Optional[str]) -> None:
+    # Same as _derived_extract — unused, present only to satisfy
+    # ModuleConfig's required field shape.
+    raise RuntimeError(
+        "derived module rows are handled by _migrate_derived_row directly, "
+        "not the generic update_row() path"
+    )
+
+
+async def _migrate_derived_row(row: dict, *, dry_run: bool, delete_source: bool) -> str:
+    """Migrate one resource's derived-asset directory to
+    ``sb://library/derived/{rid}/`` — same key shape on both sides so the
+    read path stays resource_id-addressable, no DB lookup required for
+    ``preview_sprite.jpg``.
+
+    Same 4-step safety ordering as ``_migrate_album_row``/``_migrate_hls_row``
+    (file-count verify before any DB mutation; dry_run stops there; delete
+    only after the DB sync below has run) — adapted further still: there
+    isn't always a DB row to update (preview_sprite.jpg has none), so "the DB
+    mutation" here is a best-effort per-column sync rather than one required
+    UPDATE.
+    """
+    resource_id = row["resource_id"]
+    local_dir = Path(row["dir"])
+    if not local_dir.is_dir():
+        return "missing"
+
+    local_files = [p for p in local_dir.rglob("*") if p.is_file()]
+    if not local_files:
+        return "missing"
+
+    store = media_storage.library_store()
+    prefix = media_storage.derived_key_prefix(resource_id)
+
+    def _key(rel: str) -> str:
+        return f"{prefix}{rel}"
+
+    await store.put_dir(str(local_dir), _key, skip_existing=True)
+
+    # Verify BEFORE touching the DB — same ordering guarantee as every other
+    # directory-migration path in this file.
+    remote_keys = await store.list_prefix(prefix)
+    if len(remote_keys) != len(local_files):
+        raise RuntimeError(
+            f"derived file count mismatch after put_dir: resource_id="
+            f"{resource_id} local={len(local_files)} remote={len(remote_keys)}"
+        )
+
+    if dry_run:
+        return "dry_run_ok"
+
+    # Best-effort column sync: match the column's CURRENT basename against a
+    # file that actually migrated, so the exact filename the reader already
+    # expects (thumbnail.webp vs .png, cover.<ext>) keeps working. A column
+    # that's already sb:// or doesn't reference a file in this directory is
+    # left untouched — this loop only ever narrows toward sb://, never
+    # invents a value.
+    try:
+        db_row = await db_engine.fetch_one(
+            _DERIVED_RESOURCE_SELECT_SQL, {"resource_id": int(resource_id)}
+        )
+    except Exception as e:
+        logger.warning(
+            f"[storage-migration] derived column lookup failed for "
+            f"resource_id={resource_id} (file PUT already committed, DB sync "
+            f"skipped, non-fatal): {e}"
+        )
+        db_row = None
+    if db_row:
+        for col, update_sql in _DERIVED_COLUMN_UPDATE_SQL.items():
+            current = db_row.get(col)
+            if not current or current.startswith("sb://"):
+                continue
+            basename = Path(current).name
+            if (local_dir / basename).is_file():
+                await db_engine.execute(
+                    update_sql,
+                    {
+                        "path": media_storage.to_file_path(
+                            store.bucket, _key(basename)
+                        ),
+                        "resource_id": int(resource_id),
+                    },
+                )
+
+    if delete_source:
+        shutil.rmtree(str(local_dir), ignore_errors=True)
+
+    return "migrated"
+
+
 # storyboard: SKIPPED — see module docstring above. Do not add an entry.
 
 _MODULES: dict[str, ModuleConfig] = {
@@ -486,6 +696,15 @@ _MODULES: dict[str, ModuleConfig] = {
         select_sql=_HLS_SELECT_SQL,
         extract=_hls_extract,
         update_row=_hls_update_row,
+    ),
+    "derived": ModuleConfig(
+        name="derived",
+        # Never executed — this module's rows come from a filesystem walk
+        # (see _list_derived_rows / the module comment above), not SQL.
+        select_sql="-- derived module: rows come from a filesystem walk, not SQL",
+        extract=_derived_extract,
+        update_row=_derived_update_row,
+        list_rows=_list_derived_rows,
     ),
 }
 
@@ -757,9 +976,15 @@ async def storage_migration_workflow(
     except Exception as e:
         logger.warning(f"[storage-migration] start {task_id}: {e}")
 
-    rows = await db_engine.fetch_all(
-        module_cfg.select_sql, {"scope_id": scope_id, "limit": limit}
-    )
+    # ``derived`` has no SQL SELECT to run — its rows come from a filesystem
+    # walk (module_cfg.list_rows). Every other module fetches via the shared
+    # SQL path.
+    if module_cfg.list_rows is not None:
+        rows = await module_cfg.list_rows(scope_id, limit)
+    else:
+        rows = await db_engine.fetch_all(
+            module_cfg.select_sql, {"scope_id": scope_id, "limit": limit}
+        )
 
     counts: dict[str, int] = {
         "migrated": 0,
@@ -771,14 +996,20 @@ async def storage_migration_workflow(
     total = len(rows)
     for i, row in enumerate(rows, start=1):
         try:
-            outcome = await _migrate_row(
-                row, module_cfg, dry_run=dry_run, delete_source=delete_source
-            )
+            if module == "derived":
+                outcome = await _migrate_derived_row(
+                    row, dry_run=dry_run, delete_source=delete_source
+                )
+            else:
+                outcome = await _migrate_row(
+                    row, module_cfg, dry_run=dry_run, delete_source=delete_source
+                )
             counts[outcome] = counts.get(outcome, 0) + 1
         except Exception as e:
             counts["failed"] += 1
+            row_ref = row.get("id", row.get("resource_id"))
             logger.warning(
-                f"[storage-migration] module={module} row={row.get('id')} "
+                f"[storage-migration] module={module} row={row_ref} "
                 f"failed (batch continues): {e!r}"
             )
         if i % _PROGRESS_EVERY == 0 or i == total:
