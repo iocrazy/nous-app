@@ -160,7 +160,7 @@ export const TaskRowExpanded: React.FC<TaskRowExpandedProps> = ({ task }) => {
         {!isTerminal && (
           <button
             onClick={onCancel}
-            className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/30 hover:bg-amber-500/20"
+            className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded bg-amber-500/10 text-warn ring-1 ring-amber-500/30 hover:bg-amber-500/20"
           >
             <Ban size={12} /> Cancel
           </button>

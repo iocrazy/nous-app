@@ -175,6 +175,34 @@
   /* Cover tint is driven by the runtime --tint var (unknown lightness), so
      mix it toward ink to guarantee a readable dark text on the pale fill. */
   [data-theme="light"] .btn-tint-cover  { color: color-mix(in srgb, rgb(var(--tint,99,102,241)) 42%, #18181b); }
+
+  /* ── Amber notice surfaces — theme-aware siblings of .btn-tint-amber.
+     The old inline pattern (text-amber-200 on bg-amber-500/10) is dark-only:
+     pale amber text vanishes on a light background (2026-07-28 user report,
+     "提供方未配置" banner). These classes own COLOR only; spacing/layout stay
+     Tailwind utilities at the call site. `.banner-amber` = container + body
+     text; `.banner-amber-strong` = title/emphasis; `.chip-tint-amber` =
+     small status chips. Do NOT use on text over media/dark overlays — those
+     backgrounds are constant-dark, keep raw amber-200/300 there. ── */
+  .banner-amber { background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.4); color: rgba(253,230,138,.9); }
+  .banner-amber-strong { color: #fcd34d; }
+  .chip-tint-amber { background: rgba(245,158,11,.15); border: 1px solid rgba(245,158,11,.3); color: #fcd34d; }
+  [data-theme="light"] .banner-amber { color: #92400e; }
+  [data-theme="light"] .banner-amber-strong { color: #b45309; }
+  [data-theme="light"] .chip-tint-amber { color: #b45309; }
+  /* Inline amber text (icons, counts, emphasis words, chip text) — dark
+     keeps the familiar amber-300/200 hues, light drops to amber-700/800.
+     NOTE: Tailwind's `dark:` variant is NOT wired to [data-theme] in this
+     app (it follows prefers-color-scheme), so theme-correct amber must go
+     through these classes, not `text-amber-700 dark:text-amber-300`. */
+  .text-warn { color: #fcd34d; }        /* = amber-300 in dark */
+  .text-warn-soft { color: #fde68a; }   /* = amber-200 in dark */
+  /* Hover pairs with .text-warn: dark lightens (300→200), light deepens
+     (700→800), so hover feedback survives in both themes. */
+  .hover-text-warn:hover { color: #fde68a; }
+  [data-theme="light"] .text-warn { color: #b45309; }
+  [data-theme="light"] .text-warn-soft { color: #92400e; }
+  [data-theme="light"] .hover-text-warn:hover { color: #92400e; }
 }
 
 /* ── Island app shell — island redesign v2 P1b (docs/design/island-redesign-spec.md §2).

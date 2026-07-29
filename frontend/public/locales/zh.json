@@ -2543,6 +2543,37 @@
       "providerDisabledTitle": "提供方未配置",
       "providerDisabledBody": "模型 {{model}} 所属的提供方尚未在此账户配置。该 Agent 的调用将失败。请在下方选择其它模型，或在 AI 设置中配置该提供方。",
       "switchToModel": "切换到 {{model}}",
+      "goToAISettings": "去 AI 设置",
+      "usage": {
+        "title": "使用方",
+        "empty": "暂无模块使用此 Agent — 可在会话中调用它，或将它绑定到工作流。",
+        "runs30d": "近 {{days}} 天 {{count}} 次运行",
+        "conversations": "{{count}} 个会话",
+        "routines": "{{count}} 个例行任务",
+        "module": {
+          "resources": "素材库",
+          "projects": "项目",
+          "canvas": "画板",
+          "parser": "选题灵感",
+          "issues": "任务"
+        },
+        "feature": {
+          "visualAnalysis": "视觉分析",
+          "assetCaption": "素材反推",
+          "assetClassify": "素材分类",
+          "videoSummary": "视频摘要",
+          "subtitleTranslation": "字幕翻译",
+          "topicScoring": "选题评分",
+          "scriptEditor": "剧本编辑器",
+          "storyboardDesign": "分镜",
+          "issueCoordination": "任务协调",
+          "characterDesign": "角色设计",
+          "locationDesign": "场景设计",
+          "propDesign": "道具设计",
+          "chat": "会话",
+          "other": "其它"
+        }
+      },
       "pickIcon": "选择图标",
       "searchIcons": "搜索图标...",
       "newAgentTitle": "新建 Agent",

@@ -2543,6 +2543,37 @@
       "providerDisabledTitle": "Provider not configured",
       "providerDisabledBody": "Model {{model}} belongs to a provider this account hasn't configured. Invocations of this agent will fail. Pick another model below or configure the provider in AI Settings.",
       "switchToModel": "Switch to {{model}}",
+      "goToAISettings": "Go to AI Settings",
+      "usage": {
+        "title": "Used By",
+        "empty": "No module uses this agent yet — invoke it from chat or bind it to a workflow.",
+        "runs30d": "{{count}} runs in {{days}}d",
+        "conversations": "{{count}} conversations",
+        "routines": "{{count}} routines",
+        "module": {
+          "resources": "Resources",
+          "projects": "Projects",
+          "canvas": "Canvas",
+          "parser": "Topic Inspiration",
+          "issues": "Issues"
+        },
+        "feature": {
+          "visualAnalysis": "Visual Analysis",
+          "assetCaption": "Asset Caption",
+          "assetClassify": "Asset Classify",
+          "videoSummary": "Video Summary",
+          "subtitleTranslation": "Subtitle Translation",
+          "topicScoring": "Topic Scoring",
+          "scriptEditor": "Script Editor",
+          "storyboardDesign": "Storyboard",
+          "issueCoordination": "Issue Coordination",
+          "characterDesign": "Character Design",
+          "locationDesign": "Location Design",
+          "propDesign": "Prop Design",
+          "chat": "Chat",
+          "other": "Other"
+        }
+      },
       "pickIcon": "Pick icon",
       "searchIcons": "Search icons...",
       "newAgentTitle": "New Agent",

@@ -242,7 +242,7 @@ export function aiIntentPillClass(status?: string): string {
     case 'processing':
     case 'pending':
     case 'running':
-      return 'bg-amber-500/15 text-amber-300 border-amber-500/40 animate-pulse';
+      return 'bg-amber-500/15 text-warn border-amber-500/40 animate-pulse';
     case 'failed':
       return 'bg-red-500/15 text-red-300 border-red-500/40';
     default:

@@ -8,6 +8,7 @@
 //   the hydrated agent immutably on success.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type {
   AgentChatPermissions,
@@ -87,6 +88,7 @@ interface AgentEditorProps {
 
 export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, onAgentDeleted }) => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { userProfile, aiSettings } = useAuth();
   const { addToast } = useToast();
   // Admin escape removed (2026-05-19 QA): backend rejects PATCH on system
@@ -476,15 +478,15 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
       </header>
 
       {modelProviderDisabled && (
-        <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200/90 flex items-start justify-between gap-3">
+        <div className="mb-4 rounded-lg banner-amber px-4 py-3 text-sm flex items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
-            <div className="font-medium">
+            <div className="font-medium banner-amber-strong">
               {t(
                 'aiLibrary.agents.providerDisabledTitle',
                 'Provider not configured',
               )}
             </div>
-            <div className="text-xs text-amber-200/70">
+            <div className="text-xs opacity-90">
               {t(
                 'aiLibrary.agents.providerDisabledBody',
                 "Model {{model}} belongs to a provider this account hasn't configured. Invocations of this agent will fail. Pick another model below or configure the provider in AI Settings.",
@@ -492,17 +494,25 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
               )}
             </div>
           </div>
-          {!readOnly && firstEnabledModel && (
+          <div className="shrink-0 flex items-center gap-2">
+            {!readOnly && firstEnabledModel && (
+              <button
+                onClick={switchToFirstEnabled}
+                disabled={saving}
+                className="rounded-md btn-tint-amber px-3 py-1.5 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+              >
+                {t('aiLibrary.agents.switchToModel', 'Switch to {{model}}', {
+                  model: firstEnabledModel,
+                })}
+              </button>
+            )}
             <button
-              onClick={switchToFirstEnabled}
-              disabled={saving}
-              className="shrink-0 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-200 hover:bg-amber-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+              onClick={() => navigate('/settings?tab=ai')}
+              className="rounded-md btn-tint-amber px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap"
             >
-              {t('aiLibrary.agents.switchToModel', 'Switch to {{model}}', {
-                model: firstEnabledModel,
-              })}
+              {t('aiLibrary.agents.goToAISettings', 'Go to AI Settings')}
             </button>
-          )}
+          </div>
         </div>
       )}
 
@@ -634,6 +644,15 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
               ),
               noModelsLabel: t('aiLibrary.agents.noModelsAvailable'),
             })}
+            {modelGroups.every((g) => g.models.length === 0) && (
+              <button
+                type="button"
+                onClick={() => navigate('/settings?tab=ai')}
+                className="mt-1.5 text-xs text-warn hover:underline"
+              >
+                {t('aiLibrary.agents.goToAISettings', 'Go to AI Settings')} →
+              </button>
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -716,7 +735,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
       {sub === 'files' && (
         <section className="space-y-5">
           {readOnly && (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-warn">
               {t('aiLibrary.agents.presetReadOnly')}
             </div>
           )}
@@ -1033,7 +1052,7 @@ const SkillsSection: React.FC<{
   return (
     <section className="space-y-6">
       {readOnly && (
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-warn">
           {t('aiLibrary.agents.presetReadOnly')}
         </div>
       )}
@@ -1259,7 +1278,7 @@ const PausedBanner: React.FC<{
   const { t } = useTranslation();
   const isBudget = reason === 'budget';
   const wrap = isBudget
-    ? 'border-amber-500/40 bg-amber-500/10 text-amber-200'
+    ? 'border-amber-500/40 bg-amber-500/10 text-warn-soft'
     : 'border-ink-700 bg-ink-800 text-ink-200';
   const icon = isBudget ? 'text-amber-400' : 'text-ink-400';
   const title = isBudget

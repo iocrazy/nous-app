@@ -13,7 +13,7 @@ export function StoryboardReadOnlyBanner() {
     <div
       role="status"
       data-testid="storyboard-readonly-banner"
-      className="flex items-center justify-center gap-2 px-4 py-2 text-xs font-medium text-amber-200 bg-amber-500/15 border-b border-amber-500/30"
+      className="flex items-center justify-center gap-2 px-4 py-2 text-xs font-medium text-warn-soft bg-amber-500/15 border-b border-amber-500/30"
     >
       {t('storyboard.readOnlyBanner')}
     </div>

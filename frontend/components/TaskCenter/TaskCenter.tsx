@@ -259,7 +259,7 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
         <button
           type="button"
           onClick={handleRefresh}
-          className="flex items-center gap-2 px-4 py-2 text-xs bg-amber-500/10 text-amber-300 border-b border-amber-500/30 hover:bg-amber-500/15 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 text-xs bg-amber-500/10 text-warn border-b border-amber-500/30 hover:bg-amber-500/15 transition-colors"
           title={`Realtime: ${isConnected ? 'connected' : 'down'} · WebSocket: ${isWsConnected ? 'connected' : 'down'}. Click to refresh.`}
         >
           <WifiOff size={12} />

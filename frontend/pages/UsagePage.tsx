@@ -366,7 +366,7 @@ const SummaryCards: React.FC<{ data: UsageAggregate }> = ({ data }) => {
       />
       <SummaryCard
         icon={<DollarSign size={18} />}
-        tint="text-amber-300 bg-amber-500/10"
+        tint="text-warn bg-amber-500/10"
         label={t('aiUsage.totalCost', 'Total cost')}
         value={formatCost(data.total_cost_cents)}
       />
@@ -500,7 +500,7 @@ const StatTiles: React.FC<{ summary: UsageDailySummary }> = ({ summary }) => {
     <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
       <SummaryCard
         icon={<DollarSign size={18} />}
-        tint="text-amber-300 bg-amber-500/10"
+        tint="text-warn bg-amber-500/10"
         label={t('aiUsage.statSpend', 'Spend')}
         value={formatCost(summary.total_cost_cents)}
       />
@@ -981,7 +981,7 @@ const StatusPill: React.FC<{ status: string }> = ({ status }) => {
     running: 'bg-sky-500/10 text-sky-300',
     failed: 'bg-red-500/10 text-red-300',
     cancelled: 'bg-ink-700/60 text-ink-400',
-    heartbeat_lost: 'bg-amber-500/10 text-amber-300',
+    heartbeat_lost: 'bg-amber-500/10 text-warn',
   };
   return (
     <span

@@ -34,7 +34,7 @@ import { UiSelect } from '../components/ui';
 const STATUS_COLOR: Record<IssueStatus, string> = {
   backlog: 'bg-ink-700/60 text-ink-300',
   todo: 'bg-blue-500/15 text-blue-300 border border-blue-500/30',
-  in_progress: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
+  in_progress: 'bg-amber-500/15 text-warn border border-amber-500/30',
   in_review: 'bg-purple-500/15 text-purple-300 border border-purple-500/30',
   needs_followup: 'bg-orange-500/15 text-orange-300 border border-orange-500/30',
   blocked: 'bg-rose-500/15 text-rose-300 border border-rose-500/30',

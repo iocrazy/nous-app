@@ -95,7 +95,7 @@ function triggerBadge(trigger: string): { label: string; cls: string } {
     return { label: 'Chat', cls: 'border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]' };
   }
   if (trigger.startsWith('issue')) {
-    return { label: 'Issue', cls: 'border-amber-500/40 bg-amber-500/10 text-amber-300' };
+    return { label: 'Issue', cls: 'border-amber-500/40 bg-amber-500/10 text-warn' };
   }
   if (trigger.startsWith('script')) {
     return { label: 'Script', cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' };
@@ -124,7 +124,7 @@ export const RunStatusBadge: React.FC<{ status: AgentRunStatus }> = ({ status })
     running: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
     completed: 'border-ink-700 bg-ink-800 text-ink-200',
     failed: 'border-red-500/40 bg-red-500/10 text-red-300',
-    cancelled: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+    cancelled: 'border-amber-500/40 bg-amber-500/10 text-warn',
     heartbeat_lost: 'border-orange-500/40 bg-orange-500/10 text-orange-300',
   };
   return (
@@ -300,7 +300,7 @@ const RunDetailPane: React.FC<{
           </span>
         </div>
         {detail.cancel_requested && detail.status === 'running' && (
-          <p className="mt-2 text-xs text-amber-300">
+          <p className="mt-2 text-xs text-warn">
             {t(
               'aiLibrary.agents.runs.cancelPendingNote',
               'Cancel has been requested. The runner will observe it between tool iterations.',

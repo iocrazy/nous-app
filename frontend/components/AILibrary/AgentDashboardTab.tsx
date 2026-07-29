@@ -15,6 +15,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Bar,
@@ -30,13 +31,21 @@ import {
 import {
   ActivitySquare,
   AlertTriangle,
+  Briefcase,
+  CalendarClock,
   CheckCircle2,
   CircleDashed,
   ExternalLink,
+  FolderOpen,
+  Lightbulb,
+  ListTodo,
+  MessageSquare,
+  Palette,
+  Plug,
 } from 'lucide-react';
 
 import { aiLibraryService } from '../../services/aiLibraryService';
-import type { AgentDashboard } from '../../types';
+import type { AgentDashboard, AgentUsage } from '../../types';
 
 const POLL_MS = 15_000;
 
@@ -89,7 +98,7 @@ function statusBadgeClass(status: string): string {
     case 'queued':
     case 'waiting_for_other':
     case 'blocked':
-      return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
+      return 'bg-amber-500/15 text-warn border-amber-500/30';
     default:
       return 'bg-ink-500/15 text-ink-300 border-ink-500/30';
   }
@@ -130,6 +139,143 @@ export const STATUS_COLORS: Record<string, string> = {
 
 function statusColor(status: string): string {
   return STATUS_COLORS[status] ?? '#71717a';
+}
+
+// "Used by" card — icon per consuming module (module_key = team route segment).
+const MODULE_ICONS: Record<string, typeof FolderOpen> = {
+  resources: FolderOpen,
+  projects: Briefcase,
+  canvas: Palette,
+  parser: Lightbulb,
+  issues: ListTodo,
+};
+
+/**
+ * Static registry chips + 30d dynamic evidence for one agent.
+ * Fetched once (registry data doesn't change mid-session).
+ */
+function UsageCard({ slug }: { slug: string }): React.ReactElement | null {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { teamId } = useParams<{ teamId: string }>();
+  const [usage, setUsage] = useState<AgentUsage | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    aiLibraryService
+      .getAgentUsage(slug)
+      .then((u) => {
+        if (!cancelled) setUsage(u);
+      })
+      .catch((err) => {
+        console.error('[UsageCard] fetch failed:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug]);
+
+  if (!usage) return null;
+
+  const runTotal = usage.trigger_counts.reduce((s, tr) => s + tr.count, 0);
+  const featureCounts = usage.trigger_counts.reduce<Record<string, number>>(
+    (acc, tr) => {
+      acc[tr.feature_key] = (acc[tr.feature_key] ?? 0) + tr.count;
+      return acc;
+    },
+    {},
+  );
+  const hasAnything =
+    usage.modules.length > 0 ||
+    runTotal > 0 ||
+    usage.conversation_count > 0 ||
+    usage.routine_count > 0;
+
+  return (
+    <section>
+      <h3 className="text-sm font-medium text-ink-200 mb-2">
+        {t('aiLibrary.agents.usage.title', 'Used By')}
+      </h3>
+      <div className="rounded-lg border border-ink-800 bg-ink-900/40 p-3">
+        {hasAnything ? (
+          <div className="space-y-2.5">
+            {usage.modules.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {usage.modules.map((m) => {
+                  const Icon = MODULE_ICONS[m.module_key] ?? Plug;
+                  const label = t(
+                    `aiLibrary.agents.usage.module.${m.module_key}`,
+                    m.module_key,
+                  );
+                  const feature = t(
+                    `aiLibrary.agents.usage.feature.${m.feature_key}`,
+                    m.feature_key,
+                  );
+                  return (
+                    <button
+                      key={`${m.module_key}:${m.feature_key}`}
+                      type="button"
+                      disabled={!teamId}
+                      onClick={() =>
+                        teamId && navigate(`/team/${teamId}/${m.module_key}`)
+                      }
+                      className="inline-flex items-center gap-1.5 rounded-md border border-ink-700 bg-ink-800/60 px-2.5 py-1 text-xs text-ink-200 hover:border-[var(--accent-border)] hover:text-[var(--accent-text)] disabled:cursor-default disabled:hover:border-ink-700 disabled:hover:text-ink-200 transition-colors"
+                      title={feature}
+                    >
+                      <Icon size={12} />
+                      <span>{label}</span>
+                      <span className="text-ink-500">· {feature}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-ink-500">
+              <span>
+                {t('aiLibrary.agents.usage.runs30d', '{{count}} runs in {{days}}d', {
+                  count: runTotal,
+                  days: usage.window_days,
+                })}
+                {runTotal > 0 && (
+                  <span className="text-ink-600">
+                    {' '}
+                    (
+                    {Object.entries(featureCounts)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(
+                        ([fk, c]) =>
+                          `${t(`aiLibrary.agents.usage.feature.${fk}`, fk)} ${c}`,
+                      )
+                      .join(' · ')}
+                    )
+                  </span>
+                )}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <MessageSquare size={11} />
+                {t('aiLibrary.agents.usage.conversations', '{{count}} conversations', {
+                  count: usage.conversation_count,
+                })}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <CalendarClock size={11} />
+                {t('aiLibrary.agents.usage.routines', '{{count}} routines', {
+                  count: usage.routine_count,
+                })}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="text-xs text-ink-500">
+            {t(
+              'aiLibrary.agents.usage.empty',
+              'No module uses this agent yet — invoke it from chat or bind it to a workflow.',
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  );
 }
 
 export function AgentDashboardTab({
@@ -214,6 +360,9 @@ export function AgentDashboardTab({
 
   return (
     <div className="space-y-6 px-1 pb-6">
+      {/* Which product modules use this agent (static registry + 30d evidence) */}
+      <UsageCard slug={slug} />
+
       {/* Latest Run banner */}
       <section>
         <div className="flex items-center justify-between mb-2">

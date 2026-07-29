@@ -17,6 +17,7 @@ import type {
   AgentChatPermissions,
   AgentDashboard,
   AgentRunDetail,
+  AgentUsage,
   AgentRunEvent,
   AgentRunListResponse,
   LiveAgentRun,
@@ -357,6 +358,18 @@ export const aiLibraryService = {
       { headers: await getAuthHeaders() },
     );
     return handle<AgentDashboard>(resp);
+  },
+
+  /**
+   * "Used by" card data — static consuming-module registry merged with
+   * 30d run-trigger counts, conversation bindings, and routine count.
+   */
+  async getAgentUsage(slug: string): Promise<AgentUsage> {
+    const resp = await fetch(
+      `${base()}/agents/${encodeURIComponent(slug)}/usage`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle<AgentUsage>(resp);
   },
 
   /** Full detail view of one run. 404 if not owned by the caller. */

@@ -238,7 +238,7 @@ const COLOR_MAP: Record<string, { bg: string; text: string; border: string; badg
     bg: 'bg-amber-500/10',
     text: 'text-amber-400',
     border: 'border-amber-500/30',
-    badge: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+    badge: 'bg-amber-500/20 text-warn border-amber-500/30',
   },
   teal: {
     bg: 'bg-teal-500/10',

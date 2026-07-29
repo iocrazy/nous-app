@@ -400,7 +400,7 @@ const IconButton: React.FC<IconButtonProps> = ({
   tone,
 }) => {
   const toneClass = {
-    amber: 'text-ink-500 hover:text-amber-300 hover:bg-amber-500/10',
+    amber: 'text-ink-500 hover-text-warn hover:bg-amber-500/10',
     emerald: 'text-ink-500 hover:text-emerald-300 hover:bg-emerald-500/10',
     red: 'text-ink-500 hover:text-red-300 hover:bg-red-500/10',
     zinc: 'text-ink-500 hover:text-ink-200 hover:bg-ink-800',
@@ -424,7 +424,7 @@ const CountTile: React.FC<{ label: string; value: React.ReactNode; accent: 'ambe
   value,
   accent,
 }) => {
-  const valueClass = accent === 'amber' ? 'text-amber-300' : 'text-ink-200';
+  const valueClass = accent === 'amber' ? 'text-warn' : 'text-ink-200';
   return (
     <div className="rounded bg-ink-950/40 border border-ink-800/40 px-2 py-1.5">
       <div className="text-[10px] uppercase tracking-wider text-ink-600">{label}</div>
@@ -500,7 +500,7 @@ function stateClass(state: string): string {
     case 'working':
       return 'bg-[var(--accent-soft)] text-[var(--accent-text)]';
     case 'paused':
-      return 'bg-amber-500/15 text-amber-300';
+      return 'bg-amber-500/15 text-warn';
     case 'blocked':
     case 'terminated':
       return 'bg-red-500/15 text-red-300';

@@ -22,7 +22,7 @@ const SOURCE_META: Record<
 
 const STATUS_STYLE: Record<TopicStatus, string> = {
   candidate: 'bg-ink-800 text-ink-300',
-  shortlisted: 'bg-amber-500/15 text-amber-300',
+  shortlisted: 'bg-amber-500/15 text-warn',
   produced: 'bg-emerald-500/15 text-emerald-300',
   archived: 'bg-ink-800/60 text-ink-500',
 };

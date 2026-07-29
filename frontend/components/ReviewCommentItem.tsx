@@ -138,7 +138,7 @@ const ReviewCommentItem: React.FC<ReviewCommentItemProps> = ({
         {comment.drawing_data && comment.drawing_data.strokes && comment.drawing_data.strokes.length > 0 && onViewAnnotation && (
           <button
             onClick={() => onViewAnnotation(comment.drawing_data!)}
-            className="inline-flex items-center gap-1 mt-1.5 px-2 py-1 rounded text-xs font-medium bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 transition-colors"
+            className="inline-flex items-center gap-1 mt-1.5 px-2 py-1 rounded text-xs font-medium bg-amber-500/15 text-warn hover:bg-amber-500/25 transition-colors"
           >
             <PenTool className="w-3 h-3" />
             {t('annotations.viewAnnotation')}

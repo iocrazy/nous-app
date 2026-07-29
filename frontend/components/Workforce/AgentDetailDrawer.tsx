@@ -291,7 +291,7 @@ const MESSAGE_TYPE_META: Record<
   approval_request: {
     icon: <ShieldAlert className="w-3 h-3" />,
     label: 'Approval',
-    accent: 'bg-amber-600/20 text-amber-300 border-amber-700/40',
+    accent: 'bg-amber-600/20 text-warn border-amber-700/40',
   },
   notification: {
     icon: <Bell className="w-3 h-3" />,
@@ -469,7 +469,7 @@ const StatusBadge: React.FC<{ value: string }> = ({ value }) => {
       case 'unread':
         return 'bg-[var(--accent-soft)] text-[var(--accent-text)]';
       case 'reading':
-        return 'bg-amber-500/15 text-amber-300';
+        return 'bg-amber-500/15 text-warn';
       case 'processed':
       case 'delivered':
         return 'bg-emerald-500/15 text-emerald-300';
@@ -477,7 +477,7 @@ const StatusBadge: React.FC<{ value: string }> = ({ value }) => {
       case 'expired':
         return 'bg-ink-800/60 text-ink-400';
       case 'pending':
-        return 'bg-amber-500/15 text-amber-300';
+        return 'bg-amber-500/15 text-warn';
       default:
         return 'bg-ink-800/60 text-ink-400';
     }
