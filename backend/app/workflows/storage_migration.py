@@ -322,18 +322,13 @@ async def _project_files_update_row(
 
 _DOWNLOADS_SELECT_SQL = """
     SELECT rv.id, rv.resource_id, rv.version_number, rv.file_path,
-           rv.filename, rv.mime_type, r.current_version, ri.scope_id,
-           pm.id AS parsed_media_id
+           rv.filename, rv.mime_type, r.current_version, ri.scope_id
     FROM resource_versions rv
     JOIN resources r ON r.id = rv.resource_id
     LEFT JOIN LATERAL (
       SELECT scope_id FROM resource_items WHERE resource_id = r.id
       ORDER BY id LIMIT 1
     ) ri ON true
-    LEFT JOIN LATERAL (
-      SELECT id FROM parsed_media pm2
-      WHERE rv.file_path LIKE '%'||pm2.id||'%' LIMIT 1
-    ) pm ON true
     WHERE rv.file_path IS NOT NULL
       AND rv.file_path NOT LIKE 'sb://%'
       AND rv.storage_status = 'ok'
@@ -834,6 +829,10 @@ async def _migrate_album_row(
         raise RuntimeError(f"album directory is empty, nothing to migrate: {local}")
 
     store = media_storage.library_store()
+    # row["id"] is resource_versions.id (a VERSION id, not resources.id) —
+    # deliberate: the prefix is self-referential, written straight back into
+    # this same row's file_path below, and source_type='web' rows are
+    # effectively never re-versioned, so any stable-per-row id works fine.
     prefix = media_storage.album_key_prefix(extract.scope_id, row["id"])
 
     def _key(rel: str) -> str:

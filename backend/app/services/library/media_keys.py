@@ -82,8 +82,17 @@ class MediaKeyBuilder:
         """Compose the ``sb://`` value stored in generated_media.file_path."""
         return f"{_SB_SCHEME}{bucket}/{key}"
 
-    def album_prefix(self, scope_id: int, resource_id) -> str:
+    def album_prefix(self, scope_id: int, rid) -> str:
         """Prefix owning an album's flattened objects: ``t{scope}/album/{rid}/``.
+
+        ``rid`` is whatever ID the caller treats as the album's stable
+        identity within its scope — this builder is agnostic to what table it
+        came from. The ``downloads`` migration module (the only caller today)
+        passes ``resource_versions.id`` (a version id), not ``resources.id``:
+        source_type='web' rows are effectively never re-versioned, and the
+        prefix is self-referential (stored right back into that same row's
+        ``file_path``), so any stable-per-row id works — it does not need to
+        be the parent resource's id.
 
         Deliberately shares the content-addressed ``t{scope_id}/`` root (not a
         dedicated namespace like HLS's ``hls/``) — a two-hex-char sha shard can
@@ -93,7 +102,7 @@ class MediaKeyBuilder:
         ``MediaLocation.is_prefix`` true, telling the reader "list everything
         under this key" instead of "GET this one object".
         """
-        return f"t{scope_id}/album/{resource_id}/"
+        return f"t{scope_id}/album/{rid}/"
 
     def derived_prefix(self, resource_id) -> str:
         """Prefix owning one resource's derived assets: ``derived/{rid}/``.

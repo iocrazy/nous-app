@@ -119,9 +119,14 @@ def hls_key_prefix(resource_id: str, version_id: str) -> str:
     return _KEYS.hls_prefix(resource_id, version_id)
 
 
-def album_key_prefix(scope_id: int, resource_id) -> str:
-    """Prefix owning an album's flattened objects: ``t{scope}/album/{rid}/``."""
-    return _KEYS.album_prefix(scope_id, resource_id)
+def album_key_prefix(scope_id: int, rid) -> str:
+    """Prefix owning an album's flattened objects: ``t{scope}/album/{rid}/``.
+
+    ``rid`` is caller-defined identity, not necessarily ``resources.id`` — see
+    ``MediaKeyBuilder.album_prefix`` for why the ``downloads`` module passes a
+    ``resource_versions.id`` here instead.
+    """
+    return _KEYS.album_prefix(scope_id, rid)
 
 
 def derived_key_prefix(resource_id) -> str:
