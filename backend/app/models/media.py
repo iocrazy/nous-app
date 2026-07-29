@@ -543,6 +543,12 @@ class ResourceVersions(Base):
         comment="SHA-256 hex digest of this version file content",
     )
     audio_bitrate_kbps: Mapped[int | None] = mapped_column(Integer)
+    storage_status: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'ok'::text"),
+        comment="迁移/读取时的源文件存在性: ok=正常, source_missing=文件已丢失(记录保留)",
+    )
 
 
 class ResourceItems(Base):
