@@ -123,6 +123,35 @@ async def test_filesystem_extract_audio_path_exists(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_chinese_title_disposition_is_latin1_safe():
+    """Regression (Task C6 counterpart of the C2 video fix): a Chinese
+    title passes the safe_title alnum filter untouched and used to land
+    raw in a bare Content-Disposition header — latin-1 encode failure on
+    the response, HTTP 500. Must be RFC 5987 encoded instead."""
+    video = _video(extract_audio_path=SB_AUDIO_PATH, title="我的音乐")
+    sentinel = Response(content=b"audio-bytes", media_type="audio/mp4")
+    serve = AsyncMock(return_value=sentinel)
+    exists = AsyncMock(return_value=True)
+
+    with (
+        _patch_repo(video),
+        _patch_base_path(),
+        patch("app.services.library.media_serving.serve_stored_file", new=serve),
+        patch(
+            "app.services.library.media_storage.ObjectStore.exists",
+            new=exists,
+        ),
+    ):
+        resp = await download_music_file(PLATFORM_ID, _request(), _auth())
+
+    assert resp is sentinel
+    args, kwargs = serve.await_args
+    disposition = kwargs["disposition"]
+    disposition.encode("latin-1")
+    assert "filename*=UTF-8''" in disposition
+
+
+@pytest.mark.asyncio
 async def test_no_audio_and_status_not_completed_returns_404():
     """Both sources empty/missing and music_download_status isn't
     completed/skipped — explicit 404, not a silent pass-through."""

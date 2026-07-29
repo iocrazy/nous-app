@@ -7,6 +7,7 @@ Endpoints for downloading video/cover/music files, managing pending/retry downlo
 """
 
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import FileResponse
@@ -23,6 +24,25 @@ from app.repositories.user_logs_repository import log_user_action
 router = APIRouter()
 
 TAGS_DOWNLOAD = ["Download Management"]
+
+
+def _content_disposition(filename: str, fallback: str) -> str:
+    """Build an RFC 5987/6266-safe ``attachment`` Content-Disposition value.
+
+    HTTP header values must be latin-1 encodable. ``filename`` may contain
+    non-ASCII characters (e.g. Chinese titles — ``.isalnum()`` is True for
+    CJK, so they survive the caller's alnum filter untouched), which blows
+    up latin-1 encoding if dropped straight into a bare header. Emit both
+    parameters: ``filename=`` is an ASCII-only fallback for old clients,
+    ``filename*=UTF-8''...`` is the percent-encoded real name that modern
+    browsers use per RFC 5987.
+    """
+    ascii_name = (
+        filename.encode("ascii", "ignore").decode().replace('"', "").strip() or fallback
+    )
+    quoted = quote(filename, safe="")
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quoted}"
+
 
 # Map an audio file suffix (lowercased, e.g. ".flac") to its MIME content type.
 _AUDIO_CONTENT_TYPES = {
@@ -199,7 +219,7 @@ async def download_video_file(platform_id: str, request: Request, auth: AuthDep)
         # safe_title is already restricted to alnum/space/-_. so it can't
         # contain a quote, but strip defensively before it lands in a header.
         safe_title = safe_title.replace('"', "")
-        disposition = f'attachment; filename="{safe_title}.mp4"'
+        disposition = _content_disposition(f"{safe_title}.mp4", f"{platform_id}.mp4")
 
         return await serve_stored_file(
             download_path,
@@ -342,7 +362,7 @@ async def download_music_file(platform_id: str, request: Request, auth: AuthDep)
             chosen_rel,
             mime=content_type,
             request=request,
-            disposition=f'attachment; filename="{filename}"',
+            disposition=_content_disposition(filename, f"{platform_id}_audio{suffix}"),
         )
     except HTTPException:
         raise
