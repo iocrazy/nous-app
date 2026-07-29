@@ -50,6 +50,47 @@ async def _get_media_row(media_id: str) -> dict:
     return media
 
 
+async def _resolve_album_location(media_id: str):
+    """图集当前存储位置:已迁移(sb:// 前缀)返回 MediaLocation,否则 None。
+
+    桥接 media_id(parsed_media)→ resources.media_id 反查 resource → 该
+    resource 当前 version 的 file_path(album 迁移写的是 resource_versions
+    这一列,不是 parsed_media.download_path)。resource 不存在 / 没有对应
+    version / file_path 为空或非 sb:// 前缀,一律返回 None —— 调用方零回退到
+    原文件系统读取逻辑,保证迁移前后都能读。"""
+    from app.repositories.resources_repository import ResourcesRepository
+    from app.services.library.media_storage import resolve_media_source
+
+    repo = ResourcesRepository()
+    resource = await repo.get_resource_by_media_id(media_id)
+    if not resource:
+        return None
+    version = await repo.get_version_by_number(
+        resource["id"], resource["current_version"]
+    )
+    file_path = (version or {}).get("file_path")
+    if not file_path:
+        return None
+    loc = resolve_media_source(file_path)
+    if loc.is_object_store and loc.is_prefix:
+        return loc
+    return None
+
+
+def _slide_kind(suffix: str) -> Optional[tuple[str, str]]:
+    """(slide_type, media_type) for a slide file extension, or None to skip
+    (non-slide file, e.g. a stray .txt). Same allowlist the filesystem and
+    S3-prefix branches both use — keeps the two paths classifying identically
+    (cover.jpg included in both, matching the original iterdir loop which
+    never special-cased it)."""
+    suffix = suffix.lower()
+    if suffix in (".jpg", ".jpeg", ".png", ".webp"):
+        return "image", f"image/{suffix.lstrip('.')}"
+    if suffix in (".mp4", ".mov", ".webm"):
+        return "video", f"video/{suffix.lstrip('.')}"
+    return None
+
+
 async def _resolve_audio_source(media: dict, base_path: str) -> Optional[str]:
     """Resolve the audio source for a media row (rel path or sb:// value),
     tolerating a missing video download_path. Order: music_download_path →
@@ -90,6 +131,28 @@ async def list_slides(media_id: str, auth: AuthDep):
     - **media_id**: parsed_media Snowflake ID
     """
     try:
+        loc = await _resolve_album_location(media_id)
+        if loc:
+            from app.services.library.media_storage import ObjectStore
+
+            keys = await ObjectStore(loc.bucket).list_prefix(loc.key)
+            slides = []
+            for key in sorted(keys):
+                name = key.rsplit("/", 1)[-1]
+                kind = _slide_kind(Path(name).suffix)
+                if not kind:
+                    continue
+                slide_type, mt = kind
+                slides.append(
+                    {
+                        "name": name,
+                        "type": slide_type,
+                        "media_type": mt,
+                        "url": f"/api/v1/media/{media_id}/slides/{name}",
+                    }
+                )
+            return {"slides": slides, "count": len(slides)}
+
         media, download_path = await _get_media_download_path(media_id)
         base_path = Utils.get_download_base_path()
 
@@ -103,15 +166,10 @@ async def list_slides(media_id: str, auth: AuthDep):
         for f in sorted(slides_dir.iterdir()):
             if not f.is_file():
                 continue
-            suffix = f.suffix.lower()
-            if suffix in (".jpg", ".jpeg", ".png", ".webp"):
-                slide_type = "image"
-                mt = f"image/{suffix.lstrip('.')}"
-            elif suffix in (".mp4", ".mov", ".webm"):
-                slide_type = "video"
-                mt = f"video/{suffix.lstrip('.')}"
-            else:
+            kind = _slide_kind(f.suffix)
+            if not kind:
                 continue
+            slide_type, mt = kind
             slides.append(
                 {
                     "name": f.name,
@@ -131,7 +189,11 @@ async def list_slides(media_id: str, auth: AuthDep):
 
 @router.get("/{media_id}/slides/{filename}", tags=TAGS_MEDIA_CONTENT)
 async def serve_slide_file(
-    media_id: str, filename: str, auth: OptionalAuthDep = None, token: str = None
+    media_id: str,
+    filename: str,
+    request: Request,
+    auth: OptionalAuthDep = None,
+    token: str = None,
 ):
     """
     Serve a single slide file.
@@ -155,6 +217,20 @@ async def serve_slide_file(
         raise HTTPException(status_code=400, detail="Invalid filename")
 
     try:
+        loc = await _resolve_album_location(media_id)
+        if loc:
+            from app.services.library.media_serving import serve_stored_file
+
+            mime = _mt.guess_type(filename)[0] or "application/octet-stream"
+            # loc.key 是前缀形态(以 / 结尾),直接拼 filename;重建成
+            # sb://bucket/key 值交给 serve_stored_file —— 它内部会用
+            # resolve_media_source 重新解析,所以必须是完整 sb:// 字符串,
+            # 不能只传裸 key(会被误判成文件系统相对路径)。
+            sb_path = f"sb://{loc.bucket}/{loc.key}{filename}"
+            return await serve_stored_file(
+                sb_path, mime=mime, request=request, disposition="inline"
+            )
+
         media, download_path = await _get_media_download_path(media_id)
         base_path = Utils.get_download_base_path()
 
