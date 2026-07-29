@@ -113,8 +113,10 @@ const actionRow = (c: HTMLElement) =>
     el.className.includes('gap-1.5'),
   )!;
 
-// The info column — the element that owns the scroll box and the section padding.
-const infoColumn = (c: HTMLElement) => c.querySelector('.overflow-y-auto') as HTMLElement;
+// The info column — the element that owns the section padding. Bare mode marks
+// it with `@container`; the classic card with its own scroll box instead.
+const infoColumn = (c: HTMLElement) =>
+  (c.querySelector('.\\@container') ?? c.querySelector('.overflow-y-auto')) as HTMLElement;
 
 describe('MediaCard — narrow info-island layout', () => {
   it('makes the bare info column a query container so its grids see the panel width', () => {
@@ -130,6 +132,23 @@ describe('MediaCard — narrow info-island layout', () => {
   it('does not turn the classic card into a query container', () => {
     const { container } = render(<MediaCard data={video} hidePreview />);
     expect(container.innerHTML).not.toContain('@container');
+  });
+
+  it('lets the bare column grow with the host panel instead of nesting a 70vh scroller', () => {
+    // The island host (VideoDetailPanel) provides the scroll box; a second
+    // capped scroller here cut the action row at 70vh and left the rest of
+    // the panel blank.
+    const { container } = render(<MediaCard data={video} bare hidePreview />);
+    const col = infoColumn(container).className;
+    expect(col).not.toContain('max-h-[70vh]');
+    expect(col).not.toContain('overflow-y-auto');
+  });
+
+  it('keeps the classic card info column capped beside the tall preview', () => {
+    const { container } = render(<MediaCard data={video} hidePreview />);
+    const col = infoColumn(container).className;
+    expect(col).toContain('md:max-h-[70vh]');
+    expect(col).toContain('overflow-y-auto');
   });
 
   it('drops the stat grid to 2 columns below 23rem of column width when bare', () => {

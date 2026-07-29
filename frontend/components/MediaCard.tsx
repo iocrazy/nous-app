@@ -718,8 +718,15 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             container here keeps the modal viewport-sized instead of trapping it
             inside a 360px panel. The only other fixed descendant — the
             three-dots menu's click-catcher backdrop — renders solely when
-            `!hidePreview`, and every `bare` caller passes `hidePreview`. */}
-        <div className={`flex-1 ${bare ? '@container ' : ''}p-4 sm:p-6 flex flex-col md:max-h-[70vh] overflow-y-auto custom-scrollbar`}>
+            `!hidePreview`, and every `bare` caller passes `hidePreview`.
+
+            `md:max-h-[70vh] overflow-y-auto` is classic-card only: it caps the
+            info column beside the tall preview so the card stays one screen.
+            The bare/island host (VideoDetailPanel) already wraps the card in
+            its own `overflow-y-auto` panel — keeping the cap there nests a
+            second scroller that cuts content at 70vh and leaves the rest of
+            the panel blank. */}
+        <div className={`flex-1 ${bare ? '@container ' : 'md:max-h-[70vh] overflow-y-auto custom-scrollbar '}p-4 sm:p-6 flex flex-col`}>
 
           {/* Header Metadata — desktop: badges left + ID right; mobile: ID left + actions right.
               `flex-wrap`: the badges and the ID/actions group are both
