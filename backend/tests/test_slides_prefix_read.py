@@ -39,15 +39,15 @@ def _auth() -> AuthContext:
     return AuthContext(user_id="u1", auth_type="jwt")
 
 
-def _patch_resources_repo(resource: dict | None, version: dict | None):
-    """resources_repository.ResourcesRepository — 两次调用链
-    (get_resource_by_media_id → get_version_by_number) 的 mock。"""
-    repo = MagicMock()
-    repo.get_resource_by_media_id = AsyncMock(return_value=resource)
-    repo.get_version_by_number = AsyncMock(return_value=version)
+def _patch_db_fetch_one(row: dict | None):
+    """app.db.engine.fetch_one —— _resolve_album_location 的非 scoped 直查。
+
+    row=None 模拟 SQL 查不到行(resource 不存在 / 无对应 version,
+    INNER JOIN 直接筛掉);row={"file_path": ...} 模拟查到一行(file_path
+    可能是 sb:// 前缀,也可能是文件系统相对路径或 NULL)。"""
     return patch(
-        "app.repositories.resources_repository.ResourcesRepository",
-        return_value=repo,
+        "app.db.engine.fetch_one",
+        new=AsyncMock(return_value=row),
     )
 
 
@@ -64,6 +64,77 @@ def _patch_base_path(path="/tmp/fake-base"):
     )
 
 
+# ── _resolve_album_location 直查路径(F1 scope bug 回归) ─────────────────
+#
+# 根因:get_resource_by_media_id 用 scoped read_scope(),而 slides 端点上下文
+# 没有打开 scope session → 报 "no scope is set" 被内部 except 吞成 None →
+# 已迁图集被误判成未迁移,delete 本地目录后 404。修复后改走 db_engine.fetch_one
+# 非 scoped 直查,以下测试钉住"打的是新路径"而不是旧的 ResourcesRepository。
+
+
+@pytest.mark.asyncio
+async def test_resolve_album_location_queries_db_engine_directly_not_scoped_repo():
+    """确认新实现调用 db_engine.fetch_one(非 scoped),且完全不碰
+    ResourcesRepository(scoped,需要 scope session,是本 bug 的根因)。"""
+    from app.api.media_slides_router import _resolve_album_location
+
+    fetch_one = AsyncMock(return_value={"file_path": ALBUM_PREFIX})
+    repo_cls = MagicMock(
+        side_effect=AssertionError(
+            "ResourcesRepository 不应被调用 —— 需要 scope session,是本 bug 的根因"
+        )
+    )
+
+    with (
+        patch("app.db.engine.fetch_one", new=fetch_one),
+        patch("app.repositories.resources_repository.ResourcesRepository", repo_cls),
+    ):
+        loc = await _resolve_album_location(MEDIA_ID)
+
+    fetch_one.assert_awaited_once()
+    sql, params = fetch_one.await_args.args
+    assert params == {"media_id": 700}
+    assert "resources" in sql.lower()
+    assert "resource_versions" in sql.lower()
+    assert loc is not None
+    assert loc.is_object_store and loc.is_prefix
+
+
+@pytest.mark.asyncio
+async def test_resolve_album_location_no_row_returns_none():
+    """无 resource / 无对应 version(INNER JOIN 查不到行)→ None,走 fs 回退。"""
+    from app.api.media_slides_router import _resolve_album_location
+
+    with _patch_db_fetch_one(None):
+        loc = await _resolve_album_location(MEDIA_ID)
+
+    assert loc is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_album_location_non_prefix_file_path_returns_none():
+    """file_path 是文件系统相对路径(非 sb:// 前缀)→ None,走 fs 回退。"""
+    from app.api.media_slides_router import _resolve_album_location
+
+    with _patch_db_fetch_one({"file_path": "web/album700/slides"}):
+        loc = await _resolve_album_location(MEDIA_ID)
+
+    assert loc is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_album_location_invalid_media_id_returns_none():
+    """media_id 非数字(防御性 int 转换失败)→ None,不抛异常。"""
+    from app.api.media_slides_router import _resolve_album_location
+
+    fetch_one = AsyncMock()
+    with patch("app.db.engine.fetch_one", new=fetch_one):
+        loc = await _resolve_album_location("not-a-number")
+
+    fetch_one.assert_not_awaited()
+    assert loc is None
+
+
 # ── 已迁移(sb:// 前缀) ───────────────────────────────────────────────────
 
 
@@ -73,8 +144,6 @@ async def test_list_slides_migrated_album_lists_prefix():
     返回 slides,url 形如 /api/v1/media/{id}/slides/{name}。"""
     from app.api.media_slides_router import list_slides
 
-    resource = {"id": "123", "current_version": 1}
-    version = {"file_path": ALBUM_PREFIX}
     keys = [
         "t5/album/123/7613_0.jpg",
         "t5/album/123/7613_1.jpg",
@@ -83,7 +152,7 @@ async def test_list_slides_migrated_album_lists_prefix():
     list_prefix = AsyncMock(return_value=keys)
 
     with (
-        _patch_resources_repo(resource, version),
+        _patch_db_fetch_one({"file_path": ALBUM_PREFIX}),
         patch(
             "app.services.library.media_storage.ObjectStore.list_prefix",
             new=list_prefix,
@@ -107,13 +176,11 @@ async def test_list_slides_migrated_album_includes_cover_like_original():
     不特判 cover —— S3 分支同样不排除,避免与未迁移行为产生差异。"""
     from app.api.media_slides_router import list_slides
 
-    resource = {"id": "123", "current_version": 1}
-    version = {"file_path": ALBUM_PREFIX}
     keys = ["t5/album/123/7613_0.jpg", "t5/album/123/cover.jpg"]
     list_prefix = AsyncMock(return_value=keys)
 
     with (
-        _patch_resources_repo(resource, version),
+        _patch_db_fetch_one({"file_path": ALBUM_PREFIX}),
         patch(
             "app.services.library.media_storage.ObjectStore.list_prefix",
             new=list_prefix,
@@ -132,13 +199,11 @@ async def test_serve_slide_file_migrated_album_delegates_to_serve_stored_file():
     委托给 serve_stored_file(而不是自己碰文件系统)。"""
     from app.api.media_slides_router import serve_slide_file
 
-    resource = {"id": "123", "current_version": 1}
-    version = {"file_path": ALBUM_PREFIX}
     sentinel = Response(content=b"jpg-bytes", media_type="image/jpeg")
     serve = AsyncMock(return_value=sentinel)
 
     with (
-        _patch_resources_repo(resource, version),
+        _patch_db_fetch_one({"file_path": ALBUM_PREFIX}),
         patch("app.services.library.media_serving.serve_stored_file", new=serve),
     ):
         resp = await serve_slide_file(
@@ -184,7 +249,7 @@ async def test_list_slides_unmigrated_falls_back_to_filesystem_no_resource(tmp_p
     media = {"id": MEDIA_ID, "download_path": download_path}
 
     with (
-        _patch_resources_repo(None, None),
+        _patch_db_fetch_one(None),
         _patch_media_repo(media),
         _patch_base_path(str(tmp_path)),
     ):
@@ -207,10 +272,9 @@ async def test_list_slides_unmigrated_when_version_file_path_empty(tmp_path):
     (slides_dir / "001.png").write_bytes(b"x")
 
     media = {"id": MEDIA_ID, "download_path": download_path}
-    resource = {"id": "123", "current_version": 1}
 
     with (
-        _patch_resources_repo(resource, {"file_path": None}),
+        _patch_db_fetch_one({"file_path": None}),
         _patch_media_repo(media),
         _patch_base_path(str(tmp_path)),
     ):
@@ -234,7 +298,7 @@ async def test_serve_slide_file_unmigrated_falls_back_to_filesystem(tmp_path):
     serve = AsyncMock()
 
     with (
-        _patch_resources_repo(None, None),
+        _patch_db_fetch_one(None),
         _patch_media_repo(media),
         _patch_base_path(str(tmp_path)),
         patch("app.services.library.media_serving.serve_stored_file", new=serve),

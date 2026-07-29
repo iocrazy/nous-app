@@ -75,6 +75,32 @@ async def test_sb_row_delegated_to_serve_stored_file():
 
 
 @pytest.mark.asyncio
+async def test_chinese_title_disposition_is_latin1_safe():
+    """Regression: a Chinese title used to survive the safe_title alnum
+    filter (`.isalnum()` is True for CJK) and land raw in a bare
+    Content-Disposition header, which blew up on latin-1 encode when
+    Starlette wrote the response — HTTP 500 in production. The disposition
+    handed to serve_stored_file must always be latin-1 encodable and use
+    RFC 5987 `filename*=UTF-8''...` for the non-ASCII payload."""
+    video = _video(title="我的视频")
+    sentinel = Response(content=b"video-bytes", media_type="video/mp4")
+    serve = AsyncMock(return_value=sentinel)
+
+    with (
+        _patch_repo(video),
+        patch("app.services.library.media_serving.serve_stored_file", new=serve),
+    ):
+        resp = await download_video_file(PLATFORM_ID, _request(), _auth())
+
+    assert resp is sentinel
+    args, kwargs = serve.await_args
+    disposition = kwargs["disposition"]
+    # Core regression assertion — this raised UnicodeEncodeError pre-fix.
+    disposition.encode("latin-1")
+    assert "filename*=UTF-8''" in disposition
+
+
+@pytest.mark.asyncio
 async def test_missing_download_path_returns_404():
     """No download_path on the record is still a 404 (existing behavior,
     preserved even though the filesystem-exists check is gone)."""
