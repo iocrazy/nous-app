@@ -18,6 +18,12 @@
  * the workflow may also write new AI tags). Patch/translate/ensure-trigger-
  * tag stay callback-based — hosts differ in how they hold that state.
  *
+ * A failed Generate renders an in-section card (not a toast) whose copy comes
+ * from `utils/errorCatalog.ts` — the backend classifies the underlying
+ * provider error into `metadata.error_code`, so "Step … exceeded its maximum
+ * of 3 retries" becomes "check the API key in Settings → AI". The raw engine
+ * text stays available behind a Details disclosure.
+ *
  * ⚡ Generate Similar (Task 5): when the analysis JSON result is present,
  * a second action sits next to Send to Canvas. It opens the same
  * SendToCanvasModal, just flagged `autoRun` with the analysis result's
@@ -25,11 +31,12 @@
  * a `gen` block and reruns the freshly-inserted prompt node once it lands.
  */
 import { useEffect, useRef, useState } from 'react';
-import { ChevronUp, Copy, Languages, Loader2, Send, Sparkles, Zap } from 'lucide-react';
+import { AlertTriangle, ChevronUp, Copy, Languages, Loader2, Send, Sparkles, X, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import type { Resource } from '../../types';
 import { hasPromptData } from '../../utils/promptTriggerTags';
+import { resolveTaskError, type ResolvedTaskError } from '../../utils/errorCatalog';
 import { generateGenPrompt } from '../../services/resourceService';
 import { useTaskCompletion } from '../../hooks/useTaskCompletion';
 import { useOptionalToast } from '../Toast';
@@ -109,6 +116,13 @@ export function PromptSection({
   };
   useEffect(() => () => clearGenTimeout(), []);
 
+  // Failure surface. A toast was the wrong channel for this: the whole
+  // problem being fixed is that the user can't act on an AI failure, and a
+  // notification that disappears in a few seconds can't be read twice. The
+  // resolved copy sits in the section until the next Generate, with the raw
+  // engine text kept behind a Details disclosure so nothing is lost.
+  const [genError, setGenError] = useState<{ resolved: ResolvedTaskError; raw: string } | null>(null);
+
   const { task: genTask } = useTaskCompletion(taskId, {
     onComplete: () => {
       clearGenTimeout();
@@ -118,16 +132,20 @@ export function PromptSection({
     onError: (task) => {
       clearGenTimeout();
       setTaskId(null);
-      toast?.addToast(
-        task.error_msg || t('resources.infoPanel.promptGenerateFailed', 'Failed to generate prompt'),
-        'error',
-      );
+      // metadata.error_code is written by the backend's error_catalog on the
+      // workflow's failure path; error_msg is the trigger-owned raw text and
+      // is only the fallback (see utils/errorCatalog.ts).
+      setGenError({
+        resolved: resolveTaskError(task.metadata, task.error_msg, t),
+        raw: task.error_msg || '',
+      });
     },
   });
   const generating = dispatching || Boolean(taskId);
 
   const handleGenerate = async () => {
     if (generating) return;
+    setGenError(null);
     setDispatching(true);
     try {
       const id = await generateGenPrompt(resource.id);
@@ -143,11 +161,13 @@ export function PromptSection({
       }, 90000);
     } catch (err) {
       console.error('Failed to start prompt generation:', err);
+      // Dispatch-time failure — no task row exists, so there is no
+      // error_code to resolve; the catalog falls back to the raw text.
       const msg =
         err instanceof Error && err.message
           ? err.message
           : t('resources.infoPanel.promptGenerateFailed', 'Failed to generate prompt');
-      toast?.addToast(msg, 'error');
+      setGenError({ resolved: resolveTaskError(null, msg, t), raw: msg });
     } finally {
       setDispatching(false);
     }
@@ -328,6 +348,43 @@ export function PromptSection({
   const otherSideNeg = lang === 'zh' ? resource.gen_prompt_negative : resource.gen_prompt_negative_zh;
   const copyValue = showJson ? (resource.gen_prompt_json || '') : posValue;
 
+  // Failure card — sits above the editors rather than replacing them, so a
+  // failed Generate never blocks writing the prompt by hand.
+  const errorCard = genError && !generating ? (
+    <div
+      role="alert"
+      className="mb-2 flex items-start gap-1.5 border border-red-400/30 rounded-[10px] bg-red-500/[.06] px-3 py-2.5"
+    >
+      <AlertTriangle size={12} className="mt-0.5 shrink-0 text-red-400" />
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] text-red-300">{genError.resolved.title}</div>
+        {Boolean(genError.resolved.hint) && (
+          <div className="mt-0.5 text-[10px] text-ink-400">{genError.resolved.hint}</div>
+        )}
+        {/* Only when the copy above REPLACED the raw text — without a resolved
+            code the title already IS the raw error, and a disclosure would
+            just repeat it. */}
+        {Boolean(genError.resolved.code) && Boolean(genError.raw) && (
+          <details className="mt-1">
+            <summary className="cursor-pointer text-[9.5px] text-ink-600 hover:text-ink-400">
+              {t('common.details', 'Details')}
+            </summary>
+            <div className="mt-1 font-mono text-[9.5px] text-ink-600 break-words">
+              {genError.raw}
+            </div>
+          </details>
+        )}
+      </div>
+      <button
+        onClick={() => setGenError(null)}
+        aria-label={t('common.dismiss', 'Dismiss')}
+        className="text-ink-600 hover:text-ink-300 transition-colors"
+      >
+        <X size={11} />
+      </button>
+    </div>
+  ) : null;
+
   return (
     <div className="px-4 mt-3">
       <div className="flex items-center justify-between mb-1">
@@ -364,6 +421,8 @@ export function PromptSection({
           </button>
         </div>
       </div>
+
+      {errorCard}
 
       {generating ? (
         <div className="border border-ink-700 rounded-[10px] bg-ink-800/40 px-3 py-2.5">

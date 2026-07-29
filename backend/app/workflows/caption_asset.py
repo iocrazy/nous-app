@@ -22,6 +22,10 @@ Design (mirrors analyze_l1 / upload_postprocess conventions):
     pattern — tags/tag_groups are shared vocabulary, not tenant rows).
   - Failure paths RAISE (CLAUDE.md 路线 C rule 4) so task_tracking shows
     the real reason instead of a phantom "completed".
+  - The tail-catch also records an ``error_catalog`` code into
+    ``metadata.error_code`` — ``error_msg`` is trigger-owned, so that is
+    the only place a user-actionable classification can live (see
+    ``app/services/ai/error_catalog.py``).
 """
 
 from __future__ import annotations
@@ -112,6 +116,7 @@ async def caption_asset_workflow(
     cached LLM result instead of paying for a second vision call.
     """
     from app.repositories.resources_repository import ResourcesRepository
+    from app.services.ai.error_catalog import record_ai_error_code
     from app.services.infra.unified_task_manager import get_task_manager
     from app.workflows._ai_tags import write_ai_tags
     from app.workflows._failure_handler import record_workflow_failure
@@ -218,6 +223,12 @@ async def caption_asset_workflow(
             "tags_added": attached,
         }
     except Exception as e:  # noqa: BLE001
+        # Translate the raw failure into a stable error code the frontend
+        # can turn into actionable copy (a provider 401 otherwise reaches
+        # the user as "Step … exceeded its maximum of N retries"). Writes
+        # metadata only — error_msg/phase stay trigger-owned — and never
+        # raises, so the failure path below is unchanged.
+        await record_ai_error_code(wf_id, e)
         return await record_workflow_failure(
             workflow_id=wf_id,
             error=e,
