@@ -56,6 +56,11 @@ class MediaLocation:
     def is_object_store(self) -> bool:
         return self.backend == "object_store"
 
+    @property
+    def is_prefix(self) -> bool:
+        """key 以 / 结尾 = 前缀形态(一个资源对应该前缀下的多个对象,如图集)。"""
+        return self.is_object_store and bool(self.key) and self.key.endswith("/")
+
 
 def resolve_media_source(file_path: str) -> MediaLocation:
     """Parse a ``generated_media.file_path`` value into a MediaLocation.
