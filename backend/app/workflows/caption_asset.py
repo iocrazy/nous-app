@@ -1,7 +1,9 @@
 """caption_asset (prompt_caption) DBOS workflow — IC-port P1-2.
 
-Reverse-engineers a generation prompt for an image resource via the
-user's assigned ``caption`` vision agent and writes it to
+Reverse-engineers a generation prompt for an image resource — or, since
+2026-07-29, a VIDEO resource, which is captioned from its downloaded
+cover still (``app/services/ai/caption_source.py`` owns that ladder) —
+via the user's assigned ``caption`` vision agent and writes it to
 ``resources.gen_prompt`` / ``gen_prompt_zh`` / ``gen_prompt_json``
 (upgraded to the three-format contract 2026-07-28), plus 3-6 semantic
 tags written through to the tags system (``source='ai'`` — same
@@ -116,6 +118,10 @@ async def caption_asset_workflow(
     cached LLM result instead of paying for a second vision call.
     """
     from app.repositories.resources_repository import ResourcesRepository
+    from app.services.ai.caption_source import (
+        caption_gate_reason,
+        resolve_caption_source,
+    )
     from app.services.ai.error_catalog import record_ai_error_code
     from app.services.infra.unified_task_manager import get_task_manager
     from app.workflows._ai_tags import write_ai_tags
@@ -130,15 +136,23 @@ async def caption_asset_workflow(
             resource = await repo.get_resource_by_id(resource_id)
             if not resource:
                 raise RuntimeError(f"resource {resource_id} not found")
-            file_path = resource.get("file_path")
-            if not file_path:
-                raise RuntimeError("resource has no stored file to caption")
+            # An image captions itself; a video captions its cover still
+            # (caption_source owns that ladder — see its module docstring).
+            # The endpoint already gated on this, but a cover can disappear
+            # between dispatch and execution, so re-resolve here and fail
+            # with the SAME user-facing reason the gate would have given.
+            source_path = await resolve_caption_source(resource)
+            if not source_path:
+                raise RuntimeError(
+                    await caption_gate_reason(resource)
+                    or "resource has no stored file to caption"
+                )
 
             await manager.update_progress(wf_id, 10, subtitle="Resolving provider")
             cfg = await resolve_caption_provider(user_id)
 
             await manager.update_progress(wf_id, 30, subtitle="Analyzing image...")
-            async with materialize(file_path) as local_path:
+            async with materialize(source_path) as local_path:
                 result = await call_caption(
                     abs_path=str(local_path),
                     user_id=user_id,

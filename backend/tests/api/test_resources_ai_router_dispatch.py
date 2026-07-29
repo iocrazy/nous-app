@@ -62,6 +62,30 @@ def test_batch_endpoint_dispatches_per_resource_with_skip_reasons() -> None:
     assert "skipped" in source and "dispatched" in source
 
 
+def test_slide_endpoint_pins_the_same_wf_id_contract() -> None:
+    source = _source("generate_slide_prompt")
+    assert "dbos_workflow_id=wf_id" in source and "workflow_id=wf_id" in source, (
+        "the per-slide endpoint dispatches its own workflow (not via "
+        "_dispatch_asset_ai, which has no slide_name), so it has to honour "
+        "the wf_id contract itself."
+    )
+    assert "caption_slide_workflow" in source
+
+
+def test_slide_endpoint_gates_before_dispatching() -> None:
+    source = _source("generate_slide_prompt")
+    assert "check_media_access" in source
+    # A bad slide name must 4xx at the endpoint, not become a failed Task
+    # Center row minutes later.
+    assert "resolve_slide_file" in source
+    assert "is_image_slide" in source
+    # Albums are the ONLY resources with per-slide prompts, and media_id is
+    # what identifies one (file_type holds raw platform codes for downloads,
+    # so it can't be the discriminator).
+    assert "if not media_id:" in source
+    assert "status_code=422" in source
+
+
 def test_training_set_export_guards_every_resource() -> None:
     source = _source("export_training_set")
     assert "check_media_access" in source, (

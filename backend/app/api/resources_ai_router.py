@@ -7,8 +7,13 @@ Provider-routed AI operations on a single resource. Currently:
   generation prompt between EN and ZH via the user's assigned
   `translation` agent (task_assignment.translation, default `translate`).
 - POST /resources/{id}/gen-prompt/generate — reverse-engineer a bilingual
-  prompt from the image via the assigned `caption` vision agent
-  (dispatched as the caption_asset DBOS workflow).
+  prompt from the image (or, for a video, its downloaded cover still) via
+  the assigned `caption` vision agent (dispatched as the caption_asset
+  DBOS workflow).
+- POST /resources/{id}/slides/{name}/generate-prompt — the same, for ONE
+  slide of a downloaded album, merged into `resources.slide_prompts`
+  (caption_slide workflow). Albums have no whole-resource variant: their
+  `file_path` is a directory of slides.
 - POST /resources/{id}/classify — 12-dimension bilingual auto-tagging via
   the assigned `classify` vision agent (classify_asset DBOS workflow);
   on-demand only, uploads never auto-classify.
@@ -169,7 +174,14 @@ def _resolve_ai_operation(operation: str) -> dict:
 
 
 def _image_gate_reason(resource: Optional[dict]) -> Optional[str]:
-    """Why this resource can't run an image-AI operation (None = it can)."""
+    """Why this resource can't run a STRICT image-only operation.
+
+    Still image-only on purpose. Two callers depend on that: ``classify``
+    (12-dimension tagging is defined over the asset itself, not a stand-in
+    cover) and the LoRA training-set export (a zip of video covers is not a
+    training set). Reverse-prompting is the one that widened — it goes
+    through ``caption_gate_reason`` instead.
+    """
     if not resource:
         return "Resource not found"
     if (resource.get("file_type") or "") != "image":
@@ -177,6 +189,20 @@ def _image_gate_reason(resource: Optional[dict]) -> Optional[str]:
     if not resource.get("file_path"):
         return "Resource has no stored file"
     return None
+
+
+async def _gate_reason(operation: str, resource: Optional[dict]) -> Optional[str]:
+    """Gate for one asset-AI operation (None = it may run).
+
+    ``caption`` accepts images AND videos (the latter via their cover
+    still) and rejects albums with a pointer to the per-slide flow;
+    everything else stays strictly image-only.
+    """
+    if operation == "caption":
+        from app.services.ai.caption_source import caption_gate_reason
+
+        return await caption_gate_reason(resource)
+    return _image_gate_reason(resource)
 
 
 async def _dispatch_asset_ai(resource: dict, user_id: str, operation: str) -> str:
@@ -227,7 +253,7 @@ async def _single_asset_ai(resource_id: str, user_id: str, operation: str) -> di
         raise HTTPException(status_code=404, detail="Resource not found")
     if not await check_media_access(resource_id, user_id, None):
         raise HTTPException(status_code=403, detail="Access denied")
-    gate = _image_gate_reason(resource)
+    gate = await _gate_reason(operation, resource)
     if gate:
         raise HTTPException(status_code=400, detail=gate)
 
@@ -254,6 +280,112 @@ async def generate_gen_prompt(
     the workflow writes gen_prompt / gen_prompt_zh when it finishes.
     """
     return await _single_asset_ai(resource_id, auth.user_id, "caption")
+
+
+@router.post("/{resource_id}/slides/{slide_name}/generate-prompt")
+async def generate_slide_prompt(
+    resource_id: str,
+    slide_name: str,
+    auth: AuthDep,
+):
+    """Reverse-engineer a prompt for ONE slide of a downloaded album.
+
+    The album-shaped counterpart of ``generate_gen_prompt``: a carousel's
+    ``file_path`` is a directory, so there is no single image to caption —
+    each slide is captioned on its own and the result lands in
+    ``resources.slide_prompts[slide_name]`` (merged, never overwriting the
+    other slides — see ``merge_slide_prompt_map``).
+
+    Same dispatch contract as the other asset-AI endpoints: a pre-created
+    task_tracking row whose ``dbos_workflow_id`` MATCHES the dispatched
+    ``workflow_id``. Returns the task id.
+
+    Status codes: 404 unknown resource or unknown slide file, 403 no
+    access, 422 the resource is not a downloaded album / the slide is a
+    video (nothing for a vision model to read), 400 a malformed slide name.
+    """
+    from app.api.media_permissions import check_media_access
+    from app.repositories.media_repository import MediaRepository
+    from app.services.media.slide_paths import (
+        InvalidSlideName,
+        SlideNotFound,
+        is_image_slide,
+        resolve_slide_file,
+    )
+
+    resource = await ResourcesRepository().get_resource_by_id(resource_id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    if not await check_media_access(resource_id, auth.user_id, None):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # An album is a download-backed resource — the slides live under
+    # parsed_media.download_path, so no media_id means no slides. This is
+    # NOT gated on file_type: for downloads that column holds the raw
+    # platform type code ('68', '2', …), never a stable 'gallery' enum
+    # (see app/services/ai/caption_source.py).
+    media_id = resource.get("media_id")
+    if not media_id:
+        raise HTTPException(
+            status_code=422,
+            detail="Per-slide prompts are only available for downloaded albums",
+        )
+    if not is_image_slide(slide_name):
+        raise HTTPException(
+            status_code=422,
+            detail="Only image slides can be reverse-engineered",
+        )
+
+    media = await MediaRepository().get_by_id(str(media_id))
+    download_path = (media or {}).get("download_path")
+    if not download_path:
+        raise HTTPException(status_code=404, detail="Album files not found")
+
+    # Resolve up front so a bad slide name fails as a 4xx here rather than
+    # as a failed Task Center row minutes later.
+    try:
+        resolve_slide_file(download_path, slide_name)
+    except InvalidSlideName:
+        raise HTTPException(status_code=400, detail="Invalid slide name")
+    except SlideNotFound:
+        raise HTTPException(status_code=404, detail="Slide file not found")
+
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from app.services.infra.unified_task_manager import get_task_manager
+    from app.workflows.caption_slide import caption_slide_workflow
+
+    wf_id = str(_uuid.uuid4())
+    try:
+        await get_task_manager().create(
+            user_id=auth.user_id,
+            task_type="prompt_caption_slide",
+            title=f"Prompt {slide_name[:40]}",
+            resource_id=str(resource_id),
+            dbos_workflow_id=wf_id,
+        )
+    except Exception as e:
+        logger.warning(f"[CaptionSlide] pre-create task_tracking row: {e}")
+
+    try:
+        await start_workflow_routed(
+            "prompt_caption_slide",
+            dbos_workflow_callable=caption_slide_workflow,
+            dbos_workflow_kwargs={
+                "resource_id": str(resource_id),
+                "user_id": auth.user_id,
+                "media_id": str(media_id),
+                "slide_name": slide_name,
+            },
+            workflow_id=wf_id,
+        )
+    except Exception as e:
+        logger.error(
+            f"[CaptionSlide] dispatch failed for {resource_id} slide "
+            f"{slide_name!r}: {e}"
+        )
+        raise HTTPException(status_code=500, detail="Failed to start slide caption")
+
+    return {"success": True, "task_id": wf_id}
 
 
 @router.post("/{resource_id}/classify")
@@ -290,7 +422,7 @@ async def batch_asset_ai(
 
     for resource_id in dict.fromkeys(data.resource_ids):  # dedupe, keep order
         resource = await repo.get_resource_by_id(resource_id)
-        gate = _image_gate_reason(resource)
+        gate = await _gate_reason(data.operation, resource)
         if gate:
             skipped.append({"resource_id": resource_id, "reason": gate})
             continue

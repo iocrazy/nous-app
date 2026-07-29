@@ -206,6 +206,12 @@ async def serve_slide_file(
     import mimetypes as _mt
 
     from app.api.media_auth import validate_media_cookie
+    from app.services.media.slide_paths import (
+        InvalidSlideName,
+        SlideNotFound,
+        resolve_slide_file,
+        validate_slide_name,
+    )
 
     if not auth and token:
         if not await validate_media_cookie(token):
@@ -213,7 +219,9 @@ async def serve_slide_file(
     elif not auth:
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    if "/" in filename or "\\" in filename or ".." in filename:
+    try:
+        validate_slide_name(filename)
+    except InvalidSlideName:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
     try:
@@ -232,12 +240,12 @@ async def serve_slide_file(
             )
 
         media, download_path = await _get_media_download_path(media_id)
-        base_path = Utils.get_download_base_path()
 
-        file_path = Path(base_path) / download_path / "slides" / filename
-        if not file_path.exists():
-            file_path = Path(base_path) / download_path / filename
-        if not file_path.exists():
+        try:
+            file_path = resolve_slide_file(download_path, filename)
+        except InvalidSlideName:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        except SlideNotFound:
             raise HTTPException(status_code=404, detail="Slide file not found")
 
         return FileResponse(

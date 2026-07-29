@@ -1,0 +1,142 @@
+"""caption_slide (prompt_caption_slide) DBOS workflow.
+
+The per-slide variant of ``caption_asset``: reverse-engineers a prompt for
+ONE slide of a downloaded album and merges it into the parent resource's
+``resources.slide_prompts`` JSONB map.
+
+Reuses ``caption_asset``'s two ``@DBOS.step``s verbatim
+(``resolve_caption_provider`` / ``call_caption``) — the provider
+resolution and the vision call are identical; only the input file and the
+destination column differ.
+
+WHAT THIS DELIBERATELY DOES NOT DO
+==================================
+No AI tags. ``caption_asset`` writes 3-6 semantic tags per image, which is
+right for one asset — but an album runs this once PER SLIDE, so a 26-slide
+carousel would attach up to ~150 tag rows to a single resource and the
+shared ``tags`` vocabulary would grow by the same order on every album.
+Slide captions therefore write prompt text only; the album's resource-level
+tags still come from the normal Tags picker.
+
+MERGE DISCIPLINE
+================
+The write goes through ``ResourcesRepository.merge_slide_prompt``, which
+read-modify-writes the WHOLE map — never a bare ``{slide_name: entry}``
+that would clobber every other slide. Same rule the frontend's
+``SlidePromptStrip`` follows on its own PATCH path (see that file's header);
+both ends of the same column have to honour it or one of them erases the
+other's work.
+
+Route C discipline (CLAUDE.md): ``manager.create()`` happens at dispatch,
+progress goes through the manager API, failures RAISE, and the tail-catch
+records an ``error_catalog`` code into ``metadata.error_code``.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from dbos import DBOS
+from loguru import logger
+
+from app.db.scope import Scope, request_scope
+from app.workflows.caption_asset import call_caption, resolve_caption_provider
+
+
+@DBOS.workflow()
+async def caption_slide_workflow(
+    resource_id: str,
+    user_id: str,
+    media_id: str,
+    slide_name: str,
+) -> dict[str, Any]:
+    """Caption one album slide into ``slide_prompts[slide_name]``.
+
+    workflow_id idempotency: re-running with the same id replays the
+    cached vision result instead of paying for a second call.
+    """
+    from app.repositories.media_repository import MediaRepository
+    from app.repositories.resources_repository import ResourcesRepository
+    from app.services.ai.error_catalog import record_ai_error_code
+    from app.services.infra.unified_task_manager import get_task_manager
+    from app.services.media.slide_paths import resolve_slide_file
+    from app.workflows._failure_handler import record_workflow_failure
+
+    manager = get_task_manager()
+    wf_id = DBOS.workflow_id
+
+    try:
+        async with request_scope(Scope(user_id=user_id)):
+            repo = ResourcesRepository()
+            resource = await repo.get_resource_by_id(resource_id)
+            if not resource:
+                raise RuntimeError(f"resource {resource_id} not found")
+
+            media = await MediaRepository().get_by_id(str(media_id))
+            download_path = (media or {}).get("download_path")
+            if not download_path:
+                raise RuntimeError(
+                    f"album {media_id} has no download_path — its slides are "
+                    "not on disk"
+                )
+            # Re-resolves (and re-guards) rather than trusting a path passed
+            # through the workflow input: DBOS freezes inputs, so a stale
+            # absolute path from an earlier deploy would outlive the file.
+            slide_path = resolve_slide_file(download_path, slide_name)
+
+            await manager.update_progress(wf_id, 10, subtitle="Resolving provider")
+            cfg = await resolve_caption_provider(user_id)
+
+            await manager.update_progress(
+                wf_id, 30, subtitle=f"Analyzing {slide_name}..."
+            )
+            result = await call_caption(
+                abs_path=str(slide_path),
+                user_id=user_id,
+                resource_id=str(resource_id),
+                provider_key=cfg["provider_key"],
+                provider_config=cfg["provider_config"],
+                agent_slug=cfg.get("agent_slug") or "caption",
+                wf_id=wf_id,
+            )
+
+            await manager.update_progress(wf_id, 70, subtitle="Parsing result")
+            entry: dict[str, str] = {}
+            if result.get("en"):
+                entry["en"] = result["en"]
+            if result.get("zh"):
+                entry["zh"] = result["zh"]
+            if not entry:
+                raise RuntimeError(
+                    "caption agent returned neither an EN nor a ZH prompt"
+                )
+
+            await manager.update_progress(wf_id, 85, subtitle="Saving slide prompt")
+            # Only the positive sides are written. The caption contract has no
+            # negative-prompt field, so any neg_en/neg_zh the user typed by
+            # hand survives (merge_slide_prompt merges INTO the existing entry).
+            await repo.merge_slide_prompt(resource_id, slide_name, entry)
+
+        await manager.update_progress(wf_id, 100, subtitle="Slide prompt generated")
+        logger.info(
+            f"[CaptionSlide] generated prompt for resource {resource_id} "
+            f"slide {slide_name!r} ({sorted(entry.keys())})"
+        )
+        return {
+            "status": "ok",
+            "resource_id": resource_id,
+            "slide_name": slide_name,
+            "sides": sorted(entry.keys()),
+        }
+    except Exception as e:  # noqa: BLE001
+        await record_ai_error_code(wf_id, e)
+        return await record_workflow_failure(
+            workflow_id=wf_id,
+            error=e,
+            context={
+                "workflow": "caption_slide",
+                "resource_id": resource_id,
+                "slide_name": slide_name,
+                "user_id": user_id,
+            },
+        )

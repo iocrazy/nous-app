@@ -227,6 +227,33 @@ def _mappings_dict(row: Any) -> Dict[str, Any]:
     return _rest_parity({k: _plain(v) for k, v in dict(row).items()})
 
 
+def merge_slide_prompt_map(
+    current: Optional[Dict[str, Any]],
+    slide_name: str,
+    entry: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Fold one slide's fields into the whole ``slide_prompts`` map.
+
+    Two levels of merge, both load-bearing:
+      - map level: every OTHER slide's entry is carried over untouched, so
+        captioning slide 7 can never erase slides 1-6. This is the same
+        promise ``SlidePromptStrip`` makes on the frontend PATCH path — the
+        column has two writers and both have to keep it.
+      - entry level: only the keys in ``entry`` are replaced, so a caption
+        run (which produces ``en``/``zh`` only) leaves a hand-written
+        ``neg_en``/``neg_zh`` in place.
+
+    Pure and side-effect free — the repository method wraps it, and the
+    clobber cases are asserted against this function directly.
+    """
+    merged: Dict[str, Any] = dict(current or {})
+    existing = merged.get(slide_name)
+    base: Dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+    base.update(entry)
+    merged[slide_name] = base
+    return merged
+
+
 class ResourcesRepository(AsyncpgRepository):
     """Resource library data access (async, ORM-backed).
 
@@ -548,6 +575,43 @@ class ResourcesRepository(AsyncpgRepository):
             return updated
         except Exception as e:
             logger.error(f"Failed to update resource {resource_id}: {e}")
+            raise
+
+    async def merge_slide_prompt(
+        self, resource_id: str, slide_name: str, entry: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Merge ONE slide's prompt fields into ``resources.slide_prompts``.
+
+        Returns the slide's resulting entry (``{}`` when the row is
+        missing / not owned, mirroring ``update_resource``).
+
+        The merge is whole-map (``merge_slide_prompt_map``) so no other
+        slide is ever clobbered, and it happens INSIDE the write_scope
+        session that persists it — reading through a separate scope first
+        would widen the read-modify-write window across two transactions,
+        and two slides captioned back-to-back on the same album is a
+        perfectly ordinary thing for a user to do.
+        """
+        try:
+            async with write_scope() as session:
+                obj = await session.get(Resources, self._bigint(resource_id))
+                if obj is None:
+                    return {}
+                merged = merge_slide_prompt_map(obj.slide_prompts, slide_name, entry)
+                # Reassign (not in-place mutate) — a plain JSONB dict is not
+                # a MutableDict, so the unit of work only sees the change if
+                # the attribute itself is set to a new object.
+                obj.slide_prompts = merged
+                await session.flush()
+            logger.info(
+                f"Merged slide prompt for resource {resource_id} slide {slide_name!r}"
+            )
+            return merged[slide_name]
+        except Exception as e:
+            logger.error(
+                f"Failed to merge slide prompt for {resource_id} "
+                f"slide {slide_name!r}: {e}"
+            )
             raise
 
     async def delete_resource(self, resource_id: str) -> bool:

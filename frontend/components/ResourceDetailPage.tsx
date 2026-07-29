@@ -68,6 +68,7 @@ import { createTag } from '../services/unifiedTagService';
 import { fetchResourceCanvasRefs, type CanvasBackRef } from '../services/projectAssetsService';
 import { EagleTagPicker } from './EagleTagPicker';
 import { PromptSection } from './resources/PromptSection';
+import { canGenerateForResource } from './resources/ResourcePromptSection';
 import { getSupabaseAccessToken, getSupabaseClient } from '../supabaseClient';
 import { formatDateLocalized } from '../utils/formatDate';
 import { downloadFile } from '../utils/download';
@@ -1830,7 +1831,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                 }
               }
             }}
-            canGenerate={resource.file_type === 'image'}
+            canGenerate={canGenerateForResource(resource)}
             onGenerated={handlePromptGenerated}
             translating={promptTranslating}
             onTranslate={handleTranslatePrompt}
