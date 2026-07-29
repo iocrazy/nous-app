@@ -188,6 +188,7 @@ async def run_whisper(
         )
 
     from app.services.ai.transcribe.whisper_service import WhisperService
+    from app.services.library.media_storage import materialize
 
     # Honor the user's Settings → AI → Transcription model pick. Without this
     # the branch dropped `task_assignment` on the floor and WhisperService
@@ -197,12 +198,18 @@ async def run_whisper(
     whisper_model = _assignment_model(task_assignment, provider_config, "whisper-1")
 
     svc = WhisperService(provider_key=provider_key, provider_config=provider_config)
-    result = await svc.transcribe_and_save(
-        resource_id=resource_id,
-        audio_path=audio_path,
-        language=language,
-        whisper_model=whisper_model,
-    )
+    # WhisperService ultimately opens audio_path as a local file to upload to
+    # the provider. materialize() is a no-op passthrough for filesystem rows
+    # (yields the real path) and streams sb:// rows to a deleted-on-exit temp
+    # file — so this line is the only change needed to make the upload path
+    # object-store aware (Task C4, storage-full-s3-migration PR-1).
+    async with materialize(audio_path) as local_audio:
+        result = await svc.transcribe_and_save(
+            resource_id=resource_id,
+            audio_path=str(local_audio),
+            language=language,
+            whisper_model=whisper_model,
+        )
     if result is None:
         raise RuntimeError("transcribe_and_save returned None")
 
@@ -222,14 +229,22 @@ async def _run_volcengine_asr(
     task_assignment: str = "",
 ) -> dict[str, Any]:
     """Volcengine ASR path — needs a public audio URL since the API pulls
-    the file rather than receiving an upload. Reuses the HMAC-signed media
-    token (app.api.media_auth) so the URL is short-lived (1h) and tied to
-    the calling user.
+    the file rather than receiving an upload. Two source shapes:
 
-    Ported verbatim from master's app.tasks.ai_tasks.transcribe_audio_task
-    (the volcengine branch). The DBOS port had previously dropped this.
+    - filesystem row: reuses the HMAC-signed media token (app.api.media_auth)
+      so the /media route URL is short-lived (1h) and tied to the calling
+      user. Ported verbatim from master's app.tasks.ai_tasks.transcribe_audio_task
+      (the volcengine branch). The DBOS port had previously dropped this.
+    - sb:// row (object store): the /media route doesn't serve these, so we
+      hand Volcengine a Supabase Storage signed URL instead. The signed URL
+      is built against the LAN-facing SUPABASE_URL, which Volcengine's cloud
+      side cannot reach — the scheme+host is swapped for
+      STORAGE_SIGNED_URL_PUBLIC_BASE (identical host-swap logic to
+      media_serving.py::serve_stored_file). Task C4, storage-full-s3-migration
+      PR-1.
     """
     import time as time_mod
+    from urllib.parse import urlsplit, urlunsplit
 
     from app.api.media_auth import _sign_token
     from app.core.config import settings
@@ -238,38 +253,59 @@ async def _run_volcengine_asr(
         RESOURCE_V2,
         VolcengineASRService,
     )
+    from app.services.library.media_storage import ObjectStore, resolve_media_source
 
-    # 解析到磁盘路径,以便下面推导对外 URL。
-    from app.services.media.audio_source import AudioSourceResolver
+    loc = resolve_media_source(audio_path)
+    if loc.is_object_store:
+        public_base = (settings.STORAGE_SIGNED_URL_PUBLIC_BASE or "").strip()
+        if not public_base:
+            raise RuntimeError(
+                "volcengine ASR needs a publicly-reachable signed URL base "
+                "for object-store audio sources, but "
+                "STORAGE_SIGNED_URL_PUBLIC_BASE is not configured — refusing "
+                "to build a LAN-only URL Volcengine's cloud side can't reach"
+            )
+        store = ObjectStore(loc.bucket)
+        signed = await store.signed_url(loc.key, ttl_seconds=3600)
+        parts = urlsplit(signed)
+        base = urlsplit(public_base.rstrip("/"))
+        audio_url = urlunsplit((base.scheme, base.netloc, parts.path, parts.query, ""))
+        ext = os.path.splitext(loc.key)[1].lstrip(".").lower()
+    else:
+        # 解析到磁盘路径,以便下面推导对外 URL。
+        from app.services.media.audio_source import AudioSourceResolver
 
-    _resolver = AudioSourceResolver()
-    audio_path = _resolver.resolve(audio_path)
+        _resolver = AudioSourceResolver()
+        resolved_path = _resolver.resolve(audio_path)
 
-    # Pull the bound user id from the provider_config caller (load_transcribe_inputs
-    # passes provider_config without user_id; we need to recover it from the
-    # signed-token chain). The simplest path: read the resource's creator_id.
-    # Avoids threading user_id through every step signature.
-    from app.db import engine as db_engine
+        # Pull the bound user id from the provider_config caller
+        # (load_transcribe_inputs passes provider_config without user_id; we
+        # need to recover it from the signed-token chain). The simplest path:
+        # read the resource's creator_id. Avoids threading user_id through
+        # every step signature. Only needed for the /media token — the
+        # object-store branch above has no equivalent per-user gate.
+        from app.db import engine as db_engine
 
-    row = await db_engine.fetch_one(
-        "SELECT creator_id FROM public.resources WHERE id = :rid",
-        {"rid": int(resource_id)},
-    )
-    if not row:
-        raise RuntimeError(f"resource {resource_id} not found for volcengine asr")
-    user_id = str(row["creator_id"])
+        row = await db_engine.fetch_one(
+            "SELECT creator_id FROM public.resources WHERE id = :rid",
+            {"rid": int(resource_id)},
+        )
+        if not row:
+            raise RuntimeError(f"resource {resource_id} not found for volcengine asr")
+        user_id = str(row["creator_id"])
 
-    # Build signed media URL (4-part HMAC, 1h TTL — same scheme as <video src>).
-    now = int(time_mod.time())
-    expires_at = now + 3600
-    media_token = _sign_token(user_id, now, expires_at)
+        # Build signed media URL (4-part HMAC, 1h TTL — same scheme as <video src>).
+        now = int(time_mod.time())
+        expires_at = now + 3600
+        media_token = _sign_token(user_id, now, expires_at)
 
-    media_public_url = getattr(settings, "MEDIA_PUBLIC_URL", "https://cn.nous.ink:88")
-    # The /media route serves files by path relative to the download root.
-    rel_path = _resolver.to_relative(audio_path)
-    audio_url = f"{media_public_url}/media/{rel_path}?token={media_token}"
+        media_public_url = getattr(settings, "MEDIA_PUBLIC_URL", "https://cn.nous.ink:88")
+        # The /media route serves files by path relative to the download root.
+        rel_path = _resolver.to_relative(resolved_path)
+        audio_url = f"{media_public_url}/media/{rel_path}?token={media_token}"
 
-    ext = os.path.splitext(audio_path)[1].lstrip(".").lower()
+        ext = os.path.splitext(resolved_path)[1].lstrip(".").lower()
+
     audio_format = ext if ext in ("mp3", "wav", "ogg") else "wav"
 
     # Pick API resource based on the model the user assigned in
