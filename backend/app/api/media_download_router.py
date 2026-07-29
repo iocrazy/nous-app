@@ -8,7 +8,7 @@ Endpoints for downloading video/cover/music files, managing pending/retry downlo
 
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel
@@ -167,12 +167,18 @@ async def retry_download(
 
 
 @router.get("/download/{platform_id}", tags=TAGS_DOWNLOAD)
-async def download_video_file(platform_id: str, auth: AuthDep):
+async def download_video_file(platform_id: str, request: Request, auth: AuthDep):
     """
     Download video file
 
-    Return video file for browser download.
+    Return video file for browser download. Storage unification: routes
+    through ``serve_stored_file`` — ``download_path`` may be a legacy
+    filesystem-relative path or an ``sb://`` object-store row (post
+    downloader S3 migration), and the router never special-cases the
+    shape. Mirrors ``projects_router.py::download_file``.
     """
+    from app.services.library.media_serving import serve_stored_file
+
     try:
         repo = MediaRepository()
         video = await repo.get_by_platform_id(platform_id)
@@ -184,26 +190,22 @@ async def download_video_file(platform_id: str, auth: AuthDep):
         if not download_path:
             raise HTTPException(status_code=404, detail="Video file path not found")
 
-        try:
-            base_path = Utils.get_download_base_path()
-        except ValueError:
-            raise HTTPException(status_code=404, detail="Download path not configured")
-        file_path = Path(base_path) / download_path
-        if not file_path.exists():
-            raise HTTPException(status_code=404, detail="Video file not found")
-
         video_title = video.get("title", platform_id)
         safe_title = "".join(
             c for c in video_title if c.isalnum() or c in (" ", "-", "_", ".")
         ).strip()
         if not safe_title:
             safe_title = platform_id
-        filename = f"{safe_title}.mp4"
+        # safe_title is already restricted to alnum/space/-_. so it can't
+        # contain a quote, but strip defensively before it lands in a header.
+        safe_title = safe_title.replace('"', "")
+        disposition = f'attachment; filename="{safe_title}.mp4"'
 
-        return FileResponse(
-            path=str(file_path),
-            filename=filename,
-            media_type="video/mp4",
+        return await serve_stored_file(
+            download_path,
+            mime="video/mp4",
+            request=request,
+            disposition=disposition,
         )
     except HTTPException:
         raise
