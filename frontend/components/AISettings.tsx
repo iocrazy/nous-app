@@ -42,6 +42,7 @@ import {
 import { relativeTime } from '../utils/taskDisplay';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { MCPServersPanel } from './MCPServersPanel';
+import { HotwordChipInput } from './settings/HotwordChipInput';
 import { ApprovalsPanel } from './ApprovalsPanel';
 import { NousCenterVerifyPanel } from '../features/canvas-core/smart/NousCenterVerifyPanel';
 import { MemoryPanel } from './MemoryPanel';
@@ -1048,13 +1049,11 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
                 on every ASR run, even under governance lock. */}
             <div className="flex flex-col gap-1.5 py-2">
               <span className="text-sm text-ink-300">Transcription Hotwords</span>
-              <textarea
+              <HotwordChipInput
                 value={localSettings.transcription_hotwords ?? ''}
-                onChange={(e) => setTranscriptionHotwords(e.target.value)}
+                onChange={setTranscriptionHotwords}
                 disabled={!localSettings.ai_enabled}
-                rows={2}
-                placeholder="Names, terms — comma or newline separated"
-                className="w-full bg-ink-950 border border-ink-800 rounded-lg px-3 py-2 text-sm text-ink-200 placeholder:text-ink-600 focus:outline-none focus:border-indigo-500/60 resize-y disabled:opacity-50"
+                placeholder="Type a name or term, press Enter to add"
               />
               <span className="text-xs text-ink-500">
                 Helps the transcriber spell proper nouns and jargon correctly.
