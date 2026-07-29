@@ -670,6 +670,29 @@ async def serve_resource_cover(resource_id: str, request: Request):
                 continue
             if rel_path.startswith("http"):
                 continue
+
+            # storage-migration fix round 1: the derived module migrates
+            # these two columns to sb://library/derived/{rid}/... (see
+            # storage_migration.py::_migrate_derived_row). Before this
+            # branch, an sb:// value here would fall straight through to
+            # `Path(DOWNLOAD_PATH) / "sb://library/..."` — never exists() on
+            # disk — silently treated as "no thumbnail", which cascades into
+            # the lazy-thumbnail placeholder path below regenerating a LOCAL
+            # thumbnail and overwriting the column right back to a filesystem
+            # path. That would quietly undo the migration and orphan the S3
+            # copy every time this endpoint is hit for a migrated resource.
+            loc = resolve_media_source(rel_path)
+            if loc.is_object_store:
+                mime, _ = mimetypes.guess_type(rel_path)
+                return await serve_stored_file(
+                    rel_path,
+                    mime=mime or "image/jpeg",
+                    request=request,
+                    extra_headers={
+                        "Cache-Control": "public, max-age=604800, immutable"
+                    },
+                )
+
             full_path = Path(settings.DOWNLOAD_PATH) / rel_path
             if full_path.exists():
                 # nginx direct serve (P3): bytes leave the Python process —

@@ -619,12 +619,26 @@ async def _migrate_derived_row(row: dict, *, dry_run: bool, delete_source: bool)
     await store.put_dir(str(local_dir), _key, skip_existing=True)
 
     # Verify BEFORE touching the DB — same ordering guarantee as every other
-    # directory-migration path in this file.
-    remote_keys = await store.list_prefix(prefix)
-    if len(remote_keys) != len(local_files):
+    # directory-migration path in this file. NOT a bare count comparison
+    # (fix round 1, Finding 2): ``prefix`` is ``derived/{rid}/`` with no kind
+    # segment — deliberately flat, so the read side (serve_preview_sprite/
+    # serve_resource_cover) can address any derived asset by resource_id
+    # alone regardless of which local kind directory it came from. That
+    # means thumbnails/{rid}/ and covers/{rid}/ for the SAME resource_id
+    # share one prefix, and _list_derived_rows already produced them as TWO
+    # separate rows. A raw ``len(list_prefix(prefix)) != len(local_files)``
+    # would count whichever kind migrated first as "extra" objects when the
+    # second kind's row runs, permanently mismatching and raising even
+    # though every one of THIS row's files landed correctly. Check
+    # membership of this row's own expected keys instead — order-independent
+    # across kinds/rows.
+    expected_keys = {_key(p.relative_to(local_dir).as_posix()) for p in local_files}
+    remote_keys = set(await store.list_prefix(prefix))
+    missing = expected_keys - remote_keys
+    if missing:
         raise RuntimeError(
-            f"derived file count mismatch after put_dir: resource_id="
-            f"{resource_id} local={len(local_files)} remote={len(remote_keys)}"
+            f"derived objects missing after put_dir: resource_id={resource_id} "
+            f"kind={row.get('kind')} missing={sorted(missing)}"
         )
 
     if dry_run:

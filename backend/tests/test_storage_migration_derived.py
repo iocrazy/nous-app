@@ -258,7 +258,7 @@ async def test_migrate_derived_row_count_mismatch_raises_before_mutation(
     execute = AsyncMock(return_value=0)
     monkeypatch.setattr(sm.db_engine, "execute", execute)
 
-    with pytest.raises(RuntimeError, match="derived file count mismatch"):
+    with pytest.raises(RuntimeError, match="derived objects missing"):
         await sm._migrate_derived_row(
             {"resource_id": "100", "kind": "thumbnails", "dir": str(d)},
             dry_run=False,
@@ -268,6 +268,47 @@ async def test_migrate_derived_row_count_mismatch_raises_before_mutation(
     fetch_one.assert_not_called()
     execute.assert_not_called()
     assert d.exists()
+
+
+async def test_migrate_derived_row_thumbnails_and_covers_share_prefix_no_false_mismatch(
+    tmp_path, monkeypatch
+):
+    """fix round 1, Finding 2: derived_key_prefix(rid) is flat —
+    ``derived/{rid}/`` — with no kind segment, so thumbnails/{rid}/ and
+    covers/{rid}/ for the SAME resource_id land under the SAME prefix.
+    _list_derived_rows produces them as two separate rows; migrating the
+    second kind must not count the first kind's already-migrated objects as
+    a mismatch just because list_prefix(prefix) now returns more objects
+    than this row's own local file count."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "DOWNLOAD_PATH", str(tmp_path))
+    thumb_dir = _make_thumb_dir(tmp_path, rid="100")
+    cover_dir = tmp_path / "derived" / "covers" / "100"
+    cover_dir.mkdir(parents=True)
+    (cover_dir / "cover.png").write_bytes(b"cover-bytes")
+
+    store = FakeDerivedStore()
+    _patch_store(monkeypatch, store)
+    monkeypatch.setattr(sm.db_engine, "fetch_one", AsyncMock(return_value=None))
+    monkeypatch.setattr(sm.db_engine, "execute", AsyncMock(return_value=0))
+
+    outcome_thumb = await sm._migrate_derived_row(
+        {"resource_id": "100", "kind": "thumbnails", "dir": str(thumb_dir)},
+        dry_run=False,
+        delete_source=False,
+    )
+    # Second row for the SAME resource_id — by the time this runs,
+    # list_prefix("derived/100/") already returns the first row's objects
+    # too (shared prefix), which must not be mistaken for a mismatch here.
+    outcome_cover = await sm._migrate_derived_row(
+        {"resource_id": "100", "kind": "covers", "dir": str(cover_dir)},
+        dry_run=False,
+        delete_source=False,
+    )
+
+    assert outcome_thumb == "migrated"
+    assert outcome_cover == "migrated"
 
 
 async def test_migrate_derived_row_missing_dir_is_skipped(tmp_path, monkeypatch):

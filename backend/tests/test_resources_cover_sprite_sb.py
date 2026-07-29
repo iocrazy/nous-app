@@ -106,6 +106,46 @@ async def test_cover_upload_sb_row_writes_derived_dir_and_serves_back(
     assert resp.path == str(on_disk)
 
 
+async def test_serve_cover_thumbnail_path_sb_row_goes_through_serve_stored_file(
+    monkeypatch,
+):
+    """fix round 1, Finding 1: derived module migrates thumbnail_path/
+    cover_image_path to sb://library/derived/{rid}/... — GET /cover must
+    route an sb:// value through serve_stored_file, not silently fail a raw
+    ``Path(DOWNLOAD_PATH) / "sb://..."`` existence check (which never
+    exists()), fall into the lazy-thumbnail placeholder path, and regenerate
+    + overwrite the column back to a local path — quietly undoing the
+    migration and orphaning the S3 copy."""
+    from fastapi.responses import Response
+
+    sb_thumb = "sb://library/derived/9000000000000000001/thumbnail.webp"
+    resource = {
+        "id": _RID,
+        "file_path": None,
+        "thumbnail_path": sb_thumb,
+        "cover_image_path": None,
+        "mime_type": "video/mp4",
+    }
+    repo = _repo(resource)
+    p1, p2 = _patches(repo)
+
+    sentinel = Response(status_code=200, media_type="image/webp")
+    fake_serve_stored_file = AsyncMock(return_value=sentinel)
+    with (
+        p1,
+        p2,
+        patch(
+            "app.services.library.media_serving.serve_stored_file",
+            fake_serve_stored_file,
+        ),
+    ):
+        resp = await serve_resource_cover(_RID, MagicMock())
+
+    assert resp is sentinel
+    fake_serve_stored_file.assert_awaited_once()
+    assert fake_serve_stored_file.call_args.args[0] == sb_thumb
+
+
 async def test_cover_upload_legacy_fs_row_keeps_next_to_source(tmp_path, monkeypatch):
     """Legacy fs row: byte-identical behavior — cover still lands next to
     the original."""
