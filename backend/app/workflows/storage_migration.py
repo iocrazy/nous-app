@@ -69,7 +69,6 @@ to migrate; wiring it up would just be dead SQL against renamed tables.
 from __future__ import annotations
 
 import os
-import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -386,14 +385,21 @@ async def _downloads_update_row(
 
 # ── hls: resource_versions.hls_path (filesystem → HlsPublisher) ────────
 #
-# ``derived/hls/{rid}/{vid}/master.m3u8`` on disk (see transcode_service.py's
-# ``hls_dir`` computation) → ``sb://library/hls/{rid}/{vid}/master.m3u8``.
-# rid/vid come straight out of the path itself (they're baked into it by the
-# same transcode code that writes it), so a regex extract is simpler and
-# just as safe as a join back to resources — no ambiguity since hls_path is
-# never shared between versions.
-
-_HLS_PATH_RE = re.compile(r"derived/hls/(\d+)/(\d+)/master\.m3u8$")
+# ``hls_path`` on disk has TWO different directory layouts depending on
+# where the transcode source lived (see transcode_service.py:155-173):
+#   - source already sb:// (upload/generated)  → derived/hls/{rid}/{vid}/
+#   - source still on the filesystem (download) → {source.parent}/hls/
+# The second shape has no rid/vid encoded in the path text at all — and the
+# download pipeline never had ObjectStore support until this epic's Task 1,
+# so it's predominantly THIS shape among the 97 legacy rows. A path-text
+# regex therefore silently mis-handles (or raises on) most of the batch.
+# rid/vid are read straight off the row instead: resource_versions.id IS
+# the "version_id" every other version lookup keys off
+# (repositories/resources_repository.py::get_version_by_id), and
+# resource_id is the rid — both already in the SELECT below, so this can't
+# fail the way path parsing can. The directory to migrate is still resolved
+# from hls_path itself (via resolve_media_source, in _migrate_hls_row),
+# independent of which naming convention produced it.
 
 _HLS_SELECT_SQL = """
     SELECT rv.id, rv.resource_id, rv.version_number, rv.hls_path, ri.scope_id
@@ -412,25 +418,32 @@ _HLS_SELECT_SQL = """
 
 
 def _hls_extract(row: dict) -> RowExtract:
-    """Parse rid/vid out of ``derived/hls/{rid}/{vid}/master.m3u8``.
+    """rid/vid come straight off the row, NOT parsed from ``hls_path`` text.
 
-    Raises (not a silent None) on a non-matching path — same convention as
-    ``_uploads_extract``/``_project_files_extract``: a row this migration
-    cannot safely address is a failed row, not a skipped one.
+    ``hls_path`` has two different directory layouts depending on whether
+    the transcode source was already ``sb://`` or still on the filesystem
+    (see the module-level comment above) — only one of them encodes rid/vid
+    in the path itself, so text parsing silently mis-handles (or raises on)
+    the other. ``resource_versions.id`` is the same "version_id" every other
+    version lookup keys off, and ``resource_id`` is the rid — both are
+    already selected, so this can't fail the way path parsing can. Still
+    raises (not a silent None) if either is somehow missing — same
+    convention as ``_uploads_extract``/``_project_files_extract``: a row
+    this migration cannot safely address is a failed row, not a skipped one.
     """
-    hls_path = row.get("hls_path") or ""
-    m = _HLS_PATH_RE.search(hls_path)
-    if not m:
+    resource_id = row.get("resource_id")
+    version_id = row.get("id")
+    if resource_id is None or version_id is None:
         raise RuntimeError(
-            f"resource_versions.id={row.get('id')} hls_path does not match "
-            f"derived/hls/{{rid}}/{{vid}}/master.m3u8: {hls_path!r}"
+            f"resource_versions row missing resource_id/id — cannot address "
+            f"HLS output: {row!r}"
         )
     return RowExtract(
         scope_id=int(row.get("scope_id") or 0),
         mime="application/vnd.apple.mpegurl",
         filename=None,
-        hls_rid=m.group(1),
-        hls_vid=m.group(2),
+        hls_rid=str(resource_id),
+        hls_vid=str(version_id),
     )
 
 

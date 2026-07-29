@@ -4,11 +4,23 @@ HlsPublisher 的对象存储路径已在 PR2 验证(master.m3u8 最后上传的�
 不变量、产物完整性)。本 module 只负责逐行调它 + 迁移前后的行级安全序
 (verify-before-mutate / dry_run 先于任何写入 / DB UPDATE 先于删除本地)。
 
-The extract-only test below (rid/vid parsing) comes straight from the task
-brief. The ``_migrate_row``/``_migrate_hls_row`` tests that follow go
-further — they exercise the real 4-step safety-contract ordering end to end,
-the same way test_storage_migration_downloads.py already does for the album
-path. HlsPublisher itself is stood in for by a fake (its object-store upload
+review round-1 fix: ``_hls_extract`` originally parsed rid/vid out of
+``hls_path`` TEXT via regex, which only matches the
+``derived/hls/{rid}/{vid}/`` layout. hls_path has a second, path-text-blind
+layout (``{source.parent}/hls/`` — wherever the download pipeline put the
+source file, see transcode_service.py:155-173) that has no rid/vid encoded
+in it at all, and — since the download pipeline never had ObjectStore
+support before this epic's Task 1 — is very likely the MAJORITY shape among
+the 97 legacy rows. The regex silently raised (row counted "failed") on
+that shape, which would have made the PR-4 dry-run count come up far short
+of 97. Fixed to read resource_id/id straight off the row instead (see the
+module-level comment in storage_migration.py). The tests below cover both
+layouts to make sure this doesn't regress.
+
+The ``_migrate_row``/``_migrate_hls_row`` tests that follow exercise the
+real 4-step safety-contract ordering end to end, the same way
+test_storage_migration_downloads.py already does for the album path.
+HlsPublisher itself is stood in for by a fake (its object-store upload
 behavior is PR2's concern, already covered there) so these tests stay
 focused on what THIS module owns: dispatch, verify-before-mutate, and the
 DB/delete side effects.
@@ -28,7 +40,11 @@ from app.workflows.storage_migration import _hls_extract
 # sync extract-only tests as asyncio tests (PytestWarning).
 
 
-def test_hls_extract_derives_rid_vid():
+def test_hls_extract_uses_row_resource_and_version_id():
+    """rid/vid come from the row's resource_id/id columns, not from parsing
+    hls_path text — the path here deliberately encodes a DIFFERENT "200"
+    so a regression back to path-text parsing would be caught immediately
+    (hls_vid must be "1", the row's own id, not "200")."""
     ex = _hls_extract(
         {
             "id": 1,
@@ -38,15 +54,33 @@ def test_hls_extract_derives_rid_vid():
         }
     )
     assert ex.hls_rid == "100"
-    assert ex.hls_vid == "200"
+    assert ex.hls_vid == "1"
 
 
-def test_hls_extract_raises_on_malformed_path():
-    """A row whose hls_path doesn't match the expected shape can't be safely
-    addressed — this must fail loudly (counted "failed"), not silently skip
-    or migrate to a bogus prefix."""
-    with pytest.raises(RuntimeError, match="does not match"):
-        _hls_extract({"id": 9, "hls_path": "derived/hls/only-one-segment"})
+def test_hls_extract_handles_download_pipeline_layout():
+    """The download-pipeline hls_path layout (source.parent/hls/master.m3u8,
+    e.g. under global/resources/web/...) has NO rid/vid encoded in the path
+    at all. This is the layout most of the 97 legacy rows are actually in
+    (download pipeline never had ObjectStore support before this epic) —
+    extract must succeed via the row's own columns, not path parsing."""
+    ex = _hls_extract(
+        {
+            "id": 55,
+            "resource_id": 123,
+            "version_number": 1,
+            "hls_path": "global/resources/web/douyin/123/hls/master.m3u8",
+        }
+    )
+    assert ex.hls_rid == "123"
+    assert ex.hls_vid == "55"
+
+
+def test_hls_extract_raises_on_missing_resource_or_version_id():
+    """A row missing resource_id/id can't be safely addressed — this must
+    fail loudly (counted "failed"), not silently skip or migrate to a
+    bogus prefix."""
+    with pytest.raises(RuntimeError, match="missing resource_id/id"):
+        _hls_extract({"hls_path": "derived/hls/100/200/master.m3u8"})
 
 
 # ── FakeHlsStore/FakeHlsPublisher — HlsPublisher's actual object-store
@@ -97,8 +131,12 @@ def _hls_module_cfg(update_row=None):
 
 
 def _hls_row(rid: int = 100, vid: int = 200, scope_id: int = 5) -> dict:
+    # ``id`` == ``vid``: for the derived/hls/{rid}/{vid}/ layout, the real
+    # transcode code writes the directory using resource_id/version_id (the
+    # row's own id) — see storage_migration.py's _hls_extract for why
+    # extract now reads these off the row instead of the path text.
     return {
-        "id": 3,
+        "id": vid,
         "resource_id": rid,
         "version_number": 1,
         "hls_path": f"derived/hls/{rid}/{vid}/master.m3u8",
