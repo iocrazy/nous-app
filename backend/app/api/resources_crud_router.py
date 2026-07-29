@@ -21,7 +21,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 
 from app.core.deps import AuthDep
@@ -804,16 +804,18 @@ async def serve_preview_sprite(resource_id: str):
             raise HTTPException(status_code=404, detail="Resource not found")
 
         file_path = resource.get("file_path")
-        if not file_path:
-            raise HTTPException(status_code=404, detail="No file path")
 
         from app.core.config import settings
+        from app.services.library import media_storage
 
-        # Storage unification: sb:// sources have no on-disk parent dir —
-        # thumbnail_service writes their sprite to
-        # derived/thumbnails/{resource_id}/preview_sprite.jpg. Probe that
-        # first; legacy fs rows never have the derived dir today, so their
-        # probe order is effectively unchanged (next-to-source still decides).
+        # Storage unification: derived sprite 只靠 resource_id 定位,不依赖
+        # file_path —— 458 个 file_path=NULL 的 web 视频(真实文件路径在
+        # parsed_media,resources.file_path 常年 NULL)之前会被下面这行提前
+        # 早退:
+        #   if not file_path: raise HTTPException(404)
+        # 挡在 derived 探测之前,即使 sprite 已经生成也永远 404。现在先探
+        # derived 的两种落地形态,只有两者都没找到、且 file_path 存在时,
+        # 才走文件系统 next-to-source 兜底(legacy fs 行未变)。
         derived_sprite = (
             Path(settings.DOWNLOAD_PATH)
             / "derived"
@@ -822,13 +824,31 @@ async def serve_preview_sprite(resource_id: str):
             / "preview_sprite.jpg"
         )
         if derived_sprite.exists():
-            sprite_path = derived_sprite
-        else:
-            sprite_path = (
-                Path(settings.DOWNLOAD_PATH)
-                / Path(file_path).parent
-                / "preview_sprite.jpg"
+            return FileResponse(path=str(derived_sprite), media_type="image/jpeg")
+
+        # derived 迁移(PR-4,storage_migration._MODULES["derived"])跑完后,
+        # 同一份 sprite 可能已经搬到对象存储、本地文件已删除 —— 探一次
+        # sb://library/derived/{resource_id}/preview_sprite.jpg。
+        # ObjectStore.exists() 对任何失败(未配置/网络/404)都吞异常返回
+        # False,探测失败不会变成 500,只是继续往下走 fallback。
+        derived_key = (
+            media_storage.derived_key_prefix(resource_id) + "preview_sprite.jpg"
+        )
+        store = media_storage.library_store()
+        if await store.exists(derived_key):
+            return StreamingResponse(
+                store.get_stream(derived_key), media_type="image/jpeg"
             )
+
+        if not file_path:
+            raise HTTPException(status_code=404, detail="No sprite")
+
+        # 文件系统 next-to-source 兜底(旧逻辑保留)。对 sb:// 原始行,
+        # Path(file_path).parent 拼出的本地路径本来就不存在于 DOWNLOAD_PATH
+        # 下,自然落到下面的 404,不需要额外特判 sb:// scheme。
+        sprite_path = (
+            Path(settings.DOWNLOAD_PATH) / Path(file_path).parent / "preview_sprite.jpg"
+        )
         if not sprite_path.exists():
             raise HTTPException(status_code=404, detail="Preview sprite not found")
 

@@ -20,7 +20,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app.api.resources_crud_router import (
     serve_preview_sprite,
@@ -129,10 +129,36 @@ async def test_cover_upload_legacy_fs_row_keeps_next_to_source(tmp_path, monkeyp
     assert (Path(tmp_path) / expected_rel).read_bytes() == b"legacy-cover"
 
 
+class FakeDerivedStore:
+    """Stand-in for ``media_storage.library_store()`` in the sprite endpoint's
+    object-store derived probe — ``exists``/``get_stream`` only, no real
+    network. Keeps these tests hermetic (a real ``ObjectStore.exists()``
+    swallows any failure and returns False, but would still attempt a live
+    HEAD to whatever SUPABASE_URL is configured; mocking pins the test to
+    OUR dispatch logic, not the SDK/network — house style, see
+    test_storage_migration.py's FakeStore)."""
+
+    bucket = "library"
+
+    def __init__(self, *, existing_keys: set[str] | None = None):
+        self._existing = existing_keys or set()
+
+    async def exists(self, key: str) -> bool:
+        return key in self._existing
+
+    def get_stream(self, key: str):
+        async def _gen():
+            yield b"object-store-sprite-bytes"
+
+        return _gen()
+
+
 async def test_preview_sprite_sb_row_served_from_derived_dir(tmp_path, monkeypatch):
     from app.core.config import settings as app_settings
+    from app.services.library import media_storage
 
     monkeypatch.setattr(app_settings, "DOWNLOAD_PATH", str(tmp_path))
+    monkeypatch.setattr(media_storage, "library_store", lambda: FakeDerivedStore())
     sprite = Path(tmp_path) / "derived" / "thumbnails" / _RID / "preview_sprite.jpg"
     sprite.parent.mkdir(parents=True, exist_ok=True)
     sprite.write_bytes(b"sprite-bytes")
@@ -148,8 +174,10 @@ async def test_preview_sprite_sb_row_served_from_derived_dir(tmp_path, monkeypat
 
 async def test_preview_sprite_legacy_row_probe_unchanged(tmp_path, monkeypatch):
     from app.core.config import settings as app_settings
+    from app.services.library import media_storage
 
     monkeypatch.setattr(app_settings, "DOWNLOAD_PATH", str(tmp_path))
+    monkeypatch.setattr(media_storage, "library_store", lambda: FakeDerivedStore())
     legacy_sprite = Path(tmp_path) / "teams/9/uploads/RID/v1/preview_sprite.jpg"
     legacy_sprite.parent.mkdir(parents=True, exist_ok=True)
     legacy_sprite.write_bytes(b"legacy-sprite")
@@ -167,11 +195,35 @@ async def test_preview_sprite_sb_row_404_when_no_derived_sprite(tmp_path, monkey
     from fastapi import HTTPException
 
     from app.core.config import settings as app_settings
+    from app.services.library import media_storage
 
     monkeypatch.setattr(app_settings, "DOWNLOAD_PATH", str(tmp_path))
+    monkeypatch.setattr(media_storage, "library_store", lambda: FakeDerivedStore())
     repo = _repo({"id": _RID, "file_path": SB_PATH})
     p1, _ = _patches(repo)
     with p1:
         with pytest.raises(HTTPException) as exc:
             await serve_preview_sprite(_RID)
     assert exc.value.status_code == 404
+
+
+async def test_preview_sprite_sb_row_served_from_object_store(tmp_path, monkeypatch):
+    """After the derived module (PR-4) migrates + deletes the local file,
+    the sprite lives only at sb://library/derived/{rid}/preview_sprite.jpg —
+    the endpoint must still serve it (not 404 just because the local dir is
+    gone)."""
+    from app.core.config import settings as app_settings
+    from app.services.library import media_storage
+
+    monkeypatch.setattr(app_settings, "DOWNLOAD_PATH", str(tmp_path))
+    key = f"derived/{_RID}/preview_sprite.jpg"
+    monkeypatch.setattr(
+        media_storage, "library_store", lambda: FakeDerivedStore(existing_keys={key})
+    )
+
+    repo = _repo({"id": _RID, "file_path": SB_PATH})
+    p1, _ = _patches(repo)
+    with p1:
+        resp = await serve_preview_sprite(_RID)
+
+    assert isinstance(resp, StreamingResponse)

@@ -94,3 +94,18 @@ class MediaKeyBuilder:
         under this key" instead of "GET this one object".
         """
         return f"t{scope_id}/album/{resource_id}/"
+
+    def derived_prefix(self, resource_id) -> str:
+        """Prefix owning one resource's derived assets: ``derived/{rid}/``.
+
+        Thumbnails / preview sprites / covers are keyed purely by
+        resource_id — deliberately NOT content-addressed like
+        ``content_key_from_sha`` (there is no scope_id concept for a derived
+        asset, and the reader must be able to locate it from resource_id
+        alone, with no DB lookup — see resources_crud_router.py's
+        ``serve_preview_sprite``, which has no DB column to consult for
+        preview_sprite.jpg at all). Own top-level namespace (not nested under
+        ``t{scope}/`` like albums) since derived assets don't belong to any
+        one scope's content pool.
+        """
+        return f"derived/{resource_id}/"

@@ -124,6 +124,11 @@ def album_key_prefix(scope_id: int, resource_id) -> str:
     return _KEYS.album_prefix(scope_id, resource_id)
 
 
+def derived_key_prefix(resource_id) -> str:
+    """Prefix owning one resource's derived assets: ``derived/{rid}/``."""
+    return _KEYS.derived_prefix(resource_id)
+
+
 def hls_key(resource_id: str, version_id: str, rel_path: str) -> str:
     """Full key for one HLS artefact, e.g. ``hls/{rid}/{vid}/480p/stream.m3u8``.
 
