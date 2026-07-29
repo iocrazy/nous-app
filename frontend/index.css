@@ -359,6 +359,132 @@
   --agent-line: #D5C8E0;
 }
 
+/* ============================================================
+   K1.5 (2026-07-29) 每模块主色 — 全站配色重构 W1.5 (docs/superpowers/specs/
+   2026-07-29-warm-paper-palette-design.md §5). AppLayout stamps
+   `<html data-module="…">` from the same `pathnameToView()` route mapping
+   Sidebar already uses for active-item highlighting (utils/routeConfig.ts
+   `viewToModule`) — no second route→module map. Plain CSS custom-property
+   overrides (NOT inside `@theme`) — Tailwind's `.bg-indigo-600 {
+   background-color: var(--color-indigo-600) }` utilities are generated once,
+   globally; a `[data-module="x"] { --color-indigo-600: … }` block further
+   down the cascade just wins for any element under that attribute the same
+   way `[data-theme="light"]` already overrides --ink-50..950, --line, etc.
+
+   Scope: ONLY the 4 "accent" ladders that share one hue under K1 (indigo,
+   violet, emerald, green — all currently == 绿) get re-pointed per module.
+   The 6 "semantic" ladders (purple/amber/red/rose/blue/sky) and the
+   ok/warn/danger/info/agent tokens stay global — 语义色全局不变 (spec §5):
+   an Agent chip (purple/plum) or a danger button (red/brick) must look
+   identical no matter which module you're viewing it from.
+
+   projects/workspace/workflow/editor need NO block — 绿 is the global
+   default already (spec §5 table). Everything not listed below (todolist,
+   shared, points, settings, dashboard, cleanup, billing, members, canvas)
+   also falls through to the default green — `viewToModule()` returns null
+   for those views, so AppLayout never stamps a data-module attribute at all.
+
+   KNOWN DEVIATION — 赭(ochre) for [data-module="inspiration"]: the global
+   ochre-600 anchor (#A87B2B, K1 report) fails 600-vs-white (3.80 < 4.5).
+   As an "accent" here (buttons/active-states, unlike the semantic --warn
+   token which stays the untouched global anchor) it plausibly gets used as
+   a white-text solid fill, so per this task's instruction: 50/100/200/300
+   (soft/line tier) stay IDENTICAL to the global ochre ladder (unchanged
+   mockup tone); 600 is darkened to #956C25 (OKLCH L 61.3%->56.0%, chroma
+   scaled proportionally to avoid muddying, hue held) — clears 4.72:1 vs
+   white / 4.56:1 vs paper. 400/500 re-interpolated between the pinned 300
+   and the new 600; 700/800/900/950 re-extrapolated from the new 600 (same
+   Tailwind-indigo-ratio method as K1). Full matrix in task-K1.5 report
+   appendix. */
+[data-module="ai"] {
+  /* -> 李紫 (Agent) #7A5E8F (identical to the global --color-purple-* ladder) */
+  --color-indigo-50: #F5F2F8;   --color-violet-50: #F5F2F8;   --color-emerald-50: #F5F2F8;   --color-green-50: #F5F2F8;
+  --color-indigo-100: #ECE6F1;  --color-violet-100: #ECE6F1;  --color-emerald-100: #ECE6F1;  --color-green-100: #ECE6F1;
+  --color-indigo-200: #E2DAEA;  --color-violet-200: #E2DAEA;  --color-emerald-200: #E2DAEA;  --color-green-200: #E2DAEA;
+  --color-indigo-300: #D5C8E0;  --color-violet-300: #D5C8E0;  --color-emerald-300: #D5C8E0;  --color-green-300: #D5C8E0;
+  --color-indigo-400: #AF9BBF;  --color-violet-400: #AF9BBF;  --color-emerald-400: #AF9BBF;  --color-green-400: #AF9BBF;
+  --color-indigo-500: #9279A6;  --color-violet-500: #9279A6;  --color-emerald-500: #9279A6;  --color-green-500: #9279A6;
+  --color-indigo-600: #7A5E8F;  --color-violet-600: #7A5E8F;  --color-emerald-600: #7A5E8F;  --color-green-600: #7A5E8F;
+  --color-indigo-700: #69507B;  --color-violet-700: #69507B;  --color-emerald-700: #69507B;  --color-green-700: #69507B;
+  --color-indigo-800: #554264;  --color-violet-800: #554264;  --color-emerald-800: #554264;  --color-green-800: #554264;
+  --color-indigo-900: #473A52;  --color-violet-900: #473A52;  --color-emerald-900: #473A52;  --color-green-900: #473A52;
+  --color-indigo-950: #2A2230;  --color-violet-950: #2A2230;  --color-emerald-950: #2A2230;  --color-green-950: #2A2230;
+}
+
+[data-module="inspiration"] {
+  /* -> 赭 (等待/警示, darkened for module-accent use — see KNOWN DEVIATION above) */
+  --color-indigo-50: #FBF4EB;   --color-violet-50: #FBF4EB;   --color-emerald-50: #FBF4EB;   --color-green-50: #FBF4EB;
+  --color-indigo-100: #F3EAD6;  --color-violet-100: #F3EAD6;  --color-emerald-100: #F3EAD6;  --color-green-100: #F3EAD6;
+  --color-indigo-200: #EFDFC6;  --color-violet-200: #EFDFC6;  --color-emerald-200: #EFDFC6;  --color-green-200: #EFDFC6;
+  --color-indigo-300: #E2D2AC;  --color-violet-300: #E2D2AC;  --color-emerald-300: #E2D2AC;  --color-green-300: #E2D2AC;
+  --color-indigo-400: #C6A675;  --color-violet-400: #C6A675;  --color-emerald-400: #C6A675;  --color-green-400: #C6A675;
+  --color-indigo-500: #AC8649;  --color-violet-500: #AC8649;  --color-emerald-500: #AC8649;  --color-green-500: #AC8649;
+  --color-indigo-600: #956C25;  --color-violet-600: #956C25;  --color-emerald-600: #956C25;  --color-green-600: #956C25;
+  --color-indigo-700: #805C1B;  --color-violet-700: #805C1B;  --color-emerald-700: #805C1B;  --color-green-700: #805C1B;
+  --color-indigo-800: #684C1B;  --color-violet-800: #684C1B;  --color-emerald-800: #684C1B;  --color-green-800: #684C1B;
+  --color-indigo-900: #564222;  --color-violet-900: #564222;  --color-emerald-900: #564222;  --color-green-900: #564222;
+  --color-indigo-950: #332715;  --color-violet-950: #332715;  --color-emerald-950: #332715;  --color-green-950: #332715;
+}
+
+[data-module="resources"] {
+  /* -> 钢蓝 (信息/链接) #46708E (identical to the global blue/sky ladder, --color-blue-* and --color-sky-*) */
+  --color-indigo-50: #F1F5F8;   --color-violet-50: #F1F5F8;   --color-emerald-50: #F1F5F8;   --color-green-50: #F1F5F8;
+  --color-indigo-100: #E3EBF1;  --color-violet-100: #E3EBF1;  --color-emerald-100: #E3EBF1;  --color-green-100: #E3EBF1;
+  --color-indigo-200: #D6E1E9;  --color-violet-200: #D6E1E9;  --color-emerald-200: #D6E1E9;  --color-green-200: #D6E1E9;
+  --color-indigo-300: #C2D2DE;  --color-violet-300: #C2D2DE;  --color-emerald-300: #C2D2DE;  --color-green-300: #C2D2DE;
+  --color-indigo-400: #8DA9BE;  --color-violet-400: #8DA9BE;  --color-emerald-400: #8DA9BE;  --color-green-400: #8DA9BE;
+  --color-indigo-500: #658AA5;  --color-violet-500: #658AA5;  --color-emerald-500: #658AA5;  --color-green-500: #658AA5;
+  --color-indigo-600: #46708E;  --color-violet-600: #46708E;  --color-emerald-600: #46708E;  --color-green-600: #46708E;
+  --color-indigo-700: #3A607A;  --color-violet-700: #3A607A;  --color-emerald-700: #3A607A;  --color-green-700: #3A607A;
+  --color-indigo-800: #314E63;  --color-violet-800: #314E63;  --color-emerald-800: #314E63;  --color-green-800: #314E63;
+  --color-indigo-900: #2E4252;  --color-violet-900: #2E4252;  --color-emerald-900: #2E4252;  --color-green-900: #2E4252;
+  --color-indigo-950: #1B272F;  --color-violet-950: #1B272F;  --color-emerald-950: #1B272F;  --color-green-950: #1B272F;
+}
+
+/* K1.5 addendum — the Sidebar active-nav-item pill does NOT read the accent
+   ladder above; it's `bg-[var(--accent-soft)] text-[var(--accent-text)]`
+   (Sidebar.tsx), a separate token pair introduced pre-K1 (workspace
+   light-palette rework) that K1 re-hued to green but left global. Spec §5
+   is explicit that "选中态" follows the module, and the active nav pill is
+   the single most visible "selected" indicator in the shell — discovered
+   via e2e computed-style probe during this task's verification (the ladder
+   override alone left it green in every module). Extending the SAME
+   mechanism here rather than inventing a new one: compound
+   `[data-theme][data-module]` selectors (both attributes land on <html>)
+   override --accent-text/-soft/-border per module, reusing each module's
+   already-verified ladder values (700 for light text-on-soft-bg contrast —
+   K1/K1.5 matrices; 400 for dark, verified >=4.5:1 against #18181b). */
+[data-theme="light"][data-module="ai"] {
+  --accent-text: #69507B;   /* plum-700 */
+  --accent-soft: #ECE6F1;   /* plum-100 */
+  --accent-border: #D5C8E0; /* plum-300 */
+}
+[data-theme="dark"][data-module="ai"] {
+  --accent-text: #AF9BBF;   /* plum-400 */
+  --accent-soft: rgba(122, 94, 143, 0.14);
+  --accent-border: rgba(122, 94, 143, 0.35);
+}
+[data-theme="light"][data-module="inspiration"] {
+  --accent-text: #805C1B;   /* module ochre-700 (darkened anchor tier) */
+  --accent-soft: #F3EAD6;   /* ochre-100, unchanged mockup tone */
+  --accent-border: #E2D2AC; /* ochre-300, unchanged mockup tone */
+}
+[data-theme="dark"][data-module="inspiration"] {
+  --accent-text: #C6A675;   /* module ochre-400 */
+  --accent-soft: rgba(149, 108, 37, 0.14);
+  --accent-border: rgba(149, 108, 37, 0.35);
+}
+[data-theme="light"][data-module="resources"] {
+  --accent-text: #3A607A;   /* steel-700 */
+  --accent-soft: #E3EBF1;   /* steel-100 */
+  --accent-border: #C2D2DE; /* steel-300 */
+}
+[data-theme="dark"][data-module="resources"] {
+  --accent-text: #8DA9BE;   /* steel-400 */
+  --accent-soft: rgba(70, 112, 142, 0.14);
+  --accent-border: rgba(70, 112, 142, 0.35);
+}
+
 /* ── Tinted button system — island redesign D6
    (docs/design/island-redesign-spec.md §3). Layout/size stay Tailwind
    utilities at the call site; these classes own color only:

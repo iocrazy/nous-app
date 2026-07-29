@@ -168,3 +168,71 @@ describe('K1 hue-ladder remap', () => {
     }
   });
 });
+
+/**
+ * K1.5 (2026-07-29) per-module accent scoping regression guard — 全站配色
+ * 重构 W1.5 (docs/superpowers/specs/2026-07-29-warm-paper-palette-design.md
+ * §5). `[data-module="x"]` blocks re-point ONLY the 4 accent ladders
+ * (indigo/violet/emerald/green); the 6 semantic ladders (purple/amber/red/
+ * rose/blue/sky) plus the ok/warn/danger/info/agent tokens must stay
+ * untouched by these blocks (module scoping ≠ semantic recolor).
+ */
+describe('K1.5 per-module accent scoping', () => {
+  const MODULE_ANCHOR: Record<string, string> = {
+    ai: '#7A5E8F',           // 李紫 — identical to the global purple ladder
+    inspiration: '#956C25',  // 赭, darkened for module-accent contrast (see index.css comment)
+    resources: '#46708E',    // 钢蓝 — identical to the global blue/sky ladder
+  };
+  const ACCENT_HUES = ['indigo', 'violet', 'emerald', 'green'];
+  const SEMANTIC_HUES = ['purple', 'amber', 'red', 'rose', 'blue', 'sky'];
+
+  function moduleBlock(module: string): string {
+    const m = CSS.match(new RegExp(`\\[data-module=(?:"${module}"|${module})\\]\\s*\\{([^}]*)\\}`));
+    expect(m, `[data-module="${module}"] block not found`).toBeTruthy();
+    return m![1];
+  }
+
+  for (const [module, anchor] of Object.entries(MODULE_ANCHOR)) {
+    for (const hue of ACCENT_HUES) {
+      it(`[data-module="${module}"] overrides --color-${hue}-600 to ${anchor}`, () => {
+        const block = moduleBlock(module);
+        const m = block.match(new RegExp(`--color-${hue}-600:\\s*([^;]+);`));
+        expect(m, `--color-${hue}-600 not overridden in [data-module="${module}"]`).toBeTruthy();
+        expect(m![1].trim().toUpperCase()).toBe(anchor.toUpperCase());
+      });
+    }
+
+    it(`[data-module="${module}"] does NOT touch the semantic hues (purple/amber/red/rose/blue/sky)`, () => {
+      const block = moduleBlock(module);
+      for (const hue of SEMANTIC_HUES) {
+        expect(
+          new RegExp(`--color-${hue}-\\d+:`).test(block),
+          `[data-module="${module}"] unexpectedly touches --color-${hue}-*`,
+        ).toBe(false);
+      }
+    });
+  }
+
+  it('inspiration-module ochre-600 (#956C25) clears 4.5:1 vs white and paper (#FCFBF8)', () => {
+    // Mirrors the contrast() helper above but re-declared locally to avoid
+    // coupling this describe block to the btn-tint fixtures' RGB tuples.
+    const hex = MODULE_ANCHOR.inspiration;
+    const bgWhite: RGB = [0xff, 0xff, 0xff];
+    const bgPaper: RGB = [0xfc, 0xfb, 0xf8];
+    const fg = parseColor(hex).slice(0, 3) as unknown as RGB;
+    expect(contrast(fg, bgWhite)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(fg, bgPaper)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('inspiration-module ochre soft/line (50-300) stay identical to the global ochre ladder', () => {
+    const block = moduleBlock('inspiration');
+    const GLOBAL_SOFT_LINE: Record<number, string> = {
+      50: '#FBF4EB', 100: '#F3EAD6', 200: '#EFDFC6', 300: '#E2D2AC',
+    };
+    for (const [step, hex] of Object.entries(GLOBAL_SOFT_LINE)) {
+      const m = block.match(new RegExp(`--color-indigo-${step}:\\s*([^;]+);`));
+      expect(m, `--color-indigo-${step} missing`).toBeTruthy();
+      expect(m![1].trim().toUpperCase()).toBe(hex.toUpperCase());
+    }
+  });
+});

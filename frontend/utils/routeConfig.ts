@@ -64,3 +64,42 @@ export function pathnameToView(pathname: string): ViewState {
 
   return 'parser';
 }
+
+// ---------------------------------------------------------------------------
+// K1.5 (2026-07-29) — per-module accent scoping (docs/superpowers/specs/
+// 2026-07-29-warm-paper-palette-design.md §5). AppLayout stamps the resolved
+// module onto <html data-module="…">; index.css's `[data-module="x"]` blocks
+// then re-point the accent ladders (indigo/violet/emerald/green) to that
+// module's primary hue. Colocated with `pathnameToView` since it's a direct
+// function of the same ViewState this file already owns as the single
+// source of truth — do not build a second route→module map elsewhere.
+// ---------------------------------------------------------------------------
+
+export type ModuleAccent = 'ai' | 'inspiration' | 'resources';
+
+/**
+ * Views with a dedicated non-green module accent. Every other ViewState
+ * (mediatrack/projects included — projects IS the global green default, so
+ * it needs no override) resolves to `null`, meaning "no data-module
+ * attribute" → falls through to the global accent ladder.
+ */
+const VIEW_TO_MODULE: Partial<Record<ViewState, ModuleAccent>> = {
+  // AI Library / Agent area — nested /ai-library/* plus the flat legacy
+  // /agents, /skills, /chat views that cover the same Agent/AI surface.
+  ailibrary: 'ai',
+  agents: 'ai',
+  skills: 'ai',
+  chat: 'ai',
+  // Topic Inspiration / 话题灵感 — the app's home/default page, routed at
+  // /parser (also pathnameToView's catch-all fallback; see its comment —
+  // every other view has its own explicit prefix match, so in practice this
+  // only fires for the real /parser route).
+  parser: 'inspiration',
+  // Resources + Distribution both read as 钢蓝 per spec §5.
+  resources: 'resources',
+  distribution: 'resources',
+};
+
+export function viewToModule(view: ViewState): ModuleAccent | null {
+  return VIEW_TO_MODULE[view] ?? null;
+}
