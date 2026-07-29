@@ -81,16 +81,16 @@ async def test_whisper_sb_source_forwards_materialized_temp_path(tmp_path):
         assert file_path == _SB_AUDIO
         yield local
 
-    with patch(
-        "app.services.library.media_storage.materialize", _fake_materialize
-    ):
+    with patch("app.services.library.media_storage.materialize", _fake_materialize):
         received = await _run_whisper_branch(_SB_AUDIO)
 
     assert received == str(local)
     assert not received.startswith("sb://")
 
 
-async def test_whisper_filesystem_source_passes_through_unchanged(tmp_path, monkeypatch):
+async def test_whisper_filesystem_source_passes_through_unchanged(
+    tmp_path, monkeypatch
+):
     """文件系统源:materialize 零开销透传,transcribe_and_save 收到原路径不变。"""
     from app.core import config
 
@@ -144,12 +144,15 @@ async def test_volcengine_sb_source_swaps_signed_url_host(monkeypatch):
             "t42/ab/cd/deadbeef1234.m4a?token=xyz"
         )
 
-    with patch(
-        "app.services.library.media_storage.ObjectStore.signed_url",
-        _fake_signed_url,
-    ), patch(
-        "app.services.ai.transcribe.volcengine_asr_service.VolcengineASRService",
-        fake_service_cls,
+    with (
+        patch(
+            "app.services.library.media_storage.ObjectStore.signed_url",
+            _fake_signed_url,
+        ),
+        patch(
+            "app.services.ai.transcribe.volcengine_asr_service.VolcengineASRService",
+            fake_service_cls,
+        ),
     ):
         await _run_volcengine_asr(
             audio_path=_SB_AUDIO,
@@ -175,11 +178,14 @@ async def test_volcengine_sb_source_without_public_base_raises(monkeypatch):
     captured, fake_service_cls = _patch_volcengine_service()
     signed_url_mock = AsyncMock()
 
-    with patch(
-        "app.services.library.media_storage.ObjectStore.signed_url", signed_url_mock
-    ), patch(
-        "app.services.ai.transcribe.volcengine_asr_service.VolcengineASRService",
-        fake_service_cls,
+    with (
+        patch(
+            "app.services.library.media_storage.ObjectStore.signed_url", signed_url_mock
+        ),
+        patch(
+            "app.services.ai.transcribe.volcengine_asr_service.VolcengineASRService",
+            fake_service_cls,
+        ),
     ):
         with pytest.raises(RuntimeError, match="STORAGE_SIGNED_URL_PUBLIC_BASE"):
             await _run_volcengine_asr(

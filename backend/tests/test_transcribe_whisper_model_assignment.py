@@ -66,12 +66,15 @@ async def _run(task_assignment: str, provider_config: dict) -> str:
     # exposed via __wrapped__; call it directly (no workflow context needed)
     # with a patched WhisperService import.
     fn = getattr(m.run_whisper, "__wrapped__", m.run_whisper)
-    with patch(
-        "app.services.ai.transcribe.whisper_service.WhisperService",
-        _FakeWhisperService,
-    ), patch(
-        "app.services.library.media_storage.materialize",
-        _passthrough_materialize,
+    with (
+        patch(
+            "app.services.ai.transcribe.whisper_service.WhisperService",
+            _FakeWhisperService,
+        ),
+        patch(
+            "app.services.library.media_storage.materialize",
+            _passthrough_materialize,
+        ),
     ):
         await fn(
             audio_path="/tmp/audio.mp3",

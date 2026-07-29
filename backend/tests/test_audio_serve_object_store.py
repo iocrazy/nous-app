@@ -50,9 +50,7 @@ def _media(**over):
 def _patch_repo(media):
     repo = MagicMock()
     repo.get_by_id = AsyncMock(return_value=media)
-    return patch(
-        "app.repositories.media_repository.MediaRepository", return_value=repo
-    )
+    return patch("app.repositories.media_repository.MediaRepository", return_value=repo)
 
 
 def _patch_base_path(path="/tmp/fake-base"):
