@@ -703,11 +703,30 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           )}
         </div>}
 
-        {/* Info Section - Right Side */}
-        <div className="flex-1 p-4 sm:p-6 flex flex-col md:max-h-[70vh] overflow-y-auto custom-scrollbar">
+        {/* Info Section - Right Side.
+            `@container` (bare/island only) makes THIS element the query
+            container for the grids below. The card is a full-width design
+            hosted in a drag-resizable info island (250–640px), so its grids
+            have to respond to the panel width, not the viewport's — the `sm:`
+            breakpoints throughout this file are always "large" on desktop,
+            which is exactly when the panel can be at its narrowest.
 
-          {/* Header Metadata — desktop: badges left + ID right; mobile: ID left + actions right */}
-          <div className="flex justify-between items-start gap-2 mb-2 min-w-0">
+            It goes here rather than on the card root on purpose: `container-type`
+            applies layout containment, which makes the element a containing
+            block for `position: fixed` descendants. The "Move to Trash" modal
+            (`fixed inset-0`) is a sibling of this column, so anchoring the
+            container here keeps the modal viewport-sized instead of trapping it
+            inside a 360px panel. The only other fixed descendant — the
+            three-dots menu's click-catcher backdrop — renders solely when
+            `!hidePreview`, and every `bare` caller passes `hidePreview`. */}
+        <div className={`flex-1 ${bare ? '@container ' : ''}p-4 sm:p-6 flex flex-col md:max-h-[70vh] overflow-y-auto custom-scrollbar`}>
+
+          {/* Header Metadata — desktop: badges left + ID right; mobile: ID left + actions right.
+              `flex-wrap`: the badges and the ID/actions group are both
+              shrink-resistant, so in a narrow panel they used to overflow the
+              row rather than reflow. Wrapping drops the ID+actions onto their
+              own line instead of pushing them under the clip edge. */}
+          <div className="flex flex-wrap justify-between items-start gap-2 mb-2 min-w-0">
             {/* Desktop: type badge + resolution */}
             <div className="hidden sm:flex gap-2 shrink-0">
                 <span className="px-2 py-1 text-xs font-semibold bg-ink-800 text-ink-300 rounded-md border border-ink-700 uppercase tracking-wider">
@@ -725,7 +744,10 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             </div>
             {/* Mobile: ID on the left */}
             <span className="sm:hidden text-xs text-ink-500 font-mono truncate min-w-0">ID: {data.id}</span>
-            <div className="flex items-center gap-2 min-w-0 shrink-0">
+            {/* `ml-auto` keeps this group right-aligned once the row wraps;
+                dropping `shrink-0` is what lets the ID's own `truncate`
+                actually engage instead of the group forcing its full width. */}
+            <div className="flex items-center gap-2 min-w-0 ml-auto">
               {/* Desktop: ID */}
               <span className="hidden sm:inline text-xs text-ink-500 font-mono truncate min-w-0">ID: {data.id}</span>
               {/* Mobile: injected action buttons (Share + More) */}
@@ -818,7 +840,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           {/* Mobile action buttons — injected into header row on mobile, shown separately on sm+ if needed */}
 
           {/* Title */}
-          <h2 className="text-2xl font-bold text-ink-100 mb-3 leading-tight">
+          <h2 className="text-2xl font-bold text-ink-100 mb-3 leading-tight break-words">
             {data.title || 'No Title'}
           </h2>
 
@@ -839,7 +861,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               would be misleading. Enriched UGC shows real Likes/Comments/
               Shares/Collects. */}
           {!ugcStatsMissing && (
-          <StatGrid cols={isAudio ? 3 : 4} className="mb-6">
+          <StatGrid cols={isAudio ? 3 : 4} adaptive={bare} className="mb-6">
             {!isAudio && (
               <StatCard
                 icon={<Heart className="w-4 h-4 sm:w-5 sm:h-5 text-rose-500 mb-1" />}
@@ -910,7 +932,23 @@ export const MediaCard: React.FC<MediaCardProps> = ({
             </div>
           )}
 
-          {resourceId && <ResourcePromptSection resourceId={resourceId} onTagsChanged={refetchResourceTags} />}
+          {/* Prompt block. The `-mx-4` + inner `px-4` pair is the same trick the
+              Tags picker above uses: it lands the content on the exact left
+              edge as the stats / notes / Platform Tags sections regardless of
+              whether this column is at `p-4` or `sm:p-6`. The default
+              `px-4 mt-3` (right for the sidebar panels, which have no padding
+              of their own) put this block one indent deeper than everything
+              around it and butted it against Platform Tags; `mb-4` here restores
+              the column's normal section rhythm. */}
+          {resourceId && (
+            <div className="-mx-4 mb-4">
+              <ResourcePromptSection
+                resourceId={resourceId}
+                onTagsChanged={refetchResourceTags}
+                sectionClassName="px-4"
+              />
+            </div>
+          )}
 
           {/* Platform hashtags (read-only, for analytics) */}
           {data.hashtags && (
@@ -943,9 +981,14 @@ export const MediaCard: React.FC<MediaCardProps> = ({
           />
           )}
 
-          {/* Action Buttons Row — hidden in compact mode (mobile audio player) */}
+          {/* Action Buttons Row — hidden in compact mode (mobile audio player).
+              Same container-query treatment as the stat grid: four labelled
+              buttons ("Transcript" is the widest) need ~78px each, so below
+              23rem of available column width they stack 2×2 instead of
+              truncating to illegible stubs. Full literal class strings —
+              Tailwind's scanner can't see composed fragments. */}
           {!compact && (
-          <div className="grid grid-cols-4 gap-1.5 sm:gap-2 mb-5">
+          <div className={`grid ${bare ? 'grid-cols-2 @min-[23rem]:grid-cols-4' : 'grid-cols-4'} gap-1.5 sm:gap-2 mb-5`}>
              <button
                onClick={(e) => handleAction(e, 'copy')}
                className="flex flex-col items-center justify-center gap-1 p-2 sm:p-2.5 rounded-lg bg-ink-800 hover:bg-ink-700 text-ink-400 hover:text-ink-50 transition-colors border border-ink-700 hover:border-ink-600"
@@ -993,7 +1036,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
               Hidden in compact mode (mobile audio player). */}
           {!compact && (
           <div className="mb-4">
-             <p className="text-ink-300 text-sm whitespace-pre-wrap leading-relaxed">
+             <p className="text-ink-300 text-sm whitespace-pre-wrap break-words leading-relaxed">
                {data.description || <span className="text-ink-500 italic">No description available.</span>}
              </p>
           </div>

@@ -41,6 +41,18 @@ export interface SlidePromptStripProps {
   slideName: string;
 }
 
+/**
+ * Vertical anchor for both the collapsed strip and the expanded editor.
+ *
+ * SlidePlayer's bottom gradient bar (indicator dots + mute toggle + slide
+ * counter) is ~100px tall. The original `bottom-16` (64px) put this strip
+ * INSIDE it: the pill sat on top of the dots, over a `from-black/70` gradient,
+ * which is why the per-slide prompt affordance read as "missing" on the
+ * gallery detail page even though it was mounted and rendering. `bottom-28`
+ * (112px) clears the bar so the strip reads as its own row under the slide.
+ */
+const STRIP_ANCHOR = 'absolute bottom-28 left-0 right-0 px-3';
+
 export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProps) {
   const { t } = useTranslation();
   const toast = useOptionalToast();
@@ -99,7 +111,7 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
 
   if (loadFailed) {
     return (
-      <div className="absolute bottom-16 left-0 right-0 px-3 z-10">
+      <div className={`${STRIP_ANCHOR} z-10`}>
         <div className="bg-black/55 backdrop-blur-sm rounded-lg px-3 py-1.5 text-[10px] text-red-400/85 flex items-center justify-between gap-2">
           <span>{t('resources.slidePrompt.loadFailed', 'Failed to load prompt for this slide')}</span>
           <button
@@ -162,7 +174,7 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
 
   if (!expanded) {
     return (
-      <div className="absolute bottom-16 left-0 right-0 px-3 z-10">
+      <div className={`${STRIP_ANCHOR} z-10`}>
         {hasEntry ? (
           <div className="flex items-center gap-2 bg-black/55 backdrop-blur-sm rounded-lg px-3 py-1.5">
             <span className="flex-1 min-w-0 truncate text-xs text-white/85 font-mono">
@@ -185,10 +197,16 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
             </button>
           </div>
         ) : (
+          // Dashed pill + full-strength label, mirroring PromptSection's
+          // "+ Add Prompt" empty state. The previous `text-white/60` with no
+          // border dissolved into the gradient behind it and didn't read as a
+          // control at all. The literal "+ " (rather than a Plus icon) is
+          // deliberate — it keeps the M1 double-plus guard meaningful and
+          // matches PromptSection's own pill.
           <button
             type="button"
             onClick={openEditor}
-            className="bg-black/55 backdrop-blur-sm rounded-lg px-3 py-1.5 text-xs text-white/60 hover:text-white/90 transition-colors"
+            className="bg-black/60 backdrop-blur-sm border border-dashed border-white/35 rounded-full px-3 py-1 text-xs text-white/85 hover:text-white hover:border-white/60 transition-colors"
           >
             + {t('resources.slidePrompt.addPrompt', 'Add prompt for this slide')}
           </button>
@@ -198,7 +216,7 @@ export function SlidePromptStrip({ resourceId, slideName }: SlidePromptStripProp
   }
 
   return (
-    <div className="absolute inset-x-3 bottom-16 z-20 bg-ink-900/95 backdrop-blur border border-ink-700 rounded-xl p-2.5 shadow-lg">
+    <div className="absolute inset-x-3 bottom-28 z-20 bg-ink-900/95 backdrop-blur border border-ink-700 rounded-xl p-2.5 shadow-lg">
       <div className="flex items-center justify-between mb-1.5">
         <div className="flex rounded overflow-hidden border border-ink-700/60">
           {(['en', 'zh'] as const).map((l) => (

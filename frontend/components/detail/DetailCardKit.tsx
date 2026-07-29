@@ -159,17 +159,23 @@ export function MetaTimeRow({
   className?: string;
 }) {
   if (!releaseTime && !duration) return null;
+  // `sm:flex-wrap` + per-item `min-w-0`: on sm+ this is a row, and the two
+  // items together ("Release Time: <full timestamp>" + "Duration: …") are
+  // ~360px wide — wider than the download detail's info island at its 250–420px
+  // widths. Without wrapping they overflowed and the Duration text was clipped
+  // by the panel's scroll container. `min-w-0` additionally lets a single item
+  // wrap its own text at the narrowest widths instead of overflowing alone.
   return (
-    <div className={`flex flex-col sm:flex-row sm:items-center gap-y-2 gap-x-6 text-sm text-ink-400 ${className}`}>
+    <div className={`flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-y-2 gap-x-6 text-sm text-ink-400 ${className}`}>
       {releaseTime && (
-        <div className="flex items-center gap-2">
-          <Clock size={14} className="text-ink-500" />
+        <div className="flex items-center gap-2 min-w-0">
+          <Clock size={14} className="text-ink-500 shrink-0" />
           <span>Release Time: <span className="text-ink-300 font-medium">{releaseTime}</span></span>
         </div>
       )}
       {duration && (
-        <div className="flex items-center gap-2">
-          <Timer size={14} className="text-ink-500" />
+        <div className="flex items-center gap-2 min-w-0">
+          <Timer size={14} className="text-ink-500 shrink-0" />
           <span>Duration: <span className="text-ink-300 font-medium">{duration}</span></span>
           {durationSuffix}
         </div>
@@ -179,9 +185,45 @@ export function MetaTimeRow({
 }
 
 // ── Stat grid (the signature mini-card row) ──────────────────────────────────
-export function StatGrid({ cols, className = '', children }: { cols: 3 | 4; className?: string; children: React.ReactNode }) {
+/**
+ * `adaptive` opts the grid into a container query: below 23rem of available
+ * container width it drops to two columns. Callers that pass it must sit
+ * inside an `@container` ancestor — MediaCard's bare/island info column is one.
+ *
+ * 23rem (368px) is where four cards stop fitting their labels: a card needs
+ * ~78px (the "COMMENTS" label at 10px uppercase plus `p-3`), so four of them
+ * plus three 16px gaps need ~360px. Note the query measures the container's
+ * CONTENT box, so this is the space the grid actually gets, with the host's
+ * padding already subtracted.
+ *
+ * The viewport `sm:` breakpoints elsewhere in this kit can't express that —
+ * the download detail's info island is drag-resizable from 250px to 640px
+ * while the viewport stays desktop-wide, so viewport breakpoints read "large"
+ * exactly when the panel is at its narrowest.
+ *
+ * Class strings are written out in full (not composed from fragments) because
+ * Tailwind's scanner only sees literal strings in the source.
+ */
+export function StatGrid({
+  cols,
+  adaptive = false,
+  className = '',
+  children,
+}: {
+  cols: 3 | 4;
+  adaptive?: boolean;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const colsClass = adaptive
+    ? cols === 3
+      ? 'grid-cols-2 @min-[23rem]:grid-cols-3'
+      : 'grid-cols-2 @min-[23rem]:grid-cols-4'
+    : cols === 3
+      ? 'grid-cols-3'
+      : 'grid-cols-4';
   return (
-    <div className={`grid ${cols === 3 ? 'grid-cols-3' : 'grid-cols-4'} gap-2 sm:gap-4 ${className}`}>
+    <div className={`grid ${colsClass} gap-2 sm:gap-4 ${className}`}>
       {children}
     </div>
   );
@@ -206,8 +248,12 @@ export function StatCard({
   const inner = (
     <>
       {icon}
-      <span className="text-xs sm:text-sm font-bold text-ink-50">{value}</span>
-      <span className="text-[9px] sm:text-[10px] text-ink-500 uppercase tracking-wider mt-0.5">{label}</span>
+      <span className="max-w-full truncate text-xs sm:text-sm font-bold text-ink-50">{value}</span>
+      {/* `max-w-full truncate`: the label is the widest thing in the card
+          ("COMMENTS" / "COLLECTS"), and without a cap it bled past the card
+          edge — the visible symptom being a 4th stat card that looked sliced
+          in half at narrow panel widths. */}
+      <span className="max-w-full truncate text-[9px] sm:text-[10px] text-ink-500 uppercase tracking-wider mt-0.5">{label}</span>
     </>
   );
   if (onClick) {

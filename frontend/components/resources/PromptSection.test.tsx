@@ -612,3 +612,39 @@ describe('PromptSection', () => {
     expect(screen.queryByText(/"subject": "a cat"/)).toBeNull();
   });
 });
+
+/**
+ * `sectionClassName` exists so hosts whose own container already pads its
+ * children (MediaCard's info column carries `p-4 sm:p-6`) can stop this block
+ * from sitting one indent deeper than the sections around it. The sidebar
+ * panels — which pad nothing themselves — must keep the original default.
+ */
+describe('PromptSection — section wrapper classes', () => {
+  const wrapperOf = (c: HTMLElement) => c.firstElementChild as HTMLElement;
+
+  it('defaults to px-4 mt-3 in every state (sidebar panel hosts unchanged)', () => {
+    const empty = render(<PromptSection {...props()} />);
+    expect(wrapperOf(empty.container).className).toBe('px-4 mt-3');
+    empty.unmount();
+
+    const collapsed = render(
+      <PromptSection {...props({ resource: base({ gen_prompt: 'masterpiece' }) })} />,
+    );
+    expect(wrapperOf(collapsed.container).className).toBe('px-4 mt-3');
+  });
+
+  it('honors an override in the empty, collapsed and expanded states', () => {
+    const empty = render(<PromptSection {...props({ sectionClassName: 'px-4' })} />);
+    expect(wrapperOf(empty.container).className).toBe('px-4');
+    empty.unmount();
+
+    const collapsed = render(
+      <PromptSection
+        {...props({ resource: base({ gen_prompt: 'masterpiece' }), sectionClassName: 'px-4' })}
+      />,
+    );
+    expect(wrapperOf(collapsed.container).className).toBe('px-4');
+    fireEvent.click(screen.getByText(/masterpiece/));
+    expect(wrapperOf(collapsed.container).className).toBe('px-4');
+  });
+});

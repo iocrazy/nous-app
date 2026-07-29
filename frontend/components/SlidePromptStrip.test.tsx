@@ -159,3 +159,38 @@ describe('SlidePromptStrip', () => {
     expect(screen.queryByPlaceholderText('Prompt for this slide...')).toBeNull();
   });
 });
+
+/**
+ * Placement guard (the "gallery has no per-slide prompt" report).
+ *
+ * The strip was mounting and rendering correctly all along — it just sat at
+ * `bottom-16` (64px), inside SlidePlayer's ~100px bottom gradient bar, so the
+ * pill overlapped the indicator dots and slide counter on a dark gradient and
+ * read as absent. Both the collapsed strip and the expanded editor must clear
+ * that bar.
+ */
+describe('SlidePromptStrip — clears SlidePlayer\'s bottom bar', () => {
+  const anchorOf = (c: HTMLElement) => (c.firstElementChild as HTMLElement).className;
+
+  it('anchors the collapsed strip above the ~100px bottom bar', async () => {
+    const { container } = render(<SlidePromptStrip resourceId="r1" slideName="b.jpg" />);
+    await screen.findByText(/Add prompt for this slide/i);
+    expect(anchorOf(container)).toContain('bottom-28');
+    expect(anchorOf(container)).not.toContain('bottom-16');
+  });
+
+  it('anchors the expanded editor above the bottom bar too', async () => {
+    const { container } = render(<SlidePromptStrip resourceId="r1" slideName="b.jpg" />);
+    fireEvent.click(await screen.findByText(/Add prompt for this slide/i));
+    expect(await screen.findByPlaceholderText(/Prompt for this slide/i)).toBeTruthy();
+    expect(anchorOf(container)).toContain('bottom-28');
+    expect(anchorOf(container)).not.toContain('bottom-16');
+  });
+
+  it('gives the empty state a visible pill affordance, not bare low-contrast text', async () => {
+    render(<SlidePromptStrip resourceId="r1" slideName="b.jpg" />);
+    const pill = await screen.findByText(/Add prompt for this slide/i);
+    expect(pill.className).toContain('border-dashed');
+    expect(pill.className).not.toContain('text-white/60');
+  });
+});
