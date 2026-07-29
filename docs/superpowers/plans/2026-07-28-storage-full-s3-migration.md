@@ -171,7 +171,8 @@ Claude-Session: https://claude.ai/code/session_01NpCU2EEaHKzpDTXeuXAhvA"
 ### Task 2：storage_status 列
 
 **Files:**
-- Create: `supabase/migrations/393_resource_versions_storage_status.sql`
+- Create: `supabase/migrations/394_resource_versions_storage_status.sql`
+  （原计划 393，但 origin/master 的 caption_classify fix 已占用 393，改用 394）
 
 - [ ] **Step 1：写 migration**
 
@@ -198,8 +199,8 @@ Expected：列存在，默认 `'ok'`。
 - [ ] **Step 3：提交**
 
 ```bash
-git add supabase/migrations/393_resource_versions_storage_status.sql
-git commit -m "feat(db): resource_versions.storage_status 列(mig 393)
+git add supabase/migrations/394_resource_versions_storage_status.sql
+git commit -m "feat(db): resource_versions.storage_status 列(mig 394)
 
 Claude-Session: https://claude.ai/code/session_01NpCU2EEaHKzpDTXeuXAhvA"
 ```
