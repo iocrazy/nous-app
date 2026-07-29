@@ -984,6 +984,7 @@
       "generatePrompt": "Generate",
       "generatePromptHint": "Reverse-engineer the prompt from this asset (a video uses its cover)",
       "generatePerSlideHint": "Galleries: open the item and generate per slide",
+      "generatePerSlideHintDetail": "Per-slide ⚡ Generate is on the image, below each slide",
       "generateFromImage": "Generate from Image",
       "promptGenerating": "Generating prompt from image...",
       "promptGenerated": "Prompt generated",
