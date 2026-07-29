@@ -70,6 +70,15 @@ export interface PromptSectionProps {
    *  StrictMode double-invoke safe — mirrors CanvasComposer's
    *  insertedRef). */
   autoOpenGenerateSimilar?: boolean;
+  /**
+   * Outer wrapper classes for the whole block. The default suits the sidebar
+   * panels, whose sections are `px-4 mt-N` siblings at the panel root with no
+   * padding of their own. MediaCard's info column already carries `p-4 sm:p-6`,
+   * so it overrides this (together with a negative margin on its side) to keep
+   * the block on the same left edge and vertical rhythm as its neighbours
+   * instead of sitting one indent deeper.
+   */
+  sectionClassName?: string;
 }
 
 function ResultChip({ children }: { children: React.ReactNode }) {
@@ -83,7 +92,7 @@ function ResultChip({ children }: { children: React.ReactNode }) {
 export function PromptSection({
   resource, onPatch, onEnsureTriggerTag,
   canGenerate, onGenerated, translating, onTranslate,
-  autoOpenGenerateSimilar,
+  autoOpenGenerateSimilar, sectionClassName = 'px-4 mt-3',
 }: PromptSectionProps) {
   const { t } = useTranslation();
   const toast = useOptionalToast();
@@ -307,7 +316,7 @@ export function PromptSection({
   // header plus a dashed "+ Add Prompt" pill.
   if (!expanded && !dataPresent) {
     return (
-      <div className="px-4 mt-3">
+      <div className={sectionClassName}>
         <div className="mb-2">{sectionHeader}</div>
         <button
           onClick={expand}
@@ -321,7 +330,7 @@ export function PromptSection({
 
   if (!expanded) {
     return (
-      <div className="px-4 mt-3">
+      <div className={sectionClassName}>
         <div className="flex items-center justify-between mb-2">
           {sectionHeader}
           {langToggle}
@@ -386,7 +395,7 @@ export function PromptSection({
   ) : null;
 
   return (
-    <div className="px-4 mt-3">
+    <div className={sectionClassName}>
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
           {sectionHeader}

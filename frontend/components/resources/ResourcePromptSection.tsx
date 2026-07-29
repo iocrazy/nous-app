@@ -31,12 +31,17 @@ type PromptResource = Pick<
 export function ResourcePromptSection({
   resourceId,
   onTagsChanged,
+  sectionClassName,
 }: {
   resourceId: string;
   /** Notified after the ensure-trigger-tag flow actually writes a new tag
    *  assignment, so hosts that keep their own separate Tags-block state
    *  (ResourceInfoPanel / DownloadInfoPanel / MediaCard) can refresh it. */
   onTagsChanged?: () => void;
+  /** Outer wrapper classes, forwarded to PromptSection. Hosts whose own
+   *  container already pads its children override the default `px-4 mt-3`
+   *  so the block lines up with its neighbours. */
+  sectionClassName?: string;
 }) {
   const [resource, setResource] = useState<PromptResource | null>(null);
   const [assignedTags, setAssignedTags] = useState<Array<{ tag: Tag }>>([]);
@@ -131,6 +136,7 @@ export function ResourcePromptSection({
       onGenerated={handleGenerated}
       translating={translating}
       onTranslate={handleTranslate}
+      sectionClassName={sectionClassName}
     />
   );
 }
