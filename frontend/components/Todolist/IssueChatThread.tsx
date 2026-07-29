@@ -171,7 +171,7 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
           <button
             onClick={onSimulate}
             disabled={simulating}
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[12px] rounded bg-amber-500/10 text-amber-300 ring-1 ring-amber-500/30 hover:bg-amber-500/20 disabled:opacity-50"
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[12px] rounded bg-amber-500/10 text-warn ring-1 ring-amber-500/30 hover:bg-amber-500/20 disabled:opacity-50"
             title="Dev: simulate the agent finishing this run"
           >
             <Zap size={9} /> {simulating ? 'Sim…' : 'Simulate finish'}

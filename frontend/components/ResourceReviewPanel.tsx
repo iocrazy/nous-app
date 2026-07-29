@@ -459,7 +459,7 @@ export const ResourceReviewPanel: React.FC<ResourceReviewPanelProps> = ({
               <span className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] bg-amber-500/15 text-amber-400 rounded">
                 <PenTool size={9} />
                 {pendingAnnotations.length}
-                <button onClick={onClearAnnotations} className="hover:text-amber-200">
+                <button onClick={onClearAnnotations} className="hover-text-warn">
                   <X size={9} />
                 </button>
               </span>

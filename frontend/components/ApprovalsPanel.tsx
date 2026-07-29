@@ -125,7 +125,7 @@ export const ApprovalsPanel: React.FC<ApprovalsPanelProps> = ({
           <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
           {t('approvals.title')}
           {items.length > 0 && (
-            <span className="px-1.5 py-0.5 rounded bg-amber-600/20 text-amber-300 text-[10px]">
+            <span className="px-1.5 py-0.5 rounded bg-amber-600/20 text-warn text-[10px]">
               {items.length}
             </span>
           )}

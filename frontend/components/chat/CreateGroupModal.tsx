@@ -351,7 +351,7 @@ export default function CreateGroupModal({ teamId, open, onClose, onCreated }: P
                             'flex items-center gap-[7px] rounded-[20px] pl-[5px] pr-[10px] py-[4px]',
                             'text-[12.5px] border transition-colors',
                             selected
-                              ? 'bg-amber-500/[.15] border-amber-500/50 text-amber-300'
+                              ? 'bg-amber-500/[.15] border-amber-500/50 text-warn'
                               : 'bg-island-2 border-line text-content hover:border-line-strong',
                           ].join(' ')}
                         >

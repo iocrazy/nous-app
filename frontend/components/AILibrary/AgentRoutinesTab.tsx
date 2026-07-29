@@ -458,7 +458,7 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
                     {r.timezone}
                   </span>
                   {isPaused ? (
-                    <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-px text-[10px] font-medium text-amber-300">
+                    <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-px text-[10px] font-medium text-warn">
                       {t('aiLibrary.agents.routines.paused', 'Paused')}
                     </span>
                   ) : (
@@ -473,7 +473,7 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
                       <button
                         type="button"
                         onClick={() => void resume(r)}
-                        className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-300 hover:bg-amber-500/20"
+                        className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-warn hover:bg-amber-500/20"
                       >
                         {t('aiLibrary.agents.routines.resume', 'Resume')}
                       </button>

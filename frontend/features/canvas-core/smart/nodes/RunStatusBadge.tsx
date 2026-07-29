@@ -10,7 +10,7 @@ import type { PromptNodeData } from '../types';
 type RunStatus = PromptNodeData['run_status'];
 
 const BADGE_TONE: Record<Exclude<RunStatus, 'idle'>, { pill: string; dot: string }> = {
-  queued: { pill: 'bg-amber-500/15 text-amber-600 dark:text-amber-300', dot: 'bg-amber-400' },
+  queued: { pill: 'bg-amber-500/15 text-warn', dot: 'bg-amber-400' },
   running: { pill: 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-300', dot: 'bg-indigo-400' },
   succeeded: { pill: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400', dot: 'bg-emerald-400' },
   failed: { pill: 'bg-rose-500/15 text-rose-600 dark:text-rose-400', dot: 'bg-rose-400' },

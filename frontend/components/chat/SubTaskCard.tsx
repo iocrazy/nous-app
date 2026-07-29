@@ -241,7 +241,7 @@ export function SubTaskCard({ call }: SubTaskCardProps): React.ReactElement {
       ? 'text-[var(--accent-text)] bg-[var(--accent-soft)] border-[var(--accent-border)]'
       : call.name === 'Delegate'
         ? 'text-[var(--accent-text)] bg-[var(--accent-soft)] border-[var(--accent-border)]'
-        : 'text-amber-300 bg-amber-500/10 border-amber-500/30';
+        : 'text-warn bg-amber-500/10 border-amber-500/30';
 
   return (
     <div className={`rounded-lg border ${accent} text-xs mb-1.5`}>

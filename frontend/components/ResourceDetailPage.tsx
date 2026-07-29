@@ -1141,7 +1141,7 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
                     onClick={() => setShowVersionDropdown(!showVersionDropdown)}
                     className={`flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-md transition-colors ${
                       selectedVersionId
-                        ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                        ? 'bg-amber-500/20 text-warn hover:bg-amber-500/30'
                         : `${cCtrlBg} text-content-2 hover:text-content ${cHoverSurf7}`
                     }`}
                   >
@@ -1425,14 +1425,14 @@ export const ResourceDetailPage: React.FC<ResourceDetailProps> = ({ resourceId }
         >
           {/* Version preview banner */}
           {selectedVersionId && (
-            <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/20 text-xs text-amber-300 shrink-0">
+            <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/20 text-xs text-warn shrink-0">
               <Layers size={12} />
               <span>
                 {t('resources.viewingVersion', 'Viewing version')} v{versions.find(v => v.id === selectedVersionId)?.version_number}
               </span>
               <button
                 onClick={() => setSelectedVersionId(null)}
-                className="ml-2 px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 rounded text-amber-200 transition-colors"
+                className="ml-2 px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 rounded text-warn-soft transition-colors"
               >
                 {t('resources.backToCurrent', 'Back to current')}
               </button>

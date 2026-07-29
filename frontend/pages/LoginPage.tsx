@@ -36,7 +36,7 @@ export function LoginPage() {
     <>
       <ClockDriftBanner />
       {sessionExpired && (
-        <div className="fixed top-0 inset-x-0 z-[60] flex items-center justify-center gap-2 px-4 py-2 bg-amber-500/15 border-b border-amber-500/30 text-amber-300 text-xs">
+        <div className="fixed top-0 inset-x-0 z-[60] flex items-center justify-center gap-2 px-4 py-2 bg-amber-500/15 border-b border-amber-500/30 text-warn text-xs">
           <Clock size={13} className="shrink-0" />
           {t('auth.sessionExpired', 'Your session expired — please sign in again.')}
         </div>

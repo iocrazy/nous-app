@@ -247,7 +247,7 @@ export default function GroupSettingsPanel({
         className={[
           'inline-flex items-center gap-[3px] text-[10px] font-semibold px-[6px] py-[1.5px] rounded-[5px] flex-shrink-0',
           isOwnerBadge
-            ? 'bg-amber-500/[.15] text-amber-300'
+            ? 'bg-amber-500/[.15] text-warn'
             : 'bg-[var(--accent-soft)] text-[var(--accent-text)]',
         ].join(' ')}
       >
@@ -533,7 +533,7 @@ export default function GroupSettingsPanel({
                             type="button"
                             disabled={busy}
                             onClick={() => void handleAddAgent(a.slug)}
-                            className="flex items-center gap-[5px] rounded-[16px] pl-[7px] pr-[10px] py-[3px] text-[12px] border border-dashed border-amber-500/40 text-content-3 hover:text-amber-300 hover:border-amber-500/70 transition-colors disabled:opacity-50"
+                            className="flex items-center gap-[5px] rounded-[16px] pl-[7px] pr-[10px] py-[3px] text-[12px] border border-dashed border-amber-500/40 text-content-3 hover-text-warn hover:border-amber-500/70 transition-colors disabled:opacity-50"
                           >
                             <Plus size={11} />
                             {a.name}

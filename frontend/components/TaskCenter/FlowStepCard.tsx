@@ -132,7 +132,7 @@ export const FlowStepCard: React.FC<FlowStepCardProps> = ({
       if (cur.status === 'processing') {
         const bits = [label, `${Math.round(cur.progress || 0)}%`];
         if (cur.speed && cur.speed > 0) bits.push(formatSpeed(cur.speed));
-        return { text: bits.join(' · '), tone: 'text-amber-300' };
+        return { text: bits.join(' · '), tone: 'text-warn' };
       }
       return { text: `${label} · queued`, tone: 'text-ink-500' };
     }

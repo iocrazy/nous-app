@@ -468,8 +468,8 @@ Authorization: Bearer eyJhbGciOi...`} />
           <div className="p-4 bg-amber-500/5 rounded-lg border border-amber-500/20">
             <div className="flex items-start gap-3">
               <AlertTriangle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
-              <div className="text-xs text-amber-300/80 space-y-1">
-                <p className="font-medium text-amber-300">Common Mistakes</p>
+              <div className="text-xs text-warn space-y-1">
+                <p className="font-medium text-warn">Common Mistakes</p>
                 <ul className="list-disc list-inside space-y-0.5">
                   <li>Putting API key in query params (<code className="text-amber-400/70">?api_key=xxx</code>) — use <code className="text-amber-400/70">X-API-Key</code> header instead</li>
                   <li>Sending form-data — use <code className="text-amber-400/70">Content-Type: application/json</code> with a JSON body</li>

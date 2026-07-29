@@ -559,7 +559,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
             <button
               type="button"
               onClick={() => onChorusChange(chorusStartSec === undefined ? currentTime : null)}
-              className="text-amber-300 hover:text-amber-200 transition-colors whitespace-nowrap"
+              className="text-warn hover-text-warn transition-colors whitespace-nowrap"
               title={chorusStartSec === undefined ? setChorusLabel : clearChorusLabel}
             >
               {chorusStartSec === undefined ? setChorusLabel : clearChorusLabel}
@@ -684,7 +684,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
             <button
               type="button"
               onClick={() => onChorusChange?.(currentTime)}
-              className={`px-2 py-0.5 text-xs font-medium text-amber-300 hover:text-amber-200 ${cInkCtrlBg} ${cInkCtrlHover} rounded transition-colors whitespace-nowrap`}
+              className={`px-2 py-0.5 text-xs font-medium text-warn hover-text-warn ${cInkCtrlBg} ${cInkCtrlHover} rounded transition-colors whitespace-nowrap`}
             >
               {setChorusLabel}
             </button>
@@ -692,7 +692,7 @@ export const AudioWaveformPlayer: React.FC<AudioWaveformPlayerProps> = ({
             <button
               type="button"
               onClick={() => onChorusChange?.(null)}
-              className={`px-2 py-0.5 text-xs font-medium text-amber-300 hover:text-amber-200 ${cInkCtrlBg} ${cInkCtrlHover} rounded transition-colors whitespace-nowrap`}
+              className={`px-2 py-0.5 text-xs font-medium text-warn hover-text-warn ${cInkCtrlBg} ${cInkCtrlHover} rounded transition-colors whitespace-nowrap`}
             >
               {clearChorusLabel}
             </button>

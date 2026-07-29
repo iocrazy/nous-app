@@ -76,7 +76,7 @@ export const MarkdownBody: React.FC<MarkdownBodyProps> = ({
             if (inline) {
               return (
                 <code
-                  className="rounded bg-ink-800 px-1.5 py-0.5 text-[13px] font-mono text-amber-300"
+                  className="rounded bg-ink-800 px-1.5 py-0.5 text-[13px] font-mono text-warn"
                   {...rest}
                 >
                   {children}

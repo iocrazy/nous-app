@@ -1195,7 +1195,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                         {isTempContext && (
                           <div className="flex items-center gap-2 px-2 py-1.5 bg-ink-900/60 rounded-b-xl border-t border-ink-800/50">
                             {badge && (
-                              <span className="text-xs text-amber-700 dark:text-amber-300 flex-1 truncate">
+                              <span className="text-xs text-warn flex-1 truncate">
                                 {badge}
                               </span>
                             )}
@@ -1279,7 +1279,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                               {isTempContext && (
                                 <div className="flex items-center gap-2 px-2 py-1.5 bg-ink-900/60 rounded-b-xl border-t border-ink-800/50">
                                   {badge && (
-                                    <span className="text-xs text-amber-700 dark:text-amber-300 flex-1 truncate">
+                                    <span className="text-xs text-warn flex-1 truncate">
                                       {badge}
                                     </span>
                                   )}
@@ -1358,7 +1358,7 @@ export const ResourceGrid: React.FC<ResourceGridProps> = ({
                           {isTempContext && (
                             <div className="flex items-center gap-2 px-4 py-1.5 border-t border-ink-800/50">
                               {badge && (
-                                <span className="text-xs text-amber-700 dark:text-amber-300 flex-1 truncate">
+                                <span className="text-xs text-warn flex-1 truncate">
                                   {badge}
                                 </span>
                               )}

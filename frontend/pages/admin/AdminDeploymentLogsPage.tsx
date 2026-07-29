@@ -28,7 +28,7 @@ interface DeploymentLog {
 
 const TYPE_COLORS: Record<string, string> = {
   feat: 'bg-[var(--accent-soft)] text-[var(--accent-text)] border-[var(--accent-border)]',
-  fix: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+  fix: 'bg-amber-500/20 text-warn border-amber-500/30',
   perf: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
   refactor: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
   docs: 'bg-sky-500/20 text-sky-300 border-sky-500/30',
@@ -110,7 +110,7 @@ function ReleaseNotes({ text }: { text: string }) {
         if (trimmed.startsWith('⚠️')) {
           return (
             <div key={i} className="bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2 mt-2">
-              <p className="text-[12px] text-amber-300" dangerouslySetInnerHTML={{
+              <p className="text-[12px] text-warn" dangerouslySetInnerHTML={{
                 __html: renderInline(escapeHtml(trimmed))
               }} />
             </div>

@@ -1766,6 +1766,98 @@ async def get_agent_dashboard(slug: str, auth: AuthDep) -> Dict[str, Any]:
 
 
 @router.get(
+    "/agents/{slug}/usage",
+    summary="Which product modules use this agent (static registry + 30d run evidence)",
+)
+async def get_agent_usage(slug: str, auth: AuthDep) -> Dict[str, Any]:
+    """Backs the AgentEditor → Dashboard "Used by" card.
+
+    Merges the static consuming-module registry
+    (:mod:`app.services.ai.agent_usage_registry`) with dynamic evidence:
+    agent_runs trigger counts over the last 30 days, direct_agent
+    conversation bindings, and agent routines (user_schedules rows with
+    task_type='agent_routine'). Run/routine counts are scoped to the
+    caller (same scoping as the dashboard tab); conversation count is
+    per-agent across the workspace (conversation_ai_meta has no user
+    column — it's a backend-only sidecar).
+    """
+    from app.services.ai.agent_usage_registry import (
+        feature_for_trigger,
+        modules_for_agent,
+    )
+
+    agent_repo, _ = _repos()
+    agent = await agent_repo.get_by_slug(slug)
+    if not agent:
+        raise HTTPException(status_code=404, detail="agent not found")
+
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    agent_uuid = UUID(str(agent["id"]))
+
+    from sqlalchemy import func, select
+
+    import app.db.session as db_session
+    from app.models import AgentRuns, ConversationAiMeta, UserSchedules
+
+    window_days = 30
+    window_start = datetime.now(timezone.utc) - timedelta(days=window_days)
+
+    async with db_session.read_scope() as session:
+        trigger_rows = (
+            (
+                await session.execute(
+                    select(
+                        AgentRuns.trigger,
+                        func.count().label("count"),
+                    )
+                    .where(
+                        AgentRuns.agent_id == agent_uuid,
+                        AgentRuns.user_id == user_uuid,
+                        AgentRuns.started_at >= window_start,
+                    )
+                    .group_by(AgentRuns.trigger)
+                )
+            )
+            .mappings()
+            .all()
+        )
+        conversation_count = (
+            await session.execute(
+                select(func.count()).where(ConversationAiMeta.agent_id == agent_uuid)
+            )
+        ).scalar() or 0
+        routine_count = (
+            await session.execute(
+                select(func.count()).where(
+                    UserSchedules.user_id == user_uuid,
+                    UserSchedules.task_type == "agent_routine",
+                    UserSchedules.payload["agent_slug"].astext == slug,
+                )
+            )
+        ).scalar() or 0
+
+    trigger_counts = sorted(
+        (
+            {
+                "trigger": str(r["trigger"] or "unknown"),
+                "feature_key": feature_for_trigger(str(r["trigger"] or "")),
+                "count": int(r["count"] or 0),
+            }
+            for r in trigger_rows
+        ),
+        key=lambda t: -t["count"],
+    )
+
+    return {
+        "modules": modules_for_agent(slug),
+        "trigger_counts": trigger_counts,
+        "conversation_count": int(conversation_count),
+        "routine_count": int(routine_count),
+        "window_days": window_days,
+    }
+
+
+@router.get(
     "/agents/{slug}/runs",
     response_model=RunListResponse,
     summary="List runs for a single agent (paginated)",

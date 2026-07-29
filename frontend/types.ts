@@ -1845,6 +1845,22 @@ export interface DashboardRecentRun {
   cost_cents?: number | null;
 }
 
+/** GET /ai-library/agents/{slug}/usage — "Used by" card data. */
+export interface AgentUsageModuleRef {
+  /** Team-scoped route segment (resources / projects / canvas / parser / issues). */
+  module_key: string;
+  /** i18n sub-label key: aiLibrary.agents.usage.feature.<feature_key>. */
+  feature_key: string;
+}
+
+export interface AgentUsage {
+  modules: AgentUsageModuleRef[];
+  trigger_counts: { trigger: string; feature_key: string; count: number }[];
+  conversation_count: number;
+  routine_count: number;
+  window_days: number;
+}
+
 export interface AgentDashboard {
   agent: {
     id: string;

@@ -132,7 +132,7 @@ export const ReviewCommentsPanel: React.FC<ReviewCommentsPanelProps> = ({
               {t('mediatrack.review.captureTimestamp')}
             </button>
             {pendingDrawingData && pendingDrawingData.strokes.length > 0 && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/20 text-amber-300">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/20 text-warn">
                 <PenTool className="w-3 h-3" />
                 {pendingDrawingData.strokes.length} annotation{pendingDrawingData.strokes.length !== 1 ? 's' : ''}
               </span>

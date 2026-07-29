@@ -54,7 +54,7 @@ export const RatingFilterDropdown: React.FC<RatingFilterDropdownProps> = ({
                 <Star
                   key={i}
                   size={11}
-                  className={active ? 'text-amber-300' : 'text-amber-400/70'}
+                  className={active ? 'text-warn' : 'text-amber-400/70'}
                   fill="currentColor"
                 />
               ))}

@@ -23,7 +23,7 @@ const StatusChip: React.FC<{ status: ChipStatus }> = ({ status }) => {
   const styles: Record<ChipStatus, string> = {
     idle: 'border-ink-700 bg-ink-800/80 text-ink-400',
     running: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
-    paused: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+    paused: 'border-amber-500/40 bg-amber-500/10 text-warn',
   };
   return (
     <span

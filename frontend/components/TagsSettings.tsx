@@ -801,7 +801,7 @@ export const TagsSettings: React.FC = () => {
                 cleanup so the user can delete the orphan group (its tags
                 stay, just become truly uncategorized). */}
             {groups.some((g) => isReservedGroupName(g.name)) && (
-              <div className="mx-3 mt-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200/90 space-y-2">
+              <div className="mx-3 mt-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-[11px] text-warn-soft space-y-2">
                 <div>
                   Found a custom group named "Uncategorized" — its tags
                   have been merged into the bucket above.
@@ -1436,7 +1436,7 @@ export const TagsSettings: React.FC = () => {
                   data isn't loaded on this page. Sanctioned fallback; not
                   fixing here. */}
               {editingTag.origin === 'note' && (
-                <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200/90">
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-warn-soft">
                   <NotebookPen size={14} className="shrink-0 mt-0.5" />
                   <span>
                     {t(

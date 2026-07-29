@@ -274,7 +274,7 @@ export const VideoReviewPage: React.FC<VideoReviewPageProps> = ({
               {compareMode ? (
                 <button
                   onClick={handleExitCompareMode}
-                  className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/20 text-amber-300 text-xs font-medium rounded-full hover:bg-amber-500/30 transition-colors"
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/20 text-warn text-xs font-medium rounded-full hover:bg-amber-500/30 transition-colors"
                 >
                   <X size={12} />
                   {t('mediatrack.review.exitCompare')}

@@ -71,7 +71,7 @@ const AgentWorkingBadge: React.FC<{ startedAt: string | null; agentName?: string
   const elapsed = Number.isFinite(startMs) ? Math.max(0, Math.floor((nowMs - startMs) / 1000)) : null;
   return (
     <span
-      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[12px] text-amber-300 bg-amber-500/10 ring-1 ring-amber-500/30"
+      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[12px] text-warn bg-amber-500/10 ring-1 ring-amber-500/30"
       title={agentName ? `${agentName} is working on this issue` : 'An agent is working on this issue'}
     >
       <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
