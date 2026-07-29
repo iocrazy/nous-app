@@ -40,6 +40,17 @@ per-object sha256/size check for a file-COUNT check (local rglob vs. what
 hash to verify against. The row's ``file_path`` becomes the PREFIX itself
 (trailing slash — ``MediaLocation.is_prefix``), not a path to one object.
 
+``hls`` (``resource_versions.hls_path``) is also a directory migration, but
+unlike ``downloads`` it does not call ``library_store().put_dir`` directly —
+it delegates to ``HlsPublisher.publish``, which already encodes the one
+non-negotiable HLS invariant (master.m3u8 uploaded LAST, after every
+segment/tier playlist has landed — see hls_publisher.py docstring). Re-doing
+that upload ordering here instead of reusing it would risk exposing a
+half-written master to a player. ``_migrate_hls_row`` still keeps the same
+4-step safety ordering, verifying via a post-publish file-count check
+(local rglob vs. ``list_prefix`` under the version's hls prefix) same as
+the album path.
+
 Module registry
 ----------------
 Each module supplies: a SELECT that coarse-filters ``file_path NOT LIKE
@@ -58,6 +69,7 @@ to migrate; wiring it up would just be dead SQL against renamed tables.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,6 +81,7 @@ from loguru import logger
 from app.core.config import settings
 from app.db import engine as db_engine
 from app.services.library import media_storage
+from app.services.media.transcode.hls_publisher import HlsPublisher
 
 # System-initiated batch job — no single owning end user. Matches the
 # existing SYSTEM_RUN_USER_ID convention (app/api/admin/ai_usage_router.py,
@@ -95,6 +108,11 @@ class RowExtract:
     # meaningless in this case (multiple files, each with its own) and go
     # unused; default False keeps every existing extract() call unaffected.
     is_album: bool = False
+    # hls module only — rid/vid parsed from hls_path, needed to call
+    # HlsPublisher.publish and to compute the verify-prefix. None default
+    # keeps every other module's extract() call unaffected.
+    hls_rid: Optional[str] = None
+    hls_vid: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -366,6 +384,69 @@ async def _downloads_update_row(
     )
 
 
+# ── hls: resource_versions.hls_path (filesystem → HlsPublisher) ────────
+#
+# ``derived/hls/{rid}/{vid}/master.m3u8`` on disk (see transcode_service.py's
+# ``hls_dir`` computation) → ``sb://library/hls/{rid}/{vid}/master.m3u8``.
+# rid/vid come straight out of the path itself (they're baked into it by the
+# same transcode code that writes it), so a regex extract is simpler and
+# just as safe as a join back to resources — no ambiguity since hls_path is
+# never shared between versions.
+
+_HLS_PATH_RE = re.compile(r"derived/hls/(\d+)/(\d+)/master\.m3u8$")
+
+_HLS_SELECT_SQL = """
+    SELECT rv.id, rv.resource_id, rv.version_number, rv.hls_path, ri.scope_id
+    FROM resource_versions rv
+    LEFT JOIN LATERAL (
+        SELECT scope_id FROM resource_items
+        WHERE resource_id = rv.resource_id ORDER BY id LIMIT 1
+    ) ri ON true
+    WHERE rv.hls_path IS NOT NULL
+      AND rv.hls_path NOT LIKE 'sb://%'
+      AND rv.storage_status = 'ok'
+      AND (CAST(:scope_id AS bigint) IS NULL OR ri.scope_id = :scope_id)
+    ORDER BY rv.id
+    LIMIT :limit
+"""
+
+
+def _hls_extract(row: dict) -> RowExtract:
+    """Parse rid/vid out of ``derived/hls/{rid}/{vid}/master.m3u8``.
+
+    Raises (not a silent None) on a non-matching path — same convention as
+    ``_uploads_extract``/``_project_files_extract``: a row this migration
+    cannot safely address is a failed row, not a skipped one.
+    """
+    hls_path = row.get("hls_path") or ""
+    m = _HLS_PATH_RE.search(hls_path)
+    if not m:
+        raise RuntimeError(
+            f"resource_versions.id={row.get('id')} hls_path does not match "
+            f"derived/hls/{{rid}}/{{vid}}/master.m3u8: {hls_path!r}"
+        )
+    return RowExtract(
+        scope_id=int(row.get("scope_id") or 0),
+        mime="application/vnd.apple.mpegurl",
+        filename=None,
+        hls_rid=m.group(1),
+        hls_vid=m.group(2),
+    )
+
+
+_HLS_UPDATE_SQL = """
+    UPDATE resource_versions
+    SET hls_path = :file_path
+    WHERE id = :id
+"""
+
+
+async def _hls_update_row(row: dict, file_path: str, sha256: Optional[str]) -> None:
+    # sha256 is always None for hls (no single content hash for a directory
+    # tree) — kept only to match ModuleConfig.update_row's shared signature.
+    await db_engine.execute(_HLS_UPDATE_SQL, {"file_path": file_path, "id": row["id"]})
+
+
 # storyboard: SKIPPED — see module docstring above. Do not add an entry.
 
 _MODULES: dict[str, ModuleConfig] = {
@@ -387,6 +468,12 @@ _MODULES: dict[str, ModuleConfig] = {
         extract=_downloads_extract,
         update_row=_downloads_update_row,
     ),
+    "hls": ModuleConfig(
+        name="hls",
+        select_sql=_HLS_SELECT_SQL,
+        extract=_hls_extract,
+        update_row=_hls_update_row,
+    ),
 }
 
 
@@ -403,6 +490,14 @@ async def _migrate_row(
     """Migrate one row. Returns an outcome tag: skipped / missing /
     dry_run_ok / migrated. Raises on any failure — see module docstring
     for the safety-contract ordering this enforces."""
+    if module_cfg.name == "hls":
+        # hls rows key off hls_path, not file_path, and delegate the actual
+        # upload to HlsPublisher (see _migrate_hls_row) rather than
+        # store_local_file/put_dir — different enough to warrant its own
+        # function instead of shoehorning a third branch in here.
+        return await _migrate_hls_row(
+            row, module_cfg, dry_run=dry_run, delete_source=delete_source
+        )
     file_path = row["file_path"]
     loc = media_storage.resolve_media_source(file_path)
     if loc.is_object_store:
@@ -520,6 +615,78 @@ async def _migrate_album_row(
 
     if delete_source:
         shutil.rmtree(str(local), ignore_errors=True)
+
+    return "migrated"
+
+
+async def _migrate_hls_row(
+    row: dict,
+    module_cfg: ModuleConfig,
+    *,
+    dry_run: bool,
+    delete_source: bool,
+) -> str:
+    """Filesystem HLS directory → object store, via ``HlsPublisher.publish``.
+
+    Structurally like ``_migrate_album_row`` (a directory, not a single
+    file, so no single content hash to check) but delegates the actual
+    upload to ``HlsPublisher.publish`` instead of ``library_store().put_dir``
+    directly — the publisher already encodes the one non-negotiable HLS
+    invariant (master.m3u8 uploaded LAST; see hls_publisher.py docstring),
+    which this migration must not bypass by re-implementing its own upload
+    order.
+    """
+    hls_path = row["hls_path"]
+    loc = media_storage.resolve_media_source(hls_path)
+    if loc.is_object_store:
+        return "skipped"  # already migrated — idempotent replay
+
+    # Same containment guard as _migrate_row — hls_path is legacy row data,
+    # never trust it to stay under DOWNLOAD_PATH without checking.
+    base = os.path.realpath(settings.DOWNLOAD_PATH)
+    real = os.path.realpath(os.path.join(base, loc.rel_path or ""))
+    if not (real == base or real.startswith(base + os.sep)):
+        raise RuntimeError(f"hls_path escapes DOWNLOAD_PATH: {hls_path!r}")
+
+    # hls_path points at master.m3u8 itself; the migration unit is its
+    # parent directory (the whole segment/tier tree).
+    hls_dir = Path(real).parent
+    if not hls_dir.is_dir():
+        logger.warning(f"[storage-migration] missing local HLS dir, skip: {hls_path}")
+        return "missing"
+
+    extract = module_cfg.extract(row)  # raises if hls_path doesn't parse
+
+    local_files = [p for p in hls_dir.rglob("*") if p.is_file()]
+    if not local_files:
+        raise RuntimeError(f"HLS directory is empty, nothing to migrate: {hls_dir}")
+
+    new_hls_path = await HlsPublisher().publish(
+        hls_dir, Path(base), extract.hls_rid, extract.hls_vid
+    )
+
+    # Verify BEFORE touching the DB row — same ordering guarantee as
+    # _migrate_album_row's file-count check (an HLS tree has no single
+    # content hash either). This also catches a forgotten HLS_OBJECT_STORE
+    # flag: publish() no-ops back to the same fs-relative path when the
+    # flag is off (nothing uploaded), so remote count would be 0 here and
+    # the mismatch below raises instead of silently "succeeding".
+    store = media_storage.library_store()
+    prefix = media_storage.hls_key_prefix(extract.hls_rid, extract.hls_vid)
+    remote_keys = await store.list_prefix(prefix)
+    if len(remote_keys) != len(local_files):
+        raise RuntimeError(
+            f"HLS file count mismatch after publish: id={row.get('id')} "
+            f"local={len(local_files)} remote={len(remote_keys)}"
+        )
+
+    if dry_run:
+        return "dry_run_ok"
+
+    await module_cfg.update_row(row, new_hls_path, None)
+
+    if delete_source:
+        shutil.rmtree(str(hls_dir), ignore_errors=True)
 
     return "migrated"
 

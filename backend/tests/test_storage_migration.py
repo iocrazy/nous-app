@@ -454,6 +454,7 @@ def test_update_sql_compiles_with_expected_binds():
         sm._UPLOADS_UPDATE_SQL,
         sm._PROJECT_FILES_UPDATE_SQL,
         sm._DOWNLOADS_UPDATE_SQL,
+        sm._HLS_UPDATE_SQL,
     ):
         compiled = _compilable(sql)
         stray = re.findall(r"(?<!:):[a-z_]+", compiled)
