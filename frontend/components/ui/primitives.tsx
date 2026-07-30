@@ -617,7 +617,7 @@ export function UiSelect({
                         item.disabled
                           ? 'cursor-not-allowed opacity-40'
                           : isSelected
-                            ? 'bg-ink-700 font-medium text-content'
+                            ? 'bg-[var(--accent-soft)] font-medium text-[var(--accent-text)]'
                             : 'text-content hover:bg-ink-700'
                       }`}
                       onClick={() => {

@@ -198,7 +198,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
             <button
               onClick={() => handleSelect(personalTeamId)}
               className={`flex items-center gap-2.5 w-full px-3 py-2 transition-colors ${
-                isPersonal ? 'bg-ink-800/60' : 'hover:bg-ink-800/40'
+                isPersonal ? 'bg-[var(--accent-soft)]' : 'hover:bg-ink-800/40'
               }`}
             >
               <div className="w-5 h-5 rounded bg-ink-600 flex items-center justify-center flex-shrink-0">
@@ -223,7 +223,7 @@ export const WorkspaceSwitcher: React.FC<WorkspaceSwitcherProps> = ({
                   key={team.id}
                   onClick={() => handleSelect(team.id)}
                   className={`flex items-center gap-2.5 w-full px-3 py-2 transition-colors ${
-                    isActive ? 'bg-ink-800/60' : 'hover:bg-ink-800/40'
+                    isActive ? 'bg-[var(--accent-soft)]' : 'hover:bg-ink-800/40'
                   }`}
                 >
                   <div className={`w-5 h-5 rounded ${color} flex items-center justify-center flex-shrink-0`}>

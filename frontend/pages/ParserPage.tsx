@@ -101,7 +101,7 @@ export function ParserPage() {
             onClick={() => setParserMode('single')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               parserMode === 'single'
-              ? 'bg-ink-800 text-ink-50 shadow-sm'
+              ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] shadow-sm'
               : 'text-ink-500 hover:text-ink-300'
             }`}
           >
@@ -114,7 +114,7 @@ export function ParserPage() {
             onClick={() => setParserMode('batch')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               parserMode === 'batch'
-              ? 'bg-ink-800 text-ink-50 shadow-sm'
+              ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] shadow-sm'
               : 'text-ink-500 hover:text-ink-300'
             }`}
           >
@@ -127,7 +127,7 @@ export function ParserPage() {
             onClick={() => setParserMode('playlist')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               parserMode === 'playlist'
-              ? 'bg-ink-800 text-ink-50 shadow-sm'
+              ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] shadow-sm'
               : 'text-ink-500 hover:text-ink-300'
             }`}
           >

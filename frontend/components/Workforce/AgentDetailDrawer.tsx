@@ -342,7 +342,7 @@ const InboxList: React.FC<{ rows: WorkforceInboxRow[] }> = ({ rows }) => {
             onClick={() => setFilter(null)}
             className={`px-1.5 py-0.5 text-[10px] rounded transition-colors ${
               filter === null
-                ? 'bg-ink-700 text-ink-100'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                 : 'text-ink-500 hover:bg-ink-800'
             }`}
           >

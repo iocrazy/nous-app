@@ -119,7 +119,7 @@ export function SessionList({
                 onMouseLeave={() => setHoveredId(null)}
                 className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors group ${
                   session.id === activeSessionId
-                    ? 'bg-ink-800 text-ink-200'
+                    ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                     : 'hover:bg-ink-800/60 text-ink-400'
                 }`}
               >
