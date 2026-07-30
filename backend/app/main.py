@@ -581,12 +581,29 @@ try:
 
         URL pattern: /media/{id}/cover?token=signed_token
         Includes resource-level permission checks.
+
+        Storage unification: mirrors serve_media_by_id — a migrated
+        cover_download_path carries an sb:// object-store path, which
+        _serve_file (filesystem-only) would 404 on. Legacy fs rows keep the
+        original _serve_file call byte-for-byte.
         """
         user_id = await _authenticate_media_request(
             request, token, share_token, review_token
         )
         file_path, creator_id, team_ids = await _resolve_file_path(media_id, "cover")
         await _check_permissions(media_id, user_id, share_token, creator_id, team_ids)
+
+        from app.services.library.media_storage import resolve_media_source
+
+        if resolve_media_source(file_path).is_object_store:
+            from app.services.library.media_serving import serve_stored_file
+
+            return await serve_stored_file(
+                file_path,
+                mime="image/jpeg",
+                request=request,
+                extra_headers={"Cache-Control": "public, max-age=31536000, immutable"},
+            )
         return _serve_file(file_path, cache_immutable=True)
 
     @app.get("/media/{file_path:path}")

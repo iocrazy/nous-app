@@ -10,7 +10,6 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
-from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import BaseModel
 
@@ -235,12 +234,18 @@ async def download_video_file(platform_id: str, request: Request, auth: AuthDep)
 
 
 @router.get("/download/{platform_id}/cover", tags=TAGS_DOWNLOAD)
-async def download_cover_file(platform_id: str, auth: AuthDep):
+async def download_cover_file(platform_id: str, request: Request, auth: AuthDep):
     """
     Download cover file
 
-    Return cover image for browser download.
+    Return cover image for browser download. Storage unification: mirrors
+    ``download_video_file`` (Task C2) — ``cover_download_path`` may be a
+    legacy filesystem-relative path or an ``sb://`` object-store row (front-
+    running the ``parsed_media.cover_download_path`` migration), and the
+    router never special-cases the shape.
     """
+    from app.services.library.media_serving import serve_stored_file
+
     try:
         repo = MediaRepository()
         video = await repo.get_by_platform_id(platform_id)
@@ -252,26 +257,24 @@ async def download_cover_file(platform_id: str, auth: AuthDep):
         if not cover_path:
             raise HTTPException(status_code=404, detail="Cover file path not found")
 
-        try:
-            base_path = Utils.get_download_base_path()
-        except ValueError:
-            raise HTTPException(status_code=404, detail="Download path not configured")
-        file_path = Path(base_path) / cover_path
-        if not file_path.exists():
-            raise HTTPException(status_code=404, detail="Cover file not found")
-
         video_title = video.get("title", platform_id)
         safe_title = "".join(
             c for c in video_title if c.isalnum() or c in (" ", "-", "_", ".")
         ).strip()
         if not safe_title:
             safe_title = platform_id
-        filename = f"{safe_title}_cover.jpg"
+        # safe_title is already restricted to alnum/space/-_. so it can't
+        # contain a quote, but strip defensively before it lands in a header.
+        safe_title = safe_title.replace('"', "")
+        disposition = _content_disposition(
+            f"{safe_title}_cover.jpg", f"{platform_id}_cover.jpg"
+        )
 
-        return FileResponse(
-            path=str(file_path),
-            filename=filename,
-            media_type="image/jpeg",
+        return await serve_stored_file(
+            cover_path,
+            mime="image/jpeg",
+            request=request,
+            disposition=disposition,
         )
     except HTTPException:
         raise
