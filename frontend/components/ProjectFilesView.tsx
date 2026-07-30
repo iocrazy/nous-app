@@ -346,7 +346,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
               <button
                 onClick={() => setViewMode('grid')}
                 className={`p-1.5 rounded-md transition-colors ${
-                  viewMode === 'grid' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
+                  viewMode === 'grid' ? 'bg-indigo-600 text-white' : 'text-ink-400 hover:text-ink-200'
                 }`}
               >
                 <LayoutGrid size={14} />
@@ -354,7 +354,7 @@ export const ProjectFilesView: React.FC<ProjectFilesViewProps> = ({ project, onB
               <button
                 onClick={() => setViewMode('list')}
                 className={`p-1.5 rounded-md transition-colors ${
-                  viewMode === 'list' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
+                  viewMode === 'list' ? 'bg-indigo-600 text-white' : 'text-ink-400 hover:text-ink-200'
                 }`}
               >
                 <LayoutList size={14} />

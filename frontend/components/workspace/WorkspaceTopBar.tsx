@@ -81,14 +81,14 @@ export function WorkspaceTopBar({
       {slate && (
         <span
           data-testid="ws-slate"
-          className="flex items-center gap-1.5 rounded-lg bg-[#16121f] pl-1.5 pr-2.5 py-1 shrink-0"
+          className="flex items-center gap-1.5 rounded-lg bg-island-2 border border-line-strong pl-1.5 pr-2.5 py-1 shrink-0"
         >
           <span
             aria-hidden
             className="w-[22px] h-3 rounded-[3px]"
-            style={{ background: 'repeating-linear-gradient(-45deg,#f4f1fb 0 4px,#16121f 4px 8px)' }}
+            style={{ background: 'repeating-linear-gradient(-45deg,transparent 0 4px,var(--line-strong) 4px 8px)' }}
           />
-          <span className="font-mono text-[10px] font-semibold tracking-wide text-[#f4f1fb]">
+          <span className="font-mono text-[10px] font-semibold tracking-wide text-ink-300">
             EP{slate.ep}
             {slate.scene ? ` · S${slate.scene}` : ''}
           </span>
