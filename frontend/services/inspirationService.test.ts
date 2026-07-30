@@ -114,24 +114,49 @@ describe('inspirationService', () => {
   // threw `TypeError: <obj>.filter is not a function` out of render, which
   // React Router's default ErrorBoundary then swapped the whole page for.
   describe('array-shaped endpoints degrade to [] on malformed responses', () => {
-    it('listNotes returns [] when the response is a non-array object (e.g. {success,data})', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson({ success: true, data: [] })));
-      await expect(listNotes({}, 50)).resolves.toEqual([]);
+    // Silence (and inspect) the `toArray` shape-drift warning added per
+    // review — the [] fallback must not be a *silent* swallow (CLAUDE.md's
+    // "catch 静默吞错" rule; matches resourceService.ts's checkDuplicatesBatch
+    // / workflowService.ts's fetchTemplates precedents in the same dir).
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     });
 
-    it('listNotes still returns the real list on a well-formed array response', async () => {
+    it('listNotes returns [] and warns when the response is a non-array object (e.g. {success,data})', async () => {
+      const shape = { success: true, data: [] };
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson(shape)));
+      await expect(listNotes({}, 50)).resolves.toEqual([]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        'listNotes: unexpected non-array response shape',
+        shape,
+      );
+    });
+
+    it('listNotes still returns the real list on a well-formed array response, no warning', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson([{ id: '1' }])));
       await expect(listNotes({}, 50)).resolves.toEqual([{ id: '1' }]);
+      expect(warnSpy).not.toHaveBeenCalled();
     });
 
-    it('getActivity returns [] when the response is a non-array object', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson({ success: true, data: [] })));
+    it('getActivity returns [] and warns when the response is a non-array object', async () => {
+      const shape = { success: true, data: [] };
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson(shape)));
       await expect(getActivity('2026-01-01', '2026-01-31')).resolves.toEqual([]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        'getActivity: unexpected non-array response shape',
+        shape,
+      );
     });
 
-    it('getTagCounts returns [] when the response is a non-array object', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson({ success: true, data: [] })));
+    it('getTagCounts returns [] and warns when the response is a non-array object', async () => {
+      const shape = { success: true, data: [] };
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson(shape)));
       await expect(getTagCounts()).resolves.toEqual([]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        'getTagCounts: unexpected non-array response shape',
+        shape,
+      );
     });
   });
 });

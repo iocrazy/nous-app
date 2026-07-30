@@ -75,28 +75,54 @@ function respondWith(body: unknown) {
 }
 
 describe('list-shaped getters degrade to [] on malformed responses', () => {
-  it('getHotspots returns [] when the response omits `hotspots`', async () => {
-    respondWith({});
-    await expect(getHotspots()).resolves.toEqual([]);
+  // Silence (and inspect) the `toArray` shape-drift warning added per review
+  // — the [] fallback must not be a *silent* swallow (CLAUDE.md's "catch 静默
+  // 吞错" rule; matches resourceService.ts's checkDuplicatesBatch /
+  // workflowService.ts's fetchTemplates precedents in the same dir).
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
-  it('getHotspots returns [] when `hotspots` is null', async () => {
+  it('getHotspots returns [] and warns when the response omits `hotspots`', async () => {
+    respondWith({});
+    await expect(getHotspots()).resolves.toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      'getHotspots: unexpected non-array response shape',
+      undefined,
+    );
+  });
+
+  it('getHotspots returns [] and warns when `hotspots` is null', async () => {
     respondWith({ hotspots: null });
     await expect(getHotspots()).resolves.toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      'getHotspots: unexpected non-array response shape',
+      null,
+    );
   });
 
-  it('getHotspots still returns the real list on a well-formed response', async () => {
+  it('getHotspots still returns the real list on a well-formed response, no warning', async () => {
     respondWith({ hotspots: [{ id: '1' }] });
     await expect(getHotspots()).resolves.toEqual([{ id: '1' }]);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
-  it('getHotspotDates returns [] when the response omits `dates`', async () => {
+  it('getHotspotDates returns [] and warns when the response omits `dates`', async () => {
     respondWith({});
     await expect(getHotspotDates()).resolves.toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      'getHotspotDates: unexpected non-array response shape',
+      undefined,
+    );
   });
 
-  it('getSourceHealth returns [] when the response omits `sources`', async () => {
+  it('getSourceHealth returns [] and warns when the response omits `sources`', async () => {
     respondWith({});
     await expect(getSourceHealth()).resolves.toEqual([]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      'getSourceHealth: unexpected non-array response shape',
+      undefined,
+    );
   });
 });

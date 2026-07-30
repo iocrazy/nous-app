@@ -124,15 +124,22 @@ for (const theme of ['dark', 'light'] as const) {
 // inspiration used to be excluded here too: at a mobile (390px) viewport,
 // navigating to /parser reliably crashed into React Router's default
 // ErrorBoundary (`TypeError: u is not iterable` inside TopicInspirationPage).
-// Root-caused and fixed in task-M1 — `services/topicService.ts`'s
-// `getHotspots`/`getHotspotDates`/`getSourceHealth` blindly cast a response
-// field to an array (`as Hotspot[]`); a response missing that key (this e2e
-// stub harness's catch-all shape, or any future API drift) produced
-// `undefined`, which crashed the `useMemo`s in TopicInspirationPage that
-// iterate `hotspots` unconditionally. Now routed through a `toArray` helper
-// that degrades to `[]` instead — see task-M1-report.md and
-// services/topicService.test.ts / pages/TopicInspirationPage.test.tsx for the
-// regression coverage. Re-included now that the crash no longer reproduces.
+// Root-caused and fixed in task-M1. The fix that actually matters on THIS
+// build is `services/inspirationService.ts`'s `listNotes`/`getActivity`/
+// `getTagCounts` — `.env.production` sets `VITE_FEATURE_INSPIRATION_NOTES=
+// true`, so on the production build this Playwright suite exercises,
+// `TopicInspirationPage` early-returns `<InspirationPage/>` before any
+// `topicService` call is even made; the crash is `InspirationPage`'s
+// `listNotes()` returning the e2e stub harness's generic catch-all body
+// (`{ success: true, data: [] }`, a non-array object) with no runtime shape
+// check, which then broke `NoteTimeline`'s `.filter`-based grouping.
+// `services/topicService.ts` got the same defensive fix in the same task
+// (it had the identical blind-cast anti-pattern), but that path is dead code
+// on this specific build/route combination. Both are now routed through a
+// `toArray` helper that degrades to `[]` instead — see task-M1-report.md and
+// services/inspirationService.test.ts / pages/TopicInspirationPage.test.tsx
+// for the regression coverage. Re-included now that the crash no longer
+// reproduces.
 const MOBILE_TAB_ROUTES = ROUTES.filter((r) => r.module === 'resources' || r.module === 'inspiration');
 
 for (const theme of ['dark', 'light'] as const) {
@@ -224,8 +231,9 @@ async function stubOneCompletedTask(page: Page): Promise<void> {
 // (React Router's default ErrorBoundary replacing the page), reproduced on a
 // DEFAULT (desktop) viewport under this exact probe, i.e. not only the
 // mobile-viewport-gated case the MobileTabBar probe above hit. Root-caused
-// and fixed in task-M1 (see the MOBILE_TAB_ROUTES comment above for the
-// mechanism) — re-included now that the crash no longer reproduces.
+// and fixed in task-M1 — see the MOBILE_TAB_ROUTES comment above for why the
+// fix that matters on this build is `services/inspirationService.ts`, not
+// `topicService.ts` — re-included now that the crash no longer reproduces.
 const TASK_CENTER_ROUTES = ROUTES;
 
 for (const theme of ['dark', 'light'] as const) {

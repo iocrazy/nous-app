@@ -77,8 +77,17 @@ async function jsonOrThrow(resp: Response) {
 // iterates with `for...of` instead of `.filter`). Fixed by validating the
 // shape here so a malformed payload degrades to `[]` instead of leaking a
 // non-array value into React state.
-function toArray<T>(value: unknown): T[] {
-  return Array.isArray(value) ? (value as T[]) : [];
+//
+// The degrade-to-[] is intentionally non-fatal, but it must not be silent
+// either — `resourceService.ts`'s `checkDuplicatesBatch` and
+// `workflowService.ts`'s `fetchTemplates` both log/throw on the same class
+// of shape drift rather than swallowing it. `fnName` identifies the caller
+// in the console so a real drift (vs. an intentionally-empty test stub) is
+// visible in application logs, not just silently empty.
+function toArray<T>(value: unknown, fnName: string): T[] {
+  if (Array.isArray(value)) return value as T[];
+  console.warn(`${fnName}: unexpected non-array response shape`, value);
+  return [];
 }
 
 export async function listNotes(
@@ -95,7 +104,7 @@ export async function listNotes(
   const resp = await fetch(`${base()}/notes?${params.toString()}`, {
     headers: await getAuthHeaders(),
   });
-  return toArray<InspirationNote>(await jsonOrThrow(resp));
+  return toArray<InspirationNote>(await jsonOrThrow(resp), 'listNotes');
 }
 
 export async function createNote(
@@ -146,14 +155,14 @@ export async function getActivity(
     `${base()}/notes/activity?date_from=${dateFrom}&date_to=${dateTo}`,
     { headers: await getAuthHeaders() },
   );
-  return toArray<{ day: string; cnt: number }>(await jsonOrThrow(resp));
+  return toArray<{ day: string; cnt: number }>(await jsonOrThrow(resp), 'getActivity');
 }
 
 export async function getTagCounts(): Promise<{ tag: string; cnt: number }[]> {
   const resp = await fetch(`${base()}/notes/tags`, {
     headers: await getAuthHeaders(),
   });
-  return toArray<{ tag: string; cnt: number }>(await jsonOrThrow(resp));
+  return toArray<{ tag: string; cnt: number }>(await jsonOrThrow(resp), 'getTagCounts');
 }
 
 export async function uploadAttachment(

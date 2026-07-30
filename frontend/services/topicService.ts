@@ -66,8 +66,18 @@ async function jsonOrThrow(resp: Response) {
 // `TypeError: undefined is not iterable` out of the render, which React
 // Router's error boundary then swaps the whole page for (this was the
 // pre-existing "u is not iterable" crash flagged in K1/K2 e2e runs).
-function toArray<T>(value: unknown): T[] {
-  return Array.isArray(value) ? (value as T[]) : [];
+//
+// The degrade-to-[] is intentionally non-fatal (a malformed payload for one
+// of these endpoints shouldn't crash the page the way it used to), but it
+// must not be silent either — `resourceService.ts`'s `checkDuplicatesBatch`
+// and `workflowService.ts`'s `fetchTemplates` both log/throw on the same
+// class of shape drift rather than swallowing it. `fnName` identifies the
+// caller in the console so a real drift (vs. an intentionally-empty test
+// stub) is visible in application logs, not just silently empty.
+function toArray<T>(value: unknown, fnName: string): T[] {
+  if (Array.isArray(value)) return value as T[];
+  console.warn(`${fnName}: unexpected non-array response shape`, value);
+  return [];
 }
 
 export async function getHotspots(
@@ -94,7 +104,7 @@ export async function getHotspots(
   // undefined = no tag narrowing.
   if (tagIds && tagIds.length > 0) params.set('tag_id', tagIds.join(','));
   const resp = await fetch(`${base()}?${params.toString()}`, { headers: await getAuthHeaders() });
-  return toArray<Hotspot>((await jsonOrThrow(resp)).hotspots);
+  return toArray<Hotspot>((await jsonOrThrow(resp)).hotspots, 'getHotspots');
 }
 
 // Full hotspot incl. original/translated body for the detail panel.
@@ -153,7 +163,7 @@ export async function setInterest(interest_text: string): Promise<TopicInterest>
 
 export async function getHotspotDates(): Promise<string[]> {
   const resp = await fetch(`${base()}/dates`, { headers: await getAuthHeaders() });
-  return toArray<string>((await jsonOrThrow(resp)).dates);
+  return toArray<string>((await jsonOrThrow(resp)).dates, 'getHotspotDates');
 }
 
 export type SourceHealthStatus = 'ok' | 'degraded' | 'dead';
@@ -186,7 +196,7 @@ export interface NewSourcePayload {
 
 export async function getSourceHealth(): Promise<SourceHealth[]> {
   const resp = await fetch(`${base()}/sources/health`, { headers: await getAuthHeaders() });
-  return toArray<SourceHealth>((await jsonOrThrow(resp)).sources);
+  return toArray<SourceHealth>((await jsonOrThrow(resp)).sources, 'getSourceHealth');
 }
 
 // Add a user-owned source. Its hotspots are private to the caller.
