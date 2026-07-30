@@ -70,3 +70,61 @@ export function shouldReloadForStaleChunk(
   storage.setItem(STALE_CHUNK_RELOADED_KEY, String(now));
   return true;
 }
+
+/** Minimal surface of the SW container this needs — keeps it unit-testable. */
+export interface ServiceWorkerRegistrationLike {
+  unregister(): Promise<boolean>;
+}
+export interface ServiceWorkerContainerLike {
+  getRegistrations(): Promise<readonly ServiceWorkerRegistrationLike[]>;
+}
+
+/**
+ * Reload for self-healing, bypassing the service worker's app shell.
+ *
+ * A plain ``location.reload()`` is a normal navigation, which workbox's
+ * ``navigateFallback`` answers with the PRECACHED index.html. When the SW on
+ * this tab still belongs to the PREVIOUS deploy, that "self-heal" lands the
+ * user on the old build — old styles, old chunks, all self-consistent — and
+ * the tab stays there until the SW happens to update (2026-07-29 field
+ * report: clicking a lazy route after a redeploy flipped the whole app back
+ * to the pre-palette look). Unregistering every SW first guarantees the
+ * reload's navigation hits the network and picks up the newest index.html;
+ * the fresh build re-registers its own SW on boot.
+ *
+ * Best-effort by design: any failure (no SW support, promise rejection, or a
+ * hung ``getRegistrations``) still reloads — a stale-shell reload is strictly
+ * better than no reload. The 2s timer races the unregister; double reload is
+ * harmless (the second fires after navigation started and is a no-op).
+ */
+export function forceFreshReload(
+  reload: () => void = () => window.location.reload(),
+  swContainer: ServiceWorkerContainerLike | undefined = typeof navigator !==
+  'undefined'
+    ? navigator.serviceWorker
+    : undefined,
+  scheduleFallback: (fn: () => void, ms: number) => void = (fn, ms) => {
+    setTimeout(fn, ms);
+  },
+): void {
+  if (!swContainer) {
+    reload();
+    return;
+  }
+  let done = false;
+  const reloadOnce = () => {
+    if (done) return;
+    done = true;
+    reload();
+  };
+  try {
+    swContainer
+      .getRegistrations()
+      .then((regs) => Promise.allSettled(regs.map((r) => r.unregister())))
+      .then(reloadOnce, reloadOnce);
+  } catch {
+    reloadOnce();
+    return;
+  }
+  scheduleFallback(reloadOnce, 2000);
+}

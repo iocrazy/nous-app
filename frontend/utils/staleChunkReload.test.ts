@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   RELOAD_THROTTLE_MS,
   STALE_CHUNK_RELOADED_KEY,
+  forceFreshReload,
   isStaleChunkError,
   shouldReloadForStaleChunk,
 } from './staleChunkReload';
@@ -99,5 +100,46 @@ describe('shouldReloadForStaleChunk', () => {
     // Clock skew / manual tampering must not disable self-healing forever.
     storage.setItem(STALE_CHUNK_RELOADED_KEY, String(9_000_000));
     expect(shouldReloadForStaleChunk(storage, 1_000_000)).toBe(true);
+  });
+});
+
+describe('forceFreshReload', () => {
+  it('unregisters every SW registration before reloading', async () => {
+    const calls: string[] = [];
+    const reg = { unregister: () => { calls.push('unregister'); return Promise.resolve(true); } };
+    const container = { getRegistrations: () => Promise.resolve([reg, reg]) };
+    await new Promise<void>((resolve) => {
+      forceFreshReload(() => { calls.push('reload'); resolve(); }, container, () => {});
+    });
+    expect(calls).toEqual(['unregister', 'unregister', 'reload']);
+  });
+
+  it('still reloads when unregister rejects', async () => {
+    const container = {
+      getRegistrations: () => Promise.reject(new Error('boom')),
+    };
+    let reloaded = false;
+    await new Promise<void>((resolve) => {
+      forceFreshReload(() => { reloaded = true; resolve(); }, container, () => {});
+    });
+    expect(reloaded).toBe(true);
+  });
+
+  it('reloads directly without an SW container', () => {
+    let reloaded = false;
+    forceFreshReload(() => { reloaded = true; }, undefined, () => {});
+    expect(reloaded).toBe(true);
+  });
+
+  it('fallback timer reloads at most once even if unregister also settles', async () => {
+    let reloads = 0;
+    let fire: (() => void) | undefined;
+    const container = {
+      getRegistrations: () => Promise.resolve([]),
+    };
+    forceFreshReload(() => { reloads += 1; }, container, (fn) => { fire = fn; });
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    fire?.();
+    expect(reloads).toBe(1);
   });
 });
