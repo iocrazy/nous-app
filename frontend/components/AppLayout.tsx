@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ViewState, PointPackage, Library, SmartCollection } from '../types';
-import { VIEW_PATH_MAP, pathnameToView } from '../utils/routeConfig';
+import { VIEW_PATH_MAP, pathnameToView, viewToModule } from '../utils/routeConfig';
 import { fetchLibraries } from '../services/libraryService';
 import { fetchSmartFolders } from '../services/resourceService';
 import { useAuth } from '../contexts/AuthContext';
@@ -122,6 +122,27 @@ function AppLayoutInner() {
   }, [urlTeamId, selectedTeamId, setSelectedTeamId, teams, teamsLoading, personalTeamId, location.pathname, navigate]);
 
   const view = pathnameToView(location.pathname);
+
+  // K1.5 (2026-07-29) — per-module accent scoping (spec §5). Stamped on
+  // <html>, not a wrapper div inside the Outlet subtree: several portals
+  // (document.body dialogs/sheets, IslandShell's infoIslandEl aside — see
+  // task-K1.5-report.md) render OUTSIDE whatever DOM node wraps <Outlet/>,
+  // so a `[data-module]` CSS selector only works if it's an ancestor of
+  // EVERYTHING, portals included. <html> is the one node every portal target
+  // is guaranteed to descend from. Mirrors the existing
+  // `document.documentElement.dataset.theme` pattern in ThemeContext.tsx.
+  useEffect(() => {
+    const module = viewToModule(view, location.pathname);
+    if (module) {
+      document.documentElement.dataset.module = module;
+    } else {
+      delete document.documentElement.dataset.module;
+    }
+    return () => {
+      delete document.documentElement.dataset.module;
+    };
+  }, [view, location.pathname]);
+
   const isDownloadsRoute = location.pathname.includes('/resources/downloads');
   const isDetailPage = location.pathname.includes('/resources/file/') || location.pathname.includes('/player/');
 

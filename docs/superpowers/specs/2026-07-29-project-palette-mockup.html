@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Project 模块配色设计稿 — 低饱和点缀色系统</title>
+<style>
+  :root{
+    /* ── 暖纸基底(仿参考图) ── */
+    --paper:#F3F0E9; --island:#FCFBF8; --island-2:#F6F4EE;
+    --line:#E5E0D4; --line-strong:#D6D0C0;
+    --ink:#1C1B18; --ink-2:#57544B; --ink-3:#8C887B;
+    /* ── 点缀色:同一饱和度/明度带(S≈45%,L≈38%) ── */
+    --green:#1E7A5B;  --green-soft:#E3EFE8;  --green-line:#BFDACE;
+    --ochre:#A87B2B;  --ochre-soft:#F3EAD6;  --ochre-line:#E2D2AC;
+    --brick:#AD5147;  --brick-soft:#F5E4E1;  --brick-line:#E3C4BF;
+    --steel:#46708E;  --steel-soft:#E3EBF1;  --steel-line:#C2D2DE;
+    --plum:#7A5E8F;   --plum-soft:#ECE6F1;   --plum-line:#D5C8E0;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{font-family:Inter,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--paper);color:var(--ink);padding:40px;line-height:1.5}
+  h1{font-size:22px;margin-bottom:6px}
+  h2{font-size:15px;margin:36px 0 12px;color:var(--ink);border-left:3px solid var(--green);padding-left:10px}
+  .sub{color:var(--ink-2);font-size:13px;margin-bottom:8px}
+  .rule{font-size:12.5px;color:var(--ink-2);background:var(--island);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:6px 0}
+  .rule b{color:var(--ink)}
+  /* swatches */
+  .swrow{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0}
+  .sw{width:150px;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--island)}
+  .sw .c{height:52px}
+  .sw .m{padding:8px 10px;font-size:11.5px;color:var(--ink-2)}
+  .sw .m b{display:block;color:var(--ink);font-size:12.5px}
+  .pair{display:flex}
+  .pair div{flex:1;height:52px}
+  /* mock components */
+  .board{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start}
+  .card{background:var(--island);border:1px solid var(--line);border-radius:16px;padding:16px;min-width:300px;flex:1}
+  .cap{font-size:11px;color:var(--ink-3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px}
+  /* pills / tabs */
+  .tabs{display:inline-flex;background:var(--island-2);border:1px solid var(--line);border-radius:999px;padding:3px;gap:2px}
+  .tab{padding:6px 16px;border-radius:999px;font-size:13px;color:var(--ink-2);cursor:default}
+  .tab.on{background:var(--green);color:#fff;font-weight:500}
+  .seg{display:inline-flex;background:var(--island-2);border:1px solid var(--line);border-radius:10px;padding:3px;gap:2px}
+  .seg .tab{border-radius:8px}
+  /* buttons */
+  .btn{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:9px 20px;font-size:13.5px;border:1px solid transparent;cursor:default}
+  .btn.primary{background:var(--green);color:#fff}
+  .btn.soft{background:var(--green-soft);color:var(--green);border-color:var(--green-line)}
+  .btn.ghost{background:transparent;color:var(--ink-2);border-color:var(--line-strong)}
+  .btn.danger{background:transparent;color:var(--brick);border-color:var(--brick-line)}
+  /* chips */
+  .chip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:4px 11px;font-size:12px;border:1px solid}
+  .chip.g{background:var(--green-soft);color:var(--green);border-color:var(--green-line)}
+  .chip.o{background:var(--ochre-soft);color:var(--ochre);border-color:var(--ochre-line)}
+  .chip.r{background:var(--brick-soft);color:var(--brick);border-color:var(--brick-line)}
+  .chip.s{background:var(--steel-soft);color:var(--steel);border-color:var(--steel-line)}
+  .chip.p{background:var(--plum-soft);color:var(--plum);border-color:var(--plum-line)}
+  .chip.n{background:var(--island-2);color:var(--ink-2);border-color:var(--line)}
+  .dot{width:7px;height:7px;border-radius:99px;background:currentColor}
+  /* sidebar mock */
+  .side{width:190px;flex:none}
+  .si{display:flex;align-items:center;gap:9px;padding:8px 12px;border-radius:10px;font-size:13.5px;color:var(--ink-2);margin:2px 0}
+  .si.on{background:var(--green-soft);color:var(--green);font-weight:500}
+  .si .ic{width:15px;height:15px;border:1.6px solid currentColor;border-radius:4px;opacity:.75}
+  /* workflow strip mock */
+  .strip{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .node{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:6px 13px;font-size:12.5px;border:1px solid var(--line);background:var(--island-2);color:var(--ink-2)}
+  .node.done{background:var(--green-soft);border-color:var(--green-line);color:var(--green)}
+  .node.cur{background:var(--green);border-color:var(--green);color:#fff;box-shadow:0 0 0 3px var(--green-soft)}
+  .node.lock{background:var(--ochre-soft);border-color:var(--ochre-line);color:var(--ochre)}
+  .node.over{background:var(--brick-soft);border-color:var(--brick-line);color:var(--brick)}
+  .arrow{color:var(--ink-3);font-size:11px}
+  /* version rail mock */
+  .vrow{display:flex;align-items:center;gap:8px;background:var(--island-2);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:12.5px;color:var(--ink-2);margin:5px 0}
+  .vrow b{color:var(--ink);font-weight:600}
+  .stat{display:inline-block;background:var(--island-2);border:1px solid var(--line);border-radius:12px;padding:10px 16px;text-align:center;margin-right:8px}
+  .stat b{display:block;font-size:20px;color:var(--ink)}
+  .stat span{font-size:11px;color:var(--ink-3)}
+  /* topbar mock */
+  .topbar{display:flex;align-items:center;gap:12px;background:var(--island);border:1px solid var(--line);border-radius:14px;padding:10px 16px}
+  .logo{width:26px;height:26px;border-radius:8px;background:var(--green);color:#fff;display:grid;place-items:center;font-size:13px}
+  .epchip{background:var(--island-2);border:1px solid var(--line-strong);border-radius:8px;padding:3px 10px;font-size:12px;color:var(--ink-2);font-family:ui-monospace,monospace}
+  .before{filter:none;border:1px dashed var(--line-strong);border-radius:16px;padding:14px;background:#fff}
+  .before .cap{color:#a1a1aa}
+  .b-pill{display:inline-flex;background:#f4f4f5;border-radius:999px;padding:3px;gap:2px;border:1px solid #e4e4e7}
+  .b-pill span{padding:6px 16px;border-radius:999px;font-size:13px;color:#52525b}
+  .b-pill .on{background:#18181b;color:#fff}
+  .b-btn{background:#6366f1;color:#fff;border-radius:999px;padding:9px 20px;font-size:13.5px;display:inline-block}
+  .b-chip{background:#dcfce7;color:#16a34a;border:1px solid #bbf7d0;border-radius:999px;padding:4px 11px;font-size:12px;display:inline-flex;align-items:center;gap:5px}
+  .b-logo{width:26px;height:26px;border-radius:8px;background:#6366f1;color:#fff;display:grid;place-items:center;font-size:13px;}
+  .b-ep{background:#18181b;color:#fff;border-radius:8px;padding:3px 10px;font-size:12px;font-family:ui-monospace,monospace}
+  .note{font-size:12px;color:var(--ink-3);margin-top:6px}
+</style>
+</head>
+<body>
+
+<h1>Project 模块配色设计稿</h1>
+<p class="sub">方向:仿参考图 —— 暖纸基底 + <b>同一饱和度带的低饱和点缀色</b>(绿为主角,其余同调),消灭 indigo/黑/亮绿三色混战。</p>
+
+<h2>0. 色彩纪律(整套系统只有这几条规则)</h2>
+<div class="rule"><b>主角只有绿</b>:主按钮、active 态、选中态、当前节点 —— 一律深绿 <code>#1E7A5B</code>。参考图的"不乱"来自这一条。</div>
+<div class="rule"><b>其余四色只当配角</b>,且语义固定:<b>赭</b>=等待/警示 · <b>砖红</b>=危险/逾期 · <b>钢蓝</b>=信息/链接 · <b>李紫</b>=AI/Agent 专属。全部同饱和度带(S≈45%),每色三档:实色 / soft 底 / 描边。</div>
+<div class="rule"><b>黑色退役为文字色</b>:不再有黑色 active 胶囊、黑色 EP chip —— 深色只出现在文字和图标。</div>
+
+<h2>1. 色板</h2>
+<div class="swrow">
+  <div class="sw"><div class="pair"><div style="background:var(--green)"></div><div style="background:var(--green-soft)"></div></div><div class="m"><b>绿 · 主角</b>#1E7A5B / #E3EFE8<br>按钮·active·当前·成功</div></div>
+  <div class="sw"><div class="pair"><div style="background:var(--ochre)"></div><div style="background:var(--ochre-soft)"></div></div><div class="m"><b>赭 · 等待</b>#A87B2B / #F3EAD6<br>依赖等待·进行中标记</div></div>
+  <div class="sw"><div class="pair"><div style="background:var(--brick)"></div><div style="background:var(--brick-soft)"></div></div><div class="m"><b>砖红 · 危险</b>#AD5147 / #F5E4E1<br>删除·逾期·错误</div></div>
+  <div class="sw"><div class="pair"><div style="background:var(--steel)"></div><div style="background:var(--steel-soft)"></div></div><div class="m"><b>钢蓝 · 信息</b>#46708E / #E3EBF1<br>链接·信息提示</div></div>
+  <div class="sw"><div class="pair"><div style="background:var(--plum)"></div><div style="background:var(--plum-soft)"></div></div><div class="m"><b>李紫 · Agent</b>#7A5E8F / #ECE6F1<br>AI/agent 相关标识</div></div>
+  <div class="sw"><div class="pair"><div style="background:var(--paper)"></div><div style="background:var(--island)"></div></div><div class="m"><b>暖纸基底</b>#F3F0E9 / #FCFBF8<br>页面底 / 岛面</div></div>
+</div>
+
+<h2>2. 关键组件 · 改后 vs 现状</h2>
+
+<div class="board">
+  <div class="card" style="flex:1.4">
+    <div class="cap">改后 — 工作区顶栏 + 视图切换</div>
+    <div class="topbar">
+      <div class="logo">↑</div>
+      <b style="font-size:14px">个人项目测试 1</b>
+      <span class="epchip">EP1 · S1</span>
+      <span style="flex:1"></span>
+      <span class="chip g"><span class="dot"></span>已保存</span>
+      <span class="btn primary" style="padding:7px 16px">保存版本</span>
+    </div>
+    <div style="margin-top:12px" class="tabs"><span class="tab on">剧本</span><span class="tab">大纲</span><span class="tab">封面</span></div>
+    <div class="note">EP chip 转中性描边;"已保存"并入绿系 soft;保存按钮 = 唯一实色绿。</div>
+  </div>
+  <div class="before" style="flex:1">
+    <div class="cap">现状(乱源)</div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div class="b-logo">↑</div><b style="font-size:14px;color:#18181b">个人项目测试 1</b><span class="b-ep">EP1 · S1</span>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:10px;align-items:center">
+      <div class="b-pill"><span class="on">剧本</span><span>大纲</span><span>封面</span></div>
+      <span class="b-chip">✓ 已保存</span>
+      <span class="b-btn">保存版本</span>
+    </div>
+    <div class="note">紫 logo + 黑 chip + 黑 active + 亮绿 chip + 靛蓝按钮 —— 5 种强调并存。</div>
+  </div>
+</div>
+
+<div class="board" style="margin-top:20px">
+  <div class="card side">
+    <div class="cap">改后 — 侧栏</div>
+    <div class="si"><span class="ic"></span>总览</div>
+    <div class="si"><span class="ic"></span>画布</div>
+    <div class="si on"><span class="ic"></span>剧本</div>
+    <div class="si"><span class="ic"></span>分镜 <span style="margin-left:auto;font-size:11px;color:var(--ink-3)">0/1</span></div>
+    <div class="si"><span class="ic"></span>场景 <span style="margin-left:auto;font-size:11px;color:var(--ink-3)">7</span></div>
+  </div>
+  <div class="card" style="flex:1.2">
+    <div class="cap">改后 — 编辑器右栏(写作)</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span style="font-size:12px;color:var(--ink-3)">版本历史</span>
+      <span class="btn soft" style="padding:6px 14px">保存版本</span>
+    </div>
+    <div class="vrow"><b>4</b> 我 · 7/13/2026 <span class="chip g" style="margin-left:auto;padding:2px 8px">当前</span></div>
+    <div class="vrow"><b>3</b> 我 · 7/13/2026</div>
+    <div style="margin:14px 0 6px;font-size:12px;color:var(--ink-3)">分页</div>
+    <div class="seg"><span class="tab on">连续</span><span class="tab">分页</span></div>
+    <div style="margin:14px 0 6px;font-size:12px;color:var(--ink-3)">格式</div>
+    <div class="seg"><span class="tab on">好莱坞</span><span class="tab">亚洲</span></div>
+    <div style="margin:16px 0 6px;font-size:12px;color:var(--ink-3)">统计</div>
+    <div><span class="stat"><b>7</b><span>场景</span></span><span class="stat"><b>447</b><span>字数</span></span><span class="stat"><b>7</b><span>角色</span></span><span class="stat"><b>3</b><span>地点</span></span></div>
+  </div>
+  <div class="card" style="flex:1.4">
+    <div class="cap">改后 — Workflow 节点条(语义色各就各位)</div>
+    <div class="strip">
+      <span class="node done">✓ Script</span><span class="arrow">→</span>
+      <span class="node done">✓ Storyboard</span><span class="arrow">→</span>
+      <span class="node cur">Canvas</span><span class="arrow">→</span>
+      <span class="node lock">🔒 Editing</span><span class="arrow">→</span>
+      <span class="node over">Delivery · 逾期</span>
+    </div>
+    <div style="margin-top:14px" class="cap">chips 一览</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <span class="chip g"><span class="dot"></span>已完成</span>
+      <span class="chip o"><span class="dot"></span>等待依赖</span>
+      <span class="chip r"><span class="dot"></span>逾期</span>
+      <span class="chip s"><span class="dot"></span>信息</span>
+      <span class="chip p"><span class="dot"></span>Agent 运行中</span>
+      <span class="chip n">中性标签</span>
+    </div>
+    <div style="margin-top:14px" class="cap">按钮层级</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <span class="btn primary">开始推进 →</span>
+      <span class="btn soft">Run now</span>
+      <span class="btn ghost">取消</span>
+      <span class="btn danger">删除项目</span>
+    </div>
+  </div>
+</div>
+
+<h2>3. 实施范围(拍板后)</h2>
+<div class="rule"><b>Token 层</b>:光主题下 <code>--color-accent</code> → 绿;新增五色语义变量(ochre/brick/steel/plum 及 soft/line 档);暖纸基底替换 project 模块页面底/岛面两级。</div>
+<div class="rule"><b>组件层</b>:workspace / workflow / editor / project 卡片共 26 处硬编码 indigo → accent token;黑色 active 胶囊(视图切换、分页、格式)→ 绿 active;"已保存"亮绿 → 绿系 soft;EP chip → 中性描边。</div>
+<div class="rule"><b>不动</b>:资源库/灵感/AI 库等其他模块本次不动(若看着顺眼,后续同法推全站)。</div>
+
+</body>
+</html>

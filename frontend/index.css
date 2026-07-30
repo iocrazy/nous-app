@@ -22,7 +22,160 @@
   --color-border-dark: #27272a;      /* zinc-800 */
   --color-text-dark: #fafafa;        /* zinc-50 */
   --color-text-muted: #a1a1aa;       /* zinc-400 */
-  --color-accent: #6366f1;           /* indigo-500 */
+  --color-accent: #1E7A5B;           /* was indigo-500 #6366f1 — K1 全站配色重映射: 绿(主角) anchor@600 */
+
+  /* ============================================================
+     K1 (2026-07-29) 色阶重映射 — 全站配色重构 W1 (docs/superpowers/specs/
+     2026-07-29-warm-paper-palette-design.md §2.1). Overrides Tailwind v4's
+     default 50-950 ladders for the 10 hue names still used across ~1700
+     existing bg-*, text-*, border-* call sites, so the recolor lands with
+     ZERO component edits. Mapping:
+       indigo + violet + emerald + green -> 绿   (主角/primary)  #1E7A5B@600
+       purple                            -> 李紫 (Agent)         #7A5E8F@600
+       amber                             -> 赭   (等待/警示)      #A87B2B@600
+       red + rose                        -> 砖红 (危险/逾期)      #AD5147@600
+       blue + sky                        -> 钢蓝 (信息/链接)      #46708E@600
+     Generation method (throwaway node+culori script, not checked in — see
+     task-K1-report.md): steps 100 (soft)/300 (line)/600 (solid) are taken
+     VERBATIM from the approved mockup (docs/superpowers/specs/2026-07-29-
+     project-palette-mockup.html) soft/line/anchor hex — exact reproduction,
+     no OKLCH round-trip. All other steps (50/200/400/500/700/800/900/950)
+     are interpolated/extrapolated in OKLCH space using Tailwind's own
+     default indigo ramp as the relative L/C "shape" template, hue held
+     constant per ladder at the 600 anchor's hue.
+     Contrast (full matrix in task-K1-report.md): 600-vs-white/paper and
+     700-text-on-100-soft-bg both verified >=4.5:1 for 绿/砖红/钢蓝/李紫.
+     KNOWN GAP: 赭(ochre)-600 vs white = 3.80:1 — the spec-mandated
+     #A87B2B anchor is inherently too light for white-on-solid use; the
+     mockup never pairs it that way (soft-bg + text/border only), so avoid
+     introducing `bg-amber-600 text-white`-style patterns until revisited.
+     Accepted trade-off (spec §2.1): class names now lie about hue (e.g.
+     `bg-indigo-600` renders green) — new code should use the semantic
+     tokens below (ok/warn/danger/info/agent) instead of these hue names. */
+  /* -> 绿 (主角) #1E7A5B (anchor@600) */
+  --color-indigo-50: #F1F8F5;
+  --color-indigo-100: #E3EFE8;
+  --color-indigo-200: #D4E6DE;
+  --color-indigo-300: #BFDACE;
+  --color-indigo-400: #80B39C;
+  --color-indigo-500: #4D9478;
+  --color-indigo-600: #1E7A5B;
+  --color-indigo-700: #14694D;
+  --color-indigo-800: #17553F;
+  --color-indigo-900: #1F4737;
+  --color-indigo-950: #132920;
+
+  --color-violet-50: #F1F8F5;
+  --color-violet-100: #E3EFE8;
+  --color-violet-200: #D4E6DE;
+  --color-violet-300: #BFDACE;
+  --color-violet-400: #80B39C;
+  --color-violet-500: #4D9478;
+  --color-violet-600: #1E7A5B;
+  --color-violet-700: #14694D;
+  --color-violet-800: #17553F;
+  --color-violet-900: #1F4737;
+  --color-violet-950: #132920;
+
+  --color-emerald-50: #F1F8F5;
+  --color-emerald-100: #E3EFE8;
+  --color-emerald-200: #D4E6DE;
+  --color-emerald-300: #BFDACE;
+  --color-emerald-400: #80B39C;
+  --color-emerald-500: #4D9478;
+  --color-emerald-600: #1E7A5B;
+  --color-emerald-700: #14694D;
+  --color-emerald-800: #17553F;
+  --color-emerald-900: #1F4737;
+  --color-emerald-950: #132920;
+
+  --color-green-50: #F1F8F5;
+  --color-green-100: #E3EFE8;
+  --color-green-200: #D4E6DE;
+  --color-green-300: #BFDACE;
+  --color-green-400: #80B39C;
+  --color-green-500: #4D9478;
+  --color-green-600: #1E7A5B;
+  --color-green-700: #14694D;
+  --color-green-800: #17553F;
+  --color-green-900: #1F4737;
+  --color-green-950: #132920;
+
+  /* -> 李紫 (Agent) #7A5E8F (anchor@600) */
+  --color-purple-50: #F5F2F8;
+  --color-purple-100: #ECE6F1;
+  --color-purple-200: #E2DAEA;
+  --color-purple-300: #D5C8E0;
+  --color-purple-400: #AF9BBF;
+  --color-purple-500: #9279A6;
+  --color-purple-600: #7A5E8F;
+  --color-purple-700: #69507B;
+  --color-purple-800: #554264;
+  --color-purple-900: #473A52;
+  --color-purple-950: #2A2230;
+
+  /* -> 赭 (等待/警示) #A87B2B (anchor@600) */
+  --color-amber-50: #FBF4EB;
+  --color-amber-100: #F3EAD6;
+  --color-amber-200: #EFDFC6;
+  --color-amber-300: #E2D2AC;
+  --color-amber-400: #CEAC78;
+  --color-amber-500: #BA914E;
+  --color-amber-600: #A87B2B;
+  --color-amber-700: #8A631D;
+  --color-amber-800: #765720;
+  --color-amber-900: #624C28;
+  --color-amber-950: #3A2E19;
+
+  /* -> 砖红 (危险/逾期) #AD5147 (anchor@600) */
+  --color-red-50: #FAF1EF;
+  --color-red-100: #F5E4E1;
+  --color-red-200: #EDD7D3;
+  --color-red-300: #E3C4BF;
+  --color-red-400: #D1948B;
+  --color-red-500: #C06F64;
+  --color-red-600: #AD5147;
+  --color-red-700: #96443B;
+  --color-red-800: #793932;
+  --color-red-900: #63352F;
+  --color-red-950: #3A1F1C;
+
+  --color-rose-50: #FAF1EF;
+  --color-rose-100: #F5E4E1;
+  --color-rose-200: #EDD7D3;
+  --color-rose-300: #E3C4BF;
+  --color-rose-400: #D1948B;
+  --color-rose-500: #C06F64;
+  --color-rose-600: #AD5147;
+  --color-rose-700: #96443B;
+  --color-rose-800: #793932;
+  --color-rose-900: #63352F;
+  --color-rose-950: #3A1F1C;
+
+  /* -> 钢蓝 (信息/链接) #46708E (anchor@600) */
+  --color-blue-50: #F1F5F8;
+  --color-blue-100: #E3EBF1;
+  --color-blue-200: #D6E1E9;
+  --color-blue-300: #C2D2DE;
+  --color-blue-400: #8DA9BE;
+  --color-blue-500: #658AA5;
+  --color-blue-600: #46708E;
+  --color-blue-700: #3A607A;
+  --color-blue-800: #314E63;
+  --color-blue-900: #2E4252;
+  --color-blue-950: #1B272F;
+
+  --color-sky-50: #F1F5F8;
+  --color-sky-100: #E3EBF1;
+  --color-sky-200: #D6E1E9;
+  --color-sky-300: #C2D2DE;
+  --color-sky-400: #8DA9BE;
+  --color-sky-500: #658AA5;
+  --color-sky-600: #46708E;
+  --color-sky-700: #3A607A;
+  --color-sky-800: #314E63;
+  --color-sky-900: #2E4252;
+  --color-sky-950: #1B272F;
 }
 
 /* ── Theme-aware neutral ladder (island redesign D11) ──────────────
@@ -62,16 +215,57 @@
   /* Stalled-activity semantic token (PR-7 D5) — amber that reads on dark. */
   --stall: #fbbf24;
 
-  /* Accent trio (workspace light-palette rework) — indigo emphasis that flips
-     with the theme: dark keeps the airy indigo-300-on-tint look, light swaps
-     to saturated indigo-600 on indigo-50 so active states stay readable
-     instead of washing out to pale lavender. */
-  --accent-text: #a5b4fc;
-  --accent-soft: rgba(99, 102, 241, 0.10);
-  --accent-border: rgba(99, 102, 241, 0.35);
+  /* Accent trio (workspace light-palette rework) — K1: re-hued from indigo to
+     绿(主角) alongside --color-accent above. Dark keeps an airy tint-on-dark
+     look at the ladder's 400 step (readable on dark app-bg); light (below)
+     swaps to the saturated 600 anchor on the 50 soft-tint. */
+  --accent-text: #80B39C;
+  --accent-soft: rgba(30, 122, 91, 0.14);
+  --accent-border: rgba(30, 122, 91, 0.35);
+
+  /* ============================================================
+     K1 semantic color tokens (spec §2.3) — the "正道" for new code: use
+     ok/warn/danger/info/agent (+ -soft/-line) instead of the recolored hue
+     names above. Each pairs with a light override below so bg-ok/text-warn/
+     border-danger-line etc. flip correctly per [data-theme] (mirrors the
+     --stall / --accent-text precedent). Dark values use each ladder's 400
+     step — verified >=4.5:1 against #18181b (task-K1-report.md matrix:
+     green 7.46 / ochre 8.26 / brick 7.02 / steel 7.21 / plum 6.97). Soft/line
+     in dark are translucent overlays of the anchor rgb (12%/40%), the same
+     convention as the existing .btn-tint-* dark rules. */
+  --ok: #80B39C;              /* green-400 */
+  --ok-soft: rgba(30, 122, 91, 0.14);
+  --ok-line: rgba(30, 122, 91, 0.4);
+  --warn: #CEAC78;            /* ochre-400 */
+  --warn-soft: rgba(168, 123, 43, 0.14);
+  --warn-line: rgba(168, 123, 43, 0.4);
+  --danger: #D1948B;          /* brick-400 */
+  --danger-soft: rgba(173, 81, 71, 0.14);
+  --danger-line: rgba(173, 81, 71, 0.4);
+  --info: #8DA9BE;            /* steel-400 */
+  --info-soft: rgba(70, 112, 142, 0.14);
+  --info-line: rgba(70, 112, 142, 0.4);
+  --agent: #AF9BBF;           /* plum-400 */
+  --agent-soft: rgba(122, 94, 143, 0.14);
+  --agent-line: rgba(122, 94, 143, 0.4);
 }
 
 @theme inline {
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-ok-line: var(--ok-line);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-line: var(--warn-line);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-line: var(--danger-line);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-line: var(--info-line);
+  --color-agent: var(--agent);
+  --color-agent-soft: var(--agent-soft);
+  --color-agent-line: var(--agent-line);
   --color-ink-50: var(--ink-50);
   --color-ink-100: var(--ink-100);
   --color-ink-200: var(--ink-200);
@@ -105,73 +299,249 @@
   --color-canvas-accent: var(--canvas-accent);
 }
 
-/* Light theme — ladder inverted + tuned (spec §5.4). Semantic colors
-   (indigo/green/amber/red/violet) intentionally unchanged. */
+/* Light theme — ladder inverted + tuned (spec §5.4). K1 (2026-07-29):
+   base vars + ink ladder re-based on 暖纸 (warm paper) per
+   docs/superpowers/specs/2026-07-29-warm-paper-palette-design.md §2.2 —
+   app-bg/island/island-2/line/line-strong/content* now the approved warm
+   hex; the ink-50..950 ladder keeps its original zinc lightness (L) stops
+   (so existing spacing/contrast tuning is untouched) but is re-hued warm
+   (OKLCH H~90, matching --content's own hue) instead of neutral zinc grey. */
 [data-theme="light"] {
   color-scheme: light;
-  --ink-50:  #18181b;
-  --ink-100: #27272a;
-  --ink-200: #3f3f46;
-  --ink-300: #52525b;
-  --ink-400: #71717a;
-  --ink-500: #a1a1aa;
-  --ink-600: #d4d4d8;
-  --ink-700: #e4e4e7;
-  --ink-800: #f0f0f2;
-  --ink-900: #f7f7f8;
-  --ink-950: #fcfcfd;
+  --ink-50:  #191815;
+  --ink-100: #292723;
+  --ink-200: #424039;
+  --ink-300: #56534A;
+  --ink-400: #767267;
+  --ink-500: #A6A295;
+  --ink-600: #D9D4C8;
+  --ink-700: #E8E4D9;
+  --ink-800: #F3F0E9;
+  --ink-900: #F9F7F3;
+  --ink-950: #FDFCF9;
 
-  --app-bg: #f4f4f6;
-  --island: #ffffff;
-  --island-2: #f4f4f5;
-  --card: #fafafa;
-  --line: rgba(0,0,0,.08);
-  --line-strong: rgba(0,0,0,.16);
-  --content: #1c1c21;
-  --content-2: #52525b;
-  --content-3: #8b8b94;
-  --content-4: #b0b0b8;
+  --app-bg: #F3F0E9;
+  --island: #FCFBF8;
+  --island-2: #F6F4EE;
+  --card: #FCFBF8;
+  --line: #E5E0D4;
+  --line-strong: #D6D0C0;
+  --content: #1C1B18;
+  --content-2: #57544B;
+  --content-3: #8C887B;
+  --content-4: #B2AEA1;
 
   /* Stalled-activity semantic token (PR-7 D5) — darker amber for light bg. */
   --stall: #d97706;
 
-  /* Accent trio — light theme: saturated text on a solid soft fill. */
-  --accent-text: #4f46e5;
-  --accent-soft: #eef2ff;
-  --accent-border: #c7d2fe;
+  /* Accent trio — light theme: K1 re-hued from indigo to 绿(主角). K1.6
+     (2026-07-29) fix: --accent-text standardized at the 700 tier, not the
+     600 anchor — 600-text-on-100-soft-bg measured 4.456:1 for this exact
+     pairing (below the 4.5 hard line, task-K1-report.md K1.5-review-fix
+     §Fix 2), a shortfall shared by all four hues (this default + the 3
+     module overrides below). 700-on-100 clears comfortably (5.630:1 here,
+     full matrix in task-K1-report.md §K1.6) — same soft/line fill,
+     darker text only. */
+  --accent-text: #14694D;
+  --accent-soft: #E3EFE8;
+  --accent-border: #BFDACE;
+
+  /* K1 semantic tokens (light) — anchor/soft/line taken verbatim from the
+     approved mockup per-hue swatches (exact reproduction requirement). */
+  --ok: #1E7A5B;
+  --ok-soft: #E3EFE8;
+  --ok-line: #BFDACE;
+  --warn: #A87B2B;
+  --warn-soft: #F3EAD6;
+  --warn-line: #E2D2AC;
+  --danger: #AD5147;
+  --danger-soft: #F5E4E1;
+  --danger-line: #E3C4BF;
+  --info: #46708E;
+  --info-soft: #E3EBF1;
+  --info-line: #C2D2DE;
+  --agent: #7A5E8F;
+  --agent-soft: #ECE6F1;
+  --agent-line: #D5C8E0;
+}
+
+/* ============================================================
+   K1.5 (2026-07-29) 每模块主色 — 全站配色重构 W1.5 (docs/superpowers/specs/
+   2026-07-29-warm-paper-palette-design.md §5). AppLayout stamps
+   `<html data-module="…">` from the same `pathnameToView()` route mapping
+   Sidebar already uses for active-item highlighting (utils/routeConfig.ts
+   `viewToModule`) — no second route→module map. Plain CSS custom-property
+   overrides (NOT inside `@theme`) — Tailwind's `.bg-indigo-600 {
+   background-color: var(--color-indigo-600) }` utilities are generated once,
+   globally; a `[data-module="x"] { --color-indigo-600: … }` block further
+   down the cascade just wins for any element under that attribute the same
+   way `[data-theme="light"]` already overrides --ink-50..950, --line, etc.
+
+   Scope: ONLY the 4 "accent" ladders that share one hue under K1 (indigo,
+   violet, emerald, green — all currently == 绿) get re-pointed per module.
+   The 6 "semantic" ladders (purple/amber/red/rose/blue/sky) and the
+   ok/warn/danger/info/agent tokens stay global — 语义色全局不变 (spec §5):
+   an Agent chip (purple/plum) or a danger button (red/brick) must look
+   identical no matter which module you're viewing it from.
+
+   projects/workspace/workflow/editor need NO block — 绿 is the global
+   default already (spec §5 table). Everything not listed below (todolist,
+   shared, points, settings, dashboard, cleanup, billing, members, canvas)
+   also falls through to the default green — `viewToModule()` returns null
+   for those views, so AppLayout never stamps a data-module attribute at all.
+
+   KNOWN DEVIATION — 赭(ochre) for [data-module="inspiration"]: the global
+   ochre-600 anchor (#A87B2B, K1 report) fails 600-vs-white (3.80 < 4.5).
+   As an "accent" here (buttons/active-states, unlike the semantic --warn
+   token which stays the untouched global anchor) it plausibly gets used as
+   a white-text solid fill, so per this task's instruction: 50/100/200/300
+   (soft/line tier) stay IDENTICAL to the global ochre ladder (unchanged
+   mockup tone); 600 is darkened to #956C25 (OKLCH L 61.3%->56.0%, chroma
+   scaled proportionally to avoid muddying, hue held) — clears 4.72:1 vs
+   white / 4.56:1 vs paper. 400/500 re-interpolated between the pinned 300
+   and the new 600; 700/800/900/950 re-extrapolated from the new 600 (same
+   Tailwind-indigo-ratio method as K1). Full matrix in task-K1.5 report
+   appendix. */
+[data-module="ai"] {
+  /* -> 李紫 (Agent) #7A5E8F (identical to the global --color-purple-* ladder) */
+  --color-indigo-50: #F5F2F8;   --color-violet-50: #F5F2F8;   --color-emerald-50: #F5F2F8;   --color-green-50: #F5F2F8;
+  --color-indigo-100: #ECE6F1;  --color-violet-100: #ECE6F1;  --color-emerald-100: #ECE6F1;  --color-green-100: #ECE6F1;
+  --color-indigo-200: #E2DAEA;  --color-violet-200: #E2DAEA;  --color-emerald-200: #E2DAEA;  --color-green-200: #E2DAEA;
+  --color-indigo-300: #D5C8E0;  --color-violet-300: #D5C8E0;  --color-emerald-300: #D5C8E0;  --color-green-300: #D5C8E0;
+  --color-indigo-400: #AF9BBF;  --color-violet-400: #AF9BBF;  --color-emerald-400: #AF9BBF;  --color-green-400: #AF9BBF;
+  --color-indigo-500: #9279A6;  --color-violet-500: #9279A6;  --color-emerald-500: #9279A6;  --color-green-500: #9279A6;
+  --color-indigo-600: #7A5E8F;  --color-violet-600: #7A5E8F;  --color-emerald-600: #7A5E8F;  --color-green-600: #7A5E8F;
+  --color-indigo-700: #69507B;  --color-violet-700: #69507B;  --color-emerald-700: #69507B;  --color-green-700: #69507B;
+  --color-indigo-800: #554264;  --color-violet-800: #554264;  --color-emerald-800: #554264;  --color-green-800: #554264;
+  --color-indigo-900: #473A52;  --color-violet-900: #473A52;  --color-emerald-900: #473A52;  --color-green-900: #473A52;
+  --color-indigo-950: #2A2230;  --color-violet-950: #2A2230;  --color-emerald-950: #2A2230;  --color-green-950: #2A2230;
+}
+
+[data-module="inspiration"] {
+  /* -> 赭 (等待/警示, darkened for module-accent use — see KNOWN DEVIATION above) */
+  --color-indigo-50: #FBF4EB;   --color-violet-50: #FBF4EB;   --color-emerald-50: #FBF4EB;   --color-green-50: #FBF4EB;
+  --color-indigo-100: #F3EAD6;  --color-violet-100: #F3EAD6;  --color-emerald-100: #F3EAD6;  --color-green-100: #F3EAD6;
+  --color-indigo-200: #EFDFC6;  --color-violet-200: #EFDFC6;  --color-emerald-200: #EFDFC6;  --color-green-200: #EFDFC6;
+  --color-indigo-300: #E2D2AC;  --color-violet-300: #E2D2AC;  --color-emerald-300: #E2D2AC;  --color-green-300: #E2D2AC;
+  --color-indigo-400: #C6A675;  --color-violet-400: #C6A675;  --color-emerald-400: #C6A675;  --color-green-400: #C6A675;
+  --color-indigo-500: #AC8649;  --color-violet-500: #AC8649;  --color-emerald-500: #AC8649;  --color-green-500: #AC8649;
+  --color-indigo-600: #956C25;  --color-violet-600: #956C25;  --color-emerald-600: #956C25;  --color-green-600: #956C25;
+  --color-indigo-700: #805C1B;  --color-violet-700: #805C1B;  --color-emerald-700: #805C1B;  --color-green-700: #805C1B;
+  --color-indigo-800: #684C1B;  --color-violet-800: #684C1B;  --color-emerald-800: #684C1B;  --color-green-800: #684C1B;
+  --color-indigo-900: #564222;  --color-violet-900: #564222;  --color-emerald-900: #564222;  --color-green-900: #564222;
+  --color-indigo-950: #332715;  --color-violet-950: #332715;  --color-emerald-950: #332715;  --color-green-950: #332715;
+}
+
+[data-module="resources"] {
+  /* -> 钢蓝 (信息/链接) #46708E (identical to the global blue/sky ladder, --color-blue-* and --color-sky-*) */
+  --color-indigo-50: #F1F5F8;   --color-violet-50: #F1F5F8;   --color-emerald-50: #F1F5F8;   --color-green-50: #F1F5F8;
+  --color-indigo-100: #E3EBF1;  --color-violet-100: #E3EBF1;  --color-emerald-100: #E3EBF1;  --color-green-100: #E3EBF1;
+  --color-indigo-200: #D6E1E9;  --color-violet-200: #D6E1E9;  --color-emerald-200: #D6E1E9;  --color-green-200: #D6E1E9;
+  --color-indigo-300: #C2D2DE;  --color-violet-300: #C2D2DE;  --color-emerald-300: #C2D2DE;  --color-green-300: #C2D2DE;
+  --color-indigo-400: #8DA9BE;  --color-violet-400: #8DA9BE;  --color-emerald-400: #8DA9BE;  --color-green-400: #8DA9BE;
+  --color-indigo-500: #658AA5;  --color-violet-500: #658AA5;  --color-emerald-500: #658AA5;  --color-green-500: #658AA5;
+  --color-indigo-600: #46708E;  --color-violet-600: #46708E;  --color-emerald-600: #46708E;  --color-green-600: #46708E;
+  --color-indigo-700: #3A607A;  --color-violet-700: #3A607A;  --color-emerald-700: #3A607A;  --color-green-700: #3A607A;
+  --color-indigo-800: #314E63;  --color-violet-800: #314E63;  --color-emerald-800: #314E63;  --color-green-800: #314E63;
+  --color-indigo-900: #2E4252;  --color-violet-900: #2E4252;  --color-emerald-900: #2E4252;  --color-green-900: #2E4252;
+  --color-indigo-950: #1B272F;  --color-violet-950: #1B272F;  --color-emerald-950: #1B272F;  --color-green-950: #1B272F;
+}
+
+/* K1.5 addendum — the Sidebar active-nav-item pill does NOT read the accent
+   ladder above; it's `bg-[var(--accent-soft)] text-[var(--accent-text)]`
+   (Sidebar.tsx), a separate token pair introduced pre-K1 (workspace
+   light-palette rework) that K1 re-hued to green but left global. Spec §5
+   is explicit that "选中态" follows the module, and the active nav pill is
+   the single most visible "selected" indicator in the shell — discovered
+   via e2e computed-style probe during this task's verification (the ladder
+   override alone left it green in every module). Extending the SAME
+   mechanism here rather than inventing a new one: compound
+   `[data-theme][data-module]` selectors (both attributes land on <html>)
+   override --accent-text/-soft/-border per module.
+   Tier choice — K1.6 (2026-07-29) supersedes K1.5 review fix #2: light now
+   uses the 700 tier (NOT the 600 anchor). K1.5 review fix #2 had matched
+   600 to the (then-current) global default for consistency, but precise
+   measurement showed 600-text-on-100-soft-bg fails 4.5:1 for all four hues
+   including that global default (green 4.456, plum 4.485, steel 4.389,
+   module-ochre 3.944 — task-K1-report.md K1.5-review-fix §Fix 2). K1.6
+   fixes the shipped gap at the root instead of re-matching a broken
+   baseline: standardize on 700 for all four (this + the global default
+   above), which clears comfortably everywhere (green 5.630, plum 5.654,
+   steel 5.558, module-ochre 5.066 — full precision in task-K1-report.md
+   §K1.6). Dark keeps the 400 tier — verified against the actual composited
+   background (rgba(anchor-600, .14) over `--island` dark #15151a, the real
+   backdrop the Sidebar/TopBar pills render on, not a flat swatch): all four
+   already clear 4.5:1 by a wide margin (6.34-6.89, §K1.6), so no dark
+   change was needed. */
+[data-theme="light"][data-module="ai"] {
+  --accent-text: #69507B;   /* plum-700 */
+  --accent-soft: #ECE6F1;   /* plum-100 */
+  --accent-border: #D5C8E0; /* plum-300 */
+}
+[data-theme="dark"][data-module="ai"] {
+  --accent-text: #AF9BBF;   /* plum-400 */
+  --accent-soft: rgba(122, 94, 143, 0.14);
+  --accent-border: rgba(122, 94, 143, 0.35);
+}
+[data-theme="light"][data-module="inspiration"] {
+  --accent-text: #805C1B;   /* module ochre-700 (darkened anchor, see block above) */
+  --accent-soft: #F3EAD6;   /* ochre-100, unchanged mockup tone */
+  --accent-border: #E2D2AC; /* ochre-300, unchanged mockup tone */
+}
+[data-theme="dark"][data-module="inspiration"] {
+  --accent-text: #C6A675;   /* module ochre-400 */
+  --accent-soft: rgba(149, 108, 37, 0.14);
+  --accent-border: rgba(149, 108, 37, 0.35);
+}
+[data-theme="light"][data-module="resources"] {
+  --accent-text: #3A607A;   /* steel-700 */
+  --accent-soft: #E3EBF1;   /* steel-100 */
+  --accent-border: #C2D2DE; /* steel-300 */
+}
+[data-theme="dark"][data-module="resources"] {
+  --accent-text: #8DA9BE;   /* steel-400 */
+  --accent-soft: rgba(70, 112, 142, 0.14);
+  --accent-border: rgba(70, 112, 142, 0.35);
 }
 
 /* ── Tinted button system — island redesign D6
    (docs/design/island-redesign-spec.md §3). Layout/size stay Tailwind
    utilities at the call site; these classes own color only:
-   12% tinted bg + 35% same-hue border + bright text, hover deepens. ── */
+   12% tinted bg + 35% same-hue border + bright text, hover deepens.
+   K1 (2026-07-29): recolored per spec §2.1 mapping — indigo/violet/green all
+   merge to 绿 (anchor rgb 30,122,91; "violet 与 indigo 并轨,消灭第二种绿"),
+   amber -> 赭 (168,123,43), red -> 砖红 (173,81,71). Class names kept as-is
+   (renaming is out of scope, spec §4); only the literal rgb/hex values move. ── */
 @layer components {
-  .btn-tint-indigo { background: rgba(99,102,241,.12); border: 1px solid rgba(99,102,241,.35); color: #a5b4fc; }
-  .btn-tint-indigo:hover:not(:disabled) { background: rgba(99,102,241,.2); border-color: rgba(99,102,241,.55); }
-  .btn-tint-amber { background: rgba(245,158,11,.12); border: 1px solid rgba(245,158,11,.35); color: #fcd34d; }
-  .btn-tint-amber:hover:not(:disabled) { background: rgba(245,158,11,.2); border-color: rgba(245,158,11,.55); }
-  .btn-tint-violet { background: rgba(167,139,250,.12); border: 1px solid rgba(167,139,250,.35); color: #c4b5fd; }
-  .btn-tint-violet:hover:not(:disabled) { background: rgba(167,139,250,.2); border-color: rgba(167,139,250,.55); }
-  .btn-tint-green { background: rgba(52,211,153,.12); border: 1px solid rgba(52,211,153,.35); color: #6ee7b7; }
-  .btn-tint-green:hover:not(:disabled) { background: rgba(52,211,153,.2); border-color: rgba(52,211,153,.55); }
-  .btn-tint-red { background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.3); color: #fca5a5; }
-  .btn-tint-red:hover:not(:disabled) { background: rgba(248,113,113,.18); border-color: rgba(248,113,113,.5); }
+  .btn-tint-indigo { background: rgba(30,122,91,.12); border: 1px solid rgba(30,122,91,.35); color: #80B39C; }
+  .btn-tint-indigo:hover:not(:disabled) { background: rgba(30,122,91,.2); border-color: rgba(30,122,91,.55); }
+  .btn-tint-amber { background: rgba(168,123,43,.12); border: 1px solid rgba(168,123,43,.35); color: #CEAC78; }
+  .btn-tint-amber:hover:not(:disabled) { background: rgba(168,123,43,.2); border-color: rgba(168,123,43,.55); }
+  .btn-tint-violet { background: rgba(30,122,91,.12); border: 1px solid rgba(30,122,91,.35); color: #80B39C; }
+  .btn-tint-violet:hover:not(:disabled) { background: rgba(30,122,91,.2); border-color: rgba(30,122,91,.55); }
+  .btn-tint-green { background: rgba(30,122,91,.12); border: 1px solid rgba(30,122,91,.35); color: #80B39C; }
+  .btn-tint-green:hover:not(:disabled) { background: rgba(30,122,91,.2); border-color: rgba(30,122,91,.55); }
+  .btn-tint-red { background: rgba(173,81,71,.1); border: 1px solid rgba(173,81,71,.3); color: #D1948B; }
+  .btn-tint-red:hover:not(:disabled) { background: rgba(173,81,71,.18); border-color: rgba(173,81,71,.5); }
   /* Cover-tint Share button — audio detail special (spec §3: tinted color uses
      cover-extracted --tint instead of indigo). Mock `.btn.share`:
-     bg rgba(--tint,.12) / border rgba(--tint,.4) / color rgb(--tint); hover .2/.6. */
+     bg rgba(--tint,.12) / border rgba(--tint,.4) / color rgb(--tint); hover .2/.6.
+     Fallback triple left as the pre-K1 indigo rgb — this only shows before the
+     per-track --tint is computed, not a themed color. */
   .btn-tint-cover { background: rgba(var(--tint,99,102,241),.12); border: 1px solid rgba(var(--tint,99,102,241),.4); color: rgb(var(--tint,99,102,241)); }
   .btn-tint-cover:hover:not(:disabled) { background: rgba(var(--tint,99,102,241),.2); border-color: rgba(var(--tint,99,102,241),.6); }
 
   /* Light-theme overrides — the base rules use a pale, dark-theme text color
-     (e.g. indigo #a5b4fc) that fails contrast on the pale tint-over-white
-     fill. Here each tint keeps its translucent fill but swaps to a saturated
-     700-level text color, clearing WCAG AA on white islands. Dark theme is
-     untouched (these selectors only match under [data-theme="light"]). */
-  [data-theme="light"] .btn-tint-indigo { color: #4338ca; }
-  [data-theme="light"] .btn-tint-amber  { color: #b45309; }
-  [data-theme="light"] .btn-tint-violet { color: #6d28d9; }
-  [data-theme="light"] .btn-tint-green  { color: #047857; }
-  [data-theme="light"] .btn-tint-red    { color: #b91c1c; }
+     that fails contrast on the pale tint-over-white fill. Here each tint
+     keeps its translucent fill but swaps to a saturated 700-level text
+     color, clearing WCAG AA on white islands (task-K1-report.md matrix).
+     Dark theme is untouched (these selectors only match under
+     [data-theme="light"]). */
+  [data-theme="light"] .btn-tint-indigo { color: #14694D; }
+  [data-theme="light"] .btn-tint-amber  { color: #8A631D; }
+  [data-theme="light"] .btn-tint-violet { color: #14694D; }
+  [data-theme="light"] .btn-tint-green  { color: #14694D; }
+  [data-theme="light"] .btn-tint-red    { color: #96443B; }
   /* Cover tint is driven by the runtime --tint var (unknown lightness), so
      mix it toward ink to guarantee a readable dark text on the pale fill. */
   [data-theme="light"] .btn-tint-cover  { color: color-mix(in srgb, rgb(var(--tint,99,102,241)) 42%, #18181b); }
@@ -736,14 +1106,14 @@ body {
   --text-rgb: 250 250 250;
   --text-muted: #a1a1aa;       /* zinc-400 */
   --text-muted-rgb: 161 161 170;
-  --accent: #6366f1;           /* indigo-500 */
-  --accent-rgb: 99 102 241;
+  --accent: #1E7A5B;           /* K1: was indigo-500 #6366f1 -> 绿(主角) anchor@600 */
+  --accent-rgb: 30 122 91;
   --ui-surface-panel: #18181b;
   --ui-surface-field: rgba(9, 9, 11, 0.92);
   --ui-border-soft: rgba(161, 161, 170, 0.14);
   --ui-border-strong: rgba(161, 161, 170, 0.24);
   --ui-shadow-panel: 0 14px 34px rgba(0, 0, 0, 0.38);
-  --group-node-bg: color-mix(in srgb, rgb(99 102 241 / 0.3) 30%, #09090b);
+  --group-node-bg: color-mix(in srgb, rgb(30 122 91 / 0.3) 30%, #09090b);
   --ui-radius-lg: 12px;
   --ui-radius-xl: 16px;
   --ui-radius-2xl: 20px;
@@ -1456,30 +1826,33 @@ body {
    regardless of specificity. Only the text color changes — the base soft
    bg/border already read well on light. */
 
-[data-theme="light"] .island-frame .btn-tint-indigo { color: #4338ca; }
+/* K1 (2026-07-29): recolored per spec §2.1 (indigo/violet/green -> 绿,
+   amber -> 赭, red -> 砖红) — same rgb triples as the .btn-tint-* base
+   block above. */
+[data-theme="light"] .island-frame .btn-tint-indigo { color: #14694D; }
 [data-theme="light"] .island-frame .btn-tint-indigo:hover:not(:disabled) {
-  background: rgba(99, 102, 241, 0.18);
-  border-color: rgba(99, 102, 241, 0.5);
+  background: rgba(30, 122, 91, 0.18);
+  border-color: rgba(30, 122, 91, 0.5);
 }
-[data-theme="light"] .island-frame .btn-tint-amber { color: #b45309; }
+[data-theme="light"] .island-frame .btn-tint-amber { color: #8A631D; }
 [data-theme="light"] .island-frame .btn-tint-amber:hover:not(:disabled) {
-  background: rgba(245, 158, 11, 0.2);
-  border-color: rgba(245, 158, 11, 0.55);
+  background: rgba(168, 123, 43, 0.2);
+  border-color: rgba(168, 123, 43, 0.55);
 }
-[data-theme="light"] .island-frame .btn-tint-violet { color: #6d28d9; }
+[data-theme="light"] .island-frame .btn-tint-violet { color: #14694D; }
 [data-theme="light"] .island-frame .btn-tint-violet:hover:not(:disabled) {
-  background: rgba(124, 58, 237, 0.18);
-  border-color: rgba(124, 58, 237, 0.5);
+  background: rgba(30, 122, 91, 0.18);
+  border-color: rgba(30, 122, 91, 0.5);
 }
-[data-theme="light"] .island-frame .btn-tint-green { color: #047857; }
+[data-theme="light"] .island-frame .btn-tint-green { color: #14694D; }
 [data-theme="light"] .island-frame .btn-tint-green:hover:not(:disabled) {
-  background: rgba(16, 185, 129, 0.2);
-  border-color: rgba(16, 185, 129, 0.55);
+  background: rgba(30, 122, 91, 0.2);
+  border-color: rgba(30, 122, 91, 0.55);
 }
-[data-theme="light"] .island-frame .btn-tint-red { color: #b91c1c; }
+[data-theme="light"] .island-frame .btn-tint-red { color: #96443B; }
 [data-theme="light"] .island-frame .btn-tint-red:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.16);
-  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(173, 81, 71, 0.16);
+  border-color: rgba(173, 81, 71, 0.5);
 }
 
 /* Hero CTA (Upload) — solid indigo gradient + soft glow. Sampled from the mock:

@@ -64,3 +64,56 @@ export function pathnameToView(pathname: string): ViewState {
 
   return 'parser';
 }
+
+// ---------------------------------------------------------------------------
+// K1.5 (2026-07-29) — per-module accent scoping (docs/superpowers/specs/
+// 2026-07-29-warm-paper-palette-design.md §5). AppLayout stamps the resolved
+// module onto <html data-module="…">; index.css's `[data-module="x"]` blocks
+// then re-point the accent ladders (indigo/violet/emerald/green) to that
+// module's primary hue. Colocated with `pathnameToView` since it's a direct
+// function of the same ViewState this file already owns as the single
+// source of truth — do not build a second route→module map elsewhere.
+// ---------------------------------------------------------------------------
+
+export type ModuleAccent = 'ai' | 'inspiration' | 'resources';
+
+/**
+ * Views with a dedicated non-green module accent. Every other ViewState
+ * (mediatrack/projects included — projects IS the global green default, so
+ * it needs no override) resolves to `null`, meaning "no data-module
+ * attribute" → falls through to the global accent ladder.
+ */
+const VIEW_TO_MODULE: Partial<Record<ViewState, ModuleAccent>> = {
+  // AI Library / Agent area — nested /ai-library/* plus the flat legacy
+  // /agents, /skills, /chat views that cover the same Agent/AI surface.
+  ailibrary: 'ai',
+  agents: 'ai',
+  skills: 'ai',
+  chat: 'ai',
+  // 'parser' deliberately NOT listed here — see the dedicated pathname guard
+  // in viewToModule() below (K1.5 review minor-fix).
+  // Resources + Distribution both read as 钢蓝 per spec §5.
+  resources: 'resources',
+  distribution: 'resources',
+};
+
+/**
+ * @param pathname Raw `location.pathname` (same input as `pathnameToView`).
+ *   Required, not optional: see the 'parser' guard below — without the raw
+ *   pathname there is no way to tell a genuine Topic Inspiration visit apart
+ *   from `pathnameToView`'s catch-all.
+ */
+export function viewToModule(view: ViewState, pathname: string): ModuleAccent | null {
+  if (view === 'parser') {
+    // `pathnameToView`'s trailing `return 'parser'` is BOTH the real /parser
+    // route's result AND the fallback for any route matching no explicit
+    // prefix at all (see its comment) — a genuinely unrecognized path would
+    // silently inherit the inspiration (ochre) accent otherwise (K1.5 review
+    // minor finding). Only tint when the URL actually is /parser; every other
+    // fallthrough defaults to null (no override → global green), same as any
+    // other unmapped view.
+    const stripped = pathname.replace(/^\/team\/[^/]+/, '');
+    return stripped.startsWith('/parser') ? 'inspiration' : null;
+  }
+  return VIEW_TO_MODULE[view] ?? null;
+}
