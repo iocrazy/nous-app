@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  FileText, Sparkles, Eye, Loader2, Copy, Download, Check,
+  FileText, BookOpen, ScanEye, Eye, Loader2, Copy, Download, Check,
   Clock, Tag, ChevronRight, Brain, List, AlignLeft, ChevronDown, Music,
   PanelRightClose,
 } from 'lucide-react';
@@ -459,7 +459,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   const tabs: { key: TabKey; label: string; icon: React.ReactNode }[] = [
     { key: 'overview', label: 'Overview', icon: <Eye size={16} /> },
     { key: 'transcript', label: 'Transcript', icon: <FileText size={16} /> },
-    { key: 'analysis', label: 'Analysis', icon: <Sparkles size={16} /> },
+    { key: 'analysis', label: 'Analysis', icon: <ScanEye size={16} /> },
     { key: 'lyrics', label: 'Lyrics', icon: <Music size={16} /> },
   ];
 
@@ -740,7 +740,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
             <section className="space-y-3">
               <div className="flex items-center gap-2">
                 <div className="p-1.5 bg-[var(--accent-soft)] rounded-lg text-[var(--accent-text)]">
-                  <Sparkles size={16} />
+                  <BookOpen size={16} />
                 </div>
                 <h3 className={`font-medium ${cText200}`}>Summary</h3>
                 {getStatusIndicator(video.summary_status)}
@@ -768,7 +768,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                     {summaryLoading ? (
                       <Loader2 size={14} className="animate-spin" />
                     ) : (
-                      <Sparkles size={14} />
+                      <BookOpen size={14} />
                     )}
                     Summarize
                   </button>
@@ -790,7 +790,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                     {summaryLoading ? (
                       <Loader2 size={14} className="animate-spin" />
                     ) : (
-                      <Sparkles size={14} />
+                      <BookOpen size={14} />
                     )}
                     Retry
                   </button>
@@ -865,7 +865,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
             <section className="space-y-3">
               <div className="flex items-center gap-2">
                 <div className="p-1.5 bg-purple-500/10 rounded-lg text-purple-400">
-                  <Eye size={16} />
+                  <ScanEye size={16} />
                 </div>
                 <h3 className={`font-medium ${cText200}`}>Visual Analysis</h3>
                 {getStatusIndicator(video.visual_analysis_status)}
@@ -951,7 +951,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                         {visualAnalysisLoading ? (
                           <Loader2 size={14} className="animate-spin" />
                         ) : (
-                          <Eye size={14} />
+                          <ScanEye size={14} />
                         )}
                         Trigger Visual Analysis
                       </button>
@@ -977,7 +977,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
                     {visualAnalysisLoading ? (
                       <Loader2 size={14} className="animate-spin" />
                     ) : (
-                      <Eye size={14} />
+                      <ScanEye size={14} />
                     )}
                     Retry
                   </button>

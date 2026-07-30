@@ -1099,6 +1099,7 @@ export const DownloadsView: React.FC = () => {
                 data={filteredLibrary}
                 onUpdate={handleUpdateLibraryItem}
                 onItemClick={(item) => handleVideoClick(item)}
+                aiStatusMap={aiStatusMap}
               />
             )}
 

@@ -4,9 +4,10 @@ import {
   ChevronLeft,
   X,
   MonitorPlay,
-  Brain,
+  FileText,
+  BookOpen,
+  ScanEye,
   Sparkles,
-  Eye,
   Star,
   Plus,
 } from 'lucide-react';
@@ -15,13 +16,8 @@ import { Video, Tag } from '../../types';
 import { EagleTagPicker } from '../EagleTagPicker';
 import { ResourcePromptSection } from '../resources/ResourcePromptSection';
 import { AIStatusBadge } from './AIStatusBadge';
+import type { ResourceData } from './useDownloadsData';
 import { getCoverUrl, formatResolution } from '../../utils/awemeType';
-
-interface ResourceData {
-  id: string;
-  notes: string | null;
-  rating: number;
-}
 
 interface DownloadInfoPanelProps {
   selectedVideo: Video;
@@ -107,6 +103,18 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
   const cChipBg = 'bg-island-2';
   const cChipText = 'text-content-3';
   const cChipBorder = 'border-line';
+
+  // AI state lives on `resources` (migration 067/075 moved it off
+  // parsed_media), so `selectedResourceData` is the real source and the
+  // selectedVideo fields are only a fallback for callers that hydrate the
+  // media row themselves (search hits, the backend card projection).
+  const transcriptStatus =
+    selectedResourceData?.transcript_status ?? selectedVideo.transcript_status;
+  const summaryStatus =
+    selectedResourceData?.summary_status ?? selectedVideo.summary_status;
+  const analysisStatus =
+    selectedResourceData?.visual_analysis_status ?? selectedVideo.visual_analysis_status;
+  const hasPrompt = selectedResourceData?.has_prompt ?? selectedVideo.has_prompt ?? false;
 
   const body = (
     <div className="flex-1 overflow-y-auto">
@@ -214,37 +222,50 @@ export const DownloadInfoPanel: React.FC<DownloadInfoPanelProps> = ({
           )}
 
           {/* AI Status */}
-          {(selectedVideo.transcript_status || selectedVideo.summary_status || selectedVideo.visual_analysis_status) && (
+          {(transcriptStatus || summaryStatus || analysisStatus || hasPrompt) && (
             <div className={`px-4 mt-4 border-t ${cBorderSection} pt-3`}>
               <h4 className={`text-[11px] font-semibold ${cLabel} uppercase tracking-widest mb-2`}>
                 {t('resources.infoPanel.aiStatus')}
               </h4>
               <div className="space-y-1.5">
-                {selectedVideo.transcript_status && selectedVideo.transcript_status !== 'none' && (
+                {transcriptStatus && transcriptStatus !== 'none' && (
                   <div className="flex items-center justify-between py-1">
                     <div className="flex items-center gap-2">
-                      <Brain size={12} className="text-[var(--accent-text)]" />
+                      <FileText size={12} className="text-[var(--accent-text)]" />
                       <span className={`text-xs ${cText400}`}>Transcript</span>
                     </div>
-                    <AIStatusBadge status={selectedVideo.transcript_status} />
+                    <AIStatusBadge status={transcriptStatus} />
                   </div>
                 )}
-                {selectedVideo.summary_status && selectedVideo.summary_status !== 'none' && (
+                {summaryStatus && summaryStatus !== 'none' && (
+                  <div className="flex items-center justify-between py-1">
+                    <div className="flex items-center gap-2">
+                      <BookOpen size={12} className="text-[var(--accent-text)]" />
+                      <span className={`text-xs ${cText400}`}>Summary</span>
+                    </div>
+                    <AIStatusBadge status={summaryStatus} />
+                  </div>
+                )}
+                {analysisStatus && analysisStatus !== 'none' && (
+                  <div className="flex items-center justify-between py-1">
+                    <div className="flex items-center gap-2">
+                      <ScanEye size={12} className="text-purple-400" />
+                      <span className={`text-xs ${cText400}`}>Visual Analysis</span>
+                    </div>
+                    <AIStatusBadge status={analysisStatus} />
+                  </div>
+                )}
+                {/* Prompt is a has-it/doesn't, not a pipeline state — no
+                    AIStatusBadge (which renders processing/failed states this
+                    row can never be in). The panel's own PromptSection above
+                    is where the text lives; this line just mirrors the card. */}
+                {hasPrompt && (
                   <div className="flex items-center justify-between py-1">
                     <div className="flex items-center gap-2">
                       <Sparkles size={12} className="text-[var(--accent-text)]" />
-                      <span className={`text-xs ${cText400}`}>Summary</span>
+                      <span className={`text-xs ${cText400}`}>Prompt</span>
                     </div>
-                    <AIStatusBadge status={selectedVideo.summary_status} />
-                  </div>
-                )}
-                {selectedVideo.visual_analysis_status && selectedVideo.visual_analysis_status !== 'none' && (
-                  <div className="flex items-center justify-between py-1">
-                    <div className="flex items-center gap-2">
-                      <Eye size={12} className="text-purple-400" />
-                      <span className={`text-xs ${cText400}`}>Visual Analysis</span>
-                    </div>
-                    <AIStatusBadge status={selectedVideo.visual_analysis_status} />
+                    <span className="text-[10px] text-[var(--accent-text)]">Yes</span>
                   </div>
                 )}
               </div>
