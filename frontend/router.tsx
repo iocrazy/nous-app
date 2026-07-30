@@ -6,6 +6,7 @@ import { ModuleGuard } from './components/ModuleGuard';
 import { RedirectToTeam, RedirectToDefaultTeam } from './components/RedirectToTeam';
 import { useDistributionModuleStatus } from './hooks/useDistributionModuleStatus';
 import {
+  forceFreshReload,
   isStaleChunkError,
   shouldReloadForStaleChunk,
 } from './utils/staleChunkReload';
@@ -32,7 +33,10 @@ function lazyWithRetry<T extends { default: any }>(
         // deploy left every lazy route throwing — the home page still rendered
         // (already in memory) while detail pages became unreachable.
         if (shouldReloadForStaleChunk(sessionStorage, Date.now())) {
-          window.location.reload();
+          // Bypass the SW app shell — a plain reload gets the PRECACHED old
+          // index.html via navigateFallback and "heals" onto the previous
+          // build (2026-07-29 全站回旧样式 incident).
+          forceFreshReload();
           // Never-resolving promise so React stays on the loader instead
           // of flashing the error UI before the reload kicks in.
           return new Promise<T>(() => {});
