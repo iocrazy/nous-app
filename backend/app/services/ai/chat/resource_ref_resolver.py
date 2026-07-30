@@ -27,8 +27,8 @@ async def _fetch_accessible_meta(
     rows = await db_engine.fetch_all(
         """
         SELECT r.id::text AS id, r.filename AS name,
-               r.mime_type AS mime, r.file_size AS size,
-               r.description AS brief, r.updated_at,
+               r.mime_type AS mime, r.file_size_bytes AS size,
+               r.notes AS brief, r.updated_at,
                ri.scope_id::text AS scope_id,
                t.name AS team_name, t.kind AS scope_kind
           FROM public.resources r

@@ -69,7 +69,7 @@ async def _fetch_dispatch(
     rows = await db_engine.fetch_all(
         f"""
         SELECT r.id::text, r.mime_type AS mime, r.filename AS name,
-               r.file_path, r.description AS brief
+               r.file_path, r.notes AS brief
           FROM public.resources r
           JOIN public.resource_items ri ON ri.resource_id = r.id
          WHERE r.id::text = :rid
