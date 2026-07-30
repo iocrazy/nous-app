@@ -95,16 +95,46 @@ async def _resolve_album_location(media_id: str):
 
 def _slide_kind(suffix: str) -> Optional[tuple[str, str]]:
     """(slide_type, media_type) for a slide file extension, or None to skip
-    (non-slide file, e.g. a stray .txt). Same allowlist the filesystem and
-    S3-prefix branches both use — keeps the two paths classifying identically
-    (cover.jpg included in both, matching the original iterdir loop which
-    never special-cased it)."""
+    (non-slide file, e.g. a stray .txt or .DS_Store). Same allowlist the
+    filesystem and S3-prefix branches both use — keeps the two paths
+    classifying identically."""
     suffix = suffix.lower()
     if suffix in (".jpg", ".jpeg", ".png", ".webp"):
         return "image", f"image/{suffix.lstrip('.')}"
     if suffix in (".mp4", ".mov", ".webm"):
         return "video", f"video/{suffix.lstrip('.')}"
     return None
+
+
+def _is_cover_name(name: str) -> bool:
+    """True for the album's thumbnail, which is NOT one of its slides.
+
+    Only the flat layout needs this: the downloader drops ``cover.jpg`` /
+    ``dynamic_cover.jpg`` next to the slides themselves, so enumerating that
+    directory picks the cover up as slide 1 and shifts every real slide by
+    one. (The ``slides/`` layout puts the cover outside the subdirectory,
+    which is why that shape never showed the symptom.)"""
+    return Path(name).stem.lower() in ("cover", "dynamic_cover")
+
+
+def _album_slide_names(keys: list[str], prefix: str) -> list[str]:
+    """Slide basenames for an object-store album, mirroring the fs branch.
+
+    ``list_prefix`` returns EVERY key under the album prefix — the cover and
+    the background audio included, and (for the ``slides/`` layout) two
+    directory levels mixed together. So this applies the same precedence
+    ``list_slides``' filesystem branch gets from ``Path.iterdir``: the
+    ``slides/`` subdirectory when it holds anything, otherwise the prefix
+    root, never both. Without that split a migrated album served
+    ``cover.jpg`` as its first slide.
+    """
+    sub = f"{prefix}slides/"
+    names = [k[len(sub) :] for k in keys if k.startswith(sub)]
+    if not names:
+        names = [k[len(prefix) :] for k in keys if k.startswith(prefix)]
+    # One level only: a nested key ("slides/a/b.jpg") is not addressable by
+    # the {filename} route, so listing it would produce a dead URL.
+    return [n for n in names if n and "/" not in n and not _is_cover_name(n)]
 
 
 async def _resolve_audio_source(media: dict, base_path: str) -> Optional[str]:
@@ -150,11 +180,12 @@ async def list_slides(media_id: str, auth: AuthDep):
         loc = await _resolve_album_location(media_id)
         if loc:
             from app.services.library.media_storage import ObjectStore
+            from app.services.media.slide_paths import album_key_prefix
 
-            keys = await ObjectStore(loc.bucket).list_prefix(loc.key)
+            prefix = album_key_prefix(loc.key or "")
+            keys = await ObjectStore(loc.bucket).list_prefix(prefix)
             slides = []
-            for key in sorted(keys):
-                name = key.rsplit("/", 1)[-1]
+            for name in sorted(_album_slide_names(keys, prefix)):
                 kind = _slide_kind(Path(name).suffix)
                 if not kind:
                     continue
@@ -226,6 +257,7 @@ async def serve_slide_file(
         InvalidSlideName,
         SlideNotFound,
         resolve_slide_file,
+        resolve_slide_source,
         validate_slide_name,
     )
 
@@ -246,11 +278,21 @@ async def serve_slide_file(
             from app.services.library.media_serving import serve_stored_file
 
             mime = _mt.guess_type(filename)[0] or "application/octet-stream"
-            # loc.key 是前缀形态(以 / 结尾),直接拼 filename;重建成
-            # sb://bucket/key 值交给 serve_stored_file —— 它内部会用
-            # resolve_media_source 重新解析,所以必须是完整 sb:// 字符串,
-            # 不能只传裸 key(会被误判成文件系统相对路径)。
-            sb_path = f"sb://{loc.bucket}/{loc.key}{filename}"
+            # 两种布局都得试(slides/{name} 与 {name}),所以走
+            # resolve_slide_source 而不是自己拼 f"{loc.key}{filename}" ——
+            # 后者对 slides/ 布局的图集少了一段路径,除恰好在前缀根上的封面
+            # 之外全 404。返回的是完整 sb:// 字符串:serve_stored_file 内部
+            # 用 resolve_media_source 重新解析,裸 key 会被误判成文件系统
+            # 相对路径。
+            try:
+                sb_path = await resolve_slide_source(
+                    f"sb://{loc.bucket}/{loc.key}", filename
+                )
+            except InvalidSlideName:
+                raise HTTPException(status_code=400, detail="Invalid filename")
+            except SlideNotFound:
+                raise HTTPException(status_code=404, detail="Slide file not found")
+
             return await serve_stored_file(
                 sb_path, mime=mime, request=request, disposition="inline"
             )

@@ -310,7 +310,7 @@ async def generate_slide_prompt(
         InvalidSlideName,
         SlideNotFound,
         is_image_slide,
-        resolve_slide_file,
+        resolve_slide_source,
     )
 
     resource = await ResourcesRepository().get_resource_by_id(resource_id)
@@ -342,9 +342,12 @@ async def generate_slide_prompt(
         raise HTTPException(status_code=404, detail="Album files not found")
 
     # Resolve up front so a bad slide name fails as a 4xx here rather than
-    # as a failed Task Center row minutes later.
+    # as a failed Task Center row minutes later. resolve_slide_source (not
+    # resolve_slide_file) because a migrated album's download_path is an
+    # sb:// prefix with nothing left on disk — stat'ing it would 404 every
+    # slide of every album the storage migration has touched.
     try:
-        resolve_slide_file(download_path, slide_name)
+        await resolve_slide_source(download_path, slide_name)
     except InvalidSlideName:
         raise HTTPException(status_code=400, detail="Invalid slide name")
     except SlideNotFound:

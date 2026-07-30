@@ -34,12 +34,18 @@ records an ``error_catalog`` code into ``metadata.error_code``.
 
 from __future__ import annotations
 
+from contextlib import AsyncExitStack
+from pathlib import Path
 from typing import Any
 
 from dbos import DBOS
 from loguru import logger
 
 from app.db.scope import Scope, request_scope
+
+# Module-level like caption_asset's own import of materialize — the two
+# workflows share the adapter, so they should also share how they reach it.
+from app.services.library.media_storage import materialize, resolve_media_source
 from app.workflows.caption_asset import call_caption, resolve_caption_provider
 
 
@@ -59,7 +65,7 @@ async def caption_slide_workflow(
     from app.repositories.resources_repository import ResourcesRepository
     from app.services.ai.error_catalog import record_ai_error_code
     from app.services.infra.unified_task_manager import get_task_manager
-    from app.services.media.slide_paths import resolve_slide_file
+    from app.services.media.slide_paths import resolve_slide_source
     from app.workflows._failure_handler import record_workflow_failure
 
     manager = get_task_manager()
@@ -82,7 +88,7 @@ async def caption_slide_workflow(
             # Re-resolves (and re-guards) rather than trusting a path passed
             # through the workflow input: DBOS freezes inputs, so a stale
             # absolute path from an earlier deploy would outlive the file.
-            slide_path = resolve_slide_file(download_path, slide_name)
+            slide_source = await resolve_slide_source(download_path, slide_name)
 
             await manager.update_progress(wf_id, 10, subtitle="Resolving provider")
             cfg = await resolve_caption_provider(user_id)
@@ -90,15 +96,30 @@ async def caption_slide_workflow(
             await manager.update_progress(
                 wf_id, 30, subtitle=f"Analyzing {slide_name}..."
             )
-            result = await call_caption(
-                abs_path=str(slide_path),
-                user_id=user_id,
-                resource_id=str(resource_id),
-                provider_key=cfg["provider_key"],
-                provider_config=cfg["provider_config"],
-                agent_slug=cfg.get("agent_slug") or "caption",
-                wf_id=wf_id,
-            )
+            # A migrated album's slide is an sb:// object; the vision call
+            # takes a real path, so stream it to a temp file first (same
+            # adapter caption_asset uses). Still on the filesystem →
+            # resolve_slide_source already returned an absolute path, and
+            # materialize() must NOT be used on it: it re-joins against
+            # settings.DOWNLOAD_PATH, which can differ from the base
+            # resolve_slide_file resolved under (frontend_config.yml
+            # override / the /app/downloads writability fallback).
+            async with AsyncExitStack() as stack:
+                if resolve_media_source(slide_source).is_object_store:
+                    slide_path = await stack.enter_async_context(
+                        materialize(slide_source)
+                    )
+                else:
+                    slide_path = Path(slide_source)
+                result = await call_caption(
+                    abs_path=str(slide_path),
+                    user_id=user_id,
+                    resource_id=str(resource_id),
+                    provider_key=cfg["provider_key"],
+                    provider_config=cfg["provider_config"],
+                    agent_slug=cfg.get("agent_slug") or "caption",
+                    wf_id=wf_id,
+                )
 
             await manager.update_progress(wf_id, 70, subtitle="Parsing result")
             entry: dict[str, str] = {}
