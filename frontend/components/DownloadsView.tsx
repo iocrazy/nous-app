@@ -962,21 +962,21 @@ export const DownloadsView: React.FC = () => {
             <div className="hidden md:flex items-center">
               <button
                 onClick={() => setLibraryViewMode('list')}
-                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'list' ? 'bg-ink-800/60 text-ink-200' : 'text-ink-500 hover:text-ink-300'}`}
+                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'list' ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'text-ink-500 hover:text-ink-300'}`}
                 title="List View"
               >
                 <LayoutList size={14} />
               </button>
               <button
                 onClick={() => setLibraryViewMode('grid')}
-                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'grid' ? 'bg-ink-800/60 text-ink-200' : 'text-ink-500 hover:text-ink-300'}`}
+                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'grid' ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'text-ink-500 hover:text-ink-300'}`}
                 title="Grid View"
               >
                 <LayoutGrid size={14} />
               </button>
               <button
                 onClick={() => setLibraryViewMode('feed')}
-                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'feed' ? 'bg-ink-800/60 text-ink-200' : 'text-ink-500 hover:text-ink-300'}`}
+                className={`p-1.5 rounded-lg transition-colors ${libraryViewMode === 'feed' ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'text-ink-500 hover:text-ink-300'}`}
                 title="Feed View"
               >
                 <Smartphone size={14} />

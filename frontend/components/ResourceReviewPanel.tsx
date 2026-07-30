@@ -381,7 +381,7 @@ export const ResourceReviewPanel: React.FC<ResourceReviewPanelProps> = ({
             onClick={() => setFilterStatus(f)}
             className={`px-2 py-0.5 text-[10px] font-medium rounded transition-colors ${
               filterStatus === f
-                ? 'bg-ink-700 text-ink-200'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                 : 'text-ink-500 hover:text-ink-300'
             }`}
           >
