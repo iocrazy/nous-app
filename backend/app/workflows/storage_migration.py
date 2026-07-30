@@ -946,6 +946,185 @@ async def _migrate_pm_assets_row(
     return "migrated"
 
 
+# ── web_resource_files: resources.file_path with no resource_versions row ──
+#
+# ``downloads`` (above) selects via ``resource_versions JOIN resources`` —
+# that JOIN is exactly why it misses 202 web resources (mostly qishui audio)
+# whose ``resources.file_path`` is set but which never got a
+# ``resource_versions`` row at all (legacy download pipeline wrote straight
+# to the resource, no version history). This module picks those up with a
+# plain SELECT off ``resources`` alone — no JOIN, no fan-out (unlike
+# ``pm_assets``, there's exactly one column/one migration unit per row here).
+#
+# Same content-addressed ``store_local_file`` write path as ``pm_assets`` —
+# not the fixed-prefix ``derived`` style, since a web resource has no natural
+# "kind" segment to key by. Already-``sb://`` rows are excluded by the SQL
+# filter itself (idempotent — this can't double-run against ``downloads`` or
+# a prior pass of itself), and ``_migrate_web_resource_files_row`` keeps the
+# same defensive ``resolve_media_source`` check as every other module's own
+# migrate function in case of a stale replay.
+#
+# Bypasses the generic ``_migrate_row``/``extract()``/``update_row()`` path
+# (same reason as ``derived``/``pm_assets``: this module's own function owns
+# the whole 4-step ordering directly) — but unlike those two, rows still come
+# from a plain SQL SELECT (``select_sql``, no ``list_rows``), since there's
+# no fan-out or filesystem walk here to justify one.
+#
+# ONLY ``resources.file_path`` is written here. ``parsed_media.download_path``
+# (also set on qishui rows) is intentionally NOT touched — that column is
+# refreshed by a post-migration SQL pass, not by this module (see task brief:
+# keeping the two write paths separate avoids this module needing to resolve
+# resources → parsed_media on top of everything else it already does).
+
+_WEB_RESOURCE_FILES_SELECT_SQL = """
+    SELECT
+        r.id AS resource_id,
+        r.file_path,
+        ri.scope_id
+    FROM resources r
+    LEFT JOIN LATERAL (
+        SELECT scope_id FROM resource_items
+        WHERE resource_id = r.id ORDER BY id LIMIT 1
+    ) ri ON true
+    WHERE r.source_type = 'web'
+      AND r.file_path IS NOT NULL
+      AND r.file_path NOT LIKE 'sb://%'
+      AND r.is_trashed IS NOT TRUE
+      AND (CAST(:scope_id AS bigint) IS NULL OR ri.scope_id = :scope_id)
+    ORDER BY r.id
+    LIMIT :limit
+"""
+
+
+def _web_resource_files_extract(row: dict) -> RowExtract:
+    # Never actually called — web_resource_files bypasses the generic
+    # single-object/album/hls dispatch entirely (see
+    # storage_migration_workflow's module-name branch), same as derived/
+    # pm_assets. Raises loudly if some future refactor accidentally routes it
+    # through _migrate_row anyway.
+    raise RuntimeError(
+        "web_resource_files module rows are handled by "
+        "_migrate_web_resource_files_row directly, not the generic "
+        "extract()/_migrate_row path"
+    )
+
+
+async def _web_resource_files_update_row(
+    row: dict, file_path: str, sha256: Optional[str]
+) -> None:
+    # Same as _web_resource_files_extract — unused, present only to satisfy
+    # ModuleConfig's required field shape.
+    raise RuntimeError(
+        "web_resource_files module rows are handled by "
+        "_migrate_web_resource_files_row directly, not the generic "
+        "update_row() path"
+    )
+
+
+_WEB_RESOURCE_FILES_UPDATE_SQL = """
+    UPDATE resources
+    SET file_path = :fp,
+        file_hash = COALESCE(:sha, file_hash)
+    WHERE id = :rid
+"""
+
+
+async def _migrate_web_resource_files_row(
+    row: dict, *, dry_run: bool, delete_source: bool
+) -> str:
+    """Migrate ONE orphan web resource (no resource_versions row) via
+    content-addressed ``store_local_file`` — a single object write, dedup-
+    safe by construction (same content + scope + extension always resolves
+    to the same key).
+
+    Same 4-step safety ordering as every other module (verify before any DB
+    mutation; dry_run stops there; delete only after the DB update below has
+    committed). Missing-file is checked BEFORE the orphan-scope check (a row
+    that is both missing AND scope-less reports "missing" — matches the task
+    brief's ordering, cheapest/most-fundamental check first).
+    """
+    resource_id = row["resource_id"]
+    rel_path = row["file_path"]
+    scope_id = row.get("scope_id")
+
+    # Defensive idempotent-replay guard, same as pm_assets/derived: rows fed
+    # in here should already be filtered to non-sb by the SELECT above, but a
+    # stale replay of an already-migrated row must degrade to "skipped", not
+    # try to treat an sb:// value as a filesystem path.
+    loc = media_storage.resolve_media_source(rel_path)
+    if loc.is_object_store:
+        return "skipped"
+
+    # Containment guard — same rationale as every other module: rel_path is
+    # legacy DB data, never trust it to stay under DOWNLOAD_PATH without
+    # checking (a poisoned value with ".." segments must not resolve outside
+    # DOWNLOAD_PATH before this row gets stat'd, PUT and possibly unlink'd).
+    base = os.path.realpath(settings.DOWNLOAD_PATH)
+    real = os.path.realpath(os.path.join(base, loc.rel_path or rel_path))
+    if not (real == base or real.startswith(base + os.sep)):
+        raise RuntimeError(
+            f"web_resource_files file_path escapes DOWNLOAD_PATH: {rel_path!r}"
+        )
+    local = Path(real)
+    if not local.is_file():
+        return "missing"
+
+    if scope_id is None:
+        # Orphan resource — no resource_items scope — cannot content-address
+        # without a scope. Skip (not raise): one orphan must not fail the
+        # whole batch.
+        logger.warning(
+            f"[storage-migration] web_resource_files resource_id={resource_id} "
+            "has no resolvable scope (orphan resource) — skip"
+        )
+        return "skipped_no_scope"
+
+    mime = mimetypes.guess_type(local.name)[0] or "application/octet-stream"
+    local_size = local.stat().st_size
+    store = media_storage.library_store()
+    stored = await media_storage.store_local_file(
+        scope_id=int(scope_id),
+        source_path=str(local),
+        mime=mime,
+        filename=local.name,
+        store=store,
+    )
+
+    if not stored.file_path.startswith("sb://"):
+        raise RuntimeError(
+            f"web_resource_files store_local_file returned a non-sb:// path: "
+            f"resource_id={resource_id} got={stored.file_path!r}"
+        )
+
+    # Verify BEFORE touching the DB — same ordering guarantee as every other
+    # module. Re-resolve the key via resolve_media_source (not a hardcoded
+    # "sb://library/" strip) so this keeps working regardless of bucket name.
+    stored_loc = media_storage.resolve_media_source(stored.file_path)
+    remote_size = await store.get_size(stored_loc.key)
+    if remote_size != local_size:
+        raise RuntimeError(
+            f"web_resource_files size mismatch after store_local_file: "
+            f"resource_id={resource_id} remote={remote_size} local={local_size}"
+        )
+
+    if dry_run:
+        return "dry_run_ok"
+
+    # ONLY resources.file_path — parsed_media.download_path is refreshed by a
+    # post-migration SQL pass, not here (see module comment above).
+    await db_engine.execute(
+        _WEB_RESOURCE_FILES_UPDATE_SQL,
+        {"fp": stored.file_path, "sha": stored.sha256, "rid": int(resource_id)},
+    )
+
+    if delete_source:
+        # Single-file unlink, NEVER rmtree — the resource's directory may
+        # hold sibling files.
+        local.unlink(missing_ok=True)
+
+    return "migrated"
+
+
 # storyboard: SKIPPED — see module docstring above. Do not add an entry.
 
 _MODULES: dict[str, ModuleConfig] = {
@@ -992,6 +1171,12 @@ _MODULES: dict[str, ModuleConfig] = {
         extract=_pm_assets_extract,
         update_row=_pm_assets_update_row,
         list_rows=_list_pm_assets_rows,
+    ),
+    "web_resource_files": ModuleConfig(
+        name="web_resource_files",
+        select_sql=_WEB_RESOURCE_FILES_SELECT_SQL,
+        extract=_web_resource_files_extract,
+        update_row=_web_resource_files_update_row,
     ),
 }
 
@@ -1293,6 +1478,10 @@ async def storage_migration_workflow(
                 )
             elif module == "pm_assets":
                 outcome = await _migrate_pm_assets_row(
+                    row, dry_run=dry_run, delete_source=delete_source
+                )
+            elif module == "web_resource_files":
+                outcome = await _migrate_web_resource_files_row(
                     row, dry_run=dry_run, delete_source=delete_source
                 )
             else:
