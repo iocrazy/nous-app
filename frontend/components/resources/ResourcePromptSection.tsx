@@ -32,6 +32,7 @@
  *     `editorScopeKey` re-binds its editors on every slide change.
  */
 import { useCallback, useEffect, useState } from 'react';
+import { Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabaseClient';
 import {
@@ -277,6 +278,32 @@ export function ResourcePromptSection({
         : slideName}
     </span>
   ) : undefined;
+
+  // Gallery in resource mode (list sidebars): its resource-level gen_prompt*
+  // columns are invisible on the detail page (which is slide-mode only), so an
+  // editable empty block here is a trap — anything typed in gets saved to
+  // fields "inside" never shows, and lights the card's has_prompt badge with
+  // content the user can't find (real incident: a stray test string). Offer
+  // the editor only when legacy data already exists (viewable / clearable);
+  // otherwise show just the pointer to where prompts actually live.
+  const galleryResourceMode = !slideMode && !canGenerate && Boolean(resource.media_id);
+  const hasResourceLevelData = [
+    resource.gen_prompt,
+    resource.gen_prompt_zh,
+    resource.gen_prompt_negative,
+    resource.gen_prompt_negative_zh,
+  ].some((v) => (v ?? '').trim() !== '');
+  if (galleryResourceMode && !hasResourceLevelData) {
+    return (
+      <div className={sectionClassName ?? 'px-4 mt-3'} data-testid="gallery-prompt-hint-only">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-content-3 uppercase tracking-widest">
+          <Sparkles size={11} />
+          {t('resources.infoPanel.promptSection', 'Prompt')}
+        </div>
+        <p className="mt-1.5 text-xs text-content-4">{effectiveGalleryHint}</p>
+      </div>
+    );
+  }
 
   return (
     <PromptSection
