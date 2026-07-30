@@ -4,7 +4,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getHotspots } from './topicService';
+import { getHotspots, getHotspotDates, getSourceHealth } from './topicService';
 
 vi.mock('./parserService', () => ({
   getAuthHeaders: vi.fn().mockResolvedValue({ 'Content-Type': 'application/json' }),
@@ -49,5 +49,54 @@ describe('getHotspots tag filter', () => {
     const spy = stubFetch();
     await getHotspots(undefined, undefined, undefined, 'all', undefined);
     expect(lastUrl(spy)).not.toContain('tag_id');
+  });
+});
+
+// Regression coverage for the pre-existing "TypeError: u is not iterable"
+// crash (K1/K2 warm-paper-palette reports; module-accent-probe excluded 4
+// inspiration probes because of it). Root cause: these getters blindly cast
+// `response.<key>` to an array with `as T[]` — a response missing that key
+// (stub shape mismatch, or any future API contract drift) produced
+// `undefined`, which flowed straight into React state and then crashed
+// inside consumers that iterate it unconditionally (`hotspotRanking.ts`'s
+// `partitionBySignal` via `for...of`, `TopicFilterBar.tsx`'s
+// `dates.slice(...)`). Fixed by routing every list-shaped response through
+// the `toArray` helper so a malformed payload degrades to `[]` instead of
+// `undefined`. See `pages/TopicInspirationPage.test.tsx` for the page-level
+// regression proving the crash itself no longer reproduces.
+function respondWith(body: unknown) {
+  return vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+    ok: true,
+    status: 200,
+    headers: new Headers(),
+    text: async () => JSON.stringify(body),
+    json: async () => body,
+  } as unknown as Response);
+}
+
+describe('list-shaped getters degrade to [] on malformed responses', () => {
+  it('getHotspots returns [] when the response omits `hotspots`', async () => {
+    respondWith({});
+    await expect(getHotspots()).resolves.toEqual([]);
+  });
+
+  it('getHotspots returns [] when `hotspots` is null', async () => {
+    respondWith({ hotspots: null });
+    await expect(getHotspots()).resolves.toEqual([]);
+  });
+
+  it('getHotspots still returns the real list on a well-formed response', async () => {
+    respondWith({ hotspots: [{ id: '1' }] });
+    await expect(getHotspots()).resolves.toEqual([{ id: '1' }]);
+  });
+
+  it('getHotspotDates returns [] when the response omits `dates`', async () => {
+    respondWith({});
+    await expect(getHotspotDates()).resolves.toEqual([]);
+  });
+
+  it('getSourceHealth returns [] when the response omits `sources`', async () => {
+    respondWith({});
+    await expect(getSourceHealth()).resolves.toEqual([]);
   });
 });

@@ -61,6 +61,26 @@ async function jsonOrThrow(resp: Response) {
   return resp.json();
 }
 
+// Defensive unwrap for the array-shaped endpoints below (`listNotes`,
+// `getActivity`, `getTagCounts`). The real backend returns a bare JSON array
+// for each of these, but the declared `Promise<T[]>` return type is only a
+// compile-time promise — nothing here validated it at runtime, so a response
+// shaped differently (this is exactly what the e2e stub harness's generic
+// `**/api/v1/**` catch-all returns: `{ success: true, data: [] }`, not an
+// array) flowed straight through as an *object* wearing an array's type.
+// `setNotes(rows)` in `InspirationPage` then put that object into state, and
+// every consumer that unconditionally calls `.filter`/`.map` on `notes` (e.g.
+// `NoteTimeline.tsx`) threw `TypeError: <obj>.filter is not a function` out
+// of render — this was the actual mechanism behind the pre-existing "u is
+// not iterable" crash the K1/K2 module-accent-probe reports flagged (that
+// generic message is what the same class of bug produces when the caller
+// iterates with `for...of` instead of `.filter`). Fixed by validating the
+// shape here so a malformed payload degrades to `[]` instead of leaking a
+// non-array value into React state.
+function toArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
 export async function listNotes(
   filters: NoteFilters,
   limit = 50,
@@ -75,7 +95,7 @@ export async function listNotes(
   const resp = await fetch(`${base()}/notes?${params.toString()}`, {
     headers: await getAuthHeaders(),
   });
-  return jsonOrThrow(resp);
+  return toArray<InspirationNote>(await jsonOrThrow(resp));
 }
 
 export async function createNote(
@@ -126,14 +146,14 @@ export async function getActivity(
     `${base()}/notes/activity?date_from=${dateFrom}&date_to=${dateTo}`,
     { headers: await getAuthHeaders() },
   );
-  return jsonOrThrow(resp);
+  return toArray<{ day: string; cnt: number }>(await jsonOrThrow(resp));
 }
 
 export async function getTagCounts(): Promise<{ tag: string; cnt: number }[]> {
   const resp = await fetch(`${base()}/notes/tags`, {
     headers: await getAuthHeaders(),
   });
-  return jsonOrThrow(resp);
+  return toArray<{ tag: string; cnt: number }>(await jsonOrThrow(resp));
 }
 
 export async function uploadAttachment(

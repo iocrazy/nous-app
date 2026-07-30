@@ -10,6 +10,7 @@ import {
   createNote,
   deleteNote,
   getActivity,
+  getTagCounts,
   listNotes,
   updateNote,
   uploadAttachment,
@@ -98,5 +99,39 @@ describe('inspirationService', () => {
     expect(attachmentUrlWithToken('a1')).toBe(
       'http://api.test/api/v1/inspiration/attachments/a1',
     );
+  });
+
+  // Regression coverage for the pre-existing "TypeError: u is not iterable"
+  // crash (K1/K2 warm-paper-palette reports; module-accent-probe excluded 4
+  // inspiration probes because of it). Root cause: `listNotes`/`getActivity`/
+  // `getTagCounts` returned the raw parsed JSON body with no runtime shape
+  // check — the `Promise<T[]>` return type is a compile-time-only promise.
+  // The e2e stub harness's generic `**/api/v1/**` catch-all responds with
+  // `{ success: true, data: [] }` (not a bare array) for any unmatched route,
+  // including the notes/activity/tags endpoints — that object then flowed
+  // straight into `setNotes(rows)` in `InspirationPage`, and any consumer
+  // that unconditionally `.filter`/`.map`s `notes` (e.g. `NoteTimeline.tsx`)
+  // threw `TypeError: <obj>.filter is not a function` out of render, which
+  // React Router's default ErrorBoundary then swapped the whole page for.
+  describe('array-shaped endpoints degrade to [] on malformed responses', () => {
+    it('listNotes returns [] when the response is a non-array object (e.g. {success,data})', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson({ success: true, data: [] })));
+      await expect(listNotes({}, 50)).resolves.toEqual([]);
+    });
+
+    it('listNotes still returns the real list on a well-formed array response', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson([{ id: '1' }])));
+      await expect(listNotes({}, 50)).resolves.toEqual([{ id: '1' }]);
+    });
+
+    it('getActivity returns [] when the response is a non-array object', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson({ success: true, data: [] })));
+      await expect(getActivity('2026-01-01', '2026-01-31')).resolves.toEqual([]);
+    });
+
+    it('getTagCounts returns [] when the response is a non-array object', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okJson({ success: true, data: [] })));
+      await expect(getTagCounts()).resolves.toEqual([]);
+    });
   });
 });

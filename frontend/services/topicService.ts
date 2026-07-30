@@ -56,6 +56,20 @@ async function jsonOrThrow(resp: Response) {
   return resp.json();
 }
 
+// Defensive unwrap for the list-shaped endpoints below (`hotspots`/`dates`/
+// `sources`). The real backend always returns the expected array, but a
+// missing/malformed key here (a stubbed response in tests, a future API
+// change, a transient bad payload) must degrade to "empty list", not hand an
+// `undefined`/non-array value to callers. `TopicInspirationPage` feeds the
+// `hotspots` array straight into `useMemo`s that iterate it (`hotspotRanking
+// .ts`'s `partitionBySignal`/`topHotspots`) — an `undefined` there throws
+// `TypeError: undefined is not iterable` out of the render, which React
+// Router's error boundary then swaps the whole page for (this was the
+// pre-existing "u is not iterable" crash flagged in K1/K2 e2e runs).
+function toArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
 export async function getHotspots(
   day?: string,
   category?: string,
@@ -80,7 +94,7 @@ export async function getHotspots(
   // undefined = no tag narrowing.
   if (tagIds && tagIds.length > 0) params.set('tag_id', tagIds.join(','));
   const resp = await fetch(`${base()}?${params.toString()}`, { headers: await getAuthHeaders() });
-  return (await jsonOrThrow(resp)).hotspots as Hotspot[];
+  return toArray<Hotspot>((await jsonOrThrow(resp)).hotspots);
 }
 
 // Full hotspot incl. original/translated body for the detail panel.
@@ -139,7 +153,7 @@ export async function setInterest(interest_text: string): Promise<TopicInterest>
 
 export async function getHotspotDates(): Promise<string[]> {
   const resp = await fetch(`${base()}/dates`, { headers: await getAuthHeaders() });
-  return (await jsonOrThrow(resp)).dates as string[];
+  return toArray<string>((await jsonOrThrow(resp)).dates);
 }
 
 export type SourceHealthStatus = 'ok' | 'degraded' | 'dead';
@@ -172,7 +186,7 @@ export interface NewSourcePayload {
 
 export async function getSourceHealth(): Promise<SourceHealth[]> {
   const resp = await fetch(`${base()}/sources/health`, { headers: await getAuthHeaders() });
-  return (await jsonOrThrow(resp)).sources as SourceHealth[];
+  return toArray<SourceHealth>((await jsonOrThrow(resp)).sources);
 }
 
 // Add a user-owned source. Its hotspots are private to the caller.

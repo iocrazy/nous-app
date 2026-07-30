@@ -121,19 +121,19 @@ for (const theme of ['dark', 'light'] as const) {
 // inspiration (the "Parser" tab IS Topic Inspiration) and resources.
 // ai-library is intentionally absent, not a bug to force a probe against.
 //
-// inspiration is ALSO excluded here, but for a different reason — reported,
-// not forced, per review instructions. At a mobile (390px) viewport,
-// navigating to /parser reliably (100% reproduced) crashes into React
-// Router's default ErrorBoundary: `TypeError: u is not iterable` inside
-// TopicInspirationPage, under this e2e stub harness. The SAME route at a
-// desktop viewport does not crash (18/18 stable across the render-only
-// probes above) — this looks like a viewport-gated code path in
-// TopicInspirationPage hitting a stub-shape mismatch (some mobile-only
-// data fetch assumes an array, gets the generic `{success:true,data:[]}`
-// catch-all or similar and iterates something undefined instead). Pre-
-// existing, unrelated to color/module scoping, out of scope for this task —
-// see task-K1-report.md K1.5 fix section for the full writeup.
-const MOBILE_TAB_ROUTES = ROUTES.filter((r) => r.module === 'resources');
+// inspiration used to be excluded here too: at a mobile (390px) viewport,
+// navigating to /parser reliably crashed into React Router's default
+// ErrorBoundary (`TypeError: u is not iterable` inside TopicInspirationPage).
+// Root-caused and fixed in task-M1 — `services/topicService.ts`'s
+// `getHotspots`/`getHotspotDates`/`getSourceHealth` blindly cast a response
+// field to an array (`as Hotspot[]`); a response missing that key (this e2e
+// stub harness's catch-all shape, or any future API drift) produced
+// `undefined`, which crashed the `useMemo`s in TopicInspirationPage that
+// iterate `hotspots` unconditionally. Now routed through a `toArray` helper
+// that degrades to `[]` instead — see task-M1-report.md and
+// services/topicService.test.ts / pages/TopicInspirationPage.test.tsx for the
+// regression coverage. Re-included now that the crash no longer reproduces.
+const MOBILE_TAB_ROUTES = ROUTES.filter((r) => r.module === 'resources' || r.module === 'inspiration');
 
 for (const theme of ['dark', 'light'] as const) {
   for (const route of MOBILE_TAB_ROUTES) {
@@ -219,19 +219,14 @@ async function stubOneCompletedTask(page: Page): Promise<void> {
   );
 }
 
-// inspiration (/parser) excluded here — reported, not forced (review
-// instructions). Directly reproduced (screenshot in task-K1-report.md K1.5
-// fix section) the SAME pre-existing `TypeError: u is not iterable` crash
-// in TopicInspirationPage (React Router's default ErrorBoundary replaces the
-// page) while running this exact probe, on a DEFAULT (desktop) viewport this
-// time — so it isn't only the mobile-viewport-gated case the MobileTabBar
-// probe above hit; it's a genuinely intermittent race in TopicInspiration-
-// Page's data fetch, unrelated to color/module scoping. The couple of runs
-// that didn't crash outright instead read a fluctuating, non-matching color
-// off the hover-action icon — consistent with a stale/detached DOM node
-// (the error boundary having already swapped the tree under a locator that
-// resolved moments earlier), not a real accent-scoping defect.
-const TASK_CENTER_ROUTES = ROUTES.filter((r) => r.module !== 'inspiration');
+// inspiration (/parser) used to be excluded here too — the SAME
+// pre-existing `TypeError: u is not iterable` TopicInspirationPage crash
+// (React Router's default ErrorBoundary replacing the page), reproduced on a
+// DEFAULT (desktop) viewport under this exact probe, i.e. not only the
+// mobile-viewport-gated case the MobileTabBar probe above hit. Root-caused
+// and fixed in task-M1 (see the MOBILE_TAB_ROUTES comment above for the
+// mechanism) — re-included now that the crash no longer reproduces.
+const TASK_CENTER_ROUTES = ROUTES;
 
 for (const theme of ['dark', 'light'] as const) {
   for (const route of TASK_CENTER_ROUTES) {
