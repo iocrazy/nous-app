@@ -688,6 +688,264 @@ async def _migrate_derived_row(row: dict, *, dry_run: bool, delete_source: bool)
     return "migrated"
 
 
+# ── pm_assets: parsed_media cover/audio columns (DB-column-driven) ─────
+#
+# Three columns on ``parsed_media`` still hold legacy filesystem paths:
+# ``cover_download_path`` (cover.jpg), ``music_download_path`` (BGM
+# audio.m4a), ``extract_audio_path`` (extracted audio.m4a). Read-side
+# object-store awareness already landed (cover: fix commit 8d28158 in this
+# same branch; music/extract: C4/C6/C7), so it's safe to migrate the write
+# side now.
+#
+# Same house style as ``derived``: DB-column-driven, one row per
+# ``parsed_media.id`` that fans out to up to 3 migration UNITS (one per
+# non-sb column present on that row) via ``_list_pm_assets_rows``, each unit
+# migrated independently by ``_migrate_pm_assets_row`` — NOT routed through
+# the generic ``_migrate_row``/``extract()``/``update_row()`` path (same
+# reason as derived: this module's "rows" don't map 1:1 to what that path
+# expects).
+#
+# Unlike ``derived`` (fixed ``derived/{rid}/{filename}`` key, no scope
+# concept), this module uses content-addressed ``store_local_file`` — the
+# same content-addressing every other module's single-object path uses.
+# That gets automatic dedup for free: a ``cover_download_path`` value that
+# happens to be byte-identical to something already content-addressed
+# under the same scope_id (e.g. a duplicate of an already-migrated file)
+# hits ``store_local_file``'s internal ``exists()`` check and skips the PUT
+# — no special-cased "is this a refresh or a real migration" branch is
+# needed, content-addressing handles both uniformly.
+#
+# scope_id is resolved the same way ``uploads``/``downloads`` do: via the
+# owning resource's ``resource_items.scope_id`` (LEFT JOIN LATERAL, deterministic
+# pick via ORDER BY id LIMIT 1). A parsed_media row with no resource, or a
+# resource with no resource_items scope, is an ORPHAN — legacy/system-
+# initiated rows that never got a scope. Those can't be content-addressed
+# (scope_id is part of the key), so ``_migrate_pm_assets_row`` skips them
+# (``skipped_no_scope``) rather than raising — one orphan must not fail the
+# whole batch.
+#
+# Column name only ever comes from the fixed ``_PM_ASSETS_COLUMN_UPDATE_SQL``
+# dict below (never string-interpolated into SQL) — a defense-in-depth
+# whitelist even though the only caller (``_list_pm_assets_rows``) can only
+# ever emit one of the three known keys.
+
+_PM_ASSETS_MIME: dict[str, str] = {
+    "cover_download_path": "image/jpeg",
+    "music_download_path": "audio/mp4",
+    "extract_audio_path": "audio/mp4",
+}
+
+# Whitelist: the ONLY three columns this module is allowed to write, each
+# mapped to its own fixed UPDATE statement. ``_migrate_pm_assets_row`` looks
+# the column up in this dict (raising on a miss) instead of ever building
+# ``f"UPDATE parsed_media SET {column} = ..."`` from row data — row data is
+# untrusted-ish legacy input and must never reach a SQL string directly.
+_PM_ASSETS_COLUMN_UPDATE_SQL: dict[str, str] = {
+    "cover_download_path": (
+        "UPDATE parsed_media SET cover_download_path = :fp WHERE id = :pm_id"
+    ),
+    "music_download_path": (
+        "UPDATE parsed_media SET music_download_path = :fp WHERE id = :pm_id"
+    ),
+    "extract_audio_path": (
+        "UPDATE parsed_media SET extract_audio_path = :fp WHERE id = :pm_id"
+    ),
+}
+
+# Coarse SQL filter only (row-level resolve_media_source in
+# _migrate_pm_assets_row is still the real authority) — mirrors every other
+# module's SELECT convention. The three ``OR``-ed column checks are grouped
+# in their own parens so the trailing scope_id AND applies to the whole
+# group, not just the last column (operator precedence: AND binds tighter
+# than OR).
+_PM_ASSETS_SELECT_SQL = """
+    SELECT
+        pm.id AS pm_id,
+        pm.cover_download_path,
+        pm.music_download_path,
+        pm.extract_audio_path,
+        ri.scope_id
+    FROM parsed_media pm
+    LEFT JOIN resources r ON r.media_id = pm.id
+    LEFT JOIN LATERAL (
+        SELECT scope_id FROM resource_items
+        WHERE resource_id = r.id ORDER BY id LIMIT 1
+    ) ri ON true
+    WHERE (
+        (pm.cover_download_path IS NOT NULL AND pm.cover_download_path NOT LIKE 'sb://%')
+        OR (pm.music_download_path IS NOT NULL AND pm.music_download_path NOT LIKE 'sb://%')
+        OR (pm.extract_audio_path IS NOT NULL AND pm.extract_audio_path NOT LIKE 'sb://%')
+    )
+    AND (CAST(:scope_id AS bigint) IS NULL OR ri.scope_id = :scope_id)
+    ORDER BY pm.id
+    LIMIT :limit
+"""
+
+
+async def _list_pm_assets_rows(scope_id: Optional[int], limit: int) -> list[dict]:
+    """DB-column-driven rows for the three parsed_media asset columns.
+
+    Each returned row is ONE migration unit: ``{"pm_id", "column", "rel_path",
+    "scope_id", "mime"}`` — one per non-sb column value on a given
+    ``parsed_media`` row (up to 3 per row: cover/music/extract). ``scope_id``
+    is whatever ``resource_items.scope_id`` resolved to for that row's
+    resource — ``None`` when the parsed_media row is an orphan (no resource,
+    or a resource with no resource_items scope); that's preserved as-is here
+    (not skipped/raised) — the skip decision for a NULL scope belongs to
+    ``_migrate_pm_assets_row``, not this listing function.
+    """
+    db_rows = await db_engine.fetch_all(
+        _PM_ASSETS_SELECT_SQL, {"scope_id": scope_id, "limit": limit}
+    )
+
+    rows: list[dict] = []
+    for db_row in db_rows:
+        pm_id = db_row["pm_id"]
+        row_scope_id = db_row.get("scope_id")
+        for column in _PM_ASSETS_COLUMN_UPDATE_SQL:
+            value = db_row.get(column)
+            if value and not value.startswith("sb://"):
+                rows.append(
+                    {
+                        "pm_id": pm_id,
+                        "column": column,
+                        "rel_path": value,
+                        "scope_id": row_scope_id,
+                        "mime": _PM_ASSETS_MIME[column],
+                    }
+                )
+
+    # Limit enforced AFTER the fan-out, not per-DB-row — the SELECT's own
+    # LIMIT coarsely caps the number of parsed_media rows, but each row can
+    # fan out into up to 3 units, so the combined list can exceed ``limit``
+    # before this final slice (same union-limit convention as
+    # ``_list_derived_rows``).
+    return rows[:limit]
+
+
+def _pm_assets_extract(row: dict) -> RowExtract:
+    # Never actually called — pm_assets bypasses the generic single-object/
+    # album/hls dispatch entirely (see storage_migration_workflow's
+    # module-name branch), same as derived. Raises loudly if some future
+    # refactor accidentally routes it through _migrate_row anyway.
+    raise RuntimeError(
+        "pm_assets module rows are handled by _migrate_pm_assets_row directly, "
+        "not the generic extract()/_migrate_row path"
+    )
+
+
+async def _pm_assets_update_row(
+    row: dict, file_path: str, sha256: Optional[str]
+) -> None:
+    # Same as _pm_assets_extract — unused, present only to satisfy
+    # ModuleConfig's required field shape.
+    raise RuntimeError(
+        "pm_assets module rows are handled by _migrate_pm_assets_row directly, "
+        "not the generic update_row() path"
+    )
+
+
+async def _migrate_pm_assets_row(
+    row: dict, *, dry_run: bool, delete_source: bool
+) -> str:
+    """Migrate ONE parsed_media asset (cover, music, or extracted audio) via
+    content-addressed ``store_local_file`` — a single object write, dedup-
+    safe by construction (same content + scope + extension always resolves
+    to the same key, so a byte-identical file already migrated elsewhere
+    just skips the PUT).
+
+    Same 4-step safety ordering as every other module (verify before any DB
+    mutation; dry_run stops there; delete only after the DB sync below has
+    committed), plus one extra early exit unique to this module: a ``None``
+    scope_id (orphan parsed_media with no resource / no resource_items
+    scope) can't be content-addressed at all, so it's skipped before ever
+    touching the filesystem or store.
+    """
+    pm_id = row["pm_id"]
+    column = row["column"]
+    rel_path = row["rel_path"]
+    scope_id = row.get("scope_id")
+    mime = row["mime"]
+
+    if column not in _PM_ASSETS_COLUMN_UPDATE_SQL:
+        # Defensive — should be unreachable: _list_pm_assets_rows only ever
+        # emits one of the three whitelisted columns. Raise loudly rather
+        # than silently falling through to build a SQL string from an
+        # unexpected column value.
+        raise RuntimeError(
+            f"pm_assets: column {column!r} is not in the update-SQL whitelist "
+            f"({sorted(_PM_ASSETS_COLUMN_UPDATE_SQL)}) — refusing to migrate"
+        )
+
+    if scope_id is None:
+        # Orphan parsed_media — no resource, or a resource with no
+        # resource_items scope — cannot content-address without a scope.
+        # Skip (not raise): one orphan must not fail the whole batch.
+        logger.warning(
+            f"[storage-migration] pm_assets pm_id={pm_id} column={column} has "
+            "no resolvable scope (orphan parsed_media) — skip"
+        )
+        return "skipped_no_scope"
+
+    loc = media_storage.resolve_media_source(rel_path)
+    if loc.is_object_store:
+        return "skipped"  # already migrated — idempotent replay
+
+    # Containment guard — same rationale as every other module: rel_path is
+    # legacy DB data, never trust it to stay under DOWNLOAD_PATH without
+    # checking.
+    base = os.path.realpath(settings.DOWNLOAD_PATH)
+    real = os.path.realpath(os.path.join(base, loc.rel_path or rel_path))
+    if not (real == base or real.startswith(base + os.sep)):
+        raise RuntimeError(f"pm_assets rel_path escapes DOWNLOAD_PATH: {rel_path!r}")
+    local = Path(real)
+    if not local.is_file():
+        return "missing"
+
+    local_size = local.stat().st_size
+    store = media_storage.library_store()
+    stored = await media_storage.store_local_file(
+        scope_id=int(scope_id),
+        source_path=str(local),
+        mime=mime,
+        filename=local.name,
+        store=store,
+    )
+
+    if not stored.file_path.startswith("sb://"):
+        raise RuntimeError(
+            f"pm_assets store_local_file returned a non-sb:// path: "
+            f"pm_id={pm_id} column={column} got={stored.file_path!r}"
+        )
+
+    # Verify BEFORE touching the DB — same ordering guarantee as every other
+    # module. Re-resolve the key via resolve_media_source (not a hardcoded
+    # "sb://library/" strip) so this keeps working regardless of bucket name.
+    stored_loc = media_storage.resolve_media_source(stored.file_path)
+    remote_size = await store.get_size(stored_loc.key)
+    if remote_size != local_size:
+        raise RuntimeError(
+            f"pm_assets size mismatch after store_local_file: pm_id={pm_id} "
+            f"column={column} remote={remote_size} local={local_size}"
+        )
+
+    if dry_run:
+        return "dry_run_ok"
+
+    await db_engine.execute(
+        _PM_ASSETS_COLUMN_UPDATE_SQL[column],
+        {"fp": stored.file_path, "pm_id": int(pm_id)},
+    )
+
+    if delete_source:
+        # Single-file unlink, NEVER rmtree — cover/audio sit NEXT TO the
+        # source video (same directory); removing the directory would take
+        # the video down with it.
+        local.unlink(missing_ok=True)
+
+    return "migrated"
+
+
 # storyboard: SKIPPED — see module docstring above. Do not add an entry.
 
 _MODULES: dict[str, ModuleConfig] = {
@@ -724,6 +982,16 @@ _MODULES: dict[str, ModuleConfig] = {
         extract=_derived_extract,
         update_row=_derived_update_row,
         list_rows=_list_derived_rows,
+    ),
+    "pm_assets": ModuleConfig(
+        name="pm_assets",
+        # Never executed — this module's rows come from _list_pm_assets_rows
+        # (DB-column-driven fan-out over the 3 parsed_media asset columns;
+        # see the module comment above), not this placeholder SQL.
+        select_sql="-- pm_assets module: rows come from _list_pm_assets_rows, not SQL",
+        extract=_pm_assets_extract,
+        update_row=_pm_assets_update_row,
+        list_rows=_list_pm_assets_rows,
     ),
 }
 
@@ -1023,6 +1291,10 @@ async def storage_migration_workflow(
                 outcome = await _migrate_derived_row(
                     row, dry_run=dry_run, delete_source=delete_source
                 )
+            elif module == "pm_assets":
+                outcome = await _migrate_pm_assets_row(
+                    row, dry_run=dry_run, delete_source=delete_source
+                )
             else:
                 outcome = await _migrate_row(
                     row, module_cfg, dry_run=dry_run, delete_source=delete_source
@@ -1030,7 +1302,7 @@ async def storage_migration_workflow(
             counts[outcome] = counts.get(outcome, 0) + 1
         except Exception as e:
             counts["failed"] += 1
-            row_ref = row.get("id", row.get("resource_id"))
+            row_ref = row.get("id", row.get("resource_id", row.get("pm_id")))
             logger.warning(
                 f"[storage-migration] module={module} row={row_ref} "
                 f"failed (batch continues): {e!r}"
