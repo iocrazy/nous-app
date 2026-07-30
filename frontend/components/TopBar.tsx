@@ -95,7 +95,7 @@ const IconButton: React.FC<{
     onClick={onClick}
     className={`relative p-2 rounded-lg transition-colors ${
       active
-        ? 'bg-island-2 text-content'
+        ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
         : 'text-content-2 hover:bg-island-2 hover:text-content-2'
     }`}
   >

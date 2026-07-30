@@ -154,7 +154,7 @@ const RunListCard: React.FC<{
       type="button"
       onClick={onSelect}
       className={`w-full border-b border-ink-800/70 px-3 py-2.5 text-left transition-colors ${
-        selected ? 'bg-ink-800/80' : 'hover:bg-ink-900/70'
+        selected ? 'bg-[var(--accent-soft)]' : 'hover:bg-ink-900/70'
       }`}
     >
       <div className="flex items-center gap-2">

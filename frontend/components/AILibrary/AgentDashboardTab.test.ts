@@ -30,12 +30,14 @@ describe('STATUS_COLORS', () => {
     }
   });
 
-  it('groups in-flight states under indigo and terminal-success under emerald', () => {
-    // Chart legend cohesion — same hue for related states.
-    expect(STATUS_COLORS.in_progress).toBe('#6366f1');
-    expect(STATUS_COLORS.assigned).toMatch(/^#[68]/);
-    expect(STATUS_COLORS.done).toBe('#10b981');
-    expect(STATUS_COLORS.completed).toBe('#10b981');
-    expect(STATUS_COLORS.failed).toBe('#ef4444');
+  it('groups in-flight states under plum (agent hue) and terminal-success under green', () => {
+    // Chart legend cohesion — same hue for related states. Values are the
+    // warm-paper-palette anchors (K1 remap): plum for in-flight/agent-owned,
+    // green for terminal success, brick for failure.
+    expect(STATUS_COLORS.in_progress).toBe('#7A5E8F');
+    expect(STATUS_COLORS.assigned).toMatch(/^#[7A]/i);
+    expect(STATUS_COLORS.done).toBe('#1E7A5B');
+    expect(STATUS_COLORS.completed).toBe('#1E7A5B');
+    expect(STATUS_COLORS.failed).toBe('#AD5147');
   });
 });

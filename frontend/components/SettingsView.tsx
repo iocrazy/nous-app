@@ -357,7 +357,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
                       key={p}
                       onClick={() => setPreference(p)}
                       className={`px-3 py-1 text-xs rounded-md transition-colors ${
-                        preference === p ? 'bg-ink-800 text-ink-100' : 'text-ink-500 hover:text-ink-300'
+                        preference === p ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'text-ink-500 hover:text-ink-300'
                       }`}
                     >
                       {t(`settings.theme.${p}`, p === 'system' ? 'System' : p === 'light' ? 'Light' : 'Dark')}

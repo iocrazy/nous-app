@@ -202,7 +202,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               onClick={() => setActiveTab(item.id)}
               className={`flex-shrink-0 flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors relative ${
                 activeTab === item.id
-                  ? 'text-ink-50'
+                  ? 'text-[var(--accent-text)]'
                   : 'text-ink-500 hover:text-ink-300'
               }`}
             >
@@ -255,7 +255,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       onClick={() => setActiveTab(item.id)}
                       className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer select-none ${
                         activeTab === item.id
-                          ? 'bg-ink-800 text-ink-50'
+                          ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                           : 'text-ink-400 hover:text-ink-50 hover:bg-ink-800/50'
                       }`}
                     >

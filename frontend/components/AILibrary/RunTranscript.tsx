@@ -139,7 +139,7 @@ export const RunTranscript: React.FC<{ runId: string; isRunning: boolean }> = ({
               onClick={() => setMode(m)}
               className={`px-2.5 py-1 text-[10px] font-medium capitalize transition-colors ${
                 mode === m
-                  ? 'bg-ink-700 text-ink-100'
+                  ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                   : 'bg-ink-800/60 text-ink-400 hover:text-ink-200'
               }`}
             >
