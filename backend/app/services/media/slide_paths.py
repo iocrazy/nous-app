@@ -18,8 +18,22 @@ are still in production (measured 2026-07-29: 71 albums on the
 subdirectory shape, 3 flat), so resolution tries the subdirectory first
 and falls back — the same order ``list_slides`` uses to enumerate them.
 
-Pure functions on purpose (``download_path`` comes in as an argument, no
-DB access here) so the traversal cases are testable without a database.
+TWO BACKENDS, SAME PROBE ORDER
+==============================
+Once an album is migrated to the object store its ``download_path`` becomes
+a prefix (``sb://library/t{scope}/album/{rid}/``) and there is nothing on
+disk to stat. Both layouts survived the migration verbatim (the uploader
+mirrors the directory tree), so ``resolve_slide_source`` probes the SAME
+two candidates in the SAME order — ``slides/{name}`` then ``{name}`` — just
+with ``ObjectStore.exists`` instead of ``Path.is_file``. Keeping that in
+this module (rather than letting each caller rebuild a key) is what stops
+the backends from drifting apart: rebuilding ``{prefix}{name}`` inline is
+exactly the bug this replaced, which served ``cover.jpg`` as slide 1 and
+404'd every slide after it.
+
+``resolve_slide_file`` stays pure/sync (no DB, no network) so the traversal
+cases remain testable without either; only the object-store entrypoint is
+async.
 """
 
 from pathlib import Path
@@ -88,5 +102,52 @@ def resolve_slide_file(download_path: str, slide_name: str) -> Path:
             continue
         if resolved.is_file():
             return resolved
+
+    raise SlideNotFound(f"slide {name!r} not found under {download_path!r}")
+
+
+def album_key_prefix(key: str) -> str:
+    """Normalize an album's object key into a ``.../`` prefix.
+
+    Album ``file_path`` values are written prefix-shaped already, but a
+    leading slash or a missing trailing one would silently break the
+    ``key.startswith(prefix)`` arithmetic every caller does, so normalize
+    in one place. Raises ``InvalidSlideName`` on a ``..`` segment: object
+    keys are a flat namespace, but they are interpolated into the
+    storage-api URL path (``ObjectStore._object_target``), where an HTTP
+    client WILL normalize ``..`` and walk out of the bucket.
+    """
+    prefix = (key or "").strip("/")
+    if not prefix:
+        raise InvalidSlideName("album key is empty")
+    if ".." in prefix.split("/"):
+        raise InvalidSlideName(f"album key escapes its prefix: {key!r}")
+    return prefix + "/"
+
+
+async def resolve_slide_source(download_path: str, slide_name: str) -> str:
+    """Locate one slide, whichever backend the album lives on.
+
+    Returns a value the storage helpers understand: an absolute filesystem
+    path for a download_path still on disk, or a full ``sb://bucket/key``
+    string once the album has been migrated (``serve_stored_file`` and
+    ``materialize`` both re-parse it through ``resolve_media_source``, so it
+    must carry the scheme, not just the bare key).
+
+    Raises ``InvalidSlideName`` / ``SlideNotFound`` exactly like
+    ``resolve_slide_file`` — callers keep mapping those to 400 / 404.
+    """
+    from app.services.library.media_storage import ObjectStore, resolve_media_source
+
+    name = validate_slide_name(slide_name)
+    loc = resolve_media_source(download_path)
+    if not loc.is_object_store:
+        return str(resolve_slide_file(download_path, name))
+
+    prefix = album_key_prefix(loc.key or "")
+    store = ObjectStore(loc.bucket)
+    for key in (f"{prefix}slides/{name}", f"{prefix}{name}"):
+        if await store.exists(key):
+            return f"sb://{loc.bucket}/{key}"
 
     raise SlideNotFound(f"slide {name!r} not found under {download_path!r}")

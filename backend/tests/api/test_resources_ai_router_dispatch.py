@@ -76,8 +76,10 @@ def test_slide_endpoint_gates_before_dispatching() -> None:
     source = _source("generate_slide_prompt")
     assert "check_media_access" in source
     # A bad slide name must 4xx at the endpoint, not become a failed Task
-    # Center row minutes later.
-    assert "resolve_slide_file" in source
+    # Center row minutes later. resolve_slide_SOURCE, not resolve_slide_file:
+    # a migrated album has nothing on disk, so the filesystem-only resolver
+    # would 404 every slide of it.
+    assert "resolve_slide_source" in source
     assert "is_image_slide" in source
     # Albums are the ONLY resources with per-slide prompts, and media_id is
     # what identifies one (file_type holds raw platform codes for downloads,
