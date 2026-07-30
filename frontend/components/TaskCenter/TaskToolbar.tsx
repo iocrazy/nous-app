@@ -72,7 +72,7 @@ const GroupByPicker: React.FC<{
         onClick={() => setOpen((v) => !v)}
         className={`p-1.5 rounded border transition ${
           open || value !== 'none'
-            ? 'bg-ink-800 border-ink-700 text-ink-100'
+            ? 'bg-[var(--accent-soft)] border-[var(--accent-border)] text-[var(--accent-text)]'
             : 'bg-ink-900 border-ink-800 text-ink-400 hover:text-ink-200'
         }`}
         title={`Group by: ${GROUP_OPTIONS.find((o) => o.value === value)?.label ?? 'None'}`}
@@ -89,11 +89,11 @@ const GroupByPicker: React.FC<{
                 type="button"
                 onClick={() => { onChange(o.value); setOpen(false); }}
                 className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition ${
-                  active ? 'bg-ink-900 text-ink-100' : 'text-ink-300 hover:bg-ink-900/60'
+                  active ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'text-ink-300 hover:bg-ink-900/60'
                 }`}
               >
                 <span className="flex-1">{o.label}</span>
-                {active && <Check size={11} className="text-emerald-400" />}
+                {active && <Check size={11} className="text-[var(--accent-text)]" />}
               </button>
             );
           })}
@@ -181,7 +181,7 @@ export const TaskToolbar: React.FC<TaskToolbarProps> = ({
           <button
             type="button"
             onClick={() => onViewModeChange('list')}
-            className={`p-1.5 rounded transition ${viewMode === 'list' ? 'bg-ink-800 text-ink-100' : 'text-ink-500 hover:text-ink-300'}`}
+            className={`p-1.5 rounded transition ${viewMode === 'list' ? 'bg-indigo-600 text-white' : 'text-ink-500 hover:text-ink-300'}`}
             title="List view"
           >
             <LayoutList size={13} />
@@ -189,7 +189,7 @@ export const TaskToolbar: React.FC<TaskToolbarProps> = ({
           <button
             type="button"
             onClick={() => onViewModeChange('kanban')}
-            className={`p-1.5 rounded transition ${viewMode === 'kanban' ? 'bg-ink-800 text-ink-100' : 'text-ink-500 hover:text-ink-300'}`}
+            className={`p-1.5 rounded transition ${viewMode === 'kanban' ? 'bg-indigo-600 text-white' : 'text-ink-500 hover:text-ink-300'}`}
             title="Kanban view"
           >
             <LayoutGrid size={13} />

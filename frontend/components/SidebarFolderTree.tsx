@@ -42,9 +42,9 @@ const FolderNode: React.FC<FolderNodeProps> = ({
       <div
         className={`flex items-center gap-1 py-1 pr-2 rounded-md text-[13px] cursor-pointer transition-colors group ${
           isActive
-            ? 'bg-ink-800 text-ink-50 font-medium'
+            ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] font-medium'
             : dragOver
-              ? 'bg-ink-800/70 text-ink-200'
+              ? 'text-[var(--accent-text)] ring-1 ring-inset ring-[var(--accent-border)]'
               : 'text-ink-400 hover:bg-ink-800/50 hover:text-ink-200'
         }`}
         style={{ paddingLeft: `${8 + depth * 16}px` }}

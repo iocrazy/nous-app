@@ -63,21 +63,35 @@ export const EDITOR_SHELL_STYLES = `
   --script-hei:"PingFang SC","Microsoft YaHei","Hiragino Sans GB","Heiti SC","Noto Sans CJK SC","SimHei","黑体",sans-serif;
   --script-song:"Songti SC","STSong","SimSun","宋体","Noto Serif CJK SC","Source Han Serif SC",serif;
   --sans:-apple-system,"Inter","Segoe UI",Helvetica,Arial,sans-serif;
-  /* ── Neutral-ink chrome (laper parity) ──────────────────────────────────
-     The editor shell's active / selected chrome used to be a wall of brand
-     indigo (active toolbar pills, doc tabs, the pagination + format
-     segmenteds, selected scene rows, stat tiles, count/IE chips) — read as
-     "整体蓝白". laper's chrome is ink, not colour: the active state is a near-
-     black pill (light) / near-white pill (dark), selection is a soft warm-grey
-     ink wash. These tokens carry that language. Every value derives from the
-     theme's own --ink / --surface, so light and dark INVERT automatically
-     (deep-ink pill ↔ bright-ink pill) and no new hex enters the sheet. Brand
-     indigo now survives only on the focus ring and genuine primary CTAs (Save
-     version, empty-state create) — the single accent, not the whole chrome. */
-  --pill-ink-bg:var(--ink);                                   /* active pill: near-black (light) / near-white (dark) */
-  --pill-ink-on:var(--surface);                               /* text on the pill — inverts with it */
-  --sel-ink-bg:color-mix(in srgb, var(--ink) 8%, transparent);/* soft selected row / current item */
-  --sel-ink-fg:var(--ink);                                    /* text on a soft-selected row */
+  /* ── Accent chrome (W2 palette — retired "laper" neutral-ink parity) ────
+     The editor shell's active / selected chrome used to be a near-black pill
+     (light) / near-white pill (dark) — "neutral-ink chrome" (active toolbar
+     pills, doc tabs, the pagination + format segmenteds, selected scene
+     rows, pinned TOC entries, presence avatars, non-destructive confirm
+     buttons). That read as a 3rd emphasis colour alongside brand indigo and
+     bright-green success chips (docs/superpowers/specs/2026-07-29-warm-
+     paper-palette-design.md — "黑色 active 胶囊" retirement). These tokens now
+     point at the same module-accent green every other view's active/current
+     state uses:
+       --pill-ink-bg  → --color-indigo-600, the SAME module-scoped ladder
+         member 'bg-indigo-600' resolves to app-wide (K1 remap) — unlike
+         --color-accent (a plain constant with no [data-module] override),
+         this ladder IS re-pointed per module by the [data-module] blocks in
+         index.css, so a solid pill here tracks the same accent mechanism as
+         every other primary CTA, in every module, not just the project
+         default. No per-theme inversion needed since the ladder's 600 stop
+         doesn't change with theme, only with module.
+       --sel-ink-bg / --sel-ink-fg → --accent-soft / --accent-text, the exact
+         pairing WorkspaceSidebar's '.si.on' and WorkflowStrip's current-node
+         chip already use for soft selected/current rows (also module-scoped,
+         via the [data-theme][data-module] accent-text/-soft/-border blocks).
+     Neutral chips (count/IE, stat tiles, hover washes) keep their original
+     ink-tinted tokens below — only genuinely active/selected/confirming
+     chrome moves to accent. */
+  --pill-ink-bg:var(--color-indigo-600);                      /* active pill/tab/seg/chip: solid module-accent (module-scoped ladder, not the constant --color-accent) */
+  --pill-ink-on:#fff;                                         /* text on the solid pill — matches bg-indigo-600 text-white elsewhere */
+  --sel-ink-bg:var(--accent-soft);                            /* soft selected row / current item — accent-soft, not ink tint */
+  --sel-ink-fg:var(--accent-text);                             /* text on a soft-selected row — accent-text */
   --hover-ink-bg:color-mix(in srgb, var(--ink) 6%, transparent);
   --chip-ink-bg:color-mix(in srgb, var(--ink) 8%, transparent);/* neutral count / IE / stat chip fill */
   --chip-ink-fg:var(--ink-soft);                              /* quiet ink for chip text */
@@ -392,7 +406,7 @@ export const EDITOR_SHELL_STYLES = `
   transition:width 0.12s ease, opacity 0.12s ease, background 0.12s ease;
 }
 .mh-toc-tick:hover{ width:22px; opacity:0.8; }
-.mh-toc-tick.active{ width:28px; opacity:1; background:var(--ink); }
+.mh-toc-tick.active{ width:28px; opacity:1; background:var(--pill-ink-bg); }
 /* Floating panel — reuses the SceneRail list. Hidden (faded + shifted) until the
    toc is open (hover/pin) OR a scene row inside it gains focus (keyboard reveal).
    Kept in the DOM so screen readers + Tab can always reach the list. */

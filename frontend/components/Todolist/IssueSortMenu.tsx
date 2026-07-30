@@ -87,7 +87,7 @@ export const IssueSortMenu: React.FC<IssueSortMenuProps> = ({ sort, onChange, on
             type="button"
             onClick={() => pick(k)}
             className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition ${
-              active ? 'bg-ink-900 text-ink-100' : 'text-ink-300 hover:bg-ink-900/60'
+              active ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'text-ink-300 hover:bg-ink-900/60'
             }`}
           >
             <span className="flex-1">{SORT_LABEL[k]}</span>

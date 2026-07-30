@@ -284,7 +284,7 @@ export const CookiesSettings: React.FC = () => {
                           onClick={() => updateCard(platform.id, { activeTab: tab })}
                           className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors capitalize ${
                             card.activeTab === tab
-                              ? 'bg-ink-700 text-ink-50'
+                              ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                               : 'text-ink-500 hover:text-ink-300'
                           }`}
                         >

@@ -39,7 +39,7 @@ export interface ResourcesSidebarProps {
 const sidebarItemClass = (active: boolean) =>
   `w-full flex items-center gap-3 px-3 py-2 text-[13px] rounded-lg transition-colors text-left cursor-pointer select-none ${
     active
-      ? 'bg-island-2 text-content font-medium'
+      ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] font-medium'
       : 'text-content-2 hover:bg-island-2 hover:text-content-2'
   }`;
 

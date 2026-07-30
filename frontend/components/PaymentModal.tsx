@@ -212,7 +212,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               <button
                 onClick={handleConfirmPayment}
                 disabled={isCreatingOrder}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-amber-600 hover:bg-amber-500 disabled:bg-amber-600/50 disabled:cursor-not-allowed text-white rounded-xl font-medium transition-colors"
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-amber-500/10 hover:bg-amber-500/20 disabled:bg-amber-500/5 disabled:cursor-not-allowed text-warn border border-amber-500/30 rounded-xl font-medium transition-colors"
               >
                 {isCreatingOrder ? (
                   <>
@@ -331,7 +331,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 </button>
                 <button
                   onClick={handleRetry}
-                  className="flex-1 px-4 py-3 text-white bg-amber-600 hover:bg-amber-500 rounded-xl font-medium transition-colors"
+                  className="flex-1 px-4 py-3 text-warn bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl font-medium transition-colors"
                 >
                   Try Again
                 </button>

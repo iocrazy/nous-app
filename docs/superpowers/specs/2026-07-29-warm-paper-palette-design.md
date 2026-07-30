@@ -45,6 +45,7 @@
 
 - **黑色 active 胶囊**(约 165 处 `bg-ink-900`/`bg-black` 上下文,实际 active 语义的是其中一部分):视图切换、分页/格式 segmented、tab 等 → 绿 active。按模块分波:项目/工作区 → 资源库+灵感库 → AI 库/聊天/设置/其余
 - 个别用中性 ink 阶表达强调的部件(如 EP chip 黑底)→ 中性描边样式
+- **tab/segmented vs 菜单行 active 态的实心/soft 判据**(W4 最终审定):approved mockup(`2026-07-29-project-palette-mockup.html`)里 `.tab.on{background:var(--green);color:#fff}` 是实心白字,而不是 soft 底 —— 据此拍板:**tab/segmented 视图切换器(list/grid/kanban/board/preview-code 等互斥模式按钮组)active 态 = 实心模块强调色**(`bg-indigo-600 text-white` 写法,经 `[data-module]` 变量重指向各模块主色,同 W2 的 ProjectsListView Queue/Grid);**菜单/列表行选中态(下拉行、GroupByPicker、WorkspaceSwitcher、侧栏行、文件夹树)= soft 底 + 强调文字**(`bg-[var(--accent-soft)] text-[var(--accent-text)]`)不变。前者是 mockup 直接管辖的控件形态,后者是行选中语义,二者不是同一种视觉物件,不应共用同一 idiom。
 
 ### 2.5 验收
 

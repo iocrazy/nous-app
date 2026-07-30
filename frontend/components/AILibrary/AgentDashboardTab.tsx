@@ -125,15 +125,19 @@ function StatusBadge({ status }: { status: string }): React.ReactElement {
 
 // Coloring: status buckets use a small palette so the legend ties out
 // to the bar colors. Centralised so the same map can be used by tests.
+// Palette anchors (warm-paper-palette, K1 remap): green = terminal-success,
+// plum (agent hue) = in-flight/agent-owned, ochre = waiting/warn, brick =
+// danger/failed. `cancelled` stays a literal neutral gray — it's genuinely
+// a non-accent status, not a black/gray standing in for emphasis.
 export const STATUS_COLORS: Record<string, string> = {
-  done: '#10b981',
-  completed: '#10b981',
-  in_progress: '#6366f1',
-  assigned: '#818cf8',
-  queued: '#f59e0b',
-  waiting_for_other: '#f59e0b',
-  blocked: '#f59e0b',
-  failed: '#ef4444',
+  done: '#1E7A5B',
+  completed: '#1E7A5B',
+  in_progress: '#7A5E8F',
+  assigned: '#AF9BBF',
+  queued: '#A87B2B',
+  waiting_for_other: '#A87B2B',
+  blocked: '#A87B2B',
+  failed: '#AD5147',
   cancelled: '#a1a1aa',
 };
 
@@ -442,9 +446,9 @@ export function AgentDashboardTab({
                   borderRadius: 6,
                   fontSize: 11,
                 }}
-                cursor={{ fill: 'rgba(99,102,241,0.08)' }}
+                cursor={{ fill: 'rgba(30,122,91,0.08)' }}
               />
-              <Bar dataKey="count" fill="#10b981" radius={[2, 2, 0, 0]} />
+              <Bar dataKey="count" fill="#1E7A5B" radius={[2, 2, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -473,7 +477,7 @@ export function AgentDashboardTab({
                     borderRadius: 6,
                     fontSize: 11,
                   }}
-                  cursor={{ fill: 'rgba(99,102,241,0.08)' }}
+                  cursor={{ fill: 'rgba(30,122,91,0.08)' }}
                 />
                 <Bar dataKey="count" radius={[2, 2, 0, 0]}>
                   {statusEntries.map((e) => (
@@ -513,11 +517,11 @@ export function AgentDashboardTab({
                   borderRadius: 6,
                   fontSize: 11,
                 }}
-                cursor={{ fill: 'rgba(99,102,241,0.08)' }}
+                cursor={{ fill: 'rgba(30,122,91,0.08)' }}
               />
               <Legend wrapperStyle={{ fontSize: 10, color: '#a1a1aa' }} />
-              <Bar dataKey="success" stackId="r" fill="#10b981" name="success" />
-              <Bar dataKey="fail" stackId="r" fill="#ef4444" name="fail" />
+              <Bar dataKey="success" stackId="r" fill="#1E7A5B" name="success" />
+              <Bar dataKey="fail" stackId="r" fill="#AD5147" name="fail" />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>

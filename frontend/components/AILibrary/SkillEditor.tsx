@@ -501,7 +501,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
                   onClick={() => setViewMode('preview')}
                   className={`flex items-center gap-1.5 px-3 py-1 text-sm transition-colors ${
                     viewMode === 'preview'
-                      ? 'bg-ink-800 text-ink-100'
+                      ? 'bg-indigo-600 text-white'
                       : 'text-ink-500 hover:text-ink-200'
                   }`}
                 >
@@ -513,7 +513,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
                   onClick={() => setViewMode('code')}
                   className={`flex items-center gap-1.5 border-l border-ink-800 px-3 py-1 text-sm transition-colors ${
                     viewMode === 'code'
-                      ? 'bg-ink-800 text-ink-100'
+                      ? 'bg-indigo-600 text-white'
                       : 'text-ink-500 hover:text-ink-200'
                   }`}
                 >

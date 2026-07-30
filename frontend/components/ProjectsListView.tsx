@@ -198,7 +198,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
               title={t('projects.view.queue', 'Queue view')}
               data-testid="home-view-queue-btn"
               className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                homeView === 'queue' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
+                homeView === 'queue' ? 'bg-indigo-600 text-white' : 'text-ink-400 hover:text-ink-200'
               }`}
             >
               ☰ {t('projects.view.queue', 'Queue')}
@@ -209,7 +209,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
               title={t('projects.view.grid', 'Grid view')}
               data-testid="home-view-grid-btn"
               className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                homeView === 'grid' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
+                homeView === 'grid' ? 'bg-indigo-600 text-white' : 'text-ink-400 hover:text-ink-200'
               }`}
             >
               ▦ {t('projects.view.grid', 'Grid')}
@@ -255,7 +255,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
               <button
                 onClick={() => setViewMode('grid')}
                 className={`p-1.5 rounded-md transition-colors ${
-                  viewMode === 'grid' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
+                  viewMode === 'grid' ? 'bg-indigo-600 text-white' : 'text-ink-400 hover:text-ink-200'
                 }`}
               >
                 <LayoutGrid size={14} />
@@ -263,7 +263,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
               <button
                 onClick={() => setViewMode('table')}
                 className={`p-1.5 rounded-md transition-colors ${
-                  viewMode === 'table' ? 'bg-ink-700 text-ink-50' : 'text-ink-400 hover:text-ink-200'
+                  viewMode === 'table' ? 'bg-indigo-600 text-white' : 'text-ink-400 hover:text-ink-200'
                 }`}
               >
                 <LayoutList size={14} />

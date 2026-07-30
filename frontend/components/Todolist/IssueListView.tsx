@@ -595,7 +595,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
               onClick={() => onViewModeChange('list')}
               className={`p-1.5 transition ${
                 viewMode === 'list'
-                  ? 'bg-ink-800 text-ink-100'
+                  ? 'bg-indigo-600 text-white'
                   : 'text-ink-400 hover:text-ink-200'
               }`}
               title="List view"
@@ -607,7 +607,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
               onClick={() => onViewModeChange('board')}
               className={`p-1.5 transition border-l border-ink-800 ${
                 viewMode === 'board'
-                  ? 'bg-ink-800 text-ink-100'
+                  ? 'bg-indigo-600 text-white'
                   : 'text-ink-400 hover:text-ink-200'
               }`}
               title="Board view"
@@ -647,7 +647,9 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
               onClick={() => { setSortOpen((v) => !v); setFilterOpen(false); setColumnPickerOpen(false); }}
               className={`p-1.5 rounded border transition inline-flex items-center gap-1 ${
                 sortOpen
-                  ? 'bg-ink-800 border-ink-700 text-ink-100'
+                  // Same theme-flipping accent as the Filters button above —
+                  // half-migrated leftover, matched to that idiom.
+                  ? 'bg-[var(--accent-soft)] border-[var(--accent-border)] text-[var(--accent-text)]'
                   : 'bg-ink-900/80 border-ink-800 text-ink-400 hover:text-ink-200'
               }`}
               title={`Sort: ${SORT_LABEL_BY_KEY[sort.key]} ${sort.dir === 'asc' ? '↑' : '↓'}`}
@@ -668,7 +670,9 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
               onClick={() => { setColumnPickerOpen((v) => !v); setFilterOpen(false); setSortOpen(false); }}
               className={`p-1.5 rounded border transition ${
                 columnPickerOpen
-                  ? 'bg-ink-800 border-ink-700 text-ink-100'
+                  // Same theme-flipping accent as the Filters button above —
+                  // half-migrated leftover, matched to that idiom.
+                  ? 'bg-[var(--accent-soft)] border-[var(--accent-border)] text-[var(--accent-text)]'
                   : 'bg-ink-900/80 border-ink-800 text-ink-400 hover:text-ink-200'
               }`}
               title="Column visibility"

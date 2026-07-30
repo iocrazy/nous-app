@@ -1005,7 +1005,7 @@ export function AIChatPanel({
                 onClick={() => handlePlanModeChange(m)}
                 className={`px-2 py-0.5 rounded transition-colors ${
                   planMode === m
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
                     : 'text-ink-500 hover:text-ink-300 hover:bg-ink-800'
                 }`}
                 title={

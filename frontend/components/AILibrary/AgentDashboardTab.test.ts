@@ -30,12 +30,20 @@ describe('STATUS_COLORS', () => {
     }
   });
 
-  it('groups in-flight states under indigo and terminal-success under emerald', () => {
-    // Chart legend cohesion — same hue for related states.
-    expect(STATUS_COLORS.in_progress).toBe('#6366f1');
-    expect(STATUS_COLORS.assigned).toMatch(/^#[68]/);
-    expect(STATUS_COLORS.done).toBe('#10b981');
-    expect(STATUS_COLORS.completed).toBe('#10b981');
-    expect(STATUS_COLORS.failed).toBe('#ef4444');
+  it('groups in-flight states under plum (agent hue) and terminal-success under green', () => {
+    // Chart legend cohesion — same hue for related states. Values are the
+    // warm-paper-palette anchors (K1 remap): plum for in-flight/agent-owned,
+    // green for terminal success, brick for failure.
+    expect(STATUS_COLORS.in_progress).toBe('#7A5E8F');
+    // Was `toMatch(/^#[7A]/i)` — a character class, not a literal, so it
+    // only pinned "starts with # then 7 or A/a" and would have passed for
+    // e.g. '#a1a1aa' (cancelled's gray) just as happily as any plum shade.
+    // Pin the exact value: #AF9BBF is the dark-theme --agent anchor
+    // (plum-400, index.css), so `assigned` genuinely sits in the plum
+    // family rather than merely matching a loose leading-nibble pattern.
+    expect(STATUS_COLORS.assigned).toBe('#AF9BBF');
+    expect(STATUS_COLORS.done).toBe('#1E7A5B');
+    expect(STATUS_COLORS.completed).toBe('#1E7A5B');
+    expect(STATUS_COLORS.failed).toBe('#AD5147');
   });
 });

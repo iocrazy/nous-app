@@ -263,7 +263,7 @@ export function ProjectNavSidebar({
               onClick={() => onSectionChange(section.key)}
               className={`flex items-center gap-3 w-full px-3 py-2 rounded-md text-[13px] transition-colors duration-120 ${
                 isActive
-                  ? 'text-ink-100 bg-ink-800/80'
+                  ? 'text-[var(--accent-text)] bg-[var(--accent-soft)]'
                   : 'text-ink-400 hover:text-ink-200 hover:bg-ink-800/50'
               }`}
             >
