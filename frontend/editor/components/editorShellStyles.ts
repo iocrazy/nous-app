@@ -73,17 +73,22 @@ export const EDITOR_SHELL_STYLES = `
      paper-palette-design.md — "黑色 active 胶囊" retirement). These tokens now
      point at the same module-accent green every other view's active/current
      state uses:
-       --pill-ink-bg  → --color-accent, the SAME constant hex 'bg-indigo-600'
-         resolves to app-wide (K1 remap), so solid pills read identically to
-         every other primary CTA in both themes — no per-theme inversion
-         needed since the accent hex itself doesn't change with theme.
+       --pill-ink-bg  → --color-indigo-600, the SAME module-scoped ladder
+         member 'bg-indigo-600' resolves to app-wide (K1 remap) — unlike
+         --color-accent (a plain constant with no [data-module] override),
+         this ladder IS re-pointed per module by the [data-module] blocks in
+         index.css, so a solid pill here tracks the same accent mechanism as
+         every other primary CTA, in every module, not just the project
+         default. No per-theme inversion needed since the ladder's 600 stop
+         doesn't change with theme, only with module.
        --sel-ink-bg / --sel-ink-fg → --accent-soft / --accent-text, the exact
          pairing WorkspaceSidebar's '.si.on' and WorkflowStrip's current-node
-         chip already use for soft selected/current rows.
+         chip already use for soft selected/current rows (also module-scoped,
+         via the [data-theme][data-module] accent-text/-soft/-border blocks).
      Neutral chips (count/IE, stat tiles, hover washes) keep their original
      ink-tinted tokens below — only genuinely active/selected/confirming
      chrome moves to accent. */
-  --pill-ink-bg:var(--color-accent);                          /* active pill/tab/seg/chip: solid module-accent green */
+  --pill-ink-bg:var(--color-indigo-600);                      /* active pill/tab/seg/chip: solid module-accent (module-scoped ladder, not the constant --color-accent) */
   --pill-ink-on:#fff;                                         /* text on the solid pill — matches bg-indigo-600 text-white elsewhere */
   --sel-ink-bg:var(--accent-soft);                            /* soft selected row / current item — accent-soft, not ink tint */
   --sel-ink-fg:var(--accent-text);                             /* text on a soft-selected row — accent-text */
@@ -401,7 +406,7 @@ export const EDITOR_SHELL_STYLES = `
   transition:width 0.12s ease, opacity 0.12s ease, background 0.12s ease;
 }
 .mh-toc-tick:hover{ width:22px; opacity:0.8; }
-.mh-toc-tick.active{ width:28px; opacity:1; background:var(--ink); }
+.mh-toc-tick.active{ width:28px; opacity:1; background:var(--pill-ink-bg); }
 /* Floating panel — reuses the SceneRail list. Hidden (faded + shifted) until the
    toc is open (hover/pin) OR a scene row inside it gains focus (keyboard reveal).
    Kept in the DOM so screen readers + Tab can always reach the list. */
