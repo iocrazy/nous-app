@@ -956,6 +956,19 @@ async def _migrate_pm_assets_row(
 # plain SELECT off ``resources`` alone — no JOIN, no fan-out (unlike
 # ``pm_assets``, there's exactly one column/one migration unit per row here).
 #
+# ``AND NOT EXISTS (... resource_versions ...)`` makes the split from
+# ``downloads`` STRUCTURAL, not a data-state assumption. Without it, a web
+# resource that DOES have a resource_versions row but hasn't been migrated by
+# ``downloads`` yet (``resources.file_path`` still filesystem) would ALSO
+# match this module's SELECT — this module would migrate
+# ``resources.file_path`` while leaving ``resource_versions.file_path``
+# untouched, and a subsequent ``delete_source`` run would delete the shared
+# local file out from under the still-filesystem ``resource_versions`` row
+# (nothing else ever fixes that dangling path). Requiring zero
+# resource_versions rows makes the two modules' row sets structurally
+# disjoint — ``downloads`` owns every resource_id that has an rv row,
+# regardless of run order, and this module owns only what never had one.
+#
 # Same content-addressed ``store_local_file`` write path as ``pm_assets`` —
 # not the fixed-prefix ``derived`` style, since a web resource has no natural
 # "kind" segment to key by. Already-``sb://`` rows are excluded by the SQL
@@ -990,6 +1003,9 @@ _WEB_RESOURCE_FILES_SELECT_SQL = """
       AND r.file_path IS NOT NULL
       AND r.file_path NOT LIKE 'sb://%'
       AND r.is_trashed IS NOT TRUE
+      AND NOT EXISTS (
+        SELECT 1 FROM resource_versions rv WHERE rv.resource_id = r.id
+      )
       AND (CAST(:scope_id AS bigint) IS NULL OR ri.scope_id = :scope_id)
     ORDER BY r.id
     LIMIT :limit

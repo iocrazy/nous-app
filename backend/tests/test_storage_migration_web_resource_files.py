@@ -87,9 +87,28 @@ def test_web_resource_files_select_sql_excludes_sb_and_trashed_and_non_web():
     assert "source_type" in sql and "'web'" in sql
     assert "NOT LIKE 'sb://%'" in sql
     assert "is_trashed" in sql
-    # 不 JOIN resource_versions —— 正是收漏无-rv 行的关键(与 downloads 的
-    # SELECT 区分开)。
-    assert "resource_versions" not in sql
+
+
+def test_web_resource_files_select_sql_structurally_excludes_rows_with_versions():
+    """与 downloads 的互斥必须是结构性的(NOT EXISTS resource_versions),不能只
+    依赖"202 行凑巧全无 rv + downloads 已跑完"这种数据状态假设 —— 否则一个
+    "有 resource_versions 但 downloads 还没迁"的 web 资源会被本模块也 SELECT
+    到,迁完 resources.file_path 但漏了 resource_versions.file_path,
+    delete_source 会把两者共享的本地文件删掉,留下 rv 侧悬空死链(没有任何后置
+    代码会修)。用 sqlparse-free 的文本编译校验:真实喂进 asyncpg 方言编译一遍
+    (同 test_storage_migration.py 的 _compilable 手法),确认 NOT EXISTS 子查询
+    完整落在 WHERE 里、且引用的是 resource_versions.resource_id = r.id。"""
+    from sqlalchemy import text
+    from sqlalchemy.dialects import postgresql
+
+    sql = sm._WEB_RESOURCE_FILES_SELECT_SQL
+    assert "NOT EXISTS" in sql
+    assert "resource_versions" in sql
+    assert "rv.resource_id = r.id" in sql
+
+    compiled = str(text(sql).compile(dialect=postgresql.asyncpg.dialect()))
+    assert "NOT EXISTS" in compiled
+    assert "resource_versions" in compiled
 
 
 # ── _migrate_web_resource_files_row —— content-addressed store_local_file ──
