@@ -579,16 +579,44 @@ class AILibraryChatService:
 
         runner = stack.runner
 
+        # Vision capability decided once per turn: gates the new-message
+        # multipart build, the history image replay, AND the runner's
+        # promotion of image-bearing tool results (ResourceFetch).
+        from app.services.ai.model_capabilities import model_supports_vision
+
+        supports_vision = await model_supports_vision(composed.model)
+        runner.vision_capable = supports_vision
+
         # Build the message history payload: prior turns + new user turn.
         # We always pass role+content; tool-call stubs that AgentRunner
         # generated in a previous turn aren't replayed (they're ephemeral
         # — the persisted assistant message captures the final content).
-        user_messages: List[Dict[str, Any]] = []
-        for msg in history:
-            role = msg.get("role")
-            if role not in ("user", "assistant", "system"):
-                continue
-            user_messages.append({"role": role, "content": msg.get("content") or ""})
+        # Recent image attachments ARE replayed (budgeted) so follow-up
+        # turns like "now look at the top-left corner" still see the image
+        # — the live request only inlines the CURRENT turn's bytes.
+        from app.services.ai.chat.history_image_replay import (
+            build_history_messages,
+        )
+
+        try:
+            user_messages: List[Dict[str, Any]] = await build_history_messages(
+                history,
+                user_id=str(user_id),
+                supports_vision=supports_vision,
+            )
+        except Exception as replay_exc:
+            logger.warning(
+                f"[chat] history image replay failed (text-only history): "
+                f"{replay_exc!r}"
+            )
+            user_messages = []
+            for msg in history:
+                role = msg.get("role")
+                if role not in ("user", "assistant", "system"):
+                    continue
+                user_messages.append(
+                    {"role": role, "content": msg.get("content") or ""}
+                )
 
         # S4 Task 6: split attachments by kind before resolution.
         # resource_ref attachments → resource_ref_resolver (metadata only,
@@ -750,7 +778,6 @@ class AILibraryChatService:
                 from app.services.ai.chat.chat_attachment_resolver import (
                     resolve_attachments,
                 )
-                from app.services.ai.model_capabilities import model_supports_vision
 
                 # resolve_attachments reads `.kind`/`.url`/... as attributes —
                 # passing the normalized dicts crashes it ('dict' object has
@@ -760,7 +787,6 @@ class AILibraryChatService:
                     [AttachmentRequest.model_validate(a) for a in binary_atts]
                 )
                 attachment_failures = list(resolved.failures)
-                supports_vision = await model_supports_vision(composed.model)
                 new_user_msg = build_user_message(
                     effective_content,
                     resolved.attachments,
