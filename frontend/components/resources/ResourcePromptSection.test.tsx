@@ -306,3 +306,28 @@ describe('ResourcePromptSection — gallery generate hint', () => {
     expect(capturedProps.generateUnavailableHint).toBeUndefined();
   });
 });
+
+describe('ResourcePromptSection — gallery sidebar trap', () => {
+  const galleryEmpty = {
+    ...resourceRow,
+    id: 'ge1',
+    file_type: '68',
+    mime_type: 'image/jpeg',
+    media_id: 'm9',
+    gen_prompt: null,
+  };
+  const galleryLegacy = { ...galleryEmpty, id: 'ge2', gen_prompt: '132123' };
+
+  it('renders hint-only (no editable block) for an empty gallery in resource mode', async () => {
+    singleMock.mockResolvedValue({ data: galleryEmpty, error: null });
+    const { findByTestId, queryByTestId } = render(<ResourcePromptSection resourceId="ge1" />);
+    await findByTestId('gallery-prompt-hint-only');
+    expect(queryByTestId('prompt-section')).toBeNull();
+  });
+
+  it('still offers the editor when legacy resource-level data exists', async () => {
+    singleMock.mockResolvedValue({ data: galleryLegacy, error: null });
+    render(<ResourcePromptSection resourceId="ge2" />);
+    await screen.findByTestId('prompt-section');
+  });
+});
