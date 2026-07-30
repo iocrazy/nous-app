@@ -984,7 +984,6 @@
       "generatePrompt": "反推",
       "generatePromptHint": "从素材反推生成提示词（视频使用封面图）",
       "generatePerSlideHint": "图集：打开详情后逐张反推",
-      "generatePerSlideHintDetail": "逐张反推：在图片下方，每张各有一个 ⚡ Generate",
       "generateFromImage": "从图片反推",
       "promptGenerating": "正在从图片反推提示词...",
       "promptGenerated": "提示词已生成",
@@ -1011,21 +1010,9 @@
       "generateSimilarNeedsPrompt": "请先反推生成提示词，再试一次生成同款"
     },
     "slidePrompt": {
-      "addPrompt": "为这张图添加提示词",
-      "loadFailed": "加载这张图的提示词失败",
-      "expand": "展开",
-      "copy": "复制",
-      "save": "保存",
-      "saveFailed": "保存失败",
-      "positivePlaceholder": "这张图的提示词...",
-      "negative": "负面",
-      "negativePlaceholder": "负面提示词（要避免的内容）...",
       "close": "关闭",
-      "generate": "反推",
       "generateHint": "从这张图反推生成提示词",
-      "regenerateHint": "重新反推 — 会覆盖这张图现有的提示词",
-      "generating": "正在分析这张图...",
-      "generateFailed": "提示词生成失败"
+      "slideBadge": "第 {{index}}/{{count}} 张"
     },
     "folderInfoPanel": {
       "title": "文件夹信息",

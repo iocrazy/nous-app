@@ -10,24 +10,62 @@
  * detail card) don't have that state lying around, so this wrapper
  * fetches/owns it itself — mount it with just a `resourceId` and it takes
  * care of the rest, including Generate for image resources.
+ *
+ * ── Slide mode (2026-07-29) ──────────────────────────────────────────────
+ * Pass `slideName` and the block edits ONE slide of a download album instead
+ * of the resource's own `gen_prompt*` columns. The album's per-slide prompts
+ * live in a single JSONB column on the PARENT resource (`slide_prompts:
+ * Record<slideName, {en, zh, neg_en, neg_zh}>`), fetched with everything else
+ * in the one row read — so paging through slides never refetches, and the
+ * displayed entry is always re-derived from the freshest map (including
+ * slides edited earlier in the same session).
+ *
+ * This replaces the on-image SlidePromptStrip overlay: the user asked for the
+ * prompt to stay in its usual place on the right and just follow the slide.
+ *
+ * Two invariants carried over from that overlay:
+ *   - Saving PATCHes the WHOLE map (`{...map, [slideName]: entry}`), never a
+ *     bare `{[slideName]: entry}`, so other slides are never clobbered. That
+ *     only holds because a failed row read renders nothing at all (see the
+ *     `!resource` guard) rather than defaulting the map to `{}`.
+ *   - An unsaved draft on slide A is never written to slide B — PromptSection's
+ *     `editorScopeKey` re-binds its editors on every slide change.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../supabaseClient';
-import { addResourceTag, fetchResourceTags, translateGenPrompt, updateResource } from '../../services/resourceService';
+import {
+  addResourceTag, fetchResourceTags, generateSlidePrompt, translateGenPrompt, updateResource,
+} from '../../services/resourceService';
 import { fetchAllTags } from '../../services/unifiedTagService';
 import { ensureDefaultTriggerTag } from '../../utils/promptTriggerTags';
 import type { Resource, Tag } from '../../types';
 import { PromptSection } from './PromptSection';
 
+// `slide_prompts` is fetched unconditionally rather than only in slide mode:
+// making the select depend on `slideName` would refetch the row the moment the
+// viewer reports its first slide, and the column is null on everything that
+// isn't a download album.
 const PROMPT_FIELDS =
-  'id, filename, file_type, mime_type, media_id, gen_prompt, gen_prompt_zh, gen_prompt_negative, gen_prompt_negative_zh, gen_prompt_json';
+  'id, filename, file_type, mime_type, media_id, gen_prompt, gen_prompt_zh, gen_prompt_negative, gen_prompt_negative_zh, gen_prompt_json, slide_prompts';
 
 type PromptResource = Pick<
   Resource,
   | 'id' | 'filename' | 'file_type' | 'mime_type' | 'media_id' | 'gen_prompt' | 'gen_prompt_zh'
-  | 'gen_prompt_negative' | 'gen_prompt_negative_zh' | 'gen_prompt_json'
+  | 'gen_prompt_negative' | 'gen_prompt_negative_zh' | 'gen_prompt_json' | 'slide_prompts'
 >;
+
+type SlidePromptsMap = NonNullable<Resource['slide_prompts']>;
+type SlidePromptEntry = SlidePromptsMap[string];
+
+/** slide entry ⇄ the `gen_prompt*` shape PromptSection edits. One place, so
+ *  the read mapping and the write mapping can't drift apart. */
+const SLIDE_FIELD_OF: Record<string, keyof SlidePromptEntry> = {
+  gen_prompt: 'en',
+  gen_prompt_zh: 'zh',
+  gen_prompt_negative: 'neg_en',
+  gen_prompt_negative_zh: 'neg_zh',
+};
 
 /**
  * Can this resource be reverse-engineered as a WHOLE? Mirrors the backend's
@@ -37,7 +75,8 @@ type PromptResource = Pick<
  * - image → yes, it captions its own bytes
  * - video → yes, it captions its downloaded cover still
  * - download-backed image → NO: that's an album, whose `file_path` is a
- *   directory of slides. It captions per slide, through SlidePromptStrip's ⚡.
+ *   directory of slides. It captions per slide — this component's slide mode
+ *   drives that endpoint instead (and turns Generate back on there).
  * - anything else (audio, documents) → no
  *
  * Gated on `mime_type`, not `file_type`: for downloaded rows `file_type`
@@ -60,7 +99,9 @@ export function ResourcePromptSection({
   resourceId,
   onTagsChanged,
   sectionClassName,
-  galleryHint,
+  slideName,
+  slideIndex,
+  slideCount,
 }: {
   resourceId: string;
   /** Notified after the ensure-trigger-tag flow actually writes a new tag
@@ -71,11 +112,13 @@ export function ResourcePromptSection({
    *  container already pads its children override the default `px-4 mt-3`
    *  so the block lines up with its neighbours. */
   sectionClassName?: string;
-  /** Override for the gallery "generate lives elsewhere" hint. The default
-   *  says "open the item" — correct in the list sidebars, circular on the
-   *  detail page (the user IS in the item), so that host points at the
-   *  on-image strip instead. */
-  galleryHint?: string;
+  /** Album detail only: the slide the viewer is currently showing. Switches
+   *  the block into slide mode (see the header). The list sidebars leave it
+   *  unset and keep the "open the item" hint. */
+  slideName?: string;
+  /** 0-based position + total, for the "Slide 2/11" header badge. */
+  slideIndex?: number;
+  slideCount?: number;
 }) {
   const { t } = useTranslation();
   const [resource, setResource] = useState<PromptResource | null>(null);
@@ -118,6 +161,35 @@ export function ResourcePromptSection({
       console.error('Failed to update resource prompt:', err),
     );
   }, [resourceId]);
+
+  // Slide mode's write path. PromptSection speaks `gen_prompt*`; this maps the
+  // committed field back onto the slide's entry and PATCHes the WHOLE map, so
+  // no other slide is touched. Depending on the map object (state, stable
+  // between edits) rather than reading it inside a state updater keeps the
+  // PATCH out of the updater — updaters can be double-invoked.
+  const slidePromptsMap = resource?.slide_prompts ?? null;
+  const handleSlidePatch = useCallback((fields: Partial<Resource>) => {
+    if (!slideName) return;
+    const entry: SlidePromptEntry = { ...(slidePromptsMap?.[slideName] || {}) };
+    let touched = false;
+    for (const [column, value] of Object.entries(fields)) {
+      const slideField = SLIDE_FIELD_OF[column];
+      if (!slideField) continue;
+      entry[slideField] = typeof value === 'string' ? value : '';
+      touched = true;
+    }
+    if (!touched) return;
+    const merged: SlidePromptsMap = { ...(slidePromptsMap || {}), [slideName]: entry };
+    setResource((prev) => (prev ? { ...prev, slide_prompts: merged } : prev));
+    updateResource(resourceId, { slide_prompts: merged }).catch((err) =>
+      console.error('Failed to save slide prompt:', err),
+    );
+  }, [resourceId, slideName, slidePromptsMap]);
+
+  const dispatchSlideGenerate = useCallback(
+    () => generateSlidePrompt(resourceId, slideName as string),
+    [resourceId, slideName],
+  );
 
   const handleTranslate = useCallback((lang: 'en' | 'zh') => {
     setTranslating(true);
@@ -162,30 +234,76 @@ export function ResourcePromptSection({
   if (loading || !resource) return null;
 
   const canGenerate = canGenerateForResource(resource);
-  // A downloaded row that can't generate here but has a linked parsed_media
-  // is a gallery — its Generate is per-slide, in the detail viewer's strip.
-  // Say so instead of silently omitting the button.
+  // An album (download-backed, so no whole-resource caption) whose host tells
+  // us which slide is on screen: edit that slide's entry right here.
+  const slideMode = Boolean(slideName) && !canGenerate && Boolean(resource.media_id);
+  // A gallery WITHOUT a slide on screen — the list sidebars, and the detail
+  // page before the viewer reports its first slide. Point at where Generate
+  // does live instead of silently omitting the button.
   const effectiveGalleryHint =
-    !canGenerate && resource.media_id
-      ? galleryHint ??
-        t(
+    !canGenerate && !slideMode && resource.media_id
+      ? t(
           'resources.infoPanel.generatePerSlideHint',
           'Galleries: open the item and generate per slide',
         )
       : undefined;
 
+  const slideEntry: SlidePromptEntry =
+    (slideName ? resource.slide_prompts?.[slideName] : null) || {};
+  // The slide's entry wearing the `gen_prompt*` shape PromptSection edits.
+  // `gen_prompt_json` is blanked deliberately: a slide entry has no structured
+  // result, and leaving the album's own JSON here would offer a JSON tab and
+  // Generate Similar built from the wrong asset.
+  const slideResource: PromptResource = {
+    ...resource,
+    gen_prompt: slideEntry.en ?? null,
+    gen_prompt_zh: slideEntry.zh ?? null,
+    gen_prompt_negative: slideEntry.neg_en ?? null,
+    gen_prompt_negative_zh: slideEntry.neg_zh ?? null,
+    gen_prompt_json: null,
+  };
+
+  const slideBadge = slideMode ? (
+    <span
+      data-testid="slide-prompt-badge"
+      className="px-1.5 py-0.5 rounded-full bg-ink-800 border border-ink-700 text-[9.5px] text-ink-400 normal-case tracking-normal max-w-[120px] truncate"
+      title={slideName}
+    >
+      {typeof slideIndex === 'number' && slideCount
+        ? t('resources.slidePrompt.slideBadge', 'Slide {{index}}/{{count}}', {
+            index: slideIndex + 1,
+            count: slideCount,
+          })
+        : slideName}
+    </span>
+  ) : undefined;
+
   return (
     <PromptSection
       key={resourceId}
-      resource={resource as unknown as Resource}
-      onPatch={handlePatch}
+      resource={(slideMode ? slideResource : resource) as unknown as Resource}
+      onPatch={slideMode ? handleSlidePatch : handlePatch}
       onEnsureTriggerTag={handleEnsureTriggerTag}
-      canGenerate={canGenerate}
+      canGenerate={slideMode || canGenerate}
       generateUnavailableHint={effectiveGalleryHint}
       onGenerated={handleGenerated}
       translating={translating}
       onTranslate={handleTranslate}
       sectionClassName={sectionClassName}
+      {...(slideMode
+        ? {
+            onDispatchGenerate: dispatchSlideGenerate,
+            generateTitle: t(
+              'resources.slidePrompt.generateHint',
+              'Reverse-engineer the prompt from this slide',
+            ),
+            // No per-slide translate endpoint exists — the resource-level one
+            // would rewrite the album's own columns instead.
+            canTranslate: false,
+            headerBadge: slideBadge,
+            editorScopeKey: `${resourceId}:${slideName}`,
+          }
+        : {})}
     />
   );
 }

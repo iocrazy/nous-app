@@ -127,8 +127,8 @@ describe('ResourcePromptSection', () => {
   });
 
   // An album's file_path is a DIRECTORY of slides — there is no single image
-  // to caption, so the resource-level action stays off and the per-slide ⚡
-  // in SlidePromptStrip is the way in.
+  // to caption, so the WHOLE-resource action stays off. Generate comes back
+  // once a host names the slide on screen (see ResourcePromptSection.slide.test).
   it('canGenerate is false for a downloaded album', async () => {
     singleMock.mockResolvedValueOnce({
       data: { ...resourceRow, file_type: '68', mime_type: 'image/jpeg', media_id: '88' },

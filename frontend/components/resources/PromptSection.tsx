@@ -24,6 +24,12 @@
  * of 3 retries" becomes "check the API key in Settings → AI". The raw engine
  * text stays available behind a Details disclosure.
  *
+ * The block is also the album per-slide editor (2026-07-29): the host feeds
+ * one slide's entry through the same `gen_prompt*` shape and overrides the
+ * dispatch endpoint + `editorScopeKey`, so paging through slides swaps the
+ * contents of this one block instead of opening a second editor over the
+ * image. See `editorScopeKey` for what that buys.
+ *
  * ⚡ Generate Similar (Task 5): when the analysis JSON result is present,
  * a second action sits next to Send to Canvas. It opens the same
  * SendToCanvasModal, just flagged `autoRun` with the analysis result's
@@ -50,10 +56,45 @@ export interface PromptSectionProps {
   onEnsureTriggerTag: () => Promise<void>;
   /** Image assets get the Generate (reverse-engineer) button. */
   canGenerate: boolean;
+  /**
+   * Dispatch override for Generate. Defaults to the whole-resource caption
+   * endpoint (`generateGenPrompt(resource.id)`). Album hosts pass the
+   * per-slide endpoint instead — everything downstream of the dispatch (task
+   * watch, progress card, error catalog, `onGenerated`) is identical, so the
+   * endpoint is the only thing that varies.
+   */
+  onDispatchGenerate?: () => Promise<string>;
+  /** Title/tooltip for the Generate button. Defaults to the whole-asset copy. */
+  generateTitle?: string;
+  /**
+   * Translate is a resource-level endpoint (`gen_prompt*` columns only), so
+   * hosts whose editors are bound to something else — an album's per-slide
+   * entry — turn it off rather than offer a button that would translate the
+   * wrong text. Defaults true.
+   */
+  canTranslate?: boolean;
+  /** Rendered next to the "PROMPT" caption — album hosts put "Slide 2/11" here. */
+  headerBadge?: React.ReactNode;
+  /**
+   * Identity of what the editors are bound to. Defaults to `resource.id`,
+   * which is right whenever the block edits the resource's own columns.
+   *
+   * Album hosts feed ONE resource but swap which slide's entry is displayed,
+   * so `resource.id` alone can't tell "the user browsed to another slide"
+   * apart from "nothing changed". Two things key off this instead:
+   *   - the editor sync effect, so an unsaved draft on slide A is dropped on
+   *     arrival at slide B even when both slides hold the SAME text (with
+   *     `resource.id` in the deps that case doesn't re-run, and A's draft
+   *     would blur-commit onto B)
+   *   - the Generate spinner / error card, so a run started on slide A
+   *     decorates only slide A. The task watch itself deliberately survives
+   *     browsing away, so the result still lands via `onGenerated`.
+   */
+  editorScopeKey?: string;
   /** Shown in the Generate button's place when `canGenerate` is false but
-   *  generation exists elsewhere for this asset — e.g. galleries, whose
-   *  per-slide Generate lives in the detail viewer's slide strip. Without
-   *  it the block renders two bare textareas and reads as "not built". */
+   *  generation exists elsewhere for this asset — e.g. a gallery in a list
+   *  sidebar, which captions per slide and so needs the detail page open.
+   *  Without it the block renders two bare textareas and reads as "not built". */
   generateUnavailableHint?: string;
   /** Fired once the self-managed Generate flow completes successfully —
    *  the host should refetch the resource (new gen_prompt* / gen_prompt_json)
@@ -97,10 +138,12 @@ function ResultChip({ children }: { children: React.ReactNode }) {
 export function PromptSection({
   resource, onPatch, onEnsureTriggerTag,
   canGenerate, generateUnavailableHint, onGenerated, translating, onTranslate,
+  onDispatchGenerate, generateTitle, canTranslate = true, headerBadge, editorScopeKey,
   autoOpenGenerateSimilar, sectionClassName = 'px-4 mt-3',
 }: PromptSectionProps) {
   const { t } = useTranslation();
   const toast = useOptionalToast();
+  const scopeKey = editorScopeKey ?? resource.id;
   const [expanded, setExpanded] = useState(false);
   const [lang, setLang] = useState<'en' | 'zh'>(() =>
     (resource.gen_prompt?.trim() ? 'en' : resource.gen_prompt_zh?.trim() ? 'zh' : 'en'),
@@ -135,7 +178,12 @@ export function PromptSection({
   // notification that disappears in a few seconds can't be read twice. The
   // resolved copy sits in the section until the next Generate, with the raw
   // engine text kept behind a Details disclosure so nothing is lost.
-  const [genError, setGenError] = useState<{ resolved: ResolvedTaskError; raw: string } | null>(null);
+  const [genError, setGenError] = useState<
+    { scope: string; resolved: ResolvedTaskError; raw: string } | null
+  >(null);
+  // Which scope the in-flight run belongs to — see `editorScopeKey`. Constant
+  // for every host that edits the resource's own columns.
+  const [genScope, setGenScope] = useState<string | null>(null);
 
   const { task: genTask } = useTaskCompletion(taskId, {
     onComplete: () => {
@@ -150,19 +198,26 @@ export function PromptSection({
       // workflow's failure path; error_msg is the trigger-owned raw text and
       // is only the fallback (see utils/errorCatalog.ts).
       setGenError({
+        scope: genScope ?? scopeKey,
         resolved: resolveTaskError(task.metadata, task.error_msg, t),
         raw: task.error_msg || '',
       });
     },
   });
-  const generating = dispatching || Boolean(taskId);
+  const running = dispatching || Boolean(taskId);
+  // Visible progress is scoped: an album run started on slide A must not
+  // decorate slide B. `running` stays the re-entrancy guard.
+  const generating = running && genScope === scopeKey;
+  const scopedError = genError && genError.scope === scopeKey ? genError : null;
 
   const handleGenerate = async () => {
-    if (generating) return;
+    if (running) return;
     setGenError(null);
+    setGenScope(scopeKey);
+    const target = scopeKey;
     setDispatching(true);
     try {
-      const id = await generateGenPrompt(resource.id);
+      const id = await (onDispatchGenerate ? onDispatchGenerate() : generateGenPrompt(resource.id));
       setTaskId(id);
       clearGenTimeout();
       genTimeoutRef.current = window.setTimeout(() => {
@@ -181,7 +236,7 @@ export function PromptSection({
         err instanceof Error && err.message
           ? err.message
           : t('resources.infoPanel.promptGenerateFailed', 'Failed to generate prompt');
-      setGenError({ resolved: resolveTaskError(null, msg, t), raw: msg });
+      setGenError({ scope: target, resolved: resolveTaskError(null, msg, t), raw: msg });
     } finally {
       setDispatching(false);
     }
@@ -190,11 +245,26 @@ export function PromptSection({
   const posField = lang === 'zh' ? 'gen_prompt_zh' : 'gen_prompt';
   const negField = lang === 'zh' ? 'gen_prompt_negative_zh' : 'gen_prompt_negative';
 
-  // Sync editors from the resource whenever id/lang/data changes.
+  // Re-pick the language side whenever the editors re-bind to a different
+  // scope. Only album slide mode ever changes scope, and there it matters: a
+  // slide whose entry is zh-only would otherwise read as EMPTY just because the
+  // previous slide was showing EN. A manual toggle is respected until the next
+  // scope change, and hosts with a fixed scope only see this on mount, where it
+  // agrees with the useState initializer.
+  useEffect(() => {
+    setLang((prev) =>
+      resource.gen_prompt?.trim() ? 'en' : resource.gen_prompt_zh?.trim() ? 'zh' : prev,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeKey]);
+
+  // Sync editors from the resource whenever scope/lang/data changes. Keyed on
+  // `scopeKey` rather than `resource.id` so an album's slide switch re-runs it
+  // even when the two slides hold identical text (see `editorScopeKey`).
   useEffect(() => {
     setPosValue((resource[posField] as string | null) || '');
     setNegValue((resource[negField] as string | null) || '');
-  }, [resource.id, resource[posField], resource[negField], lang]);
+  }, [scopeKey, resource[posField], resource[negField], lang]);
 
   const dataPresent = hasPromptData(resource);
   const posPreview = ((resource[posField] as string | null) || '').trim();
@@ -263,6 +333,7 @@ export function PromptSection({
       <h4 className="text-[11px] font-semibold text-ink-500 uppercase tracking-widest">
         {t('resources.infoPanel.promptSection', 'Prompt')}
       </h4>
+      {headerBadge}
     </div>
   );
 
@@ -316,19 +387,101 @@ export function PromptSection({
     </div>
   );
 
+  const generateButton = canGenerate ? (
+    <button onClick={handleGenerate} disabled={running}
+      title={generateTitle ?? t('resources.infoPanel.generatePromptHint', 'Reverse-engineer the prompt from this asset (a video uses its cover)')}
+      className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-[var(--accent-text)] transition-colors disabled:opacity-50">
+      {generating ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}{' '}
+      {t('resources.infoPanel.generatePrompt', 'Generate')}
+    </button>
+  ) : null;
+
+  // Progress card. Shown in the empty state too, not just the expanded one —
+  // Generate is reachable from both (see below), so its feedback has to be.
+  const analyzingCard = (
+    <div className="border border-ink-700 rounded-[10px] bg-ink-800/40 px-3 py-2.5">
+      <div className="flex items-center gap-1.5 text-[11px] text-ink-300">
+        <Loader2 size={12} className="animate-spin text-[var(--accent-text)]" />
+        {t('resources.infoPanel.promptAnalyzing', 'Analyzing...')}
+        {genTask?.progress ? (
+          <span className="ml-auto text-[10px] text-ink-500">{genTask.progress}%</span>
+        ) : null}
+      </div>
+      <div className="mt-2 h-1 bg-ink-800 rounded-full overflow-hidden">
+        <div
+          className="h-full rounded-full bg-indigo-500 transition-all duration-300"
+          style={{ width: `${Math.max(genTask?.progress ?? 0, 4)}%` }}
+        />
+      </div>
+      {genTask?.subtitle && (
+        <div className="mt-1 text-[10px] text-ink-600">{genTask.subtitle}</div>
+      )}
+    </div>
+  );
+
+  // Failure card — sits above the editors rather than replacing them, so a
+  // failed Generate never blocks writing the prompt by hand.
+  const errorCard = scopedError && !generating ? (
+    <div
+      role="alert"
+      className="mb-2 flex items-start gap-1.5 border border-red-400/30 rounded-[10px] bg-red-500/[.06] px-3 py-2.5"
+    >
+      <AlertTriangle size={12} className="mt-0.5 shrink-0 text-red-400" />
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] text-red-300">{scopedError.resolved.title}</div>
+        {Boolean(scopedError.resolved.hint) && (
+          <div className="mt-0.5 text-[10px] text-ink-400">{scopedError.resolved.hint}</div>
+        )}
+        {/* Only when the copy above REPLACED the raw text — without a resolved
+            code the title already IS the raw error, and a disclosure would
+            just repeat it. */}
+        {Boolean(scopedError.resolved.code) && Boolean(scopedError.raw) && (
+          <details className="mt-1">
+            <summary className="cursor-pointer text-[9.5px] text-ink-600 hover:text-ink-400">
+              {t('common.details', 'Details')}
+            </summary>
+            <div className="mt-1 font-mono text-[9.5px] text-ink-600 break-words">
+              {scopedError.raw}
+            </div>
+          </details>
+        )}
+      </div>
+      <button
+        onClick={() => setGenError(null)}
+        aria-label={t('common.dismiss', 'Dismiss')}
+        className="text-ink-600 hover:text-ink-300 transition-colors"
+      >
+        <X size={11} />
+      </button>
+    </div>
+  ) : null;
+
   // Both empty states (no data at all, whether or not a trigger tag is
   // already assigned) collapse into the same first-class block: a section
   // header plus a dashed "+ Add Prompt" pill.
+  //
+  // Generate sits NEXT TO that pill rather than only inside the expanded
+  // editor. An asset with no prompt yet is exactly the case where "reverse-
+  // engineer it for me" is the answer, and burying it one click deep is what
+  // made the album's per-slide Generate read as missing.
   if (!expanded && !dataPresent) {
     return (
       <div className={sectionClassName}>
-        <div className="mb-2">{sectionHeader}</div>
-        <button
-          onClick={expand}
-          className="border border-dashed border-ink-600 rounded-full px-3 py-1 text-xs text-ink-400 hover:text-[var(--accent-text)] hover:border-[var(--accent-border)] hover:bg-[var(--accent-soft)] transition-colors"
-        >
-          + {t('resources.infoPanel.addPrompt', 'Add Prompt')}
-        </button>
+        <div className="flex items-center justify-between mb-2">
+          {sectionHeader}
+          {generateButton}
+        </div>
+        {errorCard}
+        {generating ? (
+          analyzingCard
+        ) : (
+          <button
+            onClick={expand}
+            className="border border-dashed border-ink-600 rounded-full px-3 py-1 text-xs text-ink-400 hover:text-[var(--accent-text)] hover:border-[var(--accent-border)] hover:bg-[var(--accent-soft)] transition-colors"
+          >
+            + {t('resources.infoPanel.addPrompt', 'Add Prompt')}
+          </button>
+        )}
       </div>
     );
   }
@@ -362,43 +515,6 @@ export function PromptSection({
   const otherSideNeg = lang === 'zh' ? resource.gen_prompt_negative : resource.gen_prompt_negative_zh;
   const copyValue = showJson ? (resource.gen_prompt_json || '') : posValue;
 
-  // Failure card — sits above the editors rather than replacing them, so a
-  // failed Generate never blocks writing the prompt by hand.
-  const errorCard = genError && !generating ? (
-    <div
-      role="alert"
-      className="mb-2 flex items-start gap-1.5 border border-red-400/30 rounded-[10px] bg-red-500/[.06] px-3 py-2.5"
-    >
-      <AlertTriangle size={12} className="mt-0.5 shrink-0 text-red-400" />
-      <div className="min-w-0 flex-1">
-        <div className="text-[11px] text-red-300">{genError.resolved.title}</div>
-        {Boolean(genError.resolved.hint) && (
-          <div className="mt-0.5 text-[10px] text-ink-400">{genError.resolved.hint}</div>
-        )}
-        {/* Only when the copy above REPLACED the raw text — without a resolved
-            code the title already IS the raw error, and a disclosure would
-            just repeat it. */}
-        {Boolean(genError.resolved.code) && Boolean(genError.raw) && (
-          <details className="mt-1">
-            <summary className="cursor-pointer text-[9.5px] text-ink-600 hover:text-ink-400">
-              {t('common.details', 'Details')}
-            </summary>
-            <div className="mt-1 font-mono text-[9.5px] text-ink-600 break-words">
-              {genError.raw}
-            </div>
-          </details>
-        )}
-      </div>
-      <button
-        onClick={() => setGenError(null)}
-        aria-label={t('common.dismiss', 'Dismiss')}
-        className="text-ink-600 hover:text-ink-300 transition-colors"
-      >
-        <X size={11} />
-      </button>
-    </div>
-  ) : null;
-
   return (
     <div className={sectionClassName}>
       <div className="flex items-center justify-between mb-1">
@@ -407,20 +523,13 @@ export function PromptSection({
           {hasJson ? resultTabs : langToggle}
         </div>
         <div className="flex items-center gap-2.5">
-          {canGenerate && (
-            <button onClick={handleGenerate} disabled={generating}
-              title={t('resources.infoPanel.generatePromptHint', 'Reverse-engineer the prompt from this asset (a video uses its cover)')}
-              className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-[var(--accent-text)] transition-colors disabled:opacity-50">
-              {generating ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}{' '}
-              {t('resources.infoPanel.generatePrompt', 'Generate')}
-            </button>
-          )}
+          {generateButton}
           {!canGenerate && generateUnavailableHint && (
             <span className="text-[10px] text-ink-500" data-testid="generate-unavailable-hint">
               {generateUnavailableHint}
             </span>
           )}
-          {Boolean(otherSidePos || otherSideNeg) && (
+          {canTranslate && Boolean(otherSidePos || otherSideNeg) && (
             <button onClick={() => onTranslate(lang)} disabled={translating}
               title={t('resources.infoPanel.translatePromptHint', 'Translate from the other language')}
               className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-[var(--accent-text)] transition-colors disabled:opacity-50">
@@ -444,24 +553,7 @@ export function PromptSection({
       {errorCard}
 
       {generating ? (
-        <div className="border border-ink-700 rounded-[10px] bg-ink-800/40 px-3 py-2.5">
-          <div className="flex items-center gap-1.5 text-[11px] text-ink-300">
-            <Loader2 size={12} className="animate-spin text-[var(--accent-text)]" />
-            {t('resources.infoPanel.promptAnalyzing', 'Analyzing...')}
-            {genTask?.progress ? (
-              <span className="ml-auto text-[10px] text-ink-500">{genTask.progress}%</span>
-            ) : null}
-          </div>
-          <div className="mt-2 h-1 bg-ink-800 rounded-full overflow-hidden">
-            <div
-              className="h-full rounded-full bg-indigo-500 transition-all duration-300"
-              style={{ width: `${Math.max(genTask?.progress ?? 0, 4)}%` }}
-            />
-          </div>
-          {genTask?.subtitle && (
-            <div className="mt-1 text-[10px] text-ink-600">{genTask.subtitle}</div>
-          )}
-        </div>
+        analyzingCard
       ) : showJson ? (
         <div>
           {Boolean(category || aspectRatio) && (
