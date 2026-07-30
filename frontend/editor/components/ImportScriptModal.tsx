@@ -169,7 +169,7 @@ export function ImportScriptModal({ projectId, onClose, defaultName }: Props) {
               onClick={() => setTab(key)}
               className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 tab === key
-                  ? 'bg-ink-700 text-ink-100'
+                  ? 'bg-indigo-600 text-white'
                   : 'text-ink-400 hover:text-ink-200'
               }`}
             >
