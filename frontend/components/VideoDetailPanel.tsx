@@ -27,6 +27,9 @@ import { TaskErrorNotice } from './TaskErrorNotice';
 interface VideoDetailPanelProps {
   video: Video;
   resourceId?: string;
+  /** Album detail only: the slide the viewer is showing. Forwarded to
+   *  MediaCard so the Overview tab's Prompt block edits that slide's entry. */
+  slide?: { name: string; index: number; count: number };
   onClose: () => void;
   onUpdate?: (id: string, updates: Partial<Video>) => void;
   onDelete?: (id: string, deleteFiles: boolean) => Promise<void>;
@@ -106,6 +109,7 @@ const downloadTextFile = (content: string, filename: string, mimeType: string) =
 export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
   video,
   resourceId,
+  slide,
   onClose,
   onUpdate,
   onDelete,
@@ -546,6 +550,7 @@ export const VideoDetailPanel: React.FC<VideoDetailPanelProps> = ({
             mobileActions={mobileActions}
             compact={compact}
             bare={island}
+            slide={slide}
           />
         )}
 

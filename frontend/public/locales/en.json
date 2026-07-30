@@ -984,7 +984,6 @@
       "generatePrompt": "Generate",
       "generatePromptHint": "Reverse-engineer the prompt from this asset (a video uses its cover)",
       "generatePerSlideHint": "Galleries: open the item and generate per slide",
-      "generatePerSlideHintDetail": "Per-slide ⚡ Generate is on the image, below each slide",
       "generateFromImage": "Generate from Image",
       "promptGenerating": "Generating prompt from image...",
       "promptGenerated": "Prompt generated",
@@ -1011,21 +1010,9 @@
       "generateSimilarNeedsPrompt": "Generate a prompt first, then try Generate Similar"
     },
     "slidePrompt": {
-      "addPrompt": "Add prompt for this slide",
-      "loadFailed": "Failed to load prompt for this slide",
-      "expand": "Expand",
-      "copy": "Copy",
-      "save": "Save",
-      "saveFailed": "Failed to save",
-      "positivePlaceholder": "Prompt for this slide...",
-      "negative": "Negative",
-      "negativePlaceholder": "Negative prompt (what to avoid)...",
       "close": "Close",
-      "generate": "Generate",
       "generateHint": "Reverse-engineer the prompt from this slide",
-      "regenerateHint": "Regenerate — replaces this slide’s prompt",
-      "generating": "Analyzing slide...",
-      "generateFailed": "Failed to generate prompt"
+      "slideBadge": "Slide {{index}}/{{count}}"
     },
     "folderInfoPanel": {
       "title": "Folder Info",

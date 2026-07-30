@@ -69,6 +69,13 @@ interface MediaCardProps {
    * not double-boxed). Defaults false so every classic caller is unchanged.
    */
   bare?: boolean;
+  /**
+   * Album detail only: the slide the viewer is currently showing. Switches the
+   * Prompt block into per-slide mode so paging through the album swaps which
+   * slide's prompt this block reads and writes (2026-07-29 — replaces the
+   * on-image overlay strip). Unset everywhere else.
+   */
+  slide?: { name: string; index: number; count: number };
 }
 
 // Helper to generate consistent colors from strings (Shared logic)
@@ -152,6 +159,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   mobileActions,
   compact = false,
   bare = false,
+  slide,
 }) => {
   const { t } = useTranslation();
   const { mediaToken } = useAuth();
@@ -955,10 +963,9 @@ export const MediaCard: React.FC<MediaCardProps> = ({
                 resourceId={resourceId}
                 onTagsChanged={refetchResourceTags}
                 sectionClassName="px-4"
-                galleryHint={t(
-                  'resources.infoPanel.generatePerSlideHintDetail',
-                  'Per-slide ⚡ Generate is on the image, below each slide',
-                )}
+                slideName={slide?.name}
+                slideIndex={slide?.index}
+                slideCount={slide?.count}
               />
             </div>
           )}

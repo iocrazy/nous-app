@@ -184,17 +184,20 @@ export const GalleryViewer: React.FC<GalleryViewerProps> = ({ galleryId, mediaTo
           per-image prompt is just that child's own gen_prompt* columns via
           the existing ResourcePromptSection (spec 2026-07-28-prompt-dataline
           §2: "zero new storage" for upload galleries). Floats OVER the image
-          (same pattern as SlidePlayer's SlidePromptStrip) instead of
-          reserving permanent layout height: `absolute`, so the pager keeps
-          its full-bleed image area for everyone who never touches prompts.
-          Collapsed = a small corner pill (no layout cost either way);
+          instead of reserving permanent layout height: `absolute`, so the
+          pager keeps its full-bleed image area for everyone who never touches
+          prompts. Collapsed = a small corner pill (no layout cost either way);
           expanded = a bottom-anchored overlay card, `inset-x-3 bottom-3`
-          inside this same `relative overflow-hidden` container — mirrors
-          SlidePlayer's expanded editor card, which was checked against the
-          same clipping concern (stays within bounds by construction: it's
-          anchored to the edges of the container that clips it, never sized
-          past them). Lazy-mounted (only while `promptOpen`) so browsing the
-          gallery never pays for the resource fetch unless requested. */}
+          inside this same `relative overflow-hidden` container (stays within
+          bounds by construction: it's anchored to the edges of the container
+          that clips it, never sized past them). Lazy-mounted (only while
+          `promptOpen`) so browsing the gallery never pays for the resource
+          fetch unless requested.
+
+          NOTE this is the UPLOAD gallery, whose children are real resources.
+          Download albums went the other way on 2026-07-29: no overlay at all,
+          the detail page's right-hand Prompt block follows the slide instead
+          (ResourcePromptSection slide mode). Worth revisiting for symmetry. */}
       {promptOpen ? (
         <div className="absolute inset-x-3 bottom-3 z-20 max-h-[70%] overflow-y-auto bg-ink-900/95 backdrop-blur border border-ink-700 rounded-xl shadow-lg">
           <div className="flex justify-end px-2 pt-1.5">

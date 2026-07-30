@@ -3,7 +3,6 @@ import { ChevronLeft, ChevronRight, Volume2, VolumeX, Loader2, ImageOff } from '
 import Loading from './common/Loading';
 import { getApiUrl } from '../utils/apiConfig';
 import { getAuthHeaders } from '../services/parserService';
-import { SlidePromptStrip } from './SlidePromptStrip';
 
 interface Slide {
   name: string;
@@ -18,13 +17,16 @@ interface SlidePlayerProps {
   mediaId: string;
   mediaToken?: string;
   downloadStatus?: string; // 'pending' | 'downloading' | 'completed' | 'failed'
-  /** resources.id for this album (parsed_media→resources link). The
-   *  per-slide prompt strip only mounts when this is present — SharePage's
-   *  unauthenticated preview doesn't pass it, so it stays edit-free there. */
-  resourceId?: string;
+  /**
+   * Reports which slide is on screen, so a host can follow along — the detail
+   * page uses it to point its right-hand Prompt block at the current slide's
+   * entry. Fires once for slide 0 as soon as the list lands, then on every
+   * navigation. Hosts that don't care (SharePage) leave it unset.
+   */
+  onSlideChange?: (slideName: string, index: number, total: number) => void;
 }
 
-export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, downloadStatus, resourceId }) => {
+export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, downloadStatus, onSlideChange }) => {
   const [slides, setSlides] = useState<Slide[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -114,6 +116,14 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [goNext, goPrev]);
+
+  // Announce the visible slide (including the initial one, once the list
+  // resolves). Guarded on the slide actually existing so an empty / failed
+  // album never reports a phantom name.
+  useEffect(() => {
+    const slide = slides[currentIndex];
+    if (slide) onSlideChange?.(slide.name, currentIndex, slides.length);
+  }, [slides, currentIndex, onSlideChange]);
 
   // Sync audio mute state
   useEffect(() => {
@@ -289,12 +299,6 @@ export const SlidePlayer: React.FC<SlidePlayerProps> = ({ mediaId, mediaToken, d
           {currentIndex + 1} / {slides.length}
         </p>
       </div>
-
-      {/* Per-slide prompt strip — sibling of the bottom bar above, not
-          nested in it, so it doesn't disturb the dots/mute/counter layout. */}
-      {resourceId && (
-        <SlidePromptStrip resourceId={resourceId} slideName={currentSlide.name} />
-      )}
 
       {/* Background music audio element */}
       <audio

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft, Loader2, FileQuestion, UserRound,
   Share2, Download, MoreHorizontal, ExternalLink, Copy, Trash2,
@@ -64,6 +64,22 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
   // `hidden sm:flex` at 640px while `isMobile` is the md breakpoint at 767px — a
   // mismatch in the 640–767px band would double-mount VideoDetailPanel).
   const islandDesktop = !isMobile;
+
+  // Which album slide the viewer is showing. Lifted here because the two ends
+  // are in different subtrees: SlidePlayer (stage) reports it, the right-hand
+  // Prompt block (inside VideoDetailPanel → MediaCard) follows it. Both the
+  // island-desktop and the classic/mobile layouts render the SAME `playerSwitch`
+  // and `detailPanel` consts below, so wiring it once covers every branch.
+  const [currentSlide, setCurrentSlide] = useState<
+    { name: string; index: number; count: number } | null
+  >(null);
+  const handleSlideChange = useCallback((name: string, index: number, count: number) => {
+    setCurrentSlide((prev) =>
+      prev && prev.name === name && prev.index === index && prev.count === count
+        ? prev
+        : { name, index, count },
+    );
+  }, []);
 
   // iOS WebKit (standalone PWA): safe-area insets / viewport can stay unsettled
   // until the first scroll, leaving the header tucked under the status bar until
@@ -404,7 +420,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
       </div>
     )
   ) : video.media_type && isAlbumType(video.media_type) ? (
-    <SlidePlayer mediaId={String(video.id)} mediaToken={mediaToken ?? undefined} downloadStatus={video.image_download_status || video.video_download_status || undefined} resourceId={resourceId || undefined} />
+    <SlidePlayer mediaId={String(video.id)} mediaToken={mediaToken ?? undefined} downloadStatus={video.image_download_status || video.video_download_status || undefined} onSlideChange={handleSlideChange} />
   ) : (hlsUrl || getVideoUrl(video, mediaToken ?? undefined)) ? (
     <VideoPlayer
       src={hlsUrl || getVideoUrl(video, mediaToken ?? undefined)!}
@@ -530,6 +546,7 @@ export function DownloadDetailPage({ resourceId: propResourceId, mediaId: propMe
     <VideoDetailPanel
       video={video}
       resourceId={resourceId || undefined}
+      slide={currentSlide ?? undefined}
       playerCurrentTime={currentTime}
       sodaTheme={sodaTheme}
       compact={isMobile && isAudio}
