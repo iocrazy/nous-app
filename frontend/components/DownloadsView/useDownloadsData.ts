@@ -16,7 +16,17 @@ export interface ResourceData {
   transcript_status?: string;
   summary_status?: string;
   visual_analysis_status?: string;
+  // Does this resource carry an AI prompt? Drives the card's Prompt icon.
+  has_prompt?: boolean;
 }
+
+// Prompt-presence filter for the probe query below. `like._*` compiles to
+// LIKE '_%' — one char or more — so NULL and the '' that clearing a prompt
+// writes (PromptSection.commit sends value.trim()) both stay out. The jsonb
+// side mirrors it with <> '{}'. Same predicate the backend computes in SQL
+// (MediaRepository.has_prompt_expr); negative prompts deliberately excluded.
+const PROMPT_PRESENCE_FILTER =
+  'gen_prompt.like._*,gen_prompt_zh.like._*,slide_prompts.neq.{}';
 
 export function useResourceDataMap(libraryIds: string[]) {
   const [resourceDataMap, setResourceDataMap] = useState<Record<string, ResourceData>>({});
@@ -30,16 +40,39 @@ export function useResourceDataMap(libraryIds: string[]) {
     // gateway URL/header ceiling (Kong/nginx 502 at scale). Each chunk
     // returns ≤ chunk-size rows, so the 1000-row PostgREST cap is also
     // never hit. Run chunks in parallel and merge.
-    Promise.all(
-      chunked(libraryIds, PG_IN_CHUNK).map((ids) =>
-        supabase
-          .from('resources')
-          .select(
-            'id, media_id, notes, rating, transcript_status, summary_status, visual_analysis_status',
-          )
-          .in('media_id', ids),
+    const chunks = chunked(libraryIds, PG_IN_CHUNK);
+    Promise.all([
+      Promise.all(
+        chunks.map((ids) =>
+          supabase
+            .from('resources')
+            .select(
+              'id, media_id, notes, rating, transcript_status, summary_status, visual_analysis_status',
+            )
+            .in('media_id', ids),
+        ),
       ),
-    ).then((results) => {
+      // Prompt presence rides a separate media_id-only query on purpose:
+      // gen_prompt / gen_prompt_zh are capped at 20k chars EACH, so selecting
+      // the text just to test whether it's there would let prompts dominate
+      // the page payload. This one returns only the ids that have one.
+      Promise.all(
+        chunks.map((ids) =>
+          supabase
+            .from('resources')
+            .select('media_id')
+            .in('media_id', ids)
+            .or(PROMPT_PRESENCE_FILTER),
+        ),
+      ),
+    ]).then(([results, promptResults]) => {
+      const withPrompt = new Set<string>();
+      for (const { data, error } of promptResults) {
+        if (error || !data) continue;
+        for (const row of data) {
+          if (row.media_id) withPrompt.add(String(row.media_id));
+        }
+      }
       const map: Record<string, ResourceData> = {};
       for (const { data, error } of results) {
         if (error || !data) continue;
@@ -52,6 +85,7 @@ export function useResourceDataMap(libraryIds: string[]) {
               transcript_status: row.transcript_status ?? undefined,
               summary_status: row.summary_status ?? undefined,
               visual_analysis_status: row.visual_analysis_status ?? undefined,
+              has_prompt: withPrompt.has(String(row.media_id)),
             };
           }
         }
@@ -68,22 +102,29 @@ export function useResourceDataMap(libraryIds: string[]) {
     return map;
   }, [resourceDataMap]);
 
-  // Per-media AI status map — passed to CompactMediaCard so the four AI
-  // icons (audio / transcript / summary / analysis) reflect the
-  // resource-level status. Without this the icons were stuck gray because
+  // Per-media AI status map — passed to CompactMediaCard so the five AI
+  // icons (audio / transcript / summary / analysis / prompt) reflect the
+  // resource-level state. Without this the icons were stuck gray because
   // the columns were removed from parsed_media in migration 075.
   const aiStatusMap = useMemo(() => {
     const map: Record<string, {
       transcript_status?: string;
       summary_status?: string;
       visual_analysis_status?: string;
+      has_prompt?: boolean;
     }> = {};
     for (const [mediaId, rd] of Object.entries(resourceDataMap)) {
-      if (rd.transcript_status || rd.summary_status || rd.visual_analysis_status) {
+      if (
+        rd.transcript_status ||
+        rd.summary_status ||
+        rd.visual_analysis_status ||
+        rd.has_prompt
+      ) {
         map[mediaId] = {
           transcript_status: rd.transcript_status,
           summary_status: rd.summary_status,
           visual_analysis_status: rd.visual_analysis_status,
+          has_prompt: rd.has_prompt,
         };
       }
     }

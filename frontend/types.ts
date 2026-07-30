@@ -73,6 +73,12 @@ export interface ParsedMedia {
   summary_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
   visual_analysis_status?: 'none' | 'pending' | 'processing' | 'completed' | 'failed';
 
+  // Does the owning resource carry an AI prompt? Computed server-side
+  // (MediaRepository.has_prompt_expr) from gen_prompt / gen_prompt_zh /
+  // slide_prompts, so the card's Prompt icon doesn't have to pull the
+  // prompt text (capped at 20k chars per column) for every row.
+  has_prompt?: boolean;
+
   // AI Generated Content (legacy)
   ai_extract_text?: string;
   ai_rewrite_text?: string;

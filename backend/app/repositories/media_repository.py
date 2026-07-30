@@ -42,8 +42,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
+from sqlalchemy import and_, cast
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, insert, or_, select, update
+from sqlalchemy import func, insert, literal, or_, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.core.enums import DownloadStatus
 from app.db.pg_coerce import coerce_datetime_strings
@@ -133,6 +135,64 @@ def _pm_card_dict(row: Any) -> Dict[str, Any]:
     return {col: _plain(getattr(row, col)) for col in _CARD_COLS}
 
 
+def has_prompt_expr():
+    """SQL boolean — does the joined ``resources`` row carry an AI prompt?
+
+    True when the positive prompt (EN or ZH) holds non-blank text, or the
+    per-slide prompt map is a non-empty JSON object. ``btrim(coalesce(...))``
+    handles both NULL and the empty string the prompt editor writes when the
+    user clears a field (``PromptSection.commit`` sends ``value.trim()``, so a
+    cleared prompt lands as ``''``, not NULL — a bare NOT NULL test would
+    light the card icon on an empty prompt).
+
+    Negative prompts are deliberately NOT part of the signal: a negative-only
+    asset has nothing to show as "has a prompt".
+
+    A function, not a module constant, so every call site gets its own clause
+    tree (a shared one would be re-parented across statements).
+
+    Column names verified against information_schema on 2026-07-29:
+    ``resources.gen_prompt`` / ``gen_prompt_zh`` (text), ``slide_prompts``
+    (jsonb).
+    """
+    empty_jsonb = cast(literal("{}"), JSONB)
+    return or_(
+        func.btrim(func.coalesce(Resources.gen_prompt, "")) != "",
+        func.btrim(func.coalesce(Resources.gen_prompt_zh, "")) != "",
+        and_(
+            Resources.slide_prompts.isnot(None),
+            Resources.slide_prompts != empty_jsonb,
+        ),
+    )
+
+
+def _card_join_columns() -> tuple:
+    """Column list for the resources⨝parsed_media card projection.
+
+    ``get_user_media_list`` and ``search`` return the SAME shape — the
+    CARD_SELECT columns plus two per-user overlays: ``resource_id`` and the
+    computed ``has_prompt``. Both take the projection from here (and the row
+    unpacking from ``_card_row``) so the two can't drift apart.
+
+    ``has_prompt`` is an overlay, NOT a ``parsed_media`` column — it must
+    never be added to ``CARD_SELECT``, whose names are read off the
+    ``ParsedMedia`` ORM object by ``_pm_card_dict``.
+    """
+    return (
+        Resources.id.label("__resource_id"),
+        has_prompt_expr().label("__has_prompt"),
+        ParsedMedia,
+    )
+
+
+def _card_row(resource_id: Any, has_prompt: Any, media: Any) -> Dict[str, Any]:
+    """One ``_card_join_columns()`` result row → the card dict callers expect."""
+    card = _pm_card_dict(media)
+    card["resource_id"] = resource_id
+    card["has_prompt"] = bool(has_prompt)
+    return card
+
+
 class MediaRepository(AsyncpgRepository):
     """Media Repository for the ``parsed_media`` table (async, ORM-backed).
 
@@ -159,6 +219,10 @@ class MediaRepository(AsyncpgRepository):
     # PostgREST rejects the whole query with a 400 and the list / search
     # endpoints return empty. Verified against information_schema on
     # 2026-04-24.
+    #
+    # Per-user fields that live on ``resources`` (``resource_id``,
+    # ``has_prompt``) are OVERLAYS added by ``_card_row`` — they belong in
+    # ``_card_join_columns``, never in this string.
     CARD_SELECT = (
         "id, platform_id, source_platform, "
         "title, author, description, "
@@ -420,16 +484,18 @@ class MediaRepository(AsyncpgRepository):
         ascending: bool = False,
     ) -> List[Dict[str, Any]]:
         """Per-user media list. JOINs resources ⨝ parsed_media and returns
-        CARD_SELECT-shaped dicts with ``resource_id`` overlaid — preserves
-        the embedded-PostgREST shape callers expect. Ordering is on the
-        ``resources`` row (library add-time), matching legacy semantics."""
+        CARD_SELECT-shaped dicts with ``resource_id`` + ``has_prompt``
+        overlaid — preserves the embedded-PostgREST shape callers expect.
+        Ordering is on the ``resources`` row (library add-time), matching
+        legacy semantics. Projection shared with ``search`` via
+        ``_card_join_columns`` — keep the two in sync."""
         try:
             col_name = _safe_order(order_by, _SAFE_RESOURCES_ORDER_COLS)
             col = getattr(Resources, col_name)
             order_clause = col.asc() if ascending else col.desc()
             async with read_scope() as session:
                 result = await session.execute(
-                    select(Resources.id.label("__resource_id"), ParsedMedia)
+                    select(*_card_join_columns())
                     .join(ParsedMedia, ParsedMedia.id == Resources.media_id)
                     .where(Resources.creator_id == user_id)
                     .where(Resources.source_type == "web")
@@ -438,12 +504,7 @@ class MediaRepository(AsyncpgRepository):
                     .limit(limit)
                     .offset(skip)
                 )
-                videos: List[Dict[str, Any]] = []
-                for resource_id, media in result.all():
-                    card = _pm_card_dict(media)
-                    card["resource_id"] = resource_id
-                    videos.append(card)
-                return videos
+                return [_card_row(*row) for row in result.all()]
         except Exception as e:
             logger.error(f"Failed to get user media list: {e}")
             return []
@@ -465,14 +526,15 @@ class MediaRepository(AsyncpgRepository):
     ) -> List[Dict[str, Any]]:
         """User-scoped media search. JOINs resources ⨝ parsed_media and
         builds a parameterised WHERE from the optional filters. Same return
-        shape as ``get_user_media_list`` (CARD_SELECT columns + resource_id).
+        shape as ``get_user_media_list`` (CARD_SELECT columns + resource_id +
+        has_prompt) — both take the projection from ``_card_join_columns``.
 
         ``category`` is accepted for signature parity but ignored — legacy
         never wired it to a WHERE clause (tags live on a join table this
         query doesn't touch). Datetimes bound as ``datetime`` directly."""
         try:
             stmt = (
-                select(Resources.id.label("__resource_id"), ParsedMedia)
+                select(*_card_join_columns())
                 .join(ParsedMedia, ParsedMedia.id == Resources.media_id)
                 .where(Resources.creator_id == user_id)
                 .where(Resources.source_type == "web")
@@ -502,12 +564,7 @@ class MediaRepository(AsyncpgRepository):
 
             async with read_scope() as session:
                 result = await session.execute(stmt)
-                videos: List[Dict[str, Any]] = []
-                for resource_id, media in result.all():
-                    card = _pm_card_dict(media)
-                    card["resource_id"] = resource_id
-                    videos.append(card)
-                return videos
+                return [_card_row(*row) for row in result.all()]
         except Exception as e:
             logger.error(f"搜索视频失败: {e}")
             return []

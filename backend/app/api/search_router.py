@@ -31,6 +31,11 @@ async def _fetch_user_resources_by_media_id(
       * AI status fields (``transcript_status`` / ``summary_status`` /
         ``visual_analysis_status``) so the card's AI dot icons reflect
         the per-user processing state instead of always rendering grey.
+      * ``has_prompt`` — same signal the library list overlays, so the
+        card's Prompt icon lights on search hits too. Computed in SQL
+        (``has_prompt_expr``) rather than selecting the prompt text: the
+        columns are capped at 20 000 chars each and would dominate the
+        payload for a page of hits.
 
     Empty ``media_ids`` short-circuits to avoid an unnecessary query.
     """
@@ -41,6 +46,7 @@ async def _fetch_user_resources_by_media_id(
     from app.db.session import read_scope
     from app.models import Resources
     from app.repositories._orm_helpers import _plain
+    from app.repositories.media_repository import has_prompt_expr
 
     async with read_scope() as session:
         result = await session.execute(
@@ -50,6 +56,7 @@ async def _fetch_user_resources_by_media_id(
                 Resources.transcript_status,
                 Resources.summary_status,
                 Resources.visual_analysis_status,
+                has_prompt_expr().label("has_prompt"),
             )
             .where(Resources.creator_id == user_id)
             .where(Resources.source_type == "web")
@@ -67,6 +74,7 @@ async def _fetch_user_resources_by_media_id(
             "transcript_status": _plain(row.get("transcript_status")),
             "summary_status": _plain(row.get("summary_status")),
             "visual_analysis_status": _plain(row.get("visual_analysis_status")),
+            "has_prompt": bool(row.get("has_prompt")),
         }
     return out
 

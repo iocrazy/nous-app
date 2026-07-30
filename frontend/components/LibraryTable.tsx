@@ -6,16 +6,28 @@ import { Video } from '../types';
 import {
   Video as VideoIcon, Image as ImageIcon, Music, Tag, Check, X, ExternalLink,
   Heart, MessageCircle, Share2, ArrowUpDown, ArrowUp, ArrowDown, Clock, Copy, Play,
-  FileText, Sparkles, Eye
+  FileText, Sparkles, BookOpen, ScanEye
 } from 'lucide-react';
 import { isVideoType, getAwemeTypeLabel, getVideoUrl, getCoverUrl } from '../utils/awemeType';
 import { pickCoverFrame } from '../utils/coverSource';
 import { useAuth } from '../contexts/AuthContext';
 
+interface AIStatusEntry {
+  transcript_status?: string;
+  summary_status?: string;
+  visual_analysis_status?: string;
+  has_prompt?: boolean;
+}
+
 interface LibraryTableProps {
   data: Video[];
   onUpdate: (id: string, updates: Partial<Video>) => void;
   onItemClick?: (item: Video) => void;
+  /** Per-media AI state keyed by parsed_media id, same map CompactMediaCard
+   *  takes. These columns live on `resources` (migration 067/075 moved them
+   *  off parsed_media), so without this the row's AI icons read undefined
+   *  off the media row and render permanently grey. */
+  aiStatusMap?: Record<string, AIStatusEntry>;
 }
 
 type SortKey = keyof Video | 'published_at' | 'created_at';
@@ -46,6 +58,12 @@ const getTagStyle = (tag: string) => {
   return styles[Math.abs(hash) % styles.length];
 };
 
+// Prompt is a has-it/doesn't, not a pipeline status, so it gets a plain
+// on/off instead of getAIStatusClass's state colours. Accent token matches
+// the PromptBadge on the uploads grid.
+const getPromptClass = (hasPrompt?: boolean): string =>
+  hasPrompt ? 'text-[var(--accent-text)]' : 'text-ink-600';
+
 // Helper to get AI status icon styling
 const getAIStatusClass = (status?: string): string => {
   switch (status) {
@@ -60,11 +78,23 @@ const getAIStatusClass = (status?: string): string => {
   }
 };
 
-export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onItemClick }) => {
+export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onItemClick, aiStatusMap }) => {
   const { mediaToken } = useAuth();
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedShareId, setCopiedShareId] = useState<string | null>(null);
   const [activeMedia, setActiveMedia] = useState<{type: 'video' | 'image', url: string} | null>(null);
+
+  // Resource-level AI state wins; the media row's own fields are the fallback
+  // for callers that hydrate them (search hits, the backend card projection).
+  const aiStateOf = (item: Video): AIStatusEntry => {
+    const fromMap = item.id ? aiStatusMap?.[item.id] : undefined;
+    return {
+      transcript_status: fromMap?.transcript_status ?? item.transcript_status,
+      summary_status: fromMap?.summary_status ?? item.summary_status,
+      visual_analysis_status: fromMap?.visual_analysis_status ?? item.visual_analysis_status,
+      has_prompt: fromMap?.has_prompt ?? item.has_prompt ?? false,
+    };
+  };
 
   // HLS video refs
   const modalVideoRef = useRef<HTMLVideoElement>(null);
@@ -311,17 +341,25 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
       </div>
 
       {/* AI Status */}
-      <div className="flex items-center gap-2 px-1">
-        <div className="flex items-center gap-1.5" title={`Transcript: ${item.transcript_status || 'pending'}`}>
-          <FileText size={12} className={getAIStatusClass(item.transcript_status)} />
-        </div>
-        <div className="flex items-center gap-1.5" title={`Summary: ${item.summary_status || 'pending'}`}>
-          <Sparkles size={12} className={getAIStatusClass(item.summary_status)} />
-        </div>
-        <div className="flex items-center gap-1.5" title={`Visual Analysis: ${item.visual_analysis_status || 'pending'}`}>
-          <Eye size={12} className={getAIStatusClass(item.visual_analysis_status)} />
-        </div>
-      </div>
+      {(() => {
+        const ai = aiStateOf(item);
+        return (
+          <div className="flex items-center gap-2 px-1">
+            <div className="flex items-center gap-1.5" title={`Transcript: ${ai.transcript_status || 'pending'}`}>
+              <FileText size={12} className={getAIStatusClass(ai.transcript_status)} />
+            </div>
+            <div className="flex items-center gap-1.5" title={`Summary: ${ai.summary_status || 'pending'}`}>
+              <BookOpen size={12} className={getAIStatusClass(ai.summary_status)} />
+            </div>
+            <div className="flex items-center gap-1.5" title={`Visual Analysis: ${ai.visual_analysis_status || 'pending'}`}>
+              <ScanEye size={12} className={getAIStatusClass(ai.visual_analysis_status)} />
+            </div>
+            <div className="flex items-center gap-1.5" title={`Prompt: ${ai.has_prompt ? 'yes' : 'none'}`}>
+              <Sparkles size={12} className={getPromptClass(ai.has_prompt)} />
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Tags */}
       {item.tags && item.tags.length > 0 && (
@@ -487,11 +525,28 @@ export const LibraryTable: React.FC<LibraryTableProps> = ({ data, onUpdate, onIt
 
                 {/* AI Status */}
                 <td className="px-4 py-4">
-                  <div className="flex items-center gap-2">
-                    <FileText size={14} className={getAIStatusClass(item.transcript_status)} title={`Transcript: ${item.transcript_status || 'pending'}`} />
-                    <Sparkles size={14} className={getAIStatusClass(item.summary_status)} title={`Summary: ${item.summary_status || 'pending'}`} />
-                    <Eye size={14} className={getAIStatusClass(item.visual_analysis_status)} title={`Visual Analysis: ${item.visual_analysis_status || 'pending'}`} />
-                  </div>
+                  {(() => {
+                    const ai = aiStateOf(item);
+                    return (
+                      // lucide icons take no `title` prop (it isn't in
+                      // LucideProps) — the tooltip belongs on a wrapper, same
+                      // as the grid variant above.
+                      <div className="flex items-center gap-2">
+                        <span title={`Transcript: ${ai.transcript_status || 'pending'}`}>
+                          <FileText size={14} className={getAIStatusClass(ai.transcript_status)} />
+                        </span>
+                        <span title={`Summary: ${ai.summary_status || 'pending'}`}>
+                          <BookOpen size={14} className={getAIStatusClass(ai.summary_status)} />
+                        </span>
+                        <span title={`Visual Analysis: ${ai.visual_analysis_status || 'pending'}`}>
+                          <ScanEye size={14} className={getAIStatusClass(ai.visual_analysis_status)} />
+                        </span>
+                        <span title={`Prompt: ${ai.has_prompt ? 'yes' : 'none'}`}>
+                          <Sparkles size={14} className={getPromptClass(ai.has_prompt)} />
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </td>
 
                 {/* Content Column with Copy Interaction */}

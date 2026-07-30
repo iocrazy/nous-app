@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { Video } from '../types';
-import { Video as VideoIcon, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check, AudioLines, Music, FileText, Sparkles, Eye } from 'lucide-react';
+import { Video as VideoIcon, Image as ImageIcon, Heart, Play, MessageCircle, Share2, Bookmark, User, ChevronLeft, ChevronRight, Users, Check, AudioLines, Music, FileText, Sparkles, BookOpen, ScanEye } from 'lucide-react';
 import { isVideoType, getCoverUrl, getVideoUrl } from '../utils/awemeType';
 import { pickCoverFrame } from '../utils/coverSource';
 import { getPreviewSpriteUrl } from '../services/resourceService';
@@ -31,7 +31,7 @@ interface CompactMediaCardProps {
   onToggleSelect?: (e: React.MouseEvent) => void;
   forceShowCheckbox?: boolean;
   resourceId?: string;
-  aiStatus?: { transcript_status?: string; summary_status?: string; visual_analysis_status?: string };
+  aiStatus?: { transcript_status?: string; summary_status?: string; visual_analysis_status?: string; has_prompt?: boolean };
 }
 
 // Helper to get AI status icon styling
@@ -407,11 +407,25 @@ export const CompactMediaCard: React.FC<CompactMediaCardProps> = ({ data, onClic
             <FileText size={11} className={getAIStatusClass(aiStatus?.transcript_status || data.transcript_status, 'text-indigo-400')} />
           </div>
           <div title={`Summary: ${aiStatus?.summary_status || data.summary_status || 'none'}`}>
-            <Sparkles size={11} className={getAIStatusClass(aiStatus?.summary_status || data.summary_status, 'text-amber-400')} />
+            <BookOpen size={11} className={getAIStatusClass(aiStatus?.summary_status || data.summary_status, 'text-amber-400')} />
           </div>
           <div title={`Analysis: ${aiStatus?.visual_analysis_status || data.visual_analysis_status || 'none'}`}>
-            <Eye size={11} className={getAIStatusClass(aiStatus?.visual_analysis_status || data.visual_analysis_status, 'text-violet-400')} />
+            <ScanEye size={11} className={getAIStatusClass(aiStatus?.visual_analysis_status || data.visual_analysis_status, 'text-violet-400')} />
           </div>
+          {/* Prompt — not a pipeline status but a has-it/doesn't, so it's a
+              plain on/off rather than a getAIStatusClass state. Sparkles +
+              accent token match the PromptBadge on the uploads grid. */}
+          {(() => {
+            const hasPrompt = aiStatus?.has_prompt ?? data.has_prompt ?? false;
+            return (
+              <div title={`Prompt: ${hasPrompt ? 'yes' : 'none'}`}>
+                <Sparkles
+                  size={11}
+                  className={hasPrompt ? 'text-[var(--accent-text)]' : 'text-ink-600'}
+                />
+              </div>
+            );
+          })()}
         </div>
 
         {/* Stats Grid */}
