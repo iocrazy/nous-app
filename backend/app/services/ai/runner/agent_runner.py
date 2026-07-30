@@ -84,6 +84,46 @@ SUPPORTED_TOOLS: frozenset[str] = frozenset(
 )
 
 
+_IMG_PROMOTED_NOTE = (
+    "[image content delivered as an image part in the following user message]"
+)
+_IMG_OMITTED_NOTE = "[image omitted: the current model has no vision capability]"
+
+
+def _image_blocks(result: Any) -> list[dict]:
+    """Usable image_url blocks (data:/http(s) url) inside a tool result's
+    ``content`` list. Anything else — error dicts, text content, relative
+    URLs no provider could fetch — yields []."""
+    if not isinstance(result, dict) or result.get("error"):
+        return []
+    content = result.get("content")
+    if not isinstance(content, list):
+        return []
+    out: list[dict] = []
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "image_url":
+            continue
+        url = str(block.get("url") or "")
+        if url.startswith(("data:", "http://", "https://")):
+            out.append(block)
+    return out
+
+
+def _strip_image_urls(result: dict, note: str) -> dict:
+    """Copy of ``result`` with image_url block urls replaced by ``note`` —
+    for the tool message, the tool_call trace and the transcript event, so
+    multi-MB base64 never rides anywhere except the promoted image part."""
+    content = [
+        (
+            {**b, "url": note}
+            if isinstance(b, dict) and b.get("type") == "image_url"
+            else b
+        )
+        for b in result.get("content") or []
+    ]
+    return {**result, "content": content}
+
+
 def _last_user_text(user_messages: list[dict]) -> str:
     """Last user-role message content as display text (P3 transcript).
 
@@ -195,6 +235,11 @@ class AgentRunner:
         # attachments. None means no @-referenced resources for this turn —
         # calls to ResourceFetch return a clear error instead of crashing.
         self.resource_fetch_handler: Optional[Any] = None
+        # Whether the turn's model accepts image parts. Set by the chat
+        # service (model_supports_vision) each turn; gates the promotion of
+        # image-bearing tool results into user-message image parts. Default
+        # False = old text-only behaviour.
+        self.vision_capable: bool = False
         # Spec-2: per-request FinishIssue handler. Injected by the chat service
         # only for issue-context turns; None on regular chat turns so a stray
         # FinishIssue call returns a clear "not available" result.
@@ -642,6 +687,23 @@ class AgentRunner:
                     else:
                         result = await self.delegate_tool.execute(args)
 
+                # Image promotion: vision models only see images in user
+                # messages — lift image blocks out of the tool result and
+                # strip the base64 from everything persisted (tool msg,
+                # trace, transcript event).
+                promoted_parts: list[dict] = []
+                if tool_name == "ResourceFetch":
+                    img_blocks = _image_blocks(result)
+                    if img_blocks:
+                        if self.vision_capable:
+                            promoted_parts = [
+                                {"type": "image_url", "image_url": {"url": b["url"]}}
+                                for b in img_blocks
+                            ]
+                            result = _strip_image_urls(result, _IMG_PROMOTED_NOTE)
+                        else:
+                            result = _strip_image_urls(result, _IMG_OMITTED_NOTE)
+
                 messages.append(
                     {
                         "role": "tool",
@@ -650,6 +712,19 @@ class AgentRunner:
                         "content": _json.dumps(result, ensure_ascii=False),
                     }
                 )
+                if promoted_parts:
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "[image content from ResourceFetch]",
+                                },
+                                *promoted_parts,
+                            ],
+                        }
+                    )
 
                 # Bugfix: trace this dispatch — same shape as run_turn's
                 # tool_call_trace (see extract_issue_outcome, which reads
@@ -1183,6 +1258,22 @@ class AgentRunner:
                     else:
                         result = await self.delegate_tool.execute(args)
 
+                # Image promotion (mirrors stream_turn): strip base64 BEFORE
+                # the trace/recorder capture the result; the pixels ride only
+                # in the injected user-message image part below.
+                promoted_parts: list[dict] = []
+                if tool_name == "ResourceFetch":
+                    img_blocks = _image_blocks(result)
+                    if img_blocks:
+                        if self.vision_capable:
+                            promoted_parts = [
+                                {"type": "image_url", "image_url": {"url": b["url"]}}
+                                for b in img_blocks
+                            ]
+                            result = _strip_image_urls(result, _IMG_PROMOTED_NOTE)
+                        else:
+                            result = _strip_image_urls(result, _IMG_OMITTED_NOTE)
+
                 # Trace for the chat UI. Done AFTER the dispatch so the
                 # result is captured. The result payload is already a
                 # plain dict from skill_tool / delegate_tool; we don't
@@ -1231,6 +1322,19 @@ class AgentRunner:
                         "content": json.dumps(result, ensure_ascii=False),
                     }
                 )
+                if promoted_parts:
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "[image content from ResourceFetch]",
+                                },
+                                *promoted_parts,
+                            ],
+                        }
+                    )
 
                 # Wave G (G3): if the guard says we're looping, inject
                 # ONE system warning into messages. Subsequent iterations

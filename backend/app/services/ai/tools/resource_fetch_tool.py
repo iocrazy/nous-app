@@ -89,22 +89,44 @@ async def _fetch_dispatch(
     row = rows[0]
     mime = (row.get("mime") or "").lower()
 
-    # Image
+    # Image — resolve the actual BYTES and inline them as a data URL.
+    # The pre-2026-07-30 shape minted a relative /api/v1/media/{id}?token=
+    # URL, which no external provider can fetch — and even if it could,
+    # the result rides in a role:tool message where vision pipelines never
+    # look. AgentRunner promotes data-URL blocks from this result into a
+    # user-message image part (see agent_runner image promotion), so the
+    # model actually sees the pixels. resolve_attachments handles all
+    # three file_path shapes (sb:// object store / shared-volume relative /
+    # public http) with the size cap and S3 timeout guards already proven
+    # on the chat-attachment path.
     if mime.startswith("image/"):
-        try:
-            import time
+        fp = row.get("file_path") or ""
+        if not fp:
+            return {"error": f"image resource {row['name']!r} has no file_path"}
 
-            from app.api.media_auth import _sign_token as _sign
+        from app.schemas.ai_library_chat import AttachmentRequest
+        from app.services.ai.chat.chat_attachment_resolver import (
+            resolve_attachments,
+        )
 
-            now = int(time.time())
-            expires_at = now + 4 * 3600
-            token = _sign(user_id, now, expires_at)
-            url = f"/api/v1/media/{resource_id}?token={token}"
-        except Exception as exc:
-            logger.warning(f"[resource_fetch] failed to mint media token: {exc!r}")
-            url = f"/api/v1/media/{resource_id}"
+        resolved = await resolve_attachments(
+            [AttachmentRequest(kind="image", url=fp, mime=mime)]
+        )
+        if not resolved.attachments:
+            reason = resolved.failures[0].reason if resolved.failures else "unknown"
+            logger.warning(
+                f"[resource_fetch] image {resource_id} unresolvable: {reason}"
+            )
+            return {"error": (f"image {row['name']!r} could not be loaded: {reason}")}
+        att = resolved.attachments[0]
         return {
-            "content": [{"type": "image_url", "url": url, "mime": mime}],
+            "content": [
+                {
+                    "type": "image_url",
+                    "url": att.data_url or att.url,
+                    "mime": mime,
+                }
+            ],
             "meta": {"name": row["name"], "kind": "image"},
         }
 
