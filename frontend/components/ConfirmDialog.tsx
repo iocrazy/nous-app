@@ -43,7 +43,11 @@ const VARIANT_CONFIG: Record<ConfirmVariant, {
   warning: {
     icon: <AlertTriangle size={20} className="text-amber-400" />,
     iconBg: 'bg-amber-500/10',
-    buttonClass: 'bg-amber-600 hover:bg-amber-500 text-white',
+    // K1 known gap fix: amber-600 solid fails 3.80:1 vs white (<4.5 AA) —
+    // "ochre never white-on-solid" (warm-paper-palette design §2.4), so
+    // warning uses the soft-tint idiom (soft bg + text-warn + line border)
+    // instead of a solid fill, matching danger/info's non-solid-warn pairing.
+    buttonClass: 'bg-amber-500/10 hover:bg-amber-500/20 text-warn border border-amber-500/30',
   },
   info: {
     icon: <Info size={20} className="text-indigo-400" />,

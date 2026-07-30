@@ -72,7 +72,7 @@ export function DeleteDialog({ video, isDeleting, onClose, onConfirm }: DeleteDi
           <button
             onClick={onConfirm}
             disabled={isDeleting}
-            className="flex-1 px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium transition-colors disabled:opacity-70 flex items-center justify-center gap-2"
+            className="flex-1 px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-warn border border-amber-500/30 rounded-lg font-medium transition-colors disabled:opacity-70 flex items-center justify-center gap-2"
           >
             {isDeleting ? (
               <>

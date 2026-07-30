@@ -1085,7 +1085,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
               onClick={() => setTaskTab('media')}
               className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
                 taskTab === 'media'
-                  ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] shadow-sm'
+                  ? 'bg-indigo-600 text-white shadow-sm'
                   : 'text-ink-500 hover:text-ink-300'
               }`}
             >
@@ -1096,7 +1096,7 @@ export const AISettings: React.FC<AISettingsProps> = ({ settings, onSave }) => {
               onClick={() => setTaskTab('storyboard')}
               className={`flex-1 px-3 py-2 rounded-md text-xs font-medium transition-colors ${
                 taskTab === 'storyboard'
-                  ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] shadow-sm'
+                  ? 'bg-indigo-600 text-white shadow-sm'
                   : 'text-ink-500 hover:text-ink-300'
               }`}
             >

@@ -446,7 +446,7 @@ export function AgentDashboardTab({
                   borderRadius: 6,
                   fontSize: 11,
                 }}
-                cursor={{ fill: 'rgba(99,102,241,0.08)' }}
+                cursor={{ fill: 'rgba(30,122,91,0.08)' }}
               />
               <Bar dataKey="count" fill="#1E7A5B" radius={[2, 2, 0, 0]} />
             </BarChart>
@@ -477,7 +477,7 @@ export function AgentDashboardTab({
                     borderRadius: 6,
                     fontSize: 11,
                   }}
-                  cursor={{ fill: 'rgba(99,102,241,0.08)' }}
+                  cursor={{ fill: 'rgba(30,122,91,0.08)' }}
                 />
                 <Bar dataKey="count" radius={[2, 2, 0, 0]}>
                   {statusEntries.map((e) => (
@@ -517,7 +517,7 @@ export function AgentDashboardTab({
                   borderRadius: 6,
                   fontSize: 11,
                 }}
-                cursor={{ fill: 'rgba(99,102,241,0.08)' }}
+                cursor={{ fill: 'rgba(30,122,91,0.08)' }}
               />
               <Legend wrapperStyle={{ fontSize: 10, color: '#a1a1aa' }} />
               <Bar dataKey="success" stackId="r" fill="#1E7A5B" name="success" />

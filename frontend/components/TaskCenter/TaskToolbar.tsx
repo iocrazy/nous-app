@@ -181,7 +181,7 @@ export const TaskToolbar: React.FC<TaskToolbarProps> = ({
           <button
             type="button"
             onClick={() => onViewModeChange('list')}
-            className={`p-1.5 rounded transition ${viewMode === 'list' ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'text-ink-500 hover:text-ink-300'}`}
+            className={`p-1.5 rounded transition ${viewMode === 'list' ? 'bg-indigo-600 text-white' : 'text-ink-500 hover:text-ink-300'}`}
             title="List view"
           >
             <LayoutList size={13} />
@@ -189,7 +189,7 @@ export const TaskToolbar: React.FC<TaskToolbarProps> = ({
           <button
             type="button"
             onClick={() => onViewModeChange('kanban')}
-            className={`p-1.5 rounded transition ${viewMode === 'kanban' ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]' : 'text-ink-500 hover:text-ink-300'}`}
+            className={`p-1.5 rounded transition ${viewMode === 'kanban' ? 'bg-indigo-600 text-white' : 'text-ink-500 hover:text-ink-300'}`}
             title="Kanban view"
           >
             <LayoutGrid size={13} />

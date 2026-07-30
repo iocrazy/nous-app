@@ -595,7 +595,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
               onClick={() => onViewModeChange('list')}
               className={`p-1.5 transition ${
                 viewMode === 'list'
-                  ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
+                  ? 'bg-indigo-600 text-white'
                   : 'text-ink-400 hover:text-ink-200'
               }`}
               title="List view"
@@ -607,7 +607,7 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
               onClick={() => onViewModeChange('board')}
               className={`p-1.5 transition border-l border-ink-800 ${
                 viewMode === 'board'
-                  ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
+                  ? 'bg-indigo-600 text-white'
                   : 'text-ink-400 hover:text-ink-200'
               }`}
               title="Board view"
