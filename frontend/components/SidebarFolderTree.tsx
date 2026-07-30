@@ -44,7 +44,7 @@ const FolderNode: React.FC<FolderNodeProps> = ({
           isActive
             ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] font-medium'
             : dragOver
-              ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
+              ? 'text-[var(--accent-text)] ring-1 ring-inset ring-[var(--accent-border)]'
               : 'text-ink-400 hover:bg-ink-800/50 hover:text-ink-200'
         }`}
         style={{ paddingLeft: `${8 + depth * 16}px` }}

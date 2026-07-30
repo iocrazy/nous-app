@@ -93,7 +93,7 @@ const GroupByPicker: React.FC<{
                 }`}
               >
                 <span className="flex-1">{o.label}</span>
-                {active && <Check size={11} className="text-emerald-400" />}
+                {active && <Check size={11} className="text-[var(--accent-text)]" />}
               </button>
             );
           })}
