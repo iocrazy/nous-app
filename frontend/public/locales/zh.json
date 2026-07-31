@@ -1870,12 +1870,12 @@
         "toggleFailed": "更新 Autopilot 状态失败"
       },
       "brief": {
-        "label": "Brief",
+        "label": "背景说明",
         "placeholder": "为接手此阶段的人补充一些背景信息…",
-        "reviewHeading": "Brief"
+        "reviewHeading": "背景说明"
       },
       "startEarly": {
-        "button": "Start early",
+        "button": "提前开工",
         "cancelled": "此阶段关联的任务已被取消 — 请先在待办中恢复，再提前开工。",
         "blocked": "此阶段暂时还无法开工。",
         "failed": "提前开工失败"
