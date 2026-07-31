@@ -122,6 +122,20 @@ async def instantiate_project_workflow(
 
     await enqueue_stage_hook_dispatch(str(project_id), group)
 
+    # M4 Autopilot (task O2, spec §2 trigger 2): the project's first active
+    # group may itself contain auto_start nodes — best-effort tail enqueue,
+    # same discipline as the hook above; a hiccup here must never fail
+    # project creation.
+    try:
+        from app.workflows.autopilot import enqueue_autopilot_tick
+
+        await enqueue_autopilot_tick(str(project_id))
+    except Exception as exc:  # noqa: BLE001 — enrichment only, never fails create
+        logger.warning(
+            f"[workflow] autopilot tick enqueue failed for project "
+            f"{project_id}: {exc!r}"
+        )
+
     return nodes
 
 

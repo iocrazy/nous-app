@@ -732,6 +732,15 @@ export interface Project {
   // Workflow badge (M2-W3-3) — batch-derived; null/absent for a No-workflow
   // project (no instance nodes).
   workflow_badge?: ProjectWorkflowBadge | null;
+  /** M4 Autopilot (mig 395, task O1): project-level master switch — the
+   * `autopilot_tick` engine no-ops entirely when this is false (spec §2 step
+   * 1). Real NOT NULL DEFAULT true column, written straight through by
+   * `PATCH /projects/{id}` (`ProjectUpdate.autopilot_enabled`, no name
+   * mapping unlike `archived`). Optional here (like `modules_enabled` above)
+   * so pre-mig-395 literals across the codebase keep compiling untouched —
+   * callers should default a missing value to `true`, the server's own
+   * default. */
+  autopilot_enabled?: boolean;
 }
 
 /** Project-card workflow badge (M2-W3-3). Null for No-workflow projects. */
@@ -1057,6 +1066,16 @@ export interface WorkflowNodeEvents {
   /** Reserved for a future "chain into another workflow on completion" hook
    * (M3.5+) — never surfaced in the Events tab UI; always `null` today. */
   on_complete_workflow?: string | null;
+  /** M4 Autopilot (mig 395, task O1/O2): template-layer config — when a node
+   * with an agent owner arrives (deps satisfied) with no manual start, the
+   * `autopilot_tick` engine begins it automatically (mirrors the manual
+   * "Start early" action). Copied verbatim into the instance at
+   * instantiation, then FROZEN there — not reachable from `ProjectNodePatch`
+   * (no `events` field there at all), same idiom as `completion_policy`.
+   * Optional (not `?:` on the first three booleans above) so pre-mig-395
+   * literals across the codebase keep compiling untouched; `normalizeEvents`
+   * (workflowService.ts) still fills a real `false` once data flows through it. */
+  auto_start?: boolean;
 }
 
 /** Six-type whitelist for a node's deliverable form field (mig 390, M3 PR-I
@@ -1220,6 +1239,15 @@ export interface ProjectStageNode {
    * on. Optional/normalized the same way as `form_schema`/`form_data` so a
    * pre-mig-391 row never hands `undefined` to a consumer. */
   depends_on?: string[];
+  /** Pre-work notes for whoever works this stage (mig 395, M4 Autopilot task
+   * O1/O2) — instance-only runtime text, writable any time before the node
+   * finishes (PATCH-able, see `ProjectNodePatch.brief`). Injected into an
+   * agent's task context on auto-start/dispatch/start-early alike; surfaced
+   * read-only once the node reaches `in_review` (pinned in the Stage Board's
+   * review context + the mirror issue) and permanently read-only once
+   * `done`/`skipped`. Optional/normalized the same way as `form_schema` above
+   * so a pre-mig-395 row never hands `undefined` to a consumer. */
+  brief?: string;
 }
 
 /** GET /projects/{id}/workflow payload. */
@@ -1300,6 +1328,10 @@ export interface ProjectNodePatch {
    * on the instance directly. Backward-only (target sort_order strictly
    * smaller) is validated server-side. */
   depends_on?: string[];
+  /** Pre-work notes (mig 395, M4 Autopilot task O1/O2) — full-replace instance
+   * text. Server merges are unnecessary here (unlike `form_data`'s per-key
+   * whitelist merge) since this is a single free-text field, not a keyed map. */
+  brief?: string;
 }
 
 /** Blocked-reason codes the advance predicate can return (spec §7). */

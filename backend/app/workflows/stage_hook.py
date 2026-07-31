@@ -46,13 +46,10 @@ async def _stage_hook_dispatch_impl(project_id: str, node_id: str) -> None:
       1. Re-fetch the node and double-check ``events.prepare_agent_run`` AND
          ``owner_agent_id`` — guards a race where the node's config changed
          between enqueue and execution.
-      2. ``metadata.run_prepared_at`` already set → idempotent no-op.
-      3. Look up the node's mirror issue (best-effort empty on error) — no
-         issue means nothing to link the notification to, so bail with a
-         warning rather than notifying without a target.
-      4. Notify the humans who could confirm the run.
-      5. Stamp ``metadata.run_prepared_at`` so a duplicate arrival short-
-         circuits at step 2.
+      2. Delegate the actual prep (idempotency stamp / mirror lookup /
+         notify) to ``prepare_agent_run`` — the same "upshot" behavior the
+         M4 autopilot engine's quota-exceeded branch reuses verbatim (task
+         O2 brief: "超额度 → 走 M3 的『上膛』路径").
     """
     from app.repositories.project_stage_nodes_repository import (
         get_project_stage_nodes_repository,
@@ -73,6 +70,47 @@ async def _stage_hook_dispatch_impl(project_id: str, node_id: str) -> None:
         # a human) — nothing to prepare any more.
         return
 
+    await prepare_agent_run(project_id, node_id, node)
+
+
+async def prepare_agent_run(
+    project_id: str,
+    node_id: str,
+    node: Dict[str, Any],
+    *,
+    title: Optional[str] = None,
+) -> None:
+    """Shared "upshot" prep: notify the humans who could confirm a run, then
+    stamp ``metadata.run_prepared_at`` so a repeat call is idempotent.
+
+    Extracted from ``_stage_hook_dispatch_impl`` (M3 PR-H2) so the M4
+    autopilot engine can reuse the EXACT same behavior for its own
+    quota-exceeded branch (design spec §2 step 2: "超额度 → 走 M3 的『上膛』
+    路径(run_prepared + 通知)") without re-implementing the notify/stamp
+    logic or re-checking ``events.prepare_agent_run`` (autopilot's own gate
+    is ``events.auto_start`` + quota, a different config key entirely).
+
+    ``title`` lets a caller substitute distinct copy (e.g. autopilot's
+    "Autopilot paused: daily limit reached") while sharing the same
+    idempotency stamp — the two prep paths dedupe against EACH OTHER via the
+    shared ``run_prepared_at`` key, so a node already prepared by one path is
+    never re-notified by the other.
+
+    Steps:
+      1. ``metadata.run_prepared_at`` already set → idempotent no-op.
+      2. Look up the node's mirror issue (best-effort empty on error) — no
+         issue means nothing to link the notification to, so bail with a
+         warning rather than notifying without a target.
+      3. Notify the humans who could confirm the run.
+      4. Stamp ``metadata.run_prepared_at`` so a duplicate call short-
+         circuits at step 1.
+    """
+    from app.repositories.project_stage_nodes_repository import (
+        get_project_stage_nodes_repository,
+    )
+
+    nodes_repo = get_project_stage_nodes_repository()
+
     metadata = node.get("metadata") or {}
     if metadata.get("run_prepared_at"):
         return  # already prepared — idempotent
@@ -85,7 +123,7 @@ async def _stage_hook_dispatch_impl(project_id: str, node_id: str) -> None:
         )
         return
 
-    await _notify_prepared(node, identifier)
+    await _notify_prepared(node, identifier, title=title)
 
     await nodes_repo.set_node_metadata(
         node_id,
@@ -118,7 +156,9 @@ async def _mirror_issue_identifier(project_id: str, node_id: str) -> Optional[st
     return None
 
 
-async def _notify_prepared(node: Dict[str, Any], identifier: str) -> None:
+async def _notify_prepared(
+    node: Dict[str, Any], identifier: str, *, title: Optional[str] = None
+) -> None:
     """Notify the humans who could confirm this node's agent run.
 
     Recipients: owner_user_id + user members, deduped (same shape as
@@ -126,6 +166,9 @@ async def _notify_prepared(node: Dict[str, Any], identifier: str) -> None:
     since a hook-prepared run has no acting user. An empty recipient set
     (e.g. an agent owner with no user members) is a silent no-op, never a
     fallback ping to some other party.
+
+    ``title`` defaults to the standard "Agent run ready" copy; a caller (the
+    M4 autopilot quota-exceeded branch) may pass distinct copy instead.
     """
     from app.services.notifications import notify
 
@@ -141,12 +184,12 @@ async def _notify_prepared(node: Dict[str, Any], identifier: str) -> None:
         return
 
     node_name = node.get("name") or "Stage"
-    title = f'Agent run ready — "{node_name}"'
+    effective_title = title or f'Agent run ready — "{node_name}"'
     for user_id in recipients:
         await notify(
             user_id,
             "workflow_stage",
-            title,
+            effective_title,
             body=None,
             link_kind="issue",
             link_id=identifier,

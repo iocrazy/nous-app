@@ -570,6 +570,11 @@ async def execute_advance(
         # enqueue_stage_hook_dispatch() never raises (per-node try/except), so
         # this can never affect the advance's return value or mutations.
         await enqueue_stage_hook_dispatch(str(project_id), next_group)
+
+        # M4 Autopilot (task O2, spec §2 trigger 2): the newly-arrived group
+        # may itself contain auto_start nodes, or unblock a further cascade —
+        # best-effort tail enqueue, never affects the advance's return value.
+        await _enqueue_autopilot_tick_best_effort(str(project_id))
     else:
         prev_group = groups[idx - 1]
         await nodes_repo.set_current_node_id(str(project_id), str(prev_group[0]["id"]))
@@ -596,4 +601,31 @@ async def execute_advance(
                 actor_user_id=str(user_id),
             )
 
+        # M4 Autopilot (task O2, spec §2 trigger 2): reopening the previous
+        # group is an arrival too — best-effort tail enqueue.
+        await _enqueue_autopilot_tick_best_effort(str(project_id))
+
     return preview
+
+
+async def _enqueue_autopilot_tick_best_effort(project_id: str) -> None:
+    """Best-effort tail enqueue of ``autopilot_tick`` after an arrival.
+
+    Re-entrancy guard (see ``autopilot.cascade_in_progress``'s docstring):
+    when THIS ``execute_advance`` call is itself one of the autopilot
+    engine's own cascade-loop steps, skip the enqueue — the tick that
+    started the cascade is already looping through every subsequent step
+    in-process, so a nested enqueue here would only be a redundant, wasteful
+    extra tick, never a missed one. Never raises — an enqueue failure must
+    never affect the advance that just completed.
+    """
+    try:
+        from app.workflows.autopilot import cascade_in_progress, enqueue_autopilot_tick
+
+        if cascade_in_progress():
+            return
+        await enqueue_autopilot_tick(project_id)
+    except Exception as exc:  # noqa: BLE001 — never blocks the advance
+        logger.warning(
+            f"[advance] autopilot tick enqueue failed for project {project_id}: {exc!r}"
+        )

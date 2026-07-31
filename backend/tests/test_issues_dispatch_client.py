@@ -54,7 +54,9 @@ def test_dispatch_uses_client_when_set(monkeypatch):
     assert options["queue_name"] == "dbos_dispatch"
     assert options["workflow_id"] == "issue-12345-abc"
     assert "app_version" not in options
-    assert args == (12345,)
+    # M4 Autopilot (task O2): `auto` now rides as a second positional arg
+    # (default False for a manual dispatch — this call site never passes it).
+    assert args == (12345, False)
 
 
 def test_dispatch_pins_app_version_when_present(monkeypatch):
@@ -68,7 +70,7 @@ def test_dispatch_pins_app_version_when_present(monkeypatch):
 
     options, args = fake.calls[0]
     assert options["app_version"] == "deadbeef"
-    assert args == (7,)
+    assert args == (7, False)
 
 
 def test_dispatch_falls_back_to_start_workflow_when_client_none(monkeypatch):
@@ -88,4 +90,4 @@ def test_dispatch_falls_back_to_start_workflow_when_client_none(monkeypatch):
     assert len(spy) == 1
     wf, args = spy[0]
     assert wf is issues_router.execute_issue
-    assert args == (99,)
+    assert args == (99, False)

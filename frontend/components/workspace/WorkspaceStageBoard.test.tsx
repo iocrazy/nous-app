@@ -16,6 +16,8 @@ import { createInstance, type i18n as I18n } from 'i18next';
 
 import enJson from '../../public/locales/en.json';
 import { WorkspaceStageBoard } from './WorkspaceStageBoard';
+import { ToastProvider } from '../Toast';
+import { ApiError } from '../../services/apiClient';
 import type { ProjectStageNode, ProjectWorkflow, StageBoardData } from '../../types';
 
 function makeI18n(): I18n {
@@ -31,6 +33,8 @@ function makeI18n(): I18n {
 
 const mockWorkflowService = vi.hoisted(() => ({
   fetchStageBoard: vi.fn(),
+  updateProjectNode: vi.fn(),
+  startEarlyNode: vi.fn(),
 }));
 vi.mock('../../services/workflowService', () => mockWorkflowService);
 
@@ -130,15 +134,17 @@ function renderBoard(
   const onOpenTodolist = opts.onOpenTodolist ?? vi.fn();
   const utils = render(
     <I18nextProvider i18n={makeI18n()}>
-      <WorkspaceStageBoard
-        projectId="10"
-        projectName="Spring Campaign"
-        nodeId={data.node.id}
-        workflow={opts.workflow === undefined ? workflow() : opts.workflow}
-        canWrite={opts.canWrite ?? true}
-        onRequestAdvance={onRequestAdvance}
-        onOpenTodolist={onOpenTodolist}
-      />
+      <ToastProvider>
+        <WorkspaceStageBoard
+          projectId="10"
+          projectName="Spring Campaign"
+          nodeId={data.node.id}
+          workflow={opts.workflow === undefined ? workflow() : opts.workflow}
+          canWrite={opts.canWrite ?? true}
+          onRequestAdvance={onRequestAdvance}
+          onOpenTodolist={onOpenTodolist}
+        />
+      </ToastProvider>
     </I18nextProvider>,
   );
   return { ...utils, onRequestAdvance, onOpenTodolist };
@@ -146,6 +152,8 @@ function renderBoard(
 
 beforeEach(() => {
   mockWorkflowService.fetchStageBoard.mockReset();
+  mockWorkflowService.updateProjectNode.mockReset().mockResolvedValue(node({}));
+  mockWorkflowService.startEarlyNode.mockReset();
   mockDeliverablesZone.mockClear();
   mockProjectsService.fetchProjectMembers.mockReset().mockResolvedValue([]);
   mockAiLibraryService.aiLibraryService.listAgents.mockReset().mockResolvedValue([]);
@@ -520,5 +528,140 @@ describe('WorkspaceStageBoard — Run now chip (M3 Task H3)', () => {
     expect(onOpenTodolist).toHaveBeenCalledTimes(1);
     expect(mockIssuesService.getDispatchPreview).not.toHaveBeenCalled();
     expect(screen.queryByRole('dialog', { name: 'Confirm dispatch' })).toBeNull();
+  });
+});
+
+describe('WorkspaceStageBoard — brief (M4 Autopilot task O1/O2/O3)', () => {
+  it('seeds the brief box from node.brief and saves on blur only when changed', async () => {
+    renderBoard(board({ node: node({ brief: 'Original note' }) }));
+
+    const field = await screen.findByTestId('stage-board-brief-field');
+    expect(field).toHaveValue('Original note');
+
+    fireEvent.blur(field);
+    expect(mockWorkflowService.updateProjectNode).not.toHaveBeenCalled();
+
+    fireEvent.change(field, { target: { value: 'Updated note' } });
+    fireEvent.blur(field);
+    await waitFor(() =>
+      expect(mockWorkflowService.updateProjectNode).toHaveBeenCalledWith(
+        '10',
+        '1',
+        { brief: 'Updated note' },
+      ),
+    );
+  });
+
+  it('is read-only once the node is done', async () => {
+    renderBoard(board({ node: node({ brief: 'Original note', status: 'done' }) }));
+    expect(await screen.findByTestId('stage-board-brief-field')).toBeDisabled();
+  });
+
+  it('is read-only once the node is skipped', async () => {
+    renderBoard(board({ node: node({ brief: 'Original note', skipped: true }) }));
+    expect(await screen.findByTestId('stage-board-brief-field')).toBeDisabled();
+  });
+
+  it('pins a read-only brief block at the top when the node is in_review with a non-empty brief', async () => {
+    renderBoard(board({ node: node({ brief: 'Check pacing in act 2.', status: 'in_review' }) }));
+    expect(await screen.findByTestId('stage-board-brief-pinned')).toHaveTextContent(
+      'Check pacing in act 2.',
+    );
+  });
+
+  it('does not pin when in_review but brief is empty', async () => {
+    renderBoard(board({ node: node({ brief: '', status: 'in_review' }) }));
+    await screen.findByTestId('workspace-stage-board');
+    expect(screen.queryByTestId('stage-board-brief-pinned')).toBeNull();
+  });
+
+  it('does not pin when brief is set but the node is not in_review', async () => {
+    renderBoard(board({ node: node({ brief: 'Some note', status: 'in_progress' }) }));
+    await screen.findByTestId('workspace-stage-board');
+    expect(screen.queryByTestId('stage-board-brief-pinned')).toBeNull();
+  });
+});
+
+describe('WorkspaceStageBoard — Start early (M4 Autopilot task O2/O3)', () => {
+  it('renders the button for a future node (outside the active group) whose dependencies are satisfied', async () => {
+    const dep = node({ id: 'dep-1', name: 'Script', status: 'done' });
+    renderBoard(
+      board({ node: node({ id: '2', status: 'pending', depends_on: ['dep-1'] }) }),
+      { workflow: workflow({ current_node_id: '1', nodes: [node({ id: '1' }), dep, node({ id: '2', status: 'pending', depends_on: ['dep-1'] })] }) },
+    );
+    expect(await screen.findByTestId('stage-board-start-early')).toBeInTheDocument();
+  });
+
+  it('hides the button when a dependency is not yet satisfied', async () => {
+    const dep = node({ id: 'dep-1', name: 'Script', status: 'pending' });
+    renderBoard(
+      board({ node: node({ id: '2', status: 'pending', depends_on: ['dep-1'] }) }),
+      { workflow: workflow({ current_node_id: '1', nodes: [node({ id: '1' }), dep, node({ id: '2', status: 'pending', depends_on: ['dep-1'] })] }) },
+    );
+    await screen.findByTestId('workspace-stage-board');
+    expect(screen.queryByTestId('stage-board-start-early')).toBeNull();
+  });
+
+  it('hides the button for the active node — Complete Stage is the right action there instead', async () => {
+    renderBoard(
+      board({ node: node({ id: '1', status: 'pending' }) }),
+      { workflow: workflow({ current_node_id: '1', nodes: [node({ id: '1', status: 'pending' })] }) },
+    );
+    expect(await screen.findByTestId('stage-board-complete')).toBeInTheDocument();
+    expect(screen.queryByTestId('stage-board-start-early')).toBeNull();
+  });
+
+  it('hides the button when canWrite is false', async () => {
+    renderBoard(
+      board({ node: node({ id: '2', status: 'pending' }) }),
+      {
+        workflow: workflow({ current_node_id: '1', nodes: [node({ id: '1' }), node({ id: '2', status: 'pending' })] }),
+        canWrite: false,
+      },
+    );
+    await screen.findByTestId('workspace-stage-board');
+    expect(screen.queryByTestId('stage-board-start-early')).toBeNull();
+  });
+
+  it('clicking Start early calls startEarlyNode and refetches the board on success', async () => {
+    mockWorkflowService.startEarlyNode.mockResolvedValue(node({ id: '2', status: 'in_progress' }));
+    renderBoard(
+      board({ node: node({ id: '2', status: 'pending' }) }),
+      { workflow: workflow({ current_node_id: '1', nodes: [node({ id: '1' }), node({ id: '2', status: 'pending' })] }) },
+    );
+
+    fireEvent.click(await screen.findByTestId('stage-board-start-early'));
+    await waitFor(() => expect(mockWorkflowService.startEarlyNode).toHaveBeenCalledWith('10', '2'));
+    // Success re-triggers the board fetch (refreshTick), same mechanism the
+    // Run now dispatch already uses.
+    await waitFor(() => expect(mockWorkflowService.fetchStageBoard).toHaveBeenCalledTimes(2));
+  });
+
+  it('maps a DEPS_PENDING 422 to the shared "Waiting on" toast copy', async () => {
+    mockWorkflowService.startEarlyNode.mockRejectedValue(
+      new ApiError('DEPS_PENDING', 422, { code: 'DEPS_PENDING', details: { waiting_on: ['Script'] } }),
+    );
+    renderBoard(
+      board({ node: node({ id: '2', status: 'pending' }) }),
+      { workflow: workflow({ current_node_id: '1', nodes: [node({ id: '1' }), node({ id: '2', status: 'pending' })] }) },
+    );
+
+    fireEvent.click(await screen.findByTestId('stage-board-start-early'));
+    expect(await screen.findByText('Waiting on: Script')).toBeInTheDocument();
+  });
+
+  it('maps a NODE_CANCELLED 422 to its own copy', async () => {
+    mockWorkflowService.startEarlyNode.mockRejectedValue(
+      new ApiError('This node was cancelled', 422, { code: 'NODE_CANCELLED' }),
+    );
+    renderBoard(
+      board({ node: node({ id: '2', status: 'pending' }) }),
+      { workflow: workflow({ current_node_id: '1', nodes: [node({ id: '1' }), node({ id: '2', status: 'pending' })] }) },
+    );
+
+    fireEvent.click(await screen.findByTestId('stage-board-start-early'));
+    expect(
+      await screen.findByText("This stage's task was cancelled — restore it in the Todolist before starting it early."),
+    ).toBeInTheDocument();
   });
 });

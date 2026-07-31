@@ -1824,6 +1824,7 @@
         "notifyOnComplete": "完成时通知",
         "suggestAgentRun": "到达时建议启动 Agent",
         "prepareAgentRun": "到达时预备 Agent 运行",
+        "autoStart": "满足条件后自动开工",
         "builtinTitle": "内置行为",
         "builtinBody": "到达时会派生镜像任务，完成时会关闭它。不会自动启动任何 Agent。"
       },
@@ -1861,6 +1862,23 @@
         "noCandidates": "没有更早的阶段可供依赖",
         "waitingOn": "等待中：{{names}}",
         "lockedTitle": "被依赖阻塞"
+      },
+      "autopilot": {
+        "label": "Autopilot",
+        "onTitle": "Autopilot 已开启 — 点击暂停",
+        "offTitle": "Autopilot 已暂停 — 点击开启",
+        "toggleFailed": "更新 Autopilot 状态失败"
+      },
+      "brief": {
+        "label": "背景说明",
+        "placeholder": "为接手此阶段的人补充一些背景信息…",
+        "reviewHeading": "背景说明"
+      },
+      "startEarly": {
+        "button": "提前开工",
+        "cancelled": "此阶段关联的任务已被取消 — 请先在待办中恢复，再提前开工。",
+        "blocked": "此阶段暂时还无法开工。",
+        "failed": "提前开工失败"
       }
     }
   },

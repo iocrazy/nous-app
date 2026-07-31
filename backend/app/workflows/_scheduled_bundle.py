@@ -17,6 +17,7 @@ from app.workflows.agent_cost_anomaly import (  # noqa: F401
     agent_cost_anomaly_workflow,
 )
 from app.workflows.agent_runs_sweeper import agent_runs_sweeper_workflow  # noqa: F401
+from app.workflows.autopilot_sweep import autopilot_sweep_workflow  # noqa: F401
 from app.workflows.consolidate_agent_memory import (  # noqa: F401
     consolidate_agent_memory_workflow,
 )

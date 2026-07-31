@@ -243,4 +243,45 @@ describe('response handling', () => {
     });
     await expect(apiJson('/api/v1/x')).rejects.toBeInstanceOf(ApiError);
   });
+
+  // M4 Autopilot (task O3): the start-early endpoint raises 422s with a
+  // STRUCTURED `detail` object rather than a plain string — regression guard
+  // that `.code`/`.details` surface the real payload instead of the native
+  // Error constructor's `[object Object]` ToString() coercion.
+  it('unwraps a structured (object) `detail` into code/message/details', async () => {
+    mockFetchOnce({
+      ok: false,
+      status: 422,
+      body: { detail: { code: 'DEPS_PENDING', waiting_on: ['Script', 'Storyboard'] } },
+    });
+
+    let caught: ApiError | null = null;
+    try {
+      await apiJson('/api/v1/x');
+    } catch (err) {
+      caught = err as ApiError;
+    }
+
+    expect(caught).toBeInstanceOf(ApiError);
+    expect(caught!.status).toBe(422);
+    expect(caught!.code).toBe('DEPS_PENDING');
+    expect(caught!.details).toEqual({ code: 'DEPS_PENDING', waiting_on: ['Script', 'Storyboard'] });
+    // No `message` key on this particular detail shape — falls back to `code`
+    // rather than producing "[object Object]" or an empty string.
+    expect(caught!.message).toBe('DEPS_PENDING');
+  });
+
+  it('prefers a structured detail`s own `message` field over its `code`', async () => {
+    mockFetchOnce({
+      ok: false,
+      status: 422,
+      body: { detail: { code: 'NODE_CANCELLED', message: 'This node was cancelled' } },
+    });
+
+    await expect(apiJson('/api/v1/x')).rejects.toMatchObject({
+      status: 422,
+      code: 'NODE_CANCELLED',
+      message: 'This node was cancelled',
+    });
+  });
 });

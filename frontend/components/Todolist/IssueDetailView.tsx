@@ -27,6 +27,7 @@ import { dispatchIssue, getDispatchPreview, type DispatchPreview } from '../../s
 import { DispatchConfirmDialog } from './DispatchConfirmDialog';
 import { PipelineRunStrip } from './PipelineRunStrip';
 import { DeliverablesZone } from './DeliverablesZone';
+import { StageBriefMirror } from './StageBriefMirror';
 import { IssueCostLine } from './IssueCostLine';
 import { SubtaskBar } from './SubtaskBar';
 import type { SubtaskCount } from './issueFlow';
@@ -437,6 +438,17 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               />
             )}
           </div>
+
+          {/* M4 Autopilot (task O1/O2/O3, spec §3) — pinned read-only echo of
+              the node's brief while it's in_review. Same mounting gate as
+              DeliverablesZone below (project-backed + workflow-node mirror
+              only); `origin_id` is the node id for a `project_stage` mirror. */}
+          {isStageMirror && issue.project && issue.raw.origin_id && (
+            <StageBriefMirror
+              projectId={String(issue.project.id)}
+              nodeId={issue.raw.origin_id}
+            />
+          )}
 
           {issue.project && (
             <DeliverablesZone

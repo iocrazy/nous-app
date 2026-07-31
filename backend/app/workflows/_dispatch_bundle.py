@@ -23,6 +23,7 @@ from app.workflows.agent_workforce import (  # noqa: F401
 from app.workflows.ai_summary import ai_summary_workflow  # noqa: F401
 from app.workflows.ai_transcription import ai_transcription_workflow  # noqa: F401
 from app.workflows.analyze_l1 import analyze_l1_workflow  # noqa: F401
+from app.workflows.autopilot import autopilot_tick  # noqa: F401
 from app.workflows.backfill_issue_scope import (  # noqa: F401
     backfill_issue_scope_workflow,
 )

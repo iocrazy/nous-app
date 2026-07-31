@@ -23,14 +23,50 @@ from app.services.issues.issue_chat_stream import (  # noqa: F401
 from app.services.issues.issue_session import get_or_create_issue_session
 
 
-def _build_user_message(issue: dict[str, Any]) -> str:
-    """Compose a user message from an issue's title and optional description."""
+def _build_user_message(issue: dict[str, Any], brief: str | None = None) -> str:
+    """Compose a user message from an issue's title, optional description,
+    and (M4 Autopilot, task O2) an optional workflow-node ``brief`` — the
+    "heads up" runtime text a manager can write onto a ``project_stage_nodes``
+    row any time before/while it's open (design spec §1/§3). Appended
+    regardless of how the run was dispatched (auto-start, confirm-gate
+    manual, or start-early) — the brief is context for the WORK, not a
+    dispatch-mechanism detail."""
     title = (issue.get("title") or "").strip()
     description = (issue.get("description") or "").strip()
     parts = [f"Task: {title}"] if title else []
     if description:
         parts.append(f"\nDetails:\n{description}")
+    if brief:
+        parts.append(f"\nContext:\n{brief}")
     return "\n".join(parts) or "Complete the assigned task."
+
+
+async def _resolve_stage_brief(issue: dict[str, Any]) -> str | None:
+    """Best-effort lookup of the workflow node's ``brief`` for a
+    ``project_stage`` mirror issue — None for any other origin_kind, a
+    missing/legacy origin, or a lookup failure (never raises; a brief is
+    enrichment, not a dispatch precondition)."""
+    if issue.get("origin_kind") != "project_stage" or not issue.get("origin_id"):
+        return None
+    try:
+        from app.services.library.project_stage_issues import parse_stage_origin_id
+
+        project_id, node_id = parse_stage_origin_id(str(issue["origin_id"]))
+        if project_id is None:
+            return None
+        from app.repositories.project_stage_nodes_repository import (
+            get_project_stage_nodes_repository,
+        )
+
+        node = await get_project_stage_nodes_repository().get_node(node_id, project_id)
+        brief = (node or {}).get("brief")
+        return brief.strip() if isinstance(brief, str) and brief.strip() else None
+    except Exception as exc:  # noqa: BLE001 — a brief is enrichment only
+        logger.warning(
+            f"[issue_agent] stage-brief lookup failed for issue "
+            f"{issue.get('id')}: {exc!r}"
+        )
+        return None
 
 
 # Synthetic nudge for a continuation turn (Spec-2). The session already carries
@@ -47,6 +83,7 @@ async def run_issue_agent(
     agent_id: str,
     user_id: str,
     is_continuation: bool = False,
+    auto: bool = False,
 ) -> dict[str, Any]:
     """Run the assigned agent on the issue via the chat runtime.
 
@@ -60,6 +97,16 @@ async def run_issue_agent(
 
     ``is_continuation`` sends a short "keep going" nudge instead of the full
     task text (Spec-2 bounded continuation); the agent already has the history.
+
+    ``auto`` (M4 Autopilot, task O2): True when this dispatch was started by
+    the autopilot engine rather than a human confirming "Run now". Threaded
+    all the way from ``execute_issue``'s own ``auto`` kwarg through
+    ``run_issue_agent_step``. Flips the ``trigger`` value passed to
+    ``run_session_turn`` from ``'issue_dispatch'`` to
+    ``'issue_dispatch_auto'`` — a distinct ``agent_runs.trigger`` the daily
+    quota counter (``agent_runs_repository.count_auto_dispatches_today``)
+    filters on, so a MANUAL dispatch never counts against the autopilot
+    budget even though it produces the exact same shape of run otherwise.
 
     Raises RuntimeError when the issue has no assignable agent session.
 
@@ -77,7 +124,13 @@ async def run_issue_agent(
     async def _cb(delta: str) -> None:
         await publish_chunk(iid, delta)
 
-    content_in = CONTINUATION_NUDGE if is_continuation else _build_user_message(issue)
+    trigger = "issue_dispatch_auto" if auto else "issue_dispatch"
+
+    if is_continuation:
+        content_in = CONTINUATION_NUDGE
+    else:
+        brief = await _resolve_stage_brief(issue)
+        content_in = _build_user_message(issue, brief=brief)
 
     # W3c: classify spend by who ultimately caused it. A routine/pipeline issue
     # runs on the schedule/pipeline owner's behalf (rule_owner); anything else
@@ -93,7 +146,7 @@ async def run_issue_agent(
             session_id,
             user_id=user_id,
             content=content_in,
-            trigger="issue_dispatch",
+            trigger=trigger,
             chunk_callback=_cb,
             attribution=attribution,
         )

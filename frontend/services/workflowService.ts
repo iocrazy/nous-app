@@ -50,6 +50,10 @@ export const DEFAULT_EVENTS: WorkflowNodeEvents = {
   // completion hook — see WorkflowNodeEvents in types.ts.
   prepare_agent_run: false,
   on_complete_workflow: null,
+  // mig 395 (M4 Autopilot, task O1/O2): default OFF — merging this PR must be
+  // a zero-behavior-change no-op until a template explicitly opts a node in
+  // (spec §5 "默认全关").
+  auto_start: false,
 };
 
 const normalizeEvents = (events: Partial<WorkflowNodeEvents> | null | undefined): WorkflowNodeEvents => ({
@@ -58,6 +62,7 @@ const normalizeEvents = (events: Partial<WorkflowNodeEvents> | null | undefined)
   suggest_agent_run: events?.suggest_agent_run ?? DEFAULT_EVENTS.suggest_agent_run,
   prepare_agent_run: events?.prepare_agent_run ?? DEFAULT_EVENTS.prepare_agent_run,
   on_complete_workflow: events?.on_complete_workflow ?? DEFAULT_EVENTS.on_complete_workflow,
+  auto_start: events?.auto_start ?? DEFAULT_EVENTS.auto_start,
 });
 
 /** Fill in `completion_policy`/`events`/`form_schema` on a template node
@@ -107,6 +112,11 @@ const normalizeInstanceNode = (
   // mig 391 (M3 PR-J): dependency edges — real, stable instance node ids.
   // Tolerate a pre-mig-391 row the same way as the fields above.
   depends_on: node.depends_on ?? [],
+  // mig 395 (M4 Autopilot, task O1/O2): pre-work notes — CurrentNodeCard's
+  // and WorkspaceStageBoard's brief textareas seed straight off this and must
+  // never see `undefined` (the defaulted-seed idiom, StageNodeForm's
+  // `lastSaved` fix) on a pre-mig-395 row.
+  brief: node.brief ?? '',
 });
 
 // ============================================
@@ -244,6 +254,28 @@ export const updateProjectNode = async (
     patch,
   );
   if (!response.data) throw new Error('Empty response from updateProjectNode');
+  return normalizeInstanceNode(response.data);
+};
+
+/**
+ * Manual "Start early" (M4 Autopilot, task O2/O3) — begin work on a future
+ * (not-yet-current) node ahead of the normal cursor flow, once its
+ * dependencies are actually satisfied. The hand-operated twin of the
+ * autopilot engine's own auto-start step; an agent owner is NEVER
+ * auto-dispatched from this path (server always routes it to the M3 confirm
+ * gate instead). The server 422s (ApiError, status 422) with a machine
+ * `code` — `NODE_NOT_PENDING` / `NODE_CANCELLED` / the shared `DEPS_PENDING`
+ * (carrying `waiting_on` in `details`, same shape as `AdvancePreview`) — when
+ * it no longer clears; callers should catch that and surface mapped copy.
+ */
+export const startEarlyNode = async (
+  projectId: string,
+  nodeId: string,
+): Promise<ProjectStageNode> => {
+  const response = await apiClient.post<Envelope<ProjectStageNode>>(
+    `/api/v1/projects/${projectId}/workflow/nodes/${nodeId}/start-early`,
+  );
+  if (!response.data) throw new Error('Empty response from startEarlyNode');
   return normalizeInstanceNode(response.data);
 };
 

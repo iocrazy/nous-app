@@ -16,12 +16,13 @@
 
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowRight, Bot, ExternalLink, FileCheck2, User } from 'lucide-react';
+import { ArrowRight, Bot, ExternalLink, FileCheck2, Rocket, User } from 'lucide-react';
 import { Loading } from '../common/Loading';
-import { fetchStageBoard, updateProjectNode } from '../../services/workflowService';
+import { fetchStageBoard, startEarlyNode, updateProjectNode } from '../../services/workflowService';
 import { fetchProjectMembers } from '../../services/projectsService';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { dispatchIssue, getDispatchPreview, type DispatchPreview } from '../../services/issuesService';
+import { ApiError } from '../../services/apiClient';
 import { useOptionalToast } from '../Toast';
 import {
   isNodeInActiveGroup,
@@ -31,6 +32,7 @@ import {
   unmetDeps,
 } from '../workflow/nodeStatus';
 import type { AgentOption, PersonOption } from '../workflow/OwnerPicker';
+import { BriefField } from '../workflow/BriefField';
 import { DeliverablesZone } from '../Todolist/DeliverablesZone';
 import { DispatchConfirmDialog } from '../Todolist/DispatchConfirmDialog';
 import { StageNodeForm } from './StageNodeForm';
@@ -97,6 +99,8 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
   const [dispatchPreview, setDispatchPreview] = useState<DispatchPreview | null>(null);
   const [dispatching, setDispatching] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
+  // Start early (M4 Autopilot task O2/O3) — busy state for THIS board's node.
+  const [startingEarly, setStartingEarly] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -174,6 +178,19 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
 
   const hasFolder = Boolean(issue && node.folder_id);
 
+  // Start early (M4 Autopilot task O2/O3, spec §3) — the manual, hand-operated
+  // twin of the autopilot engine's own auto-start step. Only ever offered for
+  // a node OUTSIDE the active group (the active group already has Complete
+  // Stage below) whose dependencies are already satisfied (`waitingOn` above
+  // — the server re-checks the exact same predicate on the actual call).
+  const canStartEarly =
+    !isActiveGroup && node.status === 'pending' && !node.skipped && waitingOn.length === 0;
+
+  // brief (mig 395) — editable any time before the node finishes; once
+  // done/skipped it's a permanent read-only record of what was asked for.
+  const briefReadOnly = node.status === 'done' || node.status === 'skipped' || node.skipped;
+  const brief = (node.brief ?? '').trim();
+
   // Run now (H3): only a solid button once the stage hook actually prepared a
   // run (`metadata.run_prepared_at` set) — before that it's still the plain
   // E3 suggest text chip (unchanged). Both share the same base gate
@@ -217,6 +234,52 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
     } catch (err) {
       console.error('[WorkspaceStageBoard] form save failed', err);
       toast?.addToast(err instanceof Error ? err.message : t('common.error'), 'error');
+    }
+  };
+
+  /** brief blur-save (mig 395, task O1/O2/O3) — full-replace single-key
+   * PATCH, same "swap the FULL updated node into `board`" idiom as the
+   * form-field save above. */
+  const handleBriefSave = async (next: string) => {
+    try {
+      const updated = await updateProjectNode(projectId, node.id, { brief: next });
+      setBoard((prev) => (prev ? { ...prev, node: updated } : prev));
+    } catch (err) {
+      console.error('[WorkspaceStageBoard] brief save failed', err);
+      toast?.addToast(err instanceof Error ? err.message : t('common.error'), 'error');
+    }
+  };
+
+  /** Start early (M4 Autopilot task O2/O3) — shares the exact error codes the
+   * server's tick/start-early endpoint uses: DEPS_PENDING (waiting_on),
+   * NODE_CANCELLED, or a generic block. Success refetches the board (via
+   * `refreshTick`, same mechanism the Run now dispatch already uses) so the
+   * header/status/action-bar reflect the freshly-started node immediately. */
+  const handleStartEarly = async () => {
+    setStartingEarly(true);
+    try {
+      await startEarlyNode(projectId, node.id);
+      setRefreshTick((v) => v + 1);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 422) {
+        if (err.code === 'DEPS_PENDING') {
+          const waitingOnNames =
+            (err.details as { waiting_on?: string[] } | undefined)?.waiting_on ?? [];
+          toast?.addToast(
+            t('projects.workflow.deps.waitingOn', { names: waitingOnNames.join(', ') }),
+            'error',
+          );
+        } else if (err.code === 'NODE_CANCELLED') {
+          toast?.addToast(t('projects.workflow.startEarly.cancelled'), 'error');
+        } else {
+          toast?.addToast(t('projects.workflow.startEarly.blocked'), 'error');
+        }
+      } else {
+        console.error('[WorkspaceStageBoard] start early failed', err);
+        toast?.addToast(t('projects.workflow.startEarly.failed'), 'error');
+      }
+    } finally {
+      setStartingEarly(false);
     }
   };
 
@@ -327,6 +390,21 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
         )}
       </div>
 
+      {/* ── in_review pin (M4 Autopilot task O2/O3, spec §3: brief 置顶展示
+          于 Stage Board 审阅区) — read-only highlight, front and center for
+          whoever is reviewing this stage. ──────────────────────────────── */}
+      {node.status === 'in_review' && brief && (
+        <div
+          data-testid="stage-board-brief-pinned"
+          className="rounded-xl border border-[var(--accent-border)] bg-[var(--accent-soft)] p-4 text-[13px] text-[var(--accent-text)]"
+        >
+          <h3 className="mb-1.5 text-[11px] uppercase tracking-wider opacity-80">
+            {t('projects.workflow.brief.reviewHeading')}
+          </h3>
+          <p className="whitespace-pre-wrap">{brief}</p>
+        </div>
+      )}
+
       {/* ── Tasks — mirror issue + sub-issues, all read-only ────────────── */}
       <div data-testid="stage-board-tasks" className="rounded-xl border border-line bg-island p-4">
         <h3 className="mb-2 text-[11px] uppercase tracking-wider text-ink-500">
@@ -361,6 +439,23 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
         disabled={!canWrite}
         onSave={handleFormSave}
       />
+
+      {/* ── brief (mig 395, M4 Autopilot task O1/O2/O3) — pre-work notes for
+          whoever works this stage; injected into an agent's context on
+          auto-start/dispatch/start-early alike. Blur-save, read-only once
+          the node is done/skipped. ──────────────────────────────────────── */}
+      <div data-testid="stage-board-brief" className="rounded-xl border border-line bg-island p-4">
+        <h3 className="mb-2 text-[11px] uppercase tracking-wider text-ink-500">
+          {t('projects.workflow.brief.label')}
+        </h3>
+        <BriefField
+          value={node.brief ?? ''}
+          disabled={!canWrite || briefReadOnly}
+          placeholder={t('projects.workflow.brief.placeholder')}
+          onSave={(next) => void handleBriefSave(next)}
+          testId="stage-board-brief-field"
+        />
+      </div>
 
       {/* ── Deliverables ─────────────────────────────────────────────────── */}
       <div data-testid="stage-board-deliverables" className="rounded-xl border border-line bg-island p-4">
@@ -420,6 +515,29 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
             }}
           >
             {t('projects.workflow.completeStage')} <ArrowRight size={13} />
+          </button>
+        </div>
+      )}
+
+      {/* ── Start early (M4 Autopilot task O2/O3) — a future node OUTSIDE the
+          active group whose dependencies are already satisfied. Mutually
+          exclusive with the action bar above (canStartEarly requires
+          !isActiveGroup). ────────────────────────────────────────────────── */}
+      {canStartEarly && canWrite && (
+        <div className="flex items-center justify-end">
+          <button
+            type="button"
+            onClick={() => void handleStartEarly()}
+            disabled={startingEarly}
+            data-testid="stage-board-start-early"
+            className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[12.5px] transition disabled:cursor-not-allowed disabled:opacity-50"
+            style={{
+              background: 'var(--accent-soft)',
+              color: 'var(--accent-text)',
+              borderColor: 'var(--accent-border)',
+            }}
+          >
+            <Rocket size={13} /> {t('projects.workflow.startEarly.button')}
           </button>
         </div>
       )}

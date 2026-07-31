@@ -8,7 +8,7 @@
  * flow). See task-E3-brief.md.
  */
 import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { createInstance, type i18n as I18n } from 'i18next';
 
@@ -16,6 +16,14 @@ import enJson from '../../public/locales/en.json';
 import { CurrentNodeCard } from './CurrentNodeCard';
 import type { AgentOption, PersonOption } from './OwnerPicker';
 import type { ProjectStageNode } from '../../types';
+
+// CurrentNodeCard's owner/schedule/brief edits all round-trip through
+// updateProjectNode — mocked so a brief blur-save test never hits a real
+// fetch (mirrors WorkspaceStageBoard.test.tsx's own workflowService mock).
+const mockWorkflowService = vi.hoisted(() => ({
+  updateProjectNode: vi.fn(),
+}));
+vi.mock('../../services/workflowService', () => mockWorkflowService);
 
 function makeI18n(): I18n {
   const instance = createInstance();
@@ -58,26 +66,46 @@ const agents: AgentOption[] = [{ id: 'agent-1', name: 'Script Bot' }];
 
 function renderCard(
   overrides: Partial<ProjectStageNode>,
-  opts: { onOpenTodolist?: () => void; onOpenStage?: (nodeId: string) => void } = {},
+  opts: {
+    onOpenTodolist?: () => void;
+    onOpenStage?: (nodeId: string) => void;
+    canWrite?: boolean;
+    onPatched?: () => void;
+    onRequestAdvance?: (direction: 'forward' | 'back') => void;
+    isActive?: boolean;
+    allNodes?: ProjectStageNode[];
+    onStartEarly?: (nodeId: string) => void;
+    startEarlyBusy?: boolean;
+  } = {},
 ) {
   const onOpenTodolist = opts.onOpenTodolist ?? vi.fn();
+  const onPatched = opts.onPatched ?? vi.fn();
+  const onRequestAdvance = opts.onRequestAdvance ?? vi.fn();
   const utils = render(
     <I18nextProvider i18n={makeI18n()}>
       <CurrentNodeCard
         projectId="10"
         node={node(overrides)}
-        canWrite={false}
+        canWrite={opts.canWrite ?? false}
         people={people}
         agents={agents}
-        onPatched={vi.fn()}
-        onRequestAdvance={vi.fn()}
+        onPatched={onPatched}
+        onRequestAdvance={onRequestAdvance}
         onOpenTodolist={onOpenTodolist}
         onOpenStage={opts.onOpenStage}
+        isActive={opts.isActive}
+        allNodes={opts.allNodes}
+        onStartEarly={opts.onStartEarly}
+        startEarlyBusy={opts.startEarlyBusy}
       />
     </I18nextProvider>,
   );
-  return { ...utils, onOpenTodolist };
+  return { ...utils, onOpenTodolist, onPatched, onRequestAdvance };
 }
+
+beforeEach(() => {
+  mockWorkflowService.updateProjectNode.mockReset().mockResolvedValue(node({}));
+});
 
 describe('CurrentNodeCard — suggest-agent-run chip', () => {
   it('renders with the agent name when both the flag and an agent owner are set', () => {
@@ -234,5 +262,172 @@ describe('CurrentNodeCard — Run now chip (M3 Task H3)', () => {
     );
     fireEvent.click(screen.getByTestId('workflow-run-now-chip'));
     expect(onOpenTodolist).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('CurrentNodeCard — brief (M4 Autopilot task O1/O2/O3)', () => {
+  it('seeds the textarea from node.brief', () => {
+    renderCard({ brief: 'Focus on the opening hook.' }, { canWrite: true });
+    expect(screen.getByTestId('workflow-node-brief')).toHaveValue('Focus on the opening hook.');
+  });
+
+  it('saves on blur only when the value actually changed', () => {
+    renderCard({ brief: 'Original note' }, { canWrite: true });
+    const field = screen.getByTestId('workflow-node-brief');
+
+    // Blur with no edit at all — must not manufacture a PATCH (the exact
+    // phantom-save bug StageNodeForm's lastSaved fix guards against).
+    fireEvent.blur(field);
+    expect(mockWorkflowService.updateProjectNode).not.toHaveBeenCalled();
+
+    fireEvent.change(field, { target: { value: 'Updated note' } });
+    fireEvent.blur(field);
+    expect(mockWorkflowService.updateProjectNode).toHaveBeenCalledTimes(1);
+    expect(mockWorkflowService.updateProjectNode).toHaveBeenCalledWith(
+      '10',
+      '1',
+      { brief: 'Updated note' },
+    );
+  });
+
+  it('is read-only once the node is done', () => {
+    renderCard({ brief: 'Original note', status: 'done' }, { canWrite: true });
+    expect(screen.getByTestId('workflow-node-brief')).toBeDisabled();
+  });
+
+  it('is read-only once the node is skipped', () => {
+    renderCard({ brief: 'Original note', skipped: true }, { canWrite: true });
+    expect(screen.getByTestId('workflow-node-brief')).toBeDisabled();
+  });
+
+  it('stays editable while the node is in_review', () => {
+    renderCard({ brief: 'Original note', status: 'in_review' }, { canWrite: true });
+    expect(screen.getByTestId('workflow-node-brief')).not.toBeDisabled();
+  });
+
+  it('pins a read-only brief block when the node is in_review with a non-empty brief', () => {
+    renderCard({ brief: 'Reviewer: check pacing in act 2.', status: 'in_review' });
+    expect(screen.getByTestId('workflow-node-brief-pinned')).toHaveTextContent(
+      'Reviewer: check pacing in act 2.',
+    );
+  });
+
+  it('does not pin when in_review but brief is empty', () => {
+    renderCard({ brief: '', status: 'in_review' });
+    expect(screen.queryByTestId('workflow-node-brief-pinned')).toBeNull();
+  });
+
+  it('does not pin when brief is set but the node is not in_review', () => {
+    renderCard({ brief: 'Some note', status: 'in_progress' });
+    expect(screen.queryByTestId('workflow-node-brief-pinned')).toBeNull();
+  });
+});
+
+describe('CurrentNodeCard — Start early (M4 Autopilot task O2/O3)', () => {
+  const dep = (over: Partial<ProjectStageNode>) => node({ id: 'dep-1', name: 'Script', ...over });
+
+  it('never renders for the active node (isActive default true), even if otherwise eligible', () => {
+    renderCard(
+      { id: 'n1', status: 'pending' },
+      { canWrite: true, allNodes: [node({ id: 'n1', status: 'pending' })], onStartEarly: vi.fn() },
+    );
+    expect(screen.queryByTestId('workflow-start-early')).toBeNull();
+  });
+
+  it('renders for a future node (isActive=false) whose dependencies are all satisfied', () => {
+    renderCard(
+      { id: 'n1', status: 'pending', depends_on: ['dep-1'] },
+      {
+        canWrite: true,
+        isActive: false,
+        allNodes: [dep({ status: 'done' }), node({ id: 'n1', status: 'pending', depends_on: ['dep-1'] })],
+        onStartEarly: vi.fn(),
+      },
+    );
+    expect(screen.getByTestId('workflow-start-early')).toBeInTheDocument();
+  });
+
+  it('hides the button when a dependency is not yet satisfied', () => {
+    renderCard(
+      { id: 'n1', status: 'pending', depends_on: ['dep-1'] },
+      {
+        canWrite: true,
+        isActive: false,
+        allNodes: [dep({ status: 'pending' }), node({ id: 'n1', status: 'pending', depends_on: ['dep-1'] })],
+        onStartEarly: vi.fn(),
+      },
+    );
+    expect(screen.queryByTestId('workflow-start-early')).toBeNull();
+  });
+
+  it('hides the button when the future node is not pending (already started)', () => {
+    renderCard(
+      { id: 'n1', status: 'in_progress' },
+      { canWrite: true, isActive: false, allNodes: [node({ id: 'n1', status: 'in_progress' })], onStartEarly: vi.fn() },
+    );
+    expect(screen.queryByTestId('workflow-start-early')).toBeNull();
+  });
+
+  it('hides the button when the future node is skipped', () => {
+    renderCard(
+      { id: 'n1', status: 'pending', skipped: true },
+      { canWrite: true, isActive: false, allNodes: [node({ id: 'n1', status: 'pending', skipped: true })], onStartEarly: vi.fn() },
+    );
+    expect(screen.queryByTestId('workflow-start-early')).toBeNull();
+  });
+
+  it('hides the button when no onStartEarly handler is provided', () => {
+    renderCard(
+      { id: 'n1', status: 'pending' },
+      { canWrite: true, isActive: false, allNodes: [node({ id: 'n1', status: 'pending' })] },
+    );
+    expect(screen.queryByTestId('workflow-start-early')).toBeNull();
+  });
+
+  it('hides the button when canWrite is false', () => {
+    renderCard(
+      { id: 'n1', status: 'pending' },
+      { canWrite: false, isActive: false, allNodes: [node({ id: 'n1', status: 'pending' })], onStartEarly: vi.fn() },
+    );
+    expect(screen.queryByTestId('workflow-start-early')).toBeNull();
+  });
+
+  it('clicking the button calls onStartEarly with the node id', () => {
+    const onStartEarly = vi.fn();
+    renderCard(
+      { id: 'n1', status: 'pending' },
+      { canWrite: true, isActive: false, allNodes: [node({ id: 'n1', status: 'pending' })], onStartEarly },
+    );
+    fireEvent.click(screen.getByTestId('workflow-start-early'));
+    expect(onStartEarly).toHaveBeenCalledWith('n1');
+  });
+
+  it('disables the button while startEarlyBusy is true', () => {
+    renderCard(
+      { id: 'n1', status: 'pending' },
+      {
+        canWrite: true,
+        isActive: false,
+        allNodes: [node({ id: 'n1', status: 'pending' })],
+        onStartEarly: vi.fn(),
+        startEarlyBusy: true,
+      },
+    );
+    expect(screen.getByTestId('workflow-start-early')).toBeDisabled();
+  });
+
+  it('hides Back/Complete-stage on a future-node peek card (isActive=false)', () => {
+    renderCard(
+      { id: 'n1', status: 'pending' },
+      { canWrite: true, isActive: false, allNodes: [node({ id: 'n1', status: 'pending' })], onStartEarly: vi.fn() },
+    );
+    expect(screen.queryByTestId('workflow-back-btn')).toBeNull();
+    expect(screen.queryByTestId('workflow-complete-stage')).toBeNull();
+  });
+
+  it('keeps Back/Complete-stage for the active node (isActive default true)', () => {
+    renderCard({ id: 'n1', status: 'in_progress' }, { canWrite: true });
+    expect(screen.getByTestId('workflow-back-btn')).toBeInTheDocument();
+    expect(screen.getByTestId('workflow-complete-stage')).toBeInTheDocument();
   });
 });

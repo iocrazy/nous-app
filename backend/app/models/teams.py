@@ -350,6 +350,12 @@ class Projects(Base):
         ),
     )
     archived_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
+    # Project-level Autopilot master switch (mig 395, M4 Autopilot §1). Default
+    # on, but inert until a workflow node opts in via events.auto_start;
+    # Autopilot never crosses a review gate regardless of this flag.
+    autopilot_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
 
 
 class ProjectFiles(Base):

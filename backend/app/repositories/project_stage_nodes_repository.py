@@ -156,6 +156,9 @@ def _node_row(
         "metadata": obj.metadata_,
         "form_schema": obj.form_schema,
         "form_data": obj.form_data,
+        # Runtime "heads up" text (mig 395, M4 Autopilot §1) — instance-only,
+        # same shape as form_data/metadata_ above.
+        "brief": obj.brief,
         "members": members,
         # Dependency edges (mig 391, M3 PR-J): the OTHER live nodes in this
         # project this node depends on (real instance ids). A node removed by
@@ -501,6 +504,7 @@ class ProjectStageNodesRepository:
         skipped: Optional[bool] = None,
         form_data: Optional[Dict[str, Any]] = None,
         depends_on: Optional[List[str]] = None,
+        brief: Optional[str] = None,
         _set_owner: bool = False,
         _set_schedule_start: bool = False,
         _set_schedule_due: bool = False,
@@ -532,6 +536,11 @@ class ProjectStageNodesRepository:
         validation/insert (M3 final review #3) — a repeated id is not a
         backward-only violation, so without the dedupe it would reach the
         insert loop and hit the composite-PK IntegrityError instead.
+
+        ``brief`` (mig 395, M4 Autopilot §1) is a plain overwrite — runtime
+        free text, no whitelist to enforce (unlike ``form_data``'s per-key
+        ``form_schema`` filter), writable any time before/while the node is
+        open.
         """
         pid = int(str(project_id))
         nid = int(str(node_id))
@@ -611,6 +620,12 @@ class ProjectStageNodesRepository:
                 merged = dict(node.form_data or {})
                 merged.update(filtered)
                 node.form_data = merged
+            if brief is not None:
+                # Runtime data (mig 395, M4 Autopilot §1) — no whitelist beyond
+                # NodePatch itself (same treatment as form_data, minus the
+                # per-key form_schema filter since brief is free text, not a
+                # keyed field set).
+                node.brief = brief
             node.updated_at = datetime.datetime.now(datetime.timezone.utc)
 
             if members is not None:

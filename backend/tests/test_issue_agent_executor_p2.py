@@ -90,9 +90,26 @@ class _FakeStore:
 
     def __init__(self, session_row: Dict[str, Any]) -> None:
         self._session_row = session_row
+        # M4 Autopilot fix (task O2 review C1): record what the caller
+        # actually passed, and echo project_id/team_id back into the
+        # returned row when supplied — a real MessageStore persists exactly
+        # what it was given, so a test that hard-codes the canned row's
+        # project_id would never catch a caller silently failing to pass it
+        # (which is precisely how the quota bug shipped: agent_runs.project_id
+        # was NULL in prod because create_session was never called with one).
+        self.create_session_calls: List[Dict[str, Any]] = []
 
-    async def create_session(self, **_kw: Any) -> Dict[str, Any]:
-        return self._session_row
+    async def create_session(self, **kw: Any) -> Dict[str, Any]:
+        self.create_session_calls.append(dict(kw))
+        # Persist into self._session_row (not just a locally-returned copy)
+        # so a SUBSEQUENT get_session() — which is what run_session_turn
+        # actually reloads the row through — sees the same project_id/
+        # team_id a real backing store would have written.
+        if "project_id" in kw:
+            self._session_row["project_id"] = kw["project_id"]
+        if "team_id" in kw:
+            self._session_row["team_id"] = kw["team_id"]
+        return dict(self._session_row)
 
     async def get_session(self, *, session_id: int) -> Optional[Dict[str, Any]]:
         return self._session_row
@@ -338,6 +355,195 @@ async def test_issue_session_and_turn_link_via_conversation_id(
     outcome, reason = extract_issue_outcome(result.get("tool_calls"))
     assert outcome == "completed"
     assert reason == "shipped"
+
+
+async def test_issue_session_project_id_reaches_agent_runs_via_run_recorder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """M4 Autopilot review fix (C1): the autopilot daily quota
+    (``agent_runs_repository.count_auto_dispatches_today``) filters
+    ``agent_runs`` by ``project_id`` — but ``get_or_create_issue_session``
+    used to never pass ``project_id``/``team_id`` from the issue row into
+    ``create_session``, so every issue-dispatch session (including every
+    project_stage mirror issue's) carried ``project_id=NULL`` end to end,
+    and the quota guardrail was structurally a no-op (reviewer measured
+    80/80 real rows NULL in prod).
+
+    This is the SAME real ``get_or_create_issue_session`` -> real
+    ``create_session`` -> real ``run_session_turn`` harness as
+    ``test_issue_session_and_turn_link_via_conversation_id`` above — reaches
+    through the store/RunRecorder fakes rather than trusting them: the fake
+    STORE now echoes back whatever ``project_id``/``team_id`` it actually
+    received (see ``_FakeStore.create_session``), so this proves the ISSUE
+    ROW's real project_id/team_id genuinely flow into the store call, and
+    from there into the RunRecorder kwargs that become ``agent_runs.
+    project_id`` — not just that some hard-coded fixture value survives.
+
+    Also exercises ``trigger='issue_dispatch_auto'`` (the autopilot
+    quota-discriminator value, task O2) through the identical real path.
+    """
+    from app.db import engine as db_engine_module
+    from app.schemas.ai_library import ComposedSystemPrompt
+    from app.services.ai.chat import ai_library_chat_service as chat_service_module
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+    from app.services.issues import issue_session as session_module
+
+    agent_id = uuid4()
+    user_id = uuid4()
+    issue_id = 9191
+    session_id_int = 616161
+    issue_project_id = 7001
+    issue_team_id = 8001
+
+    session_row = {
+        "id": session_id_int,
+        "user_id": str(user_id),
+        "agent_slug": "issue_agent",
+        "agent_id": str(agent_id),
+        "title": "Autopilot dispatch",
+        "total_tokens": 0,
+        "message_count": 0,
+        "team_id": None,
+        "project_id": None,
+        "store_kind": "conversations",
+    }
+    store = _FakeStore(session_row)
+
+    def _service_factory(*_a: Any, **_kw: Any) -> AILibraryChatService:
+        return AILibraryChatService(store=store)
+
+    monkeypatch.setattr(session_module, "AILibraryChatService", _service_factory)
+
+    issue_row = {
+        "ai_session_id": None,
+        "title": "Autopilot dispatch",
+        "assignee_agent_id": str(agent_id),
+        "created_by_user_id": str(user_id),
+        "assignee_user_id": None,
+        # The real column set the C1 fix now SELECTs and forwards.
+        "project_id": issue_project_id,
+        "team_id": issue_team_id,
+    }
+
+    async def _fake_fetch_one(
+        sql: str, params: Optional[dict] = None
+    ) -> Optional[dict]:
+        assert "public.issues" in sql
+        assert "project_id" in sql and "team_id" in sql
+        return dict(issue_row)
+
+    async def _fake_execute(sql: str, params: Optional[dict] = None) -> int:
+        return 1
+
+    monkeypatch.setattr(db_engine_module, "fetch_one", _fake_fetch_one)
+    monkeypatch.setattr(db_engine_module, "execute", _fake_execute)
+
+    fake_agent_record = {
+        "id": str(agent_id),
+        "slug": "issue_agent",
+        "model": "qwen-max",
+        "budget_per_run_cents": None,
+        "fallback_models": [],
+    }
+    fake_agent_repo = MagicMock()
+    fake_agent_repo.get_by_id = AsyncMock(return_value=fake_agent_record)
+    fake_agent_repo.get_by_slug = AsyncMock(return_value=fake_agent_record)
+    monkeypatch.setattr(session_module, "get_agent_repository", lambda: fake_agent_repo)
+    monkeypatch.setattr(
+        chat_service_module, "get_agent_repository", lambda: fake_agent_repo
+    )
+
+    # --- real get_or_create_issue_session -> real create_session ---
+    session_id = await session_module.get_or_create_issue_session(issue_id)
+    assert session_id == str(session_id_int)
+
+    # The store really received the issue's own project_id/team_id — this is
+    # the crux of the C1 fix, checked BEFORE it ever reaches RunRecorder.
+    assert store.create_session_calls
+    assert store.create_session_calls[0]["project_id"] == issue_project_id
+    assert store.create_session_calls[0]["team_id"] == issue_team_id
+
+    composed = ComposedSystemPrompt(
+        agent_id=agent_id,
+        agent_slug="issue_agent",
+        model="qwen-max",
+        temperature=0.7,
+        max_tokens=4096,
+        system_message="You are the issue agent.",
+        tools=[],
+        skill_manifest=[],
+        cache_fingerprint="fp-autopilot",
+    )
+    composer = MagicMock()
+    composer.compose = AsyncMock(return_value=composed)
+
+    runner = MagicMock()
+
+    async def _run_turn(composed_arg, *, user_messages, recorder):
+        return {"content": "did the thing", "tool_calls": _default_tool_calls()}
+
+    runner.run_turn = AsyncMock(side_effect=_run_turn)
+
+    recorder = MagicMock()
+    recorder.run_id = uuid4()
+    recorder.prompt_tokens = 3
+    recorder.completion_tokens = 5
+    recorder.set_summaries = MagicMock()
+
+    captured_kwargs: Dict[str, Any] = {}
+
+    def _fake_run_recorder(**kwargs: Any) -> _RunRecorderCM:
+        captured_kwargs.update(kwargs)
+        return _RunRecorderCM(recorder)
+
+    fake_stack = MagicMock()
+    fake_stack.runner = runner
+    fake_stack.graph_facts = []
+    fake_stack.user_context = None
+    fake_stack.agent_memory_facts = []
+    fake_stack.primary_model = "qwen-max"
+    fake_stack.fallback_chain_active = False
+
+    with (
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.build_agent_runner_stack",
+            AsyncMock(return_value=fake_stack),
+        ),
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.PromptComposer",
+            return_value=composer,
+        ),
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.AgentRunner",
+            return_value=runner,
+        ),
+        patch(
+            "app.services.ai.providers.ai_provider_helpers.resolve_db_adapter",
+            new=AsyncMock(return_value=MagicMock()),
+        ),
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.SkillToolService",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "app.services.ai.chat.ai_library_chat_service.RunRecorder",
+            side_effect=_fake_run_recorder,
+        ),
+    ):
+        turn_service = AILibraryChatService(store=store)
+        await turn_service.run_session_turn(
+            session_id,
+            user_id=user_id,
+            content="Task: autopilot dispatch",
+            trigger="issue_dispatch_auto",
+        )
+
+    # The whole point of C1: agent_runs.project_id (via RunRecorder kwargs)
+    # is the issue's REAL project_id, not NULL — so
+    # count_auto_dispatches_today's WHERE project_id=X actually matches rows.
+    assert captured_kwargs["project_id"] == issue_project_id
+    assert captured_kwargs["team_id"] == issue_team_id
+    assert captured_kwargs["trigger"] == "issue_dispatch_auto"
 
 
 class _FinishIssueStreamingAdapter:

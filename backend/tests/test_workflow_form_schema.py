@@ -375,6 +375,36 @@ async def test_update_node_without_form_data_kwarg_leaves_form_data_untouched(
     assert node.form_data == {"notes": "existing"}
 
 
+# ── update_node: brief is a plain overwrite (mig 395, M4 Autopilot §1) ──────
+#
+# Unlike form_data, brief has no per-key whitelist to filter against (it's
+# free text, not a keyed field set) — a straight assignment, same shape as
+# the ``skipped``/schedule fields above it in ``update_node``.
+
+
+@pytest.mark.asyncio
+async def test_update_node_writes_brief(monkeypatch):
+    node = _live_node(form_schema=[], form_data={})
+
+    await _install_and_call(
+        monkeypatch, node, brief="Double-check the client's logo usage"
+    )
+
+    assert node.brief == "Double-check the client's logo usage"
+
+
+@pytest.mark.asyncio
+async def test_update_node_without_brief_kwarg_leaves_brief_untouched(monkeypatch):
+    """brief=None (the default — caller didn't touch it) must not overwrite an
+    existing brief, same "leave unchanged" contract as form_data=None."""
+    node = _live_node(form_schema=[], form_data={})
+    node.brief = "Existing heads-up"
+
+    await _install_and_call(monkeypatch, node, skipped=True)
+
+    assert node.brief == "Existing heads-up"
+
+
 # ── _slugify_label: kebab-case a label into a key ───────────────────────────
 
 

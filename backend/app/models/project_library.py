@@ -474,6 +474,12 @@ class ProjectStageNodes(Base):
     form_data: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
+    # Runtime "heads up before you start" text (mig 395, M4 Autopilot §1).
+    # Instance-only, no template-side counterpart (like form_data/metadata_
+    # above) — writable any time before/while the node is open via NodePatch.
+    brief: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''::text")
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )

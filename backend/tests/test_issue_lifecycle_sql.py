@@ -140,11 +140,14 @@ async def test_run_issue_agent_step_invokes_executor(monkeypatch):
 
     ran = {}
 
-    async def fake_run_issue_agent(*, issue, agent_id, user_id, is_continuation=False):
+    async def fake_run_issue_agent(
+        *, issue, agent_id, user_id, is_continuation=False, auto=False
+    ):
         ran["issue_id"] = issue["id"]
         ran["agent_id"] = agent_id
         ran["user_id"] = user_id
         ran["is_continuation"] = is_continuation
+        ran["auto"] = auto
         return {"content": "essay output", "outcome": "completed", "reason": "done"}
 
     monkeypatch.setattr(
@@ -159,6 +162,9 @@ async def test_run_issue_agent_step_invokes_executor(monkeypatch):
         "agent_id": "agent-uuid",
         "user_id": "user-uuid",
         "is_continuation": False,
+        # M4 Autopilot (task O2): default auto=False when the workflow-level
+        # kwarg isn't threaded in (a plain manual-dispatch call).
+        "auto": False,
     }
     assert out["content"] == "essay output"
     assert out["outcome"] == "completed"

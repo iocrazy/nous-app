@@ -20,7 +20,7 @@ async def get_or_create_issue_session(issue_id: int) -> Optional[str]:
 
     row = await db_engine.fetch_one(
         "SELECT ai_session_id, title, assignee_agent_id, created_by_user_id, "
-        "assignee_user_id FROM public.issues WHERE id = :id",
+        "assignee_user_id, project_id, team_id FROM public.issues WHERE id = :id",
         {"id": issue_id},
     )
     if not row:
@@ -37,11 +37,23 @@ async def get_or_create_issue_session(issue_id: int) -> Optional[str]:
     if not agent:
         raise RuntimeError(f"assignee agent {agent_id} not found")
 
-    # create_session expects user_id as UUID (keyword-only)
+    # M4 Autopilot fix (task O2 review C1): the issue's own project_id/team_id
+    # MUST flow onto the session — RunRecorder tags agent_runs.project_id from
+    # session["project_id"] (ai_library_chat_service._run_session_turn_inner),
+    # and the autopilot daily quota counts agent_runs BY project_id
+    # (agent_runs_repository.count_auto_dispatches_today). Without this, every
+    # issue-dispatch session (including every project_stage mirror issue's)
+    # created project_id=NULL, so agent_runs.project_id was NULL for every row
+    # the quota counter filters on — the guardrail was structurally a no-op
+    # (reviewer measured 80/80 rows NULL in prod). This also fixes project_id
+    # attribution for every OTHER issue-dispatch consumer of agent_runs
+    # (Usage panel project scoping, etc.), not just autopilot.
     session = await AILibraryChatService().create_session(
         user_id=UUID(str(user_id)),
         agent_slug=agent["slug"],
         title=(row.get("title") or "Issue")[:200],
+        project_id=row.get("project_id"),
+        team_id=row.get("team_id"),
         context_type="issue",
         context_id=str(issue_id),
     )

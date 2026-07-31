@@ -53,6 +53,12 @@ class ProjectUpdate(BaseModel):
             "directly to the DB as a column named 'archived'."
         ),
     )
+    # M4 Autopilot (mig 395, spec §1): project-level master switch. Written
+    # straight through — unlike ``archived``, this IS the real column name, so
+    # the router's ``data.model_dump(exclude_none=True)`` -> service ->
+    # ``_known_only(data, _PROJECTS_ATTRS, ...)`` repo path needs no special
+    # case (same as ``is_starred`` / ``color_label`` above it).
+    autopilot_enabled: Optional[bool] = None
 
 
 class ProjectResponse(BaseModel):

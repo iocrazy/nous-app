@@ -7,10 +7,13 @@
  * knows where they are.
  */
 
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Bot } from 'lucide-react';
+import { ArrowLeft, Bot, Zap, ZapOff } from 'lucide-react';
 import { MiniStepper } from './MiniStepper';
-import type { ProjectStage, ProjectWorkflow } from '../../types';
+import { updateProject } from '../../services/projectsService';
+import { useOptionalToast } from '../Toast';
+import type { Project, ProjectStage, ProjectWorkflow } from '../../types';
 
 interface WorkspaceTopBarProps {
   projectName: string;
@@ -24,6 +27,19 @@ interface WorkspaceTopBarProps {
   onRequestAdvance?: (direction: 'forward' | 'back') => void;
   /** Non-adjacent jump → land on the Overview node card. */
   onJumpToNode?: (nodeId: string) => void;
+  /** M4 Autopilot (mig 395, task O1/O2): the project-level master switch —
+   * omitted entirely hides the chip (e.g. a host that hasn't wired it
+   * through yet). `projectId` is required alongside it since the chip owns
+   * its own PATCH call (optimistic + revert-on-error, mirroring
+   * AgentMemoriesPanel's own capture-before-mutate / revert-on-failure
+   * idiom — this is the first topbar mutation, so there's no prior topbar
+   * pattern to match). */
+  projectId?: string;
+  autopilotEnabled?: boolean;
+  /** Bubbles the fresh value up after a successful toggle so the caller can
+   * sync its own `project` state (mirrors `ProjectWorkspace`'s existing
+   * `onProjectUpdated` bubble-up from the Settings module). */
+  onAutopilotChange?: (enabled: boolean) => void;
 }
 
 export function WorkspaceTopBar({
@@ -34,8 +50,38 @@ export function WorkspaceTopBar({
   workflow,
   onRequestAdvance,
   onJumpToNode,
+  projectId,
+  autopilotEnabled,
+  onAutopilotChange,
 }: WorkspaceTopBarProps) {
   const { t } = useTranslation();
+  const toast = useOptionalToast();
+  // Optimistic local mirror of the prop — toggled immediately on click, then
+  // reverted if the PATCH fails. Re-synced whenever the caller's own value
+  // changes underneath us (e.g. navigating to a different project).
+  const [autopilot, setAutopilot] = useState(autopilotEnabled ?? true);
+  const [autopilotSaving, setAutopilotSaving] = useState(false);
+  useEffect(() => {
+    setAutopilot(autopilotEnabled ?? true);
+  }, [autopilotEnabled, projectId]);
+
+  const handleToggleAutopilot = async () => {
+    if (!projectId || autopilotSaving) return;
+    const prev = autopilot;
+    const next = !prev;
+    setAutopilot(next); // optimistic
+    setAutopilotSaving(true);
+    try {
+      const updated: Project = await updateProject(projectId, { autopilot_enabled: next });
+      onAutopilotChange?.(updated.autopilot_enabled ?? next);
+    } catch (err) {
+      console.error('[WorkspaceTopBar] autopilot toggle failed', err);
+      setAutopilot(prev); // revert
+      toast?.addToast(t('projects.workflow.autopilot.toggleFailed'), 'error');
+    } finally {
+      setAutopilotSaving(false);
+    }
+  };
 
   // Map the workflow's nodes onto the MiniStepper's stage shape; adjacent
   // dots run the advance / back gate, non-adjacent dots navigate to the node
@@ -96,6 +142,31 @@ export function WorkspaceTopBar({
       )}
 
       <div className="flex-1" />
+
+      {/* M4 Autopilot (mig 395, task O1/O2/O3) — project-level master switch,
+          same chip family as agents-active below (rounded-full soft-tint
+          pill + icon + short label) but its own semantic hue: on = --agent
+          (this IS the "an agent may act automatically" signal), off = a
+          neutral/muted tone — never the amber/warn hue agents-active uses,
+          so the two chips never read as the same kind of state. */}
+      {projectId && autopilotEnabled !== undefined && (
+        <button
+          type="button"
+          onClick={() => void handleToggleAutopilot()}
+          disabled={!canWrite || autopilotSaving}
+          data-testid="workspace-autopilot-chip"
+          data-autopilot={autopilot ? 'on' : 'off'}
+          title={t(
+            autopilot ? 'projects.workflow.autopilot.onTitle' : 'projects.workflow.autopilot.offTitle',
+          )}
+          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium whitespace-nowrap transition disabled:cursor-not-allowed disabled:opacity-60 ${
+            autopilot ? 'bg-agent-soft text-agent' : 'bg-ink-800 text-ink-500'
+          }`}
+        >
+          {autopilot ? <Zap size={12} /> : <ZapOff size={12} />}
+          {t('projects.workflow.autopilot.label')}
+        </button>
+      )}
 
       {agentsActive > 0 && (
         <span
