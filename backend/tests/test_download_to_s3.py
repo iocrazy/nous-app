@@ -177,3 +177,53 @@ async def test_upload_wiring_propagates_store_failure(monkeypatch, tmp_path):
         await _upload_downloaded_video_to_s3(
             user_id="user-1", local_path=str(local), relative_path="teams/1/x/video.mp4"
         )
+
+
+@pytest.mark.asyncio
+async def test_upload_wiring_passes_through_mime(monkeypatch, tmp_path):
+    """非视频成品(封面)经同一 helper 上传:``mime`` 参数透传给 store_local_file。
+
+    覆盖 2026-07-31 的接线补齐 —— 封面下载路径与 yt-dlp fallback 现在都复用
+    这个 helper,封面显式传 ``image/jpeg``;默认仍是 ``video/mp4``(其它测试覆盖)。
+    """
+    import app.services.library.media_storage as media_storage
+    import app.services.library.resources_service as resources_service
+    import app.services.library.storage_flag as storage_flag
+    from app.services.media.downloader.downloader import (
+        _upload_downloaded_video_to_s3,
+    )
+
+    async def _enabled():
+        return True
+
+    async def _fake_resolve(user_id):
+        return "1"
+
+    calls = {}
+
+    async def _fake_store_local_file(*, scope_id, source_path, mime, filename, store):
+        calls["mime"] = mime
+        calls["filename"] = filename
+        return StoredObject(
+            file_path="sb://library/t1/aa/bb/aabbccdd.jpg",
+            size_bytes=3,
+            sha256="aabbccdd",
+        )
+
+    monkeypatch.setattr(storage_flag, "unified_storage_enabled", _enabled)
+    monkeypatch.setattr(resources_service, "_resolve_personal_team_id", _fake_resolve)
+    monkeypatch.setattr(media_storage, "store_local_file", _fake_store_local_file)
+    monkeypatch.setattr(media_storage, "library_store", lambda: object())
+
+    local = tmp_path / "cover.jpg"
+    local.write_bytes(b"abc")
+    result = await _upload_downloaded_video_to_s3(
+        user_id="user-1",
+        local_path=str(local),
+        relative_path="teams/1/x/cover.jpg",
+        mime="image/jpeg",
+    )
+
+    assert result == "sb://library/t1/aa/bb/aabbccdd.jpg"
+    assert calls["mime"] == "image/jpeg"
+    assert calls["filename"] == "cover.jpg"
