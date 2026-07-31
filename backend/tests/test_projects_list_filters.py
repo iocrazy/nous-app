@@ -381,6 +381,57 @@ async def test_service_update_project_no_archived_key_passes_through_unchanged()
     assert sent["name"] == "Renamed"
 
 
+# ── mig 395 (M4 Autopilot §1): ProjectUpdate.autopilot_enabled ────────────
+#
+# Unlike ``archived``, this IS the real column name (Projects.autopilot_enabled,
+# mig 395) — the service does no special-case mapping for it at all, so a
+# PATCH carrying it must reach the repo call completely unchanged (same
+# passthrough shape as ``test_service_update_project_no_archived_key_passes_
+# through_unchanged`` above, just asserting the field DOES survive rather
+# than one that must be translated away).
+
+
+def test_project_update_schema_accepts_autopilot_enabled():
+    from app.schemas.projects import ProjectUpdate
+
+    data = ProjectUpdate(autopilot_enabled=False).model_dump(exclude_none=True)
+    assert data == {"autopilot_enabled": False}
+
+
+@pytest.mark.asyncio
+async def test_service_update_project_passes_autopilot_enabled_through_unchanged():
+    from app.services.library.projects_service import ProjectsService
+
+    svc = ProjectsService()
+    with (
+        patch.object(
+            svc.repo,
+            "get_project_by_id",
+            new=AsyncMock(return_value={"id": _PROJECT_ID_1}),
+        ),
+        patch.object(
+            svc.repo,
+            "update_project",
+            new=AsyncMock(return_value={"id": _PROJECT_ID_1}),
+        ) as update_mock,
+    ):
+        await svc.update_project(
+            str(_PROJECT_ID_1), _OWNER_ID, {"autopilot_enabled": False}
+        )
+
+    sent = update_mock.call_args.args[1]
+    assert sent["autopilot_enabled"] is False
+
+
+def test_projects_model_maps_autopilot_enabled_column():
+    """Proves the write-path whitelist (``_known_only`` against
+    ``Projects.__mapper__.column_attrs``, see ``projects_repository.py``)
+    actually includes the new column — without this, a PATCH carrying
+    ``autopilot_enabled`` would silently no-op exactly like the
+    ``display_code`` phantom-column case the repo's docstring describes."""
+    assert "autopilot_enabled" in {p.key for p in Projects.__mapper__.column_attrs}
+
+
 # ── create_project: team_id str → int coercion (asyncpg int8 strict) ─────
 
 

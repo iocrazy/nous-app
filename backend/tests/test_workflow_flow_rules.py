@@ -53,7 +53,7 @@ from app.repositories.workflow_templates_repository import (
     WorkflowTemplatesRepository,
 )
 from app.schemas.issue import IssueStatus, IssueStatusTransition
-from app.schemas.workflow import TemplateNodeIn, WorkflowNodeEvents
+from app.schemas.workflow import NodeOut, NodePatch, TemplateNodeIn, WorkflowNodeEvents
 
 issues_router = importlib.import_module("app.api.issues_router")
 
@@ -609,6 +609,9 @@ async def test_get_project_workflow_response_carries_completion_policy_and_event
         # per-field, per the brief's self-review note).
         "prepare_agent_run": False,
         "on_complete_workflow": None,
+        # mig 395 (M4 Autopilot §1): same "defaults in on a predating row"
+        # shape as prepare_agent_run/on_complete_workflow above.
+        "auto_start": False,
     }
     assert payload["nodes"][0]["metadata"] == {}
 
@@ -732,3 +735,148 @@ def test_on_complete_workflow_non_null_rejected_as_not_implemented():
             sort_order=1,
             events={"on_complete_workflow": "x"},
         )
+
+
+# ── mig 395 (M4 Autopilot §1): WorkflowNodeEvents.auto_start ────────────────
+#
+# auto_start is CONFIG (template-layer, same treatment as completion_policy /
+# the other events keys since mig 386): authored on the template, copied
+# verbatim at instantiation, and NEVER accepted on an instance PATCH. Unlike
+# on_complete_workflow it needs no "not implemented" guard — it IS
+# implemented (the autopilot_tick engine is later M4 work; this task only
+# lands the config surface it will read).
+
+
+def test_auto_start_defaults_false():
+    """Merging this PR must change zero behavior for every existing template/
+    node until an editor explicitly opts a node in."""
+    events = WorkflowNodeEvents()
+    assert events.auto_start is False
+
+    node = TemplateNodeIn(name="Script", sort_order=1)
+    assert node.events.auto_start is False
+
+
+def test_auto_start_round_trips_through_template_node_in_and_node_to_dict():
+    """Must validate through TemplateNodeIn, survive
+    ``events.model_dump()``, and reach ``_node_to_dict``'s payload — the same
+    seam that carries every other events key into the repo write path (mirrors
+    the mig 389 prepare_agent_run regression test above)."""
+    workflow_templates_router = importlib.import_module(
+        "app.api.workflow_templates_router"
+    )
+
+    node = TemplateNodeIn(
+        name="Script",
+        sort_order=1,
+        events={"auto_start": True},
+    )
+
+    assert node.events.auto_start is True
+    dumped = node.events.model_dump()
+    assert dumped["auto_start"] is True
+
+    payload = workflow_templates_router._node_to_dict(node)
+    assert payload["events"]["auto_start"] is True
+
+
+@pytest.mark.asyncio
+async def test_instantiate_copies_auto_start_event(monkeypatch):
+    """``instantiate_from_template`` copies the ENTIRE events dict verbatim
+    (same code path proven for completion_policy/events above) — pinning
+    auto_start specifically so a future refactor of that copy can't
+    special-case it away by accident."""
+    tpl_nodes = [
+        _tpl_node(
+            node_id=1,
+            sort_order=1,
+            completion_policy="owner",
+            events={
+                "notify_on_arrival": True,
+                "notify_on_complete": False,
+                "suggest_agent_run": False,
+                "auto_start": True,
+            },
+        ),
+    ]
+    session = _InstantiateFakeSession(tpl_nodes)
+
+    import app.repositories.project_stage_nodes_repository as mod
+
+    monkeypatch.setattr(mod, "write_scope", _write_scope_with(session))
+
+    repo = ProjectStageNodesRepository()
+    result = await repo.instantiate_from_template("50", "1")
+
+    assert len(result) == 1
+    assert result[0]["events"]["auto_start"] is True
+
+
+def test_node_patch_has_no_events_or_auto_start_field():
+    """Instance PATCH must never be able to flip auto_start — it stays frozen
+    template config. NodePatch has no ``events`` field at all (unlike
+    ``form_data``, which DOES have an instance-writable counterpart), so this
+    is enforced by omission, same regression-pin shape as
+    test_node_patch_has_form_data_but_not_form_schema_declared in
+    test_workflow_form_schema.py."""
+    assert "events" not in NodePatch.model_fields
+    assert "auto_start" not in NodePatch.model_fields
+
+    # Passing it anyway must not raise (pydantic v2 default extra="ignore")
+    # but must also not be stored/dumped anywhere.
+    patch = NodePatch(events={"auto_start": True})
+    dumped = patch.model_dump(exclude_unset=True)
+    assert "events" not in dumped
+    assert "auto_start" not in dumped
+
+
+# ── mig 395 (M4 Autopilot §1): NodeOut.brief / NodePatch.brief ──────────────
+#
+# brief is RUNTIME data (same instance-PATCH-able treatment as form_data),
+# the opposite of auto_start above — writable any time before/while the node
+# is open, never copied from a template (there is nothing to copy: a
+# template node has no brief).
+
+
+def test_node_out_defaults_brief_empty():
+    node = NodeOut(
+        id="1",
+        project_id="100",
+        name="Script",
+        sort_order=1,
+        status="pending",
+        review_required=False,
+        deliverable_required=False,
+        skipped=False,
+    )
+    assert node.brief == ""
+
+
+def test_node_out_carries_brief():
+    node = NodeOut(
+        id="1",
+        project_id="100",
+        name="Script",
+        sort_order=1,
+        status="pending",
+        review_required=False,
+        deliverable_required=False,
+        skipped=False,
+        brief="Client wants the logo bigger this time",
+    )
+    assert node.brief == "Client wants the logo bigger this time"
+
+    dumped = node.model_dump()
+    assert dumped["brief"] == "Client wants the logo bigger this time"
+
+
+def test_node_patch_has_brief_field_optional_defaults_none():
+    assert "brief" in NodePatch.model_fields
+
+    patch = NodePatch()
+    assert patch.brief is None
+
+
+def test_node_patch_carries_brief():
+    patch = NodePatch(brief="Heads up: client changed the deadline")
+    assert patch.brief == "Heads up: client changed the deadline"

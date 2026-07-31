@@ -583,6 +583,8 @@ async def patch_workflow_node(
         kwargs["form_data"] = payload.form_data
     if "depends_on" in fields and payload.depends_on is not None:
         kwargs["depends_on"] = payload.depends_on
+    if "brief" in fields and payload.brief is not None:
+        kwargs["brief"] = payload.brief
 
     repo = get_project_stage_nodes_repository()
     try:

@@ -97,6 +97,14 @@ class WorkflowNodeEvents(BaseModel):
     # completion" hook. Not implemented yet -- any non-None value is rejected
     # rather than silently accepted and later ignored.
     on_complete_workflow: Optional[str] = None
+    # mig 395 (M4 Autopilot §1): auto-open + auto-dispatch this node the moment
+    # its dependencies are satisfied (the "B档" behavior — see design doc). This
+    # is CONFIG (template-layer, copied verbatim at instantiation, same as
+    # completion_policy/the other events keys), never runtime data — it is
+    # never accepted on an instance PATCH (NodePatch has no ``events`` field at
+    # all, so this is enforced by omission, not a validator). Default false:
+    # merging this PR changes zero behavior until a template/node opts in.
+    auto_start: bool = False
 
     @field_validator("on_complete_workflow")
     @classmethod
@@ -255,6 +263,11 @@ class NodeOut(BaseModel):
     # default-empty so a pre-mig-391 row (or a bare-dict NodeOut) never
     # crashes a consumer reading ``node.depends_on``.
     depends_on: List[str] = Field(default_factory=list)
+    # mig 395 (M4 Autopilot §1): instance-only runtime "heads up before you
+    # start" text — same declare-it-or-pydantic-silently-drops-it reason as
+    # metadata/form_schema/depends_on above. Default '' matches the column's
+    # server_default so a pre-mig-395 row never crashes a consumer.
+    brief: str = ""
 
 
 class ProjectWorkflowOut(BaseModel):
@@ -292,6 +305,11 @@ class NodePatch(BaseModel):
     # ProjectStageNodesRepository.update_node — a schema-level check can't see
     # sibling sort_order values.
     depends_on: Optional[List[str]] = None
+    # mig 395 (M4 Autopilot §1): runtime data (same PATCH-able-instance-field
+    # treatment as form_data above) — writable any time before/while the node
+    # is open. Deliberately NOT ``events`` (auto_start stays config, frozen at
+    # instantiation, never accepted here — see WorkflowNodeEvents.auto_start).
+    brief: Optional[str] = None
 
     @model_validator(mode="after")
     def _owner_xor(self) -> "NodePatch":
