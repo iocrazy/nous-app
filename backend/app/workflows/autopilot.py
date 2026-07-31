@@ -35,6 +35,11 @@ same idempotency discipline ``stage_hook`` uses):
      can't advance any further or hits a real gate (review/deliverable/
      form/deps) — notified ONCE per (node, reason) via a metadata stamp,
      never re-notified while the same block persists across ticks.
+  4. Steps 2 and 3 repeat until neither changes anything: a cascade that
+     opens a new group can make that group's own ``auto_start`` nodes
+     eligible, and no nested tick will notice (the re-entrancy guard
+     suppresses ``execute_advance``'s tail enqueue during a cascade). See
+     ``_autopilot_tick_impl``.
 
 Hard line: the review gate is NEVER touched here. Nothing in this module (or
 in the ``execute_advance`` it calls) can move a node ``in_review`` → ``done``
@@ -93,6 +98,12 @@ _BLOCK_LABEL: Dict[str, str] = {
 # Cascade bound — a real workflow has a handful of groups; this only guards
 # against a pathological/cyclic template turning the loop unbounded.
 _MAX_CASCADE_STEPS = 50
+
+# Bound on the tick's (auto-start → cascade) fixpoint loop. Real usage settles
+# in two iterations (one that does work, one that confirms there is no more);
+# anything beyond that is a pathological template, so cap and flag it rather
+# than spin.
+_MAX_TICK_PASSES = 10
 
 # Re-entrancy guard (brief: "级联推进...幂等防重入"). ``_cascade_pass`` calls
 # ``execute_advance`` directly (in-process, same task) rather than enqueueing
@@ -323,7 +334,7 @@ async def _notify_cascade_blocked_once(
     )
 
 
-async def _cascade_pass(project_id: str, project: Dict[str, Any]) -> None:
+async def _cascade_pass(project_id: str, project: Dict[str, Any]) -> bool:
     """Spec §2 step 3. Loops ``execute_advance`` — the SAME predicate
     ``compute_advance_preview``/``execute_advance`` share (#1400) — until
     blocked or there's nothing left to advance into. Never a parallel
@@ -333,14 +344,22 @@ async def _cascade_pass(project_id: str, project: Dict[str, Any]) -> None:
     (there is no human actor for an automated cascade) — same "acts on the
     owner's behalf" convention W3c's rule_owner attribution uses elsewhere.
     No owner on the project row → nothing this tick can safely advance.
+
+    Returns True when at least one group actually advanced, so
+    ``_autopilot_tick_impl`` knows to re-run the auto-start pass over the
+    group this cascade just opened (see its own docstring). The ceiling-
+    exhaustion path below returns False on purpose: that case is already
+    flagged as pathological, and letting the caller loop it again would only
+    multiply the damage.
     """
     from app.services.workflow.advance_service import execute_advance
 
     owner_id = project.get("owner_id")
     if not owner_id:
-        return
+        return False
     actor_user_id = str(owner_id)
 
+    advanced = False
     token = _cascade_active.set(True)
     try:
         for _ in range(_MAX_CASCADE_STEPS):
@@ -353,8 +372,9 @@ async def _cascade_pass(project_id: str, project: Dict[str, Any]) -> None:
                     f"[autopilot] cascade advance failed for project "
                     f"{project_id}: {exc!r}"
                 )
-                return
+                return advanced
             if preview.will_advance:
+                advanced = True
                 continue  # a new group just arrived — re-evaluate it too
             if preview.blocked_reason == BLOCK_NOT_MANAGER_OR_EDITOR:
                 # Review fix I5: this stalls the cascade silently (no
@@ -379,7 +399,7 @@ async def _cascade_pass(project_id: str, project: Dict[str, Any]) -> None:
                         f"[autopilot] cascade-blocked notify failed for project "
                         f"{project_id}: {exc!r}"
                     )
-            return
+            return advanced
         else:
             # Loop exhausted _MAX_CASCADE_STEPS without ever blocking — every
             # single step advanced. A real template has a handful of groups;
@@ -391,14 +411,28 @@ async def _cascade_pass(project_id: str, project: Dict[str, Any]) -> None:
                 f"{_MAX_CASCADE_STEPS}-step ceiling without ever blocking — "
                 "possible cyclic/pathological workflow template"
             )
+            return False
     finally:
         _cascade_active.reset(token)
 
 
 async def _autopilot_tick_impl(project_id: str) -> None:
     """One tick: re-checks ``autopilot_enabled`` fresh, then runs the
-    auto-start pass followed by the cascade pass. Fully idempotent — safe to
-    call any number of times for the same project, concurrently or not."""
+    (auto-start pass → cascade pass) sequence to a fixpoint. Fully idempotent
+    — safe to call any number of times for the same project, concurrently or
+    not.
+
+    Why a LOOP and not one pass of each: a cascade that opens a new group can
+    itself make that group's ``auto_start`` nodes eligible, and nothing else
+    will notice within this tick. ``execute_advance``'s own tail enqueue is
+    (correctly) suppressed by the ``cascade_in_progress()`` re-entrancy guard,
+    so no nested tick re-checks the newly-opened group; the node then sits
+    ``pending`` until an unrelated later trigger happens to fire. Re-running
+    the auto-start pass after every cascade that actually advanced closes that
+    gap in-tick. Each pass re-reads live state, so a run that changes nothing
+    converges immediately (the common case is exactly two iterations: work,
+    then a no-op confirmation).
+    """
     from app.repositories.projects_repository import get_projects_repository
 
     project = await get_projects_repository().get_project_by_id(int(str(project_id)))
@@ -407,8 +441,15 @@ async def _autopilot_tick_impl(project_id: str) -> None:
     if not project.get("autopilot_enabled", True):
         return
 
-    await _auto_start_pass(project_id, project)
-    await _cascade_pass(project_id, project)
+    for _ in range(_MAX_TICK_PASSES):
+        await _auto_start_pass(project_id, project)
+        if not await _cascade_pass(project_id, project):
+            return
+    logger.warning(
+        f"[autopilot] tick for project {project_id} hit the "
+        f"{_MAX_TICK_PASSES}-pass ceiling without reaching a fixpoint — "
+        "possible cyclic/pathological workflow template"
+    )
 
 
 @DBOS.workflow()

@@ -435,8 +435,41 @@ _ISSUE_TO_NODE_STATUS: Dict[str, str] = {
     "cancelled": "pending",
 }
 
+# Public view of the statuses the projection actually maps, so a caller can
+# skip fetching the issue row at all for a status that would be a no-op here
+# (``blocked`` / ``needs_followup`` have no node counterpart).
+STAGE_NODE_SYNC_STATUSES = frozenset(_ISSUE_TO_NODE_STATUS)
 
-async def _fire_stage_node_sync(issue: Optional[dict], new_status: str) -> None:
+
+async def fire_stage_node_sync(
+    issue: Optional[dict],
+    new_status: str,
+    *,
+    enqueue_autopilot: bool = True,
+) -> None:
+    """Public seam onto the issue→node projection, for the callers that write
+    ``issues.status`` WITHOUT going through ``transition_status``.
+
+    ``issue_lifecycle.set_status`` is the one such caller: it updates
+    ``public.issues`` with raw SQL (the execution columns are service_role-
+    only), which skipped this projection entirely — a mirror node stayed on
+    its old status after an agent self-completed to ``in_review``.
+
+    ``enqueue_autopilot=False`` suppresses the ``done``-path tail tick. Pass
+    it from anything running inside a ``@DBOS.step``: starting a workflow
+    there raises a bare AssertionError (see ``issue_lifecycle.
+    _maybe_fire_subissue_barrier``'s docstring). Same best-effort contract as
+    the internal hook — never raises.
+    """
+    await _fire_stage_node_sync(issue, new_status, enqueue_autopilot=enqueue_autopilot)
+
+
+async def _fire_stage_node_sync(
+    issue: Optional[dict],
+    new_status: str,
+    *,
+    enqueue_autopilot: bool = True,
+) -> None:
     """Best-effort issue→node status projection after a status transition.
 
     Only fires for a ``project_stage`` mirror issue whose ``origin_id`` is the
@@ -473,7 +506,7 @@ async def _fire_stage_node_sync(issue: Optional[dict], new_status: str) -> None:
         # may unblock other nodes' events.auto_start deps, or close out the
         # active group so a cascade advance can run — best-effort tail
         # enqueue, never allowed to affect the transition above.
-        if mapped == "done":
+        if mapped == "done" and enqueue_autopilot:
             await _enqueue_autopilot_tick_best_effort(project_id)
     except Exception as exc:  # noqa: BLE001 — the transition is the primary op
         logger.warning(
