@@ -34,6 +34,10 @@ vi.mock('react-router-dom', async (importOriginal) => {
 const addToast = vi.fn();
 vi.mock('../Toast', () => ({
   useToast: () => ({ addToast }),
+  // WorkspaceTopBar's Autopilot chip (M4 Autopilot task O3) uses the
+  // optional variant so it stays safe in provider-less hosts — this mock
+  // module has no <ToastProvider>, so it must still export something.
+  useOptionalToast: () => ({ addToast }),
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({
@@ -96,6 +100,9 @@ vi.mock('react-i18next', () => ({
 const mockProjectsService = vi.hoisted(() => ({
   generateMissingFrames: vi.fn(),
   fetchEpisodesProgress: vi.fn(),
+  // WorkspaceTopBar's Autopilot chip (M4 Autopilot task O3) — unused by these
+  // tests (no click on the chip), just needs to exist so the import resolves.
+  updateProject: vi.fn(),
 }));
 vi.mock('../../services/projectsService', () => mockProjectsService);
 

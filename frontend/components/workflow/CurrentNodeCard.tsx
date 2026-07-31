@@ -8,14 +8,15 @@
  */
 
 import React, { useState } from 'react';
-import { ArrowLeft, ArrowRight, Bot, ClipboardList, ExternalLink, FileCheck2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bot, ClipboardList, ExternalLink, FileCheck2, Rocket } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { updateProjectNode } from '../../services/workflowService';
 import type { ProjectNodePatch, ProjectStageNode } from '../../types';
 import { AgentOption, OwnerPicker, PersonOption } from './OwnerPicker';
 import { NodeSchedulePicker } from './NodeSchedulePicker';
-import { isNodeOverdue, NODE_STATUS_CONFIG, NODE_STATUS_LABEL } from './nodeStatus';
+import { isNodeOverdue, NODE_STATUS_CONFIG, NODE_STATUS_LABEL, unmetDeps } from './nodeStatus';
 import { countFilledFields } from './formFieldFill';
+import { BriefField } from './BriefField';
 
 interface CurrentNodeCardProps {
   projectId: string;
@@ -33,6 +34,24 @@ interface CurrentNodeCardProps {
    * (e.g. in a host that hasn't wired the Stage Board route yet) — falls back
    * to `onOpenTodolist` when absent. */
   onOpenStage?: (nodeId: string) => void;
+  /** False when WorkflowSection is rendering this card for a FUTURE node — a
+   * peek-ahead "Start early" surface (M4 Autopilot task O3), not the active
+   * cursor group. Hides the Back/Complete-stage row (those act on the shared
+   * workflow cursor, not this specific node) and instead may show a "Start
+   * early" button. Defaults `true` — every existing caller (the active
+   * group) keeps its current behavior unchanged. */
+  isActive?: boolean;
+  /** The full project node list, needed to compute this node's own dependency
+   * gate locally (`nodeStatus.ts::unmetDeps`, display-only — the server
+   * re-checks on the actual `startEarlyNode` call). Optional: omitting it
+   * (or `isActive` staying `true`) simply never shows the Start-early button. */
+  allNodes?: ProjectStageNode[];
+  /** Fires the actual `startEarlyNode` call — the caller (WorkflowSection)
+   * owns the busy state / toast / error-code mapping, mirroring how
+   * `onRequestAdvance` and `onPatched` are also thin fire callbacks here. */
+  onStartEarly?: (nodeId: string) => void;
+  /** Disables the Start-early button while the caller's request is in flight. */
+  startEarlyBusy?: boolean;
 }
 
 const Row: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
@@ -52,11 +71,27 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
   onRequestAdvance,
   onOpenTodolist,
   onOpenStage,
+  isActive = true,
+  allNodes,
+  onStartEarly,
+  startEarlyBusy,
 }) => {
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const meta = NODE_STATUS_CONFIG[node.status];
   const overdue = isNodeOverdue(node);
+
+  // Dependency gate (mig 391, M3 PR-J), reused for the Start-early gate (M4
+  // Autopilot task O3, spec §3: "deps-satisfied … 时显示按钮") — local
+  // derivation, display-only; the server re-rules on the actual call.
+  const waitingOn = allNodes ? unmetDeps(allNodes, node) : [];
+  const canStartEarly =
+    !isActive && node.status === 'pending' && !node.skipped && waitingOn.length === 0;
+
+  // brief (mig 395): editable any time before the node finishes; once
+  // done/skipped it's a permanent read-only record of what was asked for.
+  const briefReadOnly = node.status === 'done' || node.status === 'skipped' || node.skipped;
+  const brief = (node.brief ?? '').trim();
 
   const patch = async (body: ProjectNodePatch) => {
     setSaving(true);
@@ -136,6 +171,21 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
           )
         )}
       </div>
+
+      {/* in_review pin (M4 Autopilot task O3, spec §3: "brief 置顶展示" —
+          primarily the Stage Board's review context, but a cheap same-signal
+          highlight here too so the card doesn't disagree with it). */}
+      {node.status === 'in_review' && brief && (
+        <div
+          data-testid="workflow-node-brief-pinned"
+          className="mb-3 rounded-md border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-2 text-[12.5px] text-[var(--accent-text)]"
+        >
+          <div className="mb-1 text-[10px] uppercase tracking-wider opacity-80">
+            {t('projects.workflow.brief.reviewHeading')}
+          </div>
+          <p className="whitespace-pre-wrap">{brief}</p>
+        </div>
+      )}
 
       <Row label={t('projects.workflow.owner')}>
         <OwnerPicker
@@ -227,6 +277,21 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
         </Row>
       )}
 
+      {/* brief (mig 395, M4 Autopilot task O1/O2/O3) — the "compact entry"
+          twin of WorkspaceStageBoard's fuller box; same blur-save contract
+          (BriefField). Read-only once the node is done/skipped — a
+          permanent record of what was asked for, not editable history. */}
+      <Row label={t('projects.workflow.brief.label')}>
+        <BriefField
+          value={node.brief ?? ''}
+          disabled={!canWrite || saving || briefReadOnly}
+          compact
+          placeholder={t('projects.workflow.brief.placeholder')}
+          onSave={(next) => void patch({ brief: next })}
+          testId="workflow-node-brief"
+        />
+      </Row>
+
       <div className="mt-3 flex items-center gap-2 border-t border-line pt-3">
         <button
           onClick={onOpenTodolist}
@@ -235,7 +300,11 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
         >
           <ExternalLink size={13} /> {t('projects.workflow.openInTodolist')}
         </button>
-        {canWrite && (
+        {/* Back/Complete-stage act on the SHARED workflow cursor — only
+            meaningful for the active group. A future-node peek card
+            (isActive=false) never renders these; it may show Start-early
+            instead. */}
+        {isActive && canWrite && (
           <>
             <button
               onClick={() => onRequestAdvance('back')}
@@ -257,6 +326,26 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
               {t('projects.workflow.completeStage')} <ArrowRight size={13} />
             </button>
           </>
+        )}
+        {/* Start early (M4 Autopilot task O2/O3) — the manual, hand-operated
+            twin of the autopilot engine's own auto-start step. Only ever
+            shown on a future-node peek card whose dependencies are already
+            satisfied (see `canStartEarly` above — local unmetDeps, the
+            server re-checks on the actual call). */}
+        {canStartEarly && onStartEarly && canWrite && (
+          <button
+            onClick={() => onStartEarly(node.id)}
+            disabled={startEarlyBusy}
+            data-testid="workflow-start-early"
+            className="ml-auto inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[12.5px] transition disabled:cursor-not-allowed disabled:opacity-50"
+            style={{
+              background: 'var(--accent-soft)',
+              color: 'var(--accent-text)',
+              borderColor: 'var(--accent-border)',
+            }}
+          >
+            <Rocket size={13} /> {t('projects.workflow.startEarly.button')}
+          </button>
         )}
       </div>
     </div>

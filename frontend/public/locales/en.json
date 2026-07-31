@@ -1824,6 +1824,7 @@
         "notifyOnComplete": "Notify on completion",
         "suggestAgentRun": "Suggest agent run on arrival",
         "prepareAgentRun": "Prepare agent run on arrival",
+        "autoStart": "Auto-start when ready",
         "builtinTitle": "Built-in behavior",
         "builtinBody": "Arrival derives the mirror issue; completion closes it. No agent starts automatically."
       },
@@ -1861,6 +1862,23 @@
         "noCandidates": "No earlier stages to depend on",
         "waitingOn": "Waiting on: {{names}}",
         "lockedTitle": "Blocked by dependencies"
+      },
+      "autopilot": {
+        "label": "Autopilot",
+        "onTitle": "Autopilot is on — click to pause",
+        "offTitle": "Autopilot is paused — click to turn on",
+        "toggleFailed": "Failed to update Autopilot"
+      },
+      "brief": {
+        "label": "Brief",
+        "placeholder": "Add context for whoever works this stage…",
+        "reviewHeading": "Brief"
+      },
+      "startEarly": {
+        "button": "Start early",
+        "cancelled": "This stage's task was cancelled — restore it in the Todolist before starting it early.",
+        "blocked": "This stage can't be started yet.",
+        "failed": "Failed to start this stage early"
       }
     }
   },

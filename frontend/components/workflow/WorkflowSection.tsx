@@ -19,6 +19,7 @@ import {
   addProjectNode,
   deleteProjectNode,
   fetchStageLibrary,
+  startEarlyNode,
 } from '../../services/workflowService';
 import { ApiError } from '../../services/apiClient';
 import type { ProjectStageNode, ProjectWorkflow, StageLibraryItem } from '../../types';
@@ -27,7 +28,7 @@ import { WorkflowStrip } from './WorkflowStrip';
 import { CurrentNodeCard } from './CurrentNodeCard';
 import { LibraryPickerModal } from './LibraryPickerModal';
 import { AgentOption, PersonOption } from './OwnerPicker';
-import { isNodeInActiveGroup } from './nodeStatus';
+import { isNodeInActiveGroup, unmetDeps } from './nodeStatus';
 
 interface WorkflowSectionProps {
   projectId: string;
@@ -69,6 +70,10 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [removing, setRemoving] = useState<ProjectStageNode | null>(null);
   const [busy, setBusy] = useState(false);
+  // Start early (M4 Autopilot task O2/O3) — which future node's request is
+  // currently in flight, so only THAT card's button disables (not every
+  // eligible one at once).
+  const [startingEarlyId, setStartingEarlyId] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -150,6 +155,38 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
     }
   };
 
+  // Start early (M4 Autopilot task O2/O3) — the manual, hand-operated twin of
+  // the autopilot engine's own auto-start step (spec §3). Shares the exact
+  // same error codes the server's tick uses: DEPS_PENDING (waiting_on),
+  // NODE_CANCELLED, or a generic NODE_NOT_PENDING/other block.
+  const handleStartEarly = async (nodeId: string) => {
+    setStartingEarlyId(nodeId);
+    try {
+      await startEarlyNode(projectId, nodeId);
+      onReload();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 422) {
+        if (err.code === 'DEPS_PENDING') {
+          const waitingOn =
+            (err.details as { waiting_on?: string[] } | undefined)?.waiting_on ?? [];
+          addToast(
+            t('projects.workflow.deps.waitingOn', { names: waitingOn.join(', ') }),
+            'error',
+          );
+        } else if (err.code === 'NODE_CANCELLED') {
+          addToast(t('projects.workflow.startEarly.cancelled'), 'error');
+        } else {
+          addToast(t('projects.workflow.startEarly.blocked'), 'error');
+        }
+      } else {
+        console.error('[WorkflowSection] start early failed', err);
+        addToast(t('projects.workflow.startEarly.failed'), 'error');
+      }
+    } finally {
+      setStartingEarlyId(null);
+    }
+  };
+
   if (!workflow.has_workflow) return null;
 
   // The active group: the current node plus any siblings in its parallel group
@@ -157,6 +194,16 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
   // WorkspaceStageBoard's "Complete stage" gate can't silently diverge).
   const current = workflow.nodes.find((n) => n.id === workflow.current_node_id) ?? null;
   const groupNodes = workflow.nodes.filter((n) => isNodeInActiveGroup(n, current));
+  // Future nodes eligible for Start early: not yet reached by the cursor,
+  // still pending (never started), not skipped, and every dependency already
+  // satisfied (nodeStatus.ts::unmetDeps — display-only, the server re-checks).
+  const futureEligible = workflow.nodes.filter(
+    (n) =>
+      !isNodeInActiveGroup(n, current) &&
+      n.status === 'pending' &&
+      !n.skipped &&
+      unmetDeps(workflow.nodes, n).length === 0,
+  );
 
   return (
     <div ref={rootRef} data-testid="workflow-section" className="flex flex-col gap-3">
@@ -182,6 +229,25 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
           onOpenStage={onOpenStage}
         />
       ))}
+      {canWrite &&
+        futureEligible.map((node) => (
+          <CurrentNodeCard
+            key={node.id}
+            projectId={projectId}
+            node={node}
+            canWrite={canWrite}
+            people={people}
+            agents={agents}
+            onPatched={onReload}
+            onRequestAdvance={onRequestAdvance}
+            onOpenTodolist={onOpenTodolist}
+            onOpenStage={onOpenStage}
+            isActive={false}
+            allNodes={workflow.nodes}
+            onStartEarly={(id) => void handleStartEarly(id)}
+            startEarlyBusy={startingEarlyId === node.id}
+          />
+        ))}
 
       {pickerOpen && (
         <LibraryPickerModal

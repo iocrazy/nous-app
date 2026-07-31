@@ -460,6 +460,9 @@ export function ProjectWorkspace({
         workflow={workflow}
         onRequestAdvance={requestAdvance}
         onJumpToNode={handleJumpToNode}
+        projectId={project.id}
+        autopilotEnabled={project.autopilot_enabled ?? true}
+        onAutopilotChange={(enabled) => onProjectUpdated?.({ ...project, autopilot_enabled: enabled })}
       />
       <div className="flex-1 min-h-0 flex overflow-hidden">
       <WorkspaceSidebar

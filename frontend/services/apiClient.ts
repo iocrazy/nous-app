@@ -157,11 +157,28 @@ async function toApiError(response: Response): Promise<ApiError> {
     }
     try {
       const body = JSON.parse(text);
-      const message = body?.error ?? body?.detail ?? `HTTP ${response.status}`;
+      // FastAPI's `HTTPException(detail=...)` lands as `{"detail": ...}`. Most
+      // routes pass a plain string reason (e.g. NodeDeleteBlocked's 409) — but
+      // the M4 Autopilot start-early endpoint (task O2) raises 422s with a
+      // STRUCTURED `detail` object (`{code, message?, waiting_on?}`) so the
+      // caller can distinguish DEPS_PENDING/NODE_CANCELLED/NODE_NOT_PENDING
+      // without string-matching a human sentence. Passing that object straight
+      // through as the Error `message` would get silently ToString()'d to
+      // "[object Object]" by the native Error constructor — unwrap it here so
+      // `.code`/`.details` carry the real structured payload either way.
+      const rawDetail = body?.detail;
+      const structuredDetail =
+        rawDetail && typeof rawDetail === 'object' && !Array.isArray(rawDetail)
+          ? (rawDetail as { code?: string; message?: string; [key: string]: unknown })
+          : undefined;
+      const message =
+        body?.error ??
+        (structuredDetail ? (structuredDetail.message ?? structuredDetail.code) : rawDetail) ??
+        `HTTP ${response.status}`;
       return new ApiError(message, response.status, {
-        code: body?.code,
+        code: body?.code ?? structuredDetail?.code,
         requestId: body?.request_id ?? requestId,
-        details: body?.details,
+        details: body?.details ?? structuredDetail,
       });
     } catch {
       return new ApiError(text.slice(0, 200), response.status, { requestId });

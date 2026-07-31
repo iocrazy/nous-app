@@ -1049,6 +1049,17 @@ const EventsTab: React.FC<{
           checked={value.prepare_agent_run ?? false}
           onChange={(v) => onChange({ ...value, prepare_agent_run: v })}
         />
+        {/* mig 395 (M4 Autopilot, task O1/O2/O3): deps-satisfied auto-start —
+            the `autopilot_tick` engine begins this node automatically once it
+            arrives with no manual click needed (spec §2 step 2). Frozen at
+            instantiation (not instance-PATCH-able), same idiom as the three
+            booleans above it. Defaults false — off for every existing
+            template until a user opts a node in here. */}
+        <Toggle
+          label={t('projects.workflow.events.autoStart')}
+          checked={value.auto_start ?? false}
+          onChange={(v) => onChange({ ...value, auto_start: v })}
+        />
       </div>
       <RuleRow
         title={t('projects.workflow.events.builtinTitle')}
