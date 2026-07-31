@@ -2676,7 +2676,9 @@
         "turns": "{{count}} turns",
         "hideTurns": "Hide turns",
         "showTurns": "Show turns",
-        "conversation": "Conversation"
+        "conversation": "Conversation",
+        "threadLoading": "Loading conversation...",
+        "threadEmpty": "No messages in this conversation."
       },
       "budget": {
         "sectionLabel": "Monthly budget",
