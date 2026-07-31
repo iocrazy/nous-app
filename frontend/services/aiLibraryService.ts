@@ -19,6 +19,7 @@ import type {
   AgentRunDetail,
   AgentUsage,
   AgentRunEvent,
+  AgentRunGroupListResponse,
   AgentRunListResponse,
   LiveAgentRun,
   AILibraryAgent,
@@ -334,16 +335,39 @@ export const aiLibraryService = {
     slug: string,
     limit = 50,
     offset = 0,
+    conversationId?: string,
   ): Promise<AgentRunListResponse> {
     const qs = new URLSearchParams({
       limit: String(limit),
       offset: String(offset),
     });
+    if (conversationId) qs.set('conversation_id', conversationId);
     const resp = await fetch(
       `${base()}/agents/${encodeURIComponent(slug)}/runs?${qs.toString()}`,
       { headers: await getAuthHeaders() },
     );
     return handle<AgentRunListResponse>(resp);
+  },
+
+  /**
+   * Conversation-grouped runs, newest activity first: one item per chat
+   * conversation (turns rolled up) or per standalone run. `total` counts
+   * groups. Expand a group's turns via `listAgentRuns(slug, ..., conversationId)`.
+   */
+  async listAgentRunGroups(
+    slug: string,
+    limit = 50,
+    offset = 0,
+  ): Promise<AgentRunGroupListResponse> {
+    const qs = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    });
+    const resp = await fetch(
+      `${base()}/agents/${encodeURIComponent(slug)}/run-groups?${qs.toString()}`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle<AgentRunGroupListResponse>(resp);
   },
 
   /**

@@ -200,6 +200,85 @@ async def test_list_by_agent_shape_and_total(
     assert result["items"][0]["status"] == "running"
 
 
+async def test_list_groups_by_agent_collapses_conversation(
+    integration_db_url, patched_engine, cleanup_test_rows
+):
+    """3 chat turns sharing one conversation collapse to ONE group (tokens
+    rolled up, latest turn's fields surfaced); a conversation-less run stays
+    its own group; total counts groups. And the conversation_id filter on
+    list_by_agent returns exactly the conversation's turns."""
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        agent_id, user_id = await _seed_agent_and_user(conn)
+        # conversations.scope_id FKs teams(id) — borrow a real team, same
+        # pattern as the auth.users borrow in _seed_agent_and_user.
+        team_id = await conn.fetchval("SELECT id FROM teams LIMIT 1")
+        if team_id is None:
+            pytest.skip("No teams rows to satisfy conversations.scope_id FK")
+        conv_id = await conn.fetchval(
+            """INSERT INTO conversations (type, scope_id, created_by)
+               VALUES ('direct_agent', $1, $2) RETURNING id""",
+            team_id,
+            user_id,
+        )
+        base = datetime.now(timezone.utc)
+        for i in range(3):
+            await _insert_run(
+                conn,
+                agent_id,
+                user_id,
+                conversation_id=conv_id,
+                trigger="chat",
+                status="completed",
+                prompt_tokens=100,
+                completion_tokens=10,
+                output_summary=f"turn-{i}",
+                started_at=base - timedelta(minutes=i),
+            )
+        await _insert_run(
+            conn,
+            agent_id,
+            user_id,
+            trigger="visual_analysis_l1",
+            status="failed",
+            started_at=base - timedelta(hours=1),
+        )
+    finally:
+        await conn.close()
+
+    result = await _repo().list_groups_by_agent(agent_id=agent_id, user_id=user_id)
+    assert result["total"] == 2
+    assert len(result["items"]) == 2
+
+    grouped, single = result["items"]  # newest activity first → chat group
+    assert grouped["group_key"] == f"conv:{conv_id}"
+    assert grouped["conversation_id"] == str(conv_id)
+    assert grouped["run_count"] == 3
+    assert int(grouped["prompt_tokens"]) == 300
+    assert int(grouped["completion_tokens"]) == 30
+    # Latest turn (i=0, newest started_at) drives the display fields.
+    assert grouped["latest_output_summary"] == "turn-0"
+    assert grouped["latest_status"] == "completed"
+
+    assert single["group_key"].startswith("run:")
+    assert single["conversation_id"] is None
+    assert single["run_count"] == 1
+    assert single["error_count"] == 1
+
+    turns = await _repo().list_by_agent(
+        agent_id=agent_id, user_id=user_id, conversation_id=str(conv_id)
+    )
+    assert turns["total"] == 3
+    assert all(int(r["conversation_id"]) == conv_id for r in turns["items"])
+
+    # Cleanup the seeded conversation (agent_runs rows cascade via ai_agents).
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        await conn.execute("DELETE FROM conversations WHERE id = $1", conv_id)
+    finally:
+        await conn.close()
+
+
 async def test_list_children_direct_only(
     integration_db_url, patched_engine, cleanup_test_rows
 ):

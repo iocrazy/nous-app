@@ -2653,7 +2653,11 @@
         "selectPrompt": "选择一条运行记录查看详情",
         "transcript": "执行记录",
         "transcriptNice": "Nice",
-        "transcriptRaw": "Raw"
+        "transcriptRaw": "Raw",
+        "turns": "{{count}} 轮对话",
+        "hideTurns": "收起轮次",
+        "showTurns": "展开轮次",
+        "conversation": "会话"
       },
       "budget": {
         "sectionLabel": "每月预算",
