@@ -127,7 +127,12 @@ async def retry_download(
 
         resource_id = None
         if media_id:
-            from app.repositories.media_repository import MediaRepository
+            # NB: do NOT re-import MediaRepository here. It is already imported
+            # at module scope; a function-local ``from ... import MediaRepository``
+            # makes the name local for the WHOLE function, so the earlier
+            # ``repo = MediaRepository()`` (line ~110) hits UnboundLocalError
+            # ("cannot access local variable 'MediaRepository'") and every retry
+            # 500s. ResourcesRepository is only used here, so its local import is fine.
             from app.repositories.resources_repository import ResourcesRepository
 
             res_repo = ResourcesRepository()
