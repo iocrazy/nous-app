@@ -419,19 +419,30 @@ export function useLibrary({ isAuthenticated, selectedTeamId, onVideoRealtimeUpd
                 .eq('creator_id', ownedUserId)
                 .maybeSingle();
               if (!resource) return;
+              // Attach the join field the list rows normally carry from
+              // CARD_SELECT — the raw replication record doesn't have it, and
+              // without it the card can't navigate to its detail page.
+              const withJoin = { ...newRecord, resource_id: String(resource.id) } as Video;
               setLibrary(prev => {
                 if (prev.find(item => item.platform_id === newRecord.platform_id)) return prev;
-                return [newRecord, ...prev];
+                return [withJoin, ...prev];
               });
             } else if (payload.eventType === 'UPDATE') {
               // Fast client-side filter: ignore events for media not in our library.
+              // MERGE onto the existing item instead of replacing it: the
+              // replication record only carries parsed_media columns, so a
+              // wholesale swap wipes every joined field the row was loaded
+              // with (resource_id → card can't open its detail page,
+              // has_prompt → badge goes dark, aiStatus, …). A download's
+              // completion always fires one of these, which is how fresh
+              // items kept losing their click-through.
               setLibrary(prev => {
                 const idx = prev.findIndex(item => item.platform_id === newRecord.platform_id);
                 if (idx < 0) return prev;
-                return prev.map((item, i) => i === idx ? newRecord : item);
+                return prev.map((item, i) => (i === idx ? { ...item, ...newRecord } : item));
               });
               setSelectedLibraryItem(prev =>
-                prev?.platform_id === newRecord.platform_id ? newRecord : prev
+                prev?.platform_id === newRecord.platform_id ? { ...prev, ...newRecord } : prev
               );
               onVideoRealtimeUpdate?.(newRecord);
             } else if (payload.eventType === 'DELETE') {
