@@ -52,6 +52,44 @@ class ThumbnailService:
     def __init__(self):
         self.repo = ResourcesRepository()
 
+    async def _upload_derived_to_s3(
+        self, resource_id: str, thumb_abs: Path, sprite_abs: Optional[Path]
+    ) -> str:
+        """Upload the derived thumbnail (and sprite, if any) to S3 under the
+        ``derived/{rid}/`` prefix and return the sb:// thumbnail path.
+
+        Mirrors storage_migration._migrate_derived_row's key scheme
+        (``sb://library/derived/{rid}/{filename}``) — the exact shape
+        ``serve_resource_cover`` / ``serve_preview_sprite`` already read. The
+        sprite has no DB column; it is uploaded to the key
+        ``serve_preview_sprite`` falls back to, so it survives local-FS
+        deletion. Storage-flag off → return the FS relative path unchanged
+        (old behavior, fully reversible).
+        """
+        thumb_relative = str(thumb_abs.relative_to(Path(settings.DOWNLOAD_PATH)))
+
+        from app.services.library.storage_flag import unified_storage_enabled
+
+        if not await unified_storage_enabled():
+            return thumb_relative
+
+        import mimetypes
+
+        from app.services.library import media_storage
+
+        store = media_storage.library_store()
+        prefix = media_storage.derived_key_prefix(resource_id)
+
+        thumb_key = f"{prefix}{thumb_abs.name}"
+        thumb_mime = mimetypes.guess_type(thumb_abs.name)[0] or "image/webp"
+        await store.put_file(thumb_key, str(thumb_abs), thumb_mime)
+
+        if sprite_abs is not None and Path(sprite_abs).is_file():
+            sprite_key = f"{prefix}preview_sprite.jpg"
+            await store.put_file(sprite_key, str(sprite_abs), "image/jpeg")
+
+        return media_storage.to_file_path(store.bucket, thumb_key)
+
     async def generate_thumbnail(
         self,
         resource_id: str,
@@ -92,6 +130,7 @@ class ThumbnailService:
                 # derived dir for sb:// sources).
                 # (webp ≈ 30-50% smaller than jpeg at equivalent quality)
                 thumb_abs = out_dir / "thumbnail.webp"
+                sprite_abs = None
 
                 if mime_type.startswith("video/"):
                     ok = await self._generate_video_thumbnail(
@@ -120,18 +159,23 @@ class ThumbnailService:
                 if not ok:
                     return None
 
-                # Store relative path (same pattern as file_path)
-                thumb_relative = str(
-                    thumb_abs.relative_to(Path(settings.DOWNLOAD_PATH))
+                # Storage tiering: upload the derived thumbnail (+ sprite) to
+                # S3 under the canonical derived/{rid}/ prefix that
+                # serve_resource_cover / serve_preview_sprite already read.
+                # Without this every regenerated thumbnail/sprite re-introduces
+                # filesystem debt after the S3 migration (mirrors the download /
+                # cover S3 wiring — 2026-07-31). Flag off → FS path, reversible.
+                thumb_persist = await self._upload_derived_to_s3(
+                    resource_id, thumb_abs, sprite_abs
                 )
 
             await self.repo.update_resource(
-                resource_id, {"thumbnail_path": thumb_relative}
+                resource_id, {"thumbnail_path": thumb_persist}
             )
             logger.info(
-                f"Thumbnail generated for resource {resource_id}: {thumb_relative}"
+                f"Thumbnail generated for resource {resource_id}: {thumb_persist}"
             )
-            return thumb_relative
+            return thumb_persist
 
         except Exception as e:
             logger.error(f"Thumbnail generation failed for resource {resource_id}: {e}")
