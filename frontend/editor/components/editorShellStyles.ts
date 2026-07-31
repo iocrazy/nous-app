@@ -26,7 +26,14 @@ export const EDITOR_SHELL_STYLES = `
   --indigo:#1E7A5B; --indigo-deep:#14694D; --indigo-soft:#E3EFE8;
   --violet:#7A5E8F; --violet-soft:#ECE6F1;
   --tick-action:#6E6A60; --tick-dialogue:var(--indigo); --tick-character:var(--violet);
-  --tick-paren:#C5C0B4; --tick-transition:#A87B2B; --tick-comment:#46708E; --tick-subtitle:#8C887B;
+  /* tick-transition uses the K1.5 module-ochre DEEPENED anchor (#956C25, not
+     the global --warn/赭 anchor #A87B2B) — the global anchor measures 3.67:1
+     as TEXT on --surface/--sheet-bg (below the 4.5 AA line for this exact
+     small-text use), the same shortfall K1.5 already fixed for module-accent
+     use by darkening ochre-600. #956C25 clears 4.56:1 (--surface) / 4.68:1
+     (--sheet-bg). See index.css [data-module="inspiration"] --color-indigo-600
+     for the same anchor used the same way. */
+  --tick-paren:#C5C0B4; --tick-transition:#956C25; --tick-comment:#46708E; --tick-subtitle:#8C887B;
   --sheet-bg:#FFFEFB; --sheet-bg-2:#FBF9F4; --sheet-border:#EAE5D8;
   --sheet-ink:#17160F; --sheet-ink-soft:#5F5B4F;
   --green:#12945a; --green-soft:#e2f6ec; --red:#e0435a; --red-soft:#fbe6ea;
@@ -582,7 +589,7 @@ export const EDITOR_SHELL_STYLES = `
      one paper-toned DNA for every editor popup, flipping with the theme so it
      never flashes white on dark paper. */
   background:var(--surface); border:1px solid var(--sheet-border);
-  border-radius:10px; box-shadow:0 10px 28px rgba(35,20,90,0.14);
+  border-radius:10px; box-shadow:0 10px 28px rgba(28,27,24,0.14);
   padding:4px; font-family:var(--sans);
 }
 .mh-heading-opt{
@@ -991,7 +998,7 @@ export const EDITOR_SHELL_STYLES = `
   /* Elevated chrome surface (not a hardcoded #fff) so the cue picker flips with
      the editor theme instead of flashing white on dark paper. */
   background:var(--surface); border:1px solid var(--sheet-border);
-  border-radius:10px; box-shadow:0 10px 28px rgba(35,20,90,0.14);
+  border-radius:10px; box-shadow:0 10px 28px rgba(28,27,24,0.14);
   padding:4px; font-family:var(--sans);
 }
 .mh-mention-list{ list-style:none; margin:0; padding:0; max-height:228px; overflow-y:auto; }
@@ -2620,7 +2627,7 @@ export const EDITOR_SHELL_STYLES = `
 .mh-slash-menu{
   position:absolute; z-index:30; min-width:190px;
   background:var(--surface); border:1px solid var(--sheet-border);
-  border-radius:10px; box-shadow:0 10px 28px rgba(35,20,90,0.14); padding:4px;
+  border-radius:10px; box-shadow:0 10px 28px rgba(28,27,24,0.14); padding:4px;
   font-family:var(--sans);
 }
 .mh-slash-item{
@@ -2763,7 +2770,7 @@ export const EDITOR_SHELL_STYLES = `
   width:340px; pointer-events:auto;
   background:rgba(255,255,255,0.72); backdrop-filter:blur(8px);
   border:1px solid var(--surface-border); border-radius:10px;
-  box-shadow:0 6px 18px rgba(35,20,90,0.08);
+  box-shadow:0 6px 18px rgba(28,27,24,0.08);
   overflow:hidden; display:flex;
 }
 /* The diff view fills the card and scrolls INSIDE it (its own topbar stays
@@ -2803,7 +2810,7 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-ctx-menu{
   position:fixed; z-index:50; min-width:172px;
   background:#fff; border:1px solid var(--sheet-border);
-  border-radius:8px; box-shadow:0 12px 32px rgba(35,20,90,0.18);
+  border-radius:8px; box-shadow:0 12px 32px rgba(28,27,24,0.18);
   padding:4px; font-family:var(--sans);
 }
 .mh-scene-ctx-item{
@@ -2830,6 +2837,6 @@ export const EDITOR_SHELL_STYLES = `
 .mh-scene-move-hint{
   font-family:var(--sans); font-size:12px; font-weight:600; color:#fff;
   background:var(--indigo); padding:3px 10px; border-radius:999px;
-  box-shadow:0 4px 12px rgba(35,20,90,0.25); pointer-events:none;
+  box-shadow:0 4px 12px rgba(28,27,24,0.25); pointer-events:none;
 }
 `;
