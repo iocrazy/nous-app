@@ -1,6 +1,7 @@
 import { lazy, Suspense, type LazyExoticComponent, type ReactNode } from 'react';
 import { createBrowserRouter, Navigate, useParams } from 'react-router-dom';
 import { AuthGuard } from './components/AuthGuard';
+import RouterErrorPage from './components/RouterErrorPage';
 import { AppLayout } from './components/AppLayout';
 import { ModuleGuard } from './components/ModuleGuard';
 import { RedirectToTeam, RedirectToDefaultTeam } from './components/RedirectToTeam';
@@ -125,6 +126,15 @@ function SuspenseWrap({ children }: { children: React.ReactNode }) {
 }
 
 export const router = createBrowserRouter([
+  // Pathless root: every route below inherits this errorElement, so a render
+  // or chunk-load failure shows RouterErrorPage instead of React Router's
+  // built-in developer screen. Most common trigger: a deploy invalidates the
+  // hashed chunks an already-open tab still points at (lazyWithRetry above
+  // self-heals the first time; this is the floor when its reload throttle
+  // has already been spent).
+  {
+  errorElement: <RouterErrorPage />,
+  children: [
   // Public routes (no auth required)
   {
     path: '/login',
@@ -289,5 +299,7 @@ export const router = createBrowserRouter([
       // Catch-all → redirect to default team
       { path: '*', element: <RedirectToDefaultTeam /> },
     ],
+  },
+  ],
   },
 ]);
