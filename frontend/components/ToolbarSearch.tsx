@@ -38,6 +38,10 @@ interface ToolbarSearchProps {
   /** Per-host scope options. Defaults to media (parsed_media) fields when
    *  omitted, so the existing DownloadsView call site keeps working. */
   scopeOptions?: ScopeOption[];
+  /** Seed for the (uncontrolled) input — used when a host remounts and wants
+   *  the box to show the query it was carrying before. Read once, at mount;
+   *  later changes are ignored so typing is never fought over. */
+  initialQuery?: string;
 }
 
 const MEDIA_SCOPE_LABELS: Record<SearchField, string> = {
@@ -72,10 +76,11 @@ export const ToolbarSearch: React.FC<ToolbarSearchProps> = ({
   searchScope,
   onSearchScopeChange,
   scopeOptions,
+  initialQuery = '',
 }) => {
   const effectiveScopeOptions = scopeOptions ?? DEFAULT_MEDIA_SCOPE_OPTIONS;
   const { t } = useTranslation();
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery);
   const [mode, setMode] = useState<SearchMode>('keyword');
   const [showDropdown, setShowDropdown] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);

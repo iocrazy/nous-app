@@ -52,6 +52,16 @@ import { useAuth } from '../contexts/AuthContext';
 
 import { DownloadInfoPanel } from './DownloadsView/DownloadInfoPanel';
 import { DownloadContextMenu, ContextMenuState } from './DownloadsView/DownloadContextMenu';
+import { BackToTopButton } from './DownloadsView/BackToTopButton';
+import {
+  applyScrollOffsets,
+  clearDownloadsListState,
+  readDownloadsListState,
+  readScrollOffsets,
+  saveDownloadsListState,
+  type DownloadsListState,
+  type ScrollOffsets,
+} from './DownloadsView/listStateCache';
 import {
   useResourceDataMap,
   useTagSearchMap,
@@ -66,6 +76,14 @@ export const DownloadsView: React.FC = () => {
   const { addToast } = useToast();
   const exportTasks = useExportTasks();
   const { mediaToken } = useAuth();
+
+  // ─── Restore point (module cache, see listStateCache.ts) ───────────────
+  // Read exactly once per mount, before any state below initializes from it.
+  // Null = cold entry (first visit, reload, other workspace, expired) and the
+  // view behaves exactly as it did before this cache existed.
+  const [restored] = useState<DownloadsListState | null>(() =>
+    readDownloadsListState(selectedTeamId),
+  );
 
   // ─── Library data (shared via context — avoids duplicate Supabase fetch) ───
   const {
@@ -124,16 +142,23 @@ export const DownloadsView: React.FC = () => {
   }, [library]);
 
   // ─── Local search state ───────────────────────────────
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<import('../services/searchService').SearchResult[]>([]);
+  // Seeded from the restore point so returning from a detail page keeps the
+  // query, the hit list and the hydrated rows in lockstep — a query with a
+  // full-library result set underneath would be worse than clearing it.
+  const [searchQuery, setSearchQuery] = useState(restored?.searchQuery ?? '');
+  const [searchResults, setSearchResults] = useState<import('../services/searchService').SearchResult[]>(
+    restored?.searchResults ?? [],
+  );
   /** Backend-hydrated full Video rows for every hit in ``searchResults``,
    *  keyed by platform_id. Populated on handleAISearch from the ``videos``
    *  field of SearchResponse. Used by ``filteredLibrary`` so the cards
    *  (including AI-status icons, counts, audio paths) render correctly even
    *  for hits that aren't in the paginated library yet. */
-  const [searchVideoMap, setSearchVideoMap] = useState<Record<string, Video>>({});
-  const [isSearchActive, setIsSearchActive] = useState(false);
-  const [searchQueryText, setSearchQueryText] = useState('');
+  const [searchVideoMap, setSearchVideoMap] = useState<Record<string, Video>>(
+    restored?.searchVideoMap ?? {},
+  );
+  const [isSearchActive, setIsSearchActive] = useState(restored?.isSearchActive ?? false);
+  const [searchQueryText, setSearchQueryText] = useState(restored?.searchQueryText ?? '');
   const [isAISearching, setIsAISearching] = useState(false);
   // Eagle-style search-scope toggles (Title / Description / Author /
   // Hashtags). Persisted in localStorage so the choice survives reloads.
@@ -199,6 +224,9 @@ export const DownloadsView: React.FC = () => {
     if (pullDistance >= 50 && !pullRefreshing) {
       setPullRefreshing(true);
       setPullDistance(50);
+      // Same reasoning as the toolbar Refresh button: a deliberate reload
+      // invalidates the remembered position.
+      clearDownloadsListState();
       loadLibraryData().finally(() => {
         setPullRefreshing(false);
         setPullDistance(0);
@@ -380,9 +408,17 @@ export const DownloadsView: React.FC = () => {
   // happened to be loaded. This piggybacks on the same ``isSearchActive``
   // state that AI / Smart search use, so the existing "Found N matching
   // items" footer + hidden Load More UX kicks in for keyword mode too.
+  // Set when the search state came back from the restore point: the hits are
+  // already in hand, so the first debounce pass would re-issue the exact same
+  // backend query and swap the list out from under the scroll restore.
+  const skipQuickSearchRef = useRef(!!restored?.searchQuery);
   useEffect(() => {
+    // Consumed on the first pass regardless of what the query looks like —
+    // leaving it armed would swallow the user's next real search.
+    const isRestorePass = skipQuickSearchRef.current;
+    skipQuickSearchRef.current = false;
     const trimmed = searchQuery.trim();
-    if (trimmed.length < 2) return;
+    if (trimmed.length < 2 || isRestorePass) return;
     const timer = setTimeout(async () => {
       try {
         const response = await textSearch(trimmed, 1000, searchScope);
@@ -434,10 +470,19 @@ export const DownloadsView: React.FC = () => {
   const [renameValue, setRenameValue] = useState('');
   const [shareTargetResourceId, setShareTargetResourceId] = useState<string | null>(null);
   const [shareTargetName, setShareTargetName] = useState<string>('');
-  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(
+    restored?.isMobileSearchOpen ?? false,
+  );
+  // A restored overlay must NOT grab focus — popping the virtual keyboard on
+  // a plain back-navigation is jarring. Manual opens still autofocus.
+  const [autoFocusMobileSearch, setAutoFocusMobileSearch] = useState(
+    !restored?.isMobileSearchOpen,
+  );
   const [openFacet, setOpenFacet] = useState<ChipId | null>(null);
   const [batchTagOpen, setBatchTagOpen] = useState(false);
-  const [mobileSearchQuery, setMobileSearchQuery] = useState('');
+  const [mobileSearchQuery, setMobileSearchQuery] = useState(
+    restored?.mobileSearchQuery ?? '',
+  );
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   // ─── Selected video tag / resource data ───────────────
@@ -902,6 +947,100 @@ export const DownloadsView: React.FC = () => {
     addToast('Renamed', 'success');
   }, [renameTarget, renameValue, handleUpdateLibraryItem, addToast]);
 
+  // ─── List-state memory (scroll offset + search) ────────
+  // Feed mode scrolls inside LibraryFeed's own virtualized container, so the
+  // offsets captured here would be meaningless there — skip it entirely.
+  const isScrollMemoryEnabled = libraryViewMode !== 'feed';
+
+  // Live scroll offset, tracked via a ref so the listener never re-renders.
+  // Read at unmount time, when the DOM node may already be detached.
+  const scrollOffsetsRef = useRef<ScrollOffsets>({
+    scrollTop: restored?.scrollTop ?? 0,
+    windowScrollY: restored?.windowScrollY ?? 0,
+  });
+  useEffect(() => {
+    if (!isScrollMemoryEnabled) return;
+    const scroller = contentScrollRef.current;
+    let rafId: number | null = null;
+    const onScroll = () => {
+      if (rafId != null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        scrollOffsetsRef.current = readScrollOffsets(contentScrollRef.current);
+      });
+    };
+    scroller?.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      if (rafId != null) cancelAnimationFrame(rafId);
+      scroller?.removeEventListener('scroll', onScroll);
+      window.removeEventListener('scroll', onScroll);
+    };
+  }, [isScrollMemoryEnabled]);
+
+  // Mirror of everything worth restoring, refreshed on every render so the
+  // unmount handler below never closes over a stale value.
+  const snapshotRef = useRef<Omit<DownloadsListState, keyof ScrollOffsets | 'savedAt'>>(null!);
+  snapshotRef.current = {
+    teamId: selectedTeamId,
+    searchQuery,
+    isSearchActive,
+    searchQueryText,
+    searchResults,
+    searchVideoMap,
+    mobileSearchQuery,
+    isMobileSearchOpen,
+  };
+
+  useEffect(() => {
+    return () => {
+      saveDownloadsListState({
+        ...snapshotRef.current,
+        ...scrollOffsetsRef.current,
+        savedAt: Date.now(),
+      });
+    };
+  }, []);
+
+  // Restore the offset once the list is tall enough to hold it. The rows
+  // themselves survive in LibraryContext (mounted above this route), but a
+  // re-fetch — or a first paint that hasn't laid out yet — can leave the
+  // container short for a few frames, and scrolling then would silently clamp.
+  // Mode at mount: switching grid↔feed later must not re-fire the restore and
+  // yank a settled list around.
+  const restoreEligibleRef = useRef(isScrollMemoryEnabled);
+  useEffect(() => {
+    if (!restored || !restoreEligibleRef.current) return;
+    const target: ScrollOffsets = {
+      scrollTop: restored.scrollTop,
+      windowScrollY: restored.windowScrollY,
+    };
+    if (target.scrollTop <= 0 && target.windowScrollY <= 0) return;
+    let rafId: number | null = null;
+    let attempts = 0;
+    const attempt = () => {
+      rafId = null;
+      // ~30 frames (half a second) before giving up and leaving the user at
+      // the top — better than an indefinite loop fighting a shorter list.
+      if (applyScrollOffsets(contentScrollRef.current, target) || attempts++ >= 30) return;
+      rafId = requestAnimationFrame(attempt);
+    };
+    rafId = requestAnimationFrame(attempt);
+    return () => {
+      if (rafId != null) cancelAnimationFrame(rafId);
+    };
+    // Mount-only: ``restored`` is captured once and never changes identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // An explicit refresh means "show me the current list", so the remembered
+  // position stops being meaningful — drop it rather than restore it later.
+  const handleManualRefresh = useCallback(() => {
+    clearDownloadsListState();
+    scrollOffsetsRef.current = { scrollTop: 0, windowScrollY: 0 };
+    return loadLibraryData();
+  }, [loadLibraryData]);
+
   // ─── Render ────────────────────────────────────────────
   return (
     <div className={`flex-1 min-w-0 flex flex-col ${libraryViewMode === 'feed' ? '' : 'md:h-full'}`}>
@@ -916,7 +1055,7 @@ export const DownloadsView: React.FC = () => {
 
           <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={loadLibraryData}
+              onClick={handleManualRefresh}
               disabled={isLoadingLibrary}
               className="p-1.5 rounded-lg text-ink-500 hover:text-ink-200 hover:bg-ink-800/80 transition-colors"
               title="Refresh Data"
@@ -925,6 +1064,7 @@ export const DownloadsView: React.FC = () => {
             </button>
 
             <ToolbarSearch
+              initialQuery={restored?.searchQuery || restored?.searchQueryText || ''}
               onQueryChange={handleSearchQueryChange}
               onAISearch={handleAISearch}
               onClear={handleSearchClear}
@@ -1216,6 +1356,11 @@ export const DownloadsView: React.FC = () => {
         )}
       </div>
 
+      {/* Back to top — outside the scroll container so its click doesn't reach
+          the container's clear-selection handler. Feed mode owns its own
+          snap-scrolling surface, so it opts out. */}
+      {isScrollMemoryEnabled && <BackToTopButton scrollerRef={contentScrollRef} />}
+
       {/* Info Panel — island: bare column portaled into the shell's info island
           (integrated, like My Uploads); classic: floating overlay in place. */}
       {selectedVideo && (() => {
@@ -1311,7 +1456,7 @@ export const DownloadsView: React.FC = () => {
                   <Search size={16} className="text-ink-300 mr-2 flex-shrink-0" />
                 )}
                 <input
-                  autoFocus
+                  autoFocus={autoFocusMobileSearch}
                   enterKeyHint="search"
                   className="bg-transparent border-none outline-none text-white text-sm w-full placeholder-ink-400"
                   placeholder="Search (press Enter for library)"
@@ -1361,7 +1506,7 @@ export const DownloadsView: React.FC = () => {
               </div>
             ) : (
               <button
-                onClick={() => setIsMobileSearchOpen(true)}
+                onClick={() => { setAutoFocusMobileSearch(true); setIsMobileSearchOpen(true); }}
                 className="p-2 bg-black/20 backdrop-blur-md rounded-full text-white hover:bg-black/40 transition-colors shadow-lg border border-white/5"
               >
                 <Search size={20} className="drop-shadow-md" />
