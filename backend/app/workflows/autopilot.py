@@ -55,6 +55,7 @@ from app.schemas.workflow import (
     BLOCK_DELIVERABLE_MISSING,
     BLOCK_DEPS_PENDING,
     BLOCK_FORM_INCOMPLETE,
+    BLOCK_NOT_MANAGER_OR_EDITOR,
     BLOCK_REVIEW_PENDING,
 )
 
@@ -267,6 +268,18 @@ async def _notify_cascade_blocked_once(
     closing group's owner is still the right person to tell "your next step
     can't start yet", so the anchor/recipients stay the same; only the
     copy differs (naming the actual waiting-on dependency, not the anchor).
+
+    Review fix I3: the notify() call is tagged with the anchor node's mirror
+    issue (``link_kind="issue"``/``link_id=identifier``, same as
+    ``stage_hook._notify_prepared``) — NOT link-less. ``notify()`` itself
+    dedupes on ``(user_id, kind, link_kind, link_id)`` within a 10-minute
+    window; a link-less call would collide with ANY other link-less
+    ``workflow_stage`` notification (e.g. a cascade block on a different
+    node/project for the same recipient) and get silently swallowed by that
+    UNRELATED dedupe — while this function had already written its own
+    "notified" stamp, so the real event would never be retried. Tagging the
+    link makes the dedupe key specific to THIS node's event, matching the
+    stamp's own specificity.
     """
     if not preview.closing:
         return
@@ -274,6 +287,7 @@ async def _notify_cascade_blocked_once(
         get_project_stage_nodes_repository,
     )
     from app.services.notifications import notify
+    from app.services.workflow.advance_service import _first_issue_identifier
 
     nodes_repo = get_project_stage_nodes_repository()
     node_ref = preview.closing[0]
@@ -293,12 +307,15 @@ async def _notify_cascade_blocked_once(
         if preview.blocked_reason == BLOCK_DEPS_PENDING and preview.waiting_on:
             label = f"waiting on: {', '.join(preview.waiting_on)}"
         title = f'Autopilot paused — "{node_name}" {label} — {project_name}'
+        identifier = await _first_issue_identifier(str(project_id), node_ref.node_id)
         for user_id in recipients:
             await notify(
                 user_id,
                 "workflow_stage",
                 title,
                 body=None,
+                link_kind="issue" if identifier else None,
+                link_id=identifier,
             )
 
     await nodes_repo.set_node_metadata(
@@ -339,7 +356,22 @@ async def _cascade_pass(project_id: str, project: Dict[str, Any]) -> None:
                 return
             if preview.will_advance:
                 continue  # a new group just arrived — re-evaluate it too
-            if preview.blocked_reason in _CASCADE_NOTIFY_REASONS:
+            if preview.blocked_reason == BLOCK_NOT_MANAGER_OR_EDITOR:
+                # Review fix I5: this stalls the cascade silently (no
+                # notification — there's no human action to point at, the
+                # actor itself has no role) but was ALSO silent in the logs,
+                # making a permanently-stuck project's autopilot invisible.
+                # The underlying gap (resolve_effective_role has no owner-
+                # special-case for a personal/team_id-null project — see
+                # task-O2-report.md Concerns) is NOT fixed here — out of
+                # scope for this guardrail pass — just made discoverable.
+                logger.warning(
+                    f"[autopilot] cascade stalled for project {project_id}: "
+                    "the acting owner has no resolvable manager/editor role "
+                    "(BLOCK_NOT_MANAGER_OR_EDITOR) — autopilot cannot advance "
+                    "this project until that's fixed"
+                )
+            elif preview.blocked_reason in _CASCADE_NOTIFY_REASONS:
                 try:
                     await _notify_cascade_blocked_once(project_id, project, preview)
                 except Exception as exc:  # noqa: BLE001 — notify is enrichment only
@@ -348,6 +380,17 @@ async def _cascade_pass(project_id: str, project: Dict[str, Any]) -> None:
                         f"{project_id}: {exc!r}"
                     )
             return
+        else:
+            # Loop exhausted _MAX_CASCADE_STEPS without ever blocking — every
+            # single step advanced. A real template has a handful of groups;
+            # this many CONSECUTIVE successful advances in one tick is almost
+            # certainly a cyclic/pathological template, not real usage
+            # (adjacent minor fix — flagged, not auto-remediated).
+            logger.warning(
+                f"[autopilot] cascade for project {project_id} hit the "
+                f"{_MAX_CASCADE_STEPS}-step ceiling without ever blocking — "
+                "possible cyclic/pathological workflow template"
+            )
     finally:
         _cascade_active.reset(token)
 

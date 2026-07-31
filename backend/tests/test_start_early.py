@@ -100,6 +100,13 @@ class _FakeIssueRepo:
                     issue["status"] = new_status
         return {"id": issue_id, "status": new_status}
 
+    def seed(self, origin_id: str, issue: Dict[str, Any]) -> None:
+        """Pre-populate an EXISTING mirror issue (e.g. a cancelled one) so
+        ``ensure_stage_issue``'s idempotent-create check finds it and never
+        overwrites it — review fix I4's tests need a cancelled mirror already
+        in place, not one freshly created by the call under test."""
+        self._by_origin.setdefault(origin_id, []).append(dict(issue))
+
 
 class _FakeProjectsRepo:
     async def get_project_by_id(self, pid):
@@ -305,3 +312,82 @@ async def test_agent_owner_never_dispatches_goes_through_confirm_gate(monkeypatc
     # that structurally; this proves the positive behavior happened too).
     titles = [c["title"] for c in notify_spy.calls]
     assert any("ready" in t.lower() for t in titles)
+
+
+# ── I4: cancelled mirror is never resurrected ───────────────────────────────
+
+_ORIGIN_ID = "project_stage:100:1"  # build_stage_origin_id(_PROJECT, _NODE)
+
+
+async def test_start_early_cancelled_mirror_422_not_fake_success(monkeypatch):
+    """Review fix I4 (adjacent minor): a cancelled mirror issue projects the
+    node BACK to status='pending' (no node-level "cancelled" state), which
+    looks identical to a fresh node to the generic not-pending check — without
+    this fix start-early would return a fake 200 doing nothing. Must 422 with
+    a distinct, actionable code instead."""
+    nodes_repo = _FakeNodesRepo([_node()])
+    issue_repo = _FakeIssueRepo()
+    issue_repo.seed(_ORIGIN_ID, {"id": 501, "status": "cancelled"})
+    _install(monkeypatch, nodes_repo=nodes_repo, issue_repo=issue_repo)
+
+    with pytest.raises(HTTPException) as exc:
+        await _call(_PROJECT, _NODE, _USER)
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "NODE_CANCELLED"
+    assert issue_repo.transitions == []
+
+
+async def test_start_node_now_never_resurrects_cancelled_mirror(monkeypatch):
+    """Direct unit test of the shared helper (autopilot's own auto-start
+    step calls this same function) — a cancelled mirror must short-circuit
+    BEFORE the transition/notify/dispatch block, not just before start-
+    early's own pre-check (that pre-check is a UX nicety; this is the real
+    guard both callers rely on)."""
+    from app.services.workflow.node_start import start_node_now
+
+    node = _node(owner_agent_id=_AGENT, members=[{"user_id": _MEMBER_USER}])
+    nodes_repo = _FakeNodesRepo([node])
+    issue_repo = _FakeIssueRepo()
+    issue_repo.seed(_ORIGIN_ID, {"id": 501, "status": "cancelled"})
+    notify_spy = _NotifySpy()
+    _install(
+        monkeypatch, nodes_repo=nodes_repo, issue_repo=issue_repo, notify_spy=notify_spy
+    )
+
+    def _boom(issue_id, wf_id, *, auto=False):
+        raise AssertionError(
+            "a cancelled mirror must never be dispatched — autopilot would "
+            "be resurrecting a human's cancellation"
+        )
+
+    issues_router_mod = importlib.import_module("app.api.issues_router")
+    monkeypatch.setattr(issues_router_mod, "_dispatch_execute_issue", _boom)
+
+    # dispatch=True simulates autopilot's own under-quota auto-start call —
+    # proves the guard fires even when the caller WOULD have dispatched.
+    result = await start_node_now(
+        _PROJECT, node, actor_user_id=None, dispatch=True, dispatch_auto=True
+    )
+
+    assert issue_repo.transitions == []
+    assert notify_spy.calls == []
+    assert result["id"] == node["id"]
+
+
+async def test_start_node_now_never_resurrects_done_mirror(monkeypatch):
+    from app.services.workflow.node_start import start_node_now
+
+    node = _node()
+    nodes_repo = _FakeNodesRepo([node])
+    issue_repo = _FakeIssueRepo()
+    issue_repo.seed(_ORIGIN_ID, {"id": 501, "status": "done"})
+    notify_spy = _NotifySpy()
+    _install(
+        monkeypatch, nodes_repo=nodes_repo, issue_repo=issue_repo, notify_spy=notify_spy
+    )
+
+    await start_node_now(_PROJECT, node, actor_user_id=_USER, dispatch=False)
+
+    assert issue_repo.transitions == []
+    assert notify_spy.calls == []

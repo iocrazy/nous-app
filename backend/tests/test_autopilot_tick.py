@@ -21,6 +21,7 @@ import pytest
 
 import app.services.workflow.advance_service as advance_service
 import app.workflows.autopilot as autopilot
+from app.repositories.issue_repository import IssueRepository
 
 pytestmark = pytest.mark.asyncio
 
@@ -105,10 +106,19 @@ class _FakeNodesRepo:
         self.list_nodes_calls = 0
         self.metadata_patches: List[Any] = []
         self.current_node_id_calls: List[Any] = []
+        self.set_node_status_calls: List[Any] = []
 
     async def list_nodes(self, project_id):
         self.list_nodes_calls += 1
         return list(self._nodes)
+
+    async def set_node_status(self, node_id, status):
+        self.set_node_status_calls.append((str(node_id), status))
+        for n in self._nodes:
+            if str(n["id"]) == str(node_id):
+                n["status"] = status
+                return status
+        return None
 
     async def get_node(self, node_id, project_id=None):
         for n in self._nodes:
@@ -165,7 +175,15 @@ class _NotifySpy:
         self.calls: List[Dict[str, Any]] = []
 
     async def __call__(self, user_id, kind, title, **kwargs):
-        self.calls.append({"user_id": user_id, "kind": kind, "title": title})
+        self.calls.append(
+            {
+                "user_id": user_id,
+                "kind": kind,
+                "title": title,
+                "link_kind": kwargs.get("link_kind"),
+                "link_id": kwargs.get("link_id"),
+            }
+        )
         return 1
 
 
@@ -459,7 +477,9 @@ async def test_tick_cascade_never_turns_in_review_to_done_and_notifies_once(
     )
     nodes_repo = _FakeNodesRepo([blocked_node])
     projects_repo = _FakeProjectsRepo(current_node_id="1")
-    issue_repo = _FakeIssueRepo(by_node={"1": [{"id": 501, "status": "in_review"}]})
+    issue_repo = _FakeIssueRepo(
+        by_node={"1": [{"id": 501, "status": "in_review", "identifier": "MH-501"}]}
+    )
     notify_spy = _NotifySpy()
     _install_repos(
         monkeypatch,
@@ -477,6 +497,12 @@ async def test_tick_cascade_never_turns_in_review_to_done_and_notifies_once(
     # Blocked-cascade notification fired exactly once.
     assert len(notify_spy.calls) == 1
     assert "review" in notify_spy.calls[0]["title"].lower()
+    # Review fix I3: tagged with the mirror issue's link, not link-less —
+    # otherwise this notify() would collide (and silently dedupe) against
+    # ANY other link-less workflow_stage notification within the 10-minute
+    # window, while the "already notified" stamp had already been written.
+    assert notify_spy.calls[0]["link_kind"] == "issue"
+    assert notify_spy.calls[0]["link_id"] == "MH-501"
 
     # A second tick, same blocked state — no repeat notification.
     await autopilot._autopilot_tick_impl(_PROJECT)
@@ -508,12 +534,75 @@ async def test_tick_cascade_advances_through_multiple_groups(monkeypatch):
     assert notify_spy.calls == []
 
 
-async def test_tick_cascade_reentrancy_guard_skips_nested_enqueue(monkeypatch):
-    n1 = _node("1", sort_order=1, auto_start=False, status="done")
+class _RealishIssueRepo(IssueRepository):
+    """Review fix I2 regression harness: the ORIGINAL version of this test
+    used a bare-fake issue repo whose ``transition_status`` just recorded the
+    call without ever invoking the real ``_fire_stage_node_sync`` hook —
+    which meant the re-entrancy guard added to
+    ``issue_repository._enqueue_autopilot_tick_best_effort`` (the done-
+    rollback path, distinct from ``advance_service``'s own tail-enqueue
+    guard) was never actually exercised; the test was false-green.
+
+    This subclasses the REAL ``IssueRepository`` so ``transition_status`` /
+    ``_fire_stage_node_sync`` run unmodified — only the two DB-touching leaf
+    methods (``get_by_id`` / ``update``) are stubbed with an in-memory dict,
+    plus ``list_by_origin`` / ``list_children`` for the mirror-issue lookups
+    ``execute_advance`` / ``_fire_stage_node_sync`` both do.
+    """
+
+    def __init__(self, issues_by_id: Dict[int, Dict[str, Any]]):
+        self._issues = issues_by_id
+
+    async def get_by_id(self, issue_id):
+        row = self._issues.get(int(issue_id))
+        return dict(row) if row else None
+
+    async def update(self, issue_id, patch):
+        row = self._issues.get(int(issue_id))
+        if row is None:
+            raise ValueError(f"issue id={issue_id} not found")
+        row.update(patch)
+        return dict(row)
+
+    async def list_by_origin(self, kind, origin_id):
+        return [
+            dict(r)
+            for r in self._issues.values()
+            if r.get("origin_kind") == kind and r.get("origin_id") == origin_id
+        ]
+
+    async def list_children(self, issue_id):
+        return []
+
+
+async def test_tick_cascade_reentrancy_guard_skips_nested_enqueue_real_hook(
+    monkeypatch,
+):
+    """Drives the REAL issue_repository.transition_status ->
+    _fire_stage_node_sync -> _enqueue_autopilot_tick_best_effort chain (not a
+    fake that skips the hook entirely) to prove BOTH re-entrancy guards —
+    advance_service's own tail-enqueue AND issue_repository's done-rollback
+    hook (review fix I2) — stay silent for the cascade's own internal moves."""
+    n1 = _node("1", sort_order=1, auto_start=False, status="in_progress")
     n2 = _node("2", sort_order=2, auto_start=False, status="pending")
     projects_repo = _FakeProjectsRepo(current_node_id="1")
     nodes_repo = _FakeNodesRepo([n1, n2], projects_repo=projects_repo)
-    issue_repo = _FakeIssueRepo(by_node={"1": [{"id": 501, "status": "done"}]})
+    issue_repo = _RealishIssueRepo(
+        {
+            501: {
+                "id": 501,
+                "status": "in_progress",
+                "origin_kind": "project_stage",
+                "origin_id": "project_stage:100:1",
+            },
+            502: {
+                "id": 502,
+                "status": "todo",
+                "origin_kind": "project_stage",
+                "origin_id": "project_stage:100:2",
+            },
+        }
+    )
     _install_repos(
         monkeypatch,
         nodes_repo=nodes_repo,
@@ -531,9 +620,15 @@ async def test_tick_cascade_reentrancy_guard_skips_nested_enqueue(monkeypatch):
 
     await autopilot._autopilot_tick_impl(_PROJECT)
 
-    # execute_advance's own tail-enqueue call would normally fire once per
-    # successful forward move — the re-entrancy guard must suppress ALL of
-    # them while _cascade_pass's own loop is driving those calls.
+    # The real hook chain genuinely fired: node "1"'s mirror issue really
+    # transitioned to 'done', and the issue->node sync really projected it
+    # onto the node (proving this isn't the old false-green fake).
+    assert issue_repo._issues[501]["status"] == "done"
+    assert nodes_repo.set_node_status_calls == [("1", "done")]
+
+    # Both re-entrancy guards (advance_service's tail-enqueue AND
+    # issue_repository's done-rollback hook, I2) suppressed EVERY nested
+    # enqueue attempt the cascade's own internal moves would otherwise fire.
     assert enqueue_calls == []
 
 
@@ -560,3 +655,92 @@ async def test_tick_deps_pending_cascade_notifies_once(monkeypatch):
     assert len(notify_spy.calls) == 1
     assert "waiting on" in notify_spy.calls[0]["title"].lower()
     assert "Node 3" in notify_spy.calls[0]["title"]
+
+
+class _LoggerSpy:
+    """Stand-in for the module-level ``logger`` so a test can assert a
+    specific ``.warning(...)`` fired without disturbing the shared loguru
+    singleton other tests/modules rely on — patches ``autopilot.logger``
+    (this module's own name binding) only."""
+
+    def __init__(self):
+        self.warnings: List[str] = []
+
+    def warning(self, msg, *a, **kw):
+        self.warnings.append(str(msg))
+
+    def __getattr__(self, name):
+        def _noop(*a, **kw):
+            return None
+
+        return _noop
+
+
+# ── I5: BLOCK_NOT_MANAGER_OR_EDITOR is discoverable in logs ─────────────────
+
+
+async def test_tick_cascade_no_role_actor_logs_warning_no_notify(monkeypatch):
+    n1 = _node("1", sort_order=1, auto_start=False, status="done")
+    n2 = _node("2", sort_order=2, auto_start=False, status="pending")
+    projects_repo = _FakeProjectsRepo(current_node_id="1")
+    nodes_repo = _FakeNodesRepo([n1, n2], projects_repo=projects_repo)
+    issue_repo = _FakeIssueRepo(by_node={"1": [{"id": 501, "status": "done"}]})
+    notify_spy = _NotifySpy()
+    _install_repos(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        issue_repo=issue_repo,
+        notify_spy=notify_spy,
+        # The role gap itself is a known, unfixed pre-existing issue (see
+        # task-O2-report.md Concerns) — simulate it directly rather than
+        # depending on resolve_effective_role's real personal-project edge
+        # case, which fakes elsewhere in this file don't reproduce.
+        role=None,
+    )
+
+    spy_logger = _LoggerSpy()
+    monkeypatch.setattr(autopilot, "logger", spy_logger)
+
+    await autopilot._autopilot_tick_impl(_PROJECT)
+
+    # No human action to point at (the actor itself has no role) — correctly
+    # silent to the user...
+    assert notify_spy.calls == []
+    # ...but no longer silent in the logs (review fix I5).
+    assert any(
+        "BLOCK_NOT_MANAGER_OR_EDITOR" in w or "resolvable manager/editor" in w
+        for w in spy_logger.warnings
+    )
+
+
+# ── adjacent minor: _MAX_CASCADE_STEPS exhaustion is flagged ────────────────
+
+
+async def test_tick_cascade_ceiling_exhaustion_logs_warning(monkeypatch):
+    # One more group than _MAX_CASCADE_STEPS so every one of the 50 bounded
+    # iterations can succeed (each needs a NEXT group to exist) without ever
+    # naturally blocking — the pathological "never stops advancing" case.
+    node_count = autopilot._MAX_CASCADE_STEPS + 10
+    nodes = [
+        _node(str(i), sort_order=i, auto_start=False, status="done")
+        for i in range(node_count)
+    ]
+    projects_repo = _FakeProjectsRepo(current_node_id="0")
+    nodes_repo = _FakeNodesRepo(nodes, projects_repo=projects_repo)
+    issue_repo = _FakeIssueRepo()
+    _install_repos(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        issue_repo=issue_repo,
+        notify_spy=_NotifySpy(),
+    )
+
+    spy_logger = _LoggerSpy()
+    monkeypatch.setattr(autopilot, "logger", spy_logger)
+
+    await autopilot._autopilot_tick_impl(_PROJECT)
+
+    assert len(nodes_repo.current_node_id_calls) == autopilot._MAX_CASCADE_STEPS
+    assert any("ceiling" in w for w in spy_logger.warnings)

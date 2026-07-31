@@ -693,7 +693,7 @@ async def start_workflow_node_early(
         get_project_stage_nodes_repository,
     )
     from app.services.workflow.advance_service import _unmet_dependency_names
-    from app.services.workflow.node_start import start_node_now
+    from app.services.workflow.node_start import _open_mirror_issue, start_node_now
 
     nodes_repo = get_project_stage_nodes_repository()
     node = await nodes_repo.get_node(node_id, project_id)
@@ -710,6 +710,26 @@ async def start_workflow_node_early(
             detail={
                 "code": "NODE_NOT_PENDING",
                 "message": "Only a not-yet-started, non-skipped node can be started early",
+            },
+        )
+
+    # Review fix I4 (adjacent minor): a cancelled mirror issue projects the
+    # node BACK to status='pending' (issue_repository._ISSUE_TO_NODE_STATUS
+    # has no node-level "cancelled" state), which is indistinguishable from a
+    # genuinely-fresh node by the check above alone — without this, start-
+    # early would return a fake 200 (start_node_now's own I4 guard silently
+    # no-ops on a cancelled mirror, so nothing actually happens but the
+    # caller can't tell). Surface it as a distinct, actionable 422 instead.
+    existing_issue = await _open_mirror_issue(project_id, node_id)
+    if existing_issue is not None and existing_issue.get("status") == "cancelled":
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "NODE_CANCELLED",
+                "message": (
+                    "This node's task was cancelled — restore it in the "
+                    "Todolist before starting it early"
+                ),
             },
         )
 

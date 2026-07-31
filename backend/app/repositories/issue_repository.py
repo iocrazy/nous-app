@@ -485,10 +485,24 @@ async def _fire_stage_node_sync(issue: Optional[dict], new_status: str) -> None:
 async def _enqueue_autopilot_tick_best_effort(project_id: str) -> None:
     """Best-effort import + enqueue seam so a broken import can never abort
     the caller's own try/except (belt-and-braces, same idiom as the other
-    hook wrappers in this module)."""
-    try:
-        from app.workflows.autopilot import enqueue_autopilot_tick
+    hook wrappers in this module).
 
+    Re-entrancy guard (review fix I2): ``execute_advance``'s forward branch —
+    itself one of ``autopilot._cascade_pass``'s own loop steps — transitions
+    each closing-group node's mirror issue to 'done', which is EXACTLY this
+    hook's own trigger (the issue→node sync fires on every status write, not
+    just user-driven closes). Without checking ``cascade_in_progress()`` here
+    too, a cascade closing N nodes in one group would fan out N redundant
+    nested tick enqueues per step — the SAME hole ``advance_service``'s own
+    tail-enqueue call guards against, just reached through this OTHER
+    call site instead. Never raises — an enqueue failure must never affect
+    the status transition that triggered it.
+    """
+    try:
+        from app.workflows.autopilot import cascade_in_progress, enqueue_autopilot_tick
+
+        if cascade_in_progress():
+            return
         await enqueue_autopilot_tick(project_id)
     except Exception as exc:  # noqa: BLE001 — never blocks the status transition
         logger.warning(

@@ -36,9 +36,18 @@ JOIN public.project_stage_nodes n ON n.project_id = p.id
 WHERE p.autopilot_enabled = true
   AND n.status = 'pending'
   AND n.skipped = false
-  AND COALESCE((n.events->>'auto_start')::boolean, false) = true
+  AND n.events->>'auto_start' = 'true'
 LIMIT :limit
 """
+# Plain string equality, NOT ``(n.events->>'auto_start')::boolean`` (review
+# adjacent-minor fix): a ``::boolean`` cast RAISES on any row whose value
+# isn't one of Postgres's recognized boolean literals, and — unlike a
+# per-row filter mismatch — that raise aborts the ENTIRE query, so one dirty
+# row (a hand-edited events blob, a future migration bug) would take down
+# the global sweep for every OTHER project too. Pydantic's
+# ``WorkflowNodeEvents.auto_start: bool`` always serializes as the JSON
+# literal ``true``/``false``, so string equality never loses a real match —
+# it degrades a bad row to "not eligible" instead of a global 500.
 
 
 @DBOS.step()

@@ -30,6 +30,18 @@ from loguru import logger
 # whose mirror issue is in one of these needs no further transition.
 _ALREADY_STARTED = frozenset({"in_progress", "in_review", "done", "cancelled"})
 
+# Review fix I4: a node whose mirror issue is cancelled or done must NEVER be
+# (re)started — `_ISSUE_TO_NODE_STATUS` (issue_repository.py) projects a
+# cancelled mirror back onto the node as `status='pending'` (there is no
+# node-level "cancelled" state), which makes a user-cancelled node look
+# indistinguishable from a genuinely-not-started one to the auto-start
+# eligibility check (`status == 'pending'`). Without this guard, the next
+# sweep/tick would see it as a fresh auto_start candidate and re-dispatch —
+# silently overriding the human's cancellation. `done` is guarded too
+# defensively (should never reach here via the 'pending' projection, but a
+# resurrected done node would be equally wrong).
+_NEVER_RESURRECT = frozenset({"cancelled", "done"})
+
 
 async def _mirror_issues(project_id: str, node_id: str) -> list[Dict[str, Any]]:
     """The mirror issues for one node's origin (best-effort empty on error) —
@@ -119,6 +131,15 @@ async def start_node_now(
         logger.warning(
             f"[node_start] no mirror issue for project {project_id} node "
             f"{node_id} after ensure_node_issues — skipping start"
+        )
+        return node
+
+    if issue.get("status") in _NEVER_RESURRECT:
+        # Cancelled (or already-done) — refuse to resurrect: no transition,
+        # no dispatch, no notify. See _NEVER_RESURRECT's docstring (I4).
+        logger.info(
+            f"[node_start] node {node_id} project {project_id} mirror issue "
+            f"is {issue.get('status')!r} — refusing to (re)start"
         )
         return node
 
