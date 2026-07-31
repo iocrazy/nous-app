@@ -493,6 +493,51 @@ class AgentRunsRepository(AsyncpgRepository):
             logger.error(f"Failed to load monthly usage: {e}")
             return []
 
+    # ------------------------------------------------------------------
+    # Autopilot quota (M4, mig 395)
+    # ------------------------------------------------------------------
+
+    async def count_auto_dispatches_today(self, project_id: str) -> int:
+        """Count of this project's AUTO-dispatched agent runs since the start
+        of the current UTC day (the autopilot daily-quota counter, design
+        spec §2 step 4).
+
+        "Auto" is identified by ``trigger == 'issue_dispatch_auto'`` — a
+        distinct value from the manual confirm-gate path's
+        ``'issue_dispatch'`` (see ``run_issue_agent``), so a manual "Run now"
+        never counts against the quota even though it produces the exact
+        same shape of agent_runs row otherwise. Scoped by ``started_at`` (the
+        column every other time-window query on this table uses, e.g.
+        ``idx_agent_runs_agent_started``) rather than ``created_at`` so a
+        row's quota-day matches the moment the run actually started.
+
+        UTC day boundary (never project/user local time — spec §4: "按 UTC
+        日,简单一致"). Best-effort: any read failure degrades to 0 (fail
+        OPEN on the count so a DB hiccup never permanently blocks autopilot
+        into the "over quota" branch) — errors are logged, never raised.
+        """
+        from datetime import datetime, timezone
+
+        try:
+            day_start = datetime.now(timezone.utc).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            async with read_scope() as session:
+                total = await session.scalar(
+                    select(func.count())
+                    .select_from(AgentRuns)
+                    .where(AgentRuns.project_id == int(str(project_id)))
+                    .where(AgentRuns.trigger == "issue_dispatch_auto")
+                    .where(AgentRuns.started_at >= day_start)
+                )
+            return int(total or 0)
+        except Exception as e:
+            logger.error(
+                f"[agent_runs] count_auto_dispatches_today failed for project "
+                f"{project_id}: {e}"
+            )
+            return 0
+
 
 # ─── Factory ──────────────────────────────────────────────────────────
 

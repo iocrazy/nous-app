@@ -737,7 +737,7 @@ class AILibraryChatService:
         # declare its outcome (completed | needs_input | continue). The
         # execute_issue workflow reads the declaration from the returned
         # tool_calls trace; chat turns never see this tool.
-        if trigger in ("issue_dispatch", "issue_reply"):
+        if trigger in ("issue_dispatch", "issue_dispatch_auto", "issue_reply"):
             from app.services.ai.tools.finish_issue_tool import (
                 FINISH_ISSUE_INSTRUCTION,
                 finish_issue_handler,

@@ -468,10 +468,32 @@ async def _fire_stage_node_sync(issue: Optional[dict], new_status: str) -> None:
         )
 
         await get_project_stage_nodes_repository().set_node_status(node_id, mapped)
+
+        # M4 Autopilot (task O2, spec §2 trigger 1): a node reaching 'done'
+        # may unblock other nodes' events.auto_start deps, or close out the
+        # active group so a cascade advance can run — best-effort tail
+        # enqueue, never allowed to affect the transition above.
+        if mapped == "done":
+            await _enqueue_autopilot_tick_best_effort(project_id)
     except Exception as exc:  # noqa: BLE001 — the transition is the primary op
         logger.warning(
             f"[issue_repository] stage-node sync hook failed for issue "
             f"{(issue or {}).get('id')}: {exc!r}"
+        )
+
+
+async def _enqueue_autopilot_tick_best_effort(project_id: str) -> None:
+    """Best-effort import + enqueue seam so a broken import can never abort
+    the caller's own try/except (belt-and-braces, same idiom as the other
+    hook wrappers in this module)."""
+    try:
+        from app.workflows.autopilot import enqueue_autopilot_tick
+
+        await enqueue_autopilot_tick(project_id)
+    except Exception as exc:  # noqa: BLE001 — never blocks the status transition
+        logger.warning(
+            f"[issue_repository] autopilot tick enqueue failed for project "
+            f"{project_id}: {exc!r}"
         )
 
 

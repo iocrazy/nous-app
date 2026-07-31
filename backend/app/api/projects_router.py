@@ -57,6 +57,7 @@ from app.schemas.projects import (
     UpdateMemberRoleRequest,
 )
 from app.schemas.workflow import (
+    BLOCK_DEPS_PENDING,
     AdvancePreview,
     DepsBackwardOnly,
     NodeCreate,
@@ -659,6 +660,75 @@ async def delete_workflow_node(
     except NodeDeleteBlocked as exc:
         raise HTTPException(status_code=409, detail=exc.reason) from exc
     return {"success": True, "data": {"deleted": True}}
+
+
+@router.post("/{project_id}/workflow/nodes/{node_id}/start-early")
+async def start_workflow_node_early(
+    project_id: str,
+    node_id: str,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    """Manual "Start early" (M4 Autopilot, task O2 brief): begin work on a
+    node ahead of the normal cursor flow, once its dependencies are actually
+    satisfied — the hand-operated twin of the autopilot engine's own
+    auto_start step (``app.workflows.autopilot._auto_start_pass``), sharing
+    the exact same dependency predicate (``_unmet_dependency_names``, no
+    co-arrival/closing-group exemptions — this is a standalone future node,
+    not a group's forward advance) and the same ``node_start.start_node_now``
+    execution path.
+
+    404 (node not found) is raised BEFORE 403 (insufficient role) — the
+    project-level guard above already 404s a missing PROJECT; this handles
+    the missing NODE. manager/editor only (``WRITE_ROLES``, the workflow
+    single-source — mirrors ``patch_workflow_node`` / ``post_advance``).
+
+    An agent-owned node is NEVER auto-dispatched from here (``dispatch=False``
+    always) — it still goes through the M3 confirm gate, same as any other
+    manually-surfaced "Agent run ready" prompt; only autopilot's own quota-
+    cleared auto-start path actually dispatches.
+    """
+    from app.core.workflow_roles import WRITE_ROLES, resolve_effective_role
+    from app.repositories.project_stage_nodes_repository import (
+        get_project_stage_nodes_repository,
+    )
+    from app.services.workflow.advance_service import _unmet_dependency_names
+    from app.services.workflow.node_start import start_node_now
+
+    nodes_repo = get_project_stage_nodes_repository()
+    node = await nodes_repo.get_node(node_id, project_id)
+    if node is None:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    role = await resolve_effective_role(auth.user_id, project_id=project_id)
+    if role not in WRITE_ROLES:
+        raise HTTPException(status_code=403, detail="Insufficient role")
+
+    if node.get("skipped") or node.get("status") != "pending":
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "NODE_NOT_PENDING",
+                "message": "Only a not-yet-started, non-skipped node can be started early",
+            },
+        )
+
+    nodes = await nodes_repo.list_nodes(project_id)
+    node_by_id = {str(n["id"]): n for n in nodes}
+    waiting_on = _unmet_dependency_names([node], node_by_id, exempt_ids=set())
+    if waiting_on:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": BLOCK_DEPS_PENDING, "waiting_on": waiting_on},
+        )
+
+    updated = await start_node_now(
+        project_id,
+        node,
+        actor_user_id=str(auth.user_id),
+        dispatch=False,
+    )
+    return {"success": True, "data": updated}
 
 
 @router.get("/{project_id}/advance-preview", response_model=AdvancePreview)

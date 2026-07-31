@@ -69,6 +69,10 @@ TRIGGER_FEATURE_MAP: dict[str, str] = {
     "script_ai": "scriptEditor",
     "issue_reply": "issueCoordination",
     "issue_dispatch": "issueCoordination",
+    # M4 Autopilot (task O2): auto-dispatched confirm-gate runs — same
+    # feature bucket as a manual "Run now", distinguished only by
+    # agent_runs.trigger for the daily-quota counter, not by Usage grouping.
+    "issue_dispatch_auto": "issueCoordination",
     "visual_analysis_l1": "visualAnalysis",
     "prompt_caption": "assetCaption",
     "asset_classify": "assetClassify",

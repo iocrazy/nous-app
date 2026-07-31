@@ -39,7 +39,7 @@ from app.workflows.issue_lifecycle import execute_issue
 router = APIRouter(prefix="/issues", tags=["Issues"])
 
 
-def _dispatch_execute_issue(issue_id: int, wf_id: str) -> None:
+def _dispatch_execute_issue(issue_id: int, wf_id: str, *, auto: bool = False) -> None:
     """Dispatch the execute_issue DBOS workflow under a pinned workflow_id.
 
     Client-aware (gateway→DBOSClient prep, currently DORMANT): when the gateway
@@ -48,6 +48,11 @@ def _dispatch_execute_issue(issue_id: int, wf_id: str) -> None:
     None — today's reality) fall back to the in-process
     `SetWorkflowID + DBOS.start_workflow` path. Zero behavior change while the
     client stays None.
+
+    ``auto`` (M4 Autopilot, task O2): forwarded as ``execute_issue``'s own
+    ``auto`` kwarg — see that workflow's docstring. Manual dispatch (this
+    endpoint, ``dispatch_issue`` below) always leaves it at the default
+    False; ``node_start._dispatch_node`` is the only caller that passes True.
     """
     from app.services.infra.dbos_orchestrator import (
         _resolve_pinned_app_version,
@@ -66,11 +71,11 @@ def _dispatch_execute_issue(issue_id: int, wf_id: str) -> None:
         pinned = _resolve_pinned_app_version()
         if pinned:
             opts["app_version"] = pinned
-        client.enqueue(EnqueueOptions(**opts), issue_id)
+        client.enqueue(EnqueueOptions(**opts), issue_id, auto)
         return
 
     with SetWorkflowID(wf_id):
-        DBOS.start_workflow(execute_issue, issue_id)
+        DBOS.start_workflow(execute_issue, issue_id, auto)
 
 
 def _normalise_uuid_strs(row: dict) -> dict:

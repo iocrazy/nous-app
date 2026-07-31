@@ -11,6 +11,7 @@ Steps + workflow are async because the engine helpers are async.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 from datetime import datetime, timezone
@@ -319,6 +320,7 @@ async def run_issue_agent_step(
     agent_id: str,
     user_id: str,
     is_continuation: bool = False,
+    auto: bool = False,
 ) -> dict[str, Any]:
     """Run the assigned agent on the issue. The RunRecorder (issue_id-linked)
     + mig-208 triggers write the result into the issue chat; we return the
@@ -326,7 +328,11 @@ async def run_issue_agent_step(
     workflow can route status + continuation. No retry: run_issue_agent calls
     run_session_turn which is non-idempotent (appends user msg + charges) and
     streams per-token chunks — a retry would re-emit the whole stream (double
-    bubble) and re-charge the user."""
+    bubble) and re-charge the user.
+
+    ``auto`` (M4 Autopilot, task O2) forwards straight through to
+    ``run_issue_agent`` — see that function's docstring for what it changes
+    (the quota-counted ``agent_runs.trigger`` value)."""
     from app.services.issues.issue_agent_executor import run_issue_agent
 
     return await run_issue_agent(
@@ -334,6 +340,7 @@ async def run_issue_agent_step(
         agent_id=agent_id,
         user_id=user_id,
         is_continuation=is_continuation,
+        auto=auto,
     )
 
 
@@ -472,8 +479,18 @@ async def _maybe_fire_subissue_barrier(issue_id: int) -> None:
 
 
 @DBOS.workflow()
-async def execute_issue(issue_id: int) -> dict[str, Any]:
-    """Parent workflow — owns the issue lifecycle."""
+async def execute_issue(issue_id: int, auto: bool = False) -> dict[str, Any]:
+    """Parent workflow — owns the issue lifecycle.
+
+    ``auto`` (M4 Autopilot, task O2): True when the autopilot engine started
+    this dispatch (via ``node_start._dispatch_node`` /
+    ``app.api.issues_router._dispatch_execute_issue(..., auto=True)``) rather
+    than a human confirming "Run now". Bound onto ``run_issue_agent_step`` via
+    ``functools.partial`` at the call site below so
+    ``_run_dispatch_with_continuation``'s own signature — and its existing
+    unit tests, which inject a bare ``run_turn`` fake — stay untouched;
+    forwarded from there down to ``run_issue_agent`` (see its docstring for
+    what it changes)."""
     await load_issue(issue_id)
 
     workflow_id = DBOS.workflow_id
@@ -499,7 +516,7 @@ async def execute_issue(issue_id: int) -> dict[str, Any]:
                 issue_row,
                 agent_id,
                 user_id,
-                run_turn=run_issue_agent_step,
+                run_turn=functools.partial(run_issue_agent_step, auto=auto),
                 set_status=set_status,
                 load_issue=load_issue,
                 auto_close=auto_close,
