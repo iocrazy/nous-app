@@ -2809,7 +2809,7 @@ export const EDITOR_SHELL_STYLES = `
    point (SceneContextMenu clamps it inside the viewport). */
 .mh-scene-ctx-menu{
   position:fixed; z-index:50; min-width:172px;
-  background:#fff; border:1px solid var(--sheet-border);
+  background:var(--surface); border:1px solid var(--sheet-border);
   border-radius:8px; box-shadow:0 12px 32px rgba(28,27,24,0.18);
   padding:4px; font-family:var(--sans);
 }
