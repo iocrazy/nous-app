@@ -11,35 +11,50 @@
  */
 export const EDITOR_SHELL_STYLES = `
 .mh-editor-shell[data-theme='light']{
-  --bg:#f1f0f8; --bg-2:#e9e7f6;
-  --surface:#ffffff; --surface-border:#e2dff2; --surface-2:#f6f5fc;
-  --ink:#1c1830; --ink-soft:#5b5771; --ink-faint:#8d89a6;
-  --indigo:#4f3ee0; --indigo-deep:#3c2ec4; --indigo-soft:#ece9fb;
-  --violet:#8b30e0; --violet-soft:#f4eafd;
-  --tick-action:#726e88; --tick-dialogue:var(--indigo); --tick-character:var(--violet);
-  --tick-paren:#c3bdd8; --tick-transition:#b45309; --tick-comment:#0d9488; --tick-subtitle:#8d89a6;
-  --sheet-bg:#ffffff; --sheet-bg-2:#fbfaff; --sheet-border:#e6e2f5;
-  --sheet-ink:#211c34; --sheet-ink-soft:#6a6580;
+  /* Warm-paper re-anchor (docs/superpowers/specs/2026-07-29-warm-paper-palette-design.md):
+     these were a private lavender palette (bg/surface/ink family + indigo/violet
+     accents + tick-* syntax colours) never touched by the K1/K1.6 site-wide
+     recolor because the shell scopes its own hex under .mh-editor-shell instead
+     of consuming the global --color-* / --accent-* tokens. Values below are re-hued
+     to the warm-paper system 1:1 (base paper/island/ink from index.css light block,
+     indigo->绿 anchor@600/700, violet->李紫 plum@600, tick-transition->赭,
+     tick-comment->钢蓝); every variable NAME is unchanged so nothing downstream
+     needs edits. */
+  --bg:#F3F0E9; --bg-2:#ECE7DC;
+  --surface:#FCFBF8; --surface-border:#E5E0D4; --surface-2:#F6F4EE;
+  --ink:#1C1B18; --ink-soft:#57544B; --ink-faint:#8C887B;
+  --indigo:#1E7A5B; --indigo-deep:#14694D; --indigo-soft:#E3EFE8;
+  --violet:#7A5E8F; --violet-soft:#ECE6F1;
+  --tick-action:#6E6A60; --tick-dialogue:var(--indigo); --tick-character:var(--violet);
+  --tick-paren:#C5C0B4; --tick-transition:#A87B2B; --tick-comment:#46708E; --tick-subtitle:#8C887B;
+  --sheet-bg:#FFFEFB; --sheet-bg-2:#FBF9F4; --sheet-border:#EAE5D8;
+  --sheet-ink:#17160F; --sheet-ink-soft:#5F5B4F;
   --green:#12945a; --green-soft:#e2f6ec; --red:#e0435a; --red-soft:#fbe6ea;
   --amber:#b45309; --amber-soft:#fdf1de;
-  --shadow-island:0 1px 2px rgba(30,20,70,0.05), 0 10px 26px -10px rgba(45,30,110,0.12);
-  --shadow-float:0 18px 44px -12px rgba(30,15,90,0.30), 0 3px 10px rgba(25,15,70,0.10);
-  --shadow-sheet:0 1px 1px rgba(30,15,80,0.02), 0 26px 50px -22px rgba(35,20,90,0.16), 0 4px 14px rgba(35,20,90,0.05);
+  --shadow-island:0 1px 2px rgba(28,27,24,0.05), 0 10px 26px -10px rgba(28,27,24,0.12);
+  --shadow-float:0 18px 44px -12px rgba(28,27,24,0.30), 0 3px 10px rgba(28,27,24,0.10);
+  --shadow-sheet:0 1px 1px rgba(28,27,24,0.02), 0 26px 50px -22px rgba(28,27,24,0.16), 0 4px 14px rgba(28,27,24,0.05);
   --tick-glow:none; --grain-opacity:0.05; --grain-blend:multiply;
   --radius-lg:20px; --radius-md:13px; --radius-sm:9px;
   --accent-on:#ffffff;
-  --minimap-mask:rgba(241,240,248,0.60);
+  --minimap-mask:rgba(243,240,233,0.60);
 }
 .mh-editor-shell[data-theme='dark']{
-  --bg:#171320; --bg-2:#1c1727;
-  --surface:#221c2e; --surface-border:#362c44; --surface-2:#2a2236;
-  --ink:#f0eafb; --ink-soft:#b9aed1; --ink-faint:#8a7fa1;
-  --indigo:#9184f7; --indigo-deep:#b3a6ff; --indigo-soft:#2c2547;
-  --violet:#cc93f7; --violet-soft:#372a49;
-  --tick-action:#a199b8; --tick-dialogue:var(--indigo); --tick-character:var(--violet);
-  --tick-paren:#5c5372; --tick-transition:#f2c464; --tick-comment:#2dd4bf; --tick-subtitle:#8a7fa1;
-  --sheet-bg:#130f1b; --sheet-bg-2:#171223; --sheet-border:#2c2438;
-  --sheet-ink:#ece5fa; --sheet-ink-soft:#9b8fb5;
+  /* Dark counterpart of the warm-paper re-anchor above — bg/surface family lifted
+     from index.css's dark island tokens (--island/--island-2/--card) for chrome
+     coherence with the rest of the app; indigo/violet accents use the K1.6-verified
+     dark 400-tier anchors (green-400 / plum-400) with the same rgba-composited
+     soft fills index.css uses for --ok-soft/--agent-soft. Shadows stay neutral
+     black (already hue-agnostic, no lavender tint to remove). */
+  --bg:#15151a; --bg-2:#1a1a1f;
+  --surface:#1d1d22; --surface-border:#2a2a30; --surface-2:#232329;
+  --ink:#E7E7EA; --ink-soft:#A3A3AD; --ink-faint:#74747E;
+  --indigo:#80B39C; --indigo-deep:#BFDACE; --indigo-soft:rgba(30,122,91,0.14);
+  --violet:#AF9BBF; --violet-soft:rgba(122,94,143,0.14);
+  --tick-action:#8B8B95; --tick-dialogue:var(--indigo); --tick-character:var(--violet);
+  --tick-paren:#4B4B53; --tick-transition:#C6A675; --tick-comment:#8DA9BE; --tick-subtitle:#74747E;
+  --sheet-bg:#121216; --sheet-bg-2:#17171b; --sheet-border:#33333A;
+  --sheet-ink:#E7E7EA; --sheet-ink-soft:#85858F;
   --green:#57e0a1; --green-soft:#1c3129; --red:#ff7a8a; --red-soft:#3a1f26;
   --amber:#f2c464; --amber-soft:#35291a;
   --shadow-island:0 1px 2px rgba(0,0,0,0.35), 0 10px 30px -12px rgba(0,0,0,0.55);
@@ -47,8 +62,8 @@ export const EDITOR_SHELL_STYLES = `
   --shadow-sheet:0 1px 1px rgba(0,0,0,0.3), 0 30px 60px -24px rgba(0,0,0,0.7), 0 4px 16px rgba(0,0,0,0.3);
   --tick-glow:0 0 7px currentColor; --grain-opacity:0.065; --grain-blend:overlay;
   --radius-lg:20px; --radius-md:13px; --radius-sm:9px;
-  --accent-on:#1a1424;
-  --minimap-mask:rgba(19,15,27,0.62);
+  --accent-on:#050507;
+  --minimap-mask:rgba(18,18,22,0.62);
 }
 
 .mh-editor-shell{
