@@ -94,6 +94,7 @@ async def _upload_downloaded_video_to_s3(
     user_id: Optional[str],
     local_path: str,
     relative_path: str,
+    mime: str = "video/mp4",
 ) -> str:
     """成品落盘后补传对象存储(止血,新下载不再增长文件系统债务)。
 
@@ -119,7 +120,7 @@ async def _upload_downloaded_video_to_s3(
     stored = await store_local_file(
         scope_id=scope_id,
         source_path=local_path,
-        mime="video/mp4",
+        mime=mime,
         filename=os.path.basename(relative_path),
         store=library_store(),
     )
@@ -1439,20 +1440,32 @@ class DownloaderService:
                     )
                     cover_ok = False
                 if cover_ok:
-                    # Update database (store relative path)
+                    # Storage tiering: upload the cover to S3 and persist the
+                    # sb:// path. Falls back to the FS relative path when the
+                    # flag is off or user_id is missing (same guard as video).
+                    # This path — shared by every platform — previously persisted
+                    # only the FS path, so new covers kept re-introducing FS
+                    # debt after the S3 migration (2026-07-31).
+                    stored_cover_path = await _upload_downloaded_video_to_s3(
+                        user_id=user_id,
+                        local_path=cover_full_path,
+                        relative_path=cover_relative_path,
+                        mime="image/jpeg",
+                    )
+                    # Update database (store S3 / relative path)
                     try:
                         await repo.update(
                             platform_id,
                             {
                                 "cover_download_status": DownloadStatus.COMPLETED.value,
-                                "cover_download_path": cover_relative_path,  # Use relative path
+                                "cover_download_path": stored_cover_path,
                             },
                         )
                     except Exception as e:
                         logger.error(f"更新封面下载状态失败: {e}")
 
                     result.cover_download_status = DownloadStatus.COMPLETED
-                    result.cover_path = cover_relative_path  # Return relative path
+                    result.cover_path = stored_cover_path
                     logger.success(f"封面 {platform_id} 下载成功: {cover_full_path}")
 
                     # Log success

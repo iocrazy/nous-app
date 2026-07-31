@@ -246,27 +246,47 @@ def _do_douyin_download(
                             )
                         )
                         if ytdlp_result.get("file_path"):
-                            file_name = os.path.basename(ytdlp_result["file_path"])
+                            local_file = ytdlp_result["file_path"]
+                            file_name = os.path.basename(local_file)
                             relative_path = f"{relative_prefix}/{file_name}"
                             from app.repositories.media_repository import (
                                 MediaRepository as _MR_yt,
                             )
                             from app.services.media.downloader.downloader import (
+                                _upload_downloaded_video_to_s3,
                                 persist_video_download,
+                            )
+
+                            # Optimize BEFORE the S3 upload so the stored copy
+                            # carries the faststart moov atom (mirrors the httpx
+                            # path in downloader.py: optimize, then upload).
+                            run_async(
+                                DownloaderService.optimize_video_for_streaming(
+                                    local_file
+                                )
+                            )
+                            # Storage tiering: the yt-dlp fallback landed the
+                            # file on local disk — upload to S3 and persist the
+                            # sb:// path so this path stops re-introducing FS
+                            # debt. The httpx path already does this
+                            # (downloader.py:693); this fallback was missed,
+                            # silently keeping every bilibili / non-douyin
+                            # download on the filesystem (2026-07-31).
+                            stored_path = run_async(
+                                _upload_downloaded_video_to_s3(
+                                    user_id=user_id,
+                                    local_path=local_file,
+                                    relative_path=relative_path,
+                                )
                             )
 
                             persisted = run_async(
                                 persist_video_download(
                                     _MR_yt(),
                                     platform_id=platform_id,
-                                    download_path=relative_path,
+                                    download_path=stored_path,
                                     duration=0,
                                     storage_size=ytdlp_result.get("file_size", 0),
-                                )
-                            )
-                            run_async(
-                                DownloaderService.optimize_video_for_streaming(
-                                    ytdlp_result["file_path"]
                                 )
                             )
                             if persisted:
