@@ -34,8 +34,14 @@ tests/
 .DS_Store
 Thumbs.db
 
-# 本地配置（使用 volume 挂载）
-backend/.env.local
+# 本地配置（运行时由 compose env_file / volume 提供，绝不烤进镜像）
+# ⚠️ backend/.env 必须排除：Dockerfile 的 `COPY backend/ .` 会把它带进
+# /app/.env，而 pydantic 以 /app/.env 为 env_file。手动 `up.sh --build` 从
+# 带本地 dev backend/.env 的 worktree 构建时,曾把 DOWNLOAD_PATH=/Volumes/...
+# (Mac 路径) 烤进生产镜像 → 容器找不到 /app/downloads 下的文件(2026-07-31)。
+# CI 从干净 checkout 构建碰不到,但手动构建会,所以这里统一挡掉所有 backend/.env*。
+backend/.env
+backend/.env.*
 *.local
 
 # 下载目录
