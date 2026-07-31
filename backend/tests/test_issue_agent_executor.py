@@ -89,6 +89,85 @@ async def test_run_issue_agent_runs_session_turn(monkeypatch):
     assert out["content"] == "essay"
 
 
+async def test_run_issue_agent_auto_true_maps_to_issue_dispatch_auto_trigger(
+    monkeypatch,
+):
+    """M4 Autopilot quota hard line (task O2 review, round 2 carry-forward):
+    the ONLY thing distinguishing an autopilot-driven dispatch from a manual
+    one in ``agent_runs`` — and therefore the only thing
+    ``count_auto_dispatches_today``'s ``WHERE trigger='issue_dispatch_auto'``
+    can filter on — is this exact ``auto: bool`` -> ``trigger`` string
+    mapping inside ``run_issue_agent`` itself. Every OTHER test that checks
+    ``trigger == 'issue_dispatch_auto'`` (test_issue_agent_executor_p2.py's
+    C1 regression test) passes that trigger value in DIRECTLY to
+    ``run_session_turn``, bypassing this mapping entirely — so the mapping's
+    True branch was previously unproven. Drives the real
+    ``run_issue_agent(..., auto=True)`` call (same lightweight
+    run_session_turn-mocked harness as the sibling test above — the
+    "least faking" seam this module's existing tests already established)."""
+    from app.services.issues import issue_agent_executor as m
+
+    monkeypatch.setattr(
+        m, "get_or_create_issue_session", AsyncMock(return_value="sess-2")
+    )
+    chat_svc = AsyncMock()
+    chat_svc.run_session_turn = AsyncMock(
+        return_value={"assistant_message": {"content": "auto essay"}, "run_id": "r"}
+    )
+    monkeypatch.setattr(m, "AILibraryChatService", lambda: chat_svc)
+    monkeypatch.setattr(m, "publish_chunk", AsyncMock())
+    monkeypatch.setattr(m, "publish_message", AsyncMock())
+    monkeypatch.setattr(m, "publish_status", AsyncMock())
+
+    out = await m.run_issue_agent(
+        issue={"id": 410, "title": "autopilot task", "description": "x"},
+        agent_id="a",
+        user_id="u",
+        auto=True,
+    )
+
+    chat_svc.run_session_turn.assert_awaited_once()
+    aa = chat_svc.run_session_turn.await_args
+    assert aa.kwargs["trigger"] == "issue_dispatch_auto"
+    assert out["content"] == "auto essay"
+
+
+async def test_run_issue_agent_auto_false_maps_to_manual_issue_dispatch_trigger(
+    monkeypatch,
+):
+    """Sibling of the test above — explicit ``auto=False`` (not just the
+    default) must still yield the MANUAL trigger value, never
+    ``issue_dispatch_auto``. Together the two pin both halves of the
+    mapping so a manual "Run now" can never accidentally count against the
+    autopilot daily quota, and an autopilot dispatch can never accidentally
+    be miscounted as manual."""
+    from app.services.issues import issue_agent_executor as m
+
+    monkeypatch.setattr(
+        m, "get_or_create_issue_session", AsyncMock(return_value="sess-3")
+    )
+    chat_svc = AsyncMock()
+    chat_svc.run_session_turn = AsyncMock(
+        return_value={"assistant_message": {"content": "manual essay"}, "run_id": "r"}
+    )
+    monkeypatch.setattr(m, "AILibraryChatService", lambda: chat_svc)
+    monkeypatch.setattr(m, "publish_chunk", AsyncMock())
+    monkeypatch.setattr(m, "publish_message", AsyncMock())
+    monkeypatch.setattr(m, "publish_status", AsyncMock())
+
+    out = await m.run_issue_agent(
+        issue={"id": 411, "title": "manual task", "description": "x"},
+        agent_id="a",
+        user_id="u",
+        auto=False,
+    )
+
+    chat_svc.run_session_turn.assert_awaited_once()
+    aa = chat_svc.run_session_turn.await_args
+    assert aa.kwargs["trigger"] == "issue_dispatch"
+    assert out["content"] == "manual essay"
+
+
 async def test_run_issue_agent_extracts_finish_outcome(monkeypatch):
     from app.services.issues import issue_agent_executor as m
 
