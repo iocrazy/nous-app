@@ -144,6 +144,138 @@ async def test_list_agent_runs_returns_paginated_envelope() -> None:
     assert result["offset"] == 0
 
 
+@pytest.mark.asyncio
+async def test_list_agent_runs_passes_conversation_filter() -> None:
+    """The grouped view's expand path: conversation_id must reach the repo."""
+    agent_id = uuid4()
+    mock_agent_repo = MagicMock(
+        get_by_slug=AsyncMock(return_value={"id": str(agent_id), "slug": "x"})
+    )
+    with (
+        patch(
+            "app.api.ai_library_router._repos",
+            return_value=(mock_agent_repo, MagicMock()),
+        ),
+        patch("app.repositories.agent_runs_repository.AgentRunsRepository") as runs_cls,
+    ):
+        runs_cls.return_value.list_by_agent = AsyncMock(
+            return_value={"items": [], "total": 0}
+        )
+        await list_agent_runs(
+            "x", _fake_auth(), limit=10, offset=0, conversation_id="123456789"
+        )
+        kwargs = runs_cls.return_value.list_by_agent.call_args.kwargs
+    assert kwargs["conversation_id"] == "123456789"
+
+
+@pytest.mark.asyncio
+async def test_list_agent_runs_rejects_non_numeric_conversation_id() -> None:
+    """Snowflake ids are numeric strings; anything else is a 400, not a
+    swallowed SQL error."""
+    with pytest.raises(HTTPException) as exc:
+        await list_agent_runs(
+            "any", _fake_auth(), limit=10, offset=0, conversation_id="abc"
+        )
+    assert exc.value.status_code == 400
+
+
+# ------------------------------- run groups -------------------------------
+
+
+def _sample_group_row(**overrides) -> dict:
+    base = {
+        "group_key": "conv:900001",
+        "conversation_id": "900001",
+        "run_count": 3,
+        "prompt_tokens": 300,
+        "completion_tokens": 150,
+        "cost_cents": "0.5",  # numeric arrives as Decimal/str from PG
+        "first_started_at": datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc),
+        "last_started_at": datetime(2026, 7, 3, 10, 0, tzinfo=timezone.utc),
+        "any_running": False,
+        "error_count": 0,
+        "latest_run_id": "800001",
+        "latest_status": "completed",
+        "trigger": "chat",
+        "model": "qwen-max",
+        "latest_output_summary": "Sure — here is the analysis.",
+        "latest_error_code": None,
+        "latest_ended_at": datetime(2026, 7, 3, 10, 1, tzinfo=timezone.utc),
+    }
+    base.update(overrides)
+    return base
+
+
+@pytest.mark.asyncio
+async def test_list_run_groups_404_when_agent_missing() -> None:
+    from app.api.ai_library_router import list_agent_run_groups
+
+    with patch(
+        "app.api.ai_library_router._repos",
+        return_value=(
+            MagicMock(get_by_slug=AsyncMock(return_value=None)),
+            MagicMock(),
+        ),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await list_agent_run_groups("nope", _fake_auth(), limit=10, offset=0)
+        assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_run_groups_rejects_bad_pagination() -> None:
+    from app.api.ai_library_router import list_agent_run_groups
+
+    with pytest.raises(HTTPException) as exc:
+        await list_agent_run_groups("any", _fake_auth(), limit=0, offset=0)
+    assert exc.value.status_code == 400
+    with pytest.raises(HTTPException) as exc:
+        await list_agent_run_groups("any", _fake_auth(), limit=10, offset=-1)
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_list_run_groups_envelope_and_cost_coercion() -> None:
+    """Groups page returns the envelope, coerces numeric cost to float, and
+    total counts GROUPS (repo's number passes through untouched)."""
+    from app.api.ai_library_router import list_agent_run_groups
+
+    agent_id = uuid4()
+    mock_agent_repo = MagicMock(
+        get_by_slug=AsyncMock(return_value={"id": str(agent_id), "slug": "x"})
+    )
+    page = {
+        "items": [
+            _sample_group_row(),
+            _sample_group_row(
+                group_key="run:800002",
+                conversation_id=None,
+                run_count=1,
+                cost_cents=None,
+                trigger="visual_analysis",
+            ),
+        ],
+        "total": 2,
+    }
+    with (
+        patch(
+            "app.api.ai_library_router._repos",
+            return_value=(mock_agent_repo, MagicMock()),
+        ),
+        patch("app.repositories.agent_runs_repository.AgentRunsRepository") as runs_cls,
+    ):
+        runs_cls.return_value.list_groups_by_agent = AsyncMock(return_value=page)
+        result = await list_agent_run_groups("x", _fake_auth(), limit=10, offset=0)
+
+    assert result["total"] == 2
+    grouped, single = result["items"]
+    assert grouped["cost_cents"] == 0.5
+    assert isinstance(grouped["cost_cents"], float)
+    assert grouped["run_count"] == 3
+    assert single["conversation_id"] is None
+    assert single["cost_cents"] is None
+
+
 # ------------------------------- get run -------------------------------
 
 

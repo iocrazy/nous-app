@@ -51,6 +51,10 @@ class RunListItem(BaseModel):
     # the list snippet (paperclip-style split pane shows it in the left
     # column). Full content stays in metadata_json on the detail view.
     output_summary: Optional[str] = None
+    # mig 331: conversations.id (BIGINT Snowflake → numeric string) for
+    # conversations-backed chat turns; NULL for everything else. Lets the
+    # Runs tab group one conversation's turns instead of flat-listing them.
+    conversation_id: Optional[str] = None
 
 
 class RunTaskRef(BaseModel):
@@ -88,6 +92,46 @@ class RunListResponse(BaseModel):
     """Pagination envelope for the runs list endpoint."""
 
     items: list[RunListItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class RunGroupItem(BaseModel):
+    """One row of the conversation-grouped Runs view: a whole chat
+    conversation (run_count > 1 possible) or a single non-chat run
+    (conversation_id NULL, run_count == 1). Carries per-group rollups plus
+    the latest run's display fields for the list card."""
+
+    model_config = ConfigDict(coerce_numbers_to_str=True)
+
+    group_key: str
+    # conversations.id as numeric string; NULL for single non-chat runs.
+    conversation_id: Optional[str] = None
+    run_count: int
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cost_cents: Optional[float] = None
+    first_started_at: datetime
+    last_started_at: datetime
+    any_running: bool = False
+    error_count: int = 0
+    # Latest run of the group — drives the card's status icon / snippet and
+    # the auto-selected detail pane.
+    latest_run_id: str
+    latest_status: RunStatus
+    trigger: str
+    model: Optional[str] = None
+    latest_output_summary: Optional[str] = None
+    latest_error_code: Optional[str] = None
+    latest_ended_at: Optional[datetime] = None
+
+
+class RunGroupListResponse(BaseModel):
+    """Pagination envelope for the grouped runs endpoint. ``total`` counts
+    groups, not runs."""
+
+    items: list[RunGroupItem]
     total: int
     limit: int
     offset: int

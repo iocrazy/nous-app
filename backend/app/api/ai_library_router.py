@@ -51,6 +51,7 @@ from app.repositories.skill_repository import (
 )
 from app.schemas.agent_runs import (
     RunDetail,
+    RunGroupListResponse,
     RunListItem,
     RunListResponse,
     UsageAggregate,
@@ -1476,6 +1477,8 @@ def _row_to_run_list_item(row: Dict[str, Any]) -> Dict[str, Any]:
         # Phase 3a/3b/4 of #199: surface parent_run_id so the Runs UI
         # can render sub-spawn hierarchy without an extra round-trip.
         "parent_run_id": row.get("parent_run_id"),
+        # mig 331: lets the Runs UI tie a turn back to its conversation.
+        "conversation_id": row.get("conversation_id"),
     }
 
 
@@ -1867,8 +1870,56 @@ async def list_agent_runs(
     auth: AuthDep,
     limit: int = 50,
     offset: int = 0,
+    conversation_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Runs for this agent, scoped to the authenticated user. Newest first."""
+    """Runs for this agent, scoped to the authenticated user. Newest first.
+
+    ``conversation_id`` narrows to one conversation's turns — the expand
+    path of the grouped Runs view (numeric-string Snowflake)."""
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be 1..200")
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be >= 0")
+    if conversation_id is not None and not conversation_id.isdigit():
+        raise HTTPException(status_code=400, detail="conversation_id must be numeric")
+
+    agent_repo, _ = _repos()
+    agent = await agent_repo.get_by_slug(slug)
+    if not agent:
+        raise HTTPException(status_code=404, detail="agent not found")
+
+    runs_repo = get_agent_runs_repository()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    agent_uuid = UUID(str(agent["id"]))
+    page = await runs_repo.list_by_agent(
+        agent_id=agent_uuid,
+        user_id=user_uuid,
+        limit=limit,
+        offset=offset,
+        conversation_id=conversation_id,
+    )
+    return {
+        "items": [_row_to_run_list_item(r) for r in page["items"]],
+        "total": page["total"],
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get(
+    "/agents/{slug}/run-groups",
+    response_model=RunGroupListResponse,
+    summary="Conversation-grouped runs for a single agent (paginated)",
+)
+async def list_agent_run_groups(
+    slug: str,
+    auth: AuthDep,
+    limit: int = 50,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    """One item per chat conversation (turns rolled up) or per standalone
+    run. Fixes the Runs tab flat-listing every turn of one conversation as
+    its own record. ``total`` counts groups."""
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=400, detail="limit must be 1..200")
     if offset < 0:
@@ -1882,11 +1933,19 @@ async def list_agent_runs(
     runs_repo = get_agent_runs_repository()
     user_uuid = _coerce_user_uuid(auth.user_id)
     agent_uuid = UUID(str(agent["id"]))
-    page = await runs_repo.list_by_agent(
+    page = await runs_repo.list_groups_by_agent(
         agent_id=agent_uuid, user_id=user_uuid, limit=limit, offset=offset
     )
     return {
-        "items": [_row_to_run_list_item(r) for r in page["items"]],
+        "items": [
+            {
+                **r,
+                "cost_cents": (
+                    float(r["cost_cents"]) if r.get("cost_cents") is not None else None
+                ),
+            }
+            for r in page["items"]
+        ],
         "total": page["total"],
         "limit": limit,
         "offset": offset,

@@ -1776,6 +1776,37 @@ export interface AgentRunListItem {
   task_id?: string | null;
   /** 500-char display summary — left-column snippet in the split-pane Runs tab. */
   output_summary?: string | null;
+  /** conversations.id (numeric-string Snowflake, mig 331) for chat turns; null otherwise. */
+  conversation_id?: string | null;
+}
+
+/** One row of the conversation-grouped Runs view: a whole chat conversation
+ * (run_count > 1 possible) or a single non-chat run. */
+export interface AgentRunGroupItem {
+  group_key: string;
+  conversation_id?: string | null;
+  run_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cost_cents?: number | null;
+  first_started_at: string;
+  last_started_at: string;
+  any_running: boolean;
+  error_count: number;
+  latest_run_id: string;
+  latest_status: AgentRunStatus;
+  trigger: string;
+  model?: string | null;
+  latest_output_summary?: string | null;
+  latest_error_code?: string | null;
+  latest_ended_at?: string | null;
+}
+
+export interface AgentRunGroupListResponse {
+  items: AgentRunGroupItem[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 /** Slim task_tracking ref attached to a run detail ("Tasks Touched"). */

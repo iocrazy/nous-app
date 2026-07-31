@@ -47,6 +47,7 @@ def test_repository_exposes_public_data_methods():
 
     expected = {
         "list_by_agent",
+        "list_groups_by_agent",
         "get_by_id",
         "list_children",
         "request_cancel",
@@ -66,6 +67,7 @@ def test_repository_exposes_public_data_methods():
     "method_name",
     [
         "list_by_agent",
+        "list_groups_by_agent",
         "get_by_id",
         "list_children",
         "request_cancel",
@@ -89,7 +91,17 @@ def test_public_method_signatures_stable(method_name):
     params = set(sig.parameters.keys())
 
     expected_params = {
-        "list_by_agent": {"self", "agent_id", "user_id", "limit", "offset"},
+        # conversation_id: the grouped Runs view's expand path (one
+        # conversation's turns) — optional, callers may omit it.
+        "list_by_agent": {
+            "self",
+            "agent_id",
+            "user_id",
+            "limit",
+            "offset",
+            "conversation_id",
+        },
+        "list_groups_by_agent": {"self", "agent_id", "user_id", "limit", "offset"},
         "get_by_id": {"self", "run_id", "user_id"},
         "list_children": {"self", "parent_run_id", "user_id", "limit"},
         "request_cancel": {"self", "run_id", "user_id"},

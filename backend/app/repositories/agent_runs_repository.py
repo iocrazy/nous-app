@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from loguru import logger
-from sqlalchemy import case, func, select, update
+from sqlalchemy import case, func, select, text, update
 
 from app.db.repository_base import AsyncpgRepository
 from app.db.session import read_scope, write_scope
@@ -129,22 +129,32 @@ class AgentRunsRepository(AsyncpgRepository):
         user_id: UUID,
         limit: int = 50,
         offset: int = 0,
+        conversation_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Paginated runs for one agent, scoped to the caller. Returns
         {"items": [...], "total": N}. Two queries — count + page — matching
-        the prior shape rather than collapsing into a window function."""
+        the prior shape rather than collapsing into a window function.
+
+        ``conversation_id`` narrows to one conversation's turns (the expand
+        path of the grouped Runs view). Snowflake ids travel as strings
+        through FastAPI query params — coerced to int here for the PG int8
+        codec (same convention as ``_bigint``)."""
         try:
             async with read_scope() as session:
+                base_filters = [
+                    AgentRuns.agent_id == agent_id,
+                    AgentRuns.user_id == user_id,
+                ]
+                if conversation_id is not None:
+                    base_filters.append(
+                        AgentRuns.conversation_id == int(conversation_id)
+                    )
                 total = await session.scalar(
-                    select(func.count())
-                    .select_from(AgentRuns)
-                    .where(AgentRuns.agent_id == agent_id)
-                    .where(AgentRuns.user_id == user_id)
+                    select(func.count()).select_from(AgentRuns).where(*base_filters)
                 )
                 result = await session.execute(
                     select(AgentRuns)
-                    .where(AgentRuns.agent_id == agent_id)
-                    .where(AgentRuns.user_id == user_id)
+                    .where(*base_filters)
                     .order_by(AgentRuns.started_at.desc())
                     .limit(limit)
                     .offset(offset)
@@ -153,6 +163,94 @@ class AgentRunsRepository(AsyncpgRepository):
             return {"items": items, "total": int(total or 0)}
         except Exception as e:
             logger.error(f"Failed to list runs (agent={agent_id}, user={user_id}): {e}")
+            return {"items": [], "total": 0}
+
+    # Group key: chat turns of one conversation share conversation_id (mig
+    # 331); everything else (issue turns, workflow runs, vision batches …)
+    # has conversation_id NULL and stays a group of one keyed by its own id.
+    # ``'conv:' || NULL`` is NULL, so COALESCE falls through to the run id.
+    @staticmethod
+    def _group_key_sql(alias: str = "") -> str:
+        p = f"{alias}." if alias else ""
+        return (
+            f"COALESCE('conv:' || {p}conversation_id::text, 'run:' || {p}id::text)"
+        )
+
+    async def list_groups_by_agent(
+        self,
+        *,
+        agent_id: UUID,
+        user_id: UUID,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """Conversation-grouped runs page for the Runs tab. One item per
+        conversation (chat) or per run (everything else), newest activity
+        first, with per-group token/cost rollups and the latest run's display
+        fields for the list card. Returns {"items": [...], "total": N} where
+        total counts GROUPS, not runs."""
+        page_sql = text(
+            f"""
+            WITH g AS (
+                SELECT
+                    {self._group_key_sql()}                     AS group_key,
+                    MAX(conversation_id)::text                  AS conversation_id,
+                    COUNT(*)::int                               AS run_count,
+                    COALESCE(SUM(prompt_tokens), 0)::bigint     AS prompt_tokens,
+                    COALESCE(SUM(completion_tokens), 0)::bigint AS completion_tokens,
+                    SUM(cost_cents)                             AS cost_cents,
+                    MIN(started_at)                             AS first_started_at,
+                    MAX(started_at)                             AS last_started_at,
+                    BOOL_OR(status = 'running')                 AS any_running,
+                    COUNT(*) FILTER (
+                        WHERE status IN ('failed', 'heartbeat_lost')
+                    )::int                                      AS error_count
+                FROM agent_runs
+                WHERE agent_id = :agent_id AND user_id = :user_id
+                GROUP BY 1
+            )
+            SELECT g.*,
+                   r.id::text        AS latest_run_id,
+                   r.status          AS latest_status,
+                   r.trigger         AS trigger,
+                   r.model           AS model,
+                   r.output_summary  AS latest_output_summary,
+                   r.error_code      AS latest_error_code,
+                   r.ended_at        AS latest_ended_at
+            FROM g
+            JOIN LATERAL (
+                SELECT id, status, trigger, model, output_summary,
+                       error_code, ended_at
+                FROM agent_runs r2
+                WHERE r2.agent_id = :agent_id AND r2.user_id = :user_id
+                  AND {self._group_key_sql('r2')} = g.group_key
+                ORDER BY r2.started_at DESC
+                LIMIT 1
+            ) r ON TRUE
+            ORDER BY g.last_started_at DESC
+            LIMIT :limit OFFSET :offset
+            """
+        )
+        total_sql = text(
+            f"""
+            SELECT COUNT(DISTINCT {self._group_key_sql()})
+            FROM agent_runs
+            WHERE agent_id = :agent_id AND user_id = :user_id
+            """
+        )
+        params = {"agent_id": agent_id, "user_id": user_id}
+        try:
+            async with read_scope() as session:
+                total = await session.scalar(total_sql, params)
+                result = await session.execute(
+                    page_sql, {**params, "limit": limit, "offset": offset}
+                )
+                items = [dict(row) for row in result.mappings().all()]
+            return {"items": items, "total": int(total or 0)}
+        except Exception as e:
+            logger.error(
+                f"Failed to list run groups (agent={agent_id}, user={user_id}): {e}"
+            )
             return {"items": [], "total": 0}
 
     async def get_by_id(

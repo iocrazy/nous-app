@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  CheckCircle2, ChevronLeft, ChevronRight, Loader2, RefreshCw,
+  CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2, RefreshCw,
   XCircle, Ban, HeartCrack, ArrowLeft, X,
 } from 'lucide-react';
 import type {
-  AgentRunDetail, AgentRunListItem, AgentRunListResponse, AgentRunStatus,
+  AgentRunDetail, AgentRunGroupItem, AgentRunGroupListResponse,
+  AgentRunListItem, AgentRunStatus,
 } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { RunTranscript } from './RunTranscript';
@@ -177,6 +178,125 @@ const RunListCard: React.FC<{
     </button>
   );
 };
+
+// ─── Left column: conversation group (multi-turn chats collapse to one) ────
+
+const ConversationGroupCard: React.FC<{
+  slug: string;
+  group: AgentRunGroupItem;
+  selectedRunId: string | null;
+  onSelectRun: (runId: string) => void;
+}> = ({ slug, group, selectedRunId, onSelectRun }) => {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const [turns, setTurns] = useState<AgentRunListItem[] | null>(null);
+  const [turnsError, setTurnsError] = useState<string | null>(null);
+
+  const badge = triggerBadge(group.trigger);
+  const status: AgentRunStatus = group.any_running ? 'running' : group.latest_status;
+  const snippet = (group.latest_output_summary || group.latest_error_code || '').slice(0, 90);
+  const headerSelected = !expanded && selectedRunId === group.latest_run_id;
+
+  const toggle = async (): Promise<void> => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next) {
+      onSelectRun(group.latest_run_id);
+      if (turns === null && group.conversation_id) {
+        try {
+          const resp = await aiLibraryService.listAgentRuns(
+            slug, 200, 0, group.conversation_id,
+          );
+          setTurns(resp.items);
+          setTurnsError(null);
+        } catch (err) {
+          console.error('[ConversationGroupCard] listAgentRuns failed:', err);
+          setTurnsError(err instanceof Error ? err.message : String(err));
+        }
+      }
+    }
+  };
+
+  return (
+    <div className="border-b border-ink-800/70">
+      <button
+        type="button"
+        onClick={() => void toggle()}
+        className={`w-full px-3 py-2.5 text-left transition-colors ${
+          headerSelected ? 'bg-[var(--accent-soft)]' : 'hover:bg-ink-900/70'
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          <StatusIcon status={status} />
+          <span className={`rounded border px-1.5 py-px text-[10px] font-medium ${badge.cls}`}>
+            {badge.label}
+          </span>
+          <span className="rounded border border-ink-700 bg-ink-800 px-1.5 py-px text-[10px] font-medium text-ink-300">
+            {t('aiLibrary.agents.runs.turns', { defaultValue: '{{count}} turns', count: group.run_count })}
+          </span>
+          <ChevronDown
+            size={12}
+            className={`text-ink-500 transition-transform ${expanded ? 'rotate-180' : ''}`}
+          />
+          <span className="ml-auto text-[10px] text-ink-500 whitespace-nowrap">
+            {relativeAge(group.last_started_at)}
+          </span>
+        </div>
+        {snippet && (
+          <p className="mt-1 line-clamp-2 text-xs leading-snug text-ink-400">{snippet}</p>
+        )}
+        <div className="mt-1 text-[10px] tabular-nums text-ink-500">
+          {formatTokens(group.prompt_tokens + group.completion_tokens)} tok
+          {group.cost_cents != null && <> · {formatCost(group.cost_cents)}</>}
+          {group.error_count > 0 && (
+            <span className="text-red-400"> · {group.error_count}⚠</span>
+          )}
+        </div>
+      </button>
+      {expanded && (
+        <div className="border-l-2 border-ink-800 ml-3">
+          {turnsError && (
+            <p className="px-3 py-2 text-xs text-red-300">{turnsError}</p>
+          )}
+          {turns === null && !turnsError && (
+            <p className="px-3 py-2 text-xs text-ink-500">
+              {t('aiLibrary.agents.runs.loading', 'Loading runs...')}
+            </p>
+          )}
+          {turns?.map((run) => (
+            <RunListCard
+              key={run.id}
+              run={run}
+              selected={run.id === selectedRunId}
+              onSelect={() => onSelectRun(run.id)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** Adapt a single-run group to the RunListCard shape (no expand affordance). */
+function groupToRunItem(g: AgentRunGroupItem): AgentRunListItem {
+  return {
+    id: g.latest_run_id,
+    agent_id: '',
+    status: g.any_running ? 'running' : g.latest_status,
+    trigger: g.trigger,
+    model: g.model,
+    prompt_tokens: g.prompt_tokens,
+    completion_tokens: g.completion_tokens,
+    total_tokens: g.prompt_tokens + g.completion_tokens,
+    cost_cents: g.cost_cents,
+    started_at: g.last_started_at,
+    ended_at: g.latest_ended_at,
+    error_code: g.latest_error_code,
+    skill_slugs_used: [],
+    output_summary: g.latest_output_summary,
+    conversation_id: g.conversation_id,
+  };
+}
 
 // ─── Right pane: run detail ────────────────────────────────────────────────
 
@@ -412,7 +532,7 @@ const RunDetailPane: React.FC<{
 export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
-  const [page, setPage] = useState<AgentRunListResponse | null>(null);
+  const [page, setPage] = useState<AgentRunGroupListResponse | null>(null);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -428,14 +548,14 @@ export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
       if (mode === 'initial') setLoading(true);
       else setRefreshing(true);
       try {
-        const resp = await aiLibraryService.listAgentRuns(slug, PAGE_SIZE, targetOffset);
+        const resp = await aiLibraryService.listAgentRunGroups(slug, PAGE_SIZE, targetOffset);
         setPage(resp);
         setError(null);
         // Auto-select the newest run on first load (desktop behaviour —
         // mobile stays on the list until the user taps a row).
-        setSelectedRunId((prev) => prev ?? resp.items[0]?.id ?? null);
+        setSelectedRunId((prev) => prev ?? resp.items[0]?.latest_run_id ?? null);
       } catch (err) {
-        console.error('[AgentRunsSplit] listAgentRuns failed:', err);
+        console.error('[AgentRunsSplit] listAgentRunGroups failed:', err);
         const msg = friendlyError(err);
         setError(msg);
         if (mode === 'initial') {
@@ -530,17 +650,30 @@ export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
           </button>
         </div>
         <div className="max-h-[70vh] overflow-y-auto rounded-lg border border-ink-800 bg-ink-900/40 custom-scrollbar">
-          {items.map((run) => (
-            <RunListCard
-              key={run.id}
-              run={run}
-              selected={run.id === selectedRunId}
-              onSelect={() => {
-                setSelectedRunId(run.id);
-                setMobileShowDetail(true);
-              }}
-            />
-          ))}
+          {items.map((group) =>
+            group.run_count > 1 && group.conversation_id ? (
+              <ConversationGroupCard
+                key={group.group_key}
+                slug={slug}
+                group={group}
+                selectedRunId={selectedRunId}
+                onSelectRun={(runId) => {
+                  setSelectedRunId(runId);
+                  setMobileShowDetail(true);
+                }}
+              />
+            ) : (
+              <RunListCard
+                key={group.group_key}
+                run={groupToRunItem(group)}
+                selected={group.latest_run_id === selectedRunId}
+                onSelect={() => {
+                  setSelectedRunId(group.latest_run_id);
+                  setMobileShowDetail(true);
+                }}
+              />
+            ),
+          )}
         </div>
         {(hasPrev || hasNext) && (
           <footer className="mt-2 flex items-center justify-end gap-2">

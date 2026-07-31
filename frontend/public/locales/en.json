@@ -2671,7 +2671,11 @@
         "selectPrompt": "Select a run to view details",
         "transcript": "Transcript",
         "transcriptNice": "Nice",
-        "transcriptRaw": "Raw"
+        "transcriptRaw": "Raw",
+        "turns": "{{count}} turns",
+        "hideTurns": "Hide turns",
+        "showTurns": "Show turns",
+        "conversation": "Conversation"
       },
       "budget": {
         "sectionLabel": "Monthly budget",
