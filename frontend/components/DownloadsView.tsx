@@ -463,15 +463,35 @@ export const DownloadsView: React.FC = () => {
   // render the card chrome immediately while it fetches the rest —
   // matches the pattern most video sites use (search → detail without
   // a blank-screen pause).
-  const handleNavigateToDetail = useCallback((item: Video) => {
-    const rid = (item as any).resource_id;
+  const handleNavigateToDetail = useCallback(async (item: Video) => {
+    const teamPath = selectedTeamId ? `/team/${selectedTeamId}` : '';
+    let rid = (item as any).resource_id;
+    // A freshly-downloaded row can reach the list before its `resources` row
+    // exists (post-download workflow creates it async), so the joined
+    // resource_id is null and stays null until a full refetch — leaving the
+    // card permanently unclickable. Self-heal: look the link up on demand.
     if (!rid) {
-      console.warn('[DownloadsView] item has no resource_id, skipping nav', item);
+      try {
+        const { getSupabaseClient } = await import('../supabaseClient');
+        const sb = getSupabaseClient();
+        const { data } = (await sb
+          ?.from('resources')
+          .select('id')
+          .eq('media_id', String(item.id))
+          .limit(1)
+          .maybeSingle()) ?? { data: null };
+        rid = data?.id ? String(data.id) : null;
+        if (rid) (item as any).resource_id = rid;
+      } catch (err) {
+        console.error('[DownloadsView] resource_id lookup failed', err);
+      }
+    }
+    if (!rid) {
+      addToast('Still processing — try again in a moment', 'info');
       return;
     }
-    const teamPath = selectedTeamId ? `/team/${selectedTeamId}` : '';
     navigate(`${teamPath}/resources/file/${rid}`, { state: { preloaded: item } });
-  }, [selectedTeamId, navigate]);
+  }, [selectedTeamId, navigate, addToast]);
 
   // ─── Multi-select ──────────────────────────────────────
   const handleToggleSelect = useCallback((platformId: string, e: React.MouseEvent) => {
@@ -763,17 +783,10 @@ export const DownloadsView: React.FC = () => {
 
   const handleCtxViewDetails = useCallback(() => {
     if (!contextMenu) return;
-    const v = contextMenu.video;
-    const rid = (v as any).resource_id;
-    if (!rid) {
-      console.warn('[DownloadsView] context-menu item has no resource_id', v);
-      setContextMenu(null);
-      return;
-    }
-    const teamPath = selectedTeamId ? `/team/${selectedTeamId}` : '';
-    navigate(`${teamPath}/resources/file/${rid}`, { state: { preloaded: v } });
+    // Same self-healing lookup as a direct card click.
+    void handleNavigateToDetail(contextMenu.video);
     setContextMenu(null);
-  }, [contextMenu, selectedTeamId, navigate]);
+  }, [contextMenu, handleNavigateToDetail]);
 
   const handleCtxOpenNewTab = useCallback(() => {
     if (!contextMenu) return;
