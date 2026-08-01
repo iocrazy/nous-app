@@ -2216,11 +2216,25 @@ export interface ChatToolCall {
   result: Record<string, unknown>;
 }
 
+/**
+ * One attachment the backend could not resolve for a chat turn (G2).
+ * Mirrors backend ``AttachmentFailure`` — ``index`` is 0-based into the
+ * binary (non-``resource_ref``) attachments sent with that turn.
+ */
+export interface ChatAttachmentFailure {
+  index: number;
+  kind: string;
+  reason: string;
+}
+
 export interface ChatResponse {
   message: AIChatMessage;
   usage: { prompt_tokens?: number; completion_tokens?: number };
   run_id?: string | null;
   tool_calls?: ChatToolCall[];
+  /** Empty/absent on success — non-empty means some attachments degraded
+   *  to text-only. Surfaced to the user via AttachmentFailureBanner. */
+  attachment_failures?: ChatAttachmentFailure[];
 }
 
 /** Reference attachment for chat composer @-mention.

@@ -2199,6 +2199,7 @@
     "approvedContinue": "Approved — send a message to continue.",
     "rejectedNote": "Rejected — the agent will not run this action.",
     "approvalResolved": "This request was already handled.",
+    "attachmentFailures": "{{count}} attachment(s) failed to load",
     "suggestions": {
       "outlineStory": "Help me outline a story",
       "reviewChapter": "Review my chapter",

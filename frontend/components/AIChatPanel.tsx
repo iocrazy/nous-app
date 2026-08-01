@@ -32,6 +32,7 @@ import { AgentSelector } from './AgentSelector';
 import { SessionList, type SessionItem } from './SessionList';
 import { MessageBubble } from './chat/AIChatBubble';
 import { TypingIndicator } from './chat/TypingIndicator';
+import { AttachmentFailureBanner } from './chat/AttachmentFailureBanner';
 import { ChatInput } from './chat/ChatInput';
 import { CommitmentsPanel } from './CommitmentsPanel';
 import { ChatAttachmentPicker, type StagedAttachment } from './ChatAttachmentPicker';
@@ -179,6 +180,17 @@ export function AIChatPanel({
   }, [sessionsOverlayOpen]);
   const [messages, setMessages] = useState<AIChatMessage[]>([]);
   const [selectedAgentSlug, setSelectedAgentSlug] = useState<string | null>(null);
+  // T6: count of attachments the backend couldn't resolve for the most
+  // recently completed turn (from the stream's 'done' event). Ephemeral —
+  // not persisted on the message row — so it's cleared on the next send
+  // and whenever the active session changes, rather than tied to a
+  // specific message id.
+  const [attachmentFailureCount, setAttachmentFailureCount] = useState<number | undefined>(
+    undefined,
+  );
+  useEffect(() => {
+    setAttachmentFailureCount(undefined);
+  }, [activeSessionId]);
 
   // Agent-scoped mode: when agentSlug prop is provided the panel locks to that
   // agent (no selector) and scopes sessions without a project filter. When absent,
@@ -541,6 +553,7 @@ export function AIChatPanel({
     async (text: string, refAttachments: ResourceRefAttachment[] = []) => {
       if (!activeSessionId || sending) return;
       setSending(true);
+      setAttachmentFailureCount(undefined);
 
       // Optimistic user bubble — replaced by the authoritative row after
       // the server responds and we reload the message list. Staged image
@@ -626,9 +639,18 @@ export function AIChatPanel({
             throw new Error(
               typeof evt.data?.error === 'string' ? evt.data.error : 'stream error',
             );
+          } else if (evt.type === 'done') {
+            // G2: backend resolves attachments best-effort and reports
+            // per-attachment failures instead of failing the whole turn —
+            // surface the count so a silent no-op isn't the user's only
+            // signal that "the file didn't make it".
+            const failures = evt.data?.attachment_failures;
+            if (Array.isArray(failures) && failures.length > 0) {
+              setAttachmentFailureCount(failures.length);
+            }
           }
-          // 'done' ends the generator; unknown event types are no-ops
-          // (forward-compat per the backend contract).
+          // Unknown event types are no-ops (forward-compat per the
+          // backend contract).
         }
         // Refetch full history so IDs + timestamps + tokens are
         // server-authoritative (also swaps out both temp bubbles).
@@ -963,6 +985,8 @@ export function AIChatPanel({
                 }
               />
             ))}
+
+            <AttachmentFailureBanner count={attachmentFailureCount} />
 
             {/* Typing dots only until the first streamed delta arrives —
                 after that the growing assistant bubble is the indicator. */}

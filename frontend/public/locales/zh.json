@@ -2199,6 +2199,7 @@
     "approvedContinue": "已批准——发送消息以继续。",
     "rejectedNote": "已拒绝——该操作不会执行。",
     "approvalResolved": "该请求已在别处处理。",
+    "attachmentFailures": "{{count}} 个附件加载失败",
     "suggestions": {
       "outlineStory": "帮我构建故事大纲",
       "reviewChapter": "审阅我的章节",
