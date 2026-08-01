@@ -1,12 +1,20 @@
 """Deep S3 existence audit for the migrated library.
 
-Collects every sb:// key from the 7 index columns and probes each with
-``store.exists`` in bounded chunks. Results go into the run's task_tracking
-metadata (jsonb) — no new table. Route C: phase columns are trigger-owned;
-this workflow only ``complete``s with a ``metadata_patch`` for its business
-fields and never PATCHes phase/status/progress directly. A storage-call
-exception counts as *uncertain* (``errors``), never as missing — network
-flaps must not masquerade as broken objects.
+Collects every sb:// key from the 7 index columns and probes each in bounded
+concurrency chunks. Results go into the run's task_tracking metadata (jsonb)
+— no new table. Route C: phase columns are trigger-owned; this workflow only
+``complete``s with a ``metadata_patch`` for its business fields and never
+PATCHes phase/status/progress directly.
+
+Probing deliberately does NOT use ``ObjectStore.exists()``: that method
+(``media_storage.py::ObjectStore.exists``) collapses every exception —
+a real 404, a timeout, a connection failure, a 5xx — into a bare ``False``,
+so it cannot tell "confirmed gone" from "storage had a hiccup". Calling it
+here would silently misreport every network flap as a broken object. Instead
+``_probe_one`` calls ``store.get_size()`` directly and classifies the
+outcome itself: an HTTP 404 means the object is genuinely missing; any other
+exception (timeout, connection error, 5xx, ...) is *uncertain* and counted
+as ``errors``, never as missing.
 """
 
 from __future__ import annotations
@@ -15,6 +23,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
+import httpx
 from dbos import DBOS
 from loguru import logger
 
@@ -80,21 +89,48 @@ async def collect_audit_keys_step() -> list[dict]:
     return out
 
 
+async def _probe_one(store, key: str) -> str:
+    """Probe a single key. Returns ``"present"`` / ``"missing"`` / ``"error"``.
+
+    Calls ``store.get_size(key)`` directly (the HEAD-shaped primitive
+    ``ObjectStore.exists()`` wraps) so the exception itself can be inspected
+    rather than swallowed. Only a genuine HTTP 404 (``httpx.HTTPStatusError``
+    with ``response.status_code == 404``) counts as ``"missing"`` — a 404 is
+    the storage server explicitly saying the object doesn't exist. Every
+    other failure (timeout, connection error, 5xx, ...) is uncertain and
+    classified ``"error"``: a network flap must never masquerade as proof
+    the object is gone.
+    """
+    try:
+        await store.get_size(key)
+        return "present"
+    except httpx.HTTPStatusError as e:
+        if e.response is not None and e.response.status_code == 404:
+            return "missing"
+        logger.debug(
+            f"[storage-audit] get_size({key!r}) HTTP {e.response.status_code} "
+            "— uncertain, counted as error"
+        )
+        return "error"
+    except Exception as e:  # noqa: BLE001 — uncertain, not missing
+        logger.debug(f"[storage-audit] get_size({key!r}) failed: {e!r}")
+        return "error"
+
+
 async def _probe_keys(store, rows: list[dict], chunk_size: int = _CHUNK):
-    """Probe every row's key with ``store.exists`` in bounded concurrency
-    chunks. Missing objects are collected; exceptions are counted as
-    ``errors`` (uncertain) and never treated as missing."""
+    """Probe every row's key in bounded concurrency chunks. Missing objects
+    are collected; uncertain failures are counted as ``errors`` and never
+    treated as missing (see ``_probe_one``)."""
     missing: list[dict] = []
     errors = 0
 
     async def probe(row):
         nonlocal errors
-        try:
-            if not await store.exists(row["key"]):
-                missing.append(row)
-        except Exception as e:  # noqa: BLE001 — uncertain, not missing
+        outcome = await _probe_one(store, row["key"])
+        if outcome == "missing":
+            missing.append(row)
+        elif outcome == "error":
             errors += 1
-            logger.debug(f"[storage-audit] exists() failed for {row['key']}: {e!r}")
 
     for i in range(0, len(rows), chunk_size):
         await asyncio.gather(*(probe(r) for r in rows[i : i + chunk_size]))
@@ -113,7 +149,8 @@ def _cap_missing(missing: list[dict]):
 @DBOS.workflow()
 async def storage_audit_workflow() -> dict[str, Any]:
     """Deep S3 existence audit — scan every ``sb://`` key referenced by the
-    library index tables and probe each with ``store.exists``.
+    library index tables and probe each via ``_probe_one`` (HTTP 404 =
+    missing; any other failure = uncertain ``errors``, never missing).
 
     No parameters: always audits the whole library. Results land in this
     run's ``task_tracking.metadata`` (jsonb); no new table. Route C: never
@@ -172,7 +209,9 @@ async def storage_audit_workflow() -> dict[str, Any]:
             metadata_patch=result,
         )
     except Exception as e:
-        logger.warning(f"[storage-audit] complete {task_id}: {e}")
+        logger.warning(
+            f"[storage-audit] complete {task_id} failed, scan results lost: {e}"
+        )
 
     logger.info(
         f"[storage-audit] scanned={len(rows)} missing={len(missing)} errors={errors}"
