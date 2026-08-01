@@ -98,6 +98,36 @@ async def test_probe_one_classifies_404_vs_5xx_vs_success():
     assert await sa._probe_one(FakeStore(), "ok.jpg") == "present"
 
 
+@pytest.mark.asyncio
+async def test_probe_one_prefix_three_states():
+    """I4: an album key is a PREFIX (trailing "/", e.g.
+    ``t5/album/42/``) — get_size HEADs a single key, so pointing it at a
+    prefix always 404s. Before the fix every album in the library was
+    counted as ``missing`` (one prior deep-scan run's ``errors`` count
+    happened to equal the exact number of prefix-shaped keys). The fix
+    dispatches a trailing-"/" key through ``list_prefix`` instead: any
+    object under the prefix → present; an empty listing → missing (the
+    album really is gone); the listing call raising → error (uncertain,
+    never counted as missing — same rule as the plain-key branch)."""
+    from app.workflows import storage_audit as sa
+
+    class FakeStore:
+        async def get_size(self, key):  # pragma: no cover - must not be hit
+            raise AssertionError("get_size must not be called for a prefix key")
+
+        async def list_prefix(self, prefix):
+            if prefix == "t5/album/42/":
+                return ["t5/album/42/slides/001.jpg", "t5/album/42/audio.mp3"]
+            if prefix == "t5/album/99/":
+                return []
+            raise RuntimeError("storage-api unreachable")
+
+    store = FakeStore()
+    assert await sa._probe_one(store, "t5/album/42/") == "present"
+    assert await sa._probe_one(store, "t5/album/99/") == "missing"
+    assert await sa._probe_one(store, "t5/album/boom/") == "error"
+
+
 def test_missing_truncation():
     from app.workflows.storage_audit import _cap_missing
 
