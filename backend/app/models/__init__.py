@@ -34,8 +34,8 @@ from app.models.agent_messaging import (  # noqa: F401
 )
 from app.models.agents import (  # noqa: F401
     AgentRunEvents,
-    AgentRunTranscriptEvents,
     AgentRuns,
+    AgentRunTranscriptEvents,
     AgentSkills,
     AgentStateHistory,
     AgentTasks,
