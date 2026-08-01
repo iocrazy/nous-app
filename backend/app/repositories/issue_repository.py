@@ -60,12 +60,26 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from loguru import logger
-from sqlalchemy import or_, select, text
+from sqlalchemy import and_, or_, select, text
 from sqlalchemy import update as sa_update
 
 from app.db.session import read_scope, write_scope
 from app.models import Issues
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
+
+
+def needs_input_predicate():
+    """Spec-4 (needs_input first-class): the row shape that means "the agent
+    is stalled waiting on a human answer" — extracted for testability, same
+    spirit as ``visibility_predicate``.
+
+    ``execution_state`` is JSONB; ``[...]`` indexes it and ``.astext`` casts
+    the JSON scalar to text for the ``=`` compare (Postgres jsonb ->> ).
+    """
+    return and_(
+        Issues.status == "needs_followup",
+        Issues.execution_state["agent_outcome"].astext == "needs_input",
+    )
 
 
 def visibility_predicate(user_id: str):
@@ -283,6 +297,33 @@ class IssueRepository:
             result = await session.execute(page_stmt)
             items = [_row(r) for r in result.scalars().all()]
         return items, total
+
+    async def list_needs_input(
+        self, user_id: str, *, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Issues visible to user_id that are parked at ``needs_followup``
+        with ``execution_state.agent_outcome == 'needs_input'`` — the agent is
+        waiting on a human answer (Spec-4 needs_input first-class). Feeds the
+        Task Center 'needs your answer' list (Task 3).
+
+        Same D6.1 visibility fold as ``list_for_user`` (own OR assignee OR
+        team member); ordered by ``updated_at`` DESC (most recently asked
+        first), capped at ``limit``. Always excludes soft-deleted rows (no
+        ``include_hidden`` toggle, unlike ``list_for_user``) — an issue the
+        caller hid is not something they're waiting to answer.
+        """
+        _uuid.UUID(user_id)
+        async with read_scope() as session:
+            stmt = (
+                select(Issues)
+                .where(visibility_predicate(user_id))
+                .where(needs_input_predicate())
+                .where(Issues.hidden_at.is_(None))
+                .order_by(Issues.updated_at.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return [_row(r) for r in result.scalars().all()]
 
     async def map_identifiers(self, issue_ids: list[int]) -> dict[str, str]:
         """{issue id (as str) → human identifier (MH-N)} for a set of ids.
