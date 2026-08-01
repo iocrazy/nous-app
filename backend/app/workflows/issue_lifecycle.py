@@ -365,7 +365,12 @@ async def respond_to_issue_reply(
     attachments: Optional[list[dict]] = None,
 ) -> dict[str, Any]:
     """Spec-1b: run one agent turn in response to a human reply on an issue.
-    Serialized per issue via the turn lock; does NOT change issue status.
+    Serialized per issue via the turn lock; does NOT change issue status —
+    EXCEPT the Spec-4 needs_input-resume case: a reply on an issue parked at
+    ``needs_followup`` with a pending ``needs_input`` FinishIssue declaration
+    is treated as the human's answer, so it IS routed (in_progress before the
+    turn, then re-routed by the turn's own outcome afterward). See
+    ``_run_reply_turns`` for the exact condition and routing.
 
     ``attachments`` (added in sub-plan 3, Task 5) is a list of serialised
     AttachmentRequest dicts forwarded to run_session_turn so the agent turn

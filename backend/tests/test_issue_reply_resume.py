@@ -6,7 +6,33 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.workflows.issue_lifecycle import _run_reply_turns, route_finish_outcome
+from app.workflows.issue_lifecycle import (
+    _pending_agent_outcome,
+    _run_reply_turns,
+    route_finish_outcome,
+)
+
+
+def test_pending_agent_outcome_reads_valid_json_string():
+    issue = {"execution_state": '{"agent_outcome": "needs_input"}'}
+    assert _pending_agent_outcome(issue) == "needs_input"
+
+
+def test_pending_agent_outcome_none_on_malformed_json_string():
+    issue = {"execution_state": "{not valid json"}
+    assert _pending_agent_outcome(issue) is None
+
+
+def test_pending_agent_outcome_reads_native_dict():
+    # Defensive path: some callers may hand a jsonb column already decoded to
+    # a dict rather than the raw string load_issue's engine returns.
+    issue = {"execution_state": {"agent_outcome": "needs_input"}}
+    assert _pending_agent_outcome(issue) == "needs_input"
+
+
+def test_pending_agent_outcome_none_when_missing_or_none():
+    assert _pending_agent_outcome({}) is None
+    assert _pending_agent_outcome({"execution_state": None}) is None
 
 
 @pytest.mark.asyncio
