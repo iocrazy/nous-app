@@ -129,6 +129,42 @@ async def _upload_downloaded_video_to_s3(
     return stored.file_path
 
 
+async def _upload_album_to_s3(
+    *,
+    user_id: Optional[str],
+    resource_id,
+    local_dir: str,
+    relative_path: str,
+) -> str:
+    """图集(carousel)整目录补传对象存储,返回 sb:// album 前缀。
+
+    图集是目录形态(slides/ + audio.mp3 + cover.jpg),没有单文件内容哈希可
+    寻址,所以走 album 前缀布局 ``t{scope}/album/{rid}/``——与
+    storage_migration._migrate_album_row 迁移存量图集的 key 方案完全一致,
+    读端(_resolve_album_location / serve_slide_file / is_prefix)已按此消费。
+    这是 PR-1 之后第 4 条漏接 S3 的写路径(video-httpx/video-ytdlp/cover/
+    thumbnail 已接),新图集此前一直整目录落文件系统(2026-08-01 深扫撞出)。
+
+    开关关闭 / user_id 缺失 / resource_id 缺失(resource 建行失败)时原样返回
+    ``relative_path``,保持旧 FS 行为可回退。上传失败上抛——外层已有
+    "写失败即报 FAILED,retry 可重跑"语义,与视频路径一致。
+    """
+    from app.services.library.storage_flag import unified_storage_enabled
+
+    if not user_id or not resource_id or not await unified_storage_enabled():
+        return relative_path
+
+    from app.services.library import media_storage
+    from app.services.library.resources_service import _resolve_personal_team_id
+
+    scope_id = int(await _resolve_personal_team_id(user_id))
+    prefix = media_storage.album_key_prefix(scope_id, resource_id)
+    store = media_storage.library_store()
+    # skip_existing: retry 重放不重复 PUT 已落对象(对齐迁移模块)。
+    await store.put_dir(local_dir, lambda rel: f"{prefix}{rel}", skip_existing=True)
+    return media_storage.to_file_path(store.bucket, prefix)
+
+
 class DownloaderService:
 
     @staticmethod
@@ -910,8 +946,12 @@ class DownloaderService:
         platform_id: str,
         resource_dir_relative: str,
         video_data: dict,
-    ) -> None:
+    ) -> Optional[str]:
         """Create a resource record for carousel content if one doesn't exist.
+
+        Returns the resource id (existing or newly created) so the caller can
+        build the album's S3 prefix (``t{scope}/album/{rid}/``); None when
+        creation failed.
 
         Args:
             media_id: parsed_media ID (Snowflake BIGINT as string)
@@ -939,7 +979,7 @@ class DownloaderService:
                     f"[Carousel/Resource] Resource already exists for media {media_id} "
                     f"(user {user_id})"
                 )
-                return
+                return str(existing.get("id")) if existing.get("id") else None
 
             # Shared assets — cover_image_path, *_download_status — live on
             # parsed_media. ``file_path`` for carousel slides points at the
@@ -989,10 +1029,12 @@ class DownloaderService:
                             "added_by": user_id,
                         }
                     )
+                return str(resource_id) if resource_id else None
             except Exception as e:
                 logger.error(
                     f"[Carousel/Resource] Failed to create resource for media {media_id}: {e}"
                 )
+                return None
 
     @staticmethod
     async def download_images_by_platform_id(
@@ -1132,13 +1174,42 @@ class DownloaderService:
 
                 # Create resource record (backfill)
                 if user_id:
-                    await DownloaderService._ensure_carousel_resource(
+                    carousel_rid = await DownloaderService._ensure_carousel_resource(
                         media_id=media_id,
                         user_id=user_id,
                         platform_id=platform_id,
                         resource_dir_relative=resource_dir_relative,
                         video_data=video_data,
                     )
+
+                    # Storage tiering: upload the whole album directory
+                    # (slides/ + audio.mp3 + cover.jpg) to the canonical
+                    # album prefix t{scope}/album/{rid}/ and repoint the
+                    # index columns at it — the 4th unwired write path
+                    # after video-httpx/video-ytdlp/cover/thumbnail; new
+                    # albums silently landed on the filesystem until
+                    # 2026-08-01's deep scan caught one. Flag off /
+                    # missing rid → FS paths stay (old behavior).
+                    album_path = await _upload_album_to_s3(
+                        user_id=user_id,
+                        resource_id=carousel_rid,
+                        local_dir=str(resource_dir_full),
+                        relative_path=resource_dir_relative,
+                    )
+                    if album_path.startswith("sb://"):
+                        pm_updates = {"download_path": album_path}
+                        if os.path.isfile(
+                            os.path.join(str(resource_dir_full), "audio.mp3")
+                        ):
+                            pm_updates["music_download_path"] = f"{album_path}audio.mp3"
+                        await repo.update(platform_id, pm_updates)
+                        from app.repositories.resources_repository import (
+                            ResourcesRepository,
+                        )
+
+                        await ResourcesRepository().update_resource(
+                            carousel_rid, {"file_path": album_path}
+                        )
 
                 # Log success
                 if user_id:
