@@ -367,12 +367,19 @@ async def dispatch_deep_verify(auth: AdminAuthDep, request: Request):
 
     from app.services.infra.dbos_orchestrator import start_workflow_routed
     from app.services.infra.unified_task_manager import get_task_manager
-    from app.workflows.storage_audit import SYSTEM_RUN_USER_ID, storage_audit_workflow
+    from app.workflows.storage_audit import storage_audit_workflow
 
     workflow_id = str(uuid.uuid4())
     manager = get_task_manager()
+    # user_id MUST be the dispatching admin, NOT SYSTEM_RUN_USER_ID:
+    # task_tracking.user_id has an FK to auth.users (unified_tasks_user_id_fkey)
+    # and the all-zeros system UUID has no auth.users row, so a system-id
+    # insert raises ForeignKeyViolation and the whole dispatch 500s (found in
+    # prod smoke 2026-07-31; storage_migration's identical in-workflow create
+    # has been failing the same way for weeks — just silently, because that
+    # call is wrapped in a non-fatal try/except).
     await manager.create(
-        user_id=SYSTEM_RUN_USER_ID,
+        user_id=auth.user_id,
         task_type="storage_audit",
         title="Deep S3 storage audit",
         dbos_workflow_id=workflow_id,
