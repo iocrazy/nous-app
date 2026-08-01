@@ -77,6 +77,23 @@ export interface CommentTriggerPreview {
 export interface IssueMessagePostResponse {
   comment: IssueMessage;
   agent_run: IssueMessage | null;
+  /** True only on the Wake path (a reply turn actually started). `agent_run`
+   *  above is always null regardless of path, so this is the field to check
+   *  before assuming a reply drove the agent forward — the Note path
+   *  (suppressed / `/note` body) and the Legacy path (no assignee agent)
+   *  both start nothing and leave this false. */
+  agent_dispatched: boolean;
+}
+
+/** Thrown by callers (e.g. TaskCenter's needs-input answer handler) when a
+ *  reply POSTed successfully but `agent_dispatched` came back false — the
+ *  message was saved, but no turn was started, so the caller has to signal
+ *  that distinctly from a network/backend failure. */
+export class AgentNotDispatchedError extends Error {
+  constructor() {
+    super('reply posted but no agent turn was dispatched');
+    this.name = 'AgentNotDispatchedError';
+  }
 }
 
 // ── REST helpers ───────────────────────────────────────────────────

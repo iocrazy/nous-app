@@ -14,6 +14,7 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { getIssue, type NeedsInputItem } from '../../services/issuesService';
+import { AgentNotDispatchedError } from '../../services/issueMessageService';
 
 interface NeedsInputSectionProps {
   items: NeedsInputItem[];
@@ -25,6 +26,11 @@ export const NeedsInputSection: React.FC<NeedsInputSectionProps> = ({ items, onA
   const navigate = useNavigate();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  // Finding 5 (final review): set only when a reply POSTed successfully but
+  // no agent turn was actually dispatched (legacy/no-op paths) — distinct
+  // from a network/backend failure, which restores the draft for retry
+  // instead. Cleared on the next submit attempt for that row.
+  const [dispatchErrors, setDispatchErrors] = useState<Record<string, boolean>>({});
 
   // A resolved `onAnswer` promise only means the POST landed — it does NOT
   // guarantee the backend's needs_followup flip has landed before the next
@@ -51,6 +57,21 @@ export const NeedsInputSection: React.FC<NeedsInputSectionProps> = ({ items, onA
       });
       return changed ? next : prev;
     });
+    // Same reappearing-id logic as pendingIds above: a row that left `items`
+    // and comes back reads as a fresh ask, not "still showing the old
+    // no-dispatch warning".
+    setDispatchErrors((prev) => {
+      let changed = false;
+      const next: Record<string, boolean> = {};
+      for (const id of Object.keys(prev)) {
+        if (currentIds.has(id)) {
+          next[id] = prev[id];
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
   }, [items]);
 
   if (items.length === 0) return null;
@@ -60,6 +81,12 @@ export const NeedsInputSection: React.FC<NeedsInputSectionProps> = ({ items, onA
     if (!text || pendingIds.has(issueId)) return;
     setPendingIds((prev) => new Set(prev).add(issueId));
     setDrafts((prev) => ({ ...prev, [issueId]: '' }));
+    setDispatchErrors((prev) => {
+      if (!(issueId in prev)) return prev;
+      const next = { ...prev };
+      delete next[issueId];
+      return next;
+    });
     try {
       await onAnswer(issueId, text);
       // Deliberately NOT clearing pendingIds here — see the comment on the
@@ -67,14 +94,23 @@ export const NeedsInputSection: React.FC<NeedsInputSectionProps> = ({ items, onA
       // clears it.
     } catch (err) {
       console.error(`[NeedsInputSection] onAnswer failed for issue ${issueId}:`, err);
-      // Restore the draft so the user doesn't lose what they typed, and
-      // re-enable the card so they can retry.
-      setDrafts((prev) => ({ ...prev, [issueId]: text }));
       setPendingIds((prev) => {
         const next = new Set(prev);
         next.delete(issueId);
         return next;
       });
+      if (err instanceof AgentNotDispatchedError) {
+        // The message WAS saved server-side (no data lost) — just no turn
+        // started. Re-typing it would post a duplicate, so the draft is
+        // left empty; the card gets an inline warning instead of silently
+        // sitting pending forever with no status flip to clear it.
+        setDispatchErrors((prev) => ({ ...prev, [issueId]: true }));
+        return;
+      }
+      // Network/backend failure: nothing was saved — restore the draft so
+      // the user doesn't lose what they typed, and re-enable the card so
+      // they can retry.
+      setDrafts((prev) => ({ ...prev, [issueId]: text }));
     }
   };
 
@@ -141,6 +177,9 @@ export const NeedsInputSection: React.FC<NeedsInputSectionProps> = ({ items, onA
                   {t('taskCenter.answerButton')}
                 </button>
               </div>
+              {dispatchErrors[item.issue_id] && (
+                <p className="text-xs text-warn">{t('taskCenter.answerNotDispatched')}</p>
+              )}
             </li>
           );
         })}

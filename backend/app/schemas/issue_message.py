@@ -126,7 +126,17 @@ class IssueMessagePost(BaseModel):
 class IssueMessagePostResponse(BaseModel):
     """The user's comment row (optimistic on the session paths; canonical on
     the legacy path). ``agent_run`` is always None today — the dispatched turn
-    surfaces through GET /messages, not here — kept for wire compatibility."""
+    surfaces through GET /messages, not here — kept for wire compatibility.
+
+    ``agent_dispatched`` (final review fix, silent no-op finding): True only
+    on the Wake path where a reply turn was actually started. False on the
+    Note path (suppressed / `/note` body) and the Legacy path (no assignee
+    agent) — those never start a workflow, so a caller relying on this field
+    (rather than the always-null ``agent_run``) can tell the difference and
+    surface it instead of leaving the UI waiting on a status flip that will
+    never come.
+    """
 
     comment: IssueMessage
     agent_run: Optional[IssueMessage] = None
+    agent_dispatched: bool = False

@@ -301,12 +301,13 @@ async def _run_reply_turns(
     exactly one reply turn, then release.
 
     Spec-4 (needs_input first-class): a reply on an issue parked at
-    ``needs_followup`` with ``execution_state.agent_outcome == "needs_input"``
-    is treated as the human's answer to the agent's question — the issue is
-    resumed (``in_progress``) before the turn and routed by the turn's own
-    FinishIssue outcome (``route_finish_outcome``) afterward. Any other status
-    is left untouched — Spec-1b's original "no status change" behavior for a
-    plain reply on an in-flight/already-terminal issue.
+    ``needs_followup`` with ``execution_state.agent_outcome`` in
+    ``{"needs_input", "empty_output"}`` is treated as the human's answer to
+    the agent's question (or nudge past a silent EMPTY_OUTPUT stall) — the
+    issue is resumed (``in_progress``) before the turn and routed by the
+    turn's own FinishIssue outcome (``route_finish_outcome``) afterward. Any
+    other status is left untouched — Spec-1b's original "no status change"
+    behavior for a plain reply on an in-flight/already-terminal issue.
 
     ``load_issue`` / ``set_status`` are optional so existing callers/tests
     that don't exercise the resume path (and predate it) keep working
@@ -341,7 +342,8 @@ async def _run_reply_turns(
             issue = await load_issue(issue_id)
             resuming = (
                 (issue or {}).get("status") == "needs_followup"
-                and _pending_agent_outcome(issue or {}) == "needs_input"
+                and _pending_agent_outcome(issue or {})
+                in {"needs_input", "empty_output"}
             )
             if resuming:
                 await set_status(issue_id, "in_progress")
@@ -384,6 +386,16 @@ async def _run_reply_turns(
                 content_len=content_len,
                 run_id=(result or {}).get("run_id"),
             )
+            # I4 (final review): mirrors execute_issue's own fan-in call — a
+            # child issue resumed and completed via a reply-answer (rather
+            # than the dispatch loop) must still wake its parent's barrier,
+            # or a parent with issue_agent_auto_close ON hangs forever
+            # waiting for a sibling that already finished. Called from the
+            # workflow body (this function is never a @DBOS.step), same
+            # constraint _maybe_fire_subissue_barrier's own docstring
+            # explains. Non-resuming replies never change status, so there
+            # is nothing for the barrier to react to — left untouched.
+            await _maybe_fire_subissue_barrier(issue_id)
         return {"issue_id": issue_id, "executed": True}
     finally:
         await release(issue_id)
@@ -532,13 +544,23 @@ async def route_finish_outcome(
     two copies drifting apart.
 
     Routing:
-      0 chars + none    → needs_followup, agent_outcome=None,
+      0 chars + none    → needs_followup, agent_outcome="empty_output",
                           outcome_reason="Agent produced no output
                           (EMPTY_OUTPUT)". A2 (needs_input first-class design
                           §5.1): a silent provider failure was previously
                           whitewashed into in_review ("please review", when
                           the agent produced literally nothing) — typed
-                          instead, and NEVER routed to in_review.
+                          instead, and NEVER routed to in_review. I3 (final
+                          review): ``agent_outcome`` is deliberately distinct
+                          from ``"needs_input"`` — the needs-input endpoint
+                          predicate only matches the literal string
+                          ``"needs_input"``, so an EMPTY_OUTPUT stall never
+                          appears in the Task Center "needs your answer" feed
+                          (nothing was actually asked) — but it's still a
+                          member of the resume gate's accepted set in
+                          ``_run_reply_turns``, so a plain reply on the issue
+                          can nudge it forward instead of parking it out of
+                          reach forever.
       completed       → done if ``auto_close`` (slice 2a platform toggle) else
                         in_review (human confirms)
       needs_input     → needs_followup (slice 2b: a deliberate hand-off, distinct
@@ -563,7 +585,7 @@ async def route_finish_outcome(
         await set_status(
             issue_id,
             "needs_followup",
-            agent_outcome=None,
+            agent_outcome="empty_output",
             outcome_reason="Agent produced no output (EMPTY_OUTPUT)",
         )
         if run_id is not None:

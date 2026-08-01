@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NeedsInputSection } from './NeedsInputSection';
 import type { NeedsInputItem } from '../../services/issuesService';
+import { AgentNotDispatchedError } from '../../services/issueMessageService';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k }),
@@ -122,5 +123,59 @@ describe('NeedsInputSection', () => {
   it('renders nothing when items is empty', () => {
     const { container } = renderSection([]);
     expect(container.firstChild).toBeNull();
+  });
+
+  it('clears pending and shows an inline warning (no draft restore) when onAnswer rejects with AgentNotDispatchedError', async () => {
+    // Finding 5 (final review): the message posted successfully server-side
+    // (legacy/no-op path) but no agent turn started — TaskCenter's handler
+    // signals this by rejecting with AgentNotDispatchedError rather than
+    // resolving, so the row must not sit "pending" forever with no
+    // feedback, and must not treat it like a network failure (which would
+    // restore the draft for retry and re-post a duplicate).
+    const onAnswer = vi.fn().mockRejectedValue(new AgentNotDispatchedError());
+    renderSection([item()], onAnswer);
+
+    const textarea = screen.getByPlaceholderText(
+      'taskCenter.answerPlaceholder',
+    ) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Wednesday works better.' } });
+    fireEvent.click(screen.getByRole('button', { name: /taskCenter\.answerButton/i }));
+
+    await waitFor(() => expect(onAnswer).toHaveBeenCalled());
+
+    await waitFor(() => {
+      expect(screen.getByText('taskCenter.answerNotDispatched')).toBeTruthy();
+    });
+    // Card is interactive again (not stuck pending)...
+    expect(screen.getByPlaceholderText('taskCenter.answerPlaceholder')).not.toBeDisabled();
+    // ...but the draft is NOT restored — the message was already saved, so
+    // resubmitting the same text would post a duplicate.
+    expect(
+      (screen.getByPlaceholderText('taskCenter.answerPlaceholder') as HTMLTextAreaElement)
+        .value,
+    ).toBe('');
+  });
+
+  it('restores the draft (no inline warning) when onAnswer rejects with a plain error', async () => {
+    // Regression line: a genuine network/backend failure keeps its original
+    // behavior — draft restored for retry, no dispatch-specific warning.
+    const onAnswer = vi.fn().mockRejectedValue(new Error('network blip'));
+    renderSection([item()], onAnswer);
+
+    const textarea = screen.getByPlaceholderText(
+      'taskCenter.answerPlaceholder',
+    ) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Wednesday works better.' } });
+    fireEvent.click(screen.getByRole('button', { name: /taskCenter\.answerButton/i }));
+
+    await waitFor(() => expect(onAnswer).toHaveBeenCalled());
+
+    await waitFor(() => {
+      expect(
+        (screen.getByPlaceholderText('taskCenter.answerPlaceholder') as HTMLTextAreaElement)
+          .value,
+      ).toBe('Wednesday works better.');
+    });
+    expect(screen.queryByText('taskCenter.answerNotDispatched')).toBeNull();
   });
 });

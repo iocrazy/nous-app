@@ -17,7 +17,16 @@ Fix round 1 (review): ``mark_empty_output`` must NOT touch ``liveness_state``
 ``status='failed'`` (migration 207's contract), and this run's status stays
 ``'completed'``. See ``AgentRunsRepository.mark_empty_output`` for the full
 reasoning; ``test_mark_empty_output_leaves_liveness_state_untouched`` below
-pins it at the repository level."""
+pins it at the repository level.
+
+Fix round 2 (final review, I3): the EMPTY_OUTPUT branch writes
+``agent_outcome="empty_output"`` (previously ``None``), which is what lets a
+reply resume it — the resume gate in ``_run_reply_turns`` only accepts a
+pending ``agent_outcome`` from a fixed set, so a ``None`` value parked the
+issue at ``needs_followup`` out of reach of any future reply. It stays
+distinct from ``"needs_input"`` so the Task Center needs-your-answer feed
+(``needs_input_predicate``, exact-match) never lists an EMPTY_OUTPUT stall as
+something the agent actually asked about."""
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -39,7 +48,7 @@ async def test_zero_content_no_outcome_goes_needs_followup_empty_output():
     set_status.assert_awaited_once_with(
         1,
         "needs_followup",
-        agent_outcome=None,
+        agent_outcome="empty_output",
         outcome_reason="Agent produced no output (EMPTY_OUTPUT)",
     )
     # Never in_review — the whole point of the fix.
@@ -72,7 +81,7 @@ async def test_zero_content_defaults_content_len_and_still_routes_empty_output()
     set_status.assert_awaited_once_with(
         1,
         "needs_followup",
-        agent_outcome=None,
+        agent_outcome="empty_output",
         outcome_reason="Agent produced no output (EMPTY_OUTPUT)",
     )
 

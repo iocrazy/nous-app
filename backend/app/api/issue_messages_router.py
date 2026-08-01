@@ -425,7 +425,9 @@ async def post_issue_message(
         raise HTTPException(500, "failed to dispatch reply turn")
 
     return IssueMessagePostResponse(
-        comment=_optimistic_comment(issue_id, payload.body, auth), agent_run=None
+        comment=_optimistic_comment(issue_id, payload.body, auth),
+        agent_run=None,
+        agent_dispatched=True,
     )
 
 

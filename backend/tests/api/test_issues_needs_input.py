@@ -195,6 +195,41 @@ async def test_plain_needs_followup_without_agent_outcome_excluded(
 
 
 @pytest.mark.integration
+async def test_empty_output_agent_outcome_excluded(
+    patched_engine, issue_seq, teams_and_users, cleanup_issues
+):
+    """I3 (final review): an EMPTY_OUTPUT stall (agent_outcome='empty_output',
+    set so a reply CAN resume it — see route_finish_outcome) must not appear
+    in the needs-your-answer feed — the agent produced nothing, it never
+    actually asked the human a question. Only the literal 'needs_input'
+    value belongs in this list."""
+    me = str(teams_and_users["me"])
+    team_a = teams_and_users["team_a"]
+    created = await _repo().atomic_create(
+        {
+            "title": _title(),
+            "created_by_user_id": me,
+            "team_id": team_a,
+            "status": "needs_followup",
+        }
+    )
+    from app.db import engine as db_engine
+
+    await db_engine.execute_as_service_role(
+        "UPDATE public.issues SET execution_state = CAST(:state AS jsonb) "
+        "WHERE id = :iid",
+        {
+            "state": '{"agent_outcome": "empty_output", '
+            '"outcome_reason": "Agent produced no output (EMPTY_OUTPUT)"}',
+            "iid": created["id"],
+        },
+    )
+
+    rows = await _repo().list_needs_input(me)
+    assert all(r["id"] != created["id"] for r in rows)
+
+
+@pytest.mark.integration
 async def test_other_team_issue_excluded(
     patched_engine, issue_seq, teams_and_users, cleanup_issues
 ):
