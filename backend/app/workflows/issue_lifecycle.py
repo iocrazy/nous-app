@@ -251,7 +251,12 @@ async def run_issue_reply_step(
     await publish_message(issue_id, assistant, session_user_id=None)
     content = assistant.get("content") or ""
     outcome, reason = extract_issue_outcome(result.get("tool_calls"))
-    return {"content": content, "outcome": outcome, "reason": reason}
+    return {
+        "content": content,
+        "outcome": outcome,
+        "reason": reason,
+        "run_id": result.get("run_id"),
+    }
 
 
 # Spec-1b: bounded wait for the per-issue turn lock. Replies are human-paced,
@@ -307,6 +312,13 @@ async def _run_reply_turns(
     that don't exercise the resume path (and predate it) keep working
     unchanged: without ``load_issue`` there is no way to detect the pending
     state, so this behaves exactly as before.
+
+    A resuming turn that raises is caught and routed to ``blocked`` with a
+    typed error before re-raising — otherwise the ``set_status(in_progress)``
+    above would leave the issue stuck there forever with no terminal status
+    ever written (mirrors ``execute_issue``'s own outer try/except). A
+    non-resuming reply never touched status, so an exception there just
+    propagates unchanged (Spec-1b).
     """
     acquired = False
     for _ in range(max_attempts):
@@ -334,23 +346,43 @@ async def _run_reply_turns(
             if resuming:
                 await set_status(issue_id, "in_progress")
 
-        result = await run_turn(
-            issue_id=issue_id,
-            session_id=session_id,
-            user_id=user_id,
-            reply_text=reply_text,
-            attachments=attachments,
-        )
+        try:
+            result = await run_turn(
+                issue_id=issue_id,
+                session_id=session_id,
+                user_id=user_id,
+                reply_text=reply_text,
+                attachments=attachments,
+            )
+        except Exception as exc:
+            # Parked finding (Task 1 review): resuming already flipped the
+            # issue to in_progress above — without this, a turn that raises
+            # here leaves it stuck in_progress forever (no terminal status
+            # ever gets written). Mirrors execute_issue's own outer
+            # try/except (blocked + typed error fields, then re-raise).
+            # Non-resuming replies never touched status, so they stay
+            # untouched here too — the exception just propagates.
+            if resuming:
+                await set_status(
+                    issue_id,
+                    "blocked",
+                    error_code="issue_reply_resume_failed",
+                    error_message=str(exc)[:500],
+                )
+            raise
 
         if resuming:
             outcome = (result or {}).get("outcome")
             reason = (result or {}).get("reason")
+            content_len = len((result or {}).get("content") or "")
             await route_finish_outcome(
                 issue_id,
                 outcome,
                 reason,
                 auto_close=auto_close,
                 set_status=set_status,
+                content_len=content_len,
+                run_id=(result or {}).get("run_id"),
             )
         return {"issue_id": issue_id, "executed": True}
     finally:
@@ -462,6 +494,26 @@ async def run_issue_agent_step(
 PREEMPT_STATUSES = frozenset({"cancelled", "done", "closed"})
 
 
+async def _backfill_run_issue_id(run_id: str, issue_id: int) -> None:
+    """Best-effort: stamp ``agent_runs.issue_id`` for the run that just
+    executed this issue's turn. See ``AgentRunsRepository.backfill_issue_id``
+    for why this is a post-hoc UPDATE rather than a RunRecorder constructor
+    kwarg."""
+    from app.repositories.agent_runs_repository import get_agent_runs_repository
+
+    await get_agent_runs_repository().backfill_issue_id(run_id, issue_id)
+
+
+async def _mark_run_empty_output(run_id: str) -> None:
+    """Best-effort: type the EMPTY_OUTPUT run row + finalize its
+    liveness_state. See ``AgentRunsRepository.mark_empty_output``."""
+    from app.repositories.agent_runs_repository import get_agent_runs_repository
+
+    await get_agent_runs_repository().mark_empty_output(
+        run_id, error_message="Agent produced no output (EMPTY_OUTPUT)"
+    )
+
+
 async def route_finish_outcome(
     issue_id: int,
     outcome: Optional[str],
@@ -469,6 +521,8 @@ async def route_finish_outcome(
     *,
     auto_close: bool,
     set_status: Callable[..., Awaitable[None]],
+    content_len: int = 0,
+    run_id: Optional[str] = None,
 ) -> None:
     """Route an agent's FinishIssue declaration (or the lack of one) to an
     issue status transition. Shared by the dispatch loop's terminal step
@@ -477,14 +531,43 @@ async def route_finish_outcome(
     two copies drifting apart.
 
     Routing:
+      0 chars + none    → needs_followup, agent_outcome=None,
+                          outcome_reason="Agent produced no output
+                          (EMPTY_OUTPUT)". A2 (needs_input first-class design
+                          §5.1): a silent provider failure was previously
+                          whitewashed into in_review ("please review", when
+                          the agent produced literally nothing) — typed
+                          instead, and NEVER routed to in_review.
       completed       → done if ``auto_close`` (slice 2a platform toggle) else
                         in_review (human confirms)
       needs_input     → needs_followup (slice 2b: a deliberate hand-off, distinct
                         from blocked=errored; carries the agent's reason)
       continue (capped)→ in_review (handed to a human after the cap; never
                         auto-closes — the agent never said it finished)
-      none declared   → in_review (default — unchanged legacy behavior)
+      none declared (but has content) → in_review (default — unchanged
+                        legacy behavior)
+
+    ``run_id``, when given, also drives per-run housekeeping every
+    issue-linked turn should get regardless of outcome: ``agent_runs.issue_id``
+    backfill (unconditional) and, for the EMPTY_OUTPUT branch specifically, a
+    typed error_code + liveness finalize (prod evidence: agent_runs
+    333739667136736 sat at status=completed/error_code=NULL/liveness_state=
+    'running' having produced 0 chars with no declaration).
     """
+    if run_id is not None:
+        await _backfill_run_issue_id(run_id, issue_id)
+
+    if content_len == 0 and outcome is None:
+        await set_status(
+            issue_id,
+            "needs_followup",
+            agent_outcome=None,
+            outcome_reason="Agent produced no output (EMPTY_OUTPUT)",
+        )
+        if run_id is not None:
+            await _mark_run_empty_output(run_id)
+        return
+
     if outcome == "needs_input":
         await set_status(
             issue_id,
@@ -567,8 +650,15 @@ async def _run_dispatch_with_continuation(
             continue
         break
 
+    content_len = len((res or {}).get("content") or "")
     await route_finish_outcome(
-        issue_id, outcome, reason, auto_close=auto_close, set_status=set_status
+        issue_id,
+        outcome,
+        reason,
+        auto_close=auto_close,
+        set_status=set_status,
+        content_len=content_len,
+        run_id=(res or {}).get("run_id"),
     )
     return {"outcome": outcome, "attempts": attempt}
 

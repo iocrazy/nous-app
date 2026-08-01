@@ -126,3 +126,47 @@ async def test_reply_to_normal_issue_keeps_status_untouched():
 
     set_status.assert_not_awaited()
     assert out["executed"] is True
+
+
+@pytest.mark.asyncio
+async def test_reply_resume_turn_raises_leaves_issue_blocked_not_stuck():
+    """Parked finding (Task 1 review, same silent-failure theme as A2): if
+    ``set_status(in_progress)`` succeeds and the resumed turn then raises,
+    the issue must not be left stuck in_progress forever — mirror
+    execute_issue's own outer try/except (blocked + typed error, re-raise)."""
+    calls = []
+
+    async def fake_set_status(issue_id, status, **kw):
+        calls.append((status, kw.get("error_code")))
+
+    async def fake_load_issue(issue_id):
+        return {
+            "id": issue_id,
+            "status": "needs_followup",
+            "execution_state": '{"agent_outcome": "needs_input"}',
+        }
+
+    async def fake_run_turn(**kw):
+        raise RuntimeError("llm blew up")
+
+    acquire = AsyncMock(return_value=True)
+    release = AsyncMock()
+    sleep = AsyncMock()
+
+    with pytest.raises(RuntimeError, match="llm blew up"):
+        await _run_reply_turns(
+            7,
+            "u",
+            "the style is X",
+            session_id="s",
+            acquire=acquire,
+            run_turn=fake_run_turn,
+            release=release,
+            sleep=sleep,
+            load_issue=fake_load_issue,
+            set_status=fake_set_status,
+            auto_close=False,
+        )
+
+    assert calls == [("in_progress", None), ("blocked", "issue_reply_resume_failed")]
+    release.assert_awaited_once_with(7)

@@ -158,6 +158,15 @@ async def run_issue_agent(
             f"[issue_agent] issue={iid} session={session_id} "
             f"produced {len(content)} chars; outcome={outcome}"
         )
-        return {"content": content, "outcome": outcome, "reason": reason}
+        return {
+            "content": content,
+            "outcome": outcome,
+            "reason": reason,
+            # A2 (needs_input first-class design §5.1): threaded up to
+            # route_finish_outcome so it can backfill agent_runs.issue_id
+            # and, for the zero-content/no-outcome case, type the row's
+            # error_code + finalize its liveness_state.
+            "run_id": result.get("run_id"),
+        }
     finally:
         await publish_status(iid, "done")

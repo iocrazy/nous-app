@@ -531,6 +531,63 @@ class AgentRunsRepository(AsyncpgRepository):
             return False
 
     # ------------------------------------------------------------------
+    # Issue-linked run housekeeping (A2, needs_input first-class design §5.1)
+    # ------------------------------------------------------------------
+
+    async def backfill_issue_id(self, run_id: str, issue_id: int) -> None:
+        """Best-effort: stamp ``agent_runs.issue_id`` on a run that already
+        finished, keyed by ``run_id``.
+
+        RunRecorder has supported an ``issue_id`` constructor kwarg since
+        mig-208 (see ``test_run_recorder_issue_id.py``), but no
+        issue-dispatch/reply caller ever threads it through at construction
+        time — every issue-linked agent_runs row starts NULL. Rather than
+        widen ``RunRecorder``'s call site (shared by every other trigger),
+        this backfills post-hoc using the ``run_id`` the turn's own result
+        dict already carries. ``WHERE issue_id IS NULL`` makes it idempotent
+        and never clobbers a value some other write already set. Never
+        raises — this is decoration, not the primary status-routing op."""
+        try:
+            async with write_scope() as session:
+                await session.execute(
+                    update(AgentRuns)
+                    .where(AgentRuns.id == self._bigint(run_id))
+                    .where(AgentRuns.issue_id.is_(None))
+                    .values(issue_id=int(issue_id))
+                )
+        except Exception as e:
+            logger.error(
+                f"[agent_runs] backfill_issue_id failed "
+                f"(run={run_id} issue={issue_id}): {e}"
+            )
+
+    async def mark_empty_output(self, run_id: str, *, error_message: str) -> None:
+        """Type a zero-content, no-outcome run as a typed EMPTY_OUTPUT
+        failure (A2) instead of leaving it looking like an ordinary
+        ``completed`` row.
+
+        Also finalizes ``liveness_state`` to ``'dead'`` — the closest analog
+        in the 5-state model (see ``liveness_scanner.py``'s own use of
+        ``dead`` alongside ``status='failed'``/``error_code='liveness_dead'``)
+        so the row stops reading ``'running'`` forever once RunRecorder has
+        already flipped ``status`` away from running (prod evidence: run
+        333739667136736 sat at ``liveness_state='running'`` post-completion).
+        Never raises — best-effort annotation on an already-finished row."""
+        try:
+            async with write_scope() as session:
+                await session.execute(
+                    update(AgentRuns)
+                    .where(AgentRuns.id == self._bigint(run_id))
+                    .values(
+                        error_code="EMPTY_OUTPUT",
+                        error_message=error_message,
+                        liveness_state="dead",
+                    )
+                )
+        except Exception as e:
+            logger.error(f"[agent_runs] mark_empty_output failed (run={run_id}): {e}")
+
+    # ------------------------------------------------------------------
     # Sweeper helpers
     # ------------------------------------------------------------------
 
