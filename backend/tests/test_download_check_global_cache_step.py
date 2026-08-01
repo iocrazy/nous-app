@@ -175,6 +175,67 @@ async def test_filesystem_video_path_missing_file_cache_miss(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_sb_album_prefix_cache_hit_when_objects_exist():
+    """I3: an album download_path is a PREFIX (trailing "/"), not a single
+    object key — exists()/get_size() (both HEAD one key) always resolve
+    False/0 for it, so the global cache permanently missed every already-
+    downloaded album (full re-download + re-upload on every request). The
+    fix dispatches a prefix through list_prefix instead: non-empty listing
+    = cache hit."""
+    from app.workflows.download import check_global_cache_step
+
+    sb_album_path = "sb://library/t5/album/42/"
+    media = _media(download_path=sb_album_path)
+    list_prefix = AsyncMock(
+        return_value=["t5/album/42/slides/001.jpg", "t5/album/42/audio.mp3"]
+    )
+
+    with (
+        _patch_repo(media),
+        patch(
+            "app.services.library.media_storage.ObjectStore.list_prefix",
+            new=list_prefix,
+        ),
+    ):
+        result = await check_global_cache_step(
+            platform_id=PLATFORM_ID,
+            media_type=68,
+            download_video=True,
+            download_cover=False,
+        )
+
+    assert result == {"cache_hit": True}
+    list_prefix.assert_awaited_once_with("t5/album/42/")
+
+
+@pytest.mark.asyncio
+async def test_sb_album_prefix_cache_miss_when_empty():
+    """An album prefix with nothing under it (never uploaded / wiped) is a
+    genuine cache miss, not a crash."""
+    from app.workflows.download import check_global_cache_step
+
+    sb_album_path = "sb://library/t5/album/99/"
+    media = _media(download_path=sb_album_path)
+    list_prefix = AsyncMock(return_value=[])
+
+    with (
+        _patch_repo(media),
+        patch(
+            "app.services.library.media_storage.ObjectStore.list_prefix",
+            new=list_prefix,
+        ),
+    ):
+        result = await check_global_cache_step(
+            platform_id=PLATFORM_ID,
+            media_type=68,
+            download_video=True,
+            download_cover=False,
+        )
+
+    assert result == {"cache_hit": False}
+
+
+@pytest.mark.asyncio
 async def test_no_media_row_cache_miss():
     with _patch_repo(None):
         from app.workflows.download import check_global_cache_step

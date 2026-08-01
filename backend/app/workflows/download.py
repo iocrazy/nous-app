@@ -104,6 +104,14 @@ async def check_global_cache_step(
         if loc.is_object_store:
             store = ObjectStore(loc.bucket)
             try:
+                # I3: an album is a prefix (key ends in "/") — no single
+                # object lives AT loc.key, so exists()/get_size() (both HEAD
+                # a single key) always resolve False/0 for one, making the
+                # global cache permanently miss for every already-downloaded
+                # album (full re-download + re-upload on every request).
+                # list_prefix at least one object under the prefix = present.
+                if loc.is_prefix:
+                    return len(await store.list_prefix(loc.key)) > 0
                 return await store.exists(loc.key) and await store.get_size(loc.key) > 0
             except Exception:
                 # 探测失败(网络抖动/storage-api 挂了)保守当没缓存,继续下载

@@ -200,8 +200,23 @@ async def delete_video(
                 loc = resolve_media_source(raw_path)
                 if loc.is_object_store:
                     try:
-                        await ObjectStore(loc.bucket).remove(loc.key)
-                        files_deleted.append(f"object: {loc.key}")
+                        # C2: a prefix location (album — key ends in "/",
+                        # e.g. t{scope}/album/{rid}/) has no single object at
+                        # ``loc.key``. A plain ``remove()`` targets a key that
+                        # was never PUT (the slides/audio/cover objects live
+                        # UNDER the prefix), so it silently deletes nothing
+                        # while the SDK call itself still "succeeds" — the
+                        # delete endpoint reports done, the album stays on S3
+                        # forever. remove_prefix lists then bulk-removes every
+                        # object actually under the prefix.
+                        if loc.is_prefix:
+                            n = await ObjectStore(loc.bucket).remove_prefix(loc.key)
+                            files_deleted.append(
+                                f"album prefix: {loc.key} ({n} objects)"
+                            )
+                        else:
+                            await ObjectStore(loc.bucket).remove(loc.key)
+                            files_deleted.append(f"object: {loc.key}")
                     except Exception as e:
                         logger.warning(
                             f"Failed to delete object store {label} "

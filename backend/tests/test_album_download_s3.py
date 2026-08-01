@@ -125,3 +125,57 @@ async def test_album_upload_propagates_store_failure(monkeypatch, tmp_path):
             local_dir=str(tmp_path),
             relative_path="global/resources/web/douyin/9",
         )
+
+
+@pytest.mark.asyncio
+async def test_repoint_album_resource_version_runs_expected_update(monkeypatch):
+    """C1: the read path (media_slides_router._ALBUM_LOCATION_SQL) resolves
+    an album via resource_versions.file_path (JOIN version_number =
+    r.current_version), not resources.file_path — so repointing only
+    resources.file_path (as the reindex block already did) leaves a RETRY's
+    resource_versions row pointing at the filesystem, and slides 404 forever.
+    This guards that ``_repoint_album_resource_version`` issues the UPDATE
+    against ``resource_versions`` with the resource_id + album_path bound,
+    scoped to non-sb:// rows (idempotent against an already-migrated row)."""
+    from app.db import engine as db_engine
+    from app.services.media.downloader.downloader import (
+        _ALBUM_RV_REPOINT_SQL,
+        _repoint_album_resource_version,
+    )
+
+    calls = {}
+
+    async def fake_execute(sql, params):
+        calls["sql"] = sql
+        calls["params"] = params
+        return 1
+
+    monkeypatch.setattr(db_engine, "execute", fake_execute)
+
+    await _repoint_album_resource_version("42", "sb://library/t5/album/42/")
+
+    assert calls["sql"] == _ALBUM_RV_REPOINT_SQL
+    assert calls["params"] == {
+        "file_path": "sb://library/t5/album/42/",
+        "resource_id": 42,
+    }
+    assert "NOT LIKE 'sb://%'" in _ALBUM_RV_REPOINT_SQL
+    assert "version_number = r.current_version" in _ALBUM_RV_REPOINT_SQL
+
+
+@pytest.mark.asyncio
+async def test_repoint_album_resource_version_zero_rows_is_harmless(monkeypatch):
+    """First download: no resource_versions row exists yet for the freshly
+    created resource, so the UPDATE matches 0 rows — must not raise."""
+    from app.db import engine as db_engine
+    from app.services.media.downloader.downloader import (
+        _repoint_album_resource_version,
+    )
+
+    async def fake_execute(sql, params):
+        return 0
+
+    monkeypatch.setattr(db_engine, "execute", fake_execute)
+
+    # Should not raise.
+    await _repoint_album_resource_version("42", "sb://library/t5/album/42/")

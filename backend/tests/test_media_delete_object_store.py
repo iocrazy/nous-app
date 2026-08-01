@@ -133,6 +133,41 @@ async def test_object_store_remove_failure_does_not_500_db_delete_still_runs():
 
 
 @pytest.mark.asyncio
+async def test_sb_album_prefix_deletes_via_remove_prefix_not_remove():
+    """C2: an album's download_path is a PREFIX (trailing "/", e.g.
+    ``t5/album/42/``) — the slides/audio/cover objects live UNDER it, not AT
+    it. A plain ``remove(key)`` targets a key that was never PUT, so it
+    "succeeds" while deleting nothing and the album stays on S3 forever
+    (every migrated/newly-downloaded album silently survives a delete). The
+    fix dispatches a prefix location through ``remove_prefix`` instead."""
+    sb_album_path = "sb://library/331438215859255/album/42/"
+    video = _video(download_path=sb_album_path)
+    repo_patch, repo = _patch_repo(video)
+    remove = AsyncMock()
+    remove_prefix = AsyncMock(return_value=2)
+
+    with (
+        repo_patch,
+        patch("app.services.library.media_storage.ObjectStore.remove", new=remove),
+        patch(
+            "app.services.library.media_storage.ObjectStore.remove_prefix",
+            new=remove_prefix,
+        ),
+    ):
+        result = await delete_video(
+            PLATFORM_ID, BackgroundTasks(), _auth(), delete_files=True
+        )
+
+    remove_prefix.assert_awaited_once_with("331438215859255/album/42/")
+    remove.assert_not_awaited()
+    repo.delete.assert_awaited_once_with(PLATFORM_ID)
+    assert any(
+        f == "album prefix: 331438215859255/album/42/ (2 objects)"
+        for f in result["files_deleted"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_sb_cover_path_deletes_object_store_object():
     """cover_download_path is sb:// too — same object-store dispatch applies
     to the cover, not just the main download_path."""

@@ -165,6 +165,39 @@ async def _upload_album_to_s3(
     return media_storage.to_file_path(store.bucket, prefix)
 
 
+# C1: 图集读端(media_slides_router.py _ALBUM_LOCATION_SQL)解析的是
+# resource_versions.file_path(JOIN version_number = r.current_version),
+# 不是 resources.file_path。重指块只更新了 resources.file_path,retry 场景
+# (rv 已存在、仍指着文件系统)_resolve_album_location 永远拿不到 sb:// 前缀,
+# slides 端点 404。这条 UPDATE 同时把该 resource 当前版本的 rv.file_path
+# 刷成 album_path——与 storage_migration._DOWNLOADS_UPDATE_SQL 同表同步的
+# 做法一致。条件 `file_path NOT LIKE 'sb://%'` 使其对已迁移的行无害幂等;
+# 首次下载时 rv 尚不存在,UPDATE 0 行——首下的 rv 由
+# finalize_post_download_step 从 pm.download_path 建,那时 pm.download_path
+# 已经是本函数写回的 sb:// 值,不会漏接。
+_ALBUM_RV_REPOINT_SQL = """
+    UPDATE resource_versions rv
+    SET file_path = :file_path
+    FROM resources r
+    WHERE rv.resource_id = r.id
+      AND rv.resource_id = :resource_id
+      AND rv.version_number = r.current_version
+      AND rv.file_path IS NOT NULL
+      AND rv.file_path NOT LIKE 'sb://%'
+"""
+
+
+async def _repoint_album_resource_version(resource_id, album_path: str) -> None:
+    """把 ``resource_id`` 当前版本的 resource_versions.file_path 重指到
+    ``album_path``(见 ``_ALBUM_RV_REPOINT_SQL`` 的注释)。"""
+    from app.db import engine as db_engine
+
+    await db_engine.execute(
+        _ALBUM_RV_REPOINT_SQL,
+        {"file_path": album_path, "resource_id": int(resource_id)},
+    )
+
+
 class DownloaderService:
 
     @staticmethod
@@ -1174,42 +1207,67 @@ class DownloaderService:
 
                 # Create resource record (backfill)
                 if user_id:
-                    carousel_rid = await DownloaderService._ensure_carousel_resource(
-                        media_id=media_id,
-                        user_id=user_id,
-                        platform_id=platform_id,
-                        resource_dir_relative=resource_dir_relative,
-                        video_data=video_data,
-                    )
+                    # I5: _ensure_carousel_resource opens its own
+                    # request_scope internally, but the upload+repoint block
+                    # below also writes to `resources` (update_resource,
+                    # load-then-modify via write_scope) — that call needs the
+                    # SAME ambient USER scope or it raises UnscopedQueryError
+                    # the moment SCOPE_ENFORCE_RESOURCES flips on. Wrapping the
+                    # whole block (not just the _ensure_carousel_resource call)
+                    # covers both. Nesting with the scope
+                    # _ensure_carousel_resource itself opens is safe —
+                    # request_scope tokens stack and unwind independently.
+                    from app.db.scope import Scope, request_scope
 
-                    # Storage tiering: upload the whole album directory
-                    # (slides/ + audio.mp3 + cover.jpg) to the canonical
-                    # album prefix t{scope}/album/{rid}/ and repoint the
-                    # index columns at it — the 4th unwired write path
-                    # after video-httpx/video-ytdlp/cover/thumbnail; new
-                    # albums silently landed on the filesystem until
-                    # 2026-08-01's deep scan caught one. Flag off /
-                    # missing rid → FS paths stay (old behavior).
-                    album_path = await _upload_album_to_s3(
-                        user_id=user_id,
-                        resource_id=carousel_rid,
-                        local_dir=str(resource_dir_full),
-                        relative_path=resource_dir_relative,
-                    )
-                    if album_path.startswith("sb://"):
-                        pm_updates = {"download_path": album_path}
-                        if os.path.isfile(
-                            os.path.join(str(resource_dir_full), "audio.mp3")
-                        ):
-                            pm_updates["music_download_path"] = f"{album_path}audio.mp3"
-                        await repo.update(platform_id, pm_updates)
-                        from app.repositories.resources_repository import (
-                            ResourcesRepository,
+                    async with request_scope(Scope(user_id=user_id)):
+                        carousel_rid = (
+                            await DownloaderService._ensure_carousel_resource(
+                                media_id=media_id,
+                                user_id=user_id,
+                                platform_id=platform_id,
+                                resource_dir_relative=resource_dir_relative,
+                                video_data=video_data,
+                            )
                         )
 
-                        await ResourcesRepository().update_resource(
-                            carousel_rid, {"file_path": album_path}
+                        # Storage tiering: upload the whole album directory
+                        # (slides/ + audio.mp3 + cover.jpg) to the canonical
+                        # album prefix t{scope}/album/{rid}/ and repoint the
+                        # index columns at it — the 4th unwired write path
+                        # after video-httpx/video-ytdlp/cover/thumbnail; new
+                        # albums silently landed on the filesystem until
+                        # 2026-08-01's deep scan caught one. Flag off /
+                        # missing rid → FS paths stay (old behavior).
+                        album_path = await _upload_album_to_s3(
+                            user_id=user_id,
+                            resource_id=carousel_rid,
+                            local_dir=str(resource_dir_full),
+                            relative_path=resource_dir_relative,
                         )
+                        if album_path.startswith("sb://"):
+                            pm_updates = {"download_path": album_path}
+                            if os.path.isfile(
+                                os.path.join(str(resource_dir_full), "audio.mp3")
+                            ):
+                                pm_updates["music_download_path"] = (
+                                    f"{album_path}audio.mp3"
+                                )
+                            await repo.update(platform_id, pm_updates)
+                            from app.repositories.resources_repository import (
+                                ResourcesRepository,
+                            )
+
+                            await ResourcesRepository().update_resource(
+                                carousel_rid, {"file_path": album_path}
+                            )
+                            # C1: also repoint the CURRENT resource_versions
+                            # row — the slides read path resolves via
+                            # resource_versions.file_path, not
+                            # resources.file_path (see
+                            # _ALBUM_RV_REPOINT_SQL's comment).
+                            await _repoint_album_resource_version(
+                                carousel_rid, album_path
+                            )
 
                 # Log success
                 if user_id:

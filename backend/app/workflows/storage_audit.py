@@ -100,15 +100,33 @@ async def collect_audit_keys_step() -> list[dict]:
 async def _probe_one(store, key: str) -> str:
     """Probe a single key. Returns ``"present"`` / ``"missing"`` / ``"error"``.
 
-    Calls ``store.get_size(key)`` directly (the HEAD-shaped primitive
-    ``ObjectStore.exists()`` wraps) so the exception itself can be inspected
-    rather than swallowed. Only a genuine HTTP 404 (``httpx.HTTPStatusError``
-    with ``response.status_code == 404``) counts as ``"missing"`` — a 404 is
-    the storage server explicitly saying the object doesn't exist. Every
-    other failure (timeout, connection error, 5xx, ...) is uncertain and
-    classified ``"error"``: a network flap must never masquerade as proof
-    the object is gone.
+    Two shapes: a plain object key, or an ALBUM PREFIX (key ends in "/",
+    e.g. ``t{scope}/album/{rid}/`` — the carousel/album layout has no single
+    file to address). ``get_size`` is a HEAD on exactly one key, so pointing
+    it at a prefix always 404s — the deep scan was counting every one of the
+    library's album prefixes as ``missing`` (I4: one prior run's ``errors``
+    count matched the library's prefix-shaped key count exactly). A prefix is
+    probed instead via ``list_prefix``: any object found under it → present;
+    none → missing; the listing call itself raising → error (uncertain, same
+    as a plain-key network failure below — never counted as missing).
+
+    For a plain key: calls ``store.get_size(key)`` directly (the HEAD-shaped
+    primitive ``ObjectStore.exists()`` wraps) so the exception itself can be
+    inspected rather than swallowed. Only a genuine HTTP 404
+    (``httpx.HTTPStatusError`` with ``response.status_code == 404``) counts
+    as ``"missing"`` — a 404 is the storage server explicitly saying the
+    object doesn't exist. Every other failure (timeout, connection error,
+    5xx, ...) is uncertain and classified ``"error"``: a network flap must
+    never masquerade as proof the object is gone.
     """
+    if key.endswith("/"):
+        try:
+            keys = await store.list_prefix(key)
+            return "present" if keys else "missing"
+        except Exception as e:  # noqa: BLE001 — uncertain, not missing
+            logger.debug(f"[storage-audit] list_prefix({key!r}) failed: {e!r}")
+            return "error"
+
     try:
         await store.get_size(key)
         return "present"
