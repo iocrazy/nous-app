@@ -29,6 +29,7 @@ export function useNotionTable<T>(config: UseNotionTableConfig<T>) {
     defaultPageSize = 20,
     refetchInterval = false,
     rowKey = 'id',
+    rowFilter,
   } = config
 
   // --- Load saved preferences (non-blocking: data loads even if prefs fail) ---
@@ -197,7 +198,11 @@ export function useNotionTable<T>(config: UseNotionTableConfig<T>) {
     placeholderData: (prev) => prev,
   })
 
-  const data = queryResult.data?.items ?? []
+  const rawData = queryResult.data?.items ?? []
+  const data = useMemo(
+    () => (rowFilter ? rawData.filter(rowFilter) : rawData),
+    [rawData, rowFilter],
+  )
   const total = queryResult.data?.total ?? 0
 
   // --- TanStack Table column defs ---
