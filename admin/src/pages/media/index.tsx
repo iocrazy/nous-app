@@ -13,6 +13,8 @@ import {
   Menu,
   Descriptions,
   Spin,
+  Radio,
+  Button,
 } from '@arco-design/web-react'
 import {
   IconMore,
@@ -37,7 +39,18 @@ import {
   useDeleteVideo,
   useRetryVideo,
 } from '../../api/endpoints/videos'
+import { useStorageStats, useAudit, useDeepVerify } from '../../api/endpoints/storage'
 import { formatDateTime, formatBytes } from '../../utils/format'
+
+export type StorageFilter = 'all' | 'ok' | 'broken' | 'no_video' | 'fs_residue'
+
+const STORAGE_FILTER_OPTIONS: { label: string; value: StorageFilter }[] = [
+  { label: 'All', value: 'all' },
+  { label: 'OK', value: 'ok' },
+  { label: 'Broken', value: 'broken' },
+  { label: 'No Video', value: 'no_video' },
+  { label: 'FS Residue', value: 'fs_residue' },
+]
 
 const API_URL = import.meta.env.DEV ? '' : (import.meta.env.VITE_API_URL || '')
 
@@ -81,61 +94,108 @@ function StatusTag({ status }: { status: string }) {
 
 function StatsCards() {
   const { data: stats } = useVideoStats()
+  const { data: sst } = useStorageStats()
+  const { data: audit } = useAudit()
   if (!stats) return null
 
   return (
-    <Grid.Row gutter={16} style={{ marginBottom: 16 }}>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic title="Total" value={stats.total} />
-        </Card>
-      </Grid.Col>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic
-            title="Completed"
-            value={stats.completed}
-            styleValue={{ color: 'rgb(var(--green-6))' }}
-          />
-        </Card>
-      </Grid.Col>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic
-            title="Failed"
-            value={stats.failed}
-            styleValue={{ color: 'rgb(var(--red-6))' }}
-          />
-        </Card>
-      </Grid.Col>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic
-            title="Pending"
-            value={stats.pending}
-            styleValue={{ color: 'rgb(var(--orange-6))' }}
-          />
-        </Card>
-      </Grid.Col>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic
-            title="Downloading"
-            value={stats.downloading}
-            styleValue={{ color: 'rgb(var(--blue-6))' }}
-          />
-        </Card>
-      </Grid.Col>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic
-            title="Storage"
-            value={formatBytes(stats.total_storage_bytes)}
-            prefix={<IconStorage />}
-          />
-        </Card>
-      </Grid.Col>
-    </Grid.Row>
+    <div style={{ marginBottom: 16 }}>
+      <Grid.Row gutter={16} style={{ marginBottom: 8 }}>
+        <Grid.Col span={4}>
+          <Card>
+            <Statistic title="Total" value={stats.total} />
+          </Card>
+        </Grid.Col>
+        <Grid.Col span={4}>
+          <Card>
+            <Statistic
+              title="Completed"
+              value={stats.completed}
+              styleValue={{ color: 'rgb(var(--green-6))' }}
+            />
+          </Card>
+        </Grid.Col>
+        <Grid.Col span={4}>
+          <Card>
+            <Statistic
+              title="Failed"
+              value={stats.failed}
+              styleValue={{ color: 'rgb(var(--red-6))' }}
+            />
+          </Card>
+        </Grid.Col>
+        <Grid.Col span={4}>
+          <Card>
+            <Statistic
+              title="Pending"
+              value={stats.pending}
+              styleValue={{ color: 'rgb(var(--orange-6))' }}
+            />
+          </Card>
+        </Grid.Col>
+        <Grid.Col span={4}>
+          <Card>
+            <Statistic
+              title="Downloading"
+              value={stats.downloading}
+              styleValue={{ color: 'rgb(var(--blue-6))' }}
+            />
+          </Card>
+        </Grid.Col>
+        <Grid.Col span={4}>
+          <Card>
+            <Statistic
+              title="Storage"
+              value={formatBytes(stats.total_storage_bytes)}
+              prefix={<IconStorage />}
+            />
+          </Card>
+        </Grid.Col>
+      </Grid.Row>
+      <Grid.Row gutter={16}>
+        <Grid.Col span={6}>
+          <Card>
+            <Statistic
+              title="FS Residue"
+              value={sst?.fs_residue ?? '—'}
+              styleValue={{
+                color: (sst?.fs_residue ?? 0) > 0 ? 'rgb(var(--orange-6))' : 'rgb(var(--green-6))',
+              }}
+            />
+          </Card>
+        </Grid.Col>
+        <Grid.Col span={6}>
+          <Card>
+            <Statistic title="Orphans" value={sst?.orphans ?? '—'} />
+          </Card>
+        </Grid.Col>
+        <Grid.Col span={6}>
+          <Card>
+            <Statistic
+              title="Broken on S3"
+              value={sst?.broken ?? '—'}
+              styleValue={{
+                color: (sst?.broken ?? 0) > 0 ? 'rgb(var(--red-6))' : 'rgb(var(--green-6))',
+              }}
+            />
+          </Card>
+        </Grid.Col>
+        <Grid.Col span={6}>
+          <Card>
+            <Statistic title="HLS Ready" value={sst?.hls_ready ?? '—'} />
+          </Card>
+        </Grid.Col>
+      </Grid.Row>
+      <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+        {audit?.status === 'completed'
+          ? `Last S3 scan ${formatDateTime(audit.scanned_at)} · ${audit.scanned} objects · ${audit.missing.length} missing`
+          : audit?.status === 'queued' || audit?.status === 'in_progress'
+            ? 'Scanning storage…'
+            : audit?.status === 'failed'
+              ? 'Last deep scan failed'
+              : 'No deep scan yet'}
+      </Typography.Text>
+    </div>
   )
 }
 
@@ -338,8 +398,12 @@ function ActionsCell({
 
 export function MediaList() {
   const [detailId, setDetailId] = useState<number | null>(null)
+  const [storageFilter, setStorageFilter] = useState<StorageFilter>('all')
   const deleteVideo = useDeleteVideo()
   const retryVideo = useRetryVideo()
+  const { data: audit } = useAudit()
+  const deepVerify = useDeepVerify()
+  const auditRunning = audit?.status === 'queued' || audit?.status === 'in_progress'
 
   const handleDelete = (video: VideoData) => {
     Modal.confirm({
@@ -500,6 +564,24 @@ export function MediaList() {
         isLoading={isLoading}
         title="Media"
         headerContent={<StatsCards />}
+        toolbarExtra={
+          <Space>
+            <Radio.Group
+              type="button"
+              size="small"
+              value={storageFilter}
+              onChange={(v) => setStorageFilter(v)}
+              options={STORAGE_FILTER_OPTIONS}
+            />
+            <Button
+              size="small"
+              loading={deepVerify.isPending || auditRunning}
+              onClick={() => deepVerify.mutate()}
+            >
+              {auditRunning ? 'Verifying…' : 'Deep Verify'}
+            </Button>
+          </Space>
+        }
         emptyText="No media found"
         scrollX={1200}
       />
