@@ -23,7 +23,12 @@
       "perPage": "{{count}} / page",
       "prev": "Previous",
       "next": "Next"
-    }
+    },
+    "needsAnswer": "Needs your answer",
+    "needsAnswerEmpty": "No questions waiting — you're all caught up.",
+    "viewConversation": "View conversation",
+    "answerPlaceholder": "Type your answer…",
+    "answerButton": "Answer"
   },
   "nav": {
     "linkParser": "Link Parser",

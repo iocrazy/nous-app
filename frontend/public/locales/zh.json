@@ -23,7 +23,12 @@
       "perPage": "{{count}} 条/页",
       "prev": "上一页",
       "next": "下一页"
-    }
+    },
+    "needsAnswer": "待你回复",
+    "needsAnswerEmpty": "暂无待回复问题，都处理完了。",
+    "viewConversation": "查看对话",
+    "answerPlaceholder": "输入你的回复…",
+    "answerButton": "回复"
   },
   "nav": {
     "linkParser": "链接解析",
