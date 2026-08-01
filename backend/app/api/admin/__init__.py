@@ -18,6 +18,7 @@ from .search_router import router as search_router
 from .settings_router import router as settings_router
 from .stats_router import router as stats_router
 from .storage_migration_router import router as storage_migration_router
+from .storage_router import router as storage_router
 from .table_preferences_router import router as table_preferences_router
 from .tags_router import router as tags_router
 from .tasks_router import router as tasks_router
@@ -147,6 +148,11 @@ admin_router.include_router(
     storage_migration_router,
     prefix="/storage-migration",
     tags=["Admin - Storage Migration"],
+)
+admin_router.include_router(
+    storage_router,
+    prefix="/storage",
+    tags=["Admin - Storage"],
 )
 admin_router.include_router(
     backfill_router,
