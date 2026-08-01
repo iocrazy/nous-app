@@ -81,7 +81,7 @@ class _FakeSession:
         is_update = sql.lstrip().startswith("update")
         is_select = sql.lstrip().startswith("select")
 
-        if is_insert and "agent_run_events" in sql:
+        if is_insert and "agent_run_transcript_events" in sql:
             self._table.event_inserts.append(dict(bind_params))
             return _ExecResult()
 
