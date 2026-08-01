@@ -13,8 +13,6 @@ from app.db import engine as db_engine
 
 router = APIRouter()
 
-_FS = "LIKE '%/%' AND {c} NOT LIKE 'sb://%'"
-
 
 def _fs_cond(col: str) -> str:
     return f"({col} IS NOT NULL AND {col} LIKE '%/%' AND {col} NOT LIKE 'sb://%')"
@@ -32,9 +30,19 @@ _FS_RESIDUE_WHERE = " OR ".join(
     ]
 )
 
+# resources.media_id is NOT unique in prod (verified: 2 media_id values have
+# 2 matching resources rows each) — a plain LEFT JOIN fans a media row out
+# into >1 row for those ids, and _fetch_media_status silently drops all but
+# the last one when the frontend collapses by media_id, potentially hiding a
+# real fs_residue row behind a later ok-looking one. LATERAL + LIMIT 1 keeps
+# it to one row per pm, same deterministic-pick convention as the rv/ri
+# LATERALs below.
 _JOINS = """
     FROM parsed_media pm
-    LEFT JOIN resources r ON r.media_id = pm.id
+    LEFT JOIN LATERAL (
+        SELECT id, thumbnail_path, cover_image_path, file_path FROM resources
+        WHERE media_id = pm.id ORDER BY id LIMIT 1
+    ) r ON true
     LEFT JOIN LATERAL (
         SELECT hls_path, file_path FROM resource_versions
         WHERE resource_id = r.id ORDER BY id DESC LIMIT 1
