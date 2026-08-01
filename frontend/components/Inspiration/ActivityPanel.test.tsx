@@ -1,5 +1,18 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+
+// The fixtures below are pinned to July 2026 while the calendar opens on the
+// CURRENT month — without freezing the clock the whole suite breaks at every
+// month boundary (first hit: CI in UTC crossed into 2026-08-01 while local
+// dev was still 07-31, so `2026-07-07` cells no longer rendered). Fake ONLY
+// Date: waitFor/findBy need real setTimeout to keep polling.
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-07-15T12:00:00Z'));
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 const getActivity = vi.fn();
 vi.mock('../../services/inspirationService', () => ({
@@ -65,22 +78,29 @@ describe('ActivityPanel', () => {
 });
 
 describe('ActivityPanel calendar enrichment (go-live feedback)', () => {
+  // Calendar view opens on the CURRENT month, so the seeded note must live in
+  // it — a hardcoded '2026-07-07' made these two tests fail on every CI run
+  // where the UTC month had moved on (first seen 2026-08-01T00:33Z, while
+  // local dev machines still on 07-31 kept passing).
+  const now = new Date();
+  const seedDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-07`;
+
   beforeEach(() => {
     localStorage.clear();
     localStorage.setItem('inspiration.activityMode', 'calendar');
-    getActivity.mockResolvedValue([{ day: '2026-07-07', cnt: 3 }]);
+    getActivity.mockResolvedValue([{ day: seedDay, cnt: 3 }]);
   });
 
   it('days with notes show a visible count badge', async () => {
     render(<ActivityPanel selectedDate={null} onSelectDate={vi.fn()} refreshKey={0} />);
-    const cell = await screen.findByLabelText('2026-07-07: 3 notes');
+    const cell = await screen.findByLabelText(`${seedDay}: 3 notes`);
     expect(cell.textContent).toContain('3');
   });
 
   it('Today button selects today and shows the month footer total', async () => {
     const onSelectDate = vi.fn();
     render(<ActivityPanel selectedDate={null} onSelectDate={onSelectDate} refreshKey={0} />);
-    await screen.findByLabelText('2026-07-07: 3 notes');
+    await screen.findByLabelText(`${seedDay}: 3 notes`);
     fireEvent.click(screen.getByText('Today'));
     expect(onSelectDate).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
     expect(screen.getByText(/notes this month/)).toBeTruthy();

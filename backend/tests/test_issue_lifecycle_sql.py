@@ -193,3 +193,86 @@ async def test_load_issue_normalizes_datetime_and_uuid():
     assert isinstance(out["created_at"], str)  # datetime → isoformat
     assert out["assignee_user_id"] == str(owner)  # UUID → str
     assert out["title"] == "x"
+
+
+# ── set_status → project_stage node projection (probe follow-up) ─────────────
+
+
+async def test_set_status_in_review_projects_onto_stage_node():
+    """Regression (live E2E probe, 2026-07-31): ``set_status`` writes
+    ``public.issues`` with raw SQL, bypassing ``transition_status`` where the
+    issue→node projection lives. An agent self-completing to ``in_review``
+    left its stage node on ``in_progress``, so the Stage Board showed work
+    still running that was actually awaiting a manager's review."""
+    import app.workflows.issue_lifecycle as il
+
+    fired = {}
+
+    async def fake_execute(sql, params=None):
+        return 1
+
+    async def fake_fetch_one(sql, params=None):
+        assert "origin_kind" in sql
+        return {"id": 7, "origin_kind": "project_stage", "origin_id": "ps:1:2"}
+
+    async def fake_sync(issue, new_status, *, enqueue_autopilot=True):
+        fired["issue"] = issue
+        fired["status"] = new_status
+        fired["enqueue_autopilot"] = enqueue_autopilot
+
+    with (
+        patch("app.db.engine.execute_as_service_role", fake_execute),
+        patch("app.db.engine.fetch_one", fake_fetch_one),
+        patch("app.repositories.issue_repository.fire_stage_node_sync", fake_sync),
+    ):
+        await il.set_status(7, "in_review")
+
+    assert fired["status"] == "in_review"
+    assert fired["issue"]["origin_kind"] == "project_stage"
+    # Suppressed on purpose: set_status runs inside a @DBOS.step, where
+    # starting a workflow raises a bare AssertionError.
+    assert fired["enqueue_autopilot"] is False
+
+
+async def test_set_status_skips_projection_for_unmapped_status():
+    """``blocked`` has no node counterpart — don't even fetch the row."""
+    import app.workflows.issue_lifecycle as il
+
+    calls = []
+
+    async def fake_execute(sql, params=None):
+        return 1
+
+    async def fake_fetch_one(sql, params=None):
+        calls.append(sql)
+        return None
+
+    with (
+        patch("app.db.engine.execute_as_service_role", fake_execute),
+        patch("app.db.engine.fetch_one", fake_fetch_one),
+    ):
+        await il.set_status(7, "blocked", error_code="x", error_message="boom")
+
+    assert calls == []
+
+
+async def test_set_status_survives_a_failing_stage_node_projection():
+    """The projection is enrichment — a failure must never abort the status
+    write the workflow depends on."""
+    import app.workflows.issue_lifecycle as il
+
+    async def fake_execute(sql, params=None):
+        return 1
+
+    async def fake_fetch_one(sql, params=None):
+        return {"id": 7, "origin_kind": "project_stage", "origin_id": "ps:1:2"}
+
+    async def boom(issue, new_status, *, enqueue_autopilot=True):
+        raise RuntimeError("node repo down")
+
+    with (
+        patch("app.db.engine.execute_as_service_role", fake_execute),
+        patch("app.db.engine.fetch_one", fake_fetch_one),
+        patch("app.repositories.issue_repository.fire_stage_node_sync", boom),
+    ):
+        await il.set_status(7, "in_review")  # must not raise
