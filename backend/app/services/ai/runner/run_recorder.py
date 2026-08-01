@@ -399,13 +399,15 @@ class RunRecorder:
 
             from app.db.session import write_scope
 
-            # agent_run_events is mig-285 (run_id BIGINT + seq/event_type/payload);
-            # the AgentRunEvents ORM model still maps the pre-285 harness columns,
-            # so insert via raw text() (jsonb cast) to hit the real table.
+            # agent_run_transcript_events (mig 397). Mig 285 tried to reuse
+            # the `agent_run_events` name, but that table is the mig-155
+            # cost-audit log (still written by cost_auditor) and the
+            # IF NOT EXISTS no-oped — these inserts failed silently until
+            # the transcript stream got its own table.
             async with write_scope() as session:
                 await session.execute(
                     text(
-                        "INSERT INTO agent_run_events "
+                        "INSERT INTO agent_run_transcript_events "
                         "(run_id, seq, event_type, payload) VALUES "
                         "(:run_id, :seq, :event_type, CAST(:payload AS jsonb))"
                     ),

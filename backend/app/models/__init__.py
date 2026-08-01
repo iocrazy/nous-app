@@ -35,6 +35,7 @@ from app.models.agent_messaging import (  # noqa: F401
 from app.models.agents import (  # noqa: F401
     AgentRunEvents,
     AgentRuns,
+    AgentRunTranscriptEvents,
     AgentSkills,
     AgentStateHistory,
     AgentTasks,
@@ -252,6 +253,7 @@ __all__ = [
     "AgentInbox",
     "AgentOutbox",
     "AgentRunEvents",
+    "AgentRunTranscriptEvents",
     "AgentRuns",
     "AgentSkills",
     "AgentStateHistory",

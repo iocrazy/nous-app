@@ -2110,30 +2110,23 @@ async def list_run_events(
     if not row:
         raise HTTPException(status_code=404, detail="run not found")
 
-    # NOTE: the ``AgentRunEvents`` ORM model is stale — it still maps the
-    # mig-155 harness columns (iteration / tool_name / …), whereas the live
-    # table is mig-285 (seq / event_type / payload). We reference the drifted
-    # columns via ``column(...)`` so the rendered SQL matches the real table
-    # byte-for-byte; ``run_id`` (BIGINT) is the one mapped column that lines up.
-    from sqlalchemy import column, select
+    # agent_run_transcript_events (mig 397, ORM AgentRunTranscriptEvents).
+    # NOT `agent_run_events` — that name is the mig-155 cost-audit log; mig
+    # 285's attempt to reuse it no-oped on IF NOT EXISTS, which is why this
+    # endpoint 500'd with `column "seq" does not exist` until 397.
+    from sqlalchemy import select
 
     from app.db.session import read_scope
-    from app.models import AgentRunEvents
+    from app.models import AgentRunTranscriptEvents as TE
 
     async with read_scope() as session:
         rows = (
             (
                 await session.execute(
-                    select(
-                        column("seq"),
-                        column("event_type"),
-                        column("payload"),
-                        column("created_at"),
-                    )
-                    .select_from(AgentRunEvents)
-                    .where(AgentRunEvents.run_id == int(run_id))
-                    .where(column("seq") > after_seq)
-                    .order_by(column("seq").asc())
+                    select(TE.seq, TE.event_type, TE.payload, TE.created_at)
+                    .where(TE.run_id == int(run_id))
+                    .where(TE.seq > after_seq)
+                    .order_by(TE.seq.asc())
                     .limit(max(1, min(limit, 1000)))
                 )
             )

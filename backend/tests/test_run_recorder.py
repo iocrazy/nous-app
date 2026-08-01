@@ -81,7 +81,7 @@ class _FakeSession:
         is_update = sql.lstrip().startswith("update")
         is_select = sql.lstrip().startswith("select")
 
-        if is_insert and "agent_run_events" in sql:
+        if is_insert and "agent_run_transcript_events" in sql:
             self._table.event_inserts.append(dict(bind_params))
             return _ExecResult()
 
@@ -106,9 +106,11 @@ class _FakeSession:
 
         if is_select and "cancel_requested" in sql:
             return _ExecResult(
-                first_row=_Row((self._table._cancel_requested,))
-                if self._table._cancel_requested is not None
-                else None
+                first_row=(
+                    _Row((self._table._cancel_requested,))
+                    if self._table._cancel_requested is not None
+                    else None
+                )
             )
 
         if is_select and "task_tracking" in sql:
