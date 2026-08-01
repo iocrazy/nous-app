@@ -7,12 +7,20 @@ EMPTY_OUTPUT and routed to ``needs_followup``, never ``in_review``. Content
 present but no outcome still falls back to the legacy ``in_review`` default
 (regression line). Also covers the run-row housekeeping ``route_finish_outcome``
 performs when given a ``run_id``: ``agent_runs.issue_id`` backfill
-(unconditional) and, for the EMPTY_OUTPUT branch, a typed error_code +
-liveness finalize (prod evidence: agent_runs 333739667136736 sat at
-status=completed/error_code=NULL/liveness_state='running' after producing 0
-chars with no declaration)."""
+(unconditional) and, for the EMPTY_OUTPUT branch, a typed error_code /
+error_message (prod evidence: agent_runs 333739667136736 sat at
+status=completed/error_code=NULL after producing 0 chars with no
+declaration).
+
+Fix round 1 (review): ``mark_empty_output`` must NOT touch ``liveness_state``
+— every other writer of ``liveness_state='dead'`` pairs it atomically with
+``status='failed'`` (migration 207's contract), and this run's status stays
+``'completed'``. See ``AgentRunsRepository.mark_empty_output`` for the full
+reasoning; ``test_mark_empty_output_leaves_liveness_state_untouched`` below
+pins it at the repository level."""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -70,7 +78,7 @@ async def test_zero_content_defaults_content_len_and_still_routes_empty_output()
 
 
 @pytest.mark.asyncio
-async def test_zero_content_marks_run_row_empty_output_and_finalizes_liveness():
+async def test_zero_content_marks_run_row_empty_output():
     set_status = AsyncMock()
     repo = AsyncMock()
 
@@ -91,6 +99,54 @@ async def test_zero_content_marks_run_row_empty_output_and_finalizes_liveness():
     repo.mark_empty_output.assert_awaited_once_with(
         "900000000000123", error_message="Agent produced no output (EMPTY_OUTPUT)"
     )
+
+
+class _FakeResult:
+    def first(self):
+        return None
+
+
+class _FakeSession:
+    def __init__(self, captured: dict) -> None:
+        self._captured = captured
+
+    async def execute(self, stmt, params=None):
+        self._captured["stmt"] = stmt
+        return _FakeResult()
+
+
+def _write_scope(captured: dict):
+    @asynccontextmanager
+    async def _scope():
+        yield _FakeSession(captured)
+
+    return _scope
+
+
+@pytest.mark.asyncio
+async def test_mark_empty_output_leaves_liveness_state_untouched():
+    """Repository-level pin (fix round 1): the EMPTY_OUTPUT UPDATE must set
+    error_code/error_message and nothing else — in particular, it must NOT
+    set liveness_state. Every other writer of liveness_state='dead'
+    (liveness_scanner._mark_dead, liveness/reconcile.reconcile_stranded_runs)
+    pairs it atomically with status='failed'; this run's status stays
+    'completed', so writing 'dead' here would mint a combo that never
+    exists anywhere else and breaks ops triage's dead⟺failed assumption."""
+    from app.repositories.agent_runs_repository import get_agent_runs_repository
+
+    captured: dict = {}
+    with patch(
+        "app.repositories.agent_runs_repository.write_scope", _write_scope(captured)
+    ):
+        await get_agent_runs_repository().mark_empty_output(
+            "900000000000123", error_message="Agent produced no output (EMPTY_OUTPUT)"
+        )
+
+    params = captured["stmt"].compile().params
+    assert params["error_code"] == "EMPTY_OUTPUT"
+    assert params["error_message"] == "Agent produced no output (EMPTY_OUTPUT)"
+    assert "liveness_state" not in params
+    assert "status" not in params
 
 
 @pytest.mark.asyncio

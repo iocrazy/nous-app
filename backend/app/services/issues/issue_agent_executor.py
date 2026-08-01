@@ -165,7 +165,7 @@ async def run_issue_agent(
             # A2 (needs_input first-class design §5.1): threaded up to
             # route_finish_outcome so it can backfill agent_runs.issue_id
             # and, for the zero-content/no-outcome case, type the row's
-            # error_code + finalize its liveness_state.
+            # error_code/error_message.
             "run_id": result.get("run_id"),
         }
     finally:

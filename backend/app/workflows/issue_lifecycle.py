@@ -505,8 +505,9 @@ async def _backfill_run_issue_id(run_id: str, issue_id: int) -> None:
 
 
 async def _mark_run_empty_output(run_id: str) -> None:
-    """Best-effort: type the EMPTY_OUTPUT run row + finalize its
-    liveness_state. See ``AgentRunsRepository.mark_empty_output``."""
+    """Best-effort: type the EMPTY_OUTPUT run row (error_code/error_message).
+    Deliberately does NOT touch liveness_state — see
+    ``AgentRunsRepository.mark_empty_output`` for why."""
     from app.repositories.agent_runs_repository import get_agent_runs_repository
 
     await get_agent_runs_repository().mark_empty_output(
@@ -550,9 +551,10 @@ async def route_finish_outcome(
     ``run_id``, when given, also drives per-run housekeeping every
     issue-linked turn should get regardless of outcome: ``agent_runs.issue_id``
     backfill (unconditional) and, for the EMPTY_OUTPUT branch specifically, a
-    typed error_code + liveness finalize (prod evidence: agent_runs
-    333739667136736 sat at status=completed/error_code=NULL/liveness_state=
-    'running' having produced 0 chars with no declaration).
+    typed ``error_code``/``error_message`` (prod evidence: agent_runs
+    333739667136736 sat at status=completed/error_code=NULL having produced 0
+    chars with no declaration). Deliberately does NOT touch
+    ``liveness_state`` — see ``AgentRunsRepository.mark_empty_output``.
     """
     if run_id is not None:
         await _backfill_run_issue_id(run_id, issue_id)

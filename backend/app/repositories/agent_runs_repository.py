@@ -566,13 +566,23 @@ class AgentRunsRepository(AsyncpgRepository):
         failure (A2) instead of leaving it looking like an ordinary
         ``completed`` row.
 
-        Also finalizes ``liveness_state`` to ``'dead'`` — the closest analog
-        in the 5-state model (see ``liveness_scanner.py``'s own use of
-        ``dead`` alongside ``status='failed'``/``error_code='liveness_dead'``)
-        so the row stops reading ``'running'`` forever once RunRecorder has
-        already flipped ``status`` away from running (prod evidence: run
-        333739667136736 sat at ``liveness_state='running'`` post-completion).
-        Never raises — best-effort annotation on an already-finished row."""
+        Deliberately does NOT touch ``liveness_state``. Every other writer of
+        ``liveness_state='dead'`` — ``liveness_scanner._mark_dead`` and
+        ``liveness/reconcile.reconcile_stranded_runs`` — pairs it atomically
+        with ``status='failed'`` (migration 207's column comment documents
+        this as the intended contract: dead means "the process actually
+        died", a different ops playbook from "the model returned nothing").
+        This run's ``status`` stays ``'completed'`` (RunRecorder already
+        closed it that way, successfully, before this method ever runs), so
+        writing ``liveness_state='dead'`` here would mint a never-before-seen
+        ``status='completed' + liveness_state='dead'`` combo and pollute that
+        invariant for ops triage. The EMPTY_OUTPUT typing is already fully
+        carried by ``error_code``/``error_message`` — no liveness_state write
+        needed. (The "liveness_state stays 'running' after completion" probe
+        observation is a real but separate gap: it needs its own terminal
+        value + migration, out of scope here — do not "fix" it by reaching
+        for 'dead'.) Never raises — best-effort annotation on an
+        already-finished row."""
         try:
             async with write_scope() as session:
                 await session.execute(
@@ -581,7 +591,6 @@ class AgentRunsRepository(AsyncpgRepository):
                     .values(
                         error_code="EMPTY_OUTPUT",
                         error_message=error_message,
-                        liveness_state="dead",
                     )
                 )
         except Exception as e:
