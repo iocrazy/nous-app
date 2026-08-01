@@ -632,6 +632,129 @@ async def test_tick_cascade_reentrancy_guard_skips_nested_enqueue_real_hook(
     assert enqueue_calls == []
 
 
+async def test_tick_auto_starts_node_the_cascade_just_opened_same_tick(
+    monkeypatch,
+):
+    """Regression (live E2E probe, 2026-07-31): the tick ran auto-start ONCE
+    and then cascaded, so an ``auto_start`` node that only became eligible
+    BECAUSE of that cascade was never picked up. Nothing else rescued it
+    either — ``execute_advance``'s tail enqueue is suppressed by the
+    ``cascade_in_progress()`` re-entrancy guard, so no nested tick re-checked
+    the newly-opened group. The node sat ``pending`` until some unrelated
+    later trigger happened along.
+
+    Here node 2 depends on node 1, which is still ``in_progress`` when the
+    tick starts — so the FIRST auto-start pass correctly skips it. The cascade
+    then closes node 1 (real mirror-issue transition → real
+    ``_fire_stage_node_sync`` → node 1 done) and opens node 2's group, which
+    is exactly what makes node 2 eligible. The fixpoint loop must re-run the
+    auto-start pass and dispatch it within this same tick.
+    """
+    n1 = _node("1", sort_order=1, auto_start=False, status="in_progress")
+    n2 = _node(
+        "2",
+        sort_order=2,
+        auto_start=True,
+        status="pending",
+        owner_agent_id=_AGENT,
+        depends_on=["1"],
+    )
+    projects_repo = _FakeProjectsRepo(current_node_id="1")
+    nodes_repo = _FakeNodesRepo([n1, n2], projects_repo=projects_repo)
+    issue_repo = _RealishIssueRepo(
+        {
+            501: {
+                "id": 501,
+                "status": "in_progress",
+                "origin_kind": "project_stage",
+                "origin_id": "project_stage:100:1",
+            },
+            502: {
+                "id": 502,
+                "status": "todo",
+                "origin_kind": "project_stage",
+                "origin_id": "project_stage:100:2",
+            },
+        }
+    )
+    _install_repos(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        issue_repo=issue_repo,
+        notify_spy=_NotifySpy(),
+    )
+
+    spy = _StartNodeSpy()
+    monkeypatch.setattr(autopilot, "start_node_now", spy)
+
+    async def _spy_enqueue(project_id):
+        return None
+
+    monkeypatch.setattr(autopilot, "enqueue_autopilot_tick", _spy_enqueue)
+
+    await autopilot._autopilot_tick_impl(_PROJECT)
+
+    # The cascade really did close node 1 and move the cursor onto node 2...
+    assert issue_repo._issues[501]["status"] == "done"
+    assert nodes_repo.current_node_id_calls[-1] == (_PROJECT, "2")
+    # ...and the SAME tick then auto-started the node it just unblocked.
+    assert len(spy.calls) == 1
+    assert spy.calls[0]["node_id"] == "2"
+    assert spy.calls[0]["dispatch"] is True
+    assert spy.calls[0]["dispatch_auto"] is True
+
+
+async def test_tick_fixpoint_loop_stops_when_cascade_advances_nothing(monkeypatch):
+    """The loop must converge, not spin: a cascade that advances nothing ends
+    the tick after a single auto-start pass."""
+    candidate = _node("1", sort_order=1)
+    nodes_repo = _FakeNodesRepo([candidate])
+    projects_repo = _FakeProjectsRepo()
+    _install_repos(monkeypatch, nodes_repo=nodes_repo, projects_repo=projects_repo)
+
+    monkeypatch.setattr(autopilot, "start_node_now", _StartNodeSpy())
+
+    cascade_calls: List[int] = []
+
+    async def _no_advance(project_id, project):
+        cascade_calls.append(1)
+        return False
+
+    monkeypatch.setattr(autopilot, "_cascade_pass", _no_advance)
+
+    await autopilot._autopilot_tick_impl(_PROJECT)
+
+    assert len(cascade_calls) == 1
+    assert nodes_repo.list_nodes_calls == 1
+
+
+async def test_tick_fixpoint_loop_is_bounded_and_flags_a_runaway(monkeypatch):
+    """A cascade that claims to advance forever is capped at
+    ``_MAX_TICK_PASSES`` and flagged, never left to spin."""
+    nodes_repo = _FakeNodesRepo([_node("1", auto_start=False, status="done")])
+    projects_repo = _FakeProjectsRepo()
+    _install_repos(monkeypatch, nodes_repo=nodes_repo, projects_repo=projects_repo)
+
+    monkeypatch.setattr(autopilot, "start_node_now", _StartNodeSpy())
+
+    cascade_calls: List[int] = []
+
+    async def _always_advance(project_id, project):
+        cascade_calls.append(1)
+        return True
+
+    monkeypatch.setattr(autopilot, "_cascade_pass", _always_advance)
+
+    spy_logger = _LoggerSpy()
+    monkeypatch.setattr(autopilot, "logger", spy_logger)
+
+    await autopilot._autopilot_tick_impl(_PROJECT)
+
+    assert len(cascade_calls) == autopilot._MAX_TICK_PASSES
+    assert any("pass ceiling" in w for w in spy_logger.warnings)
+
+
 async def test_tick_deps_pending_cascade_notifies_once(monkeypatch):
     """A DEPS_PENDING block (mig 391 gate 5) is also a genuine gate worth a
     human notification — distinct code path from REVIEW_PENDING above."""

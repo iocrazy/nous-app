@@ -105,6 +105,45 @@ async def set_status(
     await db_engine.execute_as_service_role(
         f"UPDATE public.issues SET {', '.join(cols)} WHERE id = :id", params
     )
+    await _project_status_onto_stage_node(issue_id, status)
+
+
+async def _project_status_onto_stage_node(issue_id: int, status: str) -> None:
+    """Mirror the status just written above onto the issue's project_stage
+    node, if it has one.
+
+    ``set_status`` writes ``public.issues`` with raw SQL rather than through
+    ``issue_repository.transition_status``, which is where the issue→node
+    projection normally rides. Without this call the node kept whatever status
+    it had before: an agent self-completing to ``in_review`` left its node on
+    ``in_progress``, so the Stage Board showed work still running that was
+    actually waiting for a manager's review.
+
+    The ``done``-path autopilot tail enqueue is suppressed — this runs inside
+    a ``@DBOS.step``, where starting a workflow raises a bare AssertionError
+    (the trap ``_maybe_fire_subissue_barrier`` avoids by living in the
+    workflow body). Those ticks still arrive via the arrival/advance triggers
+    and the 5-minute sweep.
+    """
+    try:
+        from app.db import engine as db_engine
+        from app.repositories.issue_repository import (
+            STAGE_NODE_SYNC_STATUSES,
+            fire_stage_node_sync,
+        )
+
+        if status not in STAGE_NODE_SYNC_STATUSES:
+            return
+        row = await db_engine.fetch_one(
+            "SELECT id, origin_kind, origin_id FROM public.issues WHERE id = :id",
+            {"id": issue_id},
+        )
+        await fire_stage_node_sync(row, status, enqueue_autopilot=False)
+    except Exception as exc:  # noqa: BLE001 — the status write is the primary op
+        logger.warning(
+            f"[execute_issue] stage-node projection failed for issue "
+            f"{issue_id}: {exc!r}"
+        )
 
 
 @DBOS.step()

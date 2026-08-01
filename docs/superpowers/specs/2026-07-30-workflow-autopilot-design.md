@@ -40,6 +40,10 @@ agent_runs 侧        自动派发需可识别(dispatch 元数据标 auto;具体
 
 **纪律**:审阅门语义零改动(in_review→done 只有人/manager);失败 run 通知 + 节点停 in_progress;所有通知走 M3 `stage_notifications` 同族(kind=workflow_stage)。
 
+**零门槛节点瞬时推进是预期语义**(2026-07-31 实测探针确认):一个组若 review/deliverable/form/deps 全未配置,advance predicate 没有任何东西可拦,autopilot 会在到达当轮 tick 内直接级联跨过它——包括项目创建那一刻。门槛定义"何时算完成",没配门槛=无需等待;不存在隐式的"至少等自己镜像 issue 做完"门。想让节点停下来等,至少配一个门(最轻的是 review_required)。
+
+**tick 内 (auto-start → cascade) 循环到不动点**(同日探针修正):级联打开新组后,`execute_advance` 的尾部 enqueue 被防重入护栏抑制,故 tick 自身负责重跑 auto-start pass 直至一轮无变化(上限 10 轮,超限告警),否则新组的 auto_start 节点会滞留 pending 等外部触发。
+
 ## 3. API 与前端
 
 - `POST /projects/{id}/workflow/nodes/{node_id}/start-early` —— 手动先行开工:deps 满足才放行(否则 422 DEPS_PENDING + waiting_on),行为=tick 第 2 步的单节点手动版(agent owner 仍走 confirm 门,手动路径不自动 dispatch)
