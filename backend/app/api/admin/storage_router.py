@@ -6,10 +6,11 @@ verification lives in Task 3 (same file). Read logic is module-level
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 
 from app.core.admin_deps import AdminAuthDep
 from app.db import engine as db_engine
+from app.utils.admin_helpers import create_audit_log
 
 router = APIRouter()
 
@@ -22,6 +23,8 @@ _FS_RESIDUE_WHERE = " OR ".join(
     [
         _fs_cond("pm.download_path"),
         _fs_cond("pm.cover_download_path"),
+        _fs_cond("pm.music_download_path"),
+        _fs_cond("pm.extract_audio_path"),
         _fs_cond("r.thumbnail_path"),
         _fs_cond("r.cover_image_path"),
         _fs_cond("r.file_path"),
@@ -299,11 +302,18 @@ async def _find_running_audit() -> str | None:
     """Most recent still-running storage_audit workflow id, if any — used
     to dedup /verify dispatch so an admin double-click doesn't spawn a
     second full-library scan. Column is ``dbos_workflow_id`` (task_tracking's
-    actual PK per app/models/ops.py::TaskTracking), not ``task_id``."""
+    actual PK per app/models/ops.py::TaskTracking), not ``task_id``.
+
+    Bounded to the last 2 hours: without a time cap, a run stuck in
+    queued/in_progress (crashed worker, DBOS recovery failure) would dedup
+    every future /verify dispatch forever — a full-library scan realistically
+    finishes in minutes, so anything older than 2h is presumed dead and
+    should self-heal rather than block new dispatches indefinitely."""
     row = await db_engine.fetch_one(
         """
         SELECT dbos_workflow_id FROM task_tracking
         WHERE task_type = 'storage_audit' AND phase IN ('queued','in_progress')
+          AND created_at > now() - interval '2 hours'
         ORDER BY created_at DESC LIMIT 1
         """
     )
@@ -321,21 +331,69 @@ async def verify_media_on_s3(auth: AdminAuthDep, media_id: int):
 
 
 @router.post("/verify")
-async def dispatch_deep_verify(auth: AdminAuthDep):
+async def dispatch_deep_verify(auth: AdminAuthDep, request: Request):
     """Dispatch a full-library storage_audit workflow run, deduped against
-    any run still queued/in_progress."""
+    any run still queued/in_progress.
+
+    Pre-creates the task_tracking row BEFORE dispatching the workflow (I5
+    fix). Fact established while fixing this: ``start_workflow_routed``
+    (app/services/infra/dbos_orchestrator.py) does NOT create any
+    task_tracking row itself — it only calls ``DBOS.start_workflow(...)``
+    (or the dormant DBOSClient.enqueue path) and returns immediately with
+    ``handle.workflow_id``; the workflow body executes concurrently in the
+    background. ``storage_audit_workflow`` is the one that calls
+    ``manager.create()``, and it does so from INSIDE the workflow body —
+    so there is a real race: this endpoint could return to the frontend
+    before that INSERT has landed, and an immediate ``GET /audit`` poll
+    would see no row yet (no queued/in_progress task to poll), so the UI's
+    polling loop never starts and the Deep Verify button springs back.
+
+    Fix: mint the workflow id here, INSERT the task_tracking row
+    ourselves via ``manager.create()`` (phase=QUEUED, route-C compliant —
+    it's the sanctioned manager API, not a raw phase PATCH), and only THEN
+    dispatch the workflow with that same id via ``workflow_id=``. By the
+    time this endpoint returns, the row is guaranteed to exist. The
+    workflow body's own ``manager.create()`` call will hit the
+    already-existing row (INTEGRITY / duplicate PK on dbos_workflow_id);
+    that call is already wrapped in try/except in storage_audit.py
+    (non-fatal, logs a warning) — so a workflow replay/re-run never
+    crashes on the duplicate insert.
+    """
     running = await _find_running_audit()
     if running:
         return {"workflow_id": running, "already_running": True}
 
+    import uuid
+
     from app.services.infra.dbos_orchestrator import start_workflow_routed
-    from app.workflows.storage_audit import storage_audit_workflow
+    from app.services.infra.unified_task_manager import get_task_manager
+    from app.workflows.storage_audit import SYSTEM_RUN_USER_ID, storage_audit_workflow
+
+    workflow_id = str(uuid.uuid4())
+    manager = get_task_manager()
+    await manager.create(
+        user_id=SYSTEM_RUN_USER_ID,
+        task_type="storage_audit",
+        title="Deep S3 storage audit",
+        dbos_workflow_id=workflow_id,
+    )
 
     result = await start_workflow_routed(
         "storage_audit",
         dbos_workflow_callable=storage_audit_workflow,
         dbos_workflow_kwargs={},
+        workflow_id=workflow_id,
     )
+
+    await create_audit_log(
+        admin_id=auth.user_id,
+        action="storage_audit_dispatch",
+        target_type="workflow",
+        target_id=result["dbos_workflow_id"],
+        details={"workflow_id": result["dbos_workflow_id"]},
+        ip_address=request.client.host if request.client else None,
+    )
+
     return {"workflow_id": result["dbos_workflow_id"], "already_running": False}
 
 

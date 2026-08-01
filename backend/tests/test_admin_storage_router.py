@@ -11,12 +11,25 @@ not this module.
 """
 
 import importlib
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 from fastapi import HTTPException
 
 sr = importlib.import_module("app.api.admin.storage_router")
+
+
+def _auth():
+    auth = MagicMock()
+    auth.user_id = "admin-1"
+    return auth
+
+
+def _request(host="10.0.0.9"):
+    request = MagicMock()
+    request.client.host = host
+    return request
 
 
 def _http_status_error(status_code: int) -> httpx.HTTPStatusError:
@@ -220,3 +233,138 @@ async def test_deep_verify_dedups_running(monkeypatch):
     monkeypatch.setattr(sr.db_engine, "fetch_one", fake_fetch_one)
     out = await sr._find_running_audit()
     assert out == "wf-123"
+
+
+def test_find_running_audit_sql_caps_by_time(monkeypatch):
+    """M4: a queued/in_progress storage_audit stuck forever (crashed worker)
+    must not dedup every future /verify dispatch indefinitely — the query
+    must bound itself to a recent window so a stale run self-heals."""
+    captured = {}
+
+    async def fake_fetch_one(sql, params=None):
+        captured["sql"] = " ".join(sql.split())
+        return None
+
+    monkeypatch.setattr(sr.db_engine, "fetch_one", fake_fetch_one)
+    import asyncio
+
+    asyncio.run(sr._find_running_audit())
+    assert "interval '2 hours'" in captured["sql"]
+    assert "created_at >" in captured["sql"]
+
+
+def test_fs_residue_where_covers_nine_columns():
+    """I4: fs_residue must also catch the two extra parsed_media columns
+    storage_migration's pm_assets module migrated to S3 (music_download_path,
+    extract_audio_path) — previously only cover_download_path was covered,
+    so a leftover filesystem path in either column would silently never
+    surface as fs_residue."""
+    assert sr._FS_RESIDUE_WHERE.count(" OR ") == 8  # 9 conditions, 8 joins
+    for col in (
+        "pm.download_path",
+        "pm.cover_download_path",
+        "pm.music_download_path",
+        "pm.extract_audio_path",
+        "r.thumbnail_path",
+        "r.cover_image_path",
+        "r.file_path",
+        "rv.hls_path",
+        "rv.file_path",
+    ):
+        assert col in sr._FS_RESIDUE_WHERE, col
+
+
+@pytest.mark.asyncio
+async def test_dispatch_deep_verify_precreates_task_tracking_before_dispatch(
+    monkeypatch,
+):
+    """I5 fix: start_workflow_routed does NOT create any task_tracking row
+    itself (verified against app/services/infra/dbos_orchestrator.py — it
+    only calls DBOS.start_workflow/DBOSClient.enqueue and returns the
+    workflow id; the row is created from INSIDE storage_audit_workflow's own
+    body, which runs concurrently). Without a pre-create, the endpoint could
+    return before that INSERT lands, so an immediate GET /audit poll sees no
+    queued/in_progress row and the frontend's poll loop never starts.
+
+    This test asserts the endpoint itself calls manager.create() (via
+    get_task_manager()) BEFORE dispatching, and passes that SAME minted id
+    through to start_workflow_routed's `workflow_id=` kwarg — so whichever
+    id DBOS actually uses is the one already sitting in task_tracking."""
+
+    async def fake_no_running(*a, **kw):
+        return None
+
+    monkeypatch.setattr(sr, "_find_running_audit", fake_no_running)
+
+    fake_manager = MagicMock()
+    fake_manager.create = AsyncMock()
+    monkeypatch.setattr(
+        "app.services.infra.unified_task_manager.get_task_manager",
+        lambda: fake_manager,
+    )
+
+    dispatch = AsyncMock(
+        return_value={
+            "mode": "dbos",
+            "task_type": "storage_audit",
+            "dbos_workflow_id": "wf-precreated",
+        }
+    )
+    monkeypatch.setattr(
+        "app.services.infra.dbos_orchestrator.start_workflow_routed", dispatch
+    )
+    audit = AsyncMock(return_value=None)
+    monkeypatch.setattr(sr, "create_audit_log", audit)
+
+    result = await sr.dispatch_deep_verify(_auth(), _request())
+
+    # create() happened, dispatch happened, and the id create() used is
+    # exactly the id passed to start_workflow_routed(workflow_id=...).
+    fake_manager.create.assert_awaited_once()
+    created_id = fake_manager.create.call_args.kwargs["dbos_workflow_id"]
+    dispatch.assert_awaited_once()
+    assert dispatch.call_args.kwargs["workflow_id"] == created_id
+    assert fake_manager.create.call_args.kwargs["task_type"] == "storage_audit"
+    assert result == {"workflow_id": "wf-precreated", "already_running": False}
+
+    # M3: audit log fired with the dispatched workflow id.
+    audit.assert_awaited_once()
+    audit_kwargs = audit.call_args.kwargs
+    assert audit_kwargs["admin_id"] == "admin-1"
+    assert audit_kwargs["action"] == "storage_audit_dispatch"
+    assert audit_kwargs["target_id"] == "wf-precreated"
+    assert audit_kwargs["ip_address"] == "10.0.0.9"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_deep_verify_skips_precreate_when_already_running(
+    monkeypatch,
+):
+    """When a scan is already queued/in_progress, dispatch must short-circuit
+    before creating a second task_tracking row or dispatching a second
+    workflow."""
+
+    async def fake_running(*a, **kw):
+        return "wf-already"
+
+    monkeypatch.setattr(sr, "_find_running_audit", fake_running)
+
+    fake_manager = MagicMock()
+    fake_manager.create = AsyncMock()
+    monkeypatch.setattr(
+        "app.services.infra.unified_task_manager.get_task_manager",
+        lambda: fake_manager,
+    )
+    dispatch = AsyncMock()
+    monkeypatch.setattr(
+        "app.services.infra.dbos_orchestrator.start_workflow_routed", dispatch
+    )
+    audit = AsyncMock(return_value=None)
+    monkeypatch.setattr(sr, "create_audit_log", audit)
+
+    result = await sr.dispatch_deep_verify(_auth(), _request())
+
+    assert result == {"workflow_id": "wf-already", "already_running": True}
+    fake_manager.create.assert_not_awaited()
+    dispatch.assert_not_awaited()
+    audit.assert_not_awaited()

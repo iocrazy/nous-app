@@ -1,6 +1,6 @@
 """Deep S3 existence audit for the migrated library.
 
-Collects every sb:// key from the 7 index columns and probes each in bounded
+Collects every sb:// key from the 9 index columns and probes each in bounded
 concurrency chunks. Results go into the run's task_tracking metadata (jsonb)
 — no new table. Route C: phase columns are trigger-owned; this workflow only
 ``complete``s with a ``metadata_patch`` for its business fields and never
@@ -47,25 +47,33 @@ _COLLECT_SQL = """
     SELECT cover_download_path, 'cover', id, NULL::bigint
     FROM parsed_media WHERE cover_download_path LIKE 'sb://%'
     UNION ALL
-    SELECT thumbnail_path, 'thumbnail', NULL::bigint, id
+    SELECT music_download_path, 'music', id, NULL::bigint
+    FROM parsed_media WHERE music_download_path LIKE 'sb://%'
+    UNION ALL
+    SELECT extract_audio_path, 'extract_audio', id, NULL::bigint
+    FROM parsed_media WHERE extract_audio_path LIKE 'sb://%'
+    UNION ALL
+    SELECT thumbnail_path, 'thumbnail', media_id, id
     FROM resources WHERE thumbnail_path LIKE 'sb://%'
     UNION ALL
-    SELECT cover_image_path, 'cover_image', NULL::bigint, id
+    SELECT cover_image_path, 'cover_image', media_id, id
     FROM resources WHERE cover_image_path LIKE 'sb://%'
     UNION ALL
-    SELECT file_path, 'file', NULL::bigint, id
+    SELECT file_path, 'file', media_id, id
     FROM resources WHERE file_path LIKE 'sb://%'
     UNION ALL
-    SELECT hls_path, 'hls', NULL::bigint, resource_id
-    FROM resource_versions WHERE hls_path LIKE 'sb://%'
+    SELECT rv.hls_path, 'hls', r.media_id, rv.resource_id
+    FROM resource_versions rv JOIN resources r ON r.id = rv.resource_id
+    WHERE rv.hls_path LIKE 'sb://%'
     UNION ALL
-    SELECT file_path, 'version_file', NULL::bigint, resource_id
-    FROM resource_versions WHERE file_path LIKE 'sb://%'
+    SELECT rv.file_path, 'version_file', r.media_id, rv.resource_id
+    FROM resource_versions rv JOIN resources r ON r.id = rv.resource_id
+    WHERE rv.file_path LIKE 'sb://%'
 """
 
 
 async def collect_audit_keys_step() -> list[dict]:
-    """Fetch every sb:// key across the 7 index columns, strip the
+    """Fetch every sb:// key across the 9 index columns, strip the
     ``sb://library/`` prefix, and de-dupe (the same object can be
     referenced from more than one column/table)."""
     rows = await db_engine.fetch_all(_COLLECT_SQL)
@@ -202,16 +210,17 @@ async def storage_audit_workflow() -> dict[str, Any]:
         "scanned_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    try:
-        await manager.complete(
-            task_id,
-            subtitle=f"{len(missing)} missing, {errors} errors",
-            metadata_patch=result,
-        )
-    except Exception as e:
-        logger.warning(
-            f"[storage-audit] complete {task_id} failed, scan results lost: {e}"
-        )
+    # Route C: this is the workflow's ONLY product (the scan result lives
+    # solely in task_tracking.metadata — no other table holds it). A failed
+    # complete() here must NOT be swallowed: if it were, the workflow would
+    # still return normally and DBOS would mark it SUCCESS, leaving
+    # phase=completed with empty metadata — a silent "Broken 0" false-green
+    # in the UI. Let it raise so DBOS marks the run ERROR instead.
+    await manager.complete(
+        task_id,
+        subtitle=f"{len(missing)} missing, {errors} errors",
+        metadata_patch=result,
+    )
 
     logger.info(
         f"[storage-audit] scanned={len(rows)} missing={len(missing)} errors={errors}"
