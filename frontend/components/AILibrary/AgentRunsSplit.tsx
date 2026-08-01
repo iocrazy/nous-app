@@ -9,8 +9,16 @@ import type {
   AgentRunListItem, AgentRunStatus,
 } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
+import { ConversationThreadPane } from './ConversationThreadPane';
 import { RunTranscript } from './RunTranscript';
 import { useToast } from '../Toast';
+
+// What the right pane shows: a conversation THREAD (coherent Q&A transcript,
+// selected via a group header) or a single run's engineering detail
+// (tokens / metadata, selected via a turn card).
+type RunsSelection =
+  | { kind: 'run'; runId: string }
+  | { kind: 'conversation'; conversationId: string };
 
 // Paperclip-style split-pane Runs tab: left = scrollable run list (status
 // icon, short id, trigger badge, age, summary snippet, tokens), right =
@@ -184,9 +192,10 @@ const RunListCard: React.FC<{
 const ConversationGroupCard: React.FC<{
   slug: string;
   group: AgentRunGroupItem;
-  selectedRunId: string | null;
+  selection: RunsSelection | null;
   onSelectRun: (runId: string) => void;
-}> = ({ slug, group, selectedRunId, onSelectRun }) => {
+  onSelectConversation: (conversationId: string) => void;
+}> = ({ slug, group, selection, onSelectRun, onSelectConversation }) => {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [turns, setTurns] = useState<AgentRunListItem[] | null>(null);
@@ -195,13 +204,18 @@ const ConversationGroupCard: React.FC<{
   const badge = triggerBadge(group.trigger);
   const status: AgentRunStatus = group.any_running ? 'running' : group.latest_status;
   const snippet = (group.latest_output_summary || group.latest_error_code || '').slice(0, 90);
-  const headerSelected = !expanded && selectedRunId === group.latest_run_id;
+  const headerSelected =
+    selection?.kind === 'conversation' &&
+    selection.conversationId === group.conversation_id;
+
+  const selectedRunId = selection?.kind === 'run' ? selection.runId : null;
 
   const toggle = async (): Promise<void> => {
-    const next = !expanded;
-    setExpanded(next);
-    if (next) {
-      onSelectRun(group.latest_run_id);
+    // Header click = read the conversation as one thread; the expanded turn
+    // cards remain the per-run diagnostics entry point.
+    if (group.conversation_id) onSelectConversation(group.conversation_id);
+    if (!expanded) {
+      setExpanded(true);
       if (turns === null && group.conversation_id) {
         try {
           const resp = await aiLibraryService.listAgentRuns(
@@ -214,6 +228,8 @@ const ConversationGroupCard: React.FC<{
           setTurnsError(err instanceof Error ? err.message : String(err));
         }
       }
+    } else if (headerSelected) {
+      setExpanded(false);
     }
   };
 
@@ -537,7 +553,7 @@ export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selection, setSelection] = useState<RunsSelection | null>(null);
   // Mobile: list ↔ detail toggle (md+ shows both panes).
   const [mobileShowDetail, setMobileShowDetail] = useState(false);
   const offsetRef = useRef(offset);
@@ -551,9 +567,17 @@ export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
         const resp = await aiLibraryService.listAgentRunGroups(slug, PAGE_SIZE, targetOffset);
         setPage(resp);
         setError(null);
-        // Auto-select the newest run on first load (desktop behaviour —
-        // mobile stays on the list until the user taps a row).
-        setSelectedRunId((prev) => prev ?? resp.items[0]?.latest_run_id ?? null);
+        // Auto-select the newest item on first load (desktop behaviour —
+        // mobile stays on the list until the user taps a row). Multi-turn
+        // conversations open as a thread; single runs as run detail.
+        setSelection((prev) => {
+          if (prev) return prev;
+          const first = resp.items[0];
+          if (!first) return null;
+          return first.run_count > 1 && first.conversation_id
+            ? { kind: 'conversation', conversationId: first.conversation_id }
+            : { kind: 'run', runId: first.latest_run_id };
+        });
       } catch (err) {
         console.error('[AgentRunsSplit] listAgentRunGroups failed:', err);
         const msg = friendlyError(err);
@@ -656,9 +680,13 @@ export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
                 key={group.group_key}
                 slug={slug}
                 group={group}
-                selectedRunId={selectedRunId}
+                selection={selection}
                 onSelectRun={(runId) => {
-                  setSelectedRunId(runId);
+                  setSelection({ kind: 'run', runId });
+                  setMobileShowDetail(true);
+                }}
+                onSelectConversation={(conversationId) => {
+                  setSelection({ kind: 'conversation', conversationId });
                   setMobileShowDetail(true);
                 }}
               />
@@ -666,9 +694,11 @@ export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
               <RunListCard
                 key={group.group_key}
                 run={groupToRunItem(group)}
-                selected={group.latest_run_id === selectedRunId}
+                selected={
+                  selection?.kind === 'run' && selection.runId === group.latest_run_id
+                }
                 onSelect={() => {
-                  setSelectedRunId(group.latest_run_id);
+                  setSelection({ kind: 'run', runId: group.latest_run_id });
                   setMobileShowDetail(true);
                 }}
               />
@@ -699,11 +729,17 @@ export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
         )}
       </div>
 
-      {/* Right: detail pane */}
+      {/* Right: conversation thread OR single-run detail */}
       <div className={`min-w-0 flex-1 ${mobileShowDetail ? '' : 'hidden md:block'}`}>
-        {selectedRunId ? (
+        {selection?.kind === 'conversation' ? (
+          <ConversationThreadPane
+            conversationId={selection.conversationId}
+            agentName={slug}
+            onBack={() => setMobileShowDetail(false)}
+          />
+        ) : selection?.kind === 'run' ? (
           <RunDetailPane
-            runId={selectedRunId}
+            runId={selection.runId}
             onCancel={handleCancel}
             onBack={() => setMobileShowDetail(false)}
           />

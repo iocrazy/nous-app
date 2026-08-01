@@ -78,12 +78,12 @@ describe('ActivityPanel', () => {
 });
 
 describe('ActivityPanel calendar enrichment (go-live feedback)', () => {
-  // Calendar view opens on the CURRENT month, so the seeded note must live in
-  // it — a hardcoded '2026-07-07' made these two tests fail on every CI run
-  // where the UTC month had moved on (first seen 2026-08-01T00:33Z, while
-  // local dev machines still on 07-31 kept passing).
-  const now = new Date();
-  const seedDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-07`;
+  // The file-level beforeAll freezes the clock at 2026-07-15, so the rendered
+  // "current month" is always July 2026 — hardcoded July fixtures are safe.
+  // NOTE: do NOT compute seed days from `new Date()` in a describe body: that
+  // runs at collection time, BEFORE beforeAll freezes the clock, so it reads
+  // the real date and diverges from what the component renders.
+  const seedDay = '2026-07-07';
 
   beforeEach(() => {
     localStorage.clear();
@@ -115,7 +115,10 @@ describe('ActivityPanel calendar enrichment (go-live feedback)', () => {
 });
 
 describe('ActivityPanel year/month wheel picker', () => {
-  const nowYear = new Date().getFullYear();
+  // Matches the file-level frozen clock (2026-07-15) — a collection-time
+  // `new Date().getFullYear()` would read the real year and diverge from the
+  // component's frozen "current year" starting January 2027.
+  const nowYear = 2026;
 
   beforeEach(() => {
     vi.clearAllMocks();

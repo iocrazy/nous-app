@@ -2676,7 +2676,9 @@
         "turns": "{{count}} 轮对话",
         "hideTurns": "收起轮次",
         "showTurns": "展开轮次",
-        "conversation": "会话"
+        "conversation": "会话",
+        "threadLoading": "加载对话中...",
+        "threadEmpty": "该会话没有消息。"
       },
       "budget": {
         "sectionLabel": "每月预算",
