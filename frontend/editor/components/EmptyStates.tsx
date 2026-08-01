@@ -20,8 +20,23 @@ export function ColdStart({
   const { t } = useTranslation();
   return (
     <div className="mh-coldstart" data-testid="cold-start">
+      <div className="mh-coldstart-slug">{t('editor.coldStartSlug')}</div>
       <div className="mh-coldstart-title">{t('editor.coldStartTitle')}</div>
       <p className="mh-coldstart-sub">{t('editor.coldStartSub')}</p>
+      <div className="mh-coldstart-ghost" aria-hidden="true">
+        <div className="mh-coldstart-gl">
+          <span className="mh-coldstart-tick is-action" />
+          <span className="mh-coldstart-bar" style={{ width: '78%' }} />
+        </div>
+        <div className="mh-coldstart-gl is-character">
+          <span className="mh-coldstart-tick is-char" />
+          <span className="mh-coldstart-bar" style={{ width: '26%' }} />
+        </div>
+        <div className="mh-coldstart-gl is-dialogue">
+          <span className="mh-coldstart-tick is-dlg" />
+          <span className="mh-coldstart-bar" style={{ width: '55%' }} />
+        </div>
+      </div>
       <div className="mh-coldstart-actions">
         <button type="button" className="mh-coldstart-btn" onClick={onCreateStory}>
           {t('editor.createStory')}
@@ -35,6 +50,14 @@ export function ColdStart({
             {t('editor.importScript')}
           </button>
         )}
+      </div>
+      <div className="mh-coldstart-keys">
+        <span>
+          <kbd>Tab</kbd> {t('editor.coldStartKeyTab')}
+        </span>
+        <span>
+          <kbd>Enter</kbd> {t('editor.coldStartKeyEnter')}
+        </span>
       </div>
     </div>
   );

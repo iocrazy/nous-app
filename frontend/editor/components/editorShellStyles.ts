@@ -1189,6 +1189,39 @@ export const EDITOR_SHELL_STYLES = `
   box-shadow:none;
 }
 .mh-coldstart-btn-secondary:hover{ background:var(--surface-2); }
+/* Screenplay-flavoured dressing (C-step redesign, 方案 A): slugline eyebrow,
+   a three-line ghost script teasing the element grammar with the editor's own
+   tick colours, and the two machine keys pulled out of the sub copy into key
+   caps. Decorative only — the seeded scene renders the real thing. */
+.mh-coldstart-slug{
+  font-family:var(--mono); font-size:12px; letter-spacing:0.14em;
+  text-transform:uppercase; color:var(--ink-faint);
+}
+.mh-coldstart-ghost{
+  width:100%; max-width:360px; display:flex; flex-direction:column; gap:7px;
+  margin-top:10px; opacity:0.75;
+}
+.mh-coldstart-gl{ display:flex; align-items:center; gap:10px; }
+.mh-coldstart-gl.is-character{ justify-content:center; }
+.mh-coldstart-gl.is-dialogue{ padding-left:15%; }
+.mh-coldstart-tick{ width:3px; height:14px; border-radius:2px; flex:none; }
+.mh-coldstart-tick.is-action{ background:var(--tick-action); }
+.mh-coldstart-tick.is-char{ background:var(--tick-character); }
+.mh-coldstart-tick.is-dlg{ background:var(--tick-dialogue); }
+.mh-coldstart-bar{
+  height:9px; border-radius:5px; background:var(--surface-2);
+  border:1px solid var(--hairline);
+}
+.mh-coldstart-keys{
+  display:flex; gap:14px; margin-top:8px; align-items:center;
+  color:var(--ink-faint); font-size:12px;
+}
+.mh-coldstart-keys kbd{
+  font-family:var(--sans); font-size:11px; font-weight:600; line-height:1;
+  color:var(--ink-soft); background:var(--surface);
+  border:1px solid var(--surface-border); border-bottom-width:2px;
+  border-radius:6px; padding:4px 7px;
+}
 
 /* ===== RIGHT PANEL ===== */
 .mh-right-col{ width:296px; display:flex; flex-direction:column; min-height:0; transition:width 0.2s ease; }
