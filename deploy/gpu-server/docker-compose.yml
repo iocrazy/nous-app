@@ -83,7 +83,13 @@ services:
     depends_on:
       - backend
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:80/health || exit 1"]
+      # 127.0.0.1, NOT localhost: inside the alpine container `localhost`
+      # resolves to ::1 first, and nginx here only binds IPv4 — the probe
+      # got "connection refused" forever and the container sat permanently
+      # unhealthy, which desensitizes `docker ps` as an incident signal
+      # (2026-08-01: masked nothing this time, but the badge was noise
+      # while diagnosing the nous-rest outage).
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
