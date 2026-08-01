@@ -15,12 +15,14 @@ from sqlalchemy import (
     Computed,
     DateTime,
     ForeignKeyConstraint,
+    Identity,
     Index,
     Integer,
     Numeric,
     PrimaryKeyConstraint,
     SmallInteger,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -468,6 +470,50 @@ class AgentRunEvents(Base):
         comment="provider_byok_keys row this event billed against. NULL = platform key.",
     )
     parent_run_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+
+
+class AgentRunTranscriptEvents(Base):
+    """Per-run transcript stream (mig 397).
+
+    NOT the same thing as ``AgentRunEvents`` above: that table is the
+    mig-155 cost-audit log (iteration / token deltas, written by
+    cost_auditor). Mig 285 tried to create THIS shape under that name and
+    silently no-oped on IF NOT EXISTS — the transcript stream lives here
+    instead. Writer: RunRecorder.record_event; reader:
+    GET /ai-library/runs/{id}/events.
+    """
+
+    __tablename__ = "agent_run_transcript_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type = ANY (ARRAY['user'::text, 'assistant'::text,"
+            " 'tool_call'::text, 'error'::text, 'system'::text])",
+            name="agent_run_transcript_events_event_type_check",
+        ),
+        ForeignKeyConstraint(
+            ["run_id"],
+            ["public.agent_runs.id"],
+            ondelete="CASCADE",
+            name="agent_run_transcript_events_run_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="agent_run_transcript_events_pkey"),
+        UniqueConstraint(
+            "run_id", "seq", name="agent_run_transcript_events_run_id_seq_key"
+        ),
+        Index("idx_agent_run_transcript_events_run_id", "run_id"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
 
 
 class AgentTasks(Base):
