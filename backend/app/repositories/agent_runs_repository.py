@@ -172,9 +172,7 @@ class AgentRunsRepository(AsyncpgRepository):
     @staticmethod
     def _group_key_sql(alias: str = "") -> str:
         p = f"{alias}." if alias else ""
-        return (
-            f"COALESCE('conv:' || {p}conversation_id::text, 'run:' || {p}id::text)"
-        )
+        return f"COALESCE('conv:' || {p}conversation_id::text, 'run:' || {p}id::text)"
 
     async def list_groups_by_agent(
         self,

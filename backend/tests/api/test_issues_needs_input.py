@@ -109,7 +109,9 @@ async def teams_and_users(integration_db_url):
             await conn.execute("DELETE FROM teams WHERE id = $1", team_a)
         if team_b is not None:
             await conn.execute("DELETE FROM teams WHERE id = $1", team_b)
-        await conn.execute("DELETE FROM auth.users WHERE id = ANY($1)", [me, other_user])
+        await conn.execute(
+            "DELETE FROM auth.users WHERE id = ANY($1)", [me, other_user]
+        )
         await conn.close()
 
 

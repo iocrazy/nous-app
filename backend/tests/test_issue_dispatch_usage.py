@@ -364,9 +364,13 @@ async def test_issue_dispatch_doubao_sse_trailing_usage_chunk_records_tokens_and
     composed = _composed(model="doubao-seed-2-0-lite-260428")
     runner = AgentRunner(adapter=adapter, skill_tool=None)
 
-    with p_read, p_write, _patch(
-        "app.services.ai.adapters.openai_compat.httpx.AsyncClient",
-        return_value=_FakeDoubaoHttpxClient(sse_lines),
+    with (
+        p_read,
+        p_write,
+        _patch(
+            "app.services.ai.adapters.openai_compat.httpx.AsyncClient",
+            return_value=_FakeDoubaoHttpxClient(sse_lines),
+        ),
     ):
         async with RunRecorder(
             agent_id=composed.agent_id,

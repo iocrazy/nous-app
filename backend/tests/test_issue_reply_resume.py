@@ -2,6 +2,7 @@
 
 仅当 needs_followup + agent_outcome=needs_input 时回复才驱动状态流转;
 其它状态回复保持 Spec-1b 的"不改状态"。"""
+
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -39,7 +40,9 @@ def test_pending_agent_outcome_none_when_missing_or_none():
 @pytest.mark.asyncio
 async def test_route_completed_autoclose_off_goes_in_review():
     set_status = AsyncMock()
-    await route_finish_outcome(1, "completed", "r", auto_close=False, set_status=set_status)
+    await route_finish_outcome(
+        1, "completed", "r", auto_close=False, set_status=set_status
+    )
     set_status.assert_awaited_once_with(
         1, "in_review", agent_outcome="completed", outcome_reason="r"
     )
@@ -48,7 +51,9 @@ async def test_route_completed_autoclose_off_goes_in_review():
 @pytest.mark.asyncio
 async def test_route_needs_input_goes_needs_followup():
     set_status = AsyncMock()
-    await route_finish_outcome(1, "needs_input", "which style?", auto_close=True, set_status=set_status)
+    await route_finish_outcome(
+        1, "needs_input", "which style?", auto_close=True, set_status=set_status
+    )
     set_status.assert_awaited_once_with(
         1, "needs_followup", agent_outcome="needs_input", outcome_reason="which style?"
     )
@@ -187,7 +192,9 @@ async def test_multi_round_needs_input_cycle_completes_on_second_answer():
     }
     calls: list[str] = []
 
-    async def fake_set_status(issue_id, status, *, agent_outcome=None, outcome_reason=None, **kw):
+    async def fake_set_status(
+        issue_id, status, *, agent_outcome=None, outcome_reason=None, **kw
+    ):
         calls.append(status)
         issue_state["status"] = status
         state: dict = {}
@@ -207,7 +214,11 @@ async def test_multi_round_needs_input_cycle_completes_on_second_answer():
 
     turn_outcomes = iter(
         [
-            {"content": "which style?", "outcome": "needs_input", "reason": "which style?"},
+            {
+                "content": "which style?",
+                "outcome": "needs_input",
+                "reason": "which style?",
+            },
             {"content": "done", "outcome": "completed", "reason": None},
         ]
     )
@@ -286,9 +297,7 @@ async def test_resume_reply_that_completes_fires_subissue_barrier():
     sleep = AsyncMock()
     barrier = AsyncMock()
 
-    with patch(
-        "app.workflows.issue_lifecycle._maybe_fire_subissue_barrier", barrier
-    ):
+    with patch("app.workflows.issue_lifecycle._maybe_fire_subissue_barrier", barrier):
         await _run_reply_turns(
             9,
             "u",
@@ -324,9 +333,7 @@ async def test_non_resume_reply_never_fires_subissue_barrier():
     sleep = AsyncMock()
     barrier = AsyncMock()
 
-    with patch(
-        "app.workflows.issue_lifecycle._maybe_fire_subissue_barrier", barrier
-    ):
+    with patch("app.workflows.issue_lifecycle._maybe_fire_subissue_barrier", barrier):
         await _run_reply_turns(
             9,
             "u",

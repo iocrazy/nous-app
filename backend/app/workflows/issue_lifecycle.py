@@ -340,11 +340,12 @@ async def _run_reply_turns(
         resuming = False
         if load_issue is not None and set_status is not None:
             issue = await load_issue(issue_id)
-            resuming = (
-                (issue or {}).get("status") == "needs_followup"
-                and _pending_agent_outcome(issue or {})
-                in {"needs_input", "empty_output"}
-            )
+            resuming = (issue or {}).get(
+                "status"
+            ) == "needs_followup" and _pending_agent_outcome(issue or {}) in {
+                "needs_input",
+                "empty_output",
+            }
             if resuming:
                 await set_status(issue_id, "in_progress")
 

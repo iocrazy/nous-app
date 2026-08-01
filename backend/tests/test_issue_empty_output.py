@@ -27,6 +27,7 @@ issue at ``needs_followup`` out of reach of any future reply. It stays
 distinct from ``"needs_input"`` so the Task Center needs-your-answer feed
 (``needs_input_predicate``, exact-match) never lists an EMPTY_OUTPUT stall as
 something the agent actually asked about."""
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager

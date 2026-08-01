@@ -284,7 +284,10 @@ async def _collect_stream_chunks(adapter, lines: list[str]):
         return_value=_FakeAsyncClient(lines),
     ):
         composed = _make_composed()
-        return [c async for c in adapter.stream(composed, [{"role": "user", "content": "hi"}])]
+        return [
+            c
+            async for c in adapter.stream(composed, [{"role": "user", "content": "hi"}])
+        ]
 
 
 @pytest.mark.asyncio
@@ -342,7 +345,9 @@ async def test_stream_still_works_when_usage_bundled_with_finish() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stream_terminal_chunk_has_no_usage_when_provider_never_sends_it() -> None:
+async def test_stream_terminal_chunk_has_no_usage_when_provider_never_sends_it() -> (
+    None
+):
     """No usage anywhere in the stream — terminal chunk still fires (once)
     with usage=None; callers decide how to handle the missing telemetry."""
     adapter = OpenAICompatibleAdapter(
@@ -363,7 +368,9 @@ async def test_stream_terminal_chunk_has_no_usage_when_provider_never_sends_it()
 
 
 @pytest.mark.asyncio
-async def test_stream_flushes_pending_finish_when_connection_closes_before_done() -> None:
+async def test_stream_flushes_pending_finish_when_connection_closes_before_done() -> (
+    None
+):
     """Fix-3 regression guard: the pending_finish hold-back (fix-2) must not
     silently swallow the terminal chunk if the connection drops right after
     the finish_reason line — before either a usage-only tail chunk or
@@ -395,7 +402,9 @@ async def test_stream_flushes_pending_finish_when_connection_closes_before_done(
 
 
 @pytest.mark.asyncio
-async def test_stream_flushes_pending_tool_call_when_connection_closes_before_done() -> None:
+async def test_stream_flushes_pending_tool_call_when_connection_closes_before_done() -> (
+    None
+):
     """Same truncation scenario, but the dropped finish frame carries a
     tool_call_delta — a due tool call must not be skipped."""
     adapter = OpenAICompatibleAdapter(
