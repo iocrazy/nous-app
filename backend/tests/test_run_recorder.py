@@ -106,9 +106,11 @@ class _FakeSession:
 
         if is_select and "cancel_requested" in sql:
             return _ExecResult(
-                first_row=_Row((self._table._cancel_requested,))
-                if self._table._cancel_requested is not None
-                else None
+                first_row=(
+                    _Row((self._table._cancel_requested,))
+                    if self._table._cancel_requested is not None
+                    else None
+                )
             )
 
         if is_select and "task_tracking" in sql:
