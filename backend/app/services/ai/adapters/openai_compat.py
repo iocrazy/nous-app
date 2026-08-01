@@ -217,7 +217,9 @@ class OpenAICompatibleAdapter:
                         final_finish = finish
                         # Don't yield yet — a trailing usage-only chunk may
                         # still be coming (see docstring). Flushed above on
-                        # the next usage sighting, or at [DONE] otherwise.
+                        # the next usage sighting, or at [DONE] otherwise —
+                        # or, failing both, by the fallback below if the
+                        # connection closes first.
                         pending_finish = StreamChunk(
                             delta_text=delta_text,
                             tool_call_delta=tool_call_delta,
@@ -229,3 +231,22 @@ class OpenAICompatibleAdapter:
                             delta_text=delta_text,
                             tool_call_delta=tool_call_delta,
                         )
+
+                # A1 (Task 5 fix-3): ``aiter_lines()`` can exhaust with no
+                # exception on a silent connection close (SSE/network
+                # flake) — real, not hypothetical. If that happens right
+                # after the finish_reason line but before either a usage
+                # tail chunk or ``[DONE]`` shows up, the loop above exits
+                # normally and — without this fallback — the held-back
+                # ``pending_finish`` (its real finish_reason, e.g. 'length'
+                # or 'tool_calls', plus any delta_text/tool_call_delta
+                # riding it) would be silently dropped. Emit it as-is;
+                # usage stays whatever final_usage holds (often still None
+                # here — an honest "never arrived", not fabricated).
+                if pending_finish is not None:
+                    yield StreamChunk(
+                        delta_text=pending_finish.delta_text,
+                        tool_call_delta=pending_finish.tool_call_delta,
+                        finish_reason=pending_finish.finish_reason,
+                        usage=final_usage,
+                    )

@@ -360,3 +360,62 @@ async def test_stream_terminal_chunk_has_no_usage_when_provider_never_sends_it()
     finish_chunks = [c for c in chunks if c.finish_reason]
     assert len(finish_chunks) == 1
     assert finish_chunks[0].usage is None
+
+
+@pytest.mark.asyncio
+async def test_stream_flushes_pending_finish_when_connection_closes_before_done() -> None:
+    """Fix-3 regression guard: the pending_finish hold-back (fix-2) must not
+    silently swallow the terminal chunk if the connection drops right after
+    the finish_reason line — before either a usage-only tail chunk or
+    ``[DONE]`` ever arrives. ``aiter_lines()`` just exhausts in that case
+    (no exception). Pre-fix-3, the finish frame — including its real
+    finish_reason and any delta_text/tool_call riding it — was dropped
+    entirely; AgentRunner would then never see finish_reason='length' (or
+    a due tool call) at all."""
+    adapter = OpenAICompatibleAdapter(
+        api_url="https://example.com/v1/chat/completions", api_key="sk"
+    )
+    lines = _sse(
+        [
+            'data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}',
+            'data: {"choices":[{"delta":{"content":" there"},"finish_reason":"length"}]}',
+            # connection drops here — no usage chunk, no [DONE]
+        ]
+    )
+    chunks = await _collect_stream_chunks(adapter, lines)
+
+    finish_chunks = [c for c in chunks if c.finish_reason]
+    assert len(finish_chunks) == 1, "the terminal chunk must still be emitted"
+    assert finish_chunks[0].finish_reason == "length", (
+        "real finish_reason must survive — not silently replaced by "
+        "AgentRunner's synthesized 'stop'"
+    )
+    assert finish_chunks[0].delta_text == " there"
+    assert finish_chunks[0].usage is None
+
+
+@pytest.mark.asyncio
+async def test_stream_flushes_pending_tool_call_when_connection_closes_before_done() -> None:
+    """Same truncation scenario, but the dropped finish frame carries a
+    tool_call_delta — a due tool call must not be skipped."""
+    adapter = OpenAICompatibleAdapter(
+        api_url="https://example.com/v1/chat/completions", api_key="sk"
+    )
+    lines = _sse(
+        [
+            'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc1",'
+            '"function":{"name":"Skill","arguments":"{}"}}]},'
+            '"finish_reason":"tool_calls"}]}',
+            # connection drops here — no usage chunk, no [DONE]
+        ]
+    )
+    chunks = await _collect_stream_chunks(adapter, lines)
+
+    finish_chunks = [c for c in chunks if c.finish_reason]
+    assert len(finish_chunks) == 1
+    assert finish_chunks[0].finish_reason == "tool_calls"
+    assert finish_chunks[0].tool_call_delta == {
+        "tool_calls": [
+            {"index": 0, "id": "tc1", "function": {"name": "Skill", "arguments": "{}"}}
+        ]
+    }
