@@ -219,3 +219,144 @@ def test_doubao_adapter_has_volces_default_url() -> None:
 
     a = DoubaoAdapter(api_key="test")
     assert "volces.com" in a.api_url
+
+
+# ─── stream() — usage on a trailing empty-choices chunk (A1 fix-2) ─────
+#
+# Root cause (needs_input first-class, Task 5): per the OpenAI streaming
+# spec, a provider with stream_options.include_usage=true (confirmed:
+# Volcengine/Doubao) sends the terminal usage as its OWN chunk with an
+# EMPTY ``choices`` array, arriving AFTER the chunk that carries
+# ``finish_reason``. AgentRunner's stream consumer stops iterating this
+# generator the instant it sees a chunk with finish_reason set, so
+# whatever usage the OLD parser attached to THAT chunk is final — and it
+# was always None for this two-chunk-tail shape, even though the model
+# produced a real reply. Fixed: stream() now defers yielding the
+# finish-bearing chunk until a subsequent usage-only line has had a
+# chance to fill it in (or [DONE] confirms none is coming).
+
+
+class _FakeStreamResponse:
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = lines
+
+    def raise_for_status(self) -> None:
+        pass
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+
+class _FakeStreamCM:
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = lines
+
+    async def __aenter__(self):
+        return _FakeStreamResponse(self._lines)
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _FakeAsyncClient:
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = lines
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def stream(self, method, url, json=None, headers=None):
+        return _FakeStreamCM(self._lines)
+
+
+def _sse(lines: list[str]):
+    """Wrap raw SSE ``data: ...`` lines (already prefixed) for the fake client."""
+    return lines
+
+
+async def _collect_stream_chunks(adapter, lines: list[str]):
+    with patch(
+        "app.services.ai.adapters.openai_compat.httpx.AsyncClient",
+        return_value=_FakeAsyncClient(lines),
+    ):
+        composed = _make_composed()
+        return [c async for c in adapter.stream(composed, [{"role": "user", "content": "hi"}])]
+
+
+@pytest.mark.asyncio
+async def test_stream_attaches_usage_from_trailing_empty_choices_chunk() -> None:
+    """The exact Doubao/Volcengine shape: finish_reason arrives on a normal
+    chunk (usage still null there), then a SEPARATE trailing chunk with
+    choices=[] carries the real usage. The single terminal StreamChunk the
+    adapter yields must carry that usage, not None."""
+    adapter = OpenAICompatibleAdapter(
+        api_url="https://ark.example/v1/chat/completions", api_key="sk"
+    )
+    lines = _sse(
+        [
+            'data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}',
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+            'data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150}}',
+            "data: [DONE]",
+        ]
+    )
+    chunks = await _collect_stream_chunks(adapter, lines)
+
+    finish_chunks = [c for c in chunks if c.finish_reason]
+    assert len(finish_chunks) == 1, "must yield exactly one terminal chunk"
+    assert finish_chunks[0].usage == {
+        "prompt_tokens": 100,
+        "completion_tokens": 50,
+        "total_tokens": 150,
+    }
+
+
+@pytest.mark.asyncio
+async def test_stream_still_works_when_usage_bundled_with_finish() -> None:
+    """Providers that bundle usage onto the SAME chunk as finish_reason
+    (the pre-fix assumption) must keep working unchanged."""
+    adapter = OpenAICompatibleAdapter(
+        api_url="https://example.com/v1/chat/completions", api_key="sk"
+    )
+    lines = _sse(
+        [
+            'data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}',
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}],'
+            '"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}',
+            "data: [DONE]",
+        ]
+    )
+    chunks = await _collect_stream_chunks(adapter, lines)
+
+    finish_chunks = [c for c in chunks if c.finish_reason]
+    assert len(finish_chunks) == 1
+    assert finish_chunks[0].usage == {
+        "prompt_tokens": 10,
+        "completion_tokens": 2,
+        "total_tokens": 12,
+    }
+
+
+@pytest.mark.asyncio
+async def test_stream_terminal_chunk_has_no_usage_when_provider_never_sends_it() -> None:
+    """No usage anywhere in the stream — terminal chunk still fires (once)
+    with usage=None; callers decide how to handle the missing telemetry."""
+    adapter = OpenAICompatibleAdapter(
+        api_url="https://example.com/v1/chat/completions", api_key="sk"
+    )
+    lines = _sse(
+        [
+            'data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}',
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+            "data: [DONE]",
+        ]
+    )
+    chunks = await _collect_stream_chunks(adapter, lines)
+
+    finish_chunks = [c for c in chunks if c.finish_reason]
+    assert len(finish_chunks) == 1
+    assert finish_chunks[0].usage is None

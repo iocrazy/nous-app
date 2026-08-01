@@ -1,31 +1,43 @@
 """A1 (needs_input first-class, Task 5): issue-dispatch turns must record
 real token/cost telemetry on their agent_runs row.
 
-Root cause: AgentRunner._stream_turn_inner (agent_runner.py) has two
-fallback branches — the adapter exposes no ``.stream()`` method at all, or
-``.stream()`` raises ``StreamingNotSupported`` mid-loop — that call
-``self.adapter.call(...)`` directly and hand the provider's usage dict
-straight to the caller via ``StreamChunk(usage=...)``, but never call
-``recorder.record_usage(...)``. Every turn driven through
-``run_session_turn`` passes a ``chunk_callback`` (both interactive chat's
-SSE path in ``chat_stream`` and ``issue_agent_executor.run_issue_agent``
-do), so both always go through ``stream_turn`` — never the buffered
-``run_turn`` (which DOES call ``record_usage`` after every
-``adapter.call``). Providers that implement real streaming (the
-OpenAI-compatible adapters: Qwen/DeepSeek/Doubao/ModelScope/OpenAI) never
-hit these branches, so interactive chat — which commonly binds those
-models — records usage fine. ``ClaudeAdapter`` has no ``.stream()`` method
-at all, so any issue whose assigned agent is bound to a ``claude-*`` model
-always takes the silent-drop branch: the turn completes and produces a real
-reply, but the agent_runs row's prompt_tokens/completion_tokens/cost_cents
-stay 0/NULL. This matches prod: both ``issue_dispatch_auto`` runs ever
-executed show 0 tokens even though one demonstrably produced a model
-reply.
+Fix 1 (kept, real but NOT the prod cause): AgentRunner._stream_turn_inner
+(agent_runner.py) has two buffered fallback branches — the adapter exposes
+no ``.stream()`` method at all, or ``.stream()`` raises
+``StreamingNotSupported`` mid-loop — that used to hand the provider's usage
+dict straight to the caller via ``StreamChunk(usage=...)`` without ever
+calling ``recorder.record_usage(...)``. This is a genuine bug (e.g.
+``ClaudeAdapter`` has no ``.stream()`` method), but it is NOT what actually
+zeroed out the two ``issue_dispatch_auto`` runs in prod: both used
+``doubao-seed-2-0-lite-260428``, which routes to ``DoubaoAdapter`` — a full
+``OpenAICompatibleAdapter`` subclass with a working ``.stream()`` — so
+neither fallback branch was ever taken for them, and ``StreamingNotSupported``
+is raised nowhere in the codebase (dead branch today). This fix stays
+because it's still a correctness gap for any adapter that genuinely can't
+stream (Claude), and its tests keep passing.
 
-Fix: call ``recorder.record_usage(...)`` in both fallback branches too,
-reusing the exact accumulate-then-cost-on-finish flow RunRecorder already
-provides (no new pricing logic — ``compute_cost_cents``/``_finish`` are
-untouched).
+Fix 2 (the actual prod root cause): OpenAICompatibleAdapter.stream()
+(openai_compat.py) parses the SSE tail assuming usage always arrives
+bundled on the SAME chunk as ``finish_reason``. Per the OpenAI streaming
+spec, a provider with ``stream_options.include_usage=true`` — confirmed:
+Volcengine/Doubao — instead sends the terminal usage as its OWN trailing
+chunk with an EMPTY ``choices`` array, arriving AFTER the chunk carrying
+``finish_reason``. AgentRunner's stream consumer (agent_runner.py,
+``async for chunk in stream_method(...)``) stops iterating the instant it
+sees a chunk with ``finish_reason`` set (breaks out to run tool calls /
+finish the turn), so whatever usage the adapter attached to THAT chunk is
+final — and for this two-chunk-tail shape it was always ``None``, even
+though the model produced a real, content-bearing reply. See
+``tests/test_ai_adapters/test_openai_compat.py`` for the direct SSE-parser
+regression test; the test below reproduces the full path (real adapter →
+AgentRunner.stream_turn → RunRecorder → persisted agent_runs row) with the
+exact Doubao SSE shape.
+
+Fix: ``stream()`` now defers yielding the finish-bearing ``StreamChunk``
+until a subsequent usage-only line has had a chance to fill it in (or
+``[DONE]`` confirms none is coming) — no change to AgentRunner's
+break-on-finish_reason consumption, which matches the existing StreamChunk
+contract ("on the FINAL chunk, usage SHOULD be populated").
 """
 
 from __future__ import annotations
@@ -267,5 +279,116 @@ async def test_issue_dispatch_turn_records_usage_when_stream_raises_not_supporte
     finish = table.update_calls[0]
     assert finish["prompt_tokens"] == 200
     assert finish["completion_tokens"] == 75
+    assert finish.get("cost_cents") is not None
+    assert finish["cost_cents"] > 0
+
+
+# ─── Fix 2 (the actual prod cause): Doubao SSE tail-usage shape ────────
+#
+# Reproduces the real prod path end to end: the REAL OpenAICompatibleAdapter
+# (DoubaoAdapter's base class) with a mocked httpx SSE stream shaped exactly
+# like Volcengine's — finish_reason on one chunk, usage on a separate
+# trailing empty-choices chunk — driven through the real AgentRunner.stream_turn
+# and a real RunRecorder against the same fake DB harness used above. Must
+# fail at the current parser (agent_runner.py:~523's
+# ``if recorder is not None and chunk.usage:`` never firing because the
+# adapter's terminal chunk carries usage=None), not at the fallback branches
+# Fix 1 covers.
+
+
+class _FakeDoubaoStreamResponse:
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = lines
+
+    def raise_for_status(self) -> None:
+        pass
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+
+class _FakeDoubaoStreamCM:
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = lines
+
+    async def __aenter__(self):
+        return _FakeDoubaoStreamResponse(self._lines)
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _FakeDoubaoHttpxClient:
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = lines
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def stream(self, method, url, json=None, headers=None):
+        return _FakeDoubaoStreamCM(self._lines)
+
+
+@pytest.mark.asyncio
+async def test_issue_dispatch_doubao_sse_trailing_usage_chunk_records_tokens_and_cost():
+    """The actual prod shape: DoubaoAdapter (real OpenAICompatibleAdapter.stream()),
+    trigger='issue_dispatch_auto', SSE stream where usage arrives ONLY on a
+    trailing empty-choices chunk after finish_reason. Must end up with
+    non-zero/non-null tokens + cost_cents on the finished agent_runs row."""
+    from unittest.mock import patch as _patch
+
+    from app.services.ai.adapters.doubao import DoubaoAdapter
+
+    table = _FakeTable(
+        price_row={
+            "prompt_cents_per_1k": 1.0,
+            "completion_cents_per_1k": 3.0,
+            "cached_input_cents_per_1k": None,
+            "effective_at": None,
+        }
+    )
+    p_read, p_write = _patched(table)
+
+    sse_lines = [
+        'data: {"choices":[{"delta":{"content":"the issue is done"},"finish_reason":null}]}',
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+        'data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150}}',
+        "data: [DONE]",
+    ]
+
+    adapter = DoubaoAdapter(api_key="test", default_model="doubao-seed-2-0-lite-260428")
+    composed = _composed(model="doubao-seed-2-0-lite-260428")
+    runner = AgentRunner(adapter=adapter, skill_tool=None)
+
+    with p_read, p_write, _patch(
+        "app.services.ai.adapters.openai_compat.httpx.AsyncClient",
+        return_value=_FakeDoubaoHttpxClient(sse_lines),
+    ):
+        async with RunRecorder(
+            agent_id=composed.agent_id,
+            user_id=uuid4(),
+            trigger="issue_dispatch_auto",
+            model=composed.model,
+            provider="doubao",
+        ) as recorder:
+            async for _ in runner.stream_turn(
+                composed,
+                [{"role": "user", "content": "Task: do the thing"}],
+                recorder=recorder,
+                auto_recorder=False,
+            ):
+                pass
+
+    assert recorder.prompt_tokens == 100
+    assert recorder.completion_tokens == 50
+
+    assert len(table.update_calls) == 1
+    finish = table.update_calls[0]
+    assert finish["prompt_tokens"] == 100
+    assert finish["completion_tokens"] == 50
     assert finish.get("cost_cents") is not None
     assert finish["cost_cents"] > 0
