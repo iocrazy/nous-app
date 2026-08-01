@@ -268,3 +268,77 @@ async def get_media_status(auth: AdminAuthDep, media_ids: str):
 @router.get("/media/{media_id}/detail")
 async def get_media_storage_detail(auth: AdminAuthDep, media_id: int):
     return await _fetch_media_detail(media_id)
+
+
+_SB_PREFIX = "sb://library/"
+
+
+async def _verify_keys(store, assets: list[dict]) -> list[dict]:
+    """Probe each asset's key, reusing storage_audit's own classifier
+    (``_probe_one``) rather than ``ObjectStore.exists()`` — that method
+    collapses every exception (a real 404, a timeout, a 5xx) into a bare
+    ``False``, so it cannot tell "confirmed gone" from "storage had a
+    hiccup" (see storage_audit.py module docstring). Mapping:
+    present -> exists=True, missing -> exists=False,
+    error (uncertain) -> exists=None. Never conflate missing with error."""
+    from app.workflows.storage_audit import _probe_one
+
+    out = []
+    for a in assets:
+        key = a.get("key")
+        if not key:
+            continue
+        bare = key[len(_SB_PREFIX) :] if key.startswith(_SB_PREFIX) else key
+        outcome = await _probe_one(store, bare)
+        exists = {"present": True, "missing": False, "error": None}[outcome]
+        out.append({"kind": a["kind"], "key": key, "exists": exists})
+    return out
+
+
+async def _find_running_audit() -> str | None:
+    """Most recent still-running storage_audit workflow id, if any — used
+    to dedup /verify dispatch so an admin double-click doesn't spawn a
+    second full-library scan. Column is ``dbos_workflow_id`` (task_tracking's
+    actual PK per app/models/ops.py::TaskTracking), not ``task_id``."""
+    row = await db_engine.fetch_one(
+        """
+        SELECT dbos_workflow_id FROM task_tracking
+        WHERE task_type = 'storage_audit' AND phase IN ('queued','in_progress')
+        ORDER BY created_at DESC LIMIT 1
+        """
+    )
+    return row["dbos_workflow_id"] if row else None
+
+
+@router.post("/media/{media_id}/verify")
+async def verify_media_on_s3(auth: AdminAuthDep, media_id: int):
+    """Synchronous single-media S3 existence check — probes every asset key
+    from ``_fetch_media_detail`` right now (no workflow dispatch)."""
+    from app.services.library.media_storage import library_store
+
+    detail = await _fetch_media_detail(media_id)
+    return {"results": await _verify_keys(library_store(), detail["assets"])}
+
+
+@router.post("/verify")
+async def dispatch_deep_verify(auth: AdminAuthDep):
+    """Dispatch a full-library storage_audit workflow run, deduped against
+    any run still queued/in_progress."""
+    running = await _find_running_audit()
+    if running:
+        return {"workflow_id": running, "already_running": True}
+
+    from app.services.infra.dbos_orchestrator import start_workflow_routed
+    from app.workflows.storage_audit import storage_audit_workflow
+
+    result = await start_workflow_routed(
+        "storage_audit",
+        dbos_workflow_callable=storage_audit_workflow,
+        dbos_workflow_kwargs={},
+    )
+    return {"workflow_id": result["dbos_workflow_id"], "already_running": False}
+
+
+@router.get("/audit")
+async def get_storage_audit(auth: AdminAuthDep):
+    return await _fetch_latest_audit()

@@ -12,9 +12,22 @@ not this module.
 
 import importlib
 
+import httpx
 import pytest
+from fastapi import HTTPException
 
 sr = importlib.import_module("app.api.admin.storage_router")
+
+
+def _http_status_error(status_code: int) -> httpx.HTTPStatusError:
+    """Build a real httpx.HTTPStatusError the way ObjectStore.get_size's
+    ``resp.raise_for_status()`` would (see test_storage_audit_workflow.py's
+    identically-named helper) — anchors the uncertain/missing split on the
+    real exception shape rather than a stand-in that could hide a
+    404-vs-other-error classification bug."""
+    request = httpx.Request("HEAD", "http://store.internal/x")
+    response = httpx.Response(status_code, request=request)
+    return httpx.HTTPStatusError(f"{status_code}", request=request, response=response)
 
 
 @pytest.mark.asyncio
@@ -145,3 +158,65 @@ async def test_media_detail_assets(monkeypatch):
     assert kinds["sprite"]["present_in_db"] is False
     assert kinds["hls"]["key"].endswith("master.m3u8")
     assert out["scope_id"] == "5"
+
+
+@pytest.mark.asyncio
+async def test_media_status_rejects_non_integer_ids():
+    """Task 1 ledger item: media_ids boundary validation had no test —
+    non-numeric tokens must 422, not raise an unhandled ValueError."""
+    with pytest.raises(HTTPException) as exc_info:
+        await sr.get_media_status(auth=None, media_ids="1,abc,3")
+    assert exc_info.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_media_status_rejects_too_many_ids():
+    """Task 1 ledger item: the >200 ids branch had no test."""
+    media_ids = ",".join(str(i) for i in range(1, 202))  # 201 ids
+    with pytest.raises(HTTPException) as exc_info:
+        await sr.get_media_status(auth=None, media_ids=media_ids)
+    assert exc_info.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_verify_keys_exists_missing_uncertain():
+    """_verify_keys must classify via the same present/missing/error
+    semantics as storage_audit._probe_one (404 → missing, any other
+    failure → uncertain/None, never conflated with missing)."""
+
+    class FakeStore:
+        async def get_size(self, key):
+            if key.endswith("gone.jpg"):
+                raise _http_status_error(404)
+            if key.endswith("boom.webp"):
+                raise _http_status_error(500)
+            return 123
+
+    assets = [
+        {"kind": "video", "key": "sb://library/t5/aa/v.mp4"},
+        {"kind": "cover", "key": "sb://library/derived/1/gone.jpg"},
+        {"kind": "thumbnail", "key": "sb://library/derived/1/boom.webp"},
+        {"kind": "hls", "key": None},  # 无 key 跳过
+    ]
+    out = await sr._verify_keys(FakeStore(), assets)
+    by = {r["kind"]: r for r in out}
+    assert by["video"]["exists"] is True
+    assert by["cover"]["exists"] is False
+    assert by["thumbnail"]["exists"] is None  # 异常 → 不确定
+    assert "hls" not in by
+
+
+@pytest.mark.asyncio
+async def test_deep_verify_dedups_running(monkeypatch):
+    """task_tracking's PK column is dbos_workflow_id, not task_id (verified
+    against app/models/ops.py::TaskTracking — the brief's ⚠️ note flagged
+    this needed confirming against real code)."""
+
+    async def fake_fetch_one(sql, params=None):
+        return {
+            "dbos_workflow_id": "wf-123"
+        }  # 已有 queued/in_progress 的 storage_audit
+
+    monkeypatch.setattr(sr.db_engine, "fetch_one", fake_fetch_one)
+    out = await sr._find_running_audit()
+    assert out == "wf-123"
