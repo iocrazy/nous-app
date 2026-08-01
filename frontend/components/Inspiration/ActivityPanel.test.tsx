@@ -1,5 +1,18 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+
+// The fixtures below are pinned to July 2026 while the calendar opens on the
+// CURRENT month — without freezing the clock the whole suite breaks at every
+// month boundary (first hit: CI in UTC crossed into 2026-08-01 while local
+// dev was still 07-31, so `2026-07-07` cells no longer rendered). Fake ONLY
+// Date: waitFor/findBy need real setTimeout to keep polling.
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-07-15T12:00:00Z'));
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 const getActivity = vi.fn();
 vi.mock('../../services/inspirationService', () => ({
