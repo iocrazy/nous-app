@@ -10,7 +10,7 @@
  * parent's `items` prop no longer includes it (driven by TaskManagerContext
  * refetching after the reply flips the issue out of needs_followup).
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { getIssue, type NeedsInputItem } from '../../services/issuesService';
@@ -26,6 +26,33 @@ export const NeedsInputSection: React.FC<NeedsInputSectionProps> = ({ items, onA
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
 
+  // A resolved `onAnswer` promise only means the POST landed — it does NOT
+  // guarantee the backend's needs_followup flip has landed before the next
+  // `items` snapshot arrives (that flip + the refetch are two separate
+  // round trips). So pending is cleared ONLY by the row actually leaving
+  // `items` (the real completion signal), never by promise resolution.
+  // Without this, a slow flip would re-enable the card with an empty
+  // draft while the row is still present, making the answer look like it
+  // vanished. If an issue_id later REAPPEARS after having left `items`, it
+  // reads as a fresh ask (agent asked again, or the flip didn't stick) —
+  // pruning stale pending entries below means a reappearing id is simply
+  // not in `pendingIds` anymore, so it renders answerable, not stuck.
+  useEffect(() => {
+    const currentIds = new Set(items.map((i) => i.issue_id));
+    setPendingIds((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (currentIds.has(id)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [items]);
+
   if (items.length === 0) return null;
 
   const handleSubmit = async (issueId: string) => {
@@ -35,16 +62,13 @@ export const NeedsInputSection: React.FC<NeedsInputSectionProps> = ({ items, onA
     setDrafts((prev) => ({ ...prev, [issueId]: '' }));
     try {
       await onAnswer(issueId, text);
-      // On success the row normally vanishes when `items` refreshes; clear
-      // the pending flag too in case the parent keeps the row around briefly.
-      setPendingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(issueId);
-        return next;
-      });
+      // Deliberately NOT clearing pendingIds here — see the comment on the
+      // items-sync effect above. The row's removal from `items` is what
+      // clears it.
     } catch (err) {
       console.error(`[NeedsInputSection] onAnswer failed for issue ${issueId}:`, err);
-      // Restore the draft so the user doesn't lose what they typed.
+      // Restore the draft so the user doesn't lose what they typed, and
+      // re-enable the card so they can retry.
       setDrafts((prev) => ({ ...prev, [issueId]: text }));
       setPendingIds((prev) => {
         const next = new Set(prev);

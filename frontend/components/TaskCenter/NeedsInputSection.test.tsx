@@ -1,4 +1,4 @@
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NeedsInputSection } from './NeedsInputSection';
@@ -52,7 +52,10 @@ describe('NeedsInputSection', () => {
   });
 
   it('calls onAnswer(issueId, text) on submit, clears the input, and puts the card in a pending state', async () => {
-    const onAnswer = vi.fn(() => new Promise<void>(() => {})); // never resolves — assert pending state
+    // Never resolves — this test only covers the moment of submit (entering
+    // pending). The full resolve → refetch lifecycle is covered separately
+    // below, since a resolved promise must NOT by itself clear pending.
+    const onAnswer = vi.fn(() => new Promise<void>(() => {}));
     renderSection([item()], onAnswer);
 
     const textarea = screen.getByPlaceholderText(
@@ -68,6 +71,52 @@ describe('NeedsInputSection', () => {
     expect(textarea.value).toBe('');
     expect(textarea).toBeDisabled();
     expect(button).toBeDisabled();
+  });
+
+  it('keeps the card pending after onAnswer resolves — only a refetch that drops the row clears it, and a later reappearance is a fresh ask', async () => {
+    const onAnswer = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = renderSection([item()], onAnswer);
+
+    const textarea = screen.getByPlaceholderText(
+      'taskCenter.answerPlaceholder',
+    ) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Wednesday works better.' } });
+    fireEvent.click(screen.getByRole('button', { name: /taskCenter\.answerButton/i }));
+
+    await waitFor(() =>
+      expect(onAnswer).toHaveBeenCalledWith('1001', 'Wednesday works better.'),
+    );
+
+    // (a) resolve alone doesn't re-enable the card — `items` is still the
+    // same snapshot (the parent hasn't refetched yet, or the backend's
+    // needs_followup flip hasn't landed), so the row must stay pending
+    // rather than reopening with an empty draft.
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('taskCenter.answerPlaceholder')).toBeDisabled();
+    });
+
+    // (b) refetch-without-the-row removes it — the parent's next snapshot
+    // no longer contains this issue (the flip landed for real).
+    rerender(
+      <MemoryRouter>
+        <NeedsInputSection items={[]} onAnswer={onAnswer} />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText('Confirm publish schedule')).toBeNull();
+
+    // (c) refetch-with-the-row-again re-enables input — the issue reappears
+    // (agent asked again, or the earlier flip didn't stick); this must read
+    // as a fresh ask, not "still pending from before".
+    rerender(
+      <MemoryRouter>
+        <NeedsInputSection items={[item()]} onAnswer={onAnswer} />
+      </MemoryRouter>,
+    );
+    const reopened = screen.getByPlaceholderText(
+      'taskCenter.answerPlaceholder',
+    ) as HTMLTextAreaElement;
+    expect(reopened).not.toBeDisabled();
+    expect(reopened.value).toBe('');
   });
 
   it('renders nothing when items is empty', () => {
