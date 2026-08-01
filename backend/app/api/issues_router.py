@@ -33,6 +33,8 @@ from app.schemas.issue import (
     IssueListResponse,
     IssueStatusTransition,
     IssueUpdate,
+    NeedsInputItem,
+    NeedsInputListResponse,
 )
 from app.workflows.issue_lifecycle import execute_issue
 
@@ -146,6 +148,33 @@ async def get_by_identifier(identifier: str, auth: AuthDep) -> Issue:
         )
     await _assert_visibility(row, auth)
     return Issue.model_validate(_normalise_uuid_strs(row))
+
+
+@router.get("/needs-input", response_model=NeedsInputListResponse)
+async def list_needs_input(auth: AuthDep) -> NeedsInputListResponse:
+    """Issues waiting on a human answer (Spec-4 needs_input first-class) —
+    feeds the Task Center 'needs your answer' section (Task 3).
+
+    Route-ordering trap: this MUST be declared before GET /{issue_id} below.
+    FastAPI matches routes in declaration order, and /{issue_id}'s int
+    converter would 422 trying to parse the literal path segment
+    "needs-input" as an int if that route came first.
+    """
+    rows = await issue_repository.list_needs_input(str(auth.user_id))
+    items = [
+        NeedsInputItem(
+            issue_id=str(r["id"]),
+            title=r["title"],
+            question=(r.get("execution_state") or {}).get("outcome_reason"),
+            project_id=(
+                str(r["project_id"]) if r.get("project_id") is not None else None
+            ),
+            team_id=str(r["team_id"]) if r.get("team_id") is not None else None,
+            asked_at=r["updated_at"],
+        )
+        for r in rows
+    ]
+    return NeedsInputListResponse(items=items)
 
 
 @router.get("/{issue_id}", response_model=Issue)

@@ -343,6 +343,7 @@ python3 -c "import os; os.setxattr('<目录>/.probe','user.t',b'1')"
 - **`libraries` 表没有 `team_id` 列**：scope 走 `scope_type` (`team`/`user`/`project`) + `scope_id` 两列。代码里 `select("..., team_id, ...")` 会拿 PG 42703 错。team 归属判断要先看 `scope_type='team'` 再用 `scope_id`。
 - **`parsed_media` 没有 `transcript_status` 列**：AI 状态字段已迁到 `videos` 表（`transcript_status` / `summary_status` / `visual_analysis_status`）。在 `parsed_media` 上查会 PG 42703。
 - **gpupc 上 PG 容器内部监听 55434，不是 5432**：自托管 Supabase 的 `POSTGRES_PORT=55434` 会同时喂给容器内的 `PGPORT`（为与同机 `sb-dev` 共存），所以 **PG 进程本身只监听 55434**。走宿主机端口时无所谓（`ports: "127.0.0.1:55436:55434"` 映射层会转换），但**走 docker 内网容器名直连会绕过映射层**，必须写 `nous-db:55434` —— 写 5432 拿 `Connection refused`。`DBOS_DATABASE_URL` 尤其要注意：DBOS 依赖 LISTEN/NOTIFY，不能走 pooler，只能直连，所以它是唯一必须硬编码这个非标准端口的地方。血泪教训见 [`deploy/gpu-server/README.md`](deploy/gpu-server/README.md) 的「DBOS 直连端口」节。
+- **触发路径必须类型化失败回显**：`attachment_failures` 字段后端早就在返回（`ai_library_chat_service.py`），前端却整整没读过——因为没有强制约定"新触发路径要连带写失败分支"。用户动作→agent 触发的每条路径必须返回类型化结果(成功/失败/原因),silent no-op 不可接受——与'DBOS 失败必须 raise'同族。新增触发路径时先写失败分支的用户可见回显。
 
 ### Schema 迁移 / 代码漂移检查口径
 

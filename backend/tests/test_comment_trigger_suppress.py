@@ -185,6 +185,10 @@ async def test_suppressed_comment_starts_nothing_and_leaves_a_note(monkeypatch):
     assert kw["user_id"] == _OWNER
     assert resp.agent_run is None
     assert resp.comment.body == "wait for the client"
+    # Silent-no-op fix (final review, finding 5): the note path never starts
+    # a workflow, so agent_dispatched must be False (agent_run stays null on
+    # every path and can't be used to tell them apart).
+    assert resp.agent_dispatched is False
 
 
 @pytest.mark.asyncio
@@ -220,6 +224,7 @@ async def test_note_prefix_comment_starts_nothing_and_stores_body_verbatim(monke
     assert kw["content"] == "/note check the license before shipping"
     assert resp.agent_run is None
     assert resp.comment.body == "/note check the license before shipping"
+    assert resp.agent_dispatched is False
 
 
 @pytest.mark.asyncio

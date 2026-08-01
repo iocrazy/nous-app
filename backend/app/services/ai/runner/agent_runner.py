@@ -251,6 +251,33 @@ class AgentRunner:
         self.generate_image_handler: Optional[Any] = None
         self.generate_video_handler: Optional[Any] = None
 
+    @staticmethod
+    def _record_buffered_usage(
+        recorder: Optional[RunRecorder], usage: Optional[dict]
+    ) -> None:
+        """A1 (needs_input first-class, Task 5): stream_turn's two buffered
+        fallbacks — no ``adapter.stream()`` at all, or a mid-loop
+        ``StreamingNotSupported`` — call ``adapter.call()`` directly and used
+        to hand the provider's usage straight to the caller via the yielded
+        ``StreamChunk`` without ever telling the recorder. Any trigger that
+        drives a turn through stream_turn (chat's SSE path AND
+        issue_agent_executor both always pass a chunk_callback, so both
+        always land here) then persisted 0/NULL tokens+cost whenever the
+        bound model's adapter can't really stream — e.g. ClaudeAdapter has
+        no ``.stream()`` method. Mirrors run_turn's post-``adapter.call``
+        ``record_usage`` call so both code paths feed the same accumulator;
+        cost_cents is still computed once, in RunRecorder.compute_cost_cents/
+        _finish — nothing here duplicates pricing."""
+        if recorder is None or not usage:
+            return
+        from app.services.ai.runner.usage_cached import extract_cached_input_tokens
+
+        recorder.record_usage(
+            prompt_tokens=int(usage.get("prompt_tokens") or 0),
+            completion_tokens=int(usage.get("completion_tokens") or 0),
+            cached_input_tokens=extract_cached_input_tokens(usage),
+        )
+
     async def stream_turn(
         self,
         composed: ComposedSystemPrompt,
@@ -354,6 +381,7 @@ class AgentRunner:
         if stream_method is None:
             resp = await self.adapter.call(composed, user_messages)
             msg = resp["choices"][0]["message"]
+            self._record_buffered_usage(recorder, resp.get("usage"))
             yield StreamChunk(
                 delta_text=msg.get("content") or "",
                 finish_reason=resp["choices"][0].get("finish_reason") or "stop",
@@ -512,6 +540,7 @@ class AgentRunner:
             except StreamingNotSupported:
                 resp = await self.adapter.call(composed, messages)
                 msg = resp["choices"][0]["message"]
+                self._record_buffered_usage(recorder, resp.get("usage"))
                 yield StreamChunk(
                     delta_text=strip_reasoning(msg.get("content") or ""),
                     finish_reason=resp["choices"][0].get("finish_reason") or "stop",

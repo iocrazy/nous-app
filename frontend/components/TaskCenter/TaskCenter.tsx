@@ -21,7 +21,9 @@ import { TaskListView } from './TaskListView';
 import { TaskKanbanView } from './TaskKanbanView';
 import { BatchActionBar } from './BatchActionBar';
 import { TaskPagination } from './TaskPagination';
+import { NeedsInputSection } from './NeedsInputSection';
 import { useTaskPage } from './useTaskPage';
+import { postIssueMessage, AgentNotDispatchedError } from '../../services/issueMessageService';
 import { useToast } from '../Toast';
 import { useTranslation } from 'react-i18next';
 import {
@@ -41,9 +43,33 @@ interface TaskCenterProps {
 }
 
 export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
-  const { revision, refreshTasks, isConnected, isWsConnected, retryTask, deleteTask } = useTaskManager();
+  const {
+    revision, refreshTasks, isConnected, isWsConnected, retryTask, deleteTask,
+    needsInputItems, refreshNeedsInput,
+  } = useTaskManager();
   const { addToast } = useToast();
   const { t } = useTranslation();
+
+  // Reuses the existing issue-reply endpoint (issueMessageService.postIssueMessage)
+  // rather than adding a parallel one — posting the reply flips the issue's
+  // needs_followup status server-side, and refreshNeedsInput() re-pulls the
+  // list so the row disappears once it's no longer waiting on an answer.
+  //
+  // Silent-no-op fix (final review, finding 5): the POST can succeed (the
+  // message is saved) while starting no agent turn at all — the legacy
+  // no-assignee path and the /note-suppressed path both do this, and
+  // `agent_run` in the response is always null on every path (can't be used
+  // to tell them apart). Without checking `agent_dispatched`, the card would
+  // sit "pending" forever waiting for a status flip that will never come,
+  // with zero feedback. Throwing here routes it into NeedsInputSection's
+  // existing catch, which it distinguishes from a network failure.
+  const handleAnswerNeedsInput = async (issueId: string, text: string) => {
+    const res = await postIssueMessage(Number(issueId), { body: text });
+    if (!res.agent_dispatched) {
+      throw new AgentNotDispatchedError();
+    }
+    await refreshNeedsInput();
+  };
 
   // Settings → Tasks list: server-side page-number pagination. Owns
   // page / multi-select filters / sort / search; `tasks` below is the
@@ -255,6 +281,7 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({ embedded = false }) => {
 
   return (
     <div className={containerClass}>
+      <NeedsInputSection items={needsInputItems} onAnswer={handleAnswerNeedsInput} />
       {showStaleBanner && (
         <button
           type="button"

@@ -158,3 +158,25 @@ class DispatchPreview(BaseModel):
     will_start: bool
     agent_id: Optional[str] = None
     blocked_reason: Optional[DispatchBlockedReason] = None
+
+
+class NeedsInputItem(BaseModel):
+    """One issue parked at ``needs_followup`` with the agent waiting on a
+    human answer (Spec-4 needs_input first-class). Feeds the Task Center
+    'needs your answer' section (Task 3).
+
+    ``issue_id`` / ``project_id`` / ``team_id`` are BIGINT — str-serialized
+    per the Snowflake-precision convention, NOT the native int the plain
+    ``Issue`` schema uses for these same columns.
+    """
+
+    issue_id: str
+    title: str
+    question: Optional[str] = None
+    project_id: Optional[str] = None
+    team_id: Optional[str] = None
+    asked_at: datetime
+
+
+class NeedsInputListResponse(BaseModel):
+    items: list[NeedsInputItem]

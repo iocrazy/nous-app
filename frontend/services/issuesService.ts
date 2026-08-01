@@ -113,6 +113,24 @@ export interface IssueListFilters {
   offset?: number;
 }
 
+/** One issue parked at `needs_followup` with the agent waiting on a human
+ * answer (Spec-4 needs_input first-class). Mirrors
+ * backend/app/schemas/issue.py::NeedsInputItem — feeds the Task Center
+ * "Needs your answer" section (Task 3). All BIGINT ids ride as strings
+ * (Snowflake-precision convention), unlike the plain `Issue` shape above. */
+export interface NeedsInputItem {
+  issue_id: string;
+  title: string;
+  question: string | null;
+  project_id: string | null;
+  team_id: string | null;
+  asked_at: string;
+}
+
+export interface NeedsInputListResponse {
+  items: NeedsInputItem[];
+}
+
 // ── REST helpers ───────────────────────────────────────────────────
 
 const _base = `${getApiUrl()}/api/v1/issues`;
@@ -157,6 +175,15 @@ export async function getIssue(issueId: number): Promise<Issue> {
     headers: await getAuthHeaders(),
   });
   return _json<Issue>(res);
+}
+
+/** Issues currently waiting on a human answer — Task Center "Needs your
+ * answer" section's data source (Task 3). */
+export async function listNeedsInput(): Promise<NeedsInputListResponse> {
+  const res = await fetch(`${_base}/needs-input`, {
+    headers: await getAuthHeaders(),
+  });
+  return _json<NeedsInputListResponse>(res);
 }
 
 /**

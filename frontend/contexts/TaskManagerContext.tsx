@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useCallback, useRef, useState } from 'react';
 import { getSupabaseClient, getSupabaseAccessToken } from '../supabaseClient';
 import { useAuth } from './AuthContext';
 import { getAuthHeaders } from '../services/parserService';
@@ -6,6 +6,7 @@ import {
   cancelWorkflow,
   restartWorkflow,
 } from '../services/dbosWorkflowService';
+import { listNeedsInput, type NeedsInputItem } from '../services/issuesService';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -157,6 +158,11 @@ interface TaskManagerContextType extends TaskManagerState {
   deleteTask: (taskId: string) => Promise<void>;
   clearCompleted: () => Promise<void>;
   refreshTasks: () => Promise<void>;
+  /** Issues parked at needs_followup waiting on a human answer — feeds the
+   * Task Center "Needs your answer" section (Task 3). Separate from
+   * `tasks` — sourced from public.issues, not task_tracking. */
+  needsInputItems: NeedsInputItem[];
+  refreshNeedsInput: () => Promise<void>;
 }
 
 // ─── Reducer ────────────────────────────────────────────
@@ -662,6 +668,90 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     };
   }, [currentUserId, refreshTasks, bumpActiveCounts]);
 
+  // ─── Needs-input (Task 3): Task Center "Needs your answer" ────────────
+  // Separate data source from task_tracking — sourced from public.issues
+  // (Spec-4 needs_input first-class). Plain useState (not the reducer)
+  // since it's a different table/lifecycle than UnifiedTask, and the list
+  // is always a full server-computed snapshot (needs_input_predicate joins
+  // status + execution_state->>'agent_outcome', neither of which we can
+  // recompute from a bare Realtime payload) rather than something we can
+  // incrementally patch client-side.
+  const [needsInputItems, setNeedsInputItems] = useState<NeedsInputItem[]>([]);
+  const needsInputChannelRef = useRef<ReturnType<ReturnType<typeof getSupabaseClient>['channel']> | null>(null);
+  const [needsInputRealtimeUp, setNeedsInputRealtimeUp] = useState(false);
+
+  const refreshNeedsInput = useCallback(async () => {
+    try {
+      const res = await listNeedsInput();
+      setNeedsInputItems(res.items);
+    } catch (e) {
+      console.error('[TaskManager] Failed to fetch needs-input items:', e);
+    }
+  }, []);
+
+  // Debounced refetch trigger — a burst of `issues` UPDATEs (e.g. an agent
+  // dispatch touching several columns in sequence) should coalesce into one
+  // refetch, same pattern as bumpActiveCounts above.
+  const needsInputRefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debouncedRefreshNeedsInput = useCallback(() => {
+    if (needsInputRefetchTimer.current) clearTimeout(needsInputRefetchTimer.current);
+    needsInputRefetchTimer.current = setTimeout(() => {
+      refreshNeedsInput();
+    }, 500);
+  }, [refreshNeedsInput]);
+
+  // public.issues IS in the supabase_realtime publication (migrations 168 /
+  // 172 / 210) with the columns this feature needs (status, title,
+  // team_id, project_id, updated_at) — so Realtime is viable here, unlike a
+  // guess-and-poll fallback. execution_state (which the needs_input
+  // predicate also reads) is deliberately excluded from the publication
+  // (migration 172, security hardening), so a payload alone can't tell us
+  // whether a row now matches — every event is just a "go refetch" trigger,
+  // never a local merge.
+  useEffect(() => {
+    if (!currentUserId) return;
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    refreshNeedsInput();
+
+    const channel = supabase
+      .channel(`needs-input-${currentUserId}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'issues',
+      }, () => {
+        debouncedRefreshNeedsInput();
+      })
+      .subscribe((status) => {
+        setNeedsInputRealtimeUp(status === 'SUBSCRIBED');
+      });
+
+    needsInputChannelRef.current = channel;
+
+    return () => {
+      if (needsInputChannelRef.current) {
+        supabase.removeChannel(needsInputChannelRef.current);
+        needsInputChannelRef.current = null;
+      }
+      if (needsInputRefetchTimer.current) clearTimeout(needsInputRefetchTimer.current);
+    };
+  }, [currentUserId, refreshNeedsInput, debouncedRefreshNeedsInput]);
+
+  // 60s polling backstop — only while the issues Realtime channel itself is
+  // down (mirrors the task_tracking "both channels down" backstop below,
+  // scoped to this one channel since needs-input has no WebSocket leg).
+  useEffect(() => {
+    if (!currentUserId || needsInputRealtimeUp) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        refreshNeedsInput();
+      }
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [currentUserId, needsInputRealtimeUp, refreshNeedsInput]);
+
   // ─── Redis WebSocket for real-time progress ────────────
   const wsRef = useRef<WebSocket | null>(null);
   const wsReconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -763,11 +853,12 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const handler = () => {
       if (document.visibilityState === 'visible') {
         refreshTasks();
+        refreshNeedsInput();
       }
     };
     document.addEventListener('visibilitychange', handler);
     return () => document.removeEventListener('visibilitychange', handler);
-  }, [currentUserId, refreshTasks]);
+  }, [currentUserId, refreshTasks, refreshNeedsInput]);
 
   // ─── Polling backstop ───────────────────────────────────
   // When Realtime AND WS are BOTH down (both connections lost simultaneously),
@@ -857,6 +948,8 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
       deleteTask,
       clearCompleted,
       refreshTasks,
+      needsInputItems,
+      refreshNeedsInput,
     }}>
       {children}
     </TaskManagerContext.Provider>

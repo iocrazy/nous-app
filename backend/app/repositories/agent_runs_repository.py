@@ -172,9 +172,7 @@ class AgentRunsRepository(AsyncpgRepository):
     @staticmethod
     def _group_key_sql(alias: str = "") -> str:
         p = f"{alias}." if alias else ""
-        return (
-            f"COALESCE('conv:' || {p}conversation_id::text, 'run:' || {p}id::text)"
-        )
+        return f"COALESCE('conv:' || {p}conversation_id::text, 'run:' || {p}id::text)"
 
     async def list_groups_by_agent(
         self,
@@ -529,6 +527,72 @@ class AgentRunsRepository(AsyncpgRepository):
         except Exception as e:
             logger.error(f"Failed to request cancel for run {run_id}: {e}")
             return False
+
+    # ------------------------------------------------------------------
+    # Issue-linked run housekeeping (A2, needs_input first-class design §5.1)
+    # ------------------------------------------------------------------
+
+    async def backfill_issue_id(self, run_id: str, issue_id: int) -> None:
+        """Best-effort: stamp ``agent_runs.issue_id`` on a run that already
+        finished, keyed by ``run_id``.
+
+        RunRecorder has supported an ``issue_id`` constructor kwarg since
+        mig-208 (see ``test_run_recorder_issue_id.py``), but no
+        issue-dispatch/reply caller ever threads it through at construction
+        time — every issue-linked agent_runs row starts NULL. Rather than
+        widen ``RunRecorder``'s call site (shared by every other trigger),
+        this backfills post-hoc using the ``run_id`` the turn's own result
+        dict already carries. ``WHERE issue_id IS NULL`` makes it idempotent
+        and never clobbers a value some other write already set. Never
+        raises — this is decoration, not the primary status-routing op."""
+        try:
+            async with write_scope() as session:
+                await session.execute(
+                    update(AgentRuns)
+                    .where(AgentRuns.id == self._bigint(run_id))
+                    .where(AgentRuns.issue_id.is_(None))
+                    .values(issue_id=int(issue_id))
+                )
+        except Exception as e:
+            logger.error(
+                f"[agent_runs] backfill_issue_id failed "
+                f"(run={run_id} issue={issue_id}): {e}"
+            )
+
+    async def mark_empty_output(self, run_id: str, *, error_message: str) -> None:
+        """Type a zero-content, no-outcome run as a typed EMPTY_OUTPUT
+        failure (A2) instead of leaving it looking like an ordinary
+        ``completed`` row.
+
+        Deliberately does NOT touch ``liveness_state``. Every other writer of
+        ``liveness_state='dead'`` — ``liveness_scanner._mark_dead`` and
+        ``liveness/reconcile.reconcile_stranded_runs`` — pairs it atomically
+        with ``status='failed'`` (migration 207's column comment documents
+        this as the intended contract: dead means "the process actually
+        died", a different ops playbook from "the model returned nothing").
+        This run's ``status`` stays ``'completed'`` (RunRecorder already
+        closed it that way, successfully, before this method ever runs), so
+        writing ``liveness_state='dead'`` here would mint a never-before-seen
+        ``status='completed' + liveness_state='dead'`` combo and pollute that
+        invariant for ops triage. The EMPTY_OUTPUT typing is already fully
+        carried by ``error_code``/``error_message`` — no liveness_state write
+        needed. (The "liveness_state stays 'running' after completion" probe
+        observation is a real but separate gap: it needs its own terminal
+        value + migration, out of scope here — do not "fix" it by reaching
+        for 'dead'.) Never raises — best-effort annotation on an
+        already-finished row."""
+        try:
+            async with write_scope() as session:
+                await session.execute(
+                    update(AgentRuns)
+                    .where(AgentRuns.id == self._bigint(run_id))
+                    .values(
+                        error_code="EMPTY_OUTPUT",
+                        error_message=error_message,
+                    )
+                )
+        except Exception as e:
+            logger.error(f"[agent_runs] mark_empty_output failed (run={run_id}): {e}")
 
     # ------------------------------------------------------------------
     # Sweeper helpers

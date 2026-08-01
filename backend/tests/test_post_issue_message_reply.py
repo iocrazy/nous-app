@@ -62,6 +62,10 @@ async def test_session_issue_dispatches_reply_workflow(monkeypatch):
     assert resp.comment.kind == IssueMessageKind.COMMENT
     assert resp.comment.body == "please continue"
     assert resp.agent_run is None
+    # Silent-no-op fix (final review, finding 5): agent_run stays null on the
+    # wake path too, so the frontend must read agent_dispatched instead to
+    # tell a real dispatch apart from the note/legacy paths below.
+    assert resp.agent_dispatched is True
 
 
 @pytest.mark.asyncio
@@ -114,6 +118,9 @@ async def test_legacy_issue_still_inserts_issue_messages(monkeypatch):
     params = captured["stmt"].compile(dialect=postgresql.dialect()).params
     assert params["kind"] == "comment"
     assert resp.comment.body == "hi"
+    # Legacy path never starts a workflow — agent_dispatched must stay False
+    # so the frontend doesn't wait on a status flip that will never come.
+    assert resp.agent_dispatched is False
 
 
 def _nullctx():

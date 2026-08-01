@@ -126,6 +126,20 @@ class OpenAICompatibleAdapter:
         Final chunk's ``usage`` (when provider supplies it — DashScope/
         OpenAI both do at finish_reason=stop) is attached to the LAST
         StreamChunk for the runner to record.
+
+        A1 (needs_input first-class, Task 5 fix-2): a provider with
+        ``stream_options.include_usage=true`` (confirmed: Volcengine/Doubao)
+        does NOT bundle usage onto the same chunk as ``finish_reason`` — it
+        sends the terminal usage as its OWN trailing chunk with an EMPTY
+        ``choices`` array, arriving AFTER the finish_reason chunk. The
+        AgentRunner stream consumer stops iterating this generator the
+        instant it sees a chunk with ``finish_reason`` set, so whichever
+        usage value is on THAT chunk is final. We therefore hold the
+        finish-bearing chunk back (``pending_finish``) instead of yielding
+        it immediately, so a following usage-only line can still fill it in
+        before the caller ever sees it — restoring the "usage populated on
+        the final chunk" contract regardless of which shape the provider
+        uses.
         """
         body = self._build_body(composed, messages)
         body["stream"] = True
@@ -141,16 +155,28 @@ class OpenAICompatibleAdapter:
                 resp.raise_for_status()
                 final_finish: str | None = None
                 final_usage: Dict[str, Any] | None = None
+                pending_finish: StreamChunk | None = None
 
                 async for raw in resp.aiter_lines():
                     if not raw or not raw.startswith("data:"):
                         continue
                     payload = raw[len("data:") :].strip()
                     if payload == "[DONE]":
-                        # Emit terminal chunk if not already (some
-                        # providers send finish_reason on a separate
-                        # line; others bundle it with the [DONE] line).
-                        if final_finish is None:
+                        if pending_finish is not None:
+                            # No trailing usage chunk showed up before
+                            # [DONE] — flush with whatever usage we have
+                            # (possibly still None; provider genuinely
+                            # never sent it).
+                            yield StreamChunk(
+                                delta_text=pending_finish.delta_text,
+                                tool_call_delta=pending_finish.tool_call_delta,
+                                finish_reason=pending_finish.finish_reason,
+                                usage=final_usage,
+                            )
+                        elif final_finish is None:
+                            # Emit terminal chunk if not already (some
+                            # providers send finish_reason on a separate
+                            # line; others bundle it with the [DONE] line).
                             yield StreamChunk(finish_reason="stop", usage=final_usage)
                         return
                     try:
@@ -158,11 +184,22 @@ class OpenAICompatibleAdapter:
                     except json.JSONDecodeError:
                         continue
 
-                    # Capture usage if present on this event (final chunk
-                    # in OpenAI-style streams).
+                    # Capture usage if present on this event. Per the
+                    # two-chunk-tail shape, this often arrives on its OWN
+                    # event (choices=[]) strictly after the finish_reason
+                    # event — if we're holding a pending finish chunk, this
+                    # is exactly what it was waiting for: flush it now.
                     usage = evt.get("usage")
                     if usage:
                         final_usage = usage
+                        if pending_finish is not None:
+                            yield StreamChunk(
+                                delta_text=pending_finish.delta_text,
+                                tool_call_delta=pending_finish.tool_call_delta,
+                                finish_reason=pending_finish.finish_reason,
+                                usage=final_usage,
+                            )
+                            return
 
                     choices = evt.get("choices") or []
                     if not choices:
@@ -178,7 +215,12 @@ class OpenAICompatibleAdapter:
 
                     if finish:
                         final_finish = finish
-                        yield StreamChunk(
+                        # Don't yield yet — a trailing usage-only chunk may
+                        # still be coming (see docstring). Flushed above on
+                        # the next usage sighting, or at [DONE] otherwise —
+                        # or, failing both, by the fallback below if the
+                        # connection closes first.
+                        pending_finish = StreamChunk(
                             delta_text=delta_text,
                             tool_call_delta=tool_call_delta,
                             finish_reason=finish,
@@ -189,3 +231,22 @@ class OpenAICompatibleAdapter:
                             delta_text=delta_text,
                             tool_call_delta=tool_call_delta,
                         )
+
+                # A1 (Task 5 fix-3): ``aiter_lines()`` can exhaust with no
+                # exception on a silent connection close (SSE/network
+                # flake) — real, not hypothetical. If that happens right
+                # after the finish_reason line but before either a usage
+                # tail chunk or ``[DONE]`` shows up, the loop above exits
+                # normally and — without this fallback — the held-back
+                # ``pending_finish`` (its real finish_reason, e.g. 'length'
+                # or 'tool_calls', plus any delta_text/tool_call_delta
+                # riding it) would be silently dropped. Emit it as-is;
+                # usage stays whatever final_usage holds (often still None
+                # here — an honest "never arrived", not fabricated).
+                if pending_finish is not None:
+                    yield StreamChunk(
+                        delta_text=pending_finish.delta_text,
+                        tool_call_delta=pending_finish.tool_call_delta,
+                        finish_reason=pending_finish.finish_reason,
+                        usage=final_usage,
+                    )

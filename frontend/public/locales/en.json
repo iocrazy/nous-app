@@ -23,7 +23,12 @@
       "perPage": "{{count}} / page",
       "prev": "Previous",
       "next": "Next"
-    }
+    },
+    "needsAnswer": "Needs your answer",
+    "viewConversation": "View conversation",
+    "answerPlaceholder": "Type your answer…",
+    "answerButton": "Answer",
+    "answerNotDispatched": "Answer posted, but the agent could not be triggered — open the conversation to follow up."
   },
   "nav": {
     "linkParser": "Link Parser",
@@ -2194,6 +2199,7 @@
     "approvedContinue": "Approved — send a message to continue.",
     "rejectedNote": "Rejected — the agent will not run this action.",
     "approvalResolved": "This request was already handled.",
+    "attachmentFailures": "{{count}} attachment(s) failed to load",
     "suggestions": {
       "outlineStory": "Help me outline a story",
       "reviewChapter": "Review my chapter",
