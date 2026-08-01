@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Tag,
   Card,
@@ -13,6 +14,8 @@ import {
   Menu,
   Descriptions,
   Spin,
+  Radio,
+  Button,
 } from '@arco-design/web-react'
 import {
   IconMore,
@@ -37,7 +40,25 @@ import {
   useDeleteVideo,
   useRetryVideo,
 } from '../../api/endpoints/videos'
+import {
+  useStorageStats,
+  useAudit,
+  useDeepVerify,
+  useMediaStatus,
+} from '../../api/endpoints/storage'
+import type { MediaStorageRow } from '../../api/endpoints/storage'
+import { StorageSection } from './StorageSection'
 import { formatDateTime, formatBytes } from '../../utils/format'
+
+export type StorageFilter = 'all' | 'ok' | 'broken' | 'no_video' | 'fs_residue'
+
+const STORAGE_FILTER_OPTIONS: { label: string; value: StorageFilter }[] = [
+  { label: 'All', value: 'all' },
+  { label: 'OK', value: 'ok' },
+  { label: 'Broken', value: 'broken' },
+  { label: 'No Video', value: 'no_video' },
+  { label: 'FS Residue', value: 'fs_residue' },
+]
 
 const API_URL = import.meta.env.DEV ? '' : (import.meta.env.VITE_API_URL || '')
 
@@ -81,61 +102,118 @@ function StatusTag({ status }: { status: string }) {
 
 function StatsCards() {
   const { data: stats } = useVideoStats()
+  const { data: sst } = useStorageStats()
+  const { data: audit } = useAudit()
+  const qc = useQueryClient()
+  const prevAuditStatusRef = useRef<string | undefined>(undefined)
+
+  useEffect(() => {
+    if (prevAuditStatusRef.current !== 'completed' && audit?.status === 'completed') {
+      qc.invalidateQueries({ queryKey: ['storage-stats'] })
+    }
+    prevAuditStatusRef.current = audit?.status
+  }, [audit?.status, qc])
+
   if (!stats) return null
 
   return (
-    <Grid.Row gutter={16} style={{ marginBottom: 16 }}>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic title="Total" value={stats.total} />
-        </Card>
-      </Grid.Col>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic
-            title="Completed"
-            value={stats.completed}
-            styleValue={{ color: 'rgb(var(--green-6))' }}
-          />
-        </Card>
-      </Grid.Col>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic
-            title="Failed"
-            value={stats.failed}
-            styleValue={{ color: 'rgb(var(--red-6))' }}
-          />
-        </Card>
-      </Grid.Col>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic
-            title="Pending"
-            value={stats.pending}
-            styleValue={{ color: 'rgb(var(--orange-6))' }}
-          />
-        </Card>
-      </Grid.Col>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic
-            title="Downloading"
-            value={stats.downloading}
-            styleValue={{ color: 'rgb(var(--blue-6))' }}
-          />
-        </Card>
-      </Grid.Col>
-      <Grid.Col span={4}>
-        <Card>
-          <Statistic
-            title="Storage"
-            value={formatBytes(stats.total_storage_bytes)}
-            prefix={<IconStorage />}
-          />
-        </Card>
-      </Grid.Col>
-    </Grid.Row>
+    <div style={{ marginBottom: 16 }}>
+      <Grid.Row gutter={16} style={{ marginBottom: 8 }}>
+        <Grid.Col span={4}>
+          <Card>
+            <Statistic title="Total" value={stats.total} />
+          </Card>
+        </Grid.Col>
+        <Grid.Col span={4}>
+          <Card>
+            <Statistic
+              title="Completed"
+              value={stats.completed}
+              styleValue={{ color: 'rgb(var(--green-6))' }}
+            />
+          </Card>
+        </Grid.Col>
+        <Grid.Col span={4}>
+          <Card>
+            <Statistic
+              title="Failed"
+              value={stats.failed}
+              styleValue={{ color: 'rgb(var(--red-6))' }}
+            />
+          </Card>
+        </Grid.Col>
+        <Grid.Col span={4}>
+          <Card>
+            <Statistic
+              title="Pending"
+              value={stats.pending}
+              styleValue={{ color: 'rgb(var(--orange-6))' }}
+            />
+          </Card>
+        </Grid.Col>
+        <Grid.Col span={4}>
+          <Card>
+            <Statistic
+              title="Downloading"
+              value={stats.downloading}
+              styleValue={{ color: 'rgb(var(--blue-6))' }}
+            />
+          </Card>
+        </Grid.Col>
+        <Grid.Col span={4}>
+          <Card>
+            <Statistic
+              title="Storage"
+              value={formatBytes(stats.total_storage_bytes)}
+              prefix={<IconStorage />}
+            />
+          </Card>
+        </Grid.Col>
+      </Grid.Row>
+      <Grid.Row gutter={16}>
+        <Grid.Col span={6}>
+          <Card>
+            <Statistic
+              title="FS Residue"
+              value={sst?.fs_residue ?? '—'}
+              styleValue={{
+                color: (sst?.fs_residue ?? 0) > 0 ? 'rgb(var(--orange-6))' : 'rgb(var(--green-6))',
+              }}
+            />
+          </Card>
+        </Grid.Col>
+        <Grid.Col span={6}>
+          <Card>
+            <Statistic title="Orphans" value={sst?.orphans ?? '—'} />
+          </Card>
+        </Grid.Col>
+        <Grid.Col span={6}>
+          <Card>
+            <Statistic
+              title="Broken on S3"
+              value={sst?.broken ?? '—'}
+              styleValue={{
+                color: (sst?.broken ?? 0) > 0 ? 'rgb(var(--red-6))' : 'rgb(var(--green-6))',
+              }}
+            />
+          </Card>
+        </Grid.Col>
+        <Grid.Col span={6}>
+          <Card>
+            <Statistic title="HLS Ready" value={sst?.hls_ready ?? '—'} />
+          </Card>
+        </Grid.Col>
+      </Grid.Row>
+      <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+        {audit?.status === 'completed'
+          ? `Last S3 scan ${formatDateTime(audit.scanned_at)} · ${audit.scanned} objects · ${audit.missing.length} missing`
+          : audit?.status === 'queued' || audit?.status === 'in_progress'
+            ? 'Scanning storage…'
+            : audit?.status === 'failed'
+              ? 'Last deep scan failed'
+              : 'No deep scan yet'}
+      </Typography.Text>
+    </div>
   )
 }
 
@@ -229,6 +307,7 @@ function DetailContent({ detail }: { detail: VideoDetailData }) {
           <Typography.Paragraph>{detail.video_desc}</Typography.Paragraph>
         </Card>
       )}
+      <StorageSection mediaId={detail.id} />
     </div>
   )
 }
@@ -338,8 +417,30 @@ function ActionsCell({
 
 export function MediaList() {
   const [detailId, setDetailId] = useState<number | null>(null)
+  const [storageFilter, setStorageFilter] = useState<StorageFilter>('all')
+  const [pageIds, setPageIds] = useState<string[]>([])
   const deleteVideo = useDeleteVideo()
   const retryVideo = useRetryVideo()
+  const { data: audit } = useAudit()
+  const deepVerify = useDeepVerify()
+  const auditRunning = audit?.status === 'queued' || audit?.status === 'in_progress'
+
+  // Storage status for the currently-loaded page of rows (lags one render behind
+  // pagination: `pageIds` is synced from the table's fetched items via effect below).
+  const { data: storageRows } = useMediaStatus(pageIds)
+  const storageBy = useMemo(
+    () => new Map((storageRows ?? []).map((r: MediaStorageRow) => [r.media_id, r])),
+    [storageRows],
+  )
+  const brokenSet = useMemo(
+    () =>
+      new Set(
+        (audit?.missing ?? [])
+          .map((m) => m.media_id)
+          .filter((id): id is string => id != null),
+      ),
+    [audit],
+  )
 
   const handleDelete = (video: VideoData) => {
     Modal.confirm({
@@ -438,6 +539,74 @@ export function MediaList() {
         cell: (row) => formatDateTime(row.created_at),
       },
       {
+        key: 'assets',
+        header: 'Assets',
+        type: 'text',
+        size: 110,
+        cell: (row) => {
+          const s = storageBy.get(String(row.id))
+          if (!s) return null
+          const cell = (label: string, ok: boolean) => (
+            <span
+              style={{
+                display: 'inline-grid',
+                placeItems: 'center',
+                width: 18,
+                height: 18,
+                borderRadius: 4,
+                marginRight: 3,
+                fontSize: 10,
+                fontWeight: 700,
+                background: ok ? 'var(--color-success-light-1)' : 'var(--color-fill-2)',
+                color: ok ? 'rgb(var(--success-6))' : 'var(--color-text-3)',
+              }}
+            >
+              {label}
+            </span>
+          )
+          return (
+            <>
+              {cell('C', s.cover_ok)}
+              {cell('T', s.thumbnail_ok)}
+              {cell('H', s.hls_ok)}
+            </>
+          )
+        },
+      },
+      {
+        key: 'storage',
+        header: 'Storage',
+        type: 'text',
+        size: 120,
+        cell: (row) => {
+          const s = storageBy.get(String(row.id))
+          if (!s) return null
+          if (brokenSet.has(String(row.id)))
+            return (
+              <Tag color="red" size="small">
+                Broken
+              </Tag>
+            )
+          if (s.storage_status === 'ok')
+            return (
+              <Tag color="green" size="small">
+                OK
+              </Tag>
+            )
+          if (s.storage_status === 'fs_residue')
+            return (
+              <Tag color="orange" size="small">
+                FS Residue
+              </Tag>
+            )
+          return (
+            <Tag color="gray" size="small">
+              No Video
+            </Tag>
+          )
+        },
+      },
+      {
         key: 'actions',
         header: 'Actions',
         type: 'text',
@@ -455,7 +624,17 @@ export function MediaList() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [retryVideo.variables, retryVideo.isPending],
+    [retryVideo.variables, retryVideo.isPending, storageBy, brokenSet],
+  )
+
+  const rowFilter = useCallback(
+    (r: VideoData) => {
+      if (storageFilter === 'all') return true
+      if (storageFilter === 'broken') return brokenSet.has(String(r.id))
+      const s = storageBy.get(String(r.id))
+      return s?.storage_status === storageFilter
+    },
+    [storageFilter, storageBy, brokenSet],
   )
 
   const {
@@ -464,9 +643,11 @@ export function MediaList() {
     pagination,
     isLoading,
     setPage,
+    queryResult,
   } = useNotionTable<VideoData>({
     tableKey: 'admin_media',
     columns,
+    rowFilter,
     defaultSorts: [{ field: 'created_at', direction: 'desc' }],
     fetchData: async ({ page, pageSize, filters, sorts, search }) => {
       const statusFilter = filters.find((f) => f.field === 'video_download_status')
@@ -490,6 +671,14 @@ export function MediaList() {
     },
   })
 
+  useEffect(() => {
+    const items = queryResult.data?.items ?? []
+    const next = Array.from(new Set(items.map((r) => String(r.id)))).sort()
+    setPageIds((prev) =>
+      prev.length === next.length && prev.every((v, i) => v === next[i]) ? prev : next,
+    )
+  }, [queryResult.data])
+
   return (
     <div>
       <NotionTable<VideoData>
@@ -500,6 +689,24 @@ export function MediaList() {
         isLoading={isLoading}
         title="Media"
         headerContent={<StatsCards />}
+        toolbarExtra={
+          <Space>
+            <Radio.Group
+              type="button"
+              size="small"
+              value={storageFilter}
+              onChange={(v) => setStorageFilter(v)}
+              options={STORAGE_FILTER_OPTIONS}
+            />
+            <Button
+              size="small"
+              loading={deepVerify.isPending || auditRunning}
+              onClick={() => deepVerify.mutate()}
+            >
+              {auditRunning ? 'Verifying…' : 'Deep Verify'}
+            </Button>
+          </Space>
+        }
         emptyText="No media found"
         scrollX={1200}
       />

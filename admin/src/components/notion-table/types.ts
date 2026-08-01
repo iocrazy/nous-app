@@ -55,6 +55,9 @@ export interface UseNotionTableConfig<T> {
   defaultPageSize?: number
   refetchInterval?: number | false
   rowKey?: string | ((row: T) => string)
+  /** Optional client-side filter applied to the already-loaded page of rows
+   *  (does not affect pagination `total`, which still reflects the server count). */
+  rowFilter?: (row: T) => boolean
 }
 
 // --- Toolbar props ---
