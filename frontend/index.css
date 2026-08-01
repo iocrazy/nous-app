@@ -1125,8 +1125,13 @@ body {
    Namespaced --canvas-*, follows [data-theme] (unlike the legacy dark-only
    block above, which storyboard/editor surfaces still consume). Color values
    are translated from Infinite-Canvas canvas.css:2-3; radii/shadow/blur/ease
-   from its layout spec. We NEVER port theme.css itself. Primary stays
-   MediaHub indigo (--canvas-accent) until the neutral-vs-color decision;
+   from its layout spec. We NEVER port theme.css itself. Primary
+   (--canvas-accent) is no longer the parked MediaHub indigo: K1.5 settled the
+   neutral-vs-color question (spec §5 — each module gets a primary, semantics
+   stay global), so it now reads the shared accent ladder anchor
+   --color-indigo-600 instead of a fixed hex. That makes it follow whatever
+   module the canvas is rendered under for free; today `viewToModule()` maps
+   canvas to no module, so it resolves to the global default 绿 #1E7A5B.
    --canvas-strong carries Infinite's neutral flip for when it lands. */
 :root,
 [data-theme="dark"] {
@@ -1139,8 +1144,11 @@ body {
   --canvas-text: #e5e9f0;
   --canvas-muted: #8f9aab;
   --canvas-strong: #d8dee9;
-  --canvas-accent: #6366f1;
-  --canvas-accent-rgb: 99 102 241;
+  --canvas-accent: var(--color-indigo-600);
+  /* No rgb-triplet form exists on the ladder (it is hex-only), so the alpha
+     companion for .mh-accent-chip tracks the same anchor by hand — keep this
+     in sync with --color-indigo-600's global default. */
+  --canvas-accent-rgb: 30 122 91; /* #1E7A5B */
   --canvas-mask: rgba(15, 20, 29, 0.6);
   --canvas-r-panel: 24px;
   --canvas-r-node: 22px;

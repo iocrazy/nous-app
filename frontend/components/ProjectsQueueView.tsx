@@ -18,7 +18,7 @@ import { FolderOpen, Loader2, Star } from 'lucide-react';
 import type { Project, ProjectSuggestionItem } from '../types';
 import { generateMissingFrames } from '../services/projectsService';
 import { useToast } from './Toast';
-import { StageRing } from './project/StageRing';
+import { StageRing, ringStageFromBadge } from './project/StageRing';
 import { formatRelativeTime } from '../utils/relativeTime';
 
 interface ProjectsQueueViewProps {
@@ -137,16 +137,7 @@ export function ProjectsQueueView({
         const badge = project?.workflow_badge ?? null;
         const stageName = badge?.current_node_name ?? item.stage_slug ?? '';
         const agentsActive = badge?.agents_active ?? 0;
-        // StageRing is workflow-driven only — a No-workflow project (no badge /
-        // no cursor) renders no ring.
-        const ringStage =
-          badge && badge.workflow_position != null && badge.workflow_total > 0
-            ? {
-                name: badge.current_node_name ?? '',
-                index: badge.workflow_position,
-                total: badge.workflow_total,
-              }
-            : null;
+        const ringStage = ringStageFromBadge(badge);
 
         return (
           <div

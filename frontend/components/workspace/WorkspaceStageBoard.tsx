@@ -110,7 +110,10 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
         aiLibraryService.listAgents().catch(() => []),
       ]);
       if (!alive) return;
-      setPeople(mem.map((m) => ({ id: m.user_id, name: m.email || 'Member' })));
+      // Name stays raw here (an emailless member yields ''); the generic
+      // fallback label is applied at the render site so this effect does not
+      // have to depend on `t` and refetch on every language switch.
+      setPeople(mem.map((m) => ({ id: m.user_id, name: m.email })));
       setAgents(ag.map((a) => ({ id: a.id, name: a.name, slug: a.slug })));
     })();
     return () => {
@@ -351,11 +354,15 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
             </span>
             {node.owner_agent_id ? (
               <span className="inline-flex items-center gap-1 text-ink-200">
-                <Bot size={12} /> {agents.find((a) => a.id === node.owner_agent_id)?.name ?? 'Agent'}
+                <Bot size={12} />{' '}
+                {agents.find((a) => a.id === node.owner_agent_id)?.name ??
+                  t('projects.workflow.genericAgent')}
               </span>
             ) : node.owner_user_id ? (
               <span className="inline-flex items-center gap-1 text-ink-200">
-                <User size={12} /> {people.find((p) => p.id === node.owner_user_id)?.name ?? 'Member'}
+                <User size={12} />{' '}
+                {people.find((p) => p.id === node.owner_user_id)?.name ||
+                  t('projects.workflow.genericMember')}
               </span>
             ) : (
               <span className="text-ink-500">{t('projects.workflow.unassigned')}</span>

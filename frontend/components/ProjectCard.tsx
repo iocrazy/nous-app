@@ -3,7 +3,7 @@ import { Star, Clock, FileText, MoreVertical, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Project, ProjectSuggestionItem } from '../types';
 import { formatRelativeTime } from '../utils/relativeTime';
-import { StageRing } from './project/StageRing';
+import { StageRing, ringStageFromBadge } from './project/StageRing';
 import { generateMissingFrames } from '../services/projectsService';
 import { useToast } from './Toast';
 
@@ -76,18 +76,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
     : colors.border;
   const isArchived = Boolean(project.archived_at);
   const workflowBadge = project.workflow_badge ?? null;
-  // StageRing is workflow-driven only (G3 dropped the SOP current_stage
-  // fallback) — a No-workflow project (no badge / no cursor) renders no ring.
-  const ringStage =
-    workflowBadge &&
-    workflowBadge.workflow_position != null &&
-    workflowBadge.workflow_total > 0
-      ? {
-          name: workflowBadge.current_node_name ?? '',
-          index: workflowBadge.workflow_position,
-          total: workflowBadge.workflow_total,
-        }
-      : null;
+  const ringStage = ringStageFromBadge(workflowBadge);
   const membersPreview = project.members_preview ?? null;
   const activity = project.latest_activity ?? null;
   const hasSuggestion = Boolean(suggestion && suggestion.kind && suggestion.action);

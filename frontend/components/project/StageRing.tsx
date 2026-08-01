@@ -9,12 +9,31 @@
  */
 
 import React from 'react';
+import type { ProjectWorkflowBadge } from '../../types';
 
 interface RingStage {
   name: string;
   /** 1-based position among the ring's segments. */
   index: number;
   total: number;
+}
+
+/**
+ * Workflow badge -> ring stage. The ring is workflow-driven only (G3 dropped
+ * the SOP `current_stage` fallback), so a No-workflow project — no badge, or
+ * a badge with no cursor — yields null and renders no ring. Shared by every
+ * card surface that shows the ring (ProjectCard grid, ProjectsQueueView rows)
+ * so the "what counts as a ringable badge" condition lives in one place.
+ */
+export function ringStageFromBadge(
+  badge: ProjectWorkflowBadge | null | undefined,
+): RingStage | null {
+  if (!badge || badge.workflow_position == null || badge.workflow_total <= 0) return null;
+  return {
+    name: badge.current_node_name ?? '',
+    index: badge.workflow_position,
+    total: badge.workflow_total,
+  };
 }
 
 interface StageRingProps {

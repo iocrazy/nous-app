@@ -1,26 +1,14 @@
-"""M2 PR-G1.5: build_stage_suggestion always degrades to "no stage" now — the
-legacy SOP stage cursor (``current_stage_id`` / ``ProjectStagesRepository.
-get_current``) is retired end-to-end, so there is nothing left to read a
-stage from. The rich kind-decision table (storyboard progress branches,
-generic navigate) still lives in the pure ``_suggestion_from`` helper — it is
-shared with the homepage batch (``get_project_suggestions``) and stays fully
-covered here by calling it directly instead of through the now-stage-less
-``build_stage_suggestion``.
+"""M2 PR-G1.5 retired the legacy SOP stage cursor (``current_stage_id`` /
+``ProjectStagesRepository.get_current``) end-to-end, so there is nothing left
+to read a stage from and the single-project entry point
+(``build_stage_suggestion``) — which could then only return the degraded "no
+stage" dict, and had no callers — has been deleted. The rich kind-decision
+table (storyboard progress branches, generic navigate) still lives in the pure
+``_suggestion_from`` helper, the reference for the ``StageSuggestionResponse``
+kind values the frontend renders, and stays covered here directly.
 """
 
-import pytest
-
-from app.services.library.projects_service import ProjectsService, _suggestion_from
-
-
-@pytest.mark.asyncio
-async def test_build_stage_suggestion_always_renders_nothing():
-    """No more stage cursor to read — every project degrades to kind=""
-    regardless of project_id, exactly like a workflow project already did
-    before this retirement."""
-    svc = ProjectsService.__new__(ProjectsService)  # bypass __init__ deps
-    out = await svc.build_stage_suggestion(1)
-    assert out == {"stage_slug": None, "kind": "", "progress": None, "action": None}
+from app.services.library.projects_service import _suggestion_from
 
 
 def test_suggestion_from_no_stage_renders_nothing():

@@ -57,9 +57,13 @@ _STAGE_NAV_TAB = {
     "delivery": "output",
 }
 
-# Days a project may dwell in a given stage before the card flags it as
-# stalled (B1 hybrid activity row). "review" gets a tighter SLA than the
-# rest of the pipeline; everything else falls back to _DEFAULT_STALL_DAYS.
+# Days (not hours) a project may dwell in a given stage before the card flags
+# it as stalled (B1 hybrid activity row). "review" is the only special case:
+# it is a hand-off waiting on a human, so sitting there is a queue backlog
+# worth surfacing early, while the produce-heavy stages legitimately run long.
+# To give another stage its own SLA, add `"<stage_slug>": <days>` here — the
+# lookup in _merge_activity falls back to _DEFAULT_STALL_DAYS for any slug
+# absent from this map, so no other code needs touching.
 STAGE_STALL_THRESHOLDS = {"review": 3}
 _DEFAULT_STALL_DAYS = 7
 
@@ -136,9 +140,13 @@ async def resolve_current_stage(
 
 def _suggestion_from(stage_slug: str | None, progress: dict | None = None) -> dict:
     """Pure decision table: SOP stage slug (+ optional storyboard progress)
-    -> suggestion dict. Extracted (PR-8 Task A) so ``build_stage_suggestion``
-    (single project) and ``get_project_suggestions`` (homepage batch, G7)
-    share exactly one kind table instead of two copies drifting apart.
+    -> suggestion dict. Extracted (PR-8 Task A) so the single-project and the
+    batch (``get_project_suggestions``, homepage G7) paths shared exactly one
+    kind table instead of two copies drifting apart. The single-project entry
+    point (``build_stage_suggestion``) is gone — after M2 PR-G1.5 retired the
+    SOP stage cursor it could only ever return the degraded "no stage" dict,
+    and nothing called it. This table is kept because it is the reference for
+    the ``StageSuggestionResponse`` kind values the frontend still renders.
 
     ``progress`` is only consulted when ``stage_slug == "storyboard"``; when
     it is ``None`` for a storyboard-stage project (e.g. the batch fetch
@@ -1309,7 +1317,7 @@ class ProjectsService:
             return {}
 
     # ------------------------------------------------------------------ #
-    # Stage suggestion (B3)
+    # Repo accessors (B3)
     # ------------------------------------------------------------------ #
 
     def _stages_repo(self):
@@ -1333,19 +1341,6 @@ class ProjectsService:
         )
 
         return get_script_shot_repository()
-
-    async def build_stage_suggestion(self, project_id) -> dict:
-        """Typed 'what's the one next step' for the project — always "no
-        stage" now (M2 PR-G1.5).
-
-        The legacy SOP stage cursor (``current_stage_id`` /
-        ``ProjectStagesRepository.get_current``) is retired end-to-end, so
-        there is no stage left to suggest from; every project takes the
-        existing degrade path (kind="" → the frontend renders nothing).
-        Decision table lives in the module-level ``_suggestion_from`` helper,
-        shared with the batch ``get_project_suggestions`` (Task A).
-        """
-        return _suggestion_from(None)
 
     # ------------------------------------------------------------------ #
     # Batch stage suggestions (B3 / G7 — homepage queue data source)
