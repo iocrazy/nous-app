@@ -121,6 +121,17 @@ ALLOWED_BYPASS_PATHS: dict[str, str] = {
     "services/ai/memory/promotion_evaluator.py": (
         "agent-memory promotion classification/scrub LLM, scheduled fire-and-forget"
     ),
+    # Issue-lifecycle forced FinishIssue declaration fallback: calls the
+    # adapter directly (not via AgentRunner/LLMFallbackChain) because it
+    # deliberately bypasses the normal tool loop to FORCE tool_choice onto
+    # FinishIssue. IS covered by telemetry — _run_forced_declare_turn opens
+    # its own RunRecorder (trigger suffixed "_finish_declare", distinct from
+    # the main turn's trigger so it can't inflate the autopilot quota
+    # counter) around both adapter.call sites, same shape as
+    # visual_analysis_service.py above.
+    "services/ai/tools/forced_finish_declaration.py": (
+        "FinishIssue tool_choice forcing, wrapped in its own RunRecorder"
+    ),
 }
 
 # Patterns that indicate a direct LLM call. If any of these appear in a
