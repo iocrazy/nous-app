@@ -45,8 +45,12 @@ services:
     env_file: /media/heygo/program/datahub/nous/secrets/backend.env
     environment:
       - MEDIAHUB_ROLE=gateway
+      # materialize S3 读通缓存(spec 2026-08-02-s3-materialize-disk-cache):
+      # 必须指向本地 NVMe——放 CIFS 比直接拉 S3 还慢(145 vs 266 MB/s)。
+      - MEDIA_S3_CACHE_DIR=/app/s3cache
     volumes:
       - /mnt/heytime/Sources/nous/media:/app/downloads
+      - /media/heygo/program/datahub/nous/data/s3cache:/app/s3cache
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -101,8 +105,11 @@ services:
     env_file: /media/heygo/program/datahub/nous/secrets/backend.env
     environment:
       - MEDIAHUB_ROLE=worker
+      # 同 backend:materialize S3 读通缓存,共享同一宿主机 NVMe 目录。
+      - MEDIA_S3_CACHE_DIR=/app/s3cache
     volumes:
       - /mnt/heytime/Sources/nous/media:/app/downloads
+      - /media/heygo/program/datahub/nous/data/s3cache:/app/s3cache
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

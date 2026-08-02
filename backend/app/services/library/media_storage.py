@@ -519,6 +519,66 @@ async def materialize(file_path: str) -> AsyncIterator["Path"]:
         yield Path(real)
         return
     store = ObjectStore(loc.bucket)
+
+    # ── 读通磁盘缓存(2026-08-02,spec 2026-08-02-s3-materialize-disk-cache)──
+    # followup 链(缩略图/抽音频/转码/AI)各自独立 materialize 同一个对象,
+    # 无缓存时同链重复全量拉 3-4 次。缓存在部署机本地 NVMe(compose bind);
+    # 文件名 = sha256(key)——对 key 哈希而非假设 key 含内容 sha,因为
+    # derived/album/hls 的 key 不是内容寻址的。命中刷 mtime(LRU 信号,
+    # atime 受 relatime 不可靠),退出不删;禁用(默认)走下方 temp 旧行为。
+    #
+    # ⚠️ 缓存是纯加速层,任何缓存侧的 OSError 都必须降级到下方 temp 路径而
+    # 不是失败整条链:CLAUDE.md 记录过四次"容器身份 ≠ 目录属主 → 写失败"。
+    # 典型触发是宿主机缓存目录被删后 docker 自动以 root:root 0755 重建,
+    # 容器 uid 1031 写不进——若在此硬失败,转码/缩略图/抽音频/AI/聊天附件
+    # 会全线瘫痪,而这些在本 PR 之前都能靠 temp 正常工作。
+    cache_dir = settings.MEDIA_S3_CACHE_DIR
+    if cache_dir and os.path.isdir(cache_dir) and os.access(cache_dir, os.W_OK):
+        import contextlib
+        import uuid as _uuid
+
+        from loguru import logger
+
+        name = hashlib.sha256(loc.key.encode()).hexdigest()[:32] + Path(loc.key).suffix
+        cached = Path(cache_dir) / name
+        if cached.is_file():
+            try:
+                os.utime(cached, None)
+            except OSError:  # 刷新 mtime 失败只影响 LRU 新鲜度,不影响可用性
+                pass
+            yield cached
+            return
+        tmp_cache = Path(cache_dir) / f".tmp-{_uuid.uuid4().hex}"
+        cache_ok = True
+        try:
+            import aiofiles
+
+            async with aiofiles.open(tmp_cache, "wb") as out:
+                async for chunk in store.get_stream(loc.key):
+                    await out.write(chunk)
+            # 并发同 key 竞态安全:各写各的 tmp,replace 原子幂等入位。
+            os.replace(tmp_cache, cached)
+            # 只读保护:调用方(ffmpeg/whisper/缩略图)均只读源文件;0444 把
+            # 未来某个误写调用方变成显式报错而非静默污染缓存。chmod 失败不
+            # 该让已经就位的缓存作废——只是少了道护栏。
+            with contextlib.suppress(OSError):
+                os.chmod(cached, 0o444)
+        except OSError as e:
+            # 缓存侧写失败(权限/磁盘满/目录被删)→ 记一条再降级到 temp。
+            tmp_cache.unlink(missing_ok=True)
+            cache_ok = False
+            logger.warning(
+                f"[materialize] cache write failed, falling back to temp: {e!r}"
+            )
+        except BaseException:
+            # 下载本身失败(网络/存储服务)——与缓存无关,保持上抛语义。
+            tmp_cache.unlink(missing_ok=True)
+            raise
+        if cache_ok:
+            _evict_s3_cache(cache_dir, settings.MEDIA_S3_CACHE_MAX_GB)
+            yield cached
+            return
+
     fd, tmp = tempfile.mkstemp(suffix=Path(loc.key).suffix)
     os.close(fd)
     try:
@@ -530,3 +590,60 @@ async def materialize(file_path: str) -> AsyncIterator["Path"]:
         yield Path(tmp)
     finally:
         Path(tmp).unlink(missing_ok=True)
+
+
+def _evict_s3_cache(cache_dir: str, max_gb: float) -> None:
+    """按 mtime 从旧到新删,直到目录总量落回上限内。best-effort。
+
+    正在被 ffmpeg 读的文件被删也安全(POSIX unlink:已打开的 fd 不受影响,
+    inode 到关闭才回收),所以不需要任何"在用"协调——这正是选 LRU 缓存而
+    不是跨 workflow 显式引用计数的原因(计数泄漏 = FS 债务回潮)。
+    残留的老 .tmp-*(下载中途崩溃遗尸)同样按 mtime 参与淘汰被清走。
+    30 分钟内的新文件不淘汰:刚 replace 入位、调用方尚未 open 的窗口里,
+    并发淘汰把它删掉会让调用方拿到 FileNotFoundError——热文件本来也不该
+    是 LRU 受害者。
+    """
+    import time as _time
+    from pathlib import Path as _Path
+
+    from loguru import logger
+
+    _FRESH_S = 30 * 60
+
+    try:
+        now = _time.time()
+        entries = []
+        total = 0
+        for p in _Path(cache_dir).iterdir():
+            if not p.is_file():
+                continue
+            st = p.stat()
+            total += st.st_size
+            if now - st.st_mtime < _FRESH_S:
+                continue  # 新鲜文件计入总量但不做淘汰候选
+            entries.append((st.st_mtime, st.st_size, p))
+        cap = int(max_gb * 1024**3)
+        if total <= cap:
+            return
+        # 0444 的文件照样能 unlink(只需目录写权限),不用先 chmod ——
+        # 多这一步只会在 chmod 失败时白白跳过一个本可删掉的文件。
+        freed = 0
+        for _mtime, size, p in sorted(entries):
+            try:
+                p.unlink()
+            except OSError:
+                continue
+            total -= size
+            freed += 1
+            if total <= cap:
+                break
+        if total > cap:
+            # 删光候选仍超限 = 要么全是新鲜文件(30 分钟后自愈),要么删不动
+            # (uid 漂移/EPERM)。静默增长过 CLAUDE.md 的"catch 静默吞错"红线。
+            logger.warning(
+                f"[s3cache] still over cap after evicting {freed} file(s): "
+                f"{total / 1024**3:.1f}GB > {max_gb}GB in {cache_dir}"
+            )
+    except OSError as e:
+        logger.warning(f"[s3cache] eviction pass aborted on {cache_dir}: {e!r}")
+        return
