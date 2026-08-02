@@ -73,6 +73,13 @@ TRIGGER_FEATURE_MAP: dict[str, str] = {
     # feature bucket as a manual "Run now", distinguished only by
     # agent_runs.trigger for the daily-quota counter, not by Usage grouping.
     "issue_dispatch_auto": "issueCoordination",
+    # Forced FinishIssue declaration fallback (forced_finish_declaration.py):
+    # a distinct agent_runs.trigger per base trigger so it's never counted
+    # against the autopilot daily quota (count_auto_dispatches_today filters
+    # the exact string 'issue_dispatch_auto') — but it should still bucket
+    # under the same Usage feature as the turn it followed, not "other".
+    "issue_dispatch_finish_declare": "issueCoordination",
+    "issue_dispatch_auto_finish_declare": "issueCoordination",
     "visual_analysis_l1": "visualAnalysis",
     "prompt_caption": "assetCaption",
     "asset_classify": "assetClassify",

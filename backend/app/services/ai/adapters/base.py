@@ -85,6 +85,14 @@ class AIAdapter(Protocol):
         self,
         composed: ComposedSystemPrompt,
         messages: List[Dict[str, Any]],
+        *,
+        # Optional per-call override, e.g.
+        # {"type": "function", "function": {"name": "FinishIssue"}} to FORCE
+        # a specific tool call (the issue-lifecycle forced-declaration
+        # fallback). None (default) preserves each adapter's own default
+        # (typically "auto" when tools are present). Adapters that don't
+        # implement forcing may accept-and-ignore this kwarg.
+        tool_choice: Optional[Any] = None,
     ) -> Dict[str, Any]: ...
 
 
