@@ -116,6 +116,42 @@ def test_evict_removes_oldest_beyond_cap(tmp_path):
     assert names == ["b.mp4", "c.mp4"]
 
 
+@pytest.mark.asyncio
+async def test_unwritable_cache_dir_falls_back_to_temp(monkeypatch, tmp_path):
+    """缓存目录存在但不可写(docker 自动重建 bind source 为 root:root 0755 的
+    经典场景)→ 必须降级到 temp,而不是让转码/缩略图/AI 全线硬失败。"""
+    ro = tmp_path / "ro"
+    ro.mkdir(mode=0o555)
+    monkeypatch.setattr(settings, "MEDIA_S3_CACHE_DIR", str(ro))
+    monkeypatch.setattr(media_storage, "ObjectStore", FakeStore)
+
+    async with materialize(SB) as p:
+        assert p.read_bytes() == b"chunk1-chunk2"
+        assert p.parent != ro  # 走的是 temp
+        kept = p
+    assert not kept.exists()
+    assert list(ro.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_cache_write_error_falls_back_to_temp(monkeypatch, tmp_path):
+    """缓存写入过程报 OSError(磁盘满/目录中途被删)→ 降级 temp 继续可用。"""
+    monkeypatch.setattr(settings, "MEDIA_S3_CACHE_DIR", str(tmp_path))
+    monkeypatch.setattr(media_storage, "ObjectStore", FakeStore)
+
+    real_replace = os.replace
+
+    def boom_replace(src, dst):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(os, "replace", boom_replace)
+    async with materialize(SB) as p:
+        assert p.read_bytes() == b"chunk1-chunk2"  # 内容照常拿到
+        assert p.parent != tmp_path
+    monkeypatch.setattr(os, "replace", real_replace)
+    assert not list(tmp_path.glob(".tmp-*"))  # tmp 已清理
+
+
 def test_evict_spares_fresh_files(tmp_path):
     """30 分钟内的新文件豁免:刚入位、调用方尚未 open 的窗口不被并发淘汰误伤。"""
     from app.services.library.media_storage import _evict_s3_cache
