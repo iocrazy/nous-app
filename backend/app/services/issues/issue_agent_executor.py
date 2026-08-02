@@ -183,6 +183,11 @@ async def run_issue_agent(
                     assistant_text=content,
                     issue_id=iid,
                     trigger=trigger,
+                    # W3c: same two-level cost tag as the main turn's own
+                    # RunRecorder — without this the forced-declare row
+                    # would default to direct_human regardless of whether
+                    # this issue is actually a routine/pipeline dispatch.
+                    attribution=attribution,
                 )
             except Exception as exc:  # noqa: BLE001 — decoration, never break the turn
                 logger.warning(
