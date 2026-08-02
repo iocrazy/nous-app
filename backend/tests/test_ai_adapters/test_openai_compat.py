@@ -72,6 +72,88 @@ def test_build_body_injects_tools_and_tool_choice_auto() -> None:
     assert body["tool_choice"] == "auto"
 
 
+def test_build_body_tool_choice_override_reaches_body() -> None:
+    """Forced-declaration seam (issue lifecycle): an explicit tool_choice
+    passed to _build_body must reach the request body verbatim, overriding
+    the "auto" default."""
+    adapter = OpenAICompatibleAdapter(
+        api_url="https://example.com/v1/chat/completions",
+        api_key="sk-test",
+    )
+    tool_schema = {
+        "type": "function",
+        "function": {"name": "FinishIssue", "parameters": {"type": "object"}},
+    }
+    composed = _make_composed(tools=[tool_schema])
+    forced_choice = {"type": "function", "function": {"name": "FinishIssue"}}
+
+    body = adapter._build_body(composed, [], tool_choice=forced_choice)
+
+    assert body["tool_choice"] == forced_choice
+
+
+def test_build_body_default_path_still_sends_auto_when_tool_choice_omitted() -> None:
+    """Every existing caller doesn't pass tool_choice — behavior must stay
+    byte-identical: "auto" whenever tools are present."""
+    adapter = OpenAICompatibleAdapter(
+        api_url="https://example.com/v1/chat/completions",
+        api_key="sk-test",
+    )
+    tool_schema = {
+        "type": "function",
+        "function": {"name": "Skill", "parameters": {"type": "object"}},
+    }
+    composed = _make_composed(tools=[tool_schema])
+
+    body = adapter._build_body(composed, [])
+
+    assert body["tool_choice"] == "auto"
+
+
+@pytest.mark.asyncio
+async def test_call_forwards_tool_choice_to_the_request_body() -> None:
+    """adapter.call(..., tool_choice=...) must reach the POST body — the
+    seam the forced-declaration fallback relies on."""
+    adapter = OpenAICompatibleAdapter(
+        api_url="https://provider.example/v1/chat/completions",
+        api_key="sk-live-test",
+    )
+    tool_schema = {
+        "type": "function",
+        "function": {"name": "FinishIssue", "parameters": {"type": "object"}},
+    }
+    composed = _make_composed(tools=[tool_schema])
+    forced_choice = {"type": "function", "function": {"name": "FinishIssue"}}
+
+    fake_response_data = {
+        "choices": [{"message": {"role": "assistant", "content": "ok"}}]
+    }
+
+    with patch(
+        "app.services.ai.adapters.openai_compat.httpx.AsyncClient"
+    ) as mock_client_cls:
+        mock_instance = AsyncMock()
+        fake_resp = type(
+            "_Resp",
+            (),
+            {
+                "json": lambda self: fake_response_data,
+                "raise_for_status": lambda self: None,
+            },
+        )()
+        mock_instance.post = AsyncMock(return_value=fake_resp)
+        mock_client_cls.return_value.__aenter__.return_value = mock_instance
+
+        await adapter.call(
+            composed,
+            [{"role": "user", "content": "hi"}],
+            tool_choice=forced_choice,
+        )
+
+    posted_body = mock_instance.post.call_args.kwargs["json"]
+    assert posted_body["tool_choice"] == forced_choice
+
+
 def test_build_body_falls_back_to_default_model_when_composed_empty() -> None:
     adapter = OpenAICompatibleAdapter(
         api_url="https://example.com",

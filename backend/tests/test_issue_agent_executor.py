@@ -39,6 +39,12 @@ async def test_run_issue_agent_passes_chunk_callback_and_publishes(monkeypatch):
         m, "get_or_create_issue_session", AsyncMock(return_value="sess-99")
     )
     monkeypatch.setattr(m, "AILibraryChatService", lambda: fake_chat)
+    # This turn produces content with no FinishIssue declaration, which would
+    # otherwise trigger the forced-declaration fallback — irrelevant to what
+    # this test drives (chunk_callback plumbing + publish), so stub it out.
+    monkeypatch.setattr(
+        m, "attempt_forced_finish_declaration", AsyncMock(return_value=(None, None))
+    )
 
     chunks, messages = [], []
     monkeypatch.setattr(
@@ -77,6 +83,11 @@ async def test_run_issue_agent_runs_session_turn(monkeypatch):
     monkeypatch.setattr(m, "publish_chunk", AsyncMock())
     monkeypatch.setattr(m, "publish_message", AsyncMock())
     monkeypatch.setattr(m, "publish_status", AsyncMock())
+    # "essay" has no FinishIssue declaration — stub the forced-declaration
+    # fallback so this test stays focused on the trigger-mapping contract.
+    monkeypatch.setattr(
+        m, "attempt_forced_finish_declaration", AsyncMock(return_value=(None, None))
+    )
     out = await m.run_issue_agent(
         issue={"id": 409, "title": "写一篇短文", "description": "春"},
         agent_id="a",
@@ -118,6 +129,9 @@ async def test_run_issue_agent_auto_true_maps_to_issue_dispatch_auto_trigger(
     monkeypatch.setattr(m, "publish_chunk", AsyncMock())
     monkeypatch.setattr(m, "publish_message", AsyncMock())
     monkeypatch.setattr(m, "publish_status", AsyncMock())
+    monkeypatch.setattr(
+        m, "attempt_forced_finish_declaration", AsyncMock(return_value=(None, None))
+    )
 
     out = await m.run_issue_agent(
         issue={"id": 410, "title": "autopilot task", "description": "x"},
@@ -154,6 +168,9 @@ async def test_run_issue_agent_auto_false_maps_to_manual_issue_dispatch_trigger(
     monkeypatch.setattr(m, "publish_chunk", AsyncMock())
     monkeypatch.setattr(m, "publish_message", AsyncMock())
     monkeypatch.setattr(m, "publish_status", AsyncMock())
+    monkeypatch.setattr(
+        m, "attempt_forced_finish_declaration", AsyncMock(return_value=(None, None))
+    )
 
     out = await m.run_issue_agent(
         issue={"id": 411, "title": "manual task", "description": "x"},
@@ -216,6 +233,9 @@ async def test_run_issue_agent_continuation_sends_nudge(monkeypatch):
     monkeypatch.setattr(m, "publish_chunk", AsyncMock())
     monkeypatch.setattr(m, "publish_message", AsyncMock())
     monkeypatch.setattr(m, "publish_status", AsyncMock())
+    monkeypatch.setattr(
+        m, "attempt_forced_finish_declaration", AsyncMock(return_value=(None, None))
+    )
     await m.run_issue_agent(
         issue={"id": 8, "title": "big task", "description": "lots"},
         agent_id="a",
@@ -294,6 +314,9 @@ async def test_run_issue_agent_publish_message_survives_realistic_bigint_row(
     monkeypatch.setattr(m, "AILibraryChatService", lambda: fake_chat)
     monkeypatch.setattr(m, "publish_chunk", AsyncMock())
     monkeypatch.setattr(m, "publish_status", AsyncMock())
+    monkeypatch.setattr(
+        m, "attempt_forced_finish_declaration", AsyncMock(return_value=(None, None))
+    )
     # Deliberately do NOT monkeypatch m.publish_message — exercise the real
     # publish_message -> mapper -> IssueMessage chain.
 

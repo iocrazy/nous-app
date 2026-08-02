@@ -13,7 +13,7 @@ by `data: [DONE]`).
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator, Dict, List
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 import httpx
 from loguru import logger
@@ -62,6 +62,8 @@ class OpenAICompatibleAdapter:
         self,
         composed: ComposedSystemPrompt,
         messages: List[Dict[str, Any]],
+        *,
+        tool_choice: Optional[Any] = None,
     ) -> Dict[str, Any]:
         # Audit #8 (fix C): route-authoritative — the wire model must match
         # the model this adapter resolved its endpoint + key for.
@@ -85,7 +87,13 @@ class OpenAICompatibleAdapter:
         }
         if composed.tools:
             body["tools"] = composed.tools
-            body["tool_choice"] = "auto"
+            # FinishIssue forced-declaration fallback (issue lifecycle): a
+            # caller that needs the model to emit ONE specific tool call
+            # (e.g. {"type": "function", "function": {"name": "FinishIssue"}})
+            # passes tool_choice explicitly. Every existing caller leaves it
+            # None, so this is a pure default-unchanged addition — "auto"
+            # still wins whenever tool_choice isn't given.
+            body["tool_choice"] = tool_choice if tool_choice is not None else "auto"
         return body
 
     def _build_headers(self) -> Dict[str, str]:
@@ -98,8 +106,10 @@ class OpenAICompatibleAdapter:
         self,
         composed: ComposedSystemPrompt,
         messages: List[Dict[str, Any]],
+        *,
+        tool_choice: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        body = self._build_body(composed, messages)
+        body = self._build_body(composed, messages, tool_choice=tool_choice)
         headers = self._build_headers()
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             resp = await client.post(self.api_url, json=body, headers=headers)

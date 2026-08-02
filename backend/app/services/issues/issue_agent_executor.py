@@ -15,6 +15,9 @@ from loguru import logger
 
 from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 from app.services.ai.tools.finish_issue_tool import extract_issue_outcome
+from app.services.ai.tools.forced_finish_declaration import (
+    attempt_forced_finish_declaration,
+)
 from app.services.issues.issue_chat_stream import (  # noqa: F401
     publish_chunk,
     publish_message,
@@ -154,6 +157,40 @@ async def run_issue_agent(
         await publish_message(iid, assistant, session_user_id=None)
         content = assistant.get("content") or ""
         outcome, reason = extract_issue_outcome(result.get("tool_calls"))
+
+        # Bounded fallback (production gap, 2026-08-01 E2E probe): agents
+        # reliably produce content but almost never call FinishIssue on
+        # their own, even when the tool is registered and the system prompt
+        # commands it. When the turn produced content but declared nothing,
+        # force exactly ONE short follow-up call with tool_choice pinned to
+        # FinishIssue. Skipped entirely when an outcome was already declared
+        # (zero added cost on the healthy path) or when content is empty
+        # (that's the EMPTY_OUTPUT path — route_finish_outcome's own typed
+        # branch, left untouched). Defense in depth: even though
+        # attempt_forced_finish_declaration is itself fail-open, wrap it here
+        # too so a bug in that module can never turn an already-succeeded
+        # turn into an unhandled exception.
+        if outcome is None and content:
+            logger.info(
+                f"[issue_agent] issue={iid} session={session_id} produced "
+                f"content but declared no outcome; forcing FinishIssue "
+                f"declaration"
+            )
+            try:
+                outcome, reason = await attempt_forced_finish_declaration(
+                    session_id=session_id,
+                    user_id=user_id,
+                    assistant_text=content,
+                    issue_id=iid,
+                    trigger=trigger,
+                )
+            except Exception as exc:  # noqa: BLE001 — decoration, never break the turn
+                logger.warning(
+                    f"[issue_agent] forced FinishIssue declaration raised "
+                    f"for issue {iid}: {exc!r}"
+                )
+                outcome, reason = None, None
+
         logger.info(
             f"[issue_agent] issue={iid} session={session_id} "
             f"produced {len(content)} chars; outcome={outcome}"
