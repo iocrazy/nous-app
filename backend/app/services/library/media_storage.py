@@ -519,6 +519,43 @@ async def materialize(file_path: str) -> AsyncIterator["Path"]:
         yield Path(real)
         return
     store = ObjectStore(loc.bucket)
+
+    # ── 读通磁盘缓存(2026-08-02,spec 2026-08-02-s3-materialize-disk-cache)──
+    # followup 链(缩略图/抽音频/转码/AI)各自独立 materialize 同一个对象,
+    # 无缓存时同链重复全量拉 3-4 次。缓存在部署机本地 NVMe(compose bind);
+    # 文件名 = sha256(key)——对 key 哈希而非假设 key 含内容 sha,因为
+    # derived/album/hls 的 key 不是内容寻址的。命中刷 mtime(LRU 信号,
+    # atime 受 relatime 不可靠),退出不删;禁用(默认)走下方 temp 旧行为。
+    cache_dir = settings.MEDIA_S3_CACHE_DIR
+    if cache_dir and os.path.isdir(cache_dir):
+        import hashlib
+        import uuid as _uuid
+
+        name = hashlib.sha256(loc.key.encode()).hexdigest()[:32] + Path(loc.key).suffix
+        cached = Path(cache_dir) / name
+        if cached.is_file():
+            os.utime(cached, None)
+            yield cached
+            return
+        tmp_cache = Path(cache_dir) / f".tmp-{_uuid.uuid4().hex}"
+        try:
+            import aiofiles
+
+            async with aiofiles.open(tmp_cache, "wb") as out:
+                async for chunk in store.get_stream(loc.key):
+                    await out.write(chunk)
+            # 并发同 key 竞态安全:各写各的 tmp,replace 原子幂等入位。
+            os.replace(tmp_cache, cached)
+            # 只读保护:调用方(ffmpeg/whisper/缩略图)均只读源文件;0444 把
+            # 未来某个误写调用方变成显式报错而非静默污染缓存。
+            os.chmod(cached, 0o444)
+        except BaseException:
+            tmp_cache.unlink(missing_ok=True)
+            raise
+        _evict_s3_cache(cache_dir, settings.MEDIA_S3_CACHE_MAX_GB)
+        yield cached
+        return
+
     fd, tmp = tempfile.mkstemp(suffix=Path(loc.key).suffix)
     os.close(fd)
     try:
@@ -530,3 +567,48 @@ async def materialize(file_path: str) -> AsyncIterator["Path"]:
         yield Path(tmp)
     finally:
         Path(tmp).unlink(missing_ok=True)
+
+
+def _evict_s3_cache(cache_dir: str, max_gb: float) -> None:
+    """按 mtime 从旧到新删,直到目录总量落回上限内。best-effort。
+
+    正在被 ffmpeg 读的文件被删也安全(POSIX unlink:已打开的 fd 不受影响,
+    inode 到关闭才回收),所以不需要任何"在用"协调——这正是选 LRU 缓存而
+    不是跨 workflow 显式引用计数的原因(计数泄漏 = FS 债务回潮)。
+    残留的老 .tmp-*(下载中途崩溃遗尸)同样按 mtime 参与淘汰被清走。
+    30 分钟内的新文件不淘汰:刚 replace 入位、调用方尚未 open 的窗口里,
+    并发淘汰把它删掉会让调用方拿到 FileNotFoundError——热文件本来也不该
+    是 LRU 受害者。
+    """
+    import os as _os
+    import time as _time
+    from pathlib import Path as _Path
+
+    _FRESH_S = 30 * 60
+
+    try:
+        now = _time.time()
+        entries = []
+        total = 0
+        for p in _Path(cache_dir).iterdir():
+            if not p.is_file():
+                continue
+            st = p.stat()
+            total += st.st_size
+            if now - st.st_mtime < _FRESH_S:
+                continue  # 新鲜文件计入总量但不做淘汰候选
+            entries.append((st.st_mtime, st.st_size, p))
+        cap = int(max_gb * 1024**3)
+        if total <= cap:
+            return
+        for _mtime, size, p in sorted(entries):
+            try:
+                _os.chmod(p, 0o644)
+                p.unlink()
+                total -= size
+            except OSError:
+                continue
+            if total <= cap:
+                break
+    except OSError:
+        return
