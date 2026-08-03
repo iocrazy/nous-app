@@ -7,8 +7,10 @@ approval_gate 用同款 DBOS.recv/send 验证过 pause-resume 可行；本模块
 所有对外函数失败都"软"处理（返 None/False），因为调用方永远有旧路径
 （respond_to_issue_reply）兜底 —— 本模块任何故障都不得比现状更糟。
 
-等待标记写 task_tracking.metadata.awaiting_input（路线 C 业务装饰字段，
-不碰 trigger 独管的 phase/status 列）；inbox 通知走 notify() 唯一写路径。
+等待标记权威位在 issues.execution_state.awaiting_input（issue dispatch
+没有 task_tracking 行，见 mark_awaiting_input）；task_tracking.metadata
+仅作 best-effort 装饰写（路线 C 业务装饰字段，不碰 trigger 独管的
+phase/status 列）；inbox 通知走 notify() 唯一写路径。
 """
 
 from __future__ import annotations
@@ -82,25 +84,42 @@ async def signal_user_reply(
 async def mark_awaiting_input(
     *, workflow_id: str, issue_id: int, user_id: str, prompt: str
 ) -> None:
-    """写等待标记（task_tracking.metadata.awaiting_input，路线 C 业务装饰字段）
-    并投 inbox 通知。任一失败只记日志 —— 标记失败不阻断挂起，UI 少个高亮而已。"""
+    """写等待标记并投 inbox 通知。任一失败只记日志 —— 标记失败不阻断挂起，
+    回复会走旧路径兜底。
+
+    权威落点是 ``issues.execution_state.awaiting_input``（jsonb merge，不碰
+    ``set_status`` 写的 agent_outcome/outcome_reason 键）——2026-08-03 E2E
+    实测 issue dispatch **没有** task_tracking 行（spec 的落点假设错了），
+    标记写在那里等于没写，回复分流永远降级旧路径并撞上 dispatch 自己持有
+    的 execution_locked_at。写时序与 set_status 兼容：挂起入口先
+    route_finish_outcome（覆盖式写 execution_state）再本函数 merge；唤醒
+    时 clear 在 set_status(in_progress)（无 state 不写列）之前。
+
+    task_tracking.metadata 同步 best-effort 装饰写保留（今天恒 0 行，若
+    未来 dispatch 建了 task 行，Task Center 行高亮即自动点亮）。"""
     from app.db import engine as db_engine
     from app.services.notifications import notify
 
     clipped = (prompt or "")[:_PROMPT_MAX]
     now = datetime.now(timezone.utc).isoformat()
+    marker = json.dumps({"prompt": clipped, "since": now, "issue_id": issue_id})
+    try:
+        await db_engine.execute_as_service_role(
+            """UPDATE public.issues
+               SET execution_state = COALESCE(execution_state, '{}'::jsonb)
+                   || jsonb_build_object('awaiting_input', (:marker)::jsonb)
+               WHERE id = :iid""",
+            {"marker": marker, "iid": issue_id},
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[input_gate] mark issue marker failed issue={issue_id}: {exc}")
     try:
         await db_engine.execute_as_service_role(
             """UPDATE public.task_tracking
                SET metadata = COALESCE(metadata, '{}'::jsonb)
                    || jsonb_build_object('awaiting_input', (:marker)::jsonb)
                WHERE dbos_workflow_id = :wf""",
-            {
-                "marker": json.dumps(
-                    {"prompt": clipped, "since": now, "issue_id": issue_id}
-                ),
-                "wf": workflow_id,
-            },
+            {"marker": marker, "wf": workflow_id},
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"[input_gate] mark metadata failed wf={workflow_id}: {exc}")
@@ -128,9 +147,22 @@ async def mark_awaiting_input(
 
 
 async def clear_awaiting_input(*, workflow_id: str) -> None:
-    """移除等待标记。inbox 行有意保留（用户稍后仍可从收件箱进入）。"""
+    """移除等待标记（issues 权威位 + task_tracking 装饰位）。
+    inbox 行有意保留（用户稍后仍可从收件箱进入）。"""
     from app.db import engine as db_engine
 
+    try:
+        await db_engine.execute_as_service_role(
+            """UPDATE public.issues
+               SET execution_state = execution_state - 'awaiting_input'
+               WHERE dbos_workflow_id = :wf
+                 AND execution_state ? 'awaiting_input'""",
+            {"wf": workflow_id},
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"[input_gate] clear issue marker failed wf={workflow_id}: {exc}"
+        )
     try:
         await db_engine.execute_as_service_role(
             """UPDATE public.task_tracking
@@ -143,18 +175,20 @@ async def clear_awaiting_input(*, workflow_id: str) -> None:
 
 
 async def _fetch_awaiting_rows() -> list[dict]:
-    """所有带 awaiting_input 标记的 task 行 + 其 DBOS app_version。
+    """所有带 awaiting_input 标记的 issue 行 + 其 DBOS app_version。
 
-    JOIN dbos.workflow_status 是引擎侧读（非 UI 数据源，不违路线 C——路线 C
-    禁的是前端/列表 endpoint 直查引擎表；reaper 恰恰是引擎孤儿的清道夫，
-    与 _bg_reap_internal_queue 同族）。"""
+    权威标记位在 issues.execution_state（issue dispatch 没有 task_tracking
+    行，见 mark_awaiting_input）。JOIN dbos.workflow_status 是引擎侧读
+    （非 UI 数据源，不违路线 C——路线 C 禁的是前端/列表 endpoint 直查
+    引擎表；reaper 恰恰是引擎孤儿的清道夫，与 _bg_reap_internal_queue
+    同族）。"""
     from app.db import engine as db_engine
 
     return await db_engine.fetch_all(
-        """SELECT t.dbos_workflow_id, t.issue_id, w.application_version
-           FROM public.task_tracking t
-           JOIN dbos.workflow_status w ON w.workflow_uuid = t.dbos_workflow_id
-           WHERE t.metadata ? 'awaiting_input'
+        """SELECT i.dbos_workflow_id, i.id AS issue_id, w.application_version
+           FROM public.issues i
+           JOIN dbos.workflow_status w ON w.workflow_uuid = i.dbos_workflow_id
+           WHERE i.execution_state ? 'awaiting_input'
              AND w.status IN ('PENDING', 'ENQUEUED')""",
     )
 
