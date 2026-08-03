@@ -36,7 +36,7 @@ from app.repositories.user_logs_repository import (
     get_user_logs_repository,
     log_user_action,
 )
-from app.services.library.media_storage import ObjectStore, resolve_media_source
+from app.services.library.media_storage import resolve_media_source
 from app.services.library.object_gc import delete_object_if_unreferenced
 
 router = APIRouter(prefix="/media")
@@ -200,46 +200,34 @@ async def delete_video(
                 """
                 loc = resolve_media_source(raw_path)
                 if loc.is_object_store:
-                    # C2: a prefix location (album — key ends in "/", e.g.
-                    # t{scope}/album/{rid}/) has no single object at
-                    # ``loc.key``. A plain ``remove()`` targets a key that was
-                    # never PUT (the slides/audio/cover objects live UNDER
-                    # the prefix), so it silently deletes nothing while the
-                    # SDK call itself still "succeeds" — the delete endpoint
-                    # reports done, the album stays on S3 forever.
-                    # remove_prefix lists then bulk-removes every object
-                    # actually under the prefix. Prefixes are namespaced by
-                    # id and never shared, so no reference check is needed.
-                    if loc.is_prefix:
-                        try:
-                            n = await ObjectStore(loc.bucket).remove_prefix(loc.key)
-                            files_deleted.append(
-                                f"album prefix: {loc.key} ({n} objects)"
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                f"Failed to delete object store {label} "
-                                f"{loc.bucket}/{loc.key}: {e}"
-                            )
-                        return
-
-                    # Single (content-addressed) key: this raw_path can be
-                    # the SAME S3 object a `resources` row still serves
-                    # (measured 2026-08-03: 991 groups of
-                    # parsed_media.download_path <-> resources.file_path share
-                    # a key) — an unconditional remove() here used to destroy
-                    # that resource's file out from under it. Route through
-                    # the reference-safe primitive instead; exclude this
-                    # video's own row since the parsed_media DELETE below
-                    # hasn't run yet (it would otherwise see its own row as a
-                    # live "reference" and never actually delete anything).
+                    # This raw_path — single key OR prefix (album — key ends
+                    # in "/", e.g. t{scope}/album/{rid}/) — can be the SAME
+                    # object/prefix a `resources` row still serves.
+                    # Content-addressed single keys share via the global
+                    # download cache (991 groups of parsed_media.download_path
+                    # <-> resources.file_path measured 2026-08-03). Album
+                    # prefixes are NOT namespace-exclusive either: 82/82
+                    # measured 2026-08-03 are co-referenced (the rid segment
+                    # is a resource_versions.id written back into that row's
+                    # own file_path and copied into both columns — see
+                    # object_gc.py's module docstring). Only hls/{rid}/{vid}/
+                    # and derived/{rid}/ prefixes are truly exclusive.
+                    # delete_object_if_unreferenced knows this distinction
+                    # internally (namespace-exclusive prefix -> remove
+                    # outright; anything else, including album -> reference
+                    # query first) — route both shapes through it uniformly.
+                    # Exclude this video's own row since the parsed_media
+                    # DELETE below hasn't run yet (it would otherwise see its
+                    # own row as a live "reference" and never actually delete
+                    # anything).
                     pm_id = video.get("id")
                     outcome = await delete_object_if_unreferenced(
                         raw_path,
                         exclude={"parsed_media": [pm_id]} if pm_id else None,
                     )
                     if outcome == "deleted":
-                        files_deleted.append(f"object: {loc.key}")
+                        kind = "album prefix" if loc.is_prefix else "object"
+                        files_deleted.append(f"{kind}: {loc.key}")
                     elif outcome == "kept_referenced":
                         logger.info(
                             f"Skipped delete for {label} {loc.bucket}/{loc.key}: "

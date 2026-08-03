@@ -538,6 +538,28 @@ class ResourcesService:
         if not target:
             raise ValueError("Version not found")
 
+        await self.repo.delete_version(version_id)
+
+        # If we deleted the current version, switch to the latest remaining
+        # BEFORE cleaning up its physical files (I4). Until this switch
+        # runs, ``resources.file_path`` still points at the version being
+        # deleted — content dedup routinely makes it the exact same raw
+        # sb:// string — so a reference check performed earlier would always
+        # see that column as a live reference to ITSELF and never delete
+        # (permanent leak on every current-version delete; unreachable today
+        # since production has 0 multi-version resources, but silent once
+        # any exist). Once the switch has run, ``resources.file_path``
+        # points at the NEW current version: if it deduped to the same key,
+        # the reference check correctly keeps the object; if different, the
+        # old key is now genuinely unreferenced and gets removed.
+        if target["version_number"] == resource.get("current_version"):
+            remaining = await self.repo.get_versions(resource_id)
+            if remaining:
+                latest = remaining[0]  # ordered desc by version_number
+                await self.set_current_version(
+                    resource_id, latest["version_number"], user_id
+                )
+
         # Delete physical files for this version. sb:// rows go through the
         # reference-safe primitive (a version's file_path can dedup with
         # resources.file_path / parsed_media.download_path — see
@@ -580,17 +602,6 @@ class ResourcesService:
             )
             outcome = await delete_object_if_unreferenced(hls_prefix_raw)
             logger.info(f"[object-gc] version {version_id} hls prefix: {outcome}")
-
-        await self.repo.delete_version(version_id)
-
-        # If we deleted the current version, switch to the latest remaining
-        if target["version_number"] == resource.get("current_version"):
-            remaining = await self.repo.get_versions(resource_id)
-            if remaining:
-                latest = remaining[0]  # ordered desc by version_number
-                await self.set_current_version(
-                    resource_id, latest["version_number"], user_id
-                )
 
         return True
 

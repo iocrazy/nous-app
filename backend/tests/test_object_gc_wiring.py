@@ -189,6 +189,56 @@ async def test_delete_version_hls_prefix_cleared_when_present():
     assert hls_calls[0].kwargs == {}
 
 
+async def test_delete_version_current_switch_happens_before_object_cleanup():
+    """I4: deleting the CURRENT version used to clean up its physical file
+    BEFORE switching resources.file_path to the new current version. Under
+    content dedup, resources.file_path is routinely the exact same raw sb://
+    string as the version being deleted (this is the entire reason
+    object_gc's reference query exists) — cleaning up first meant that
+    column always looked like a live self-reference, so a current-version
+    delete permanently leaked its object every single time (unreachable
+    today — 0 multi-version resources in production — but a guaranteed leak
+    the moment any multi-version resource exists). The fix reorders: switch
+    set_current_version FIRST, clean up the deleted version's object AFTER —
+    this test asserts that exact call order."""
+    resource_id = RID
+    version_id = "7000000000000000003"
+    resource = {"id": resource_id, "current_version": 1}
+    versions = [
+        {"id": version_id, "version_number": 1, "file_path": SB_FILE},
+        {"id": "other", "version_number": 2, "file_path": "sb://library/x/y/z.mp4"},
+    ]
+    svc = ResourcesService.__new__(ResourcesService)
+    svc.repo = _versions_repo(resource, versions)
+    # get_versions is called twice: once up front for the "keep at least one"
+    # guard, once again (post repo.delete_version) to find the new latest for
+    # the switch — after a real delete, only "other" would remain.
+    svc.repo.get_versions = AsyncMock(side_effect=[versions, [versions[1]]])
+
+    order: list[str] = []
+
+    async def _fake_set_current_version(rid, version_number, uid):
+        order.append("switch")
+        return {}
+
+    svc.set_current_version = AsyncMock(side_effect=_fake_set_current_version)
+
+    async def _fake_gc(raw_path, **kwargs):
+        order.append("cleanup")
+        return "deleted"
+
+    gc = AsyncMock(side_effect=_fake_gc)
+
+    with patch(
+        "app.services.library.resources_service.delete_object_if_unreferenced", gc
+    ):
+        result = await svc.delete_version(resource_id, version_id, "user-1")
+
+    assert result is True
+    assert order == ["switch", "cleanup"]
+    svc.set_current_version.assert_awaited_once_with(resource_id, 2, "user-1")
+
+
 async def test_delete_version_legacy_fs_file_path_untouched(tmp_path):
     """A legacy filesystem version's file_path removes its v{n}/ directory
     via shutil, unchanged — never routed through object_gc."""

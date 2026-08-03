@@ -1368,6 +1368,19 @@ class ResourcesRepository(AsyncpgRepository):
         Bounded + ordered to match the REST twin: at most ``limit`` rows,
         oldest-trashed first. Was an unbounded SELECT (whole expired set into
         RAM at scale); the daily sweeper re-runs to drain a larger backlog.
+
+        C2: ``media_id`` and ``thumbnail_path`` MUST be in this projection.
+        This is the only unattended cleanup path (``scheduled_cleanup.py`` ->
+        ``resources_service.cleanup_expired_trash``), and that service reads
+        both ``resource.get("media_id")`` (to decide whether the shared
+        parsed_media row + physical file can be GC'd) and
+        ``resource.get("thumbnail_path")`` (``_delete_physical_files``'s
+        thumbnail cleanup branch). Before this fix the projection only
+        carried id/file_path/cover_image_path, so ``media_id`` was silently
+        None for every row on this path — the scheduled sweeper matched
+        every kept-alive row as if it had no parsed_media at all and never
+        ran the shared-object GC branch, and thumbnail_path was dead code
+        here specifically.
         """
         try:
             cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
@@ -1377,6 +1390,8 @@ class ResourcesRepository(AsyncpgRepository):
                         Resources.id,
                         Resources.file_path,
                         Resources.cover_image_path,
+                        Resources.media_id,
+                        Resources.thumbnail_path,
                     )
                     .where(Resources.is_trashed.is_(True))
                     .where(Resources.trashed_at < cutoff)

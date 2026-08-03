@@ -4,7 +4,10 @@ Spec: docs/superpowers/specs/2026-08-03-reference-safe-object-deletion-design.md
 
 Pure unit tests: ObjectStore and db_engine are mocked, no real network/DB.
 Covers every bullet in the spec's test list:
-  * prefix -> remove_prefix called, no reference query
+  * EXCLUSIVE prefix (hls/derived) -> remove_prefix called, no reference query
+  * NON-exclusive prefix (album) -> reference query runs first, same as a
+    single object (C1: production measurement found 82/82 album prefixes
+    co-referenced by a live parsed_media/resources row pair)
   * single object with another live reference -> kept_referenced, no remove
   * single object with no reference -> remove called, deleted
   * exclude excludes the caller's own row from the reference query
@@ -35,9 +38,12 @@ def _fake_store(monkeypatch, *, remove=None, remove_prefix=None):
 
 
 @pytest.mark.asyncio
-async def test_prefix_removed_without_reference_query(monkeypatch):
-    """Prefix-shaped key (album/HLS/derived) -> remove_prefix called, and the
-    reference query (db_engine.fetch_one) must NOT be touched at all."""
+async def test_exclusive_prefix_removed_without_reference_query(monkeypatch):
+    """EXCLUSIVE prefix namespace (derived/{rid}/ here, hls/{rid}/{vid}/ is the
+    other) -> remove_prefix called, and the reference query (db_engine.
+    fetch_one) must NOT be touched at all. These two namespaces are named
+    purely from IDs the caller owns and are genuinely never shared — unlike
+    album prefixes, see test_album_prefix_* below (C1)."""
     remove_prefix = AsyncMock(return_value=3)
     _fake_store(monkeypatch, remove_prefix=remove_prefix)
     fetch_one = AsyncMock(side_effect=AssertionError("must not query for a prefix"))
@@ -48,6 +54,60 @@ async def test_prefix_removed_without_reference_query(monkeypatch):
     assert outcome == "deleted"
     remove_prefix.assert_awaited_once_with("derived/42/")
     fetch_one.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_exclusive_hls_prefix_removed_without_reference_query(monkeypatch):
+    """hls/{rid}/{vid}/ is the other exclusive namespace — same treatment."""
+    remove_prefix = AsyncMock(return_value=5)
+    _fake_store(monkeypatch, remove_prefix=remove_prefix)
+    fetch_one = AsyncMock(side_effect=AssertionError("must not query for a prefix"))
+    monkeypatch.setattr(object_gc.db_engine, "fetch_one", fetch_one)
+
+    outcome = await object_gc.delete_object_if_unreferenced("sb://library/hls/9/3/")
+
+    assert outcome == "deleted"
+    remove_prefix.assert_awaited_once_with("hls/9/3/")
+    fetch_one.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_album_prefix_with_reference_is_kept(monkeypatch):
+    """C1: an album prefix (t{scope}/album/{rid}/) is NOT namespace-exclusive
+    — production measurement 2026-08-03 found 82/82 album prefixes
+    co-referenced by a live parsed_media.download_path <-> resources.file_path
+    pair (the rid segment is a resource_versions.id written back into that
+    row's own file_path and copied into both columns). Another live row
+    pointing at the same raw album prefix string -> kept_referenced,
+    remove_prefix must NEVER be called. This is the exact regression the
+    original (wrong) 'prefixes are always exclusive' invariant would miss."""
+    remove_prefix = AsyncMock()
+    _fake_store(monkeypatch, remove_prefix=remove_prefix)
+    fetch_one = AsyncMock(return_value={"?column?": 1})  # a row was found
+    monkeypatch.setattr(object_gc.db_engine, "fetch_one", fetch_one)
+
+    outcome = await object_gc.delete_object_if_unreferenced("sb://library/t5/album/42/")
+
+    assert outcome == "kept_referenced"
+    remove_prefix.assert_not_awaited()
+    fetch_one.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_album_prefix_without_reference_is_removed(monkeypatch):
+    """No other row references the album prefix -> reference query runs,
+    finds nothing, THEN remove_prefix is called (not remove — it's still a
+    prefix, just not an exclusive-namespace one)."""
+    remove_prefix = AsyncMock(return_value=2)
+    _fake_store(monkeypatch, remove_prefix=remove_prefix)
+    fetch_one = AsyncMock(return_value=None)  # no reference found
+    monkeypatch.setattr(object_gc.db_engine, "fetch_one", fetch_one)
+
+    outcome = await object_gc.delete_object_if_unreferenced("sb://library/t5/album/99/")
+
+    assert outcome == "deleted"
+    fetch_one.assert_awaited_once()
+    remove_prefix.assert_awaited_once_with("t5/album/99/")
 
 
 @pytest.mark.asyncio
@@ -193,9 +253,9 @@ async def test_reference_check_failure_never_deletes(monkeypatch):
     remove.assert_not_awaited()
 
 
-def test_reference_query_covers_all_nine_index_columns():
+def test_reference_query_covers_all_eleven_index_columns():
     """Regression guard mirroring storage_audit's own _COLLECT_SQL test: the
-    reference query must cover the exact same 9 index columns, so a
+    reference query must cover the exact same 11 index columns, so a
     reference-safe delete never misses a live reference (which would cause
     over-deletion) and the audit + GC lists never drift apart."""
     sql, _ = object_gc._build_reference_query("sb://library/x", None)
@@ -214,3 +274,20 @@ def test_reference_query_covers_all_nine_index_columns():
     assert "SELECT 1 FROM resources WHERE file_path = :raw_path" in sql_flat
     assert "SELECT 1 FROM resource_versions WHERE hls_path = :raw_path" in sql_flat
     assert "SELECT 1 FROM resource_versions WHERE file_path = :raw_path" in sql_flat
+    # I3: project_files / file_versions share the same library bucket + same
+    # content-addressed scheme as a resource upload (both resolve scope_id to
+    # the owning team's snowflake) — a byte-identical upload to a project and
+    # to that team's resource library can produce one object referenced from
+    # two tables. 0 actual collisions found in a full-schema scan 2026-08-03,
+    # but nothing prevents one as unified storage adoption grows.
+    assert "SELECT 1 FROM project_files WHERE file_path = :raw_path" in sql_flat
+    assert "SELECT 1 FROM file_versions WHERE file_path = :raw_path" in sql_flat
+
+
+def test_exclusive_prefix_namespace_classifier():
+    """Direct unit coverage of the namespace split C1 hinges on: hls/ and
+    derived/ are exclusive; everything else (including album) is not."""
+    assert object_gc._is_exclusive_prefix("hls/9/3/master.m3u8")
+    assert object_gc._is_exclusive_prefix("derived/42/")
+    assert not object_gc._is_exclusive_prefix("t5/album/42/")
+    assert not object_gc._is_exclusive_prefix("t5/aa/bb/deadbeef.mp4")

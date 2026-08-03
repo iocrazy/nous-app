@@ -1,6 +1,6 @@
 """Deep S3 existence audit for the migrated library.
 
-Collects every sb:// key from the 9 index columns and probes each in bounded
+Collects every sb:// key from the 11 index columns and probes each in bounded
 concurrency chunks. Results go into the run's task_tracking metadata (jsonb)
 — no new table. Route C: phase columns are trigger-owned; this workflow only
 ``complete``s with a ``metadata_patch`` for its business fields and never
@@ -39,11 +39,19 @@ _PREFIX = "sb://library/"
 _CHUNK = 50
 _MISSING_CAP = 500
 
-# Same 9 index columns as ``app.services.library.object_gc``'s reference
-# query (``_PARSED_MEDIA_COLS`` / ``_RESOURCES_COLS`` / `_RESOURCE_VERSIONS_COLS``)
-# — keep both lists in sync; a column added to one and not the other lets
-# reference-safe deletion either leak an object or (less likely but still a
-# drift) miss a live reference.
+# Same 11 index columns as ``app.services.library.object_gc``'s reference
+# query (``_PARSED_MEDIA_COLS`` / ``_RESOURCES_COLS`` / `_RESOURCE_VERSIONS_COLS``
+# / ``_PROJECT_FILES_COLS`` / ``_FILE_VERSIONS_COLS``) — keep both lists in
+# sync; a column added to one and not the other lets reference-safe deletion
+# either leak an object or (less likely but still a drift) miss a live
+# reference.
+#
+# I3: project_files / file_versions (projects_service.upload_file /
+# upload_new_version) write into the SAME library bucket with the SAME
+# content-addressed scheme as a resource upload (both resolve scope_id to the
+# owning team's snowflake), so a byte-identical upload to a project and to
+# that team's resource library can produce one object referenced from two
+# tables neither object_gc nor this audit previously scanned.
 _COLLECT_SQL = """
     SELECT download_path AS key, 'video' AS kind, id AS media_id,
            NULL::bigint AS resource_id
@@ -74,6 +82,13 @@ _COLLECT_SQL = """
     SELECT rv.file_path, 'version_file', r.media_id, rv.resource_id
     FROM resource_versions rv JOIN resources r ON r.id = rv.resource_id
     WHERE rv.file_path LIKE 'sb://%'
+    UNION ALL
+    SELECT file_path, 'project_file', media_id, id
+    FROM project_files WHERE file_path LIKE 'sb://%'
+    UNION ALL
+    SELECT fv.file_path, 'project_file_version', pf.media_id, fv.file_id
+    FROM file_versions fv JOIN project_files pf ON pf.id = fv.file_id
+    WHERE fv.file_path LIKE 'sb://%'
 """
 
 

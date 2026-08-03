@@ -185,12 +185,17 @@ async def test_object_store_remove_failure_does_not_500_db_delete_still_runs():
 
 @pytest.mark.asyncio
 async def test_sb_album_prefix_deletes_via_remove_prefix_not_remove():
-    """C2: an album's download_path is a PREFIX (trailing "/", e.g.
+    """An album's download_path is a PREFIX (trailing "/", e.g.
     ``t5/album/42/``) — the slides/audio/cover objects live UNDER it, not AT
     it. A plain ``remove(key)`` targets a key that was never PUT, so it
     "succeeds" while deleting nothing and the album stays on S3 forever
     (every migrated/newly-downloaded album silently survives a delete). The
-    fix dispatches a prefix location through ``remove_prefix`` instead."""
+    fix dispatches a prefix location through ``remove_prefix`` instead.
+
+    C1: album prefixes are NOT namespace-exclusive (unlike hls/derived), so
+    this now goes through the same reference check as a single object first
+    — this test's ``fetch_one`` returns None (no other row references it),
+    the "go ahead and delete" case."""
     sb_album_path = "sb://library/331438215859255/album/42/"
     video = _video(download_path=sb_album_path)
     repo_patch, repo = _patch_repo(video)
@@ -199,6 +204,7 @@ async def test_sb_album_prefix_deletes_via_remove_prefix_not_remove():
 
     with (
         repo_patch,
+        _patch_no_reference(),
         patch("app.services.library.media_storage.ObjectStore.remove", new=remove),
         patch(
             "app.services.library.media_storage.ObjectStore.remove_prefix",
@@ -213,9 +219,43 @@ async def test_sb_album_prefix_deletes_via_remove_prefix_not_remove():
     remove.assert_not_awaited()
     repo.delete.assert_awaited_once_with(PLATFORM_ID)
     assert any(
-        f == "album prefix: 331438215859255/album/42/ (2 objects)"
-        for f in result["files_deleted"]
+        f == "album prefix: 331438215859255/album/42/" for f in result["files_deleted"]
     )
+
+
+@pytest.mark.asyncio
+async def test_sb_album_prefix_kept_when_still_referenced():
+    """C1 regression: production measurement 2026-08-03 found 82/82 album
+    prefixes co-referenced by a live ``resources.file_path`` row (the album's
+    rid segment is a resource_versions.id written back into that row's own
+    file_path and copied into both resources.file_path and
+    parsed_media.download_path). Deleting this parsed_media row must NOT wipe
+    the album out from under the still-live resources row —
+    ObjectStore.remove_prefix must never be called."""
+    sb_album_path = "sb://library/331438215859255/album/42/"
+    video = _video(download_path=sb_album_path)
+    repo_patch, repo = _patch_repo(video)
+    remove_prefix = AsyncMock()
+    # Another live row (e.g. resources.file_path) references the same album
+    # prefix string.
+    fetch_one = AsyncMock(return_value={"?column?": 1})
+
+    with (
+        repo_patch,
+        patch("app.services.library.object_gc.db_engine.fetch_one", new=fetch_one),
+        patch(
+            "app.services.library.media_storage.ObjectStore.remove_prefix",
+            new=remove_prefix,
+        ),
+    ):
+        result = await delete_video(
+            PLATFORM_ID, BackgroundTasks(), _auth(), delete_files=True
+        )
+
+    remove_prefix.assert_not_awaited()
+    repo.delete.assert_awaited_once_with(PLATFORM_ID)
+    assert result["success"] is True
+    assert result["files_deleted"] == []
 
 
 @pytest.mark.asyncio
