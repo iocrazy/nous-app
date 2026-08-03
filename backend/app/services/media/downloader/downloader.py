@@ -1241,6 +1241,21 @@ class DownloaderService:
                             )
                         )
 
+                        # BGM pointer determinism (discard-review C1):
+                        # ``_upload_album_to_s3`` now rmtree's the local album
+                        # directory on success (discard_local_source), so
+                        # audio.mp3's existence must be captured BEFORE the
+                        # upload call — checking afterwards would always see
+                        # an already-deleted directory and silently drop
+                        # music_download_path forever (BGM 404 + a
+                        # regenerated fs_residue row on the next scan).
+                        # audio.mp3 (if any) was written earlier by
+                        # ``_download_standalone_music`` above, so it is
+                        # already in place by the time we snapshot this.
+                        has_audio = os.path.isfile(
+                            os.path.join(str(resource_dir_full), "audio.mp3")
+                        )
+
                         # Storage tiering: upload the whole album directory
                         # (slides/ + audio.mp3 + cover.jpg) to the canonical
                         # album prefix t{scope}/album/{rid}/ and repoint the
@@ -1257,9 +1272,7 @@ class DownloaderService:
                         )
                         if album_path.startswith("sb://"):
                             pm_updates = {"download_path": album_path}
-                            if os.path.isfile(
-                                os.path.join(str(resource_dir_full), "audio.mp3")
-                            ):
+                            if has_audio:
                                 pm_updates["music_download_path"] = (
                                     f"{album_path}audio.mp3"
                                 )
