@@ -39,6 +39,11 @@ _PREFIX = "sb://library/"
 _CHUNK = 50
 _MISSING_CAP = 500
 
+# Same 9 index columns as ``app.services.library.object_gc``'s reference
+# query (``_PARSED_MEDIA_COLS`` / ``_RESOURCES_COLS`` / `_RESOURCE_VERSIONS_COLS``)
+# — keep both lists in sync; a column added to one and not the other lets
+# reference-safe deletion either leak an object or (less likely but still a
+# drift) miss a live reference.
 _COLLECT_SQL = """
     SELECT download_path AS key, 'video' AS kind, id AS media_id,
            NULL::bigint AS resource_id

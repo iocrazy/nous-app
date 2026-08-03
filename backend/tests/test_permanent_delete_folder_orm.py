@@ -30,7 +30,7 @@ def _service_with_stubbed_repo() -> ResourcesService:
     assert isinstance(svc.repo, ResourcesRepository)
     assert not hasattr(svc.repo, "_get_client")  # the bypass is gone
     # Physical-side effects are out of scope for these DB-flow tests.
-    svc._delete_physical_files = MagicMock()
+    svc._delete_physical_files = AsyncMock()
     svc._delete_media_record = AsyncMock()
     return svc
 

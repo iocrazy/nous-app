@@ -37,6 +37,7 @@ from app.repositories.user_logs_repository import (
     log_user_action,
 )
 from app.services.library.media_storage import ObjectStore, resolve_media_source
+from app.services.library.object_gc import delete_object_if_unreferenced
 
 router = APIRouter(prefix="/media")
 
@@ -199,29 +200,53 @@ async def delete_video(
                 """
                 loc = resolve_media_source(raw_path)
                 if loc.is_object_store:
-                    try:
-                        # C2: a prefix location (album — key ends in "/",
-                        # e.g. t{scope}/album/{rid}/) has no single object at
-                        # ``loc.key``. A plain ``remove()`` targets a key that
-                        # was never PUT (the slides/audio/cover objects live
-                        # UNDER the prefix), so it silently deletes nothing
-                        # while the SDK call itself still "succeeds" — the
-                        # delete endpoint reports done, the album stays on S3
-                        # forever. remove_prefix lists then bulk-removes every
-                        # object actually under the prefix.
-                        if loc.is_prefix:
+                    # C2: a prefix location (album — key ends in "/", e.g.
+                    # t{scope}/album/{rid}/) has no single object at
+                    # ``loc.key``. A plain ``remove()`` targets a key that was
+                    # never PUT (the slides/audio/cover objects live UNDER
+                    # the prefix), so it silently deletes nothing while the
+                    # SDK call itself still "succeeds" — the delete endpoint
+                    # reports done, the album stays on S3 forever.
+                    # remove_prefix lists then bulk-removes every object
+                    # actually under the prefix. Prefixes are namespaced by
+                    # id and never shared, so no reference check is needed.
+                    if loc.is_prefix:
+                        try:
                             n = await ObjectStore(loc.bucket).remove_prefix(loc.key)
                             files_deleted.append(
                                 f"album prefix: {loc.key} ({n} objects)"
                             )
-                        else:
-                            await ObjectStore(loc.bucket).remove(loc.key)
-                            files_deleted.append(f"object: {loc.key}")
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to delete object store {label} "
-                            f"{loc.bucket}/{loc.key}: {e}"
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to delete object store {label} "
+                                f"{loc.bucket}/{loc.key}: {e}"
+                            )
+                        return
+
+                    # Single (content-addressed) key: this raw_path can be
+                    # the SAME S3 object a `resources` row still serves
+                    # (measured 2026-08-03: 991 groups of
+                    # parsed_media.download_path <-> resources.file_path share
+                    # a key) — an unconditional remove() here used to destroy
+                    # that resource's file out from under it. Route through
+                    # the reference-safe primitive instead; exclude this
+                    # video's own row since the parsed_media DELETE below
+                    # hasn't run yet (it would otherwise see its own row as a
+                    # live "reference" and never actually delete anything).
+                    pm_id = video.get("id")
+                    outcome = await delete_object_if_unreferenced(
+                        raw_path,
+                        exclude={"parsed_media": [pm_id]} if pm_id else None,
+                    )
+                    if outcome == "deleted":
+                        files_deleted.append(f"object: {loc.key}")
+                    elif outcome == "kept_referenced":
+                        logger.info(
+                            f"Skipped delete for {label} {loc.bucket}/{loc.key}: "
+                            "still referenced by another row"
                         )
+                    # "noop" — storage-call or reference-check failure;
+                    # object_gc already logged a warning.
                     return
 
                 # 补 base_path join：旧代码 `Path(download_path)` 完全没 join

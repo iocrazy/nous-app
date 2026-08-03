@@ -33,7 +33,15 @@ from app.repositories.resources_repository import (
     EXPIRED_TRASH_BATCH,
     ResourcesRepository,
 )
-from app.services.library.media_storage import resolve_media_source, store_local_file
+from app.services.library.media_storage import (
+    LIBRARY_BUCKET,
+    derived_key_prefix,
+    hls_key_prefix,
+    resolve_media_source,
+    store_local_file,
+    to_file_path,
+)
+from app.services.library.object_gc import delete_object_if_unreferenced
 from app.services.library.storage_flag import unified_storage_enabled
 
 
@@ -530,21 +538,48 @@ class ResourcesService:
         if not target:
             raise ValueError("Version not found")
 
-        # Delete physical files for this version
+        # Delete physical files for this version. sb:// rows go through the
+        # reference-safe primitive (a version's file_path can dedup with
+        # resources.file_path / parsed_media.download_path — see
+        # object_gc.py); legacy filesystem rows keep the original directory
+        # removal untouched.
         file_path = target.get("file_path")
         if file_path:
-            import shutil
+            loc = resolve_media_source(file_path)
+            if loc.is_object_store:
+                outcome = await delete_object_if_unreferenced(
+                    file_path, exclude={"resource_versions": [version_id]}
+                )
+                logger.info(
+                    f"[object-gc] version {version_id} file_path {file_path!r}: "
+                    f"{outcome}"
+                )
+            else:
+                import shutil
 
-            base = Path(settings.DOWNLOAD_PATH)
-            full = base / file_path
-            # Remove the v{n}/ directory
-            version_dir = full.parent
-            if version_dir.exists() and version_dir.name.startswith("v"):
-                try:
-                    shutil.rmtree(version_dir)
-                    logger.info(f"Deleted version directory: {version_dir}")
-                except Exception as e:
-                    logger.warning(f"Failed to delete version dir {version_dir}: {e}")
+                base = Path(settings.DOWNLOAD_PATH)
+                full = base / file_path
+                # Remove the v{n}/ directory
+                version_dir = full.parent
+                if version_dir.exists() and version_dir.name.startswith("v"):
+                    try:
+                        shutil.rmtree(version_dir)
+                        logger.info(f"Deleted version directory: {version_dir}")
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to delete version dir {version_dir}: {e}"
+                        )
+
+        # HLS output tree for this version — path-addressed, namespaced by
+        # (resource_id, version_id), so never shared with any other row.
+        # Deleted as a prefix (whole tree, not just the master.m3u8 that
+        # hls_path points at) with no reference check needed.
+        if target.get("hls_path"):
+            hls_prefix_raw = to_file_path(
+                LIBRARY_BUCKET, hls_key_prefix(resource_id, version_id) + "/"
+            )
+            outcome = await delete_object_if_unreferenced(hls_prefix_raw)
+            logger.info(f"[object-gc] version {version_id} hls prefix: {outcome}")
 
         await self.repo.delete_version(version_id)
 
@@ -813,7 +848,7 @@ class ResourcesService:
                 )
             else:
                 if remaining == 0:
-                    self._delete_physical_files(resource)
+                    await self._delete_physical_files(resource)
                     await self._delete_media_record(media_id)
                 else:
                     logger.info(
@@ -822,7 +857,7 @@ class ResourcesService:
                     )
         else:
             # No media_id (direct upload) — always delete physical files
-            self._delete_physical_files(resource)
+            await self._delete_physical_files(resource)
 
         return result
 
@@ -887,10 +922,10 @@ class ResourcesService:
                 if media_id:
                     remaining = await self.repo.count_resources_by_media_id(media_id)
                     if remaining == 0:
-                        self._delete_physical_files(resource)
+                        await self._delete_physical_files(resource)
                         await self._delete_media_record(media_id)
                 else:
-                    self._delete_physical_files(resource)
+                    await self._delete_physical_files(resource)
 
                 cleaned += 1
             except Exception as e:
@@ -908,54 +943,117 @@ class ResourcesService:
             )
         return cleaned
 
-    def _delete_physical_files(self, resource: dict) -> None:
-        """Delete physical files for a resource from disk.
+    async def _delete_physical_files(self, resource: dict) -> None:
+        """Delete physical files for a resource — filesystem or sb:// object.
 
-        Storage layout examples:
+        Legacy filesystem layout examples (unchanged, kept line-for-line):
           uploads:  teams/{scope}/uploads/{resource_id}/v1/{file}
           downloads: global/resources/web/{platform}/{media_id}/{file}
-
-        Strategy: find the resource-specific directory (identified by a
+        Strategy there: find the resource-specific directory (identified by a
         numeric/snowflake-ID segment in the path) and remove it entirely,
         then prune empty ancestor directories up to DOWNLOAD_PATH.
+
+        For ``sb://`` rows, each of file_path / cover_image_path /
+        thumbnail_path is content-addressed and can be shared with another
+        live row (991/967 dedup groups — see object_gc.py's module
+        docstring), so deletion goes through
+        ``delete_object_if_unreferenced``. ``exclude`` declares the rows this
+        very call is in the middle of retiring: this resource's own id, and
+        (when present) its originating ``parsed_media`` row — the caller
+        (``permanent_delete`` / ``cleanup_expired_trash``) always deletes the
+        ``resources`` row before invoking this, but the ``parsed_media`` row
+        is still live at this point (deleted right after, by
+        ``_delete_media_record``), so without excluding it here a shared key
+        would see its own soon-to-be-orphaned parsed_media row as a
+        "reference" and never get cleaned up.
+
+        The resource's ``derived/{rid}/`` prefix (thumbnails + preview
+        sprite) is namespaced by resource_id alone — never shared — so it is
+        always removed outright, no reference check.
         """
         import shutil
 
         base = Path(settings.DOWNLOAD_PATH).resolve()
+        rid = resource.get("id")
+        media_id = resource.get("media_id")
+        exclude: dict = {}
+        if rid:
+            exclude["resources"] = [rid]
+        if media_id:
+            exclude["parsed_media"] = [media_id]
+
         file_path = resource.get("file_path")
-
         if file_path:
-            full_path = base / file_path
-            # Walk up from the file to find the resource-specific directory.
-            # Pattern: .../{resource_id}/v1/{file}  →  want to delete {resource_id}/
-            # Or:      .../{media_id}/{file}        →  want to delete {media_id}/
-            target_dir = self._find_resource_dir(full_path, base)
+            loc = resolve_media_source(file_path)
+            if loc.is_object_store:
+                outcome = await delete_object_if_unreferenced(
+                    file_path, exclude=exclude or None
+                )
+                logger.info(
+                    f"[object-gc] resource {rid} file_path {file_path!r}: {outcome}"
+                )
+            else:
+                full_path = base / file_path
+                # Walk up from the file to find the resource-specific
+                # directory. Pattern: .../{resource_id}/v1/{file} → delete
+                # {resource_id}/. Or: .../{media_id}/{file} → delete
+                # {media_id}/.
+                target_dir = self._find_resource_dir(full_path, base)
 
-            if target_dir and target_dir.exists():
-                try:
-                    shutil.rmtree(target_dir)
-                    logger.info(f"Deleted resource directory: {target_dir}")
-                except Exception as e:
-                    logger.warning(f"Failed to delete directory {target_dir}: {e}")
-            elif full_path.exists():
-                try:
-                    full_path.unlink()
-                    logger.info(f"Deleted file: {full_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to delete file {full_path}: {e}")
+                if target_dir and target_dir.exists():
+                    try:
+                        shutil.rmtree(target_dir)
+                        logger.info(f"Deleted resource directory: {target_dir}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete directory {target_dir}: {e}")
+                elif full_path.exists():
+                    try:
+                        full_path.unlink()
+                        logger.info(f"Deleted file: {full_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete file {full_path}: {e}")
 
-            # Prune empty ancestor directories up to base
-            self._prune_empty_parents(target_dir or full_path, base)
+                # Prune empty ancestor directories up to base
+                self._prune_empty_parents(target_dir or full_path, base)
 
         cover_path = resource.get("cover_image_path")
         if cover_path:
-            cover_full = base / cover_path
-            if cover_full.exists():
-                try:
-                    cover_full.unlink()
-                    logger.info(f"Deleted cover: {cover_full}")
-                except Exception as e:
-                    logger.warning(f"Failed to delete cover {cover_full}: {e}")
+            loc = resolve_media_source(cover_path)
+            if loc.is_object_store:
+                outcome = await delete_object_if_unreferenced(
+                    cover_path, exclude=exclude or None
+                )
+                logger.info(
+                    f"[object-gc] resource {rid} cover_image_path "
+                    f"{cover_path!r}: {outcome}"
+                )
+            else:
+                cover_full = base / cover_path
+                if cover_full.exists():
+                    try:
+                        cover_full.unlink()
+                        logger.info(f"Deleted cover: {cover_full}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete cover {cover_full}: {e}")
+
+        thumbnail_path = resource.get("thumbnail_path")
+        if thumbnail_path:
+            loc = resolve_media_source(thumbnail_path)
+            if loc.is_object_store:
+                outcome = await delete_object_if_unreferenced(
+                    thumbnail_path, exclude=exclude or None
+                )
+                logger.info(
+                    f"[object-gc] resource {rid} thumbnail_path "
+                    f"{thumbnail_path!r}: {outcome}"
+                )
+            # Legacy filesystem thumbnails were never cleaned up here before
+            # this change; not adding new filesystem-deletion scope now.
+
+        if rid:
+            derived_prefix_raw = to_file_path(LIBRARY_BUCKET, derived_key_prefix(rid))
+            outcome = await delete_object_if_unreferenced(derived_prefix_raw)
+            logger.info(f"[object-gc] resource {rid} derived prefix: {outcome}")
 
     @staticmethod
     def _find_resource_dir(file_path: Path, base: Path) -> Optional[Path]:
