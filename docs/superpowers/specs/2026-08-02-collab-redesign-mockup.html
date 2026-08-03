@@ -1,0 +1,724 @@
+<title>AI Library 重设计 · 全套设计稿</title>
+<style>
+  :root {
+    --paper: #faf8f4; --surface: #ffffff; --line: #e8e4dc; --line-soft: #f0ede6;
+    --ink: #2a2823; --ink-2: #6b675e; --ink-3: #9c978b;
+    --green: #1E7A5B; --green-soft: rgba(30,122,91,.10); --green-line: rgba(30,122,91,.35);
+    --lilac: #7A5E8F; --lilac-soft: rgba(122,94,143,.10); --lilac-line: rgba(122,94,143,.32);
+    --ochre: #A87B2B; --ochre-soft: rgba(168,123,43,.12);
+    --brick: #AD5147; --brick-soft: rgba(173,81,71,.10);
+    --steel: #46708E; --steel-soft: rgba(70,112,142,.10);
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #121110; --surface: #1c1a18; --line: #2e2b27; --line-soft: #262421;
+      --ink: #ece8e0; --ink-2: #a39e93; --ink-3: #6f6a60;
+      --green: #4C9E7E; --green-soft: rgba(76,158,126,.14); --green-line: rgba(76,158,126,.4);
+      --lilac: #A184B8; --lilac-soft: rgba(161,132,184,.14); --lilac-line: rgba(161,132,184,.35);
+      --ochre: #CEAC78; --ochre-soft: rgba(206,172,120,.14);
+      --brick: #C97B72; --brick-soft: rgba(201,123,114,.14);
+      --steel: #7FA3BF; --steel-soft: rgba(127,163,191,.14);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #121110; --surface: #1c1a18; --line: #2e2b27; --line-soft: #262421;
+    --ink: #ece8e0; --ink-2: #a39e93; --ink-3: #6f6a60;
+    --green: #4C9E7E; --green-soft: rgba(76,158,126,.14); --green-line: rgba(76,158,126,.4);
+    --lilac: #A184B8; --lilac-soft: rgba(161,132,184,.14); --lilac-line: rgba(161,132,184,.35);
+    --ochre: #CEAC78; --ochre-soft: rgba(206,172,120,.14);
+    --brick: #C97B72; --brick-soft: rgba(201,123,114,.14);
+    --steel: #7FA3BF; --steel-soft: rgba(127,163,191,.14);
+  }
+  :root[data-theme="light"] {
+    --paper: #faf8f4; --surface: #ffffff; --line: #e8e4dc; --line-soft: #f0ede6;
+    --ink: #2a2823; --ink-2: #6b675e; --ink-3: #9c978b;
+    --green: #1E7A5B; --green-soft: rgba(30,122,91,.10); --green-line: rgba(30,122,91,.35);
+    --lilac: #7A5E8F; --lilac-soft: rgba(122,94,143,.10); --lilac-line: rgba(122,94,143,.32);
+    --ochre: #A87B2B; --ochre-soft: rgba(168,123,43,.12);
+    --brick: #AD5147; --brick-soft: rgba(173,81,71,.10);
+    --steel: #46708E; --steel-soft: rgba(70,112,142,.10);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink);
+    font: 15px/1.65 ui-sans-serif, system-ui, "PingFang SC", "Noto Sans SC", sans-serif;
+    padding: 48px 24px 80px; }
+  .wrap { max-width: 1140px; margin: 0 auto; }
+  h1 { font-size: 27px; font-weight: 700; letter-spacing: -.01em; margin: 0 0 6px; text-wrap: balance; }
+  .sub { color: var(--ink-2); margin: 0 0 8px; max-width: 68ch; }
+  .vtag { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .06em; color: var(--green); background: var(--green-soft); border: 1px solid var(--green-line); border-radius: 99px; padding: 2px 10px; margin: 0 0 10px; }
+  .toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 30px; }
+  .toc a { font-size: 12px; color: var(--ink-2); text-decoration: none; border: 1px solid var(--line); border-radius: 99px; padding: 4px 12px; background: var(--surface); }
+  .toc a:hover { border-color: var(--green-line); color: var(--green); }
+  h2 { font-size: 16px; font-weight: 700; margin: 56px 0 4px; display: flex; align-items: center; gap: 10px; scroll-margin-top: 24px; }
+  h2 .no { font-size: 11px; font-weight: 600; color: var(--ink-3); letter-spacing: .08em; }
+  .h2sub { color: var(--ink-2); font-size: 13.5px; margin: 0 0 18px; max-width: 76ch; }
+  .h2sub b { color: var(--ink); }
+
+  /* 通用 mockup 容器 */
+  .hifi { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); box-shadow: 0 8px 32px rgba(0,0,0,.06); }
+  .chip { font-size: 12px; padding: 5px 12px; border-radius: 99px; border: 1px solid var(--line); color: var(--ink-2); background: var(--paper); white-space: nowrap; }
+  .chip b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .chip.bad { background: var(--brick-soft); border-color: transparent; color: var(--brick); }
+  .chip.bad b { color: var(--brick); }
+  .cap { font-size: 10.5px; padding: 2px 8px; border-radius: 6px; background: var(--paper); border: 1px solid var(--line-soft); color: var(--ink-2); white-space: nowrap; }
+  .cap.tmpl { background: var(--steel-soft); color: var(--steel); border-color: transparent; }
+  .cap.scope { background: var(--ochre-soft); color: var(--ochre); border-color: transparent; }
+  .cap.on { background: var(--green-soft); color: var(--green); border-color: transparent; }
+  .dot { width: 7px; height: 7px; border-radius: 99px; flex: none; }
+  .dot.ok { background: var(--green); }
+  .dot.idle { background: var(--ink-3); opacity: .5; }
+  .dot.err { background: var(--brick); }
+  .dot.wait { background: var(--ochre); }
+  .avatar { border-radius: 10px; display: grid; place-items: center; font-weight: 700; flex: none; }
+  .av-lilac { background: var(--lilac-soft); color: var(--lilac); border: 1px solid var(--lilac-line); }
+  .av-green { background: var(--green-soft); color: var(--green); border: 1px solid var(--green-line); }
+  .av-steel { background: var(--steel-soft); color: var(--steel); border: 1px solid var(--line); }
+  .pulse { width: 8px; height: 8px; border-radius: 99px; background: var(--lilac); animation: pu 1.6s ease-in-out infinite; flex: none; }
+  @keyframes pu { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+  button { font-family: inherit; }
+
+  /* IA 对比 */
+  .ia { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .iacol { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .iacol h3 { margin: 0 0 10px; font-size: 13px; }
+  .iacol.old h3 { color: var(--ink-3); }
+  .iacol.new h3 { color: var(--green); }
+  .iatree { font-size: 12.5px; color: var(--ink-2); line-height: 2; font-variant-numeric: tabular-nums; }
+  .iatree i { font-style: normal; color: var(--ink-3); }
+  .iatree b { color: var(--ink); font-weight: 600; }
+  .iatree .del { text-decoration: line-through; opacity: .55; }
+  .iatree .add { color: var(--green); font-weight: 600; }
+
+  /* 总览页 */
+  .hf-top { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px 14px; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; gap: 12px; }
+  .hf-title { font-size: 19px; font-weight: 700; }
+  .pagetabs { display: flex; gap: 2px; background: var(--paper); border: 1px solid var(--line); border-radius: 9px; padding: 3px; }
+  .pagetabs span { font-size: 12.5px; padding: 5px 14px; border-radius: 7px; color: var(--ink-2); cursor: pointer; white-space: nowrap; }
+  .pagetabs span.on { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+  .pagetabs .soon i { font-style: normal; font-size: 10px; background: var(--ochre-soft); color: var(--ochre); border-radius: 4px; padding: 1px 5px; margin-left: 5px; }
+  .newbtn { font-size: 12.5px; font-weight: 600; background: var(--green); color: #fff; border: none; border-radius: 8px; padding: 8px 16px; cursor: pointer; }
+  .filterbar { display: flex; align-items: center; gap: 8px; padding: 12px 24px; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; }
+  .search { flex: 1; min-width: 170px; max-width: 300px; display: flex; align-items: center; gap: 8px; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; font-size: 12.5px; color: var(--ink-3); }
+  .fchip { font-size: 12px; color: var(--ink-2); background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; white-space: nowrap; }
+  .fchip.on { background: var(--green-soft); border-color: var(--green-line); color: var(--green); font-weight: 600; }
+  .fcount { margin-left: auto; font-size: 12px; color: var(--ink-3); }
+  .hf-live { margin: 16px 24px 0; padding: 10px 14px; background: var(--lilac-soft); border: 1px solid var(--lilac-line); border-radius: 10px; display: flex; align-items: center; gap: 12px; font-size: 13px; }
+  .hf-live b { color: var(--lilac); }
+  .hf-live .spacer { flex: 1; }
+  .hf-live a { color: var(--lilac); font-size: 12.5px; text-decoration: none; border-bottom: 1px dotted var(--lilac-line); }
+  .hf-groups { padding: 20px 24px 24px; display: flex; flex-direction: column; gap: 22px; }
+  .grp-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+  .grp-h b { font-size: 13px; }
+  .grp-h span { font-size: 11.5px; color: var(--ink-3); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+  .agent { border: 1px solid var(--line); border-radius: var(--radius); padding: 13px 15px; background: var(--surface); display: flex; flex-direction: column; gap: 9px; transition: border-color .15s, box-shadow .15s; cursor: pointer; }
+  .agent:hover { border-color: var(--lilac-line); box-shadow: 0 2px 12px rgba(0,0,0,.05); }
+  .agent .row1 { display: flex; align-items: center; gap: 10px; }
+  .agent .avatar { width: 36px; height: 36px; font-size: 16px; }
+  .agent .nm { font-weight: 600; font-size: 13.5px; line-height: 1.25; }
+  .agent .md { font-size: 11px; color: var(--ink-3); }
+  .agent .dot { margin-left: auto; }
+  .caps { display: flex; gap: 6px; flex-wrap: wrap; }
+  .agent .meta { display: flex; gap: 12px; font-size: 11.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .agent .meta i { font-style: normal; }
+  .agent .warnline { font-size: 11.5px; color: var(--brick); background: var(--brick-soft); border-radius: 6px; padding: 4px 8px; }
+  .agent .acts { display: none; gap: 6px; margin-top: 2px; }
+  .agent:hover .acts { display: flex; }
+  .acts button { font-size: 11.5px; padding: 4px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--paper); color: var(--ink-2); cursor: pointer; }
+  .acts button.pri { background: var(--green-soft); border-color: var(--green-line); color: var(--green); }
+
+  /* 详情页 */
+  .dt-head { display: flex; align-items: center; gap: 14px; padding: 18px 24px; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; }
+  .dt-head .avatar { width: 44px; height: 44px; font-size: 19px; }
+  .dt-head .nm { font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .dt-head .slug { font-size: 11.5px; color: var(--ink-3); font-family: ui-monospace, monospace; }
+  .dt-head .spacer { flex: 1; }
+  .chatbtn { font-size: 13px; font-weight: 600; background: var(--green); color: #fff; border: none; border-radius: 9px; padding: 9px 20px; cursor: pointer; }
+  .dt-tabs { display: flex; gap: 20px; padding: 0 24px; border-bottom: 1px solid var(--line-soft); }
+  .dt-tabs span { font-size: 13px; padding: 11px 2px; color: var(--ink-2); cursor: pointer; border-bottom: 2px solid transparent; }
+  .dt-tabs span.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--green); }
+  .dt-body { display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; padding: 20px 24px 24px; }
+  @media (max-width: 760px) { .dt-body { grid-template-columns: 1fr; } }
+  .panel { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+  .panel .ph { font-size: 12px; font-weight: 600; color: var(--ink-2); padding: 12px 16px 0; display: flex; align-items: center; gap: 8px; }
+  .panel .ph .spacer { flex: 1; }
+  .panel .ph a { font-size: 11.5px; color: var(--green); text-decoration: none; font-weight: 500; }
+  .convrow { display: flex; align-items: center; gap: 10px; padding: 11px 16px; border-top: 1px solid var(--line-soft); font-size: 12.5px; cursor: pointer; }
+  .convrow:hover { background: var(--paper); }
+  .convrow .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .convrow .n { color: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .waitcard { margin: 12px 16px 16px; background: var(--ochre-soft); border: 1px solid var(--ochre); border-radius: 9px; padding: 12px 14px; font-size: 12.5px; }
+  .waitcard b { color: var(--ochre); display: flex; gap: 6px; align-items: center; margin-bottom: 4px; font-size: 12px; }
+  .waitcard .q { color: var(--ink); margin-bottom: 8px; }
+  .waitcard button { font-size: 11.5px; padding: 4px 12px; border-radius: 7px; border: 1px solid var(--ochre); background: transparent; color: var(--ochre); cursor: pointer; font-weight: 600; }
+  .statrow { display: flex; gap: 8px; padding: 12px 16px 16px; flex-wrap: wrap; }
+  .routine { display: flex; align-items: center; gap: 10px; padding: 11px 16px; border-top: 1px solid var(--line-soft); font-size: 12.5px; }
+  .routine .desc { flex: 1; }
+  .routine .desc i { display: block; font-style: normal; font-size: 11px; color: var(--ink-3); }
+  .toggle { width: 32px; height: 18px; border-radius: 99px; background: var(--green); position: relative; flex: none; }
+  .toggle::after { content: ""; position: absolute; right: 2px; top: 2px; width: 14px; height: 14px; border-radius: 99px; background: #fff; }
+  .toggle.off { background: var(--line); }
+  .toggle.off::after { right: auto; left: 2px; }
+
+  /* 人格与技能 */
+  .seg { display: flex; gap: 2px; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 2px; margin: 12px 16px 0; width: fit-content; }
+  .seg span { font-size: 11.5px; padding: 4px 12px; border-radius: 6px; color: var(--ink-2); cursor: pointer; }
+  .seg span.on { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+  .mdedit { margin: 10px 16px 16px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--paper); padding: 14px 16px; font-size: 12.5px; line-height: 1.7; color: var(--ink-2); min-height: 120px; }
+  .mdedit .cursorline { color: var(--ink); background: var(--green-soft); border-radius: 3px; padding: 0 2px; }
+  .mdedit .hint { margin-top: 10px; font-size: 11px; color: var(--ink-3); }
+  .prop { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-top: 1px solid var(--line-soft); font-size: 12.5px; }
+  .prop .k { color: var(--ink-2); }
+  .prop .v { font-weight: 600; font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 6px; }
+  .prop .v small { font-weight: 400; color: var(--ink-3); }
+  .skrow { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--line-soft); font-size: 12.5px; }
+  .skrow .desc { flex: 1; }
+  .skrow .desc i { display: block; font-style: normal; font-size: 11px; color: var(--ink-3); }
+
+  /* 档案 */
+  .arc { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 20px 24px 24px; }
+  @media (max-width: 760px) { .arc { grid-template-columns: 1fr; } }
+  .vline { display: flex; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--line-soft); font-size: 12.5px; }
+  .vline .vd { width: 8px; height: 8px; border-radius: 99px; background: var(--line); margin-top: 6px; flex: none; }
+  .vline .vd.cur { background: var(--green); }
+  .vline .vt i { display: block; font-style: normal; font-size: 11px; color: var(--ink-3); }
+  .costrow { display: flex; justify-content: space-between; padding: 9px 16px; border-top: 1px solid var(--line-soft); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .costrow span:last-child { font-weight: 600; }
+
+  /* 技能页 */
+  .skillcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(255px, 1fr)); gap: 10px; padding: 20px 24px 24px; }
+  .skill { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; background: var(--surface); display: flex; flex-direction: column; gap: 8px; cursor: pointer; transition: border-color .15s; }
+  .skill:hover { border-color: var(--green-line); }
+  .skill .sname { font-weight: 600; font-size: 13.5px; display: flex; align-items: center; gap: 8px; }
+  .skill .sname i { font-style: normal; }
+  .skill .sdesc { font-size: 12px; color: var(--ink-2); line-height: 1.5; }
+  .usedby { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+  .ua { width: 20px; height: 20px; border-radius: 6px; font-size: 10px; font-weight: 700; display: grid; place-items: center; }
+  .usedby span { font-size: 11px; color: var(--ink-3); margin-left: 4px; }
+  .usedby.none span { color: var(--ochre); margin-left: 0; }
+
+  /* 技能编辑页 */
+  .sk-body { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; padding: 20px 24px 24px; }
+  @media (max-width: 760px) { .sk-body { grid-template-columns: 1fr; } }
+  .filetabs { display: flex; gap: 2px; padding: 12px 16px 0; flex-wrap: wrap; }
+  .filetabs span { font-size: 11.5px; font-family: ui-monospace, monospace; padding: 5px 12px; border-radius: 7px 7px 0 0; color: var(--ink-3); cursor: pointer; border: 1px solid transparent; }
+  .filetabs span.on { color: var(--ink); background: var(--paper); border-color: var(--line-soft); border-bottom-color: var(--paper); font-weight: 600; }
+  .filetabs .addf { color: var(--green); }
+  .forkbn { margin: 12px 16px 0; padding: 9px 14px; background: var(--steel-soft); border: 1px solid var(--line); border-radius: 8px; font-size: 12px; color: var(--steel); display: flex; align-items: center; gap: 10px; }
+  .forkbn button { margin-left: auto; font-size: 11.5px; font-weight: 600; padding: 4px 12px; border-radius: 7px; border: 1px solid var(--steel); background: transparent; color: var(--steel); cursor: pointer; }
+
+  /* 新建 modal */
+  .modalfr { max-width: 520px; margin: 0 auto; }
+  .mrow { padding: 12px 20px 0; }
+  .mrow label { display: block; font-size: 12px; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; }
+  .minput { border: 1px solid var(--line); border-radius: 8px; background: var(--paper); padding: 9px 12px; font-size: 13px; color: var(--ink); }
+  .minput.ghost { color: var(--ink-3); }
+  .mgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .mtmpl { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; font-size: 12.5px; cursor: pointer; }
+  .mtmpl.on { border-color: var(--green-line); background: var(--green-soft); }
+  .mtmpl .avatar { width: 28px; height: 28px; font-size: 12px; border-radius: 7px; }
+  .mfoot { display: flex; justify-content: flex-end; gap: 8px; padding: 18px 20px; }
+  .mfoot .ghostbtn { font-size: 12.5px; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--ink-2); cursor: pointer; }
+
+  /* 规格表 */
+  .spectable { width: 100%; border-collapse: collapse; font-size: 12.5px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .spectable th, .spectable td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  .spectable th { font-size: 11px; letter-spacing: .05em; color: var(--ink-3); font-weight: 600; background: var(--paper); }
+  .spectable td:first-child { font-weight: 600; white-space: nowrap; }
+  .spectable tr:last-child td { border-bottom: none; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .tablewrap { overflow-x: auto; border-radius: 12px; }
+
+  .next { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; margin-top: 44px; font-size: 13.5px; color: var(--ink-2); }
+  .next b { color: var(--ink); }
+  .next ol { margin: 8px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+  footer { margin-top: 28px; font-size: 12px; color: var(--ink-3); }
+</style>
+
+<div class="wrap">
+  <h1>AI Library 重设计 · 全套设计稿</h1>
+  <p class="sub">两个面组成的完整套件——<b>协作面（核心）</b>：agent 干活的过程进度、人机交接、issue 作为枢纽打通各模块；<b>管理面（辅助）</b>：智能体/技能的剧组花名册式管理。配色为 K1 warm-paper 系统，数据取自生产真实状态。</p>
+  <span class="vtag">v4 · 协作面 + 管理面</span>
+  <div class="toc">
+    <a href="#s8">★ A1 我的工作台</a><a href="#s9">★ A2 任务协作时间线</a><a href="#s10">★ A3 模块打通地图</a>
+    <a href="#ia">B0 信息架构</a><a href="#s1">B1 智能体总览</a><a href="#s2">B2 详情·工作台</a><a href="#s3">B3 人格与技能</a><a href="#s4">B4 档案</a><a href="#s5">B5 技能库</a><a href="#s6">B6 技能编辑</a><a href="#s7">B7 新建/Fork</a><a href="#spec">规格</a><a href="#map">迁移映射</a>
+  </div>
+
+  <h2 id="s8"><span class="no">A1 · 协作面</span>Issues 页 · 3 处微改（现有 UI 一切不动）</h2>
+  <p class="h2sub">现有 Issues 页（scope 切换 / Quick / 管道条 / Group / 列表·看板 / 列配置）<b>全部原样保留，零重排</b>。改动只有下面 3 处，第 1 处还是条件渲染——没有待办时页面与现在像素级相同。</p>
+  <div class="tablewrap"><table class="spectable">
+    <tr><th>#</th><th>改动</th><th>位置</th><th>行为</th></tr>
+    <tr><td>1</td><td><b>「等我的」横条</b>（唯一新元素）</td><td>Quick 行与列表之间</td><td>仅当存在 agent 提问 / 审批 / 待验收时渲染，可折叠；点卡片直达对应 issue。空时完全不出现</td></tr>
+    <tr><td>2</td><td>现有 <code>running</code> chip 加后缀</td><td>issue 行尾（chip 已存在，见 MH-1）</td><td><code>running</code> → <code>running · 第3轮 4m</code>，数据来自 task_tracking Realtime，组件不换</td></tr>
+    <tr><td>3</td><td>新增 <code>等你回复</code> chip</td><td>needs_followup 行尾，与 running chip 同款同位</td><td>赭色；hover 显示 agent 的提问原文</td></tr>
+  </table></div>
+  <p class="h2sub" style="margin-top:14px">横条本体长这样（就这一个新组件）：</p>
+  <div style="max-width:760px;border:1px solid var(--ochre);border-radius:10px;background:var(--ochre-soft);padding:10px 14px">
+    <div style="font-size:11.5px;font-weight:700;color:var(--ochre);display:flex;align-items:center;gap:8px">⏸ 等我的 3<span style="margin-left:auto;color:var(--ink-3);font-weight:400">折叠 ▾</span></div>
+    <div style="display:flex;gap:8px;margin-top:8px;overflow-x:auto">
+      <div style="flex:none;min-width:230px;background:var(--surface);border:1px solid var(--ochre);border-radius:8px;padding:8px 12px;font-size:12px"><b style="color:var(--ochre)">提问</b> · Script AI<br><span style="color:var(--ink-2)">"女主选择沉默还是摊牌？"</span> <a href="#" style="color:var(--ochre)">去回复</a></div>
+      <div style="flex:none;min-width:210px;background:var(--surface);border:1px solid var(--steel);border-radius:8px;padding:8px 12px;font-size:12px"><b style="color:var(--steel)">审批</b> · Storyboard<br><span style="color:var(--ink-2)">图像生成 ¥0.8</span> <a href="#" style="color:var(--steel)">批准/拒绝</a></div>
+      <div style="flex:none;min-width:220px;background:var(--surface);border:1px solid var(--green-line);border-radius:8px;padding:8px 12px;font-size:12px"><b style="color:var(--green)">待验收</b> · 《错位》大纲<br><span style="color:var(--ink-2)">12 轮 · ¥0.4</span> <a href="#" style="color:var(--green)">审阅</a></div>
+    </div>
+  </div>
+
+  <h2 id="s9"><span class="no">A2 · 协作面</span>任务详情 · 人机协作时间线</h2>
+  <p class="h2sub">issue 详情页升级为协作主战场（IssueDetailView/IssueChatThread 增强，借 paperclip IssueRunLedger 模式）：<b>对话、agent 运行边界、提问、交付物折成一条时间线</b>；右栏是进度轨道与关联关系。agent 的一次多轮运行折叠成一张运行卡，点开才看轮次明细——不再淹没对话。</p>
+  <div class="hifi">
+    <div class="dt-head">
+      <span class="cap" style="background:var(--lilac-soft);color:var(--lilac);border-color:transparent">进行中</span>
+      <div><div class="nm">《雨夜》第二幕展开</div><div class="slug">NOUS-128 · 项目《雨夜》 · 指派给 Script AI</div></div>
+      <div class="spacer"></div>
+      <span class="chip">backlog → todo → <b style="color:var(--lilac)">in_progress</b> → in_review → done</span>
+    </div>
+    <div class="dt-body">
+      <div class="panel">
+        <div class="ph">时间线</div>
+        <div class="vline"><span class="vd"></span><div class="vt"><b>你</b> 创建任务并派给 Script AI：「基于第一幕定稿展开第二幕，冲突推到中点反转」<i>昨天 20:14</i></div></div>
+        <div class="vline"><span class="vd" style="background:var(--lilac)"></span><div class="vt" style="width:100%">
+          <div style="border:1px solid var(--lilac-line);background:var(--lilac-soft);border-radius:9px;padding:10px 12px;font-size:12.5px">
+            <b style="color:var(--lilac)">▶ Script AI 运行 #1</b> · 2 轮 · 9 分钟 · 14k tok · ¥0.2
+            <div style="color:var(--ink-2);margin-top:4px">产出第二幕 1-4 场初稿 → <a href="#" style="color:var(--lilac)">展开对话流</a></div>
+          </div><i>昨天 20:23</i>
+        </div></div>
+        <div class="vline"><span class="vd" style="background:var(--ochre)"></span><div class="vt" style="width:100%">
+          <div class="waitcard" style="margin:0">
+            <b>⏸ Script AI 提问（等你 2 小时）</b>
+            <div class="q">"第二幕结尾，女主选择沉默还是摊牌？两个走向我都拟了梗概。"</div>
+            <button>在此回复 →</button>
+          </div><i>今天 12:02 · 回复后 agent 原地继续（同一运行上下文）</i>
+        </div></div>
+        <div class="vline"><span class="vd" style="background:var(--green)"></span><div class="vt" style="width:100%">
+          <div style="border:1px solid var(--green-line);background:var(--green-soft);border-radius:9px;padding:10px 12px;font-size:12.5px">
+            <b style="color:var(--green)">📎 交付物</b> · 第二幕 1-4 场.md
+            <div style="color:var(--ink-2);margin-top:2px">已入资源库 → 项目《雨夜》/剧本/</div>
+          </div><i>DeliverablesZone 现有能力</i>
+        </div></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="panel">
+          <div class="ph">进度</div>
+          <div class="prop"><span class="k">状态</span><span class="v" style="color:var(--ochre)">等你回复</span></div>
+          <div class="prop"><span class="k">运行</span><span class="v">1 次 · 2 轮</span></div>
+          <div class="prop"><span class="k">耗时 / 花费</span><span class="v">9 分钟 · ¥0.2</span></div>
+          <div class="prop"><span class="k">执行者</span><span class="v"><span class="ua av-lilac" style="display:inline-grid">剧</span> Script AI</span></div>
+        </div>
+        <div class="panel">
+          <div class="ph">关联</div>
+          <div class="prop"><span class="k">项目</span><span class="v">《雨夜》</span></div>
+          <div class="prop"><span class="k">交付物</span><span class="v">1 个 → 资源库</span></div>
+          <div class="prop"><span class="k">子任务</span><span class="v">无</span></div>
+          <div class="prop"><span class="k">流水线</span><span class="v">剧本 → 分镜（下一站）</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2 id="s10"><span class="no">A3 · 协作面</span>模块打通地图</h2>
+  <p class="h2sub">issue 是枢纽。绿色 = 链路已存在只需呈现；赭色 = 有缺口，是本次真正要建的。</p>
+  <div class="tablewrap">
+  <table class="spectable">
+    <tr><th>边</th><th>机制</th><th>状态</th></tr>
+    <tr><td>issue → agent</td><td>派发（DispatchConfirmDialog）· 回复续跑（issue chat）· 流水线接力（PipelineRunStrip）</td><td><span style="color:var(--green)">✓ 已通</span>，时间线里可视化即可</td></tr>
+    <tr><td>agent → 人</td><td>needs_input 提问挂起 + 等你回复卡 + 我的工作台聚合</td><td><span style="color:var(--ochre)">⚠ 缺口</span>——2️⃣ spec 已写好待实施，是协作面的地基</td></tr>
+    <tr><td>issue → 会话</td><td>issue chat 本身就是 conversation（同一存储）</td><td><span style="color:var(--green)">✓ 已通</span>，运行卡「展开对话流」直接复用上周的会话聚合视图</td></tr>
+    <tr><td>issue → 资源库</td><td>交付物落库（DeliverablesZone）</td><td><span style="color:var(--green)">✓ 已通</span>，时间线交付物卡 + 反向"来自哪个任务"待补</td></tr>
+    <tr><td>issue → 项目</td><td>归属关系已有</td><td><span style="color:var(--green)">✓ 已通</span></td></tr>
+    <tr><td>运行进度 → UI</td><td>task_tracking Realtime（轮次/耗时/状态边界事件）</td><td><span style="color:var(--ochre)">⚠ 半通</span>——数据在流，但"第 N 轮 · 已 X 分钟"级别的过程可视没做</td></tr>
+    <tr><td>失败 → 人</td><td>类型化失败回显（附件失败/空产出/断链）</td><td><span style="color:var(--ochre)">⚠ 缺口</span>——4️⃣ 静默失败契约，与 2️⃣ 同期实施</td></tr>
+  </table>
+  </div>
+
+  <h2 id="ia"><span class="no">00</span>信息架构：侧栏瘦身</h2>
+  <p class="h2sub">17 个 agent 和 9 个技能从侧栏移进内容区（卡片网格承载导航职责），侧栏只留高频入口。<b>会话 / 工作团队 / 洞察维持不动</b>——本次只动"管理"面。</p>
+  <div class="ia">
+    <div class="iacol old">
+      <h3>现在（侧栏 30+ 项）</h3>
+      <div class="iatree">
+        总览<br>
+        <i>运行时</i> · 工作团队<br>
+        <i>聊天</i> · 会话 / Storyboard<br>
+        <i>智能体</i> · <span class="del">test / test-analyze / Analyze / Caption / Character-Expression / …共 19 行平铺</span><br>
+        <i>技能</i> · <span class="del">技能（进去是三栏文件树）</span><br>
+        <i>洞察</i> · AI 用量 / 成本与预算 / 我的记忆
+      </div>
+    </div>
+    <div class="iacol new">
+      <h3>重设计后（侧栏 7 项）</h3>
+      <div class="iatree">
+        <span class="add">✦ AI Library（智能体 | 技能 | 市场·留位）</span><br>
+        <i>运行时</i> · 工作团队<br>
+        <i>聊天</i> · 会话 / Storyboard<br>
+        <i>洞察</i> · AI 用量 / 成本与预算 / 我的记忆<br>
+        <br>
+        <b>导航逻辑</b>：agent 点卡片进详情；侧栏"最近对话过的 3 个 agent"作为快捷位（可选）
+      </div>
+    </div>
+  </div>
+
+  <h2 id="s1"><span class="no">01</span>智能体总览（主视图）</h2>
+  <p class="h2sub">页签切换 智能体/技能，市场留位；筛选行按分组和状态过滤；分组卡片带状态灯与能力统计。系统 preset 定位为<b>官方模板</b>：主操作 Chat / Fork 定制。故障直出原因（真实的 qwen-max 断链）。</p>
+  <div class="hifi">
+    <div class="hf-top">
+      <div class="hf-title">AI Library</div>
+      <div class="pagetabs"><span class="on">智能体 17</span><span>技能 9</span><span class="soon">市场<i>规划中</i></span></div>
+      <button class="newbtn">+ 新建智能体</button>
+    </div>
+    <div class="filterbar">
+      <div class="search">🔍 搜索智能体…</div>
+      <span class="fchip on">全部</span><span class="fchip">✍️ 编剧组</span><span class="fchip">🎨 美术组</span><span class="fchip">🔧 工具组</span><span class="fchip">⚠ 仅故障</span>
+      <span class="fcount">17 个 · 8 故障 · 今日 26 runs · 本月 ¥4.2</span>
+    </div>
+    <div class="hf-live">
+      <span class="pulse"></span>
+      <span><b>Script AI</b> 正在展开《雨夜》第二幕 · 第 3 轮</span>
+      <span class="spacer"></span><a href="#">查看运行 →</a>
+    </div>
+    <div class="hf-groups">
+      <div>
+        <div class="grp-h"><b>✍️ 编剧组</b><span>长产出 · 32K 输出</span></div>
+        <div class="cards">
+          <div class="agent">
+            <div class="row1"><div class="avatar av-lilac">剧</div><div><div class="nm">Script AI</div><div class="md">doubao-lite · 32K</div></div><span class="cap" style="margin-left:auto;background:var(--lilac-soft);color:var(--lilac);border-color:transparent">运行中</span></div>
+            <div class="caps"><span class="cap tmpl">系统模板</span><span class="cap">3 技能</span><span class="cap scope">个人</span></div>
+            <div class="meta"><i>本周 12 runs</i><i>38k tok</i></div>
+            <div class="acts"><button class="pri">查看运行</button><button>Chat</button><button>Fork 定制</button></div>
+          </div>
+          <div class="agent">
+            <div class="row1"><div class="avatar av-lilac">镜</div><div><div class="nm">Storyboard</div><div class="md">doubao-lite · 32K</div></div><span class="dot ok"></span></div>
+            <div class="caps"><span class="cap tmpl">系统模板</span><span class="cap">2 技能</span><span class="cap scope">个人</span></div>
+            <div class="meta"><i>本周 5 runs</i><i>21k tok</i></div>
+            <div class="acts"><button class="pri">Chat</button><button>Fork 定制</button><button>运行记录</button></div>
+          </div>
+          <div class="agent">
+            <div class="row1"><div class="avatar av-lilac">摘</div><div><div class="nm">Summarize</div><div class="md">doubao-lite · 16K</div></div><span class="dot idle"></span></div>
+            <div class="caps"><span class="cap tmpl">系统模板</span><span class="cap">1 技能</span><span class="cap scope">个人</span></div>
+            <div class="meta"><i>本周 2 runs</i><i>6k tok</i></div>
+            <div class="acts"><button class="pri">Chat</button><button>Fork 定制</button><button>运行记录</button></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="grp-h"><b>🎨 美术组</b><span>设定卡 · 8K 输出</span></div>
+        <div class="cards">
+          <div class="agent">
+            <div class="row1"><div class="avatar av-green">相</div><div><div class="nm">Character Portrait</div><div class="md">qwen-max · 8K</div></div><span class="cap" style="margin-left:auto;background:var(--brick-soft);color:var(--brick);border-color:transparent">故障</span></div>
+            <div class="caps"><span class="cap tmpl">系统模板</span><span class="cap">2 技能</span></div>
+            <div class="warnline">Provider 断链 30 天 — 需配置 DashScope key</div>
+            <div class="acts"><button class="pri" style="background:var(--brick-soft);border-color:var(--brick);color:var(--brick)">修复指引</button><button>运行记录</button></div>
+          </div>
+          <div class="agent">
+            <div class="row1"><div class="avatar av-green">人</div><div><div class="nm">Character Persona</div><div class="md">qwen-max · 8K</div></div><span class="dot err"></span></div>
+            <div class="caps"><span class="cap tmpl">系统模板</span><span class="cap">2 技能</span></div>
+            <div class="warnline">Provider 断链 30 天 — 需配置 DashScope key</div>
+          </div>
+          <div class="agent">
+            <div class="row1"><div class="avatar av-green">景</div><div><div class="nm">Location Design</div><div class="md">qwen-max · 8K</div></div><span class="dot err"></span></div>
+            <div class="caps"><span class="cap tmpl">系统模板</span><span class="cap">1 技能</span></div>
+            <div class="warnline">Provider 断链 30 天 — 需配置 DashScope key</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="grp-h"><b>🔧 工具组</b><span>轻任务 · 4K 上限是刻意保护</span></div>
+        <div class="cards">
+          <div class="agent">
+            <div class="row1"><div class="avatar av-steel">析</div><div><div class="nm">Analyze</div><div class="md">doubao-lite · 4K</div></div><span class="dot ok"></span></div>
+            <div class="caps"><span class="cap tmpl">系统模板</span><span class="cap">1 技能</span></div>
+            <div class="meta"><i>本周 9 runs</i><i>12k tok</i></div>
+            <div class="acts"><button class="pri">Chat</button><button>Fork 定制</button><button>运行记录</button></div>
+          </div>
+          <div class="agent">
+            <div class="row1"><div class="avatar av-steel">译</div><div><div class="nm">Translate</div><div class="md">doubao-lite · 4K</div></div><span class="dot idle"></span></div>
+            <div class="caps"><span class="cap tmpl">系统模板</span><span class="cap">1 技能</span></div>
+            <div class="meta"><i>本周 0 runs</i><i>—</i></div>
+            <div class="acts"><button class="pri">Chat</button><button>Fork 定制</button><button>运行记录</button></div>
+          </div>
+          <div class="agent">
+            <div class="row1"><div class="avatar av-steel">调</div><div><div class="nm">my-analyzer</div><div class="md">doubao-lite · 4K</div></div><span class="dot idle"></span></div>
+            <div class="caps"><span class="cap">自建</span><span class="cap">1 技能</span><span class="cap scope">团队</span></div>
+            <div class="meta"><i>Fork 自 Analyze</i></div>
+            <div class="acts"><button class="pri">Chat</button><button>配置</button><button>运行记录</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2 id="s2"><span class="no">02</span>Agent 详情 · 工作台（默认落地页）</h2>
+  <p class="h2sub">点卡片进入。左列 = 最近对话（会话聚合的运行记录，点进即上周上线的对话流视图）；右列 = <b>等你回复</b>（needs_input 一等状态的 UI 落点，与路线图 2️⃣ 直接衔接）+ 例行任务开关 + 本周统计。</p>
+  <div class="hifi">
+    <div class="dt-head">
+      <div class="avatar av-lilac">剧</div>
+      <div><div class="nm">Script AI <span class="cap tmpl">系统模板</span></div><div class="slug">script_ai · doubao-seed-2.0-lite</div></div>
+      <div class="spacer"></div>
+      <span class="chip"><span class="dot ok" style="display:inline-block;margin-right:6px"></span>空闲</span>
+      <button class="chatbtn">开始对话</button>
+    </div>
+    <div class="dt-tabs"><span class="on">工作台</span><span>人格与技能</span><span>档案</span></div>
+    <div class="dt-body">
+      <div class="panel">
+        <div class="ph">最近对话 <span class="spacer"></span><a href="#">全部运行记录 →</a></div>
+        <div class="convrow"><span class="pulse"></span><span class="t">《雨夜》第二幕展开</span><span class="n">进行中 · 第 3 轮</span></div>
+        <div class="convrow"><span class="dot idle"></span><span class="t">短剧《错位》大纲三稿</span><span class="n">12 轮 · 昨天</span></div>
+        <div class="convrow"><span class="dot idle"></span><span class="t">分支推演：女主是否揭穿</span><span class="n">6 轮 · 3 天前</span></div>
+        <div class="convrow"><span class="dot idle"></span><span class="t">《雨夜》第一幕定稿</span><span class="n">18 轮 · 5 天前</span></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="panel">
+          <div class="ph">⏸ 等你回复</div>
+          <div class="waitcard">
+            <b><span class="dot wait" style="display:inline-block"></span>暂停 2 小时</b>
+            <div class="q">"第二幕结尾，女主选择沉默还是摊牌？两个走向我都拟了梗概。"</div>
+            <button>去回复 →</button>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="ph">例行任务 <span class="spacer"></span><a href="#s7b">+ 新建任务</a></div>
+          <div class="routine"><div class="desc">每晚整理当日灵感库<i>每天 21:00 · 上次成功</i></div><div class="toggle"></div></div>
+          <div class="routine"><div class="desc">周一选题池刷新<i>每周一 9:00 · 已暂停</i></div><div class="toggle off"></div></div>
+        </div>
+        <div class="panel">
+          <div class="ph">本周</div>
+          <div class="statrow"><span class="chip">runs <b>12</b></span><span class="chip">tok <b>38k</b></span><span class="chip">花费 <b>¥1.6</b></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2 id="s3"><span class="no">03</span>Agent 详情 · 人格与技能</h2>
+  <p class="h2sub">左列 = 三份人格文档（IDENTITY/SOUL/AGENT）分段切换、<b>点即内联编辑</b>（吸收方向 C 的文档体验，不再跳"文件"标签）；右列 = 属性卡（模型/输出上限/温度/权限域）+ 技能绑定开关（与技能库双向同步）。系统模板只读 + Fork 提示逻辑保留。</p>
+  <div class="hifi">
+    <div class="dt-head">
+      <div class="avatar av-lilac">剧</div>
+      <div><div class="nm">Script AI</div><div class="slug">script_ai</div></div>
+      <div class="spacer"></div>
+    </div>
+    <div class="dt-tabs"><span>工作台</span><span class="on">人格与技能</span><span>档案</span></div>
+    <div class="dt-body">
+      <div class="panel">
+        <div class="ph">人格文档</div>
+        <div class="seg"><span class="on">IDENTITY</span><span>SOUL</span><span>AGENT</span></div>
+        <div class="mdedit">
+          # Script AI<br><br>
+          你是资深剧本创作者，擅长短剧与电影长片的结构化写作。<br>
+          <span class="cursorline">核心创作观：冲突先于对白，人物弧光先于情节巧合。|</span><br>
+          输出遵循三幕结构，每幕标注情绪基调与节奏……<br>
+          <span class="hint">点击任意段落直接编辑 · ⌘S 保存并生成新版本 · 系统模板需 Fork 后编辑</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="panel">
+          <div class="ph">属性</div>
+          <div class="prop"><span class="k">模型</span><span class="v">doubao-seed-2.0-lite <small>▾</small></span></div>
+          <div class="prop"><span class="k">输出上限</span><span class="v">32,768 <small>模型上限</small></span></div>
+          <div class="prop"><span class="k">温度</span><span class="v">0.7</span></div>
+          <div class="prop"><span class="k">权限域</span><span class="v"><span class="cap scope">个人</span><small>▾</small></span></div>
+          <div class="prop"><span class="k">月度预算</span><span class="v">无限制 <small>▾</small></span></div>
+        </div>
+        <div class="panel">
+          <div class="ph">技能 <span class="spacer"></span><a href="#">+ 绑定技能</a></div>
+          <div class="skrow"><div class="desc">📝 Script Outline<i>三幕结构大纲</i></div><div class="toggle"></div></div>
+          <div class="skrow"><div class="desc">🌿 Script Branch<i>剧情分支推演</i></div><div class="toggle"></div></div>
+          <div class="skrow"><div class="desc">✂️ Script Expand<i>逐场扩写</i></div><div class="toggle off"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2 id="s4"><span class="no">04</span>Agent 详情 · 档案</h2>
+  <p class="h2sub">低频审计信息：版本时间线（人格文档每次保存生成一版，可回滚）+ 成本明细。刻意收窄，不与工作台抢注意力。</p>
+  <div class="hifi">
+    <div class="dt-tabs" style="border-top:none"><span>工作台</span><span>人格与技能</span><span class="on">档案</span></div>
+    <div class="arc">
+      <div class="panel">
+        <div class="ph">版本历史</div>
+        <div class="vline"><span class="vd cur"></span><div class="vt">v7 · 强化冲突优先创作观<i>今天 14:20 · 当前版本</i></div></div>
+        <div class="vline"><span class="vd"></span><div class="vt">v6 · 加入短剧节奏规范<i>3 天前 · 回滚到此版</i></div></div>
+        <div class="vline"><span class="vd"></span><div class="vt">v5 · Fork 自系统模板<i>上周</i></div></div>
+      </div>
+      <div class="panel">
+        <div class="ph">成本 · 近 30 天</div>
+        <div class="costrow"><span>运行次数</span><span>47</span></div>
+        <div class="costrow"><span>输入 tok</span><span>412k</span></div>
+        <div class="costrow"><span>输出 tok</span><span>156k</span></div>
+        <div class="costrow"><span>花费</span><span>¥3.2</span></div>
+      </div>
+    </div>
+  </div>
+
+  <h2 id="s5"><span class="no">05</span>技能库</h2>
+  <p class="h2sub">与智能体页同一套卡片语言。核心增量：<b>「被哪些 agent 使用」关系可见</b>（现在完全隐形）；孤儿技能赭色提醒。来源徽章区分 Nous 内置 / 自建；权限域同 agent。</p>
+  <div class="hifi">
+    <div class="hf-top">
+      <div class="hf-title">AI Library</div>
+      <div class="pagetabs"><span>智能体 17</span><span class="on">技能 9</span><span class="soon">市场<i>规划中</i></span></div>
+      <button class="newbtn">+ 新建技能</button>
+    </div>
+    <div class="skillcards">
+      <div class="skill">
+        <div class="sname"><i>📝</i> Script Outline</div>
+        <div class="sdesc">三幕结构大纲生成，含转折点与情绪曲线标注</div>
+        <div class="caps"><span class="cap tmpl">Nous 内置</span></div>
+        <div class="usedby"><span class="ua av-lilac">剧</span><span>Script AI 在用</span></div>
+      </div>
+      <div class="skill">
+        <div class="sname"><i>🎬</i> Film Storyboard</div>
+        <div class="sdesc">剧本到分镜表：镜号 / 景别 / 运镜 / 台词对位</div>
+        <div class="caps"><span class="cap tmpl">Nous 内置</span></div>
+        <div class="usedby"><span class="ua av-lilac">镜</span><span>Storyboard 在用</span></div>
+      </div>
+      <div class="skill">
+        <div class="sname"><i>✒️</i> Product Copywriting</div>
+        <div class="sdesc">AIDA 结构营销文案</div>
+        <div class="caps"><span class="cap tmpl">Nous 内置</span></div>
+        <div class="usedby none"><span>⚠ 暂无 agent 使用 — 绑定或归档</span></div>
+      </div>
+      <div class="skill">
+        <div class="sname"><i>🌿</i> Script Branch</div>
+        <div class="sdesc">剧情分支推演：N 条走向与后果评估</div>
+        <div class="caps"><span class="cap tmpl">Nous 内置</span></div>
+        <div class="usedby"><span class="ua av-lilac">剧</span><span>Script AI 在用</span></div>
+      </div>
+      <div class="skill">
+        <div class="sname"><i>📱</i> Short Video Script</div>
+        <div class="sdesc">抖音/快手口播脚本：钩子 + 节奏卡点 + 违禁词提醒</div>
+        <div class="caps"><span class="cap">自建</span><span class="cap scope">团队</span></div>
+        <div class="usedby none"><span>⚠ 暂无 agent 使用 — 绑定或归档</span></div>
+      </div>
+      <div class="skill">
+        <div class="sname"><i>📤</i> Social Media Post</div>
+        <div class="sdesc">多平台发布规范：小红书/微博/公众号 格式适配</div>
+        <div class="caps"><span class="cap tmpl">Nous 内置</span></div>
+        <div class="usedby"><span class="ua av-steel">译</span><span class="ua av-steel">析</span><span>2 个 agent 在用</span></div>
+      </div>
+    </div>
+  </div>
+
+  <h2 id="s6"><span class="no">06</span>技能编辑页</h2>
+  <p class="h2sub">替代三栏文件树：<b>文件即页签</b>（SKILL.md 主文档 + references/scripts 子文件），预览/源码切换保留；右列 = 元信息 + 使用关系 + 版本。内置技能顶部 Fork 横幅（现有流程不变，视觉融入新语言）。</p>
+  <div class="hifi">
+    <div class="dt-head">
+      <div class="avatar av-green" style="width:40px;height:40px;font-size:17px">📝</div>
+      <div><div class="nm">Script Outline</div><div class="slug">script-outline · 3 files</div></div>
+      <div class="spacer"></div>
+      <span class="cap tmpl">Nous 内置 · 只读</span>
+    </div>
+    <div class="forkbn">🔒 内置技能只读 — Fork 后可编辑，Fork 版可绑定到你的任何 agent<button>Fork 此技能</button></div>
+    <div class="sk-body">
+      <div class="panel">
+        <div class="filetabs"><span class="on">SKILL.md</span><span>references/三幕理论.md</span><span>references/案例库.md</span><span class="addf">+ 文件</span></div>
+        <div class="mdedit" style="margin-top:0;border-radius:0 8px 8px 8px">
+          # Script Outline<br><br>
+          你负责把一句话灵感展开为三幕结构大纲。<br><br>
+          ## 输出格式<br>
+          第一幕（建置）：主角日常 + 激励事件，标注情绪基调……<br>
+          第二幕（对抗）：升级的障碍序列，中点反转……<br>
+          <span class="hint">预览 / 源码 切换 · 引用文件懒加载给 agent</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="panel">
+          <div class="ph">被使用</div>
+          <div class="skrow"><span class="ua av-lilac">剧</span><div class="desc">Script AI<i>系统模板</i></div><a style="font-size:11px;color:var(--green)" href="#">查看 →</a></div>
+        </div>
+        <div class="panel">
+          <div class="ph">版本</div>
+          <div class="vline"><span class="vd cur"></span><div class="vt">v3 · 补充情绪曲线标注<i>随 seed 更新 · 当前</i></div></div>
+          <div class="vline"><span class="vd"></span><div class="vt">v2 · 初版三幕模板<i>上月</i></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2 id="s7"><span class="no">07</span>新建 / Fork 流程</h2>
+  <p class="h2sub">一个 modal 搞定（不做多步向导）：<b>从模板起步是默认路径</b>——先选模板（=现有系统 preset），再命名与选权限域。空白创建是次要入口。Fork 复用同一 modal，模板预选。</p>
+  <div class="hifi modalfr">
+    <div class="dt-head" style="padding:16px 20px"><div class="nm" style="font-size:15px">新建智能体</div><div class="spacer"></div><span style="color:var(--ink-3)">✕</span></div>
+    <div class="mrow">
+      <label>从模板开始</label>
+      <div class="mgrid">
+        <div class="mtmpl on"><div class="avatar av-lilac">剧</div><div>Script AI<br><small style="color:var(--ink-3);font-size:11px">剧本创作</small></div></div>
+        <div class="mtmpl"><div class="avatar av-lilac">镜</div><div>Storyboard<br><small style="color:var(--ink-3);font-size:11px">分镜设计</small></div></div>
+        <div class="mtmpl"><div class="avatar av-green">相</div><div>Character Portrait<br><small style="color:var(--ink-3);font-size:11px">人物画像</small></div></div>
+        <div class="mtmpl"><div class="avatar av-steel">空</div><div>空白创建<br><small style="color:var(--ink-3);font-size:11px">从零开始</small></div></div>
+      </div>
+    </div>
+    <div class="mrow mgrid">
+      <div><label>名称</label><div class="minput">我的短剧编剧</div></div>
+      <div><label>权限域</label><div class="minput ghost">个人 ▾　(个人 / 团队 / 项目)</div></div>
+    </div>
+    <div class="mrow"><label>说明（可选）</label><div class="minput ghost">专注 3 分钟短剧，快节奏强钩子…</div></div>
+    <div class="mfoot"><button class="ghostbtn">取消</button><button class="newbtn">创建并打开</button></div>
+  </div>
+
+  <h2 id="s7b"><span class="no">07·B</span>新建例行任务</h2>
+  <p class="h2sub">从工作台"例行任务 → + 新建任务"进入。<b>自然语言描述任务</b> + 频率快捷档 + 结果去向。后端复用现有例行任务调度链路，只是把入口从隐藏 tab 提到工作台。（吸收 EvoFlow"部署为员工"的频率档位，但去掉"上班打卡"隐喻——每 10 分钟这种高频档对写作场景无意义，最小档设为每小时。）</p>
+  <div class="hifi modalfr">
+    <div class="dt-head" style="padding:16px 20px"><div class="avatar av-lilac" style="width:30px;height:30px;font-size:13px">剧</div><div class="nm" style="font-size:15px">Script AI · 新建例行任务</div><div class="spacer"></div><span style="color:var(--ink-3)">✕</span></div>
+    <div class="mrow">
+      <label>任务描述（直接用自然语言写给 agent）</label>
+      <div class="minput" style="min-height:56px">整理今天灵感库里的新条目，按题材归类，把可发展成短剧的标记出来并写一句推荐理由。</div>
+    </div>
+    <div class="mrow">
+      <label>频率</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <span class="fchip">每小时</span><span class="fchip on">每天</span><span class="fchip">工作日</span><span class="fchip">每周</span><span class="fchip">自定义</span>
+        <span class="minput" style="padding:5px 12px;font-size:12.5px">21:00</span>
+      </div>
+    </div>
+    <div class="mrow mgrid">
+      <div><label>结果去向</label><div class="minput ghost">发到待办事项 ▾　(待办 / 仅记录 / 通知我)</div></div>
+      <div><label>产出需审批</label><div class="minput ghost">低风险自动通过 ▾</div></div>
+    </div>
+    <div class="mfoot"><button class="ghostbtn">取消</button><button class="newbtn">创建并启用</button></div>
+  </div>
+
+  <h2 id="spec"><span class="no">08</span>组件规格</h2>
+  <div class="tablewrap">
+  <table class="spectable">
+    <tr><th>组件</th><th>规格</th><th>语义</th></tr>
+    <tr><td>状态呈现</td><td>醒目态用<b>文字徽章</b>：运行中(李紫) · 等回复(赭) · 故障(砖红)；空闲降级为灰点</td><td>吸收 EvoFlow：裸圆点对非技术用户太隐晦。故障徽章必须携带一行可操作原因（warnline）</td></tr>
+    <tr><td>主按钮随状态</td><td>空闲→开始对话 · 运行中→查看运行 · 等回复→去回复(赭) · 故障→修复指引</td><td>吸收 EvoFlow 三卡三 CTA：按钮即状态出口，先给动作再给解释</td></tr>
+    <tr><td>头像</td><td>36px 圆角方块 · 图标或首字 · 组色背景</td><td>编剧组=李紫 · 美术组=绿 · 工具组=钢蓝。沿用 AgentIconPicker，不引入人脸头像</td></tr>
+    <tr><td>徽章</td><td>系统模板(钢蓝) · 自建(默认) · 权限域(赭) · N 技能(默认)</td><td>权限域取值：个人 / 团队 / 项目（对应 user_id / team_id / project_id 现有字段）</td></tr>
+    <tr><td>卡片</td><td>240px 最小宽 · hover 抬升 + 显示操作行</td><td>主操作 Chat 常绿；系统模板第二操作是 Fork 定制，自建是 配置</td></tr>
+    <tr><td>正在工作横幅</td><td>李紫底 · 脉冲点 · 单条（多个时轮播/计数）</td><td>数据源 = agent_runs status=running（LiveRunsStrip 已有）</td></tr>
+    <tr><td>等你回复卡</td><td>赭色系 · 引用 agent 原话 · 去回复按钮</td><td>needs_input 一等状态（路线图 2️⃣）的 UI 落点，spec 已有</td></tr>
+    <tr><td>分组</td><td>编剧组 / 美术组 / 工具组（agent 新增 group 字段，seed 提供默认）</td><td>用户 Fork 的 agent 继承来源分组，可改</td></tr>
+    <tr><td>文档编辑</td><td>内联点击编辑 · ⌘S 保存 = 新版本 · 预览/源码切换</td><td>沿用 MarkdownEditor/MarkdownBody，去掉"文件"独立标签</td></tr>
+  </table>
+  </div>
+
+  <h2 id="map"><span class="no">09</span>旧 → 新 迁移映射</h2>
+  <div class="tablewrap">
+  <table class="spectable">
+    <tr><th>现在</th><th>去哪了</th><th>代码落点</th></tr>
+    <tr><td>侧栏 19 行 agent 平铺</td><td>总览页分组卡片</td><td>AILibrarySidebar 瘦身 + 新 AgentGalleryPage</td></tr>
+    <tr><td>仪表盘 tab</td><td>工作台（统计并入右列）</td><td>AgentDashboardTab 拆解</td></tr>
+    <tr><td>概览 tab（identity 等编辑）</td><td>人格与技能 · 左列文档区</td><td>AgentEditor 1487 行顺势拆分</td></tr>
+    <tr><td>文件 tab</td><td>并入人格文档三段切换</td><td>同上</td></tr>
+    <tr><td>技能 tab</td><td>人格与技能 · 右列绑定开关</td><td>同上</td></tr>
+    <tr><td>权限 tab</td><td>属性卡「权限域」一行</td><td>PermissionsSection 收敛</td></tr>
+    <tr><td>运行记录 tab</td><td>工作台左列（会话聚合视图直接复用）</td><td>AgentRunsSplit / ConversationThreadPane 复用</td></tr>
+    <tr><td>例行任务 tab</td><td>工作台右列开关卡</td><td>AgentRoutinesTab 收敛</td></tr>
+    <tr><td>版本 tab</td><td>档案</td><td>VersionHistoryPanel 平移</td></tr>
+    <tr><td>技能三栏文件树</td><td>技能库卡片 + 编辑页文件页签</td><td>SkillList/SkillEditor 重构</td></tr>
+    <tr><td>系统 preset 语义</td><td>「官方模板」+ Fork 定制；市场留位</td><td>文案与徽章层面，后端不动；跨用户共享为将来项</td></tr>
+  </table>
+  </div>
+
+  <div class="next">
+    <b>落地路径（协作面优先，每步独立 PR 可上线）：</b>
+    <ol>
+      <li><b>第一批 · 协作面地基</b>：needs_input 一等状态（2️⃣ spec 已定稿：DBOS recv 挂起 + 等你回复卡 + inbox 通知）+ 静默失败回显（4️⃣）。没有这个，"等我的"永远不醒目</li>
+      <li><b>第二批 · 任务协作时间线</b>：issue 详情时间线折叠运行边界卡（复用会话聚合视图做"展开对话流"）+ 右栏进度轨道（task_tracking 轮次/耗时实时）+ 交付物卡</li>
+      <li><b>第三批 · 待办事项注意力层</b>：等我的横条（置顶、可折叠、跨视图）+ in_progress 行内实时进度。现有 list/board/Quick/管道条/Group 全部不动，只贴层</li>
+      <li><b>第四批 · 管理面（B 系列）</b>：智能体总览卡片页 → 详情三区归并 → 技能库卡片化 → 新建/Fork。管理面不依赖前三批，可与之并行由另一 session 承接</li>
+    </ol>
+  </div>
+
+  <footer>nous · AI Library redesign · 全套设计 v3 · 2026-08</footer>
+</div>
