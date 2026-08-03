@@ -177,6 +177,32 @@ class AgentCreate(BaseModel):
     agent_group: Optional[str] = Field(default=None, max_length=32)
 
 
+class AgentFault(BaseModel):
+    """Why an agent is unhealthy, plus what to do about it.
+
+    ``detail`` is NOT optional in practice for every kind we emit — the spec
+    requires a fault badge to carry one actionable line, so a bare kind with
+    no remedy would defeat the point.
+    """
+
+    kind: Literal["budget", "manual", "dead_runs"]
+    detail: str
+
+
+class AgentStatsItem(BaseModel):
+    runs_7d: int = 0
+    tokens_7d: int = 0
+    running_count: int = 0
+    needs_input_count: int = 0
+    fault: Optional[AgentFault] = None
+
+
+class AgentStatsResponse(BaseModel):
+    """Batch stats for the AI Library gallery, keyed by agent id (str UUID)."""
+
+    items: dict[str, AgentStatsItem] = Field(default_factory=dict)
+
+
 # ---------- Skills & files ----------
 
 

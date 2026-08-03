@@ -45,6 +45,7 @@ from app.repositories.agent_runs_repository import (
 from app.repositories.agent_workforce_repository import (
     tt_row_to_task_shape,
 )
+from app.repositories.issue_repository import get_issue_repository
 from app.repositories.skill_repository import (
     SkillRepository,
     get_skill_repository,
@@ -59,6 +60,7 @@ from app.schemas.agent_runs import (
 from app.schemas.ai_library import (
     AgentCreate,
     AgentOut,
+    AgentStatsResponse,
     AgentUpdate,
     ChatPermissionsOut,
     SkillCreate,
@@ -409,6 +411,90 @@ async def list_agents(request: Request, auth: AuthDep) -> List[Dict[str, Any]]:
             )
         )
     return await _enrich_agents_with_scope_names(enriched_with_skills)
+
+
+# Fault copy. Each line must name the remedy, not just the symptom — the
+# gallery renders it verbatim under the badge (spec §B1: 故障徽章必须携带一行
+# 可操作原因).
+_FAULT_DETAIL = {
+    "budget": "Monthly budget exceeded — raise the budget or resume the agent",
+    "manual": "Paused by admin — resume from the agent's Profile tab",
+}
+_FAULT_DETAIL_MAX = 120
+
+
+# MUST stay above /agents/{slug} — FastAPI matches in declaration order and
+# the slug route would otherwise swallow "stats".
+@router.get(
+    "/agents/stats",
+    response_model=AgentStatsResponse,
+    summary="Batch 7d stats / live runs / waiting replies / fault per agent",
+)
+async def get_agents_stats(
+    request: Request, auth: AuthDep, days: int = 7
+) -> Dict[str, Any]:
+    """One request covering every agent the caller can see.
+
+    Replaces the gallery's per-agent ``/dashboard`` fan-out. Visibility
+    reuses ``list_accessible`` so an agent the caller can't see never
+    appears here either.
+
+    Each aggregate is a single GROUP BY across all agent ids — never a
+    per-agent query (see the N+1 guard in
+    ``tests/test_ai_library_agent_stats.py``).
+    """
+    window_days = max(1, min(int(days), 90))
+    agent_repo = get_agent_repository()
+    runs_repo = get_agent_runs_repository()
+    issue_repo = get_issue_repository()
+
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    user_team_ids = await _fetch_user_team_ids(user_uuid)
+    project_ids = await _fetch_user_project_ids(user_uuid)
+    scoped_team = _scoped_team_id(request, user_team_ids)
+    team_ids = [scoped_team] if scoped_team is not None else user_team_ids
+    rows = await agent_repo.list_accessible(
+        user_id=user_uuid, team_ids=team_ids, project_ids=project_ids
+    )
+
+    agent_ids: List[UUID] = []
+    for row in rows:
+        try:
+            agent_ids.append(UUID(str(row["id"])))
+        except (KeyError, TypeError, ValueError) as exc:
+            logger.warning(f"[ai-library] stats skipping agent with bad id: {exc}")
+
+    since = datetime.now(timezone.utc) - timedelta(days=window_days)
+    usage = await runs_repo.usage_by_agent_since(agent_ids, since)
+    running = await runs_repo.running_counts_by_agent(agent_ids)
+    dead_reasons = await runs_repo.dead_run_reasons_by_agent(agent_ids, since)
+    needs_input = await issue_repo.count_needs_input_by_agent(
+        str(user_uuid), [str(a) for a in agent_ids]
+    )
+
+    items: Dict[str, Any] = {}
+    for row in rows:
+        agent_id = str(row.get("id"))
+        if agent_id == "None":
+            continue
+        paused = row.get("paused_reason")
+        fault: Optional[Dict[str, Any]] = None
+        if paused in _FAULT_DETAIL:
+            fault = {"kind": paused, "detail": _FAULT_DETAIL[paused]}
+        elif agent_id in dead_reasons:
+            fault = {
+                "kind": "dead_runs",
+                "detail": dead_reasons[agent_id][:_FAULT_DETAIL_MAX],
+            }
+        agent_usage = usage.get(agent_id) or {}
+        items[agent_id] = {
+            "runs_7d": int(agent_usage.get("runs", 0)),
+            "tokens_7d": int(agent_usage.get("tokens", 0)),
+            "running_count": int(running.get(agent_id, 0)),
+            "needs_input_count": int(needs_input.get(agent_id, 0)),
+            "fault": fault,
+        }
+    return {"items": items}
 
 
 @router.get(
