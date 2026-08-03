@@ -360,10 +360,17 @@ def install_background_bootstrap(app: FastAPI) -> None:
     app.state.bg_tasks.spawn(
         "reap_internal_queue", _bg_reap_internal_queue(), long_running=True
     )
-    # long_running: sleeps 30s before its single sweep — keep it off the
-    # /readyz gate (readiness must not wait for a housekeeping delay).
+    # Detached housekeeping: sleeps 30s before its single sweep, so readiness
+    # must not wait for it — but it IS finite. Registering it as a daemon
+    # (long_running=True, the original #1662 wiring) made `dead_daemons()`
+    # read its normal return as a crash: /readyz went permanently
+    # "degraded"/503, both containers sat (unhealthy), and the deploy smoke
+    # gate only passed by racing the 30s sleep. gates_readiness=False is the
+    # flag that actually expresses "don't gate on me".
     app.state.bg_tasks.spawn(
-        "reap_stale_input_waits", _bg_reap_stale_input_waits(), long_running=True
+        "reap_stale_input_waits",
+        _bg_reap_stale_input_waits(),
+        gates_readiness=False,
     )
     # Worker-stall detector: only on the HTTP-serving process (gateway /
     # combined), which stays healthy during a worker dequeue stall and can
