@@ -63,6 +63,10 @@ class AgentBase(BaseModel):
     identity_md: Optional[str] = None
     soul_md: Optional[str] = None
     agent_md: Optional[str] = None
+    # Roster grouping for the gallery (mig 400): writing / art / tools.
+    # NULL = ungrouped; the UI buckets those under tools rather than
+    # rendering a fourth section.
+    agent_group: Optional[str] = Field(default=None, max_length=32)
 
 
 class AgentOut(AgentBase):
@@ -113,6 +117,7 @@ class AgentUpdate(BaseModel):
     identity_md: Optional[str] = None
     soul_md: Optional[str] = None
     agent_md: Optional[str] = None
+    agent_group: Optional[str] = Field(default=None, max_length=32)
     enabled: Optional[bool] = None
     skill_ids: Optional[list[int]] = None  # replace binding
     # Budget guard. 0 or null ⇒ unlimited. Positive int ⇒ hard cap; the
@@ -168,6 +173,8 @@ class AgentCreate(BaseModel):
     identity_md: Optional[str] = None
     soul_md: Optional[str] = None
     agent_md: Optional[str] = None
+    # Omitted on a fork ⇒ inherit the source agent's group (see create_agent).
+    agent_group: Optional[str] = Field(default=None, max_length=32)
 
 
 # ---------- Skills & files ----------

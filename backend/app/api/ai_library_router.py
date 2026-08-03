@@ -510,6 +510,7 @@ async def create_agent(
         "identity_md": None,
         "soul_md": None,
         "agent_md": None,
+        "agent_group": None,
     }
 
     # If fork_from given, copy content fields from source (source may be
@@ -528,6 +529,9 @@ async def create_agent(
             "model",
             "temperature",
             "max_tokens",
+            # A fork stays in its source's roster group unless the payload
+            # says otherwise — a forked Portrait AI belongs with the artists.
+            "agent_group",
         ):
             if source.get(key) is not None:
                 fields[key] = source[key]
@@ -540,6 +544,7 @@ async def create_agent(
         "identity_md",
         "soul_md",
         "agent_md",
+        "agent_group",
     ):
         val = getattr(payload, key)
         if val is not None:

@@ -30,6 +30,31 @@ SCRIPT_EXTS = {".py", ".sh", ".js", ".ts"}
 TEXT_ASSET_EXTS = {".json", ".yaml", ".yml", ".txt"}
 SCRIPT_AI_SKILL_SLUGS = ["script-outline", "script-expand", "script-branch"]
 
+# Roster grouping for the AI Library gallery (mig 400, spec 2026-08-02 §B1).
+# Keys are seed DIRECTORY names — note the mixed hyphen/underscore style is
+# the real on-disk state, not a typo. tests/test_agent_group_seed.py asserts
+# this map and backend/seeds/agents/ stay in lockstep.
+DEFAULT_AGENT_GROUP = "tools"
+AGENT_GROUP_BY_SLUG = {
+    "script_ai": "writing",
+    "storyboard": "writing",
+    "summarize": "writing",
+    "character-expression": "art",
+    "character-persona": "art",
+    "character-portrait": "art",
+    "character-turnaround": "art",
+    "location-design": "art",
+    "location-visual": "art",
+    "prop-design": "art",
+    "prop-visual": "art",
+    "analyze": "tools",
+    "caption": "tools",
+    "classify": "tools",
+    "coordinator": "tools",
+    "topic-scorer": "tools",
+    "translate": "tools",
+}
+
 
 def _sha(*chunks: Any) -> str:
     """sha256 of pipe-joined str(chunk). NULL → empty so identical content
@@ -169,6 +194,7 @@ class SeedLoader:
             "soul_md": read_if_exists("SOUL.md"),
             "agent_md": read_if_exists("AGENT.md"),
             "is_system_preset": True,
+            "agent_group": AGENT_GROUP_BY_SLUG.get(slug, DEFAULT_AGENT_GROUP),
         }
 
     async def _upsert_agent(self, slug: str, fields: dict[str, Any]) -> None:
@@ -178,6 +204,9 @@ class SeedLoader:
             fields.get("agent_md"),
             fields.get("name"),
             fields.get("description"),
+            # Must be hashed: without it, re-grouping an agent hits the skip
+            # branch below and the new group never reaches the DB.
+            fields.get("agent_group"),
         )
         fields_with_hash = {**fields, "seed_hash": seed_hash}
 
