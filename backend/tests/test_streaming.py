@@ -57,6 +57,77 @@ async def test_stream_turn_falls_back_to_buffered():
     assert chunks[0].finish_reason == "stop"
 
 
+class _BufferedToolCallAdapter:
+    """No stream(); first call answers with a FinishIssue tool_call (empty
+    content — doubao-lite's real shape), second call answers with text."""
+
+    def __init__(self):
+        self.calls = 0
+
+    async def call(self, composed, messages):
+        self.calls += 1
+        if self.calls == 1:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "FinishIssue",
+                                        "arguments": '{"outcome": "needs_input", "reason": "Which style?"}',
+                                    },
+                                }
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            }
+        return {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "asked the user"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 3},
+        }
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_buffered_fallback_executes_tool_calls():
+    """生产回归（2026-08-03 E2E 定位）：adapter 是 LLMFallbackChain（无
+    .stream）时，旧的伪流式分支一次 call 后只透传 content —— 模型答
+    tool_calls（FinishIssue/Skill…）就整轮被吞：不执行、无 trace、正文空。
+    表现即 memory 'doubao-lite 空产出' 与 #1658 'FinishIssue 从未被调用'。
+    该分支必须与 run_turn 同语义：执行工具循环并带出 tool_call_trace。"""
+    adapter = _BufferedToolCallAdapter()
+    runner = AgentRunner(adapter=adapter, skill_tool=None)
+
+    async def finish_handler(args):
+        return {"acknowledged": True, **args}
+
+    runner.finish_issue_handler = finish_handler
+    chunks = []
+    async for chunk in runner.stream_turn(
+        _composed(), [{"role": "user", "content": "hi"}]
+    ):
+        chunks.append(chunk)
+    terminal = chunks[-1]
+    trace = terminal.tool_call_trace or []
+    assert [t["name"] for t in trace] == ["FinishIssue"]
+    assert trace[0]["args"]["outcome"] == "needs_input"
+    assert adapter.calls == 2  # tool loop re-entered, not a single bare call
+    full_text = "".join(c.delta_text or "" for c in chunks)
+    assert "asked the user" in full_text
+
+
 # ─── streaming adapter (happy path) ──────────────────────────────────
 
 
@@ -519,6 +590,13 @@ async def test_stream_turn_caller_recorder_overrides_auto(monkeypatch):
 
         def record_usage(self, **k): ...
         def record_skill(self, *a): ...
+
+        # run_turn (which the buffered branch now delegates to) polls these
+        # between iterations — the real RunRecorder always has them.
+        async def heartbeat(self): ...
+
+        async def check_cancelled(self):
+            return False
 
     runner = AgentRunner(adapter=_BufferedOnlyAdapter(), skill_tool=None)
     rec = _SentinelRecorder()

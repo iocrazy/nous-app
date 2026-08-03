@@ -379,13 +379,29 @@ class AgentRunner:
 
         stream_method = getattr(self.adapter, "stream", None)
         if stream_method is None:
-            resp = await self.adapter.call(composed, user_messages)
-            msg = resp["choices"][0]["message"]
-            self._record_buffered_usage(recorder, resp.get("usage"))
+            # Production ALWAYS lands here for chunk_callback turns: the chat
+            # wiring hands stream_turn an LLMFallbackChain, which has no
+            # ``stream``. This branch used to do one bare adapter.call and
+            # forward ONLY message content — a model that answered with
+            # tool_calls (FinishIssue, Skill, …) had the whole turn silently
+            # swallowed: no tool execution, no tool_call_trace, empty text
+            # (the "doubao-lite 空产出" / "FinishIssue 从未被调用" signature,
+            # root-caused 2026-08-03). Delegate to run_turn so the buffered
+            # path shares its full tool loop; run_turn records usage on the
+            # recorder itself (no _record_buffered_usage — that would
+            # double-count).
+            result = await self.run_turn(
+                composed, user_messages, recorder=recorder, abort=abort
+            )
+            if result.get("cancelled"):
+                return
+            raw = result.get("raw") or {}
+            raw_choices = raw.get("choices") or [{}]
             yield StreamChunk(
-                delta_text=msg.get("content") or "",
-                finish_reason=resp["choices"][0].get("finish_reason") or "stop",
-                usage=resp.get("usage"),
+                delta_text=result.get("content") or "",
+                finish_reason=(raw_choices[0].get("finish_reason") or "stop"),
+                usage=raw.get("usage"),
+                tool_call_trace=result.get("tool_calls") or [],
             )
             return
 
