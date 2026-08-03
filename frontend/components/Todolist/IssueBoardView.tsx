@@ -9,7 +9,9 @@
  */
 
 import React, { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
+import { runningChipLabel, needsReplyChip } from './issueChips';
 import type { UiIssue } from './types';
 import type { IssueStatus } from '../../services/issuesService';
 import { IssueStatusIcon, STATUS_ORDER, STATUS_LABEL, PriorityIcon } from './IssueStatusIcon';
@@ -31,7 +33,12 @@ const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }>
 
 const BoardCard: React.FC<{ issue: UiIssue; teamId: string }> = ({ issue, teamId }) => {
   const initials = issue.assignee?.name.slice(0, 2).toUpperCase() ?? (issue.assignee_user_label?.slice(0, 2).toUpperCase() ?? '');
-  const isLive = !!issue.raw.dbos_workflow_id && issue.status !== 'done' && issue.status !== 'cancelled';
+  const { t } = useTranslation();
+  // Board cards are narrow: the running chip keeps the turn/elapsed suffix
+  // (it is the progress signal) while the reply chip drops to a short label
+  // with the question as its tooltip.
+  const runningLabel = runningChipLabel(issue, new Date());
+  const needsReply = needsReplyChip(issue);
   return (
     <Link
       to={`/team/${teamId}/todolist/${issue.identifier}`}
@@ -39,10 +46,19 @@ const BoardCard: React.FC<{ issue: UiIssue; teamId: string }> = ({ issue, teamId
     >
       <div className="flex items-center gap-1.5 mb-1.5">
         <span className="font-mono text-[9px] text-ink-500 uppercase tracking-wider">{issue.identifier}</span>
-        {isLive && (
-          <span className="inline-flex items-center gap-1 text-[9px] text-amber-400" title="An agent is working on this">
-            <span className="w-1 h-1 rounded-full bg-amber-400 animate-pulse" />
-            running
+        {runningLabel && (
+          <span className="inline-flex items-center gap-1 text-[9px] text-amber-400 truncate" title="An agent is working on this">
+            <span className="w-1 h-1 rounded-full bg-amber-400 animate-pulse shrink-0" />
+            {runningLabel}
+          </span>
+        )}
+        {needsReply && (
+          <span
+            data-testid="needs-reply-chip"
+            className="inline-flex items-center px-1 py-0.5 rounded text-[9px] text-warn bg-warn-soft ring-1 ring-warn-line shrink-0"
+            title={needsReply.question ?? undefined}
+          >
+            {t('issues.needsReplyChip', 'Needs your reply')}
           </span>
         )}
         <span title={issue.priority} className="ml-auto"><PriorityIcon priority={issue.priority} /></span>

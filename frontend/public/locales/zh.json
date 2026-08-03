@@ -3772,5 +3772,11 @@
     "replyHere": "输入你的回复…",
     "reply": "回复",
     "replying": "提交中…"
+  },
+  "issues": {
+    "needsReplyChip": "等你回复",
+    "waitingOnYou": "等我的",
+    "approve": "批准",
+    "reject": "拒绝"
   }
 }

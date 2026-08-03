@@ -8,8 +8,10 @@
  *         applied client-side against the already-fetched UiIssue list.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
+
 import {
   Plus, Search, Columns, Filter, ArrowUpDown, RotateCw,
   Diamond, ChevronRight, ChevronDown, Check, X,
@@ -64,6 +66,16 @@ import {
 } from './IssueSortMenu';
 import { relativeTime } from '../../utils/taskDisplay';
 import { originModule } from './issueOrigin';
+import { runningChipLabel, needsReplyChip } from './issueChips';
+import { buildAttentionItems } from './attentionItems';
+import {
+  AttentionStrip,
+  loadAttentionCollapsed,
+  saveAttentionCollapsed,
+} from './AttentionStrip';
+import { useTaskManager } from '../../contexts/TaskManagerContext';
+import { aiLibraryService } from '../../services/aiLibraryService';
+import type { AILibraryApprovalRequest } from '../../types';
 import {
   computeSubtaskCounts,
   dueBucket,
@@ -162,6 +174,21 @@ const DUE_CLASS: Record<'normal' | 'soon' | 'overdue', string> = {
   overdue: 'text-rose-400 font-semibold',
 };
 
+/**
+ * A `Date` that advances once a second while `active`, frozen otherwise.
+ * Only live rows pay for a timer — a finished issue's elapsed time never
+ * changes, so re-rendering it every second would be pure waste.
+ */
+function useTickingNow(active: boolean): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+
 interface IssueRowProps {
   issue: UiIssue;
   teamId: string;
@@ -180,10 +207,16 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
   // Due date is pre-baked: the column lands with the workflow session, so this
   // is null (renders nothing) until then.
   const due = dueBucket(readDueDate(issue.raw));
+  const { t } = useTranslation();
   // An agent is actively working this issue: dispatched to a DBOS workflow and
   // not yet in a terminal state. Surfaces as an amber pulse (data already on
-  // the row — no extra fetch).
+  // the row — no extra fetch). A1: the chip now also carries which turn it is
+  // on and how long it has been going — "running" says an agent is assigned,
+  // a moving number says it is actually getting somewhere.
   const isLive = !!issue.raw.dbos_workflow_id && issue.status !== 'done' && issue.status !== 'cancelled';
+  const now = useTickingNow(isLive);
+  const runningLabel = runningChipLabel(issue, now);
+  const needsReply = needsReplyChip(issue);
   return (
     <Link
       to={`/team/${teamId}/todolist/${issue.identifier}`}
@@ -199,10 +232,19 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
         </span>
       )}
       <span className="flex-1 truncate text-[14px] text-ink-200 group-hover:text-ink-50">{issue.title}</span>
-      {isLive && (
+      {runningLabel && (
         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] text-amber-400 bg-amber-500/10 shrink-0" title="An agent is working on this">
           <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-          running
+          {runningLabel}
+        </span>
+      )}
+      {needsReply && (
+        <span
+          data-testid="needs-reply-chip"
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] text-warn bg-warn-soft ring-1 ring-warn-line shrink-0"
+          title={needsReply.question ?? undefined}
+        >
+          {t('issues.needsReplyChip', 'Needs your reply')}
         </span>
       )}
       {visibleCols.has('parent') && parent && (
@@ -380,6 +422,32 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   const showGroupToggle = scope.type === 'team';
   const projectGrouped = showGroupToggle && groupMode === 'project';
 
+  // ── A1「等我的」横条 ────────────────────────────────────────────────
+  // Questions come from the TaskManager feed (already polled app-wide);
+  // approvals are fetched here on the same 60s cadence as the TopBar panel;
+  // in_review issues are already in `scopedIssues`, no fetch at all.
+  const { needsInputItems } = useTaskManager();
+  const [approvals, setApprovals] = useState<AILibraryApprovalRequest[]>([]);
+  const attentionScopeKey = `${scope.type}:${teamId ?? 'none'}`;
+  const [attentionCollapsed, setAttentionCollapsed] = useState(() =>
+    loadAttentionCollapsed(attentionScopeKey));
+
+  const refreshApprovals = useCallback(async () => {
+    try {
+      const res = await aiLibraryService.listApprovalRequests();
+      setApprovals(res.items ?? []);
+    } catch (err) {
+      // Non-fatal: the other two attention sources still render.
+      console.error('[IssueListView] approval requests load failed', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshApprovals();
+    const id = setInterval(() => { void refreshApprovals(); }, 60_000);
+    return () => clearInterval(id);
+  }, [refreshApprovals]);
+
   // Keyboard: `C` opens New Issue, `/` focuses search. Guarded against typing
   // contexts (inputs/textarea/contenteditable), IME composition, modifier
   // combos, and already-handled events so it never hijacks real input.
@@ -443,6 +511,48 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   }, [scopedIssues]);
 
   const filteredByPanel = useMemo(() => applyFilters(scopedIssues, filters, currentUserId), [scopedIssues, filters, currentUserId]);
+
+  // Attention items are built off the SCOPED list (not the filtered one): a
+  // display filter hides rows, it does not mean the work stopped waiting.
+  const attentionItems = useMemo(
+    () => buildAttentionItems(
+      needsInputItems,
+      approvals,
+      scopedIssues.filter((i) => i.status === 'in_review'),
+    ),
+    [needsInputItems, approvals, scopedIssues],
+  );
+
+  // The needs-input feed carries no identifier, and the detail route is keyed
+  // by identifier — so resolve through the list we already have, and degrade
+  // to a non-clickable card when the issue isn't in this scope.
+  const issueLinkFor = useCallback((issueId: number): string | null => {
+    const match = issues.find((i) => i.id === issueId);
+    return match && teamId ? `/team/${teamId}/todolist/${match.identifier}` : null;
+  }, [issues, teamId]);
+
+  const handleAttentionToggle = useCallback((next: boolean) => {
+    setAttentionCollapsed(next);
+    saveAttentionCollapsed(attentionScopeKey, next);
+  }, [attentionScopeKey]);
+
+  const handleApprove = useCallback(async (id: string) => {
+    try {
+      await aiLibraryService.approveRequest(id);
+    } catch (err) {
+      console.error('[IssueListView] approve failed', err);
+    }
+    await refreshApprovals();
+  }, [refreshApprovals]);
+
+  const handleReject = useCallback(async (id: string) => {
+    try {
+      await aiLibraryService.rejectRequest(id);
+    } catch (err) {
+      console.error('[IssueListView] reject failed', err);
+    }
+    await refreshApprovals();
+  }, [refreshApprovals]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -762,6 +872,16 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
           )}
         </div>
       </div>
+
+      <AttentionStrip
+        items={attentionItems}
+        collapsed={attentionCollapsed}
+        onToggle={handleAttentionToggle}
+        onApprove={handleApprove}
+        onReject={handleReject}
+        teamId={teamId}
+        issueLinkFor={issueLinkFor}
+      />
 
       {scope.type === 'project' && (
         <div
