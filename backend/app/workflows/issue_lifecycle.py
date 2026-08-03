@@ -443,6 +443,43 @@ async def respond_to_issue_reply(
         await publish_status(issue_id, "done")
 
 
+async def run_issue_reply_for_wait(
+    issue_id: int,
+    user_id: str,
+    reply_text: str,
+    attachments: Optional[list[dict]] = None,
+) -> dict[str, Any]:
+    """One reply turn for the needs_input wait loop (spec 2026-07-30 §4).
+
+    Called from the SUSPENDED dispatch workflow's body right after DBOS.recv
+    wakes it — the inner calls (``ensure_issue_session_step`` /
+    ``run_issue_reply_step``) are @DBOS.step themselves, so each checkpoints
+    individually and a worker crash mid-turn replays from the right point.
+
+    Unlike ``respond_to_issue_reply`` this deliberately does NOT acquire the
+    per-issue turn lock: the dispatch workflow already holds
+    ``execution_locked_at`` for its whole lifetime (``atomic_checkout`` →
+    ``clear_lock`` in execute_issue's finally) and ``acquire_turn_lock`` claims
+    the very same column — re-acquiring here would spin against our own lock
+    for ~10min and defer the reply. Serialization is already guaranteed by the
+    held dispatch lock. Status routing is the wait loop's job — this only runs
+    the turn and reports the FinishIssue declaration
+    (``{content, outcome, reason, run_id}``).
+    """
+    session_id = await ensure_issue_session_step(issue_id)
+    await publish_status(issue_id, "running")
+    try:
+        return await run_issue_reply_step(
+            issue_id=issue_id,
+            session_id=session_id,
+            user_id=user_id,
+            reply_text=reply_text,
+            attachments=attachments,
+        )
+    finally:
+        await publish_status(issue_id, "done")
+
+
 @DBOS.step()
 async def load_issue(issue_id: int) -> dict[str, Any]:
     """Read issue row as a plain dict (serializes through DBOS step memo).
@@ -632,6 +669,10 @@ async def _run_dispatch_with_continuation(
     load_issue: Callable[[int], Awaitable[dict[str, Any]]],
     max_continuations: int = ISSUE_MAX_CONTINUATIONS,
     auto_close: bool = False,
+    wait_for_input: Optional[Callable[..., Awaitable[Optional[dict]]]] = None,
+    mark_waiting: Optional[Callable[..., Awaitable[None]]] = None,
+    clear_waiting: Optional[Callable[..., Awaitable[None]]] = None,
+    run_reply: Optional[Callable[..., Awaitable[dict[str, Any]]]] = None,
 ) -> dict[str, Any]:
     """Spec-2 core: run the agent, then route the issue by the agent's declared
     FinishIssue outcome via ``route_finish_outcome`` (see its docstring for the
@@ -642,14 +683,33 @@ async def _run_dispatch_with_continuation(
     Before every turn the issue is re-loaded and the dispatch is preempted if it
     was externally moved to a terminal/cancelled status (see ``PREEMPT_STATUSES``)
     — the external status is left untouched.
+
+    needs_input suspend-resume (spec 2026-07-30): when ALL four gate deps
+    (``wait_for_input`` / ``mark_waiting`` / ``clear_waiting`` / ``run_reply``)
+    are injected, a ``needs_input`` declaration parks the issue at
+    ``needs_followup`` exactly like today, then SUSPENDS the workflow on
+    DBOS.recv instead of terminating. A user reply (delivered by the reply
+    endpoint's wake diversion) resumes the issue to ``in_progress``, runs one
+    reply turn, and re-enters this routing. Bounded two ways: recv TTL
+    (``NEEDS_INPUT_RECV_TTL_HOURS`` — timeout leaves the issue parked at
+    needs_followup, today's terminal state) and
+    ``NEEDS_INPUT_MAX_WAIT_ROUNDS`` per dispatch. With any gate dep missing
+    (production wiring off / degraded) behavior is byte-for-byte today's:
+    needs_input terminates the dispatch.
     """
+    from app.core.config import settings
+
     attempt = 0
+    wait_rounds = 0
     outcome: Optional[str] = None
     reason: Optional[str] = None
+    res: Optional[dict[str, Any]] = None
+    gate_ready = all([wait_for_input, mark_waiting, clear_waiting, run_reply])
     while True:
         # Reconcile against external state before (re)running. A user or another
         # agent may have cancelled/closed the issue since dispatch; if so, stop
-        # without overwriting their status.
+        # without overwriting their status. Re-checked after every recv wakeup
+        # too — a human may have closed the issue while the agent was waiting.
         fresh = await load_issue(issue_id)
         fresh_status = (fresh or {}).get("status")
         if fresh_status in PREEMPT_STATUSES:
@@ -664,15 +724,55 @@ async def _run_dispatch_with_continuation(
                 "preempted_status": fresh_status,
                 "outcome": outcome,
                 "attempts": attempt,
+                "wait_rounds": wait_rounds,
             }
-        res = await run_turn(
-            issue_row, agent_id, user_id, is_continuation=(attempt > 0)
-        )
+        if outcome == "needs_input" and gate_ready:
+            # Park exactly as the terminal path would (route_finish_outcome
+            # keeps the run_id housekeeping single-sourced), then suspend.
+            await route_finish_outcome(
+                issue_id,
+                outcome,
+                reason,
+                auto_close=auto_close,
+                set_status=set_status,
+                content_len=len((res or {}).get("content") or ""),
+                run_id=(res or {}).get("run_id"),
+            )
+            await mark_waiting(issue_id, reason or "")
+            payload = await wait_for_input(
+                issue_id,
+                ttl_seconds=settings.NEEDS_INPUT_RECV_TTL_HOURS * 3600,
+            )
+            await clear_waiting(issue_id)
+            if payload is None:
+                # Timeout / malformed payload: the issue already sits at
+                # needs_followup (today's terminal state) — no further routing.
+                return {
+                    "outcome": outcome,
+                    "attempts": attempt,
+                    "wait_rounds": wait_rounds,
+                }
+            wait_rounds += 1
+            await set_status(issue_id, "in_progress")
+            res = await run_reply(issue_id, payload)
+        else:
+            res = await run_turn(
+                issue_row,
+                agent_id,
+                user_id,
+                is_continuation=(attempt > 0 or wait_rounds > 0),
+            )
         outcome = (res or {}).get("outcome")
         reason = (res or {}).get("reason")
         if outcome == "continue" and attempt < max_continuations:
             attempt += 1
             continue
+        if (
+            outcome == "needs_input"
+            and gate_ready
+            and wait_rounds < settings.NEEDS_INPUT_MAX_WAIT_ROUNDS
+        ):
+            continue  # back to loop top: preempt re-check → park + suspend
         break
 
     content_len = len((res or {}).get("content") or "")
@@ -685,7 +785,7 @@ async def _run_dispatch_with_continuation(
         content_len=content_len,
         run_id=(res or {}).get("run_id"),
     )
-    return {"outcome": outcome, "attempts": attempt}
+    return {"outcome": outcome, "attempts": attempt, "wait_rounds": wait_rounds}
 
 
 async def _maybe_fire_subissue_barrier(issue_id: int) -> None:
@@ -754,6 +854,38 @@ async def execute_issue(issue_id: int, auto: bool = False) -> dict[str, Any]:
             # Spec-2: route status + bounded continuation by the agent's
             # FinishIssue declaration (agent output already bridged to chat).
             auto_close = await load_auto_close_flag()
+
+            # needs_input gate (spec 2026-07-30): wire the suspend-resume
+            # primitives into the loop. Closures capture this workflow's id so
+            # the reply endpoint's DBOS.send lands on the right waiter; any
+            # gate failure degrades softly (input_gate's contract) back to
+            # today's terminate-then-reply-restart path.
+            from app.agent_framework import input_gate
+
+            async def _wait(issue_id_: int, ttl_seconds: int):
+                return await input_gate.await_user_input(
+                    issue_id_, ttl_seconds=ttl_seconds
+                )
+
+            async def _mark(issue_id_: int, prompt: str):
+                await input_gate.mark_awaiting_input(
+                    workflow_id=workflow_id,
+                    issue_id=issue_id_,
+                    user_id=user_id,
+                    prompt=prompt,
+                )
+
+            async def _clear(issue_id_: int):
+                await input_gate.clear_awaiting_input(workflow_id=workflow_id)
+
+            async def _reply(issue_id_: int, payload: dict):
+                return await run_issue_reply_for_wait(
+                    issue_id_,
+                    payload.get("user_id") or user_id,
+                    payload["reply_text"],
+                    payload.get("attachments"),
+                )
+
             routed = await _run_dispatch_with_continuation(
                 issue_id,
                 issue_row,
@@ -763,6 +895,10 @@ async def execute_issue(issue_id: int, auto: bool = False) -> dict[str, Any]:
                 set_status=set_status,
                 load_issue=load_issue,
                 auto_close=auto_close,
+                wait_for_input=_wait,
+                mark_waiting=_mark,
+                clear_waiting=_clear,
+                run_reply=_reply,
             )
             result = {"issue_id": issue_id, "executed": True, **routed}
         else:

@@ -48,3 +48,28 @@ export function taskRowActions(
 function isTerminalSuccessLike(status: UnifiedTask['status']): boolean {
   return status === 'completed';
 }
+
+/** The awaiting_input marker input_gate writes into task_tracking.metadata
+ * while an issue-dispatch workflow is suspended waiting for the user's answer
+ * (needs_input first-class, spec 2026-07-30). */
+export interface AwaitingInputMarker {
+  prompt?: string;
+  since?: string;
+  issue_id?: number | string;
+}
+
+/**
+ * The awaiting_input marker for a row that can actually consume an answer, or
+ * null. Terminal rows are excluded even when a stale marker survives (a
+ * cancel/reap race can leave one behind) — a workflow that already ended can
+ * never receive the reply, so highlighting it would be a lie.
+ */
+export function taskAwaitingInput(task: {
+  status: UnifiedTask['status'];
+  metadata?: Record<string, unknown>;
+}): AwaitingInputMarker | null {
+  if (task.status !== 'pending' && task.status !== 'processing') return null;
+  const marker = task.metadata?.awaiting_input;
+  if (!marker || typeof marker !== 'object' || Array.isArray(marker)) return null;
+  return marker as AwaitingInputMarker;
+}

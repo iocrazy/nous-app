@@ -549,6 +549,7 @@
     "downloadResult": "Download",
     "tabActive": "Active",
     "tabHistory": "History",
+    "waitingInput": "Waiting for your input",
     "running": "Running",
     "queued": "Queued",
     "completed": "Done",

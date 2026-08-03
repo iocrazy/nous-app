@@ -340,6 +340,19 @@ class Settings(BaseSettings):
         description="Cache TTL for agent config lookups (seconds)",
     )
 
+    # needs_input 一等状态（spec 2026-07-30）：recv 挂起 TTL 与单次 dispatch 等待轮上限
+    NEEDS_INPUT_RECV_TTL_HOURS: int = Field(
+        default=72,
+        description="How long a dispatch workflow stays suspended waiting for the "
+        "user's answer before giving up (falls back to today's terminate-and-"
+        "reply-restart behavior)",
+    )
+    NEEDS_INPUT_MAX_WAIT_ROUNDS: int = Field(
+        default=5,
+        description="Max needs_input suspend rounds per dispatch — caps an agent "
+        "that keeps asking follow-up questions in one workflow",
+    )
+
     MEDIA_PUBLIC_URL: str = Field(
         default="https://cn.nous.ink:88",
         description="Public URL for media file access. Defaults to the "

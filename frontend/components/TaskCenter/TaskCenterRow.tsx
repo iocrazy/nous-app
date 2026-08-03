@@ -10,7 +10,7 @@ import {
   type UnifiedTask,
   type TaskStatus,
 } from '../../contexts/TaskManagerContext';
-import { taskRowActions, taskShowsCover } from './taskRowPresentation';
+import { taskAwaitingInput, taskRowActions, taskShowsCover } from './taskRowPresentation';
 import { TaskTypeIcon } from './TaskTypeIcon';
 import { failureLabel } from '../../utils/taskFailure';
 
@@ -68,6 +68,7 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
   const actions = taskRowActions(task);
   const isActive = task.status === 'pending' || task.status === 'processing';
   const showCover = taskShowsCover(task) && !coverFailed;
+  const awaiting = taskAwaitingInput(task);
 
   const handleOpen = () => {
     if (actions.open && task.resource_id) onOpenResource(String(task.resource_id));
@@ -189,6 +190,15 @@ export const TaskCenterRow: React.FC<TaskCenterRowProps> = ({
               <span className="text-[10px] text-ink-600">{formatFileSize(task.total_bytes)}</span>
             )}
           </div>
+
+          {/* needs_input: the workflow is suspended waiting for the user —
+              louder than a subtitle, quieter than an error. */}
+          {awaiting && (
+            <div className="mt-0.5 text-[10px] text-warn line-clamp-2 break-words">
+              <span className="font-medium">{t('topbar.waitingInput')}</span>
+              {awaiting.prompt && <span className="text-warn/80"> — {awaiting.prompt}</span>}
+            </div>
+          )}
 
           {task.error_msg && (
             <div className="text-[10px] text-red-400 mt-0.5 line-clamp-2 break-words">

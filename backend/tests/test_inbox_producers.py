@@ -52,10 +52,12 @@ def test_generation_producer_step_kind_and_link() -> None:
     assert wf_src.count("emit_download_notification_step(") == 4
 
 
-def test_no_fifth_producer_kind_leaks_in() -> None:
-    """The four allowed kinds are the only ones the notify Literal admits (the
-    original three plus M2 PR-E's spec'd ``workflow_stage`` addition). A drift
-    here means someone widened the inbox beyond the (now four-kind) contract."""
+def test_no_sixth_producer_kind_leaks_in() -> None:
+    """The five allowed kinds are the only ones the notify Literal admits (the
+    original three, M2 PR-E's spec'd ``workflow_stage``, and mig 399's spec'd
+    ``agent_question`` — an agent paused waiting for the user's answer,
+    produced by ``agent_framework/input_gate.py``). A drift here means someone
+    widened the inbox beyond the (now five-kind) contract."""
     from app.services.notifications import NotificationKind
 
     # typing.Literal args carry the exact allowed set.
@@ -65,4 +67,15 @@ def test_no_fifth_producer_kind_leaks_in() -> None:
         "publish_result",
         "autopilot_output",
         "workflow_stage",
+        "agent_question",
     }
+
+
+def test_agent_question_producer_wires_issue_link() -> None:
+    """input_gate is the only agent_question producer, and it deep-links the
+    notification to the asking issue (link_kind='issue')."""
+    from app.agent_framework import input_gate
+
+    src = inspect.getsource(input_gate.mark_awaiting_input)
+    assert '"agent_question"' in src
+    assert 'link_kind="issue"' in src

@@ -5,11 +5,13 @@ best-effort from exactly three producer sites (a notification failure must never
 break the producing flow), so every insert is wrapped: any exception is logged
 loudly and swallowed — the caller's success/failure is never affected.
 
-NARROWNESS (the design): the inbox carries exactly three ``kind`` values —
-``generation_result`` / ``publish_result`` / ``autopilot_output``. If you find
-yourself tempted to add a fourth producer, don't — Realtime already covers
-immediacy elsewhere, and comment/@mention notifications are deliberately out of
-scope. Note the temptation in a PR instead.
+NARROWNESS (the design): the inbox carries a closed set of ``kind`` values,
+each one a "a result landed / needs my action" event — ``generation_result`` /
+``publish_result`` / ``autopilot_output`` / ``workflow_stage`` /
+``agent_question`` (mig 399, an agent paused waiting for the user's answer).
+If you find yourself tempted to add another producer, make sure it fits that
+definition — Realtime already covers immediacy elsewhere, and comment/@mention
+notifications are deliberately out of scope.
 
 DEDUPE: producers can double-fire across retry/mirror seams (e.g. a DBOS step
 replay). Before inserting, an identical (user_id, kind, link_kind, link_id) row
@@ -29,7 +31,11 @@ from app.db.session import read_scope, write_scope
 from app.models import InboxNotifications
 
 NotificationKind = Literal[
-    "generation_result", "publish_result", "autopilot_output", "workflow_stage"
+    "generation_result",
+    "publish_result",
+    "autopilot_output",
+    "workflow_stage",
+    "agent_question",
 ]
 NotificationSeverity = Literal["info", "success", "error"]
 NotificationLinkKind = Literal["issue", "resource", "publish_batch"]

@@ -83,6 +83,9 @@ export const TaskCenterStatusBar: React.FC<TaskCenterStatusBarProps> = ({
         <StatChip color="bg-emerald-500" count={counts.running} label={t('topbar.running')} />
         <StatChip color="bg-amber-500" count={counts.queued} label={t('topbar.queued')} />
         <StatChip color="bg-ink-500" count={counts.completed} label={t('topbar.completed')} />
+        {counts.waiting > 0 && (
+          <StatChip color="bg-warn" count={counts.waiting} label={t('topbar.waitingInput')} />
+        )}
         {counts.failed > 0 && (
           <StatChip color="bg-red-500" count={counts.failed} label={t('topbar.failed')} />
         )}

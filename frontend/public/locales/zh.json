@@ -549,6 +549,7 @@
     "downloadResult": "下载",
     "tabActive": "进行中",
     "tabHistory": "历史",
+    "waitingInput": "等你回复",
     "running": "运行",
     "queued": "排队",
     "completed": "完成",

@@ -131,6 +131,6 @@ describe('summarizeFlowItems', () => {
       task({ flow_id: undefined, status: 'completed' }),
     ]);
     const counts = summarizeFlowItems(items);
-    expect(counts).toEqual({ running: 1, queued: 1, completed: 2, failed: 1 });
+    expect(counts).toEqual({ running: 1, queued: 1, completed: 2, failed: 1, waiting: 0 });
   });
 });
