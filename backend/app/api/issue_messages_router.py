@@ -122,13 +122,16 @@ def _dispatch_respond_to_issue_reply(
 
 
 async def _load_awaiting_marker(workflow_id: str) -> Optional[dict]:
-    """按 dbos_workflow_id 取 task_tracking.metadata.awaiting_input；无则 None。"""
+    """按 dbos_workflow_id 取 issues.execution_state.awaiting_input；无则 None。
+
+    权威标记位在 issues 行上（issue dispatch 没有 task_tracking 行——
+    2026-08-03 E2E 实测修正，见 input_gate.mark_awaiting_input）。"""
     import json
 
     from app.db import engine as db_engine
 
     row = await db_engine.fetch_one(
-        "SELECT metadata->'awaiting_input' AS marker FROM public.task_tracking "
+        "SELECT execution_state->'awaiting_input' AS marker FROM public.issues "
         "WHERE dbos_workflow_id = :wf",
         {"wf": workflow_id},
     )
