@@ -48,6 +48,7 @@ class _Entry:
     finished_at: Optional[float] = None
     exception: Optional[BaseException] = None
     long_running: bool = False
+    gates_readiness: bool = True
 
 
 @dataclass
@@ -70,7 +71,12 @@ class BackgroundTaskRegistry:
     _entries: Dict[str, _Entry] = field(default_factory=dict)
 
     def spawn(
-        self, name: str, coro: Awaitable[Any], *, long_running: bool = False
+        self,
+        name: str,
+        coro: Awaitable[Any],
+        *,
+        long_running: bool = False,
+        gates_readiness: bool = True,
     ) -> asyncio.Task:
         """Wrap `coro` in a tracked Task and start it.
 
@@ -79,12 +85,26 @@ class BackgroundTaskRegistry:
         Records exceptions on the entry so `/readyz` can surface them
         without scraping logs.
 
-        `long_running=True` marks a daemon-style loop that lives for the
-        process lifetime (reap sweeps, stall detector). Those tasks never
-        finish by design, so `all_done()` gates on them being ALIVE instead
-        of done — a pending daemon doesn't hold `/readyz` at 503 "starting"
-        forever, and a crashed one flips readiness to "degraded". They still
-        show up in `status_snapshot()` and are cancelled on `shutdown()`.
+        Three kinds of task, two flags:
+
+        - **startup gate** (default): finite work readiness waits for.
+          `/readyz` stays 503 "starting" until it finishes.
+        - **daemon** (`long_running=True`): a loop that lives for the process
+          lifetime (internal-queue reaper, stall detector). Never finishes by
+          design, so `all_done()` gates on it being ALIVE — a pending daemon
+          doesn't pin `/readyz` at "starting", and a **finished** one means it
+          crashed and flips readiness to "degraded".
+        - **detached housekeeping** (`gates_readiness=False`): finite work that
+          readiness must NOT wait for (e.g. a sweep deliberately delayed 30s).
+          It is allowed to finish, and finishing is not a crash.
+
+        ⚠️ Do NOT express "keep it off the readiness gate" as
+        `long_running=True` — that lies about the task's shape, and the moment
+        it returns, `dead_daemons()` reads it as a crashed daemon: `/readyz`
+        goes **permanently** "degraded"/503, both containers sit `(unhealthy)`,
+        and the deploy smoke gate starts failing (auto-rollback). That is
+        exactly what happened to `reap_stale_input_waits` (#1662, caught
+        2026-08-03). Use `gates_readiness=False` for that intent.
         """
         loop = asyncio.get_event_loop()
         started_at = loop.time()
@@ -116,7 +136,11 @@ class BackgroundTaskRegistry:
 
         task = loop.create_task(_runner(), name=f"bg:{name}")
         entry = _Entry(
-            name=name, task=task, started_at=started_at, long_running=long_running
+            name=name,
+            task=task,
+            started_at=started_at,
+            long_running=long_running,
+            gates_readiness=gates_readiness,
         )
         self._entries[name] = entry
         logger.info(f"[bg-task:{name}] spawned")
@@ -131,7 +155,9 @@ class BackgroundTaskRegistry:
         and the process is degraded, which must not read as \"ready\".
         """
         finite_done = all(
-            e.task.done() for e in self._entries.values() if not e.long_running
+            e.task.done()
+            for e in self._entries.values()
+            if not e.long_running and e.gates_readiness
         )
         return finite_done and not self.dead_daemons()
 
@@ -158,6 +184,7 @@ class BackgroundTaskRegistry:
                     "name": entry.name,
                     "done": entry.task.done(),
                     "long_running": entry.long_running,
+                    "gates_readiness": entry.gates_readiness,
                     "duration_seconds": duration,
                     "error": (
                         f"{type(entry.exception).__name__}: {entry.exception}"
