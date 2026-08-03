@@ -3740,6 +3740,10 @@
     "elapsed": "Elapsed",
     "assignee": "Assignee",
     "project": "Project",
-    "subIssues": "Sub-issues"
+    "subIssues": "Sub-issues",
+    "agentAsking": "Agent needs your answer",
+    "replyHere": "Reply here…",
+    "reply": "Reply",
+    "replying": "Replying…"
   }
 }

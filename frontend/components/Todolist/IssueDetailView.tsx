@@ -23,7 +23,8 @@ import { formatElapsed } from './formatElapsed';
 import { IssueChatThread } from './IssueChatThread';
 import { IssueRelatedTab } from './IssueRelatedTab';
 import { IssueReplyBox, type ComposerAttachment } from './IssueReplyBox';
-import { getCommentTriggerPreview, listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
+import { AgentNotDispatchedError, getCommentTriggerPreview, listIssueMessages, postIssueMessage } from '../../services/issueMessageService';
+import { NeedsInputCard } from './NeedsInputCard';
 import { dispatchIssue, getDispatchPreview, type DispatchPreview } from '../../services/issuesService';
 import { DispatchConfirmDialog } from './DispatchConfirmDialog';
 import { PipelineRunStrip } from './PipelineRunStrip';
@@ -433,6 +434,27 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
     }
   };
 
+  // The agent stopped and asked something. `agent_outcome` is set by
+  // route_finish_outcome's needs_input branch; the literal string match is
+  // deliberate — an EMPTY_OUTPUT stall parks at the same status but nothing
+  // was actually asked, so it must not render a question card.
+  const execState = issue.raw.execution_state as Record<string, unknown> | null;
+  const isAskingUser =
+    issue.status === 'needs_followup' && execState?.agent_outcome === 'needs_input';
+  const agentQuestion = (execState?.outcome_reason as string | null | undefined) ?? null;
+
+  // Same contract as TaskCenter's handleAnswerNeedsInput: a POST can succeed
+  // while starting no turn at all, and `agent_run` is null on every path, so
+  // `agent_dispatched` is the only way to tell. Throwing the typed error lets
+  // the card show "saved but nothing started" instead of silently pretending
+  // the agent picked it up.
+  const handleAnswerQuestion = async (body: string) => {
+    const res = await postIssueMessage(issue.id, { body });
+    await refresh();
+    if (!res.agent_dispatched) throw new AgentNotDispatchedError();
+    onIssueDispatched?.();
+  };
+
   const handleDispatch = async () => {
     if (!issue?.id) return;
     setDispatching(true);
@@ -566,6 +588,14 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               isStageMirror={isStageMirror}
               projectName={issue.project.name}
               stageName={stageName}
+            />
+          )}
+
+          {isAskingUser && (
+            <NeedsInputCard
+              question={agentQuestion}
+              agentName={issue.assignee?.name}
+              onSubmit={handleAnswerQuestion}
             />
           )}
 

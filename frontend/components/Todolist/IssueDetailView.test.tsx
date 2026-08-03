@@ -147,3 +147,38 @@ describe('IssueDetailView — 右栏进度/关联轨道', () => {
     expect(screen.queryByText('Pilot Season')).toBeNull();
   });
 });
+
+describe('IssueDetailView — needs_input 提问卡挂载', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('mounts the question card when the agent declared needs_input', async () => {
+    const { container } = renderDetail(mkIssue({
+      status: 'needs_followup',
+      raw: {
+        status: 'needs_followup',
+        execution_state: { agent_outcome: 'needs_input', outcome_reason: 'Cold open or teaser?' },
+      } as never,
+    }));
+    const card = await waitFor(() => {
+      const el = container.querySelector('[data-testid="needs-input-card"]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(card.textContent).toContain('Cold open or teaser?');
+  });
+
+  it('does NOT mount the card for an empty_output stall parked at the same status', async () => {
+    // Nothing was asked — a question card here would invent a question.
+    const { container } = renderDetail(mkIssue({
+      status: 'needs_followup',
+      raw: {
+        status: 'needs_followup',
+        execution_state: { agent_outcome: 'empty_output', outcome_reason: 'Agent produced no output' },
+      } as never,
+    }));
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="detail-progress-panel"]')).not.toBeNull();
+    });
+    expect(container.querySelector('[data-testid="needs-input-card"]')).toBeNull();
+  });
+});
