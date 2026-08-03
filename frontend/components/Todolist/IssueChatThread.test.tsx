@@ -144,3 +144,28 @@ describe('IssueChatThread — 运行组折叠', () => {
     expect(meta.textContent).toMatch(/\$0\.12/);
   });
 });
+
+describe('IssueChatThread — 交付物卡', () => {
+  it('renders a deliverable upload as an ok-tinted card naming the file', () => {
+    const msg = {
+      id: 'd-1',
+      issue_id: 1,
+      kind: 'comment',
+      author_user_id: 'u1',
+      author_agent_id: null,
+      body: 'Filed deliverable: pilot-v3.fdx',
+      created_at: '2026-05-26T12:00:00Z',
+      meta: { deliverable_upload: true, file_id: 'f-1', filename: 'pilot-v3.fdx' },
+    };
+    const { container } = render(
+      <IssueChatThread messages={[msg as never]} agentsById={{}} selfUserId="u1" />,
+    );
+    const row = container.querySelector('[data-testid="deliverable-filed-row"]') as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(row.textContent).toContain('pilot-v3.fdx');
+    // A deliverable is an outcome, not a status murmur — it gets a real card.
+    expect(row.className).toMatch(/border-ok-line/);
+    expect(row.className).toMatch(/bg-ok-soft/);
+    expect(row.className).not.toMatch(/emerald/);
+  });
+});

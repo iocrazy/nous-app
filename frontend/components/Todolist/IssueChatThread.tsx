@@ -8,7 +8,7 @@
  */
 
 import React, { useState } from 'react';
-import { Zap, ChevronRight, ChevronDown } from 'lucide-react';
+import { Zap, ChevronRight, ChevronDown, Paperclip } from 'lucide-react';
 import type { IssueMessage, AgentLivenessState } from '../../services/issueMessageService';
 import { simulateAgentRunComplete } from '../../services/issueMessageService';
 import { coalesceSystemStatus } from './coalesceSystemStatus';
@@ -104,7 +104,11 @@ const SystemStatusEvent: React.FC<{ msg: IssueMessage; selfUserId?: string }> = 
 /**
  * A deliverable-upload line. Emitted as an authored comment (the issue_messages
  * system_status kind requires a status transition, which an upload has none of)
- * but rendered as a centered system-style row via its meta marker.
+ * and identified by its meta marker.
+ *
+ * A2: promoted from a muted centered whisper to an ok-tinted card. A filed
+ * deliverable is what the whole exchange was FOR — it read as less important
+ * than a todo → in_progress flip, which is exactly backwards.
  */
 const DeliverableFiledEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, AgentRef>; selfUserId?: string }> = ({ msg, agentsById, selfUserId }) => {
   const agent = msg.author_agent_id ? agentsById[msg.author_agent_id] : null;
@@ -114,11 +118,12 @@ const DeliverableFiledEvent: React.FC<{ msg: IssueMessage; agentsById: Record<st
   return (
     <div
       data-testid="deliverable-filed-row"
-      className="text-center text-[11px] text-ink-500 italic my-2"
+      className="my-3 flex items-center gap-2 rounded-lg border border-ok-line bg-ok-soft px-3 py-2"
     >
-      <span className="text-ink-400 not-italic font-medium">{who}</span>
-      {' '}filed{' '}
-      <span className="text-ink-300 not-italic font-medium">{filename}</span>
+      <Paperclip size={14} className="text-ok shrink-0" />
+      <span className="text-[14px] text-ink-200 font-medium truncate">{filename}</span>
+      <span className="text-[12px] text-ink-500 truncate">filed by {who}</span>
+      <span className="ml-auto text-[12px] text-ink-500 shrink-0">{relativeTime(msg.created_at)}</span>
     </div>
   );
 };

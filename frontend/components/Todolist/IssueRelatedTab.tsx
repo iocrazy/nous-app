@@ -31,15 +31,15 @@ export const IssueRelatedTab: React.FC<IssueRelatedTabProps> = ({ issue }) => {
       try {
         const subs = await listSubIssues(issue.id);
         if (!cancelled) setChildren(subs);
-      } catch {
-        /* ignore */
+      } catch (err) {
+        console.error('[IssueRelatedTab] sub-issue load failed', err);
       }
       if (issue.parent_id) {
         try {
           const p = await getIssue(issue.parent_id);
           if (!cancelled) setParent(p);
-        } catch {
-          /* ignore */
+        } catch (err) {
+          console.error('[IssueRelatedTab] parent issue load failed', err);
         }
       } else {
         setParent(null);
