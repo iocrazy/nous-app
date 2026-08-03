@@ -2825,7 +2825,14 @@
       "newFileTypeHint": "类型：{{t}}",
       "newFileContentLabel": "初始内容",
       "deleteFileConfirm": "删除 {{path}}？此操作不可恢复。",
-      "deleteFileError": "删除失败：{{err}}"
+      "deleteFileError": "删除失败：{{err}}",
+      "builtIn": "Nous 内置",
+      "usedBy": "{{count}} 个智能体在用",
+      "orphanHint": "没有智能体在用——绑定到某个智能体或归档它",
+      "orphanCount": "{{count}} 个未被使用",
+      "search": "搜索技能…",
+      "noneMatch": "没有匹配的技能",
+      "newSkill": "+ 新建技能"
     },
     "workforce": {
       "runningNow": "运行中"

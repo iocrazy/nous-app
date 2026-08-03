@@ -249,10 +249,11 @@ class SkillOut(BaseModel):
     output_format: Optional[str] = None
     frontmatter_json: dict = Field(default_factory=dict)
     files: list[SkillFileOut] = Field(default_factory=list)
-    # Reverse index of which agents bind this skill. Populated by the
-    # skill detail endpoint via an agent_skills join. Empty list for
-    # un-bound skills. The list endpoint leaves this empty for
-    # performance — UI's "Used by" badge only renders in the detail view.
+    # Reverse index of which agents bind this skill, via an agent_skills
+    # join. Empty list for un-bound skills — the gallery's "no agent uses
+    # this" warning depends on that being [] rather than absent. Populated
+    # on BOTH the detail endpoint (per skill) and the list endpoint (one
+    # batched JOIN for the page — see skill_repository.map_binding_agents).
     agents: list[SkillAgentRef] = Field(default_factory=list)
     updated_at: datetime
     # Phase 2 minor cleanup — denormalized names for the scope badge in the UI.
