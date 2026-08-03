@@ -854,6 +854,38 @@ async def execute_issue(issue_id: int, auto: bool = False) -> dict[str, Any]:
             # Spec-2: route status + bounded continuation by the agent's
             # FinishIssue declaration (agent output already bridged to chat).
             auto_close = await load_auto_close_flag()
+
+            # needs_input gate (spec 2026-07-30): wire the suspend-resume
+            # primitives into the loop. Closures capture this workflow's id so
+            # the reply endpoint's DBOS.send lands on the right waiter; any
+            # gate failure degrades softly (input_gate's contract) back to
+            # today's terminate-then-reply-restart path.
+            from app.agent_framework import input_gate
+
+            async def _wait(issue_id_: int, ttl_seconds: int):
+                return await input_gate.await_user_input(
+                    issue_id_, ttl_seconds=ttl_seconds
+                )
+
+            async def _mark(issue_id_: int, prompt: str):
+                await input_gate.mark_awaiting_input(
+                    workflow_id=workflow_id,
+                    issue_id=issue_id_,
+                    user_id=user_id,
+                    prompt=prompt,
+                )
+
+            async def _clear(issue_id_: int):
+                await input_gate.clear_awaiting_input(workflow_id=workflow_id)
+
+            async def _reply(issue_id_: int, payload: dict):
+                return await run_issue_reply_for_wait(
+                    issue_id_,
+                    payload.get("user_id") or user_id,
+                    payload["reply_text"],
+                    payload.get("attachments"),
+                )
+
             routed = await _run_dispatch_with_continuation(
                 issue_id,
                 issue_row,
@@ -863,6 +895,10 @@ async def execute_issue(issue_id: int, auto: bool = False) -> dict[str, Any]:
                 set_status=set_status,
                 load_issue=load_issue,
                 auto_close=auto_close,
+                wait_for_input=_wait,
+                mark_waiting=_mark,
+                clear_waiting=_clear,
+                run_reply=_reply,
             )
             result = {"issue_id": issue_id, "executed": True, **routed}
         else:
