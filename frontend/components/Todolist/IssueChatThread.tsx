@@ -8,10 +8,12 @@
  */
 
 import React, { useState } from 'react';
-import { Zap, ChevronRight, ChevronDown } from 'lucide-react';
+import { Zap, ChevronRight, ChevronDown, Paperclip } from 'lucide-react';
 import type { IssueMessage, AgentLivenessState } from '../../services/issueMessageService';
 import { simulateAgentRunComplete } from '../../services/issueMessageService';
 import { coalesceSystemStatus } from './coalesceSystemStatus';
+import { groupAgentRuns, type RunGroupEntry } from './runGrouping';
+import { formatTokens, formatCentsAsUsd } from '../../pages/usagePanelHelpers';
 import type { AgentRef } from './types';
 import { STATUS_LABEL, STATUS_COLOR, IssueStatusIcon } from './IssueStatusIcon';
 import type { IssueStatus } from '../../services/issuesService';
@@ -102,7 +104,11 @@ const SystemStatusEvent: React.FC<{ msg: IssueMessage; selfUserId?: string }> = 
 /**
  * A deliverable-upload line. Emitted as an authored comment (the issue_messages
  * system_status kind requires a status transition, which an upload has none of)
- * but rendered as a centered system-style row via its meta marker.
+ * and identified by its meta marker.
+ *
+ * A2: promoted from a muted centered whisper to an ok-tinted card. A filed
+ * deliverable is what the whole exchange was FOR — it read as less important
+ * than a todo → in_progress flip, which is exactly backwards.
  */
 const DeliverableFiledEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, AgentRef>; selfUserId?: string }> = ({ msg, agentsById, selfUserId }) => {
   const agent = msg.author_agent_id ? agentsById[msg.author_agent_id] : null;
@@ -112,11 +118,12 @@ const DeliverableFiledEvent: React.FC<{ msg: IssueMessage; agentsById: Record<st
   return (
     <div
       data-testid="deliverable-filed-row"
-      className="text-center text-[11px] text-ink-500 italic my-2"
+      className="my-3 flex items-center gap-2 rounded-lg border border-ok-line bg-ok-soft px-3 py-2"
     >
-      <span className="text-ink-400 not-italic font-medium">{who}</span>
-      {' '}filed{' '}
-      <span className="text-ink-300 not-italic font-medium">{filename}</span>
+      <Paperclip size={14} className="text-ok shrink-0" />
+      <span className="text-[14px] text-ink-200 font-medium truncate">{filename}</span>
+      <span className="text-[12px] text-ink-500 truncate">filed by {who}</span>
+      <span className="ml-auto text-[12px] text-ink-500 shrink-0">{relativeTime(msg.created_at)}</span>
     </div>
   );
 };
@@ -191,9 +198,92 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
           {relativeTime(msg.created_at)}
         </span>
       </div>
+      <RunMetaLine msg={msg} />
       {msg.body && (
         <div className="ml-7 rounded border border-ink-800/80 bg-ink-900/50 p-3 text-[14px] text-ink-300 leading-relaxed whitespace-pre-wrap break-words">
           {msg.body}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * What the turn actually cost. `meta` has carried model / prompt_tokens /
+ * completion_tokens / cost_cents since the bridge trigger (mig 206) but none
+ * of it ever reached the screen. Missing fields are skipped rather than shown
+ * as zeros — an unpriced run should read as "no data", not "free".
+ */
+const RunMetaLine: React.FC<{ msg: IssueMessage }> = ({ msg }) => {
+  const model = msg.meta?.model as string | undefined;
+  const tokens = Number(msg.meta?.prompt_tokens ?? 0) + Number(msg.meta?.completion_tokens ?? 0);
+  const cents = Number(msg.meta?.cost_cents ?? 0);
+  const parts: string[] = [];
+  if (model) parts.push(model);
+  if (Number.isFinite(tokens) && tokens > 0) parts.push(`${formatTokens(tokens)} tok`);
+  if (Number.isFinite(cents) && cents > 0) parts.push(formatCentsAsUsd(cents));
+  const attempt = Number(msg.meta?.continuation_attempt ?? 0);
+  if (Number.isFinite(attempt) && attempt > 0) parts.push(`continuation ${attempt}`);
+  if (parts.length === 0) return null;
+  return (
+    <div data-testid="agent-run-meta" className="ml-7 mb-1 text-[11px] text-ink-500 font-mono">
+      {parts.join(' · ')}
+    </div>
+  );
+};
+
+/**
+ * A folded stretch of consecutive agent runs. Collapsed by default: one line
+ * with the turn count and the summed cost, so a five-turn dispatch reads as
+ * one event instead of five walls of text. Expanding renders the original
+ * rows (runs plus the status flips between them) unchanged.
+ */
+const RunGroupCard: React.FC<{
+  entry: RunGroupEntry;
+  agentsById: Record<string, AgentRef>;
+  selfUserId?: string;
+}> = ({ entry, agentsById, selfUserId }) => {
+  const [expanded, setExpanded] = useState(false);
+  const agentId = entry.runs[0]?.author_agent_id;
+  const agent = agentId ? agentsById[agentId] : null;
+  const summary = [
+    `${entry.runs.length} turns`,
+    entry.totals.durationSeconds > 0 ? formatDuration(entry.totals.durationSeconds) : null,
+    entry.totals.tokens > 0 ? `${formatTokens(entry.totals.tokens)} tok` : null,
+    entry.totals.costCents > 0 ? formatCentsAsUsd(entry.totals.costCents) : null,
+  ].filter(Boolean).join(' · ');
+
+  return (
+    <div
+      data-testid="run-group-card"
+      className="my-3 rounded-lg border border-agent-line bg-agent-soft"
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        data-testid="run-group-toggle"
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-ink-900/30 rounded-lg transition-colors"
+      >
+        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <AgentAvatar initials={(agent?.name ?? '·').slice(0, 2).toUpperCase()} color={agent?.avatar_color} size={18} />
+        <span className="text-xs font-medium text-ink-200">{agent?.name ?? 'Agent'} run</span>
+        <span className="text-[12px] text-ink-500 truncate">· {summary}</span>
+        {entry.anyRunning && (
+          <span className="inline-flex items-center gap-1 text-[11px] text-ok">
+            <span className="w-1.5 h-1.5 rounded-full bg-ok animate-pulse" />
+            running
+          </span>
+        )}
+        <span className="ml-auto text-[12px] text-ink-500 shrink-0">{relativeTime(entry.startedAt)}</span>
+      </button>
+      {expanded && (
+        <div data-testid="run-group-body" className="px-3 pb-2">
+          {entry.items.map((m) => (
+            m.kind === 'agent_run'
+              ? <AgentRunEvent key={m.id} msg={m} agentsById={agentsById} />
+              : <SystemStatusEvent key={m.id} msg={m} selfUserId={selfUserId} />
+          ))}
         </div>
       )}
     </div>
@@ -289,6 +379,41 @@ const StreamingBubble: React.FC<{ text: string }> = ({ text }) => (
   </div>
 );
 
+type RenderRow =
+  | RunGroupEntry
+  | { kind: 'single'; key: string; message: IssueMessage }
+  | { kind: 'status_group'; key: string; messages: IssueMessage[] };
+
+/**
+ * Two grouping passes, in this order: agent runs fold first (they may span
+ * status events), then whatever is left between the run cards goes through
+ * the existing status coalescing. Running them the other way round would let
+ * a status group wall off two runs that belong together.
+ */
+function buildTimeline(messages: IssueMessage[]): RenderRow[] {
+  const rows: RenderRow[] = [];
+  let pending: IssueMessage[] = [];
+  const flush = () => {
+    if (pending.length === 0) return;
+    for (const item of coalesceSystemStatus(pending)) {
+      rows.push(item.type === 'status_group'
+        ? { kind: 'status_group', key: item.key, messages: item.messages }
+        : { kind: 'single', key: item.key, message: item.message });
+    }
+    pending = [];
+  };
+  for (const entry of groupAgentRuns(messages)) {
+    if (entry.kind === 'single') {
+      pending.push(entry.message);
+      continue;
+    }
+    flush();
+    rows.push(entry);
+  }
+  flush();
+  return rows;
+}
+
 export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agentsById, selfUserId, streamingText }) => {
   const hasStreaming = typeof streamingText === 'string' && streamingText.length > 0;
 
@@ -299,12 +424,15 @@ export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agen
       </div>
     );
   }
-  const renderItems = coalesceSystemStatus(messages);
+  const renderItems = buildTimeline(messages);
   return (
     <div className="px-4 py-3">
       {renderItems.map((item) => {
-        if (item.type === 'status_group') {
+        if (item.kind === 'status_group') {
           return <SystemStatusGroup key={item.key} messages={item.messages} selfUserId={selfUserId} />;
+        }
+        if (item.kind === 'run_group') {
+          return <RunGroupCard key={item.key} entry={item} agentsById={agentsById} selfUserId={selfUserId} />;
         }
         const m = item.message;
         if (m.kind === 'system_status') return <SystemStatusEvent key={item.key} msg={m} selfUserId={selfUserId} />;

@@ -3731,5 +3731,19 @@
     "UNKNOWN": {
       "title": "The task failed"
     }
+  },
+  "issueDetail": {
+    "progress": "Progress",
+    "links": "Links",
+    "status": "Status",
+    "runs": "Runs",
+    "elapsed": "Elapsed",
+    "assignee": "Assignee",
+    "project": "Project",
+    "subIssues": "Sub-issues",
+    "agentAsking": "Agent needs your answer",
+    "replyHere": "Reply here…",
+    "reply": "Reply",
+    "replying": "Replying…"
   }
 }

@@ -3731,5 +3731,19 @@
     "UNKNOWN": {
       "title": "任务失败"
     }
+  },
+  "issueDetail": {
+    "progress": "进度",
+    "links": "关联",
+    "status": "状态",
+    "runs": "运行",
+    "elapsed": "耗时",
+    "assignee": "执行者",
+    "project": "项目",
+    "subIssues": "子任务",
+    "agentAsking": "Agent 需要你的回复",
+    "replyHere": "输入你的回复…",
+    "reply": "回复",
+    "replying": "提交中…"
   }
 }

@@ -658,6 +658,44 @@ async def route_finish_outcome(
         await set_status(issue_id, "in_review")
 
 
+async def mark_turn_progress(issue_id: int, turn: int) -> None:
+    """A1-2 逐轮进度装饰写。jsonb merge——绝不覆盖 set_status 写的键。
+
+    ``set_status`` writes ``execution_state`` wholesale, so this must merge
+    (``||``) rather than assign. Being clobbered by a later ``set_status`` is
+    accepted by design: a terminal row shows no turn counter.
+    """
+    from app.db import engine as db_engine
+
+    await db_engine.execute_as_service_role(
+        """UPDATE public.issues
+           SET execution_state = COALESCE(execution_state, '{}'::jsonb)
+               || jsonb_build_object(
+                   'turn', CAST(:turn AS integer),
+                   'turn_started_at', to_char(now() AT TIME ZONE 'utc',
+                                              'YYYY-MM-DD"T"HH24:MI:SS"Z"'))
+           WHERE id = :iid""",
+        {"turn": turn, "iid": issue_id},
+    )
+
+
+async def _safe_mark_turn(
+    mark_turn: Optional[Callable[..., Awaitable[None]]],
+    issue_id: int,
+    turn: int,
+) -> None:
+    """Progress decoration must never abort a dispatch — swallow everything."""
+    if mark_turn is None:
+        return
+    try:
+        await mark_turn(issue_id, turn)
+    except Exception as exc:  # noqa: BLE001 — the dispatch is the primary op
+        logger.warning(
+            f"[execute_issue] turn progress mark failed for issue "
+            f"{issue_id} turn {turn}: {exc!r}"
+        )
+
+
 async def _run_dispatch_with_continuation(
     issue_id: int,
     issue_row: dict[str, Any],
@@ -673,6 +711,7 @@ async def _run_dispatch_with_continuation(
     mark_waiting: Optional[Callable[..., Awaitable[None]]] = None,
     clear_waiting: Optional[Callable[..., Awaitable[None]]] = None,
     run_reply: Optional[Callable[..., Awaitable[dict[str, Any]]]] = None,
+    mark_turn: Optional[Callable[..., Awaitable[None]]] = None,
 ) -> dict[str, Any]:
     """Spec-2 core: run the agent, then route the issue by the agent's declared
     FinishIssue outcome via ``route_finish_outcome`` (see its docstring for the
@@ -696,11 +735,17 @@ async def _run_dispatch_with_continuation(
     ``NEEDS_INPUT_MAX_WAIT_ROUNDS`` per dispatch. With any gate dep missing
     (production wiring off / degraded) behavior is byte-for-byte today's:
     needs_input terminates the dispatch.
+
+    ``mark_turn`` (A1-2 progress), when injected, is awaited right before every
+    agent turn (initial, continuation and post-resume reply alike) with the
+    1-based turn number, so the list page can show "turn N" while the dispatch
+    is still running. It is decoration only: any failure is swallowed.
     """
     from app.core.config import settings
 
     attempt = 0
     wait_rounds = 0
+    turn_no = 0
     outcome: Optional[str] = None
     reason: Optional[str] = None
     res: Optional[dict[str, Any]] = None
@@ -754,8 +799,12 @@ async def _run_dispatch_with_continuation(
                 }
             wait_rounds += 1
             await set_status(issue_id, "in_progress")
+            turn_no += 1
+            await _safe_mark_turn(mark_turn, issue_id, turn_no)
             res = await run_reply(issue_id, payload)
         else:
+            turn_no += 1
+            await _safe_mark_turn(mark_turn, issue_id, turn_no)
             res = await run_turn(
                 issue_row,
                 agent_id,
@@ -899,6 +948,7 @@ async def execute_issue(issue_id: int, auto: bool = False) -> dict[str, Any]:
                 mark_waiting=_mark,
                 clear_waiting=_clear,
                 run_reply=_reply,
+                mark_turn=mark_turn_progress,
             )
             result = {"issue_id": issue_id, "executed": True, **routed}
         else:
