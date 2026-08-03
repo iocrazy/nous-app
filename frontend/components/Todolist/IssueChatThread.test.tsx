@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { render, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { IssueChatThread } from './IssueChatThread';
 import type { AgentRef } from './types';
@@ -86,5 +86,61 @@ describe('IssueChatThread — CommentEvent alignment', () => {
     expect(wrapper.className).toMatch(/justify-start/);
     const bubble = wrapper.querySelector('[data-testid="comment-bubble"]') as HTMLElement;
     expect(bubble.className).toMatch(/bg-ink-800/);
+  });
+});
+
+function _run(over: Record<string, unknown> = {}) {
+  return {
+    id: `run-${Math.random().toString(36).slice(2)}`,
+    issue_id: 1,
+    kind: 'agent_run',
+    author_agent_id: 'a1',
+    author_user_id: null,
+    body: 'turn output',
+    duration_seconds: 60,
+    created_at: '2026-05-26T12:00:00Z',
+    meta: { status: 'completed', model: 'qwen-max', prompt_tokens: 4000, completion_tokens: 1000, cost_cents: 12 },
+    ...over,
+  };
+}
+
+describe('IssueChatThread — 运行组折叠', () => {
+  const agents: Record<string, AgentRef> = { a1: { id: 'a1', slug: 'w', name: 'Writer' } };
+
+  it('folds consecutive runs into a collapsed card with the summed header', () => {
+    const { container } = render(
+      <IssueChatThread messages={[_run(), _run(), _run()] as never} agentsById={agents} selfUserId="u1" />,
+    );
+    const card = container.querySelector('[data-testid="run-group-card"]') as HTMLElement;
+    expect(card).not.toBeNull();
+    expect(card.textContent).toMatch(/3 turns/);
+    // 3 × 5k tokens, 3 × 12 cents.
+    expect(card.textContent).toMatch(/15\.0k tok/);
+    expect(card.textContent).toMatch(/\$0\.36/);
+    // Collapsed: the individual turns are not rendered yet.
+    expect(container.querySelector('[data-testid="run-group-body"]')).toBeNull();
+  });
+
+  it('reveals the per-turn rows when expanded', () => {
+    const { container } = render(
+      <IssueChatThread messages={[_run(), _run()] as never} agentsById={agents} selfUserId="u1" />,
+    );
+    const toggle = container.querySelector('[data-testid="run-group-toggle"]') as HTMLElement;
+    fireEvent.click(toggle);
+    const body = container.querySelector('[data-testid="run-group-body"]') as HTMLElement;
+    expect(body).not.toBeNull();
+    expect(body.querySelectorAll('[data-testid="agent-run-meta"]')).toHaveLength(2);
+  });
+
+  it('renders a lone run inline with its model / token / cost line', () => {
+    const { container } = render(
+      <IssueChatThread messages={[_run()] as never} agentsById={agents} selfUserId="u1" />,
+    );
+    expect(container.querySelector('[data-testid="run-group-card"]')).toBeNull();
+    const meta = container.querySelector('[data-testid="agent-run-meta"]') as HTMLElement;
+    expect(meta).not.toBeNull();
+    expect(meta.textContent).toMatch(/qwen-max/);
+    expect(meta.textContent).toMatch(/5\.0k tok/);
+    expect(meta.textContent).toMatch(/\$0\.12/);
   });
 });
