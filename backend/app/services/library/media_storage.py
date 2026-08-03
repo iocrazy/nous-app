@@ -134,6 +134,59 @@ def derived_key_prefix(resource_id) -> str:
     return _KEYS.derived_prefix(resource_id)
 
 
+def discard_local_source(local_path, stored_path: str) -> None:
+    """成品确认落 S3 后,删掉本地工作副本(文件或目录)+ 清理变空的父目录。
+
+    **只在 ``stored_path`` 是 sb:// 时动手**——开关关闭 / user_id 缺失 /
+    上传降级时上传 helper 返回的是本地相对路径,那种情况下本地副本就是唯一
+    的成品,删了就是丢数据。
+
+    为什么要删:上传后保留本地副本的旧理由是"留给转码链路 materialize 读"
+    (见 ``_upload_downloaded_video_to_s3`` 的历史注释)。这个前提已经失效
+    ——materialize 现在对 sb:// 走 S3 + 本地读通缓存,没有任何代码再按本地
+    路径读它们,于是每次下载/转码都白留一份:2026-08-02 实测
+    ``global/`` 1.2G、``derived/hls/`` 1.1G,且每天新增十几个目录。
+
+    删除失败只记 warning、绝不上抛:回收是运维动作,不该让一次成功的下载/
+    转码被判失败(与 HlsPublisher 清理旧对象"Never fail a transcode over
+    cleanup"同一取向)。
+    """
+    import os
+    import shutil
+    from pathlib import Path as _Path
+
+    from loguru import logger
+
+    from app.core.config import settings
+
+    if not stored_path or not str(stored_path).startswith("sb://"):
+        return
+    try:
+        base = os.path.realpath(settings.DOWNLOAD_PATH)
+        real = os.path.realpath(str(local_path))
+        # Containment:只回收 DOWNLOAD_PATH 之内的东西。上游传进来的路径来自
+        # DB/磁盘拼接,不预设它一定规矩(与 materialize / 迁移模块同款守卫)。
+        if not real.startswith(base + os.sep):
+            logger.warning(f"[discard] refusing path outside DOWNLOAD_PATH: {real}")
+            return
+        p = _Path(real)
+        if p.is_dir():
+            shutil.rmtree(real, ignore_errors=True)
+        else:
+            p.unlink(missing_ok=True)
+        # 顺带收掉因此变空的父目录(如 global/resources/web/{platform}/{id}/),
+        # 否则删完文件会留一地空壳。逐级向上,遇到非空或到 DOWNLOAD_PATH 即停。
+        parent = p.parent
+        while str(parent) != base and str(parent).startswith(base + os.sep):
+            try:
+                parent.rmdir()  # 非空会抛 OSError,正是我们要的停止条件
+            except OSError:
+                break
+            parent = parent.parent
+    except OSError as e:
+        logger.warning(f"[discard] local cleanup failed for {local_path}: {e!r}")
+
+
 def hls_key(resource_id: str, version_id: str, rel_path: str) -> str:
     """Full key for one HLS artefact, e.g. ``hls/{rid}/{vid}/480p/stream.m3u8``.
 

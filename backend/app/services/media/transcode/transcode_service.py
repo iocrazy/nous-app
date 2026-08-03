@@ -378,6 +378,13 @@ class TranscodeService:
                 relative_hls = await self._hls.publish(
                     hls_dir, base, str(resource_id), str(version_id)
                 )
+                # 切片全部落 S3 后回收本地 HLS 工作目录(每次转码几十~几百 MB,
+                # 实测 derived/hls 已积到 1.1G 且每天在长)。只在 publish 返回
+                # sb:// 时删——legacy fs 行返回的是文件系统相对路径,那份本地
+                # 树就是唯一成品。helper 自带 DOWNLOAD_PATH containment 守卫。
+                from app.services.library.media_storage import discard_local_source
+
+                discard_local_source(hls_dir, relative_hls)
 
                 # Update DB
                 await self.repo.update_version(
