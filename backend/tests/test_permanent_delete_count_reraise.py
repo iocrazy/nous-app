@@ -55,7 +55,7 @@ async def test_permanent_delete_skips_file_gc_when_count_raises():
 
     svc = _service_with_repo(repo)
     # Spy on the destructive helpers — they must NOT be called on count failure.
-    svc._delete_physical_files = MagicMock()
+    svc._delete_physical_files = AsyncMock()
     svc._delete_media_record = AsyncMock()
 
     result = await svc.permanent_delete("res-1", _USER)
@@ -82,7 +82,7 @@ async def test_permanent_delete_gcs_files_when_count_zero():
     repo.count_resources_by_media_id = AsyncMock(return_value=0)
 
     svc = _service_with_repo(repo)
-    svc._delete_physical_files = MagicMock()
+    svc._delete_physical_files = AsyncMock()
     svc._delete_media_record = AsyncMock()
 
     result = await svc.permanent_delete("res-2", _USER)
@@ -104,7 +104,7 @@ async def test_permanent_delete_skips_gc_when_count_nonzero():
     repo.count_resources_by_media_id = AsyncMock(return_value=1)
 
     svc = _service_with_repo(repo)
-    svc._delete_physical_files = MagicMock()
+    svc._delete_physical_files = AsyncMock()
     svc._delete_media_record = AsyncMock()
 
     result = await svc.permanent_delete("res-3", _USER)
@@ -136,7 +136,7 @@ async def test_cleanup_expired_trash_count_raise_skips_only_that_resource():
     )
 
     svc = _service_with_repo(repo)
-    svc._delete_physical_files = MagicMock()
+    svc._delete_physical_files = AsyncMock()
     svc._delete_media_record = AsyncMock()
 
     cleaned = await svc.cleanup_expired_trash(older_than_days=30)

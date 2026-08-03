@@ -178,6 +178,30 @@ def test_collect_sql_wires_media_id_for_resource_and_version_sources():
     )
 
 
+def test_collect_sql_covers_project_files_and_file_versions():
+    """I3: project_files / file_versions (projects_service.upload_file /
+    upload_new_version) write into the SAME library bucket with the SAME
+    content-addressed scheme as a resource upload (both resolve scope_id to
+    the owning team's snowflake) — a byte-identical upload to a project and
+    to that team's resource library can produce one object referenced from
+    two tables neither the audit nor object_gc's reference query previously
+    scanned. Guard both new sources are present, and (mirroring the existing
+    NULL::bigint guard above) that they inherit media_id via a real column /
+    JOIN rather than hardcoding NULL::bigint."""
+    from app.workflows.storage_audit import _COLLECT_SQL
+
+    sql = " ".join(_COLLECT_SQL.split())
+    assert "SELECT file_path, 'project_file', media_id, id " "FROM project_files" in sql
+    assert (
+        "SELECT fv.file_path, 'project_file_version', pf.media_id, fv.file_id "
+        "FROM file_versions fv JOIN project_files pf ON pf.id = fv.file_id" in sql
+    )
+    # Still exactly the 4 parsed_media-sourced NULL::bigint occurrences — the
+    # two new sources must NOT add a fifth (they select real id/media_id
+    # columns, same pattern as the resources/resource_versions sources).
+    assert sql.count("NULL::bigint") == 4
+
+
 def test_collect_sql_covers_music_and_extract_audio_kinds():
     """I4: storage_migration's pm_assets module migrated three
     parsed_media columns to S3 (download_path, cover_download_path,

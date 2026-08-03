@@ -89,6 +89,83 @@ async def test_expired_trash_respects_custom_limit() -> None:
     assert "limit 100" in _compiled(session)
 
 
+@pytest.mark.asyncio
+async def test_expired_trash_projection_includes_media_id_and_thumbnail() -> None:
+    """C2 regression: ``scheduled_cleanup.py`` -> ``resources_service.
+    cleanup_expired_trash`` is the ONLY unattended cleanup path, and that
+    service reads ``resource.get("media_id")`` to decide whether the shared
+    parsed_media row + physical file can be GC'd, and
+    ``resource.get("thumbnail_path")`` for the thumbnail cleanup branch.
+    Before the fix this projection selected only id/file_path/
+    cover_image_path — media_id was silently None for every row on this
+    path, so the scheduled sweeper NEVER ran the shared-object GC branch
+    (every one of the ~909 single-object-shared-key rows measured
+    2026-08-03 stayed kept_referenced forever) and thumbnail_path was dead
+    code specifically here.
+
+    Asserted against the REAL compiled SELECT (not a hand-built dict) so a
+    future column drop is caught the same way the original bug would have
+    been — a service-level test that stubs the repo's return value as a
+    complete dict can never catch a missing SELECT column."""
+    session = _CapSession()
+    repo = _repo_with(session)
+
+    await repo.get_expired_trashed_resources()
+
+    sql = _compiled(session)
+    assert "public.resources.media_id" in sql
+    assert "public.resources.thumbnail_path" in sql
+
+
+class _RowResult:
+    def __init__(self, rows: List[dict]) -> None:
+        self._rows = rows
+
+    def mappings(self):
+        return self
+
+    def all(self) -> List[dict]:
+        return self._rows
+
+
+class _DataSession:
+    def __init__(self, rows: List[dict]) -> None:
+        self._rows = rows
+
+    async def execute(self, stmt: Any, params: Any = None) -> _RowResult:
+        return _RowResult(self._rows)
+
+
+@pytest.mark.asyncio
+async def test_expired_trash_row_carries_media_id_and_thumbnail_through() -> None:
+    """C2 regression (data-flow half): simulates what the fixed SELECT now
+    returns and proves media_id / thumbnail_path survive ``_rest_parity``
+    untouched and land in the dict ``cleanup_expired_trash`` reads —
+    exercising the real repository method's row-shaping logic, not a stub
+    that fabricates the post-fix shape directly."""
+    rows = [
+        {
+            "id": 1,
+            "file_path": "sb://library/t5/aa/bb/x.mp4",
+            "cover_image_path": None,
+            "media_id": 42,
+            "thumbnail_path": "sb://library/derived/1/thumb.jpg",
+        }
+    ]
+
+    @asynccontextmanager
+    async def _fake_read_scope():
+        yield _DataSession(rows)
+
+    repo_mod.read_scope = _fake_read_scope  # type: ignore[assignment]
+    repo = ResourcesRepository()
+
+    result = await repo.get_expired_trashed_resources()
+
+    assert result[0]["media_id"] == 42
+    assert result[0]["thumbnail_path"] == "sb://library/derived/1/thumb.jpg"
+
+
 # ─── get_untranscoded_video_versions ────────────────────────────────
 
 
