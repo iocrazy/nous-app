@@ -101,3 +101,42 @@ describe('IssueListView', () => {
     expect(screen.getByText(/create one/i)).toBeTruthy();
   });
 });
+
+describe('IssueListView — A1 注意力 chip', () => {
+  it('suffixes the running chip with the turn number', () => {
+    renderList([
+      mkIssue({
+        id: 9,
+        identifier: 'MH-9',
+        title: 'Long dispatch',
+        status: 'in_progress',
+        raw: { dbos_workflow_id: 'wf-9', execution_state: { turn: 3 } } as never,
+      }),
+    ]);
+    expect(screen.getByText(/running · turn 3/)).toBeTruthy();
+  });
+
+  it('renders the needs-your-reply chip with the question as its tooltip', () => {
+    const { container } = renderList([
+      mkIssue({
+        id: 10,
+        identifier: 'MH-10',
+        title: 'Waiting on me',
+        status: 'needs_followup',
+        raw: {
+          execution_state: { agent_outcome: 'needs_input', outcome_reason: 'Monday or Wednesday?' },
+        } as never,
+      }),
+    ]);
+    const chip = container.querySelector('[data-testid="needs-reply-chip"]') as HTMLElement;
+    expect(chip).not.toBeNull();
+    expect(chip.getAttribute('title')).toBe('Monday or Wednesday?');
+  });
+
+  it('does not render the reply chip for an issue nobody asked about', () => {
+    const { container } = renderList([
+      mkIssue({ id: 11, identifier: 'MH-11', title: 'Plain', status: 'in_progress' }),
+    ]);
+    expect(container.querySelector('[data-testid="needs-reply-chip"]')).toBeNull();
+  });
+});

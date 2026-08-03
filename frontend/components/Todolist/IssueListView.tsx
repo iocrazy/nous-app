@@ -9,7 +9,9 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
+
 import {
   Plus, Search, Columns, Filter, ArrowUpDown, RotateCw,
   Diamond, ChevronRight, ChevronDown, Check, X,
@@ -64,6 +66,7 @@ import {
 } from './IssueSortMenu';
 import { relativeTime } from '../../utils/taskDisplay';
 import { originModule } from './issueOrigin';
+import { runningChipLabel, needsReplyChip } from './issueChips';
 import {
   computeSubtaskCounts,
   dueBucket,
@@ -162,6 +165,21 @@ const DUE_CLASS: Record<'normal' | 'soon' | 'overdue', string> = {
   overdue: 'text-rose-400 font-semibold',
 };
 
+/**
+ * A `Date` that advances once a second while `active`, frozen otherwise.
+ * Only live rows pay for a timer — a finished issue's elapsed time never
+ * changes, so re-rendering it every second would be pure waste.
+ */
+function useTickingNow(active: boolean): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+
 interface IssueRowProps {
   issue: UiIssue;
   teamId: string;
@@ -180,10 +198,16 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
   // Due date is pre-baked: the column lands with the workflow session, so this
   // is null (renders nothing) until then.
   const due = dueBucket(readDueDate(issue.raw));
+  const { t } = useTranslation();
   // An agent is actively working this issue: dispatched to a DBOS workflow and
   // not yet in a terminal state. Surfaces as an amber pulse (data already on
-  // the row — no extra fetch).
+  // the row — no extra fetch). A1: the chip now also carries which turn it is
+  // on and how long it has been going — "running" says an agent is assigned,
+  // a moving number says it is actually getting somewhere.
   const isLive = !!issue.raw.dbos_workflow_id && issue.status !== 'done' && issue.status !== 'cancelled';
+  const now = useTickingNow(isLive);
+  const runningLabel = runningChipLabel(issue, now);
+  const needsReply = needsReplyChip(issue);
   return (
     <Link
       to={`/team/${teamId}/todolist/${issue.identifier}`}
@@ -199,10 +223,19 @@ const IssueRow: React.FC<IssueRowProps> = ({ issue, teamId, visibleCols, parentL
         </span>
       )}
       <span className="flex-1 truncate text-[14px] text-ink-200 group-hover:text-ink-50">{issue.title}</span>
-      {isLive && (
+      {runningLabel && (
         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] text-amber-400 bg-amber-500/10 shrink-0" title="An agent is working on this">
           <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-          running
+          {runningLabel}
+        </span>
+      )}
+      {needsReply && (
+        <span
+          data-testid="needs-reply-chip"
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] text-warn bg-warn-soft ring-1 ring-warn-line shrink-0"
+          title={needsReply.question ?? undefined}
+        >
+          {t('issues.needsReplyChip', 'Needs your reply')}
         </span>
       )}
       {visibleCols.has('parent') && parent && (

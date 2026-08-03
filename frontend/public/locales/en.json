@@ -3745,5 +3745,9 @@
     "replyHere": "Reply here…",
     "reply": "Reply",
     "replying": "Replying…"
+  },
+  "issues": {
+    "needsReplyChip": "Needs your reply",
+    "waitingOnYou": "Waiting on you"
   }
 }
