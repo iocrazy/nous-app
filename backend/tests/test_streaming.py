@@ -594,6 +594,7 @@ async def test_stream_turn_caller_recorder_overrides_auto(monkeypatch):
         # run_turn (which the buffered branch now delegates to) polls these
         # between iterations — the real RunRecorder always has them.
         async def heartbeat(self): ...
+
         async def check_cancelled(self):
             return False
 
