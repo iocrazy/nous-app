@@ -1,5 +1,6 @@
 import type { UnifiedTask } from '../../contexts/TaskManagerContext';
 import type { TaskCounts } from './taskCenterSummary';
+import { taskAwaitingInput } from './taskRowPresentation';
 
 // Pure grouping logic for the floating Task Center panel: one user
 // submission (parse → download → thumbnail / extract_audio / transcode /
@@ -123,7 +124,9 @@ export function flowDisplayTitle(flow: FlowItem): string {
  * nothing processing yet, failed if any step failed, completed otherwise.
  */
 export function summarizeFlowItems(items: PanelItem[]): TaskCounts {
-  const counts: TaskCounts = { running: 0, queued: 0, completed: 0, failed: 0 };
+  const counts: TaskCounts = {
+    running: 0, queued: 0, completed: 0, failed: 0, waiting: 0,
+  };
   for (const item of items) {
     if (item.kind === 'single') {
       switch (item.task.status) {
@@ -133,6 +136,7 @@ export function summarizeFlowItems(items: PanelItem[]): TaskCounts {
         case 'failed':
         case 'cancelled':  counts.failed++; break;
       }
+      if (taskAwaitingInput(item.task)) counts.waiting++;
       continue;
     }
     if (item.steps.some((s) => s.status === 'processing')) counts.running++;
@@ -140,6 +144,7 @@ export function summarizeFlowItems(items: PanelItem[]): TaskCounts {
     else if (item.failedCount > 0 || item.steps.some((s) => s.status === 'cancelled'))
       counts.failed++;
     else counts.completed++;
+    if (item.steps.some((s) => taskAwaitingInput(s))) counts.waiting++;
   }
   return counts;
 }

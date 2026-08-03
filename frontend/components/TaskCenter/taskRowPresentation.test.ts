@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { taskRowActions, taskShowsCover } from './taskRowPresentation';
+import { taskAwaitingInput, taskRowActions, taskShowsCover } from './taskRowPresentation';
 import type { UnifiedTask } from '../../contexts/TaskManagerContext';
 
 // Minimal task factory — only the fields the presentation helpers read.
@@ -70,5 +70,30 @@ describe('taskRowActions', () => {
     // Defensive: a partial-failure that left a resource behind should still be openable.
     const a = taskRowActions(makeTask({ status: 'failed', resource_id: 'r1' }));
     expect(a).toEqual({ open: true, download: true, retry: true, cancel: false });
+  });
+});
+
+describe('taskAwaitingInput', () => {
+  const marker = { prompt: 'Which ending do you want?', since: '2026-08-03T00:00:00Z', issue_id: 42 };
+
+  it('returns the marker for an active task flagged awaiting_input', () => {
+    const t = makeTask({ status: 'processing', metadata: { awaiting_input: marker } });
+    expect(taskAwaitingInput(t)).toEqual(marker);
+  });
+
+  it('returns null when there is no marker', () => {
+    expect(taskAwaitingInput(makeTask({ status: 'processing' }))).toBeNull();
+  });
+
+  it('returns null on a terminal task even if a stale marker survives', () => {
+    // A cancel/reap race can leave the marker on a terminal row — never show
+    // "waiting for your input" on a task that can no longer consume it.
+    const t = makeTask({ status: 'cancelled', metadata: { awaiting_input: marker } });
+    expect(taskAwaitingInput(t)).toBeNull();
+  });
+
+  it('returns null for a malformed marker', () => {
+    const t = makeTask({ status: 'processing', metadata: { awaiting_input: 'yes' } });
+    expect(taskAwaitingInput(t)).toBeNull();
   });
 });

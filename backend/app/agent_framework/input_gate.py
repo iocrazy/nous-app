@@ -100,6 +100,17 @@ async def mark_awaiting_input(
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"[input_gate] mark metadata failed wf={workflow_id}: {exc}")
+    # 深链 link_id 口径：issue 链接携带人类标识符（MH-N），issues 路由按它
+    # 解析（scheduled_master 的 autopilot producer 同款,含 str(id) 兜底）。
+    link_id = str(issue_id)
+    try:
+        ident = await db_engine.fetch_val(
+            "SELECT identifier FROM public.issues WHERE id = :id", {"id": issue_id}
+        )
+        if ident:
+            link_id = str(ident)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"[input_gate] identifier lookup failed issue={issue_id}: {exc}")
     # notify() 自身永不 raise（唯一 inbox 写路径，带 10 分钟去重）
     await notify(
         user_id,
@@ -108,7 +119,7 @@ async def mark_awaiting_input(
         body=clipped,
         severity="info",
         link_kind="issue",
-        link_id=str(issue_id),
+        link_id=link_id,
     )
 
 

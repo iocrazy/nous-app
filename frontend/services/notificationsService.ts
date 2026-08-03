@@ -11,7 +11,8 @@ export type InboxKind =
   | 'generation_result'
   | 'publish_result'
   | 'autopilot_output'
-  | 'workflow_stage';
+  | 'workflow_stage'
+  | 'agent_question';
 export type InboxSeverity = 'info' | 'success' | 'error';
 export type InboxLinkKind = 'issue' | 'resource' | 'publish_batch';
 
