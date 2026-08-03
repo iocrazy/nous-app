@@ -260,8 +260,24 @@ async def _bg_reap_stale_input_waits() -> None:
 
         current = _resolve_pinned_app_version()
         if not current:
+            # Prod reality (2026-08-03 首次发版实测): /app/build-info.json is not
+            # baked into the image, so the pinned resolver returns None on every
+            # boot and the sweep would NEVER run — leaving post-deploy stale
+            # waits eating replies. Fall back to the version DBOS itself
+            # computed at launch (GlobalParams.app_version, set by the time
+            # this 30s-delayed task runs); it's exactly the value stamped onto
+            # this process's workflow_status rows, which is the comparison the
+            # reaper needs.
+            try:
+                from dbos._utils import GlobalParams
+
+                current = GlobalParams.app_version or None
+            except Exception:  # noqa: BLE001 — private-ish import, keep soft
+                current = None
+        if not current:
             logger.info(
-                "reap_stale_input_waits: no pinned app version resolved; skipping"
+                "reap_stale_input_waits: no app version resolvable "
+                "(build-info absent and DBOS not launched); skipping"
             )
             return
         n = await reap_stale_input_waits(current_version=current)
