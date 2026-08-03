@@ -3748,6 +3748,8 @@
   },
   "issues": {
     "needsReplyChip": "等你回复",
-    "waitingOnYou": "等我的"
+    "waitingOnYou": "等我的",
+    "approve": "批准",
+    "reject": "拒绝"
   }
 }

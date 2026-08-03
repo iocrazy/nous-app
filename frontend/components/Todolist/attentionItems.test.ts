@@ -76,3 +76,14 @@ describe('buildAttentionItems', () => {
     expect(new Set(items.map((i) => i.id)).size).toBe(items.length);
   });
 });
+
+describe('buildAttentionItems — 上游畸形数据不得掀翻整页', () => {
+  it('treats a nullish feed as "nothing waiting"', () => {
+    // Real incident: TaskManagerContext did `setNeedsInputItems(res.items)`
+    // with no fallback, so a 200 whose body lacked `items` parked `undefined`
+    // in state and this strip took the whole Issues page down.
+    expect(buildAttentionItems(undefined, undefined, undefined)).toEqual([]);
+    expect(buildAttentionItems(null, null, null)).toEqual([]);
+    expect(buildAttentionItems(undefined, [approval], undefined)).toHaveLength(1);
+  });
+});

@@ -3748,6 +3748,8 @@
   },
   "issues": {
     "needsReplyChip": "Needs your reply",
-    "waitingOnYou": "Waiting on you"
+    "waitingOnYou": "Waiting on you",
+    "approve": "Approve",
+    "reject": "Reject"
   }
 }

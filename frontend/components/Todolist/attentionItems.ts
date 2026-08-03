@@ -27,12 +27,15 @@ export interface AttentionItem {
 }
 
 export function buildAttentionItems(
-  needsInput: NeedsInputItem[],
-  approvals: AILibraryApprovalRequest[],
-  inReviewIssues: UiIssue[],
+  needsInput: NeedsInputItem[] | null | undefined,
+  approvals: AILibraryApprovalRequest[] | null | undefined,
+  inReviewIssues: UiIssue[] | null | undefined,
 ): AttentionItem[] {
+  // Nullish-tolerant on purpose: this strip sits at the top of a whole page,
+  // so one upstream feed returning a malformed body must degrade to "nothing
+  // waiting", never take the Issues page down with it.
   return [
-    ...needsInput.map((n): AttentionItem => ({
+    ...(needsInput ?? []).map((n): AttentionItem => ({
       type: 'question',
       id: `question:${n.issue_id}`,
       title: n.title,
@@ -40,13 +43,13 @@ export function buildAttentionItems(
       // NeedsInputItem carries issue_id as a string; the list rows key on number.
       issueId: Number(n.issue_id),
     })),
-    ...approvals.map((a): AttentionItem => ({
+    ...(approvals ?? []).map((a): AttentionItem => ({
       type: 'approval',
       id: a.id,
       title: a.hook_name,
       detail: a.reason ?? null,
     })),
-    ...inReviewIssues.map((i): AttentionItem => ({
+    ...(inReviewIssues ?? []).map((i): AttentionItem => ({
       type: 'review',
       id: `review:${i.id}`,
       title: i.title,

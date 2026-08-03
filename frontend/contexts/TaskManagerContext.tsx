@@ -683,7 +683,10 @@ export const TaskManagerProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const refreshNeedsInput = useCallback(async () => {
     try {
       const res = await listNeedsInput();
-      setNeedsInputItems(res.items);
+      // `?? []` is load-bearing: a 200 whose body lacks `items` (degraded
+      // backend, proxy-shaped envelope) would otherwise park `undefined` in
+      // state, and every consumer that maps the list crashes its whole page.
+      setNeedsInputItems(res.items ?? []);
     } catch (e) {
       console.error('[TaskManager] Failed to fetch needs-input items:', e);
     }
