@@ -127,10 +127,69 @@ async def clear_awaiting_input(*, workflow_id: str) -> None:
         logger.warning(f"[input_gate] clear metadata failed wf={workflow_id}: {exc}")
 
 
+async def _fetch_awaiting_rows() -> list[dict]:
+    """所有带 awaiting_input 标记的 task 行 + 其 DBOS app_version。
+
+    JOIN dbos.workflow_status 是引擎侧读（非 UI 数据源，不违路线 C——路线 C
+    禁的是前端/列表 endpoint 直查引擎表；reaper 恰恰是引擎孤儿的清道夫，
+    与 _bg_reap_internal_queue 同族）。"""
+    from app.db import engine as db_engine
+
+    return await db_engine.fetch_all(
+        """SELECT t.dbos_workflow_id, t.issue_id, w.application_version
+           FROM public.task_tracking t
+           JOIN dbos.workflow_status w ON w.workflow_uuid = t.dbos_workflow_id
+           WHERE t.metadata ? 'awaiting_input'
+             AND w.status IN ('PENDING', 'ENQUEUED')""",
+    )
+
+
+async def _cancel_workflow(workflow_id: str) -> None:
+    from dbos import DBOS
+
+    await DBOS.cancel_workflow_async(workflow_id)
+
+
+async def _clear_issue_lock(workflow_id: str) -> None:
+    """按 dbos_workflow_id 定位（atomic_checkout 写过它,比 task_tracking.issue_id
+    回填更可靠）,释放被 reap 的 dispatch 持有的 issue 执行锁。"""
+    from app.db import engine as db_engine
+
+    await db_engine.execute_as_service_role(
+        "UPDATE public.issues SET execution_locked_at = NULL "
+        "WHERE dbos_workflow_id = :wf",
+        {"wf": workflow_id},
+    )
+
+
+async def reap_stale_input_waits(*, current_version: str) -> int:
+    """部署换版本后,旧版本挂起的 workflow 无 worker 认领 —— 假活。
+    清标记 + cancel + 释放 issue 执行锁,使回复自动走旧路径;issue 停在
+    needs_followup 用户无感。锁必须在这里清：被 reap 的 workflow 永远跑不到
+    execute_issue 的 ``finally: clear_lock``,而 ``acquire_turn_lock`` 用的是
+    同一列 —— 不清的话旧路径回复会对死锁自旋 10 分钟后 defer。
+    单行失败只记日志继续 —— 一个坏行不能挡住整个 sweep。"""
+    cleaned = 0
+    for row in await _fetch_awaiting_rows():
+        if row.get("application_version") == current_version:
+            continue
+        wf = row["dbos_workflow_id"]
+        try:
+            await clear_awaiting_input(workflow_id=wf)
+            await _cancel_workflow(wf)
+            await _clear_issue_lock(wf)
+            cleaned += 1
+            logger.info(f"[input_gate] reaped stale wait wf={wf}")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[input_gate] reap failed wf={wf}: {exc}")
+    return cleaned
+
+
 __all__ = [
     "TOPIC_PREFIX",
     "await_user_input",
     "signal_user_reply",
     "mark_awaiting_input",
     "clear_awaiting_input",
+    "reap_stale_input_waits",
 ]

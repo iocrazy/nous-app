@@ -239,6 +239,38 @@ async def _bg_reap_internal_queue() -> None:
         await asyncio.sleep(interval)
 
 
+async def _bg_reap_stale_input_waits() -> None:
+    """One-shot startup sweep: clear cross-version fake-alive needs_input waits.
+
+    A deploy bumps the DBOS app version; workflows suspended on the input gate
+    under the OLD version are never recovered by the new workers — the
+    awaiting_input marker stays on, so replies keep getting sent into the void
+    instead of falling back to the legacy respond_to_issue_reply path. The
+    sweep (``input_gate.reap_stale_input_waits``) clears the marker, cancels
+    the workflow, and releases the issue's execution lock. Delayed ~30s so
+    DBOS launch (needed for cancel) has settled — same pattern as the
+    internal-queue reaper's prompt-first-run.
+    """
+    import asyncio
+
+    await asyncio.sleep(30)
+    try:
+        from app.agent_framework.input_gate import reap_stale_input_waits
+        from app.services.infra.dbos_orchestrator import _resolve_pinned_app_version
+
+        current = _resolve_pinned_app_version()
+        if not current:
+            logger.info(
+                "reap_stale_input_waits: no pinned app version resolved; skipping"
+            )
+            return
+        n = await reap_stale_input_waits(current_version=current)
+        if n:
+            logger.info(f"reap_stale_input_waits: reaped {n} cross-version wait(s)")
+    except Exception as exc:  # noqa: BLE001 — best-effort, never break startup
+        logger.warning(f"reap_stale_input_waits failed: {exc!r}")
+
+
 async def _bg_memory_warmup() -> None:
     """Pre-warm the memory-recall connection pools so the FIRST chat turn after
     a restart doesn't pay cold-start latency on the synchronous hot path.
@@ -311,6 +343,11 @@ def install_background_bootstrap(app: FastAPI) -> None:
     # readiness would report 503 "starting" for the whole process lifetime.
     app.state.bg_tasks.spawn(
         "reap_internal_queue", _bg_reap_internal_queue(), long_running=True
+    )
+    # long_running: sleeps 30s before its single sweep — keep it off the
+    # /readyz gate (readiness must not wait for a housekeeping delay).
+    app.state.bg_tasks.spawn(
+        "reap_stale_input_waits", _bg_reap_stale_input_waits(), long_running=True
     )
     # Worker-stall detector: only on the HTTP-serving process (gateway /
     # combined), which stays healthy during a worker dequeue stall and can
