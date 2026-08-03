@@ -81,8 +81,13 @@ const CanvasListPage = lazyWithRetry(() => import('./features/canvas-core/ui/Can
 const AILibraryLayout = lazyWithRetry(() =>
   import('./components/AILibrary/AILibraryLayout').then(m => ({ default: m.AILibraryLayout })),
 );
-const AILibraryIndex = lazyWithRetry(() =>
-  import('./pages/AILibraryIndex').then(m => ({ default: m.AILibraryIndex })),
+// B1: /ai-library lands on the agent roster. The old usage-summary
+// dashboard (pages/AILibraryIndex) is retired as a landing page — its
+// numbers live on the Insights entries.
+const AgentGalleryPage = lazyWithRetry(() =>
+  import('./components/AILibrary/AgentGalleryPage').then(m => ({
+    default: m.AgentGalleryPage,
+  })),
 );
 const ChatPage = lazyWithRetry(() =>
   import('./pages/ChatPage').then(m => ({ default: m.ChatPage })),
@@ -241,7 +246,7 @@ export const router = createBrowserRouter([
             path: 'ai-library',
             element: <SuspenseWrap><AILibraryLayout /></SuspenseWrap>,
             children: [
-              { index: true, element: <SuspenseWrap><AILibraryIndex /></SuspenseWrap> },
+              { index: true, element: <SuspenseWrap><AgentGalleryPage /></SuspenseWrap> },
               { path: 'agents', element: <SuspenseWrap><AgentsPage /></SuspenseWrap> },
               { path: 'agents/:slug', element: <SuspenseWrap><AgentsPage /></SuspenseWrap> },
               { path: 'skills', element: <SuspenseWrap><SkillsPage /></SuspenseWrap> },

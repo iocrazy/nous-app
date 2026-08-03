@@ -71,7 +71,6 @@
     "memory": "我的记忆",
     "workforce": "工作团队",
     "sessions": "会话",
-    "dashboard": "总览",
     "liveRuns": "{{count}} 个运行中",
     "distribution": "分发"
   },
@@ -2856,13 +2855,48 @@
     },
     "insightsSection": "洞察",
     "openChatWith": "与 {{name}} 聊天",
-    "dashboard": {
-      "loadError": "用量加载失败",
-      "todayRuns": "今日运行",
-      "todayTokens": "今日 tokens",
-      "weekRuns": "7 日运行",
-      "weekTokens": "7 日 tokens",
-      "topModels": "7 日模型排行"
+    "officialTemplate": "官方模板",
+    "customAgent": "自建",
+    "newAgent": "新建智能体",
+    "searchAgents": "搜索智能体…",
+    "filterAll": "全部",
+    "filterFaultsOnly": "仅故障",
+    "noAgentsMatch": "没有符合筛选条件的智能体",
+    "skillCount": "{{count}} 个技能",
+    "weekMeta": "{{runs}} 次运行 · {{tokens}} tok · 近 7 天",
+    "weekMetaEmpty": "近 7 天无运行",
+    "liveBanner": "{{name}} 正在运行",
+    "statsUnavailable": "周统计暂不可用——卡片只显示智能体信息",
+    "group": {
+      "writing": "编剧组",
+      "art": "美术组",
+      "tools": "工具组"
+    },
+    "status": {
+      "idle": "空闲",
+      "running": "运行中",
+      "needsReply": "等你回复",
+      "fault": "故障"
+    },
+    "action": {
+      "chat": "对话",
+      "viewRuns": "查看运行",
+      "goReply": "去回复",
+      "fixGuide": "修复指引",
+      "fork": "Fork 定制",
+      "configure": "配置",
+      "runs": "运行记录"
+    },
+    "scope": {
+      "team": "团队",
+      "project": "项目",
+      "private": "个人"
+    },
+    "tab": {
+      "agents": "智能体",
+      "skills": "技能",
+      "market": "市场",
+      "marketPlanned": "规划中"
     }
   },
   "teamUsage": {

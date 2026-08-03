@@ -71,7 +71,6 @@
     "memory": "My Memory",
     "workforce": "Workforce",
     "sessions": "Sessions",
-    "dashboard": "Dashboard",
     "liveRuns": "{{count}} running",
     "distribution": "Distribution"
   },
@@ -2856,13 +2855,48 @@
     },
     "insightsSection": "Insights",
     "openChatWith": "Chat with {{name}}",
-    "dashboard": {
-      "loadError": "Failed to load usage",
-      "todayRuns": "Runs today",
-      "todayTokens": "Tokens today",
-      "weekRuns": "Runs · 7d",
-      "weekTokens": "Tokens · 7d",
-      "topModels": "Top models · 7d"
+    "officialTemplate": "Official template",
+    "customAgent": "Custom",
+    "newAgent": "New Agent",
+    "searchAgents": "Search agents...",
+    "filterAll": "All",
+    "filterFaultsOnly": "Faults only",
+    "noAgentsMatch": "No agents match these filters",
+    "skillCount": "{{count}} skills",
+    "weekMeta": "{{runs}} runs · {{tokens}} tok · 7d",
+    "weekMetaEmpty": "No runs · 7d",
+    "liveBanner": "{{name}} is running now",
+    "statsUnavailable": "Weekly stats unavailable — cards show agent details only",
+    "group": {
+      "writing": "Writing",
+      "art": "Art",
+      "tools": "Tools"
+    },
+    "status": {
+      "idle": "Idle",
+      "running": "Running",
+      "needsReply": "Waiting for reply",
+      "fault": "Fault"
+    },
+    "action": {
+      "chat": "Chat",
+      "viewRuns": "View run",
+      "goReply": "Go reply",
+      "fixGuide": "How to fix",
+      "fork": "Fork & customize",
+      "configure": "Configure",
+      "runs": "Runs"
+    },
+    "scope": {
+      "team": "Team",
+      "project": "Project",
+      "private": "Private"
+    },
+    "tab": {
+      "agents": "Agents",
+      "skills": "Skills",
+      "market": "Marketplace",
+      "marketPlanned": "Planned"
     }
   },
   "teamUsage": {
