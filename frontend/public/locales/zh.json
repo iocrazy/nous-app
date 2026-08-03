@@ -3731,5 +3731,15 @@
     "UNKNOWN": {
       "title": "任务失败"
     }
+  },
+  "issueDetail": {
+    "progress": "进度",
+    "links": "关联",
+    "status": "状态",
+    "runs": "运行",
+    "elapsed": "耗时",
+    "assignee": "执行者",
+    "project": "项目",
+    "subIssues": "子任务"
   }
 }
