@@ -1,34 +1,40 @@
 // frontend/components/AILibrary/NewAgentModal.tsx
-// Modal form for creating a new user-owned agent.
+// New Agent — template first (B5, spec 2026-08-02 §B5).
 //
-// Phase 2 PR 2.8a: optional fork from an existing agent.
-// Phase 2 PR 2.9:  optional scope — Private / Team / Project.
-//   - Private (default): agent is visible only to the creator
-//   - Team:    visible to all members of the chosen team
-//   - Project: visible to owner + members of the chosen project
+// The form used to lead with slug/name and bury "Fork from" at the bottom as
+// an optional dropdown, which reads as "blank agent is the normal path". It
+// isn't: starting from an official template and customizing it is. So step 1
+// is picking a template (or explicitly choosing Blank), and identity comes
+// after.
+//
+// Form rules live in newAgentForm.ts so the scope validation and the
+// BIGINT-as-string handling are testable without a DOM.
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AILibraryAgent, Team, Project } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { fetchMyTeams } from '../../services/teamService';
 import { fetchProjects } from '../../services/projectsService';
 import { UiSelect } from '../ui';
+import { getAgentIcon } from './agentIcons';
+import {
+  buildCreatePayload,
+  emptyForm,
+  slugFromName,
+  validateForm,
+  type NewAgentForm,
+  type NewAgentFormError,
+  type NewAgentScope,
+} from './newAgentForm';
 
 interface NewAgentModalProps {
   existingAgents: AILibraryAgent[];
   onClose: () => void;
   onCreated: (slug: string) => void;
-  /**
-   * Preselect a source agent to fork from. When set, the "Fork from" dropdown
-   * opens with this value already selected. Used by AgentEditor's fork button.
-   */
+  /** Preselect the template to fork. Used by the gallery's Fork button. */
   initialForkFrom?: string;
 }
-
-type ScopeKind = 'private' | 'team' | 'project';
-
-const SLUG_PATTERN = /^[a-z0-9_-]+$/;
 
 export const NewAgentModal: React.FC<NewAgentModalProps> = ({
   existingAgents,
@@ -37,24 +43,37 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
   initialForkFrom,
 }) => {
   const { t } = useTranslation();
-  const [slug, setSlug] = useState('');
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [forkFrom, setForkFrom] = useState<string>(initialForkFrom ?? ''); // empty = no fork
+  const [form, setForm] = useState<NewAgentForm>(() =>
+    emptyForm(initialForkFrom ?? null),
+  );
+  /** Whether the user typed their own slug — stop deriving it if so. */
+  const [slugTouched, setSlugTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
+  const [showErrors, setShowErrors] = useState(false);
 
-  // Scope picker state — default private (no team / no project).
-  const [scopeKind, setScopeKind] = useState<ScopeKind>('private');
-  const [teamId, setTeamId] = useState<string>('');
-  const [projectId, setProjectId] = useState<string>('');
   const [teams, setTeams] = useState<Team[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [scopeLoading, setScopeLoading] = useState(false);
 
+  const update = <K extends keyof NewAgentForm>(key: K, value: NewAgentForm[K]) =>
+    setForm((f) => ({ ...f, [key]: value }));
+
+  const templates = useMemo(
+    () => existingAgents.filter((a) => a.is_system_preset),
+    [existingAgents],
+  );
+  const takenSlugs = useMemo(
+    () => existingAgents.map((a) => a.slug),
+    [existingAgents],
+  );
+  const errors = validateForm(form, takenSlugs);
+  const hasError = (e: NewAgentFormError) => showErrors && errors.includes(e);
+
   // Lazy-fetch teams + projects the first time the user leaves "Private".
   useEffect(() => {
-    if (scopeKind === 'private') return;
+    if (form.scope === 'private') return;
     if (teams.length > 0 || projects.length > 0) return;
     let cancelled = false;
     setScopeLoading(true);
@@ -74,35 +93,59 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [scopeKind, teams.length, projects.length]);
+  }, [form.scope, teams.length, projects.length]);
 
-  const slugIsValid = slug.length > 0 && SLUG_PATTERN.test(slug);
-  const scopeIsValid =
-    scopeKind === 'private' ||
-    (scopeKind === 'team' && teamId !== '') ||
-    (scopeKind === 'project' && projectId !== '');
-  const canSubmit =
-    slugIsValid && name.trim().length > 0 && scopeIsValid && !submitting;
+  const pickTemplate = (slug: string | null) => {
+    setForm((f) => {
+      const source = slug ? existingAgents.find((a) => a.slug === slug) : null;
+      // Prefill from the template only while the user hasn't typed a name —
+      // switching templates shouldn't clobber something they wrote.
+      const name = f.name || (source ? `${source.name} (copy)` : '');
+      return {
+        ...f,
+        template: slug,
+        name,
+        slug: slugTouched ? f.slug : slugFromName(name),
+      };
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit) return;
+    if (errors.length > 0) {
+      setShowErrors(true);
+      return;
+    }
     setSubmitting(true);
     setError(null);
+    setWarning(null);
     try {
-      // Resolve BIGINT scope ids — strings end-to-end (Number() rounds past 2^53).
-      const parsedTeamId =
-        scopeKind === 'team' && teamId ? teamId : undefined;
-      const parsedProjectId =
-        scopeKind === 'project' && projectId ? projectId : undefined;
-      const created = await aiLibraryService.createAgent({
-        slug,
-        name: name.trim(),
-        description: description.trim() || undefined,
-        fork_from: forkFrom || undefined,
-        team_id: parsedTeamId,
-        project_id: parsedProjectId,
-      });
+      const created = await aiLibraryService.createAgent(buildCreatePayload(form));
+
+      // The backend's fork copies content but NOT skill bindings. Copy them
+      // in a follow-up PATCH so a forked agent actually behaves like its
+      // template. If that second call fails the agent still exists, so this
+      // reports a warning and continues — never a silent partial fork.
+      const source = form.template
+        ? existingAgents.find((a) => a.slug === form.template)
+        : undefined;
+      if (source && (source.skill_ids?.length ?? 0) > 0) {
+        try {
+          await aiLibraryService.updateAgent(created.slug, {
+            skill_ids: source.skill_ids,
+          });
+        } catch (err) {
+          console.error('[NewAgentModal] copying skill bindings failed:', err);
+          setWarning(
+            t(
+              'aiLibrary.agents.forkSkillsNotCopied',
+              'Agent created, but its skills were not copied — bind them manually.',
+            ),
+          );
+          onCreated(created.slug);
+          return;
+        }
+      }
       onCreated(created.slug);
     } catch (err) {
       console.error('[NewAgentModal] createAgent failed:', err);
@@ -112,105 +155,161 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
     }
   };
 
+  const inputClass = (bad: boolean) =>
+    `mt-1 w-full rounded-md border bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:outline-none ${
+      bad ? 'border-danger-line' : 'border-ink-700 focus:border-[var(--accent-border)]'
+    }`;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-md rounded-lg border border-ink-800 bg-ink-900 p-6 shadow-xl">
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-ink-800 bg-ink-900 p-6 shadow-xl">
         <h2 className="text-lg font-semibold text-ink-100">
           {t('aiLibrary.agents.newAgentTitle', 'New Agent')}
         </h2>
         <p className="mt-1 text-xs text-ink-500">
           {t(
-            'aiLibrary.agents.newAgentHint',
-            'Create a custom agent. You can start from scratch or fork an existing agent as a starting point.',
+            'aiLibrary.agents.newAgentHintV2',
+            'Start from an official template and customize it, or build from blank.',
           )}
         </p>
 
-        <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-ink-400">
-              {t('aiLibrary.agents.slugLabel', 'Slug')}
-            </label>
-            <input
-              type="text"
-              value={slug}
-              onChange={(e) => setSlug(e.target.value)}
-              placeholder="my-custom-agent"
-              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
-              disabled={submitting}
-              required
-            />
-            {slug && !slugIsValid && (
-              <p className="mt-1 text-xs text-red-400">
+        <form onSubmit={handleSubmit} className="mt-4 space-y-5">
+          {/* Step 1 — template */}
+          <fieldset>
+            <legend className="text-xs font-medium text-ink-400">
+              {t('aiLibrary.agents.templateStep', '1. Start from')}
+            </legend>
+            <div className="mt-2 grid gap-2 sm:grid-cols-3">
+              <TemplateCard
+                selected={form.template === null}
+                title={t('aiLibrary.agents.blankTemplate', 'Blank agent')}
+                subtitle={t('aiLibrary.agents.blankTemplateHint', 'Write it yourself')}
+                onSelect={() => pickTemplate(null)}
+                testId="template-blank"
+              />
+              {templates.map((a) => {
+                const Icon = getAgentIcon(a.icon);
+                return (
+                  <TemplateCard
+                    key={a.slug}
+                    selected={form.template === a.slug}
+                    title={a.name}
+                    subtitle={a.description ?? a.model}
+                    icon={<Icon size={14} />}
+                    onSelect={() => pickTemplate(a.slug)}
+                    testId={`template-${a.slug}`}
+                  />
+                );
+              })}
+            </div>
+            {form.template && (
+              <p className="mt-1.5 text-xs text-ink-500">
                 {t(
-                  'aiLibrary.agents.slugInvalid',
-                  'Lowercase letters, digits, dash, underscore only.',
+                  'aiLibrary.agents.forkFromHintV2',
+                  'Copies the identity / soul / instructions, model settings and skill bindings.',
                 )}
               </p>
             )}
-          </div>
+          </fieldset>
 
-          <div>
-            <label className="block text-xs font-medium text-ink-400">
-              {t('aiLibrary.agents.nameLabel', 'Name')}
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="My Custom Agent"
-              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
-              disabled={submitting}
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-ink-400">
-              {t('aiLibrary.agents.descriptionLabel', 'Description')}
-              <span className="ml-1 text-ink-600">
-                ({t('common.optional', 'optional')})
-              </span>
-            </label>
-            <input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
-              disabled={submitting}
-            />
-          </div>
-
-          <fieldset className="space-y-2">
-            <legend className="block text-xs font-medium text-ink-400">
-              {t('aiLibrary.agents.scopeLabel', 'Scope')}
+          {/* Step 2 — identity */}
+          <fieldset>
+            <legend className="text-xs font-medium text-ink-400">
+              {t('aiLibrary.agents.identityStep', '2. Name it')}
             </legend>
-            <div className="flex gap-2">
-              <ScopeRadio
-                checked={scopeKind === 'private'}
+            <div className="mt-2 grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block text-xs font-medium text-ink-400">
+                  {t('aiLibrary.agents.nameLabel', 'Name')}
+                </label>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={(e) => {
+                    const name = e.target.value;
+                    setForm((f) => ({
+                      ...f,
+                      name,
+                      slug: slugTouched ? f.slug : slugFromName(name),
+                    }));
+                  }}
+                  placeholder="My Custom Agent"
+                  className={inputClass(hasError('name'))}
+                  disabled={submitting}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-ink-400">
+                  {t('aiLibrary.agents.slugLabel', 'Slug')}
+                </label>
+                <input
+                  type="text"
+                  value={form.slug}
+                  onChange={(e) => {
+                    setSlugTouched(true);
+                    update('slug', e.target.value);
+                  }}
+                  placeholder="my-custom-agent"
+                  className={`${inputClass(hasError('slug') || hasError('slugTaken'))} font-mono`}
+                  disabled={submitting}
+                />
+                {hasError('slug') && (
+                  <p className="mt-1 text-xs text-danger">
+                    {t(
+                      'aiLibrary.agents.slugInvalid',
+                      'Lowercase letters, digits, dash, underscore only.',
+                    )}
+                  </p>
+                )}
+                {hasError('slugTaken') && (
+                  <p className="mt-1 text-xs text-danger">
+                    {t('aiLibrary.agents.slugTaken', 'That slug is already in use.')}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="mt-3">
+              <label className="block text-xs font-medium text-ink-400">
+                {t('aiLibrary.agents.descriptionLabel', 'Description')}
+                <span className="ml-1 text-ink-600">
+                  ({t('common.optional', 'optional')})
+                </span>
+              </label>
+              <input
+                type="text"
+                value={form.description}
+                onChange={(e) => update('description', e.target.value)}
+                className={inputClass(false)}
                 disabled={submitting}
-                onChange={() => setScopeKind('private')}
-                label={t('aiLibrary.agents.scopePrivateLabel', 'Private')}
-              />
-              <ScopeRadio
-                checked={scopeKind === 'team'}
-                disabled={submitting}
-                onChange={() => setScopeKind('team')}
-                label={t('aiLibrary.agents.scopeTeamLabel', 'Team')}
-              />
-              <ScopeRadio
-                checked={scopeKind === 'project'}
-                disabled={submitting}
-                onChange={() => setScopeKind('project')}
-                label={t('aiLibrary.agents.scopeProjectLabel', 'Project')}
               />
             </div>
-            {scopeKind === 'team' && (
+          </fieldset>
+
+          {/* Step 3 — scope */}
+          <fieldset>
+            <legend className="text-xs font-medium text-ink-400">
+              {t('aiLibrary.agents.scopeStep', '3. Who can use it')}
+            </legend>
+            <div className="mt-2 flex gap-2">
+              {(['private', 'team', 'project'] as NewAgentScope[]).map((k) => (
+                <ScopeRadio
+                  key={k}
+                  checked={form.scope === k}
+                  disabled={submitting}
+                  onChange={() => update('scope', k)}
+                  label={t(
+                    `aiLibrary.agents.scope${k[0].toUpperCase()}${k.slice(1)}Label`,
+                    k[0].toUpperCase() + k.slice(1),
+                  )}
+                />
+              ))}
+            </div>
+            {form.scope === 'team' && (
               <UiSelect
-                value={teamId}
-                onChange={(e) => setTeamId(e.target.value)}
-                className="mt-1 w-full"
+                value={form.teamId}
+                onChange={(e) => update('teamId', e.target.value)}
+                className="mt-2 w-full"
                 disabled={submitting || scopeLoading}
-                required
               >
                 <option value="">
                   {scopeLoading
@@ -224,13 +323,12 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
                 ))}
               </UiSelect>
             )}
-            {scopeKind === 'project' && (
+            {form.scope === 'project' && (
               <UiSelect
-                value={projectId}
-                onChange={(e) => setProjectId(e.target.value)}
-                className="mt-1 w-full"
+                value={form.projectId}
+                onChange={(e) => update('projectId', e.target.value)}
+                className="mt-2 w-full"
                 disabled={submitting || scopeLoading}
-                required
               >
                 <option value="">
                   {scopeLoading
@@ -244,7 +342,15 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
                 ))}
               </UiSelect>
             )}
-            <p className="text-xs text-ink-500">
+            {(hasError('teamId') || hasError('projectId')) && (
+              <p className="mt-1 text-xs text-danger">
+                {t(
+                  'aiLibrary.agents.scopeIdRequired',
+                  'Pick one, or the agent is created as private.',
+                )}
+              </p>
+            )}
+            <p className="mt-1 text-xs text-ink-500">
               {t(
                 'aiLibrary.agents.scopeHint',
                 'Private = only you. Team / Project = everyone in that scope.',
@@ -252,43 +358,18 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
             </p>
           </fieldset>
 
-          <div>
-            <label className="block text-xs font-medium text-ink-400">
-              {t('aiLibrary.agents.forkFromLabel', 'Fork from')}
-              <span className="ml-1 text-ink-600">
-                ({t('common.optional', 'optional')})
-              </span>
-            </label>
-            <UiSelect
-              value={forkFrom}
-              onChange={(e) => setForkFrom(e.target.value)}
-              className="mt-1 w-full"
-              disabled={submitting}
-            >
-              <option value="">
-                {t('aiLibrary.agents.forkFromNone', 'Start from scratch')}
-              </option>
-              {existingAgents.map((a) => (
-                <option key={a.slug} value={a.slug}>
-                  {a.name} {a.is_system_preset ? '(preset)' : ''}
-                </option>
-              ))}
-            </UiSelect>
-            <p className="mt-1 text-xs text-ink-500">
-              {t(
-                'aiLibrary.agents.forkFromHint',
-                'Copies the identity / soul / instructions + model settings. Skill bindings are NOT copied.',
-              )}
-            </p>
-          </div>
-
           {error && (
-            <div className="rounded-md border border-red-500/40 bg-red-500/10 p-2 text-xs text-red-300">
+            <div className="rounded-md border border-danger-line bg-danger-soft p-2 text-xs text-danger">
               {error}
             </div>
           )}
+          {warning && (
+            <div className="rounded-md border border-warn-line bg-warn-soft p-2 text-xs text-warn">
+              {warning}
+            </div>
+          )}
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex justify-end gap-2 pt-1">
             <button
               type="button"
               onClick={onClose}
@@ -299,7 +380,7 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={!canSubmit}
+              disabled={submitting}
               className="rounded-md btn-tint-indigo px-4 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting
@@ -313,10 +394,46 @@ export const NewAgentModal: React.FC<NewAgentModalProps> = ({
   );
 };
 
-/**
- * Small radio chip used by the Scope picker. Kept inline so the modal file
- * stays self-contained; extract later if other forms need the same UI.
- */
+function TemplateCard({
+  selected,
+  title,
+  subtitle,
+  icon,
+  onSelect,
+  testId,
+}: {
+  selected: boolean;
+  title: string;
+  subtitle?: string | null;
+  icon?: React.ReactNode;
+  onSelect: () => void;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      data-testid={testId}
+      aria-pressed={selected}
+      className={`rounded-lg border p-2.5 text-left transition-colors ${
+        selected
+          ? 'border-[var(--accent-border)] bg-[var(--accent-soft)]'
+          : 'border-ink-700 bg-ink-800 hover:border-ink-600'
+      }`}
+    >
+      <span className="flex items-center gap-1.5 text-[13px] font-medium text-ink-100">
+        {icon}
+        <span className="min-w-0 truncate">{title}</span>
+      </span>
+      {subtitle && (
+        <span className="mt-0.5 line-clamp-2 block text-[11px] text-ink-500">
+          {subtitle}
+        </span>
+      )}
+    </button>
+  );
+}
+
 interface ScopeRadioProps {
   checked: boolean;
   disabled: boolean;

@@ -7,12 +7,13 @@
 
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { MessageCircleQuestion } from 'lucide-react';
+import { MessageCircleQuestion, Plus } from 'lucide-react';
 import type { AILibraryAgent } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { AgentDashboardTab } from './AgentDashboardTab';
 import { AgentRunsSplit } from './AgentRunsSplit';
 import { AgentRoutinesTab } from './AgentRoutinesTab';
+import { NewRoutineModal } from './NewRoutineModal';
 
 interface AgentWorkbenchTabProps {
   agent: AILibraryAgent;
@@ -29,6 +30,10 @@ export const AgentWorkbenchTab: React.FC<AgentWorkbenchTabProps> = ({
   const { t } = useTranslation();
   const [showRuns, setShowRuns] = useState(false);
   const [waiting, setWaiting] = useState(0);
+  const [newRoutineOpen, setNewRoutineOpen] = useState(false);
+  // Bumped after a create so AgentRoutinesTab remounts and refetches — it
+  // owns its own list and exposes no reload handle.
+  const [routinesKey, setRoutinesKey] = useState(0);
 
   // Waiting-reply count comes from the batch stats endpoint. It is a COUNT,
   // not a list: `NeedsInputItem` carries no agent dimension, so a per-issue
@@ -86,7 +91,31 @@ export const AgentWorkbenchTab: React.FC<AgentWorkbenchTabProps> = ({
         <AgentDashboardTab slug={slug} onOpenRuns={() => setShowRuns(true)} />
       )}
 
-      <AgentRoutinesTab agent={agent} />
+      <section>
+        <div className="mb-2 flex items-center justify-end">
+          <button
+            type="button"
+            onClick={() => setNewRoutineOpen(true)}
+            data-testid="new-routine"
+            className="inline-flex items-center gap-1 rounded-md border border-ink-700 px-2.5 py-1 text-[12px] text-ink-200 hover:bg-ink-800/60"
+          >
+            <Plus size={12} />
+            {t('aiLibrary.agents.routines.newTask', 'New task')}
+          </button>
+        </div>
+        <AgentRoutinesTab key={routinesKey} agent={agent} />
+      </section>
+
+      {newRoutineOpen && (
+        <NewRoutineModal
+          agent={agent}
+          onClose={() => setNewRoutineOpen(false)}
+          onCreated={() => {
+            setNewRoutineOpen(false);
+            setRoutinesKey((k) => k + 1);
+          }}
+        />
+      )}
     </div>
   );
 };
