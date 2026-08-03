@@ -14,11 +14,15 @@ import { UiSelect } from '../ui';
 // an issue (origin_kind='routine') assigned to this agent and dispatches the
 // existing execute_issue chain — results land as issue replies.
 
+// Preset cron shortcuts for the inline editor. "Every 15 min" is gone on
+// purpose (spec YAGNI): a quarter-hourly agent routine burns budget on a
+// cadence nobody asked for, and every real routine here is daily or slower.
+// Weekdays covers the common "work mornings" case the old set missed.
 const CRON_PRESETS: Array<{ label: string; expr: string }> = [
   { label: 'Daily 09:00', expr: '0 9 * * *' },
+  { label: 'Weekdays 09:00', expr: '0 9 * * 1-5' },
   { label: 'Hourly', expr: '0 * * * *' },
   { label: 'Weekly Mon 09:00', expr: '0 9 * * 1' },
-  { label: 'Every 15 min', expr: '*/15 * * * *' },
 ];
 
 // The browser's IANA timezone — the sensible default for a new routine.
