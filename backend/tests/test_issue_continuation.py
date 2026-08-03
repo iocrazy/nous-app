@@ -274,8 +274,12 @@ async def test_needs_input_waits_then_reply_continues_to_completed():
         [{"reply_text": "摊牌", "user_id": "u1", "attachments": None}]
     )
     result = await _run_dispatch_with_continuation(
-        1, {"id": 1}, "agent", "u1",
-        run_turn=run_turn, set_status=set_status,
+        1,
+        {"id": 1},
+        "agent",
+        "u1",
+        run_turn=run_turn,
+        set_status=set_status,
         load_issue=AsyncMock(return_value={"status": "in_progress"}),
         **deps,
     )
@@ -301,8 +305,12 @@ async def test_needs_input_timeout_terminates_like_today():
 
     deps, calls = _mk_wait_deps([None])
     result = await _run_dispatch_with_continuation(
-        1, {"id": 1}, "agent", "u1",
-        run_turn=run_turn, set_status=set_status,
+        1,
+        {"id": 1},
+        "agent",
+        "u1",
+        run_turn=run_turn,
+        set_status=set_status,
         load_issue=AsyncMock(return_value={"status": "in_progress"}),
         **deps,
     )
@@ -322,12 +330,19 @@ async def test_needs_input_wait_rounds_capped():
         return {"outcome": "needs_input", "reason": "and again?"}
 
     deps, calls = _mk_wait_deps(
-        [{"reply_text": f"r{i}", "user_id": "u", "attachments": None} for i in range(10)]
+        [
+            {"reply_text": f"r{i}", "user_id": "u", "attachments": None}
+            for i in range(10)
+        ]
     )
     deps["run_reply"] = run_reply
     result = await _run_dispatch_with_continuation(
-        1, {"id": 1}, "agent", "u1",
-        run_turn=run_turn, set_status=AsyncMock(),
+        1,
+        {"id": 1},
+        "agent",
+        "u1",
+        run_turn=run_turn,
+        set_status=AsyncMock(),
         load_issue=AsyncMock(return_value={"status": "in_progress"}),
         **deps,
     )
@@ -347,8 +362,12 @@ async def test_needs_input_without_gate_behaves_as_today():
         return {"content": "?", "outcome": "needs_input", "reason": "?"}
 
     result = await _run_dispatch_with_continuation(
-        1, {"id": 1}, "agent", "u1",
-        run_turn=run_turn, set_status=set_status,
+        1,
+        {"id": 1},
+        "agent",
+        "u1",
+        run_turn=run_turn,
+        set_status=set_status,
         load_issue=AsyncMock(return_value={"status": "in_progress"}),
     )
     assert result["outcome"] == "needs_input"
@@ -370,9 +389,14 @@ async def test_wait_wakeup_preempted_by_external_close():
         [{"reply_text": "r", "user_id": "u", "attachments": None}]
     )
     result = await _run_dispatch_with_continuation(
-        1, {"id": 1}, "agent", "u1",
-        run_turn=run_turn, set_status=AsyncMock(),
-        load_issue=load_issue, **deps,
+        1,
+        {"id": 1},
+        "agent",
+        "u1",
+        run_turn=run_turn,
+        set_status=AsyncMock(),
+        load_issue=load_issue,
+        **deps,
     )
     assert result.get("preempted") is True
     assert calls["replies"] == []  # 回复回合没有跑

@@ -47,7 +47,9 @@ async def await_user_input(issue_id: int, *, ttl_seconds: int) -> Optional[dict]
     payload = await _recv_async(_topic_for(issue_id), timeout_seconds=ttl_seconds)
     if not isinstance(payload, dict) or not payload.get("reply_text"):
         if payload is not None:
-            logger.warning(f"[input_gate] malformed payload for issue {issue_id}: {payload!r}")
+            logger.warning(
+                f"[input_gate] malformed payload for issue {issue_id}: {payload!r}"
+            )
         return None
     return {
         "reply_text": str(payload["reply_text"]),
@@ -94,7 +96,9 @@ async def mark_awaiting_input(
                    || jsonb_build_object('awaiting_input', (:marker)::jsonb)
                WHERE dbos_workflow_id = :wf""",
             {
-                "marker": json.dumps({"prompt": clipped, "since": now, "issue_id": issue_id}),
+                "marker": json.dumps(
+                    {"prompt": clipped, "since": now, "issue_id": issue_id}
+                ),
                 "wf": workflow_id,
             },
         )

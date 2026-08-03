@@ -27,9 +27,7 @@ async def test_reaper_clears_stale_and_cancels():
 
 
 async def test_reaper_skips_current_version():
-    rows = [
-        {"dbos_workflow_id": "wf-new", "application_version": "v2", "issue_id": 7}
-    ]
+    rows = [{"dbos_workflow_id": "wf-new", "application_version": "v2", "issue_id": 7}]
     with (
         patch.object(
             input_gate, "_fetch_awaiting_rows", new=AsyncMock(return_value=rows)
