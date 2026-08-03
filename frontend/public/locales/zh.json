@@ -2540,14 +2540,10 @@
       "noAvailableSkills": "没有可用技能。请先在技能 tab 创建。",
       "skillsUpdatedToast": "技能已更新",
       "tab": {
-        "dashboard": "仪表盘",
-        "overview": "概览",
-        "files": "文件",
-        "skills": "技能",
-        "runs": "运行记录",
         "versions": "版本",
-        "routines": "例行任务",
-        "permissions": "权限"
+        "workbench": "工作台",
+        "persona": "人格与技能",
+        "profile": "档案"
       },
       "loadErrorPrefix": "加载智能体失败",
       "listLoadError": "加载智能体列表失败",
@@ -2747,7 +2743,12 @@
       "overrideResetToast": "已恢复系统默认",
       "delete": "删除智能体",
       "deleteConfirm": "删除该智能体?其运行记录与技能绑定将被移除;聊天历史仍可查看。",
-      "deletedToast": "智能体已删除"
+      "deletedToast": "智能体已删除",
+      "attributes": "属性",
+      "costSection": "成本与限额",
+      "waitingReplies": "{{count}} 条待你回复",
+      "viewInIssues": "去 Issues 查看",
+      "backToOverview": "返回概览"
     },
     "skills": {
       "addFile": "+ 添加文件",

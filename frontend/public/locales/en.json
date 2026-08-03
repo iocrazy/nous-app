@@ -2540,14 +2540,10 @@
       "noAvailableSkills": "No available skills. Create one in the Skills tab.",
       "skillsUpdatedToast": "Skills updated",
       "tab": {
-        "dashboard": "Dashboard",
-        "overview": "Overview",
-        "files": "Files",
-        "skills": "Skills",
-        "runs": "Runs",
         "versions": "Versions",
-        "routines": "Routines",
-        "permissions": "Permissions"
+        "workbench": "Workbench",
+        "persona": "Persona & Skills",
+        "profile": "Profile"
       },
       "loadErrorPrefix": "Failed to load agent",
       "listLoadError": "Failed to load agents",
@@ -2747,7 +2743,12 @@
       "overrideResetToast": "Restored system defaults",
       "delete": "Delete agent",
       "deleteConfirm": "Delete this agent? Its runs and skill bindings are removed; chat history stays readable.",
-      "deletedToast": "Agent deleted"
+      "deletedToast": "Agent deleted",
+      "attributes": "Attributes",
+      "costSection": "Cost & limits",
+      "waitingReplies": "{{count}} issue(s) waiting for your reply",
+      "viewInIssues": "View in Issues",
+      "backToOverview": "Back to overview"
     },
     "skills": {
       "addFile": "+ Add file",

@@ -1,54 +1,68 @@
 // frontend/components/AILibrary/AgentEditor.tsx
-// Agent edit pane — Overview / Files / Skills sub-tabs.
+// Agent detail shell — three tabs (B2, spec 2026-08-02 §B2).
 //
-// - Overview: editable form (name / description / model / temperature /
-//   max_tokens / enabled). Disabled for system presets unless the user is admin.
-// - Files: IDENTITY.md / SOUL.md / AGENT.md editors (preset = read-only).
-// - Draft state is local; `save()` PATCHes via aiLibraryService and replaces
-//   the hydrated agent immutably on success.
+//   Workbench  what it's doing      → AgentWorkbenchTab
+//   Persona    who it is            → AgentPersonaTab
+//   Profile    its paperwork        → AgentProfileTab
+//
+// Eight sub-tabs used to sit here; LEGACY_TAB_MAP keeps old ``?tab=`` links
+// working. This file keeps what the tabs share: loading the agent, the draft
+// and its single Save, the paused/override banners, and tab routing.
+//
+// Draft state is local; `save()` PATCHes via aiLibraryService and replaces
+// the hydrated agent immutably on success.
+//
+// ⚠️ Every hook stays ABOVE the loading/error early-returns. A useState below
+// them changes the hook count between the loading and loaded renders and
+// blows up with React #310 on every agent open — that regression shipped
+// once already (see resetOverride's note).
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type {
   AgentChatPermissions,
   AILibraryAgent,
   AILibrarySkill,
-  AISettings as AISettingsType,
   NousModelPublic,
 } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { getNousModels, getAIGovernance } from '../../services/aiService';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../Toast';
-import {
-  AlertTriangle,
-  ArrowDown,
-  ArrowUp,
-  Play,
-  Plus,
-  X,
-} from 'lucide-react';
-import { UiSelect } from '../ui';
-import { MarkdownEditor } from './MarkdownEditor';
+import { AlertTriangle, Play } from 'lucide-react';
 import { NewAgentModal } from './NewAgentModal';
-import { AgentIconPicker } from './AgentIconPicker';
-import { AgentDashboardTab } from './AgentDashboardTab';
 import { AgentActionBar } from './AgentActionBar';
-import { AgentRunsSplit } from './AgentRunsSplit';
-import { AgentRoutinesTab } from './AgentRoutinesTab';
-import { VersionHistoryPanel } from './VersionHistoryPanel';
-import PermissionsSection from './PermissionsSection';
+import { AgentWorkbenchTab } from './AgentWorkbenchTab';
+import { AgentPersonaTab } from './AgentPersonaTab';
+import { AgentProfileTab } from './AgentProfileTab';
+import { PROVIDER_DISPLAY_NAMES, getAvailableModels } from './agentEditorModel';
 
-type SubTab =
-  | 'dashboard'
-  | 'overview'
-  | 'files'
-  | 'skills'
-  | 'permissions'
-  | 'runs'
-  | 'routines'
-  | 'versions';
+type SubTab = 'workbench' | 'persona' | 'profile';
+
+/**
+ * Where each of the old eight sub-tabs went (B2, spec 2026-08-02 §B2).
+ * Bookmarks and in-app links carrying the old ``?tab=`` values keep working
+ * instead of silently landing on the default tab.
+ */
+export const LEGACY_TAB_MAP: Record<string, SubTab> = {
+  dashboard: 'workbench',
+  runs: 'workbench',
+  routines: 'workbench',
+  overview: 'persona',
+  files: 'persona',
+  skills: 'persona',
+  permissions: 'persona',
+  versions: 'profile',
+};
+
+const SUB_TABS: SubTab[] = ['workbench', 'persona', 'profile'];
+
+/** Resolve a ``?tab=`` value (new or legacy) to a tab; unknown → workbench. */
+export function resolveSubTab(raw: string | null | undefined): SubTab {
+  if (raw && SUB_TABS.includes(raw as SubTab)) return raw as SubTab;
+  return (raw && LEGACY_TAB_MAP[raw]) || 'workbench';
+}
 
 /**
  * Lift a useful message out of an error. Backend errors come back as
@@ -89,6 +103,10 @@ interface AgentEditorProps {
 export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, onAgentDeleted }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  // Same derivation as AILibraryLayout — the workbench links into the team's
+  // issue list, which needs the team segment.
+  const { teamId } = useParams();
+  const urlPrefix = teamId ? `/team/${teamId}` : '';
   const { userProfile, aiSettings } = useAuth();
   const { addToast } = useToast();
   // Admin escape removed (2026-05-19 QA): backend rejects PATCH on system
@@ -121,7 +139,18 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
     return base;
   }, [aiSettings, nousEnabled, nousLlm]);
   const [agent, setAgent] = useState<AILibraryAgent | null>(null);
-  const [sub, setSub] = useState<SubTab>('dashboard');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sub = resolveSubTab(searchParams.get('tab'));
+  const setSub = useCallback(
+    (next: SubTab) => {
+      // replace: tab switches shouldn't stack history entries between the
+      // gallery and the agent the user came from.
+      const params = new URLSearchParams(searchParams);
+      params.set('tab', next);
+      setSearchParams(params, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
   const [draft, setDraft] = useState<Partial<AILibraryAgent>>({});
   const [permDraft, setPermDraft] = useState<AgentChatPermissions>(() => ({}));
   const [localSkillIds, setLocalSkillIds] = useState<number[]>([]);
@@ -139,7 +168,6 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
     let cancelled = false;
     setAgent(null);
     setError(null);
-    setSub('dashboard');
     setLocalSkillIds([]);
 
     aiLibraryService
@@ -170,7 +198,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
     // retrigger this effect, run cleanup on the previous pass, flip
     // `cancelled=true`, and the in-flight fetch would then silently no-op in
     // both its .then and .finally — UI stuck on "Loading skills..." forever.
-    if (sub !== 'skills' || allSkills !== null) return;
+    if (sub !== 'persona' || allSkills !== null) return;
     let cancelled = false;
     setSkillsLoading(true);
     aiLibraryService
@@ -373,6 +401,29 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
     }
   };
 
+  /**
+   * Chat permissions save their own way: a dedicated endpoint with its own
+   * role gate, deliberately NOT folded into the header Save (permissions are
+   * governance, editable even on presets whose content is locked).
+   */
+  const savePermissions = async (): Promise<void> => {
+    setPermSaving(true);
+    try {
+      const updated = await aiLibraryService.updateAgentChatPermissions(
+        agent.slug,
+        permDraft,
+      );
+      setAgent(updated);
+      setPermDraft(updated.chat_permissions ?? {});
+      addToast(t('aiLibrary.agents.saved', 'Agent saved'), 'success');
+    } catch (err) {
+      console.error('[AgentEditor] updateAgentChatPermissions failed:', err);
+      addToast(t('aiLibrary.agents.saveError', { error: friendlyError(err) }), 'error');
+    } finally {
+      setPermSaving(false);
+    }
+  };
+
   // ─── Skill binding helpers (local-state only; PATCH on Save) ───────────────
 
   const addSkill = (skillId: number): void => {
@@ -430,17 +481,6 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
     );
     onAgentForked?.(newSlug);
   };
-
-  const subTabs: SubTab[] = [
-    'dashboard',
-    'overview',
-    'files',
-    'skills',
-    'permissions',
-    'runs',
-    'routines',
-    'versions',
-  ];
 
   return (
     <div>
@@ -517,13 +557,13 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
       )}
 
       <nav className="mb-4 flex gap-1 border-b border-ink-800">
-        {subTabs.map((k) => (
+        {SUB_TABS.map((k) => (
           <button
             key={k}
             onClick={() => setSub(k)}
             className={`px-3 py-2 text-sm font-medium transition-colors -mb-px border-b-2 ${
               sub === k
-                ? 'border-indigo-500 text-ink-100'
+                ? 'border-[var(--accent-border)] text-ink-100'
                 : 'border-transparent text-ink-500 hover:text-ink-300'
             }`}
           >
@@ -532,307 +572,39 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
         ))}
       </nav>
 
-      {sub === 'dashboard' && (
-        <AgentDashboardTab slug={slug} onOpenRuns={() => setSub('runs')} />
+      {sub === 'workbench' && (
+        <AgentWorkbenchTab agent={agent} slug={slug} urlPrefix={urlPrefix} />
       )}
 
-      {sub === 'overview' && (
-        <section className="space-y-4 text-sm">
-          {agent.paused_reason && (
-            <PausedBanner
-              reason={agent.paused_reason}
-              disabled={catalogLocked || resuming}
-              onResume={handleResume}
-              resuming={resuming}
-            />
-          )}
-          {isPreset &&
-            (agent.override_scope ? (
-              <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-2 text-xs text-[var(--accent-text)]">
-                <span>
-                  {t(
-                    'aiLibrary.agents.overrideActive',
-                    'Customized ({{scope}} layer) — your edits apply only to you; the system default is untouched.',
-                    { scope: agent.override_scope },
-                  )}
-                </span>
-                <button
-                  onClick={resetOverride}
-                  disabled={resetting}
-                  className="shrink-0 rounded-md border border-[var(--accent-border)] px-2.5 py-1 font-medium text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {resetting
-                    ? t('common.loading')
-                    : t('aiLibrary.agents.resetToDefaults', 'Reset to defaults')}
-                </button>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-ink-700 bg-ink-800/60 px-3 py-2 text-xs text-ink-400">
-                {t(
-                  'aiLibrary.agents.presetOverrideHint',
-                  'System agent — edits are saved as your personal customization (visible only to you) and can be reset anytime.',
-                )}
-              </div>
-            ))}
-
-          <div className="flex items-center gap-3">
-            <AgentIconPicker
-              value={draft.icon ?? null}
-              onChange={(slug) => updateDraft('icon', slug)}
-              disabled={catalogLocked}
-              size={24}
-            />
-            <p className="text-xs text-ink-500">
-              {t(
-                'aiLibrary.agents.iconHint',
-                'Icon shown in the sidebar and throughout the app.',
-              )}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-ink-400">
-                {t('aiLibrary.agents.nameLabel', 'Name')}
-              </label>
-              <input
-                type="text"
-                value={draft.name ?? ''}
-                onChange={(e) => updateDraft('name', e.target.value)}
-                disabled={catalogLocked}
-                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-ink-400">
-                {t('aiLibrary.agents.slugLabel', 'Slug')}
-              </label>
-              <input
-                type="text"
-                value={agent.slug}
-                disabled
-                className="mt-1 w-full rounded-md border border-ink-800 bg-ink-950 px-3 py-2 text-sm text-ink-400 font-mono cursor-not-allowed"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-ink-400">
-              {t('aiLibrary.agents.descriptionLabel', 'Description')}
-            </label>
-            <textarea
-              value={draft.description ?? ''}
-              onChange={(e) => updateDraft('description', e.target.value)}
-              disabled={catalogLocked}
-              rows={2}
-              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-ink-400">
-              {t('aiLibrary.agents.modelLabel', 'Model')}
-            </label>
-            {renderModelSelect({
-              value: draft.model ?? '',
-              groups: modelGroups,
-              disabled: readOnly,
-              onChange: (v) => updateDraft('model', v),
-              providerNotEnabledLabel: t(
-                'aiLibrary.agents.modelProviderNotEnabled',
-                'provider not enabled',
-              ),
-              noModelsLabel: t('aiLibrary.agents.noModelsAvailable'),
-            })}
-            {modelGroups.every((g) => g.models.length === 0) && (
-              <button
-                type="button"
-                onClick={() => navigate('/settings?tab=ai')}
-                className="mt-1.5 text-xs text-warn hover:underline"
-              >
-                {t('aiLibrary.agents.goToAISettings', 'Go to AI Settings')} →
-              </button>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-ink-400">
-                {t('aiLibrary.agents.temperatureLabel', 'Temperature')}
-              </label>
-              <input
-                type="number"
-                step="0.1"
-                min={0}
-                max={2}
-                value={draft.temperature ?? 0}
-                onChange={(e) => {
-                  // Round to one decimal so 0.7 doesn't round-trip as
-                  // 0.6999999... (the float the DB stores after a
-                  // 0.1+0.1+0.1+... seed). One decimal matches the
-                  // step= attribute and the UX intent.
-                  const raw = Number(e.target.value);
-                  const tidy = Number.isFinite(raw) ? Math.round(raw * 10) / 10 : 0;
-                  updateDraft('temperature', tidy);
-                }}
-                disabled={readOnly}
-                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-ink-400">
-                {t('aiLibrary.agents.maxTokensLabel', 'Max tokens')}
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={100000}
-                value={draft.max_tokens ?? 0}
-                onChange={(e) => updateDraft('max_tokens', Number(e.target.value))}
-                disabled={readOnly}
-                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-ink-400">
-                {t('aiLibrary.agents.enabledLabel', 'Enabled')}
-              </label>
-              <label className="mt-1 flex items-center gap-2 rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100">
-                <input
-                  type="checkbox"
-                  checked={draft.enabled ?? false}
-                  onChange={(e) => updateDraft('enabled', e.target.checked)}
-                  disabled={catalogLocked}
-                  className="h-4 w-4"
-                />
-                <span>{(draft.enabled ?? false) ? t('common.yes', 'Yes') : t('common.no', 'No')}</span>
-              </label>
-            </div>
-          </div>
-
-          <BudgetFields
-            tokenBudget={draft.monthly_token_budget ?? null}
-            costCentsBudget={draft.monthly_cost_cents_budget ?? null}
-            disabled={catalogLocked}
-            onTokenChange={(v) => updateDraft('monthly_token_budget', v)}
-            onCostChange={(v) => updateDraft('monthly_cost_cents_budget', v)}
-          />
-
-          <RunLimitFields
-            timeoutSec={draft.timeout_sec ?? null}
-            maxConcurrentRuns={draft.max_concurrent_runs ?? null}
-            disabled={catalogLocked}
-            onTimeoutChange={(v) => updateDraft('timeout_sec', v)}
-            onConcurrencyChange={(v) => updateDraft('max_concurrent_runs', v)}
-          />
-
-          <div className="pt-1 text-xs text-ink-500">
-            {t('aiLibrary.agents.boundSkills')}: <span className="text-ink-200 font-medium">{agent.skill_ids.length}</span>
-          </div>
-        </section>
-      )}
-
-      {sub === 'files' && (
-        <section className="space-y-5">
-          {readOnly && (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-warn">
-              {t('aiLibrary.agents.presetReadOnly')}
-            </div>
-          )}
-          <div>
-            <h3 className="mb-2 text-sm font-semibold text-ink-200">
-              {t('aiLibrary.agents.identityTitle')} <span className="text-ink-500 font-normal">(IDENTITY.md)</span>
-            </h3>
-            <MarkdownEditor
-              value={draft.identity_md ?? ''}
-              onChange={(v) => setDraft((d) => ({ ...d, identity_md: v }))}
-              disabled={readOnly}
-            />
-          </div>
-          <div>
-            <h3 className="mb-2 text-sm font-semibold text-ink-200">
-              {t('aiLibrary.agents.soulTitle')} <span className="text-ink-500 font-normal">(SOUL.md)</span>
-            </h3>
-            <MarkdownEditor
-              value={draft.soul_md ?? ''}
-              onChange={(v) => setDraft((d) => ({ ...d, soul_md: v }))}
-              disabled={readOnly}
-            />
-          </div>
-          <div>
-            <h3 className="mb-2 text-sm font-semibold text-ink-200">
-              {t('aiLibrary.agents.instructionsTitle')} <span className="text-ink-500 font-normal">(AGENT.md)</span>
-            </h3>
-            <MarkdownEditor
-              value={draft.agent_md ?? ''}
-              onChange={(v) => setDraft((d) => ({ ...d, agent_md: v }))}
-              disabled={readOnly}
-              rows={16}
-            />
-          </div>
-        </section>
-      )}
-
-      {sub === 'skills' && (
-        <SkillsSection
+      {sub === 'persona' && (
+        <AgentPersonaTab
+          agent={agent}
+          draft={draft}
+          updateDraft={updateDraft}
+          readOnly={readOnly}
+          catalogLocked={catalogLocked}
+          modelGroups={modelGroups}
           localSkillIds={localSkillIds}
           allSkills={allSkills}
           skillsLoading={skillsLoading}
-          readOnly={catalogLocked}
-          onAdd={addSkill}
-          onRemove={removeSkill}
-          onMove={moveSkill}
+          onAddSkill={addSkill}
+          onRemoveSkill={removeSkill}
+          onMoveSkill={moveSkill}
+          permDraft={permDraft}
+          onPermChange={setPermDraft}
+          onSavePermissions={savePermissions}
+          permSaving={permSaving}
         />
       )}
 
-      {sub === 'permissions' && (
-        <div>
-          <PermissionsSection value={permDraft} onChange={setPermDraft} />
-          <div className="mt-4 flex justify-end">
-            <button
-              type="button"
-              disabled={permSaving}
-              className="rounded-lg btn-tint-indigo px-4 py-2 text-sm font-medium"
-              onClick={async () => {
-                setPermSaving(true);
-                try {
-                  const updated = await aiLibraryService.updateAgentChatPermissions(
-                    agent.slug,
-                    permDraft,
-                  );
-                  setAgent(updated);
-                  setPermDraft(updated.chat_permissions ?? {});
-                  addToast(
-                    t('aiLibrary.agents.saved', 'Agent saved'),
-                    'success',
-                  );
-                } catch (err) {
-                  console.error('[AgentEditor] updateAgentChatPermissions failed:', err);
-                  addToast(
-                    t('aiLibrary.agents.saveError', { error: friendlyError(err) }),
-                    'error',
-                  );
-                } finally {
-                  setPermSaving(false);
-                }
-              }}
-            >
-              {permSaving ? t('common.saving') : t('common.save', 'Save')}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {sub === 'runs' && <AgentRunsSplit slug={slug} />}
-
-      {sub === 'routines' && <AgentRoutinesTab agent={agent} />}
-
-      {sub === 'versions' && (
-        <VersionHistoryPanel
-          kind="agent"
+      {sub === 'profile' && (
+        <AgentProfileTab
+          agent={agent}
           slug={slug}
+          draft={draft}
+          updateDraft={updateDraft}
+          catalogLocked={catalogLocked}
           onRollback={() => {
-            // Refetch agent so the form picks up the rolled-back content
             void aiLibraryService.getAgent(slug).then((a) => {
               setAgent(a);
               setDraft(buildDraft(a));
@@ -892,337 +664,6 @@ const ScopeBadge: React.FC<{ agent: AILibraryAgent }> = ({ agent }) => {
   return (
     <span className={`${base} border-ink-700 bg-ink-900 text-ink-400`}>
       {t('aiLibrary.agents.scopeBadgePrivate', 'Private')}
-    </span>
-  );
-};
-
-/**
- * Model group — one entry per enabled provider, with its available models.
- * Used to render grouped <optgroup> in the model picker.
- */
-interface ProviderModelGroup {
-  providerKey: string;
-  providerName: string;
-  models: string[];
-}
-
-// Friendly names for providers when the Overview model picker renders optgroups.
-// Keep in sync with AISettings.tsx PROVIDER_META (we don't import from there to
-// avoid a circular-ish dependency; this mapping is small and stable).
-const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
-  openai: 'OpenAI',
-  deepseek: 'DeepSeek',
-  doubao: 'Doubao',
-  minimax: 'MiniMax',
-  kimi: 'Kimi',
-  qwen: 'Qwen',
-  volcengine: 'Volcengine',
-  ollama: 'Ollama',
-  lmstudio: 'LM Studio',
-  nous: 'Nous (Platform)',
-};
-
-/**
- * Collect the curated whitelist of models exposed by every enabled
- * provider in aiSettings. Reads ``config.enabled_models`` (set in the
- * AI Settings UI via "Add Model" chips) — this is intentionally narrow
- * so users see only the models they care about, not the full 100+
- * provider catalog.
- *
- * Falls back to ``[selected_model]`` when ``enabled_models`` is missing
- * (legacy accounts; aiService.getAISettings auto-seeds this on read).
- */
-export function getAvailableModels(
-  settings: AISettingsType | null | undefined,
-): ProviderModelGroup[] {
-  if (!settings?.providers) return [];
-  return Object.entries(settings.providers)
-    .filter(([, config]) => config?.enabled)
-    .map(([key, config]) => {
-      const whitelist = config?.enabled_models;
-      const fallback = config?.selected_model ? [config.selected_model] : [];
-      const models = Array.from(new Set(whitelist ?? fallback)).filter(Boolean);
-      return {
-        providerKey: key,
-        providerName: PROVIDER_DISPLAY_NAMES[key] ?? key,
-        models,
-      };
-    })
-    .filter((g) => g.models.length > 0);
-}
-
-/**
- * Render the grouped model <select>. If the current value is not present in
- * any provider group (e.g. the user has disabled the provider that owned it),
- * we still show it as a leading disabled option so the user sees the stale
- * selection rather than it silently flipping to the first option.
- */
-function renderModelSelect(params: {
-  value: string;
-  groups: ProviderModelGroup[];
-  disabled: boolean;
-  onChange: (v: string) => void;
-  providerNotEnabledLabel: string;
-  noModelsLabel: string;
-}): React.ReactElement {
-  const { value, groups, disabled, onChange, providerNotEnabledLabel, noModelsLabel } =
-    params;
-  const knownModels = new Set(groups.flatMap((g) => g.models));
-  const showOrphan = value !== '' && !knownModels.has(value);
-
-  return (
-    <UiSelect
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      disabled={disabled}
-      className="mt-1 w-full font-mono"
-    >
-      {showOrphan && (
-        <option value={value}>
-          {value} ({providerNotEnabledLabel})
-        </option>
-      )}
-      {groups.length === 0 && !showOrphan && (
-        <option value="">{noModelsLabel}</option>
-      )}
-      {groups.map((group) => (
-        <optgroup key={group.providerKey} label={group.providerName}>
-          {group.models.map((m) => (
-            <option key={`${group.providerKey}:${m}`} value={m}>
-              {m}
-            </option>
-          ))}
-        </optgroup>
-      ))}
-    </UiSelect>
-  );
-}
-
-/**
- * Skills sub-tab body — renders the bound skill list (with reorder + remove)
- * plus the "Available Skills" picker underneath. All mutations flow through
- * local state (``localSkillIds``); the PATCH is triggered by the header Save
- * button, which reads both the Overview draft and the skill ids at save time.
- *
- * Read-only mode (system preset + non-admin viewer) hides every action button
- * but still shows the bound list so the viewer can see what's composed.
- */
-const SkillsSection: React.FC<{
-  localSkillIds: number[];
-  allSkills: AILibrarySkill[] | null;
-  skillsLoading: boolean;
-  readOnly: boolean;
-  onAdd: (skillId: number) => void;
-  onRemove: (skillId: number) => void;
-  onMove: (skillId: number, direction: -1 | 1) => void;
-}> = ({ localSkillIds, allSkills, skillsLoading, readOnly, onAdd, onRemove, onMove }) => {
-  const { t } = useTranslation();
-
-  // Build a quick lookup so we can render skill metadata for the bound list
-  // without scanning `allSkills` on every row.
-  const skillById = useMemo(() => {
-    const map = new Map<number, AILibrarySkill>();
-    (allSkills ?? []).forEach((s) => map.set(s.id, s));
-    return map;
-  }, [allSkills]);
-
-  // Bound list preserves the user-chosen order (== sort_order on save).
-  const boundSkills = useMemo(
-    () =>
-      localSkillIds.map((id) => ({
-        id,
-        skill: skillById.get(id) ?? null,
-      })),
-    [localSkillIds, skillById],
-  );
-
-  // Available list = every accessible skill minus the ones already bound.
-  // Stable order = the server order from ``listSkills`` (name asc with preset
-  // grouping today).
-  const availableSkills = useMemo(() => {
-    if (!allSkills) return [];
-    const bound = new Set(localSkillIds);
-    return allSkills.filter((s) => !bound.has(s.id));
-  }, [allSkills, localSkillIds]);
-
-  if (skillsLoading && allSkills === null) {
-    return <p className="text-sm text-ink-500">{t('aiLibrary.agents.loadingSkills')}</p>;
-  }
-
-  return (
-    <section className="space-y-6">
-      {readOnly && (
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-warn">
-          {t('aiLibrary.agents.presetReadOnly')}
-        </div>
-      )}
-
-      <div>
-        <h3 className="mb-2 text-sm font-semibold text-ink-200">
-          {t('aiLibrary.agents.currentSkills', 'Bound Skills')}
-          <span className="ml-2 text-xs font-normal text-ink-500">
-            ({boundSkills.length})
-          </span>
-        </h3>
-        {boundSkills.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-ink-800 bg-ink-900/40 px-3 py-4 text-sm text-ink-500">
-            {t(
-              'aiLibrary.agents.noSkillsBound',
-              'No skills bound yet. Add one below.',
-            )}
-          </div>
-        ) : (
-          <ul className="space-y-1.5">
-            {boundSkills.map(({ id, skill }, idx) => (
-              <li
-                key={id}
-                className="flex items-center gap-3 rounded-lg border border-ink-800 bg-ink-900/60 px-3 py-2"
-              >
-                <span className="text-xl leading-none" aria-hidden>
-                  {skill?.icon ?? ''}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-ink-100">
-                    {skill?.name ?? `Skill #${id}`}
-                  </div>
-                  {skill?.slug && (
-                    <div className="truncate font-mono text-xs text-ink-500">
-                      {skill.slug}
-                    </div>
-                  )}
-                </div>
-                {skill && <SkillScopeBadge skill={skill} />}
-                {!readOnly && (
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => onMove(id, -1)}
-                      disabled={idx === 0}
-                      className="rounded-md border border-ink-700 bg-ink-800 p-1.5 text-ink-300 hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-40"
-                      title={t('aiLibrary.agents.moveUp', 'Move up')}
-                      aria-label={t('aiLibrary.agents.moveUp', 'Move up')}
-                    >
-                      <ArrowUp size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onMove(id, 1)}
-                      disabled={idx === boundSkills.length - 1}
-                      className="rounded-md border border-ink-700 bg-ink-800 p-1.5 text-ink-300 hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-40"
-                      title={t('aiLibrary.agents.moveDown', 'Move down')}
-                      aria-label={t('aiLibrary.agents.moveDown', 'Move down')}
-                    >
-                      <ArrowDown size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onRemove(id)}
-                      className="rounded-md border border-red-500/30 bg-red-500/10 p-1.5 text-red-300 hover:bg-red-500/20"
-                      title={t('aiLibrary.agents.removeSkill', 'Remove')}
-                      aria-label={t('aiLibrary.agents.removeSkill', 'Remove')}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {!readOnly && (
-        <div>
-          <h3 className="mb-2 text-sm font-semibold text-ink-200">
-            {t('aiLibrary.agents.availableSkills', 'Available Skills')}
-            <span className="ml-2 text-xs font-normal text-ink-500">
-              ({availableSkills.length})
-            </span>
-          </h3>
-          {availableSkills.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-ink-800 bg-ink-900/40 px-3 py-4 text-sm text-ink-500">
-              {t(
-                'aiLibrary.agents.noAvailableSkills',
-                'No available skills. Create one in the Skills tab.',
-              )}
-            </div>
-          ) : (
-            <ul className="space-y-1.5">
-              {availableSkills.map((skill) => (
-                <li
-                  key={skill.id}
-                  className="flex items-center gap-3 rounded-lg border border-ink-800 bg-ink-900/40 px-3 py-2"
-                >
-                  <span className="text-xl leading-none" aria-hidden>
-                    {skill.icon ?? ''}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-ink-100">
-                      {skill.name}
-                    </div>
-                    {skill.slug && (
-                      <div className="truncate font-mono text-xs text-ink-500">
-                        {skill.slug}
-                      </div>
-                    )}
-                  </div>
-                  <SkillScopeBadge skill={skill} />
-                  <button
-                    type="button"
-                    onClick={() => onAdd(skill.id)}
-                    className="inline-flex items-center gap-1 rounded-md border border-[var(--accent-border)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"
-                  >
-                    <Plus size={12} />
-                    {t('aiLibrary.agents.addSkill', 'Add')}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </section>
-  );
-};
-
-/**
- * Compact scope indicator for the skill-binding rows. Mirrors the preset /
- * team / project / private pattern used elsewhere in the AI Library UI.
- */
-const SkillScopeBadge: React.FC<{ skill: AILibrarySkill }> = ({ skill }) => {
-  const { t } = useTranslation();
-  const base = 'rounded border px-2 py-0.5 text-xs whitespace-nowrap';
-  const isPreset =
-    skill.is_public && skill.team_id == null && skill.project_id == null;
-
-  if (isPreset) {
-    return (
-      <span className={`${base} border-ink-700 bg-ink-800 text-ink-300`}>
-        {t('aiLibrary.agents.systemPreset', 'System Preset')}
-      </span>
-    );
-  }
-  if (skill.team_id != null) {
-    return (
-      <span className={`${base} border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent-text)]`}>
-        {t('aiLibrary.skills.scopeBadgeTeam', 'Team: {{name}}', {
-          name: skill.team_name ?? skill.team_id,
-        })}
-      </span>
-    );
-  }
-  if (skill.project_id != null) {
-    return (
-      <span className={`${base} border-emerald-500/40 bg-emerald-500/10 text-emerald-300`}>
-        {t('aiLibrary.skills.scopeBadgeProject', 'Project: {{name}}', {
-          name: skill.project_name ?? skill.project_id,
-        })}
-      </span>
-    );
-  }
-  return (
-    <span className={`${base} border-ink-700 bg-ink-900 text-ink-400`}>
-      {t('aiLibrary.skills.scopeBadgePrivate', 'Private')}
     </span>
   );
 };
@@ -1325,163 +766,4 @@ const PausedBanner: React.FC<{
  * digits without React emitting spurious 0s or NaN — we parse on change and
  * send `null` back up when the field is empty.
  */
-/**
- * Run limits (mig 286, paperclip P4). timeout_sec bounds one run's tool loop
- * (checked between LLM iterations); max_concurrent_runs is a pre-flight cap
- * enforced by RunRecorder. Blank = unlimited.
- */
-const RunLimitFields: React.FC<{
-  timeoutSec: number | null;
-  maxConcurrentRuns: number | null;
-  disabled: boolean;
-  onTimeoutChange: (value: number | null) => void;
-  onConcurrencyChange: (value: number | null) => void;
-}> = ({ timeoutSec, maxConcurrentRuns, disabled, onTimeoutChange, onConcurrencyChange }) => {
-  const { t } = useTranslation();
-  const parseIntOr = (raw: string, min: number): number | null => {
-    if (raw === '') return null;
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) ? Math.max(min, Math.floor(parsed)) : null;
-  };
-  return (
-    <div className="space-y-1.5">
-      <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
-        {t('aiLibrary.agents.limits.sectionLabel', 'Run limits')}
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-xs font-medium text-ink-400">
-            {t('aiLibrary.agents.limits.timeoutLabel', 'Timeout (sec)')}
-          </label>
-          <input
-            type="number"
-            min={0}
-            step={10}
-            value={timeoutSec ?? ''}
-            placeholder={t('aiLibrary.agents.budget.unlimitedPlaceholder', 'Unlimited')}
-            onChange={(e) => onTimeoutChange(parseIntOr(e.target.value, 0))}
-            disabled={disabled}
-            className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed tabular-nums"
-          />
-          <p className="mt-1 text-xs text-ink-500">
-            {t(
-              'aiLibrary.agents.limits.timeoutHint',
-              "Max wall-clock per run, checked between LLM iterations. Blank or 0 = no cap.",
-            )}
-          </p>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-ink-400">
-            {t('aiLibrary.agents.limits.concurrencyLabel', 'Max concurrent runs')}
-          </label>
-          <input
-            type="number"
-            min={1}
-            step={1}
-            value={maxConcurrentRuns ?? ''}
-            placeholder={t('aiLibrary.agents.budget.unlimitedPlaceholder', 'Unlimited')}
-            onChange={(e) => onConcurrencyChange(parseIntOr(e.target.value, 1))}
-            disabled={disabled}
-            className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed tabular-nums"
-          />
-          <p className="mt-1 text-xs text-ink-500">
-            {t(
-              'aiLibrary.agents.limits.concurrencyHint',
-              "New runs are rejected while this many are already running. Blank = unlimited.",
-            )}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const BudgetFields: React.FC<{
-  tokenBudget: number | null;
-  costCentsBudget: number | null;
-  disabled: boolean;
-  onTokenChange: (value: number | null) => void;
-  onCostChange: (value: number | null) => void;
-}> = ({ tokenBudget, costCentsBudget, disabled, onTokenChange, onCostChange }) => {
-  const { t } = useTranslation();
-  // Display dollars for the cost budget to match the Runs tab's cost column,
-  // but we still PATCH the column in cents. 500 cents ⇢ "5.00" displayed.
-  const dollarsStr = costCentsBudget != null ? (costCentsBudget / 100).toFixed(2) : '';
-  return (
-    <div className="space-y-1.5">
-      <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
-        {t('aiLibrary.agents.budget.sectionLabel', 'Monthly budget')}
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-xs font-medium text-ink-400">
-            {t('aiLibrary.agents.budget.tokenBudgetLabel', 'Token budget')}
-          </label>
-          <input
-            type="number"
-            min={0}
-            step={1000}
-            value={tokenBudget ?? ''}
-            placeholder={t('aiLibrary.agents.budget.unlimitedPlaceholder', 'Unlimited')}
-            onChange={(e) => {
-              const raw = e.target.value;
-              if (raw === '') {
-                onTokenChange(null);
-                return;
-              }
-              const parsed = Number(raw);
-              onTokenChange(Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : null);
-            }}
-            disabled={disabled}
-            className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed tabular-nums"
-          />
-          <p className="mt-1 text-xs text-ink-500">
-            {t(
-              'aiLibrary.agents.budget.tokenBudgetHint',
-              'Cap on total prompt+completion tokens this calendar month. Blank or 0 = unlimited.',
-            )}
-          </p>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-ink-400">
-            {t('aiLibrary.agents.budget.costBudgetLabel', 'Cost budget (USD)')}
-          </label>
-          <div className="mt-1 flex items-center gap-2">
-            <span className="text-ink-500 text-sm">$</span>
-            <input
-              type="number"
-              min={0}
-              step={0.01}
-              value={dollarsStr}
-              placeholder={t('aiLibrary.agents.budget.unlimitedPlaceholder', 'Unlimited')}
-              onChange={(e) => {
-                const raw = e.target.value;
-                if (raw === '') {
-                  onCostChange(null);
-                  return;
-                }
-                const dollars = Number(raw);
-                if (!Number.isFinite(dollars)) {
-                  onCostChange(null);
-                  return;
-                }
-                // cents = round(dollars * 100) — avoid float drift like 19.99 * 100 === 1998.9999...
-                onCostChange(Math.max(0, Math.round(dollars * 100)));
-              }}
-              disabled={disabled}
-              className="flex-1 rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed tabular-nums"
-            />
-          </div>
-          <p className="mt-1 text-xs text-ink-500">
-            {t(
-              'aiLibrary.agents.budget.costBudgetHint',
-              "Hard cap on this month's spend. The sweeper pauses the agent within ~60s of crossing the cap.",
-            )}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 export default AgentEditor;
