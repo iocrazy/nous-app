@@ -45,6 +45,7 @@ from dbos import DBOS, SetWorkflowID
 from fastapi import APIRouter, HTTPException, status
 from loguru import logger
 
+from app.agent_framework import input_gate
 from app.core.deps import AuthDep
 from app.repositories.issue_repository import issue_repository
 from app.schemas.issue_message import (
@@ -118,6 +119,70 @@ def _dispatch_respond_to_issue_reply(
             body,
             attachments,
         )
+
+
+async def _load_awaiting_marker(workflow_id: str) -> Optional[dict]:
+    """按 dbos_workflow_id 取 task_tracking.metadata.awaiting_input；无则 None。"""
+    import json
+
+    from app.db import engine as db_engine
+
+    row = await db_engine.fetch_one(
+        "SELECT metadata->'awaiting_input' AS marker FROM public.task_tracking "
+        "WHERE dbos_workflow_id = :wf",
+        {"wf": workflow_id},
+    )
+    marker = (row or {}).get("marker")
+    if isinstance(marker, str):
+        try:
+            marker = json.loads(marker)
+        except ValueError:
+            return None
+    return marker if isinstance(marker, dict) else None
+
+
+async def _workflow_is_terminal(workflow_id: str) -> bool:
+    """DBOS 视角 workflow 是否已终态（SUCCESS/ERROR/CANCELLED…）。
+    查询失败按"终态"处理 —— 宁可走旧路径也不投递到虚空。"""
+    from app.db import engine as db_engine
+
+    try:
+        row = await db_engine.fetch_one(
+            "SELECT status FROM dbos.workflow_status WHERE workflow_uuid = :wf",
+            {"wf": workflow_id},
+        )
+        return (row or {}).get("status") not in ("PENDING", "ENQUEUED")
+    except Exception:  # noqa: BLE001
+        return True
+
+
+async def _try_wake_waiting_workflow(
+    issue_row: dict, user_id: str, reply_text: str, attachments: Optional[list]
+) -> bool:
+    """回复分流（spec 2026-07-30 §4）：True=已投递给挂起等 needs_input 回复的
+    dispatch workflow（原地续跑，不再另起 respond_to_issue_reply——后者会撞上
+    dispatch 自己持有的 execution_locked_at 自旋 10 分钟后 defer）；False=调用方
+    走旧路径 dispatch。
+
+    已接受的竞态窗口：终态预检通过后、send 落地前 workflow 恰好超时终结（72h
+    TTL 的最后几毫秒），消息被 DBOS 静默丢弃——与现状"dispatch 后 workflow 在
+    跑 turn 前崩溃"同形（乐观评论已回给 UI 但无 turn 落库），用户重发即可。
+    """
+    wf_id = issue_row.get("dbos_workflow_id")
+    if not wf_id:
+        return False
+    marker = await _load_awaiting_marker(wf_id)
+    if not marker:
+        return False
+    if await _workflow_is_terminal(wf_id):
+        return False
+    return await input_gate.signal_user_reply(
+        workflow_id=wf_id,
+        issue_id=int(issue_row["id"]),
+        reply_text=reply_text,
+        user_id=user_id,
+        attachments=attachments,
+    )
 
 
 async def _assert_issue_visible(issue_id: int, auth) -> dict:
@@ -406,6 +471,20 @@ async def post_issue_message(
             raise HTTPException(500, "failed to save note")
         return IssueMessagePostResponse(
             comment=_optimistic_comment(issue_id, payload.body, auth), agent_run=None
+        )
+
+    # ── Wake path: waiting-workflow diversion first (spec 2026-07-30 §4) ──
+    # A dispatch suspended on the needs_input gate consumes the reply in
+    # place; only when no waiter exists (or delivery fails) does the reply
+    # start a fresh respond_to_issue_reply turn (the pre-existing path).
+    if await _try_wake_waiting_workflow(
+        issue_row, owner_id, payload.body, attachments_payload
+    ):
+        logger.info(f"[issue_reply] issue {issue_id}: delivered to waiting workflow")
+        return IssueMessagePostResponse(
+            comment=_optimistic_comment(issue_id, payload.body, auth),
+            agent_run=None,
+            agent_dispatched=True,
         )
 
     # ── Wake path (Spec-1b) ───────────────────────────────────────────────
