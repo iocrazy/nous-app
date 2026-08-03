@@ -39,6 +39,19 @@ async def _recv_async(topic: str, *, timeout_seconds: int) -> Any:
 
 
 async def _send_async(workflow_id: str, payload: dict, *, topic: str) -> None:
+    """Send via the gateway DBOSClient when present, else the DBOS singleton.
+
+    approval_gate 的同款分支，但对本模块是生死攸关而非 dormant：回复端点跑
+    在 GATEWAY 进程（enqueue-only DBOSClient，**没有** DBOS 单例——
+    ``DBOS.send_async`` 恒抛 "No DBOS was created yet"，2026-08-03 E2E 实测
+    唤醒因此永远降级旧路径、撞挂起 dispatch 自己持有的执行锁）。worker /
+    combined 角色没有 client，走单例分支。"""
+    from app.services.infra.dbos_orchestrator import get_dbos_client
+
+    client = get_dbos_client()
+    if client is not None:
+        await client.send_async(workflow_id, payload, topic=topic)
+        return
     from dbos import DBOS
 
     await DBOS.send_async(workflow_id, payload, topic=topic)

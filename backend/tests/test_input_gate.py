@@ -59,6 +59,40 @@ async def test_signal_user_reply_sends_on_topic():
     )
 
 
+async def test_send_async_prefers_gateway_client():
+    """回复端点跑在 GATEWAY（enqueue-only DBOSClient,无 DBOS 单例）——
+    _send_async 必须优先走 client,否则唤醒在生产恒失败降级旧路径
+    （2026-08-03 E2E 实测 'No DBOS was created yet'）。"""
+    fake_client = AsyncMock()
+    with patch(
+        "app.services.infra.dbos_orchestrator.get_dbos_client",
+        return_value=fake_client,
+    ):
+        await input_gate._send_async(
+            "wf-1", {"reply_text": "hi"}, topic="needs_input:1"
+        )
+    fake_client.send_async.assert_awaited_once_with(
+        "wf-1", {"reply_text": "hi"}, topic="needs_input:1"
+    )
+
+
+async def test_send_async_falls_back_to_singleton_without_client():
+    """worker / combined 角色没有 client → 走 DBOS 单例分支。"""
+    with (
+        patch(
+            "app.services.infra.dbos_orchestrator.get_dbos_client",
+            return_value=None,
+        ),
+        patch("dbos.DBOS.send_async", new=AsyncMock()) as singleton_send,
+    ):
+        await input_gate._send_async(
+            "wf-1", {"reply_text": "hi"}, topic="needs_input:1"
+        )
+    singleton_send.assert_awaited_once_with(
+        "wf-1", {"reply_text": "hi"}, topic="needs_input:1"
+    )
+
+
 def test_awaiting_marker_authoritative_home_is_issues_table():
     """标记权威位钉在 issues.execution_state —— issue dispatch 没有
     task_tracking 行（2026-08-03 E2E 实测），写回 task_tracking 独家会让
