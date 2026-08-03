@@ -2748,7 +2748,17 @@
       "costSection": "Cost & limits",
       "waitingReplies": "{{count}} issue(s) waiting for your reply",
       "viewInIssues": "View in Issues",
-      "backToOverview": "Back to overview"
+      "backToOverview": "Back to overview",
+      "newAgentHintV2": "Start from an official template and customize it, or build from blank.",
+      "templateStep": "1. Start from",
+      "identityStep": "2. Name it",
+      "scopeStep": "3. Who can use it",
+      "blankTemplate": "Blank agent",
+      "blankTemplateHint": "Write it yourself",
+      "forkFromHintV2": "Copies the identity / soul / instructions, model settings and skill bindings.",
+      "slugTaken": "That slug is already in use.",
+      "scopeIdRequired": "Pick one, or the agent is created as private.",
+      "forkSkillsNotCopied": "Agent created, but its skills were not copied — bind them manually."
     },
     "skills": {
       "addFile": "+ Add file",
