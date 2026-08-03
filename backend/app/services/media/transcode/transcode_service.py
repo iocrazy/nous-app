@@ -21,7 +21,11 @@ from loguru import logger
 from app.agent_framework.process_lifecycle import safe_popen_kwargs
 from app.core.config import settings
 from app.repositories.resources_repository import ResourcesRepository
-from app.services.library.media_storage import materialize, resolve_media_source
+from app.services.library.media_storage import (
+    discard_local_source,
+    materialize,
+    resolve_media_source,
+)
 from app.services.media.transcode.transcode_probe import TranscodeProbe
 
 
@@ -314,6 +318,16 @@ class TranscodeService:
 
                         if on_progress:
                             await on_progress(100, "Done")
+
+                        # H.264 快通道回收本地 HLS 目录(I1,discard-review):
+                        # 标准路径早就有这行,快通道(is_h264,绝大多数下载的
+                        # MP4 都会走这里)此前完全没堵,derived/hls/ 的泄漏
+                        # 几乎全部来自这条路径。必须放在 phase-1 与 phase-2
+                        # 都发布完之后 —— phase 2 的 republish 复用的还是这
+                        # 同一份 hls_dir 本地树,提前删会让 phase 2 拿不到
+                        # 源文件。helper 只在 relative_hls 是 sb:// 时动手,
+                        # 且自带 DOWNLOAD_PATH containment 守卫。
+                        discard_local_source(hls_dir, relative_hls)
                         return {"status": "completed", "hls_path": relative_hls}
 
                 # ============================================================
@@ -378,6 +392,11 @@ class TranscodeService:
                 relative_hls = await self._hls.publish(
                     hls_dir, base, str(resource_id), str(version_id)
                 )
+                # 切片全部落 S3 后回收本地 HLS 工作目录(每次转码几十~几百 MB,
+                # 实测 derived/hls 已积到 1.1G 且每天在长)。只在 publish 返回
+                # sb:// 时删——legacy fs 行返回的是文件系统相对路径,那份本地
+                # 树就是唯一成品。helper 自带 DOWNLOAD_PATH containment 守卫。
+                discard_local_source(hls_dir, relative_hls)
 
                 # Update DB
                 await self.repo.update_version(

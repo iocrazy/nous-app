@@ -113,7 +113,11 @@ async def _upload_downloaded_video_to_s3(
     if not user_id or not await unified_storage_enabled():
         return relative_path
 
-    from app.services.library.media_storage import library_store, store_local_file
+    from app.services.library.media_storage import (
+        discard_local_source,
+        library_store,
+        store_local_file,
+    )
     from app.services.library.resources_service import _resolve_personal_team_id
 
     scope_id = int(await _resolve_personal_team_id(user_id))
@@ -124,8 +128,10 @@ async def _upload_downloaded_video_to_s3(
         filename=os.path.basename(relative_path),
         store=library_store(),
     )
-    # 成品已在 S3;本地文件留给转码链路 materialize 读取,回收统一由后续
-    # 迁移 PR 的 delete_source 阶段处理,这里绝不删除本地文件。
+    # 成品已在 S3 → 回收本地工作副本。旧注释说"本地文件留给转码链路
+    # materialize 读取"——该前提已失效:materialize 对 sb:// 走 S3 + 本地
+    # 读通缓存,没有代码再按本地路径读它,留着就是每次下载白涨一份。
+    discard_local_source(local_path, stored.file_path)
     return stored.file_path
 
 
@@ -162,7 +168,12 @@ async def _upload_album_to_s3(
     store = media_storage.library_store()
     # skip_existing: retry 重放不重复 PUT 已落对象(对齐迁移模块)。
     await store.put_dir(local_dir, lambda rel: f"{prefix}{rel}", skip_existing=True)
-    return media_storage.to_file_path(store.bucket, prefix)
+    album_path = media_storage.to_file_path(store.bucket, prefix)
+    # 整目录已在 S3 → 回收本地副本(slides/ + audio.mp3)。注意封面下载在
+    # download_strategies 里排在图集分支之后,它会重建该目录写 cover.jpg,
+    # 那份由封面自己的上传路径回收。
+    media_storage.discard_local_source(local_dir, album_path)
+    return album_path
 
 
 # C1: 图集读端(media_slides_router.py _ALBUM_LOCATION_SQL)解析的是
@@ -1230,6 +1241,21 @@ class DownloaderService:
                             )
                         )
 
+                        # BGM pointer determinism (discard-review C1):
+                        # ``_upload_album_to_s3`` now rmtree's the local album
+                        # directory on success (discard_local_source), so
+                        # audio.mp3's existence must be captured BEFORE the
+                        # upload call — checking afterwards would always see
+                        # an already-deleted directory and silently drop
+                        # music_download_path forever (BGM 404 + a
+                        # regenerated fs_residue row on the next scan).
+                        # audio.mp3 (if any) was written earlier by
+                        # ``_download_standalone_music`` above, so it is
+                        # already in place by the time we snapshot this.
+                        has_audio = os.path.isfile(
+                            os.path.join(str(resource_dir_full), "audio.mp3")
+                        )
+
                         # Storage tiering: upload the whole album directory
                         # (slides/ + audio.mp3 + cover.jpg) to the canonical
                         # album prefix t{scope}/album/{rid}/ and repoint the
@@ -1246,9 +1272,7 @@ class DownloaderService:
                         )
                         if album_path.startswith("sb://"):
                             pm_updates = {"download_path": album_path}
-                            if os.path.isfile(
-                                os.path.join(str(resource_dir_full), "audio.mp3")
-                            ):
+                            if has_audio:
                                 pm_updates["music_download_path"] = (
                                     f"{album_path}audio.mp3"
                                 )

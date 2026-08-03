@@ -391,11 +391,23 @@ async def download_gallery_zip(platform_id: str, auth: AuthDep):
     CDN tokens, and silently dropping anything that wasn't an image).
     Streaming a zip from the backend hits the downloaded-to-disk copy
     once, and gives the user one file instead of N prompts.
+
+    Storage tiering (discard-review C2): once an album is migrated to the
+    object store, ``download_path`` is an ``sb://`` prefix and the local
+    working directory has been recycled by ``discard_local_source`` — the
+    filesystem branch below would 404 ("Gallery folder not found") even
+    though the slides are still in S3. Resolve the album location the same
+    way ``media_slides_router`` does (``_resolve_album_location`` +
+    ``_album_slide_names``) so both endpoints share ONE key-layout rule
+    (``slides/`` subdirectory preferred, cover excluded) instead of growing
+    a second, drifting copy of it.
     """
     import io
     import zipfile
 
     from fastapi.responses import StreamingResponse
+
+    slide_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".mov", ".webm"}
 
     try:
         repo = MediaRepository()
@@ -403,6 +415,75 @@ async def download_gallery_zip(platform_id: str, auth: AuthDep):
         if not video:
             raise HTTPException(status_code=404, detail="Media not found")
 
+        video_title = video.get("title", platform_id) or platform_id
+        safe_title = (
+            "".join(
+                c for c in video_title if c.isalnum() or c in (" ", "-", "_", ".")
+            ).strip()
+            or platform_id
+        )
+        zip_name = f"{safe_title[:80]}_gallery.zip"
+
+        media_id = video.get("id")
+        loc = None
+        if media_id is not None:
+            from app.api.media_slides_router import _resolve_album_location
+
+            loc = await _resolve_album_location(str(media_id))
+
+        if loc:
+            from app.services.library.media_storage import ObjectStore
+            from app.services.media.slide_paths import album_key_prefix
+
+            prefix = album_key_prefix(loc.key or "")
+            store = ObjectStore(loc.bucket)
+            keys = await store.list_prefix(prefix)
+
+            # Same precedence media_slides_router._album_slide_names applies:
+            # the slides/ subdirectory when it holds anything, otherwise the
+            # prefix root — never mix the two layouts, and never the cover.
+            from app.api.media_slides_router import _album_slide_names
+
+            sub = f"{prefix}slides/"
+            base_prefix = sub if any(k.startswith(sub) for k in keys) else prefix
+            names = sorted(
+                n
+                for n in _album_slide_names(keys, prefix)
+                if Path(n).suffix.lower() in slide_exts
+            )
+
+            buffer = io.BytesIO()
+            added = 0
+            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as zf:
+                for name in names:
+                    key = f"{base_prefix}{name}"
+                    try:
+                        data = await store.get_bytes(key)
+                    except Exception as e:
+                        # Mirrors the fs branch's "best effort, skip what's
+                        # missing" — an individual object can be absent
+                        # (partial upload) without failing the whole zip.
+                        logger.warning(
+                            f"[Gallery/Zip] Skipping missing slide object "
+                            f"{key!r} for {platform_id}: {e}"
+                        )
+                        continue
+                    zf.writestr(name, data)
+                    added += 1
+
+            if added == 0:
+                raise HTTPException(status_code=404, detail="No gallery files on disk")
+
+            buffer.seek(0)
+            return StreamingResponse(
+                buffer,
+                media_type="application/zip",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{zip_name}"',
+                },
+            )
+
+        # ── Filesystem branch (legacy, unchanged) ───────────────────────
         try:
             base_path = Utils.get_download_base_path()
         except ValueError:
@@ -440,7 +521,6 @@ async def download_gallery_zip(platform_id: str, auth: AuthDep):
         if not slides_dir.exists() or not slides_dir.is_dir():
             slides_dir = candidate_dir
 
-        slide_exts = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".mov", ".webm"}
         files = sorted(
             [
                 f
@@ -450,15 +530,6 @@ async def download_gallery_zip(platform_id: str, auth: AuthDep):
         )
         if not files:
             raise HTTPException(status_code=404, detail="No gallery files on disk")
-
-        video_title = video.get("title", platform_id) or platform_id
-        safe_title = (
-            "".join(
-                c for c in video_title if c.isalnum() or c in (" ", "-", "_", ".")
-            ).strip()
-            or platform_id
-        )
-        zip_name = f"{safe_title[:80]}_gallery.zip"
 
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as zf:

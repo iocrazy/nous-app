@@ -88,7 +88,14 @@ class ThumbnailService:
             sprite_key = f"{prefix}preview_sprite.jpg"
             await store.put_file(sprite_key, str(sprite_abs), "image/jpeg")
 
-        return media_storage.to_file_path(store.bucket, thumb_key)
+        stored_path = media_storage.to_file_path(store.bucket, thumb_key)
+        # 派生产物已在 S3 → 回收本地副本(serve_resource_cover /
+        # serve_preview_sprite 都已能从 S3 读),否则 derived/thumbnails/
+        # 每生成一次就白留一份。
+        if sprite_abs is not None:
+            media_storage.discard_local_source(sprite_abs, stored_path)
+        media_storage.discard_local_source(thumb_abs, stored_path)
+        return stored_path
 
     async def generate_thumbnail(
         self,
