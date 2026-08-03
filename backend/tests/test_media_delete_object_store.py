@@ -281,3 +281,61 @@ async def test_sb_cover_path_deletes_object_store_object():
     assert any(
         f == "object: 331438215859255/ab/cd/cover.jpg" for f in result["files_deleted"]
     )
+
+
+SB_MUSIC_PATH = "sb://library/331438215859255/11/22/bgmaudio0001.m4a"
+SB_EXTRACT_PATH = "sb://library/331438215859255/33/44/extracted002.m4a"
+
+
+@pytest.mark.asyncio
+async def test_audio_columns_are_deleted_too():
+    """M6 回归:``music_download_path`` / ``extract_audio_path`` 也是
+    pm_assets 迁移覆盖的成品(白名单三列之一),但删除侧长期只清
+    download_path + cover_download_path —— 生产实测 531 + 469 个 sb://
+    音频对象会在删 media 时漏成孤儿。四列必须都清。"""
+    video = _video(
+        download_path=SB_VIDEO_PATH,
+        music_download_path=SB_MUSIC_PATH,
+        extract_audio_path=SB_EXTRACT_PATH,
+    )
+    repo_patch, repo = _patch_repo(video)
+    remove = AsyncMock()
+
+    with (
+        repo_patch,
+        _patch_no_reference(),
+        patch("app.services.library.media_storage.ObjectStore.remove", new=remove),
+    ):
+        result = await delete_video(
+            PLATFORM_ID, BackgroundTasks(), _auth(), delete_files=True
+        )
+
+    removed = {c.args[0] for c in remove.await_args_list}
+    assert "331438215859255/11/22/bgmaudio0001.m4a" in removed
+    assert "331438215859255/33/44/extracted002.m4a" in removed
+    assert "331438215859255/ab/cd/deadbeef1234.mp4" in removed
+    repo.delete.assert_awaited_once_with(PLATFORM_ID)
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_audio_object_kept_when_still_referenced():
+    """音频列走的是同一个引用安全原语:BGM 与抽取音频可能去重成同一个
+    key、或被别的行引用,不能无条件删。"""
+    video = _video(music_download_path=SB_MUSIC_PATH)
+    repo_patch, repo = _patch_repo(video)
+    remove = AsyncMock()
+    fetch_one = AsyncMock(return_value={"?column?": 1})  # 仍被引用
+
+    with (
+        repo_patch,
+        patch("app.services.library.object_gc.db_engine.fetch_one", new=fetch_one),
+        patch("app.services.library.media_storage.ObjectStore.remove", new=remove),
+    ):
+        result = await delete_video(
+            PLATFORM_ID, BackgroundTasks(), _auth(), delete_files=True
+        )
+
+    remove.assert_not_awaited()
+    repo.delete.assert_awaited_once_with(PLATFORM_ID)
+    assert result["success"] is True

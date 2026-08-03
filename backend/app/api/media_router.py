@@ -266,6 +266,21 @@ async def delete_video(
             if cover_path:
                 await _delete_stored_file(cover_path, "cover")
 
+            # 音频两列同样是 pm_assets 迁移覆盖的成品(storage_migration 的
+            # _PM_ASSETS_COLUMN_UPDATE_SQL 三列白名单),但删除侧一直只清
+            # download_path + cover_download_path —— 实测生产有 531 个
+            # music_download_path + 469 个 extract_audio_path 的 sb:// 对象,
+            # 删 media 时全部漏成孤儿。它们与视频/封面同为内容寻址单对象,
+            # 走同一个引用检查(BGM 与抽取音频可能去重成同一个 key,也可能
+            # 被别的行引用,不能无条件删)。
+            for col, label in (
+                ("music_download_path", "music"),
+                ("extract_audio_path", "extract_audio"),
+            ):
+                audio_path = video.get(col)
+                if audio_path:
+                    await _delete_stored_file(audio_path, label)
+
         result = await repo.delete(platform_id)
 
         if not result:
