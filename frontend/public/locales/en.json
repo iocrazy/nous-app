@@ -2832,7 +2832,8 @@
       "orphanCount": "{{count}} unused",
       "search": "Search skills...",
       "noneMatch": "No skills match this search",
-      "newSkill": "+ New Skill"
+      "newSkill": "+ New Skill",
+      "newFile": "+ File"
     },
     "workforce": {
       "runningNow": "Running now"

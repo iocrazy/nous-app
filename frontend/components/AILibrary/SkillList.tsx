@@ -43,6 +43,12 @@ interface SkillListProps {
   onNewFile?: (slug: string) => void;
   /** Delete the given file (after user confirmation is handled by caller). */
   onDeleteFile?: (slug: string, filePath: string) => void;
+  /**
+   * Hide the per-skill file tree (B3/B4): when the editor shows file tabs,
+   * the rail duplicating that navigation gives two places to click for the
+   * same thing and two selection states to keep in sync.
+   */
+  hideFileTree?: boolean;
 }
 
 /** Preset = system-seed: is_public && no team/project owner. */
@@ -242,6 +248,7 @@ export const SkillList: React.FC<SkillListProps> = ({
   onNewSkill,
   onNewFile,
   onDeleteFile,
+  hideFileTree = false,
 }) => {
   const { t } = useTranslation();
   const [filter, setFilter] = useState('');
@@ -385,21 +392,23 @@ export const SkillList: React.FC<SkillListProps> = ({
                       {s.name}
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => toggleSkill(s.slug ?? String(s.id))}
-                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-500 opacity-70 transition-opacity hover:bg-ink-800/60 hover:text-ink-200 group-hover:opacity-100"
-                    aria-label={expanded ? 'Collapse' : 'Expand'}
-                  >
-                    {expanded ? (
-                      <ChevronDown size={12} />
-                    ) : (
-                      <ChevronRight size={12} />
-                    )}
-                  </button>
+                  {!hideFileTree && (
+                    <button
+                      type="button"
+                      onClick={() => toggleSkill(s.slug ?? String(s.id))}
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-500 opacity-70 transition-opacity hover:bg-ink-800/60 hover:text-ink-200 group-hover:opacity-100"
+                      aria-label={expanded ? 'Collapse' : 'Expand'}
+                    >
+                      {expanded ? (
+                        <ChevronDown size={12} />
+                      ) : (
+                        <ChevronRight size={12} />
+                      )}
+                    </button>
+                  )}
                 </div>
 
-                {expanded && (
+                {expanded && !hideFileTree && (
                   <div className="pb-2 pl-2 pr-1">
                     {/* SKILL.md root file, rendered as a synthetic leaf. */}
                     <button

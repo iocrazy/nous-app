@@ -187,6 +187,7 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
         onNewSkill={() => setShowNewSkillModal(true)}
         onNewFile={(s) => setNewFileSkillSlug(s)}
         onDeleteFile={handleDeleteFile}
+        hideFileTree
       />
 
       <div className="flex-1 min-w-0 h-full">
@@ -202,6 +203,12 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
           filePath={selectedFilePath ?? ''}
           hideBack
           onBack={() => onSlugChange?.('')}
+          onSelectFile={(path) =>
+            path
+              ? onFilePathChange?.(selectedSlug, path)
+              : onSlugChange?.(selectedSlug)
+          }
+          onNewFile={() => setNewFileSkillSlug(selectedSlug)}
           onSkillForked={handleSkillForked}
           onSkillDeleted={handleSkillDeleted}
         />

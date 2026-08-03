@@ -24,8 +24,8 @@
 // - Nous has "Bundled preset" vs "User/Team/Project" scopes — no
 //   GitHub / skills.sh / URL source variants (and thus no "Check for
 //   updates" workflow).
-// - "Used by" not yet returned by GET /skills/:slug — shows a dash
-//   placeholder until the backend adds it.
+// - "Used by" renders the real reverse index: GET /skills and
+//   /skills/:slug both return ``agents`` (B3, spec 2026-08-02 §B3).
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -65,6 +65,14 @@ interface SkillEditorProps {
   filePath?: string | null;
   /** V6 split-pane hides the in-editor Back button. */
   hideBack?: boolean;
+  /**
+   * Notify the parent that a different file tab was picked, so it can put
+   * the path in the URL. Without it the tabs still work — they just fall
+   * back to local state and the deep link stays on the previous file.
+   */
+  onSelectFile?: (path: string) => void;
+  /** Open the parent's "new file" modal for this skill. */
+  onNewFile?: () => void;
 }
 
 const SKILL_MD = 'SKILL.md';
@@ -129,6 +137,8 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   onSkillDeleted,
   filePath = null,
   hideBack = false,
+  onSelectFile,
+  onNewFile,
 }) => {
   const { t } = useTranslation();
   const { userProfile } = useAuth();
@@ -460,13 +470,44 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
         )}
       </div>
 
-      {/* ── Sub-header: file path + toggle ────────────────────────── */}
+      {/* ── Sub-header: file tabs + toggle ────────────────────────── */}
       <div className="border-b border-ink-800/80 px-5 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="truncate font-mono text-sm text-ink-300">
-              {activeTab}
-            </div>
+          {/* File tabs carry navigation between a skill's files now — the
+              left rail's per-skill tree did it before, which meant the
+              editor never showed what else was in the skill you had open. */}
+          <div
+            className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+            data-testid="skill-file-tabs"
+          >
+            {[SKILL_MD, ...skill.files.map((f) => f.path)].map((path) => (
+              <button
+                key={path}
+                type="button"
+                onClick={() => {
+                  setActiveTab(path);
+                  onSelectFile?.(path === SKILL_MD ? '' : path);
+                }}
+                data-testid="skill-file-tab"
+                aria-pressed={activeTab === path}
+                className={`shrink-0 rounded-t border-b-2 px-2.5 py-1 font-mono text-xs transition-colors ${
+                  activeTab === path
+                    ? 'border-[var(--accent-border)] text-ink-100'
+                    : 'border-transparent text-ink-500 hover:text-ink-300'
+                }`}
+              >
+                {path}
+              </button>
+            ))}
+            {editable && onNewFile && (
+              <button
+                type="button"
+                onClick={onNewFile}
+                className="shrink-0 rounded px-2 py-1 text-xs text-ink-500 hover:text-ink-300"
+              >
+                {t('aiLibrary.skills.newFile', '+ File')}
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {editMode && editable ? (
