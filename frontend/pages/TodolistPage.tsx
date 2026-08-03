@@ -24,6 +24,7 @@ import {
 } from '../services/issuesService';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { toAgentRef, toUiIssue, type ProjectNameMap } from '../components/Todolist/uiIssue';
+import { mergeRealtimeIssue } from '../components/Todolist/mergeRealtimeIssue';
 import { computeSubtaskCounts } from '../components/Todolist/issueFlow';
 import { fetchProjects, createProject } from '../services/projectsService';
 import { useToast } from '../components/Toast';
@@ -255,12 +256,15 @@ export function TodolistPage() {
           }
           const raw = payload.new as Issue;
           if (!raw?.id) return;
-          const ui = toUiIssue(raw, agentsById, projectsById);
           setIssues((prev) => {
-            const idx = prev.findIndex((i) => i.id === ui.id);
-            if (idx < 0) return [ui, ...prev]; // INSERT
-            const next = [...prev]; // UPDATE
-            next[idx] = ui;
+            const idx = prev.findIndex((i) => i.id === raw.id);
+            // INSERT: nothing to merge onto.
+            if (idx < 0) return [toUiIssue(raw, agentsById, projectsById), ...prev];
+            // UPDATE: merge, don't replace — the publication (mig 172) omits
+            // dbos_workflow_id / execution_state / execution_locked_at, so a
+            // wholesale swap blanks them and the running chip flickers off.
+            const next = [...prev];
+            next[idx] = mergeRealtimeIssue(prev[idx], raw, agentsById, projectsById);
             return next;
           });
         },
