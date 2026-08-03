@@ -8,7 +8,7 @@
  *         applied client-side against the already-fetched UiIssue list.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 
@@ -67,6 +67,15 @@ import {
 import { relativeTime } from '../../utils/taskDisplay';
 import { originModule } from './issueOrigin';
 import { runningChipLabel, needsReplyChip } from './issueChips';
+import { buildAttentionItems } from './attentionItems';
+import {
+  AttentionStrip,
+  loadAttentionCollapsed,
+  saveAttentionCollapsed,
+} from './AttentionStrip';
+import { useTaskManager } from '../../contexts/TaskManagerContext';
+import { aiLibraryService } from '../../services/aiLibraryService';
+import type { AILibraryApprovalRequest } from '../../types';
 import {
   computeSubtaskCounts,
   dueBucket,
@@ -413,6 +422,32 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   const showGroupToggle = scope.type === 'team';
   const projectGrouped = showGroupToggle && groupMode === 'project';
 
+  // ── A1「等我的」横条 ────────────────────────────────────────────────
+  // Questions come from the TaskManager feed (already polled app-wide);
+  // approvals are fetched here on the same 60s cadence as the TopBar panel;
+  // in_review issues are already in `scopedIssues`, no fetch at all.
+  const { needsInputItems } = useTaskManager();
+  const [approvals, setApprovals] = useState<AILibraryApprovalRequest[]>([]);
+  const attentionScopeKey = `${scope.type}:${teamId ?? 'none'}`;
+  const [attentionCollapsed, setAttentionCollapsed] = useState(() =>
+    loadAttentionCollapsed(attentionScopeKey));
+
+  const refreshApprovals = useCallback(async () => {
+    try {
+      const res = await aiLibraryService.listApprovalRequests();
+      setApprovals(res.items ?? []);
+    } catch (err) {
+      // Non-fatal: the other two attention sources still render.
+      console.error('[IssueListView] approval requests load failed', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshApprovals();
+    const id = setInterval(() => { void refreshApprovals(); }, 60_000);
+    return () => clearInterval(id);
+  }, [refreshApprovals]);
+
   // Keyboard: `C` opens New Issue, `/` focuses search. Guarded against typing
   // contexts (inputs/textarea/contenteditable), IME composition, modifier
   // combos, and already-handled events so it never hijacks real input.
@@ -476,6 +511,48 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
   }, [scopedIssues]);
 
   const filteredByPanel = useMemo(() => applyFilters(scopedIssues, filters, currentUserId), [scopedIssues, filters, currentUserId]);
+
+  // Attention items are built off the SCOPED list (not the filtered one): a
+  // display filter hides rows, it does not mean the work stopped waiting.
+  const attentionItems = useMemo(
+    () => buildAttentionItems(
+      needsInputItems,
+      approvals,
+      scopedIssues.filter((i) => i.status === 'in_review'),
+    ),
+    [needsInputItems, approvals, scopedIssues],
+  );
+
+  // The needs-input feed carries no identifier, and the detail route is keyed
+  // by identifier — so resolve through the list we already have, and degrade
+  // to a non-clickable card when the issue isn't in this scope.
+  const issueLinkFor = useCallback((issueId: number): string | null => {
+    const match = issues.find((i) => i.id === issueId);
+    return match && teamId ? `/team/${teamId}/todolist/${match.identifier}` : null;
+  }, [issues, teamId]);
+
+  const handleAttentionToggle = useCallback((next: boolean) => {
+    setAttentionCollapsed(next);
+    saveAttentionCollapsed(attentionScopeKey, next);
+  }, [attentionScopeKey]);
+
+  const handleApprove = useCallback(async (id: string) => {
+    try {
+      await aiLibraryService.approveRequest(id);
+    } catch (err) {
+      console.error('[IssueListView] approve failed', err);
+    }
+    await refreshApprovals();
+  }, [refreshApprovals]);
+
+  const handleReject = useCallback(async (id: string) => {
+    try {
+      await aiLibraryService.rejectRequest(id);
+    } catch (err) {
+      console.error('[IssueListView] reject failed', err);
+    }
+    await refreshApprovals();
+  }, [refreshApprovals]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -795,6 +872,16 @@ export const IssueListView: React.FC<IssueListViewProps> = ({ issues, loading, e
           )}
         </div>
       </div>
+
+      <AttentionStrip
+        items={attentionItems}
+        collapsed={attentionCollapsed}
+        onToggle={handleAttentionToggle}
+        onApprove={handleApprove}
+        onReject={handleReject}
+        teamId={teamId}
+        issueLinkFor={issueLinkFor}
+      />
 
       {scope.type === 'project' && (
         <div

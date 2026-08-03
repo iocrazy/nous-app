@@ -1,0 +1,57 @@
+/**
+ * Aggregate the three things that are actually blocked on the user (A1).
+ *
+ * They each live somewhere else today: an agent's question sits in the Task
+ * Center feed, a tool approval in the TopBar panel, and a finished-but-
+ * unconfirmed issue is just another row in the list. Nothing on the Issues
+ * page answers "what is waiting on me right now" — this does.
+ *
+ * Pure: the three inputs are fetched by the caller, this only shapes them.
+ */
+
+import type { NeedsInputItem } from '../../services/issuesService';
+import type { AILibraryApprovalRequest } from '../../types';
+import type { UiIssue } from './types';
+
+export type AttentionType = 'question' | 'approval' | 'review';
+
+export interface AttentionItem {
+  type: AttentionType;
+  /** Unique across all three sources — the React key and the action target. */
+  id: string;
+  title: string;
+  /** The question / approval reason, when one was given. */
+  detail: string | null;
+  /** Set for question and review items; approvals are agent-level, not issue-level. */
+  issueId?: number;
+}
+
+export function buildAttentionItems(
+  needsInput: NeedsInputItem[],
+  approvals: AILibraryApprovalRequest[],
+  inReviewIssues: UiIssue[],
+): AttentionItem[] {
+  return [
+    ...needsInput.map((n): AttentionItem => ({
+      type: 'question',
+      id: `question:${n.issue_id}`,
+      title: n.title,
+      detail: n.question ?? null,
+      // NeedsInputItem carries issue_id as a string; the list rows key on number.
+      issueId: Number(n.issue_id),
+    })),
+    ...approvals.map((a): AttentionItem => ({
+      type: 'approval',
+      id: a.id,
+      title: a.hook_name,
+      detail: a.reason ?? null,
+    })),
+    ...inReviewIssues.map((i): AttentionItem => ({
+      type: 'review',
+      id: `review:${i.id}`,
+      title: i.title,
+      detail: i.identifier ?? null,
+      issueId: i.id,
+    })),
+  ];
+}

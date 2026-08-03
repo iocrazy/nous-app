@@ -1,6 +1,19 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { describe, it, expect, vi } from 'vitest';
+// The strip's three sources: the TaskManager feed (app-wide provider, absent
+// here), the approvals endpoint, and scopedIssues (already in props).
+vi.mock('../../contexts/TaskManagerContext', () => ({
+  useTaskManager: () => ({ needsInputItems: [] }),
+}));
+vi.mock('../../services/aiLibraryService', () => ({
+  aiLibraryService: {
+    listApprovalRequests: vi.fn(async () => ({ items: [], count: 0 })),
+    approveRequest: vi.fn(async () => ({ id: 'x', status: 'approved' })),
+    rejectRequest: vi.fn(async () => ({ id: 'x', status: 'rejected' })),
+  },
+}));
+
 import { IssueListView } from './IssueListView';
 import type { UiIssue } from './types';
 import type { Issue } from '../../services/issuesService';
