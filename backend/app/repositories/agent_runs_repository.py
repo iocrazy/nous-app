@@ -656,6 +656,92 @@ class AgentRunsRepository(AsyncpgRepository):
             return []
 
     # ------------------------------------------------------------------
+    # AI Library gallery batch stats (spec 2026-08-02 §B1)
+    #
+    # Three GROUP BY queries covering EVERY agent the caller can see. They
+    # exist so the gallery stops fanning out one /dashboard request per
+    # agent (19 round-trips on the current preset roster). Each returns a
+    # dict keyed by agent id as str — absent key means "no rows", which the
+    # router renders as a zero, so callers never branch on None.
+    # ------------------------------------------------------------------
+
+    async def usage_by_agent_since(
+        self, agent_ids: List[UUID], since: datetime
+    ) -> Dict[str, Dict[str, int]]:
+        """{agent_id: {runs, tokens}} for runs started at/after ``since``."""
+        if not agent_ids:
+            return {}
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(
+                        AgentRuns.agent_id,
+                        func.count().label("runs"),
+                        func.coalesce(func.sum(AgentRuns.total_tokens), 0).label(
+                            "tokens"
+                        ),
+                    )
+                    .where(AgentRuns.agent_id.in_(agent_ids))
+                    .where(AgentRuns.started_at >= since)
+                    .group_by(AgentRuns.agent_id)
+                )
+                return {
+                    str(r.agent_id): {"runs": int(r.runs), "tokens": int(r.tokens or 0)}
+                    for r in result.all()
+                }
+        except Exception as e:
+            logger.error(f"[agent_runs] usage_by_agent_since failed: {e}")
+            return {}
+
+    async def running_counts_by_agent(self, agent_ids: List[UUID]) -> Dict[str, int]:
+        """{agent_id: live run count}. No time window — 'running' is now."""
+        if not agent_ids:
+            return {}
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AgentRuns.agent_id, func.count().label("n"))
+                    .where(AgentRuns.agent_id.in_(agent_ids))
+                    .where(AgentRuns.status == "running")
+                    .group_by(AgentRuns.agent_id)
+                )
+                return {str(r.agent_id): int(r.n) for r in result.all()}
+        except Exception as e:
+            logger.error(f"[agent_runs] running_counts_by_agent failed: {e}")
+            return {}
+
+    async def dead_run_reasons_by_agent(
+        self, agent_ids: List[UUID], since: datetime
+    ) -> Dict[str, str]:
+        """{agent_id: most recent error_message} over stuck/dead runs since
+        ``since``.
+
+        DISTINCT ON picks the latest row per agent in one pass — the fault
+        badge only ever shows the newest reason, and pulling every dead run
+        just to take the first would scale with failure volume.
+        """
+        if not agent_ids:
+            return {}
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(AgentRuns.agent_id, AgentRuns.error_message)
+                    .where(AgentRuns.agent_id.in_(agent_ids))
+                    .where(AgentRuns.liveness_state.in_(("stuck", "dead")))
+                    .where(AgentRuns.started_at >= since)
+                    .distinct(AgentRuns.agent_id)
+                    .order_by(AgentRuns.agent_id, AgentRuns.started_at.desc())
+                )
+                return {
+                    str(r.agent_id): r.error_message
+                    for r in result.all()
+                    if r.error_message
+                }
+        except Exception as e:
+            logger.error(f"[agent_runs] dead_run_reasons_by_agent failed: {e}")
+            return {}
+
+    # ------------------------------------------------------------------
     # Autopilot quota (M4, mig 395)
     # ------------------------------------------------------------------
 

@@ -87,6 +87,21 @@ export type ChatAttachmentInput =
       alt_text?: string;
     };
 
+/** Why an agent is unhealthy, plus the one line telling the user what to do. */
+export interface AgentFault {
+  kind: 'budget' | 'manual' | 'dead_runs';
+  detail: string;
+}
+
+/** Per-agent rollup served by GET /agents/stats (mig 400 era, spec §B1). */
+export interface AgentStatsItem {
+  runs_7d: number;
+  tokens_7d: number;
+  running_count: number;
+  needs_input_count: number;
+  fault: AgentFault | null;
+}
+
 export const aiLibraryService = {
   // ─── Agents ────────────────────────────────────────────────────────────────
 
@@ -95,6 +110,20 @@ export const aiLibraryService = {
       headers: await getAuthHeaders(),
     });
     return handle<AILibraryAgent[]>(resp);
+  },
+
+  /**
+   * Batch stats for every visible agent, keyed by agent id.
+   *
+   * One request for the whole gallery — the per-agent /dashboard fan-out it
+   * replaces cost one round-trip per card.
+   */
+  async getAgentStats(days = 7): Promise<Record<string, AgentStatsItem>> {
+    const resp = await fetch(`${base()}/agents/stats?days=${days}`, {
+      headers: await getAuthHeaders(),
+    });
+    const data = await handle<{ items: Record<string, AgentStatsItem> }>(resp);
+    return data.items ?? {};
   },
 
   async getAgent(slug: string): Promise<AILibraryAgent> {

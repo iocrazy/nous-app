@@ -68,14 +68,9 @@
     "skills": "Skills",
     "aiUsage": "AI Usage",
     "aiCost": "Cost & Budget",
-    "newAgent": "New agent",
-    "agentRunning": "Running...",
-    "agentPausedBudget": "Paused: monthly budget exceeded",
-    "agentPausedManual": "Paused by admin",
     "memory": "My Memory",
     "workforce": "Workforce",
     "sessions": "Sessions",
-    "dashboard": "Dashboard",
     "liveRuns": "{{count}} running",
     "distribution": "Distribution"
   },
@@ -2491,7 +2486,6 @@
     "skillsSection": "Skills",
     "usageSection": "Usage",
     "runtimeSection": "Runtime",
-    "loadingAgents": "Loading...",
     "noAgents": "No agents yet",
     "loadAgentsError": "Failed to load",
     "retry": "Retry",
@@ -2546,14 +2540,10 @@
       "noAvailableSkills": "No available skills. Create one in the Skills tab.",
       "skillsUpdatedToast": "Skills updated",
       "tab": {
-        "dashboard": "Dashboard",
-        "overview": "Overview",
-        "files": "Files",
-        "skills": "Skills",
-        "runs": "Runs",
         "versions": "Versions",
-        "routines": "Routines",
-        "permissions": "Permissions"
+        "workbench": "Workbench",
+        "persona": "Persona & Skills",
+        "profile": "Profile"
       },
       "loadErrorPrefix": "Failed to load agent",
       "listLoadError": "Failed to load agents",
@@ -2753,7 +2743,12 @@
       "overrideResetToast": "Restored system defaults",
       "delete": "Delete agent",
       "deleteConfirm": "Delete this agent? Its runs and skill bindings are removed; chat history stays readable.",
-      "deletedToast": "Agent deleted"
+      "deletedToast": "Agent deleted",
+      "attributes": "Attributes",
+      "costSection": "Cost & limits",
+      "waitingReplies": "{{count}} issue(s) waiting for your reply",
+      "viewInIssues": "View in Issues",
+      "backToOverview": "Back to overview"
     },
     "skills": {
       "addFile": "+ Add file",
@@ -2861,16 +2856,48 @@
     },
     "insightsSection": "Insights",
     "openChatWith": "Chat with {{name}}",
-    "noMyAgents": "No custom agents yet",
-    "systemAgents": "System",
-    "systemAgentsAlert": "A system agent is paused",
-    "dashboard": {
-      "loadError": "Failed to load usage",
-      "todayRuns": "Runs today",
-      "todayTokens": "Tokens today",
-      "weekRuns": "Runs · 7d",
-      "weekTokens": "Tokens · 7d",
-      "topModels": "Top models · 7d"
+    "officialTemplate": "Official template",
+    "customAgent": "Custom",
+    "newAgent": "New Agent",
+    "searchAgents": "Search agents...",
+    "filterAll": "All",
+    "filterFaultsOnly": "Faults only",
+    "noAgentsMatch": "No agents match these filters",
+    "skillCount": "{{count}} skills",
+    "weekMeta": "{{runs}} runs · {{tokens}} tok · 7d",
+    "weekMetaEmpty": "No runs · 7d",
+    "liveBanner": "{{name}} is running now",
+    "statsUnavailable": "Weekly stats unavailable — cards show agent details only",
+    "group": {
+      "writing": "Writing",
+      "art": "Art",
+      "tools": "Tools"
+    },
+    "status": {
+      "idle": "Idle",
+      "running": "Running",
+      "needsReply": "Waiting for reply",
+      "fault": "Fault"
+    },
+    "action": {
+      "chat": "Chat",
+      "viewRuns": "View run",
+      "goReply": "Go reply",
+      "fixGuide": "How to fix",
+      "fork": "Fork & customize",
+      "configure": "Configure",
+      "runs": "Runs"
+    },
+    "scope": {
+      "team": "Team",
+      "project": "Project",
+      "private": "Private"
+    },
+    "tab": {
+      "agents": "Agents",
+      "skills": "Skills",
+      "market": "Marketplace",
+      "marketPlanned": "Planned"
     }
   },
   "teamUsage": {

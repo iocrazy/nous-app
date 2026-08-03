@@ -325,6 +325,46 @@ class IssueRepository:
             result = await session.execute(stmt)
             return [_row(r) for r in result.scalars().all()]
 
+    async def count_needs_input_by_agent(
+        self, user_id: str, agent_ids: list[str]
+    ) -> dict[str, int]:
+        """{agent_id: count} of needs_input issues assigned to each agent and
+        visible to ``user_id`` (AI Library gallery "waiting for your reply"
+        badge, spec 2026-08-02 §B1).
+
+        One GROUP BY over ``assignee_agent_id`` — the partial index
+        ``issues_assignee_agent_status_idx`` covers it. Same visibility fold
+        and hidden_at exclusion as ``list_needs_input``: an agent parked on an
+        issue the caller can't see must not inflate the caller's badge.
+
+        Agents with no such issue are simply absent from the dict.
+        """
+        if not agent_ids:
+            return {}
+        _uuid.UUID(user_id)
+        ids = [_uuid.UUID(str(a)) for a in agent_ids]
+        try:
+            from sqlalchemy import func
+
+            async with read_scope() as session:
+                rows = (
+                    await session.execute(
+                        select(
+                            Issues.assignee_agent_id,
+                            func.count().label("n"),
+                        )
+                        .where(Issues.assignee_agent_id.in_(ids))
+                        .where(visibility_predicate(user_id))
+                        .where(needs_input_predicate())
+                        .where(Issues.hidden_at.is_(None))
+                        .group_by(Issues.assignee_agent_id)
+                    )
+                ).all()
+            return {str(r[0]): int(r[1]) for r in rows}
+        except Exception as e:
+            logger.error(f"[issues] count_needs_input_by_agent failed: {e}")
+            return {}
+
     async def map_identifiers(self, issue_ids: list[int]) -> dict[str, str]:
         """{issue id (as str) → human identifier (MH-N)} for a set of ids.
 

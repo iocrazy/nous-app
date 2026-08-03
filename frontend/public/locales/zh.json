@@ -68,14 +68,9 @@
     "skills": "技能",
     "aiUsage": "AI 用量",
     "aiCost": "成本与预算",
-    "newAgent": "新建智能体",
-    "agentRunning": "运行中...",
-    "agentPausedBudget": "已暂停：超出月度预算",
-    "agentPausedManual": "已被管理员暂停",
     "memory": "我的记忆",
     "workforce": "工作团队",
     "sessions": "会话",
-    "dashboard": "总览",
     "liveRuns": "{{count}} 个运行中",
     "distribution": "分发"
   },
@@ -2491,7 +2486,6 @@
     "skillsSection": "技能",
     "usageSection": "用量",
     "runtimeSection": "运行时",
-    "loadingAgents": "加载中...",
     "noAgents": "暂无智能体",
     "loadAgentsError": "加载失败",
     "retry": "重试",
@@ -2546,14 +2540,10 @@
       "noAvailableSkills": "没有可用技能。请先在技能 tab 创建。",
       "skillsUpdatedToast": "技能已更新",
       "tab": {
-        "dashboard": "仪表盘",
-        "overview": "概览",
-        "files": "文件",
-        "skills": "技能",
-        "runs": "运行记录",
         "versions": "版本",
-        "routines": "例行任务",
-        "permissions": "权限"
+        "workbench": "工作台",
+        "persona": "人格与技能",
+        "profile": "档案"
       },
       "loadErrorPrefix": "加载智能体失败",
       "listLoadError": "加载智能体列表失败",
@@ -2753,7 +2743,12 @@
       "overrideResetToast": "已恢复系统默认",
       "delete": "删除智能体",
       "deleteConfirm": "删除该智能体?其运行记录与技能绑定将被移除;聊天历史仍可查看。",
-      "deletedToast": "智能体已删除"
+      "deletedToast": "智能体已删除",
+      "attributes": "属性",
+      "costSection": "成本与限额",
+      "waitingReplies": "{{count}} 条待你回复",
+      "viewInIssues": "去 Issues 查看",
+      "backToOverview": "返回概览"
     },
     "skills": {
       "addFile": "+ 添加文件",
@@ -2861,16 +2856,48 @@
     },
     "insightsSection": "洞察",
     "openChatWith": "与 {{name}} 聊天",
-    "noMyAgents": "还没有自建 agent",
-    "systemAgents": "系统",
-    "systemAgentsAlert": "有系统 agent 已暂停",
-    "dashboard": {
-      "loadError": "用量加载失败",
-      "todayRuns": "今日运行",
-      "todayTokens": "今日 tokens",
-      "weekRuns": "7 日运行",
-      "weekTokens": "7 日 tokens",
-      "topModels": "7 日模型排行"
+    "officialTemplate": "官方模板",
+    "customAgent": "自建",
+    "newAgent": "新建智能体",
+    "searchAgents": "搜索智能体…",
+    "filterAll": "全部",
+    "filterFaultsOnly": "仅故障",
+    "noAgentsMatch": "没有符合筛选条件的智能体",
+    "skillCount": "{{count}} 个技能",
+    "weekMeta": "{{runs}} 次运行 · {{tokens}} tok · 近 7 天",
+    "weekMetaEmpty": "近 7 天无运行",
+    "liveBanner": "{{name}} 正在运行",
+    "statsUnavailable": "周统计暂不可用——卡片只显示智能体信息",
+    "group": {
+      "writing": "编剧组",
+      "art": "美术组",
+      "tools": "工具组"
+    },
+    "status": {
+      "idle": "空闲",
+      "running": "运行中",
+      "needsReply": "等你回复",
+      "fault": "故障"
+    },
+    "action": {
+      "chat": "对话",
+      "viewRuns": "查看运行",
+      "goReply": "去回复",
+      "fixGuide": "修复指引",
+      "fork": "Fork 定制",
+      "configure": "配置",
+      "runs": "运行记录"
+    },
+    "scope": {
+      "team": "团队",
+      "project": "项目",
+      "private": "个人"
+    },
+    "tab": {
+      "agents": "智能体",
+      "skills": "技能",
+      "market": "市场",
+      "marketPlanned": "规划中"
     }
   },
   "teamUsage": {

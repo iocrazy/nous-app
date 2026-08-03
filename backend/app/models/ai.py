@@ -177,6 +177,13 @@ class AiAgents(Base):
         Integer,
         comment="Cap on simultaneous runs for this agent. NULL = uncapped.",
     )
+    agent_group: Mapped[Optional[str]] = mapped_column(
+        Text,
+        comment=(
+            "Roster grouping for the AI Library gallery: writing / art / tools. "
+            "NULL = ungrouped (UI falls back to tools)."
+        ),
+    )
 
 
 class AiModelPrices(Base):

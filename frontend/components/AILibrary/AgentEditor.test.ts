@@ -5,7 +5,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { getAvailableModels } from './AgentEditor';
+import { getAvailableModels } from './agentEditorModel';
+import { LEGACY_TAB_MAP, resolveSubTab } from './AgentEditor';
 import type { AISettings } from '../../types';
 
 function buildSettings(overrides: Partial<AISettings>): AISettings {
@@ -89,5 +90,32 @@ describe('getAvailableModels', () => {
       },
     });
     expect(getAvailableModels(settings)[0].models).toEqual(['doubao-pro', 'doubao-lite']);
+  });
+});
+
+describe('resolveSubTab', () => {
+  it('accepts the three current tabs', () => {
+    expect(resolveSubTab('workbench')).toBe('workbench');
+    expect(resolveSubTab('persona')).toBe('persona');
+    expect(resolveSubTab('profile')).toBe('profile');
+  });
+
+  it('maps every one of the old eight tabs somewhere', () => {
+    // Bookmarks and older in-app links carry these; landing them all on the
+    // default tab would silently lose the user's place.
+    expect(
+      ['dashboard', 'runs', 'routines'].map(resolveSubTab),
+    ).toEqual(['workbench', 'workbench', 'workbench']);
+    expect(
+      ['overview', 'files', 'skills', 'permissions'].map(resolveSubTab),
+    ).toEqual(['persona', 'persona', 'persona', 'persona']);
+    expect(resolveSubTab('versions')).toBe('profile');
+    expect(Object.keys(LEGACY_TAB_MAP)).toHaveLength(8);
+  });
+
+  it('falls back to the workbench for missing or unknown values', () => {
+    expect(resolveSubTab(null)).toBe('workbench');
+    expect(resolveSubTab(undefined)).toBe('workbench');
+    expect(resolveSubTab('nonsense')).toBe('workbench');
   });
 });

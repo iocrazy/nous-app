@@ -1627,6 +1627,8 @@ export interface AILibraryAgent {
   identity_md?: string | null;
   soul_md?: string | null;
   agent_md?: string | null;
+  /** Roster group for the gallery (mig 400). Null → bucketed under 'tools'. */
+  agent_group?: string | null;
   is_system_preset: boolean;
   team_id?: number | null;
   project_id?: number | null;
