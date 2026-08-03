@@ -1057,15 +1057,23 @@ async def list_skills(request: Request, auth: AuthDep) -> List[Dict[str, Any]]:
         project_ids=project_ids,
     )
 
-    enriched: List[Dict[str, Any]] = []
+    valid: List[tuple[int, Dict[str, Any]]] = []
     for s in skills:
         try:
-            skill_id = int(s["id"])
+            valid.append((int(s["id"]), s))
         except (KeyError, TypeError, ValueError) as exc:
             logger.warning(f"[ai-library] skipping skill with bad id: {exc}")
-            continue
+
+    # One JOIN for the page — the gallery shows "used by N agents" (and the
+    # orphan warning) on every card, so a per-skill lookup would be N+1.
+    binding_agents = await skill_repo.map_binding_agents([sid for sid, _ in valid])
+
+    enriched: List[Dict[str, Any]] = []
+    for skill_id, s in valid:
         files = await skill_repo.list_files(skill_id)
-        enriched.append({**s, "files": files})
+        enriched.append(
+            {**s, "files": files, "agents": binding_agents.get(skill_id, [])}
+        )
     return await _enrich_skills_with_scope_names(enriched)
 
 

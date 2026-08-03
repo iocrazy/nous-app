@@ -2825,7 +2825,15 @@
       "newFileTypeHint": "Type: {{t}}",
       "newFileContentLabel": "Initial content",
       "deleteFileConfirm": "Delete {{path}}? This cannot be undone.",
-      "deleteFileError": "Failed to delete: {{err}}"
+      "deleteFileError": "Failed to delete: {{err}}",
+      "builtIn": "Built-in",
+      "usedBy": "{{count}} agents using",
+      "orphanHint": "No agent uses this — bind it to an agent or archive it",
+      "orphanCount": "{{count}} unused",
+      "search": "Search skills...",
+      "noneMatch": "No skills match this search",
+      "newSkill": "+ New Skill",
+      "newFile": "+ File"
     },
     "workforce": {
       "runningNow": "Running now"

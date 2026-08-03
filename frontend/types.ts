@@ -1713,9 +1713,10 @@ export interface AILibrarySkill {
   output_format?: string | null;
   frontmatter_json: Record<string, unknown>;
   files: AILibrarySkillFile[];
-  // Reverse index: agents that bind this skill. Populated by the skill
-  // detail endpoint only — list endpoint leaves this empty for
-  // performance.
+  // Reverse index: agents that bind this skill. Populated by BOTH the
+  // detail and the list endpoint (the list batches it into one JOIN).
+  // Optional here for forward-compat with older payloads — treat
+  // undefined and [] alike: both mean nothing binds this skill.
   agents?: AILibrarySkillAgentRef[];
   updated_at: string;
   // Phase 2 minor cleanup — denormalized by the backend for scope badges.

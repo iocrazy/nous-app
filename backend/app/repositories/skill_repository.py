@@ -395,6 +395,44 @@ class SkillRepository(BaseRepository):
             logger.error(f"Failed to list binding agents for skill {skill_id}: {e}")
             return []
 
+    async def map_binding_agents(
+        self, skill_ids: List[int]
+    ) -> Dict[int, List[Dict[str, str]]]:
+        """Batch form of ``list_binding_agents`` — {skill_id: [{slug, name}]}.
+
+        One JOIN for a whole page of skills. The gallery renders the "used
+        by" line (and the orphan warning) on every card, so the per-skill
+        variant would mean one query per card; that cost is why the list
+        endpoint used to ship this field empty.
+
+        Skills with no binding are simply absent from the dict — callers
+        default them to ``[]``.
+        """
+        ids = [int(s) for s in skill_ids if s is not None]
+        if not ids:
+            return {}
+        try:
+            async with read_scope() as session:
+                rows = (
+                    await session.execute(
+                        select(AgentSkills.skill_id, AiAgents.slug, AiAgents.name)
+                        .select_from(AgentSkills)
+                        .join(AiAgents, AiAgents.id == AgentSkills.agent_id)
+                        .where(AgentSkills.skill_id.in_(ids))
+                    )
+                ).all()
+            out: Dict[int, List[Dict[str, str]]] = {}
+            for skill_id, slug, name in rows:
+                if not slug or not name:
+                    continue
+                out.setdefault(int(skill_id), []).append({"slug": slug, "name": name})
+            for agents in out.values():
+                agents.sort(key=lambda a: a["name"])
+            return out
+        except Exception as e:
+            logger.error(f"Failed to map binding agents for {len(ids)} skills: {e}")
+            return {}
+
     async def list_files(self, skill_id: int) -> List[Dict[str, Any]]:
         """List all files for a skill, ordered by sort_order then path."""
         try:
