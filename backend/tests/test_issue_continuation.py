@@ -7,6 +7,8 @@ injected fakes (mirrors the _run_reply_turns testability idiom) — no DBOS / DB
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from app.workflows.issue_lifecycle import _run_dispatch_with_continuation
@@ -223,3 +225,154 @@ async def test_no_preempt_when_status_stays_in_progress():
     assert rec.turns == [False]
     assert res.get("preempted") is not True
     assert rec.status_calls[-1]["status"] == "in_review"
+
+
+# ---------- needs_input 等待循环（spec 2026-07-30） ----------
+
+
+def _mk_wait_deps(payloads):
+    """payloads: 依次弹出的回复 payload（None=超时）。返回 (deps kwargs, calls 记录)。"""
+    calls = {"mark": 0, "clear": 0, "replies": []}
+    seq = list(payloads)
+
+    async def wait_for_input(issue_id, ttl_seconds):
+        return seq.pop(0) if seq else None
+
+    async def mark_waiting(issue_id, prompt):
+        calls["mark"] += 1
+
+    async def clear_waiting(issue_id):
+        calls["clear"] += 1
+
+    async def run_reply(issue_id, payload):
+        calls["replies"].append(payload["reply_text"])
+        return {"outcome": "completed", "reason": "done after reply"}
+
+    return (
+        dict(
+            wait_for_input=wait_for_input,
+            mark_waiting=mark_waiting,
+            clear_waiting=clear_waiting,
+            run_reply=run_reply,
+        ),
+        calls,
+    )
+
+
+@pytest.mark.asyncio
+async def test_needs_input_waits_then_reply_continues_to_completed():
+    """needs_input → 挂起 → 收到回复 → 回复回合 completed → in_review。"""
+    statuses = []
+
+    async def set_status(issue_id, status, **kw):
+        statuses.append((status, kw.get("agent_outcome")))
+
+    async def run_turn(issue_row, agent_id, user_id, is_continuation=False):
+        return {"content": "?", "outcome": "needs_input", "reason": "which ending?"}
+
+    deps, calls = _mk_wait_deps(
+        [{"reply_text": "摊牌", "user_id": "u1", "attachments": None}]
+    )
+    result = await _run_dispatch_with_continuation(
+        1, {"id": 1}, "agent", "u1",
+        run_turn=run_turn, set_status=set_status,
+        load_issue=AsyncMock(return_value={"status": "in_progress"}),
+        **deps,
+    )
+    assert result["outcome"] == "completed"
+    assert result["wait_rounds"] == 1
+    assert calls == {"mark": 1, "clear": 1, "replies": ["摊牌"]}
+    # 状态序列：等待时 needs_followup → 回复后 in_progress → 终态 in_review
+    assert statuses[0] == ("needs_followup", "needs_input")
+    assert statuses[1][0] == "in_progress"
+    assert statuses[-1][0] == "in_review"
+
+
+@pytest.mark.asyncio
+async def test_needs_input_timeout_terminates_like_today():
+    """超时（wait 返 None）→ 清标记 → 停在 needs_followup，与现状终态一致。"""
+    statuses = []
+
+    async def set_status(issue_id, status, **kw):
+        statuses.append(status)
+
+    async def run_turn(issue_row, agent_id, user_id, is_continuation=False):
+        return {"content": "?", "outcome": "needs_input", "reason": "which ending?"}
+
+    deps, calls = _mk_wait_deps([None])
+    result = await _run_dispatch_with_continuation(
+        1, {"id": 1}, "agent", "u1",
+        run_turn=run_turn, set_status=set_status,
+        load_issue=AsyncMock(return_value={"status": "in_progress"}),
+        **deps,
+    )
+    assert result["outcome"] == "needs_input"
+    assert calls["clear"] == 1
+    assert statuses[-1] == "needs_followup"  # 没有回到 in_progress
+
+
+@pytest.mark.asyncio
+async def test_needs_input_wait_rounds_capped():
+    """agent 连环问人 → 第 NEEDS_INPUT_MAX_WAIT_ROUNDS 轮后强制终结。"""
+
+    async def run_turn(issue_row, agent_id, user_id, is_continuation=False):
+        return {"content": "?", "outcome": "needs_input", "reason": "again?"}
+
+    async def run_reply(issue_id, payload):
+        return {"outcome": "needs_input", "reason": "and again?"}
+
+    deps, calls = _mk_wait_deps(
+        [{"reply_text": f"r{i}", "user_id": "u", "attachments": None} for i in range(10)]
+    )
+    deps["run_reply"] = run_reply
+    result = await _run_dispatch_with_continuation(
+        1, {"id": 1}, "agent", "u1",
+        run_turn=run_turn, set_status=AsyncMock(),
+        load_issue=AsyncMock(return_value={"status": "in_progress"}),
+        **deps,
+    )
+    assert result["wait_rounds"] == 5  # settings 默认
+    assert result["outcome"] == "needs_input"  # 超限按现状终结
+
+
+@pytest.mark.asyncio
+async def test_needs_input_without_gate_behaves_as_today():
+    """不注入 gate（生产未接线/故障降级）→ 现状行为：直接 needs_followup 终结。"""
+    statuses = []
+
+    async def set_status(issue_id, status, **kw):
+        statuses.append(status)
+
+    async def run_turn(issue_row, agent_id, user_id, is_continuation=False):
+        return {"content": "?", "outcome": "needs_input", "reason": "?"}
+
+    result = await _run_dispatch_with_continuation(
+        1, {"id": 1}, "agent", "u1",
+        run_turn=run_turn, set_status=set_status,
+        load_issue=AsyncMock(return_value={"status": "in_progress"}),
+    )
+    assert result["outcome"] == "needs_input"
+    assert statuses == ["needs_followup"]
+
+
+@pytest.mark.asyncio
+async def test_wait_wakeup_preempted_by_external_close():
+    """挂起期间 issue 被人工关闭 → 唤醒后 PREEMPT 复查让路，不再跑回复回合。"""
+    load_seq = [{"status": "in_progress"}, {"status": "cancelled"}]
+
+    async def load_issue(_):
+        return load_seq.pop(0) if load_seq else {"status": "cancelled"}
+
+    async def run_turn(issue_row, agent_id, user_id, is_continuation=False):
+        return {"content": "?", "outcome": "needs_input", "reason": "?"}
+
+    deps, calls = _mk_wait_deps(
+        [{"reply_text": "r", "user_id": "u", "attachments": None}]
+    )
+    result = await _run_dispatch_with_continuation(
+        1, {"id": 1}, "agent", "u1",
+        run_turn=run_turn, set_status=AsyncMock(),
+        load_issue=load_issue, **deps,
+    )
+    assert result.get("preempted") is True
+    assert calls["replies"] == []  # 回复回合没有跑
