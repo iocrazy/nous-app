@@ -8,7 +8,7 @@ Helper functions are in media_fetch_helpers.py.
 """
 
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from loguru import logger
 
 from app.api.media_batch_router import router as batch_router
@@ -29,8 +29,9 @@ from app.services.billing.points_service import PointsService
 from app.services.media.parsers.douyin_parse.parse_chain import reparse_douyin
 from app.services.media.parsers.media_service import MediaService
 from app.services.media.parsers.url_router import URLRouter
+from app.services.modules.gate import require_module
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_module("media-parser"))])
 router.include_router(batch_router)
 
 TAGS_FETCH = ["Video Fetch"]

@@ -14,12 +14,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.core.deps import AuthDep, OptionalAuthDep
 from app.schemas.shares import ShareAccessRequest, ShareCreate, ShareUpdate
+from app.services.modules.gate import require_module
 
 
 class ShareCommentCreate(BaseModel):
@@ -29,7 +30,10 @@ class ShareCommentCreate(BaseModel):
     timecode: Optional[float] = Field(None, ge=0, description="Timestamp in seconds")
 
 
-router = APIRouter(prefix="/shares")
+router = APIRouter(
+    prefix="/shares",
+    dependencies=[Depends(require_module("shares"))],
+)
 
 SHARE_CODE_LENGTH = 8
 SHARE_CODE_ALPHABET = string.ascii_letters + string.digits

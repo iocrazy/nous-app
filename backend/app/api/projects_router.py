@@ -68,8 +68,12 @@ from app.schemas.workflow import (
     WorkflowAlreadyInstantiated,
 )
 from app.services.library.projects_service import ProjectsService
+from app.services.modules.gate import require_module
 
-router = APIRouter(prefix="/projects")
+router = APIRouter(
+    prefix="/projects",
+    dependencies=[Depends(require_module("projects"))],
+)
 
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024  # 500 MB
 

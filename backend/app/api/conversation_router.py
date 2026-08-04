@@ -5,7 +5,15 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel
 
 from app.core.deps import AuthDep
@@ -27,10 +35,15 @@ from app.services.conversation_service import get_conversation_service
 from app.services.library.promote_generated_media_service import (
     PromoteGeneratedMediaService,
 )
+from app.services.modules.gate import require_module
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/conversations", tags=["Conversations"])
+router = APIRouter(
+    prefix="/conversations",
+    tags=["Conversations"],
+    dependencies=[Depends(require_module("ai-library"))],
+)
 
 
 class MessageEdit(BaseModel):

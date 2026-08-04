@@ -15,14 +15,19 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.deps import AuthDep
 from app.core.workflow_roles import WRITE_ROLES, resolve_effective_role
 from app.repositories.topics_repository import get_topics_repository
 from app.schemas.ideation import TopicCreate, TopicUpdate
+from app.services.modules.gate import require_module
 
-router = APIRouter(prefix="/ideation/topics", tags=["Ideation"])
+router = APIRouter(
+    prefix="/ideation/topics",
+    tags=["Ideation"],
+    dependencies=[Depends(require_module("ideation"))],
+)
 
 
 # ── topic collection ─────────────────────────────────────────────────────────
