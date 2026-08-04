@@ -16,7 +16,8 @@ from typing import Awaitable, Callable
 
 from fastapi import HTTPException
 
-from app.services.modules.registry import MODULES_BY_ID, read_module_state
+from app.core.cache import module_gate_cache
+from app.services.modules.registry import MODULES_BY_ID, ModuleState, read_module_state
 
 
 def require_module(module_id: str) -> Callable[[], Awaitable[None]]:
@@ -24,11 +25,19 @@ def require_module(module_id: str) -> Callable[[], Awaitable[None]]:
 
     Unknown ids raise ``KeyError`` here, at router-definition (import) time —
     a typo must crash startup, never silently un-gate an endpoint.
+
+    The switch read is cached for 5s (``module_gate_cache``): this dependency
+    runs on every request to a gated router and resolves BEFORE auth, so an
+    uncached read would let unauthenticated traffic drive one
+    ``system_settings`` query per request.
     """
     module = MODULES_BY_ID[module_id]
 
+    async def _load() -> ModuleState:
+        return await read_module_state(module)
+
     async def _check() -> None:
-        state = await read_module_state(module)
+        state: ModuleState = await module_gate_cache.get_or_load(module.key, _load)
         if not state.enabled:
             raise HTTPException(
                 status_code=503,

@@ -76,3 +76,8 @@ points_pricing_cache: TTLCache[Optional[dict[str, Any]]] = TTLCache(ttl_seconds=
 # load by every user, so cache it. Admin writes do NOT invalidate (worst-case
 # 60s staleness is acceptable for a feature switch).
 modules_status_cache: TTLCache[list[dict[str, Any]]] = TTLCache(ttl_seconds=60.0)
+# Per-module switch state behind require_module(), keyed by the module's
+# system_settings key. Short TTL so admin toggles propagate in ~5s while
+# shielding the pool from per-request reads on every gated router — the gate is
+# a router-level dependency, so it also runs for pre-auth traffic.
+module_gate_cache: TTLCache[Any] = TTLCache(ttl_seconds=5.0)

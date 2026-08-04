@@ -11,15 +11,31 @@ from __future__ import annotations
 import pytest
 
 
-def _gated_module_ids(router) -> set[str]:
+def _ids_from_dependencies(dependencies) -> set[str]:
     ids: set[str] = set()
-    for dep in router.dependencies:
+    for dep in dependencies:
         fn = dep.dependency
         for cell in getattr(fn, "__closure__", None) or ():
             obj = cell.cell_contents
             if hasattr(obj, "id") and hasattr(obj, "enabled_default"):
                 ids.add(obj.id)
     return ids
+
+
+def _gated_module_ids(router) -> set[str]:
+    return _ids_from_dependencies(router.dependencies)
+
+
+def _route_gated_module_ids(router, path: str, method: str) -> set[str]:
+    """Same closure match, but for a single route's own ``dependencies``.
+
+    Used where the gate must NOT sit at router level — those files also host
+    query/progress endpoints that stay reachable while the module is off.
+    """
+    for route in router.routes:
+        if route.path == path and method in getattr(route, "methods", set()):
+            return _ids_from_dependencies(route.dependencies)
+    raise AssertionError(f"route {method} {path} not found on router")
 
 
 @pytest.mark.parametrize(
@@ -43,6 +59,26 @@ def test_router_has_module_gate(module_path, router_name, expected_id):
     router = getattr(importlib.import_module(module_path), router_name)
     assert expected_id in _gated_module_ids(router), (
         f"{module_path}.{router_name} is missing require_module('{expected_id}')"
+    )
+
+
+@pytest.mark.parametrize(
+    "module_path,path,method",
+    [
+        # Manual "retry this download" — a new download dispatch.
+        ("app.api.media_download_router", "/retry/{platform_id}", "POST"),
+        # Batch playlist download — dispatches one parse_workflow per track.
+        ("app.api.media_soda_router", "/soda/playlist/download", "POST"),
+    ],
+)
+def test_dispatch_endpoint_has_module_gate(module_path, path, method):
+    """These two live in files whose other endpoints are read-only, so the gate
+    is endpoint-level rather than router-level."""
+    import importlib
+
+    router = importlib.import_module(module_path).router
+    assert "media-parser" in _route_gated_module_ids(router, path, method), (
+        f"{module_path} {method} {path} is missing require_module('media-parser')"
     )
 
 
