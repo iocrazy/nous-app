@@ -3,32 +3,95 @@
 Verifies that:
   (a) When team_id is set, a resource whose scope_id != team_id is rejected
       (PermissionError) even if the summoner's membership would ordinarily
-      allow it — the DB query includes the extra team filter.
-  (b) When team_id=None, the SQL / params are unchanged — no :tid bind param
-      is added — preserving the existing ai_library chat path exactly.
+      allow it — the query includes the extra team filter.
+  (b) When team_id=None, the query is unchanged — no team-scope filter is
+      added — preserving the existing ai_library chat path exactly.
+
+Phase A raw-SQL-to-ORM migration (docs/decisions/2026-08-04-raw-sql-to-orm-
+full-migration.md): the access-check query moved off db_engine.fetch_all
+text() SQL onto an ORM ``select(...)`` over ``read_scope()``. These tests
+now patch at that boundary — a fake session captures the compiled statement
+so the same assertions (team filter present when team_id is set, absent
+otherwise, membership subquery always present) still hold against the new
+implementation, without touching a real DB.
 """
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 import pytest
+
+pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
+
+
+class _FakeMappingsResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def first(self):
+        return self._rows[0] if self._rows else None
+
+
+class _FakeResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def mappings(self):
+        return _FakeMappingsResult(self._rows)
+
+
+class _CapturingSession:
+    """Captures the compiled SELECT (Postgres dialect, literal binds) so
+    tests can assert on the SQL shape without depending on SQLAlchemy's
+    internal Select repr."""
+
+    def __init__(self, rows):
+        self._rows = rows
+        self.captured_sql: str | None = None
+
+    async def execute(self, stmt):
+        from sqlalchemy.dialects import postgresql
+
+        compiled = stmt.compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+        self.captured_sql = str(compiled)
+        return _FakeResult(self._rows)
+
+
+def _patch_read_scope(monkeypatch, session):
+    import app.db.session as session_module
+
+    @asynccontextmanager
+    async def _read_scope():
+        yield session
+
+    monkeypatch.setattr(session_module, "read_scope", _read_scope)
+
+
+def _patch_system_request_scope_noop(monkeypatch):
+    import app.db.scope as scope_module
+
+    @asynccontextmanager
+    async def _system_request_scope(reason: str):
+        yield None
+
+    monkeypatch.setattr(scope_module, "system_request_scope", _system_request_scope)
+
 
 # ---------------------------------------------------------------------------
 # (a) With team_id set — resource in wrong scope raises PermissionError
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
-@pytest.mark.asyncio
 async def test_fetch_dispatch_team_scope_rejects_wrong_scope(monkeypatch):
-    """fetch_all returns [] when scope_id != team_id (as the DB would);
-    _fetch_dispatch must raise PermissionError.
-    """
-    from unittest.mock import AsyncMock
-
-    from app.db import engine as db_engine
+    """No row (as the DB would return when scope_id != team_id) →
+    _fetch_dispatch must raise PermissionError."""
     from app.services.ai.tools.resource_fetch_tool import _fetch_dispatch
 
-    monkeypatch.setattr(db_engine, "fetch_all", AsyncMock(return_value=[]))
+    _patch_system_request_scope_noop(monkeypatch)
+    _patch_read_scope(monkeypatch, _CapturingSession([]))
 
     with pytest.raises(PermissionError):
         await _fetch_dispatch(
@@ -41,28 +104,19 @@ async def test_fetch_dispatch_team_scope_rejects_wrong_scope(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# (b) With team_id set — SQL and params include the :tid team filter
+# (b) With team_id set — compiled SQL includes the team-scope filter
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
-@pytest.mark.asyncio
 async def test_fetch_dispatch_team_scope_sql_includes_team_filter(monkeypatch):
-    """When team_id is provided, fetch_all must receive SQL containing :tid
-    and params must include tid=<team_id>.
-    """
-    from app.db import engine as db_engine
+    """When team_id is provided, the compiled SELECT must filter
+    resource_items.scope_id to that team, alongside the membership
+    subquery (not a replacement for it)."""
     from app.services.ai.tools.resource_fetch_tool import _fetch_dispatch
 
-    captured_sql: list[str] = []
-    captured_params: list[dict] = []
-
-    async def _spy(sql: str, params: dict | None = None) -> list[dict]:
-        captured_sql.append(sql)
-        captured_params.append(params or {})
-        return []  # empty → PermissionError, which we expect
-
-    monkeypatch.setattr(db_engine, "fetch_all", _spy)
+    _patch_system_request_scope_noop(monkeypatch)
+    session = _CapturingSession([])
+    _patch_read_scope(monkeypatch, session)
 
     with pytest.raises(PermissionError):
         await _fetch_dispatch(
@@ -73,45 +127,29 @@ async def test_fetch_dispatch_team_scope_sql_includes_team_filter(monkeypatch):
             team_id=42,
         )
 
-    assert captured_sql, "fetch_all was not called"
-    assert (
-        ":tid" in captured_sql[0]
-    ), "SQL must contain :tid bind param when team_id is set"
-    assert (
-        captured_params[0].get("tid") == 42
-    ), "params must contain tid=42 when team_id=42"
-    # Verify the membership subquery is still present (not replaced by team filter)
-    assert (
-        "user_id=:uid" in captured_sql[0]
-    ), "SQL must contain user_id=:uid membership check"
-    assert (
-        "team_members" in captured_sql[0]
-    ), "SQL must contain team_members subquery for membership validation"
+    assert session.captured_sql is not None, "session.execute was not called"
+    sql = session.captured_sql
+    assert "'42'" in sql, "compiled SQL must bind the team_id filter"
+    assert "resource_items" in sql
+    assert "team_members" in sql, "membership subquery must still be present"
+    assert "'user-abc'" in sql, "membership subquery must filter by user_id"
 
 
 # ---------------------------------------------------------------------------
-# (c) With team_id=None — SQL/params unchanged (no :tid added)
+# (c) With team_id=None — no team-scope filter added
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
-@pytest.mark.asyncio
 async def test_fetch_dispatch_no_team_filter_when_team_id_none(monkeypatch):
-    """When team_id=None, fetch_all must NOT receive :tid — preserving exact
-    current behaviour for the existing ai_library chat path.
-    """
-    from app.db import engine as db_engine
+    """When team_id=None, the compiled SQL must not carry an extra
+    equality filter on resource_items.scope_id beyond the membership
+    IN-subquery — preserving exact current behaviour for the ai_library
+    chat path."""
     from app.services.ai.tools.resource_fetch_tool import _fetch_dispatch
 
-    captured_sql: list[str] = []
-    captured_params: list[dict] = []
-
-    async def _spy(sql: str, params: dict | None = None) -> list[dict]:
-        captured_sql.append(sql)
-        captured_params.append(params or {})
-        return []  # empty → PermissionError, which we expect
-
-    monkeypatch.setattr(db_engine, "fetch_all", _spy)
+    _patch_system_request_scope_noop(monkeypatch)
+    session = _CapturingSession([])
+    _patch_read_scope(monkeypatch, session)
 
     with pytest.raises(PermissionError):
         await _fetch_dispatch(
@@ -122,11 +160,12 @@ async def test_fetch_dispatch_no_team_filter_when_team_id_none(monkeypatch):
             team_id=None,
         )
 
-    assert captured_sql, "fetch_all was not called"
-    assert ":tid" not in captured_sql[0], "SQL must NOT contain :tid when team_id=None"
-    assert (
-        "tid" not in captured_params[0]
-    ), "params must NOT contain 'tid' key when team_id=None"
+    assert session.captured_sql is not None
+    sql = session.captured_sql
+    assert "team_members" in sql
+    # Only ONE scope_id comparison (the membership IN-subquery) — no second
+    # standalone `= '<team>'` equality the team_id branch would add.
+    assert sql.count("resource_items.scope_id") <= 2  # column ref + IN clause
 
 
 # ---------------------------------------------------------------------------
@@ -134,13 +173,10 @@ async def test_fetch_dispatch_no_team_filter_when_team_id_none(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
-@pytest.mark.asyncio
 async def test_resource_fetch_threads_team_id_to_dispatch(monkeypatch):
     """resource_fetch must accept team_id and forward it to _fetch_dispatch.
     When the dispatch raises PermissionError the public wrapper converts it
-    to {"error": "resource not accessible"} (existing catch block).
-    """
+    to {"error": "resource not accessible"} (existing catch block)."""
     from app.services.ai.tools import resource_fetch_tool as m
 
     captured_team_ids: list[int | None] = []
@@ -172,12 +208,9 @@ async def test_resource_fetch_threads_team_id_to_dispatch(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
-@pytest.mark.asyncio
 async def test_resource_fetch_team_id_defaults_to_none(monkeypatch):
     """Existing callers that don't pass team_id must still work — the arg is
-    optional and defaults to None, and _fetch_dispatch receives None.
-    """
+    optional and defaults to None, and _fetch_dispatch receives None."""
     from app.services.ai.tools import resource_fetch_tool as m
 
     captured_team_ids: list[int | None] = []

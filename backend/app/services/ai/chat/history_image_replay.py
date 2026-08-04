@@ -37,26 +37,56 @@ LoadFilePath = Callable[[str, str], Awaitable[Optional[str]]]
 
 async def _load_file_path_db(resource_id: str, user_id: str) -> Optional[str]:
     """resources.file_path for one resource, gated on the caller's team
-    memberships (same access shape as resource_fetch's row loader)."""
-    from app.db import engine as db_engine
+    memberships (same access shape as resource_fetch's row loader).
 
-    rows = await db_engine.fetch_all(
-        """
-        SELECT r.file_path
-          FROM public.resources r
-          JOIN public.resource_items ri ON ri.resource_id = r.id
-         WHERE r.id::text = :rid
-           AND r.is_trashed = false
-           AND ri.scope_id::text IN (
-                 SELECT team_id::text FROM public.team_members WHERE user_id = :uid
-               )
-         LIMIT 1
-        """,
-        {"rid": resource_id, "uid": user_id},
+    Phase A raw-SQL-to-ORM migration (docs/decisions/2026-08-04-raw-sql-to-
+    orm-full-migration.md). Original SQL (kept for reference — same JOIN/
+    predicates/LIMIT):
+      SELECT r.file_path
+        FROM public.resources r
+        JOIN public.resource_items ri ON ri.resource_id = r.id
+       WHERE r.id::text = :rid AND r.is_trashed = false
+         AND ri.scope_id::text IN (
+               SELECT team_id::text FROM public.team_members WHERE user_id = :uid
+             )
+       LIMIT 1
+    """
+    from contextlib import nullcontext
+
+    from sqlalchemy import String, cast, select
+
+    from app.db.scope import is_enforced, system_request_scope
+    from app.db.session import read_scope
+    from app.models import ResourceItems, Resources, TeamMembers
+
+    id_text = cast(Resources.id, String)
+    scope_text = cast(ResourceItems.scope_id, String)
+    membership_subq = select(cast(TeamMembers.team_id, String)).where(
+        TeamMembers.user_id == user_id
     )
-    if not rows:
-        return None
-    return rows[0].get("file_path") or None
+
+    stmt = (
+        select(Resources.file_path)
+        .join(ResourceItems, ResourceItems.resource_id == Resources.id)
+        .where(id_text == resource_id)
+        .where(Resources.is_trashed.is_(False))
+        .where(scope_text.in_(membership_subq))
+        .limit(1)
+    )
+
+    # Resources carries UserScoped(creator_id), but this access check is
+    # governed by team membership, not creator_id — matches the
+    # is_enforced-gated system_request_scope pattern used across this
+    # migration batch; no-op today (flag off).
+    scope_cm = (
+        system_request_scope(reason="history-image-replay-team-membership-access")
+        if is_enforced("resources")
+        else nullcontext()
+    )
+    async with scope_cm:
+        async with read_scope() as session:
+            file_path = (await session.execute(stmt)).scalars().first()
+    return file_path or None
 
 
 async def build_history_messages(

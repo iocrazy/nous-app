@@ -50,6 +50,11 @@ async def _get_media_row(media_id: str) -> dict:
     return media
 
 
+# Phase A raw-SQL-to-ORM migration (docs/decisions/2026-08-04-raw-sql-to-orm-
+# full-migration.md): _resolve_album_location below now runs this as an ORM
+# select() (see its body) — kept here as the reference shape the ORM
+# statement must stay semantically equivalent to (JOIN condition,
+# current_version match, LIMIT).
 _ALBUM_LOCATION_SQL = """
     SELECT rv.file_path
     FROM resources r
@@ -67,15 +72,26 @@ async def _resolve_album_location(media_id: str):
     resource 当前 version 的 file_path(album 迁移写的是 resource_versions
     这一列,不是 parsed_media.download_path)。
 
-    用非 scoped 的 db_engine 直查(而不是 ResourcesRepository 的 scoped 方法)
-    —— list_slides/serve_slide_file 这两个端点上下文没有打开 scope session
-    (user_session/system_session),调 get_resource_by_media_id 会因
-    "no scope is set" 报错并被其内部 except 吞成 None,导致已迁图集永远走
-    不到这条分支、误判成未迁移。db_engine.fetch_one 不需要 scope。
+    Phase A raw-SQL-to-ORM migration(docs/decisions/2026-08-04-raw-sql-to-
+    orm-full-migration.md):list_slides/serve_slide_file 这两个端点上下文
+    没有打开 scope session(user_session/system_session)—— 之前用非 scoped
+    的 db_engine 直查绕开这一点;调 get_resource_by_media_id 会因 "no scope
+    is set" 报错并被其内部 except 吞成 None,导致已迁图集永远走不到这条
+    分支、误判成未迁移。ORM 化后改用 ``system_request_scope`` 显式声明这里
+    本来就没有 ambient scope(而不是继续绕开钩子)—— resources 携带
+    UserScoped,SCOPE_ENFORCE_RESOURCES 打开后若不声明 system 会立刻炸
+    "no scope is set",与迁移前这段注释描述的故障同构;is_enforced 门控下
+    今天(flag off)是纯粹的 no-op。
 
     resource 不存在 / 没有对应 version / file_path 为空或非 sb:// 前缀,
     一律返回 None —— 调用方零回退到原文件系统读取逻辑,保证迁移前后都能读。"""
-    from app.db import engine as db_engine
+    from contextlib import nullcontext
+
+    from sqlalchemy import and_, select
+
+    from app.db.scope import is_enforced, system_request_scope
+    from app.db.session import read_scope
+    from app.models import Resources, ResourceVersions
     from app.services.library.media_storage import resolve_media_source
 
     try:
@@ -83,8 +99,32 @@ async def _resolve_album_location(media_id: str):
     except (TypeError, ValueError):
         return None
 
-    row = await db_engine.fetch_one(_ALBUM_LOCATION_SQL, {"media_id": mid})
-    file_path = (row or {}).get("file_path") if row else None
+    stmt = (
+        select(ResourceVersions.file_path)
+        .select_from(Resources)
+        .join(
+            ResourceVersions,
+            and_(
+                ResourceVersions.resource_id == Resources.id,
+                ResourceVersions.version_number == Resources.current_version,
+            ),
+        )
+        .where(Resources.media_id == mid)
+        .limit(1)
+    )
+
+    scope_cm = (
+        system_request_scope(
+            reason="media-slides-album-location: list_slides/serve_slide_file "
+            "have no ambient scope (no user_session/system_session open here)"
+        )
+        if is_enforced("resources")
+        else nullcontext()
+    )
+    async with scope_cm:
+        async with read_scope() as session:
+            file_path = (await session.execute(stmt)).scalars().first()
+
     if not file_path:
         return None
     loc = resolve_media_source(file_path)

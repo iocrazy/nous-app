@@ -18,33 +18,78 @@ from app.services.ai._mime_kind import kind_from_mime
 async def _fetch_accessible_meta(
     user_id: str, resource_ids: list[str]
 ) -> dict[str, dict[str, Any]]:
-    """Return dict of {id: meta} for those the user can read. Missing ids = not accessible."""
-    from app.db import engine as db_engine
+    """Return dict of {id: meta} for those the user can read. Missing ids = not accessible.
+
+    Phase A raw-SQL-to-ORM migration (docs/decisions/2026-08-04-raw-sql-to-
+    orm-full-migration.md). Original SQL (kept for reference — same JOINs/
+    predicates/columns):
+      SELECT r.id::text AS id, r.filename AS name,
+             r.mime_type AS mime, r.file_size_bytes AS size,
+             r.notes AS brief, r.updated_at,
+             ri.scope_id::text AS scope_id,
+             t.name AS team_name, t.kind AS scope_kind
+        FROM public.resources r
+        JOIN public.resource_items ri ON ri.resource_id = r.id
+        LEFT JOIN public.teams t ON t.id::text = ri.scope_id::text
+       WHERE r.id::text = ANY(:ids) AND r.is_trashed = false
+         AND ri.scope_id::text IN (
+               SELECT team_id::text FROM public.team_members WHERE user_id = :uid
+             )
+    """
+    from contextlib import nullcontext
+
+    from sqlalchemy import String, cast, select
+
+    from app.db.scope import is_enforced, system_request_scope
+    from app.db.session import read_scope
+    from app.models import ResourceItems, Resources, TeamMembers, Teams
 
     if not resource_ids:
         return {}
 
-    rows = await db_engine.fetch_all(
-        """
-        SELECT r.id::text AS id, r.filename AS name,
-               r.mime_type AS mime, r.file_size_bytes AS size,
-               r.notes AS brief, r.updated_at,
-               ri.scope_id::text AS scope_id,
-               t.name AS team_name, t.kind AS scope_kind
-          FROM public.resources r
-          JOIN public.resource_items ri ON ri.resource_id = r.id
-          LEFT JOIN public.teams t ON t.id::text = ri.scope_id::text
-         WHERE r.id::text = ANY(:ids)
-           AND r.is_trashed = false
-           -- PR-E 4c: ri.scope_id is always a teams.id snowflake; the
-           -- personal/team distinction now comes from teams.kind, not the
-           -- (dropped) scope_type column.
-           AND ri.scope_id::text IN (
-                 SELECT team_id::text FROM public.team_members WHERE user_id = :uid
-               )
-        """,
-        {"ids": resource_ids, "uid": user_id},
+    id_text = cast(Resources.id, String)
+    scope_text = cast(ResourceItems.scope_id, String)
+    membership_subq = select(cast(TeamMembers.team_id, String)).where(
+        TeamMembers.user_id == user_id
     )
+
+    stmt = (
+        select(
+            id_text.label("id"),
+            Resources.filename.label("name"),
+            Resources.mime_type.label("mime"),
+            Resources.file_size_bytes.label("size"),
+            Resources.notes.label("brief"),
+            Resources.updated_at,
+            scope_text.label("scope_id"),
+            Teams.name.label("team_name"),
+            Teams.kind.label("scope_kind"),
+        )
+        .join(ResourceItems, ResourceItems.resource_id == Resources.id)
+        .outerjoin(Teams, Teams.id == ResourceItems.scope_id)
+        .where(id_text.in_(resource_ids))
+        .where(Resources.is_trashed.is_(False))
+        # PR-E 4c: ri.scope_id is always a teams.id snowflake; the
+        # personal/team distinction now comes from teams.kind, not the
+        # (dropped) scope_type column.
+        .where(scope_text.in_(membership_subq))
+    )
+
+    # Resources carries UserScoped(creator_id), but this access check is
+    # governed by team membership, not creator_id — a team-shared resource
+    # must stay visible even when not owned by the caller. Matches the
+    # is_enforced-gated system_request_scope pattern used across this
+    # migration batch (resources_repository / resource_fetch_tool); no-op
+    # today (flag off).
+    scope_cm = (
+        system_request_scope(reason="resource-ref-resolver-team-membership-access")
+        if is_enforced("resources")
+        else nullcontext()
+    )
+    async with scope_cm:
+        async with read_scope() as session:
+            rows = (await session.execute(stmt)).mappings().all()
+
     return {
         row["id"]: {
             "id": row["id"],

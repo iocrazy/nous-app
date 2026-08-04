@@ -13,7 +13,8 @@ returns an inline base64 data URL.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from contextlib import asynccontextmanager
+from unittest.mock import patch
 
 import pytest
 
@@ -28,6 +29,50 @@ def _fake_get_stream(data: bytes):
         yield data
 
     return _gen
+
+
+class _FakeMappingsResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def first(self):
+        return self._rows[0] if self._rows else None
+
+
+class _FakeResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def mappings(self):
+        return _FakeMappingsResult(self._rows)
+
+
+class _StubSession:
+    def __init__(self, row: dict | None):
+        self._row = row
+
+    async def execute(self, _stmt):
+        return _FakeResult([self._row] if self._row else [])
+
+
+def _patch_access_check_row(row: dict | None):
+    """Phase A raw-SQL-to-ORM migration (docs/decisions/2026-08-04-raw-sql-
+    to-orm-full-migration.md): _fetch_dispatch's access-check query moved
+    off db_engine.fetch_all onto an ORM select() over read_scope(). Patches
+    that boundary instead of app.db.engine.fetch_all."""
+
+    @asynccontextmanager
+    async def _read_scope():
+        yield _StubSession(row)
+
+    @asynccontextmanager
+    async def _system_request_scope(reason: str):
+        yield None
+
+    return (
+        patch("app.db.session.read_scope", new=_read_scope),
+        patch("app.db.scope.system_request_scope", new=_system_request_scope),
+    )
 
 
 @pytest.mark.unit
@@ -46,11 +91,10 @@ async def test_image_resource_inlined_as_data_url():
         "file_path": "sb://library/t42/ab/cd/abcd.png",
         "brief": None,
     }
+    read_scope_patch, system_scope_patch = _patch_access_check_row(row)
     with (
-        patch(
-            "app.db.engine.fetch_all",
-            AsyncMock(return_value=[row]),
-        ),
+        read_scope_patch,
+        system_scope_patch,
         patch.object(ObjectStore, "get_stream", _fake_get_stream(png)),
     ):
         result = await resource_fetch(
@@ -90,11 +134,10 @@ async def test_image_resource_unresolvable_returns_error_not_bogus_url():
 
     from app.services.library.media_storage import ObjectStore
 
+    read_scope_patch, system_scope_patch = _patch_access_check_row(row)
     with (
-        patch(
-            "app.db.engine.fetch_all",
-            AsyncMock(return_value=[row]),
-        ),
+        read_scope_patch,
+        system_scope_patch,
         patch.object(ObjectStore, "get_stream", _boom),
     ):
         result = await resource_fetch(
