@@ -79,12 +79,17 @@ class _FakeExecResult:
 class _FakeSession:
     """Distinguishes the two SELECTs by their compiled WHERE clause (same
     idiom the pre-ORM raw-SQL test used: ``"issue_id IS NULL" in sql``) and
-    records every UPDATE's bind params."""
+    records every UPDATE's bind params AND compiled SQL — the SQL capture
+    matters because the ``issue_id IS NULL`` overwrite guard on the stamp
+    UPDATE produces no bind param of its own (final review fault injection:
+    dropping that guard left every test green when only params were
+    inspected)."""
 
     def __init__(self, *, unmirrored=None, mirrored_open=None) -> None:
         self._unmirrored = unmirrored or []
         self._mirrored_open = mirrored_open or []
         self.stamped: list[dict[str, Any]] = []
+        self.stamp_sql: list[str] = []
 
     async def execute(self, stmt: Any):
         sql, params = _compile(stmt)
@@ -93,6 +98,7 @@ class _FakeSession:
                 return _FakeRowsResult(self._unmirrored)
             return _FakeRowsResult(self._mirrored_open)
         self.stamped.append(params)
+        self.stamp_sql.append(sql)
         return _FakeExecResult()
 
 
@@ -159,6 +165,24 @@ async def test_existing_origin_reuses_issue_and_still_stamps(harness):
     assert counts["created"] == 0
     assert issues.created == []
     assert 77 in session.stamped[0].values()  # backlink repaired, no duplicate
+
+
+@pytest.mark.asyncio
+async def test_stamp_update_carries_issue_id_null_overwrite_guard(harness):
+    """The stamp UPDATE's WHERE clause must keep ``task_tracking.issue_id
+    IS NULL`` — it's the only thing stopping a re-run from clobbering an
+    already-stamped row's backlink with a different issue_id. That clause
+    contributes no bind param, so a test that only inspects
+    ``session.stamped[i]`` (params) can't see it go missing; this asserts
+    against the compiled SQL text instead (final review, Minor 2)."""
+    _, session = harness(unmirrored=[_ROW])
+    await wf._mirror_new_batches()
+
+    assert len(session.stamp_sql) == 1
+    sql = session.stamp_sql[0]
+    assert sql.startswith("UPDATE public.task_tracking SET issue_id=")
+    assert "task_tracking.issue_id IS NULL" in sql
+    assert "task_tracking.dbos_workflow_id = " in sql
 
 
 @pytest.mark.asyncio

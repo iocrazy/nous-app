@@ -91,13 +91,18 @@ async def write_scope() -> AsyncIterator[AsyncSession]:
     transaction. ALWAYS use this for writes; never run UPDATE/INSERT on a
     bare read_scope/connect() (that silently rolls back).
 
-    ⚠️ Known limitation (Phase B1 review, 2026-08-04): a handful of callers
-    (``input_gate.py``, ``issues_router.dispatch_issue``,
-    ``pipeline_relay.RelayGateway.dispatch_issue``) run
+    ⚠️ Known limitation (Phase B1 review, 2026-08-04): an open-ended (and
+    growing across migration batches) set of callers run
     ``session.execute(text("SET LOCAL ROLE service_role"))`` as the first
     statement in a ``write_scope()`` block, to satisfy the mig-170
     column-allowlist trigger on ``public.issues`` execution fields
     (``dbos_workflow_id`` / ``execution_locked_at`` / ``execution_state``).
+    Don't rely on an enumerated list here — it will go stale again the next
+    time a batch adds call sites without circling back to this docstring
+    (exactly what happened between Phase B1 Task 1 and Task 2, where a
+    3-caller list silently became a stale undercount once Task 2 landed).
+    Get the current full set with ``grep -rn 'SET LOCAL ROLE' app/`` instead.
+
     ``SET LOCAL`` is scoped to the CURRENT transaction — if such a call is
     ever wrapped in an ambient ``unit_of_work()`` (this ``write_scope()``
     would then join that outer session/transaction instead of opening its

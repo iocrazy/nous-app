@@ -40,12 +40,6 @@ from app.services.issues.issue_chat_stream import (  # noqa: F401
 )
 
 
-def _engine():
-    from app.db import engine as db_engine
-
-    return db_engine
-
-
 @DBOS.step()
 async def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
     """Atomically claim an issue. False if someone else already holds the lock."""
