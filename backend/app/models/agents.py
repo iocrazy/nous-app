@@ -143,6 +143,12 @@ class AgentRuns(Base):
             name="agent_runs_agent_id_fkey",
         ),
         ForeignKeyConstraint(
+            ["episode_id"],
+            ["public.episodes.id"],
+            ondelete="SET NULL",
+            name="agent_runs_episode_id_fkey",
+        ),
+        ForeignKeyConstraint(
             ["issue_id"],
             ["public.issues.id"],
             ondelete="SET NULL",
