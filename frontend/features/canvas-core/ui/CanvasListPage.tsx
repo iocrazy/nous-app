@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Frame, Loader2, Plus, Trash2 } from 'lucide-react';
-import { PageHeader } from '../../../components/AILibrary/PageHeader';
+import { PageHeader } from '../../../components/layout/PageHeader';
 import { useToast } from '../../../components/Toast';
 import { CANVAS_NAV_ENABLED } from '../flags';
 import { CanvasTrashSection } from './CanvasTrashSection';

@@ -25,7 +25,7 @@ import {
   YAxis,
 } from 'recharts';
 
-import { PageHeader } from '../components/AILibrary/PageHeader';
+import { PageHeader } from '../components/layout/PageHeader';
 import { useToast } from '../components/Toast';
 import { useWorkspaceScope } from '../hooks/useWorkspaceScope';
 import { aiLibraryService } from '../services/aiLibraryService';

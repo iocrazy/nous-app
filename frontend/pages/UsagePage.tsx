@@ -48,7 +48,7 @@ import type {
 } from '../types';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { useToast } from '../components/Toast';
-import { PageHeader } from '../components/AILibrary/PageHeader';
+import { PageHeader } from '../components/layout/PageHeader';
 
 const AGENT_BAR_COLORS = [
   '#6366f1',

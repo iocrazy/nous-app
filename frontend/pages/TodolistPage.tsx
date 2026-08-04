@@ -13,7 +13,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ListTodo, Users, User, Bot, GitBranch } from 'lucide-react';
 import { IssueListView, type IssueViewMode } from '../components/Todolist/IssueListView';
 import { PipelinesManagerModal } from '../components/Todolist/PipelinesManagerModal';
-import { PageHeader } from '../components/AILibrary/PageHeader';
+import { PageHeader } from '../components/layout/PageHeader';
 import { fetchMyTeams, fetchPersonalTeam } from '../services/teamService';
 import { IssueDetailView } from '../components/Todolist/IssueDetailView';
 import { NewIssueDialog } from '../components/Todolist/NewIssueDialog';

@@ -18,7 +18,7 @@ import { useAgentRuns } from '../../hooks/useAgentRuns';
 import { useGlobalChatStore } from '../../stores/globalChatStore';
 import { getAgentIcon } from './agentIcons';
 import { NewAgentModal } from './NewAgentModal';
-import { PageHeader } from './PageHeader';
+import { PageHeader } from '../layout/PageHeader';
 import {
   AGENT_GROUP_ORDER,
   agentGroupOf,
