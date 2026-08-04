@@ -16,7 +16,7 @@ import type { AIChatMessage, ChatSession } from '../types';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { MessageBubble } from '../components/chat/AIChatBubble';
 import { useToast } from '../components/Toast';
-import { PageHeader } from '../components/AILibrary/PageHeader';
+import { PageHeader } from '../components/layout/PageHeader';
 import { useGlobalChatStore } from '../stores/globalChatStore';
 
 function formatWhen(iso?: string | null): string {

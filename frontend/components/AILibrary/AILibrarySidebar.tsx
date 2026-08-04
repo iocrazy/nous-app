@@ -28,6 +28,7 @@ import { useAgentRuns } from '../../hooks/useAgentRuns';
 import { useGlobalChatStore } from '../../stores/globalChatStore';
 import { getAgentIcon } from '../AILibrary/agentIcons';
 import { AI_LIBRARY_NAV, activeNavKey } from './sidebarNav';
+import { SecondarySidebarHeader } from '../layout/SecondarySidebarHeader';
 
 interface AILibrarySidebarProps {
   /** URL prefix for the current team context, e.g. "/team/:teamId". */
@@ -146,7 +147,8 @@ export const AILibrarySidebar: React.FC<AILibrarySidebarProps> = ({
 
   return (
     <>
-      <div className="group relative flex w-52 flex-col overflow-y-auto border-r border-ink-800/40 pt-3">
+      <div className="group relative flex w-52 flex-col overflow-y-auto border-r border-ink-800/40">
+        <SecondarySidebarHeader title={t('sidebar.aiLibrary', 'AI Library')} />
         {AI_LIBRARY_NAV.map((section) => (
           <React.Fragment key={section.key}>
             {section.key !== 'library' && (

@@ -17,6 +17,7 @@ import {
 import { formatCappedCount } from '../utils/cappedCount';
 import { useTranslation } from 'react-i18next';
 import { useResourcesContext } from '../contexts/ResourcesContext';
+import { SecondarySidebarHeader } from './layout/SecondarySidebarHeader';
 import type { SmartCollection } from '../types';
 
 // ─── Props ─────────────────────────────────────────────
@@ -151,11 +152,11 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
         )}
       </div>
     ) : (
-    <div className={`group hidden md:flex md:static w-52 shrink-0 border-r ${cBorderRail} flex-col pt-4`} style={{ position: 'relative' }}>
-      {/* Header */}
-      <div className="px-4 pt-4 pb-3">
-        <span className={`text-sm font-semibold ${cText200}`}>{t('sidebar.resources', 'Resources')}</span>
-      </div>
+    <div className={`group hidden md:flex md:static w-52 shrink-0 border-r ${cBorderRail} flex-col`} style={{ position: 'relative' }}>
+      {/* Header — shared rail title. The rail used to carry an extra pt-4 of
+          its own on top of the header's, putting this module's title 16px
+          lower than every other rail's. */}
+      <SecondarySidebarHeader title={t('sidebar.resources', 'Resources')} />
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto px-2 pb-4 space-y-0.5">
         {/* ── Locations (island redesign D3: high-frequency content first) ── */}

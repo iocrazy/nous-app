@@ -19,6 +19,7 @@ import { TO_PUBLISH_TAG_NAME, findToPublishTagId } from '../../services/toPublis
 import { SocialAccount, LibraryVideo } from '../../types';
 import { useToast } from '../Toast';
 import { useWorkspaceScope } from '../../hooks/useWorkspaceScope';
+import { PageHeader } from '../layout/PageHeader';
 import './distribution-v4.css';
 
 type Visibility = 'public' | 'friends' | 'private';
@@ -507,12 +508,10 @@ export const PublishPage: React.FC = () => {
 
   return (
     <div className="dist-v4">
-      <div className="page-head">
-        <div>
-          <h2>{t('distribution.publish.title', 'Publish')}</h2>
-          <p>{t('distribution.publish.subtitle', 'Send library media to your connected accounts.')}</p>
-        </div>
-      </div>
+      <PageHeader
+        title={t('distribution.publish.title', 'Publish')}
+        subtitle={t('distribution.publish.subtitle', 'Send library media to your connected accounts.')}
+      />
 
       <div className="stepper" aria-hidden="true">
         <span className="step done">

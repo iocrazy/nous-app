@@ -29,6 +29,7 @@ import {
   type RefHotspot,
 } from '../services/inspirationService';
 import { fetchAllTags } from '../services/unifiedTagService';
+import { PageHeader } from '../components/layout/PageHeader';
 import type { Tag } from '../types';
 
 const PAGE_SIZE = 50;
@@ -290,64 +291,73 @@ export const InspirationPage: React.FC = () => {
 
   return (
     <div className="mx-auto w-full max-w-[1800px] px-6 py-6 2xl:px-10">
-      <div className="mb-3 flex items-center gap-3 rounded-xl bg-island px-4 py-2.5">
-        <h2 className="text-[15px] font-semibold text-content">
-          {t('inspiration.title', 'Inspiration')}
-        </h2>
-        <div className="flex items-center gap-0.5 rounded-lg bg-island-2 p-0.5">
-          <button
-            onClick={() => setTab('notes')}
-            className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-              tab === 'notes' ? 'bg-island text-content shadow-sm' : 'text-content-3 hover:text-content-2'
-            }`}
-          >
-            {t('inspiration.notes', 'Notes')}
-          </button>
-          <button
-            onClick={() => setTab('hotspots')}
-            className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-              tab === 'hotspots' ? 'bg-island text-content shadow-sm' : 'text-content-3 hover:text-content-2'
-            }`}
-          >
-            {t('inspiration.hotspotsTab', 'Hotspots')}
-          </button>
-        </div>
-        {tag && (
-          <button
-            onClick={() => setTag(null)}
-            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs text-[var(--accent-text)]"
-          >
-            #{tag} <X size={10} aria-label="Clear tag filter" />
-          </button>
-        )}
-        {date && (
-          <button
-            onClick={() => setDate(null)}
-            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs text-[var(--accent-text)]"
-          >
-            {date} <X size={10} aria-label="Clear date filter" />
-          </button>
-        )}
-        <div className="ml-auto flex w-64 items-center gap-2 rounded-lg bg-island-2 px-3 py-1.5">
-          <Search size={13} className="shrink-0 text-content-4" />
-          <input
-            value={queryInput}
-            onChange={(e) => setQueryInput(e.target.value)}
-            placeholder={t('inspiration.searchPlaceholder', 'Search notes…')}
-            className="w-full bg-transparent text-xs text-content placeholder:text-content-4 focus:outline-none"
-          />
-        </div>
-        <button
-          onClick={() => {
-            setParseUrl(null);
-            setParseOpen(true);
-          }}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[var(--accent-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"
-        >
-          <Link2 size={13} />
-          {t('inspiration.parseUrl', 'Parse URL')}
-        </button>
-      </div>
+      <PageHeader
+        className="mb-3"
+        title={t('inspiration.title', 'Inspiration')}
+        actions={
+          <>
+            {tag && (
+              <button
+                onClick={() => setTag(null)}
+                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs text-[var(--accent-text)]"
+              >
+                #{tag} <X size={10} aria-label="Clear tag filter" />
+              </button>
+            )}
+            {date && (
+              <button
+                onClick={() => setDate(null)}
+                className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs text-[var(--accent-text)]"
+              >
+                {date} <X size={10} aria-label="Clear date filter" />
+              </button>
+            )}
+            <div className="flex w-64 items-center gap-2 rounded-lg bg-island-2 px-3 py-1.5">
+              <Search size={13} className="shrink-0 text-content-4" />
+              <input
+                value={queryInput}
+                onChange={(e) => setQueryInput(e.target.value)}
+                placeholder={t('inspiration.searchPlaceholder', 'Search notes…')}
+                className="w-full bg-transparent text-xs text-content placeholder:text-content-4 focus:outline-none"
+              />
+            </div>
+            <button
+              onClick={() => {
+                setParseUrl(null);
+                setParseOpen(true);
+              }}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[var(--accent-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"
+            >
+              <Link2 size={13} />
+              {t('inspiration.parseUrl', 'Parse URL')}
+            </button>
+          </>
+        }
+        tabs={
+          <>
+            <button
+              onClick={() => setTab('notes')}
+              className={
+                tab === 'notes'
+                  ? 'border-b-2 border-[var(--accent-text)] px-3 pb-2 font-medium text-ink-100'
+                  : 'px-3 pb-2 text-ink-500 hover:text-ink-300'
+              }
+            >
+              {t('inspiration.notes', 'Notes')}
+            </button>
+            <button
+              onClick={() => setTab('hotspots')}
+              className={
+                tab === 'hotspots'
+                  ? 'border-b-2 border-[var(--accent-text)] px-3 pb-2 font-medium text-ink-100'
+                  : 'px-3 pb-2 text-ink-500 hover:text-ink-300'
+              }
+            >
+              {t('inspiration.hotspotsTab', 'Hotspots')}
+            </button>
+          </>
+        }
+      />
 
       <div className="flex gap-3">
         <div className="min-w-0 flex-1 space-y-2.5">

@@ -7,6 +7,7 @@ import {
 } from '../../services/distributionService';
 import { SocialAccount, PublishTask } from '../../types';
 import { PLATFORM_BADGE, PLATFORM_LABEL, gradientFor } from './platform';
+import { PageHeader } from '../layout/PageHeader';
 import './distribution-v4.css';
 
 const WEEK_MS = 7 * 86_400_000;
@@ -98,18 +99,16 @@ export const AccountsPage: React.FC = () => {
 
   return (
     <div className="dist-v4">
-      <div className="page-head">
-        <div>
-          <h2>
-            {t('distribution.accountsTitle', 'Platform Accounts')}
-            <span className="count">{accounts.length}</span>
-          </h2>
-          <p>{t('distribution.accountsSubtitle', 'Connect social accounts to publish from Nous')}</p>
-        </div>
-        <button type="button" className="btn btn-tint-indigo" onClick={onConnect}>
-          <Plus size={15} /> {t('distribution.connectAccount', 'Connect Account')}
-        </button>
-      </div>
+      <PageHeader
+        title={t('distribution.accountsTitle', 'Platform Accounts')}
+        count={accounts.length}
+        subtitle={t('distribution.accountsSubtitle', 'Connect social accounts to publish from Nous')}
+        actions={
+          <button type="button" className="btn btn-tint-indigo" onClick={onConnect}>
+            <Plus size={15} /> {t('distribution.connectAccount', 'Connect Account')}
+          </button>
+        }
+      />
 
       <div className="stats">
         <div className="stat">

@@ -8,6 +8,7 @@ import {
 } from '../../services/distributionService';
 import { PublishTask, PublishTaskAccount, SocialAccount } from '../../types';
 import { humanizeTaskError } from '../../utils/humanizeTaskError';
+import { PageHeader } from '../layout/PageHeader';
 import './distribution-v4.css';
 
 type Filter = 'all' | 'needs_action' | 'publishing' | 'failed' | 'done';
@@ -248,16 +249,14 @@ export const RecordsPage: React.FC = () => {
 
   return (
     <div className="dist-v4">
-      <div className="page-head">
-        <div>
-          <h2>
-            {t('distribution.records.title', 'Publish Records')}
-            <span className="count">{tasks.length}</span>
-          </h2>
-          <p>{t('distribution.records.subtitle', 'Every publish task across accounts, live from Task Center.')}</p>
-        </div>
-        <button type="button" className="btn btn-ghost btn-sm" disabled title={t('distribution.comingInD3', 'Coming in D3')}>{t('distribution.records.export', 'Export')}</button>
-      </div>
+      <PageHeader
+        title={t('distribution.records.title', 'Publish Records')}
+        count={tasks.length}
+        subtitle={t('distribution.records.subtitle', 'Every publish task across accounts, live from Task Center.')}
+        actions={
+          <button type="button" className="btn btn-ghost btn-sm" disabled title={t('distribution.comingInD3', 'Coming in D3')}>{t('distribution.records.export', 'Export')}</button>
+        }
+      />
 
       <div className="filters">
         {FILTERS.map((f) => {

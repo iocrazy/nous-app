@@ -10,10 +10,11 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { ListTodo, Users, User, Bot, GitBranch } from 'lucide-react';
 import { IssueListView, type IssueViewMode } from '../components/Todolist/IssueListView';
 import { PipelinesManagerModal } from '../components/Todolist/PipelinesManagerModal';
-import { PageHeader } from '../components/AILibrary/PageHeader';
+import { PageHeader } from '../components/layout/PageHeader';
 import { fetchMyTeams, fetchPersonalTeam } from '../services/teamService';
 import { IssueDetailView } from '../components/Todolist/IssueDetailView';
 import { NewIssueDialog } from '../components/Todolist/NewIssueDialog';
@@ -68,6 +69,7 @@ import { getSupabaseClient } from '../supabaseClient';
 
 export function TodolistPage() {
   const { identifier, teamId } = useParams<{ identifier?: string; teamId: string }>();
+  const { t } = useTranslation();
   const { isPersonal: isPersonalWorkspace, effectiveTeamId } = useWorkspaceScope();
   const navigate = useNavigate();
   const { addToast } = useToast();
@@ -423,14 +425,8 @@ export function TodolistPage() {
     <>
       <div className="px-4 pt-4">
         <PageHeader
-          title={
-            <span className="flex items-baseline gap-2">
-              Issues
-              {teamName && (
-                <span className="text-sm font-normal text-ink-500">{teamName}</span>
-              )}
-            </span>
-          }
+          title={t('issues.pageTitle', 'Issues')}
+          subtitle={teamName || undefined}
           actions={
             <div className="flex items-center gap-3">
               {teamIdNum && (
@@ -456,7 +452,6 @@ export function TodolistPage() {
             </span>
             </div>
           }
-          className="pb-2"
         />
         <div className="flex items-center gap-1.5 pb-2 text-[12px]" data-testid="scope-pills">
           <ScopePill

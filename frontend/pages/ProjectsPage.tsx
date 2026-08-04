@@ -14,6 +14,7 @@ import { RecentItemsList } from '../components/project/RecentItemsList';
 import { VideoReviewPage } from '../components/VideoReviewPage';
 import { CreateProjectModal } from '../components/CreateProjectModal';
 import { ProjectWorkspace } from '../components/workspace/ProjectWorkspace';
+import { PageHeader } from '../components/layout/PageHeader';
 
 export function ProjectsPage() {
   const navigate = useNavigate();
@@ -281,7 +282,7 @@ export function ProjectsPage() {
             />
           ) : activeFilter === 'recent' ? (
             <>
-              <h2 className="text-lg font-semibold text-ink-100 mb-4">{filterTitle}</h2>
+              <PageHeader title={filterTitle} />
               <RecentItemsList items={recentItems} onSelect={handleRecentSelect} />
             </>
           ) : (

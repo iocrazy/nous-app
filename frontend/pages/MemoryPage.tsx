@@ -8,7 +8,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { MemoryPanel } from '../components/MemoryPanel';
 import { AgentMemoriesPanel } from '../components/AgentMemoriesPanel';
-import { PageHeader } from '../components/AILibrary/PageHeader';
+import { PageHeader } from '../components/layout/PageHeader';
 
 export const MemoryPage: React.FC = () => {
   const { t } = useTranslation();

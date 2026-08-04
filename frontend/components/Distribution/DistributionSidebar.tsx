@@ -2,6 +2,7 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Users, Send, LineChart, Settings, History } from 'lucide-react';
+import { SecondarySidebarHeader } from '../layout/SecondarySidebarHeader';
 
 const Item: React.FC<{ to?: string; icon: React.ElementType; label: string; disabled?: boolean }> =
   ({ to, icon: Icon, label, disabled }) => {
@@ -29,9 +30,7 @@ export const DistributionSidebar: React.FC = () => {
   const { t } = useTranslation();
   return (
     <div className="flex w-52 flex-col overflow-y-auto border-r border-ink-800/40">
-      <div className="px-4 pt-4 pb-3">
-        <span className="text-sm font-semibold text-ink-200">{t('sidebar.distribution', 'Distribution')}</span>
-      </div>
+      <SecondarySidebarHeader title={t('sidebar.distribution', 'Distribution')} />
       <div className="px-2 flex flex-col gap-0.5">
         <Item to="publish" icon={Send} label={t('distribution.nav.publish', 'Publish')} />
         <Item to="records" icon={History} label={t('distribution.nav.records', 'Records')} />

@@ -40,7 +40,7 @@ import { getAgentIcon } from '../components/AILibrary/agentIcons';
 import { LiveRunsStrip } from '../components/AILibrary/LiveRunsStrip';
 import { getSupabaseClient } from '../supabaseClient';
 import { AgentDetailDrawer } from '../components/Workforce/AgentDetailDrawer';
-import { PageHeader } from '../components/AILibrary/PageHeader';
+import { PageHeader } from '../components/layout/PageHeader';
 
 // Realtime is the primary refresh trigger; the safety poll covers the
 // case where a Realtime subscription drops silently (Supabase gateway
