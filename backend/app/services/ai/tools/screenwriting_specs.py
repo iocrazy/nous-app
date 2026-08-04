@@ -214,9 +214,18 @@ def screenwriting_tool_specs(write_level: str) -> list[dict]:
 
     A UX filter ONLY — don't dangle a tool the agent cannot use in front of
     the model (same reasoning as the media-tool registration block in
-    ai_library_chat_service.py). The A1 gate re-checks every call regardless
-    of what was advertised, so a stale cached system prompt or a hallucinated
-    call is still blocked at the executor.
+    ai_library_chat_service.py). Advertising is never the enforcement: a
+    stale cached system prompt or an outright hallucinated tool name reaches
+    the dispatcher regardless of what this returned.
+
+    What blocks those depends on where the turn runs (A4 review, Critical 1):
+    on a runner carrying ``HighRiskCapabilityGateHook`` the gate re-checks
+    the grant per call; on a runner built WITHOUT hooks — eight services do
+    this, and they compose through the same ``PromptComposer`` that calls
+    this function — there is no gate to re-check anything, so
+    ``AgentRunner._dispatch_screenwriting`` refuses the call outright. Either
+    way the answer is a refusal, never an ungated execution; do not read the
+    filter below as the thing keeping an ungranted agent out.
     """
     from app.services.ai.permissions.high_risk_caps import HighRiskCaps
     from app.services.infra.hooks.high_risk_capability_gate import TOOL_REQUIREMENTS

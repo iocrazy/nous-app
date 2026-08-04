@@ -176,6 +176,150 @@ async def test_malformed_write_level_denies(tool_name):
 
 
 # ====================================================================== #
+# Layer 1b — the gate must be PRESENT, not merely correct when present.
+#
+# These drive the RUNNER, not the hook: the hook tests above all construct
+# HighRiskCapabilityGateHook by hand, which silently assumes something
+# registered it. Eight services build AgentRunner with no hooks at all
+# (script_ai / summarize / caption / classify / translate / visual_analysis
+# / llm_analysis / topic_scorer) while composing through the same
+# PromptComposer that advertises these tools — on those runners the whole
+# PreToolUse chain is a no-op, so a hook-level test proves nothing about
+# whether the call was gated.
+# ====================================================================== #
+
+
+def _runner(*, with_gate: bool):
+    from unittest.mock import MagicMock
+
+    from app.services.ai.runner.agent_runner import AgentRunner
+    from app.services.infra.hooks import HookRegistry
+
+    hooks = None
+    if with_gate:
+        hooks = HookRegistry()
+        hooks.register_pre(
+            HighRiskCapabilityGateHook(agent=_agent("write")),
+            name="high_risk_capability_gate",
+            priority=26,
+            fail_closed=True,
+        )
+    return AgentRunner(adapter=MagicMock(), skill_tool=MagicMock(), hooks=hooks)
+
+
+def _composed():
+    from unittest.mock import MagicMock
+
+    return MagicMock(agent_id=UUID("00000000-0000-0000-0000-000000000002"))
+
+
+def _recorder():
+    from unittest.mock import MagicMock
+
+    return MagicMock(run_id=_RUN_ID, user_id=_USER_ID, team_id=_TEAM_A)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", _ALL_TOOLS)
+async def test_a_hookless_runner_refuses_every_screenwriting_tool(tool_name):
+    """A runner with no capability gate has no business running
+    capability-gated tools. Without this, the eight hookless services would
+    execute these tools with NO write grading whatsoever — the gate isn't
+    bypassed, it simply never runs."""
+    called = False
+
+    async def _tripwire(args, ctx):
+        nonlocal called
+        called = True
+        return {"ok": True}
+
+    with patch.dict(
+        tools_mod.SCREENWRITING_HANDLERS, {tool_name: _tripwire}, clear=False
+    ):
+        result = await _runner(with_gate=False)._dispatch_screenwriting(
+            tool_name, {}, _recorder(), _composed()
+        )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "capability_gate_missing"
+    assert not called, "the handler ran on a runner with no capability gate"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", _ALL_TOOLS)
+async def test_a_runner_carrying_the_gate_reaches_the_handler(tool_name):
+    """The other half: the refusal above must be about the gate's ABSENCE,
+    not a blanket block that would make the tools unreachable everywhere."""
+    called = False
+
+    async def _tripwire(args, ctx):
+        nonlocal called
+        called = True
+        return {"ok": True, "marker": tool_name}
+
+    with patch.dict(
+        tools_mod.SCREENWRITING_HANDLERS, {tool_name: _tripwire}, clear=False
+    ):
+        result = await _runner(with_gate=True)._dispatch_screenwriting(
+            tool_name, {}, _recorder(), _composed()
+        )
+
+    assert called and result == {"ok": True, "marker": tool_name}
+
+
+@pytest.mark.asyncio
+async def test_gate_detection_is_by_type_not_by_registration_name():
+    """A hook registered under the gate's NAME but of some other type must
+    not satisfy the check — the type is what implements the decision."""
+    from unittest.mock import MagicMock
+
+    from app.services.ai.runner.agent_runner import AgentRunner
+    from app.services.infra.hooks import HookRegistry, HookResult
+
+    async def _impostor(ctx):
+        return HookResult(decision="continue")
+
+    hooks = HookRegistry()
+    hooks.register_pre(_impostor, name="high_risk_capability_gate", priority=26)
+    runner = AgentRunner(adapter=MagicMock(), skill_tool=MagicMock(), hooks=hooks)
+
+    assert runner._high_risk_gate_registered() is False
+    result = await runner._dispatch_screenwriting(
+        "ReadScene", {}, _recorder(), _composed()
+    )
+    assert result["error_code"] == "capability_gate_missing"
+
+
+def test_the_eight_hookless_services_still_construct_runners_without_hooks():
+    """Documents WHY the check above exists, and fails loudly if someone
+    "fixes" these services by adding hooks — at which point the refusal
+    stops being the thing protecting them and their exemption in
+    test_scope_binding.py needs re-arguing."""
+    import re as _re
+    from pathlib import Path
+
+    app_dir = Path(__file__).resolve().parent.parent / "app"
+    hookless = (
+        "services/storyboard/script/script_ai_service.py",
+        "services/ai/summarize/summarize_service.py",
+        "services/ai/caption/caption_service.py",
+        "services/ai/classify/classify_service.py",
+        "services/ai/translate/translate_service.py",
+        "services/ai/visual/visual_analysis_service.py",
+        "services/ai/llm/llm_analysis_service.py",
+        "services/topics/topic_scorer.py",
+    )
+    for rel in hookless:
+        text = (app_dir / rel).read_text(encoding="utf-8")
+        assert _re.search(r"AgentRunner\(", text), f"{rel} no longer builds a runner"
+        assert "hooks=" not in text, (
+            f"{rel} now passes hooks= — re-check whether "
+            "HighRiskCapabilityGateHook is among them, and revisit this "
+            "file's exemption in test_scope_binding.py"
+        )
+
+
+# ====================================================================== #
 # Layer 2 — the A2 resolver, inside each handler.
 # ====================================================================== #
 
@@ -188,6 +332,9 @@ class _FakeResult:
 
     def first(self):
         return self._first_row
+
+    def scalar(self):
+        return self._scalar
 
     def scalars(self):
         return SimpleNamespace(all=lambda: self._all, first=lambda: self._first_row)
@@ -538,8 +685,11 @@ async def test_update_shot_rejects_status_and_url_writes():
             )
         ]
     )
-    with patch.object(gateway_mod, "write_scope", lambda: _ScopeCtx(session)):
-        await gateway_mod.update_shot(
+    with (
+        patch.object(gateway_mod, "write_scope", lambda: _ScopeCtx(session)),
+        patch.object(gateway_mod, "scene_no_for_shot", AsyncMock(return_value="3A")),
+    ):
+        updated = await gateway_mod.update_shot(
             _scope(),
             _resolved_shot(),
             {"camera_angle": "LOW", "status": "done", "video_url": "x"},
@@ -553,6 +703,10 @@ async def test_update_shot_rejects_status_and_url_writes():
     assert values["camera_angle"] == "LOW"
     assert "status" not in values
     assert "video_url" not in values
+    # A4 review (Minor): UpdateShot used to hand back shot_label=None while
+    # create/list returned a real label — the model revised a card and
+    # watched its own reference vanish.
+    assert updated["shot_label"] == "3A-04"
 
 
 @pytest.mark.asyncio
@@ -665,6 +819,41 @@ async def test_read_scene_surfaces_element_ids_and_the_version_token():
             "character_id": None,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_scene_no_for_shot_walks_shot_to_scene_to_script():
+    """``ResolvedShot`` carries scene_id but not script_id, so the label
+    derivation needs one extra hop. It stays inside the gateway (and off any
+    model-supplied id) because a ResolvedShot only exists once resolve_shot
+    proved the whole shot -> scene -> script chain is in scope."""
+    session = _CaptureSession(
+        [
+            _FakeResult(scalar=_SCRIPT_ID),  # script_id for the shot's scene
+            _FakeResult(first_row=SimpleNamespace(numbering_locked_at=None)),
+            _FakeResult(scalar=None),  # no frozen scene_number (unlocked)
+            _FakeResult(all_rows=[]),
+        ]
+    )
+
+    class _Scalars:
+        def __init__(self, ids):
+            self._ids = ids
+
+        def all(self):
+            return self._ids
+
+    class _IdsResult(_FakeResult):
+        def scalars(self):
+            return _Scalars([111, _SCENE_ID, 333])
+
+    session._results[-1] = _IdsResult()
+
+    with patch.object(gateway_mod, "read_scope", lambda: _ScopeCtx(session)):
+        label = await gateway_mod.scene_no_for_shot(_scope(), _resolved_shot())
+
+    # _SCENE_ID is at index 1 in canonical order → writing-phase number "2".
+    assert label == "2"
 
 
 @pytest.mark.asyncio

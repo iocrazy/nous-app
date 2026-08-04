@@ -83,12 +83,15 @@ async def resolve_dispatch_scope(
 
     1. ``project_id`` / ``episode_id`` passed explicitly by a caller that
        already knows them (e.g. a REST route that was itself scoped to a
-       project). Used verbatim.
+       project). Used verbatim, never re-read. When a ``conversation_id`` is
+       supplied alongside an explicit project, it is used ONLY to fill in a
+       missing episode — see the body for why the project must not depend on
+       that lookup.
     2. ``parent_run_id`` — inherit the parent run's project AND episode
        (rule 2 above).
-    3. ``conversation_id`` — the conversation's own ``project_id``, plus the
-       episode implied by its AI-meta context when that context is a script
-       bound to one.
+    3. ``conversation_id`` alone — the conversation's own ``project_id``,
+       plus the episode implied by its AI-meta context when that context is
+       a script bound to one.
 
     ``agent`` (the agent row, when the caller has it) only ever SUPPRESSES
     the episode narrowing: an agent granted ``cross_episode_read`` (A1's
@@ -100,9 +103,25 @@ async def resolve_dispatch_scope(
     """
     explicit_project = _as_int(project_id)
     if explicit_project is not None:
-        return _apply_cross_episode(
-            agent, DispatchScope(explicit_project, _as_int(episode_id))
-        )
+        # An explicit project is AUTHORITATIVE and is never re-derived from a
+        # lookup that could fail (A4 review round 2). The caller already holds
+        # the value; going back to the DB for it would mean a transient error
+        # silently downgrades the run to project_id=None — and on the
+        # issue-dispatch path that column is the autopilot daily quota's
+        # filter key (agent_runs_repository.count_auto_dispatches_today), so
+        # losing it turns a spend cap into a no-op. That exact regression was
+        # caught by tests/test_issue_agent_executor_p2.py; keep the project in
+        # memory and use the conversation only to ADD an episode.
+        episode = _as_int(episode_id)
+        if episode is None and conversation_id is not None:
+            derived = await _scope_of_conversation(conversation_id)
+            # Only adopt the episode if the conversation agrees about the
+            # project. A mismatch means the two handles describe different
+            # things; narrowing to a foreign project's episode would deny
+            # every resolution rather than merely failing to narrow.
+            if derived.project_id == explicit_project:
+                episode = derived.episode_id
+        return _apply_cross_episode(agent, DispatchScope(explicit_project, episode))
 
     if parent_run_id is not None:
         inherited = await _scope_of_run(parent_run_id)

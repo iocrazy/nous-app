@@ -22,7 +22,16 @@ Two things this module deliberately does NOT do:
   in the executor, before a handler is entered at all (spec §3.1 ③: the
   enforcement point must not be reachable from anything the model can say).
   A capability check duplicated here would be a second, drifting source of
-  truth — and worse, it would suggest the hook is optional.
+  truth.
+
+  That delegation is only sound because the gate's PRESENCE is verified
+  before dispatch. It is not ambient: ``AgentRunner._run_pre_hooks`` is a
+  no-op when the runner was built without hooks, and eight services do
+  exactly that while still composing (and therefore advertising) these
+  tools. ``AgentRunner._dispatch_screenwriting`` therefore refuses to enter
+  any handler on a runner with no ``HighRiskCapabilityGateHook`` installed
+  (A4 review, Critical 1). Read the two together: the handlers assume the
+  gate ran, and the dispatcher guarantees the gate exists to run.
 - **It does not raise into the agent loop.** Every failure comes back as a
   ``{"ok": false, "error": ...}`` tool result the model can read and react
   to, matching the house convention in ``generate_media_tools.py``. A denial

@@ -226,27 +226,25 @@ async def list_scenes_in_scope(
     return out
 
 
-async def scene_no_for(scope: AgentRunScope, scene: ResolvedScene) -> Optional[str]:
-    """``scene_no_in_episode`` for one already-resolved scene.
-
-    Same rule as ``list_scenes_in_scope`` (both call
-    ``effective_scene_number``); separate because ReadScene / CreateShot know
-    exactly one scene and shouldn't pay for enumerating its siblings unless
-    the number actually has to be derived — which it only does while the
-    script is unlocked."""
+async def _scene_no(scene_id: int, script_id: int) -> Optional[str]:
+    """``scene_no_in_episode`` for one scene, keyed on ids the CALLER has
+    already had authorized. Private on purpose — the two public wrappers
+    below are the only entry points, and each of them takes a ``Resolved*``
+    handle, so this never sees a model-supplied id (see the module
+    docstring's invariant)."""
     async with read_scope() as session:
         row = (
             await session.execute(
                 select(
                     ScriptProjects.numbering_locked_at,
-                ).where(ScriptProjects.id == scene.script_id)
+                ).where(ScriptProjects.id == script_id)
             )
         ).first()
         is_locked = row is not None and row.numbering_locked_at is not None
 
         stored = (
             await session.execute(
-                select(ScriptScenes.scene_number).where(ScriptScenes.id == scene.id)
+                select(ScriptScenes.scene_number).where(ScriptScenes.id == scene_id)
             )
         ).scalar()
         if stored is not None:
@@ -257,7 +255,7 @@ async def scene_no_for(scope: AgentRunScope, scene: ResolvedScene) -> Optional[s
             (
                 await session.execute(
                     select(ScriptScenes.id)
-                    .where(ScriptScenes.script_id == scene.script_id)
+                    .where(ScriptScenes.script_id == script_id)
                     .order_by(
                         ScriptScenes.chapter_id.asc().nulls_last(),
                         ScriptScenes.sort_order.asc(),
@@ -268,10 +266,45 @@ async def scene_no_for(scope: AgentRunScope, scene: ResolvedScene) -> Optional[s
             .all()
         )
     try:
-        index = list(ids).index(scene.id)
+        index = list(ids).index(scene_id)
     except ValueError:  # pragma: no cover — scene vanished between queries
         return None
     return effective_scene_number(None, index, is_locked)
+
+
+async def scene_no_for(scope: AgentRunScope, scene: ResolvedScene) -> Optional[str]:
+    """``scene_no_in_episode`` for one already-resolved scene.
+
+    Same rule as ``list_scenes_in_scope`` (both end at
+    ``effective_scene_number``); separate because ReadScene / CreateShot know
+    exactly one scene and shouldn't pay for enumerating its siblings unless
+    the number actually has to be derived — which it only does while the
+    script is unlocked."""
+    return await _scene_no(scene.id, scene.script_id)
+
+
+async def scene_no_for_shot(scope: AgentRunScope, shot: ResolvedShot) -> Optional[str]:
+    """``scene_no_in_episode`` for the scene an already-resolved shot hangs
+    off.
+
+    ``ResolvedShot`` carries ``scene_id`` but not ``script_id`` (the
+    resolver has no reason to project it), so this costs one extra lookup —
+    which is why ``UpdateShot`` is the only caller. No authorization
+    concern: a ``ResolvedShot`` can only exist if ``resolve_shot`` already
+    proved the whole shot -> scene -> script chain is in this run's scope.
+
+    Exists because ``UpdateShot`` used to return ``shot_label: null`` while
+    create and list returned a real label — the model would revise a card
+    and watch its own reference disappear (A4 review, Minor)."""
+    async with read_scope() as session:
+        script_id = (
+            await session.execute(
+                select(ScriptScenes.script_id).where(ScriptScenes.id == shot.scene_id)
+            )
+        ).scalar()
+    if script_id is None:  # pragma: no cover — resolver proved the chain
+        return None
+    return await _scene_no(shot.scene_id, script_id)
 
 
 async def read_scene_elements(
@@ -450,7 +483,7 @@ async def update_shot(
         shot.id,
         sorted(values),
     )
-    return _shot_dict(row, None)
+    return _shot_dict(row, await scene_no_for_shot(scope, shot))
 
 
 async def episode_id_for_script(script_id: Any) -> Optional[int]:
@@ -488,5 +521,6 @@ __all__ = [
     "list_shots_for_scene",
     "read_scene_elements",
     "scene_no_for",
+    "scene_no_for_shot",
     "update_shot",
 ]

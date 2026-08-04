@@ -368,8 +368,16 @@ class PromptComposer:
         call site (the way ResourceFetch and the media tools do) because
         every dispatch path already funnels through ``compose`` — putting
         them here is the difference between the tools working on one route
-        and working on all of them. Advertising is a UX filter only; A1's
-        gate re-checks every call at the executor.
+        and working on all of them.
+
+        ⚠️ That reach is exactly why advertising must not be mistaken for
+        enforcement (A4 review, Critical 1). ``compose`` is also called by
+        eight services that build ``AgentRunner`` with NO hooks, where A1's
+        gate does not exist to re-check anything. Enforcement is therefore
+        anchored at the dispatcher: ``AgentRunner._dispatch_screenwriting``
+        refuses outright when ``HighRiskCapabilityGateHook`` isn't installed
+        on the runner. The ``write_level`` filter below only decides what to
+        SHOW the model.
 
         Returns ``[]`` when no skills are bound, Delegate is gated off, and
         the agent has no write grade.
