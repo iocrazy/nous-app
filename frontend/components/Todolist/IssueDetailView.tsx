@@ -631,7 +631,16 @@ export const IssueDetailView: React.FC<IssueDetailViewProps> = ({ issue, agents,
               )}
               {loading && messages.length === 0
                 ? <div className="text-[14px] text-ink-500 italic px-4 py-12 text-center">Loading messages…</div>
-                : <IssueChatThread messages={messages} agentsById={agentsById} selfUserId={selfUserId} streamingText={streamingText} />}
+                : (
+                  <IssueChatThread
+                    messages={messages}
+                    agentsById={agentsById}
+                    selfUserId={selfUserId}
+                    streamingText={streamingText}
+                    teamId={teamId}
+                    aiSessionId={issue.raw.ai_session_id}
+                  />
+                )}
               {isAgentWorking && (
                 <div className="flex items-center gap-2 px-4 py-2.5 text-[13px] text-ink-400">
                   <span

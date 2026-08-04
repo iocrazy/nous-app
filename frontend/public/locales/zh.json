@@ -3790,6 +3790,7 @@
     }
   },
   "issueDetail": {
+    "openConversation": "展开对话流",
     "progress": "进度",
     "links": "关联",
     "status": "状态",

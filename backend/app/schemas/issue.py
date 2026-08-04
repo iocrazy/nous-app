@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Any, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class IssueStatus(str, Enum):
@@ -120,6 +120,11 @@ class Issue(IssueBase):
     created_by_user_id: Optional[UUID] = None
     created_by_agent_id: Optional[UUID] = None
     dbos_workflow_id: Optional[str] = None
+    # BIGINT Snowflake, but str-serialized (unlike id / team_id / project_id
+    # above, which stay native int for back-compat). It exists only to be
+    # pasted into a URL — a JSON number past 2^53 rounds in the browser and
+    # deep-links to a session that does not exist.
+    ai_session_id: Optional[str] = None
     execution_locked_at: Optional[datetime] = None
     execution_state: Optional[dict[str, Any]] = None
     request_depth: int = 0
@@ -129,6 +134,14 @@ class Issue(IssueBase):
     hidden_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("ai_session_id", mode="before")
+    @classmethod
+    def _bigint_to_str(cls, v: Any) -> Any:
+        """The repository hands this column back as a native int (the 5.3
+        parity rule keeps BIGINTs unconverted). Pydantic v2 will not coerce
+        int → str on its own, so do it here rather than at every call site."""
+        return str(v) if isinstance(v, int) else v
 
 
 class IssueListResponse(BaseModel):

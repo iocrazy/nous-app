@@ -56,6 +56,10 @@ export interface Issue {
   created_by_user_id: string | null;
   created_by_agent_id: string | null;
   dbos_workflow_id: string | null;
+  /** Conversation the agent's turns were written into. BIGINT Snowflake, but
+   *  str-serialized by the backend (unlike the numeric ids above) because it
+   *  only ever ends up in a URL. Null until the first dispatch backfills one. */
+  ai_session_id: string | null;
   execution_locked_at: string | null;
   execution_state: Record<string, unknown> | null;
   request_depth: number;

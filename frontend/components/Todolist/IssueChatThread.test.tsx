@@ -1,4 +1,5 @@
 import { render, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, it, expect, vi } from 'vitest';
 import { IssueChatThread } from './IssueChatThread';
 import type { AgentRef } from './types';
@@ -142,6 +143,46 @@ describe('IssueChatThread — 运行组折叠', () => {
     expect(meta.textContent).toMatch(/qwen-max/);
     expect(meta.textContent).toMatch(/5\.0k tok/);
     expect(meta.textContent).toMatch(/\$0\.12/);
+  });
+});
+
+describe('IssueChatThread — 运行组卡展开对话流深链', () => {
+  const agents: Record<string, AgentRef> = { a1: { id: 'a1', slug: 'w', name: 'Writer' } };
+
+  function renderThread(props: { teamId?: string; aiSessionId?: string | null }) {
+    return render(
+      <MemoryRouter>
+        <IssueChatThread
+          messages={[_run(), _run()] as never}
+          agentsById={agents}
+          selfUserId="u1"
+          {...props}
+        />
+      </MemoryRouter>,
+    );
+  }
+
+  it('links the run group to the session view when the issue has a session', () => {
+    const { container } = renderThread({ teamId: '8', aiSessionId: '7300000000000000123' });
+    const link = container.querySelector('[data-testid="run-group-open-conversation"]') as HTMLAnchorElement;
+    expect(link).not.toBeNull();
+    expect(link.getAttribute('href')).toBe('/team/8/ai-library/sessions/7300000000000000123');
+  });
+
+  it('renders no link when the issue has no session yet', () => {
+    const { container } = renderThread({ teamId: '8', aiSessionId: null });
+    expect(container.querySelector('[data-testid="run-group-open-conversation"]')).toBeNull();
+  });
+
+  it('renders no link when the team id is unknown', () => {
+    const { container } = renderThread({ aiSessionId: '7300000000000000123' });
+    expect(container.querySelector('[data-testid="run-group-open-conversation"]')).toBeNull();
+  });
+
+  it('keeps the collapse toggle working alongside the link', () => {
+    const { container } = renderThread({ teamId: '8', aiSessionId: '7300000000000000123' });
+    fireEvent.click(container.querySelector('[data-testid="run-group-toggle"]') as HTMLElement);
+    expect(container.querySelector('[data-testid="run-group-body"]')).not.toBeNull();
   });
 });
 
