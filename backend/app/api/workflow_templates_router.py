@@ -53,6 +53,9 @@ def _node_to_dict(node) -> dict:
         "duration_days": node.duration_days,
         "completion_policy": node.completion_policy,
         "events": node.events.model_dump(),
+        # mig 402 (B1): flattened as-is, including None (deliverable-type
+        # node) — see TemplateNodeIn.surface docstring.
+        "surface": node.surface,
         "members": [
             {"user_id": m.user_id, "agent_id": m.agent_id} for m in node.members
         ],

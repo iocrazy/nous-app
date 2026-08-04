@@ -297,6 +297,25 @@ class EpisodeRepository:
             logger.error(f"Failed to delete episode {episode_id}: {e}")
             raise
 
+    async def set_current_node_id(
+        self, episode_id: str, node_id: Optional[str]
+    ) -> None:
+        """Move the per-episode workflow cursor (``episodes.current_node_id``,
+        mig 402, B1) — the explicit, dedicated write entry point for it,
+        sibling to ``ProjectStageNodesRepository.set_current_node_id`` (which
+        still owns the legacy ``projects.current_node_id`` column; this
+        method never touches that one). B1 only lands this accessor — B2 is
+        what actually rewires ``advance_service`` to call it instead of the
+        project-level cursor."""
+        async with write_scope() as session:
+            await session.execute(
+                update(Episodes)
+                .where(Episodes.id == _bigint(episode_id))
+                .values(
+                    current_node_id=_bigint(node_id) if node_id is not None else None
+                )
+            )
+
 
 def get_episode_repository() -> "EpisodeRepository":
     """Return the EpisodeRepository (ORM-only)."""

@@ -258,6 +258,13 @@ class WorkflowTemplateNodes(Base):
             "default_owner_agent_id IS NOT NULL)",
             name="wtn_owner_xor",
         ),
+        # Surface (mig 402, B1): NULL (deliverable-type node) or one of the
+        # known creation surfaces. See the ``surface`` column comment below.
+        CheckConstraint(
+            "surface IS NULL OR surface = ANY "
+            "(ARRAY['script'::text, 'storyboard'::text, 'renders'::text])",
+            name="workflow_template_nodes_surface_check",
+        ),
         Index("idx_wtn_template", "template_id", "sort_order"),
         {"schema": "public"},
     )
@@ -303,6 +310,14 @@ class WorkflowTemplateNodes(Base):
     form_schema: Mapped[list] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
+    # Surface (mig 402, B1): which creation surface (script/storyboard/
+    # renders) this template node corresponds to; NULL = deliverable-type
+    # node (no in-app surface). Nullable with NO server_default, unlike
+    # completion_policy/events/form_schema above -- NULL here is a real,
+    # meaningful value, not "config not yet supplied". Copied verbatim to
+    # ProjectStageNodes.surface at instantiation and frozen there (same
+    # instantiate-then-freeze idiom as those three columns).
+    surface: Mapped[str | None] = mapped_column(Text)
 
 
 class WorkflowTemplateNodeMembers(Base):
@@ -386,7 +401,12 @@ class WorkflowTemplateNodeDeps(Base):
 class ProjectStageNodes(Base):
     """Per-project workflow node instance (mig 380). Copied from a template at
     project creation (PR-B), then independent. Each node has its own status;
-    ``projects.current_node_id`` is the active-group cursor."""
+    ``projects.current_node_id`` is the active-group cursor -- UNTOUCHED by
+    mig 402/B1. ``episode_id`` (mig 402, B1) is a second, nullable cursor
+    dimension: NULL means this node is legacy project-level (every row today,
+    plus anything created before B3 wires per-episode instantiation);
+    ``episodes.current_node_id`` is the per-episode cursor B2 will read
+    instead, once it rewires ``advance_service``."""
 
     __tablename__ = "project_stage_nodes"
     __table_args__ = (
@@ -402,6 +422,12 @@ class ProjectStageNodes(Base):
             ondelete="SET NULL",
             name="project_stage_nodes_folder_id_fkey",
         ),
+        ForeignKeyConstraint(
+            ["episode_id"],
+            ["public.episodes.id"],
+            ondelete="SET NULL",
+            name="project_stage_nodes_episode_id_fkey",
+        ),
         PrimaryKeyConstraint("id", name="project_stage_nodes_pkey"),
         CheckConstraint(
             "status IN ('pending', 'in_progress', 'in_review', 'done', 'skipped')",
@@ -411,7 +437,24 @@ class ProjectStageNodes(Base):
             "NOT (owner_user_id IS NOT NULL AND owner_agent_id IS NOT NULL)",
             name="psn_owner_xor",
         ),
+        # Surface (mig 402, B1): NULL (deliverable-type node) or one of the
+        # known creation surfaces. See the ``surface`` column comment below.
+        CheckConstraint(
+            "surface IS NULL OR surface = ANY "
+            "(ARRAY['script'::text, 'storyboard'::text, 'renders'::text])",
+            name="project_stage_nodes_surface_check",
+        ),
         Index("psn_project_idx", "project_id", "sort_order"),
+        # Composite, not a bare episode_id index (mig 402, B1): every real
+        # query already has project_id in hand (a node is always reached
+        # through its project), and this column order serves both the
+        # existing "all nodes in a project" query (leading column alone) and
+        # B2's future "all nodes in THIS episode of THIS project" query
+        # (first two columns as equality, sort_order for the existing
+        # ORDER BY) without needing a second index.
+        Index(
+            "idx_project_stage_nodes_episode", "project_id", "episode_id", "sort_order"
+        ),
         {"schema": "public"},
     )
 
@@ -486,6 +529,21 @@ class ProjectStageNodes(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )
+    # Episode scoping (mig 402, B1): nullable FK to ``episodes``. NULL means a
+    # legacy project-level node -- every row in the DB predates this column,
+    # and B3 (not B1) is what starts populating it for new per-episode chains.
+    episode_id: Mapped[int | None] = mapped_column(BigInteger)
+    # Surface (mig 402, B1): which creation surface (script/storyboard/
+    # renders) this instance node corresponds to; NULL = deliverable-type
+    # node (no in-app surface, completed via upload+review) -- also the
+    # correct reading for every legacy instance predating this column (spec
+    # §5: "遗留节点 surface 为空 -> 按交付物型降级"). Copied verbatim from the
+    # template at instantiation (``instantiate_from_template``) and frozen
+    # there -- deliberately absent from ``update_node``'s keyword whitelist,
+    # same idiom as completion_policy/events/form_schema. Nullable with NO
+    # server_default, unlike those three: NULL here is a real, meaningful
+    # value, not "config not yet supplied".
+    surface: Mapped[str | None] = mapped_column(Text)
 
 
 class ProjectStageNodeMembers(Base):

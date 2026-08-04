@@ -87,6 +87,11 @@ def _node_row(
         "completion_policy": obj.completion_policy,
         "events": obj.events,
         "form_schema": obj.form_schema,
+        # Surface (mig 402, B1): template-layer declaration of which creation
+        # surface this node corresponds to; NULL = deliverable-type node.
+        # Copied verbatim into ProjectStageNodes.surface at instantiation and
+        # frozen there.
+        "surface": obj.surface,
         "members": members,
         # Dependency edges (mig 391, M3 PR-J): the OTHER template nodes (real
         # ids, stable until the next full-replace save) this node depends on.
@@ -409,6 +414,14 @@ class WorkflowTemplatesRepository:
                             else None
                         ),
                         duration_days=nd.get("duration_days"),
+                        # Surface (mig 402, B1): unlike completion_policy/
+                        # events/form_schema above, this column has NO
+                        # server_default to fall back to when omitted — it's
+                        # nullable with NULL itself being the meaningful
+                        # "deliverable-type node" value, so it's assigned
+                        # unconditionally rather than gated behind an
+                        # "only set when supplied" check.
+                        surface=nd.get("surface"),
                     )
                     if nd.get("completion_policy") is not None:
                         node_kwargs["completion_policy"] = nd["completion_policy"]

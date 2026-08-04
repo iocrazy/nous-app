@@ -379,6 +379,13 @@ class ScriptChapters(Base):
 
 
 class Episodes(Base):
+    """(mig 338) ``current_node_id`` (mig 402, B1) is the per-episode
+    workflow cursor -- the design doc's recommended home, replacing the
+    project-level ``projects.current_node_id`` (mig 380) for whatever B2
+    rewires to read it. UNTOUCHED by B1: ``advance_service`` still reads only
+    the project-level column until then; this is purely the new column plus
+    ``EpisodeRepository.set_current_node_id`` as its accessor."""
+
     __tablename__ = "episodes"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -386,6 +393,12 @@ class Episodes(Base):
             ["public.projects.id"],
             ondelete="CASCADE",
             name="episodes_project_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["current_node_id"],
+            ["public.project_stage_nodes.id"],
+            ondelete="SET NULL",
+            name="episodes_current_node_id_fkey",
         ),
         PrimaryKeyConstraint("id", name="episodes_pkey"),
         Index("idx_episodes_project", "project_id", "sort_order"),
@@ -412,6 +425,12 @@ class Episodes(Base):
         nullable=False,
         server_default=text("now()"),
     )
+    # Per-episode workflow cursor (mig 402, B1) -- FK fixes the gap mig 380
+    # left on ``projects.current_node_id`` (no FK there at all -- a deleted
+    # node left a dangling cursor id that ``advance_service._active_index``
+    # silently read as "nothing found -> group 0"), rather than repeating it
+    # on this new column.
+    current_node_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class ScriptScenes(Base):

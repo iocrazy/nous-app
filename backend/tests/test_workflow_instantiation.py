@@ -228,7 +228,11 @@ class _InstantiateFakeSession:
 
 
 def _tpl_node_with_form_schema(
-    *, node_id: int, sort_order: int, form_schema: List[Dict[str, Any]]
+    *,
+    node_id: int,
+    sort_order: int,
+    form_schema: List[Dict[str, Any]],
+    surface: Any = None,
 ) -> WorkflowTemplateNodes:
     return WorkflowTemplateNodes(
         id=node_id,
@@ -251,6 +255,7 @@ def _tpl_node_with_form_schema(
             "suggest_agent_run": False,
         },
         form_schema=form_schema,
+        surface=surface,
     )
 
 
@@ -294,6 +299,48 @@ async def test_instantiate_copies_form_schema_verbatim_and_form_data_starts_empt
     # or some other falsy sentinel — proving the copy is unconditional, not
     # gated on "only when non-empty".
     assert by_sort[2]["form_schema"] == []
+
+
+# ── FakeSession-backed: instantiate copies surface, NULL included (mig 402, B1) ──
+
+
+@pytest.mark.asyncio
+async def test_instantiate_copies_surface_verbatim_including_null(monkeypatch):
+    """surface (mig 402, B1) is copied verbatim from the template node onto
+    the instance — same instantiate-then-freeze idiom as form_schema/events/
+    completion_policy above. UNLIKE those three (NOT NULL + server_default),
+    surface is nullable with no default: a template node with surface=None
+    (deliverable-type node) must copy through as None, not silently coerced
+    to some other falsy value — this is the P0-flagged asymmetry
+    (``(x or {})`` would be wrong here)."""
+    tpl_nodes = [
+        _tpl_node_with_form_schema(
+            node_id=1, sort_order=1, form_schema=[], surface="script"
+        ),
+        _tpl_node_with_form_schema(
+            node_id=2, sort_order=2, form_schema=[], surface=None
+        ),
+    ]
+    session = _InstantiateFakeSession(tpl_nodes)
+
+    import app.repositories.project_stage_nodes_repository as mod
+
+    monkeypatch.setattr(mod, "write_scope", _write_scope_with(session))
+
+    repo = ProjectStageNodesRepository()
+    result = await repo.instantiate_from_template("50", "1")
+
+    assert len(result) == 2
+    by_sort = {n["sort_order"]: n for n in result}
+    assert by_sort[1]["surface"] == "script"
+    # The deliverable-type template node's None survives verbatim — not
+    # coerced to "" / {} / a default surface.
+    assert by_sort[2]["surface"] is None
+    # episode_id is never set by instantiate_from_template today (B1 is data
+    # layer only; B3 is what starts building per-episode chains) — every
+    # freshly instantiated node stays a legacy project-level node.
+    assert by_sort[1]["episode_id"] is None
+    assert by_sort[2]["episode_id"] is None
 
 
 # ── concurrency guard: per-project advisory lock + expect_fresh (M1.x —────────
