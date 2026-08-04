@@ -18,6 +18,17 @@ export type AgentGroup = 'writing' | 'art' | 'tools';
 
 export const AGENT_GROUP_ORDER: AgentGroup[] = ['writing', 'art', 'tools'];
 
+/**
+ * Avatar tint per group — semantic tokens, never raw hues (K1 palette).
+ * Shared so the gallery card and the detail header tint the same agent
+ * identically; they used to be two separate maps waiting to drift.
+ */
+export const GROUP_AVATAR: Record<AgentGroup, string> = {
+  writing: 'bg-agent-soft text-agent',
+  art: 'bg-info-soft text-info',
+  tools: 'bg-ok-soft text-ok',
+};
+
 /** Group buckets that predate mig 400 (or come from a newer backend) land in tools. */
 export function agentGroupOf(agent: AILibraryAgent): AgentGroup {
   const g = agent.agent_group;

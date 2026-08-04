@@ -2707,7 +2707,7 @@
         "running": "运行中",
         "paused": "已暂停"
       },
-      "assignTask": "Assign Task",
+      "assignTask": "派发任务",
       "pause": "Pause",
       "resume": "Resume",
       "resumed": "Agent 已恢复",
@@ -2780,7 +2780,8 @@
       "forkFromHintV2": "复制人格 / 灵魂 / 指令、模型设置与技能绑定。",
       "slugTaken": "这个 slug 已被占用。",
       "scopeIdRequired": "选一个，否则会创建成个人智能体。",
-      "forkSkillsNotCopied": "智能体已创建，但技能没能复制过来——请手动绑定。"
+      "forkSkillsNotCopied": "智能体已创建，但技能没能复制过来——请手动绑定。",
+      "startChat": "开始对话"
     },
     "skills": {
       "addFile": "+ 添加文件",

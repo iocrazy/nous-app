@@ -22,6 +22,7 @@ import { NewAgentModal } from './NewAgentModal';
 import { AILibraryTabs } from './AILibraryTabs';
 import {
   AGENT_GROUP_ORDER,
+  GROUP_AVATAR,
   agentGroupOf,
   deriveAgentStatus,
   primaryAction,
@@ -51,13 +52,6 @@ function GroupLabel({ group, size = 12 }: { group: AgentGroup; size?: number }) 
     </span>
   );
 }
-
-/** Avatar tint per group — semantic tokens, never raw hues (K1 palette). */
-const GROUP_AVATAR: Record<AgentGroup, string> = {
-  writing: 'bg-agent-soft text-agent',
-  art: 'bg-info-soft text-info',
-  tools: 'bg-ok-soft text-ok',
-};
 
 const fmtTokens = (n: number): string =>
   n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${Math.round(n / 1_000)}k` : String(n);

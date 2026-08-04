@@ -2780,7 +2780,8 @@
       "forkFromHintV2": "Copies the identity / soul / instructions, model settings and skill bindings.",
       "slugTaken": "That slug is already in use.",
       "scopeIdRequired": "Pick one, or the agent is created as private.",
-      "forkSkillsNotCopied": "Agent created, but its skills were not copied — bind them manually."
+      "forkSkillsNotCopied": "Agent created, but its skills were not copied — bind them manually.",
+      "startChat": "Start chat"
     },
     "skills": {
       "addFile": "+ Add file",

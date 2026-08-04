@@ -37,6 +37,9 @@ import { AgentWorkbenchTab } from './AgentWorkbenchTab';
 import { AgentPersonaTab } from './AgentPersonaTab';
 import { AgentProfileTab } from './AgentProfileTab';
 import { PROVIDER_DISPLAY_NAMES, getAvailableModels } from './agentEditorModel';
+import { GROUP_AVATAR, agentGroupOf } from './agentStatus';
+import { getAgentIcon } from './agentIcons';
+import { useGlobalChatStore } from '../../stores/globalChatStore';
 
 type SubTab = 'workbench' | 'persona' | 'profile';
 
@@ -109,6 +112,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
   const urlPrefix = teamId ? `/team/${teamId}` : '';
   const { userProfile, aiSettings } = useAuth();
   const { addToast } = useToast();
+  const requestChat = useGlobalChatStore((s) => s.requestChat);
   // Admin escape removed (2026-05-19 QA): backend rejects PATCH on system
   // presets for everyone including admins, so admin-only UI affordances
   // were a foot-gun — admin would click 保存更改 and hit a 403 with raw
@@ -484,17 +488,24 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
 
   return (
     <div>
-      <header className="mb-4 flex items-center justify-between gap-4">
+      <header className="mb-4 flex items-center gap-3">
+        <span
+          className={`grid h-11 w-11 shrink-0 place-items-center rounded-lg ${GROUP_AVATAR[agentGroupOf(agent)]}`}
+        >
+          {React.createElement(getAgentIcon(agent.icon), { size: 21 })}
+        </span>
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-ink-100 truncate">{agent.name}</h2>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-500">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-ink-100">
+            <span className="truncate">{agent.name}</span>
+            <ScopeBadge agent={agent} />
+          </h2>
+          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-ink-500">
             <span className="font-mono">{agent.slug}</span>
             <span>·</span>
             <span>{agent.model}</span>
-            <ScopeBadge agent={agent} />
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2">
           <AgentActionBar
             agent={agent}
             readOnly={catalogLocked}
@@ -505,15 +516,24 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
             onDuplicate={openForkModal}
             onDelete={isPreset ? undefined : handleDeleteAgent}
           />
-          {!readOnly && (
+          {/* Save only exists on the tab that has a draft. Workbench and
+              Profile edit nothing through this button. */}
+          {sub === 'persona' && (
             <button
               onClick={save}
               disabled={saving}
-              className="rounded-lg btn-tint-indigo px-4 py-2 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+              className="rounded-lg border border-ink-700 bg-ink-800 px-4 py-2 text-sm font-medium text-ink-200 hover:bg-ink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
             >
               {saving ? t('common.saving') : t('aiLibrary.agents.saveChanges')}
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => requestChat(agent.slug)}
+            className="rounded-lg bg-ok px-5 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 whitespace-nowrap"
+          >
+            {t('aiLibrary.agents.startChat', 'Start chat')}
+          </button>
         </div>
       </header>
 
