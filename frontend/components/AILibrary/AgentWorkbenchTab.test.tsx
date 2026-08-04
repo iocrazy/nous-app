@@ -212,13 +212,25 @@ describe('AgentWorkbenchTab — 最近对话左栏', () => {
 
   it('renders the week stats from the 7-day rollup', async () => {
     getAgentStats.mockResolvedValue({
-      [AGENT_ID]: { runs_7d: 12, tokens_7d: 38000, running_count: 0, needs_input_count: 0, fault: null },
+      [AGENT_ID]: {
+        runs_7d: 12,
+        tokens_7d: 38000,
+        cost_cents_7d: 163,
+        running_count: 0,
+        needs_input_count: 0,
+        fault: null,
+      },
     });
     renderTab();
 
     await waitFor(() => expect(screen.getByTestId('week-stats')).toBeTruthy());
     expect(screen.getByText('12')).toBeTruthy();
     expect(screen.getByText('38k')).toBeTruthy();
+    // Spend comes from the SAME 7-day rollup as runs and tokens. It used to
+    // be absent from the endpoint, so the only figure available was the
+    // dashboard's 14-day total — a different window under a "this week"
+    // label. Asserting it here pins the window, not just the formatting.
+    expect(screen.getByText('$1.63')).toBeTruthy();
   });
 
   it('shows zeroes rather than blanks when this agent has no rollup row', async () => {

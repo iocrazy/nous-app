@@ -2790,7 +2790,8 @@
         "routines": "Routines",
         "thisWeek": "This week",
         "statRuns": "runs",
-        "statTokens": "tok"
+        "statTokens": "tok",
+        "statCost": "spend"
       }
     },
     "skills": {

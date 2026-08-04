@@ -72,7 +72,7 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-function formatCost(cents: number): string {
+export function formatCost(cents: number): string {
   // cost_cents is in US cents (1 cent = $0.01). For sub-cent precision
   // (most LLM calls land in 0.0x cents), show 4 decimals.
   if (!cents) return '$0.00';

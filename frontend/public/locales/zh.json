@@ -2790,7 +2790,8 @@
         "routines": "例行任务",
         "thisWeek": "本周",
         "statRuns": "运行",
-        "statTokens": "tok"
+        "statTokens": "tok",
+        "statCost": "花费"
       }
     },
     "skills": {

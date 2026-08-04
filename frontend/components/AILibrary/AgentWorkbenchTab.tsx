@@ -20,6 +20,7 @@ import type { AILibraryAgent, AgentRunGroupItem } from '../../types';
 import { listNeedsInput, type NeedsInputItem } from '../../services/issuesService';
 import { aiLibraryService, type AgentStatsItem } from '../../services/aiLibraryService';
 import { AgentRunsSplit } from './AgentRunsSplit';
+import { formatCost } from './AgentDashboardTab';
 import { AgentRoutinesTab } from './AgentRoutinesTab';
 import { NewRoutineModal } from './NewRoutineModal';
 
@@ -263,6 +264,10 @@ export const AgentWorkbenchTab: React.FC<AgentWorkbenchTabProps> = ({
             <span className="rounded-full border border-ink-800 px-2.5 py-1 text-[11px] text-ink-400">
               {t('aiLibrary.agents.workbench.statTokens', 'tok')}{' '}
               <b className="tabular-nums text-ink-200">{fmtTokens(stats?.tokens_7d ?? 0)}</b>
+            </span>
+            <span className="rounded-full border border-ink-800 px-2.5 py-1 text-[11px] text-ink-400">
+              {t('aiLibrary.agents.workbench.statCost', 'spend')}{' '}
+              <b className="tabular-nums text-ink-200">{formatCost(stats?.cost_cents_7d ?? 0)}</b>
             </span>
           </div>
         </Panel>

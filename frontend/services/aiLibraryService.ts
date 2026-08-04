@@ -97,6 +97,8 @@ export interface AgentFault {
 export interface AgentStatsItem {
   runs_7d: number;
   tokens_7d: number;
+  /** Spend over the same window (mig-free, added alongside runs/tokens). */
+  cost_cents_7d: number;
   running_count: number;
   needs_input_count: number;
   fault: AgentFault | null;
