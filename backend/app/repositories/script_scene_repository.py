@@ -428,7 +428,7 @@ class ScriptSceneRepository:
     async def delete(self, scene_id: str) -> Dict[str, Any]:
         """Delete a scene — hard DELETE while the script's numbering is
         unlocked (writing phase; ops cascade via FK ON DELETE CASCADE, same
-        as before mig 402). Once the script is LOCKED, this instead OMITS
+        as before mig 403). Once the script is LOCKED, this instead OMITS
         the scene in place (agent-layer spec §4.2's "delete after lock"):
         stamps ``omitted_at`` and keeps the row + its ``scene_number`` —
         the printed-script "3 OMITTED" convention — so the number stays

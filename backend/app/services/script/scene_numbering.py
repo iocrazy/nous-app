@@ -13,7 +13,7 @@ Vocabulary, matching the industry convention this implements:
   - "writing phase" — script_projects.numbering_locked_at IS NULL. The
     number is DERIVED fresh from canonical position every time (never
     persisted) so an insert/delete/move immediately reflects in the number —
-    exactly today's (pre-mig-402) frontend behavior, just centralized here so
+    exactly today's (pre-mig-403) frontend behavior, just centralized here so
     every consumer (editor, agent tools, exports) computes the SAME value.
   - "lock" — freeze: every scene's derived number is written into
     script_scenes.scene_number once, and never changes again.

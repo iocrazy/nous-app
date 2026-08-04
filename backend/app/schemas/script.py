@@ -68,7 +68,7 @@ class ScriptProjectResponse(BaseModel):
     settings_json: Optional[Dict[str, Any]] = None
     viewport_json: Optional[Dict[str, Any]] = None
     target_duration_sec: Optional[int] = None
-    # Scene numbering (mig 402 / agent-layer spec §4). NULL = writing phase
+    # Scene numbering (mig 403 / agent-layer spec §4). NULL = writing phase
     # (scene numbers derived from order, never stored); once set, every
     # script_scenes.scene_number under this script is frozen permanently.
     numbering_locked_at: Optional[datetime] = None

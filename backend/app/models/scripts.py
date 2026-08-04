@@ -285,7 +285,7 @@ class ScriptProjects(Base):
         DateTime(True),
         comment="NULL=writing phase (scene numbers derived, not stored). Set "
         "once at lock time to freeze every scene_number under this script — "
-        "a one-way transition (mig 402).",
+        "a one-way transition (mig 403).",
     )
 
 
@@ -481,12 +481,12 @@ class ScriptScenes(Base):
         Text,
         comment="NULL pre-lock (derived, not stored). Post-lock: authoritative, "
         "never-renumbered display number — plain int string or int+letter "
-        "suffix for a post-lock insert (mig 402).",
+        "suffix for a post-lock insert (mig 403).",
     )
     omitted_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime(True),
         comment="Set instead of hard-delete once numbering is locked (printed-"
-        "script 'OMITTED' convention) — row + scene_number kept (mig 402).",
+        "script 'OMITTED' convention) — row + scene_number kept (mig 403).",
     )
 
 

@@ -1,4 +1,4 @@
--- Migration 402: scene numbering (agent-layer spec §4, plan A3)
+-- Migration 403: scene numbering (agent-layer spec §4, plan A3)
 --
 -- Problem: script_scenes has NO number column today — only sort_order. The
 -- displayed scene number is computed purely from array position (see
