@@ -9,6 +9,7 @@ import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Search } from 'lucide-react';
 import type { AILibrarySkill } from '../../types';
+import { skillIconFor } from './skillIcons';
 
 interface SkillGalleryProps {
   skills: AILibrarySkill[];
@@ -43,14 +44,21 @@ function SkillCard({
         ? t('aiLibrary.scope.project', 'Project')
         : t('aiLibrary.scope.private', 'Private');
 
+  const Icon = skillIconFor(skill);
+
   return (
     <button
       type="button"
       onClick={() => onOpen(skillKey(skill))}
       data-testid="skill-card"
-      className="rounded-xl border border-ink-800/60 bg-ink-900/20 p-3 text-left transition-colors hover:border-ink-700"
+      className="rounded-xl border border-ink-800/60 bg-ink-900/20 px-4 py-3.5 text-left transition-colors hover:border-ink-700"
     >
-      <div className="truncate text-[13px] font-medium text-ink-200">{skill.name}</div>
+      <div className="flex items-center gap-2 text-[13.5px] font-semibold text-ink-200">
+        <span data-testid="skill-card-icon" className="shrink-0 text-ink-500">
+          <Icon size={14} />
+        </span>
+        <span className="truncate">{skill.name}</span>
+      </div>
       {skill.description && (
         <div className="mt-1 line-clamp-2 text-[11px] text-ink-500">
           {skill.description}
@@ -79,30 +87,32 @@ function SkillCard({
               <span
                 key={a.slug}
                 title={a.name}
-                className="flex h-4 w-4 items-center justify-center rounded-sm border border-ink-800 bg-agent-soft text-[8px] text-agent"
+                className="flex h-5 w-5 items-center justify-center rounded-md border border-ink-800 bg-agent-soft text-[10px] font-bold text-agent"
               >
                 {a.name.slice(0, 1).toUpperCase()}
               </span>
             ))}
           </span>
+          {/* Count only — the names ride on the avatars' title. Spelling them
+              out here wrapped to three lines on a 255px card. */}
           <span className="min-w-0 truncate text-[11px] text-ink-500">
             {t('aiLibrary.skills.usedBy', '{{count}} agents using', {
               count: agents.length,
             })}
-            {' · '}
-            {agents.map((a) => a.name).join(', ')}
           </span>
         </div>
       ) : (
+        // A quiet ochre line, not a banner: this is a nudge, not an error, and
+        // the boxed version dominated every card it appeared on.
         <div
-          className="mt-2 flex items-start gap-1.5 rounded-md border border-warn-line bg-warn-soft px-2 py-1 text-[11px] text-warn"
+          className="mt-2 flex items-center gap-1 text-[11px] text-warn"
           data-testid="orphan-hint"
         >
-          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-          <span>
+          <AlertTriangle size={11} className="shrink-0" />
+          <span className="min-w-0 truncate">
             {t(
               'aiLibrary.skills.orphanHint',
-              'No agent uses this — bind it to an agent or archive it',
+              'No agent uses this — bind or archive',
             )}
           </span>
         </div>
@@ -157,7 +167,12 @@ export const SkillGallery: React.FC<SkillGalleryProps> = ({
         <div className="ml-auto">{actions}</div>
       </div>
 
-      <div className="mt-4 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+      {/* §05 density: columns follow card width, so a wide screen packs more
+          cards instead of stretching three of them across the whole page. */}
+      <div
+        className="mt-4 grid gap-2.5 grid-cols-[repeat(auto-fill,minmax(255px,1fr))]"
+        data-testid="skill-grid"
+      >
         {visible.map((s) => (
           <SkillCard key={skillKey(s)} skill={s} onOpen={onOpen} />
         ))}

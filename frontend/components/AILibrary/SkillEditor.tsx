@@ -581,7 +581,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
             <p className="px-4 pb-4 text-[12px] text-warn">
               {t(
                 'aiLibrary.skills.orphanHint',
-                'No agent uses this — bind it to an agent or archive it',
+                'No agent uses this — bind or archive',
               )}
             </p>
           )}

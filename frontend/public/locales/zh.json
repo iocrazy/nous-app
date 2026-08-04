@@ -2872,7 +2872,7 @@
       "deleteFileError": "删除失败：{{err}}",
       "builtIn": "Nous 内置",
       "usedBy": "{{count}} 个智能体在用",
-      "orphanHint": "没有智能体在用——绑定到某个智能体或归档它",
+      "orphanHint": "暂无智能体使用 — 绑定或归档",
       "orphanCount": "{{count}} 个未被使用",
       "search": "搜索技能…",
       "noneMatch": "没有匹配的技能",

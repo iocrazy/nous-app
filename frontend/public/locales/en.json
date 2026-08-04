@@ -2872,7 +2872,7 @@
       "deleteFileError": "Failed to delete: {{err}}",
       "builtIn": "Built-in",
       "usedBy": "{{count}} agents using",
-      "orphanHint": "No agent uses this — bind it to an agent or archive it",
+      "orphanHint": "No agent uses this — bind or archive",
       "orphanCount": "{{count}} unused",
       "search": "Search skills...",
       "noneMatch": "No skills match this search",
