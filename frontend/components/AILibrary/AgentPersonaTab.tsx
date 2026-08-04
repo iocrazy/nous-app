@@ -14,7 +14,7 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ArrowDown, ArrowUp, Plus, X } from 'lucide-react';
+import { ArrowDown, ArrowUp } from 'lucide-react';
 import type {
   AgentChatPermissions,
   AILibraryAgent,
@@ -342,141 +342,133 @@ const SkillsSection: React.FC<{
     return allSkills.filter((s) => !bound.has(s.id));
   }, [allSkills, localSkillIds]);
 
+  // One list, bound first (in composition order) then the rest. The split
+  // into "Bound" + "Available" made binding a two-list hunt; the toggle says
+  // the same thing in one row (spec §03).
+  const rows = useMemo(
+    () => [
+      ...boundSkills.map(({ id, skill }, idx) => ({
+        key: `bound-${id}`,
+        id,
+        skill,
+        bound: true,
+        idx,
+      })),
+      ...availableSkills.map((skill) => ({
+        key: `free-${skill.id}`,
+        id: skill.id,
+        skill,
+        bound: false,
+        idx: -1,
+      })),
+    ],
+    [boundSkills, availableSkills],
+  );
+
   if (skillsLoading && allSkills === null) {
     return <p className="text-sm text-ink-500">{t('aiLibrary.agents.loadingSkills')}</p>;
   }
 
   return (
-    <section className="space-y-6">
+    <section>
       {readOnly && (
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-warn">
+        <div className="mb-3 rounded-lg border border-warn-line bg-warn-soft px-3 py-2 text-xs text-warn">
           {t('aiLibrary.agents.presetReadOnly')}
         </div>
       )}
 
-      <div>
-        <h3 className="mb-2 text-sm font-semibold text-ink-200">
-          {t('aiLibrary.agents.currentSkills', 'Bound Skills')}
-          <span className="ml-2 text-xs font-normal text-ink-500">
-            ({boundSkills.length})
-          </span>
-        </h3>
-        {boundSkills.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-ink-800 bg-ink-900/40 px-3 py-4 text-sm text-ink-500">
-            {t(
-              'aiLibrary.agents.noSkillsBound',
-              'No skills bound yet. Add one below.',
-            )}
-          </div>
-        ) : (
-          <ul className="space-y-1.5">
-            {boundSkills.map(({ id, skill }, idx) => (
-              <li
-                key={id}
-                className="flex items-center gap-3 rounded-lg border border-ink-800 bg-ink-900/60 px-3 py-2"
-              >
-                <span className="text-xl leading-none" aria-hidden>
-                  {skill?.icon ?? ''}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-ink-100">
-                    {skill?.name ?? `Skill #${id}`}
-                  </div>
-                  {skill?.slug && (
-                    <div className="truncate font-mono text-xs text-ink-500">
-                      {skill.slug}
-                    </div>
-                  )}
-                </div>
-                {skill && <SkillScopeBadge skill={skill} />}
-                {!readOnly && (
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => onMove(id, -1)}
-                      disabled={idx === 0}
-                      className="rounded-md border border-ink-700 bg-ink-800 p-1.5 text-ink-300 hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-40"
-                      title={t('aiLibrary.agents.moveUp', 'Move up')}
-                      aria-label={t('aiLibrary.agents.moveUp', 'Move up')}
-                    >
-                      <ArrowUp size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onMove(id, 1)}
-                      disabled={idx === boundSkills.length - 1}
-                      className="rounded-md border border-ink-700 bg-ink-800 p-1.5 text-ink-300 hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-40"
-                      title={t('aiLibrary.agents.moveDown', 'Move down')}
-                      aria-label={t('aiLibrary.agents.moveDown', 'Move down')}
-                    >
-                      <ArrowDown size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onRemove(id)}
-                      className="rounded-md border border-red-500/30 bg-red-500/10 p-1.5 text-red-300 hover:bg-red-500/20"
-                      title={t('aiLibrary.agents.removeSkill', 'Remove')}
-                      aria-label={t('aiLibrary.agents.removeSkill', 'Remove')}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <h3 className="mb-2 text-sm font-semibold text-ink-200">
+        {t('aiLibrary.agents.currentSkills', 'Bound Skills')}
+        <span className="ml-2 text-xs font-normal text-ink-500">
+          ({boundSkills.length})
+        </span>
+      </h3>
 
-      {!readOnly && (
-        <div>
-          <h3 className="mb-2 text-sm font-semibold text-ink-200">
-            {t('aiLibrary.agents.availableSkills', 'Available Skills')}
-            <span className="ml-2 text-xs font-normal text-ink-500">
-              ({availableSkills.length})
-            </span>
-          </h3>
-          {availableSkills.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-ink-800 bg-ink-900/40 px-3 py-4 text-sm text-ink-500">
-              {t(
-                'aiLibrary.agents.noAvailableSkills',
-                'No available skills. Create one in the Skills tab.',
-              )}
-            </div>
-          ) : (
-            <ul className="space-y-1.5">
-              {availableSkills.map((skill) => (
-                <li
-                  key={skill.id}
-                  className="flex items-center gap-3 rounded-lg border border-ink-800 bg-ink-900/40 px-3 py-2"
-                >
-                  <span className="text-xl leading-none" aria-hidden>
-                    {skill.icon ?? ''}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-ink-100">
-                      {skill.name}
-                    </div>
-                    {skill.slug && (
-                      <div className="truncate font-mono text-xs text-ink-500">
-                        {skill.slug}
-                      </div>
-                    )}
-                  </div>
-                  <SkillScopeBadge skill={skill} />
-                  <button
-                    type="button"
-                    onClick={() => onAdd(skill.id)}
-                    className="inline-flex items-center gap-1 rounded-md border border-[var(--accent-border)] bg-[var(--accent-soft)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"
-                  >
-                    <Plus size={12} />
-                    {t('aiLibrary.agents.addSkill', 'Add')}
-                  </button>
-                </li>
-              ))}
-            </ul>
+      {rows.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-ink-800 bg-ink-900/40 px-3 py-4 text-sm text-ink-500">
+          {t(
+            'aiLibrary.agents.noAvailableSkills',
+            'No available skills. Create one in the Skills tab.',
           )}
         </div>
+      ) : (
+        <ul className="rounded-lg border border-ink-800">
+          {rows.map(({ key, id, skill, bound, idx }) => (
+            <li
+              key={key}
+              data-testid="skill-toggle-row"
+              data-bound={bound}
+              className="flex items-center gap-3 border-b border-ink-800/60 px-3 py-2 last:border-b-0"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-ink-100">
+                  {skill?.name ?? `Skill #${id}`}
+                </div>
+                {skill?.description ? (
+                  <div className="truncate text-[11px] text-ink-500">
+                    {skill.description}
+                  </div>
+                ) : (
+                  skill?.slug && (
+                    <div className="truncate font-mono text-[11px] text-ink-500">
+                      {skill.slug}
+                    </div>
+                  )
+                )}
+              </div>
+
+              {/* Reorder stays inline and secondary rather than moving into an
+                  overflow menu: sort_order drives the order skills are offered
+                  to the model, and a 3-item list is not worth an extra click.
+                  Only shown on bound rows — an unbound skill has no position. */}
+              {!readOnly && bound && boundSkills.length > 1 && (
+                <div className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => onMove(id, -1)}
+                    disabled={idx === 0}
+                    className="rounded p-1 text-ink-500 hover:text-ink-200 disabled:cursor-not-allowed disabled:opacity-30"
+                    title={t('aiLibrary.agents.moveUp', 'Move up')}
+                    aria-label={t('aiLibrary.agents.moveUp', 'Move up')}
+                  >
+                    <ArrowUp size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onMove(id, 1)}
+                    disabled={idx === boundSkills.length - 1}
+                    className="rounded p-1 text-ink-500 hover:text-ink-200 disabled:cursor-not-allowed disabled:opacity-30"
+                    title={t('aiLibrary.agents.moveDown', 'Move down')}
+                    aria-label={t('aiLibrary.agents.moveDown', 'Move down')}
+                  >
+                    <ArrowDown size={13} />
+                  </button>
+                </div>
+              )}
+
+              {skill && <SkillScopeBadge skill={skill} />}
+
+              <button
+                type="button"
+                role="switch"
+                aria-checked={bound}
+                disabled={readOnly}
+                onClick={() => (bound ? onRemove(id) : onAdd(id))}
+                data-testid="skill-toggle"
+                aria-label={skill?.name ?? `Skill #${id}`}
+                className={`relative h-[18px] w-8 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                  bound ? 'bg-ok' : 'bg-ink-700'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white transition-all ${
+                    bound ? 'left-[18px]' : 'left-0.5'
+                  }`}
+                />
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );
