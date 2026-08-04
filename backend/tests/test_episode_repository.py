@@ -158,3 +158,38 @@ async def test_create_without_project_id_skips_subquery(
 
     sql, _ = fake_session.calls[-1]
     assert "coalesce" not in sql.lower()
+
+
+# ── set_current_node_id: per-episode workflow cursor (mig 402, B1) ──────────
+#
+# Sibling of ProjectStageNodesRepository.set_current_node_id, but writes
+# episodes.current_node_id instead of the legacy projects.current_node_id —
+# B1 only lands this accessor, B2 is what wires advance_service to call it.
+
+
+@pytest.mark.asyncio
+async def test_set_current_node_id_updates_episode_cursor(
+    repo: EpisodeRepository, fake_session: _FakeSession
+) -> None:
+    await repo.set_current_node_id("777", "888")
+
+    sql, binds = fake_session.calls[-1]
+    assert "UPDATE" in sql and "episodes" in sql.lower()
+    assert "current_node_id" in sql
+    assert binds.get("current_node_id") == 888
+    assert binds.get("id_1") == 777
+
+
+@pytest.mark.asyncio
+async def test_set_current_node_id_none_clears_cursor(
+    repo: EpisodeRepository, fake_session: _FakeSession
+) -> None:
+    """node_id=None binds an explicit SQL NULL (clearing the cursor), not a
+    no-op — same "assign None explicitly" contract as
+    ProjectStageNodesRepository.set_current_node_id."""
+    await repo.set_current_node_id("777", None)
+
+    sql, binds = fake_session.calls[-1]
+    assert "UPDATE" in sql
+    assert "current_node_id" in binds
+    assert binds["current_node_id"] is None

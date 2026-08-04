@@ -22,6 +22,11 @@ Discipline:
     shallow JSONB merge, never touching ``status``/``events``/schedule
     columns. The stage-hook workflow (M3 PR-H2) uses it to stamp
     ``run_prepared_at`` for idempotency.
+  * ``surface`` (mig 402, B1) is copied verbatim at instantiation and frozen
+    like ``events``/``completion_policy``/``form_schema`` — deliberately
+    absent from ``update_node``'s keyword whitelist. ``episode_id`` (mig 402,
+    B1) is likewise not writable through ``update_node``; B3 is what starts
+    setting it, at instantiation time, not as a later in-place edit.
 """
 
 from __future__ import annotations
@@ -144,6 +149,8 @@ def _node_row(
         "name": obj.name,
         "sort_order": obj.sort_order,
         "parallel_group": obj.parallel_group,
+        # Episode scoping (mig 402, B1): NULL = legacy project-level node.
+        "episode_id": (str(obj.episode_id) if obj.episode_id is not None else None),
         "status": obj.status,
         "owner_user_id": _s(obj.owner_user_id),
         "owner_agent_id": _s(obj.owner_agent_id),
@@ -156,6 +163,12 @@ def _node_row(
         "folder_id": (str(obj.folder_id) if obj.folder_id is not None else None),
         "completion_policy": obj.completion_policy,
         "events": obj.events,
+        # Surface (mig 402, B1): copied verbatim from the template at
+        # instantiation and frozen (same idiom as events/completion_policy);
+        # NULL (deliverable-type node) is a real value, not "missing" -- do
+        # NOT fall back to a default here the way ``events`` sometimes reads
+        # as ``(n.get("events") or {})`` elsewhere in this codebase.
+        "surface": obj.surface,
         "metadata": obj.metadata_,
         "form_schema": obj.form_schema,
         "form_data": obj.form_data,
@@ -397,6 +410,18 @@ class ProjectStageNodesRepository:
                     # here (DB server_default '{}'::jsonb) — an instance
                     # starts with no entered values.
                     form_schema=tn.form_schema,
+                    # Surface (mig 402, B1): copied verbatim, same idiom as
+                    # completion_policy/events/form_schema above. Unlike those
+                    # three, ``tn.surface`` may legitimately be None
+                    # (deliverable-type node) — assigned as-is, never coerced
+                    # through an ``(x or {})``/``(x or default)`` fallback,
+                    # since that would silently turn a real deliverable-type
+                    # node into something else.
+                    surface=tn.surface,
+                    # episode_id intentionally NOT set here — B1 is the data
+                    # layer only. Every node instantiate_from_template creates
+                    # today stays a legacy project-level node (episode_id
+                    # NULL); B3 is what starts building per-episode chains.
                 )
                 session.add(node)
                 await session.flush()

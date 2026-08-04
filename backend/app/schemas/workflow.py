@@ -136,6 +136,13 @@ class TemplateNodeIn(BaseModel):
     # instantiate-then-freeze idiom as completion_policy/events above. ``key``
     # dedup/slugify happens in the repo write path (I2), not here.
     form_schema: List[FormFieldDef] = Field(default_factory=list)
+    # Surface (mig 402, B1) — declares which creation surface (script/
+    # storyboard/renders) this template node corresponds to; NULL means
+    # deliverable-type node (no in-app creation surface, completed via
+    # upload+review). Copied verbatim to the instance at instantiation and
+    # frozen there (same instantiate-then-freeze idiom as completion_policy/
+    # events/form_schema above) — NOT exposed on NodePatch.
+    surface: Optional[Literal["script", "storyboard", "renders"]] = None
     # Dependency edges (mig 391, M3 PR-J). ⚠️ PAYLOAD-INDEX CONTRACT, not node
     # ids: ``TemplateUpdate.nodes`` is a FULL replacement on every save
     # (workflow_templates_repository.update_template deletes every existing
@@ -288,6 +295,17 @@ class NodeOut(BaseModel):
     # metadata/form_schema/depends_on above. Default '' matches the column's
     # server_default so a pre-mig-395 row never crashes a consumer.
     brief: str = ""
+    # Surface (mig 402, B1) — copied verbatim from the template at
+    # instantiation and frozen (same idiom as completion_policy/events/
+    # form_schema above); NULL means deliverable-type node. A legacy instance
+    # predating this migration also reads NULL here and should be treated the
+    # same way (spec §5: "遗留节点 surface 为空 → 按交付物型降级").
+    surface: Optional[Literal["script", "storyboard", "renders"]] = None
+    # Episode scoping (mig 402, B1) — nullable FK to ``episodes``; NULL means
+    # a legacy project-level node (predates per-episode chains, or created
+    # before B3 wires episode-scoped instantiation). B5 hides NULL-episode
+    # nodes from the UI; this endpoint still returns them as-is.
+    episode_id: Optional[str] = None
 
 
 class ProjectWorkflowOut(BaseModel):
