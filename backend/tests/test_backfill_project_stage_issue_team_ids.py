@@ -1,8 +1,40 @@
 """Unit tests for the project-stage-issue team_id repair backfill loop."""
 
+from typing import Any
+
 import pytest
 
 import app.workflows.backfill_project_stage_issue_team_ids as wf
+
+
+class _FakeRowsResult:
+    def __init__(self, rows: list[dict]) -> None:
+        self._rows = rows
+
+    def mappings(self) -> "_FakeRowsResult":
+        return self
+
+    def all(self) -> list[dict]:
+        return self._rows
+
+
+class _FakeSession:
+    def __init__(self, rows: list[dict]) -> None:
+        self._rows = rows
+
+    async def execute(self, stmt: Any) -> _FakeRowsResult:
+        return _FakeRowsResult(self._rows)
+
+
+class _ScopeCM:
+    def __init__(self, session: _FakeSession) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> _FakeSession:
+        return self._session
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
 
 
 class _FakeIssueRepo:
@@ -55,10 +87,8 @@ def harness(monkeypatch):
         issues = _FakeIssueRepo()
         teams = _FakeTeamRepo(mapping)
 
-        async def fake_fetch_all(sql, params=None):
-            return rows
-
-        monkeypatch.setattr(wf.db_engine, "fetch_all", fake_fetch_all)
+        session = _FakeSession(rows)
+        monkeypatch.setattr(wf, "read_scope", lambda: _ScopeCM(session))
         monkeypatch.setattr(
             "app.repositories.issue_repository.get_issue_repository",
             lambda: issues,

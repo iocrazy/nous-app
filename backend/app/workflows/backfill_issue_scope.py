@@ -36,8 +36,11 @@ from typing import Any, Optional
 
 from dbos import DBOS
 from loguru import logger
+from sqlalchemy import func, select, update
+from sqlalchemy.orm import InstrumentedAttribute
 
-from app.db import engine as db_engine
+from app.db.session import read_scope, write_scope
+from app.models import Canvases, Issues, Projects, Teams
 
 # Same system-batch convention as storage_migration / topic_scorer:
 # task_tracking.user_id is UUID NOT NULL and no single end user owns a
@@ -76,76 +79,47 @@ def rounded_candidates(stored: int, real_ids: list[int]) -> list[int]:
     return [rid for rid in real_ids if int(float(rid)) == stored]
 
 
-# ── SQL ─────────────────────────────────────────────────────────────────
-
-_CANVAS_NULL_SCOPE_SQL = """
-SELECT id, origin_id
-FROM public.issues
-WHERE origin_id LIKE 'canvas:%'
-  AND team_id IS NULL
-ORDER BY id
-LIMIT :limit
-"""
-
-_CANVAS_SCOPE_LOOKUP_SQL = """
-SELECT c.id AS canvas_id, c.project_id, p.team_id
-FROM public.canvases c
-JOIN public.projects p ON p.id = c.project_id
-WHERE c.id = :canvas_id
-"""
-
-_FIX_NULL_SCOPE_SQL = """
-UPDATE public.issues
-SET team_id = :team_id,
-    project_id = COALESCE(project_id, :project_id)
-WHERE id = :id AND team_id IS NULL
-"""
-
-_SCENE_NULL_SCOPE_COUNT_SQL = """
-SELECT COUNT(*) FROM public.issues
-WHERE origin_id LIKE 'scene:%' AND team_id IS NULL
-"""
-
-_BAD_TEAM_IDS_SQL = """
-SELECT DISTINCT team_id FROM public.issues
-WHERE team_id IS NOT NULL
-  AND team_id NOT IN (SELECT id FROM public.teams)
-"""
-
-_ALL_TEAM_IDS_SQL = "SELECT id FROM public.teams"
-
-_FIX_ROUNDED_TEAM_SQL = """
-UPDATE public.issues SET team_id = :good WHERE team_id = :bad
-"""
-
-_BAD_PROJECT_IDS_SQL = """
-SELECT DISTINCT project_id FROM public.issues
-WHERE project_id IS NOT NULL
-  AND project_id NOT IN (SELECT id FROM public.projects)
-"""
-
-_ALL_PROJECT_IDS_SQL = "SELECT id FROM public.projects"
-
-_FIX_ROUNDED_PROJECT_SQL = """
-UPDATE public.issues SET project_id = :good WHERE project_id = :bad
-"""
-
-
 # ── Workflow ────────────────────────────────────────────────────────────
 
 
 async def _repair_null_scope(dry_run: bool, limit: int, result: dict[str, Any]) -> None:
     """Category 1: canvas-origin issues whose team_id is NULL."""
-    rows = await db_engine.fetch_all(_CANVAS_NULL_SCOPE_SQL, {"limit": limit})
+    async with read_scope() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(Issues.id, Issues.origin_id)
+                    .where(Issues.origin_id.like("canvas:%"), Issues.team_id.is_(None))
+                    .order_by(Issues.id)
+                    .limit(limit)
+                )
+            )
+            .mappings()
+            .all()
+        )
     fixed_ids: list[int] = []
     for row in rows:
         canvas_id = parse_canvas_origin(row.get("origin_id"))
         if canvas_id is None:
             result["null_scope_malformed"] += 1
             continue
-        scope = await db_engine.fetch_one(
-            _CANVAS_SCOPE_LOOKUP_SQL, {"canvas_id": int(canvas_id)}
-        )
+        async with read_scope() as session:
+            scope = (
+                (
+                    await session.execute(
+                        select(
+                            Canvases.id.label("canvas_id"),
+                            Canvases.project_id,
+                            Projects.team_id,
+                        )
+                        .select_from(Canvases)
+                        .join(Projects, Projects.id == Canvases.project_id)
+                        .where(Canvases.id == int(canvas_id))
+                    )
+                )
+                .mappings()
+                .first()
+            )
         if not scope or scope.get("team_id") is None:
             # Canvas deleted since, or its project has no team — nothing
             # trustworthy to write. Report, don't guess.
@@ -154,14 +128,16 @@ async def _repair_null_scope(dry_run: bool, limit: int, result: dict[str, Any]) 
         if dry_run:
             result["null_scope_would_fix"] += 1
             continue
-        changed = await db_engine.execute(
-            _FIX_NULL_SCOPE_SQL,
-            {
-                "id": row["id"],
-                "team_id": scope["team_id"],
-                "project_id": scope["project_id"],
-            },
-        )
+        async with write_scope() as session:
+            update_result = await session.execute(
+                update(Issues)
+                .where(Issues.id == row["id"], Issues.team_id.is_(None))
+                .values(
+                    team_id=scope["team_id"],
+                    project_id=func.coalesce(Issues.project_id, scope["project_id"]),
+                )
+            )
+            changed = update_result.rowcount
         if changed:
             result["null_scope_fixed"] += 1
             if len(fixed_ids) < _AUDIT_IDS_CAP:
@@ -172,23 +148,33 @@ async def _repair_null_scope(dry_run: bool, limit: int, result: dict[str, Any]) 
 
 async def _repair_rounded(
     kind: str,
-    bad_sql: str,
-    all_sql: str,
-    fix_sql: str,
+    issue_col: InstrumentedAttribute,
+    ref_model: type,
     dry_run: bool,
     result: dict[str, Any],
 ) -> None:
     """Category 2: ids rounded through float64 — repair only exact-one matches."""
-    bad_rows = await db_engine.fetch_all(bad_sql)
-    key = "team_id" if kind == "team" else "project_id"
-    bad_values = [r[key] for r in bad_rows]
+    async with read_scope() as session:
+        bad_values = (
+            (
+                await session.execute(
+                    select(issue_col.distinct()).where(
+                        issue_col.isnot(None),
+                        issue_col.notin_(select(ref_model.id)),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
     result[f"rounded_{kind}_distinct_bad"] = len(bad_values)
     if not bad_values:
         return
-    real_ids = [r["id"] for r in await db_engine.fetch_all(all_sql)]
+    async with read_scope() as session:
+        real_ids = (await session.execute(select(ref_model.id))).scalars().all()
     repairs: list[dict[str, int]] = []
     for bad in bad_values:
-        candidates = rounded_candidates(bad, real_ids)
+        candidates = rounded_candidates(bad, list(real_ids))
         if len(candidates) != 1:
             # 0 = the row's team was deleted or never existed (orphan);
             # 2+ = two live snowflakes round to the same float (possible
@@ -198,7 +184,13 @@ async def _repair_rounded(
         if dry_run:
             result[f"rounded_{kind}_would_fix"] += 1
             continue
-        changed = await db_engine.execute(fix_sql, {"good": candidates[0], "bad": bad})
+        async with write_scope() as session:
+            update_result = await session.execute(
+                update(Issues)
+                .where(issue_col == bad)
+                .values(**{issue_col.key: candidates[0]})
+            )
+            changed = update_result.rowcount
         result[f"rounded_{kind}_rows_fixed"] += changed
         if len(repairs) < _AUDIT_IDS_CAP:
             repairs.append({"from": bad, "to": candidates[0], "rows": changed})
@@ -253,28 +245,19 @@ async def backfill_issue_scope_workflow(
 
     try:
         await _repair_null_scope(dry_run, limit, result)
-        await _repair_rounded(
-            "team",
-            _BAD_TEAM_IDS_SQL,
-            _ALL_TEAM_IDS_SQL,
-            _FIX_ROUNDED_TEAM_SQL,
-            dry_run,
-            result,
-        )
-        await _repair_rounded(
-            "project",
-            _BAD_PROJECT_IDS_SQL,
-            _ALL_PROJECT_IDS_SQL,
-            _FIX_ROUNDED_PROJECT_SQL,
-            dry_run,
-            result,
-        )
+        await _repair_rounded("team", Issues.team_id, Teams, dry_run, result)
+        await _repair_rounded("project", Issues.project_id, Projects, dry_run, result)
         # Visibility-only: scene-origin issues can also be scopeless (embeds
         # without route params). Counted here so the gap is measured before
         # anyone builds a scene→script→project resolver for it.
-        result["scene_null_scope_count"] = await db_engine.fetch_val(
-            _SCENE_NULL_SCOPE_COUNT_SQL
-        )
+        async with read_scope() as session:
+            result["scene_null_scope_count"] = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(Issues)
+                    .where(Issues.origin_id.like("scene:%"), Issues.team_id.is_(None))
+                )
+            ).scalar_one()
     except Exception:
         # Persist whatever was counted before the crash, then raise —
         # 路线 C rule 4: the trigger writes phase=failed, we never do.

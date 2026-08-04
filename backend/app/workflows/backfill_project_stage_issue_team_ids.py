@@ -34,23 +34,30 @@ from typing import Any
 
 from dbos import DBOS
 from loguru import logger
+from sqlalchemy import select
 
-from app.db import engine as db_engine
+from app.db.session import read_scope
+from app.models import Issues, Projects
 
 SYSTEM_RUN_USER_ID = "00000000-0000-0000-0000-000000000000"
 
-# Orphan mirror issues + their project owner. hidden/soft-deleted issues are
-# included: a stamped team_id is harmless there and keeps the repair complete.
-_ORPHAN_STAGE_ISSUES_SQL = """
-SELECT i.id AS issue_id, i.project_id, p.owner_id
-FROM public.issues i
-JOIN public.projects p ON p.id = i.project_id
-WHERE i.origin_kind = 'project_stage'
-  AND i.team_id IS NULL
-  AND i.project_id IS NOT NULL
-ORDER BY i.id
-LIMIT :limit
-"""
+
+def _orphan_stage_issues_stmt(limit: int):
+    """Orphan mirror issues + their project owner. hidden/soft-deleted issues
+    are included: a stamped team_id is harmless there and keeps the repair
+    complete."""
+    return (
+        select(Issues.id.label("issue_id"), Issues.project_id, Projects.owner_id)
+        .select_from(Issues)
+        .join(Projects, Projects.id == Issues.project_id)
+        .where(
+            Issues.origin_kind == "project_stage",
+            Issues.team_id.is_(None),
+            Issues.project_id.isnot(None),
+        )
+        .order_by(Issues.id)
+        .limit(limit)
+    )
 
 
 async def run_backfill(dry_run: bool = True, limit: int = 500) -> dict[str, Any]:
@@ -85,7 +92,10 @@ async def run_backfill(dry_run: bool = True, limit: int = 500) -> dict[str, Any]
     except Exception as e:
         logger.warning(f"[backfill-issue-team-ids] start {task_id}: {e}")
 
-    rows = await db_engine.fetch_all(_ORPHAN_STAGE_ISSUES_SQL, {"limit": limit})
+    async with read_scope() as session:
+        rows = (
+            (await session.execute(_orphan_stage_issues_stmt(limit))).mappings().all()
+        )
     result: dict[str, Any] = {
         "dry_run": dry_run,
         "scanned": len(rows),

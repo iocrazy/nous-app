@@ -2,9 +2,44 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy.dialects import postgresql
+
+from app.db import session as db_session
+
+
+def _compile(stmt: Any) -> tuple[str, dict[str, Any]]:
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    return str(compiled), dict(compiled.params)
+
+
+class _FakeResult:
+    def __init__(self, rowcount: int = 0) -> None:
+        self.rowcount = rowcount
+
+
+class _FakeSession:
+    def __init__(self, rowcount: int = 0) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self._rowcount = rowcount
+
+    async def execute(self, stmt: Any) -> _FakeResult:
+        self.calls.append(_compile(stmt))
+        return _FakeResult(self._rowcount)
+
+
+class _ScopeCM:
+    def __init__(self, session: _FakeSession) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> _FakeSession:
+        return self._session
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
 
 
 @pytest.mark.asyncio
@@ -102,15 +137,15 @@ async def test_run_issue_reply_step_calls_run_session_turn(monkeypatch):
 async def test_acquire_turn_lock_true_when_free(monkeypatch):
     from app.workflows import issue_lifecycle as m
 
-    fake_engine = AsyncMock()
     # execution_locked_at is service_role-only (issues_update_allowlist, mig 170)
-    fake_engine.execute_as_service_role = AsyncMock(return_value=1)  # acquired
-    monkeypatch.setattr(m, "_engine", lambda: fake_engine, raising=False)
+    session = _FakeSession(rowcount=1)  # acquired
+    monkeypatch.setattr(db_session, "write_scope", lambda: _ScopeCM(session))
 
     got = await m.acquire_turn_lock.__wrapped__(99)
     assert got is True
-    sql = fake_engine.execute_as_service_role.call_args.args[0]
-    assert "execution_locked_at = now()" in sql
+    sql = "\n".join(sql for sql, _ in session.calls)
+    assert "SET LOCAL ROLE service_role" in sql
+    assert "execution_locked_at=now()" in sql
     assert "dbos_workflow_id" not in sql  # decision #2: do not touch wf id
 
 
@@ -118,9 +153,8 @@ async def test_acquire_turn_lock_true_when_free(monkeypatch):
 async def test_acquire_turn_lock_false_when_held(monkeypatch):
     from app.workflows import issue_lifecycle as m
 
-    fake_engine = AsyncMock()
-    fake_engine.execute_as_service_role = AsyncMock(return_value=0)  # already locked
-    monkeypatch.setattr(m, "_engine", lambda: fake_engine, raising=False)
+    session = _FakeSession(rowcount=0)  # already locked
+    monkeypatch.setattr(db_session, "write_scope", lambda: _ScopeCM(session))
 
     assert await m.acquire_turn_lock.__wrapped__(99) is False
 

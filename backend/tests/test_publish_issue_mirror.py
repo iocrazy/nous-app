@@ -1,6 +1,12 @@
 """Unit tests for the publish→issue mirror sweeper."""
 
+from __future__ import annotations
+
+from typing import Any
+
 import pytest
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.sql import Select
 
 import app.workflows.publish_issue_mirror as wf
 
@@ -49,28 +55,71 @@ class _FakeIssueRepo:
         return {"id": issue_id, "status": new_status}
 
 
+def _compile(stmt: Any) -> tuple[str, dict[str, Any]]:
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    return str(compiled), dict(compiled.params)
+
+
+class _FakeRowsResult:
+    def __init__(self, rows: list[dict]) -> None:
+        self._rows = rows
+
+    def mappings(self) -> "_FakeRowsResult":
+        return self
+
+    def all(self) -> list[dict]:
+        return self._rows
+
+
+class _FakeExecResult:
+    def __init__(self, rowcount: int = 1) -> None:
+        self.rowcount = rowcount
+
+
+class _FakeSession:
+    """Distinguishes the two SELECTs by their compiled WHERE clause (same
+    idiom the pre-ORM raw-SQL test used: ``"issue_id IS NULL" in sql``) and
+    records every UPDATE's bind params."""
+
+    def __init__(self, *, unmirrored=None, mirrored_open=None) -> None:
+        self._unmirrored = unmirrored or []
+        self._mirrored_open = mirrored_open or []
+        self.stamped: list[dict[str, Any]] = []
+
+    async def execute(self, stmt: Any):
+        sql, params = _compile(stmt)
+        if isinstance(stmt, Select):
+            if "task_tracking.issue_id IS NULL" in sql:
+                return _FakeRowsResult(self._unmirrored)
+            return _FakeRowsResult(self._mirrored_open)
+        self.stamped.append(params)
+        return _FakeExecResult()
+
+
+class _ScopeCM:
+    def __init__(self, session: _FakeSession) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> _FakeSession:
+        return self._session
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
+
+
 @pytest.fixture
 def harness(monkeypatch):
     def _install(*, unmirrored=None, mirrored_open=None, existing=None):
         issues = _FakeIssueRepo(existing)
-        stamped = []
+        session = _FakeSession(unmirrored=unmirrored, mirrored_open=mirrored_open)
 
-        async def fake_fetch_all(sql, params=None):
-            if "issue_id IS NULL" in sql:
-                return unmirrored or []
-            return mirrored_open or []
-
-        async def fake_execute(sql, params=None):
-            stamped.append(params)
-            return 1
-
-        monkeypatch.setattr(wf.db_engine, "fetch_all", fake_fetch_all)
-        monkeypatch.setattr(wf.db_engine, "execute", fake_execute)
+        monkeypatch.setattr(wf, "read_scope", lambda: _ScopeCM(session))
+        monkeypatch.setattr(wf, "write_scope", lambda: _ScopeCM(session))
         monkeypatch.setattr(
             "app.repositories.issue_repository.get_issue_repository",
             lambda: issues,
         )
-        return issues, stamped
+        return issues, session
 
     return _install
 
@@ -87,7 +136,7 @@ _ROW = {
 
 @pytest.mark.asyncio
 async def test_mirrors_a_running_batch_and_stamps_backlink(harness):
-    issues, stamped = harness(unmirrored=[_ROW])
+    issues, session = harness(unmirrored=[_ROW])
     counts = await wf._mirror_new_batches()
     assert counts["created"] == 1
     payload = issues.created[0]
@@ -96,19 +145,20 @@ async def test_mirrors_a_running_batch_and_stamps_backlink(harness):
     assert payload["status"] == "in_progress"
     assert payload["team_id"] == 42
     assert "assignee_agent_id" not in payload  # mirror never assigns
-    assert stamped[0]["wf_id"] == "wf-1"
+    assert "wf-1" in session.stamped[0].values()
+    assert 901 in session.stamped[0].values()  # atomic_create's fabricated id
 
 
 @pytest.mark.asyncio
 async def test_existing_origin_reuses_issue_and_still_stamps(harness):
-    issues, stamped = harness(
+    issues, session = harness(
         unmirrored=[_ROW],
         existing={"publish:9007199254740993": [{"id": 77, "status": "todo"}]},
     )
     counts = await wf._mirror_new_batches()
     assert counts["created"] == 0
     assert issues.created == []
-    assert stamped[0]["issue_id"] == 77  # backlink repaired, no duplicate
+    assert 77 in session.stamped[0].values()  # backlink repaired, no duplicate
 
 
 @pytest.mark.asyncio

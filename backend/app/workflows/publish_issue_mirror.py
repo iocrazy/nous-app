@@ -33,8 +33,10 @@ from typing import Any, Optional
 
 from dbos import DBOS
 from loguru import logger
+from sqlalchemy import BigInteger, Text, cast, func, select, text, update
 
-from app.db import engine as db_engine
+from app.db.session import read_scope, write_scope
+from app.models import Issues, PublishTasks, TaskTracking
 
 ORIGIN_KIND = "publish"
 
@@ -80,36 +82,54 @@ def terminal_sync_action(
     return None
 
 
-_UNMIRRORED_SQL = f"""
-SELECT t.dbos_workflow_id, t.title, t.user_id::text AS user_id, t.phase,
-       (t.metadata->>'publish_task_id') AS publish_task_id,
-       p.team_id
-FROM public.task_tracking t
-LEFT JOIN public.publish_tasks p
-       ON p.id = NULLIF(t.metadata->>'publish_task_id', '')::bigint
-WHERE t.task_type = 'publish'
-  AND t.issue_id IS NULL
-  AND t.created_at > NOW() - INTERVAL '{_LOOKBACK}'
-ORDER BY t.created_at DESC
-LIMIT {_BATCH_LIMIT}
-"""
+def _unmirrored_stmt():
+    """Batches not yet mirrored into an issue, joined to their publish_task
+    row (if the metadata id resolves to a live one) for team_id attribution."""
+    publish_task_id_text = TaskTracking.metadata_.op("->>")("publish_task_id")
+    join_cond = PublishTasks.id == cast(
+        func.nullif(publish_task_id_text, ""), BigInteger
+    )
+    return (
+        select(
+            TaskTracking.dbos_workflow_id,
+            TaskTracking.title,
+            cast(TaskTracking.user_id, Text).label("user_id"),
+            TaskTracking.phase,
+            publish_task_id_text.label("publish_task_id"),
+            PublishTasks.team_id,
+        )
+        .select_from(TaskTracking)
+        .outerjoin(PublishTasks, join_cond)
+        .where(
+            TaskTracking.task_type == "publish",
+            TaskTracking.issue_id.is_(None),
+            TaskTracking.created_at > func.now() - text(f"interval '{_LOOKBACK}'"),
+        )
+        .order_by(TaskTracking.created_at.desc())
+        .limit(_BATCH_LIMIT)
+    )
 
-_MIRRORED_OPEN_SQL = f"""
-SELECT t.dbos_workflow_id, t.phase, t.issue_id, i.status AS issue_status
-FROM public.task_tracking t
-JOIN public.issues i ON i.id = t.issue_id
-WHERE t.task_type = 'publish'
-  AND t.issue_id IS NOT NULL
-  AND t.phase IN ('completed', 'failed', 'lost', 'cancelled')
-  AND i.status NOT IN ('done', 'cancelled', 'blocked')
-LIMIT {_BATCH_LIMIT}
-"""
 
-_STAMP_ISSUE_SQL = """
-UPDATE public.task_tracking
-SET issue_id = :issue_id
-WHERE dbos_workflow_id = :wf_id AND issue_id IS NULL
-"""
+def _mirrored_open_stmt():
+    """Mirrored batches that reached a terminal phase but whose issue hasn't
+    been synced to a terminal status yet."""
+    return (
+        select(
+            TaskTracking.dbos_workflow_id,
+            TaskTracking.phase,
+            TaskTracking.issue_id,
+            Issues.status.label("issue_status"),
+        )
+        .select_from(TaskTracking)
+        .join(Issues, Issues.id == TaskTracking.issue_id)
+        .where(
+            TaskTracking.task_type == "publish",
+            TaskTracking.issue_id.isnot(None),
+            TaskTracking.phase.in_(["completed", "failed", "lost", "cancelled"]),
+            Issues.status.notin_(["done", "cancelled", "blocked"]),
+        )
+        .limit(_BATCH_LIMIT)
+    )
 
 
 async def _mirror_new_batches() -> dict[str, int]:
@@ -117,7 +137,8 @@ async def _mirror_new_batches() -> dict[str, int]:
 
     issues = get_issue_repository()
     counts = {"created": 0, "skipped": 0}
-    rows = await db_engine.fetch_all(_UNMIRRORED_SQL)
+    async with read_scope() as session:
+        rows = (await session.execute(_unmirrored_stmt())).mappings().all()
     for row in rows:
         try:
             status = issue_status_for_phase(row.get("phase"))
@@ -143,10 +164,15 @@ async def _mirror_new_batches() -> dict[str, int]:
                 created = await issues.atomic_create(payload)
                 issue_id = int(created["id"])
                 counts["created"] += 1
-            await db_engine.execute(
-                _STAMP_ISSUE_SQL,
-                {"issue_id": issue_id, "wf_id": row["dbos_workflow_id"]},
-            )
+            async with write_scope() as session:
+                await session.execute(
+                    update(TaskTracking)
+                    .where(
+                        TaskTracking.dbos_workflow_id == row["dbos_workflow_id"],
+                        TaskTracking.issue_id.is_(None),
+                    )
+                    .values(issue_id=issue_id)
+                )
         except Exception as exc:  # noqa: BLE001 — batch continues
             counts["skipped"] += 1
             logger.warning(
@@ -160,7 +186,8 @@ async def _sync_terminal_batches() -> dict[str, int]:
 
     issues = get_issue_repository()
     counts = {"synced": 0, "skipped": 0}
-    rows = await db_engine.fetch_all(_MIRRORED_OPEN_SQL)
+    async with read_scope() as session:
+        rows = (await session.execute(_mirrored_open_stmt())).mappings().all()
     for row in rows:
         try:
             target = terminal_sync_action(row.get("phase"), row.get("issue_status"))
