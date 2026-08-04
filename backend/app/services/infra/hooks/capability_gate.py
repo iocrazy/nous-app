@@ -21,6 +21,16 @@ Contract (same as every hook): never raises — a malformed profile fails
 open with a warning, because a config typo must not brick the agent.
 Abort reasons are user-facing (they surface in the chat as the abort
 message), so they name the blocked thing explicitly.
+
+A1 (screenwriting agent layer) added a SECOND, deliberately opposite gate
+alongside this one for high-risk capabilities (write-grading / delete /
+media generation / cross-episode read / external publish) — see
+``high_risk_capability_gate.py``. That gate is fail-CLOSED + whitelist,
+the inverse of this file's fail-OPEN + blacklist posture. Do not unify
+them: this file's fail-open is deliberate (see contract above), the other
+file's fail-closed is equally deliberate (a destructive action must not
+slip through on a config typo). Which gate a capability belongs to is a
+judgment call on the capability's blast radius, not a stylistic choice.
 """
 
 from __future__ import annotations

@@ -246,6 +246,26 @@ async def build_agent_runner_stack(
             fail_closed=True,
         )
 
+    # A1 (screenwriting agent layer): fail-closed gate for HIGH-RISK
+    # capabilities (write-grading / delete / media generation / cross-episode
+    # read / external publish). Coexists with CapabilityGateHook above — see
+    # high_risk_capability_gate.py's module docstring for why the two gates
+    # have opposite fail postures and must NOT be unified. Registered
+    # unconditionally (unlike CapabilityGateHook) because the fail-closed
+    # default — deny anything not explicitly granted — must apply even to
+    # agents with no capability_profile at all, not just agents that happen
+    # to carry one.
+    from app.services.infra.hooks.high_risk_capability_gate import (
+        HighRiskCapabilityGateHook,
+    )
+
+    registry.register_pre(
+        HighRiskCapabilityGateHook(agent),
+        name="high_risk_capability_gate",
+        priority=26,
+        fail_closed=True,
+    )
+
     registry.register_post(
         CostAuditorHook(),
         name="cost_auditor",
