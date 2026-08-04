@@ -37,11 +37,8 @@
 .dist-v4 { color: var(--content); }
 .dist-v4 * { box-sizing: border-box; }
 
-/* ═══ page head ═══ */
-.dist-v4 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 20px; }
-.dist-v4 .page-head h2 { display: flex; align-items: baseline; gap: 8px; font-size: 18px; font-weight: 600; color: var(--ink-100); margin: 0; letter-spacing: -.015em; }
-.dist-v4 .page-head h2 .count { font-size: 12px; font-weight: 400; color: var(--ink-500); font-variant-numeric: tabular-nums; }
-.dist-v4 .page-head p { margin: 3px 0 0; font-size: 13px; color: var(--content-3); }
+/* Page heads live in components/layout/PageHeader.tsx now — this module used
+   to hand-roll the same 18px/600/ink-100 spec in CSS here. */
 
 /* ═══ buttons ═══ */
 .dist-v4 .btn { display: inline-flex; align-items: center; gap: 7px; font: inherit; font-size: 13px; font-weight: 550; padding: 7px 14px; border-radius: 9px; cursor: pointer; border: 1px solid transparent; transition: background .12s, border-color .12s, color .12s; white-space: nowrap; }
