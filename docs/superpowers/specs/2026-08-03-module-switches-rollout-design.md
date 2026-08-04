@@ -90,14 +90,28 @@ DBOS retry tick:       读同一状态 → enabled=off 时本轮 skip（log 一�
 
 ## 3. 错误处理
 
-- **503 响应体**：`{"detail": {"code": "MODULE_DISABLED", "module": "<id>"}}` —
-  类型化契约，前端 API 层识别 code 后展示模块停用提示，而非通用报错 toast
-  （符合"触发路径必须类型化失败回显"纪律）
+- **503 响应体**：gate 抛 `HTTPException(503, detail={"code": "MODULE_DISABLED",
+  "module": "<id>"})`，经全局处理器包装后**上线形状**为
+  `{"success": false, "error": "Request failed", "code": "http_503",
+  "details": {"code": "MODULE_DISABLED", "module": "<id>"}}` —— 前端判定读
+  `body.details.code`，模块名读 `body.details.module`（顶层 `code` 是 envelope 的
+  `http_503`，不是模块码）。`_handle_http_exception` 对 ≥500 一律通用化以防泄漏，
+  该 body 全为我方构造、无异常字符串，故单独放行。类型化契约，前端 API 层识别
+  后展示模块停用提示而非通用报错 toast（符合"触发路径必须类型化失败回显"纪律）
 - **fail-open**：`system_settings` 读失败/行缺失 → 6 个新模块按默认值视为开启
   （registry 现有行为，`_read_raw` never raises）
 - **交叉影响（预期行为，不做联动）**：`ai-library` 关闭时 Todolist 页的
   "派发给 Agent" 按钮会收到 503 并展示停用提示；`projects` 关闭不联动关闭
   `ideation`（两者独立 gate，均在项目区内）
+- **`projects` 开关的爆炸半径（已知，暂不隔离）**：`projects_router` 除项目
+  CRUD 外还托管剧本实体数据面 —— `/{project_id}/entities`、`/characters*`、
+  `/lib/{entity_type}*`、`/workflow*` 全在同一个 router 下，因此挂的是 router 级
+  gate，关闭 `projects` 会一并拦掉这些子路径。可观察到的连带影响有两处：
+  Scripts 编辑器的 @-mention 人物候选会静默变空（`EditorShell` 处 catch 仅
+  `console.error`，不弹提示）；TodolistPage 的项目列表拉空。**Scripts 自身
+  （`script_*` router）不受该开关影响**，正文编辑、AI 续写等仍可用。
+  若将来要把剧本数据面与项目开关解绑，需把上述三组子路径从 `projects_router`
+  摘出到独立 router 再单独定 gate —— 记为后续决策，不在本 PR 范围。
 - **正在跑的任务不中断**：gate 只拦新请求/新 tick，已入队的 DBOS workflow 不受影响
 
 ## 4. 测试
