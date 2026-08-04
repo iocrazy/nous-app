@@ -32,9 +32,12 @@ export const AI_LIBRARY_NAV: AILibraryNavSection[] = [
     key: 'library',
     items: [
       {
+        // Labelled for its destination, not for the module: the rail now
+        // carries "AI Library" as its own title, and two stacked rows both
+        // reading "AI Library" made the nav row look like a heading.
         key: 'library',
-        labelKey: 'sidebar.aiLibrary',
-        labelDefault: 'AI Library',
+        labelKey: 'aiLibrary.tab.agents',
+        labelDefault: 'Agents',
         path: '/ai-library',
         // Exact match only — the gallery is the index route, so any deeper
         // path belongs to an agent/skill detail view, not to this entry.

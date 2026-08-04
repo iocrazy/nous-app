@@ -347,32 +347,33 @@ export const AgentGalleryPage: React.FC = () => {
             {t('aiLibrary.newAgent', 'New Agent')}
           </button>
         }
+        /* Marketplace is a placeholder slot, deliberately inert. */
+        tabs={
+          <>
+            <span className="border-b-2 border-[var(--accent-text)] px-3 pb-2 font-medium text-ink-100">
+              {t('aiLibrary.tab.agents', 'Agents')}{' '}
+              <span className="text-ink-600">{agents.length}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => navigate(`${urlPrefix}/ai-library/skills`)}
+              className="px-3 pb-2 text-ink-500 hover:text-ink-300"
+            >
+              {t('aiLibrary.tab.skills', 'Skills')}{' '}
+              {skillCount != null && <span className="text-ink-600">{skillCount}</span>}
+            </button>
+            <span
+              className="cursor-not-allowed px-3 pb-2 text-ink-700"
+              title={t('aiLibrary.tab.marketPlanned', 'Planned')}
+            >
+              {t('aiLibrary.tab.market', 'Marketplace')}{' '}
+              <span className="text-[10px]">
+                ({t('aiLibrary.tab.marketPlanned', 'Planned')})
+              </span>
+            </span>
+          </>
+        }
       />
-
-      {/* Page tabs — Marketplace is a placeholder slot, deliberately inert. */}
-      <div className="flex items-center gap-1 border-b border-ink-800/60 text-[13px]">
-        <span className="border-b-2 border-[var(--accent-text)] px-3 pb-2 font-medium text-ink-100">
-          {t('aiLibrary.tab.agents', 'Agents')}{' '}
-          <span className="text-ink-600">{agents.length}</span>
-        </span>
-        <button
-          type="button"
-          onClick={() => navigate(`${urlPrefix}/ai-library/skills`)}
-          className="px-3 pb-2 text-ink-500 hover:text-ink-300"
-        >
-          {t('aiLibrary.tab.skills', 'Skills')}{' '}
-          {skillCount != null && <span className="text-ink-600">{skillCount}</span>}
-        </button>
-        <span
-          className="cursor-not-allowed px-3 pb-2 text-ink-700"
-          title={t('aiLibrary.tab.marketPlanned', 'Planned')}
-        >
-          {t('aiLibrary.tab.market', 'Marketplace')}{' '}
-          <span className="text-[10px]">
-            ({t('aiLibrary.tab.marketPlanned', 'Planned')})
-          </span>
-        </span>
-      </div>
 
       {/* Filters */}
       <div className="mt-3 flex flex-wrap items-center gap-2">
