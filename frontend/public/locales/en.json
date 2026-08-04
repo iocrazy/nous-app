@@ -2791,7 +2791,8 @@
         "thisWeek": "This week",
         "statRuns": "runs",
         "statTokens": "tok",
-        "statCost": "spend"
+        "statCost": "spend",
+        "untitledConversation": "Untitled conversation"
       }
     },
     "skills": {

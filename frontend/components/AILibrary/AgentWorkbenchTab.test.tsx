@@ -168,6 +168,50 @@ describe('AgentWorkbenchTab — 最近对话左栏', () => {
     listAgentRunGroups.mockResolvedValue({ items: [] });
   });
 
+  it('never renders a raw JSON summary as the row title', async () => {
+    // A storyboard run ends with a JSON payload; the row used to print it.
+    listAgentRunGroups.mockResolvedValue({
+      items: [group({ latest_output_summary: '{"shots": [{"title": "wide"}]}' })],
+    });
+    renderTab();
+
+    await waitFor(() => expect(screen.getByTestId('conversation-row')).toBeTruthy());
+    const row = screen.getByTestId('conversation-row');
+    expect(row.textContent).not.toContain('{');
+    expect(row.textContent).toContain('Untitled conversation');
+  });
+
+  it('never falls back to the trigger — it names the agent, not the chat', async () => {
+    listAgentRunGroups.mockResolvedValue({
+      items: [group({ latest_output_summary: null, trigger: 'script_ai' })],
+    });
+    renderTab();
+
+    await waitFor(() => expect(screen.getByTestId('conversation-row')).toBeTruthy());
+    expect(screen.getByTestId('conversation-row').textContent).not.toContain('script_ai');
+  });
+
+  it('keeps both columns shrinkable so a long title cannot push one off-screen', async () => {
+    // The regression: grid/flex items default to min-width:auto, so one long
+    // unbreakable string grew the left column past its track and the right
+    // column (waiting / routines / this week) vanished behind a horizontal
+    // scrollbar. `truncate` alone does not fix that — the box has to be
+    // allowed to be narrower than its content.
+    listAgentRunGroups.mockResolvedValue({
+      items: [group({ latest_output_summary: 'A'.repeat(400) })],
+    });
+    const { container } = renderTab();
+
+    await waitFor(() => expect(screen.getByTestId('week-stats')).toBeTruthy());
+
+    const grid = container.querySelector('.grid')!;
+    for (const child of Array.from(grid.children)) {
+      expect(child.className).toContain('min-w-0');
+    }
+    // The right column must still be rendered, not merely present-but-pushed.
+    expect(screen.getByTestId('week-stats')).toBeTruthy();
+  });
+
   it('lists a conversation by its summary, not its run id', async () => {
     listAgentRunGroups.mockResolvedValue({ items: [group()] });
     renderTab();
@@ -176,14 +220,18 @@ describe('AgentWorkbenchTab — 最近对话左栏', () => {
     expect(screen.getByText('Second act outline, draft three')).toBeTruthy();
   });
 
-  it('falls back to the trigger when a run produced no summary', async () => {
+  it('falls back to a neutral label when a run produced no summary', async () => {
+    // This used to fall back to `trigger`, which printed a bare `routine` /
+    // `script_ai` — a word that describes how the run started, not what the
+    // conversation was about.
     listAgentRunGroups.mockResolvedValue({
       items: [group({ latest_output_summary: null, trigger: 'routine' })],
     });
     renderTab();
 
     await waitFor(() => expect(screen.getByTestId('conversation-row')).toBeTruthy());
-    expect(screen.getByText('routine')).toBeTruthy();
+    expect(screen.queryByText('routine')).toBeNull();
+    expect(screen.getByTestId('conversation-row').textContent).toContain('Untitled conversation');
   });
 
   it('shows an empty state rather than an endless spinner', async () => {
