@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2, RefreshCw,
-  XCircle, Ban, HeartCrack, ArrowLeft, X,
+  AlertTriangle, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Loader2,
+  RefreshCw, XCircle, Ban, HeartCrack, ArrowLeft, X,
 } from 'lucide-react';
 import type {
   AgentRunDetail, AgentRunGroupItem, AgentRunGroupListResponse,
@@ -265,7 +265,11 @@ const ConversationGroupCard: React.FC<{
           {formatTokens(group.prompt_tokens + group.completion_tokens)} tok
           {group.cost_cents != null && <> · {formatCost(group.cost_cents)}</>}
           {group.error_count > 0 && (
-            <span className="text-red-400"> · {group.error_count}⚠</span>
+            <span className="inline-flex items-center gap-0.5 text-red-400">
+              {' · '}
+              {group.error_count}
+              <AlertTriangle size={10} />
+            </span>
           )}
         </div>
       </button>

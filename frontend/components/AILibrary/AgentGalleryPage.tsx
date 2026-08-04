@@ -9,7 +9,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Plus, Search } from 'lucide-react';
+import { AlertTriangle, Palette, PenLine, Plus, Search, Wrench } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type { AILibraryAgent } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import type { AgentStatsItem } from '../../services/aiLibraryService';
@@ -28,11 +29,28 @@ import {
   type AgentGroup,
 } from './agentStatus';
 
-const GROUP_META: Record<AgentGroup, { emoji: string; labelKey: string; label: string }> = {
-  writing: { emoji: '✍️', labelKey: 'aiLibrary.group.writing', label: 'Writing' },
-  art: { emoji: '🎨', labelKey: 'aiLibrary.group.art', label: 'Art' },
-  tools: { emoji: '🔧', labelKey: 'aiLibrary.group.tools', label: 'Tools' },
+// Lucide icons, not emoji: emoji render as a different typeface at a size we
+// do not control, and they are banned from this UI.
+const GROUP_META: Record<
+  AgentGroup,
+  { Icon: LucideIcon; labelKey: string; label: string }
+> = {
+  writing: { Icon: PenLine, labelKey: 'aiLibrary.group.writing', label: 'Writing' },
+  art: { Icon: Palette, labelKey: 'aiLibrary.group.art', label: 'Art' },
+  tools: { Icon: Wrench, labelKey: 'aiLibrary.group.tools', label: 'Tools' },
 };
+
+/** Group label with its icon — used by both the filter chips and the headings. */
+function GroupLabel({ group, size = 12 }: { group: AgentGroup; size?: number }) {
+  const { t } = useTranslation();
+  const { Icon, labelKey, label } = GROUP_META[group];
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <Icon size={size} />
+      {t(labelKey, label)}
+    </span>
+  );
+}
 
 /** Avatar tint per group — semantic tokens, never raw hues (K1 palette). */
 const GROUP_AVATAR: Record<AgentGroup, string> = {
@@ -380,9 +398,7 @@ export const AgentGalleryPage: React.FC = () => {
                 : 'border-ink-800 text-ink-500 hover:text-ink-300'
             }`}
           >
-            {g === 'all'
-              ? t('aiLibrary.filterAll', 'All')
-              : `${GROUP_META[g].emoji} ${t(GROUP_META[g].labelKey, GROUP_META[g].label)}`}
+            {g === 'all' ? t('aiLibrary.filterAll', 'All') : <GroupLabel group={g} />}
           </button>
         ))}
         <button
@@ -453,9 +469,7 @@ export const AgentGalleryPage: React.FC = () => {
           return (
             <section key={g} data-testid={`group-section-${g}`}>
               <h2 className="flex items-baseline gap-2 text-[12px] font-medium text-ink-400">
-                <span>
-                  {GROUP_META[g].emoji} {t(GROUP_META[g].labelKey, GROUP_META[g].label)}
-                </span>
+                <GroupLabel group={g} />
                 <span className="text-[11px] text-ink-600">{rows.length}</span>
               </h2>
               <div className="mt-2 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
