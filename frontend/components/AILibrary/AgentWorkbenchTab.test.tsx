@@ -29,7 +29,13 @@ vi.mock('../../services/aiLibraryService', () => ({
 }));
 
 // The children own their own fetching; these tests are about this component.
-vi.mock('./AgentRunsSplit', () => ({ AgentRunsSplit: () => <div data-testid="runs-split" /> }));
+const runsSplitProps = vi.fn();
+vi.mock('./AgentRunsSplit', () => ({
+  AgentRunsSplit: (p: Record<string, unknown>) => {
+    runsSplitProps(p);
+    return <div data-testid="runs-split" />;
+  },
+}));
 vi.mock('./AgentRoutinesTab', () => ({ AgentRoutinesTab: () => <div /> }));
 vi.mock('./NewRoutineModal', () => ({ NewRoutineModal: () => <div /> }));
 
@@ -195,6 +201,34 @@ describe('AgentWorkbenchTab — 最近对话左栏', () => {
     await waitFor(() => expect(spy).toHaveBeenCalled());
     expect(screen.getByText('No conversations yet')).toBeTruthy();
     spy.mockRestore();
+  });
+
+  it('opens the clicked conversation, not just the runs list', async () => {
+    // The row used to dump the user on the runs view's default selection —
+    // the NEWEST conversation — so clicking the third row showed the first.
+    listAgentRunGroups.mockResolvedValue({ items: [group({ group_key: 'g9' })] });
+    runsSplitProps.mockClear();
+    renderTab();
+
+    await waitFor(() => expect(screen.getByTestId('conversation-row')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('conversation-row'));
+
+    const props = runsSplitProps.mock.calls.at(-1)![0] as {
+      initialGroup?: { group_key: string };
+    };
+    expect(props.initialGroup?.group_key).toBe('g9');
+  });
+
+  it('leaves the runs view on its own default when opened from the header link', async () => {
+    listAgentRunGroups.mockResolvedValue({ items: [group()] });
+    runsSplitProps.mockClear();
+    renderTab();
+
+    await waitFor(() => expect(screen.getByTestId('all-runs-link')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('all-runs-link'));
+
+    const props = runsSplitProps.mock.calls.at(-1)![0] as { initialGroup?: unknown };
+    expect(props.initialGroup).toBeNull();
   });
 
   it('swaps in the runs view from the header link, and back', async () => {

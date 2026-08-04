@@ -54,7 +54,9 @@ export const AgentWorkbenchTab: React.FC<AgentWorkbenchTabProps> = ({
   urlPrefix,
 }) => {
   const { t } = useTranslation();
-  const [showRuns, setShowRuns] = useState(false);
+  // null = the runs view is closed. A group means the user clicked that
+  // conversation; `true` means they used the "all runs" header link.
+  const [showRuns, setShowRuns] = useState<AgentRunGroupItem | true | null>(null);
   const [waiting, setWaiting] = useState<NeedsInputItem[]>([]);
   const [groups, setGroups] = useState<AgentRunGroupItem[] | null>(null);
   const [stats, setStats] = useState<AgentStatsItem | null>(null);
@@ -127,12 +129,12 @@ export const AgentWorkbenchTab: React.FC<AgentWorkbenchTabProps> = ({
       <div>
         <button
           type="button"
-          onClick={() => setShowRuns(false)}
+          onClick={() => setShowRuns(null)}
           className="mb-3 text-xs text-ink-500 hover:text-ink-300"
         >
           ← {t('aiLibrary.agents.backToOverview', 'Back to overview')}
         </button>
-        <AgentRunsSplit slug={slug} />
+        <AgentRunsSplit slug={slug} initialGroup={showRuns === true ? null : showRuns} />
       </div>
     );
   }
@@ -162,7 +164,7 @@ export const AgentWorkbenchTab: React.FC<AgentWorkbenchTabProps> = ({
           <button
             key={g.group_key}
             type="button"
-            onClick={() => setShowRuns(true)}
+            onClick={() => setShowRuns(g)}
             data-testid="conversation-row"
             className="flex w-full items-center gap-2.5 border-t border-ink-800/60 px-4 py-2.5 text-left text-[12.5px] transition-colors hover:bg-ink-900/50"
           >
