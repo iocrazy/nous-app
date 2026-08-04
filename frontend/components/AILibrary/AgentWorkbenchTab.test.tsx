@@ -9,7 +9,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { AILibraryAgent } from '../../types';
 import type { NeedsInputItem } from '../../services/issuesService';
@@ -19,13 +19,23 @@ vi.mock('../../services/issuesService', () => ({
   listNeedsInput: (...a: unknown[]) => listNeedsInput(...a),
 }));
 
+const getAgentStats = vi.fn(async () => ({}) as Record<string, unknown>);
+const listAgentRunGroups = vi.fn(async () => ({ items: [] }) as { items: unknown[] });
 vi.mock('../../services/aiLibraryService', () => ({
-  aiLibraryService: { getAgentStats: vi.fn(async () => ({})) },
+  aiLibraryService: {
+    getAgentStats: (...a: unknown[]) => getAgentStats(...(a as [])),
+    listAgentRunGroups: (...a: unknown[]) => listAgentRunGroups(...(a as [])),
+  },
 }));
 
-// The three children own their own fetching; this test is about the card.
-vi.mock('./AgentDashboardTab', () => ({ AgentDashboardTab: () => <div /> }));
-vi.mock('./AgentRunsSplit', () => ({ AgentRunsSplit: () => <div /> }));
+// The children own their own fetching; these tests are about this component.
+const runsSplitProps = vi.fn();
+vi.mock('./AgentRunsSplit', () => ({
+  AgentRunsSplit: (p: Record<string, unknown>) => {
+    runsSplitProps(p);
+    return <div data-testid="runs-split" />;
+  },
+}));
 vi.mock('./AgentRoutinesTab', () => ({ AgentRoutinesTab: () => <div /> }));
 vi.mock('./NewRoutineModal', () => ({ NewRoutineModal: () => <div /> }));
 
@@ -68,6 +78,10 @@ function renderTab() {
 describe('AgentWorkbenchTab — 等你回复卡', () => {
   beforeEach(() => {
     listNeedsInput.mockReset();
+    listNeedsInput.mockResolvedValue({ items: [] });
+    getAgentStats.mockClear();
+    listAgentRunGroups.mockClear();
+    listAgentRunGroups.mockResolvedValue({ items: [] });
   });
 
   it("shows the agent's own question verbatim, with a deep link to answer it", async () => {
@@ -123,5 +137,143 @@ describe('AgentWorkbenchTab — 等你回复卡', () => {
 
     await waitFor(() => expect(listNeedsInput).toHaveBeenCalled());
     expect(screen.queryByTestId('waitcard-answer-link')).toBeNull();
+  });
+});
+
+describe('AgentWorkbenchTab — 最近对话左栏', () => {
+  const group = (over: Record<string, unknown> = {}) => ({
+    group_key: 'g1',
+    conversation_id: '901',
+    run_count: 12,
+    prompt_tokens: 1000,
+    completion_tokens: 500,
+    cost_cents: 40,
+    first_started_at: '2026-08-01T09:00:00Z',
+    last_started_at: '2026-08-01T10:00:00Z',
+    any_running: false,
+    error_count: 0,
+    latest_run_id: 'r1',
+    latest_status: 'succeeded',
+    trigger: 'chat',
+    latest_output_summary: 'Second act outline, draft three',
+    ...over,
+  });
+
+  beforeEach(() => {
+    listNeedsInput.mockReset();
+    listNeedsInput.mockResolvedValue({ items: [] });
+    getAgentStats.mockClear();
+    getAgentStats.mockResolvedValue({});
+    listAgentRunGroups.mockClear();
+    listAgentRunGroups.mockResolvedValue({ items: [] });
+  });
+
+  it('lists a conversation by its summary, not its run id', async () => {
+    listAgentRunGroups.mockResolvedValue({ items: [group()] });
+    renderTab();
+
+    await waitFor(() => expect(screen.getByTestId('conversation-row')).toBeTruthy());
+    expect(screen.getByText('Second act outline, draft three')).toBeTruthy();
+  });
+
+  it('falls back to the trigger when a run produced no summary', async () => {
+    listAgentRunGroups.mockResolvedValue({
+      items: [group({ latest_output_summary: null, trigger: 'routine' })],
+    });
+    renderTab();
+
+    await waitFor(() => expect(screen.getByTestId('conversation-row')).toBeTruthy());
+    expect(screen.getByText('routine')).toBeTruthy();
+  });
+
+  it('shows an empty state rather than an endless spinner', async () => {
+    renderTab();
+    await waitFor(() => expect(listAgentRunGroups).toHaveBeenCalled());
+    expect(screen.queryByTestId('conversation-row')).toBeNull();
+    expect(screen.getByText('No conversations yet')).toBeTruthy();
+  });
+
+  it('degrades to the empty state when the feed fails', async () => {
+    listAgentRunGroups.mockRejectedValue(new Error('boom'));
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderTab();
+
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(screen.getByText('No conversations yet')).toBeTruthy();
+    spy.mockRestore();
+  });
+
+  it('opens the clicked conversation, not just the runs list', async () => {
+    // The row used to dump the user on the runs view's default selection —
+    // the NEWEST conversation — so clicking the third row showed the first.
+    listAgentRunGroups.mockResolvedValue({ items: [group({ group_key: 'g9' })] });
+    runsSplitProps.mockClear();
+    renderTab();
+
+    await waitFor(() => expect(screen.getByTestId('conversation-row')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('conversation-row'));
+
+    const props = runsSplitProps.mock.calls.at(-1)![0] as {
+      initialGroup?: { group_key: string };
+    };
+    expect(props.initialGroup?.group_key).toBe('g9');
+  });
+
+  it('leaves the runs view on its own default when opened from the header link', async () => {
+    listAgentRunGroups.mockResolvedValue({ items: [group()] });
+    runsSplitProps.mockClear();
+    renderTab();
+
+    await waitFor(() => expect(screen.getByTestId('all-runs-link')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('all-runs-link'));
+
+    const props = runsSplitProps.mock.calls.at(-1)![0] as { initialGroup?: unknown };
+    expect(props.initialGroup).toBeNull();
+  });
+
+  it('swaps in the runs view from the header link, and back', async () => {
+    renderTab();
+    await waitFor(() => expect(screen.getByTestId('all-runs-link')).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId('all-runs-link'));
+    expect(screen.getByTestId('runs-split')).toBeTruthy();
+    // The workbench columns are gone while the runs view is up.
+    expect(screen.queryByTestId('week-stats')).toBeNull();
+
+    fireEvent.click(screen.getByText(/Back to overview/));
+    await waitFor(() => expect(screen.getByTestId('week-stats')).toBeTruthy());
+  });
+
+  it('renders the week stats from the 7-day rollup', async () => {
+    getAgentStats.mockResolvedValue({
+      [AGENT_ID]: {
+        runs_7d: 12,
+        tokens_7d: 38000,
+        cost_cents_7d: 163,
+        running_count: 0,
+        needs_input_count: 0,
+        fault: null,
+      },
+    });
+    renderTab();
+
+    await waitFor(() => expect(screen.getByTestId('week-stats')).toBeTruthy());
+    expect(screen.getByText('12')).toBeTruthy();
+    expect(screen.getByText('38k')).toBeTruthy();
+    // Spend comes from the SAME 7-day rollup as runs and tokens. It used to
+    // be absent from the endpoint, so the only figure available was the
+    // dashboard's 14-day total — a different window under a "this week"
+    // label. Asserting it here pins the window, not just the formatting.
+    expect(screen.getByText('$1.63')).toBeTruthy();
+  });
+
+  it('shows zeroes rather than blanks when this agent has no rollup row', async () => {
+    getAgentStats.mockResolvedValue({ 'another-agent': { runs_7d: 5 } });
+    renderTab();
+
+    await waitFor(() => expect(screen.getByTestId('week-stats')).toBeTruthy());
+    // Both chips read zero, so scope the assertion to the panel rather than
+    // asking the document for a bare "0".
+    expect(screen.getByTestId('week-stats').textContent).toContain('runs 0');
   });
 });

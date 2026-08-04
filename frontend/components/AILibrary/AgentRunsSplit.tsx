@@ -549,7 +549,23 @@ const RunDetailPane: React.FC<{
 
 // ─── Split-pane container ──────────────────────────────────────────────────
 
-export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
+/**
+ * A multi-turn conversation opens as a thread; a single run as run detail.
+ * Shared by the first-load auto-select and by ``initialGroup`` so a row
+ * clicked elsewhere lands on exactly what clicking it here would.
+ */
+function selectionFor(group: AgentRunGroupItem): RunsSelection {
+  return group.run_count > 1 && group.conversation_id
+    ? { kind: 'conversation', conversationId: group.conversation_id }
+    : { kind: 'run', runId: group.latest_run_id };
+}
+
+export const AgentRunsSplit: React.FC<{
+  slug: string;
+  /** Preselect this group instead of the newest one (deep link from the
+   *  workbench's recent-conversations list). */
+  initialGroup?: AgentRunGroupItem | null;
+}> = ({ slug, initialGroup = null }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
   const [page, setPage] = useState<AgentRunGroupListResponse | null>(null);
@@ -557,7 +573,9 @@ export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selection, setSelection] = useState<RunsSelection | null>(null);
+  const [selection, setSelection] = useState<RunsSelection | null>(
+    initialGroup ? selectionFor(initialGroup) : null,
+  );
   // Mobile: list ↔ detail toggle (md+ shows both panes).
   const [mobileShowDetail, setMobileShowDetail] = useState(false);
   const offsetRef = useRef(offset);
@@ -572,15 +590,13 @@ export const AgentRunsSplit: React.FC<{ slug: string }> = ({ slug }) => {
         setPage(resp);
         setError(null);
         // Auto-select the newest item on first load (desktop behaviour —
-        // mobile stays on the list until the user taps a row). Multi-turn
-        // conversations open as a thread; single runs as run detail.
+        // mobile stays on the list until the user taps a row). A caller-
+        // supplied initialGroup already seeded `selection`, so this leaves
+        // it alone.
         setSelection((prev) => {
           if (prev) return prev;
           const first = resp.items[0];
-          if (!first) return null;
-          return first.run_count > 1 && first.conversation_id
-            ? { kind: 'conversation', conversationId: first.conversation_id }
-            : { kind: 'run', runId: first.latest_run_id };
+          return first ? selectionFor(first) : null;
         });
       } catch (err) {
         console.error('[AgentRunsSplit] listAgentRunGroups failed:', err);

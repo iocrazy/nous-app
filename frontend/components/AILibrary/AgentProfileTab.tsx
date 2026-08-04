@@ -1,15 +1,19 @@
 // frontend/components/AILibrary/AgentProfileTab.tsx
 // B2 — "this agent's paperwork" (spec 2026-08-02 §B2).
 //
-// The cold half of the detail page: spend limits, run limits, and the version
-// history you reach for when a prompt edit went wrong. Absorbs the old
-// Versions sub-tab and the budget block that used to sit at the bottom of
-// Overview, where it competed with the prompt editors for attention.
+// The cold half of the detail page: spend limits, run limits, actual spend,
+// and the version history you reach for when a prompt edit went wrong.
+// Absorbs the old Versions sub-tab, the budget block that used to sit at the
+// bottom of Overview, and — since this rebuild — the whole old dashboard
+// (14-day charts, cost breakdown, runs table, "used by"). Those answer "how
+// has it been trending", which is audit material, not the landing question
+// "what is it doing right now" that the Workbench now owns.
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AILibraryAgent } from '../../types';
 import { VersionHistoryPanel } from './VersionHistoryPanel';
+import { AgentDashboardTab } from './AgentDashboardTab';
 
 interface AgentProfileTabProps {
   agent: AILibraryAgent;
@@ -62,6 +66,11 @@ export const AgentProfileTab: React.FC<AgentProfileTabProps> = ({
         </h3>
         <VersionHistoryPanel kind="agent" slug={slug} onRollback={onRollback} />
       </section>
+
+      {/* Actual spend + activity history. `onOpenRuns` is a no-op here: the
+          runs surface lives on the Workbench, and a link that jumps tabs
+          under you reads as a bug. */}
+      <AgentDashboardTab slug={slug} onOpenRuns={undefined} />
     </div>
   );
 };

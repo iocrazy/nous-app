@@ -3,10 +3,11 @@
 //
 //   nothing selected → SkillGallery, full width. Cards carry the reverse
 //                      index (who uses this) and flag orphans.
-//   a skill selected → the split-pane editor, rail + SkillEditor.
+//   a skill selected → the editor, standalone and full width (spec §06).
 //
 // The rail used to be the only way in, which meant the answer to "is any of
-// this unused" required opening skills one at a time.
+// this unused" required opening skills one at a time. It is gone entirely
+// now: the gallery owns list navigation and the tab strip is the way back.
 //
 // Selection is URL-driven via props (slug / filePath) so deep links like
 // /ai-library/skills/:slug/files/references/example.md work on cold load
@@ -17,7 +18,6 @@ import { useTranslation } from 'react-i18next';
 import type { AILibrarySkill } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { SkillEditor } from './SkillEditor';
-import { SkillList } from './SkillList';
 import { SkillGallery } from './SkillGallery';
 import { AILibraryTabs } from './AILibraryTabs';
 import { NewSkillModal } from './NewSkillModal';
@@ -94,32 +94,6 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
     if (onFilePathChange) onFilePathChange(slug, path);
   };
 
-  const handleDeleteFile = async (slug: string, path: string) => {
-    const ok = window.confirm(
-      t(
-        'aiLibrary.skills.deleteFileConfirm',
-        `Delete ${path}? This cannot be undone.`,
-        { path },
-      ),
-    );
-    if (!ok) return;
-    try {
-      await aiLibraryService.deleteSkillFile(slug, path);
-      await loadSkills();
-      // If the user was viewing the file they just deleted, drop back to SKILL.md.
-      if (slug === selectedSlug && path === selectedFilePath) {
-        onSlugChange?.(slug);
-      }
-    } catch (err) {
-      console.error('[SkillsTab] delete file failed:', err);
-      window.alert(
-        t('aiLibrary.skills.deleteFileError', 'Failed to delete: {{err}}', {
-          err: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    }
-  };
-
   const newFileSkill =
     newFileSkillSlug != null
       ? skills.find((s) => (s.slug ?? String(s.id)) === newFileSkillSlug) ?? null
@@ -182,24 +156,17 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
     );
   }
 
+  // Editing is a standalone page (spec §06): no skill-list column beside the
+  // editor. The gallery owns list navigation — a rail that duplicated it left
+  // the editor squeezed into a third of the width and gave "+ New Skill" two
+  // homes. The tab strip above is how you get back out.
   return (
-    <div className="flex h-full min-h-0 w-full">
-      <SkillList
-        skills={skills}
-        activeSkillSlug={selectedSlug}
-        activeFilePath={selectedFilePath}
-        onSelectSkill={(s) => onSlugChange?.(s)}
-        onSelectFile={(s, p) => {
-          if (onFilePathChange) onFilePathChange(s, p);
-          else onSlugChange?.(s);
-        }}
-        onNewSkill={() => setShowNewSkillModal(true)}
-        onNewFile={(s) => setNewFileSkillSlug(s)}
-        onDeleteFile={handleDeleteFile}
-        hideFileTree
-      />
+    <div className="flex h-full min-h-0 w-full flex-col">
+      <div className="px-1 pt-6">
+        <AILibraryTabs active="skills" skillCount={skills.length} />
+      </div>
 
-      <div className="flex-1 min-w-0 h-full">
+      <div className="min-h-0 min-w-0 flex-1">
         <SkillEditor
           // ``key={selectedSlug}`` forces a full remount when the slug
           // changes so a pending in-flight fetch from the previous slug

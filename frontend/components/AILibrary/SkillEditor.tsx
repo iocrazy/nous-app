@@ -29,11 +29,12 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link, useParams } from 'react-router-dom';
+import type { TFunction } from 'i18next';
 import {
   Code2,
   Eye,
   GitFork,
-  History,
   Package,
   Pencil,
   Save,
@@ -99,35 +100,30 @@ function stripFrontmatter(md: string): string {
 }
 
 /** Classify the skill source — bundled seed vs user-owned scope. */
-function skillSource(skill: AILibrarySkill) {
+/** `managedLabel` used to ride along here but nothing ever rendered it. */
+function skillSource(skill: AILibrarySkill, t: TFunction) {
   const bundled =
     skill.is_public && skill.team_id == null && skill.project_id == null;
   if (bundled) {
-    return {
-      icon: Package,
-      label: 'Nous bundled',
-      managedLabel: 'Bundled Nous preset (read-only)',
-    };
+    return { icon: Package, label: t('aiLibrary.skills.builtIn', 'Built-in') };
   }
   if (skill.team_id != null) {
     return {
       icon: Users,
-      label: `Team: ${skill.team_name ?? skill.team_id}`,
-      managedLabel: 'Team skill',
+      label: t('aiLibrary.agents.scopeBadgeTeam', 'Team: {{name}}', {
+        name: skill.team_name ?? skill.team_id,
+      }),
     };
   }
   if (skill.project_id != null) {
     return {
       icon: Users,
-      label: `Project: ${skill.project_name ?? skill.project_id}`,
-      managedLabel: 'Project skill',
+      label: t('aiLibrary.agents.scopeBadgeProject', 'Project: {{name}}', {
+        name: skill.project_name ?? skill.project_id,
+      }),
     };
   }
-  return {
-    icon: UserIcon,
-    label: 'Private',
-    managedLabel: 'Personal skill',
-  };
+  return { icon: UserIcon, label: t('aiLibrary.scope.private', 'Private') };
 }
 
 export const SkillEditor: React.FC<SkillEditorProps> = ({
@@ -143,6 +139,8 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   const { t } = useTranslation();
   const { userProfile } = useAuth();
   const { addToast } = useToast();
+  const { teamId } = useParams();
+  const urlPrefix = teamId ? `/team/${teamId}` : '';
   // ``userProfile.role === 'admin'`` no longer gates the delete button —
   // backend rejects DELETE on bundled skills for everyone in Phase 1
   // (same shape as the agent preset read-only rule fixed in PR #309).
@@ -156,7 +154,6 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forkModalOpen, setForkModalOpen] = useState(false);
-  const [showVersions, setShowVersions] = useState(false);
   const [allSkills, setAllSkills] = useState<AILibrarySkill[]>([]);
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
   const [editMode, setEditMode] = useState(false);
@@ -244,7 +241,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   // backend DELETE route returns 403. UI matches so we don't lure the
   // user into a confirm dialog that ends with a raw 403.
   const canDelete = !isPreset;
-  const source = skillSource(skill);
+  const source = skillSource(skill, t);
   const SourceIcon = source.icon;
 
   const activeDraft = drafts[activeTab] ?? '';
@@ -349,21 +346,34 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
     }
   };
 
+  const fileCount = 1 + skill.files.length;
+
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden">
+    <div className="flex h-full min-w-0 flex-col overflow-y-auto">
       {/* ── Header ────────────────────────────────────────────────── */}
-      <div className="border-b border-ink-800/80 px-5 py-4">
+      <div className="px-5 pt-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0">
-            <h1 className="flex items-center gap-2 truncate text-2xl font-semibold text-ink-100">
-              <SourceIcon className="h-5 w-5 shrink-0 text-ink-500" />
-              {skill.name}
-            </h1>
-            {skill.description && (
-              <p className="mt-2 max-w-3xl text-sm text-ink-400">
-                {skill.description}
-              </p>
-            )}
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-ok-soft text-ok">
+              <SourceIcon className="h-5 w-5" />
+            </span>
+            <div className="min-w-0">
+              <h1 className="flex items-center gap-2 text-lg font-semibold text-ink-100">
+                <span className="truncate">{skill.name}</span>
+                {!editable && (
+                  <span className="shrink-0 rounded border border-info-line bg-info-soft px-1.5 py-0.5 text-[10.5px] font-normal text-info">
+                    {t('aiLibrary.skills.builtInReadOnly', 'Built-in · read only')}
+                  </span>
+                )}
+              </h1>
+              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-ink-500">
+                <span className="font-mono">{skill.slug ?? String(skill.id)}</span>
+                <span>·</span>
+                <span>
+                  {t('aiLibrary.skills.fileCount', '{{count}} files', { count: fileCount })}
+                </span>
+              </div>
+            </div>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
             {canDelete && (
@@ -379,19 +389,6 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
                   : t('aiLibrary.skills.remove', 'Remove')}
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => setShowVersions((v) => !v)}
-              className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors ${
-                showVersions
-                  ? 'bg-blue-600/20 text-blue-300'
-                  : 'text-ink-400 hover:bg-ink-800/60 hover:text-ink-100'
-              }`}
-              title={t('versionHistory.title', 'Version History')}
-            >
-              <History className="h-3.5 w-3.5" />
-              {t('versionHistory.title', 'Versions')}
-            </button>
             {editable ? (
               <button
                 type="button"
@@ -417,61 +414,22 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
           </div>
         </div>
 
-        {/* Metadata strip */}
-        <div className="mt-4 space-y-3 border-t border-ink-800/60 pt-4 text-sm">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <MetaLabel
-              label={t('aiLibrary.skills.metaSource', 'Source')}
-              icon={SourceIcon}
-              value={source.label}
-            />
-            <MetaLabel
-              label={t('aiLibrary.skills.metaKey', 'Key')}
-              mono
-              value={skill.slug ?? String(skill.id)}
-            />
-            <MetaLabel
-              label={t('aiLibrary.skills.metaMode', 'Mode')}
-              value={
-                editable
-                  ? t('aiLibrary.skills.metaModeEditable')
-                  : t('aiLibrary.skills.metaModeReadOnly')
-              }
-            />
-          </div>
-          <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
-            <span className="text-[11px] uppercase tracking-[0.18em] text-ink-500">
-              {t('aiLibrary.skills.metaUsedBy', 'Used by')}
-            </span>
-            {skill.agents && skill.agents.length > 0 ? (
-              <span className="flex flex-wrap gap-1.5">
-                {skill.agents.map((a) => (
-                  <span
-                    key={a.slug}
-                    className="inline-flex items-center gap-1 rounded border border-[var(--accent-border)] bg-[var(--accent-soft)] px-1.5 py-0.5 text-[11px] text-[var(--accent-text)]"
-                    title={a.slug}
-                  >
-                    {a.name}
-                  </span>
-                ))}
-              </span>
-            ) : (
-              <span className="text-ink-500">
-                {t('aiLibrary.skills.usedByPlaceholder', 'No agents attached')}
-              </span>
-            )}
-          </div>
-        </div>
+        {skill.description && (
+          <p className="mt-3 max-w-3xl text-sm text-ink-400">{skill.description}</p>
+        )}
 
         {!editable && (
-          <div className="mt-3 rounded border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[12px] text-warn">
+          <div className="mt-3 rounded border border-warn-line bg-warn-soft px-3 py-2 text-[12px] text-warn">
             {editableReason}
           </div>
         )}
       </div>
 
+      {/* ── Body: 1.6fr document / 1fr side panels (spec §06) ─────── */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 items-start gap-4 px-5 py-4 md:grid-cols-[1.6fr_1fr]">
+      <div className="min-w-0 rounded-lg border border-ink-800">
       {/* ── Sub-header: file tabs + toggle ────────────────────────── */}
-      <div className="border-b border-ink-800/80 px-5 py-3">
+      <div className="border-b border-ink-800/80 px-3 py-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           {/* File tabs carry navigation between a skill's files now — the
               left rail's per-skill tree did it before, which meant the
@@ -568,12 +526,8 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
       </div>
 
       {/* ── Content ───────────────────────────────────────────────── */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        {showVersions ? (
-          <div className="max-w-2xl">
-            <VersionHistoryPanel kind="skill" slug={skill.slug ?? String(skill.id)} />
-          </div>
-        ) : editMode && editable ? (
+      <div className="px-4 py-4">
+        {editMode && editable ? (
           isMarkdown ? (
             <MarkdownEditor
               value={activeDraft}
@@ -596,6 +550,53 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
           </pre>
         )}
       </div>
+      </div>
+
+      {/* ── Right column: who uses this, and how it got here ──────── */}
+      <div className="flex flex-col gap-4">
+        <section className="rounded-lg border border-ink-800">
+          <h2 className="px-4 pt-3 pb-2 text-[12px] font-semibold text-ink-400">
+            {t('aiLibrary.skills.metaUsedBy', 'Used by')}
+          </h2>
+          {skill.agents && skill.agents.length > 0 ? (
+            skill.agents.map((a) => (
+              <div
+                key={a.slug}
+                data-testid="skill-used-by-row"
+                className="flex items-center gap-2.5 border-t border-ink-800/60 px-4 py-2.5 text-[12.5px]"
+              >
+                <span className="grid h-5 w-5 shrink-0 place-items-center rounded bg-agent-soft text-[10px] font-bold text-agent">
+                  {a.name.slice(0, 1).toUpperCase()}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-ink-200">{a.name}</span>
+                <Link
+                  to={`${urlPrefix}/ai-library/agents/${a.slug}`}
+                  className="shrink-0 text-[11px] font-medium text-ok hover:underline"
+                >
+                  {t('aiLibrary.skills.viewAgent', 'View')} →
+                </Link>
+              </div>
+            ))
+          ) : (
+            <p className="px-4 pb-4 text-[12px] text-warn">
+              {t(
+                'aiLibrary.skills.orphanHint',
+                'No agent uses this — bind it to an agent or archive it',
+              )}
+            </p>
+          )}
+        </section>
+
+        <section className="rounded-lg border border-ink-800">
+          <h2 className="px-4 pt-3 pb-2 text-[12px] font-semibold text-ink-400">
+            {t('versionHistory.title', 'Versions')}
+          </h2>
+          <div className="px-4 pb-4">
+            <VersionHistoryPanel kind="skill" slug={skill.slug ?? String(skill.id)} />
+          </div>
+        </section>
+      </div>
+      </div>
 
       {forkModalOpen && (
         <NewSkillModal
@@ -608,23 +609,5 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
     </div>
   );
 };
-
-// ─── Inline metadata cell ──────────────────────────────────────
-const MetaLabel: React.FC<{
-  label: string;
-  value: string;
-  icon?: React.ElementType;
-  mono?: boolean;
-}> = ({ label, value, icon: Icon, mono = false }) => (
-  <div className="flex items-center gap-2">
-    <span className="text-[11px] uppercase tracking-[0.18em] text-ink-500">
-      {label}
-    </span>
-    <span className="flex items-center gap-1.5 text-ink-300">
-      {Icon && <Icon className="h-3.5 w-3.5 text-ink-500" />}
-      <span className={mono ? 'font-mono text-xs' : ''}>{value}</span>
-    </span>
-  </div>
-);
 
 export default SkillEditor;

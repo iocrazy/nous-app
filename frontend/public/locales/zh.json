@@ -2184,7 +2184,6 @@
     "contentTooLong": "内容过长（最多 10,000 字符）",
     "projectSkills": "项目技能",
     "globalSkills": "全局技能",
-    "systemPresets": "系统预设",
     "selectSkill": "选择技能",
     "noSkill": "不使用技能",
     "using": "使用中",
@@ -2508,7 +2507,6 @@
       "skills": "技能"
     },
     "agents": {
-      "systemPreset": "系统预置",
       "selectAgent": "暂无智能体 — 点击 + 创建一个",
       "pickFromSidebar": "从左侧选择一个智能体",
       "identityTitle": "身份",
@@ -2517,7 +2515,7 @@
       "boundSkills": "绑定的技能",
       "saveChanges": "保存更改",
       "saved": "已保存",
-      "presetReadOnly": "系统预置 — 只读",
+      "presetReadOnly": "官方模板 — 只读",
       "nameLabel": "名称",
       "slugLabel": "标识符",
       "descriptionLabel": "描述",
@@ -2538,7 +2536,6 @@
       "scopeBadgePrivate": "仅自己",
       "scopeBadgeTeam": "团队：{{name}}",
       "scopeBadgeProject": "项目：{{name}}",
-      "groupSystemPresets": "系统预置",
       "groupPrivate": "我的私有",
       "groupTeam": "团队：{{name}}",
       "groupProject": "项目：{{name}}",
@@ -2710,7 +2707,7 @@
         "running": "运行中",
         "paused": "已暂停"
       },
-      "assignTask": "Assign Task",
+      "assignTask": "派发任务",
       "pause": "Pause",
       "resume": "Resume",
       "resumed": "Agent 已恢复",
@@ -2783,7 +2780,19 @@
       "forkFromHintV2": "复制人格 / 灵魂 / 指令、模型设置与技能绑定。",
       "slugTaken": "这个 slug 已被占用。",
       "scopeIdRequired": "选一个，否则会创建成个人智能体。",
-      "forkSkillsNotCopied": "智能体已创建，但技能没能复制过来——请手动绑定。"
+      "forkSkillsNotCopied": "智能体已创建，但技能没能复制过来——请手动绑定。",
+      "startChat": "开始对话",
+      "workbench": {
+        "recentConversations": "最近对话",
+        "allRuns": "全部运行记录",
+        "noConversations": "暂无对话",
+        "running": "进行中",
+        "routines": "例行任务",
+        "thisWeek": "本周",
+        "statRuns": "运行",
+        "statTokens": "tok",
+        "statCost": "花费"
+      }
     },
     "skills": {
       "addFile": "+ 添加文件",
@@ -2794,7 +2803,6 @@
       "empty": "暂无技能，创建第一个吧。",
       "filterPlaceholder": "筛选技能...",
       "noMatches": "没有匹配的技能。",
-      "presetBadge": "预置",
       "presetTooltip": "Nous 内置技能",
       "selectPrompt": "从左侧选择一个技能查看和编辑。",
       "loading": "加载技能中...",
@@ -2839,7 +2847,6 @@
       "scopeBadgePrivate": "私有",
       "scopeBadgeTeam": "团队：{{name}}",
       "scopeBadgeProject": "项目：{{name}}",
-      "groupSystemPresets": "系统预置",
       "groupPrivate": "我的私有",
       "groupTeam": "团队：{{name}}",
       "groupProject": "项目：{{name}}",
@@ -2869,7 +2876,10 @@
       "noneMatch": "没有匹配的技能",
       "newSkill": "+ 新建技能",
       "newFile": "+ 文件",
-      "iconPlaceholder": "例如 SK"
+      "iconPlaceholder": "例如 SK",
+      "builtInReadOnly": "Nous 内置 · 只读",
+      "fileCount": "{{count}} 个文件",
+      "viewAgent": "查看"
     },
     "workforce": {
       "runningNow": "运行中"
@@ -2942,6 +2952,11 @@
       "skills": "技能",
       "market": "市场",
       "marketPlanned": "规划中"
+    },
+    "fault": {
+      "budget": "已超月度预算 — 请调高预算或恢复该智能体",
+      "manual": "已被管理员暂停 — 可在该智能体的「档案」tab 恢复",
+      "paused": "该智能体已暂停"
     }
   },
   "teamUsage": {

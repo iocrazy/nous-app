@@ -69,6 +69,7 @@ const agent = (over: Partial<AILibraryAgent>): AILibraryAgent =>
 const stat = (over: Partial<AgentStatsItem> = {}): AgentStatsItem => ({
   runs_7d: 0,
   tokens_7d: 0,
+  cost_cents_7d: 0,
   running_count: 0,
   needs_input_count: 0,
   fault: null,

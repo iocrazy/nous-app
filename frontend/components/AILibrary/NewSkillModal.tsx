@@ -140,12 +140,12 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
               value={slug}
               onChange={(e) => setSlug(e.target.value)}
               placeholder="my-custom-skill"
-              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-[var(--accent-border)] focus:outline-none"
               disabled={submitting}
               required
             />
             {slug && !slugIsValid && (
-              <p className="mt-1 text-xs text-red-400">
+              <p className="mt-1 text-xs text-danger">
                 {t(
                   'aiLibrary.skills.slugInvalid',
                   'Lowercase letters, digits, dash, underscore only.',
@@ -163,7 +163,7 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="My Custom Skill"
-              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-[var(--accent-border)] focus:outline-none"
               disabled={submitting}
               required
             />
@@ -180,7 +180,7 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
+              className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-[var(--accent-border)] focus:outline-none"
               disabled={submitting}
             />
           </div>
@@ -198,7 +198,7 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
                 placeholder="writing"
-                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
+                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-[var(--accent-border)] focus:outline-none"
                 disabled={submitting}
               />
             </div>
@@ -215,7 +215,7 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
                 onChange={(e) => setIcon(e.target.value)}
                 placeholder={t('aiLibrary.skills.iconPlaceholder', 'e.g. SK')}
                 maxLength={4}
-                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
+                className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-[var(--accent-border)] focus:outline-none"
                 disabled={submitting}
               />
             </div>
@@ -326,7 +326,7 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
           </div>
 
           {error && (
-            <div className="rounded-md border border-red-500/40 bg-red-500/10 p-2 text-xs text-red-300">
+            <div className="rounded-md border border-danger-line bg-danger-soft p-2 text-xs text-danger">
               {error}
             </div>
           )}
