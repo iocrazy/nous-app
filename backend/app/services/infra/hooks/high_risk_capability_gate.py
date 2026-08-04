@@ -92,6 +92,14 @@ TOOL_REQUIREMENTS: dict[str, ToolRequirement] = {
     "CreateShot": ToolRequirement(write_level="write"),
     "UpdateShot": ToolRequirement(write_level="write"),
     "ProposeEdit": ToolRequirement(write_level=DEFAULT_SCREENPLAY_WRITE_LEVEL),
+    # A5. ProposeEdit returns a reviewable revision; ApplyEdit commits one
+    # into the script through the ops channel. That is the exact line the
+    # ordinal ladder above was built to draw — "propose" earns the first,
+    # only "write" earns the second — so the split is expressed here, as two
+    # tool names the gate can grade independently, rather than as a
+    # capability check inside a handler (which would be a second source of
+    # truth the model's arguments could influence).
+    "ApplyEdit": ToolRequirement(write_level="write"),
 }
 
 

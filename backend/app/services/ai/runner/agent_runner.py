@@ -82,7 +82,7 @@ _DEFAULT_COMPACTOR = ContextCompactor()
 # the A1 capability gate runs in the PreToolUse chain and the A2 resolver runs
 # inside each handler.
 SCREENWRITING_TOOL_NAMES: frozenset[str] = frozenset(
-    {"ListScenes", "ReadScene", "CreateShot", "UpdateShot", "ProposeEdit"}
+    {"ListScenes", "ReadScene", "CreateShot", "UpdateShot", "ProposeEdit", "ApplyEdit"}
 )
 
 SUPPORTED_TOOLS: frozenset[str] = frozenset(

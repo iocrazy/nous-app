@@ -137,6 +137,22 @@ REPO_LAYER_ALLOWED_PATHS: dict[str, str] = {
     "repositories/script_repository.py": "repository implementation itself",
     "repositories/script_scene_repository.py": "repository implementation itself",
     "repositories/script_shot_repository.py": "repository implementation itself",
+    "services/ai/scope/scoped_script_gateway.py": (
+        "A5, and the ONLY agent-path entry here. Narrow on purpose: the "
+        "module calls exactly two scene-repository methods — "
+        "``apply_element_ops`` (THE ops channel: one transaction that "
+        "version-guards content_json, writes the script_ops row plus its "
+        "inverse, and raises the same VersionConflict the editor's own "
+        "optimistic-concurrency path speaks) and ``list_ops_by_scene`` (the "
+        "ledger read that the element-level precondition replays). "
+        "Re-implementing either to keep this list short would create the "
+        "second, drifting write path agent-layer spec §5.2 exists to "
+        "forbid. The authorization argument is unchanged from this module's "
+        "ORM_ALLOWED_PATHS entry: both calls take ``scene.id`` off an "
+        "already-resolved ResolvedScene, never a model-supplied id, and "
+        "test_scoped_script_gateway_takes_only_resolved_handles enforces it "
+        "by signature introspection."
+    ),
     "services/library/projects_service.py": "pre-A2 project service, authenticated REST path",
     "services/script/version_service.py": "pre-A2 script version service, authenticated REST path",
     "services/storyboard/script/script_service.py": "pre-A2 script service, authenticated REST path",

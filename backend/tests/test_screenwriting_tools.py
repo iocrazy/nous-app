@@ -28,6 +28,7 @@ import pytest
 
 import app.services.ai.scope.scope_resolver as resolver_mod
 import app.services.ai.scope.scoped_script_gateway as gateway_mod
+import app.services.ai.scope.script_selection as selection_mod
 import app.services.ai.tools.screenwriting_tools as tools_mod
 from app.services.ai.scope.agent_run_scope import AgentRunScope
 from app.services.ai.scope.scope_resolver import ResolvedScene, ResolvedShot
@@ -48,7 +49,10 @@ _SCENE_ID = 700100000000000001
 _SHOT_ID = 700100000000000002
 
 _READ_TOOLS = ("ListScenes", "ReadScene")
-_WRITE_TOOLS = ("CreateShot", "UpdateShot")
+# A5 adds ApplyEdit at "write": ProposeEdit returns a revision, ApplyEdit
+# commits one, and the ordinal ladder is what keeps a propose-graded agent
+# out of the second.
+_WRITE_TOOLS = ("CreateShot", "UpdateShot", "ApplyEdit")
 _PROPOSE_TOOLS = ("ProposeEdit",)
 _ALL_TOOLS = _READ_TOOLS + _WRITE_TOOLS + _PROPOSE_TOOLS
 
@@ -737,8 +741,9 @@ async def test_propose_edit_rejects_element_ids_not_in_the_scene():
     with (
         patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=_scope())),
         patch.object(
-            tools_mod, "resolve_scene", AsyncMock(return_value=_resolved_scene())
+            selection_mod, "resolve_scene", AsyncMock(return_value=_resolved_scene())
         ),
+        patch.object(selection_mod, "audit_resolution", AsyncMock()),
     ):
         result = await SCREENWRITING_HANDLERS["ProposeEdit"](
             {
@@ -762,7 +767,7 @@ async def test_propose_edit_writes_nothing_and_flags_a_stale_base_version():
     with (
         patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=_scope())),
         patch.object(
-            tools_mod,
+            selection_mod,
             "resolve_scene",
             AsyncMock(return_value=_resolved_scene(version=9)),
         ),
