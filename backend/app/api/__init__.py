@@ -35,6 +35,7 @@ from app.api.media_auth import router as media_auth_router
 from app.api.media_router import legacy_router as legacy_douyin_router
 from app.api.media_router import media_content_router
 from app.api.media_router import router as media_router
+from app.api.modules_router import router as modules_router
 from app.api.notifications_router import router as notifications_router
 from app.api.payment_router import router as payment_router
 from app.api.points_router import router as points_router
@@ -192,6 +193,8 @@ from app.api.pipelines_router import router as pipelines_router  # noqa: E402
 api_router.include_router(router=pipelines_router, tags=["Pipelines"])
 
 api_router.include_router(router=invites_router, tags=["Invites"])
+
+api_router.include_router(router=modules_router, tags=["Modules"])
 
 api_router.include_router(router=notifications_router, tags=["Notifications"])
 api_router.include_router(router=inbox_router, tags=["Inbox"])

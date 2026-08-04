@@ -72,3 +72,7 @@ class TTLCache(Generic[T]):
 user_settings_cache: TTLCache[Optional[dict[str, Any]]] = TTLCache(ttl_seconds=30.0)
 frontend_config_cache: TTLCache[dict[str, Any]] = TTLCache(ttl_seconds=60.0)
 points_pricing_cache: TTLCache[Optional[dict[str, Any]]] = TTLCache(ttl_seconds=300.0)
+# Batch module-switch snapshot for GET /modules/status — read on every page
+# load by every user, so cache it. Admin writes do NOT invalidate (worst-case
+# 60s staleness is acceptable for a feature switch).
+modules_status_cache: TTLCache[list[dict[str, Any]]] = TTLCache(ttl_seconds=60.0)
