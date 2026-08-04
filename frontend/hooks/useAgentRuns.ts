@@ -36,10 +36,22 @@ interface UseAgentRunsReturn {
   loaded: boolean;
 }
 
+// Monotonic per-mount suffix for the Realtime channel topic. supabase-js
+// returns the SAME channel instance for an identical topic, so two
+// simultaneous consumers of this hook (AILibrarySidebar + AgentGalleryPage,
+// 2026-08-03 prod incident) would collide: the second `.on()` lands after the
+// first `.subscribe()` and throws "cannot add `postgres_changes` callbacks …
+// after `subscribe()`", taking the whole route down via the error boundary.
+// A unique topic per mount also stops one consumer's unmount/removeChannel
+// from killing the other's live subscription. The topic is purely a
+// client-side namespace — the postgres_changes filter is what scopes rows.
+let channelSeq = 0;
+
 export function useAgentRuns(userId: string | null): UseAgentRunsReturn {
   const [runningAgentIds, setRunningAgentIds] = useState<Set<string>>(new Set());
   const [loaded, setLoaded] = useState(false);
   const countsRef = useRef<Map<string, number>>(new Map());
+  const channelSuffixRef = useRef<number>((channelSeq += 1));
 
   // Recompute the set from the counts map — called on every event.
   const syncSet = useCallback(() => {
@@ -138,7 +150,7 @@ export function useAgentRuns(userId: string | null): UseAgentRunsReturn {
     if (!userId) return;
     const supabase = getSupabaseClient();
     const channel = supabase
-      .channel(`agent-runs-${userId}`)
+      .channel(`agent-runs-${userId}-${channelSuffixRef.current}`)
       .on(
         'postgres_changes',
         {
