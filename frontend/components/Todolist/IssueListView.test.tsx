@@ -50,7 +50,7 @@ function mkIssue(over: Partial<UiIssue> & Pick<UiIssue, 'id' | 'identifier' | 't
   } as UiIssue;
 }
 
-function renderList(issues: UiIssue[]) {
+function renderList(issues: UiIssue[], viewMode: 'list' | 'board' = 'list') {
   return render(
     <MemoryRouter initialEntries={['/team/8/todolist']}>
       <Routes>
@@ -61,7 +61,7 @@ function renderList(issues: UiIssue[]) {
               issues={issues}
               loading={false}
               error={null}
-              viewMode="list"
+              viewMode={viewMode}
               onViewModeChange={vi.fn()}
               onNewIssue={vi.fn()}
               onRefresh={vi.fn()}
@@ -151,5 +151,38 @@ describe('IssueListView — A1 注意力 chip', () => {
       mkIssue({ id: 11, identifier: 'MH-11', title: 'Plain', status: 'in_progress' }),
     ]);
     expect(container.querySelector('[data-testid="needs-reply-chip"]')).toBeNull();
+  });
+});
+
+/**
+ * A1 pins the strip "between the Quick row and the list" — i.e. above the view
+ * container, not inside whichever view happens to be mounted. That is how it
+ * is built (the strip is a sibling of the scroll container, and the
+ * list/board switch happens inside it), and it is easy to undo by accident:
+ * moving the mount one level down, into the list branch, still looks right in
+ * every screenshot taken in list mode.
+ *
+ * Note the mount deliberately lives HERE and not in TodolistPage —
+ * components/workspace/WorkspaceTasks.tsx renders IssueListView too, and the
+ * project surface would silently lose the strip if it moved up a level.
+ */
+describe('IssueListView — 「等我的」横条跨视图', () => {
+  const inReview = () =>
+    mkIssue({ id: 20, identifier: 'MH-20', title: 'Second act draft', status: 'in_review' });
+
+  it('renders the strip above the list view', () => {
+    const { container } = renderList([inReview()], 'list');
+    expect(container.querySelector('[data-testid="attention-strip"]')).not.toBeNull();
+  });
+
+  it('renders the same strip above the board view', () => {
+    const { container } = renderList([inReview()], 'board');
+    expect(container.querySelector('[data-testid="attention-strip"]')).not.toBeNull();
+  });
+
+  it('stays absent in both views when nothing is waiting', () => {
+    const idle = () => mkIssue({ id: 21, identifier: 'MH-21', title: 'Plain', status: 'todo' });
+    expect(renderList([idle()], 'list').container.querySelector('[data-testid="attention-strip"]')).toBeNull();
+    expect(renderList([idle()], 'board').container.querySelector('[data-testid="attention-strip"]')).toBeNull();
   });
 });
