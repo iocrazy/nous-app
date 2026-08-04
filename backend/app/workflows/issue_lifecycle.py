@@ -40,24 +40,23 @@ from app.services.issues.issue_chat_stream import (  # noqa: F401
 )
 
 
-def _engine():
-    from app.db import engine as db_engine
-
-    return db_engine
-
-
 @DBOS.step()
 async def atomic_checkout(issue_id: int, dbos_workflow_id: str) -> bool:
     """Atomically claim an issue. False if someone else already holds the lock."""
-    from app.db import engine as db_engine
+    from sqlalchemy import func, text, update
+
+    from app.db.session import write_scope
+    from app.models import Issues
 
     # execution fields are service_role-only (issues_update_allowlist, mig 170)
-    locked = await db_engine.execute_as_service_role(
-        "UPDATE public.issues SET execution_locked_at = now(), "
-        "dbos_workflow_id = :wid "
-        "WHERE id = :id AND execution_locked_at IS NULL",
-        {"wid": dbos_workflow_id, "id": issue_id},
-    )
+    async with write_scope() as session:
+        await session.execute(text("SET LOCAL ROLE service_role"))
+        result = await session.execute(
+            update(Issues)
+            .where(Issues.id == issue_id, Issues.execution_locked_at.is_(None))
+            .values(execution_locked_at=func.now(), dbos_workflow_id=dbos_workflow_id)
+        )
+        locked = result.rowcount
     return locked > 0
 
 
@@ -76,20 +75,20 @@ async def set_status(
     Spec-2: ``agent_outcome`` / ``outcome_reason`` record the agent's FinishIssue
     self-report into execution_state so the UI can distinguish "agent reports
     done" from "agent merely stopped"."""
-    from app.db import engine as db_engine
+    from sqlalchemy import cast, literal, text, update
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    from app.db.session import write_scope
+    from app.models import Issues
 
     now_dt = datetime.now(timezone.utc)
-    cols = ["status = :status"]
-    params: dict[str, Any] = {"status": status}
+    values: dict[str, Any] = {"status": status}
     if status == "in_progress":
-        cols.append("started_at = :ts")
-        params["ts"] = now_dt
+        values["started_at"] = now_dt
     elif status == "done":
-        cols.append("completed_at = :ts")
-        params["ts"] = now_dt
+        values["completed_at"] = now_dt
     elif status == "cancelled":
-        cols.append("cancelled_at = :ts")
-        params["ts"] = now_dt
+        values["cancelled_at"] = now_dt
     state: dict[str, Any] = {}
     if error_code or error_message:
         state["error_code"] = error_code
@@ -99,13 +98,13 @@ async def set_status(
     if outcome_reason:
         state["outcome_reason"] = outcome_reason
     if state:
-        cols.append("execution_state = CAST(:state AS jsonb)")
-        params["state"] = json.dumps(state)
-    params["id"] = issue_id
+        values["execution_state"] = cast(literal(json.dumps(state)), JSONB)
     # may write execution_state (service_role-only via issues_update_allowlist)
-    await db_engine.execute_as_service_role(
-        f"UPDATE public.issues SET {', '.join(cols)} WHERE id = :id", params
-    )
+    async with write_scope() as session:
+        await session.execute(text("SET LOCAL ROLE service_role"))
+        await session.execute(
+            update(Issues).where(Issues.id == issue_id).values(**values)
+        )
     await _project_status_onto_stage_node(issue_id, status)
 
 
@@ -127,7 +126,10 @@ async def _project_status_onto_stage_node(issue_id: int, status: str) -> None:
     and the 5-minute sweep.
     """
     try:
-        from app.db import engine as db_engine
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import Issues
         from app.repositories.issue_repository import (
             STAGE_NODE_SYNC_STATUSES,
             fire_stage_node_sync,
@@ -135,11 +137,21 @@ async def _project_status_onto_stage_node(issue_id: int, status: str) -> None:
 
         if status not in STAGE_NODE_SYNC_STATUSES:
             return
-        row = await db_engine.fetch_one(
-            "SELECT id, origin_kind, origin_id FROM public.issues WHERE id = :id",
-            {"id": issue_id},
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(Issues.id, Issues.origin_kind, Issues.origin_id).where(
+                            Issues.id == issue_id
+                        )
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        await fire_stage_node_sync(
+            dict(row) if row else None, status, enqueue_autopilot=False
         )
-        await fire_stage_node_sync(row, status, enqueue_autopilot=False)
     except Exception as exc:  # noqa: BLE001 — the status write is the primary op
         logger.warning(
             f"[execute_issue] stage-node projection failed for issue "
@@ -152,13 +164,20 @@ async def load_auto_close_flag() -> bool:
     """Spec-2 slice 2a: read the platform ``issue_agent_auto_close`` toggle.
     Checkpointed as a step so a workflow replay uses the value seen at dispatch.
     Defaults to False (never auto-close) on any read failure / unset key."""
-    from app.db import engine as db_engine
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import SystemSettings
 
     try:
-        val = await db_engine.fetch_val(
-            "SELECT value FROM public.system_settings "
-            "WHERE key = 'issue_agent_auto_close'"
-        )
+        async with read_scope() as session:
+            val = (
+                await session.execute(
+                    select(SystemSettings.value).where(
+                        SystemSettings.key == "issue_agent_auto_close"
+                    )
+                )
+            ).scalar_one_or_none()
     except Exception:  # noqa: BLE001 — a settings read must never break dispatch
         logger.warning("[execute_issue] auto_close flag read failed; defaulting off")
         return False
@@ -168,12 +187,16 @@ async def load_auto_close_flag() -> bool:
 @DBOS.step()
 async def clear_lock(issue_id: int) -> None:
     """Release the execution lock so the issue can be retried later."""
-    from app.db import engine as db_engine
+    from sqlalchemy import text, update
 
-    await db_engine.execute_as_service_role(
-        "UPDATE public.issues SET execution_locked_at = NULL WHERE id = :id",
-        {"id": issue_id},
-    )
+    from app.db.session import write_scope
+    from app.models import Issues
+
+    async with write_scope() as session:
+        await session.execute(text("SET LOCAL ROLE service_role"))
+        await session.execute(
+            update(Issues).where(Issues.id == issue_id).values(execution_locked_at=None)
+        )
 
 
 @DBOS.step()
@@ -182,12 +205,20 @@ async def acquire_turn_lock(issue_id: int) -> bool:
     issues.execution_locked_at (shared with execute_issue dispatch) but does
     NOT touch dbos_workflow_id — the dispatch-status UI subscribes to that.
     Returns True if acquired, False if a turn is already in flight."""
+    from sqlalchemy import func, text, update
+
+    from app.db.session import write_scope
+    from app.models import Issues
+
     # execution_locked_at is service_role-only (issues_update_allowlist, mig 170)
-    locked = await _engine().execute_as_service_role(
-        "UPDATE public.issues SET execution_locked_at = now() "
-        "WHERE id = :id AND execution_locked_at IS NULL",
-        {"id": issue_id},
-    )
+    async with write_scope() as session:
+        await session.execute(text("SET LOCAL ROLE service_role"))
+        result = await session.execute(
+            update(Issues)
+            .where(Issues.id == issue_id, Issues.execution_locked_at.is_(None))
+            .values(execution_locked_at=func.now())
+        )
+        locked = result.rowcount
     return locked > 0
 
 
@@ -486,11 +517,21 @@ async def load_issue(issue_id: int) -> dict[str, Any]:
 
     The engine returns datetime/UUID as objects (normalized to str below) and
     jsonb as a string; no current consumer reads a jsonb column off this dict."""
-    from app.db import engine as db_engine
+    from sqlalchemy import select
 
-    row = await db_engine.fetch_one(
-        "SELECT * FROM public.issues WHERE id = :id", {"id": issue_id}
-    )
+    from app.db.session import read_scope
+    from app.models import Issues
+
+    async with read_scope() as session:
+        row = (
+            (
+                await session.execute(
+                    select(*Issues.__table__.columns).where(Issues.id == issue_id)
+                )
+            )
+            .mappings()
+            .first()
+        )
     if not row:
         raise RuntimeError(f"issue id={issue_id} not found")
     out: dict[str, Any] = {}
@@ -665,18 +706,37 @@ async def mark_turn_progress(issue_id: int, turn: int) -> None:
     (``||``) rather than assign. Being clobbered by a later ``set_status`` is
     accepted by design: a terminal row shows no turn counter.
     """
-    from app.db import engine as db_engine
+    from sqlalchemy import Integer, cast, func, literal, literal_column, text, update
+    from sqlalchemy.dialects.postgresql import JSONB
 
-    await db_engine.execute_as_service_role(
-        """UPDATE public.issues
-           SET execution_state = COALESCE(execution_state, '{}'::jsonb)
-               || jsonb_build_object(
-                   'turn', CAST(:turn AS integer),
-                   'turn_started_at', to_char(now() AT TIME ZONE 'utc',
-                                              'YYYY-MM-DD"T"HH24:MI:SS"Z"'))
-           WHERE id = :iid""",
-        {"turn": turn, "iid": issue_id},
+    from app.db.session import write_scope
+    from app.models import Issues
+
+    empty_jsonb = cast(literal("{}"), JSONB)
+    # `now() AT TIME ZONE 'utc'` has no func() form (it's an infix operator);
+    # `to_char`'s format string is a fixed literal, not user input — both are
+    # irreducible fragments per the migration's own carve-out.
+    turn_started_at = func.to_char(
+        func.now().op("AT TIME ZONE")(literal_column("'utc'")),
+        literal_column('\'YYYY-MM-DD"T"HH24:MI:SS"Z"\''),
     )
+    merge_obj = func.jsonb_build_object(
+        "turn",
+        cast(turn, Integer),
+        "turn_started_at",
+        turn_started_at,
+    )
+    async with write_scope() as session:
+        await session.execute(text("SET LOCAL ROLE service_role"))
+        await session.execute(
+            update(Issues)
+            .where(Issues.id == issue_id)
+            .values(
+                execution_state=func.coalesce(Issues.execution_state, empty_jsonb).op(
+                    "||", return_type=JSONB
+                )(merge_obj)
+            )
+        )
 
 
 async def _safe_mark_turn(
@@ -849,13 +909,18 @@ async def _maybe_fire_subissue_barrier(issue_id: int) -> None:
     best-effort and self-guarding, but wrap anyway so it can never abort the
     workflow's own completion."""
     try:
-        from app.db import engine as db_engine
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import Issues
         from app.services.issues.subissue_barrier import on_child_issue_terminal
 
-        row = await db_engine.fetch_one(
-            "SELECT status FROM public.issues WHERE id = :id", {"id": issue_id}
-        )
-        new_status = (row or {}).get("status")
+        async with read_scope() as session:
+            new_status = (
+                await session.execute(
+                    select(Issues.status).where(Issues.id == issue_id)
+                )
+            ).scalar_one_or_none()
         if new_status:
             await on_child_issue_terminal(issue_id, "in_progress", new_status)
             # W2b: pipeline-step children advance their run from the SAME seam.

@@ -6,10 +6,17 @@ repo-wide). Snowflake bigint ids are surfaced as STRINGS at the read boundary
 native datetimes (Pydantic serializes them). INT columns that are NOT ids
 (step_order / current_step) stay native int.
 
-The run-advance / complete / halt writers are compare-and-swap UPDATEs keyed on
-the run's ``current_step`` + ``status`` — that CAS is the pipeline_relay
-idempotency substrate (two barrier seams observing the same terminal edge race
-to the same UPDATE; exactly one row comes back). See pipeline_relay.py.
+The run-advance / complete / halt / cancel writers are compare-and-swap
+UPDATEs keyed on the run's ``current_step`` + ``status`` — that CAS is the
+pipeline_relay idempotency substrate (two barrier seams observing the same
+terminal edge race to the same UPDATE; exactly one row comes back). See
+pipeline_relay.py. Their RETURNING row is deliberately RAW (``.returning(
+*IssuePipelineRuns.__table__.columns)`` + ``.mappings().first()`` — ids/uuids
+as native int/UUID, NOT run through ``_run_row``'s string coercion) — this
+matches the pre-ORM ``execute_returning_one("UPDATE ... RETURNING *")``
+behavior byte-for-byte, and is why callers (see pipelines_router.py's
+``cancel_run`` handler) re-``get_run()`` when they need the fully
+string-coerced read-boundary shape instead of trusting the CAS row directly.
 """
 
 from __future__ import annotations
@@ -18,9 +25,8 @@ import uuid as _uuid
 from typing import Any, Optional
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 
-from app.db import engine as db_engine
 from app.db.session import read_scope, write_scope
 from app.models import IssuePipelineRuns, IssuePipelines, IssuePipelineSteps
 
@@ -336,67 +342,106 @@ class PipelineRepository:
     ) -> Optional[dict[str, Any]]:
         """CAS: bump current_step from ``from_step`` to ``to_step`` only while
         the run is still ``running`` AND still on ``from_step``. Returns the new
-        row on success, None if another observer already advanced (0 rows)."""
-        return await db_engine.execute_returning_one(
-            """
-            UPDATE public.issue_pipeline_runs
-               SET current_step = :to_step, updated_at = now()
-             WHERE id = :run_id
-               AND status = 'running'
-               AND current_step = :from_step
-            RETURNING *
-            """,
-            {
-                "run_id": int(run_id),
-                "from_step": int(from_step),
-                "to_step": int(to_step),
-            },
-        )
+        row on success (RAW — see module docstring), None if another observer
+        already advanced (0 rows)."""
+        async with write_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        update(IssuePipelineRuns)
+                        .where(
+                            IssuePipelineRuns.id == int(run_id),
+                            IssuePipelineRuns.status == "running",
+                            IssuePipelineRuns.current_step == int(from_step),
+                        )
+                        .values(current_step=int(to_step), updated_at=func.now())
+                        .returning(*IssuePipelineRuns.__table__.columns)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            return dict(row) if row else None
 
     async def complete_run(
         self, run_id: int, *, from_step: int
     ) -> Optional[dict[str, Any]]:
         """CAS: mark the run completed only while still running on ``from_step``.
-        Returns the row on success, None if already terminal / advanced."""
-        return await db_engine.execute_returning_one(
-            """
-            UPDATE public.issue_pipeline_runs
-               SET status = 'completed', completed_at = now(), updated_at = now()
-             WHERE id = :run_id
-               AND status = 'running'
-               AND current_step = :from_step
-            RETURNING *
-            """,
-            {"run_id": int(run_id), "from_step": int(from_step)},
-        )
+        Returns the row on success (RAW — see module docstring), None if
+        already terminal / advanced."""
+        async with write_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        update(IssuePipelineRuns)
+                        .where(
+                            IssuePipelineRuns.id == int(run_id),
+                            IssuePipelineRuns.status == "running",
+                            IssuePipelineRuns.current_step == int(from_step),
+                        )
+                        .values(
+                            status="completed",
+                            completed_at=func.now(),
+                            updated_at=func.now(),
+                        )
+                        .returning(*IssuePipelineRuns.__table__.columns)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            return dict(row) if row else None
 
     async def halt_run(self, run_id: int, *, reason: str) -> Optional[dict[str, Any]]:
-        """CAS: mark the run halted only while still running. Returns the row on
-        success, None if already terminal."""
-        return await db_engine.execute_returning_one(
-            """
-            UPDATE public.issue_pipeline_runs
-               SET status = 'halted', halted_reason = :reason,
-                   completed_at = now(), updated_at = now()
-             WHERE id = :run_id
-               AND status = 'running'
-            RETURNING *
-            """,
-            {"run_id": int(run_id), "reason": reason},
-        )
+        """CAS: mark the run halted only while still running. Returns the row
+        on success (RAW — see module docstring), None if already terminal."""
+        async with write_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        update(IssuePipelineRuns)
+                        .where(
+                            IssuePipelineRuns.id == int(run_id),
+                            IssuePipelineRuns.status == "running",
+                        )
+                        .values(
+                            status="halted",
+                            halted_reason=reason,
+                            completed_at=func.now(),
+                            updated_at=func.now(),
+                        )
+                        .returning(*IssuePipelineRuns.__table__.columns)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            return dict(row) if row else None
 
     async def cancel_run(self, run_id: int) -> Optional[dict[str, Any]]:
-        """CAS: user-initiated cancel of a running relay."""
-        return await db_engine.execute_returning_one(
-            """
-            UPDATE public.issue_pipeline_runs
-               SET status = 'cancelled', completed_at = now(), updated_at = now()
-             WHERE id = :run_id
-               AND status = 'running'
-            RETURNING *
-            """,
-            {"run_id": int(run_id)},
-        )
+        """CAS: user-initiated cancel of a running relay. Returns the row on
+        success (RAW — see module docstring), None if already terminal."""
+        async with write_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        update(IssuePipelineRuns)
+                        .where(
+                            IssuePipelineRuns.id == int(run_id),
+                            IssuePipelineRuns.status == "running",
+                        )
+                        .values(
+                            status="cancelled",
+                            completed_at=func.now(),
+                            updated_at=func.now(),
+                        )
+                        .returning(*IssuePipelineRuns.__table__.columns)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            return dict(row) if row else None
 
 
 pipeline_repository = PipelineRepository()

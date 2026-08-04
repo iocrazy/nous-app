@@ -61,6 +61,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from app.services.ai.adapters.base import StreamChunk
 from app.services.ai.tools.finish_issue_tool import (
@@ -69,6 +70,80 @@ from app.services.ai.tools.finish_issue_tool import (
 )
 
 pytestmark = pytest.mark.asyncio
+
+
+class _ORMResult:
+    """Stand-in for a SQLAlchemy ``Result`` — supports the two shapes
+    ``get_or_create_issue_session`` consumes: ``.mappings().first()`` (the
+    multi-column issue-row SELECT) and ``.scalar_one_or_none()``/``.rowcount``
+    (the UPDATE / winner-SELECT)."""
+
+    def __init__(self, mapping: Optional[dict] = None, scalar: Any = None) -> None:
+        self._mapping = mapping
+        self._scalar = scalar
+        self.rowcount = 0
+
+    def mappings(self) -> "_ORMResult":
+        return self
+
+    def first(self) -> Optional[dict]:
+        return self._mapping
+
+    def scalar_one_or_none(self) -> Any:
+        return self._scalar
+
+
+class _IssueSessionFakeSession:
+    """Fake ORM session backing ``get_or_create_issue_session``'s real
+    SELECT (issue row) + UPDATE (ai_session_id backfill), post Phase B1's
+    raw-SQL → ORM rewrite of ``issue_session.py``. Replaces the old
+    ``app.db.engine.fetch_one``/``execute`` monkeypatches, which stopped
+    being on the call path once the function moved to ``read_scope()``/
+    ``write_scope()``."""
+
+    def __init__(self, issue_row: dict, *, backfill_wins: bool = True) -> None:
+        self._issue_row = issue_row
+        self._backfill_wins = backfill_wins
+        self.executed: List[tuple] = []
+
+    async def execute(self, stmt: Any) -> _ORMResult:
+        compiled = stmt.compile(dialect=postgresql.dialect())
+        sql = str(compiled)
+        binds = dict(compiled.params)
+        self.executed.append((sql, binds))
+        if sql.startswith("SELECT public.issues.ai_session_id, "):
+            return _ORMResult(mapping=dict(self._issue_row))
+        if sql.startswith("UPDATE public.issues SET ai_session_id="):
+            result = _ORMResult()
+            result.rowcount = 1 if self._backfill_wins else 0
+            return result
+        if sql.startswith("SELECT public.issues.ai_session_id \n"):
+            return _ORMResult(scalar=self._issue_row.get("ai_session_id"))
+        return _ORMResult()
+
+
+class _ScopeCM:
+    def __init__(self, session: _IssueSessionFakeSession) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> _IssueSessionFakeSession:
+        return self._session
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
+
+
+def _patch_issue_session_orm(
+    monkeypatch: pytest.MonkeyPatch, issue_row: dict, *, backfill_wins: bool = True
+) -> _IssueSessionFakeSession:
+    from app.db import session as db_session_module
+
+    fake_session = _IssueSessionFakeSession(issue_row, backfill_wins=backfill_wins)
+    monkeypatch.setattr(db_session_module, "read_scope", lambda: _ScopeCM(fake_session))
+    monkeypatch.setattr(
+        db_session_module, "write_scope", lambda: _ScopeCM(fake_session)
+    )
+    return fake_session
 
 
 class _RunRecorderCM:
@@ -173,7 +248,6 @@ async def test_issue_session_and_turn_link_via_conversation_id(
     """Real get_or_create_issue_session -> real create_session on a fake
     ConversationsAiStore-shaped store -> real run_session_turn
     (trigger="issue_dispatch", buffered) against that session id."""
-    from app.db import engine as db_engine_module
     from app.schemas.ai_library import ComposedSystemPrompt
     from app.services.ai.chat import ai_library_chat_service as chat_service_module
     from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
@@ -215,22 +289,11 @@ async def test_issue_session_and_turn_link_via_conversation_id(
         "assignee_agent_id": str(agent_id),
         "created_by_user_id": str(user_id),
         "assignee_user_id": None,
+        "project_id": None,
+        "team_id": None,
     }
-
-    async def _fake_fetch_one(
-        sql: str, params: Optional[dict] = None
-    ) -> Optional[dict]:
-        assert "public.issues" in sql
-        return dict(issue_row)
-
-    executed: List[Any] = []
-
-    async def _fake_execute(sql: str, params: Optional[dict] = None) -> int:
-        executed.append((sql, params))
-        return 1  # backfill "wins" -- no concurrent-writer race in this test
-
-    monkeypatch.setattr(db_engine_module, "fetch_one", _fake_fetch_one)
-    monkeypatch.setattr(db_engine_module, "execute", _fake_execute)
+    # backfill "wins" -- no concurrent-writer race in this test.
+    fake_orm_session = _patch_issue_session_orm(monkeypatch, issue_row)
 
     fake_agent_record = {
         "id": str(agent_id),
@@ -251,7 +314,10 @@ async def test_issue_session_and_turn_link_via_conversation_id(
     # against the fake store. ---
     session_id = await session_module.get_or_create_issue_session(issue_id)
     assert session_id == str(session_id_int)
-    assert executed, "backfill UPDATE should have run for a brand-new session"
+    assert any(
+        sql.startswith("UPDATE public.issues SET ai_session_id=")
+        for sql, _ in fake_orm_session.executed
+    ), "backfill UPDATE should have run for a brand-new session"
 
     # --- Step 2: real run_session_turn(trigger="issue_dispatch"), buffered
     # (no chunk_callback) -- see module docstring for why buffered. ---
@@ -382,7 +448,6 @@ async def test_issue_session_project_id_reaches_agent_runs_via_run_recorder(
     Also exercises ``trigger='issue_dispatch_auto'`` (the autopilot
     quota-discriminator value, task O2) through the identical real path.
     """
-    from app.db import engine as db_engine_module
     from app.schemas.ai_library import ComposedSystemPrompt
     from app.services.ai.chat import ai_library_chat_service as chat_service_module
     from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
@@ -424,19 +489,7 @@ async def test_issue_session_project_id_reaches_agent_runs_via_run_recorder(
         "project_id": issue_project_id,
         "team_id": issue_team_id,
     }
-
-    async def _fake_fetch_one(
-        sql: str, params: Optional[dict] = None
-    ) -> Optional[dict]:
-        assert "public.issues" in sql
-        assert "project_id" in sql and "team_id" in sql
-        return dict(issue_row)
-
-    async def _fake_execute(sql: str, params: Optional[dict] = None) -> int:
-        return 1
-
-    monkeypatch.setattr(db_engine_module, "fetch_one", _fake_fetch_one)
-    monkeypatch.setattr(db_engine_module, "execute", _fake_execute)
+    fake_orm_session = _patch_issue_session_orm(monkeypatch, issue_row)
 
     fake_agent_record = {
         "id": str(agent_id),
@@ -456,6 +509,10 @@ async def test_issue_session_project_id_reaches_agent_runs_via_run_recorder(
     # --- real get_or_create_issue_session -> real create_session ---
     session_id = await session_module.get_or_create_issue_session(issue_id)
     assert session_id == str(session_id_int)
+    select_sql = next(
+        sql for sql, _ in fake_orm_session.executed if sql.startswith("SELECT")
+    )
+    assert "project_id" in select_sql and "team_id" in select_sql
 
     # The store really received the issue's own project_id/team_id — this is
     # the crux of the C1 fix, checked BEFORE it ever reaches RunRecorder.
@@ -624,7 +681,6 @@ async def test_issue_agent_run_through_real_streaming_path_surfaces_finish_issue
     agent DID call FinishIssue -- the declaration was silently dropped
     between ``stream_turn`` and the chat service's streaming branch.
     """
-    from app.db import engine as db_engine_module
     from app.schemas.ai_library import ComposedSystemPrompt
     from app.services.ai.chat import ai_library_chat_service as chat_service_module
     from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
@@ -670,19 +726,10 @@ async def test_issue_agent_run_through_real_streaming_path_surfaces_finish_issue
         "assignee_agent_id": str(agent_id),
         "created_by_user_id": str(user_id),
         "assignee_user_id": None,
+        "project_id": None,
+        "team_id": None,
     }
-
-    async def _fake_fetch_one(
-        sql: str, params: Optional[dict] = None
-    ) -> Optional[dict]:
-        assert "public.issues" in sql
-        return dict(issue_row)
-
-    async def _fake_execute(sql: str, params: Optional[dict] = None) -> int:
-        return 1
-
-    monkeypatch.setattr(db_engine_module, "fetch_one", _fake_fetch_one)
-    monkeypatch.setattr(db_engine_module, "execute", _fake_execute)
+    _patch_issue_session_orm(monkeypatch, issue_row)
 
     fake_agent_record = {
         "id": str(agent_id),

@@ -97,19 +97,40 @@ async def _scan_stranded() -> list[dict[str, Any]]:
     Stranded = in_progress + assigned agent + NO live agent_run
     (running/silent/stuck). Per candidate we also resolve DBOS ownership here so
     the workflow body just decides + dispatches."""
-    from app.db import engine as db_engine
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import AgentRuns, Issues
     from app.workflows.workflow_health_sweeper import _dbos_still_owns
 
-    rows = await db_engine.fetch_all(
-        "SELECT i.id, i.started_at, i.execution_state, i.dbos_workflow_id "
-        "FROM public.issues i "
-        "WHERE i.status = 'in_progress' AND i.assignee_agent_id IS NOT NULL "
-        "AND NOT EXISTS ("
-        "  SELECT 1 FROM public.agent_runs ar "
-        "  WHERE ar.issue_id = i.id AND ar.status = 'running' "
-        "  AND ar.liveness_state IN ('running','silent','stuck')"
-        ")"
+    live_run_exists = (
+        select(AgentRuns.id)
+        .where(
+            AgentRuns.issue_id == Issues.id,
+            AgentRuns.status == "running",
+            AgentRuns.liveness_state.in_(["running", "silent", "stuck"]),
+        )
+        .exists()
     )
+    async with read_scope() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(
+                        Issues.id,
+                        Issues.started_at,
+                        Issues.execution_state,
+                        Issues.dbos_workflow_id,
+                    ).where(
+                        Issues.status == "in_progress",
+                        Issues.assignee_agent_id.isnot(None),
+                        ~live_run_exists,
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
     out: list[dict[str, Any]] = []
     for r in rows or []:
         state = r.get("execution_state") or {}
@@ -133,21 +154,35 @@ async def _prepare_redispatch(issue_id: int, new_count: int) -> str:
     """Clear the stale lock + bump recovery state, and return a FRESH
     workflow_id (generated here, in a step, so DBOS replay is deterministic).
     Does NOT dispatch — the workflow body does that (never dispatch in a step)."""
-    from app.db import engine as db_engine
+    from sqlalchemy import Integer, Text, cast, func, literal, text, update
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    from app.db.session import write_scope
+    from app.models import Issues
 
     wf_id = f"issue-{issue_id}-{_uuid.uuid4().hex[:12]}"
     now_iso = datetime.now(timezone.utc).isoformat()
-    # Merge into execution_state jsonb without clobbering other keys.
-    await db_engine.execute_as_service_role(
-        "UPDATE public.issues SET execution_locked_at = NULL, "
-        "dbos_workflow_id = :wf, "
-        "execution_state = COALESCE(execution_state, '{}'::jsonb) || "
-        "  jsonb_build_object("
-        "    'stranded_redispatch_count', to_jsonb(:cnt::int), "
-        "    'stranded_last_dispatched_at', to_jsonb(:ts::text)) "
-        "WHERE id = :id",
-        {"wf": wf_id, "cnt": new_count, "ts": now_iso, "id": issue_id},
+    empty_jsonb = cast(literal("{}"), JSONB)
+    merge_obj = func.jsonb_build_object(
+        "stranded_redispatch_count",
+        func.to_jsonb(cast(new_count, Integer)),
+        "stranded_last_dispatched_at",
+        func.to_jsonb(cast(now_iso, Text)),
     )
+    # Merge into execution_state jsonb without clobbering other keys.
+    async with write_scope() as session:
+        await session.execute(text("SET LOCAL ROLE service_role"))
+        await session.execute(
+            update(Issues)
+            .where(Issues.id == issue_id)
+            .values(
+                execution_locked_at=None,
+                dbos_workflow_id=wf_id,
+                execution_state=func.coalesce(Issues.execution_state, empty_jsonb).op(
+                    "||", return_type=JSONB
+                )(merge_obj),
+            )
+        )
     return wf_id
 
 

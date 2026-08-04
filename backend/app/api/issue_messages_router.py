@@ -128,14 +128,20 @@ async def _load_awaiting_marker(workflow_id: str) -> Optional[dict]:
     2026-08-03 E2E 实测修正，见 input_gate.mark_awaiting_input）。"""
     import json
 
-    from app.db import engine as db_engine
+    from sqlalchemy import select
+    from sqlalchemy.dialects.postgresql import JSONB
 
-    row = await db_engine.fetch_one(
-        "SELECT execution_state->'awaiting_input' AS marker FROM public.issues "
-        "WHERE dbos_workflow_id = :wf",
-        {"wf": workflow_id},
-    )
-    marker = (row or {}).get("marker")
+    from app.db.session import read_scope
+    from app.models import Issues
+
+    async with read_scope() as session:
+        marker = (
+            await session.execute(
+                select(
+                    Issues.execution_state.op("->", return_type=JSONB)("awaiting_input")
+                ).where(Issues.dbos_workflow_id == workflow_id)
+            )
+        ).scalar_one_or_none()
     if isinstance(marker, str):
         try:
             marker = json.loads(marker)

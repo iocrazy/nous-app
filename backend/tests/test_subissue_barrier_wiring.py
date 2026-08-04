@@ -12,6 +12,8 @@ test_subissue_barrier.py.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 # ── repository post-callback ──────────────────────────────────────────────────
@@ -76,16 +78,45 @@ async def test_transition_status_survives_hook_failure(monkeypatch):
 # ── workflow-body call site ───────────────────────────────────────────────────
 
 
+class _FakeScalarResult:
+    def __init__(self, scalar: Any) -> None:
+        self._scalar = scalar
+
+    def scalar_one_or_none(self) -> Any:
+        return self._scalar
+
+
+class _FakeSession:
+    def __init__(self, scalar: Any = None, *, raise_on_execute: bool = False) -> None:
+        self.calls: list[Any] = []
+        self._scalar = scalar
+        self._raise = raise_on_execute
+
+    async def execute(self, stmt: Any) -> _FakeScalarResult:
+        self.calls.append(stmt)
+        if self._raise:
+            raise RuntimeError("db down")
+        return _FakeScalarResult(self._scalar)
+
+
+class _ScopeCM:
+    def __init__(self, session: _FakeSession) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> _FakeSession:
+        return self._session
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
+
+
 @pytest.mark.asyncio
 async def test_maybe_fire_reads_landed_status_and_calls_hook(monkeypatch):
     import app.workflows.issue_lifecycle as life
-    from app.db import engine as db_engine
+    from app.db import session as db_session
 
-    async def fake_fetch_one(sql, params):
-        assert params == {"id": 77}
-        return {"status": "done"}
-
-    monkeypatch.setattr(db_engine, "fetch_one", fake_fetch_one)
+    session = _FakeSession(scalar="done")
+    monkeypatch.setattr(db_session, "read_scope", lambda: _ScopeCM(session))
 
     calls = []
     import app.services.issues.subissue_barrier as barrier_mod
@@ -103,12 +134,10 @@ async def test_maybe_fire_reads_landed_status_and_calls_hook(monkeypatch):
 @pytest.mark.asyncio
 async def test_maybe_fire_swallows_read_failure(monkeypatch):
     import app.workflows.issue_lifecycle as life
-    from app.db import engine as db_engine
+    from app.db import session as db_session
 
-    async def boom(sql, params):
-        raise RuntimeError("db down")
-
-    monkeypatch.setattr(db_engine, "fetch_one", boom)
+    session = _FakeSession(raise_on_execute=True)
+    monkeypatch.setattr(db_session, "read_scope", lambda: _ScopeCM(session))
 
     # Must not raise — the workflow's own completion must never be aborted.
     await life._maybe_fire_subissue_barrier(77)

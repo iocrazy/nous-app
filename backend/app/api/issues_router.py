@@ -406,12 +406,18 @@ async def dispatch_issue(issue_id: int, auth: AuthDep) -> Issue:
     # repository writes via the app-role engine and the trigger rejects it —
     # use the SET LOCAL ROLE service_role helper instead (same pattern as
     # issue_lifecycle.py execution-field writes).
-    from app.db import engine as db_engine
+    from sqlalchemy import text, update
 
-    await db_engine.execute_as_service_role(
-        "UPDATE public.issues SET dbos_workflow_id = :wf WHERE id = :iid",
-        {"wf": workflow_id, "iid": issue_id},
-    )
+    from app.db.session import write_scope
+    from app.models import Issues
+
+    async with write_scope() as session:
+        await session.execute(text("SET LOCAL ROLE service_role"))
+        await session.execute(
+            update(Issues)
+            .where(Issues.id == issue_id)
+            .values(dbos_workflow_id=workflow_id)
+        )
     row = await issue_repository.get_by_id(issue_id)
     return Issue.model_validate(_normalise_uuid_strs(row))
 

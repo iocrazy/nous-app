@@ -110,39 +110,58 @@ async def mark_awaiting_input(
 
     task_tracking.metadata 同步 best-effort 装饰写保留（今天恒 0 行，若
     未来 dispatch 建了 task 行，Task Center 行高亮即自动点亮）。"""
-    from app.db import engine as db_engine
+    from sqlalchemy import cast, func, literal, select, text, update
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    from app.db.session import read_scope, write_scope
+    from app.models import Issues, TaskTracking
     from app.services.notifications import notify
 
     clipped = (prompt or "")[:_PROMPT_MAX]
     now = datetime.now(timezone.utc).isoformat()
     marker = json.dumps({"prompt": clipped, "since": now, "issue_id": issue_id})
+    empty_jsonb = cast(literal("{}"), JSONB)
+    marker_jsonb = cast(literal(marker), JSONB)
     try:
-        await db_engine.execute_as_service_role(
-            """UPDATE public.issues
-               SET execution_state = COALESCE(execution_state, '{}'::jsonb)
-                   || jsonb_build_object('awaiting_input', (:marker)::jsonb)
-               WHERE id = :iid""",
-            {"marker": marker, "iid": issue_id},
-        )
+        async with write_scope() as session:
+            await session.execute(text("SET LOCAL ROLE service_role"))
+            await session.execute(
+                update(Issues)
+                .where(Issues.id == issue_id)
+                .values(
+                    execution_state=func.coalesce(
+                        Issues.execution_state, empty_jsonb
+                    ).op("||", return_type=JSONB)(
+                        func.jsonb_build_object("awaiting_input", marker_jsonb)
+                    )
+                )
+            )
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"[input_gate] mark issue marker failed issue={issue_id}: {exc}")
     try:
-        await db_engine.execute_as_service_role(
-            """UPDATE public.task_tracking
-               SET metadata = COALESCE(metadata, '{}'::jsonb)
-                   || jsonb_build_object('awaiting_input', (:marker)::jsonb)
-               WHERE dbos_workflow_id = :wf""",
-            {"marker": marker, "wf": workflow_id},
-        )
+        async with write_scope() as session:
+            await session.execute(text("SET LOCAL ROLE service_role"))
+            await session.execute(
+                update(TaskTracking)
+                .where(TaskTracking.dbos_workflow_id == workflow_id)
+                .values(
+                    metadata_=func.coalesce(TaskTracking.metadata_, empty_jsonb).op(
+                        "||", return_type=JSONB
+                    )(func.jsonb_build_object("awaiting_input", marker_jsonb))
+                )
+            )
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"[input_gate] mark metadata failed wf={workflow_id}: {exc}")
     # 深链 link_id 口径：issue 链接携带人类标识符（MH-N），issues 路由按它
     # 解析（scheduled_master 的 autopilot producer 同款,含 str(id) 兜底）。
     link_id = str(issue_id)
     try:
-        ident = await db_engine.fetch_val(
-            "SELECT identifier FROM public.issues WHERE id = :id", {"id": issue_id}
-        )
+        async with read_scope() as session:
+            ident = (
+                await session.execute(
+                    select(Issues.identifier).where(Issues.id == issue_id)
+                )
+            ).scalar_one_or_none()
         if ident:
             link_id = str(ident)
     except Exception as exc:  # noqa: BLE001
@@ -162,27 +181,43 @@ async def mark_awaiting_input(
 async def clear_awaiting_input(*, workflow_id: str) -> None:
     """移除等待标记（issues 权威位 + task_tracking 装饰位）。
     inbox 行有意保留（用户稍后仍可从收件箱进入）。"""
-    from app.db import engine as db_engine
+    from sqlalchemy import text, update
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    from app.db.session import write_scope
+    from app.models import Issues, TaskTracking
 
     try:
-        await db_engine.execute_as_service_role(
-            """UPDATE public.issues
-               SET execution_state = execution_state - 'awaiting_input'
-               WHERE dbos_workflow_id = :wf
-                 AND execution_state ? 'awaiting_input'""",
-            {"wf": workflow_id},
-        )
+        async with write_scope() as session:
+            await session.execute(text("SET LOCAL ROLE service_role"))
+            await session.execute(
+                update(Issues)
+                .where(
+                    Issues.dbos_workflow_id == workflow_id,
+                    Issues.execution_state.has_key("awaiting_input"),
+                )
+                .values(
+                    execution_state=Issues.execution_state.op("-", return_type=JSONB)(
+                        "awaiting_input"
+                    )
+                )
+            )
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             f"[input_gate] clear issue marker failed wf={workflow_id}: {exc}"
         )
     try:
-        await db_engine.execute_as_service_role(
-            """UPDATE public.task_tracking
-               SET metadata = metadata - 'awaiting_input'
-               WHERE dbos_workflow_id = :wf""",
-            {"wf": workflow_id},
-        )
+        async with write_scope() as session:
+            await session.execute(text("SET LOCAL ROLE service_role"))
+            await session.execute(
+                update(TaskTracking)
+                .where(TaskTracking.dbos_workflow_id == workflow_id)
+                .values(
+                    metadata_=TaskTracking.metadata_.op("-", return_type=JSONB)(
+                        "awaiting_input"
+                    )
+                )
+            )
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"[input_gate] clear metadata failed wf={workflow_id}: {exc}")
 
@@ -215,13 +250,18 @@ async def _cancel_workflow(workflow_id: str) -> None:
 async def _clear_issue_lock(workflow_id: str) -> None:
     """按 dbos_workflow_id 定位（atomic_checkout 写过它,比 task_tracking.issue_id
     回填更可靠）,释放被 reap 的 dispatch 持有的 issue 执行锁。"""
-    from app.db import engine as db_engine
+    from sqlalchemy import text, update
 
-    await db_engine.execute_as_service_role(
-        "UPDATE public.issues SET execution_locked_at = NULL "
-        "WHERE dbos_workflow_id = :wf",
-        {"wf": workflow_id},
-    )
+    from app.db.session import write_scope
+    from app.models import Issues
+
+    async with write_scope() as session:
+        await session.execute(text("SET LOCAL ROLE service_role"))
+        await session.execute(
+            update(Issues)
+            .where(Issues.dbos_workflow_id == workflow_id)
+            .values(execution_locked_at=None)
+        )
 
 
 async def reap_stale_input_waits(*, current_version: str) -> int:

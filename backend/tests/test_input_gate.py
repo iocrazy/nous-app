@@ -96,22 +96,26 @@ async def test_send_async_falls_back_to_singleton_without_client():
 def test_awaiting_marker_authoritative_home_is_issues_table():
     """标记权威位钉在 issues.execution_state —— issue dispatch 没有
     task_tracking 行（2026-08-03 E2E 实测），写回 task_tracking 独家会让
-    回复分流永远查不到 marker、降级旧路径撞 dispatch 自己的执行锁。"""
+    回复分流永远查不到 marker、降级旧路径撞 dispatch 自己的执行锁。
+
+    ORM 化后（Phase B1）不再有字面 SQL 字符串好 grep，改为断言源码引用了
+    ``Issues`` ORM 模型（mark/clear 都是 ``update(Issues)``）；
+    ``_fetch_awaiting_rows`` 是 dbos.* 结构性例外，仍保留字面 SQL。"""
     import inspect
 
     mark_src = inspect.getsource(input_gate.mark_awaiting_input)
-    assert "UPDATE public.issues" in mark_src
+    assert "update(Issues)" in mark_src
     clear_src = inspect.getsource(input_gate.clear_awaiting_input)
-    assert "UPDATE public.issues" in clear_src
+    assert "update(Issues)" in clear_src
     fetch_src = inspect.getsource(input_gate._fetch_awaiting_rows)
-    assert "FROM public.issues" in fetch_src
+    assert "FROM public.issues" in fetch_src  # dbos.* JOIN — rule-3 exception
 
     # app.api.__init__ 的同名 APIRouter 变量会遮蔽模块名，走 importlib 直取。
     import importlib
 
     router_mod = importlib.import_module("app.api.issue_messages_router")
     load_src = inspect.getsource(router_mod._load_awaiting_marker)
-    assert "FROM public.issues" in load_src
+    assert "Issues" in load_src and "select(" in load_src
 
 
 async def test_signal_user_reply_swallow_errors_returns_false():
