@@ -51,6 +51,60 @@ def derive_scene_number(index: int) -> str:
     return str(index + 1)
 
 
+def effective_scene_number(
+    scene_number: Optional[str], index: int, is_locked: bool
+) -> Optional[str]:
+    """The ``scene_no_in_episode`` value for ONE scene — the single rule every
+    consumer must use (spec §4.3's honest field name).
+
+    The locked ``scene_number`` when it is set; else the writing-phase number
+    DERIVED from canonical position — UNLESS the script is already locked, in
+    which case a scene with no ``scene_number`` yet is one created after lock
+    but not yet positioned (``create_after_lock`` hasn't run for it), and
+    deriving a positional guess for it could collide with a real locked
+    number. ``None`` in that one case is honest: it has no number yet.
+
+    Lived in ``script_scene_repository.py`` as a private helper until A4
+    needed the identical rule for the agent-tool read path
+    (``scoped_script_gateway.list_scenes_in_scope``). Two copies of a
+    numbering rule is exactly the drift this module exists to prevent, so it
+    moved here and the repository imports it.
+    """
+    if scene_number is not None:
+        return scene_number
+    if is_locked:
+        return None
+    return derive_scene_number(index)
+
+
+def derive_shot_label(
+    scene_no_in_episode: Optional[str], shot_number: Optional[int]
+) -> Optional[str]:
+    """Human-facing shot label, e.g. scene ``"3A"`` shot ``2`` -> ``"3A-02"``.
+
+    A4 DECISION (see the A4 report + plan §A4's second warning block): the
+    label is DERIVED AT READ TIME and never persisted. ``script_shots``
+    keeps its existing scene-internal integer ``shot_number`` (written by
+    ``create_many``'s ``MAX+1``, read by ``scope_resolver``) unchanged — this
+    function is the composition of that integer with A3's stable
+    ``scene_no_in_episode``, computed fresh on every read.
+
+    Persisting the composite instead would re-create the exact bug A3 was
+    written to kill: during the writing phase the scene half is derived from
+    position and legitimately CHANGES when a scene is inserted, so a frozen
+    ``3-01`` on a shot would silently stop matching its own scene — two shots
+    in one episode ending up labelled ``01-01``. Deriving keeps the two
+    halves in lockstep by construction, before AND after numbering lock.
+
+    ``None`` when either half is unknown (an unlocked-insert scene with no
+    number yet, or a shot row with a NULL ``shot_number``) — the caller shows
+    nothing rather than a label that could collide with a real one.
+    """
+    if scene_no_in_episode is None or shot_number is None:
+        return None
+    return f"{scene_no_in_episode}-{int(shot_number):02d}"
+
+
 def parse_scene_number(value: str) -> Tuple[int, str]:
     """Split a locked scene number into ``(base, letter_suffix)``.
 

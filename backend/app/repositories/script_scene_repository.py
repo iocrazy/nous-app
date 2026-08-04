@@ -35,6 +35,7 @@ from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 from app.services.script.scene_numbering import (
     compute_locked_insert_number,
     derive_scene_number,
+    effective_scene_number,
     parse_scene_number,
     scene_number_sort_key,
 )
@@ -95,22 +96,10 @@ def _row(obj: Any) -> Dict[str, Any]:
     return _parity(_orm_obj_to_dict(obj, _SCENES_N2A))
 
 
-def _effective_number(
-    scene_number: Optional[str], index: int, is_locked: bool
-) -> Optional[str]:
-    """The ``scene_no_in_episode`` value for one scene: the locked
-    ``scene_number`` when set, else the writing-phase number DERIVED from
-    canonical position (never persisted) — UNLESS the script is already
-    locked, in which case a scene with no ``scene_number`` yet is one
-    created after lock but not yet positioned (``create_after_lock`` hasn't
-    run for it), and deriving a positional guess for it could collide with a
-    real locked number. ``None`` in that one case is honest: it has no
-    number yet."""
-    if scene_number is not None:
-        return scene_number
-    if is_locked:
-        return None
-    return derive_scene_number(index)
+# The private ``_effective_number`` helper used to live here; A4 moved it to
+# scene_numbering.effective_scene_number so the agent-tool read path
+# (scoped_script_gateway) computes scene_no_in_episode by the SAME rule
+# instead of keeping a second copy.
 
 
 def _scene_write_values(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -195,7 +184,7 @@ class ScriptSceneRepository:
             out: List[Dict[str, Any]] = []
             for index, r in enumerate(rows):
                 d = _row(r)
-                d["scene_no_in_episode"] = _effective_number(
+                d["scene_no_in_episode"] = effective_scene_number(
                     d["scene_number"], index, is_locked
                 )
                 out.append(d)

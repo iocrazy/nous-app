@@ -72,6 +72,19 @@ _DEFAULT_COMPACTOR = ContextCompactor()
 # tool: its handler is injected onto runner.finish_issue_handler only for
 # issue-context turns, and its spec is only added to composed.tools there, so
 # regular chat turns never see or accept it.
+# A4 screenwriting tools (spec §5.1). Unlike ResourceFetch / GenerateImage /
+# FinishIssue there is no injected handler to configure: the handlers are
+# stateless and derive everything they need from the run context, so they are
+# dispatched by direct import below. That is deliberate — an injected handler
+# means every dispatch path must remember to inject it, and a path that
+# forgets gets a tool that is advertised (the spec comes from the composer,
+# which every path shares) but inert. Authorization does NOT depend on this:
+# the A1 capability gate runs in the PreToolUse chain and the A2 resolver runs
+# inside each handler.
+SCREENWRITING_TOOL_NAMES: frozenset[str] = frozenset(
+    {"ListScenes", "ReadScene", "CreateShot", "UpdateShot", "ProposeEdit"}
+)
+
 SUPPORTED_TOOLS: frozenset[str] = frozenset(
     {
         "Skill",
@@ -80,6 +93,7 @@ SUPPORTED_TOOLS: frozenset[str] = frozenset(
         "FinishIssue",
         "GenerateImage",
         "GenerateVideo",
+        *SCREENWRITING_TOOL_NAMES,
     }
 )
 
@@ -289,6 +303,12 @@ class AgentRunner:
         user_id: Optional["UUID"] = None,
         session_id: Optional["UUID"] = None,
         trigger: str = "chat_stream",
+        # A4: scope for the AUTO-created recorder only (ignored when the
+        # caller supplies its own ``recorder`` — that one is already bound by
+        # whoever built it). Server-derived values only; never pass anything
+        # that came out of a tool argument or model output.
+        project_id: Optional[int] = None,
+        episode_id: Optional[int] = None,
     ):
         """Wave H (B) + Phase P (P1) + R4: incremental streaming with tool_calls.
 
@@ -324,6 +344,23 @@ class AgentRunner:
         # R4: optionally wrap in RunRecorder when caller didn't supply one
         async with AsyncExitStack() as _stack:
             if recorder is None and auto_recorder and user_id is not None:
+                # A4: this recorder used to stamp NEITHER scope column, so a
+                # run created here could never use the screenwriting tools.
+                # Two server-side sources, in order: the explicit kwargs a
+                # caller that knows its project passes, and — failing that —
+                # this runner's own parent run (set when the stack was built
+                # for a delegated/sub-agent turn), inherited verbatim so a
+                # child is never wider than its parent. Neither available ⇒
+                # unbound, and the tools say so.
+                from app.services.ai.scope.scope_binding import (
+                    resolve_dispatch_scope,
+                )
+
+                _scope = await resolve_dispatch_scope(
+                    project_id=project_id,
+                    episode_id=episode_id,
+                    parent_run_id=self.parent_run_id,
+                )
                 recorder = await _stack.enter_async_context(
                     RunRecorder(
                         agent_id=composed.agent_id,
@@ -331,6 +368,7 @@ class AgentRunner:
                         trigger=trigger,
                         session_id=session_id,
                         model=composed.model,
+                        **_scope.as_recorder_kwargs(),
                     )
                 )
                 inc_metric("stream_turn_auto_recorder")
@@ -711,6 +749,10 @@ class AgentRunner:
                             args,
                             self._media_run_context(recorder, composed),
                         )
+                elif tool_name in SCREENWRITING_TOOL_NAMES:
+                    result = await self._dispatch_screenwriting(
+                        tool_name, args, recorder, composed
+                    )
                 elif is_mcp:
                     # G3: route to outbound MCP server. Mirrors run_turn
                     # error handling — transport errors → tool result
@@ -869,6 +911,50 @@ class AgentRunner:
         except Exception as fi_exc:  # noqa: BLE001
             logger.warning(f"[AgentRunner] FinishIssue handler raised: {fi_exc!r}")
             return {"error": f"FinishIssue failed: {fi_exc.__class__.__name__}"}
+
+    async def _dispatch_screenwriting(
+        self,
+        tool_name: str,
+        args: dict,
+        recorder: Optional[RunRecorder],
+        composed: "ComposedSystemPrompt",
+    ) -> dict:
+        """Run one A4 screenwriting tool.
+
+        The handler needs only ``run_id`` (from which ``scope_for_run``
+        re-derives the run's server-bound scope) plus identity for logging —
+        exactly what ``_media_run_context`` already assembles, so it is
+        reused rather than duplicated.
+
+        Without a recorder there is no ``agent_runs`` row, hence no scope,
+        hence nothing these tools may touch. Say so explicitly instead of
+        letting ``scope_for_run(None)`` return None and surfacing the generic
+        "no project bound" message — an un-recorded run is a wiring problem,
+        not a user-facing scope problem, and the two need different fixes.
+        """
+        from app.services.ai.tools.screenwriting_tools import SCREENWRITING_HANDLERS
+
+        if recorder is None or recorder.run_id is None:
+            return {
+                "ok": False,
+                "error": (
+                    f"{tool_name} is unavailable: this turn is not recorded as "
+                    "an agent run, so it carries no script scope."
+                ),
+                "error_code": "no_run_context",
+            }
+        handler = SCREENWRITING_HANDLERS.get(tool_name)
+        if handler is None:  # pragma: no cover — names come from one frozenset
+            return {"ok": False, "error": f"unknown screenwriting tool {tool_name}"}
+        try:
+            return await handler(args, self._media_run_context(recorder, composed))
+        except Exception as exc:  # noqa: BLE001 — never raise into the loop
+            logger.warning(f"[AgentRunner] {tool_name} raised: {exc!r}")
+            return {
+                "ok": False,
+                "error": f"{tool_name} failed: {exc.__class__.__name__}",
+                "error_code": "tool_error",
+            }
 
     def _media_run_context(
         self, recorder: Optional[RunRecorder], composed: "ComposedSystemPrompt"
@@ -1270,6 +1356,10 @@ class AgentRunner:
                             args,
                             self._media_run_context(recorder, composed),
                         )
+                elif tool_name in SCREENWRITING_TOOL_NAMES:
+                    result = await self._dispatch_screenwriting(
+                        tool_name, args, recorder, composed
+                    )
                 elif is_mcp:
                     # Q5: route to outbound MCP server. Tool errors
                     # (server returned isError=true) come back as a

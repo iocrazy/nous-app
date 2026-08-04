@@ -1,0 +1,704 @@
+"""Adversarial tests for the A4 screenwriting tools — ListScenes / ReadScene /
+CreateShot / UpdateShot / ProposeEdit.
+
+Three enforcement layers are exercised SEPARATELY, because each fails in a
+different place and a test that only covers one would pass while the other is
+broken:
+
+  1. The A1 capability gate (``HighRiskCapabilityGateHook``) — runs in the
+     PreToolUse chain, i.e. BEFORE any handler is entered. Tested by driving
+     the hook directly with each tool name.
+  2. The A2 resolver — runs inside each handler, turning a model-supplied id
+     into an authorized row or a ``Denied``. Tested by handing a handler an
+     id whose row belongs to another project and asserting BOTH that the
+     result is a visible error and that an audit row was written.
+  3. The gateway's own rules (shot numbering, field whitelist, proposal
+     validation) — tested against a fake session.
+
+Unit suite, no DSN: the same fake-session style as ``test_scope_resolver.py``.
+"""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+from uuid import UUID
+
+import pytest
+
+import app.services.ai.scope.scope_resolver as resolver_mod
+import app.services.ai.scope.scoped_script_gateway as gateway_mod
+import app.services.ai.tools.screenwriting_tools as tools_mod
+from app.services.ai.scope.agent_run_scope import AgentRunScope
+from app.services.ai.scope.scope_resolver import ResolvedScene, ResolvedShot
+from app.services.ai.tools.screenwriting_tools import SCREENWRITING_HANDLERS
+from app.services.infra.hooks import HookContext
+from app.services.infra.hooks.high_risk_capability_gate import (
+    TOOL_REQUIREMENTS,
+    HighRiskCapabilityGateHook,
+)
+
+_RUN_ID = "800100000000000009"
+_USER_ID = "22222222-2222-2222-2222-222222222222"
+_PROJECT_A = 900100000000000001
+_PROJECT_B = 900100000000000002  # a DIFFERENT project — the cross-tenant target
+_TEAM_A = 900100000000000003
+_SCRIPT_ID = 700100000000000004
+_SCENE_ID = 700100000000000001
+_SHOT_ID = 700100000000000002
+
+_READ_TOOLS = ("ListScenes", "ReadScene")
+_WRITE_TOOLS = ("CreateShot", "UpdateShot")
+_PROPOSE_TOOLS = ("ProposeEdit",)
+_ALL_TOOLS = _READ_TOOLS + _WRITE_TOOLS + _PROPOSE_TOOLS
+
+_RUN_CONTEXT = {
+    "run_id": _RUN_ID,
+    "user_id": _USER_ID,
+    "team_id": _TEAM_A,
+    "agent_id": "00000000-0000-0000-0000-000000000002",
+}
+
+
+def _scope(project_id=_PROJECT_A, team_id=_TEAM_A, episode_id=None) -> AgentRunScope:
+    return AgentRunScope(
+        run_id=_RUN_ID,
+        user_id=_USER_ID,
+        project_id=project_id,
+        team_id=team_id,
+        episode_id=episode_id,
+    )
+
+
+def _agent(write_level: str | None = None, **caps) -> dict:
+    profile: dict = dict(caps)
+    if write_level is not None:
+        profile["write_level"] = write_level
+    return {"capability_profile": {"capabilities": profile}}
+
+
+def _hook_ctx(tool_name: str) -> HookContext:
+    return HookContext(
+        run_id=_RUN_ID,
+        agent_id=UUID("00000000-0000-0000-0000-000000000002"),
+        agent_slug="screenwriter",
+        user_id=UUID(_USER_ID),
+        session_id=None,
+        tool_name=tool_name,
+        tool_args={},
+        accumulated_prompt_tokens=0,
+        accumulated_completion_tokens=0,
+        accumulated_cost_cents=0.0,
+        iteration=1,
+    )
+
+
+# ====================================================================== #
+# Layer 1 — the A1 capability gate. Every tool is gated; no tool is a
+# free baseline; and a denial is a VISIBLE abort, not a silent pass.
+# ====================================================================== #
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", _ALL_TOOLS)
+async def test_every_screenwriting_tool_is_registered_with_the_gate(tool_name):
+    """A tool absent from TOOL_REQUIREMENTS passes the gate unconditionally.
+    Forgetting one entry is therefore a silent hole, not a crash — pin it."""
+    assert tool_name in TOOL_REQUIREMENTS
+    assert TOOL_REQUIREMENTS[tool_name].write_level is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", _ALL_TOOLS)
+async def test_ungranted_agent_is_denied_every_tool(tool_name):
+    """Fail-closed default: an agent with no capability_profile at all — the
+    entire existing fleet — reaches none of these tools, not even the reads."""
+    hook = HighRiskCapabilityGateHook(agent=None)
+    result = await hook(_hook_ctx(tool_name))
+    assert result.decision == "abort"
+    # The denial must be legible, not an empty abort: the model and the
+    # transcript both surface abort_reason.
+    assert tool_name in result.abort_reason
+    assert "none" in result.abort_reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", _ALL_TOOLS)
+async def test_write_granted_agent_is_allowed_every_tool(tool_name):
+    hook = HighRiskCapabilityGateHook(agent=_agent("write"))
+    result = await hook(_hook_ctx(tool_name))
+    assert result.decision == "continue"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", _WRITE_TOOLS)
+async def test_propose_only_agent_cannot_write_shots(tool_name):
+    """The grading is ordinal and the middle tier must not leak upward: an
+    agent trusted to SUGGEST revisions is not thereby trusted to commit
+    storyboard cards."""
+    hook = HighRiskCapabilityGateHook(agent=_agent("propose"))
+    result = await hook(_hook_ctx(tool_name))
+    assert result.decision == "abort"
+    assert "'write'" in result.abort_reason and "'propose'" in result.abort_reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", _READ_TOOLS + _PROPOSE_TOOLS)
+async def test_propose_only_agent_may_read_and_propose(tool_name):
+    hook = HighRiskCapabilityGateHook(agent=_agent("propose"))
+    assert (await hook(_hook_ctx(tool_name))).decision == "continue"
+
+
+@pytest.mark.asyncio
+async def test_read_only_agent_cannot_propose_edits():
+    hook = HighRiskCapabilityGateHook(agent=_agent("read"))
+    result = await hook(_hook_ctx("ProposeEdit"))
+    assert result.decision == "abort"
+    assert "'propose'" in result.abort_reason and "'read'" in result.abort_reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", _READ_TOOLS)
+async def test_read_only_agent_may_read(tool_name):
+    hook = HighRiskCapabilityGateHook(agent=_agent("read"))
+    assert (await hook(_hook_ctx(tool_name))).decision == "continue"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", _ALL_TOOLS)
+async def test_malformed_write_level_denies(tool_name):
+    """A profile that says ``write_level: true`` (or "WRITE", or 1) grants
+    nothing — the fail-closed parser only accepts the exact literals."""
+    hook = HighRiskCapabilityGateHook(
+        agent={"capability_profile": {"capabilities": {"write_level": True}}}
+    )
+    assert (await hook(_hook_ctx(tool_name))).decision == "abort"
+
+
+# ====================================================================== #
+# Layer 2 — the A2 resolver, inside each handler.
+# ====================================================================== #
+
+
+class _FakeResult:
+    def __init__(self, *, first_row=None, scalar=None, all_rows=None):
+        self._first_row = first_row
+        self._scalar = scalar
+        self._all = all_rows or []
+
+    def first(self):
+        return self._first_row
+
+    def scalars(self):
+        return SimpleNamespace(all=lambda: self._all, first=lambda: self._first_row)
+
+    def all(self):
+        return self._all
+
+
+class _CaptureSession:
+    def __init__(self, results=None):
+        self.statements: list = []
+        self._results = list(results or [])
+
+    async def execute(self, stmt):
+        self.statements.append(stmt)
+        return self._results.pop(0) if self._results else _FakeResult()
+
+    async def scalar(self, stmt):
+        self.statements.append(stmt)
+        result = self._results.pop(0) if self._results else _FakeResult()
+        return result._scalar if isinstance(result, _FakeResult) else result
+
+
+class _ScopeCtx:
+    def __init__(self, session):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def _scene_row(project_id, team_id=_TEAM_A, episode_id=None):
+    return SimpleNamespace(
+        id=_SCENE_ID,
+        script_id=_SCRIPT_ID,
+        heading_int_ext="INT",
+        location_text="Kitchen",
+        time_of_day="DAY",
+        content_json=[{"id": "el_1", "type": "action", "text": "She waits."}],
+        content_version=3,
+        project_id=project_id,
+        team_id=team_id,
+        episode_id=episode_id,
+    )
+
+
+def _shot_row(project_id, team_id=_TEAM_A, episode_id=None):
+    return SimpleNamespace(
+        id=_SHOT_ID,
+        scene_id=_SCENE_ID,
+        shot_number=1,
+        shot_type="MS",
+        status="empty",
+        project_id=project_id,
+        team_id=team_id,
+        episode_id=episode_id,
+    )
+
+
+def _audit_inserts(session) -> list:
+    return [s for s in session.statements if s.__class__.__name__ == "Insert"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tool_name,args,row_factory",
+    [
+        ("ReadScene", {"scene_id": str(_SCENE_ID)}, _scene_row),
+        ("CreateShot", {"scene_id": str(_SCENE_ID)}, _scene_row),
+        ("ProposeEdit", {"scene_id": str(_SCENE_ID)}, _scene_row),
+        ("UpdateShot", {"shot_id": str(_SHOT_ID)}, _shot_row),
+    ],
+)
+async def test_id_outside_the_runs_scope_is_denied_and_audited(
+    tool_name, args, row_factory
+):
+    """The core threat (spec §3.1): the model supplies a real, existing id
+    that belongs to ANOTHER project. The row is found — so a naive
+    "does it exist" check would pass — and must still be refused."""
+    session = _CaptureSession([_FakeResult(first_row=row_factory(_PROJECT_B))])
+    if tool_name == "ProposeEdit":
+        args = {**args, "element_ids": ["el_1"], "proposed_text": "New line."}
+
+    with (
+        patch.multiple(
+            resolver_mod,
+            read_scope=lambda: _ScopeCtx(session),
+            write_scope=lambda: _ScopeCtx(session),
+        ),
+        patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=_scope())),
+    ):
+        result = await SCREENWRITING_HANDLERS[tool_name](args, _RUN_CONTEXT)
+
+    assert result["ok"] is False
+    assert result["error_code"] == "scope_denied"
+    # Visible, not a silent empty success: the model is told the id failed.
+    assert "not accessible in this run" in result["error"]
+    # ...and the attempt left a trail.
+    assert _audit_inserts(session), "a denied resolution wrote no audit row"
+
+
+@pytest.mark.asyncio
+async def test_denial_does_not_leak_which_project_owns_the_id():
+    """Anti-enumeration: the message handed back to the model must not
+    distinguish "no such scene" from "someone else's scene"."""
+    session = _CaptureSession([_FakeResult(first_row=_scene_row(_PROJECT_B))])
+    with (
+        patch.multiple(
+            resolver_mod,
+            read_scope=lambda: _ScopeCtx(session),
+            write_scope=lambda: _ScopeCtx(session),
+        ),
+        patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=_scope())),
+    ):
+        denied = await SCREENWRITING_HANDLERS["ReadScene"](
+            {"scene_id": str(_SCENE_ID)}, _RUN_CONTEXT
+        )
+
+    missing = _CaptureSession([_FakeResult(first_row=None)])
+    with (
+        patch.multiple(
+            resolver_mod,
+            read_scope=lambda: _ScopeCtx(missing),
+            write_scope=lambda: _ScopeCtx(missing),
+        ),
+        patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=_scope())),
+    ):
+        absent = await SCREENWRITING_HANDLERS["ReadScene"](
+            {"scene_id": str(_SCENE_ID)}, _RUN_CONTEXT
+        )
+
+    assert denied["error"] == absent["error"]
+    assert str(_PROJECT_B) not in denied["error"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", _ALL_TOOLS)
+async def test_unbound_scope_denies_every_tool_visibly(tool_name):
+    """The failure mode A4 exists to fix, kept as a regression pin: a run
+    with no project stamped must refuse every tool AND say why — a silent
+    empty scene list would teach the model the script is blank."""
+    with patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=None)):
+        result = await SCREENWRITING_HANDLERS[tool_name]({}, _RUN_CONTEXT)
+    assert result["ok"] is False
+    assert result["error_code"] == "scope_unbound"
+    assert "No script project is bound" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_scope_bound_to_a_project_but_scene_in_same_team_is_still_denied():
+    """Same user, same TEAM, different project: still denied. Membership is
+    not the authorization model for a dispatched run (scope is)."""
+    session = _CaptureSession(
+        [_FakeResult(first_row=_scene_row(_PROJECT_B, team_id=_TEAM_A))]
+    )
+    with (
+        patch.multiple(
+            resolver_mod,
+            read_scope=lambda: _ScopeCtx(session),
+            write_scope=lambda: _ScopeCtx(session),
+        ),
+        patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=_scope())),
+    ):
+        result = await SCREENWRITING_HANDLERS["ReadScene"](
+            {"scene_id": str(_SCENE_ID)}, _RUN_CONTEXT
+        )
+    assert result["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_episode_scoped_run_denies_a_scene_from_another_episode():
+    """Now that mig 404 makes scope.episode_id real, a run narrowed to
+    episode A must not reach episode B's scenes even inside its own
+    project."""
+    episode_a, episode_b = 111, 222
+    session = _CaptureSession(
+        [_FakeResult(first_row=_scene_row(_PROJECT_A, episode_id=episode_b))]
+    )
+    with (
+        patch.multiple(
+            resolver_mod,
+            read_scope=lambda: _ScopeCtx(session),
+            write_scope=lambda: _ScopeCtx(session),
+        ),
+        patch.object(
+            tools_mod,
+            "scope_for_run",
+            AsyncMock(return_value=_scope(episode_id=episode_a)),
+        ),
+    ):
+        result = await SCREENWRITING_HANDLERS["ReadScene"](
+            {"scene_id": str(_SCENE_ID)}, _RUN_CONTEXT
+        )
+    assert result["ok"] is False
+    assert result["error_code"] == "scope_denied"
+
+
+# ====================================================================== #
+# Layer 3 — gateway rules: shot numbering, field whitelist, proposals.
+# ====================================================================== #
+
+
+def _resolved_scene(content=None, version=3) -> ResolvedScene:
+    return ResolvedScene(
+        id=_SCENE_ID,
+        script_id=_SCRIPT_ID,
+        project_id=_PROJECT_A,
+        team_id=_TEAM_A,
+        episode_id=None,
+        heading_int_ext="INT",
+        location_text="Kitchen",
+        time_of_day="DAY",
+        content_json=(
+            content
+            if content is not None
+            else [{"id": "el_1", "type": "action", "text": "She waits."}]
+        ),
+        content_version=version,
+    )
+
+
+def _resolved_shot() -> ResolvedShot:
+    return ResolvedShot(
+        id=_SHOT_ID,
+        scene_id=_SCENE_ID,
+        project_id=_PROJECT_A,
+        team_id=_TEAM_A,
+        episode_id=None,
+        shot_number=4,
+        shot_type="MS",
+        status="empty",
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_shot_assigns_the_next_scene_internal_integer():
+    """A4's shot-numbering decision, pinned: ``shot_number`` stays the
+    existing scene-scoped INTEGER assigned server-side as MAX+1 — the same
+    ladder ``ScriptShotRepository.create_many`` uses, so agent-created and
+    Auto-Storyboard-created cards interleave instead of colliding."""
+    session = _CaptureSession(
+        [
+            _FakeResult(scalar=7),  # MAX(shot_number)
+            _FakeResult(scalar=7000),  # MAX(sort_order)
+            _FakeResult(
+                first_row=SimpleNamespace(
+                    id=_SHOT_ID,
+                    shot_number=8,
+                    shot_type="CU",
+                    camera_angle=None,
+                    camera_movement=None,
+                    focal_length="85mm",
+                    description="Her hands.",
+                    status="empty",
+                )
+            ),
+        ]
+    )
+    with (
+        patch.object(gateway_mod, "write_scope", lambda: _ScopeCtx(session)),
+        patch.object(gateway_mod, "scene_no_for", AsyncMock(return_value="3A")),
+    ):
+        shot = await gateway_mod.create_shot(
+            _scope(),
+            _resolved_scene(),
+            {"shot_type": "CU", "focal_length": "85mm", "description": "Her hands."},
+        )
+
+    insert_stmt = next(
+        s for s in session.statements if s.__class__.__name__ == "Insert"
+    )
+    values = insert_stmt.compile().params
+    assert values["shot_number"] == 8
+    assert values["sort_order"] == 7000 + gateway_mod._SORT_ORDER_STEP
+    # And the composite label is DERIVED, never stored.
+    assert shot["shot_label"] == "3A-08"
+    assert "shot_label" not in values
+
+
+@pytest.mark.asyncio
+async def test_create_shot_ignores_a_model_supplied_shot_number_and_status():
+    """The model must not be able to choose its own number (that is how
+    duplicate shot ids happen) or declare a card already rendered."""
+    session = _CaptureSession(
+        [
+            _FakeResult(scalar=0),
+            _FakeResult(scalar=0),
+            _FakeResult(
+                first_row=SimpleNamespace(
+                    id=_SHOT_ID,
+                    shot_number=1,
+                    shot_type=None,
+                    camera_angle=None,
+                    camera_movement=None,
+                    focal_length=None,
+                    description="x",
+                    status="empty",
+                )
+            ),
+        ]
+    )
+    with (
+        patch.object(gateway_mod, "write_scope", lambda: _ScopeCtx(session)),
+        patch.object(gateway_mod, "scene_no_for", AsyncMock(return_value="1")),
+    ):
+        await gateway_mod.create_shot(
+            _scope(),
+            _resolved_scene(),
+            {
+                "shot_number": 99,
+                "status": "done",
+                "image_url": "https://evil.example/x.png",
+                "description": "x",
+            },
+        )
+
+    values = (
+        next(s for s in session.statements if s.__class__.__name__ == "Insert")
+        .compile()
+        .params
+    )
+    assert values["shot_number"] == 1
+    assert "status" not in values
+    assert "image_url" not in values
+
+
+@pytest.mark.asyncio
+async def test_update_shot_rejects_status_and_url_writes():
+    """``UpdateShot`` shares the repository's disjoint-lane discipline: the
+    status machine and the produced-media URLs belong to the generate
+    workflow, never to an agent's parameter edit."""
+    session = _CaptureSession(
+        [
+            _FakeResult(
+                first_row=SimpleNamespace(
+                    id=_SHOT_ID,
+                    shot_number=4,
+                    shot_type="MS",
+                    camera_angle="LOW",
+                    camera_movement=None,
+                    focal_length=None,
+                    description=None,
+                    status="empty",
+                )
+            )
+        ]
+    )
+    with patch.object(gateway_mod, "write_scope", lambda: _ScopeCtx(session)):
+        await gateway_mod.update_shot(
+            _scope(),
+            _resolved_shot(),
+            {"camera_angle": "LOW", "status": "done", "video_url": "x"},
+        )
+
+    values = (
+        next(s for s in session.statements if s.__class__.__name__ == "Update")
+        .compile()
+        .params
+    )
+    assert values["camera_angle"] == "LOW"
+    assert "status" not in values
+    assert "video_url" not in values
+
+
+@pytest.mark.asyncio
+async def test_update_shot_with_no_writable_fields_reports_instead_of_no_op():
+    """A silent success on an empty update teaches the model its edit
+    landed. Say nothing was writable instead."""
+    with (
+        patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=_scope())),
+        patch.object(
+            tools_mod,
+            "resolve_shot",
+            AsyncMock(return_value=_resolved_shot()),
+        ),
+        patch.object(gateway_mod, "update_shot", AsyncMock(return_value=None)),
+    ):
+        result = await SCREENWRITING_HANDLERS["UpdateShot"](
+            {"shot_id": str(_SHOT_ID), "status": "done"}, _RUN_CONTEXT
+        )
+    assert result["ok"] is False
+    assert result["error_code"] == "no_fields"
+
+
+@pytest.mark.asyncio
+async def test_propose_edit_rejects_element_ids_not_in_the_scene():
+    """The proposal's anchors must exist in the scene the resolver
+    authorized — a hallucinated element_id is caught here, not left for the
+    apply path to fail on later."""
+    with (
+        patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=_scope())),
+        patch.object(
+            tools_mod, "resolve_scene", AsyncMock(return_value=_resolved_scene())
+        ),
+    ):
+        result = await SCREENWRITING_HANDLERS["ProposeEdit"](
+            {
+                "scene_id": str(_SCENE_ID),
+                "element_ids": ["el_1", "el_does_not_exist"],
+                "proposed_text": "New line.",
+            },
+            _RUN_CONTEXT,
+        )
+    assert result["ok"] is False
+    assert result["error_code"] == "unknown_element"
+    assert "el_does_not_exist" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_propose_edit_writes_nothing_and_flags_a_stale_base_version():
+    """ProposeEdit is A4's boundary with A5: it produces a reviewable
+    proposal and NEVER touches the script. It also surfaces the cheap half
+    of the §5.2 concurrency contract — a base_content_version that no longer
+    matches means the writer edited meanwhile."""
+    with (
+        patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=_scope())),
+        patch.object(
+            tools_mod,
+            "resolve_scene",
+            AsyncMock(return_value=_resolved_scene(version=9)),
+        ),
+        patch.object(gateway_mod, "scene_no_for", AsyncMock(return_value="4")),
+    ):
+        fresh = await SCREENWRITING_HANDLERS["ProposeEdit"](
+            {
+                "scene_id": str(_SCENE_ID),
+                "element_ids": ["el_1"],
+                "proposed_text": "New line.",
+                "base_content_version": 9,
+            },
+            _RUN_CONTEXT,
+        )
+        stale = await SCREENWRITING_HANDLERS["ProposeEdit"](
+            {
+                "scene_id": str(_SCENE_ID),
+                "element_ids": ["el_1"],
+                "proposed_text": "New line.",
+                "base_content_version": 7,
+            },
+            _RUN_CONTEXT,
+        )
+
+    assert fresh["ok"] is True
+    assert fresh["applied"] is False
+    assert fresh["stale"] is False
+    assert fresh["proposal"]["base_content_version"] == 9
+    assert stale["stale"] is True
+    assert "re-read" in stale["note"]
+
+
+@pytest.mark.asyncio
+async def test_read_scene_surfaces_element_ids_and_the_version_token():
+    with (
+        patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=_scope())),
+        patch.object(
+            tools_mod, "resolve_scene", AsyncMock(return_value=_resolved_scene())
+        ),
+        patch.object(gateway_mod, "scene_no_for", AsyncMock(return_value="2")),
+        patch.object(gateway_mod, "list_shots_for_scene", AsyncMock(return_value=[])),
+    ):
+        result = await SCREENWRITING_HANDLERS["ReadScene"](
+            {"scene_id": str(_SCENE_ID)}, _RUN_CONTEXT
+        )
+    assert result["ok"] is True
+    assert result["scene_no_in_episode"] == "2"
+    assert result["content_version"] == 3
+    assert result["elements"] == [
+        {
+            "element_id": "el_1",
+            "type": "action",
+            "text": "She waits.",
+            "character_id": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_list_scenes_returns_nothing_for_an_unbound_scope():
+    """Gateway-level fail-closed, independent of the handler's own check."""
+    assert await gateway_mod.list_scenes_in_scope(_scope(project_id=None)) == []
+
+
+# ====================================================================== #
+# Spec advertising — a UX filter, never the enforcement.
+# ====================================================================== #
+
+
+def test_specs_are_advertised_by_write_level():
+    from app.services.ai.tools.screenwriting_specs import screenwriting_tool_specs
+
+    def names(level):
+        return {s["function"]["name"] for s in screenwriting_tool_specs(level)}
+
+    assert names("none") == set()
+    assert names("read") == set(_READ_TOOLS)
+    assert names("propose") == set(_READ_TOOLS + _PROPOSE_TOOLS)
+    assert names("write") == set(_ALL_TOOLS)
+
+
+def test_every_advertised_tool_is_dispatchable():
+    """A spec the runner cannot route is a tool that fails mysteriously
+    mid-turn. Keep the three lists in lockstep."""
+    from app.services.ai.runner.agent_runner import (
+        SCREENWRITING_TOOL_NAMES,
+        SUPPORTED_TOOLS,
+    )
+    from app.services.ai.tools.screenwriting_specs import SCREENWRITING_TOOL_SPECS
+
+    assert set(SCREENWRITING_TOOL_SPECS) == set(SCREENWRITING_TOOL_NAMES)
+    assert set(SCREENWRITING_HANDLERS) == set(SCREENWRITING_TOOL_NAMES)
+    assert SCREENWRITING_TOOL_NAMES <= SUPPORTED_TOOLS

@@ -89,7 +89,10 @@ async def test_scope_for_run_derives_from_agent_runs_row():
         [
             _FakeResult(
                 first_row=SimpleNamespace(
-                    user_id=_USER_ID, project_id=_PROJECT_ID, team_id=_TEAM_ID
+                    user_id=_USER_ID,
+                    project_id=_PROJECT_ID,
+                    team_id=_TEAM_ID,
+                    episode_id=None,
                 )
             )
         ]
@@ -155,7 +158,10 @@ async def test_scope_for_run_skips_ownership_check_when_project_id_is_none():
         [
             _FakeResult(
                 first_row=SimpleNamespace(
-                    user_id=_USER_ID, project_id=None, team_id=None
+                    user_id=_USER_ID,
+                    project_id=None,
+                    team_id=None,
+                    episode_id=None,
                 )
             )
         ]
@@ -185,7 +191,10 @@ async def test_scope_for_run_denies_when_user_cannot_read_stamped_project():
         [
             _FakeResult(
                 first_row=SimpleNamespace(
-                    user_id=_USER_ID, project_id=_PROJECT_ID, team_id=_TEAM_ID
+                    user_id=_USER_ID,
+                    project_id=_PROJECT_ID,
+                    team_id=_TEAM_ID,
+                    episode_id=None,
                 )
             )
         ]
