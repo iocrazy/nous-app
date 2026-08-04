@@ -266,9 +266,7 @@ async def test_list_session_accounts_for_check_platform_filter(monkeypatch):
 
     scope, session = _scope_returning([])
     monkeypatch.setattr(mod, "read_scope", scope)
-    await SocialAccountsRepository().list_session_accounts_for_check(
-        platform="douyin"
-    )
+    await SocialAccountsRepository().list_session_accounts_for_check(platform="douyin")
     assert "platform" in _sql(session.statements[0])
     assert "douyin" in _params(session.statements[0]).values()
 

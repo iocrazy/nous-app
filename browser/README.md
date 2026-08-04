@@ -205,7 +205,7 @@ Playwright-supported host OS:
 
 ```bash
 cd browser
-uv venv .venv && uv pip install --python .venv/bin/python -r pyproject.toml --extra dev
+uv sync --frozen --extra dev --no-install-project
 .venv/bin/python -m playwright install chromium   # host OS must be supported
 .venv/bin/python -m pytest -q
 ```
@@ -228,11 +228,20 @@ docker run --rm -e BROWSER_INTERNAL_TOKEN=dev-token nous-browser:test \
   sh -c 'Xvfb :99 -screen 0 1920x1080x24 & sleep 2; python -m pytest -m integration -q'
 ```
 
-## Upgrading Playwright
+## Dependencies and upgrading Playwright
+
+`uv.lock` is committed and the image installs from it with `uv sync --frozen`,
+so a rebuild months from now produces the same environment. `--frozen` turns a
+stale lock into a build error instead of a silent re-resolve.
+
+This matters more here than in a typical service: a Playwright point release can
+change the browser fingerprint and the DOM these validators read. Floating
+versions produce the worst possible failure — no code changed, CI green, and
+session validation quietly starts misjudging live accounts.
 
 The `playwright` pin in `pyproject.toml` and the base image tag in `Dockerfile`
-are **one decision in two files**. Bump them together or the container fails at
-runtime with `Executable doesn't exist`.
+are **one decision in two files**. Bump them together, then re-run `uv lock`, or
+the container fails at runtime with `Executable doesn't exist`.
 
 ## Known gaps / open questions
 

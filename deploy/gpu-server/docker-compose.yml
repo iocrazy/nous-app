@@ -113,8 +113,15 @@ services:
       # Xvfb 虚拟帧缓冲:必须有头运行,headless 的可检测特征会被抖音级风控查出来
       # (spec §2.4)。DISPLAY 与镜像内 Xvfb 启动的显示号一致。
       - DISPLAY=:99
-    # Chromium 默认 /dev/shm 只有 64MB,渲染进程会随机崩(经典症状:
-    # "Target closed" / tab crashed)。1g 是 Playwright 官方 docker 建议档位。
+    # Chromium 默认 /dev/shm 只有 64MB,渲染进程会随机崩("Target closed")。
+    # 保留 1g 而不是缩到 256m,两个理由:
+    #  1. tmpfs 是**按需分配**的,写多少占多少 —— 1g 只是上限,不预留,没有成本。
+    #  2. app/browser_runtime.py 目前传了 `--disable-dev-shm-usage`,该 flag 会让
+    #     Chromium 改用 /tmp 存共享内存段。而容器没挂 volume,/tmp 落在 overlay
+    #     可写层 = **真磁盘**;/dev/shm 则始终是 tmpfs = 内存。对一个专门加载
+    #     已登录页面的浏览器,把渲染缓冲写上磁盘与 §7.6「凭证不落盘」的方向相反。
+    #     所以正解是「给足 /dev/shm + 不要那个 flag」,而不是「留着 flag + 缩 shm」。
+    #     flag 去掉前,这 1g 是免费的安全网(去掉当天就生效,不用再动 compose)。
     shm_size: 1gb
     # chromium 会留一串子进程,没有 PID 1 收割就攒僵尸,最终耗尽 pid。
     init: true
