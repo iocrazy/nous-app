@@ -13,6 +13,9 @@ export interface ModuleStatus {
 }
 
 const TTL_MS = 60_000;
+// Bounded loading: guards render null while loading, so a hung status endpoint
+// must abort to the fail-defaults path, never blank a route indefinitely.
+const TIMEOUT_MS = 5_000;
 
 let cache: { at: number; data: Record<string, ModuleStatus> } | null = null;
 let inFlight: Promise<Record<string, ModuleStatus> | null> | null = null;
@@ -24,6 +27,7 @@ export async function fetchModulesStatus(): Promise<Record<string, ModuleStatus>
     try {
       const resp = await fetch(`${getApiUrl()}/api/v1/modules/status`, {
         headers: await getAuthHeaders(),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
       });
       if (!resp.ok) throw new Error(`modules/status ${resp.status}`);
       const body = await resp.json();

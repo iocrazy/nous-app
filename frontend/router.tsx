@@ -226,8 +226,10 @@ export const router = createBrowserRouter([
           { path: 'billing', element: <SuspenseWrap><BillingPage /></SuspenseWrap> },
           { path: 'todolist', element: <SuspenseWrap><GlobalModuleGuard id="todolist"><TodolistPage /></GlobalModuleGuard></SuspenseWrap> },
           { path: 'todolist/:identifier', element: <SuspenseWrap><GlobalModuleGuard id="todolist"><TodolistPage /></GlobalModuleGuard></SuspenseWrap> },
-          { path: 'issues', element: <SuspenseWrap><IssuesPage /></SuspenseWrap> },
-          { path: 'issues/:identifier', element: <SuspenseWrap><IssuesPage /></SuspenseWrap> },
+          // Issues is the same data plane as Todolist (both served by
+          // issues_router), so it rides the todolist switch.
+          { path: 'issues', element: <SuspenseWrap><GlobalModuleGuard id="todolist"><IssuesPage /></GlobalModuleGuard></SuspenseWrap> },
+          { path: 'issues/:identifier', element: <SuspenseWrap><GlobalModuleGuard id="todolist"><IssuesPage /></GlobalModuleGuard></SuspenseWrap> },
           { path: 'shared', element: <SuspenseWrap><GlobalModuleGuard id="shares"><SharedPage /></GlobalModuleGuard></SuspenseWrap> },
           // Legacy AI Library routes (kept for bookmark compatibility —
           // render without the new secondary sidebar).
