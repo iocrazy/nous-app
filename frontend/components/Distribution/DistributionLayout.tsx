@@ -9,7 +9,10 @@ export const DistributionLayout: React.FC = () => (
   <div className="flex h-full min-h-0">
     <DistributionSidebar />
     <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
-      <div className="flex-1 overflow-y-auto px-8 pb-8">
+      {/* pt-6 matches the gap AI Library's pages set on themselves; without it
+          Distribution was the only module whose title sat flush against the
+          top edge of the shell. */}
+      <div className="flex-1 overflow-y-auto px-8 pt-6 pb-8">
         <Outlet />
       </div>
     </div>
