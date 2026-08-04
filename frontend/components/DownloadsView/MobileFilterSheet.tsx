@@ -167,6 +167,7 @@ export function MobileFilterSheet({
     chipValues.ai_status.transcribed,
     chipValues.ai_status.summarized,
     chipValues.ai_status.analyzed,
+    chipValues.ai_status.hasPrompt,
   ].filter(Boolean).length;
   const summaries: Record<string, string | null> = {
     type: chipValues.type.types.length ? `${chipValues.type.types.length}` : null,

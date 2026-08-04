@@ -12,6 +12,7 @@ the filter semantics are preserved:
 - ``types``   (mime-category ``OR`` expression inlined into the WHERE)
 - ``platforms``  (source_platform pre-resolution → matched ids)
 - ``ai_transcribed`` / ``ai_summarized`` / ``ai_analyzed`` (status == completed)
+- ``ai_has_prompt`` (any of 4 prompt columns non-empty, OR predicate)
 - ``created_after`` / ``created_before`` (UTC datetime bind on r.created_at)
 - ``duration_min`` / ``duration_max`` (bounds on r.duration_seconds)
 - ``aspect_ratios`` + social metrics (API-surface no-ops — must NOT leak)
@@ -408,6 +409,43 @@ async def test_list_resources_ai_flags_false_or_none_are_inactive(
     assert "summary_status" not in sql
     assert "visual_analysis_status" not in sql
     assert "ai_transcribed" not in params
+
+
+@pytest.mark.asyncio
+async def test_list_resources_ai_has_prompt_adds_four_column_or_predicate(
+    repo: ResourcesRepository, cap_session: _CapSession
+) -> None:
+    await repo.get_resource_items(
+        scope_type="personal", scope_id="user-1", ai_has_prompt=True
+    )
+    sql, params = _main_call(cap_session)
+    assert "r.gen_prompt IS NOT NULL AND r.gen_prompt <> ''" in sql
+    assert "r.gen_prompt_negative IS NOT NULL AND r.gen_prompt_negative <> ''" in sql
+    assert "r.gen_prompt_json IS NOT NULL AND r.gen_prompt_json <> ''" in sql
+    assert "r.slide_prompts IS NOT NULL" in sql
+    assert "r.slide_prompts <> 'null'::jsonb" in sql
+    assert "r.slide_prompts <> '{}'::jsonb" in sql
+    # Purely literal predicate — no bind params introduced for it.
+    assert "ai_has_prompt" not in params
+
+
+@pytest.mark.asyncio
+async def test_list_resources_ai_has_prompt_false_or_none_are_inactive(
+    repo: ResourcesRepository, cap_session: _CapSession
+) -> None:
+    await repo.get_resource_items(
+        scope_type="personal", scope_id="user-1", ai_has_prompt=False
+    )
+    sql, _params = _main_call(cap_session)
+    assert "gen_prompt" not in sql
+    assert "slide_prompts" not in sql
+
+    await repo.get_resource_items(
+        scope_type="personal", scope_id="user-1", ai_has_prompt=None
+    )
+    sql, _params = _main_call(cap_session)
+    assert "gen_prompt" not in sql
+    assert "slide_prompts" not in sql
 
 
 @pytest.mark.asyncio

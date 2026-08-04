@@ -518,6 +518,11 @@ export interface FetchResourcesParams {
   ai_transcribed?: boolean;
   ai_summarized?: boolean;
   ai_analyzed?: boolean;
+  /** True means "any of gen_prompt / gen_prompt_negative / gen_prompt_json /
+   *  slide_prompts is non-empty". Not a status column — forces the RPC path
+   *  (fetchResourcesViaRpc) since the PostgREST builder can't express the
+   *  4-column OR/jsonb-literal predicate cleanly. */
+  ai_has_prompt?: boolean;
   /** Created-at inclusive bounds (ISO date YYYY-MM-DD, local calendar). */
   created_after?: string;
   created_before?: string;
@@ -899,7 +904,11 @@ export async function fetchResourcesPaginated(
   // list silently capped at PostgREST's 1000-row ceiling AND the giant `.in()`
   // URL risked a Kong/nginx 502 at scale. The no-tag path below stays on the
   // PostgREST keyset query (already scale-safe).
-  if (params.tag_ids && params.tag_ids.length > 0) {
+  // ai_has_prompt also forces the RPC path: the OR-across-4-columns +
+  // jsonb-literal predicate ('null'/'{}' exclusion on slide_prompts) isn't
+  // expressible via the PostgREST query builder used below, so it always
+  // routes through search_scope_resources (mig 401 adds p_has_prompt there).
+  if ((params.tag_ids && params.tag_ids.length > 0) || params.ai_has_prompt) {
     return fetchResourcesViaRpc(params, cursor, pageSize, signal);
   }
 
@@ -967,6 +976,7 @@ async function fetchResourcesViaRpc(
     p_ai_transcribed: params.ai_transcribed ?? null,
     p_ai_summarized: params.ai_summarized ?? null,
     p_ai_analyzed: params.ai_analyzed ?? null,
+    p_has_prompt: params.ai_has_prompt ?? null,
     p_created_after: params.created_after ?? null,
     p_created_before: params.created_before ?? null,
     p_duration_min: params.duration_min ?? null,

@@ -1185,6 +1185,7 @@ class ResourcesRepository(AsyncpgRepository):
         ai_transcribed: Optional[bool] = None,
         ai_summarized: Optional[bool] = None,
         ai_analyzed: Optional[bool] = None,
+        ai_has_prompt: Optional[bool] = None,
         created_after: Optional[date] = None,
         created_before: Optional[date] = None,
         duration_min: Optional[int] = None,
@@ -1285,6 +1286,27 @@ class ResourcesRepository(AsyncpgRepository):
                 if flag is True:
                     where.append(f'r."{column}" = :{key}')
                     params[key] = _AI_STATUS_COMPLETED
+
+            # "Has prompt" filter: any of the four prompt fields non-empty.
+            # Not a status column (no _AI_STATUS_FIELDS entry) — "non-empty"
+            # semantics differ per column type. Text columns (gen_prompt /
+            # gen_prompt_negative / gen_prompt_json — the latter is TEXT
+            # despite storing JSON, migration 392) need IS NOT NULL AND <> ''.
+            # slide_prompts is JSONB and must also exclude the JSON literals
+            # 'null' and '{}' (an empty object is not "has a prompt"). No
+            # bind params needed — every literal here is a fixed constant,
+            # never user input.
+            if ai_has_prompt is True:
+                where.append(
+                    "("
+                    "(r.gen_prompt IS NOT NULL AND r.gen_prompt <> '') OR "
+                    "(r.gen_prompt_negative IS NOT NULL AND r.gen_prompt_negative <> '') OR "
+                    "(r.gen_prompt_json IS NOT NULL AND r.gen_prompt_json <> '') OR "
+                    "(r.slide_prompts IS NOT NULL "
+                    "AND r.slide_prompts <> 'null'::jsonb "
+                    "AND r.slide_prompts <> '{}'::jsonb)"
+                    ")"
+                )
 
             if created_after is not None:
                 where.append("r.created_at >= :created_after")

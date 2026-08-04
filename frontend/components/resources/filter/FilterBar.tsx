@@ -240,6 +240,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         if (ai.transcribed) parts.push(t('resources.filter.ai.transcribed', 'Transcribed'));
         if (ai.summarized) parts.push(t('resources.filter.ai.summarized', 'Summarized'));
         if (ai.analyzed) parts.push(t('resources.filter.ai.analyzed', 'Analyzed'));
+        if (ai.hasPrompt) parts.push(t('resources.filter.ai.hasPrompt', 'Has Prompt'));
         if (parts.length === 0) return null;
         if (parts.length <= 2) return parts.join(', ');
         return String(parts.length);

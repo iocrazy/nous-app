@@ -285,6 +285,11 @@ export interface FetchLibraryFilterParams {
   ai_transcribed?: boolean;
   ai_summarized?: boolean;
   ai_analyzed?: boolean;
+  /** True means "any of gen_prompt / gen_prompt_negative / gen_prompt_json /
+   *  slide_prompts is non-empty". Not a status column — forces the RPC path
+   *  (fetchLibraryViaRpc) since applyLibraryFilters' PostgREST builder can't
+   *  express the 4-column OR/jsonb-literal predicate cleanly. */
+  ai_has_prompt?: boolean;
   /** resources.created_at inclusive bounds (YYYY-MM-DD). */
   created_after?: string;
   created_before?: string;
@@ -373,6 +378,7 @@ async function fetchLibraryViaRpc(
     p_ai_transcribed: f.ai_transcribed ?? null,
     p_ai_summarized: f.ai_summarized ?? null,
     p_ai_analyzed: f.ai_analyzed ?? null,
+    p_has_prompt: f.ai_has_prompt ?? null,
     p_created_after: f.created_after ?? null,
     p_created_before: f.created_before ?? null,
     p_duration_min: f.duration_min ?? null,
@@ -463,7 +469,10 @@ export const fetchLibraryPaginated = async (
     // a tag has >1000 resources) then passed it back as `.in('id', [huge list])`
     // (Kong/nginx 502 risk). The no-tag path below stays on the PostgREST keyset
     // query — already scale-safe (keyset on resources, no `.in()`).
-    if (f.tag_ids && f.tag_ids.length > 0) {
+    // ai_has_prompt also forces the RPC path — see FetchLibraryFilterParams
+    // doc comment (OR-across-4-columns + jsonb-literal predicate isn't
+    // expressible via applyLibraryFilters' PostgREST builder below).
+    if ((f.tag_ids && f.tag_ids.length > 0) || f.ai_has_prompt) {
       return await fetchLibraryViaRpc(
         supabase,
         userId,
