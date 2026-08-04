@@ -15,6 +15,8 @@ interface SkillGalleryProps {
   onOpen: (slug: string) => void;
   /** Rendered in the toolbar — typically the "+ New Skill" button. */
   actions?: React.ReactNode;
+  /** Rendered above the toolbar — the shared Agents | Skills tab strip. */
+  header?: React.ReactNode;
 }
 
 /** Same convention as SkillEditor / SkillList: public + unowned = built-in. */
@@ -113,6 +115,7 @@ export const SkillGallery: React.FC<SkillGalleryProps> = ({
   skills,
   onOpen,
   actions,
+  header,
 }) => {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
@@ -129,7 +132,8 @@ export const SkillGallery: React.FC<SkillGalleryProps> = ({
 
   return (
     <div className="pt-6 pb-12">
-      <div className="flex flex-wrap items-center gap-2">
+      {header}
+      <div className={`flex flex-wrap items-center gap-2 ${header ? 'mt-3' : ''}`}>
         <div className="relative">
           <Search
             size={13}

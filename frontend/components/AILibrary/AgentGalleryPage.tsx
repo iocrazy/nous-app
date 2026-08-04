@@ -18,7 +18,7 @@ import { useAgentRuns } from '../../hooks/useAgentRuns';
 import { useGlobalChatStore } from '../../stores/globalChatStore';
 import { getAgentIcon } from './agentIcons';
 import { NewAgentModal } from './NewAgentModal';
-import { PageHeader } from '../layout/PageHeader';
+import { AILibraryTabs } from './AILibraryTabs';
 import {
   AGENT_GROUP_ORDER,
   agentGroupOf,
@@ -335,11 +335,11 @@ export const AgentGalleryPage: React.FC = () => {
 
   return (
     <div className="max-w-5xl pt-6 pb-12">
-      <PageHeader
-        level="content"
-        // "AI Library" is the rail's job; this page is the agent roster, which
-        // is also what its first tab says.
-        title={t('aiLibrary.tab.agents', 'Agents')}
+      {/* No page title — the rail already says "AI Library". */}
+      <AILibraryTabs
+        active="agents"
+        agentCount={agents.length}
+        skillCount={skillCount}
         actions={
           <button
             type="button"
@@ -349,32 +349,6 @@ export const AgentGalleryPage: React.FC = () => {
             <Plus size={13} />
             {t('aiLibrary.newAgent', 'New Agent')}
           </button>
-        }
-        /* Marketplace is a placeholder slot, deliberately inert. */
-        tabs={
-          <>
-            <span className="border-b-2 border-[var(--accent-text)] px-3 pb-2 font-medium text-ink-100">
-              {t('aiLibrary.tab.agents', 'Agents')}{' '}
-              <span className="text-ink-600">{agents.length}</span>
-            </span>
-            <button
-              type="button"
-              onClick={() => navigate(`${urlPrefix}/ai-library/skills`)}
-              className="px-3 pb-2 text-ink-500 hover:text-ink-300"
-            >
-              {t('aiLibrary.tab.skills', 'Skills')}{' '}
-              {skillCount != null && <span className="text-ink-600">{skillCount}</span>}
-            </button>
-            <span
-              className="cursor-not-allowed px-3 pb-2 text-ink-700"
-              title={t('aiLibrary.tab.marketPlanned', 'Planned')}
-            >
-              {t('aiLibrary.tab.market', 'Marketplace')}{' '}
-              <span className="text-[10px]">
-                ({t('aiLibrary.tab.marketPlanned', 'Planned')})
-              </span>
-            </span>
-          </>
         }
       />
 

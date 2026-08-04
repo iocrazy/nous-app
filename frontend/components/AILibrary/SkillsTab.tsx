@@ -19,6 +19,7 @@ import { aiLibraryService } from '../../services/aiLibraryService';
 import { SkillEditor } from './SkillEditor';
 import { SkillList } from './SkillList';
 import { SkillGallery } from './SkillGallery';
+import { AILibraryTabs } from './AILibraryTabs';
 import { NewSkillModal } from './NewSkillModal';
 import { NewSkillFileModal } from './NewSkillFileModal';
 
@@ -152,14 +153,22 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
         <SkillGallery
           skills={skills}
           onOpen={(s) => onSlugChange?.(s)}
-          actions={
-            <button
-              type="button"
-              onClick={() => setShowNewSkillModal(true)}
-              className="rounded-md border border-ink-700 px-2.5 py-1.5 text-[12px] text-ink-200 hover:bg-ink-800/60"
-            >
-              {t('aiLibrary.skills.newSkill', '+ New Skill')}
-            </button>
+          // Same strip and same button placement as the agents gallery — this
+          // page is the other half of that surface, not a dead end.
+          header={
+            <AILibraryTabs
+              active="skills"
+              skillCount={skills.length}
+              actions={
+                <button
+                  type="button"
+                  onClick={() => setShowNewSkillModal(true)}
+                  className="rounded-md border border-ink-700 px-2.5 py-1.5 text-[12px] text-ink-200 hover:bg-ink-800/60"
+                >
+                  {t('aiLibrary.skills.newSkill', '+ New Skill')}
+                </button>
+              }
+            />
           }
         />
         {showNewSkillModal && (
