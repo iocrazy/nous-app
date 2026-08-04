@@ -144,6 +144,10 @@ async def test_resolve_scene_granted_when_project_matches():
     assert len(session.statements) == 2
     decisions = _hook_decisions(session.statements[1])
     assert decisions["decision"] == "granted"
+    # A2 review (minor #5): the plan asks for (agent / actual user / scope /
+    # ids touched) explicitly — user_id must be directly on the audit row,
+    # not only reachable via a join back to agent_runs.
+    assert decisions["user_id"] == _USER_ID
 
 
 # ======================================================================
@@ -345,6 +349,69 @@ async def test_resolve_episode_cross_tenant_denied():
         result = await resolve_episode(_EPISODE_ID, scope)
     assert isinstance(result, Denied)
     assert result.resource_type == "episode"
+
+
+@pytest.mark.asyncio
+async def test_resolve_episode_scoped_run_can_resolve_its_own_episode():
+    """A2 review fix (Important) regression pin: _resolve_episode_inner used
+    to call the shared scope kernel WITHOUT passing row_episode_id, so the
+    kernel compared None != scope.episode_id — an episode-scoped run could
+    never resolve ANY episode, including its own. The evidence test that
+    shipped with A2 only exercised resolve_scene's episode dimension; this
+    is the resolve_episode-specific case a reviewer had to execute by hand
+    to catch."""
+    scope = AgentRunScope(
+        run_id=_RUN_ID,
+        user_id=_USER_ID,
+        project_id=_PROJECT_A,
+        episode_id=_EPISODE_ID,  # scoped to the SAME episode being resolved
+    )
+    session = _CaptureSession([_FakeResult(first_row=_episode_row(_PROJECT_A))])
+    with _patched(session):
+        result = await resolve_episode(_EPISODE_ID, scope)
+    assert isinstance(result, ResolvedEpisode)
+
+
+@pytest.mark.asyncio
+async def test_resolve_episode_scoped_run_denies_a_different_episode():
+    """The other half of the same fix: an episode-scoped run must still be
+    denied a DIFFERENT episode in the same project — granting isn't
+    unconditional once row_episode_id is wired in, only correct-episode
+    resolution is."""
+    scope = AgentRunScope(
+        run_id=_RUN_ID,
+        user_id=_USER_ID,
+        project_id=_PROJECT_A,
+        episode_id=_EPISODE_A,  # a DIFFERENT episode than the one requested
+    )
+    session = _CaptureSession([_FakeResult(first_row=_episode_row(_PROJECT_A))])
+    with _patched(session):
+        result = await resolve_episode(_EPISODE_ID, scope)
+    assert isinstance(result, Denied)
+
+
+@pytest.mark.asyncio
+async def test_episode_scoped_run_denies_scene_with_unassigned_episode():
+    """Explicit, intentional decision (A2 review, Important — previously an
+    unstated side effect): an episode-scoped run must NOT transparently see
+    a scene whose script has no episode assigned yet (a legacy/pre-B1
+    script_projects row with episode_id IS NULL). Unassigned data is not
+    automatically "in scope" just because it has no episode to conflict
+    with — see scope_resolver.py's _scope_check docstring for the reasoning
+    and the escape hatch if this is ever intentionally needed."""
+    scope = AgentRunScope(
+        run_id=_RUN_ID,
+        user_id=_USER_ID,
+        project_id=_PROJECT_A,
+        episode_id=_EPISODE_A,
+    )
+    # The scene's script_project has episode_id=None (unassigned).
+    session = _CaptureSession(
+        [_FakeResult(first_row=_scene_row(_PROJECT_A, episode_id=None))]
+    )
+    with _patched(session):
+        result = await resolve_scene(_SCENE_ID, scope)
+    assert isinstance(result, Denied)
 
 
 # ======================================================================

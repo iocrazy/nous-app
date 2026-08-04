@@ -698,6 +698,17 @@ class RunRecorder:
         effective_attribution = self.attribution or "direct_human"
 
         # "now()" sentinel → native datetime for the asyncpg timestamptz bind.
+        #
+        # A2 review note: this dict feeds `.values(**updates)` below, which a
+        # static grep can't reliably follow (the keys are Python dict literals,
+        # not inline kwargs at the call site). DO NOT add "project_id" or
+        # "team_id" to this dict, ever — app/services/ai/scope/agent_run_scope.py
+        # (AgentRunScope / scope_for_run) depends on those two columns being
+        # stamped exactly once at INSERT (`_insert_row` above) and never
+        # touched again; every screenwriting-tool authorization decision
+        # (scope_resolver.py) assumes that invariant holds. If a run's scope
+        # ever needs to change after dispatch, that is a deliberate design
+        # change to agent_run_scope.py, not a one-line addition here.
         updates: dict[str, Any] = {
             "status": status,
             "ended_at": datetime.now(timezone.utc),

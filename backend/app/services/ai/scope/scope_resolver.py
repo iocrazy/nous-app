@@ -128,7 +128,24 @@ def _scope_check(
 ) -> Optional[Denied]:
     """Shared scope-comparison kernel — the actual join query differs per
     resource type, but the "is it in THIS run's scope" comparison is
-    identical everywhere, so it lives in exactly one place too."""
+    identical everywhere, so it lives in exactly one place too.
+
+    Explicit decision (A2 review, Important — this was previously an
+    unstated side effect of the comparison below, not a considered choice):
+    when a run IS episode-scoped (``scope.episode_id is not None``) and the
+    resource's own episode is unassigned (``row_episode_id is None`` — a
+    legacy scene/shot whose ``script_projects.episode_id`` predates B1, or
+    an episode-agnostic script), this DENIES. ``None != scope.episode_id``
+    is true, so it falls out of the comparison naturally, but the reasoning
+    is deliberate, not incidental: an episode-scoped run should not
+    transparently see episode-unassigned data just because that data has no
+    episode to conflict with — that would let episode-scoped tools quietly
+    reach legacy content the dispatcher never intended to expose to this
+    run. If a future need arises for an episode-scoped run to ALSO read
+    unassigned legacy scenes, that must be a new, explicit scope flag (e.g.
+    ``AgentRunScope.include_unassigned_episode``), not a loosening of this
+    comparison — see ``test_scope_resolver.py``'s
+    ``test_episode_scoped_run_denies_scene_with_unassigned_episode``."""
     if not scope.is_bound():
         return Denied(resource_type, requested_id, detail_code="scope_unbound")
     if row_project_id != scope.project_id:
@@ -281,7 +298,17 @@ async def resolve_episode(episode_id: Any, scope: AgentRunScope) -> EpisodeResul
     ``episodes`` carries ``project_id`` directly (no join needed) — no
     ``team_id`` column exists on this table, so only the project-id check
     applies (the shared kernel's team check is a no-op here since
-    ``row_team_id`` is never passed)."""
+    ``row_team_id`` is never passed).
+
+    A2 review fix (Important): the episode being resolved passes ITS OWN
+    id as ``row_episode_id`` to the shared scope kernel — an episode-scoped
+    run resolving its own episode must be granted. The bug this fixes:
+    omitting it meant the kernel compared ``None != scope.episode_id``,
+    which denies EVERY episode-scoped resolution unconditionally, including
+    the one the run is legitimately scoped to. Only caught because a
+    reviewer executed the B1-readiness path end to end — the shipped test
+    only exercised ``resolve_scene``'s episode dimension, not
+    ``resolve_episode``'s own."""
     result, detail_code = await _resolve_episode_inner(episode_id, scope)
     await _audit(scope, "episode", str(episode_id), result, detail_code)
     return result
@@ -316,6 +343,7 @@ async def _resolve_episode_inner(episode_id: Any, scope: AgentRunScope):
         resource_type="episode",
         requested_id=str(episode_id),
         row_project_id=row.project_id,
+        row_episode_id=row.id,
     )
     if denied is not None:
         return denied, denied.detail_code
@@ -386,6 +414,12 @@ async def _audit(
             "decision": "granted" if granted else "denied",
             "resource_type": resource_type,
             "requested_id": requested_id,
+            # A2 review (minor #5): the plan asks for (agent / actual user /
+            # scope / ids touched) explicitly — user_id was previously only
+            # reachable transitively via a join back to agent_runs.user_id.
+            # It's already sitting right here on the scope; record it
+            # directly so an audit query never needs that join.
+            "user_id": scope.user_id,
             "scope": {
                 "project_id": scope.project_id,
                 "team_id": scope.team_id,
