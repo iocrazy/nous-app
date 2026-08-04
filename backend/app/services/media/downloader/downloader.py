@@ -176,7 +176,7 @@ async def _upload_album_to_s3(
     return album_path
 
 
-# C1: 图集读端(media_slides_router.py _ALBUM_LOCATION_SQL)解析的是
+# C1: 图集读端(media_slides_router.py _resolve_album_location)解析的是
 # resource_versions.file_path(JOIN version_number = r.current_version),
 # 不是 resources.file_path。重指块只更新了 resources.file_path,retry 场景
 # (rv 已存在、仍指着文件系统)_resolve_album_location 永远拿不到 sb:// 前缀,
@@ -186,6 +186,12 @@ async def _upload_album_to_s3(
 # 首次下载时 rv 尚不存在,UPDATE 0 行——首下的 rv 由
 # finalize_post_download_step 从 pm.download_path 建,那时 pm.download_path
 # 已经是本函数写回的 sb:// 值,不会漏接。
+#
+# Phase A raw-SQL-to-ORM migration (docs/decisions/2026-08-04-raw-sql-to-orm-
+# full-migration.md): _repoint_album_resource_version below now issues this
+# as an ORM update()...where() (SQLAlchemy renders the cross-table WHERE
+# reference as UPDATE...FROM on Postgres) — kept here as the reference shape
+# it must stay semantically equivalent to.
 _ALBUM_RV_REPOINT_SQL = """
     UPDATE resource_versions rv
     SET file_path = :file_path
@@ -200,13 +206,54 @@ _ALBUM_RV_REPOINT_SQL = """
 
 async def _repoint_album_resource_version(resource_id, album_path: str) -> None:
     """把 ``resource_id`` 当前版本的 resource_versions.file_path 重指到
-    ``album_path``(见 ``_ALBUM_RV_REPOINT_SQL`` 的注释)。"""
-    from app.db import engine as db_engine
+    ``album_path``(见 ``_ALBUM_RV_REPOINT_SQL`` 的注释)。
 
-    await db_engine.execute(
-        _ALBUM_RV_REPOINT_SQL,
-        {"file_path": album_path, "resource_id": int(resource_id)},
+    Called from the download pipeline (no HTTP request context, so no
+    ambient user Scope) — wrapped in an ``is_enforced``-gated
+    ``system_request_scope`` (same pattern as
+    ``resources_repository.count_resources_by_media_id``).
+    ``SCOPE_ENFORCE_RESOURCES`` DEFAULTS to false in code, but production
+    sets it TRUE via ``secrets/backend.env`` (outside this repo tree —
+    CLAUDE.md's 部署陷阱 on env overriding config.yml): in production this
+    wrap is LOAD-BEARING, not a no-op — without it, this
+    Resources-referencing UPDATE...FROM would either fail-closed raise (no
+    scope set) or be forbidden outright (bulk DML under a real user scope)
+    per the choke point's write-path rules, and every album repoint would
+    raise instead of committing. The ``is_enforced`` gate exists only to
+    stay byte-for-byte legacy where the flag really is off (e.g. this
+    repo's local/test default). Resources is referenced only via the
+    UPDATE...FROM join condition (not the UPDATE target itself);
+    resource_versions carries no scope mixin.
+    """
+    from contextlib import nullcontext
+
+    from sqlalchemy import update
+
+    from app.db.scope import is_enforced, system_request_scope
+    from app.db.session import write_scope
+    from app.models import Resources, ResourceVersions
+
+    stmt = (
+        update(ResourceVersions)
+        .where(ResourceVersions.resource_id == Resources.id)
+        .where(ResourceVersions.resource_id == int(resource_id))
+        .where(ResourceVersions.version_number == Resources.current_version)
+        .where(ResourceVersions.file_path.is_not(None))
+        .where(ResourceVersions.file_path.notlike("sb://%"))
+        .values(file_path=album_path)
     )
+
+    scope_cm = (
+        system_request_scope(
+            reason="album-resource-version-repoint: download pipeline "
+            "write, no ambient request scope"
+        )
+        if is_enforced("resources")
+        else nullcontext()
+    )
+    async with scope_cm:
+        async with write_scope() as session:
+            await session.execute(stmt)
 
 
 class DownloaderService:

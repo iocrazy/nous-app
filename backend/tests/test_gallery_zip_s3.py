@@ -17,6 +17,7 @@ download_path`` + glob 兜底),对 sb:// 完全零感知,回收后必然 404
 from __future__ import annotations
 
 import zipfile
+from contextlib import asynccontextmanager, contextmanager
 from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -36,8 +37,40 @@ def _patch_media_repo(video: dict):
     return patch("app.api.media_download_router.MediaRepository", return_value=repo)
 
 
+@contextmanager
 def _patch_db_fetch_one(row: dict | None):
-    return patch("app.db.engine.fetch_one", new=AsyncMock(return_value=row))
+    """Phase A raw-SQL-to-ORM migration (docs/decisions/2026-08-04-raw-sql-
+    to-orm-full-migration.md): _resolve_album_location's direct query now
+    runs as an ORM select() over app.db.session.read_scope() rather than
+    app.db.engine.fetch_one. Both "no row" and a row with file_path=None
+    collapse to the same None outcome, matching the legacy behaviour."""
+    file_path = (row or {}).get("file_path") if row else None
+
+    class _FakeScalars:
+        def first(self):
+            return file_path
+
+    class _FakeResult:
+        def scalars(self):
+            return _FakeScalars()
+
+    class _FakeSession:
+        async def execute(self, _stmt):
+            return _FakeResult()
+
+    @asynccontextmanager
+    async def _read_scope():
+        yield _FakeSession()
+
+    @asynccontextmanager
+    async def _system_request_scope(reason: str):
+        yield None
+
+    with (
+        patch("app.db.session.read_scope", new=_read_scope),
+        patch("app.db.scope.system_request_scope", new=_system_request_scope),
+    ):
+        yield
 
 
 async def _zip_names(streaming_response) -> list[str]:

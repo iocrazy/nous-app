@@ -58,35 +58,77 @@ async def _fetch_dispatch(
     query to resources whose ``ri.scope_id`` equals the channel's team.
     ``team_id=None`` preserves the existing behaviour for the ai_library path.
     """
-    from app.db import engine as db_engine
+    from contextlib import nullcontext
 
-    params: dict = {"rid": resource_id, "uid": user_id}
-    team_clause = ""
-    if team_id is not None:
-        team_clause = "\n           AND ri.scope_id::text = :tid::text"
-        params["tid"] = int(team_id)
+    from sqlalchemy import String, cast, select
 
-    rows = await db_engine.fetch_all(
-        f"""
-        SELECT r.id::text, r.mime_type AS mime, r.filename AS name,
-               r.file_path, r.notes AS brief
-          FROM public.resources r
-          JOIN public.resource_items ri ON ri.resource_id = r.id
-         WHERE r.id::text = :rid
-           AND r.is_trashed = false
-           -- After Spec 1 PR-C: ri.scope_id is always a teams.id snowflake;
-           -- personal scope is a single-member team containing the user.
-           AND ri.scope_id::text IN (
-                 SELECT team_id::text FROM public.team_members WHERE user_id=:uid
-               ){team_clause}
-         LIMIT 1
-        """,
-        params,
+    from app.db.scope import is_enforced, system_request_scope
+    from app.db.session import read_scope
+    from app.models import ResourceItems, Resources, TeamMembers
+
+    # Original SQL (kept for reference — same JOIN/WHERE/LIMIT shape):
+    #   SELECT r.id::text, r.mime_type AS mime, r.filename AS name,
+    #          r.file_path, r.notes AS brief
+    #     FROM public.resources r
+    #     JOIN public.resource_items ri ON ri.resource_id = r.id
+    #    WHERE r.id::text = :rid AND r.is_trashed = false
+    #      AND ri.scope_id::text IN (
+    #            SELECT team_id::text FROM public.team_members WHERE user_id=:uid
+    #          )
+    #      [AND ri.scope_id::text = :tid::text]  -- when team_id is not None
+    #    LIMIT 1
+    id_text = cast(Resources.id, String)
+    scope_text = cast(ResourceItems.scope_id, String)
+    membership_subq = select(cast(TeamMembers.team_id, String)).where(
+        TeamMembers.user_id == user_id
     )
-    if not rows:
+
+    stmt = (
+        select(
+            id_text.label("id"),
+            Resources.mime_type.label("mime"),
+            Resources.filename.label("name"),
+            Resources.file_path,
+            Resources.notes.label("brief"),
+        )
+        .join(ResourceItems, ResourceItems.resource_id == Resources.id)
+        .where(id_text == resource_id)
+        .where(Resources.is_trashed.is_(False))
+        # After Spec 1 PR-C: ri.scope_id is always a teams.id snowflake;
+        # personal scope is a single-member team containing the user.
+        .where(scope_text.in_(membership_subq))
+    )
+    if team_id is not None:
+        # CHAT-SEC-AGENT-03: additionally constrain to the channel's team.
+        stmt = stmt.where(scope_text == str(int(team_id)))
+    stmt = stmt.limit(1)
+
+    # Resources carries UserScoped(creator_id), but THIS access check is
+    # governed by team membership, not creator_id — a resource shared to a
+    # team the caller belongs to must stay visible even when not owned by
+    # them. Forcing SYSTEM scope keeps this query correct (rather than
+    # silently creator_id-filtered). SCOPE_ENFORCE_RESOURCES DEFAULTS to
+    # false in code, but production sets it TRUE via secrets/backend.env
+    # (outside this repo tree — CLAUDE.md's 部署陷阱 on env overriding
+    # config.yml): in production this wrap is LOAD-BEARING — without it the
+    # do_orm_execute choke point sees Resources touched with no ambient
+    # scope and fail-closed raises UnscopedQueryError, turning every
+    # ResourceFetch call into a 500 instead of a clean PermissionError. The
+    # is_enforced gate exists only to stay byte-for-byte legacy where the
+    # flag genuinely is off (e.g. this repo's local/test default).
+    scope_cm = (
+        system_request_scope(reason="resource-fetch-team-membership-access")
+        if is_enforced("resources")
+        else nullcontext()
+    )
+    async with scope_cm:
+        async with read_scope() as session:
+            row = (await session.execute(stmt)).mappings().first()
+
+    if not row:
         raise PermissionError(f"resource {resource_id} not accessible to {user_id}")
 
-    row = rows[0]
+    row = dict(row)
     mime = (row.get("mime") or "").lower()
 
     # Image — resolve the actual BYTES and inline them as a data URL.
@@ -133,7 +175,24 @@ async def _fetch_dispatch(
     # Video / audio — read from `videos` table joined on parsed_media
     if mime.startswith("video/") or mime.startswith("audio/"):
         m = mode or ("summary" if mime.startswith("video/") else "transcript")
-        media_rows = await db_engine.fetch_all(
+        # NOT ported to the ORM: `public.videos` does not exist — it was
+        # renamed to `public.parsed_media` by migration 066
+        # (066_rename_videos_to_parsed_media.sql), and AI-generated text
+        # content now lives on `resource_summaries` / `resource_transcripts`
+        # (keyed by resource_id), not a `videos` table. This query has been
+        # dead since that rename (confirmed against the live schema — no
+        # `public.videos` relation) and always raised, degrading every
+        # video/audio ResourceFetch call to "fetch failed". Preserved
+        # byte-for-byte here (still targets the phantom table, still fails
+        # the same way) per this branch's refactor-only discipline — see
+        # docs/decisions/2026-08-04-raw-sql-to-orm-full-migration.md; fixing
+        # the join target is a real behavior change, tracked separately, not
+        # bundled into this ORM-only pass. Routed through the scoped_sql
+        # guardrail (system=True) rather than left on ungoverned db_engine —
+        # at minimum this dead call site is now declared and audited.
+        from app.db.scoped_sql import scoped_fetch_all
+
+        media_rows = await scoped_fetch_all(
             """
             SELECT v.summary, v.transcript
               FROM public.videos v
@@ -143,6 +202,13 @@ async def _fetch_dispatch(
              LIMIT 1
             """,
             {"rid": resource_id},
+            system=True,
+            reason=(
+                "resource_fetch video/audio content lookup — known dead "
+                "query against a table renamed away in migration 066; "
+                "access already validated by the resources+resource_items "
+                "team-membership check above"
+            ),
         )
         v = (media_rows or [{}])[0]
         if m == "summary":

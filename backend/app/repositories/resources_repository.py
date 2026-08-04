@@ -33,7 +33,9 @@ the retired REST bodies preserved by the ``_rest_parity`` / ``_plain`` funnels:
     ``soft_delete_resource``
 With the port, ``self._get_client()`` has zero callers and is removed; the
 async supabase admin import goes with it. ``list_accessible_for_user`` was
-already pure SQL via ``db_engine.fetch_all`` (never supabase-py) — left as-is.
+pure SQL via ``db_engine.fetch_all`` (never supabase-py) until the Phase A
+raw-SQL-to-ORM migration (docs/decisions/2026-08-04-raw-sql-to-orm-full-
+migration.md) ported it onto ``read_scope()`` + ``select(...)`` too.
 
 ⚠️ ``SCOPE_ENFORCE_RESOURCES`` is a SEPARATE flag/rollout concern (the
 app-layer tenant-scope choke point) and is INDEPENDENT of the retired
@@ -106,6 +108,8 @@ from app.models import (
     ResourceTags,
     ResourceVersions,
     Tags,
+    TeamMembers,
+    Teams,
 )
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict, _plain
 
@@ -2367,7 +2371,7 @@ class ResourcesRepository(AsyncpgRepository):
 
         return [item for item in items if matches_tags(item.get("resource_id", ""))]
 
-    # ── @-reference picker (pure SQL via db_engine — unported, unchanged) ──
+    # ── @-reference picker ──────────────────────────────────────────
 
     async def list_accessible_for_user(
         self,
@@ -2396,62 +2400,85 @@ class ResourcesRepository(AsyncpgRepository):
             scope_team_id: when provided, restricts results to this team
                 (membership verified) plus the caller's own personal team.
                 When None, returns resources across all the caller's teams.
+
+        Phase A raw-SQL-to-ORM migration (docs/decisions/2026-08-04-raw-sql-
+        to-orm-full-migration.md): was pure SQL via ``db_engine.fetch_all``.
+        ``scope_team_id`` is a CALLER-SUPPLIED, unvalidated query-string value
+        (``resources_search_router.search_resources`` has no int() coercion),
+        so — matching the legacy ``team_id::text = :scope_team_id`` — it is
+        compared as TEXT here too: a non-numeric value must yield zero
+        matches, not raise. Resources carries UserScoped(creator_id), but
+        this access check is governed by TEAM membership, not creator_id (a
+        resource shared to the caller's team must stay visible even if they
+        didn't create it) — wrapped in an ``is_enforced``-gated
+        ``system_request_scope`` (see this file's established
+        ``count_resources_by_media_id`` pattern). ``SCOPE_ENFORCE_RESOURCES``
+        DEFAULTS to false in code, but production sets it TRUE via
+        ``secrets/backend.env`` (outside this repo tree — CLAUDE.md's
+        部署陷阱 on env overriding config.yml). So this wrap is LOAD-BEARING
+        in production, not a no-op: without it, the do_orm_execute choke
+        point sees Resources touched with no ambient scope and fail-closed
+        raises ``UnscopedQueryError`` on the very first call — the picker
+        500s instead of silently mis-scoping to creator_id-only. The
+        ``is_enforced`` gate exists only to stay byte-for-byte legacy where
+        the flag genuinely is off (e.g. this repo's local/test default).
         """
-        # Inline import: matches the pattern used elsewhere in this repo for
-        # deferred-load services that would otherwise cause circular imports
-        # when ResourcesRepository is constructed during module init.
-        from app.db import engine as db_engine
+        from sqlalchemy import String, case, cast
 
         capped_limit = min(max(int(limit), 1), 50)
         kinds_list = list(kinds or [])
 
+        id_text = cast(Resources.id, String)
+        scope_id_text = cast(ResourceItems.scope_id, String)
+
         # PR-E 4c: scope_type column is being dropped; derive the personal/team
         # label from teams.kind (aliased as scope_type so the caller's response
         # shape is unchanged). scope_id is always a teams.id snowflake post PR-C.
-        sql_parts = [
-            "SELECT r.id::text, r.filename AS name, ",
-            "       r.mime_type AS mime, r.file_size_bytes AS size, ",
-            "       r.updated_at, ri.scope_id::text, ",
-            "       CASE WHEN t.kind = 'personal' THEN 'personal' ELSE 'team' END AS scope_type ",
-            "FROM public.resources r ",
-            "JOIN public.resource_items ri ON ri.resource_id = r.id ",
-            "LEFT JOIN public.teams t ON t.id::text = ri.scope_id::text ",
-            "WHERE r.is_trashed = false ",
-        ]
-        params: dict = {"user_id": user_id, "limit": capped_limit}
-
+        #
         # After Spec 1 PR-C, ri.scope_id is always a teams.id snowflake;
         # personal scope is a single-member team containing the user.
         if scope_team_id is not None:
             # Issue-scoped picker: narrow to the current team (only if the
             # caller is a member — no escalation) OR the caller's personal team.
-            sql_parts.append(
-                "  AND ri.scope_id::text IN ( "
-                "        SELECT team_id::text FROM public.team_members "
-                "          WHERE user_id = :user_id AND team_id::text = :scope_team_id "
-                "        UNION "
-                # owner_id 与 team_members.user_id 同为 uuid,而 :user_id 已被
-                # 上面那处 `user_id = :user_id` 定型为 uuid。这里再 ::text 就成了
-                # `text = uuid`,PostgreSQL 直接报 UndefinedFunctionError(500)。
-                # 两边都是 uuid,不需要任何 cast。
-                "        SELECT id::text FROM public.teams "
-                "          WHERE owner_id = :user_id AND kind = 'personal' "
-                "      ) "
+            membership_ids = (
+                select(cast(TeamMembers.team_id, String))
+                .where(
+                    TeamMembers.user_id == user_id,
+                    cast(TeamMembers.team_id, String) == scope_team_id,
+                )
+                .union(
+                    select(cast(Teams.id, String)).where(
+                        Teams.owner_id == user_id, Teams.kind == "personal"
+                    )
+                )
             )
-            params["scope_team_id"] = scope_team_id
         else:
-            sql_parts.append(
-                "  AND ri.scope_id::text IN ( "
-                "        SELECT team_id::text FROM public.team_members WHERE user_id = :user_id "
-                "      ) "
+            membership_ids = select(cast(TeamMembers.team_id, String)).where(
+                TeamMembers.user_id == user_id
             )
+
+        stmt = (
+            select(
+                id_text.label("id"),
+                Resources.filename.label("name"),
+                Resources.mime_type.label("mime"),
+                Resources.file_size_bytes.label("size"),
+                Resources.updated_at,
+                scope_id_text.label("scope_id"),
+                case((Teams.kind == "personal", "personal"), else_="team").label(
+                    "scope_type"
+                ),
+            )
+            .join(ResourceItems, ResourceItems.resource_id == Resources.id)
+            .outerjoin(Teams, Teams.id == ResourceItems.scope_id)
+            .where(Resources.is_trashed.is_(False))
+            .where(scope_id_text.in_(membership_ids))
+        )
 
         if q:
-            sql_parts.append("AND r.filename ILIKE :q_like ")
-            params["q_like"] = f"%{q}%"
+            stmt = stmt.where(Resources.filename.ilike(f"%{q}%"))
 
         if kinds_list:
-            sql_parts.append("AND r.mime_type ~ :kinds_re ")
             regex_segments = []
             for k in kinds_list:
                 if k == "video":
@@ -2464,11 +2491,20 @@ class ResourcesRepository(AsyncpgRepository):
                     regex_segments.append("^application/pdf$")
                 elif k == "doc":
                     regex_segments.append("^(text/|application/json)")
-            params["kinds_re"] = "|".join(regex_segments) if regex_segments else "."
+            kinds_re = "|".join(regex_segments) if regex_segments else "."
+            stmt = stmt.where(Resources.mime_type.regexp_match(kinds_re))
 
-        sql_parts.append("ORDER BY r.updated_at DESC LIMIT :limit")
-        rows = await db_engine.fetch_all("".join(sql_parts), params)
-        return rows or []
+        stmt = stmt.order_by(Resources.updated_at.desc()).limit(capped_limit)
+
+        scope_cm = (
+            system_request_scope(reason="resources-search-team-membership-access")
+            if is_enforced("resources")
+            else nullcontext()
+        )
+        async with scope_cm:
+            async with read_scope() as session:
+                rows = (await session.execute(stmt)).mappings().all()
+        return [dict(r) for r in rows] or []
 
     # ── Temp-folder sweeper helpers ─────────────────────────────────
 

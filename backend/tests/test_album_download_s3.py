@@ -129,53 +129,122 @@ async def test_album_upload_propagates_store_failure(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_repoint_album_resource_version_runs_expected_update(monkeypatch):
-    """C1: the read path (media_slides_router._ALBUM_LOCATION_SQL) resolves
-    an album via resource_versions.file_path (JOIN version_number =
+    """C1: the read path (media_slides_router._resolve_album_location)
+    resolves an album via resource_versions.file_path (JOIN version_number =
     r.current_version), not resources.file_path — so repointing only
     resources.file_path (as the reindex block already did) leaves a RETRY's
     resource_versions row pointing at the filesystem, and slides 404 forever.
     This guards that ``_repoint_album_resource_version`` issues the UPDATE
     against ``resource_versions`` with the resource_id + album_path bound,
-    scoped to non-sb:// rows (idempotent against an already-migrated row)."""
-    from app.db import engine as db_engine
+    scoped to non-sb:// rows (idempotent against an already-migrated row).
+
+    Phase A raw-SQL-to-ORM migration (docs/decisions/2026-08-04-raw-sql-to-
+    orm-full-migration.md): the UPDATE now runs as an ORM update()...where()
+    over app.db.session.write_scope() rather than db_engine.execute(). This
+    captures the compiled statement (Postgres dialect, literal binds) and
+    asserts the same shape the old ``_ALBUM_RV_REPOINT_SQL`` text encoded."""
+    from contextlib import asynccontextmanager
+
+    from sqlalchemy.dialects import postgresql
+
     from app.services.media.downloader.downloader import (
-        _ALBUM_RV_REPOINT_SQL,
         _repoint_album_resource_version,
     )
 
-    calls = {}
+    captured: dict = {}
 
-    async def fake_execute(sql, params):
-        calls["sql"] = sql
-        calls["params"] = params
-        return 1
+    class _FakeSession:
+        async def execute(self, stmt):
+            compiled = stmt.compile(
+                dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+            )
+            captured["sql"] = str(compiled)
+            return None
 
-    monkeypatch.setattr(db_engine, "execute", fake_execute)
+    @asynccontextmanager
+    async def _write_scope():
+        yield _FakeSession()
+
+    monkeypatch.setattr("app.db.session.write_scope", _write_scope)
 
     await _repoint_album_resource_version("42", "sb://library/t5/album/42/")
 
-    assert calls["sql"] == _ALBUM_RV_REPOINT_SQL
-    assert calls["params"] == {
-        "file_path": "sb://library/t5/album/42/",
-        "resource_id": 42,
-    }
-    assert "NOT LIKE 'sb://%'" in _ALBUM_RV_REPOINT_SQL
-    assert "version_number = r.current_version" in _ALBUM_RV_REPOINT_SQL
+    sql = captured["sql"]
+    assert "UPDATE public.resource_versions" in sql
+    assert "FROM public.resources" in sql
+    assert "resource_versions.resource_id = public.resources.id" in sql
+    assert "resource_versions.resource_id = 42" in sql
+    assert "version_number = public.resources.current_version" in sql
+    assert "file_path IS NOT NULL" in sql
+    assert "NOT LIKE 'sb://%" in sql
+    assert "file_path='sb://library/t5/album/42/'" in sql
+
+
+@pytest.mark.asyncio
+async def test_repoint_album_resource_version_opens_system_scope_when_enforced(
+    monkeypatch,
+):
+    """When SCOPE_ENFORCE_RESOURCES is on, the UPDATE...FROM references
+    Resources (via the join condition) with no ambient user scope — must go
+    through system_request_scope(reason=...), or the choke point's bulk-DML
+    write-path guard would fail-closed raise. Off (the default, covered by
+    the sibling test above), the wrap is a no-op nullcontext — no spurious
+    audit log on every repoint."""
+    from contextlib import asynccontextmanager
+
+    import app.db.scope as scope_module
+    from app.services.media.downloader.downloader import (
+        _repoint_album_resource_version,
+    )
+
+    class _FakeSession:
+        async def execute(self, _stmt):
+            return None
+
+    @asynccontextmanager
+    async def _write_scope():
+        yield _FakeSession()
+
+    captured: dict = {}
+
+    @asynccontextmanager
+    async def _system_request_scope(reason: str):
+        captured["reason"] = reason
+        yield None
+
+    monkeypatch.setattr(scope_module.settings, "SCOPE_ENFORCE_RESOURCES", True)
+    monkeypatch.setattr("app.db.session.write_scope", _write_scope)
+    monkeypatch.setattr(scope_module, "system_request_scope", _system_request_scope)
+
+    await _repoint_album_resource_version("42", "sb://library/t5/album/42/")
+
+    assert captured.get("reason"), "system_request_scope must carry a non-empty reason"
 
 
 @pytest.mark.asyncio
 async def test_repoint_album_resource_version_zero_rows_is_harmless(monkeypatch):
     """First download: no resource_versions row exists yet for the freshly
     created resource, so the UPDATE matches 0 rows — must not raise."""
-    from app.db import engine as db_engine
+    from contextlib import asynccontextmanager
+
     from app.services.media.downloader.downloader import (
         _repoint_album_resource_version,
     )
 
-    async def fake_execute(sql, params):
-        return 0
+    class _FakeSession:
+        async def execute(self, _stmt):
+            return None  # affects 0 rows, no error
 
-    monkeypatch.setattr(db_engine, "execute", fake_execute)
+    @asynccontextmanager
+    async def _write_scope():
+        yield _FakeSession()
+
+    @asynccontextmanager
+    async def _system_request_scope(reason: str):
+        yield None
+
+    monkeypatch.setattr("app.db.session.write_scope", _write_scope)
+    monkeypatch.setattr("app.db.scope.system_request_scope", _system_request_scope)
 
     # Should not raise.
     await _repoint_album_resource_version("42", "sb://library/t5/album/42/")

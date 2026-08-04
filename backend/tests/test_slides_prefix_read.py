@@ -22,6 +22,7 @@ download_path、纯文件系统枚举,对该前缀零感知 —— 图集 delete
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager, contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -45,16 +46,46 @@ def _auth() -> AuthContext:
     return AuthContext(user_id="u1", auth_type="jwt")
 
 
+@contextmanager
 def _patch_db_fetch_one(row: dict | None):
-    """app.db.engine.fetch_one —— _resolve_album_location 的非 scoped 直查。
+    """Phase A raw-SQL-to-ORM migration (docs/decisions/2026-08-04-raw-sql-
+    to-orm-full-migration.md): _resolve_album_location's non-scoped direct
+    query now runs as an ORM select() over app.db.session.read_scope()
+    (still no user_session/system_session required — see the function's
+    docstring). Patches that boundary instead of app.db.engine.fetch_one.
 
     row=None 模拟 SQL 查不到行(resource 不存在 / 无对应 version,
     INNER JOIN 直接筛掉);row={"file_path": ...} 模拟查到一行(file_path
-    可能是 sb:// 前缀,也可能是文件系统相对路径或 NULL)。"""
-    return patch(
-        "app.db.engine.fetch_one",
-        new=AsyncMock(return_value=row),
-    )
+    可能是 sb:// 前缀,也可能是文件系统相对路径或 NULL)。Both "no row" and
+    a row with file_path=None collapse to the same None outcome — exactly
+    like the legacy ``(row or {}).get("file_path") if row else None``."""
+    file_path = (row or {}).get("file_path") if row else None
+
+    class _FakeScalars:
+        def first(self):
+            return file_path
+
+    class _FakeResult:
+        def scalars(self):
+            return _FakeScalars()
+
+    class _FakeSession:
+        async def execute(self, _stmt):
+            return _FakeResult()
+
+    @asynccontextmanager
+    async def _read_scope():
+        yield _FakeSession()
+
+    @asynccontextmanager
+    async def _system_request_scope(reason: str):
+        yield None
+
+    with (
+        patch("app.db.session.read_scope", new=_read_scope),
+        patch("app.db.scope.system_request_scope", new=_system_request_scope),
+    ):
+        yield
 
 
 def _patch_media_repo(media: dict):
@@ -74,17 +105,42 @@ def _patch_base_path(path="/tmp/fake-base"):
 #
 # 根因:get_resource_by_media_id 用 scoped read_scope(),而 slides 端点上下文
 # 没有打开 scope session → 报 "no scope is set" 被内部 except 吞成 None →
-# 已迁图集被误判成未迁移,delete 本地目录后 404。修复后改走 db_engine.fetch_one
-# 非 scoped 直查,以下测试钉住"打的是新路径"而不是旧的 ResourcesRepository。
+# 已迁图集被误判成未迁移,delete 本地目录后 404。修复后改走非 scoped 直查(现为
+# ORM select() over read_scope()),以下测试钉住"打的是新路径"而不是旧的
+# ResourcesRepository。
 
 
 @pytest.mark.asyncio
-async def test_resolve_album_location_queries_db_engine_directly_not_scoped_repo():
-    """确认新实现调用 db_engine.fetch_one(非 scoped),且完全不碰
-    ResourcesRepository(scoped,需要 scope session,是本 bug 的根因)。"""
+async def test_resolve_album_location_queries_orm_directly_not_scoped_repo():
+    """确认新实现走 ORM select() over read_scope()(非 scoped 访问,不需要
+    user_session),且完全不碰 ResourcesRepository(scoped,需要 scope
+    session,是本 bug 的根因)。"""
+    from sqlalchemy.dialects import postgresql
+
     from app.api.media_slides_router import _resolve_album_location
 
-    fetch_one = AsyncMock(return_value={"file_path": ALBUM_PREFIX})
+    captured: dict = {}
+
+    class _FakeScalars:
+        def first(self):
+            return ALBUM_PREFIX
+
+    class _FakeResult:
+        def scalars(self):
+            return _FakeScalars()
+
+    class _FakeSession:
+        async def execute(self, stmt):
+            compiled = stmt.compile(
+                dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+            )
+            captured["sql"] = str(compiled)
+            return _FakeResult()
+
+    @asynccontextmanager
+    async def _read_scope():
+        yield _FakeSession()
+
     repo_cls = MagicMock(
         side_effect=AssertionError(
             "ResourcesRepository 不应被调用 —— 需要 scope session,是本 bug 的根因"
@@ -92,16 +148,16 @@ async def test_resolve_album_location_queries_db_engine_directly_not_scoped_repo
     )
 
     with (
-        patch("app.db.engine.fetch_one", new=fetch_one),
+        patch("app.db.session.read_scope", new=_read_scope),
         patch("app.repositories.resources_repository.ResourcesRepository", repo_cls),
     ):
         loc = await _resolve_album_location(MEDIA_ID)
 
-    fetch_one.assert_awaited_once()
-    sql, params = fetch_one.await_args.args
-    assert params == {"media_id": 700}
-    assert "resources" in sql.lower()
-    assert "resource_versions" in sql.lower()
+    assert captured.get("sql"), "session.execute was not called"
+    sql = captured["sql"].lower()
+    assert "resources" in sql
+    assert "resource_versions" in sql
+    assert "700" in captured["sql"], "media_id must be bound into the query"
     assert loc is not None
     assert loc.is_object_store and loc.is_prefix
 
@@ -130,14 +186,18 @@ async def test_resolve_album_location_non_prefix_file_path_returns_none():
 
 @pytest.mark.asyncio
 async def test_resolve_album_location_invalid_media_id_returns_none():
-    """media_id 非数字(防御性 int 转换失败)→ None,不抛异常。"""
+    """media_id 非数字(防御性 int 转换失败)→ None,不抛异常,且 int()
+    转换在打开任何 session/scope 之前就短路,不触发 DB 访问。"""
     from app.api.media_slides_router import _resolve_album_location
 
-    fetch_one = AsyncMock()
-    with patch("app.db.engine.fetch_one", new=fetch_one):
+    @asynccontextmanager
+    async def _must_not_open_read_scope():
+        raise AssertionError("must not open read_scope for a non-numeric id")
+        yield  # pragma: no cover
+
+    with patch("app.db.session.read_scope", new=_must_not_open_read_scope):
         loc = await _resolve_album_location("not-a-number")
 
-    fetch_one.assert_not_awaited()
     assert loc is None
 
 

@@ -365,11 +365,20 @@ try:
         if cached is not None:
             return cached.file_path, cached.creator_id, cached.team_ids
 
-        # Direct PG via the SQLAlchemy engine (Issue #199) — replaces the
-        # supabase-py path whose maybe_single().execute() returned None (→
-        # "'NoneType' object has no attribute 'data'") when the per-loop
-        # client was in a bad state. The engine has no per-loop client.
-        from app.db import engine as db_engine
+        # ORM session over the SQLAlchemy engine (Issue #199 → Phase A raw-SQL
+        # -to-ORM migration, docs/decisions/2026-08-04-raw-sql-to-orm-full-
+        # migration.md) — replaces both the supabase-py path whose
+        # maybe_single().execute() returned None (→ "'NoneType' object has no
+        # attribute 'data'") when the per-loop client was in a bad state, and
+        # the raw db_engine.fetch_one() text() SQL this superseded. The engine
+        # has no per-loop client.
+        from contextlib import nullcontext
+
+        from sqlalchemy import select
+
+        from app.db.scope import is_enforced, system_request_scope
+        from app.db.session import read_scope
+        from app.models import ParsedMedia, Resources
 
         # Determine which column to query based on file_type. Cover /
         # thumbnail are shared assets — they live on parsed_media only.
@@ -380,13 +389,50 @@ try:
         media_col = "download_path" if file_type == "file" else "cover_download_path"
 
         # 1. resources table — only meaningful for per-user file lookups.
+        # Original SQL (kept for reference — same columns, same predicate):
+        #   SELECT id, creator_id, file_path FROM public.resources WHERE id = :id
+        #
+        # This is a deliberately cross-user lookup: ownership (creator_id) is
+        # exactly what we're trying to determine here, BEFORE
+        # _check_permissions can run — there is no caller identity yet to open
+        # a user_session with (share-token / anonymous requests hit this too).
+        # Resources carries UserScoped(creator_id). ``SCOPE_ENFORCE_RESOURCES``
+        # DEFAULTS to false in code, but production sets it true via
+        # ``secrets/backend.env`` (outside this repo tree — CLAUDE.md's
+        # 部署陷阱: env overrides config.yml). So in production this
+        # ``system_request_scope`` wrap is LOAD-BEARING, not decorative:
+        # without it, the do_orm_execute choke point sees a scoped table
+        # (Resources) touched with no ambient scope and fail-closed raises
+        # ``UnscopedQueryError`` on the very first request — a 500, not a
+        # silent no-op. Gated on ``is_enforced`` (not unconditional) purely
+        # to stay byte-for-byte legacy in environments where the flag really
+        # is off (e.g. this repo's own local/test default).
         if file_type == "file":
             try:
-                row = await db_engine.fetch_one(
-                    "SELECT id, creator_id, file_path FROM public.resources "
-                    "WHERE id = :id",
-                    {"id": int(media_id)},
+                scope_cm = (
+                    system_request_scope(
+                        reason="media-serve-resolve-file-path: ownership "
+                        "unknown until this lookup runs; _check_permissions "
+                        "governs access"
+                    )
+                    if is_enforced("resources")
+                    else nullcontext()
                 )
+                async with scope_cm:
+                    async with read_scope() as session:
+                        row = (
+                            (
+                                await session.execute(
+                                    select(
+                                        Resources.id,
+                                        Resources.creator_id,
+                                        Resources.file_path,
+                                    ).where(Resources.id == int(media_id))
+                                )
+                            )
+                            .mappings()
+                            .first()
+                        )
                 if row and row.get("file_path"):
                     result = row["file_path"]
                     creator_id = row.get("creator_id")
@@ -400,12 +446,20 @@ try:
                 logger.warning(f"Resource lookup failed for {media_id}: {e}")
 
         # 2. Try parsed_media table (no ownership info — legacy)
+        # Original SQL: SELECT {media_col} FROM public.parsed_media WHERE id = :id
+        # parsed_media has no scope mixin — no ambient scope is required.
         try:
-            # media_col is one of two hardcoded column names (not user input).
-            row = await db_engine.fetch_one(
-                f"SELECT {media_col} FROM public.parsed_media WHERE id = :id",
-                {"id": int(media_id)},
-            )
+            col = getattr(ParsedMedia, media_col)
+            async with read_scope() as session:
+                row = (
+                    (
+                        await session.execute(
+                            select(col).where(ParsedMedia.id == int(media_id))
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
             if row and row.get(media_col):
                 result = row[media_col]
                 entry = media_path_cache.put(media_id, file_type, result, None, ())
@@ -416,21 +470,32 @@ try:
         raise HTTPException(status_code=404, detail="Media not found")
 
     async def _fetch_team_ids(resource_id) -> tuple[str, ...]:
-        """Fetch scope IDs for a resource from resource_items (engine).
+        """Fetch scope IDs for a resource from resource_items (ORM session).
 
         PR-E 4c: scope_id is always a teams.id snowflake post PR-C and authz is
         purely team_members membership, so we no longer filter on
         scope_type='team' — personal teams have only their owner as a member,
         so including their scope_ids can't over-authorize anyone.
+
+        Original SQL:
+          SELECT scope_id FROM public.resource_items WHERE resource_id = :rid
+        resource_items has no scope mixin — no ambient scope is required.
         """
-        from app.db import engine as db_engine
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import ResourceItems
 
         try:
-            rows = await db_engine.fetch_all(
-                "SELECT scope_id FROM public.resource_items WHERE resource_id = :rid",
-                {"rid": resource_id},
-            )
-            return tuple(str(r["scope_id"]) for r in rows if r.get("scope_id"))
+            async with read_scope() as session:
+                rows = (
+                    await session.execute(
+                        select(ResourceItems.scope_id).where(
+                            ResourceItems.resource_id == resource_id
+                        )
+                    )
+                ).all()
+            return tuple(str(r[0]) for r in rows if r[0])
         except Exception as e:
             logger.warning(f"Team scope lookup failed for resource {resource_id}: {e}")
         return ()
