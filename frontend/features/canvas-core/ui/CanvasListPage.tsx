@@ -122,6 +122,8 @@ export default function CanvasListPage() {
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-5xl px-6 pt-6 pb-12">
         <PageHeader
+          // No secondary rail in this module, so this IS the module name.
+          level="module"
           title={t('canvasList.title', 'Canvas')}
           count={totalCanvases}
           subtitle={t('canvasList.subtitle', 'All canvases across your projects')}

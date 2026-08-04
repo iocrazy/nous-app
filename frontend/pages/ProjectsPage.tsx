@@ -282,7 +282,7 @@ export function ProjectsPage() {
             />
           ) : activeFilter === 'recent' ? (
             <>
-              <PageHeader title={filterTitle} />
+              <PageHeader level="content" title={filterTitle} />
               <RecentItemsList items={recentItems} onSelect={handleRecentSelect} />
             </>
           ) : (

@@ -2868,7 +2868,8 @@
       "search": "Search skills...",
       "noneMatch": "No skills match this search",
       "newSkill": "+ New Skill",
-      "newFile": "+ File"
+      "newFile": "+ File",
+      "iconPlaceholder": "e.g. SK"
     },
     "workforce": {
       "runningNow": "Running now"

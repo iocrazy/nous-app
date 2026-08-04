@@ -213,7 +213,7 @@ export const NewSkillModal: React.FC<NewSkillModalProps> = ({
                 type="text"
                 value={icon}
                 onChange={(e) => setIcon(e.target.value)}
-                placeholder="✨"
+                placeholder={t('aiLibrary.skills.iconPlaceholder', 'e.g. SK')}
                 maxLength={4}
                 className="mt-1 w-full rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-ink-100 focus:border-indigo-500 focus:outline-none"
                 disabled={submitting}

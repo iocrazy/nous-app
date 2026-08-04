@@ -100,6 +100,7 @@ export const AccountsPage: React.FC = () => {
   return (
     <div className="dist-v4">
       <PageHeader
+        level="content"
         title={t('distribution.accountsTitle', 'Platform Accounts')}
         count={accounts.length}
         subtitle={t('distribution.accountsSubtitle', 'Connect social accounts to publish from Nous')}

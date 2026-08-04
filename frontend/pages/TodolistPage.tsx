@@ -425,6 +425,8 @@ export function TodolistPage() {
     <>
       <div className="px-4 pt-4">
         <PageHeader
+          // No secondary rail in this module, so this IS the module name.
+          level="module"
           title={t('issues.pageTitle', 'Issues')}
           subtitle={teamName || undefined}
           actions={

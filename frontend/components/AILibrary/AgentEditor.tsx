@@ -12,7 +12,7 @@
 // Draft state is local; `save()` PATCHes via aiLibraryService and replaces
 // the hydrated agent immutably on success.
 //
-// ⚠️ Every hook stays ABOVE the loading/error early-returns. A useState below
+// WARNING: Every hook stays ABOVE the loading/error early-returns. A useState below
 // them changes the hook count between the loading and loaded renders and
 // blows up with React #310 on every agent open — that regression shipped
 // once already (see resetOverride's note).

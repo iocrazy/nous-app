@@ -193,6 +193,7 @@ export function TeamAiUsagePage() {
   return (
     <div className="pt-6 px-6 pb-16 max-w-5xl mx-auto">
       <PageHeader
+        level="content"
         title={t('teamUsage.title', 'AI Cost & Budget')}
         subtitle={t(
           'teamUsage.subtitle',
