@@ -309,6 +309,10 @@ class AgentRuns(Base):
     )
     team_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     project_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+    # mig 404 (A4). Third and last member of the server-bound scope triple —
+    # see app/services/ai/scope/agent_run_scope.py. Stamped once at insert,
+    # never updated; NULL = project-wide (no episode restriction).
+    episode_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     ended_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
     model: Mapped[Optional[str]] = mapped_column(Text)
     provider: Mapped[Optional[str]] = mapped_column(Text)
