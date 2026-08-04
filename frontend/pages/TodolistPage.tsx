@@ -8,7 +8,7 @@
  *   - + New Issue → modal; on submit createIssue + navigate to detail
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ListTodo, Users, User, Bot, GitBranch } from 'lucide-react';
 import { IssueListView, type IssueViewMode } from '../components/Todolist/IssueListView';
@@ -20,11 +20,11 @@ import { NewIssueDialog } from '../components/Todolist/NewIssueDialog';
 import type { AgentRef, UiIssue } from '../components/Todolist/types';
 import type { IssueScope } from '../components/Todolist/issueScope';
 import {
-  listIssues, getIssueByIdentifier, createIssue, type Issue, type IssueCreatePayload,
+  listIssues, getIssue, getIssueByIdentifier, createIssue, type Issue, type IssueCreatePayload,
 } from '../services/issuesService';
 import { aiLibraryService } from '../services/aiLibraryService';
 import { toAgentRef, toUiIssue, type ProjectNameMap } from '../components/Todolist/uiIssue';
-import { mergeRealtimeIssue } from '../components/Todolist/mergeRealtimeIssue';
+import { mergeRealtimeIssue, shouldRefetchOnRealtime } from '../components/Todolist/mergeRealtimeIssue';
 import { computeSubtaskCounts } from '../components/Todolist/issueFlow';
 import { fetchProjects, createProject } from '../services/projectsService';
 import { useToast } from '../components/Toast';
@@ -33,6 +33,17 @@ import { useWorkspaceScope } from '../hooks/useWorkspaceScope';
 
 /** Which slice of the team's issues the list is showing (client-side toggle). */
 type ScopeMode = 'team' | 'my' | 'agent';
+
+/**
+ * How long to sit on a live row's Realtime events before refetching it.
+ *
+ * A running agent emits a burst of UPDATEs per turn (status flip, progress
+ * write, updated_at touch). Firing a request per event would hammer the API
+ * for a counter that only needs to look current to a human, so the window
+ * collapses each burst into one fetch — per issue, so a busy row can never
+ * starve a quiet one.
+ */
+const LIVE_REFETCH_DEBOUNCE_MS = 800;
 
 const ScopePill: React.FC<{
   active: boolean;
@@ -227,6 +238,64 @@ export function TodolistPage() {
     return () => { cancelled = true; };
   }, [identifier, agentsById, projectsById]);
 
+  // ── Live-row single-issue refetch ────────────────────────────────────
+  // mergeRealtimeIssue stops the running chip flickering by carrying the
+  // publication-excluded columns over, but carrying them over also freezes
+  // them: `execution_state` (where the turn counter lives) is outside the mig
+  // 172 whitelist, so a running row's "turn 3 · 4m" would read whatever the
+  // last REST fetch saw until the user navigated away. For live rows the event
+  // is a refetch signal, not data — same posture as TaskManagerContext.
+  const refetchTimers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+  // Read inside the timer callback so a fetch scheduled before the agent /
+  // project maps resolved still maps its result against the current ones.
+  const mapsRef = useRef({ agentsById, projectsById });
+  useEffect(() => {
+    mapsRef.current = { agentsById, projectsById };
+  }, [agentsById, projectsById]);
+  // Lets the Realtime handler consult the current row without reading it
+  // inside a setState updater (which React may invoke more than once).
+  const issuesRef = useRef<UiIssue[]>(issues);
+  useEffect(() => {
+    issuesRef.current = issues;
+  }, [issues]);
+
+  useEffect(() => {
+    const timers = refetchTimers.current;
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+    };
+  }, []);
+
+  const scheduleLiveRefetch = useCallback((issueId: number) => {
+    const timers = refetchTimers.current;
+    const pending = timers.get(issueId);
+    if (pending) clearTimeout(pending);
+    timers.set(issueId, setTimeout(() => {
+      timers.delete(issueId);
+      getIssue(issueId)
+        .then((fresh) => {
+          const { agentsById: agentMap, projectsById: projectMap } = mapsRef.current;
+          setIssues((prev) => {
+            const idx = prev.findIndex((i) => i.id === fresh.id);
+            // Dropped from the list (filtered / deleted) while in flight.
+            if (idx < 0) return prev;
+            const next = [...prev];
+            // Same merge as the Realtime path — `fresh` is a full REST row, so
+            // this time the excluded columns arrive with real values.
+            next[idx] = mergeRealtimeIssue(prev[idx], fresh, agentMap, projectMap);
+            return next;
+          });
+        })
+        .catch((err) => {
+          // Non-fatal on purpose: the merged row is already on screen, just
+          // with a stale turn count. Failing loudly here would be worse than
+          // the staleness this whole path exists to reduce.
+          console.error('[TodolistPage] live-row refetch failed', err);
+        });
+    }, LIVE_REFETCH_DEBOUNCE_MS));
+  }, []);
+
   // Realtime: keep the issues list in sync without a manual refresh.
   // `issues` is in the supabase_realtime publication — subscribe so status
   // changes (agent updates, other users) reflect live in the list instead
@@ -256,6 +325,9 @@ export function TodolistPage() {
           }
           const raw = payload.new as Issue;
           if (!raw?.id) return;
+          if (shouldRefetchOnRealtime(issuesRef.current.find((i) => i.id === raw.id), raw)) {
+            scheduleLiveRefetch(raw.id);
+          }
           setIssues((prev) => {
             const idx = prev.findIndex((i) => i.id === raw.id);
             // INSERT: nothing to merge onto.
@@ -273,7 +345,7 @@ export function TodolistPage() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [teamIdNum, agentsById, projectsById]);
+  }, [teamIdNum, agentsById, projectsById, scheduleLiveRefetch]);
 
   const handleCreate = async (payload: IssueCreatePayload) => {
     try {

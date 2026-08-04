@@ -56,6 +56,10 @@ export interface Issue {
   created_by_user_id: string | null;
   created_by_agent_id: string | null;
   dbos_workflow_id: string | null;
+  /** Conversation the agent's turns were written into. BIGINT Snowflake, but
+   *  str-serialized by the backend (unlike the numeric ids above) because it
+   *  only ever ends up in a URL. Null until the first dispatch backfills one. */
+  ai_session_id: string | null;
   execution_locked_at: string | null;
   execution_state: Record<string, unknown> | null;
   request_depth: number;
@@ -125,6 +129,10 @@ export interface NeedsInputItem {
   project_id: string | null;
   team_id: string | null;
   asked_at: string;
+  /** Which agent is parked on this question — the feed's agent dimension. */
+  assignee_agent_id: string | null;
+  /** Human identifier ("MH-7"); the detail route is keyed by it, not by id. */
+  identifier: string | null;
 }
 
 export interface NeedsInputListResponse {

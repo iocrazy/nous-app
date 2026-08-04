@@ -8,6 +8,8 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { Zap, ChevronRight, ChevronDown, Paperclip } from 'lucide-react';
 import type { IssueMessage, AgentLivenessState } from '../../services/issueMessageService';
 import { simulateAgentRunComplete } from '../../services/issueMessageService';
@@ -53,6 +55,18 @@ interface IssueChatThreadProps {
    * Cleared (set to '') by the parent when the `message` event arrives.
    */
   streamingText?: string;
+  /**
+   * Team whose route the run-group deep link is built under. Absent on
+   * surfaces rendered outside a /team/:teamId route — the link is then
+   * suppressed rather than pointing at a half-built URL.
+   */
+  teamId?: string;
+  /**
+   * `issues.ai_session_id` — the conversation the agent's turns were written
+   * into. Null until the issue's first dispatch backfills one, so the
+   * "Open conversation" affordance is conditional on it.
+   */
+  aiSessionId?: string | null;
 }
 
 const AgentAvatar: React.FC<{ initials: string; color?: string; size?: number }> = ({ initials, color = 'bg-ink-600', size = 22 }) => (
@@ -242,7 +256,10 @@ const RunGroupCard: React.FC<{
   entry: RunGroupEntry;
   agentsById: Record<string, AgentRef>;
   selfUserId?: string;
-}> = ({ entry, agentsById, selfUserId }) => {
+  /** Session-view deep link, or null when this issue has no session / no team. */
+  conversationHref?: string | null;
+}> = ({ entry, agentsById, selfUserId, conversationHref }) => {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const agentId = entry.runs[0]?.author_agent_id;
   const agent = agentId ? agentsById[agentId] : null;
@@ -258,25 +275,38 @@ const RunGroupCard: React.FC<{
       data-testid="run-group-card"
       className="my-3 rounded-lg border border-agent-line bg-agent-soft"
     >
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-        data-testid="run-group-toggle"
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-ink-900/30 rounded-lg transition-colors"
-      >
-        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        <AgentAvatar initials={(agent?.name ?? '·').slice(0, 2).toUpperCase()} color={agent?.avatar_color} size={18} />
-        <span className="text-xs font-medium text-ink-200">{agent?.name ?? 'Agent'} run</span>
-        <span className="text-[12px] text-ink-500 truncate">· {summary}</span>
-        {entry.anyRunning && (
-          <span className="inline-flex items-center gap-1 text-[11px] text-ok">
-            <span className="w-1.5 h-1.5 rounded-full bg-ok animate-pulse" />
-            running
-          </span>
+      {/* Toggle and deep link are SIBLINGS, not nested: an anchor inside a
+          button is invalid interactive nesting and swallows the link's click. */}
+      <div className="flex items-center">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          data-testid="run-group-toggle"
+          className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 text-left hover:bg-ink-900/30 rounded-lg transition-colors"
+        >
+          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          <AgentAvatar initials={(agent?.name ?? '·').slice(0, 2).toUpperCase()} color={agent?.avatar_color} size={18} />
+          <span className="text-xs font-medium text-ink-200">{agent?.name ?? 'Agent'} run</span>
+          <span className="text-[12px] text-ink-500 truncate">· {summary}</span>
+          {entry.anyRunning && (
+            <span className="inline-flex items-center gap-1 text-[11px] text-ok">
+              <span className="w-1.5 h-1.5 rounded-full bg-ok animate-pulse" />
+              running
+            </span>
+          )}
+          <span className="ml-auto text-[12px] text-ink-500 shrink-0">{relativeTime(entry.startedAt)}</span>
+        </button>
+        {conversationHref && (
+          <Link
+            to={conversationHref}
+            data-testid="run-group-open-conversation"
+            className="shrink-0 pl-2 pr-3 py-2 text-[12px] text-agent hover:underline whitespace-nowrap"
+          >
+            {t('issueDetail.openConversation', 'Open conversation')} →
+          </Link>
         )}
-        <span className="ml-auto text-[12px] text-ink-500 shrink-0">{relativeTime(entry.startedAt)}</span>
-      </button>
+      </div>
       {expanded && (
         <div data-testid="run-group-body" className="px-3 pb-2">
           {entry.items.map((m) => (
@@ -414,8 +444,13 @@ function buildTimeline(messages: IssueMessage[]): RenderRow[] {
   return rows;
 }
 
-export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agentsById, selfUserId, streamingText }) => {
+export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agentsById, selfUserId, streamingText, teamId, aiSessionId }) => {
   const hasStreaming = typeof streamingText === 'string' && streamingText.length > 0;
+  // A2: the folded run card is the timeline's handle on the agent's own
+  // conversation — without both halves of the route there is nothing to link to.
+  const conversationHref = teamId && aiSessionId
+    ? `/team/${teamId}/ai-library/sessions/${aiSessionId}`
+    : null;
 
   if (messages.length === 0 && !hasStreaming) {
     return (
@@ -432,7 +467,7 @@ export const IssueChatThread: React.FC<IssueChatThreadProps> = ({ messages, agen
           return <SystemStatusGroup key={item.key} messages={item.messages} selfUserId={selfUserId} />;
         }
         if (item.kind === 'run_group') {
-          return <RunGroupCard key={item.key} entry={item} agentsById={agentsById} selfUserId={selfUserId} />;
+          return <RunGroupCard key={item.key} entry={item} agentsById={agentsById} selfUserId={selfUserId} conversationHref={conversationHref} />;
         }
         const m = item.message;
         if (m.kind === 'system_status') return <SystemStatusEvent key={item.key} msg={m} selfUserId={selfUserId} />;

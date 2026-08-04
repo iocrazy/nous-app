@@ -171,6 +171,15 @@ async def list_needs_input(auth: AuthDep) -> NeedsInputListResponse:
             ),
             team_id=str(r["team_id"]) if r.get("team_id") is not None else None,
             asked_at=r["updated_at"],
+            # Already a str off the repo row (_parity sweeps uuid → str), but
+            # str() it anyway so a raw UUID from any other caller can't leak
+            # through as a non-JSON type.
+            assignee_agent_id=(
+                str(r["assignee_agent_id"])
+                if r.get("assignee_agent_id") is not None
+                else None
+            ),
+            identifier=r.get("identifier"),
         )
         for r in rows
     ]

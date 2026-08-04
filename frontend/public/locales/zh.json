@@ -2759,6 +2759,7 @@
       "attributes": "属性",
       "costSection": "成本与限额",
       "waitingReplies": "{{count}} 条待你回复",
+      "goAnswer": "去回复",
       "viewInIssues": "去 Issues 查看",
       "backToOverview": "返回概览",
       "newAgentHintV2": "从官方模板出发再定制，或者从空白开始。",
@@ -3790,6 +3791,7 @@
     }
   },
   "issueDetail": {
+    "openConversation": "展开对话流",
     "progress": "进度",
     "links": "关联",
     "status": "状态",
