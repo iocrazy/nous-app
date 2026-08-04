@@ -2948,6 +2948,11 @@
       "skills": "技能",
       "market": "市场",
       "marketPlanned": "规划中"
+    },
+    "fault": {
+      "budget": "已超月度预算 — 请调高预算或恢复该智能体",
+      "manual": "已被管理员暂停 — 可在该智能体的「档案」tab 恢复",
+      "paused": "该智能体已暂停"
     }
   },
   "teamUsage": {

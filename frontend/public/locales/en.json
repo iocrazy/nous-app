@@ -2948,6 +2948,11 @@
       "skills": "Skills",
       "market": "Marketplace",
       "marketPlanned": "Planned"
+    },
+    "fault": {
+      "budget": "Monthly budget exceeded — raise the budget or resume the agent",
+      "manual": "Paused by admin — resume from the agent’s Profile tab",
+      "paused": "Agent is paused"
     }
   },
   "teamUsage": {

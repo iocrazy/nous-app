@@ -29,6 +29,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import {
   Code2,
   Eye,
@@ -99,35 +100,30 @@ function stripFrontmatter(md: string): string {
 }
 
 /** Classify the skill source — bundled seed vs user-owned scope. */
-function skillSource(skill: AILibrarySkill) {
+/** `managedLabel` used to ride along here but nothing ever rendered it. */
+function skillSource(skill: AILibrarySkill, t: TFunction) {
   const bundled =
     skill.is_public && skill.team_id == null && skill.project_id == null;
   if (bundled) {
-    return {
-      icon: Package,
-      label: 'Nous bundled',
-      managedLabel: 'Bundled Nous preset (read-only)',
-    };
+    return { icon: Package, label: t('aiLibrary.skills.builtIn', 'Built-in') };
   }
   if (skill.team_id != null) {
     return {
       icon: Users,
-      label: `Team: ${skill.team_name ?? skill.team_id}`,
-      managedLabel: 'Team skill',
+      label: t('aiLibrary.agents.scopeBadgeTeam', 'Team: {{name}}', {
+        name: skill.team_name ?? skill.team_id,
+      }),
     };
   }
   if (skill.project_id != null) {
     return {
       icon: Users,
-      label: `Project: ${skill.project_name ?? skill.project_id}`,
-      managedLabel: 'Project skill',
+      label: t('aiLibrary.agents.scopeBadgeProject', 'Project: {{name}}', {
+        name: skill.project_name ?? skill.project_id,
+      }),
     };
   }
-  return {
-    icon: UserIcon,
-    label: 'Private',
-    managedLabel: 'Personal skill',
-  };
+  return { icon: UserIcon, label: t('aiLibrary.scope.private', 'Private') };
 }
 
 export const SkillEditor: React.FC<SkillEditorProps> = ({
@@ -244,7 +240,7 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   // backend DELETE route returns 403. UI matches so we don't lure the
   // user into a confirm dialog that ends with a raw 403.
   const canDelete = !isPreset;
-  const source = skillSource(skill);
+  const source = skillSource(skill, t);
   const SourceIcon = source.icon;
 
   const activeDraft = drafts[activeTab] ?? '';

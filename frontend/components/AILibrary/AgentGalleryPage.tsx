@@ -205,7 +205,7 @@ function AgentCard({
           data-testid="fault-warnline"
         >
           <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-          <span>{status.detail}</span>
+          <span>{status.detailKey ? t(status.detailKey, status.detail) : status.detail}</span>
         </div>
       )}
 
