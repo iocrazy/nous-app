@@ -244,7 +244,10 @@ export const router = createBrowserRouter([
           { path: 'shared', element: <SuspenseWrap><SharedPage /></SuspenseWrap> },
           // Legacy AI Library routes (kept for bookmark compatibility —
           // render without the new secondary sidebar).
-          { path: 'agents', element: <SuspenseWrap><AgentsPage /></SuspenseWrap> },
+          // Slug-less lands even worse than the nested one: AgentsTab's empty
+          // state says "pick an agent from the sidebar", and this route has no
+          // sidebar at all. A bookmark to the list should land on the list.
+          { path: 'agents', element: <RedirectToAgentGallery /> },
           { path: 'agents/:slug', element: <SuspenseWrap><AgentsPage /></SuspenseWrap> },
           { path: 'skills', element: <SuspenseWrap><SkillsPage /></SuspenseWrap> },
           { path: 'skills/:slug', element: <SuspenseWrap><SkillsPage /></SuspenseWrap> },
