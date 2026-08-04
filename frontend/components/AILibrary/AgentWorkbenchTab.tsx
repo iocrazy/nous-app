@@ -7,9 +7,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { MessageCircleQuestion, Plus } from 'lucide-react';
+import { relativeTime } from '../../utils/taskDisplay';
 import type { AILibraryAgent } from '../../types';
-import { aiLibraryService } from '../../services/aiLibraryService';
+import { listNeedsInput, type NeedsInputItem } from '../../services/issuesService';
 import { AgentDashboardTab } from './AgentDashboardTab';
 import { AgentRunsSplit } from './AgentRunsSplit';
 import { AgentRoutinesTab } from './AgentRoutinesTab';
@@ -29,24 +31,33 @@ export const AgentWorkbenchTab: React.FC<AgentWorkbenchTabProps> = ({
 }) => {
   const { t } = useTranslation();
   const [showRuns, setShowRuns] = useState(false);
-  const [waiting, setWaiting] = useState(0);
+  const [waiting, setWaiting] = useState<NeedsInputItem[]>([]);
   const [newRoutineOpen, setNewRoutineOpen] = useState(false);
   // Bumped after a create so AgentRoutinesTab remounts and refetches — it
   // owns its own list and exposes no reload handle.
   const [routinesKey, setRoutinesKey] = useState(0);
 
-  // Waiting-reply count comes from the batch stats endpoint. It is a COUNT,
-  // not a list: `NeedsInputItem` carries no agent dimension, so a per-issue
-  // list here would need a new endpoint — the per-issue entry point already
-  // exists in the issue list, which is where the link goes.
+  // The needs-input feed now carries `assignee_agent_id` and `identifier`, so
+  // this can be the questions themselves rather than the count the batch stats
+  // endpoint used to hand over. A count only says you are late; the question
+  // says whether you can clear it in ten seconds.
+  //
+  // Rows without an identifier are dropped: the detail route is keyed by it,
+  // and a card whose "go answer" button goes nowhere is worse than no card.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const stats = await aiLibraryService.getAgentStats(7);
-        if (!cancelled) setWaiting(stats[agent.id]?.needs_input_count ?? 0);
+        const resp = await listNeedsInput();
+        if (cancelled) return;
+        setWaiting(
+          (resp.items ?? []).filter(
+            (i) => i.assignee_agent_id === agent.id && !!i.identifier,
+          ),
+        );
       } catch (err) {
-        console.error('[AgentWorkbenchTab] getAgentStats failed:', err);
+        // Degrade to no card — this panel sits above the whole workbench.
+        console.error('[AgentWorkbenchTab] listNeedsInput failed:', err);
       }
     })();
     return () => {
@@ -56,24 +67,50 @@ export const AgentWorkbenchTab: React.FC<AgentWorkbenchTabProps> = ({
 
   return (
     <div className="space-y-5">
-      {waiting > 0 && (
-        <div
-          className="flex items-center gap-2 rounded-lg border border-warn-line bg-warn-soft px-3 py-2 text-[13px] text-warn"
+      {waiting.length > 0 && (
+        <section
+          className="rounded-lg border border-warn-line bg-warn-soft px-3 py-2.5"
           data-testid="waiting-replies"
         >
-          <MessageCircleQuestion size={15} className="shrink-0" />
-          <span className="min-w-0 flex-1">
-            {t('aiLibrary.agents.waitingReplies', '{{count}} issue(s) waiting for your reply', {
-              count: waiting,
-            })}
-          </span>
-          <a
-            href={`${urlPrefix}/todolist`}
-            className="shrink-0 underline"
-          >
-            {t('aiLibrary.agents.viewInIssues', 'View in Issues')}
-          </a>
-        </div>
+          <div className="flex items-center gap-2 text-[12px] font-semibold text-warn">
+            <MessageCircleQuestion size={14} className="shrink-0" />
+            <span className="min-w-0 flex-1">
+              {t('aiLibrary.agents.waitingReplies', '{{count}} issue(s) waiting for your reply', {
+                count: waiting.length,
+              })}
+            </span>
+            <a href={`${urlPrefix}/todolist`} className="shrink-0 font-normal underline">
+              {t('aiLibrary.agents.viewInIssues', 'View in Issues')}
+            </a>
+          </div>
+          <ul className="mt-2 space-y-2">
+            {waiting.map((issue) => (
+              <li
+                key={issue.issue_id}
+                data-testid="waitcard"
+                className="rounded-md border border-warn-line bg-ink-950/30 px-3 py-2"
+              >
+                {/* The agent's own words. Falling back to the title keeps the
+                    card useful when a run parked without giving a reason. */}
+                <p className="text-[13px] leading-relaxed text-ink-200 break-words">
+                  {issue.question ?? issue.title}
+                </p>
+                <div className="mt-1.5 flex items-center gap-2 text-[11px] text-ink-500">
+                  <span className="truncate">
+                    {issue.identifier} · {relativeTime(issue.asked_at)}
+                  </span>
+                  <Link
+                    to={`${urlPrefix}/todolist/${issue.identifier}`}
+                    data-testid="waitcard-answer-link"
+                    className="ml-auto shrink-0 font-medium text-warn hover:underline"
+                  >
+                    {t('aiLibrary.agents.goAnswer', 'Go answer')} →
+                  </Link>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {showRuns ? (

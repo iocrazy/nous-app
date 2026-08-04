@@ -19,6 +19,8 @@ const needsInput: NeedsInputItem = {
   project_id: null,
   team_id: '2002',
   asked_at: '2026-08-03T00:00:00Z',
+  assignee_agent_id: 'a1',
+  identifier: 'MH-1001',
 };
 
 const approval: AILibraryApprovalRequest = {

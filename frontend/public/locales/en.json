@@ -2759,6 +2759,7 @@
       "attributes": "Attributes",
       "costSection": "Cost & limits",
       "waitingReplies": "{{count}} issue(s) waiting for your reply",
+      "goAnswer": "Go answer",
       "viewInIssues": "View in Issues",
       "backToOverview": "Back to overview",
       "newAgentHintV2": "Start from an official template and customize it, or build from blank.",

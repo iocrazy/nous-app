@@ -189,6 +189,13 @@ class NeedsInputItem(BaseModel):
     project_id: Optional[str] = None
     team_id: Optional[str] = None
     asked_at: datetime
+    # Which agent is parked on this question. Without it the feed has no agent
+    # dimension, and a per-agent surface (the AI Library workbench) can only
+    # show a count someone else computed — never the question itself.
+    assignee_agent_id: Optional[str] = None
+    # Human identifier ("MH-7"). The issue detail route is keyed by it, not by
+    # the numeric id, so a "go answer" deep link cannot be built without it.
+    identifier: Optional[str] = None
 
 
 class NeedsInputListResponse(BaseModel):

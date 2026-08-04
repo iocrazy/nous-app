@@ -129,6 +129,10 @@ export interface NeedsInputItem {
   project_id: string | null;
   team_id: string | null;
   asked_at: string;
+  /** Which agent is parked on this question — the feed's agent dimension. */
+  assignee_agent_id: string | null;
+  /** Human identifier ("MH-7"); the detail route is keyed by it, not by id. */
+  identifier: string | null;
 }
 
 export interface NeedsInputListResponse {

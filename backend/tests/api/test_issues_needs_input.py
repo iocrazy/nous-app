@@ -280,6 +280,8 @@ async def test_router_maps_repo_row_to_response_shape(monkeypatch):
             {
                 "id": 4242,
                 "title": "Need clarification",
+                "identifier": "MH-7",
+                "assignee_agent_id": "22222222-2222-4222-8222-222222222222",
                 "project_id": 55,
                 "team_id": 42,
                 "updated_at": "2026-08-01T10:00:00+00:00",
@@ -302,3 +304,39 @@ async def test_router_maps_repo_row_to_response_shape(monkeypatch):
     assert item.project_id == "55"
     assert item.team_id == "42"
     assert item.question == "which color scheme?"
+    # The two fields the agent workbench needs: which agent is parked on this
+    # question (so a per-agent card can filter to its own), and the identifier
+    # the "go answer" deep link is keyed by (/todolist/:identifier).
+    assert item.assignee_agent_id == "22222222-2222-4222-8222-222222222222"
+    assert item.identifier == "MH-7"
+
+
+async def test_router_tolerates_a_row_with_no_assignee_or_identifier(monkeypatch):
+    """Both new fields are nullable: an unassigned issue can still be parked at
+    needs_input, and the row must not 500 the whole feed because of it."""
+    import importlib
+
+    issues_router = importlib.import_module("app.api.issues_router")
+
+    async def _fake_list(user_id, *, limit=50):
+        return [
+            {
+                "id": 4243,
+                "title": "Orphan question",
+                "assignee_agent_id": None,
+                "project_id": None,
+                "team_id": None,
+                "updated_at": "2026-08-01T10:00:00+00:00",
+                "execution_state": {"agent_outcome": "needs_input"},
+            }
+        ]
+
+    monkeypatch.setattr(issues_router.issue_repository, "list_needs_input", _fake_list)
+
+    class _Auth:
+        user_id = "11111111-1111-4111-8111-111111111111"
+
+    item = (await issues_router.list_needs_input(_Auth())).items[0]
+    assert item.assignee_agent_id is None
+    assert item.identifier is None
+    assert item.question is None
