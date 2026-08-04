@@ -87,6 +87,11 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
         </div>
       )}
 
+      {/* Two columns per spec §03: the persona documents are the work, the
+          attributes / skills / permissions are the settings that describe
+          them. They used to be one long stack, so reading a prompt meant
+          scrolling past every knob first. */}
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-[1.5fr_1fr] md:items-start">
       {/* Persona documents — one at a time. */}
       <section>
         <div className="mb-2 flex gap-1">
@@ -116,6 +121,7 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
         />
       </section>
 
+      <div className="flex flex-col gap-6">
       {/* Attributes */}
       <section className="space-y-4 text-sm">
         <h3 className="text-sm font-semibold text-ink-200">
@@ -283,6 +289,8 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
           </button>
         </div>
       </section>
+      </div>
+      </div>
     </div>
   );
 };
