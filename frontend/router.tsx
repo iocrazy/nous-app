@@ -118,6 +118,15 @@ function DistributionModuleGuard({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+// Slug-less /ai-library/agents used to render AgentsTab with nothing
+// selected. Since the rail stopped listing agents (B0), that state has no list
+// to pick from — it lands on an empty "choose an agent on the left" dead end.
+// The roster IS the gallery now, so send it there.
+function RedirectToAgentGallery() {
+  const { teamId } = useParams();
+  return <Navigate to={`${teamId ? `/team/${teamId}` : ''}/ai-library`} replace />;
+}
+
 function PageLoader() {
   return (
     <div className="flex items-center justify-center h-64">
@@ -247,7 +256,11 @@ export const router = createBrowserRouter([
             element: <SuspenseWrap><AILibraryLayout /></SuspenseWrap>,
             children: [
               { index: true, element: <SuspenseWrap><AgentGalleryPage /></SuspenseWrap> },
-              { path: 'agents', element: <SuspenseWrap><AgentsPage /></SuspenseWrap> },
+              // Slug-less /agents used to render AgentsTab with nothing
+              // selected. Since the rail stopped listing agents (B0), that
+              // state has no list to pick from — it is an empty "choose an
+              // agent on the left" dead end. The roster IS the gallery now.
+              { path: 'agents', element: <RedirectToAgentGallery /> },
               { path: 'agents/:slug', element: <SuspenseWrap><AgentsPage /></SuspenseWrap> },
               { path: 'skills', element: <SuspenseWrap><SkillsPage /></SuspenseWrap> },
               { path: 'skills/:slug', element: <SuspenseWrap><SkillsPage /></SuspenseWrap> },
