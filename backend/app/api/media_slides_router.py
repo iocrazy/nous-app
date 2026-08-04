@@ -79,9 +79,15 @@ async def _resolve_album_location(media_id: str):
     is set" 报错并被其内部 except 吞成 None,导致已迁图集永远走不到这条
     分支、误判成未迁移。ORM 化后改用 ``system_request_scope`` 显式声明这里
     本来就没有 ambient scope(而不是继续绕开钩子)—— resources 携带
-    UserScoped,SCOPE_ENFORCE_RESOURCES 打开后若不声明 system 会立刻炸
-    "no scope is set",与迁移前这段注释描述的故障同构;is_enforced 门控下
-    今天(flag off)是纯粹的 no-op。
+    UserScoped。``SCOPE_ENFORCE_RESOURCES`` 代码默认 false,但生产环境经
+    ``secrets/backend.env``(仓库树外,见 CLAUDE.md「部署陷阱」env 覆盖
+    config.yml 一节)设为 **true**——所以这个 ``system_request_scope`` 包装
+    在生产是承重墙,不是装饰:去掉它,do_orm_execute 钩子看到 Resources
+    被碰但没有 ambient scope,立刻 fail-closed 抛 ``UnscopedQueryError``,
+    这个端点直接 500(不是安静地退化成 None)——与迁移前这段注释描述的
+    "no scope is set" 故障是同一个坑,只是从"根本没查"变成"包装漏加"。
+    ``is_enforced`` 门控只是为了在 flag 真的关闭的环境(比如本仓库自己的
+    本地/测试默认值)保持逐字不变的旧行为,不是说生产也是 no-op。
 
     resource 不存在 / 没有对应 version / file_path 为空或非 sb:// 前缀,
     一律返回 None —— 调用方零回退到原文件系统读取逻辑,保证迁移前后都能读。"""

@@ -211,15 +211,19 @@ async def _repoint_album_resource_version(resource_id, album_path: str) -> None:
     Called from the download pipeline (no HTTP request context, so no
     ambient user Scope) — wrapped in an ``is_enforced``-gated
     ``system_request_scope`` (same pattern as
-    ``resources_repository.count_resources_by_media_id`` /
-    ``resource_fetch_tool``): a no-op today (``SCOPE_ENFORCE_RESOURCES``
-    off, bulk DML referencing an unenforced Resources touches no scoped
-    model), but required once that flag flips on — without it, this
-    Resources-referencing UPDATE...FROM would either fail-closed raise
-    (no scope set) or be forbidden outright (bulk DML under a real user
-    scope) per the choke point's write-path rules. Resources is referenced
-    only via the UPDATE...FROM join condition (not the UPDATE target
-    itself); resource_versions carries no scope mixin.
+    ``resources_repository.count_resources_by_media_id``).
+    ``SCOPE_ENFORCE_RESOURCES`` DEFAULTS to false in code, but production
+    sets it TRUE via ``secrets/backend.env`` (outside this repo tree —
+    CLAUDE.md's 部署陷阱 on env overriding config.yml): in production this
+    wrap is LOAD-BEARING, not a no-op — without it, this
+    Resources-referencing UPDATE...FROM would either fail-closed raise (no
+    scope set) or be forbidden outright (bulk DML under a real user scope)
+    per the choke point's write-path rules, and every album repoint would
+    raise instead of committing. The ``is_enforced`` gate exists only to
+    stay byte-for-byte legacy where the flag really is off (e.g. this
+    repo's local/test default). Resources is referenced only via the
+    UPDATE...FROM join condition (not the UPDATE target itself);
+    resource_versions carries no scope mixin.
     """
     from contextlib import nullcontext
 

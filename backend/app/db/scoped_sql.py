@@ -16,10 +16,18 @@ Callers must pick exactly one:
 
   * ``scope=Scope(user_id=...)`` — a tenant-bound read/write. The helper does
     NOT build the tenant predicate for you (that is
-    ``app.db.scope.scoped_sql`` — the ``(predicate_sql, params)`` builder);
-    it asserts that the params you pass through actually carry that bind
-    (``params[SCOPE_USER_PARAM] == scope.user_id``), so a caller cannot
-    declare a scope and then forget to filter by it.
+    ``app.db.scope.scoped_sql`` — the ``(predicate_sql, params)`` builder).
+    It checks two NECESSARY-BUT-NOT-SUFFICIENT signals: (a) ``params``
+    carries the bind (``params[SCOPE_USER_PARAM] == scope.user_id``) and
+    (b) the SQL text mentions the bind token at all. Neither proves the
+    token sits in a filtering WHERE position — a caller can still write
+    ``SELECT :scope_user_id, *`` (references the token, filters nothing) or
+    put it in an ``OR 1=1``-shaped tautology; this guardrail catches the
+    "declared a scope, never touched it" class of mistake (unbound/unused
+    param), NOT "wrote a scope-shaped predicate that doesn't actually
+    filter" (that positive guarantee is what the ORM choke point's
+    compile-verified ``with_loader_criteria`` gives — see app/db/scope.py —
+    and is out of reach for opaque ``text()`` SQL by construction).
   * ``system=True, reason="..."`` — a deliberate cross-tenant / system
     operation (sweepers, admin analytics, migrations, dead-table probes).
     ``reason`` is mandatory and logged at INFO for the same audit trail
@@ -87,10 +95,21 @@ def _validate_declaration(scope: Scope | None, system: bool, reason: str) -> Non
         )
 
 
-def _assert_scope_bound(scope: Scope, params: dict[str, Any]) -> None:
-    """Fail closed if ``params`` does not carry the bind the declared
-    ``scope`` promises — a ``scope=`` declaration with no matching bound
-    value would silently run unfiltered while LOOKING governed."""
+def _assert_scope_bound(scope: Scope, params: dict[str, Any], sql: str) -> None:
+    """Fail closed on two NECESSARY-BUT-NOT-SUFFICIENT signals that a
+    ``scope=`` declaration is actually wired up — see the module docstring
+    for exactly what this does and does not prove:
+
+      1. ``params`` carries the bind the declared ``scope`` promises — a
+         ``scope=`` declaration with no matching bound value would silently
+         run unfiltered while LOOKING governed.
+      2. the SQL text mentions the bind token at all (``:scope_user_id`` or
+         the bare param name) — catches the "declared a scope, built the
+         bind, forgot to reference it in the query string" slip. A plain
+         substring check, NOT a parse: it does not (cannot, for opaque
+         text()) verify the token sits in a filtering WHERE position rather
+         than a SELECT list or a tautology.
+    """
     if SCOPE_USER_PARAM not in params:
         raise UnscopedRawSQLError(
             f"scoped_sql(scope=...) requires params['{SCOPE_USER_PARAM}'] to "
@@ -105,6 +124,16 @@ def _assert_scope_bound(scope: Scope, params: dict[str, Any]) -> None:
             f"scoped_sql(scope=...): params['{SCOPE_USER_PARAM}']={bound!r} "
             f"does not match the declared scope.user_id={scope.user_id!r} — "
             "the bound tenant value must match the declared identity."
+        )
+    if SCOPE_USER_PARAM not in sql:
+        raise UnscopedRawSQLError(
+            f"scoped_sql(scope=...): params carry '{SCOPE_USER_PARAM}' but "
+            "the SQL text never references it (no ':scope_user_id' / "
+            f"'{SCOPE_USER_PARAM}' substring found) — an unused bind means "
+            "the query is NOT actually filtered by the declared scope. "
+            "This is a weak, substring-only check (see docstring) — it "
+            "cannot verify the token is in a filtering position, only that "
+            "it is referenced at all."
         )
 
 
@@ -132,7 +161,7 @@ async def scoped_sql(
     _validate_declaration(scope, system, reason)
     call_params = dict(params or {})
     if scope is not None:
-        _assert_scope_bound(scope, call_params)
+        _assert_scope_bound(scope, call_params, sql)
     else:
         logger.info(
             "[scoped_sql] system access: {} (mode={}, sql={!r})",

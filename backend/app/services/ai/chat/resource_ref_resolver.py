@@ -79,8 +79,14 @@ async def _fetch_accessible_meta(
     # governed by team membership, not creator_id — a team-shared resource
     # must stay visible even when not owned by the caller. Matches the
     # is_enforced-gated system_request_scope pattern used across this
-    # migration batch (resources_repository / resource_fetch_tool); no-op
-    # today (flag off).
+    # migration batch. SCOPE_ENFORCE_RESOURCES DEFAULTS to false in code,
+    # but production sets it TRUE via secrets/backend.env (outside this
+    # repo tree — CLAUDE.md's 部署陷阱 on env overriding config.yml): in
+    # production this wrap is LOAD-BEARING, not a no-op — without it the
+    # do_orm_execute choke point fail-closed raises UnscopedQueryError on
+    # every call (Resources touched, no ambient scope). The is_enforced
+    # gate exists only to stay byte-for-byte legacy where the flag really
+    # is off (e.g. this repo's local/test default).
     scope_cm = (
         system_request_scope(reason="resource-ref-resolver-team-membership-access")
         if is_enforced("resources")

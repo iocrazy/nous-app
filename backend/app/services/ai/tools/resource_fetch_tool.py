@@ -64,7 +64,7 @@ async def _fetch_dispatch(
 
     from app.db.scope import is_enforced, system_request_scope
     from app.db.session import read_scope
-    from app.models import Resources, ResourceItems, TeamMembers
+    from app.models import ResourceItems, Resources, TeamMembers
 
     # Original SQL (kept for reference — same JOIN/WHERE/LIMIT shape):
     #   SELECT r.id::text, r.mime_type AS mime, r.filename AS name,
@@ -107,9 +107,15 @@ async def _fetch_dispatch(
     # governed by team membership, not creator_id — a resource shared to a
     # team the caller belongs to must stay visible even when not owned by
     # them. Forcing SYSTEM scope keeps this query correct (rather than
-    # silently creator_id-filtered) if SCOPE_ENFORCE_RESOURCES ever flips on;
-    # no-op today (flag off, matches resources_repository's established
-    # is_enforced-gated system_request_scope pattern).
+    # silently creator_id-filtered). SCOPE_ENFORCE_RESOURCES DEFAULTS to
+    # false in code, but production sets it TRUE via secrets/backend.env
+    # (outside this repo tree — CLAUDE.md's 部署陷阱 on env overriding
+    # config.yml): in production this wrap is LOAD-BEARING — without it the
+    # do_orm_execute choke point sees Resources touched with no ambient
+    # scope and fail-closed raises UnscopedQueryError, turning every
+    # ResourceFetch call into a 500 instead of a clean PermissionError. The
+    # is_enforced gate exists only to stay byte-for-byte legacy where the
+    # flag genuinely is off (e.g. this repo's local/test default).
     scope_cm = (
         system_request_scope(reason="resource-fetch-team-membership-access")
         if is_enforced("resources")

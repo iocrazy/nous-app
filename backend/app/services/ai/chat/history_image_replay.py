@@ -77,7 +77,15 @@ async def _load_file_path_db(resource_id: str, user_id: str) -> Optional[str]:
     # Resources carries UserScoped(creator_id), but this access check is
     # governed by team membership, not creator_id — matches the
     # is_enforced-gated system_request_scope pattern used across this
-    # migration batch; no-op today (flag off).
+    # migration batch. SCOPE_ENFORCE_RESOURCES DEFAULTS to false in code,
+    # but production sets it TRUE via secrets/backend.env (outside this
+    # repo tree — CLAUDE.md's 部署陷阱 on env overriding config.yml): in
+    # production this wrap is LOAD-BEARING — without it the do_orm_execute
+    # choke point fail-closed raises UnscopedQueryError (Resources touched,
+    # no ambient scope), degrading every history image replay lookup to a
+    # raised exception instead of a clean file_path/None. The is_enforced
+    # gate exists only to stay byte-for-byte legacy where the flag really
+    # is off (e.g. this repo's local/test default).
     scope_cm = (
         system_request_scope(reason="history-image-replay-team-membership-access")
         if is_enforced("resources")

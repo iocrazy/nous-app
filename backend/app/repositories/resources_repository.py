@@ -2411,10 +2411,17 @@ class ResourcesRepository(AsyncpgRepository):
         this access check is governed by TEAM membership, not creator_id (a
         resource shared to the caller's team must stay visible even if they
         didn't create it) — wrapped in an ``is_enforced``-gated
-        ``system_request_scope`` (see resources_repository's established
-        ``count_resources_by_media_id`` / resource_fetch_tool pattern) so this
-        stays correct rather than silently creator_id-filtered if
-        ``SCOPE_ENFORCE_RESOURCES`` ever flips on; no-op today (flag off).
+        ``system_request_scope`` (see this file's established
+        ``count_resources_by_media_id`` pattern). ``SCOPE_ENFORCE_RESOURCES``
+        DEFAULTS to false in code, but production sets it TRUE via
+        ``secrets/backend.env`` (outside this repo tree — CLAUDE.md's
+        部署陷阱 on env overriding config.yml). So this wrap is LOAD-BEARING
+        in production, not a no-op: without it, the do_orm_execute choke
+        point sees Resources touched with no ambient scope and fail-closed
+        raises ``UnscopedQueryError`` on the very first call — the picker
+        500s instead of silently mis-scoping to creator_id-only. The
+        ``is_enforced`` gate exists only to stay byte-for-byte legacy where
+        the flag genuinely is off (e.g. this repo's local/test default).
         """
         from sqlalchemy import String, case, cast
 

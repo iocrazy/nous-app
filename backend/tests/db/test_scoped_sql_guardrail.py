@@ -13,7 +13,12 @@ so these exercise only the declare-before-you-query contract:
     this guardrail exists to close);
   * ``scope=Scope(...)`` whose bound value disagrees with ``scope.user_id`` →
     raise;
-  * ``scope=Scope(...)`` with a matching bind → forwards, params unchanged;
+  * ``scope=Scope(...)`` with a matching bind but the SQL text never
+    references the bind token → raise (an unused bind is not a filter —
+    catches "declared a scope, built the params, forgot to reference it in
+    the query string");
+  * ``scope=Scope(...)`` with a matching bind AND the SQL text referencing
+    it → forwards, params unchanged;
   * mode dispatch (fetch_all / fetch_one / execute) calls the right db_engine
     helper;
   * the three mode-specific wrappers (scoped_fetch_all/one/execute) thread
@@ -43,6 +48,10 @@ from app.db.scoped_sql import (
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
 _SQL = "SELECT 1"
+# A SQL string that actually references the bind token — required for the
+# scope= "success" tests now that _assert_scope_bound also checks the SQL
+# text mentions SCOPE_USER_PARAM (see app/db/scoped_sql.py::_assert_scope_bound).
+_SQL_SCOPED = f"SELECT * FROM t WHERE owner = :{SCOPE_USER_PARAM}"
 
 
 # ── Declaration contract ─────────────────────────────────────────────────
@@ -119,20 +128,35 @@ async def test_scope_with_mismatched_bound_param_raises(monkeypatch):
         )
 
 
+async def test_scope_with_bound_param_but_sql_never_references_token_raises(
+    monkeypatch,
+):
+    """params carries the bind but the SQL text never mentions it — an
+    unused bind is not a filter; this is exactly the gap the SQL-text
+    substring check exists to catch (M1 review fix)."""
+    monkeypatch.setattr(guardrail.db_engine, "fetch_all", AsyncMock(return_value=[]))
+    with pytest.raises(UnscopedRawSQLError):
+        await scoped_sql(
+            _SQL,  # "SELECT 1" — no SCOPE_USER_PARAM substring anywhere
+            {SCOPE_USER_PARAM: "u1"},
+            scope=Scope(user_id="u1"),
+        )
+
+
 async def test_scope_with_matching_bound_param_forwards(monkeypatch):
     fake = AsyncMock(return_value=[{"id": 1}])
     monkeypatch.setattr(guardrail.db_engine, "fetch_all", fake)
     params = {SCOPE_USER_PARAM: "u1", "q": "x"}
-    result = await scoped_sql(_SQL, params, scope=Scope(user_id="u1"))
+    result = await scoped_sql(_SQL_SCOPED, params, scope=Scope(user_id="u1"))
     assert result == [{"id": 1}]
-    fake.assert_awaited_once_with(_SQL, {SCOPE_USER_PARAM: "u1", "q": "x"})
+    fake.assert_awaited_once_with(_SQL_SCOPED, {SCOPE_USER_PARAM: "u1", "q": "x"})
 
 
 async def test_scope_zero_user_id_matches_bound_zero(monkeypatch):
     """A legitimate bigint 0 owner key is not mistaken for 'no bind'."""
     fake = AsyncMock(return_value=[])
     monkeypatch.setattr(guardrail.db_engine, "fetch_all", fake)
-    await scoped_sql(_SQL, {SCOPE_USER_PARAM: 0}, scope=Scope(user_id=0))
+    await scoped_sql(_SQL_SCOPED, {SCOPE_USER_PARAM: 0}, scope=Scope(user_id=0))
     fake.assert_awaited_once()
 
 

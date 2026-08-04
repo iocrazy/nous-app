@@ -372,9 +372,11 @@ try:
         # attribute 'data'") when the per-loop client was in a bad state, and
         # the raw db_engine.fetch_one() text() SQL this superseded. The engine
         # has no per-loop client.
+        from contextlib import nullcontext
+
         from sqlalchemy import select
 
-        from app.db.scope import system_request_scope
+        from app.db.scope import is_enforced, system_request_scope
         from app.db.session import read_scope
         from app.models import ParsedMedia, Resources
 
@@ -394,16 +396,29 @@ try:
         # exactly what we're trying to determine here, BEFORE
         # _check_permissions can run — there is no caller identity yet to open
         # a user_session with (share-token / anonymous requests hit this too).
-        # Resources carries UserScoped(creator_id) but enforcement is gated
-        # off by SCOPE_ENFORCE_RESOURCES (default false); system_request_scope
-        # documents the cross-user intent and keeps this path correct (rather
-        # than silently creator_id-filtered) if that flag ever flips on.
+        # Resources carries UserScoped(creator_id). ``SCOPE_ENFORCE_RESOURCES``
+        # DEFAULTS to false in code, but production sets it true via
+        # ``secrets/backend.env`` (outside this repo tree — CLAUDE.md's
+        # 部署陷阱: env overrides config.yml). So in production this
+        # ``system_request_scope`` wrap is LOAD-BEARING, not decorative:
+        # without it, the do_orm_execute choke point sees a scoped table
+        # (Resources) touched with no ambient scope and fail-closed raises
+        # ``UnscopedQueryError`` on the very first request — a 500, not a
+        # silent no-op. Gated on ``is_enforced`` (not unconditional) purely
+        # to stay byte-for-byte legacy in environments where the flag really
+        # is off (e.g. this repo's own local/test default).
         if file_type == "file":
             try:
-                async with system_request_scope(
-                    reason="media-serve-resolve-file-path: ownership unknown "
-                    "until this lookup runs; _check_permissions governs access"
-                ):
+                scope_cm = (
+                    system_request_scope(
+                        reason="media-serve-resolve-file-path: ownership "
+                        "unknown until this lookup runs; _check_permissions "
+                        "governs access"
+                    )
+                    if is_enforced("resources")
+                    else nullcontext()
+                )
+                async with scope_cm:
                     async with read_scope() as session:
                         row = (
                             (
