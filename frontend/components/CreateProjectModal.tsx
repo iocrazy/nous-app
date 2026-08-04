@@ -6,6 +6,7 @@ import { fetchMyTeams } from '../services/teamService';
 import { fetchTemplates } from '../services/workflowService';
 import { Project, Team, WorkflowTemplate } from '../types';
 import { UiSelect } from './ui';
+import { WorkflowChoiceCard } from './workflow/WorkflowChoiceCard';
 
 type WorkflowMethod = 'live' | 'ai' | 'hybrid';
 const WORKFLOW_METHODS: WorkflowMethod[] = ['live', 'ai', 'hybrid'];
@@ -50,8 +51,8 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const [teams, setTeams] = useState<Team[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Workflow block — only meaningful for a real team (templates are team-scoped;
-  // a personal project has team_id=NULL and no templates to instantiate).
+  // Workflow block — templates are scoped to a team (real team, or the
+  // caller's own personal team when teamId is '' — see fetchTemplates).
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [workflowTemplateId, setWorkflowTemplateId] = useState<string>(NO_WORKFLOW);
   const [workflowMethod, setWorkflowMethod] = useState<WorkflowMethod>('hybrid');
@@ -69,9 +70,10 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   }, [isOpen, defaultTeamId, topicTitle]);
 
   // Load the selected team's workflow templates; default to its Short-form
-  // (the seeded is_default). Personal workspace (no team) → no templates.
+  // (the seeded is_default). Personal workspace (teamId === '') resolves
+  // server-side to the caller's own personal team (see fetchTemplates).
   useEffect(() => {
-    if (!isOpen || !teamId) {
+    if (!isOpen) {
       setTemplates([]);
       setWorkflowTemplateId(NO_WORKFLOW);
       return;
@@ -297,8 +299,10 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             </UiSelect>
           </div>
 
-          {/* Workflow — team projects only (templates are team-scoped). */}
-          {teamId && templates.length > 0 && (
+          {/* Workflow — shown once templates resolve, for a real team OR the
+              caller's own personal team (fetchTemplates resolves teamId=''
+              server-side; see the effect above). */}
+          {templates.length > 0 && (
             <div data-testid="create-project-workflow">
               <label className="mb-2 flex items-center gap-1.5 text-sm font-medium text-ink-300">
                 <GitBranch size={14} className="text-ink-500" />
@@ -384,36 +388,3 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     </div>
   );
 };
-
-/** One selectable card in the create-project Workflow block. */
-function WorkflowChoiceCard({
-  title,
-  hint,
-  selected,
-  onClick,
-  testId,
-}: {
-  title: string;
-  hint: string;
-  selected: boolean;
-  onClick: () => void;
-  testId: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      data-testid={testId}
-      className={`flex flex-col items-start gap-0.5 rounded-lg border px-3 py-2.5 text-left transition ${
-        selected
-          ? 'border-[var(--accent-border)] bg-[var(--accent-soft)]'
-          : 'border-ink-700 hover:border-ink-600'
-      }`}
-    >
-      <span className={`text-[13px] font-medium ${selected ? 'text-[var(--accent-text)]' : 'text-ink-100'}`}>
-        {title}
-      </span>
-      <span className="text-[11px] text-ink-500">{hint}</span>
-    </button>
-  );
-}
