@@ -2781,7 +2781,17 @@
       "slugTaken": "That slug is already in use.",
       "scopeIdRequired": "Pick one, or the agent is created as private.",
       "forkSkillsNotCopied": "Agent created, but its skills were not copied — bind them manually.",
-      "startChat": "Start chat"
+      "startChat": "Start chat",
+      "workbench": {
+        "recentConversations": "Recent conversations",
+        "allRuns": "All runs",
+        "noConversations": "No conversations yet",
+        "running": "Running",
+        "routines": "Routines",
+        "thisWeek": "This week",
+        "statRuns": "runs",
+        "statTokens": "tok"
+      }
     },
     "skills": {
       "addFile": "+ Add file",

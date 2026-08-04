@@ -2781,7 +2781,17 @@
       "slugTaken": "这个 slug 已被占用。",
       "scopeIdRequired": "选一个，否则会创建成个人智能体。",
       "forkSkillsNotCopied": "智能体已创建，但技能没能复制过来——请手动绑定。",
-      "startChat": "开始对话"
+      "startChat": "开始对话",
+      "workbench": {
+        "recentConversations": "最近对话",
+        "allRuns": "全部运行记录",
+        "noConversations": "暂无对话",
+        "running": "进行中",
+        "routines": "例行任务",
+        "thisWeek": "本周",
+        "statRuns": "运行",
+        "statTokens": "tok"
+      }
     },
     "skills": {
       "addFile": "+ 添加文件",
