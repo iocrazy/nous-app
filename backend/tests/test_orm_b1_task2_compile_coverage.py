@@ -28,6 +28,7 @@ import app.workflows.backfill_issue_scope as backfill_issue_scope
 import app.workflows.publish_issue_mirror as publish_issue_mirror
 import app.workflows.stranded_issue_monitor as stranded_issue_monitor
 from app.db import session as db_session
+from app.models import Issues, Projects, Teams
 
 
 def _compile(stmt: Any) -> tuple[str, dict[str, Any]]:
@@ -78,6 +79,21 @@ class _FakeSession:
     async def execute(self, stmt: Any) -> _FakeMappingsResult:
         self.calls.append(_compile(stmt))
         return self._result
+
+
+class _QueuedSession:
+    """Returns one queued result per execute() call, in order — for
+    functions (like ``_repair_rounded``) that issue several DIFFERENT
+    statements in sequence (SELECT DISTINCT bad ids → SELECT reference-table
+    ids → UPDATE) where a single fixed canned response isn't enough."""
+
+    def __init__(self, results: list[_FakeMappingsResult]) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self._queue = list(results)
+
+    async def execute(self, stmt: Any) -> _FakeMappingsResult:
+        self.calls.append(_compile(stmt))
+        return self._queue.pop(0)
 
 
 class _ScopeCM:
@@ -254,3 +270,72 @@ async def test_repair_null_scope_write_coalesces_project_id(
     assert "project_id=coalesce(public.issues.project_id, " in sql
     assert "team_id=" in sql
     assert result["null_scope_fixed"] == 1
+
+
+# ─── backfill_issue_scope._repair_rounded (team + project) ────────────────
+#
+# Review round 1, Important: this is the one function in the batch whose
+# internal signature moved from string SQL constants to column
+# objects/models (reused for BOTH team and project repair via the same
+# code path) — the highest-risk-of-copy-paste-drift spot with no compiled-
+# statement assertion in the original delivery. Parametrized over both
+# targets so a future swap of column/model between the two call sites (e.g.
+# team repair accidentally binding to Issues.project_id, or vice versa)
+# fails loudly here instead of silently corrupting the other domain's ids.
+
+
+@pytest.mark.parametrize(
+    "kind,issue_col,ref_model",
+    [
+        ("team", Issues.team_id, Teams),
+        ("project", Issues.project_id, Projects),
+    ],
+)
+async def test_repair_rounded_compiles_matching_column_for_each_target(
+    kind: str,
+    issue_col: Any,
+    ref_model: type,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    table_name = ref_model.__tablename__
+    session = _QueuedSession(
+        [
+            _FakeMappingsResult(rows=[42]),  # SELECT DISTINCT ... NOT IN (...)
+            _FakeMappingsResult(rows=[42]),  # SELECT id FROM <ref_model>
+            _FakeMappingsResult(rowcount=1),  # UPDATE ... SET <col>=:good
+        ]
+    )
+    monkeypatch.setattr(backfill_issue_scope, "read_scope", lambda: _ScopeCM(session))
+    monkeypatch.setattr(backfill_issue_scope, "write_scope", lambda: _ScopeCM(session))
+
+    result: dict[str, Any] = {
+        f"rounded_{kind}_distinct_bad": 0,
+        f"rounded_{kind}_rows_fixed": 0,
+        f"rounded_{kind}_would_fix": 0,
+        f"rounded_{kind}_ambiguous_or_orphan": 0,
+    }
+    await backfill_issue_scope._repair_rounded(
+        kind, issue_col, ref_model, False, result
+    )
+
+    assert len(session.calls) == 3
+
+    bad_sql, _ = session.calls[0]
+    assert f"SELECT DISTINCT public.issues.{issue_col.key}" in bad_sql
+    assert f"public.issues.{issue_col.key} IS NOT NULL" in bad_sql
+    assert (
+        f"public.issues.{issue_col.key} NOT IN (SELECT public.{table_name}.id"
+        in bad_sql
+    )
+
+    all_ids_sql, _ = session.calls[1]
+    assert all_ids_sql.startswith(f"SELECT public.{table_name}.id")
+    assert f"FROM public.{table_name}" in all_ids_sql
+
+    update_sql, update_binds = session.calls[2]
+    assert update_sql.startswith(f"UPDATE public.issues SET {issue_col.key}=")
+    assert f"WHERE public.issues.{issue_col.key} = " in update_sql
+    assert 42 in update_binds.values()
+
+    assert result[f"rounded_{kind}_rows_fixed"] == 1
+    assert result[f"rounded_{kind}_distinct_bad"] == 1
