@@ -520,7 +520,7 @@ Schema (schemas/)      — Pydantic 请求/响应模型
 
 | 目标 | workflow | runner | 触发 paths | 落到哪 |
 |------|----------|--------|-----------|--------|
-| 后端 | `deploy-gpu.yml` | **self-hosted `[self-hosted, gpu]`** | `backend/**`、`Dockerfile`、`deploy/gpu-server/**`、`nous-core/**` | gpupc 本机 `nous-backend` + `nous-worker` |
+| 后端 | `deploy-gpu.yml` | **self-hosted `[self-hosted, gpu]`** | `backend/**`、`Dockerfile`、`deploy/gpu-server/**`、`nous-core/**`、`browser/**` | gpupc 本机 `nous-backend` + `nous-worker` + `nous-browser` |
 | 前端 | `deploy-pages.yml` | `ubuntu-latest` | `frontend/**` | Cloudflare Pages（GHA 构建 + wrangler 直传，不吃 Pages 的 500 构建/月配额） |
 | DB migration | `run-migration.yml` | **self-hosted `[self-hosted, gpu]`** | `supabase/migrations/**` | gpupc 本机 `nous-db` |
 
@@ -539,7 +539,9 @@ Schema (schemas/)      — Pydantic 请求/响应模型
 ### 后端链的关键设计（改之前先读）
 
 - **`actions/checkout`，绝不 `cd` 到开发目录**。曾经是 `cd /media/.../repos/nous-app && git reset --hard origin/master`，三个后果：抹掉该目录未提交改动（触发者可能是另一台机器的 merge，人在 gpupc 上写代码毫无预警）；反过来未提交改动与 master 冲突时 `git checkout` 被 git 拒绝导致部署失败；reset 到的是"执行那一刻的 master HEAD"而非触发本 job 的 commit，两次 merge 挨得近时前一个 job 会部署后一个的代码。
-- **smoke 失败自动回滚**。`up.sh` 在 smoke 之前就换好了容器，所以 smoke 失败 == 生产此刻是坏的。`Tag current image as rollback point` 先把 `nous-backend:local` 打成 `:rollback`，smoke 失败时退回并重启（不带 `--build`）。只在 `steps.smoke.outcome == 'failure'` 时触发 —— build 阶段失败容器根本没换。
+- **smoke 失败自动回滚**。`up.sh` 在 smoke 之前就换好了容器，所以 smoke 失败 == 生产此刻是坏的。`Tag current images as rollback point` 先把 `nous-backend:local` / `nous-browser:local` 打成 `:rollback`，smoke 失败时退回并重启（不带 `--build`）。只在 `steps.smoke.outcome == 'failure'` 时触发 —— build 阶段失败容器根本没换。
+- **往这条链加服务，必须同时改四处，漏一处就是静默缺口**（清单都是显式的，漏了不会报错）：① compose 加 service；② workflow 的 `Tag current images as rollback point` 加锚点；③ `./up.sh --build <清单>` 加服务名（2026-07-27 的 gateway 事故就是漏了这处，入口 502 五分钟）；④ smoke 步骤加该服务的真探针，且回滚步骤的 `./up.sh <清单>` 同步加。**只加 ①③ 而不加 ④ 的后果是最坏的**：新服务挂了 smoke 照样全绿，等于把"探针探真信号"的纪律又破一次。
+- **回滚只回镜像，不回配置**。锚点是 docker image tag，而 compose 文件、`nginx-gateway/` 模板来自本次 checkout。所以「compose/配置改错导致 smoke 失败」这一类，回滚后仍会用同一份坏配置重启，需人工介入。`gateway`（上游 nginx 镜像 + 仓库配置）完全不在回滚覆盖内。
 - **验收口径必须探 `/api/v1/readyz`，不是 `/health` 也不是 `docker ps`**。见下方「验收纪律」。
 
 ### 已退役的 NAS 老线（⚠️ 扳手当前是坏的）
