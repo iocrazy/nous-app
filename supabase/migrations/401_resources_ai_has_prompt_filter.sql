@@ -5,7 +5,8 @@
 --   gen_prompt / gen_prompt_negative / gen_prompt_json (all TEXT — despite
 --   the _json name, mig 392 made gen_prompt_json a TEXT column storing a
 --   JSON string, not JSONB) and slide_prompts (JSONB — must also exclude the
---   JSON literals 'null' and '{}', an empty object is not "has a prompt").
+--   JSON literals 'null', '{}' and '[]', an empty object/array is not "has a
+--   prompt").
 --
 -- This is NOT a status-column filter (existing 3 flags check `col = 'completed'`)
 -- so it's added as its own predicate, mirroring the exact OR-predicate already
@@ -16,8 +17,41 @@
 --     (frontend/services/resourceService.ts::fetchResourcesViaRpc)
 --   - rpc_downloads_library_search (mig 275) — Downloads view
 --     (frontend/services/dataService.ts::fetchLibraryViaRpc)
--- New param `p_has_prompt` is appended LAST (with a DEFAULT) so CREATE OR
--- REPLACE doesn't need to touch the existing parameter order/types.
+-- New param `p_has_prompt` is appended LAST (with a DEFAULT) so the parameter
+-- order/types of every existing positional caller stay untouched.
+--
+-- ── C1 fix (post-review) ─────────────────────────────────────────────────
+-- `CREATE OR REPLACE FUNCTION` with an EXTRA parameter does NOT replace the
+-- existing function — Postgres identifies functions by their full parameter
+-- list, so appending `p_has_prompt` creates a SECOND, overloaded function
+-- and leaves the original (26-arg / 23-arg) signature in place permanently.
+-- Verified against a live PG17 + PostgREST v14.8 restore of prod (oids 43616
+-- / 43604 — matches production exactly):
+--   - old+new coexist, client sends old N-key payload  -> HTTP 300 PGRST203
+--     ("Could not choose the best candidate function")
+--   - only old exists, client sends new (N+1)-key payload -> HTTP 404 PGRST202
+--   - only new exists (DROP first)                        -> HTTP 200, the
+--     appended param defaults in for legacy callers
+-- Both rollout orders (migration-first or frontend-first) hit one of the
+-- first two rows, so EVERY existing tag-filtered browse in both views would
+-- have broken permanently (not a transient race) until this fix. The DROP
+-- statements below use the exact pre-mig-401 identity arguments (types only,
+-- no names/defaults — DROP FUNCTION matches on types), reconfirmed via:
+--   SELECT pg_get_function_identity_arguments(43616);  -- search_scope_resources
+--   SELECT pg_get_function_identity_arguments(43604);  -- rpc_downloads_library_search
+-- against the same PG17 restore immediately before writing this file.
+
+DROP FUNCTION IF EXISTS public.search_scope_resources(
+  text, boolean, text, text, text[], int, boolean, boolean, boolean,
+  text, text, int, int, text[], text[], text[], boolean, int, int, int,
+  int, text, timestamptz, bigint, int, boolean
+);
+
+DROP FUNCTION IF EXISTS public.rpc_downloads_library_search(
+  uuid, text[], int, boolean, boolean, boolean, text, text, int, int,
+  text[], text[], text[], boolean, int, int, int, int, text,
+  timestamptz, bigint, int, boolean
+);
 
 CREATE OR REPLACE FUNCTION public.search_scope_resources(
   p_scope_id       text,
@@ -115,15 +149,20 @@ AS $$
       AND (p_ai_transcribed IS NULL OR p_ai_transcribed = false OR r.transcript_status = 'completed')
       AND (p_ai_summarized  IS NULL OR p_ai_summarized  = false OR r.summary_status = 'completed')
       AND (p_ai_analyzed    IS NULL OR p_ai_analyzed    = false OR r.visual_analysis_status = 'completed')
+      -- "Has prompt": any of the 3 text columns non-blank (btrim'd, and not
+      -- the literal '[]'/'""' — a serialized empty value isn't a real prompt)
+      -- OR slide_prompts (jsonb) non-null and not one of the empty literals.
+      -- M1 hardening — no known production rows hit this today, defensive.
       AND (
         p_has_prompt IS NULL OR p_has_prompt = false OR (
-          (r.gen_prompt IS NOT NULL AND r.gen_prompt <> '')
-          OR (r.gen_prompt_negative IS NOT NULL AND r.gen_prompt_negative <> '')
-          OR (r.gen_prompt_json IS NOT NULL AND r.gen_prompt_json <> '')
+          (r.gen_prompt IS NOT NULL AND btrim(r.gen_prompt) <> '' AND r.gen_prompt NOT IN ('[]', '""'))
+          OR (r.gen_prompt_negative IS NOT NULL AND btrim(r.gen_prompt_negative) <> '' AND r.gen_prompt_negative NOT IN ('[]', '""'))
+          OR (r.gen_prompt_json IS NOT NULL AND btrim(r.gen_prompt_json) <> '' AND r.gen_prompt_json NOT IN ('[]', '""'))
           OR (
             r.slide_prompts IS NOT NULL
             AND r.slide_prompts <> 'null'::jsonb
             AND r.slide_prompts <> '{}'::jsonb
+            AND r.slide_prompts <> '[]'::jsonb
           )
         )
       )
@@ -287,15 +326,18 @@ AS $$
       AND (p_ai_transcribed IS NULL OR p_ai_transcribed = false OR r.transcript_status = 'completed')
       AND (p_ai_summarized  IS NULL OR p_ai_summarized  = false OR r.summary_status = 'completed')
       AND (p_ai_analyzed    IS NULL OR p_ai_analyzed    = false OR r.visual_analysis_status = 'completed')
+      -- "Has prompt" — mirrors search_scope_resources' predicate exactly (M1:
+      -- btrim + exclude '[]'/'""' text literals + jsonb 'null'/'{}'/'[]').
       AND (
         p_has_prompt IS NULL OR p_has_prompt = false OR (
-          (r.gen_prompt IS NOT NULL AND r.gen_prompt <> '')
-          OR (r.gen_prompt_negative IS NOT NULL AND r.gen_prompt_negative <> '')
-          OR (r.gen_prompt_json IS NOT NULL AND r.gen_prompt_json <> '')
+          (r.gen_prompt IS NOT NULL AND btrim(r.gen_prompt) <> '' AND r.gen_prompt NOT IN ('[]', '""'))
+          OR (r.gen_prompt_negative IS NOT NULL AND btrim(r.gen_prompt_negative) <> '' AND r.gen_prompt_negative NOT IN ('[]', '""'))
+          OR (r.gen_prompt_json IS NOT NULL AND btrim(r.gen_prompt_json) <> '' AND r.gen_prompt_json NOT IN ('[]', '""'))
           OR (
             r.slide_prompts IS NOT NULL
             AND r.slide_prompts <> 'null'::jsonb
             AND r.slide_prompts <> '{}'::jsonb
+            AND r.slide_prompts <> '[]'::jsonb
           )
         )
       )
@@ -366,5 +408,23 @@ GRANT EXECUTE ON FUNCTION public.rpc_downloads_library_search(
   text[], text[], text[], boolean, int, int, int, int, text,
   timestamptz, bigint, int, boolean, boolean
 ) TO authenticated;
+
+-- ── Migration self-check (review-mandated) ─────────────────────────────
+-- If either DROP above is ever removed/miswritten in a future edit, this
+-- catches the resulting overload (2 functions sharing a proname) at
+-- migration-apply time instead of silently shipping the C1 regression
+-- again in production.
+DO $$
+DECLARE
+  n_search  int;
+  n_dl      int;
+BEGIN
+  SELECT count(*) INTO n_search FROM pg_proc WHERE proname = 'search_scope_resources';
+  SELECT count(*) INTO n_dl     FROM pg_proc WHERE proname = 'rpc_downloads_library_search';
+  ASSERT n_search = 1,
+    format('search_scope_resources: expected exactly 1 overload, found %s — DROP FUNCTION signature likely stale', n_search);
+  ASSERT n_dl = 1,
+    format('rpc_downloads_library_search: expected exactly 1 overload, found %s — DROP FUNCTION signature likely stale', n_dl);
+END $$;
 
 NOTIFY pgrst, 'reload schema';

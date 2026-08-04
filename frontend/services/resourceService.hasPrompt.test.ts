@@ -1,21 +1,53 @@
 /**
  * Unit tests for the "Has Prompt" AI-filter chip's server-side wiring on the
- * Resources/My Uploads view (fetchResourcesPaginated → fetchResourcesViaRpc).
+ * Resources/My Uploads view (fetchResourcesPaginated → PostgREST path /
+ * fetchResourcesViaRpc).
  *
- * ai_has_prompt is NOT a status column (unlike ai_transcribed/ai_summarized/
- * ai_analyzed) — it's an OR across 4 prompt columns including a JSONB column
- * that must exclude the 'null'/'{}' literals. That predicate isn't
- * expressible via the PostgREST query builder used by the no-tag path
- * (buildResourceItemsQuery), so ai_has_prompt=true must force the RPC path
- * (search_scope_resources, mig 401 adds p_has_prompt) even with no tag_ids.
+ * Post-review fix (I2): ai_has_prompt no longer forces the RPC path on its
+ * own. It used to (see git history), which silently dropped `search` /
+ * `flatten` — search_scope_resources has no p_search/p_flatten param, so
+ * typing a filename then checking "Has Prompt" returned every prompt-bearing
+ * resource with the search term ignored. The 4-column OR + jsonb-literal
+ * predicate (HAS_PROMPT_OR_EXPRESSION, exported from resourceService.ts) IS
+ * expressible via the PostgREST query builder — verified separately against
+ * a live PostgREST v14.8 instance (see PR notes / migration 401 comment).
+ * Only `tag_ids` still forces the RPC path (no resource_id-intersection
+ * alternative at scale); when both tags AND has_prompt are active, the RPC
+ * (search_scope_resources, mig 401) still carries p_has_prompt so that
+ * combination stays correct.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Capture every supabase.rpc call; every supabase.from(...) call is left
-// unmocked-but-safe (fetchGalleryScopeMembership swallows its own errors).
+// Capture every supabase.rpc call.
 const rpcMock = vi.fn();
 let rpcReturn: { data: unknown; error: unknown };
+
+// Capture every supabase.from(...) chained call (method name + args) so the
+// PostgREST-path test can assert the has_prompt `.or()` fragment was applied
+// without needing a real network layer. Every chained method returns the
+// same thenable proxy; `await`-ing it resolves to `fromReturn`.
+type RecordedCall = { method: string; args: unknown[] };
+let fromCalls: RecordedCall[];
+let fromReturn: { data: unknown; error: unknown; count?: number | null };
+
+function makeChainable(recorder: RecordedCall[]): unknown {
+  const proxy: unknown = new Proxy(
+    {},
+    {
+      get(_target, prop: string) {
+        if (prop === 'then') {
+          return (resolve: (v: unknown) => void) => resolve(fromReturn);
+        }
+        return (...args: unknown[]) => {
+          recorder.push({ method: prop, args });
+          return proxy;
+        };
+      },
+    },
+  );
+  return proxy;
+}
 
 vi.mock('../supabaseClient', () => ({
   supabase: {
@@ -27,41 +59,86 @@ vi.mock('../supabaseClient', () => ({
       };
       return obj;
     },
+    from: (table: string) => {
+      fromCalls.push({ method: 'from', args: [table] });
+      return makeChainable(fromCalls);
+    },
   },
 }));
 vi.mock('../utils/apiConfig', () => ({ getApiUrl: () => 'https://api.test' }));
 
-import { fetchResourcesPaginated } from './resourceService';
+import { fetchResourcesPaginated, HAS_PROMPT_OR_EXPRESSION } from './resourceService';
 
 beforeEach(() => {
   rpcMock.mockClear();
   rpcReturn = { data: { rows: [], total_count: null }, error: null };
+  fromCalls = [];
+  fromReturn = { data: [], error: null, count: 0 };
 });
 
 describe('fetchResourcesPaginated — ai_has_prompt routing', () => {
-  it('routes through search_scope_resources when ai_has_prompt=true, even with no tag_ids', async () => {
+  it('stays on the PostgREST path (no RPC call) when ai_has_prompt=true and no tag_ids', async () => {
     await fetchResourcesPaginated(
       { isPersonal: true, scopeId: 'user-1', ai_has_prompt: true },
+      null,
+      40,
+    );
+    expect(rpcMock).not.toHaveBeenCalled();
+  });
+
+  it('applies the has_prompt OR-predicate on the resources embed via the query builder', async () => {
+    await fetchResourcesPaginated(
+      { isPersonal: true, scopeId: 'user-1', ai_has_prompt: true },
+      null,
+      40,
+    );
+    const orCalls = fromCalls.filter((c) => c.method === 'or');
+    const hasPromptCall = orCalls.find(
+      (c) => c.args[0] === HAS_PROMPT_OR_EXPRESSION,
+    );
+    expect(hasPromptCall).toBeDefined();
+    expect(hasPromptCall?.args[1]).toEqual({ referencedTable: 'resources' });
+  });
+
+  it('does NOT drop `search` when combined with ai_has_prompt (I2 regression check)', async () => {
+    await fetchResourcesPaginated(
+      {
+        isPersonal: true,
+        scopeId: 'user-1',
+        ai_has_prompt: true,
+        search: 'my-file',
+      },
+      null,
+      40,
+    );
+    // Both the search .or() (referencedTable: resources, filename/notes ilike)
+    // and the has_prompt .or() must be present — neither silently dropped.
+    const orCalls = fromCalls.filter((c) => c.method === 'or');
+    const searchCall = orCalls.find(
+      (c) =>
+        typeof c.args[0] === 'string' &&
+        (c.args[0] as string).includes('filename.ilike'),
+    );
+    const hasPromptCall = orCalls.find(
+      (c) => c.args[0] === HAS_PROMPT_OR_EXPRESSION,
+    );
+    expect(searchCall).toBeDefined();
+    expect(hasPromptCall).toBeDefined();
+  });
+
+  it('routes through search_scope_resources when tag_ids is set (with p_has_prompt=null when absent)', async () => {
+    await fetchResourcesPaginated(
+      { isPersonal: true, scopeId: 'user-1', tag_ids: ['tag-a'] },
       null,
       40,
     );
     expect(rpcMock).toHaveBeenCalledTimes(1);
     const [name, params] = rpcMock.mock.calls[0] as [string, Record<string, unknown>];
     expect(name).toBe('search_scope_resources');
-    expect(params.p_has_prompt).toBe(true);
-  });
-
-  it('passes p_has_prompt=null when ai_has_prompt is absent (tag-filtered path)', async () => {
-    await fetchResourcesPaginated(
-      { isPersonal: true, scopeId: 'user-1', tag_ids: ['tag-a'] },
-      null,
-      40,
-    );
-    const params = rpcMock.mock.calls[0][1] as Record<string, unknown>;
     expect(params.p_has_prompt).toBeNull();
   });
 
-  it('combines with tag_ids without double-invoking the RPC', async () => {
+  it('combines tag_ids + ai_has_prompt into a single RPC call carrying both', async () => {
     await fetchResourcesPaginated(
       {
         isPersonal: true,

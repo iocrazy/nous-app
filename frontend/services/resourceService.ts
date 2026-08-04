@@ -519,9 +519,11 @@ export interface FetchResourcesParams {
   ai_summarized?: boolean;
   ai_analyzed?: boolean;
   /** True means "any of gen_prompt / gen_prompt_negative / gen_prompt_json /
-   *  slide_prompts is non-empty". Not a status column — forces the RPC path
-   *  (fetchResourcesViaRpc) since the PostgREST builder can't express the
-   *  4-column OR/jsonb-literal predicate cleanly. */
+   *  slide_prompts is non-empty". Not a status column — applied via a
+   *  4-column OR + jsonb-literal predicate on the `resources` embed (see
+   *  buildResourceItemsQuery). Only ``tag_ids`` forces the RPC path
+   *  (fetchResourcesViaRpc); this filter stays on the PostgREST path so
+   *  ``search``/``flatten`` keep working when combined with it. */
   ai_has_prompt?: boolean;
   /** Created-at inclusive bounds (ISO date YYYY-MM-DD, local calendar). */
   created_after?: string;
@@ -562,6 +564,48 @@ const KNOWN_MIME_PREFIXES = [
 ] as const;
 
 type ResourceFilterType = 'video' | 'image' | 'audio' | 'document' | 'other';
+
+/**
+ * PostgREST ``.or()`` expression for the "Has Prompt" filter — any of the 3
+ * TEXT prompt columns (gen_prompt / gen_prompt_negative / gen_prompt_json;
+ * gen_prompt_json is TEXT despite the name — migration 392 — confirmed via
+ * information_schema) is non-blank, OR slide_prompts (JSONB) carries a
+ * non-empty value. Mirrors the RPC predicate added in migration 401
+ * (search_scope_resources / rpc_downloads_library_search) so the two code
+ * paths agree on what "has a prompt" means.
+ *
+ * Column-type quirks baked in here, all reconfirmed against a live
+ * PostgREST v14.8 instance (matching the review's repro environment) before
+ * landing — nested and()/or() list-context filter values behave differently
+ * from flat query-param values:
+ *   - Text columns: ``col.match.[^\s]`` (regex "has a non-whitespace char")
+ *     is the nested-list-context equivalent of SQL's ``btrim(col) <> ''``
+ *     — plain ``.neq.`` alone would accept a whitespace-only value.
+ *   - Text columns also exclude the literal serialized-empty strings
+ *     ``[]``/``""`` (defensive — gen_prompt_json stores JSON *as text*, so a
+ *     stringified empty array/string would otherwise read as "has a
+ *     prompt"). No known production rows hit this today (M1, minor).
+ *   - slide_prompts (jsonb): excludes the JSON literals ``null``/``{}``/``[]``.
+ *     A literal ``""`` (empty-string) exclusion was tried and dropped: inside
+ *     a nested and()/or() list, PostgREST's quote-stripping collides with the
+ *     jsonb cast and 400s with "invalid input syntax for type json" — a
+ *     PostgREST v14.8 parser limitation, not an app bug. No known production
+ *     slide_prompts row is the empty-string literal, so this gap is inert.
+ *
+ * Verified end-to-end via real HTTP against the local PG17 + PostgREST
+ * v14.8 stack (nous-db / nous-rest, through nous-kong): querying
+ * `resource_items?select=*,resources!inner(*)&resources.or=(<this
+ * expression>)` against a scope containing the 3 known prompt-bearing rows
+ * returned exactly those 3 rows (2 via gen_prompt, 1 via slide_prompts) —
+ * same count the migration's SQL predicate and the original review's
+ * production read-only check both report.
+ */
+export const HAS_PROMPT_OR_EXPRESSION = [
+  'and(gen_prompt.match.[^\\s],gen_prompt.neq.[],gen_prompt.neq."")',
+  'and(gen_prompt_negative.match.[^\\s],gen_prompt_negative.neq.[],gen_prompt_negative.neq."")',
+  'and(gen_prompt_json.match.[^\\s],gen_prompt_json.neq.[],gen_prompt_json.neq."")',
+  'and(slide_prompts.not.is.null,slide_prompts.neq.null,slide_prompts.neq.{},slide_prompts.neq.[])',
+].join(',');
 
 /**
  * PostgREST fragments that *positively* match a type. "other" is not
@@ -795,6 +839,12 @@ function buildResourceItemsQuery(
     query = query.eq('resources.visual_analysis_status', 'completed');
   }
 
+  // ── "Has prompt": any of the 3 text columns non-blank, or slide_prompts
+  //    (jsonb) non-empty. Mirrors the RPC predicate in migration 401. ──
+  if (params.ai_has_prompt) {
+    query = query.or(HAS_PROMPT_OR_EXPRESSION, { referencedTable: 'resources' });
+  }
+
   // ── Created-at window (resources.created_at; inclusive day bounds). ──
   if (params.created_after) {
     query = query.gte('resources.created_at', `${params.created_after}T00:00:00`);
@@ -904,11 +954,19 @@ export async function fetchResourcesPaginated(
   // list silently capped at PostgREST's 1000-row ceiling AND the giant `.in()`
   // URL risked a Kong/nginx 502 at scale. The no-tag path below stays on the
   // PostgREST keyset query (already scale-safe).
-  // ai_has_prompt also forces the RPC path: the OR-across-4-columns +
-  // jsonb-literal predicate ('null'/'{}' exclusion on slide_prompts) isn't
-  // expressible via the PostgREST query builder used below, so it always
-  // routes through search_scope_resources (mig 401 adds p_has_prompt there).
-  if ((params.tag_ids && params.tag_ids.length > 0) || params.ai_has_prompt) {
+  //
+  // ai_has_prompt does NOT force the RPC path on its own (fixed post-review —
+  // it used to, but that silently dropped `search`/`flatten`: the RPC has no
+  // p_search/p_flatten param, so typing a filename then checking "Has Prompt"
+  // returned every prompt-bearing resource, search term ignored). The 4-column
+  // OR + jsonb-literal predicate IS expressible via the PostgREST builder
+  // (see the `params.ai_has_prompt` branch in buildResourceItemsQuery below),
+  // verified against a live PostgREST v14.8 instance. Only tags still force
+  // the RPC (no resource_id-intersection alternative at scale); when both tags
+  // AND has_prompt are active, search_scope_resources (mig 401) still carries
+  // p_has_prompt so the combination stays correct — search/flatten were never
+  // available in the tag-filtered RPC path anyway (pre-existing, out of scope).
+  if (params.tag_ids && params.tag_ids.length > 0) {
     return fetchResourcesViaRpc(params, cursor, pageSize, signal);
   }
 
