@@ -5,6 +5,7 @@ import { Project, ProjectFile, RecentItem, Topic } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useTeamContext } from '../contexts/TeamContext';
 import { useWorkspaceScope } from '../hooks/useWorkspaceScope';
+import { useModuleStatus } from '../hooks/useModuleStatus';
 import { fetchProjects, fetchRecentItems } from '../services/projectsService';
 import { ProjectsListView } from '../components/ProjectsListView';
 import { ProjectFilterSidebar, WORKFLOW_TEMPLATES_FILTER, IDEATION_FILTER } from '../components/project/ProjectFilterSidebar';
@@ -28,6 +29,9 @@ export function ProjectsPage() {
   // team_id=NULL, the projects personal convention). Snowflake ids stay strings.
   const { isPersonal, effectiveTeamId } = useWorkspaceScope();
   const createDefaultTeamId = isPersonal ? '' : effectiveTeamId;
+  // Module Control Center display switch — Ideation is a sub-surface of
+  // Projects, so it hides its sidebar entry and main-pane board on its own.
+  const { visible: ideationVisible } = useModuleStatus('ideation');
 
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [reviewFile, setReviewFile] = useState<ProjectFile | null>(null);
@@ -270,9 +274,10 @@ export function ProjectsPage() {
           onCreateProject={() => setIsCreateProjectModalOpen(true)}
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+          ideationVisible={ideationVisible}
         />
         <div className={'flex-1 min-w-0 h-full overflow-y-auto px-8 pt-3 pb-8'}>
-          {activeFilter === IDEATION_FILTER ? (
+          {activeFilter === IDEATION_FILTER && ideationVisible ? (
             <IdeationBoard
               teamId={effectiveTeamId}
               onCreateProjectFromTopic={(topic) => {

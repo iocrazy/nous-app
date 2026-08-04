@@ -4,8 +4,8 @@ import { render, screen } from '@testing-library/react';
 vi.mock('./InspirationPage', () => ({
   InspirationPage: () => <div data-testid="new-page">new</div>,
 }));
-vi.mock('../hooks/useTopicModuleEnabled', () => ({
-  useTopicModuleStatus: () => ({ visible: true, enabled: true }),
+vi.mock('../hooks/useModuleStatus', () => ({
+  useModuleStatus: () => ({ visible: true, enabled: true, loading: false }),
 }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_k: string, fallback?: string) => fallback ?? _k }),

@@ -32,28 +32,6 @@ export const refreshAccount = (id: string): Promise<SocialAccount> =>
 export const deleteAccount = (id: string): Promise<void> =>
   request<void>(`/accounts/${id}`, { method: 'DELETE' });
 
-/**
- * Distribution module switches (admin-controlled, DB-backed — mirrors the
- * Topic Inspiration `module-status`). `visible` gates the nav entry + routes;
- * `enabled` reports whether the account/OAuth API is reachable. Both default
- * OFF (opt-in): on any read error we fail CLOSED so the not-yet-launched
- * module never flashes into view.
- */
-export interface DistributionModuleStatus {
-  enabled: boolean;
-  visible: boolean;
-}
-
-export const getModuleStatus = async (): Promise<DistributionModuleStatus> => {
-  try {
-    const d = await request<Partial<DistributionModuleStatus>>('/module-status');
-    return { enabled: d.enabled === true, visible: d.visible === true };
-  } catch (err) {
-    console.error('distribution: module-status load failed', err);
-    return { enabled: false, visible: false };
-  }
-};
-
 export const createPublishTask = (body: PublishRequest): Promise<PublishTask> =>
   request<PublishTask>('/tasks', { method: 'POST', body: JSON.stringify(body) });
 

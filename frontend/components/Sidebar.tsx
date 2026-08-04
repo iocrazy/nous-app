@@ -29,8 +29,7 @@ import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { SidebarSection } from './sidebar/SidebarSection';
 import { hasPermission } from '../utils/permissions';
 import { VIEW_PATH_MAP, pathnameToView } from '../utils/routeConfig';
-import { useTopicModuleStatus } from '../hooks/useTopicModuleEnabled';
-import { useDistributionModuleStatus } from '../hooks/useDistributionModuleStatus';
+import { useModuleStatus } from '../hooks/useModuleStatus';
 
 // ---------------------------------------------------------------------------
 // SidebarItem
@@ -219,12 +218,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const location = useLocation();
   const navigate = useNavigate();
   const currentView = pathnameToView(location.pathname);
-  // Topic Inspiration display switch (admin) — hide the nav item only when the
-  // module is not VISIBLE; a paused pipeline (enabled=false) keeps the entry.
-  const { visible: topicModuleVisible } = useTopicModuleStatus();
-  // Distribution display switch (admin, DB-backed). Opt-in / fail-closed: the
-  // nav entry only appears once an admin flips `distribution.module.visible`.
-  const { visible: distributionModuleVisible } = useDistributionModuleStatus();
+  // Module Control Center display switches (admin, DB-backed) — hide a nav item
+  // only when the module is not VISIBLE; a paused pipeline (enabled=false)
+  // keeps the entry. Distribution is opt-in / fail-closed: its entry only
+  // appears once an admin flips the switch on.
+  const { visible: topicModuleVisible } = useModuleStatus('topic-inspiration');
+  const { visible: distributionModuleVisible } = useModuleStatus('distribution');
+  const { visible: projectsVisible } = useModuleStatus('projects');
+  const { visible: sharesVisible } = useModuleStatus('shares');
+  const { visible: todolistVisible } = useModuleStatus('todolist');
+  const { visible: aiVisible } = useModuleStatus('ai-library');
 
   // iconRail (detail routes, D5) pins the narrow rail → render icon-only.
   const collapsed = iconRail || collapsedProp;
@@ -352,7 +355,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {isViewEnabled('resources') && (
               <SidebarItem icon={Layers} label={t('sidebar.resources')} active={currentView === 'resources'} onClick={() => handleNav('resources')} collapsed={collapsed} />
             )}
-            {isViewEnabled('mediatrack') && (
+            {isViewEnabled('mediatrack') && projectsVisible && (
               <SidebarItem icon={FolderKanban} label={t('sidebar.projects')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
             )}
             {distributionModuleVisible && (
@@ -364,16 +367,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 collapsed={collapsed}
               />
             )}
-            <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
-            <SidebarItem
-              icon={Sparkles}
-              label={t('sidebar.aiLibrary', 'AI Library')}
-              active={currentView === 'ailibrary'}
-              onClick={() => handleNav('ailibrary')}
-              collapsed={collapsed}
-            />
-            <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
-            <SidebarItem icon={MessageSquare} label={t('chat.title')} active={currentView === 'chat'} onClick={() => handleNav('chat')} collapsed={collapsed} />
+            {todolistVisible && (
+              <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
+            )}
+            {aiVisible && (
+              <SidebarItem
+                icon={Sparkles}
+                label={t('sidebar.aiLibrary', 'AI Library')}
+                active={currentView === 'ailibrary'}
+                onClick={() => handleNav('ailibrary')}
+                collapsed={collapsed}
+              />
+            )}
+            {sharesVisible && (
+              <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
+            )}
+            {aiVisible && (
+              <SidebarItem icon={MessageSquare} label={t('chat.title')} active={currentView === 'chat'} onClick={() => handleNav('chat')} collapsed={collapsed} />
+            )}
           </SidebarSection>
 
           {hasPermission(permissions, 'member.view') && (
@@ -433,7 +444,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {isViewEnabled('resources') && (
             <SidebarItem icon={Layers} label={t('sidebar.resources')} active={currentView === 'resources'} onClick={() => handleNav('resources')} collapsed={collapsed} />
           )}
-          {isViewEnabled('mediatrack') && (
+          {isViewEnabled('mediatrack') && projectsVisible && (
             <SidebarItem icon={FolderKanban} label={t('sidebar.projects')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
           )}
           {distributionModuleVisible && (
@@ -445,15 +456,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
               collapsed={collapsed}
             />
           )}
-          <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
-          <SidebarItem
-            icon={Sparkles}
-            label={t('sidebar.aiLibrary', 'AI Library')}
-            active={currentView === 'ailibrary'}
-            onClick={() => handleNav('ailibrary')}
-            collapsed={collapsed}
-          />
-          <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
+          {todolistVisible && (
+            <SidebarItem icon={ListTodo} label={t('sidebar.todolist')} active={currentView === 'todolist'} onClick={() => handleNav('todolist')} collapsed={collapsed} />
+          )}
+          {aiVisible && (
+            <SidebarItem
+              icon={Sparkles}
+              label={t('sidebar.aiLibrary', 'AI Library')}
+              active={currentView === 'ailibrary'}
+              onClick={() => handleNav('ailibrary')}
+              collapsed={collapsed}
+            />
+          )}
+          {sharesVisible && (
+            <SidebarItem icon={Share2} label={t('sidebar.shared')} active={currentView === 'shared'} onClick={() => handleNav('shared')} collapsed={collapsed} />
+          )}
           <SidebarItem icon={Coins} label={t('sidebar.points')} active={currentView === 'points'} onClick={() => handleNav('points')} collapsed={collapsed} />
         </SidebarSection>
       </nav>

@@ -14,7 +14,8 @@ const OPEN: ModuleStatus = { enabled: true, visible: true };
 
 export interface ModuleStatusState extends ModuleStatus {
   /** True until the first read resolves — fail-closed guards must wait for
-   * this before redirecting (mirrors the old useDistributionModuleStatus). */
+   * this before hiding a surface, or distribution would flash its disabled
+   * page on every load. */
   loading: boolean;
 }
 
