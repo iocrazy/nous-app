@@ -57,9 +57,9 @@ def test_router_has_module_gate(module_path, router_name, expected_id):
     import importlib
 
     router = getattr(importlib.import_module(module_path), router_name)
-    assert expected_id in _gated_module_ids(router), (
-        f"{module_path}.{router_name} is missing require_module('{expected_id}')"
-    )
+    assert expected_id in _gated_module_ids(
+        router
+    ), f"{module_path}.{router_name} is missing require_module('{expected_id}')"
 
 
 @pytest.mark.parametrize(
@@ -77,9 +77,9 @@ def test_dispatch_endpoint_has_module_gate(module_path, path, method):
     import importlib
 
     router = importlib.import_module(module_path).router
-    assert "media-parser" in _route_gated_module_ids(router, path, method), (
-        f"{module_path} {method} {path} is missing require_module('media-parser')"
-    )
+    assert "media-parser" in _route_gated_module_ids(
+        router, path, method
+    ), f"{module_path} {method} {path} is missing require_module('media-parser')"
 
 
 # The retry tick's gate cannot be exercised through the workflow itself: the

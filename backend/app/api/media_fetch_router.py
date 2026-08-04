@@ -7,7 +7,6 @@ Endpoints for parsing and fetching media (single, batch, per-type, extract-audio
 Helper functions are in media_fetch_helpers.py.
 """
 
-
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from loguru import logger
 
