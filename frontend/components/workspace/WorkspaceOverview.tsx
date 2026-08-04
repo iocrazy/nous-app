@@ -54,9 +54,10 @@ export function WorkspaceOverview({
 
   return (
     <div data-testid="ws-overview" className="flex flex-col gap-3 py-3">
-      {workflow?.has_workflow && (
+      {workflow && (
         <WorkflowSection
           projectId={project.id}
+          teamId={project.team_id ?? ''}
           workflow={workflow}
           canWrite={canWrite}
           onReload={onReloadWorkflow ?? (() => undefined)}

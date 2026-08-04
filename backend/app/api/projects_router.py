@@ -59,6 +59,7 @@ from app.schemas.projects import (
 from app.schemas.workflow import (
     BLOCK_DEPS_PENDING,
     AdvancePreview,
+    AttachWorkflowRequest,
     DepsBackwardOnly,
     NodeCreate,
     NodeDeleteBlocked,
@@ -404,6 +405,94 @@ async def get_project_workflow(
         agents_active=agents_active,
         nodes=enriched,
     )
+
+
+@router.post("/{project_id}/workflow")
+async def attach_project_workflow(
+    project_id: str,
+    payload: AttachWorkflowRequest,
+    auth: AuthDep,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    """Attach a workflow template to an EXISTING project that has none yet.
+
+    M1.x opt-in migration path (spec: rather than a lossy bulk script mapping
+    the legacy 3-stage SOP onto an 11-node template for every project, the
+    user opts a project in one at a time and picks the template themselves).
+    Shares the exact instantiation path ``instantiate_project_workflow`` the
+    create-project flow uses (mirror issues, deliverable folders, stage-hook
+    dispatch, autopilot tick — all the same arrival machinery).
+
+    Guards, in order:
+      1. ``verify_project_write_access`` (owner / team member / project
+         manager-editor) — same gate every other project-mutation endpoint
+         in this router uses.
+      2. 409 if the project already has any instance nodes — instantiating
+         twice would duplicate nodes and mirror issues.
+         ``instantiate_from_template`` itself is idempotent (a project that
+         already owns any node is left untouched), but that silent no-op
+         would look like a fake success to the caller; this surfaces it as
+         an explicit, actionable error instead.
+      3. The chosen template must belong to the project's own scope (its
+         team, or — for a personal project, team_id IS NULL — the OWNER's
+         personal team, the same boundary translation
+         ``project_stage_issues._resolve_issue_team_id`` already uses) —
+         otherwise 404, so a caller can never graft another team's template
+         onto a project it doesn't own the scope of, and existence never
+         leaks across teams.
+
+    Note: ``projects.workflow_id`` (FK → the legacy, unrelated
+    ``project_workflows`` table from mig 047) is NOT consulted here — it
+    predates this M1 template system and is never written by it. The actual
+    "does this project already have a workflow" signal is instance-node
+    existence, same as ``GET /{project_id}/workflow``'s ``has_workflow``.
+    """
+    from app.repositories.project_stage_nodes_repository import (
+        get_project_stage_nodes_repository,
+    )
+    from app.repositories.projects_repository import get_projects_repository
+    from app.repositories.team_repository import get_team_repository
+    from app.repositories.workflow_templates_repository import (
+        get_workflow_templates_repository,
+    )
+    from app.services.workflow.instantiation import instantiate_project_workflow
+
+    projects_repo = get_projects_repository()
+    project = await projects_repo.get_project_by_id(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    nodes_repo = get_project_stage_nodes_repository()
+    existing_nodes = await nodes_repo.list_nodes(project_id)
+    if existing_nodes:
+        raise HTTPException(status_code=409, detail="Project already has a workflow")
+
+    team_id = project.get("team_id")
+    if team_id is None:
+        owner_id = project.get("owner_id")
+        team_id = (
+            await get_team_repository().get_personal_team_id(str(owner_id))
+            if owner_id
+            else None
+        )
+
+    template_team_id = await get_workflow_templates_repository().get_template_team_id(
+        payload.template_id
+    )
+    if (
+        team_id is None
+        or template_team_id is None
+        or str(template_team_id) != str(team_id)
+    ):
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    nodes = await instantiate_project_workflow(
+        project_id,
+        payload.template_id,
+        method=payload.method,
+        user_id=auth.user_id,
+    )
+    return {"success": True, "data": nodes}
 
 
 @router.get("/{project_id}/workflow/nodes/{node_id}/board")

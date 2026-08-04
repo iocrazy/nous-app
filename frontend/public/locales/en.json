@@ -1772,6 +1772,18 @@
         "methodAI": "AI",
         "methodHybrid": "Hybrid"
       },
+      "attach": {
+        "emptyStateTitle": "No workflow yet",
+        "emptyStateBody": "Attach a workflow template to track this project's stages, tasks and deliverables.",
+        "emptyStateButton": "Set up workflow",
+        "title": "Attach a workflow",
+        "body": "Pick a template to apply to this project. This cannot be undone once stages are created.",
+        "submit": "Attach",
+        "noTemplates": "No templates available yet.",
+        "loadFailed": "Failed to load workflow templates",
+        "alreadyHasWorkflow": "This project already has a workflow.",
+        "failed": "Failed to attach workflow"
+      },
       "confirm": {
         "advanceTitle": "Advance workflow?",
         "backTitle": "Move back?",

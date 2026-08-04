@@ -8,11 +8,14 @@
  * W3-1: when the user may write, the strip grows a "+ Add stage" affordance
  * (opens the shared library picker; add from the node bank or a blank name) and
  * a per-node remove affordance (server-fenced — a 409 surfaces its reason as a
- * toast). Renders nothing for a No-workflow project (`has_workflow=false`).
+ * toast). For a No-workflow project (`has_workflow=false`) a writer gets a
+ * "Set up workflow" empty-state CTA (M1.x opt-in migration path — see
+ * AttachWorkflowModal); a non-writer sees nothing, same as before.
  */
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { GitBranch } from 'lucide-react';
 import { fetchProjectMembers } from '../../services/projectsService';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import {
@@ -27,11 +30,15 @@ import { useToast } from '../Toast';
 import { WorkflowStrip } from './WorkflowStrip';
 import { CurrentNodeCard } from './CurrentNodeCard';
 import { LibraryPickerModal } from './LibraryPickerModal';
+import { AttachWorkflowModal } from './AttachWorkflowModal';
 import { AgentOption, PersonOption } from './OwnerPicker';
 import { isNodeInActiveGroup, unmetDeps } from './nodeStatus';
 
 interface WorkflowSectionProps {
   projectId: string;
+  /** The project's team (personal project → '' — AttachWorkflowModal's
+   * fetchTemplates resolves that server-side to the owner's personal team). */
+  teamId: string;
   workflow: ProjectWorkflow;
   canWrite: boolean;
   onReload: () => void;
@@ -54,6 +61,7 @@ const REMOVE_BLOCK_KEY: Record<string, string> = {
 
 export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
   projectId,
+  teamId,
   workflow,
   canWrite,
   onReload,
@@ -70,6 +78,8 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [removing, setRemoving] = useState<ProjectStageNode | null>(null);
   const [busy, setBusy] = useState(false);
+  // Attach-workflow (M1.x opt-in migration path) — the empty-state CTA below.
+  const [attachOpen, setAttachOpen] = useState(false);
   // Start early (M4 Autopilot task O2/O3) — which future node's request is
   // currently in flight, so only THAT card's button disables (not every
   // eligible one at once).
@@ -187,7 +197,46 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
     }
   };
 
-  if (!workflow.has_workflow) return null;
+  if (!workflow.has_workflow) {
+    // A non-writer has no action to take here — same "render nothing" as
+    // before this CTA existed.
+    if (!canWrite) return null;
+    return (
+      <div
+        data-testid="workflow-empty-state"
+        className="flex flex-col items-start gap-2 rounded-xl border border-dashed border-line p-4"
+      >
+        <div className="flex items-center gap-1.5 text-[13px] font-medium text-ink-200">
+          <GitBranch size={14} className="text-ink-500" />
+          {t('projects.workflow.attach.emptyStateTitle')}
+        </div>
+        <p className="text-[12.5px] text-ink-500">
+          {t('projects.workflow.attach.emptyStateBody')}
+        </p>
+        <button
+          type="button"
+          onClick={() => setAttachOpen(true)}
+          data-testid="workflow-empty-state-attach"
+          className="mt-1 inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[12.5px] transition"
+          style={{
+            background: 'var(--accent-soft)',
+            color: 'var(--accent-text)',
+            borderColor: 'var(--accent-border)',
+          }}
+        >
+          {t('projects.workflow.attach.emptyStateButton')}
+        </button>
+        {attachOpen && (
+          <AttachWorkflowModal
+            projectId={projectId}
+            teamId={teamId}
+            onClose={() => setAttachOpen(false)}
+            onAttached={() => onReload()}
+          />
+        )}
+      </div>
+    );
+  }
 
   // The active group: the current node plus any siblings in its parallel group
   // (shared predicate — see nodeStatus.ts::isNodeInActiveGroup — so this and

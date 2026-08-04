@@ -177,6 +177,15 @@ class TemplateCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
 
 
+class AttachWorkflowRequest(BaseModel):
+    """POST /projects/{id}/workflow body (M1.x opt-in migration path — attach
+    a workflow to an EXISTING project that has none yet, the non-lossy
+    alternative to a bulk legacy-SOP-to-template migration script)."""
+
+    template_id: str
+    method: Optional[Literal["live", "ai", "hybrid"]] = None
+
+
 class TemplateUpdate(BaseModel):
     """PATCH /workflows/{id}. Every field optional. When ``nodes`` is present it
     is a FULL replacement of the template's node list (delete + insert)."""
