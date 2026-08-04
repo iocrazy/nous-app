@@ -45,3 +45,31 @@ export function mergeRealtimeIssue(
   }
   return toUiIssue({ ...incoming, ...carried } as Issue, agentsById, projectsById);
 }
+
+/** A run is over once the issue lands here; the workflow id lingers either way. */
+const TERMINAL_STATUSES = new Set(['done', 'cancelled']);
+
+/**
+ * Should this Realtime event trigger a single-row REST refetch?
+ *
+ * The carry-over above keeps a live row from flickering, but it cannot make it
+ * ADVANCE: `execution_state` is outside the mig-172 publication, so the turn
+ * counter and the elapsed clock stay frozen at whatever the last REST fetch
+ * saw. For a row with a run in flight the event is therefore a "something
+ * moved, come and look" signal — exactly the posture TaskManagerContext takes.
+ *
+ * Deliberately narrow, because every `true` costs a request: only rows that
+ * were dispatched (`dbos_workflow_id`) and have not finished. Status is read
+ * from the INCOMING payload when it carries one — it is whitelisted, so the
+ * event that ends a run already knows the run ended, and refetching then would
+ * buy nothing.
+ */
+export function shouldRefetchOnRealtime(
+  prev: UiIssue | undefined,
+  incoming: Partial<Issue>,
+): boolean {
+  // No prior row means an INSERT: the payload is all there is, and it is whole.
+  if (!prev?.raw?.dbos_workflow_id) return false;
+  const status = incoming.status ?? prev.status;
+  return !TERMINAL_STATUSES.has(status);
+}

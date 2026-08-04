@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { Issue } from '../../services/issuesService';
-import { mergeRealtimeIssue } from './mergeRealtimeIssue';
+import { mergeRealtimeIssue, shouldRefetchOnRealtime } from './mergeRealtimeIssue';
 import { toUiIssue } from './uiIssue';
 
 const AGENTS = {};
@@ -77,5 +77,45 @@ describe('mergeRealtimeIssue', () => {
     const merged = mergeRealtimeIssue(prev, realtimePayload(), AGENTS);
     expect(merged.id).toBe(1);
     expect(merged.raw.dbos_workflow_id).toBeUndefined();
+  });
+});
+
+/**
+ * The other half of the mig-172 whitelist problem. Carrying the old value over
+ * stops the running chip flickering, but it also means `execution_state.turn`
+ * and `started_at`-derived elapsed NEVER advance from Realtime alone — the
+ * column the turn counter lives in simply isn't published. So a live row has to
+ * treat the event as "refetch me", which is what this predicate decides.
+ */
+describe('shouldRefetchOnRealtime', () => {
+  it('refetches a row that is mid-run', () => {
+    const prev = toUiIssue(rawIssue(), AGENTS);
+    expect(shouldRefetchOnRealtime(prev, realtimePayload())).toBe(true);
+  });
+
+  it('does not refetch a row that has reached a terminal status', () => {
+    // The workflow id lingers on a finished row; status is what ends the run.
+    const done = toUiIssue(rawIssue({ status: 'done' }), AGENTS);
+    expect(shouldRefetchOnRealtime(done, realtimePayload({ status: 'done' }))).toBe(false);
+
+    const cancelled = toUiIssue(rawIssue({ status: 'cancelled' }), AGENTS);
+    expect(shouldRefetchOnRealtime(cancelled, realtimePayload({ status: 'cancelled' }))).toBe(false);
+  });
+
+  it('does not refetch a row that was never dispatched', () => {
+    const idle = toUiIssue(rawIssue({ dbos_workflow_id: null }), AGENTS);
+    expect(shouldRefetchOnRealtime(idle, realtimePayload())).toBe(false);
+  });
+
+  it('does not refetch when the row is not in the list yet', () => {
+    // An INSERT event has no prior row — it arrives complete, nothing to top up.
+    expect(shouldRefetchOnRealtime(undefined, realtimePayload())).toBe(false);
+  });
+
+  it('uses the incoming status when the event is the one ending the run', () => {
+    // prev is still in_progress; the very event that flips it to done must not
+    // schedule a refetch, or every finishing run costs a pointless round trip.
+    const prev = toUiIssue(rawIssue(), AGENTS);
+    expect(shouldRefetchOnRealtime(prev, realtimePayload({ status: 'done' }))).toBe(false);
   });
 });
