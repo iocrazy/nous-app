@@ -36,12 +36,13 @@ import { AgentActionBar } from './AgentActionBar';
 import { AgentWorkbenchTab } from './AgentWorkbenchTab';
 import { AgentPersonaTab } from './AgentPersonaTab';
 import { AgentProfileTab } from './AgentProfileTab';
+import PermissionsSection from './PermissionsSection';
 import { PROVIDER_DISPLAY_NAMES, getAvailableModels } from './agentEditorModel';
 import { GROUP_AVATAR, agentGroupOf } from './agentStatus';
 import { getAgentIcon } from './agentIcons';
 import { useGlobalChatStore } from '../../stores/globalChatStore';
 
-type SubTab = 'workbench' | 'persona' | 'profile';
+type SubTab = 'workbench' | 'persona' | 'permissions' | 'profile';
 
 /**
  * Where each of the old eight sub-tabs went (B2, spec 2026-08-02 §B2).
@@ -55,11 +56,19 @@ export const LEGACY_TAB_MAP: Record<string, SubTab> = {
   overview: 'persona',
   files: 'persona',
   skills: 'persona',
-  permissions: 'persona',
   versions: 'profile',
 };
 
-const SUB_TABS: SubTab[] = ['workbench', 'persona', 'profile'];
+export const SUB_TABS: SubTab[] = ['workbench', 'persona', 'permissions', 'profile'];
+
+/** English fallbacks: `t()` with no default renders the raw key path when a
+ *  locale is missing one, which in a tab strip looks like a broken label. */
+const SUB_TAB_LABELS: Record<SubTab, string> = {
+  workbench: 'Workbench',
+  persona: 'Persona & Skills',
+  permissions: 'Permissions',
+  profile: 'Profile',
+};
 
 /** Resolve a ``?tab=`` value (new or legacy) to a tab; unknown → workbench. */
 export function resolveSubTab(raw: string | null | undefined): SubTab {
@@ -587,7 +596,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
                 : 'border-transparent text-ink-500 hover:text-ink-300'
             }`}
           >
-            {t(`aiLibrary.agents.tab.${k}`)}
+            {t(`aiLibrary.agents.tab.${k}`, SUB_TAB_LABELS[k])}
           </button>
         ))}
       </nav>
@@ -610,11 +619,23 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
           onAddSkill={addSkill}
           onRemoveSkill={removeSkill}
           onMoveSkill={moveSkill}
-          permDraft={permDraft}
-          onPermChange={setPermDraft}
-          onSavePermissions={savePermissions}
-          permSaving={permSaving}
         />
+      )}
+
+      {sub === 'permissions' && (
+        <section className="max-w-2xl">
+          <PermissionsSection value={permDraft} onChange={setPermDraft} />
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              disabled={permSaving}
+              onClick={savePermissions}
+              className="rounded-lg border border-ink-700 bg-ink-800 px-4 py-2 text-sm font-medium text-ink-200 hover:bg-ink-700 disabled:opacity-50"
+            >
+              {permSaving ? t('common.saving') : t('common.save', 'Save')}
+            </button>
+          </div>
+        </section>
       )}
 
       {sub === 'profile' && (

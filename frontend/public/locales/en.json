@@ -2552,7 +2552,8 @@
         "versions": "Versions",
         "workbench": "Workbench",
         "persona": "Persona & Skills",
-        "profile": "Profile"
+        "profile": "Profile",
+        "permissions": "Permissions"
       },
       "loadErrorPrefix": "Failed to load agent",
       "listLoadError": "Failed to load agents",

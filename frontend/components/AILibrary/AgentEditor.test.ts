@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { getAvailableModels } from './agentEditorModel';
-import { LEGACY_TAB_MAP, resolveSubTab } from './AgentEditor';
+import { LEGACY_TAB_MAP, SUB_TABS, resolveSubTab } from './AgentEditor';
 import type { AISettings } from '../../types';
 
 function buildSettings(overrides: Partial<AISettings>): AISettings {
@@ -94,9 +94,10 @@ describe('getAvailableModels', () => {
 });
 
 describe('resolveSubTab', () => {
-  it('accepts the three current tabs', () => {
+  it('accepts the four current tabs', () => {
     expect(resolveSubTab('workbench')).toBe('workbench');
     expect(resolveSubTab('persona')).toBe('persona');
+    expect(resolveSubTab('permissions')).toBe('permissions');
     expect(resolveSubTab('profile')).toBe('profile');
   });
 
@@ -107,10 +108,26 @@ describe('resolveSubTab', () => {
       ['dashboard', 'runs', 'routines'].map(resolveSubTab),
     ).toEqual(['workbench', 'workbench', 'workbench']);
     expect(
-      ['overview', 'files', 'skills', 'permissions'].map(resolveSubTab),
-    ).toEqual(['persona', 'persona', 'persona', 'persona']);
+      ['overview', 'files', 'skills'].map(resolveSubTab),
+    ).toEqual(['persona', 'persona', 'persona']);
     expect(resolveSubTab('versions')).toBe('profile');
-    expect(Object.keys(LEGACY_TAB_MAP)).toHaveLength(8);
+    // `permissions` left LEGACY_TAB_MAP when it became a real tab again —
+    // resolveSubTab matches SUB_TABS first, so an old ?tab=permissions link
+    // now lands on the permissions tab instead of being folded into persona.
+    expect(Object.keys(LEGACY_TAB_MAP)).toHaveLength(7);
+    expect(LEGACY_TAB_MAP.permissions).toBeUndefined();
+  });
+
+  it('carries permissions as its own tab, in reading order', () => {
+    // Chat permissions used to be a block at the bottom of the persona tab,
+    // where their descriptions wrapped into each other in a 1fr column.
+    // Order matters: what it does → who it is → who may talk to it → history.
+    expect(SUB_TABS).toEqual([
+      'workbench',
+      'persona',
+      'permissions',
+      'profile',
+    ]);
   });
 
   it('falls back to the workbench for missing or unknown values', () => {

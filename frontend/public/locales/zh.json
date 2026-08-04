@@ -2552,7 +2552,8 @@
         "versions": "版本",
         "workbench": "工作台",
         "persona": "人格与技能",
-        "profile": "档案"
+        "profile": "档案",
+        "permissions": "权限"
       },
       "loadErrorPrefix": "加载智能体失败",
       "listLoadError": "加载智能体列表失败",

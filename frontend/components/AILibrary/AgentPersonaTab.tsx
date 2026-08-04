@@ -1,28 +1,27 @@
 // frontend/components/AILibrary/AgentPersonaTab.tsx
 // B2 — "who this agent is" (spec 2026-08-02 §B2).
 //
-// Absorbs four of the old eight sub-tabs (Overview / Files / Skills /
-// Permissions). The three persona documents switch in place instead of
-// stacking, because you edit one voice at a time; the attributes, skill
-// bindings and permissions sit under them as the settings for that voice.
+// Absorbs three of the old eight sub-tabs (Overview / Files / Skills). The
+// three persona documents switch in place instead of stacking, because you
+// edit one voice at a time; the attributes and skill bindings sit beside them
+// as the settings for that voice.
+//
+// Permissions used to be a fourth block at the bottom of this tab. They now
+// have their own tab: squeezed into this tab's 1fr right column their
+// descriptions wrapped into each other, and "who may chat with this agent" is
+// a different question from "who is this agent".
 //
 // Editing state is owned by AgentEditor — this component is presentational
 // apart from which document is on screen. The header Save button covers the
-// draft + skill bindings; permissions keep their own Save (a separate
-// endpoint with its own role gate).
+// draft + skill bindings.
 
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowDown, ArrowUp } from 'lucide-react';
-import type {
-  AgentChatPermissions,
-  AILibraryAgent,
-  AILibrarySkill,
-} from '../../types';
+import type { AILibraryAgent, AILibrarySkill } from '../../types';
 import { MarkdownEditor } from './MarkdownEditor';
 import { AgentIconPicker } from './AgentIconPicker';
-import PermissionsSection from './PermissionsSection';
 import { renderModelSelect, type ProviderModelGroup } from './agentEditorModel';
 
 type PersonaDoc = 'identity_md' | 'soul_md' | 'agent_md';
@@ -51,10 +50,6 @@ interface AgentPersonaTabProps {
   onAddSkill: (id: number) => void;
   onRemoveSkill: (id: number) => void;
   onMoveSkill: (id: number, direction: -1 | 1) => void;
-  permDraft: AgentChatPermissions;
-  onPermChange: (next: AgentChatPermissions) => void;
-  onSavePermissions: () => void;
-  permSaving: boolean;
 }
 
 export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
@@ -70,10 +65,6 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
   onAddSkill,
   onRemoveSkill,
   onMoveSkill,
-  permDraft,
-  onPermChange,
-  onSavePermissions,
-  permSaving,
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -88,12 +79,15 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
       )}
 
       {/* Two columns per spec §03: the persona documents are the work, the
-          attributes / skills / permissions are the settings that describe
-          them. They used to be one long stack, so reading a prompt meant
-          scrolling past every knob first. */}
+          attributes and skills are the settings that describe them. They used
+          to be one long stack, so reading a prompt meant scrolling past every
+          knob first. */}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-[1.5fr_1fr] md:items-start">
-      {/* Persona documents — one at a time. */}
-      <section>
+      {/* Persona documents — one at a time. `min-w-0` on both columns for the
+          same reason as the workbench: grid items default to min-width:auto,
+          so a long slug, model id or skill name grows its column past the
+          track and squeezes/overflows the other one. */}
+      <section className="min-w-0">
         <div className="mb-2 flex gap-1">
           {PERSONA_DOCS.map((d) => (
             <button
@@ -121,7 +115,7 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
         />
       </section>
 
-      <div className="flex flex-col gap-6">
+      <div className="flex min-w-0 flex-col gap-6">
       {/* Attributes */}
       <section className="space-y-4 text-sm">
         <h3 className="text-sm font-semibold text-ink-200">
@@ -275,20 +269,6 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
         />
       </section>
 
-      {/* Permissions — own Save, own endpoint. */}
-      <section>
-        <PermissionsSection value={permDraft} onChange={onPermChange} />
-        <div className="mt-4 flex justify-end">
-          <button
-            type="button"
-            disabled={permSaving}
-            onClick={onSavePermissions}
-            className="rounded-lg btn-tint-indigo px-4 py-2 text-sm font-medium"
-          >
-            {permSaving ? t('common.saving') : t('common.save', 'Save')}
-          </button>
-        </div>
-      </section>
       </div>
       </div>
     </div>
