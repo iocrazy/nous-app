@@ -39,6 +39,12 @@ async def test_get_modules_lists_all_registered():
         "topic-inspiration",
         "distribution",
         "unified-storage",
+        "media-parser",
+        "projects",
+        "shares",
+        "todolist",
+        "ai-library",
+        "ideation",
     }
     for m in result:
         assert isinstance(m, ModuleSummaryResponse)
