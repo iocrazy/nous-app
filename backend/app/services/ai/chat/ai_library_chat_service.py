@@ -880,6 +880,32 @@ class AILibraryChatService:
         # no store_kind key (shouldn't happen post-collapse) keeps the
         # byte-identical session_id path.
         _is_conv_store = session.get("store_kind") == "conversations"
+
+        # A4 review (Important 3): this is the PRIMARY chat surface, and it
+        # used to stamp session["project_id"] raw with no episode at all.
+        # That made the episode dimension surface-dependent — the same agent
+        # on the same conversation got episode-narrowed scope when summoned
+        # via @-mention (conversation_agent_turn) but FULL-project scope
+        # here, so a narrowed agent could widen itself just by switching
+        # surfaces.
+        #
+        # The project keeps coming from the session row IN MEMORY and is
+        # passed explicitly, NOT re-derived from the conversation. Both
+        # values are the same column in production (create_session writes
+        # conversations.project_id from what the caller passed), but a
+        # re-read can FAIL, and on the issue-dispatch path a lost project_id
+        # silently disables the autopilot daily spend cap, which filters
+        # agent_runs by exactly this column. The conversation is consulted
+        # only to ADD an episode; if that lookup fails the run is simply not
+        # narrowed. See resolve_dispatch_scope's explicit-project branch.
+        from app.services.ai.scope.scope_binding import resolve_dispatch_scope
+
+        _dispatch_scope = await resolve_dispatch_scope(
+            agent=agent_record,
+            project_id=session.get("project_id"),
+            conversation_id=int(session_id) if _is_conv_store else None,
+        )
+
         try:
             async with RunRecorder(
                 agent_id=composed.agent_id,
@@ -888,7 +914,7 @@ class AILibraryChatService:
                 session_id=None if _is_conv_store else session_id,
                 conversation_id=int(session_id) if _is_conv_store else None,
                 team_id=session.get("team_id"),
-                project_id=session.get("project_id"),
+                **_dispatch_scope.as_recorder_kwargs(),
                 model=model or None,
                 provider=provider,
                 input_summary=content,

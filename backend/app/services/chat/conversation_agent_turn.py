@@ -33,6 +33,7 @@ from app.services.ai.model_capabilities import model_supports_vision
 from app.services.ai.permissions.agent_chat_caps import agent_chat_caps
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
 from app.services.ai.runner.run_recorder import RunRecorder
+from app.services.ai.scope.scope_binding import resolve_dispatch_scope
 from app.services.chat.conversation_memory_service import build_memory_block
 from app.services.library.media_storage import ObjectStore, resolve_media_source
 
@@ -427,6 +428,17 @@ async def run_conversation_agent_turn(
             f"agent={agent_slug} conversation={conversation_id} error={exc!r}"
         )
 
+    # A4: bind the run's screenwriting scope from the CONVERSATION (a
+    # server-owned handle), not from anything in the message text. Until now
+    # this call site passed a literal project_id=None, which made every
+    # resolver deny — correct as a failure direction, but it meant the
+    # screenwriting tools were inert on the main @-mention summon route.
+    # A conversation with no project still resolves to an unbound scope; the
+    # tools then report that plainly rather than half-working.
+    dispatch_scope = await resolve_dispatch_scope(
+        agent=agent, conversation_id=int(conversation_id)
+    )
+
     # Gate 5 — run turn inside RunRecorder; clean up on exit.
     result: Optional[dict[str, Any]] = None
     try:
@@ -437,7 +449,7 @@ async def run_conversation_agent_turn(
             session_id=None,
             conversation_id=int(conversation_id),
             team_id=int(scope_id) if scope_id is not None else None,
-            project_id=None,
+            **dispatch_scope.as_recorder_kwargs(),
             model=model or None,
             provider=provider,
             input_summary=f"conversation={conversation_id} summoner={summoner_user_id}",

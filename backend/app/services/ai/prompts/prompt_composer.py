@@ -128,7 +128,7 @@ class PromptComposer:
             user_context=inp.user_context,
             agent_memory_facts=inp.agent_memory_facts,
         )
-        tools = self._build_tools(skills)
+        tools = self._build_tools(skills, agent)
         manifest = [
             {
                 "slug": s.get("slug"),
@@ -347,7 +347,9 @@ class PromptComposer:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         return f"# Runtime\nModel: {agent.get('model')} | Time: {now}"
 
-    def _build_tools(self, skills: list[dict[str, Any]]) -> list[dict]:
+    def _build_tools(
+        self, skills: list[dict[str, Any]], agent: Optional[dict[str, Any]] = None
+    ) -> list[dict]:
         """Build the function-calling tools list.
 
         Built-in tools advertised:
@@ -356,8 +358,29 @@ class PromptComposer:
           behind ``FEATURE_WORKFORCE_DELEGATE`` (audit #4): the inbox→worker
           execution chain isn't fully wired, so advertising it would let the
           LLM queue tasks that orphan forever. Off (default) → not advertised.
+        - A4 screenwriting tools (ListScenes / ReadScene / CreateShot /
+          UpdateShot / ProposeEdit) — advertised per the agent's granted
+          ``capabilities.write_level``, which is "none" for every agent that
+          hasn't been explicitly granted one, so this is a no-op for the
+          whole existing fleet.
 
-        Returns ``[]`` when no skills are bound AND Delegate is gated off.
+        The screenwriting specs live HERE rather than at each chat/summon
+        call site (the way ResourceFetch and the media tools do) because
+        every dispatch path already funnels through ``compose`` — putting
+        them here is the difference between the tools working on one route
+        and working on all of them.
+
+        ⚠️ That reach is exactly why advertising must not be mistaken for
+        enforcement (A4 review, Critical 1). ``compose`` is also called by
+        eight services that build ``AgentRunner`` with NO hooks, where A1's
+        gate does not exist to re-check anything. Enforcement is therefore
+        anchored at the dispatcher: ``AgentRunner._dispatch_screenwriting``
+        refuses outright when ``HighRiskCapabilityGateHook`` isn't installed
+        on the runner. The ``write_level`` filter below only decides what to
+        SHOW the model.
+
+        Returns ``[]`` when no skills are bound, Delegate is gated off, and
+        the agent has no write grade.
         """
         from app.services.workforce.delegate_feature import (
             delegate_feature_enabled,
@@ -368,6 +391,13 @@ class PromptComposer:
             tools.append(self._skill_tool_spec())
         if delegate_feature_enabled():
             tools.append(self._delegate_tool_spec())
+        if agent is not None:
+            from app.services.ai.permissions.high_risk_caps import high_risk_caps
+            from app.services.ai.tools.screenwriting_specs import (
+                screenwriting_tool_specs,
+            )
+
+            tools.extend(screenwriting_tool_specs(high_risk_caps(agent).write_level))
         return tools
 
     def _skill_tool_spec(self) -> dict:

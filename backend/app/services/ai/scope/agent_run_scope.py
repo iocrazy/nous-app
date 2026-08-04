@@ -53,13 +53,16 @@ right here, so ANY caller that ever stamps a foreign project_id onto
 ``None`` scope (fail closed) rather than a scope object that resolves that
 project's data as legitimately in-scope.
 
-Episode granularity (deferred to spec1's B1): ``project_stage_nodes`` gets an
-``episode_id`` column in B1; until then, ``episode_id`` on this dataclass is
-always ``None`` and no resolver filters on it. Once B1 lands and a caller
-starts passing a real ``episode_id``, ``scope_resolver.py``'s existing
-``scope.episode_id is not None`` checks activate WITHOUT modification — the
-field is already threaded end to end, just unpopulated. This is the
-"additive, not a rewrite" shape the plan asks for.
+Episode granularity (A4, mig 404 — B1 has landed). ``agent_runs.episode_id``
+now exists and is stamped by the same insert-once path as ``project_id`` /
+``team_id``, so ``scope_for_run`` populates the field for real and
+``scope_resolver.py``'s pre-existing ``scope.episode_id is not None`` checks
+activate. NULL remains the norm and means "project-wide": a dispatch path
+that cannot name an episode must leave it None rather than guess, because a
+WRONG episode denies legitimate work while None merely declines to narrow.
+Where the episode IS derivable, ``scope_binding.resolve_dispatch_scope`` is
+the only thing that derives it — see that module for why the
+``cross_episode_read`` capability suppresses the narrowing.
 """
 
 from __future__ import annotations
@@ -167,7 +170,12 @@ async def scope_for_run(run_id: Optional[str]) -> Optional[AgentRunScope]:
     async with read_scope() as session:
         row = (
             await session.execute(
-                select(AgentRuns.user_id, AgentRuns.project_id, AgentRuns.team_id)
+                select(
+                    AgentRuns.user_id,
+                    AgentRuns.project_id,
+                    AgentRuns.team_id,
+                    AgentRuns.episode_id,
+                )
                 .where(AgentRuns.id == rid)
                 .limit(1)
             )
@@ -188,11 +196,18 @@ async def scope_for_run(run_id: Optional[str]) -> Optional[AgentRunScope]:
             )
             return None
 
+    # episode_id is NOT re-verified against the project the way project_id is
+    # re-verified against the user: it can only ever NARROW what this scope
+    # resolves (scope_resolver._scope_check adds an equality test on top of
+    # the project test, it never relaxes one), so a wrong value costs the run
+    # access it should have had — it can never grant access it should not.
+    # The project check above remains the security-relevant one.
     return AgentRunScope(
         run_id=str(rid),
         user_id=user_id,
         project_id=row.project_id,
         team_id=row.team_id,
+        episode_id=row.episode_id,
     )
 
 

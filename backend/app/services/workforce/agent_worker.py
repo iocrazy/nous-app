@@ -59,6 +59,7 @@ from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
+from app.services.ai.scope.scope_binding import resolve_dispatch_scope
 
 logger = logging.getLogger(__name__)
 
@@ -199,13 +200,21 @@ async def run_one_task(task: dict[str, Any]) -> dict[str, Any]:
         except ValueError:
             provider = None
 
+        # A4: a workforce run inherits its dispatcher's scope verbatim —
+        # project AND episode. Copying only the project would let an
+        # episode-scoped agent widen itself back to project-wide reach simply
+        # by handing the work to a peer, which is the kind of escalation that
+        # reads like a narrowing at the call site. No parent (a top-level
+        # workforce dispatch) leaves both None, i.e. no screenwriting reach.
+        dispatch_scope = await resolve_dispatch_scope(parent_run_id=parent_run_id)
+
         async with RunRecorder(
             agent_id=composed.agent_id,
             user_id=user_id,
             trigger="workforce",
             session_id=None,
             team_id=None,
-            project_id=None,
+            **dispatch_scope.as_recorder_kwargs(),
             model=model or None,
             provider=provider,
             input_summary=user_query,

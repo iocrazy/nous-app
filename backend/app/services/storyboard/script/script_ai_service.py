@@ -35,6 +35,7 @@ from app.services.ai.adapters.factory import provider_key_for_model
 from app.services.ai.prompts.prompt_composer import ComposerInput, PromptComposer
 from app.services.ai.runner.agent_runner import AgentRunner
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
+from app.services.ai.scope.scope_binding import resolve_dispatch_scope
 from app.services.ai.skills.skill_tool_service import SkillToolService
 from app.services.script.scene_ops import ELEMENT_TYPES
 
@@ -215,6 +216,18 @@ class ScriptAIService:
                 provider = provider_key_for_model(model) if model else None
             except ValueError:
                 provider = None
+            # A4 review (Important 3): this site already stamped project_id,
+            # but stamped it RAW — so a run here got full-project scope even
+            # when the work belongs to one episode, while the same agent
+            # reached through a conversation got episode-narrowed scope.
+            # Routing the caller-supplied project through the same derivation
+            # every other dispatch path uses keeps the episode dimension from
+            # being surface-dependent. The project value itself is unchanged
+            # (resolve_dispatch_scope uses an explicit project verbatim); what
+            # it adds is the cross_episode_read handling and one place to
+            # extend when this path learns its episode.
+            dispatch_scope = await resolve_dispatch_scope(project_id=project_id)
+
             try:
                 async with RunRecorder(
                     agent_id=composed.agent_id,
@@ -222,7 +235,7 @@ class ScriptAIService:
                     trigger="script_ai",
                     session_id=session_id,
                     team_id=team_id,
-                    project_id=project_id,
+                    **dispatch_scope.as_recorder_kwargs(),
                     model=model or None,
                     provider=provider,
                     input_summary=user_content,

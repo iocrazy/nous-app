@@ -100,6 +100,21 @@ ORM_ALLOWED_PATHS: dict[str, str] = {
         "THE single choke point this guard exists to keep unique — "
         "resolve_scene/resolve_shot/resolve_episode"
     ),
+    "services/ai/scope/scoped_script_gateway.py": (
+        "A4. The resolver answers 'may this run touch id X' for ONE id; it "
+        "deliberately does not enumerate (ListScenes has no id to resolve) "
+        "and does not write (CreateShot/UpdateShot). Those need the same "
+        "tables. This entry is paid for by a MECHANICAL invariant, not a "
+        "promise: every public function in that module takes the run's "
+        "AgentRunScope plus — where it operates on an entity — an "
+        "already-resolved ResolvedScene/ResolvedShot/ResolvedEpisode handle, "
+        "never a raw model-supplied id. Those frozen dataclasses are "
+        "constructed in exactly one place (inside the resolvers, AFTER the "
+        "scope check), so the authorization proof is carried by the type. "
+        "test_scoped_script_gateway_takes_only_resolved_handles below "
+        "enforces it by signature introspection — a future function taking a "
+        "bare scene_id fails the build."
+    ),
 }
 
 # Files allowed to reach the scene/shot/episode/script-project repository
@@ -340,6 +355,86 @@ def test_guard_fires_on_a_planted_bypass():
         )
     finally:
         planted.unlink(missing_ok=True)
+
+
+def test_scoped_script_gateway_takes_only_resolved_handles():
+    """The invariant that BUYS scoped_script_gateway.py its ORM_ALLOWED_PATHS
+    entry (A4).
+
+    Every public function there must take the run's ``AgentRunScope`` first,
+    and every remaining parameter must be either a plain value the model
+    cannot use to select a row (``fields``, ``limit``) or an
+    already-``Resolved*`` handle. A parameter annotated as a bare id is the
+    bypass shape this checks for: it would let a caller hand the gateway a
+    model-supplied ``scene_id`` and write to a scene nobody authorized.
+
+    One documented exemption, asserted to stay exactly one: dispatch-time
+    ``episode_id_for_script`` runs BEFORE any run exists, on a script id the
+    server itself read out of ``conversation_ai_meta`` — there is no scope to
+    take, and its result can only narrow the scope about to be created.
+    """
+    import inspect
+
+    from app.services.ai.scope import scoped_script_gateway as gw
+
+    dispatch_time_exempt = {"episode_id_for_script"}
+    assert dispatch_time_exempt == {"episode_id_for_script"}, (
+        "Adding a second scope-free function to the gateway needs its own "
+        "justification — see this test's docstring."
+    )
+
+    resolved_types = {"ResolvedScene", "ResolvedShot", "ResolvedEpisode"}
+    offenders: list[str] = []
+
+    for name in gw.__all__:
+        obj = getattr(gw, name)
+        if not inspect.isfunction(obj) or name in dispatch_time_exempt:
+            continue
+        params = list(inspect.signature(obj).parameters.values())
+        if not params or params[0].name != "scope":
+            offenders.append(f"{name}: first parameter is not `scope`")
+            continue
+        for param in params[1:]:
+            annotation = str(param.annotation)
+            if param.name.endswith("_id") and not any(
+                t in annotation for t in resolved_types
+            ):
+                offenders.append(
+                    f"{name}({param.name}): takes a raw id instead of a "
+                    "Resolved* handle"
+                )
+
+    assert not offenders, (
+        "scoped_script_gateway broke the invariant that justifies its "
+        "ORM_ALLOWED_PATHS entry:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_screenwriting_tools_do_not_bypass_the_resolver():
+    """The A4 tool handlers themselves must stay clean under BOTH scanners.
+
+    Belt-and-suspenders next to the two repo-wide tests above: those would
+    catch this too, but a targeted assertion names the file a future A5/A6
+    author is most likely to reach into the ORM from, and fails with a
+    message that says what to do instead."""
+    tool_files = {
+        "services/ai/tools/screenwriting_tools.py",
+        "services/ai/tools/screenwriting_specs.py",
+    }
+    hits = {
+        path
+        for path, _, _ in (
+            _scan(_ORM_ATTR_PATTERN, ORM_ALLOWED_PATHS)
+            + _scan(_ORM_IMPORT_PATTERN, ORM_ALLOWED_PATHS)
+            + _scan(_RAW_SQL_PATTERN, ORM_ALLOWED_PATHS)
+            + _scan(_REPO_LAYER_PATTERN, REPO_LAYER_ALLOWED_PATHS)
+        )
+    }
+    assert not (hits & tool_files), (
+        "A screenwriting tool handler is reaching the scene/shot tables "
+        "directly. Route it through resolve_scene/resolve_shot/"
+        "resolve_episode and then scoped_script_gateway."
+    )
 
 
 def test_guard_catches_a_join_split_across_two_physical_lines():

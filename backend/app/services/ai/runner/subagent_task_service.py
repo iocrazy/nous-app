@@ -266,6 +266,7 @@ class SubAgentTaskService:
                 PromptComposer,
             )
             from app.services.ai.runner.run_recorder import RunRecorder
+            from app.services.ai.scope.scope_binding import resolve_dispatch_scope
 
             # _attach_to_parent_run is private to agent_worker; keep an
             # eye on it during workforce refactors. The function writes
@@ -338,6 +339,13 @@ class SubAgentTaskService:
         except ValueError:
             provider = None
 
+        # A4: same inheritance rule as agent_worker — a spawned sub-agent gets
+        # its parent's project AND episode, never a wider scope than the
+        # parent it was spawned from. ``self.parent_run_id`` is the
+        # dispatcher's own run id (server-side), never anything the model
+        # supplied in the Task/Delegate arguments.
+        dispatch_scope = await resolve_dispatch_scope(parent_run_id=self.parent_run_id)
+
         try:
             async with RunRecorder(
                 agent_id=composed.agent_id,
@@ -345,7 +353,7 @@ class SubAgentTaskService:
                 trigger="subagent_task",
                 session_id=self.session_id,
                 team_id=None,
-                project_id=None,
+                **dispatch_scope.as_recorder_kwargs(),
                 model=model or None,
                 provider=provider,
                 input_summary=prompt[:240],

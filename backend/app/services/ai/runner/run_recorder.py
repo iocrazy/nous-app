@@ -93,6 +93,12 @@ class RunRecorder:
     conversation_id: Optional[int] = None  # Phase 1.5: structural run→conversation link
     team_id: Optional[int] = None
     project_id: Optional[int] = None
+    # mig 404 (A4): the third member of the server-bound scope triple. Callers
+    # must NOT pass a model-supplied value here — derive it server-side (see
+    # app/services/ai/scope/scope_binding.py::resolve_dispatch_scope, which
+    # every dispatch path uses). NULL = project-wide, the correct default
+    # whenever the dispatcher cannot name an episode.
+    episode_id: Optional[int] = None
     issue_id: Optional[int] = None  # links this run to an issue via mig-208 triggers
     # Paperclip-style bidirectional task linkage (mig 282). When the run
     # executes inside a tracked workflow, pass the task_tracking PK
@@ -587,6 +593,7 @@ class RunRecorder:
             ),
             "team_id": int(self.team_id) if self.team_id is not None else None,
             "project_id": int(self.project_id) if self.project_id is not None else None,
+            "episode_id": int(self.episode_id) if self.episode_id is not None else None,
             "task_id": self.task_id,
             "status": "running",
             "trigger": self.trigger,
@@ -701,9 +708,10 @@ class RunRecorder:
         #
         # A2 review note: this dict feeds `.values(**updates)` below, which a
         # static grep can't reliably follow (the keys are Python dict literals,
-        # not inline kwargs at the call site). DO NOT add "project_id" or
-        # "team_id" to this dict, ever — app/services/ai/scope/agent_run_scope.py
-        # (AgentRunScope / scope_for_run) depends on those two columns being
+        # not inline kwargs at the call site). DO NOT add "project_id",
+        # "team_id" or "episode_id" (mig 404) to this dict, ever —
+        # app/services/ai/scope/agent_run_scope.py
+        # (AgentRunScope / scope_for_run) depends on those three columns being
         # stamped exactly once at INSERT (`_insert_row` above) and never
         # touched again; every screenwriting-tool authorization decision
         # (scope_resolver.py) assumes that invariant holds. If a run's scope

@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from app.services.ai.permissions.high_risk_caps import (
+    DEFAULT_SCREENPLAY_WRITE_LEVEL,
     HighRiskCaps,
     high_risk_caps,
     media_kill_switch_engaged,
@@ -71,15 +72,26 @@ class ToolRequirement:
     external_publish: bool = False
 
 
-# Populate as later stages wire in more tools:
-#   A4 screenwriting tools (spec §5.1): ListScenes/ReadScene -> write_level
-#   "read"; CreateShot/UpdateShot -> "write"; ProposeEdit -> "propose".
-# GenerateImage/GenerateVideo are the only entries A1 needs — they are the
-# only high-risk tools that exist today (migrated off the
-# FEATURE_AGENT_MEDIA_TOOLS global flag, see high_risk_caps.media_kill_switch_engaged).
+# A4 screenwriting tools (spec §5.1). The write-grading tiers are ORDINAL
+# (see _WRITE_LEVEL_ORDER): a "write" agent satisfies "propose" and "read"
+# too, a "propose" agent satisfies "read" but NOT "write", and a "read" agent
+# satisfies neither of the other two. That ordering is the whole mechanism
+# behind the spec's "剧本类默认 propose" posture — an agent trusted to suggest
+# revisions is not thereby trusted to commit them.
+#
+# Note that "read" is NOT a free baseline: ``HighRiskCaps.write_level``
+# defaults to "none", which meets no tier at all, so even ListScenes requires
+# an explicit grant. That is the fail-closed premise of this gate, and it is
+# why every screenwriting tool is listed here rather than only the writing
+# ones.
 TOOL_REQUIREMENTS: dict[str, ToolRequirement] = {
     "GenerateImage": ToolRequirement(media="image"),
     "GenerateVideo": ToolRequirement(media="video"),
+    "ListScenes": ToolRequirement(write_level="read"),
+    "ReadScene": ToolRequirement(write_level="read"),
+    "CreateShot": ToolRequirement(write_level="write"),
+    "UpdateShot": ToolRequirement(write_level="write"),
+    "ProposeEdit": ToolRequirement(write_level=DEFAULT_SCREENPLAY_WRITE_LEVEL),
 }
 
 
