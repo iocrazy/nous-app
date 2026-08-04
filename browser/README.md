@@ -231,14 +231,25 @@ Integration tests skip themselves when Chromium is not installed on disk, so
 they never block a machine without browsers. To run them for real, use the
 container:
 
-```bash
-docker build -t nous-browser:test .
-docker run --rm --shm-size=1g --init -e BROWSER_INTERNAL_TOKEN=dev-token nous-browser:test \
-  sh -c 'Xvfb :99 -screen 0 1920x1080x24 & sleep 2; python -m pytest -m integration -q'
-```
+The image deliberately ships neither `tests/` (excluded in `.dockerignore`) nor
+the dev extras (`uv sync --no-install-project` installs runtime deps only) — a
+production image has no business carrying a test runner. So inject both into a
+running container rather than baking them in:
 
-(The image omits `tests/` and dev extras, so this needs a build without the
-`.dockerignore` exclusion, or a bind-mounted checkout.)
+```bash
+docker build -t nous-browser:local .
+docker run -d --name nous-browser-test --shm-size=1g --init \
+  -e BROWSER_INTERNAL_TOKEN=dev-token nous-browser:local
+
+# entrypoint.sh already started Xvfb on :99 and left it running, so the
+# integration tests inherit a working display - no need to start one here.
+docker cp tests nous-browser-test:/app/tests
+docker exec nous-browser-test uv pip install --python /app/.venv/bin/python \
+  pytest pytest-asyncio httpx
+docker exec nous-browser-test python -m pytest -m integration -q
+
+docker rm -f nous-browser-test
+```
 
 ## Dependencies and upgrading Playwright
 
