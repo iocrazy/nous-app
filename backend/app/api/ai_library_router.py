@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 from app.core.admin_deps import AdminAuthDep
 from app.core.deps import AuthDep
 from app.core.scope_dep import ScopedRequestDep
+from app.core.scope_guards import verify_project_read_access
 from app.repositories.agent_repository import (
     AGENT_OVERRIDE_FIELDS,
     AgentRepository,
@@ -2572,7 +2573,21 @@ async def create_chat_session(
     """Open a new ai_sessions row tied to ``slug``. Every chat message
     in this session will run through AgentRunner + RunRecorder, so
     tokens / cost / budget / pulse all flow through the standard
-    telemetry pipeline for chat too."""
+    telemetry pipeline for chat too.
+
+    A2 review fix (Critical): ``payload.project_id`` used to flow straight
+    into ``conversations.project_id`` with no ownership check at all —
+    ``agent_runs.project_id`` (and therefore every agent run's bound
+    ``AgentRunScope``) is stamped from exactly that column, so an
+    unvalidated project_id here was a silent cross-tenant hole one layer
+    up the stack from the resolver itself. Reject it here with a clean 403
+    rather than let it become a wrong-but-bound scope discovered later.
+    ``scope_for_run`` re-checks this independently at derivation time
+    (belt-and-suspenders for any OTHER path that stamps a project id), but
+    checking here means the caller gets an immediate, actionable error
+    instead of a run that silently fails to resolve anything."""
+    if payload.project_id is not None:
+        await verify_project_read_access(str(payload.project_id), auth)
     svc = AILibraryChatService()
     user_uuid = _coerce_user_uuid(auth.user_id)
     session = await svc.create_session(
