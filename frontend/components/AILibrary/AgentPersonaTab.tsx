@@ -487,7 +487,7 @@ const SkillScopeBadge: React.FC<{ skill: AILibrarySkill }> = ({ skill }) => {
   if (isPreset) {
     return (
       <span className={`${base} border-ink-700 bg-ink-800 text-ink-300`}>
-        {t('aiLibrary.agents.systemPreset', 'System Preset')}
+        {t('aiLibrary.officialTemplate', 'Official template')}
       </span>
     );
   }

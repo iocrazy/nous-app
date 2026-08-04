@@ -639,7 +639,7 @@ const ScopeBadge: React.FC<{ agent: AILibraryAgent }> = ({ agent }) => {
   if (agent.is_system_preset) {
     return (
       <span className={`${base} border-ink-700 bg-ink-800 text-ink-300`}>
-        {t('aiLibrary.agents.systemPreset', 'System Preset')}
+        {t('aiLibrary.officialTemplate', 'Official template')}
       </span>
     );
   }
