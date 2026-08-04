@@ -2878,6 +2878,7 @@
       "noneMatch": "No skills match this search",
       "newSkill": "+ New Skill",
       "newFile": "+ File",
+      "newFileLockedHint": "Fork this skill to add files",
       "iconPlaceholder": "e.g. SK",
       "builtInReadOnly": "Built-in · read only",
       "fileCount": "{{count}} files",
