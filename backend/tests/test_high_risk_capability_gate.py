@@ -121,6 +121,51 @@ async def test_media_cap_enforced_within_a_turn():
 
 
 @pytest.mark.asyncio
+async def test_kill_switch_blocks_even_when_capability_granted(monkeypatch):
+    # The kill switch must override an explicit grant — it's a subtract-only
+    # override, and the hook must enforce it itself (not rely solely on
+    # ai_library_chat_service.py's tool-registration check).
+    monkeypatch.setenv("FEATURE_AGENT_MEDIA_TOOLS", "off")
+    agent = {"capability_profile": {"capabilities": {"media": {"image": True}}}}
+    hook = HighRiskCapabilityGateHook(agent=agent)
+    result = await hook(_ctx(tool_name="GenerateImage"))
+    assert result.decision == "abort"
+    assert "kill switch" in result.abort_reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_kill_switch_stops_a_wired_handler_before_it_runs(monkeypatch):
+    """Full-path regression pin (review finding #1): even if a handler is
+    wired regardless of registration-time gating (cached system prompt from a
+    prior turn still advertising the tool, a hallucinated call, or a future
+    caller that wires the handler unconditionally), the hook must abort
+    BEFORE the handler executes — mirroring AgentRunner's real dispatch order
+    (PreToolUse hooks run before the GenerateImage/GenerateVideo branches in
+    agent_runner.py's tool-dispatch switch).
+    """
+    monkeypatch.setenv("FEATURE_AGENT_MEDIA_TOOLS", "off")
+    agent = {
+        "capability_profile": {
+            "capabilities": {"media": {"image": True, "video": True}}
+        }
+    }
+    hook = HighRiskCapabilityGateHook(agent=agent)
+
+    handler_calls: list[dict] = []
+
+    async def _fake_generate_image_handler(args: dict, run_context: dict) -> dict:
+        handler_calls.append(args)
+        return {"ok": True, "url": "should-never-happen"}
+
+    result = await hook(_ctx(tool_name="GenerateImage"))
+    if result.decision != "abort":
+        await _fake_generate_image_handler({"prompt": "x"}, {})
+
+    assert result.decision == "abort"
+    assert handler_calls == []  # handler must never have been reached
+
+
+@pytest.mark.asyncio
 async def test_media_cap_defaults_when_unspecified():
     agent = {"capability_profile": {"capabilities": {"media": {"video": True}}}}
     hook = HighRiskCapabilityGateHook(agent=agent)

@@ -30,7 +30,12 @@ fail_closed is belt-and-suspenders, not the primary mechanism.
 The decision point is here, in the tool executor's PreToolUse chain — NOT in
 the system prompt or tool description — because a caller (including an
 injected instruction inside screenplay content the agent read) cannot craft
-a prompt that skips a hook registered on the runner.
+a prompt that skips a hook registered on the runner. This includes the
+``FEATURE_AGENT_MEDIA_TOOLS`` kill switch: this hook calls
+``media_kill_switch_engaged()`` itself for every media call, so the
+guarantee doesn't depend on ``ai_library_chat_service.py``'s tool-spec
+registration also remembering to check it (that registration-time check is
+only a UX nicety — don't advertise a tool the agent can't use).
 """
 
 from __future__ import annotations
@@ -39,7 +44,11 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from app.services.ai.permissions.high_risk_caps import HighRiskCaps, high_risk_caps
+from app.services.ai.permissions.high_risk_caps import (
+    HighRiskCaps,
+    high_risk_caps,
+    media_kill_switch_engaged,
+)
 from app.services.infra.hooks import HookContext, HookResult
 
 logger = logging.getLogger(__name__)
@@ -105,6 +114,19 @@ class HighRiskCapabilityGateHook:
             return self._deny(ctx, "delete capability not granted")
 
         if requirement.media is not None:
+            # Checked HERE, not only at tool-registration time in
+            # ai_library_chat_service.py — that registration-time check is a
+            # UX nicety (don't advertise a tool the agent can't use), NOT the
+            # enforcement. If a GenerateImage/GenerateVideo call reaches this
+            # hook by any other path (cached system prompt from a prior turn,
+            # hallucination, a future caller that wires the handler
+            # unconditionally), the kill switch must still bite here.
+            if media_kill_switch_engaged():
+                return self._deny(
+                    ctx,
+                    "media generation is disabled install-wide "
+                    "(FEATURE_AGENT_MEDIA_TOOLS kill switch engaged)",
+                )
             if not self.caps.media_allowed(requirement.media):
                 return self._deny(ctx, f"'{requirement.media}' generation not granted")
             cap = self.caps.media.max_calls_per_turn

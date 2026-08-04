@@ -713,8 +713,12 @@ class AILibraryChatService:
         # can never grant — an unset/truthy value is a no-op and the
         # capability_profile grant is what actually enables a tool per agent.
         # HighRiskCapabilityGateHook (registered in ai_library_chat_wiring.py)
-        # is the real enforcement point either way — this block only decides
-        # whether to bother advertising the tool spec to the model.
+        # re-checks BOTH the capability grant and media_kill_switch_engaged()
+        # itself on every GenerateImage/GenerateVideo call — it is the real
+        # enforcement point regardless of what happens here. This block only
+        # decides whether to bother advertising the tool spec to the model
+        # (skip it here too so the kill switch also has the UX benefit of not
+        # dangling an unusable tool in front of the LLM).
         if not media_kill_switch_engaged():
             _media_caps = high_risk_caps(agent_record).media
             _media_specs: list[dict] = []

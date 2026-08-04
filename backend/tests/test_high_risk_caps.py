@@ -103,6 +103,17 @@ def test_meets_write_level_ordering():
     assert write_caps.meets_write_level("write") is True
 
 
+def test_meets_write_level_unrecognized_required_fails_closed():
+    # Review finding #2 (Minor): an unrecognized `required` value (a typo in
+    # a future tool's declared ToolRequirement.write_level) must fail closed
+    # — treated as the strictest tier ("write") — not silently pass. Pinning
+    # the docstring's own promise on HighRiskCaps.meets_write_level.
+    typo = "writeee"  # anything not in {"none","read","propose","write"}
+    assert HighRiskCaps(write_level="read").meets_write_level(typo) is False
+    assert HighRiskCaps(write_level="propose").meets_write_level(typo) is False
+    assert HighRiskCaps(write_level="write").meets_write_level(typo) is True
+
+
 # ============================================================
 # delete
 # ============================================================
