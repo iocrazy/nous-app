@@ -668,7 +668,14 @@ class AgentRunsRepository(AsyncpgRepository):
     async def usage_by_agent_since(
         self, agent_ids: List[UUID], since: datetime
     ) -> Dict[str, Dict[str, int]]:
-        """{agent_id: {runs, tokens}} for runs started at/after ``since``."""
+        """{agent_id: {runs, tokens, cost_cents}} for runs started at/after
+        ``since``.
+
+        ``cost_cents`` rides the same GROUP BY rather than a second query —
+        the gallery and the agent workbench both want "what did this week
+        cost", and a separate aggregate would double the round-trips this
+        endpoint exists to collapse.
+        """
         if not agent_ids:
             return {}
         try:
@@ -680,13 +687,20 @@ class AgentRunsRepository(AsyncpgRepository):
                         func.coalesce(func.sum(AgentRuns.total_tokens), 0).label(
                             "tokens"
                         ),
+                        func.coalesce(func.sum(AgentRuns.cost_cents), 0).label(
+                            "cost_cents"
+                        ),
                     )
                     .where(AgentRuns.agent_id.in_(agent_ids))
                     .where(AgentRuns.started_at >= since)
                     .group_by(AgentRuns.agent_id)
                 )
                 return {
-                    str(r.agent_id): {"runs": int(r.runs), "tokens": int(r.tokens or 0)}
+                    str(r.agent_id): {
+                        "runs": int(r.runs),
+                        "tokens": int(r.tokens or 0),
+                        "cost_cents": int(r.cost_cents or 0),
+                    }
                     for r in result.all()
                 }
         except Exception as e:

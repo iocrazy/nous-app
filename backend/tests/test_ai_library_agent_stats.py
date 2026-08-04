@@ -155,10 +155,50 @@ async def test_agent_with_no_activity_is_all_zero(client: AsyncClient) -> None:
     assert item == {
         "runs_7d": 0,
         "tokens_7d": 0,
+        "cost_cents_7d": 0,
         "running_count": 0,
         "needs_input_count": 0,
         "fault": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_spend_is_reported_for_the_same_window(client: AsyncClient) -> None:
+    """The workbench's "this week" row shows runs / tokens / spend together.
+
+    Spend used to be missing here, so the UI could only offer a 14-day figure
+    from /dashboard — a different window under a "this week" label. It rides
+    the same GROUP BY as runs and tokens (see the N+1 guard below), so this
+    asserts the router surfaces it rather than dropping it on the floor.
+    """
+    repos = _stub_stack(
+        agents=[_agent(AGENT_A, "script_ai")],
+        usage={AGENT_A: {"runs": 4, "tokens": 900, "cost_cents": 57}},
+    )
+    with _patches(*repos):
+        resp = await client.get(f"{BASE}/agents/stats?days=7")
+
+    assert resp.json()["items"][AGENT_A]["cost_cents_7d"] == 57
+
+
+@pytest.mark.asyncio
+async def test_runs_with_no_recorded_cost_report_zero_not_null(
+    client: AsyncClient,
+) -> None:
+    """``cost_cents`` is nullable per run (a provider may not price a call).
+
+    The repo coalesces the SUM, but a usage row predating that — or one built
+    by another caller — can still omit the key. Zero keeps the chip rendering;
+    ``None`` would blow up the int() cast.
+    """
+    repos = _stub_stack(
+        agents=[_agent(AGENT_A, "script_ai")],
+        usage={AGENT_A: {"runs": 2, "tokens": 100}},
+    )
+    with _patches(*repos):
+        resp = await client.get(f"{BASE}/agents/stats")
+
+    assert resp.json()["items"][AGENT_A]["cost_cents_7d"] == 0
 
 
 @pytest.mark.asyncio

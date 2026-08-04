@@ -495,6 +495,7 @@ async def get_agents_stats(
         items[agent_id] = {
             "runs_7d": int(agent_usage.get("runs", 0)),
             "tokens_7d": int(agent_usage.get("tokens", 0)),
+            "cost_cents_7d": int(agent_usage.get("cost_cents", 0)),
             "running_count": int(running.get(agent_id, 0)),
             "needs_input_count": int(needs_input.get(agent_id, 0)),
             "fault": fault,
