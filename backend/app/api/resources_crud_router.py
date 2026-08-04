@@ -135,6 +135,13 @@ async def list_resources(
             "If true, only resources whose visual_analysis_status == 'completed'."
         ),
     ),
+    ai_has_prompt: Optional[bool] = Query(
+        None,
+        description=(
+            "If true, only resources with a non-empty AI prompt — any of "
+            "gen_prompt, gen_prompt_negative, gen_prompt_json, slide_prompts."
+        ),
+    ),
     created_after: Optional[date] = Query(
         None,
         description="Inclusive lower bound on resource.created_at (UTC date).",
@@ -318,6 +325,7 @@ async def list_resources(
             ai_transcribed=ai_transcribed,
             ai_summarized=ai_summarized,
             ai_analyzed=ai_analyzed,
+            ai_has_prompt=ai_has_prompt,
             created_after=created_after,
             created_before=created_before,
             duration_min=duration_min,

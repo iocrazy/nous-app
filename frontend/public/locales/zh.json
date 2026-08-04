@@ -828,7 +828,8 @@
       "ai": {
         "transcribed": "已转录",
         "summarized": "已摘要",
-        "analyzed": "已分析"
+        "analyzed": "已分析",
+        "hasPrompt": "有提示词"
       },
       "date": {
         "today": "今天",

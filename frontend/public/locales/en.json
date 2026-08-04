@@ -828,7 +828,8 @@
       "ai": {
         "transcribed": "Transcribed",
         "summarized": "Summarized",
-        "analyzed": "Analyzed"
+        "analyzed": "Analyzed",
+        "hasPrompt": "Has Prompt"
       },
       "date": {
         "today": "Today",

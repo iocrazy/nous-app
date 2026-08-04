@@ -123,6 +123,7 @@ function loadFromStorage(): PersistedShape {
         transcribed: Boolean(srcValues.ai_status?.transcribed),
         summarized: Boolean(srcValues.ai_status?.summarized),
         analyzed: Boolean(srcValues.ai_status?.analyzed),
+        hasPrompt: Boolean(srcValues.ai_status?.hasPrompt),
       },
       date_added: sanitizeDateAdded(srcValues.date_added),
       duration: sanitizeDuration(srcValues.duration),
@@ -259,7 +260,8 @@ function isChipActiveById(id: ChipId, values: ChipValuesMap): boolean {
       return (
         values.ai_status.transcribed ||
         values.ai_status.summarized ||
-        values.ai_status.analyzed
+        values.ai_status.analyzed ||
+        values.ai_status.hasPrompt
       );
     case 'date_added': {
       const d = values.date_added;
@@ -414,6 +416,7 @@ export function useFilterBarConfig(): UseFilterBarConfigReturn {
     if (state.chipValues.ai_status.transcribed) out.ai_transcribed = true;
     if (state.chipValues.ai_status.summarized) out.ai_summarized = true;
     if (state.chipValues.ai_status.analyzed) out.ai_analyzed = true;
+    if (state.chipValues.ai_status.hasPrompt) out.ai_has_prompt = true;
     const range = datePresetToRange(state.chipValues.date_added);
     if (range.after) out.created_after = range.after;
     if (range.before) out.created_before = range.before;

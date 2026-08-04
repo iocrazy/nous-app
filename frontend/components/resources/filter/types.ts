@@ -47,13 +47,16 @@ export interface SourceChipValue {
 }
 
 /**
- * Three independent AI status flags (AND semantics — every flag set to
- * true must be satisfied). Inactive == all three false.
+ * Four independent AI status flags (AND semantics — every flag set to
+ * true must be satisfied). Inactive == all four false.
  */
 export interface AIStatusChipValue {
   transcribed: boolean;
   summarized: boolean;
   analyzed: boolean;
+  /** Any of gen_prompt / gen_prompt_negative / gen_prompt_json / slide_prompts
+   *  is non-empty. */
+  hasPrompt: boolean;
 }
 
 /** Preset relative ranges + custom absolute window. */
@@ -166,7 +169,12 @@ export const DEFAULT_CHIP_VALUES: ChipValuesMap = {
   rating: { min_rating: 0 },
   type: { types: [] },
   source: { platforms: [] },
-  ai_status: { transcribed: false, summarized: false, analyzed: false },
+  ai_status: {
+    transcribed: false,
+    summarized: false,
+    analyzed: false,
+    hasPrompt: false,
+  },
   date_added: { preset: null, customAfter: null, customBefore: null },
   duration: { preset: null, customMin: null, customMax: null },
   aspect: { buckets: [] },
@@ -208,6 +216,7 @@ export interface FetchResourcesFilterParams {
   ai_transcribed?: boolean;
   ai_summarized?: boolean;
   ai_analyzed?: boolean;
+  ai_has_prompt?: boolean;
   created_after?: string; // YYYY-MM-DD
   created_before?: string; // YYYY-MM-DD
   duration_min?: number; // seconds

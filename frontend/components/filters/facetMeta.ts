@@ -92,12 +92,13 @@ export function platformLabel(p: string): string {
 }
 
 export const AI_FLAGS: ReadonlyArray<{
-  key: 'transcribed' | 'summarized' | 'analyzed';
+  key: 'transcribed' | 'summarized' | 'analyzed' | 'hasPrompt';
   label: string;
 }> = [
   { key: 'transcribed', label: 'Transcribed' },
   { key: 'summarized', label: 'Summarized' },
   { key: 'analyzed', label: 'Analyzed' },
+  { key: 'hasPrompt', label: 'Has Prompt' },
 ];
 
 export const DATE_PRESETS: ReadonlyArray<{ id: DatePresetId; label: string }> = [

@@ -1,11 +1,20 @@
 // frontend/components/resources/filter/AIStatusFilterDropdown.tsx
 //
-// Three independent AI-status checkboxes (AND semantics — every flag
-// that's checked must equal "completed" on the resource).
+// Four independent AI-status checkboxes (AND semantics — every flag
+// that's checked must be satisfied on the resource). Three are
+// status === "completed" checks; "hasPrompt" is a non-empty-prompt check
+// (any of gen_prompt / gen_prompt_negative / gen_prompt_json / slide_prompts).
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, Eye, FileText, ListTree, type LucideIcon } from 'lucide-react';
+import {
+  Check,
+  Eye,
+  FileText,
+  ListTree,
+  WandSparkles,
+  type LucideIcon,
+} from 'lucide-react';
 
 import type { AIStatusChipValue } from './types';
 
@@ -17,7 +26,7 @@ export interface AIStatusFilterDropdownProps {
 
 type FlagKey = keyof AIStatusChipValue;
 
-const FLAG_ORDER: FlagKey[] = ['transcribed', 'summarized', 'analyzed'];
+const FLAG_ORDER: FlagKey[] = ['transcribed', 'summarized', 'analyzed', 'hasPrompt'];
 
 export const AIStatusFilterDropdown: React.FC<AIStatusFilterDropdownProps> = ({
   value,
@@ -36,12 +45,14 @@ export const AIStatusFilterDropdown: React.FC<AIStatusFilterDropdownProps> = ({
     transcribed: t('resources.filter.ai.transcribed', 'Transcribed'),
     summarized: t('resources.filter.ai.summarized', 'Summarized'),
     analyzed: t('resources.filter.ai.analyzed', 'Analyzed'),
+    hasPrompt: t('resources.filter.ai.hasPrompt', 'Has Prompt'),
   };
 
   const icons: Record<FlagKey, LucideIcon> = {
     transcribed: FileText,
     summarized: ListTree,
     analyzed: Eye,
+    hasPrompt: WandSparkles,
   };
 
   const anyActive = FLAG_ORDER.some((k) => value[k]);

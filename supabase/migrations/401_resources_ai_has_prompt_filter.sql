@@ -1,0 +1,430 @@
+-- 401_resources_ai_has_prompt_filter.sql
+--
+-- AI filter dropdown gets a 4th option: "Has Prompt" — true when ANY of the
+-- four prompt fields on `resources` is non-empty:
+--   gen_prompt / gen_prompt_negative / gen_prompt_json (all TEXT — despite
+--   the _json name, mig 392 made gen_prompt_json a TEXT column storing a
+--   JSON string, not JSONB) and slide_prompts (JSONB — must also exclude the
+--   JSON literals 'null', '{}' and '[]', an empty object/array is not "has a
+--   prompt").
+--
+-- This is NOT a status-column filter (existing 3 flags check `col = 'completed'`)
+-- so it's added as its own predicate, mirroring the exact OR-predicate already
+-- shipped in backend/app/repositories/resources_repository.py::get_resource_items
+-- (Python/asyncpg path). This migration extends the two SQL RPCs that the
+-- FRONTEND actually calls for the two AI-filterable views:
+--   - search_scope_resources (mig 269) — Resources/My Uploads view
+--     (frontend/services/resourceService.ts::fetchResourcesViaRpc)
+--   - rpc_downloads_library_search (mig 275) — Downloads view
+--     (frontend/services/dataService.ts::fetchLibraryViaRpc)
+-- New param `p_has_prompt` is appended LAST (with a DEFAULT) so the parameter
+-- order/types of every existing positional caller stay untouched.
+--
+-- ── C1 fix (post-review) ─────────────────────────────────────────────────
+-- `CREATE OR REPLACE FUNCTION` with an EXTRA parameter does NOT replace the
+-- existing function — Postgres identifies functions by their full parameter
+-- list, so appending `p_has_prompt` creates a SECOND, overloaded function
+-- and leaves the original (26-arg / 23-arg) signature in place permanently.
+-- Verified against a live PG17 + PostgREST v14.8 restore of prod (oids 43616
+-- / 43604 — matches production exactly):
+--   - old+new coexist, client sends old N-key payload  -> HTTP 300 PGRST203
+--     ("Could not choose the best candidate function")
+--   - only old exists, client sends new (N+1)-key payload -> HTTP 404 PGRST202
+--   - only new exists (DROP first)                        -> HTTP 200, the
+--     appended param defaults in for legacy callers
+-- Both rollout orders (migration-first or frontend-first) hit one of the
+-- first two rows, so EVERY existing tag-filtered browse in both views would
+-- have broken permanently (not a transient race) until this fix. The DROP
+-- statements below use the exact pre-mig-401 identity arguments (types only,
+-- no names/defaults — DROP FUNCTION matches on types), reconfirmed via:
+--   SELECT pg_get_function_identity_arguments(43616);  -- search_scope_resources
+--   SELECT pg_get_function_identity_arguments(43604);  -- rpc_downloads_library_search
+-- against the same PG17 restore immediately before writing this file.
+
+DROP FUNCTION IF EXISTS public.search_scope_resources(
+  text, boolean, text, text, text[], int, boolean, boolean, boolean,
+  text, text, int, int, text[], text[], text[], boolean, int, int, int,
+  int, text, timestamptz, bigint, int, boolean
+);
+
+DROP FUNCTION IF EXISTS public.rpc_downloads_library_search(
+  uuid, text[], int, boolean, boolean, boolean, text, text, int, int,
+  text[], text[], text[], boolean, int, int, int, int, text,
+  timestamptz, bigint, int, boolean
+);
+
+CREATE OR REPLACE FUNCTION public.search_scope_resources(
+  p_scope_id       text,
+  p_is_personal    boolean,
+  p_folder_id      text DEFAULT NULL,
+  p_library_id     text DEFAULT NULL,
+  p_tag_ids        text[] DEFAULT NULL,
+  p_min_rating     int DEFAULT NULL,
+  p_ai_transcribed boolean DEFAULT NULL,
+  p_ai_summarized  boolean DEFAULT NULL,
+  p_ai_analyzed    boolean DEFAULT NULL,
+  p_created_after  text DEFAULT NULL,
+  p_created_before text DEFAULT NULL,
+  p_duration_min   int DEFAULT NULL,
+  p_duration_max   int DEFAULT NULL,
+  p_aspect_ratios  text[] DEFAULT NULL,
+  p_types          text[] DEFAULT NULL,
+  p_platforms      text[] DEFAULT NULL,
+  p_has_comments   boolean DEFAULT NULL,
+  p_min_likes      int DEFAULT NULL,
+  p_min_comments   int DEFAULT NULL,
+  p_min_favorites  int DEFAULT NULL,
+  p_min_shares     int DEFAULT NULL,
+  p_social_combine text DEFAULT 'and',
+  p_cursor_ts      timestamptz DEFAULT NULL,
+  p_cursor_id      bigint DEFAULT NULL,
+  p_limit          int DEFAULT 40,
+  p_with_count     boolean DEFAULT false,
+  p_has_prompt     boolean DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = public
+AS $$
+  WITH filtered AS (
+    SELECT
+      ri.id         AS item_id,
+      ri.created_at AS created_at,
+      to_jsonb(ri.*) || jsonb_build_object(
+        'resource',
+        to_jsonb(r.*) || jsonb_build_object(
+          'media',
+          CASE WHEN pm.id IS NOT NULL THEN jsonb_build_object(
+            'id',             pm.id,
+            'source_platform', pm.source_platform,
+            'like_count',     pm.like_count,
+            'comment_count',  pm.comment_count,
+            'favorite_count', pm.favorite_count,
+            'share_count',    pm.share_count
+          ) ELSE NULL END
+        )
+      ) AS row
+    FROM public.resource_items ri
+    JOIN public.resources r
+      ON r.id = ri.resource_id
+    LEFT JOIN public.parsed_media pm
+      ON pm.id = r.media_id
+    WHERE
+      -- Base filters (always applied)
+      ri.scope_id = p_scope_id::bigint
+      AND r.is_trashed = false
+      AND r.source_type IS DISTINCT FROM 'web'
+
+      -- Folder: explicit folder, else root (NULL)
+      AND (
+        (p_folder_id IS NOT NULL AND ri.folder_id = p_folder_id::bigint)
+        OR (p_folder_id IS NULL AND ri.folder_id IS NULL)
+      )
+
+      -- Library: explicit library; if not personal + no library -> NULL only;
+      -- personal with no library -> no constraint.
+      AND (
+        p_library_id IS NOT NULL AND ri.library_id = p_library_id::bigint
+        OR (p_library_id IS NULL AND p_is_personal = false AND ri.library_id IS NULL)
+        OR (p_library_id IS NULL AND p_is_personal IS DISTINCT FROM false)
+      )
+
+      -- Tag AND: resource must carry EVERY requested tag
+      AND (
+        p_tag_ids IS NULL
+        OR cardinality(p_tag_ids) = 0
+        OR r.id IN (
+          SELECT rt.resource_id
+          FROM public.resource_tags rt
+          WHERE rt.tag_id = ANY(p_tag_ids::bigint[])
+          GROUP BY rt.resource_id
+          HAVING count(DISTINCT rt.tag_id) = cardinality(p_tag_ids)
+        )
+      )
+
+      -- Resource-column filters
+      AND (p_min_rating IS NULL OR r.rating >= p_min_rating)
+      AND (p_ai_transcribed IS NULL OR p_ai_transcribed = false OR r.transcript_status = 'completed')
+      AND (p_ai_summarized  IS NULL OR p_ai_summarized  = false OR r.summary_status = 'completed')
+      AND (p_ai_analyzed    IS NULL OR p_ai_analyzed    = false OR r.visual_analysis_status = 'completed')
+      -- "Has prompt": any of the 3 text columns non-blank (btrim'd, and not
+      -- the literal '[]'/'""' — a serialized empty value isn't a real prompt)
+      -- OR slide_prompts (jsonb) non-null and not one of the empty literals.
+      -- M1 hardening — no known production rows hit this today, defensive.
+      AND (
+        p_has_prompt IS NULL OR p_has_prompt = false OR (
+          (r.gen_prompt IS NOT NULL AND btrim(r.gen_prompt) <> '' AND r.gen_prompt NOT IN ('[]', '""'))
+          OR (r.gen_prompt_negative IS NOT NULL AND btrim(r.gen_prompt_negative) <> '' AND r.gen_prompt_negative NOT IN ('[]', '""'))
+          OR (r.gen_prompt_json IS NOT NULL AND btrim(r.gen_prompt_json) <> '' AND r.gen_prompt_json NOT IN ('[]', '""'))
+          OR (
+            r.slide_prompts IS NOT NULL
+            AND r.slide_prompts <> 'null'::jsonb
+            AND r.slide_prompts <> '{}'::jsonb
+            AND r.slide_prompts <> '[]'::jsonb
+          )
+        )
+      )
+      AND (p_created_after  IS NULL OR r.created_at >= (p_created_after || 'T00:00:00')::timestamptz)
+      AND (p_created_before IS NULL OR r.created_at <= (p_created_before || 'T23:59:59.999')::timestamptz)
+      AND (p_duration_min IS NULL OR r.duration_seconds >= p_duration_min)
+      AND (p_duration_max IS NULL OR r.duration_seconds <= p_duration_max)
+      AND (p_aspect_ratios IS NULL OR r.aspect_bucket = ANY(p_aspect_ratios))
+
+      -- Type filter: OR across the selected mime-type prefix groups
+      AND (
+        p_types IS NULL
+        OR (
+          ('video' = ANY(p_types) AND r.mime_type LIKE 'video/%')
+          OR ('image' = ANY(p_types) AND r.mime_type LIKE 'image/%')
+          OR ('audio' = ANY(p_types) AND r.mime_type LIKE 'audio/%')
+          OR ('document' = ANY(p_types) AND (
+                r.mime_type LIKE 'application/pdf%'
+                OR r.mime_type LIKE 'application/msword%'
+                OR r.mime_type LIKE 'application/vnd.%'
+                OR r.mime_type LIKE 'text/%'
+          ))
+          OR ('other' = ANY(p_types) AND (
+                r.mime_type NOT LIKE 'video/%'
+                AND r.mime_type NOT LIKE 'image/%'
+                AND r.mime_type NOT LIKE 'audio/%'
+                AND r.mime_type NOT LIKE 'application/pdf%'
+                AND r.mime_type NOT LIKE 'application/msword%'
+                AND r.mime_type NOT LIKE 'application/vnd.%'
+                AND r.mime_type NOT LIKE 'text/%'
+          ))
+        )
+      )
+
+      -- parsed_media-column filters
+      AND (p_platforms IS NULL OR pm.source_platform = ANY(p_platforms))
+      AND (p_has_comments IS NULL OR p_has_comments = false OR pm.comment_count > 0)
+
+      -- Social thresholds: 'or' combine vs (default) 'and' combine
+      AND (
+        CASE
+          WHEN p_social_combine = 'or' THEN (
+            (p_min_likes IS NOT NULL AND p_min_likes > 0 AND pm.like_count >= p_min_likes)
+            OR (p_min_comments IS NOT NULL AND p_min_comments > 0 AND pm.comment_count >= p_min_comments)
+            OR (p_min_favorites IS NOT NULL AND p_min_favorites > 0 AND pm.favorite_count >= p_min_favorites)
+            OR (p_min_shares IS NOT NULL AND p_min_shares > 0 AND pm.share_count >= p_min_shares)
+            -- if no social threshold is set, the OR group must not exclude rows
+            OR NOT (
+              (p_min_likes IS NOT NULL AND p_min_likes > 0)
+              OR (p_min_comments IS NOT NULL AND p_min_comments > 0)
+              OR (p_min_favorites IS NOT NULL AND p_min_favorites > 0)
+              OR (p_min_shares IS NOT NULL AND p_min_shares > 0)
+            )
+          )
+          ELSE (
+            (p_min_likes IS NULL OR p_min_likes = 0 OR pm.like_count >= p_min_likes)
+            AND (p_min_comments IS NULL OR p_min_comments = 0 OR pm.comment_count >= p_min_comments)
+            AND (p_min_favorites IS NULL OR p_min_favorites = 0 OR pm.favorite_count >= p_min_favorites)
+            AND (p_min_shares IS NULL OR p_min_shares = 0 OR pm.share_count >= p_min_shares)
+          )
+        END
+      )
+  )
+  SELECT jsonb_build_object(
+    'rows',
+    COALESCE(
+      (
+        SELECT jsonb_agg(page.row ORDER BY page.created_at DESC, page.item_id DESC)
+        FROM (
+          SELECT f.row, f.created_at, f.item_id
+          FROM filtered f
+          WHERE (
+            p_cursor_ts IS NULL
+            OR f.created_at < p_cursor_ts
+            OR (f.created_at = p_cursor_ts AND f.item_id < p_cursor_id)
+          )
+          ORDER BY f.created_at DESC, f.item_id DESC
+          LIMIT p_limit
+        ) AS page
+      ),
+      '[]'::jsonb
+    ),
+    'total_count',
+    CASE WHEN p_with_count THEN (SELECT count(*) FROM filtered) ELSE NULL END
+  );
+$$;
+
+GRANT EXECUTE ON FUNCTION public.search_scope_resources(
+  text, boolean, text, text, text[], int, boolean, boolean, boolean,
+  text, text, int, int, text[], text[], text[], boolean, int, int, int,
+  int, text, timestamptz, bigint, int, boolean, boolean
+) TO authenticated;
+
+-- ─────────────────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.rpc_downloads_library_search(
+  p_user_id        uuid,
+  p_tag_ids        text[] DEFAULT NULL,
+  p_min_rating     int DEFAULT NULL,
+  p_ai_transcribed boolean DEFAULT NULL,
+  p_ai_summarized  boolean DEFAULT NULL,
+  p_ai_analyzed    boolean DEFAULT NULL,
+  p_created_after  text DEFAULT NULL,
+  p_created_before text DEFAULT NULL,
+  p_duration_min   int DEFAULT NULL,
+  p_duration_max   int DEFAULT NULL,
+  p_aspect_ratios  text[] DEFAULT NULL,
+  p_platforms      text[] DEFAULT NULL,
+  p_media_types    text[] DEFAULT NULL,
+  p_has_comments   boolean DEFAULT NULL,
+  p_min_likes      int DEFAULT NULL,
+  p_min_comments   int DEFAULT NULL,
+  p_min_favorites  int DEFAULT NULL,
+  p_min_shares     int DEFAULT NULL,
+  p_social_combine text DEFAULT 'and',
+  p_cursor_ts      timestamptz DEFAULT NULL,
+  p_cursor_id      bigint DEFAULT NULL,
+  p_limit          int DEFAULT 40,
+  p_with_count     boolean DEFAULT false,
+  p_has_prompt     boolean DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = public
+AS $$
+  WITH filtered AS (
+    SELECT
+      r.id         AS res_id,
+      r.created_at AS created_at,
+      jsonb_build_object(
+        'id',         r.id,
+        'created_at', r.created_at,
+        'parsed_media', to_jsonb(pm.*)
+      ) AS row
+    FROM public.resources r
+    JOIN public.parsed_media pm
+      ON pm.id = r.media_id
+    WHERE
+      -- Base filters (always applied) — mirror dataService's resources query.
+      r.creator_id = p_user_id
+      AND r.source_type = 'web'
+      AND r.is_trashed = false
+
+      -- Tag AND: resource must carry EVERY requested tag.
+      AND (
+        p_tag_ids IS NULL
+        OR cardinality(p_tag_ids) = 0
+        OR r.id IN (
+          SELECT rt.resource_id
+          FROM public.resource_tags rt
+          WHERE rt.tag_id = ANY(p_tag_ids::bigint[])
+          GROUP BY rt.resource_id
+          HAVING count(DISTINCT rt.tag_id) = cardinality(p_tag_ids)
+        )
+      )
+
+      -- Resource-column filters (rating / AI status / dates / duration / aspect)
+      AND (p_min_rating IS NULL OR p_min_rating = 0 OR r.rating >= p_min_rating)
+      AND (p_ai_transcribed IS NULL OR p_ai_transcribed = false OR r.transcript_status = 'completed')
+      AND (p_ai_summarized  IS NULL OR p_ai_summarized  = false OR r.summary_status = 'completed')
+      AND (p_ai_analyzed    IS NULL OR p_ai_analyzed    = false OR r.visual_analysis_status = 'completed')
+      -- "Has prompt" — mirrors search_scope_resources' predicate exactly (M1:
+      -- btrim + exclude '[]'/'""' text literals + jsonb 'null'/'{}'/'[]').
+      AND (
+        p_has_prompt IS NULL OR p_has_prompt = false OR (
+          (r.gen_prompt IS NOT NULL AND btrim(r.gen_prompt) <> '' AND r.gen_prompt NOT IN ('[]', '""'))
+          OR (r.gen_prompt_negative IS NOT NULL AND btrim(r.gen_prompt_negative) <> '' AND r.gen_prompt_negative NOT IN ('[]', '""'))
+          OR (r.gen_prompt_json IS NOT NULL AND btrim(r.gen_prompt_json) <> '' AND r.gen_prompt_json NOT IN ('[]', '""'))
+          OR (
+            r.slide_prompts IS NOT NULL
+            AND r.slide_prompts <> 'null'::jsonb
+            AND r.slide_prompts <> '{}'::jsonb
+            AND r.slide_prompts <> '[]'::jsonb
+          )
+        )
+      )
+      AND (p_created_after  IS NULL OR r.created_at >= (p_created_after || 'T00:00:00')::timestamptz)
+      AND (p_created_before IS NULL OR r.created_at <= (p_created_before || 'T23:59:59.999')::timestamptz)
+      AND (p_duration_min IS NULL OR r.duration_seconds >= p_duration_min)
+      AND (p_duration_max IS NULL OR r.duration_seconds <= p_duration_max)
+      AND (p_aspect_ratios IS NULL OR cardinality(p_aspect_ratios) = 0 OR r.aspect_bucket = ANY(p_aspect_ratios))
+
+      -- parsed_media-column filters (platform / media_type / comments).
+      AND (p_platforms IS NULL OR cardinality(p_platforms) = 0 OR pm.source_platform = ANY(p_platforms))
+      AND (p_media_types IS NULL OR cardinality(p_media_types) = 0 OR pm.media_type = ANY(p_media_types))
+      AND (p_has_comments IS NULL OR p_has_comments = false OR pm.comment_count > 0)
+
+      -- Social thresholds: 'or' combine vs (default) 'and' combine — matches
+      -- applyLibraryFilters' AND-chain / .or() fragment behaviour. Thresholds
+      -- of 0/NULL are inactive.
+      AND (
+        CASE
+          WHEN p_social_combine = 'or' THEN (
+            (p_min_likes IS NOT NULL AND p_min_likes > 0 AND pm.like_count >= p_min_likes)
+            OR (p_min_comments IS NOT NULL AND p_min_comments > 0 AND pm.comment_count >= p_min_comments)
+            OR (p_min_favorites IS NOT NULL AND p_min_favorites > 0 AND pm.favorite_count >= p_min_favorites)
+            OR (p_min_shares IS NOT NULL AND p_min_shares > 0 AND pm.share_count >= p_min_shares)
+            -- no social threshold active → OR group must not exclude rows
+            OR NOT (
+              (p_min_likes IS NOT NULL AND p_min_likes > 0)
+              OR (p_min_comments IS NOT NULL AND p_min_comments > 0)
+              OR (p_min_favorites IS NOT NULL AND p_min_favorites > 0)
+              OR (p_min_shares IS NOT NULL AND p_min_shares > 0)
+            )
+          )
+          ELSE (
+            (p_min_likes IS NULL OR p_min_likes = 0 OR pm.like_count >= p_min_likes)
+            AND (p_min_comments IS NULL OR p_min_comments = 0 OR pm.comment_count >= p_min_comments)
+            AND (p_min_favorites IS NULL OR p_min_favorites = 0 OR pm.favorite_count >= p_min_favorites)
+            AND (p_min_shares IS NULL OR p_min_shares = 0 OR pm.share_count >= p_min_shares)
+          )
+        END
+      )
+  )
+  SELECT jsonb_build_object(
+    'rows',
+    COALESCE(
+      (
+        SELECT jsonb_agg(page.row ORDER BY page.created_at DESC, page.res_id DESC)
+        FROM (
+          SELECT f.row, f.created_at, f.res_id
+          FROM filtered f
+          WHERE (
+            p_cursor_ts IS NULL
+            OR f.created_at < p_cursor_ts
+            OR (f.created_at = p_cursor_ts AND f.res_id < p_cursor_id)
+          )
+          ORDER BY f.created_at DESC, f.res_id DESC
+          LIMIT p_limit
+        ) AS page
+      ),
+      '[]'::jsonb
+    ),
+    'total_count',
+    CASE WHEN p_with_count THEN (SELECT count(*) FROM filtered) ELSE NULL END
+  );
+$$;
+
+GRANT EXECUTE ON FUNCTION public.rpc_downloads_library_search(
+  uuid, text[], int, boolean, boolean, boolean, text, text, int, int,
+  text[], text[], text[], boolean, int, int, int, int, text,
+  timestamptz, bigint, int, boolean, boolean
+) TO authenticated;
+
+-- ── Migration self-check (review-mandated) ─────────────────────────────
+-- If either DROP above is ever removed/miswritten in a future edit, this
+-- catches the resulting overload (2 functions sharing a proname) at
+-- migration-apply time instead of silently shipping the C1 regression
+-- again in production.
+DO $$
+DECLARE
+  n_search  int;
+  n_dl      int;
+BEGIN
+  SELECT count(*) INTO n_search FROM pg_proc WHERE proname = 'search_scope_resources';
+  SELECT count(*) INTO n_dl     FROM pg_proc WHERE proname = 'rpc_downloads_library_search';
+  ASSERT n_search = 1,
+    format('search_scope_resources: expected exactly 1 overload, found %s — DROP FUNCTION signature likely stale', n_search);
+  ASSERT n_dl = 1,
+    format('rpc_downloads_library_search: expected exactly 1 overload, found %s — DROP FUNCTION signature likely stale', n_dl);
+END $$;
+
+NOTIFY pgrst, 'reload schema';
