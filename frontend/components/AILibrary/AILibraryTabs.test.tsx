@@ -42,10 +42,43 @@ describe('AILibraryTabs', () => {
     expect(navigate).toHaveBeenCalledWith('/team/7/ai-library/skills');
   });
 
-  it('renders the active tab as inert text, not a button', () => {
+  it('renders the active tab as inert text on a gallery page', () => {
     renderAt('/team/7/ai-library', <AILibraryTabs active="agents" />);
     expect(screen.queryByRole('button', { name: /Agents/ })).toBeNull();
     expect(screen.getByRole('button', { name: /Skills/ })).toBeTruthy();
+  });
+
+  it('makes the active tab clickable on a detail page', () => {
+    // On a gallery, the active tab is where you already are, so inert is
+    // right. Inside an editor it is the way back OUT to that gallery — and
+    // being inert there left users with no route back except the browser
+    // button ("怎么返回 agent 页面").
+    navigate.mockClear();
+    renderAt(
+      '/team/7/ai-library/skills/script-outline',
+      <AILibraryTabs active="skills" placement="detail" />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Skills/ }));
+    expect(navigate).toHaveBeenCalledWith('/team/7/ai-library/skills');
+  });
+
+  it('still highlights the active tab on a detail page', () => {
+    renderAt(
+      '/team/7/ai-library/agents/script_ai',
+      <AILibraryTabs active="agents" placement="detail" />,
+    );
+    const active = screen.getByRole('button', { name: /Agents/ });
+    const idle = screen.getByRole('button', { name: /Skills/ });
+    expect(active.className).toContain('text-ink-100');
+    expect(idle.className).not.toContain('text-ink-100');
+  });
+
+  it('keeps Marketplace inert even on a detail page', () => {
+    renderAt(
+      '/team/7/ai-library/agents/script_ai',
+      <AILibraryTabs active="agents" placement="detail" />,
+    );
+    expect(screen.queryByRole('button', { name: /Marketplace/ })).toBeNull();
   });
 
   it('never makes Marketplace clickable', () => {

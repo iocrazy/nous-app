@@ -36,7 +36,11 @@ const skill = (over: Partial<AILibrarySkill>): AILibrarySkill =>
   }) as AILibrarySkill;
 
 describe('SkillGallery', () => {
-  it('names the agents using a skill', () => {
+  it('states how many agents use a skill, and names them on the avatars', () => {
+    // The trailing ", ".join(names) that used to follow the count was dropped
+    // in the §05 pass: at minmax(255px) card width it wrapped to three lines
+    // for a popular skill and buried the count. The names live on the avatar
+    // squares' title attribute now, which is the mockup's form.
     render(
       <SkillGallery
         skills={[
@@ -52,7 +56,45 @@ describe('SkillGallery', () => {
     );
     const card = screen.getByTestId('skill-card');
     expect(card.textContent).toContain('2 agents using');
-    expect(card.textContent).toContain('Script AI');
+    expect(card.textContent).not.toContain('Script AI, Storyboard');
+    expect(screen.getByTitle('Script AI')).toBeTruthy();
+    expect(screen.getByTitle('Storyboard')).toBeTruthy();
+  });
+
+  it('puts an icon before the skill name', () => {
+    render(<SkillGallery skills={[skill({ category: 'script' })]} onOpen={() => {}} />);
+    expect(screen.getByTestId('skill-card-icon')).toBeTruthy();
+  });
+
+  it('never renders the stored emoji icon', () => {
+    // `skills.icon` holds an emoji (seeds ship `icon: 🎬`) and emoji are banned
+    // from this UI — the card derives its icon from the category instead.
+    render(
+      <SkillGallery
+        skills={[skill({ icon: '🎬', category: 'script' })]}
+        onOpen={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('skill-card').textContent).not.toContain('🎬');
+  });
+
+  it('keeps the orphan hint as a light inline line, not a boxed banner', () => {
+    // It was a full-width bordered warn block, which made the quietest fact on
+    // the card its loudest element and blew the card past the mockup height.
+    render(<SkillGallery skills={[skill({ agents: [] })]} onOpen={() => {}} />);
+    const hint = screen.getByTestId('orphan-hint');
+    expect(hint.className).not.toContain('border-warn-line');
+    expect(hint.className).not.toContain('bg-warn-soft');
+    expect(hint.className).toContain('text-warn');
+  });
+
+  it('lays the grid out by card width, not by a fixed column count', () => {
+    // §05 is repeat(auto-fill, minmax(255px, 1fr)); the old sm:2 / lg:3 gave
+    // three over-wide cards on a desktop and wasted the density entirely.
+    render(<SkillGallery skills={[skill({})]} onOpen={() => {}} />);
+    const grid = screen.getByTestId('skill-grid');
+    expect(grid.className).toContain('minmax(255px,1fr)');
+    expect(grid.className).not.toContain('lg:grid-cols-3');
   });
 
   it('warns about a skill no agent uses', () => {

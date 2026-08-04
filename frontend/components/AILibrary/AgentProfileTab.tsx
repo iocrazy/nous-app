@@ -60,10 +60,10 @@ export const AgentProfileTab: React.FC<AgentProfileTabProps> = ({
         </div>
       </section>
 
-      <section>
-        <h3 className="mb-2 text-sm font-semibold text-ink-200">
-          {t('aiLibrary.agents.tab.versions')}
-        </h3>
+      {/* Same single-heading rule as the skill editor: the panel brings its own
+          header (icon + current-version badge + refresh), so a wrapper title
+          here just stacks a second "Versions" on top of it. */}
+      <section className="overflow-hidden rounded-lg border border-ink-800">
         <VersionHistoryPanel kind="agent" slug={slug} onRollback={onRollback} />
       </section>
 

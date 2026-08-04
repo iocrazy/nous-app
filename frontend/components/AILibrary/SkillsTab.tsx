@@ -163,7 +163,9 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
       <div className="px-1 pt-6">
-        <AILibraryTabs active="skills" skillCount={skills.length} />
+        {/* placement="detail": the Skills tab is how you get back to the
+            gallery from here, so it must stay clickable. */}
+        <AILibraryTabs active="skills" skillCount={skills.length} placement="detail" />
       </div>
 
       <div className="min-h-0 min-w-0 flex-1">

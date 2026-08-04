@@ -2553,7 +2553,8 @@
         "versions": "Versions",
         "workbench": "Workbench",
         "persona": "Persona & Skills",
-        "profile": "Profile"
+        "profile": "Profile",
+        "permissions": "Permissions"
       },
       "loadErrorPrefix": "Failed to load agent",
       "listLoadError": "Failed to load agents",
@@ -2792,7 +2793,8 @@
         "thisWeek": "This week",
         "statRuns": "runs",
         "statTokens": "tok",
-        "statCost": "spend"
+        "statCost": "spend",
+        "untitledConversation": "Untitled conversation"
       }
     },
     "skills": {
@@ -2871,12 +2873,13 @@
       "deleteFileError": "Failed to delete: {{err}}",
       "builtIn": "Built-in",
       "usedBy": "{{count}} agents using",
-      "orphanHint": "No agent uses this — bind it to an agent or archive it",
+      "orphanHint": "No agent uses this — bind or archive",
       "orphanCount": "{{count}} unused",
       "search": "Search skills...",
       "noneMatch": "No skills match this search",
       "newSkill": "+ New Skill",
       "newFile": "+ File",
+      "newFileLockedHint": "Fork this skill to add files",
       "iconPlaceholder": "e.g. SK",
       "builtInReadOnly": "Built-in · read only",
       "fileCount": "{{count}} files",

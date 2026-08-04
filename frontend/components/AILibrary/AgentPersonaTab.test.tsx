@@ -14,7 +14,6 @@ import type { AILibraryAgent, AILibrarySkill } from '../../types';
 
 vi.mock('./MarkdownEditor', () => ({ MarkdownEditor: () => <div /> }));
 vi.mock('./AgentIconPicker', () => ({ AgentIconPicker: () => <div /> }));
-vi.mock('./PermissionsSection', () => ({ default: () => <div /> }));
 vi.mock('./agentEditorModel', () => ({ renderModelSelect: () => <div /> }));
 
 vi.mock('react-i18next', () => ({
@@ -53,10 +52,6 @@ function renderTab(over: Partial<React.ComponentProps<typeof AgentPersonaTab>> =
         onAddSkill={onAddSkill}
         onRemoveSkill={onRemoveSkill}
         onMoveSkill={onMoveSkill}
-        permDraft={{} as never}
-        onPermChange={vi.fn()}
-        onSavePermissions={vi.fn()}
-        permSaving={false}
         {...over}
       />
     </MemoryRouter>,

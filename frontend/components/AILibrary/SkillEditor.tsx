@@ -457,17 +457,32 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
                 {path}
               </button>
             ))}
-            {editable && onNewFile && (
+          </div>
+          <div className="flex items-center gap-2">
+            {/* Deliberately OUTSIDE the scroller above: in it, a skill with a
+                few files pushed this off the right edge with no affordance
+                that it was there. On a built-in skill it stays visible but
+                disabled — hiding it read as "this feature doesn't exist"
+                rather than "fork first", which is what got reported. */}
+            {onNewFile && (
               <button
                 type="button"
                 onClick={onNewFile}
-                className="shrink-0 rounded px-2 py-1 text-xs text-ink-500 hover:text-ink-300"
+                disabled={!editable}
+                data-testid="skill-new-file"
+                title={
+                  editable
+                    ? undefined
+                    : t(
+                        'aiLibrary.skills.newFileLockedHint',
+                        'Fork this skill to add files',
+                      )
+                }
+                className="shrink-0 rounded px-2 py-1 text-xs text-ok hover:text-ok disabled:cursor-not-allowed disabled:text-ink-600"
               >
                 {t('aiLibrary.skills.newFile', '+ File')}
               </button>
             )}
-          </div>
-          <div className="flex items-center gap-2">
             {editMode && editable ? (
               <>
                 <button
@@ -581,19 +596,18 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
             <p className="px-4 pb-4 text-[12px] text-warn">
               {t(
                 'aiLibrary.skills.orphanHint',
-                'No agent uses this — bind it to an agent or archive it',
+                'No agent uses this — bind or archive',
               )}
             </p>
           )}
         </section>
 
-        <section className="rounded-lg border border-ink-800">
-          <h2 className="px-4 pt-3 pb-2 text-[12px] font-semibold text-ink-400">
-            {t('versionHistory.title', 'Versions')}
-          </h2>
-          <div className="px-4 pb-4">
-            <VersionHistoryPanel kind="skill" slug={skill.slug ?? String(skill.id)} />
-          </div>
+        {/* No wrapper heading: VersionHistoryPanel renders its own header, and
+            it is the richer one (icon + current-version badge + refresh). Two
+            stacked "Versions" titles with the v1 badge wedged between them was
+            the acceptance finding. */}
+        <section className="overflow-hidden rounded-lg border border-ink-800">
+          <VersionHistoryPanel kind="skill" slug={skill.slug ?? String(skill.id)} />
         </section>
       </div>
       </div>

@@ -8,6 +8,7 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { aiLibraryService } from '../../services/aiLibraryService';
 import { AgentEditor } from './AgentEditor';
+import { AILibraryTabs } from './AILibraryTabs';
 
 interface AgentsTabProps {
   /** Selected agent slug (driven by URL via AgentsPage). */
@@ -21,18 +22,19 @@ interface AgentsTabProps {
 
 export const AgentsTab: React.FC<AgentsTabProps> = ({ slug, onSlugChange, onAgentDeleted }) => {
   const { t } = useTranslation();
-  const [hasAgents, setHasAgents] = useState<boolean | null>(null);
+  const [agentCount, setAgentCount] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // We still need to know whether *any* agent exists so the empty-state
   // copy renders correctly when the user lands on /ai-library/agents
-  // without a slug. The actual list lives in AILibrarySidebar.
+  // without a slug. The actual list lives in AILibrarySidebar. The count
+  // also feeds the tab strip below, so it costs no extra request.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
         const list = await aiLibraryService.listAgents();
-        if (!cancelled) setHasAgents(list.length > 0);
+        if (!cancelled) setAgentCount(list.length);
       } catch (err) {
         if (cancelled) return;
         console.error('[AgentsTab] listAgents failed:', err);
@@ -57,7 +59,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({ slug, onSlugChange, onAgen
   if (!slug) {
     return (
       <div className="flex h-full items-center justify-center p-6 text-sm text-ink-500">
-        {hasAgents === false
+        {agentCount === 0
           ? t('aiLibrary.agents.selectAgent', 'No agents yet — use + to create one.')
           : t('aiLibrary.agents.pickFromSidebar', 'Pick an agent from the sidebar.')}
       </div>
@@ -66,6 +68,13 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({ slug, onSlugChange, onAgen
 
   return (
     <div className="h-full overflow-y-auto pt-6 pb-8">
+      {/* The agent detail page had no strip at all, so opening an agent was a
+          one-way trip — the only route back to the gallery was the browser
+          button. Same mount and same rule as the skill editor. */}
+      <div className="px-1 pb-4">
+        <AILibraryTabs active="agents" agentCount={agentCount} placement="detail" />
+      </div>
+
       <AgentEditor
         // ``key={slug}`` forces a full remount when the slug changes so a
         // pending in-flight fetch from the previous slug can't land late and

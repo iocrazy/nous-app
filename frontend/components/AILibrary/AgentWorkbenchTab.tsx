@@ -20,6 +20,7 @@ import type { AILibraryAgent, AgentRunGroupItem } from '../../types';
 import { listNeedsInput, type NeedsInputItem } from '../../services/issuesService';
 import { aiLibraryService, type AgentStatsItem } from '../../services/aiLibraryService';
 import { AgentRunsSplit } from './AgentRunsSplit';
+import { conversationTitle } from './conversationTitle';
 import { formatCost } from './AgentDashboardTab';
 import { AgentRoutinesTab } from './AgentRoutinesTab';
 import { NewRoutineModal } from './NewRoutineModal';
@@ -36,7 +37,13 @@ const Panel: React.FC<{
   action?: React.ReactNode;
   children: React.ReactNode;
 }> = ({ title, action, children }) => (
-  <section className="rounded-lg border border-ink-800 bg-ink-900/20">
+  // `min-w-0` is load-bearing: a grid/flex item defaults to `min-width:auto`,
+  // so one long unbreakable string inside (a JSON summary, a long title) grows
+  // the column past its track and pushes the neighbouring column off-screen —
+  // which is exactly how the right-hand column disappeared behind a horizontal
+  // scrollbar. `truncate` on the text alone does not help until the box is
+  // allowed to be narrower than its content.
+  <section className="min-w-0 rounded-lg border border-ink-800 bg-ink-900/20">
     <div className="flex items-center gap-2 px-4 pt-3 pb-2 text-[12px] font-semibold text-ink-400">
       <span className="min-w-0 flex-1">{title}</span>
       {action}
@@ -174,7 +181,10 @@ export const AgentWorkbenchTab: React.FC<AgentWorkbenchTabProps> = ({
               }`}
             />
             <span className="min-w-0 flex-1 truncate text-ink-200">
-              {g.latest_output_summary?.trim() || g.trigger}
+              {conversationTitle(
+                g,
+                t('aiLibrary.agents.workbench.untitledConversation', 'Untitled conversation'),
+              )}
             </span>
             <span className="shrink-0 whitespace-nowrap text-[11px] tabular-nums text-ink-500">
               {g.any_running
@@ -191,7 +201,7 @@ export const AgentWorkbenchTab: React.FC<AgentWorkbenchTabProps> = ({
       </Panel>
 
       {/* ── right: what needs you, what runs itself, how much it cost ── */}
-      <div className="flex flex-col gap-4">
+      <div className="flex min-w-0 flex-col gap-4">
         {waiting.length > 0 && (
           <section
             className="rounded-lg border border-warn-line bg-warn-soft px-3 py-2.5"
