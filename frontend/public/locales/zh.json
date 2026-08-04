@@ -3824,5 +3824,9 @@
     "waitingOnYou": "等我的",
     "approve": "批准",
     "reject": "拒绝"
+  },
+  "moduleDisabled": {
+    "title": "功能不可用",
+    "message": "该功能当前已被管理员停用。"
   }
 }
