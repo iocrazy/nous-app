@@ -19,7 +19,7 @@ interface SkillGalleryProps {
   header?: React.ReactNode;
 }
 
-/** Same convention as SkillEditor / SkillList: public + unowned = built-in. */
+/** Same convention as SkillEditor: public + unowned = built-in. */
 const isBuiltIn = (s: AILibrarySkill): boolean =>
   s.is_public && s.team_id == null && s.project_id == null;
 
