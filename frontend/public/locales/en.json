@@ -2875,7 +2875,10 @@
       "noneMatch": "No skills match this search",
       "newSkill": "+ New Skill",
       "newFile": "+ File",
-      "iconPlaceholder": "e.g. SK"
+      "iconPlaceholder": "e.g. SK",
+      "builtInReadOnly": "Built-in · read only",
+      "fileCount": "{{count}} files",
+      "viewAgent": "View"
     },
     "workforce": {
       "runningNow": "Running now"
