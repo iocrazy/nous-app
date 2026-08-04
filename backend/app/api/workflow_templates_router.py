@@ -16,10 +16,13 @@ a non-member resolves to None → 403 on the team routes, 404 on the id routes
 
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.deps import AuthDep
 from app.core.workflow_roles import WRITE_ROLES, resolve_effective_role
+from app.repositories.team_repository import get_team_repository
 from app.repositories.workflow_templates_repository import (
     get_workflow_templates_repository,
 )
@@ -79,15 +82,42 @@ async def list_stage_library(auth: AuthDep):
 @router.get("")
 async def list_templates(
     auth: AuthDep,
-    team_id: str = Query(..., description="Team scope (snowflake id)"),
+    team_id: Optional[str] = Query(
+        None,
+        description=(
+            "Team scope (snowflake id). Omitted/empty resolves to the "
+            "caller's own personal team — a personal project has team_id=NULL "
+            "(see CreateProjectModal), so the personal-workspace create flow "
+            "has no real team id to pass here."
+        ),
+    ),
 ):
-    """List a team's templates, seeding the two built-ins on first access."""
-    role = await resolve_effective_role(auth.user_id, team_id=team_id)
-    if role is None:
-        raise HTTPException(status_code=403, detail="You are not a member of this team")
+    """List a team's templates, seeding the two built-ins on first access.
+
+    Team-scoped behavior (``team_id`` supplied) is unchanged: 403 on a
+    non-member. The personal-scope path (``team_id`` omitted) needs no
+    membership check — ``get_personal_team_id`` only ever resolves the
+    CALLER's own personal team — and degrades to an empty list rather than
+    an error when the caller has no personal team yet (should not normally
+    happen, but a fresh/legacy account is not a 403/404, just nothing to
+    show).
+    """
+    if team_id:
+        role = await resolve_effective_role(auth.user_id, team_id=team_id)
+        if role is None:
+            raise HTTPException(
+                status_code=403, detail="You are not a member of this team"
+            )
+        scope_team_id = team_id
+    else:
+        scope_team_id = await get_team_repository().get_personal_team_id(auth.user_id)
+        if scope_team_id is None:
+            return {"success": True, "data": []}
 
     repo = get_workflow_templates_repository()
-    templates = await ensure_seed_templates(team_id, repo=repo, created_by=auth.user_id)
+    templates = await ensure_seed_templates(
+        scope_team_id, repo=repo, created_by=auth.user_id
+    )
     return {"success": True, "data": templates}
 
 

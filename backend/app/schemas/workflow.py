@@ -177,6 +177,15 @@ class TemplateCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
 
 
+class AttachWorkflowRequest(BaseModel):
+    """POST /projects/{id}/workflow body (M1.x opt-in migration path — attach
+    a workflow to an EXISTING project that has none yet, the non-lossy
+    alternative to a bulk legacy-SOP-to-template migration script)."""
+
+    template_id: str
+    method: Optional[Literal["live", "ai", "hybrid"]] = None
+
+
 class TemplateUpdate(BaseModel):
     """PATCH /workflows/{id}. Every field optional. When ``nodes`` is present it
     is a FULL replacement of the template's node list (delete + insert)."""
@@ -192,6 +201,17 @@ class TemplateUpdate(BaseModel):
                 f"a template may hold at most {MAX_NODES_PER_TEMPLATE} nodes"
             )
         return self
+
+
+class WorkflowAlreadyInstantiated(Exception):
+    """Raised by ``ProjectStageNodesRepository.instantiate_from_template``
+    when called with ``expect_fresh=True`` and the project already carries
+    any instance nodes at lock-acquisition time — either a genuine prior
+    instantiation or the losing side of a concurrent attach-workflow race
+    (see the per-project ``pg_advisory_xact_lock`` in that method). The
+    create-project path never sets ``expect_fresh`` and so never raises this
+    — it keeps its historical idempotent-no-op-returns-existing behavior.
+    ``POST /projects/{id}/workflow`` (the M1.x attach path) maps this to 409."""
 
 
 # ── project workflow instance (PR-B) ────────────────────────────────────────

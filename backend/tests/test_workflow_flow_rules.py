@@ -265,17 +265,19 @@ class _InstantiateFakeSession:
     runs; only SQL execution is faked.
 
     Call order (mirrors ``instantiate_from_template`` + ``_list_nodes_in_session``):
-      1. existing-nodes check         -> empty (not yet instantiated)
-      2. template nodes select        -> canned tpl_nodes
-      3. template node-members select -> empty (no members in this fixture)
-      4. template node-deps select    -> empty (mig 391, M3 PR-J — no deps in
+      1. pg_advisory_xact_lock        -> concurrency guard (M1.x attach race
+                                          fix), result never read
+      2. existing-nodes check         -> empty (not yet instantiated)
+      3. template nodes select        -> canned tpl_nodes
+      4. template node-members select -> empty (no members in this fixture)
+      5. template node-deps select    -> empty (mig 391, M3 PR-J — no deps in
                                           this fixture)
-      5. node-bank slug map select    -> empty (fixture nodes carry no
+      6. node-bank slug map select    -> empty (fixture nodes carry no
                                           source_stage_id, so it's never
                                           consulted)
-      6. final node listing           -> whatever was committed via add()
-      7. final member listing         -> whatever was committed via add()
-      8. final deps listing           -> empty (mig 391, M3 PR-J)
+      7. final node listing           -> whatever was committed via add()
+      8. final member listing         -> whatever was committed via add()
+      9. final deps listing           -> empty (mig 391, M3 PR-J)
     """
 
     def __init__(self, tpl_nodes: List[WorkflowTemplateNodes]):
@@ -293,27 +295,29 @@ class _InstantiateFakeSession:
                 obj.id = self._next_id
                 self._next_id += 1
 
-    async def execute(self, stmt: Any) -> _Result:
+    async def execute(self, stmt: Any, params: Any = None) -> _Result:
         await self.flush()  # autoflush emulation (real AsyncSession does this)
         self._calls += 1
         if self._calls == 1:
-            return _Result([])
+            return _Result([])  # pg_advisory_xact_lock
         if self._calls == 2:
-            return _Result(self._tpl_nodes)
+            return _Result([])
         if self._calls == 3:
-            return _Result([])
+            return _Result(self._tpl_nodes)
         if self._calls == 4:
-            return _Result([])  # template node-deps select (mig 391, M3 PR-J)
-        if self._calls == 5:
             return _Result([])
+        if self._calls == 5:
+            return _Result([])  # template node-deps select (mig 391, M3 PR-J)
         if self._calls == 6:
+            return _Result([])
+        if self._calls == 7:
             nodes = [o for o in self.added if isinstance(o, ProjectStageNodes)]
             nodes.sort(key=lambda n: n.sort_order)
             return _Result(nodes)
-        if self._calls == 7:
+        if self._calls == 8:
             members = [o for o in self.added if isinstance(o, ProjectStageNodeMembers)]
             return _Result(members)
-        if self._calls == 8:
+        if self._calls == 9:
             return _Result([])  # final deps listing (mig 391, M3 PR-J)
         raise AssertionError(f"unexpected extra session.execute call #{self._calls}")
 

@@ -123,13 +123,16 @@ const normalizeInstanceNode = (
 // Team workflow templates
 // ============================================
 
-/** List a team's templates (seeds the two built-ins on first access). */
+/** List a team's templates (seeds the two built-ins on first access).
+ * `teamId` omitted/empty resolves server-side to the CALLER's own personal
+ * team — the personal-workspace create flow (no real team selected) uses
+ * this to load its own seeded templates. */
 export const fetchTemplates = async (
-  teamId: string,
+  teamId?: string,
 ): Promise<WorkflowTemplate[]> => {
   const response = await apiClient.get<Envelope<WorkflowTemplate[]>>(
     '/api/v1/workflows',
-    { query: { team_id: teamId } },
+    { query: { team_id: teamId || undefined } },
   );
   // A missing `data` key means the wrong handler answered (this exact path
   // was once shadowed by the DBOS runs list) — surface it, never mask it
@@ -211,6 +214,26 @@ export const fetchProjectWorkflow = async (
     `/api/v1/projects/${projectId}/workflow`,
   );
   return { ...workflow, nodes: (workflow.nodes ?? []).map(normalizeInstanceNode) };
+};
+
+/**
+ * Attach a workflow template to an EXISTING project that has none yet (M1.x
+ * opt-in migration path — the answer to "migrate the old SOP projects"
+ * without a lossy bulk script: the user opts a project in and picks the
+ * template themselves, one at a time). The server 409s (ApiError) if the
+ * project already has a workflow, and 404s if the template doesn't belong
+ * to the project's own scope (its team, or the owner's personal team for a
+ * personal project). Returns the freshly-instantiated node list.
+ */
+export const attachProjectWorkflow = async (
+  projectId: string,
+  body: { template_id: string; method?: 'live' | 'ai' | 'hybrid' | null },
+): Promise<ProjectStageNode[]> => {
+  const response = await apiClient.post<Envelope<ProjectStageNode[]>>(
+    `/api/v1/projects/${projectId}/workflow`,
+    body,
+  );
+  return (response.data ?? []).map(normalizeInstanceNode);
 };
 
 /**

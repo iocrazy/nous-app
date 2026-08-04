@@ -180,10 +180,10 @@ class _InstantiateFakeSession:
     """Deterministic, call-order-based fake for one full
     ``instantiate_from_template`` pass (method=None, non-empty template, no
     overrides). See ``test_workflow_flow_rules.py``'s class of the same name
-    for the full call-order rationale (now 8 calls — mig 391, M3 PR-J added a
-    template-deps read and a final-deps read) — duplicated here (not
-    imported) so this module keeps its documented "pure-unit, no cross-file
-    coupling" shape."""
+    for the full call-order rationale (now 9 calls — the M1.x attach-race fix
+    added a leading ``pg_advisory_xact_lock`` call before the existing-nodes
+    check) — duplicated here (not imported) so this module keeps its
+    documented "pure-unit, no cross-file coupling" shape."""
 
     def __init__(self, tpl_nodes: List[WorkflowTemplateNodes]):
         self._tpl_nodes = tpl_nodes
@@ -200,27 +200,29 @@ class _InstantiateFakeSession:
                 obj.id = self._next_id
                 self._next_id += 1
 
-    async def execute(self, stmt: Any) -> _Result:
+    async def execute(self, stmt: Any, params: Any = None) -> _Result:
         await self.flush()
         self._calls += 1
         if self._calls == 1:
-            return _Result([])  # existing-nodes check -> not yet instantiated
+            return _Result([])  # pg_advisory_xact_lock (concurrency guard)
         if self._calls == 2:
-            return _Result(self._tpl_nodes)  # template nodes select
+            return _Result([])  # existing-nodes check -> not yet instantiated
         if self._calls == 3:
-            return _Result([])  # template node-members select
+            return _Result(self._tpl_nodes)  # template nodes select
         if self._calls == 4:
-            return _Result([])  # template node-deps select (mig 391, M3 PR-J)
+            return _Result([])  # template node-members select
         if self._calls == 5:
-            return _Result([])  # node-bank slug map select
+            return _Result([])  # template node-deps select (mig 391, M3 PR-J)
         if self._calls == 6:
+            return _Result([])  # node-bank slug map select
+        if self._calls == 7:
             nodes = [o for o in self.added if isinstance(o, ProjectStageNodes)]
             nodes.sort(key=lambda n: n.sort_order)
             return _Result(nodes)
-        if self._calls == 7:
+        if self._calls == 8:
             members = [o for o in self.added if isinstance(o, ProjectStageNodeMembers)]
             return _Result(members)
-        if self._calls == 8:
+        if self._calls == 9:
             return _Result([])  # final deps listing (mig 391, M3 PR-J)
         raise AssertionError(f"unexpected extra session.execute call #{self._calls}")
 
@@ -292,3 +294,161 @@ async def test_instantiate_copies_form_schema_verbatim_and_form_data_starts_empt
     # or some other falsy sentinel — proving the copy is unconditional, not
     # gated on "only when non-empty".
     assert by_sort[2]["form_schema"] == []
+
+
+# ── concurrency guard: per-project advisory lock + expect_fresh (M1.x —────────
+# the attach-workflow double-instantiation race fix). A real two-connection
+# race can't be exercised here (no live Postgres — see module docstring), so
+# these pin what IS mechanically verifiable without a DB: the lock statement
+# is the actual first thing executed inside the transaction (not decorative
+# code sitting beside the real guard), and expect_fresh's branch is wired
+# correctly on both sides (raises vs. stays idempotent). ──────────────────────
+
+
+class _LockRecordingFakeSession(_InstantiateFakeSession):
+    """Same 9-call shape as the parent, but records the exact statement +
+    bound params passed to the VERY FIRST ``execute`` call so a test can
+    assert on them directly — the other tests in this module only prove the
+    lock runs first indirectly (a wrong call order desyncs the canned
+    responses and the node count comes out wrong)."""
+
+    def __init__(self, tpl_nodes: List[WorkflowTemplateNodes]):
+        super().__init__(tpl_nodes)
+        self.first_call_stmt: Any = None
+        self.first_call_params: Any = None
+
+    async def execute(self, stmt: Any, params: Any = None) -> _Result:
+        if self._calls == 0:
+            self.first_call_stmt = stmt
+            self.first_call_params = params
+        return await super().execute(stmt, params)
+
+
+@pytest.mark.asyncio
+async def test_instantiate_takes_a_per_project_advisory_lock_first(monkeypatch):
+    """The very first statement executed inside the transaction must be a
+    namespaced ``pg_advisory_xact_lock`` keyed by the project id, taken
+    BEFORE the idempotency check — otherwise it decorates the code without
+    actually closing the check-then-insert race window."""
+    tpl_nodes = [
+        _tpl_node_with_form_schema(node_id=1, sort_order=1, form_schema=[]),
+    ]
+    session = _LockRecordingFakeSession(tpl_nodes)
+
+    import app.repositories.project_stage_nodes_repository as mod
+
+    monkeypatch.setattr(mod, "write_scope", _write_scope_with(session))
+
+    repo = ProjectStageNodesRepository()
+    await repo.instantiate_from_template("777", "1")
+
+    assert session.first_call_stmt is not None
+    lock_sql = str(session.first_call_stmt)
+    assert "pg_advisory_xact_lock" in lock_sql
+    assert "hashtextextended" in lock_sql
+    # Namespaced so it can never collide with another module's advisory-lock
+    # prefix (e.g. script_repository's 'script_provision:').
+    assert "project_stage_nodes_instantiate:" in lock_sql
+    assert session.first_call_params == {"pid": "777"}
+
+
+class _AlreadyInstantiatedFakeSession:
+    """Minimal fake for the "project already has nodes at lock-acquisition
+    time" branch: the lock, then an existing-nodes check that finds a row
+    already there. ``add`` raises if reached — this branch must never touch
+    the template-copy path at all."""
+
+    def __init__(self, *, node_for_listing: Any = None):
+        self._calls = 0
+        self._node_for_listing = node_for_listing
+
+    def add(self, obj: Any) -> None:
+        raise AssertionError(
+            "the already-instantiated branch must never construct new nodes"
+        )
+
+    async def execute(self, stmt: Any, params: Any = None) -> _Result:
+        self._calls += 1
+        if self._calls == 1:
+            return _Result([])  # pg_advisory_xact_lock
+        if self._calls == 2:
+            return _Result([1])  # existing-nodes check -> already instantiated
+        if self._calls == 3:
+            # _list_nodes_in_session's node select (only reached when
+            # expect_fresh=False falls through to the idempotent return).
+            return _Result([self._node_for_listing] if self._node_for_listing else [])
+        if self._calls == 4:
+            return _Result([])  # members select
+        if self._calls == 5:
+            return _Result([])  # deps select
+        raise AssertionError(f"unexpected extra session.execute call #{self._calls}")
+
+
+@pytest.mark.asyncio
+async def test_instantiate_expect_fresh_raises_when_already_instantiated(monkeypatch):
+    """The M1.x attach-workflow endpoint's correctness guarantee: with
+    ``expect_fresh=True``, a project that already has nodes at
+    lock-acquisition time — whether a genuine prior attach or the losing
+    side of a concurrent race — raises ``WorkflowAlreadyInstantiated``
+    instead of silently returning the existing nodes. The router maps this
+    to 409 (see ``tests/api/test_project_workflow_attach.py``)."""
+    session = _AlreadyInstantiatedFakeSession()
+
+    import app.repositories.project_stage_nodes_repository as mod
+    from app.schemas.workflow import WorkflowAlreadyInstantiated
+
+    monkeypatch.setattr(mod, "write_scope", _write_scope_with(session))
+
+    repo = ProjectStageNodesRepository()
+    with pytest.raises(WorkflowAlreadyInstantiated):
+        await repo.instantiate_from_template("50", "1", expect_fresh=True)
+
+
+def _live_node_for_listing(*, node_id: int) -> ProjectStageNodes:
+    return ProjectStageNodes(
+        id=node_id,
+        project_id=50,
+        source_template_node_id=None,
+        legacy_stage_id=None,
+        name="Script",
+        sort_order=1,
+        parallel_group=None,
+        status="pending",
+        owner_user_id=None,
+        owner_agent_id=None,
+        planned_start=None,
+        planned_due=None,
+        review_required=False,
+        deliverable_required=False,
+        deliverable_label=None,
+        skipped=False,
+        completion_policy="owner",
+        events={
+            "notify_on_arrival": True,
+            "notify_on_complete": False,
+            "suggest_agent_run": False,
+        },
+        form_schema=[],
+        form_data={},
+    )
+
+
+@pytest.mark.asyncio
+async def test_instantiate_default_expect_fresh_false_stays_idempotent(monkeypatch):
+    """Regression pin: the create-project path (``maybe_instantiate_project_workflow``)
+    never sets ``expect_fresh`` — an already-instantiated project must keep
+    returning its existing nodes rather than raising, exactly as before this
+    fix (the create path's "never fail project creation" discipline)."""
+    session = _AlreadyInstantiatedFakeSession(
+        node_for_listing=_live_node_for_listing(node_id=42)
+    )
+
+    import app.repositories.project_stage_nodes_repository as mod
+
+    monkeypatch.setattr(mod, "write_scope", _write_scope_with(session))
+
+    repo = ProjectStageNodesRepository()
+    result = await repo.instantiate_from_template("50", "1")
+
+    assert len(result) == 1
+    assert result[0]["id"] == "42"
