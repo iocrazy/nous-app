@@ -1,5 +1,5 @@
 import { lazy, Suspense, type LazyExoticComponent } from 'react';
-import { createBrowserRouter, Navigate } from 'react-router-dom';
+import { createBrowserRouter, Navigate, useParams } from 'react-router-dom';
 import { AuthGuard } from './components/AuthGuard';
 import RouterErrorPage from './components/RouterErrorPage';
 import { AppLayout } from './components/AppLayout';
