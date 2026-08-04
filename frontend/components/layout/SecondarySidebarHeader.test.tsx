@@ -1,7 +1,7 @@
 /**
  * SecondarySidebarHeader — the module title at the top of a sidebar rail.
- *   1. One scale for the title, so Resources stops drifting onto its own
- *      colour token.
+ *   1. It is the PRIMARY title on screen — the module name outranks the
+ *      content-area page title next to it.
  *   2. The trailing slot (Projects' collapse button) is optional.
  */
 import React from 'react';
@@ -10,12 +10,14 @@ import { render, screen } from '@testing-library/react';
 import { SecondarySidebarHeader } from './SecondarySidebarHeader';
 
 describe('SecondarySidebarHeader', () => {
-  it('renders the title at the shared in-rail scale', () => {
+  it('renders the module name at the primary title rank', () => {
+    // The module name outranks the content-area page title beside it, which
+    // PageHeader renders one step down at text-base.
     render(<SecondarySidebarHeader title="Resources" />);
     const title = screen.getByText('Resources');
-    expect(title.className).toContain('text-sm');
+    expect(title.className).toContain('text-lg');
     expect(title.className).toContain('font-semibold');
-    expect(title.className).toContain('text-ink-200');
+    expect(title.className).toContain('text-ink-100');
   });
 
   it('applies the shared container padding', () => {
