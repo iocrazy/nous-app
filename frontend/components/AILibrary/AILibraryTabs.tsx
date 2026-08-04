@@ -23,6 +23,18 @@ export interface AILibraryTabsProps {
   skillCount?: number | null;
   /** Right-aligned slot — each page's primary "New …" button. */
   actions?: React.ReactNode;
+  /**
+   * Where this strip is mounted, which decides whether the ACTIVE tab is
+   * clickable:
+   *
+   *   'gallery' (default) — you are already on that gallery, so the active
+   *      tab is inert; clicking it would be a no-op reload.
+   *   'detail' — you are inside an agent/skill editor. The active tab is the
+   *      way back OUT to its gallery, so it stays a live link and `active`
+   *      only means "highlight this one". Making it inert here stranded
+   *      users in the editor with no route back.
+   */
+  placement?: 'gallery' | 'detail';
 }
 
 const ACTIVE_CLS = 'border-b-2 border-[var(--accent-text)] px-3 pb-2 font-medium text-ink-100';
@@ -33,6 +45,7 @@ export const AILibraryTabs: React.FC<AILibraryTabsProps> = ({
   agentCount,
   skillCount,
   actions,
+  placement = 'gallery',
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -42,34 +55,41 @@ export const AILibraryTabs: React.FC<AILibraryTabsProps> = ({
   const count = (n: number | null | undefined) =>
     n != null ? <span className="text-ink-600">{n}</span> : null;
 
+  /** A tab is inert only when it is active AND we are on its own gallery. */
+  const tab = (key: AILibraryTabKey, to: string, label: string, n?: number | null) => {
+    const isActive = active === key;
+    const body = (
+      <>
+        {label} {count(n)}
+      </>
+    );
+    if (isActive && placement === 'gallery') {
+      return <span className={ACTIVE_CLS}>{body}</span>;
+    }
+    return (
+      <button
+        type="button"
+        onClick={() => navigate(to)}
+        className={isActive ? ACTIVE_CLS : IDLE_CLS}
+      >
+        {body}
+      </button>
+    );
+  };
+
   return (
     <div className="flex items-center gap-1 border-b border-ink-800/60 text-[13px]">
-      {active === 'agents' ? (
-        <span className={ACTIVE_CLS}>
-          {t('aiLibrary.tab.agents', 'Agents')} {count(agentCount)}
-        </span>
-      ) : (
-        <button
-          type="button"
-          onClick={() => navigate(`${urlPrefix}/ai-library`)}
-          className={IDLE_CLS}
-        >
-          {t('aiLibrary.tab.agents', 'Agents')} {count(agentCount)}
-        </button>
+      {tab(
+        'agents',
+        `${urlPrefix}/ai-library`,
+        t('aiLibrary.tab.agents', 'Agents'),
+        agentCount,
       )}
-
-      {active === 'skills' ? (
-        <span className={ACTIVE_CLS}>
-          {t('aiLibrary.tab.skills', 'Skills')} {count(skillCount)}
-        </span>
-      ) : (
-        <button
-          type="button"
-          onClick={() => navigate(`${urlPrefix}/ai-library/skills`)}
-          className={IDLE_CLS}
-        >
-          {t('aiLibrary.tab.skills', 'Skills')} {count(skillCount)}
-        </button>
+      {tab(
+        'skills',
+        `${urlPrefix}/ai-library/skills`,
+        t('aiLibrary.tab.skills', 'Skills'),
+        skillCount,
       )}
 
       {/* Marketplace is a placeholder slot, deliberately inert. */}
