@@ -3824,5 +3824,9 @@
     "waitingOnYou": "Waiting on you",
     "approve": "Approve",
     "reject": "Reject"
+  },
+  "moduleDisabled": {
+    "title": "Feature Unavailable",
+    "message": "This feature is currently disabled by the administrator."
   }
 }

@@ -1,11 +1,11 @@
-import { lazy, Suspense, type LazyExoticComponent, type ReactNode } from 'react';
+import { lazy, Suspense, type LazyExoticComponent } from 'react';
 import { createBrowserRouter, Navigate, useParams } from 'react-router-dom';
 import { AuthGuard } from './components/AuthGuard';
 import RouterErrorPage from './components/RouterErrorPage';
 import { AppLayout } from './components/AppLayout';
 import { ModuleGuard } from './components/ModuleGuard';
+import { GlobalModuleGuard } from './components/GlobalModuleGuard';
 import { RedirectToTeam, RedirectToDefaultTeam } from './components/RedirectToTeam';
-import { useDistributionModuleStatus } from './hooks/useDistributionModuleStatus';
 import {
   forceFreshReload,
   isStaleChunkError,
@@ -105,19 +105,6 @@ const RecordsPage = lazyWithRetry(() =>
   import('./components/Distribution/RecordsPage').then(m => ({ default: m.RecordsPage })),
 );
 
-// Distribution area visibility is admin-controlled (DB `distribution.module`
-// display switch), NOT a build-time env flag — same model as Topic Inspiration.
-// The routes are always registered; this guard redirects to the team root when
-// the module isn't visible. It waits for `loading` so the fail-closed default
-// (visible=false) never bounces the user out before the real status arrives.
-function DistributionModuleGuard({ children }: { children: ReactNode }) {
-  const { visible, loading } = useDistributionModuleStatus();
-  const { teamId } = useParams();
-  if (loading) return null;
-  if (!visible) return <Navigate to={teamId ? `/team/${teamId}` : '/'} replace />;
-  return <>{children}</>;
-}
-
 // Slug-less /ai-library/agents used to render AgentsTab with nothing
 // selected. Since the rail stopped listing agents (B0), that state has no list
 // to pick from — it lands on an empty "choose an agent on the left" dead end.
@@ -211,7 +198,7 @@ export const router = createBrowserRouter([
         element: <AppLayout />,
         children: [
           { index: true, element: <Navigate to="parser" replace /> },
-          { path: 'parser', element: <SuspenseWrap><ModuleGuard moduleKey="parser"><TopicInspirationPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'parser', element: <SuspenseWrap><ModuleGuard moduleKey="parser"><GlobalModuleGuard id="topic-inspiration"><TopicInspirationPage /></GlobalModuleGuard></ModuleGuard></SuspenseWrap> },
           { path: 'dashboard', element: <SuspenseWrap><ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard></SuspenseWrap> },
           { path: 'dashboard/:subview', element: <SuspenseWrap><ModuleGuard moduleKey="dashboard"><DashboardPage /></ModuleGuard></SuspenseWrap> },
           { path: 'resources', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
@@ -224,9 +211,9 @@ export const router = createBrowserRouter([
           { path: 'resources/smart/:smartFolderId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
           { path: 'resources/library/:libraryId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
           { path: 'resources/library/:libraryId/folder/:folderId', element: <SuspenseWrap><ModuleGuard moduleKey="resources"><ResourcesPage /></ModuleGuard></SuspenseWrap> },
-          { path: 'projects', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard></SuspenseWrap> },
-          { path: 'projects/:projectId', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard></SuspenseWrap> },
-          { path: 'projects/:projectId/review/:fileId', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><ProjectsPage /></ModuleGuard></SuspenseWrap> },
+          { path: 'projects', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><GlobalModuleGuard id="projects"><ProjectsPage /></GlobalModuleGuard></ModuleGuard></SuspenseWrap> },
+          { path: 'projects/:projectId', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><GlobalModuleGuard id="projects"><ProjectsPage /></GlobalModuleGuard></ModuleGuard></SuspenseWrap> },
+          { path: 'projects/:projectId/review/:fileId', element: <SuspenseWrap><ModuleGuard moduleKey="projects"><GlobalModuleGuard id="projects"><ProjectsPage /></GlobalModuleGuard></ModuleGuard></SuspenseWrap> },
           // Canvas landing page (Infinite-Canvas parity Phase 0). Always
           // registered; the page itself redirects to the team root while
           // VITE_FEATURE_CANVAS_NAV is off.
@@ -237,11 +224,13 @@ export const router = createBrowserRouter([
           { path: 'points', element: <SuspenseWrap><PointsPage /></SuspenseWrap> },
           { path: 'members', element: <SuspenseWrap><MembersPage /></SuspenseWrap> },
           { path: 'billing', element: <SuspenseWrap><BillingPage /></SuspenseWrap> },
-          { path: 'todolist', element: <SuspenseWrap><TodolistPage /></SuspenseWrap> },
-          { path: 'todolist/:identifier', element: <SuspenseWrap><TodolistPage /></SuspenseWrap> },
-          { path: 'issues', element: <SuspenseWrap><IssuesPage /></SuspenseWrap> },
-          { path: 'issues/:identifier', element: <SuspenseWrap><IssuesPage /></SuspenseWrap> },
-          { path: 'shared', element: <SuspenseWrap><SharedPage /></SuspenseWrap> },
+          { path: 'todolist', element: <SuspenseWrap><GlobalModuleGuard id="todolist"><TodolistPage /></GlobalModuleGuard></SuspenseWrap> },
+          { path: 'todolist/:identifier', element: <SuspenseWrap><GlobalModuleGuard id="todolist"><TodolistPage /></GlobalModuleGuard></SuspenseWrap> },
+          // Issues is the same data plane as Todolist (both served by
+          // issues_router), so it rides the todolist switch.
+          { path: 'issues', element: <SuspenseWrap><GlobalModuleGuard id="todolist"><IssuesPage /></GlobalModuleGuard></SuspenseWrap> },
+          { path: 'issues/:identifier', element: <SuspenseWrap><GlobalModuleGuard id="todolist"><IssuesPage /></GlobalModuleGuard></SuspenseWrap> },
+          { path: 'shared', element: <SuspenseWrap><GlobalModuleGuard id="shares"><SharedPage /></GlobalModuleGuard></SuspenseWrap> },
           // Legacy AI Library routes (kept for bookmark compatibility —
           // render without the new secondary sidebar).
           // Slug-less lands even worse than the nested one: AgentsTab's empty
@@ -256,7 +245,7 @@ export const router = createBrowserRouter([
           // New nested AI Library — secondary sidebar + editor pane.
           {
             path: 'ai-library',
-            element: <SuspenseWrap><AILibraryLayout /></SuspenseWrap>,
+            element: <SuspenseWrap><GlobalModuleGuard id="ai-library"><AILibraryLayout /></GlobalModuleGuard></SuspenseWrap>,
             children: [
               { index: true, element: <SuspenseWrap><AgentGalleryPage /></SuspenseWrap> },
               // Slug-less /agents used to render AgentsTab with nothing
@@ -283,15 +272,15 @@ export const router = createBrowserRouter([
           },
 
           // Distribution — secondary sidebar + Accounts page. Always
-          // registered; DistributionModuleGuard hides it at runtime until an
-          // admin flips the DB `distribution.module` display switch.
+          // registered; GlobalModuleGuard shows the disabled notice at runtime
+          // until an admin flips the Module Control Center display switch.
           {
             path: 'distribution',
             element: (
               <SuspenseWrap>
-                <DistributionModuleGuard>
+                <GlobalModuleGuard id="distribution">
                   <DistributionLayout />
-                </DistributionModuleGuard>
+                </GlobalModuleGuard>
               </SuspenseWrap>
             ),
             children: [
@@ -302,7 +291,7 @@ export const router = createBrowserRouter([
             ],
           },
           { path: 'player/:displayId', element: <SuspenseWrap><DownloadDetailPage /></SuspenseWrap> },
-          { path: 'chat', element: <SuspenseWrap><ChatPage /></SuspenseWrap> },
+          { path: 'chat', element: <SuspenseWrap><GlobalModuleGuard id="ai-library"><ChatPage /></GlobalModuleGuard></SuspenseWrap> },
           // Script & Storyboard editors handled by fullscreen routes below
         ],
       },

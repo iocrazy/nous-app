@@ -24,21 +24,6 @@ def test_flag_off_is_404(monkeypatch):
     assert client.get("/api/v1/distribution/accounts").status_code == 404
 
 
-def test_module_status_reports_switches_and_is_reachable_when_off(monkeypatch):
-    """``/module-status`` must be reachable even when the module is off (the
-    frontend reads it to decide whether to show the nav) and report both
-    switches."""
-    client = _make_app(False, monkeypatch)
-
-    async def fake_visible() -> bool:
-        return True
-
-    monkeypatch.setattr(mc, "is_module_visible", fake_visible)
-    resp = client.get("/api/v1/distribution/module-status")
-    assert resp.status_code == 200
-    assert resp.json() == {"enabled": False, "visible": True}
-
-
 def test_connect_returns_auth_url_and_persists_state(monkeypatch):
     client = _make_app(True, monkeypatch)
     saved = {}

@@ -9,7 +9,7 @@ Endpoints for downloading video/cover/music files, managing pending/retry downlo
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from loguru import logger
 from pydantic import BaseModel
 
@@ -19,6 +19,7 @@ from app.core.scope_dep import ScopedRequestDep
 from app.core.utils import Utils
 from app.repositories.media_repository import MediaRepository
 from app.repositories.user_logs_repository import log_user_action
+from app.services.modules.gate import require_module
 
 router = APIRouter()
 
@@ -91,7 +92,14 @@ async def get_pending_downloads(auth: AuthDep, limit: int = Query(100, ge=1, le=
         )
 
 
-@router.post("/retry/{platform_id}", tags=TAGS_DOWNLOAD)
+# Endpoint-level gate: a retry is a NEW download dispatch. The rest of this
+# file is read-only (pending list, file serving) and stays reachable while the
+# media-parser module is off, so the gate cannot sit at router level.
+@router.post(
+    "/retry/{platform_id}",
+    tags=TAGS_DOWNLOAD,
+    dependencies=[Depends(require_module("media-parser"))],
+)
 async def retry_download(
     platform_id: str,
     background_tasks: BackgroundTasks,

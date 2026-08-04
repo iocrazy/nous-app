@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path
 from loguru import logger
 
 from app.core.deps import AuthDep
@@ -42,8 +42,9 @@ from app.schemas.canvas_run import (
 from app.services.canvas import CanvasConflict, CanvasService
 from app.services.canvas.canvas_run_service import CanvasRunService
 from app.services.infra.unified_task_manager import get_task_manager
+from app.services.modules.gate import require_module
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_module("projects"))])
 
 
 def _to_response(row: dict) -> dict:

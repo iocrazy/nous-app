@@ -22,7 +22,7 @@ import time
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 from pydantic import BaseModel
 
@@ -38,6 +38,7 @@ from app.services.media.parsers.soda_music.soda_api import (
     SodaApiError,
     classify_landing_url,
 )
+from app.services.modules.gate import require_module
 from app.workflows.parse import enqueue_parse_for_user
 
 router = APIRouter()
@@ -283,7 +284,14 @@ async def resolve_soda_playlist(
     )
 
 
-@router.post("/soda/playlist/download", tags=TAGS_SODA)
+# Endpoint-level gate: this dispatches one parse_workflow per track, i.e. new
+# downloads. The playlist-resolve endpoint above is a read and stays reachable
+# while the media-parser module is off, so the gate cannot sit at router level.
+@router.post(
+    "/soda/playlist/download",
+    tags=TAGS_SODA,
+    dependencies=[Depends(require_module("media-parser"))],
+)
 async def download_soda_playlist(
     request: SodaBatchDownloadRequest,
     auth: AuthDep,

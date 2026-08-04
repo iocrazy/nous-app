@@ -38,6 +38,7 @@ function renderSidebar(collapsed: boolean, onToggleCollapse = vi.fn()) {
         onCreateProject={vi.fn()}
         collapsed={collapsed}
         onToggleCollapse={onToggleCollapse}
+        ideationVisible
       />
     </I18nextProvider>,
   );

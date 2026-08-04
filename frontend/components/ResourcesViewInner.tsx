@@ -8,6 +8,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DownloadsView } from './DownloadsView';
+import { ModuleDisabledPage } from './ModuleDisabledPage';
+import { useModuleStatus } from '../hooks/useModuleStatus';
 import { semanticSearch, hybridSearch } from '../services/searchService';
 import type { Folder, SmartCollection } from '../types';
 import {
@@ -74,6 +76,10 @@ export const ResourcesViewInner: React.FC = () => {
   } = ctx;
 
   const { t } = useTranslation();
+
+  // Module Control Center display switch — covers direct URLs to
+  // /resources/downloads, which bypass the sidebar entry.
+  const { visible: mediaParserVisible } = useModuleStatus('media-parser');
 
   // ─── New folder state ────────────────────────────────
   const [creatingFolder, setCreatingFolder] = useState(false);
@@ -610,7 +616,7 @@ export const ResourcesViewInner: React.FC = () => {
     <>
       <ResourcesShell sidebarProps={sidebarProps} infoPanelProps={infoPanelProps}>
         {isDownloadsView ? (
-          <DownloadsView />
+          mediaParserVisible ? <DownloadsView /> : <ModuleDisabledPage />
         ) : isProjectAssetsView ? (
           <div className="flex flex-1 min-h-0">
             <ProjectAssetsTree

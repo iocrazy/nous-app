@@ -18,6 +18,7 @@ import { formatCappedCount } from '../utils/cappedCount';
 import { useTranslation } from 'react-i18next';
 import { useResourcesContext } from '../contexts/ResourcesContext';
 import { SecondarySidebarHeader } from './layout/SecondarySidebarHeader';
+import { useModuleStatus } from '../hooks/useModuleStatus';
 import type { SmartCollection } from '../types';
 
 // ─── Props ─────────────────────────────────────────────
@@ -85,6 +86,10 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
     myResourcesCount,
     downloadsCount,
   } = useResourcesContext();
+
+  // Module Control Center display switch — My Downloads is the media-parser
+  // surface inside Resources, so it hides with that module.
+  const { visible: mediaParserVisible } = useModuleStatus('media-parser');
 
   // Island redesign: neutral ink surfaces/borders/text aligned to the mock
   // --content/--line/--island ladder.
@@ -251,16 +256,18 @@ export const ResourcesSidebar: React.FC<ResourcesSidebarProps> = ({
         ) : (
           <>
             {/* Personal mode: My Downloads + My Uploads */}
-            <button
-              onClick={() => navigate(resPath('/resources/downloads'))}
-              className={sidebarItemClass(isDownloadsView)}
-            >
-              <Download size={15} className="shrink-0 opacity-70" />
-              <span className="flex-1 truncate">{t('resources.downloads')}</span>
-              {downloadsCount !== null && downloadsCount > 0 && (
-                <span className={`text-[11px] ${cText500} tabular-nums`}>{formatCappedCount(downloadsCount)}</span>
-              )}
-            </button>
+            {mediaParserVisible && (
+              <button
+                onClick={() => navigate(resPath('/resources/downloads'))}
+                className={sidebarItemClass(isDownloadsView)}
+              >
+                <Download size={15} className="shrink-0 opacity-70" />
+                <span className="flex-1 truncate">{t('resources.downloads')}</span>
+                {downloadsCount !== null && downloadsCount > 0 && (
+                  <span className={`text-[11px] ${cText500} tabular-nums`}>{formatCappedCount(downloadsCount)}</span>
+                )}
+              </button>
+            )}
 
             {/* My Uploads with + */}
             <div className="flex items-center justify-between pr-1">

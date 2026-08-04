@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -80,8 +80,13 @@ from app.schemas.ai_library_chat import (
 from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 from app.services.ai.permissions.agent_chat_caps import agent_chat_caps
 from app.services.ai.runner.seed_loader import SeedLoader
+from app.services.modules.gate import require_module
 
-router = APIRouter(prefix="/ai-library", tags=["AI Library"])
+router = APIRouter(
+    prefix="/ai-library",
+    tags=["AI Library"],
+    dependencies=[Depends(require_module("ai-library"))],
+)
 
 
 # ---------------------------------------------------------------------------

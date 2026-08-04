@@ -6,7 +6,7 @@ Media Batch Router
 Endpoints for batch fetching media and debug raw-parse.
 """
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from loguru import logger
 
 from app.api.media_fetch_helpers import (
@@ -23,8 +23,9 @@ from app.repositories.user_logs_repository import log_user_action
 from app.services.billing.points_service import PointsService
 from app.services.media.parsers.douyin_parse.parse_chain import fetch_douyin_detail
 from app.services.media.parsers.media_service import MediaService
+from app.services.modules.gate import require_module
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_module("media-parser"))])
 
 TAGS_FETCH = ["Video Fetch"]
 

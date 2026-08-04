@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import Optional
 
 from dbos import DBOS, SetWorkflowID
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 
 from app.core.deps import AuthDep
@@ -36,9 +36,14 @@ from app.schemas.issue import (
     NeedsInputItem,
     NeedsInputListResponse,
 )
+from app.services.modules.gate import require_module
 from app.workflows.issue_lifecycle import execute_issue
 
-router = APIRouter(prefix="/issues", tags=["Issues"])
+router = APIRouter(
+    prefix="/issues",
+    tags=["Issues"],
+    dependencies=[Depends(require_module("todolist"))],
+)
 
 
 def _dispatch_execute_issue(issue_id: int, wf_id: str, *, auto: bool = False) -> None:

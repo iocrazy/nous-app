@@ -205,7 +205,16 @@ def register_exception_handlers(app: FastAPI) -> None:
         # Replace the user-facing message with a generic string and put
         # the original detail in server logs (with request id) for
         # operators to correlate.
-        if exc.status_code >= 500:
+        # Exception: the module gate's 503. Its body is entirely of our own
+        # construction — a fixed code plus a module id from the registry, no
+        # exception text — so generalizing it leaks nothing and only destroys
+        # the typed contract the frontend needs to tell "feature switched off"
+        # apart from "server broke".
+        is_module_disabled = (
+            isinstance(exc.detail, dict) and exc.detail.get("code") == "MODULE_DISABLED"
+        )
+
+        if exc.status_code >= 500 and not is_module_disabled:
             logger.warning(
                 f"[5xx] {request.method} {request.url.path} "
                 f"({exc.status_code}) detail={detail!r} "

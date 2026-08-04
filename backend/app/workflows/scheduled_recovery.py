@@ -449,11 +449,31 @@ async def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
     return {"status": "success", "recovered": recovered}
 
 
+async def _media_parser_enabled() -> bool:
+    """Module Control Center switch for the retry tick.
+
+    Kept as a plain module-level helper (not inlined in the workflow) so it is
+    unit-testable: the DBOS decorators refuse to run their wrapped function
+    before ``DBOS.launch()``.
+    """
+    from app.services.modules.registry import MODULES_BY_ID, read_module_state
+
+    state = await read_module_state(MODULES_BY_ID["media-parser"])
+    return state.enabled
+
+
 @DBOS.scheduled("0 * * * *")  # hourly at :00
 @DBOS.workflow()
 async def retry_failed_downloads_workflow(
     scheduled_time: datetime, actual_time: datetime
 ) -> None:
+    # Module Control Center: media-parser OFF pauses the retry tick too —
+    # retries are new download dispatches (spec 2026-08-03 §1). Plain skip
+    # (not raise): a paused module is not a workflow failure.
+    if not await _media_parser_enabled():
+        logger.info("[retry_failed_downloads] media-parser module disabled — skip")
+        return
+
     # Step does DB work (collect + reset to pending); dispatch happens here in
     # the workflow body, NOT in the step (DBOS asserts on start_workflow from
     # within a step).

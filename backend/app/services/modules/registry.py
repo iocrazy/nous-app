@@ -63,6 +63,61 @@ MODULES: list[ModuleDef] = [
         enabled_default=False,
         visible_default=False,
     ),
+    # ---- 2026-08-03 rollout: six live product modules, all default-ON and
+    # fail-OPEN (missing/garbage config must never take a shipped feature
+    # down). `enabled` gates the module's API/processing via
+    # app.services.modules.gate.require_module; `visible` gates the frontend
+    # nav entries + routes via GET /api/v1/modules/status.
+    ModuleDef(
+        # Gates NEW parse/download initiation (media_fetch_router,
+        # media_batch_router) + the hourly retry tick. Reads/playback of
+        # already-downloaded media are intentionally NOT gated.
+        id="media-parser",
+        key="media.module",
+        label="Media Parser & Downloads",
+        enabled_default=True,
+        visible_default=True,
+    ),
+    ModuleDef(
+        # Gates projects_router + project_assets_router + canvases_router.
+        id="projects",
+        key="projects.module",
+        label="Projects (MediaTrack)",
+        enabled_default=True,
+        visible_default=True,
+    ),
+    ModuleDef(
+        id="shares",
+        key="shares.module",
+        label="Shares",
+        enabled_default=True,
+        visible_default=True,
+    ),
+    ModuleDef(
+        # Todolist UI is backed by issues_router.
+        id="todolist",
+        key="todolist.module",
+        label="Todolist (Issues)",
+        enabled_default=True,
+        visible_default=True,
+    ),
+    ModuleDef(
+        # Gates conversation_router + ai_library_router. Deliberately NOT
+        # ai_settings_router / ai_memory_router / script_ai_router (settings
+        # infra & the Scripts domain stay independent of this switch).
+        id="ai-library",
+        key="ai.module",
+        label="AI Library & Chat",
+        enabled_default=True,
+        visible_default=True,
+    ),
+    ModuleDef(
+        id="ideation",
+        key="ideation.module",
+        label="Ideation Board",
+        enabled_default=True,
+        visible_default=True,
+    ),
 ]
 
 MODULES_BY_ID: dict[str, ModuleDef] = {m.id: m for m in MODULES}

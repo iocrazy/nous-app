@@ -25,7 +25,6 @@ from app.schemas.distribution import (
     AccountListResponse,
     ConnectAccountRequest,
     ConnectAccountResponse,
-    ModuleStatusResponse,
 )
 from app.schemas.distribution_publish import (
     PublishTaskCreate,
@@ -57,29 +56,12 @@ async def require_distribution() -> None:
     """Gate every account/OAuth endpoint on the DB module ACCESS switch
     (``system_settings['distribution.module'].enabled``, admin-controlled,
     fail-closed) — never an env flag. Module off → 404, same as an
-    unregistered route. The ``/module-status`` endpoint below is intentionally
-    NOT behind this so the frontend can always read the (default-off) status."""
+    unregistered route. The frontend reads the switches from the batch
+    ``GET /modules/status`` endpoint, which is never behind this gate."""
     from app.services.distribution.module_config import is_module_enabled
 
     if not await is_module_enabled():
         raise HTTPException(status_code=404, detail="Not found")
-
-
-@router.get("/module-status", response_model=ModuleStatusResponse)
-async def module_status(user: CurrentUserDep):
-    """Distribution module switches (admin-controlled, DB-backed). Reachable
-    regardless of the switches so the frontend can decide whether to show the
-    nav entry (``visible``) — both default OFF (opt-in). ``enabled`` also gates
-    the account/OAuth API via ``require_distribution``."""
-    from app.services.distribution.module_config import (
-        is_module_enabled,
-        is_module_visible,
-    )
-
-    return ModuleStatusResponse(
-        enabled=await is_module_enabled(),
-        visible=await is_module_visible(),
-    )
 
 
 async def _user_team_ids(user_id: str) -> list[str]:

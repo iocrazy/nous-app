@@ -21,6 +21,12 @@ def test_registry_lists_all_modules_with_correct_defaults():
         "topic-inspiration",
         "distribution",
         "unified-storage",
+        "media-parser",
+        "projects",
+        "shares",
+        "todolist",
+        "ai-library",
+        "ideation",
     }
 
     topic = MODULES_BY_ID["topic-inspiration"]
@@ -111,3 +117,25 @@ async def test_read_state_for_key_unknown_key_uses_passed_defaults(monkeypatch):
         "some.unknown.key", enabled_default=True, visible_default=False
     )
     assert state == ModuleState(True, False)
+
+
+NEW_MODULE_IDS = {
+    "media-parser": "media.module",
+    "projects": "projects.module",
+    "shares": "shares.module",
+    "todolist": "todolist.module",
+    "ai-library": "ai.module",
+    "ideation": "ideation.module",
+}
+
+
+def test_six_rollout_modules_registered_fail_open():
+    """2026-08-03 rollout: six live modules, all default-ON / fail-open."""
+    from app.services.modules.registry import MODULES_BY_ID
+
+    for module_id, key in NEW_MODULE_IDS.items():
+        m = MODULES_BY_ID.get(module_id)
+        assert m is not None, f"missing module {module_id}"
+        assert m.key == key
+        assert m.enabled_default is True
+        assert m.visible_default is True

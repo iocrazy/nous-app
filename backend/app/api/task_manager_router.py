@@ -20,8 +20,38 @@ from app.services.infra.unified_task_manager import (
     VALID_TASK_TYPES,
     get_task_manager,
 )
+from app.services.modules.gate import require_module
 
 router = APIRouter(prefix="/task-manager")
+
+# Module Control Center: this router hosts EVERY task type, so no router-level
+# gate — only the download re-dispatch below consults the switch. Reusing the
+# dependency factory keeps the 503 detail and the 5s cache identical to the
+# other media-parser entry points.
+_require_media_parser = require_module("media-parser")
+
+
+async def _peek_task_type(task_id: str, user_id: str) -> Optional[str]:
+    """Read a task's type without mutating it (module gate runs before retry)."""
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TaskTracking
+
+    async with read_scope() as session:
+        row = (
+            (
+                await session.execute(
+                    select(TaskTracking.task_type)
+                    .where(TaskTracking.dbos_workflow_id == task_id)
+                    .where(TaskTracking.user_id == str(user_id))
+                    .limit(1)
+                )
+            )
+            .mappings()
+            .first()
+        )
+    return row.get("task_type") if row else None
 
 
 @router.get("/tasks")
@@ -292,6 +322,16 @@ async def retry_task(task_id: str, auth: AuthDep, _scope: ScopedRequestDep):
     treats a same-id start as an idempotent replay, the trigger never
     fires again, and the sweeper re-marks the row lost an hour later."""
     import uuid as _uuid
+
+    # A download retry is a NEW download dispatch, so it obeys the
+    # media-parser switch like /media/fetch and /media/retry/{platform_id}.
+    # Checked BEFORE retry_task(): that call already re-keys the row to a
+    # fresh workflow id and flips it to QUEUED, so raising afterwards would
+    # strand the task pointing at a workflow nothing ever starts — exactly
+    # the "Retry doesn't actually retry" failure this endpoint was built to
+    # fix. Other task types are untouched.
+    if await _peek_task_type(task_id, auth.user_id) == "download":
+        await _require_media_parser()
 
     new_wf_id = str(_uuid.uuid4())
     tracker = get_task_manager()

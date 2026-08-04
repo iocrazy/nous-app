@@ -22,7 +22,7 @@ import { CurrentHotspots } from '../components/TopicInspiration/CurrentHotspots'
 import { SourceHealthBadge } from '../components/TopicInspiration/SourceHealthBadge';
 import { TopicFilterBar } from '../components/TopicInspiration/TopicFilterBar';
 import { topHotspots, partitionBySignal } from '../components/TopicInspiration/hotspotRanking';
-import { useTopicModuleStatus } from '../hooks/useTopicModuleEnabled';
+import { useModuleStatus } from '../hooks/useModuleStatus';
 import { InspirationPage } from './InspirationPage';
 
 const TOP_HOTSPOTS_COUNT = 5;
@@ -31,7 +31,7 @@ export const TopicInspirationPage: React.FC = () => {
   const notesEnabled = import.meta.env.VITE_FEATURE_INSPIRATION_NOTES === 'true';
   const { t } = useTranslation();
   const { addToast } = useToast();
-  const { visible: moduleVisible, enabled: moduleEnabled } = useTopicModuleStatus();
+  const { visible: moduleVisible, enabled: moduleEnabled } = useModuleStatus('topic-inspiration');
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
   const [dates, setDates] = useState<string[]>([]);
   const [day, setDay] = useState<string | undefined>(undefined);

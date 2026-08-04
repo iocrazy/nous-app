@@ -11,7 +11,7 @@ RLS-locked refs table never leaks cross-tenant rows.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.media_permissions import check_media_access
 from app.core.deps import AuthDep
@@ -19,8 +19,9 @@ from app.core.scope_guards import verify_project_write_access
 from app.repositories.canvas_refs_repository import CanvasRefsRepository
 from app.repositories.projects_repository import ProjectsRepository
 from app.services.canvas import CanvasService
+from app.services.modules.gate import require_module
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_module("projects"))])
 
 
 async def _gate_canvas_read(canvas_id: str, auth: AuthDep) -> str:
