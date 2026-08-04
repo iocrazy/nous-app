@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Clock, Play, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { Clock, Play, Plus, Trash2 } from 'lucide-react';
 import type { AILibraryAgent } from '../../types';
 import {
   schedulesService,
@@ -83,27 +83,6 @@ function emptyForm(): RoutineFormState {
     cron_expr: '0 9 * * *',
     timezone: BROWSER_TZ,
     prompt_md: '',
-    delivery_policy: 'skip_if_active',
-  };
-}
-
-// "Daily topic scout" template — prefills a routine that reviews the topic
-// inspiration pool each morning and proposes concrete video topics.
-const DAILY_TOPIC_SCOUT_PROMPT = [
-  "Review the team's topic inspiration pool and propose 3 concrete video",
-  'topics for today. For each topic give: (1) a specific angle, (2) a',
-  'scroll-stopping hook for the first 3 seconds, and (3) one reference or',
-  'example to model it on. Favor ideas that build on notes already in the',
-  'inspiration pool over generic trends. Keep each topic tight — one or two',
-  'sentences per part.',
-].join(' ');
-
-function dailyTopicScoutForm(): RoutineFormState {
-  return {
-    name: 'Daily topic scout',
-    cron_expr: '0 9 * * *',
-    timezone: BROWSER_TZ,
-    prompt_md: DAILY_TOPIC_SCOUT_PROMPT,
     delivery_policy: 'skip_if_active',
   };
 }
@@ -388,30 +367,12 @@ export const AgentRoutinesTab: React.FC<{ agent: AILibraryAgent }> = ({ agent })
             'Each fire creates an issue assigned to this agent and runs it automatically — results land as issue replies.',
           )}
         </p>
-        {!formOpen && (
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => openForm(dailyTopicScoutForm(), null)}
-              title={t(
-                'aiLibrary.agents.routines.templateHint',
-                'Prefill a daily topic-scouting routine',
-              )}
-              className="inline-flex items-center gap-1.5 rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 text-xs font-medium text-ink-300 hover:bg-ink-700"
-            >
-              <Sparkles size={12} />
-              {t('aiLibrary.agents.routines.templateDailyTopic', 'Daily topic scout')}
-            </button>
-            <button
-              type="button"
-              onClick={() => openForm(emptyForm(), null)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-1.5 text-xs font-medium text-[var(--accent-text)] hover:bg-[var(--accent-soft)]"
-            >
-              <Plus size={12} />
-              {t('aiLibrary.agents.routines.add', 'New routine')}
-            </button>
-          </div>
-        )}
+        {/* Creation lives on the workbench card header ("New task" →
+            NewRoutineModal). This tab used to carry two more entry points of
+            its own — "Daily topic scout" and "New routine" — so the same card
+            offered three ways to make the same thing, two of them driving a
+            cron-first form and one a natural-language one. Editing an
+            existing routine still opens the form below. */}
       </header>
 
       {formOpen && (
