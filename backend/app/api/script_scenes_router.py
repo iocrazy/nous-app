@@ -32,6 +32,7 @@ from app.repositories.script_scene_repository import (
 from app.schemas.script import (
     CopilotOpsRequest,
     SceneCreate,
+    SceneCreateAfterLock,
     SceneMetaUpdate,
     SceneMoveRequest,
     SceneOpsRequest,
@@ -95,6 +96,38 @@ async def create_scene(
         raise HTTPException(status_code=500, detail="Failed to create scene")
 
 
+@router.post("/scripts/{script_id}/scenes/after-lock")
+async def create_scene_after_lock(
+    script_id: str,
+    auth: AuthDep,
+    body: SceneCreateAfterLock,
+    _guard: None = Depends(verify_script_access),
+) -> Dict[str, Any]:
+    """Create a scene in an ALREADY-LOCKED script (agent-layer spec §4.2
+    "锁定后插入"): positions it (bisecting between ``before_scene_id`` /
+    ``after_scene_id``, or appended at the tail when neither is given) and
+    assigns its ``scene_number`` — a letter suffix for a genuine insert
+    between two locked scenes, or the next plain integer for a tail append.
+    404 if the script's numbering isn't locked yet (use the plain create
+    endpoint pre-lock)."""
+    try:
+        data = body.model_dump(
+            exclude_none=True, exclude={"before_scene_id", "after_scene_id"}
+        )
+        data["script_id"] = script_id
+        scene = await get_script_scene_repository().create_after_lock(
+            data,
+            before_scene_id=body.before_scene_id,
+            after_scene_id=body.after_scene_id,
+        )
+        return {"success": True, "data": scene}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"[Scenes] create_after_lock for script {script_id} failed: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to create scene")
+
+
 @router.get("/scenes/{scene_id}")
 async def get_scene(
     scene_id: str,
@@ -142,10 +175,13 @@ async def delete_scene(
     auth: AuthDep,
     _guard: None = Depends(verify_scene_access),
 ) -> Dict[str, Any]:
-    """Delete a scene (its ops cascade via FK ON DELETE CASCADE)."""
+    """Delete a scene — hard delete pre-lock (ops cascade via FK ON DELETE
+    CASCADE); once the script's numbering is locked, this instead OMITS the
+    scene in place (kept row + scene_number, ``omitted_at`` stamped) so the
+    number is never reused (agent-layer spec §4.2 "删除保留号标 OMITTED")."""
     try:
-        await get_script_scene_repository().delete(scene_id)
-        return {"success": True}
+        result = await get_script_scene_repository().delete(scene_id)
+        return {"success": True, "data": result}
     except Exception as exc:
         logger.error(f"[Scenes] delete {scene_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to delete scene")

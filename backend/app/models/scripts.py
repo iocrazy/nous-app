@@ -281,6 +281,12 @@ class ScriptProjects(Base):
     target_duration_sec: Mapped[Optional[int]] = mapped_column(
         Integer, comment="Beats timeline target total runtime (sec); NULL=unset"
     )
+    numbering_locked_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(True),
+        comment="NULL=writing phase (scene numbers derived, not stored). Set "
+        "once at lock time to freeze every scene_number under this script — "
+        "a one-way transition (mig 402).",
+    )
 
 
 class ScriptAssets(Base):
@@ -470,6 +476,17 @@ class ScriptScenes(Base):
         DateTime(True),
         nullable=False,
         server_default=text("now()"),
+    )
+    scene_number: Mapped[Optional[str]] = mapped_column(
+        Text,
+        comment="NULL pre-lock (derived, not stored). Post-lock: authoritative, "
+        "never-renumbered display number — plain int string or int+letter "
+        "suffix for a post-lock insert (mig 402).",
+    )
+    omitted_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(True),
+        comment="Set instead of hard-delete once numbering is locked (printed-"
+        "script 'OMITTED' convention) — row + scene_number kept (mig 402).",
     )
 
 

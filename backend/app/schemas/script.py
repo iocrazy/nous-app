@@ -68,6 +68,10 @@ class ScriptProjectResponse(BaseModel):
     settings_json: Optional[Dict[str, Any]] = None
     viewport_json: Optional[Dict[str, Any]] = None
     target_duration_sec: Optional[int] = None
+    # Scene numbering (mig 402 / agent-layer spec §4). NULL = writing phase
+    # (scene numbers derived from order, never stored); once set, every
+    # script_scenes.scene_number under this script is frozen permanently.
+    numbering_locked_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -196,6 +200,17 @@ class SceneMoveRequest(BaseModel):
     honour that distinction against the repository's UNSET sentinel."""
 
     chapter_id: Optional[str] = None
+    before_scene_id: Optional[str] = None
+    after_scene_id: Optional[str] = None
+
+
+class SceneCreateAfterLock(SceneCreate):
+    """Request body for `POST /scripts/{script_id}/scenes/after-lock` — a
+    scene create for an ALREADY-LOCKED script (agent-layer spec §4.2 "锁定后
+    插入"). Adds the same before/after sparse-insertion anchors ``move_scene``
+    uses; omitting both is a tail append (continues the plain integer
+    sequence — nothing to protect there, so no letter suffix)."""
+
     before_scene_id: Optional[str] = None
     after_scene_id: Optional[str] = None
 

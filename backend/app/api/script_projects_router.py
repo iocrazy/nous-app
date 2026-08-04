@@ -9,6 +9,7 @@ from app.core.deps import AuthDep, require_team_id
 from app.core.scope_guards import verify_script_access
 from app.repositories.episode_repository import get_episode_repository
 from app.repositories.script_repository import get_script_project_repository
+from app.repositories.script_scene_repository import get_script_scene_repository
 from app.schemas.script import ScriptProjectCreate, ScriptProjectUpdate, ViewportUpdate
 from app.services.storyboard.script.script_service import ScriptService
 
@@ -145,3 +146,22 @@ async def update_viewport(
     except Exception as exc:
         logger.error(f"[Scripts] update_viewport {script_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to update viewport")
+
+
+@router.post("/{script_id}/lock-numbering")
+async def lock_numbering(
+    auth: AuthDep,
+    script_id: str,
+    _guard: None = Depends(verify_script_access),
+) -> Dict[str, Any]:
+    """Freeze scene numbering (agent-layer spec §4.2 "锁定拍摄稿"). Derives
+    every scene's number from its current order and writes it permanently;
+    idempotent — locking an already-locked script is a no-op."""
+    try:
+        result = await get_script_scene_repository().lock_numbering(script_id)
+        return {"success": True, "data": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"[Scripts] lock_numbering {script_id} failed: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to lock numbering")
