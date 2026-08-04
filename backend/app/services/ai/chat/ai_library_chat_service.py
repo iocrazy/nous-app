@@ -36,6 +36,10 @@ from app.services.ai.chat.ai_library_chat_wiring import build_agent_runner_stack
 from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
 from app.services.ai.chat.message_store import MessageStore
 from app.services.ai.chat.resource_ref_resolver import resolve_resource_refs
+from app.services.ai.permissions.high_risk_caps import (
+    high_risk_caps,
+    media_kill_switch_engaged,
+)
 from app.services.ai.prompts.prompt_composer import (
     ComposerInput,
     PromptComposer,
@@ -46,18 +50,6 @@ from app.services.ai.runner.agent_runner import (  # noqa: F401  patched in test
 )
 from app.services.ai.runner.run_recorder import AgentPausedError, RunRecorder
 from app.services.ai.skills.skill_tool_service import SkillToolService  # noqa: F401
-
-
-def _media_tools_enabled() -> bool:
-    """Return True when FEATURE_AGENT_MEDIA_TOOLS env var is truthy (1/true/yes/on)."""
-    import os
-
-    return os.environ.get("FEATURE_AGENT_MEDIA_TOOLS", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
 
 
 class AILibraryChatService:
@@ -714,24 +706,52 @@ class AILibraryChatService:
             )
 
         # Gated injection: GenerateImage + GenerateVideo tools (Plan-2 / genmedia).
-        # Default OFF — flip FEATURE_AGENT_MEDIA_TOOLS=1 in prod env to enable.
-        if _media_tools_enabled():
-            from app.services.ai.tools.generate_media_specs import (
-                generate_image_tool_spec,
-                generate_video_tool_spec,
-            )
-            from app.services.ai.tools.generate_media_tools import GenerateMediaTools
+        # A1 (screenwriting agent layer): registration is now per-agent, driven
+        # by ``capability_profile.capabilities.media`` (see high_risk_caps.py),
+        # not by a single install-wide flag. FEATURE_AGENT_MEDIA_TOOLS is kept
+        # ONLY as a kill switch that can force media tools off everywhere; it
+        # can never grant — an unset/truthy value is a no-op and the
+        # capability_profile grant is what actually enables a tool per agent.
+        # HighRiskCapabilityGateHook (registered in ai_library_chat_wiring.py)
+        # re-checks BOTH the capability grant and media_kill_switch_engaged()
+        # itself on every GenerateImage/GenerateVideo call — it is the real
+        # enforcement point regardless of what happens here. This block only
+        # decides whether to bother advertising the tool spec to the model
+        # (skip it here too so the kill switch also has the UX benefit of not
+        # dangling an unusable tool in front of the LLM).
+        if not media_kill_switch_engaged():
+            _media_caps = high_risk_caps(agent_record).media
+            _media_specs: list[dict] = []
+            if _media_caps.image:
+                from app.services.ai.tools.generate_media_specs import (
+                    generate_image_tool_spec,
+                )
 
-            composed = composed.model_copy(
-                update={
-                    "tools": list(composed.tools or [])
-                    + [generate_image_tool_spec(), generate_video_tool_spec()]
-                }
-            )
-            _media_tools = GenerateMediaTools()
-            runner.generate_image_handler = _media_tools.generate_image
-            runner.generate_video_handler = _media_tools.generate_video
-            logger.info("[chat] GenerateImage + GenerateVideo tools registered")
+                _media_specs.append(generate_image_tool_spec())
+            if _media_caps.video:
+                from app.services.ai.tools.generate_media_specs import (
+                    generate_video_tool_spec,
+                )
+
+                _media_specs.append(generate_video_tool_spec())
+
+            if _media_specs:
+                from app.services.ai.tools.generate_media_tools import (
+                    GenerateMediaTools,
+                )
+
+                composed = composed.model_copy(
+                    update={"tools": list(composed.tools or []) + _media_specs}
+                )
+                _media_tools = GenerateMediaTools()
+                if _media_caps.image:
+                    runner.generate_image_handler = _media_tools.generate_image
+                if _media_caps.video:
+                    runner.generate_video_handler = _media_tools.generate_video
+                logger.info(
+                    "[chat] media tools registered per capability grant: "
+                    f"image={_media_caps.image} video={_media_caps.video}"
+                )
 
         # Spec-2: issue-context turns expose FinishIssue so the agent can
         # declare its outcome (completed | needs_input | continue). The
