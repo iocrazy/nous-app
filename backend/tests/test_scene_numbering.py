@@ -66,6 +66,16 @@ def test_parse_scene_number_rejects_malformed(bad):
         parse_scene_number(bad)
 
 
+@pytest.mark.parametrize("bad", [None, "", "3a", "not-a-number"])
+def test_sort_key_rejects_none_and_malformed(bad):
+    """CONTRACT (scene_numbering.parse_scene_number docstring): there is no
+    defined sort position for "no number yet" — a caller must check for
+    None itself before sorting (the repository's scene_no_in_episode does
+    this), never rely on scene_number_sort_key to define one."""
+    with pytest.raises(ValueError):
+        scene_number_sort_key(bad)
+
+
 # ── scene_number_sort_key: total order ────────────────────────────────────
 
 

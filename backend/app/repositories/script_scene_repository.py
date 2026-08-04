@@ -35,6 +35,8 @@ from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 from app.services.script.scene_numbering import (
     compute_locked_insert_number,
     derive_scene_number,
+    parse_scene_number,
+    scene_number_sort_key,
 )
 from app.services.script.scene_ops import apply_ops, extract_text
 
@@ -776,6 +778,35 @@ class ScriptSceneRepository:
         )
         return {"already_locked": False, "scenes": updated}
 
+    @staticmethod
+    async def _locked_neighbour_numbers(script_id: Any, scene_id: Any) -> tuple:
+        """Fresh script-wide siblings (canonical order) plus ``scene_id``'s
+        OWN current immediate-neighbour numbers and the full existing-number
+        set. Shared by ``create_after_lock``'s initial placement AND its
+        same-base-corner reposition (below) so both read the CURRENT
+        physical position rather than a stale one computed before a second
+        ``move_scene()`` call."""
+        async with read_scope() as session:
+            sib_stmt = (
+                select(
+                    ScriptScenes.id, ScriptScenes.sort_order, ScriptScenes.scene_number
+                )
+                .where(ScriptScenes.script_id == script_id)
+                .order_by(
+                    ScriptScenes.chapter_id.asc().nulls_last(),
+                    ScriptScenes.sort_order.asc(),
+                )
+            )
+            siblings = [
+                (r[0], r[1], r[2]) for r in (await session.execute(sib_stmt)).all()
+            ]
+        existing_numbers = [s[2] for s in siblings if s[2] is not None]
+        ids = [s[0] for s in siblings]
+        idx = ids.index(_bigint(scene_id))
+        prev_number = siblings[idx - 1][2] if idx > 0 else None
+        next_number = siblings[idx + 1][2] if idx + 1 < len(siblings) else None
+        return prev_number, next_number, existing_numbers, siblings
+
     async def create_after_lock(
         self,
         data: Dict[str, Any],
@@ -805,6 +836,21 @@ class ScriptSceneRepository:
         writing past the locked draft" case): the new scene continues the
         plain integer sequence, no letter needed.
 
+        SAME-BASE CORNER (fixed, was previously a real bug — see git blame):
+        when the requested slot falls BETWEEN two neighbours that share an
+        integer base (e.g. between "3" and "3A", or between "3A" and "3B"),
+        no letter suffix can sort there — ``compute_locked_insert_number``
+        always assigns "the next unused suffix across the WHOLE base",
+        which necessarily sorts AFTER every existing member of that base's
+        run, including ``next_number``. Left at the physically-requested
+        slot, the row would display out of order relative to its own label
+        (e.g. ``list_by_script`` rendering "3, 3B, 3A, 4"). Detected via
+        ``base(prev_number) == base(next_number)`` and fixed by a SECOND
+        ``move_scene()`` call that repositions the row to sit immediately
+        after the base's current last member instead — ``new_number`` was
+        already computed as exactly the right label for THAT position, so
+        only the physical placement needs to move to agree with it.
+
         Raises ``ValueError`` if the script is not locked yet — pre-lock
         creation goes through plain ``create()``, which never touches
         ``scene_number`` (writing-phase numbers stay derived, not stored).
@@ -832,28 +878,36 @@ class ScriptSceneRepository:
                 after_scene_id=after_scene_id,
             )
 
-        # Fresh script-wide siblings (post-placement) to resolve the locked
-        # neighbours + every existing number for collision-proofing (a prior
-        # post-lock insert near the same spot must not be reused).
-        async with read_scope() as session:
-            sib_stmt = (
-                select(
-                    ScriptScenes.id, ScriptScenes.sort_order, ScriptScenes.scene_number
+        prev_number, next_number, existing_numbers, siblings = (
+            await self._locked_neighbour_numbers(script_id, scene_id)
+        )
+
+        # SAME-BASE CORNER: reposition BEFORE assigning, so the row that
+        # ends up under scene_id's id is the one actually holding the final
+        # slot (the number, computed below, already matches that slot).
+        if prev_number is not None and next_number is not None:
+            base_prev, _ = parse_scene_number(prev_number)
+            base_next, _ = parse_scene_number(next_number)
+            if base_prev == base_next:
+                same_base = [
+                    (sid, num)
+                    for sid, _order, num in siblings
+                    if sid != _bigint(scene_id)
+                    and num is not None
+                    and parse_scene_number(num)[0] == base_prev
+                ]
+                last_member_id, _ = max(
+                    same_base, key=lambda pair: scene_number_sort_key(pair[1])
                 )
-                .where(ScriptScenes.script_id == script_id)
-                .order_by(
-                    ScriptScenes.chapter_id.asc().nulls_last(),
-                    ScriptScenes.sort_order.asc(),
+                created = await self.move_scene(
+                    scene_id,
+                    chapter_id=created.get("chapter_id"),
+                    after_scene_id=str(last_member_id),
                 )
-            )
-            siblings = [
-                (r[0], r[1], r[2]) for r in (await session.execute(sib_stmt)).all()
-            ]
-        existing_numbers = [s[2] for s in siblings if s[2] is not None]
-        ids = [s[0] for s in siblings]
-        idx = ids.index(_bigint(scene_id))
-        prev_number = siblings[idx - 1][2] if idx > 0 else None
-        next_number = siblings[idx + 1][2] if idx + 1 < len(siblings) else None
+                prev_number, next_number, existing_numbers, _siblings = (
+                    await self._locked_neighbour_numbers(script_id, scene_id)
+                )
+
         new_number = compute_locked_insert_number(
             prev_number, next_number, existing_numbers
         )

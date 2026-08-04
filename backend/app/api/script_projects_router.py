@@ -33,6 +33,24 @@ async def _assert_same_project_episode(script_id: str, episode_id: str) -> None:
         )
 
 
+async def _assert_episode_unowned(script_id: str, episode_id: str) -> None:
+    """Reassign guard (agent-layer spec §4.3's episode-scoped scene-number
+    uniqueness): reject reassigning to an episode ANOTHER live script
+    already owns. The auto-provision path (``get_or_create_for_episode``)
+    enforces "at most one script per episode" via an advisory lock; this
+    manual reassign path (a plain ``UPDATE``) had NO such check at all —
+    two scripts could end up on one episode, each numbering its own scenes
+    1, 2, 3..., producing two "scene 1" in the same episode (the exact
+    laper.ai collision A3 exists to prevent, reached through a different
+    door). 409, not 404 — the episode's existence isn't in question, only
+    whether it's free to attach to."""
+    owner = await get_script_project_repository().get_by_episode(episode_id)
+    if owner is not None and str(owner.get("id")) != str(script_id):
+        raise HTTPException(
+            status_code=409, detail="Episode already has another script attached"
+        )
+
+
 @router.post("")
 async def create_script_project(
     auth: AuthDep, body: ScriptProjectCreate
@@ -105,9 +123,12 @@ async def update_script_project(
     try:
         svc = ScriptService()
         data = body.model_dump(exclude_none=True)
-        # Reassigning to another episode must stay within the script's project.
+        # Reassigning to another episode must stay within the script's
+        # project AND that episode must not already be owned by a DIFFERENT
+        # live script (episode-scoped scene numbering's uniqueness promise).
         if data.get("episode_id") is not None:
             await _assert_same_project_episode(script_id, data["episode_id"])
+            await _assert_episode_unowned(script_id, data["episode_id"])
         updated = await svc.update_project(script_id, data)
         return {"success": True, "data": updated}
     except HTTPException:

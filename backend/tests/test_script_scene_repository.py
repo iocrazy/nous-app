@@ -604,6 +604,86 @@ async def test_create_after_lock_assigns_letter_suffix_between_neighbours():
 
 
 @pytest.mark.asyncio
+async def test_create_after_lock_between_bare_and_lettered_repositions_and_reorders():
+    """SAME-BASE CORNER regression: inserting between "3" and its own already-
+    lettered child "3A" cannot get a letter that sorts there (no suffix sorts
+    after "" and before "A") — the fix repositions the row to sit after "3A"
+    instead and assigns "3B", so display order (3, 3A, 3B, 4) agrees with the
+    label, instead of the pre-fix bug (3, 3B, 3A, 4) where the row was left
+    at the literally-requested slot with a label that sorted past it."""
+    e3, e3a, e4 = 700000000000000041, 700000000000000042, 700000000000000043
+    new_scene_id = 700000000000000097
+
+    # Siblings right after the CALLER-requested placement (between "3" and
+    # "3A") — this is the pre-fix physical position.
+    siblings_before_reposition = [
+        (e3, 3000, "3"),
+        (new_scene_id, 3500, None),
+        (e3a, 4000, "3A"),
+        (e4, 5000, "4"),
+    ]
+    # Siblings after the fix's second move_scene call (repositioned after "3A").
+    siblings_after_reposition = [
+        (e3, 3000, "3"),
+        (e3a, 4000, "3A"),
+        (new_scene_id, 4500, None),
+        (e4, 5000, "4"),
+    ]
+    numbered_row = _scene_obj(sort_order=4500)
+    numbered_row.id = new_scene_id
+    numbered_row.scene_number = "3B"
+
+    session = _CaptureSession(
+        [
+            _FakeResult(scalar_first=_dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc)),
+            _FakeResult(all_rows=siblings_before_reposition),
+            _FakeResult(all_rows=siblings_after_reposition),
+            _FakeResult(scalar_first=numbered_row),  # final UPDATE ... RETURNING
+        ]
+    )
+    repo = ScriptSceneRepository()
+    with (
+        patch.object(scene_mod, "read_scope", lambda: _ScopeCtx(session)),
+        patch.object(scene_mod, "write_scope", lambda: _ScopeCtx(session)),
+        patch.object(
+            repo,
+            "create",
+            AsyncMock(return_value={"id": new_scene_id, "chapter_id": None}),
+        ),
+        patch.object(repo, "move_scene", AsyncMock()) as move_mock,
+    ):
+        out = await repo.create_after_lock(
+            {"script_id": str(_SCRIPT_ID)},
+            before_scene_id=str(e3a),
+            after_scene_id=str(e3),
+        )
+
+    # The label agrees with where the fix physically places the row: after
+    # "3A", sorting between "3A" and "4" — NOT the literally-requested slot.
+    assert out["scene_number"] == "3B"
+    assert out["scene_no_in_episode"] == "3B"
+
+    # move_scene fires TWICE: the caller's requested placement, then the
+    # same-base-corner reposition — the second call anchors on "after 3A"
+    # (e3a's id), not the caller's original before/after pair.
+    assert move_mock.call_count == 2
+    first_call, second_call = move_mock.call_args_list
+    assert first_call.kwargs.get("before_scene_id") == str(e3a)
+    assert first_call.kwargs.get("after_scene_id") == str(e3)
+    assert second_call.kwargs.get("after_scene_id") == str(e3a)
+    assert second_call.kwargs.get("before_scene_id") is None
+
+    # Neither "3"'s nor "3A"'s own id/number appears in the final UPDATE —
+    # only the new scene's id and its own "3B" label are bound.
+    upd_sql, upd_params = _rendered(session.statements[-1])
+    assert upd_sql.strip().upper().startswith("UPDATE PUBLIC.SCRIPT_SCENES")
+    assert "3B" in upd_params.values()
+    assert new_scene_id in upd_params.values()
+    assert e3 not in upd_params.values()
+    assert e3a not in upd_params.values()
+
+
+@pytest.mark.asyncio
 async def test_create_after_lock_tail_append_gets_plain_next_integer():
     """Appending past the last locked scene (no anchors) continues the plain
     sequence — no letter suffix, nothing to protect."""
@@ -641,3 +721,62 @@ async def test_create_after_lock_tail_append_gets_plain_next_integer():
 
     move_mock.assert_not_called()  # no anchors -> plain tail append, no move needed
     assert out["scene_number"] == "4"
+
+
+@pytest.mark.asyncio
+async def test_create_after_lock_skips_an_omitted_scenes_number():
+    """An OMITTED scene (agent-layer spec §4.2's 'delete after lock' — row
+    kept, omitted_at stamped, scene_number PRESERVED) still occupies its
+    number forever: the siblings query that feeds existing_numbers has no
+    ``WHERE omitted_at IS NULL`` filter, so "3A" being omitted does not free
+    it up for a later insert to reuse — the next insert at base 3 must skip
+    straight to "3B"."""
+    e3, e3_omitted, e4 = (
+        700000000000000051,
+        700000000000000052,
+        700000000000000053,
+    )
+    new_scene_id = 700000000000000096
+    siblings = [
+        (e3, 1000, "3"),
+        (e3_omitted, 1500, "3A"),  # omitted_at set, but scene_number kept
+        (new_scene_id, 1750, None),
+        (e4, 2000, "4"),
+    ]
+    numbered_row = _scene_obj(sort_order=1750)
+    numbered_row.id = new_scene_id
+    numbered_row.scene_number = "3B"
+
+    session = _CaptureSession(
+        [
+            _FakeResult(scalar_first=_dt.datetime(2026, 1, 1, tzinfo=_dt.timezone.utc)),
+            _FakeResult(all_rows=siblings),
+            _FakeResult(scalar_first=numbered_row),
+        ]
+    )
+    repo = ScriptSceneRepository()
+    with (
+        patch.object(scene_mod, "read_scope", lambda: _ScopeCtx(session)),
+        patch.object(scene_mod, "write_scope", lambda: _ScopeCtx(session)),
+        patch.object(
+            repo,
+            "create",
+            AsyncMock(return_value={"id": new_scene_id, "chapter_id": None}),
+        ),
+        patch.object(
+            repo,
+            "move_scene",
+            AsyncMock(return_value={"id": new_scene_id, "chapter_id": None}),
+        ),
+    ):
+        out = await repo.create_after_lock(
+            {"script_id": str(_SCRIPT_ID)},
+            before_scene_id=str(e3_omitted),
+            after_scene_id=str(e4),
+        )
+
+    # "3A" is taken (even though omitted) -> next unused is "3B", not a
+    # collision with the omitted scene's preserved number.
+    assert out["scene_number"] == "3B"
+    upd_sql, upd_params = _rendered(session.statements[-1])
+    assert "3B" in upd_params.values()

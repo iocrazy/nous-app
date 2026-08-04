@@ -55,11 +55,17 @@ def parse_scene_number(value: str) -> Tuple[int, str]:
     """Split a locked scene number into ``(base, letter_suffix)``.
 
     ``"3"`` -> ``(3, "")``, ``"3A"`` -> ``(3, "A")``, ``"12AB"`` -> ``(12,
-    "AB")``. Raises ``ValueError`` on anything that doesn't match the
-    ``<digits><UPPERCASE letters>*`` shape — a malformed value here means a
-    bug upstream (nothing should ever hand-write scene_number outside this
-    module + the repository's lock/insert paths), so this fails loudly
-    rather than guessing.
+    "AB")``. CONTRACT: ``value`` must be a non-``None``, well-formed
+    ``<digits><UPPERCASE letters>*`` string — ``None`` and anything else
+    that doesn't match the shape both raise ``ValueError`` (there is no
+    defined sort position for "no number yet"; a caller holding a possibly-
+    unassigned scene, e.g. a freshly ``create()``-d row in a locked script
+    that hasn't gone through ``create_after_lock`` yet, must check for
+    ``None`` itself BEFORE calling this — see ``_effective_number`` /
+    ``scene_no_in_episode`` in the repository for that check). A malformed
+    non-None value means a bug upstream (nothing should ever hand-write
+    scene_number outside this module + the repository's lock/insert paths),
+    so this fails loudly rather than guessing.
     """
     match = _NUMBER_RE.match(value.strip()) if value is not None else None
     if not match:
