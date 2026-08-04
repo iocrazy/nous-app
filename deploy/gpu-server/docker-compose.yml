@@ -49,8 +49,10 @@ services:
       # 必须指向本地 NVMe——放 CIFS 比直接拉 S3 还慢(145 vs 266 MB/s)。
       - MEDIA_S3_CACHE_DIR=/app/s3cache
       # 会话通道的浏览器执行器(见下方 browser service)。地址不是密钥,放这里;
-      # 配套的 BROWSER_INTERNAL_TOKEN 是共享密钥,放 secrets/backend.env
-      # —— 三个容器共用同一个 env_file,天然保证两边取到同一个值。
+      # 配套的 BROWSER_INTERNAL_TOKEN 是共享密钥,放 secrets/backend.env。
+      # ⚠️ browser 侧**不共用**这个 env_file(理由见 browser service 的注释),
+      # 所以同一个 token 值要在 backend.env 与 browser.env 里各写一份。写歪了
+      # 表现为 browser 返回 401 —— 可见的类型化失败,不是静默 no-op。
       - BROWSER_SERVICE_URL=http://nous-browser:8090
     volumes:
       - /mnt/heytime/Sources/nous/media:/app/downloads
@@ -114,14 +116,14 @@ services:
       # (spec §2.4)。DISPLAY 与镜像内 Xvfb 启动的显示号一致。
       - DISPLAY=:99
     # Chromium 默认 /dev/shm 只有 64MB,渲染进程会随机崩("Target closed")。
-    # 保留 1g 而不是缩到 256m,两个理由:
-    #  1. tmpfs 是**按需分配**的,写多少占多少 —— 1g 只是上限,不预留,没有成本。
-    #  2. app/browser_runtime.py 目前传了 `--disable-dev-shm-usage`,该 flag 会让
-    #     Chromium 改用 /tmp 存共享内存段。而容器没挂 volume,/tmp 落在 overlay
-    #     可写层 = **真磁盘**;/dev/shm 则始终是 tmpfs = 内存。对一个专门加载
-    #     已登录页面的浏览器,把渲染缓冲写上磁盘与 §7.6「凭证不落盘」的方向相反。
-    #     所以正解是「给足 /dev/shm + 不要那个 flag」,而不是「留着 flag + 缩 shm」。
-    #     flag 去掉前,这 1g 是免费的安全网(去掉当天就生效,不用再动 compose)。
+    # 1g 是 Playwright 官方 docker 建议档位;tmpfs 按需分配,只是上限不预留。
+    #
+    # ⚠️ 与 app/browser_runtime.py 的 LAUNCH_ARGS 成对存在,改一处必须看另一处:
+    # 那边**刻意不传** `--disable-dev-shm-usage`。该 flag 会让 Chromium 改用
+    # /tmp 存共享内存段,而容器没挂 volume,/tmp 落在 overlay 可写层 = 真磁盘;
+    # /dev/shm 则始终是 tmpfs = 内存。对一个专门加载已登录页面的浏览器,把渲染
+    # 缓冲写上磁盘与 spec §7.6「凭证不落盘」方向相反。所以这里给足 shm、那边
+    # 不传 flag。把 shm_size 缩掉而不同时恢复 flag,会把随机崩溃带回来。
     shm_size: 1gb
     # chromium 会留一串子进程,没有 PID 1 收割就攒僵尸,最终耗尽 pid。
     init: true

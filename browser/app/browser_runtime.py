@@ -26,7 +26,14 @@ HEADLESS = False
 LAUNCH_ARGS = (
     # Required in containers without a tuned seccomp profile.
     "--no-sandbox",
-    "--disable-dev-shm-usage",
+    # NOT --disable-dev-shm-usage. That flag exists for containers stuck with
+    # the 64MB default /dev/shm; it moves Chromium's shared memory to /tmp,
+    # which in this container is the overlay write layer -- a real disk. This
+    # process loads logged-in pages, so pushing render buffers to disk runs
+    # against spec §7.6 (credentials never touch disk). The compose service
+    # gives /dev/shm 1g (tmpfs, allocated on demand) instead, which is the
+    # Playwright-recommended fix. Keep both in sync: dropping shm_size without
+    # restoring this flag brings back random "Target closed" renderer crashes.
     # Drops the `navigator.webdriver` flag that Blink otherwise sets.
     "--disable-blink-features=AutomationControlled",
 )

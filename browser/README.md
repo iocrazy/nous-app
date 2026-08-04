@@ -189,10 +189,19 @@ itself bounded, so a saturated service fails fast instead of queueing forever.
 Docker is the supported path — it is the only way to get a matching Chromium
 plus Xvfb.
 
+`--shm-size` is **required**, not tuning. Docker defaults `/dev/shm` to 64MB,
+which makes Chromium tabs crash at random ("Target closed"). The usual
+workaround flag, `--disable-dev-shm-usage`, is deliberately not set — it would
+move shared memory to `/tmp`, which in this volume-less container is real disk,
+putting rendered content of logged-in pages there (see §7.6). Give it memory
+instead. The compose service sets `shm_size: 1gb`; tmpfs allocates on demand, so
+the ceiling costs nothing until used.
+
 ```bash
 cd browser
 docker build -t nous-browser:local .
-docker run --rm -p 8090:8090 -e BROWSER_INTERNAL_TOKEN=dev-token nous-browser:local
+docker run --rm -p 8090:8090 --shm-size=1g --init \
+  -e BROWSER_INTERNAL_TOKEN=dev-token nous-browser:local
 
 curl -s localhost:8090/healthz
 curl -s -X POST localhost:8090/session/validate \
@@ -224,9 +233,12 @@ container:
 
 ```bash
 docker build -t nous-browser:test .
-docker run --rm -e BROWSER_INTERNAL_TOKEN=dev-token nous-browser:test \
+docker run --rm --shm-size=1g --init -e BROWSER_INTERNAL_TOKEN=dev-token nous-browser:test \
   sh -c 'Xvfb :99 -screen 0 1920x1080x24 & sleep 2; python -m pytest -m integration -q'
 ```
+
+(The image omits `tests/` and dev extras, so this needs a build without the
+`.dockerignore` exclusion, or a bind-mounted checkout.)
 
 ## Dependencies and upgrading Playwright
 

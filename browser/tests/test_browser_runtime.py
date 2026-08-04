@@ -24,6 +24,18 @@ def test_launch_disables_the_automation_flag():
     assert "--disable-blink-features=AutomationControlled" in build_launch_kwargs(None)["args"]
 
 
+def test_shared_memory_is_never_redirected_to_disk():
+    """`--disable-dev-shm-usage` moves Chromium's shared memory from /dev/shm
+    (tmpfs, in memory) to /tmp, which in this volume-less container is the
+    overlay write layer - a real disk. This process renders logged-in pages, so
+    that flag would put session-derived content on disk, against spec 7.6.
+
+    The 64MB-default problem it exists to solve is handled by `shm_size: 1gb` on
+    the compose service. Re-adding the flag here must be a conscious act.
+    """
+    assert "--disable-dev-shm-usage" not in build_launch_kwargs(None)["args"]
+
+
 def test_proxy_credentials_are_split_out_of_the_server_url():
     options = parse_proxy_url("http://alice:s3cr3t@proxy.example.com:8080")
     assert options == {
