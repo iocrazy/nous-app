@@ -192,6 +192,9 @@ class AgentFault(BaseModel):
 class AgentStatsItem(BaseModel):
     runs_7d: int = 0
     tokens_7d: int = 0
+    #: Spend over the same window. Named ``_7d`` like its siblings even though
+    #: the window follows the ``days`` query param.
+    cost_cents_7d: int = 0
     running_count: int = 0
     needs_input_count: int = 0
     fault: Optional[AgentFault] = None
