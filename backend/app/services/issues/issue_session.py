@@ -16,13 +16,29 @@ async def get_or_create_issue_session(issue_id: int) -> Optional[str]:
 
     Returns None if the issue has no assignable agent (nothing to run).
     """
-    from app.db import engine as db_engine
+    from sqlalchemy import select, update
 
-    row = await db_engine.fetch_one(
-        "SELECT ai_session_id, title, assignee_agent_id, created_by_user_id, "
-        "assignee_user_id, project_id, team_id FROM public.issues WHERE id = :id",
-        {"id": issue_id},
-    )
+    from app.db.session import read_scope, write_scope
+    from app.models import Issues
+
+    async with read_scope() as session:
+        row = (
+            (
+                await session.execute(
+                    select(
+                        Issues.ai_session_id,
+                        Issues.title,
+                        Issues.assignee_agent_id,
+                        Issues.created_by_user_id,
+                        Issues.assignee_user_id,
+                        Issues.project_id,
+                        Issues.team_id,
+                    ).where(Issues.id == issue_id)
+                )
+            )
+            .mappings()
+            .first()
+        )
     if not row:
         raise RuntimeError(f"issue {issue_id} not found")
     if row.get("ai_session_id"):
@@ -48,7 +64,7 @@ async def get_or_create_issue_session(issue_id: int) -> Optional[str]:
     # (reviewer measured 80/80 rows NULL in prod). This also fixes project_id
     # attribution for every OTHER issue-dispatch consumer of agent_runs
     # (Usage panel project scoping, etc.), not just autopilot.
-    session = await AILibraryChatService().create_session(
+    chat_session = await AILibraryChatService().create_session(
         user_id=UUID(str(user_id)),
         agent_slug=agent["slug"],
         title=(row.get("title") or "Issue")[:200],
@@ -57,22 +73,27 @@ async def get_or_create_issue_session(issue_id: int) -> Optional[str]:
         context_type="issue",
         context_id=str(issue_id),
     )
-    session_id = str(session["id"])
+    session_id = str(chat_session["id"])
 
     # Backfill, guarding on NULL so a concurrent create loses cleanly.
     # ai_session_id is BIGINT since mig 232 (snowflake ids) — asyncpg
     # requires a real int, a str raises DataError ('str' object cannot
     # be interpreted as an integer).
-    n = await db_engine.execute(
-        "UPDATE public.issues SET ai_session_id = :sid "
-        "WHERE id = :id AND ai_session_id IS NULL",
-        {"sid": int(session_id), "id": issue_id},
-    )
-    if n == 0:
-        winner = await db_engine.fetch_one(
-            "SELECT ai_session_id FROM public.issues WHERE id = :id", {"id": issue_id}
+    async with write_scope() as session:
+        result = await session.execute(
+            update(Issues)
+            .where(Issues.id == issue_id, Issues.ai_session_id.is_(None))
+            .values(ai_session_id=int(session_id))
         )
-        if winner and winner.get("ai_session_id"):
-            return str(winner["ai_session_id"])
+        n = result.rowcount
+    if n == 0:
+        async with read_scope() as session:
+            winner = (
+                await session.execute(
+                    select(Issues.ai_session_id).where(Issues.id == issue_id)
+                )
+            ).scalar_one_or_none()
+        if winner:
+            return str(winner)
     logger.info(f"[issue_session] session {session_id} for issue {issue_id}")
     return session_id

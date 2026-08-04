@@ -223,15 +223,21 @@ class RelayGateway:
 
         import uuid as _uuid
 
+        from sqlalchemy import text, update
+
         from app.api.issues_router import _dispatch_execute_issue
-        from app.db import engine as db_engine
+        from app.db.session import write_scope
+        from app.models import Issues
 
         wf_id = f"issue-{int(issue_id)}-{_uuid.uuid4().hex[:12]}"
         _dispatch_execute_issue(int(issue_id), wf_id)
-        await db_engine.execute_as_service_role(
-            "UPDATE public.issues SET dbos_workflow_id = :wf WHERE id = :iid",
-            {"wf": wf_id, "iid": int(issue_id)},
-        )
+        async with write_scope() as session:
+            await session.execute(text("SET LOCAL ROLE service_role"))
+            await session.execute(
+                update(Issues)
+                .where(Issues.id == int(issue_id))
+                .values(dbos_workflow_id=wf_id)
+            )
         return wf_id
 
     async def last_substantive_message(self, issue_row: Dict[str, Any]) -> str:
