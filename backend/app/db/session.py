@@ -89,7 +89,27 @@ async def write_scope() -> AsyncIterator[AsyncSession]:
     """Repo write boundary. Joins the ambient unit_of_work() if active (no
     nested commit — the UoW owns it), else opens + commits its own
     transaction. ALWAYS use this for writes; never run UPDATE/INSERT on a
-    bare read_scope/connect() (that silently rolls back)."""
+    bare read_scope/connect() (that silently rolls back).
+
+    ⚠️ Known limitation (Phase B1 review, 2026-08-04): a handful of callers
+    (``input_gate.py``, ``issues_router.dispatch_issue``,
+    ``pipeline_relay.RelayGateway.dispatch_issue``) run
+    ``session.execute(text("SET LOCAL ROLE service_role"))`` as the first
+    statement in a ``write_scope()`` block, to satisfy the mig-170
+    column-allowlist trigger on ``public.issues`` execution fields
+    (``dbos_workflow_id`` / ``execution_locked_at`` / ``execution_state``).
+    ``SET LOCAL`` is scoped to the CURRENT transaction — if such a call is
+    ever wrapped in an ambient ``unit_of_work()`` (this ``write_scope()``
+    would then join that outer session/transaction instead of opening its
+    own), the role escalation would persist for every OTHER statement in that
+    same transaction until commit, not just the one write it was meant to
+    guard. No current caller does this (``unit_of_work()``/
+    ``maybe_unit_of_work()`` today only wraps ``inspiration/notes_service.py``,
+    unrelated to the issues domain) — but a future refactor that folds one of
+    these functions into a shared multi-repo transaction needs to keep this
+    in mind, or move the privileged write to its own independent
+    ``write_scope()`` deliberately kept OUTSIDE the shared UoW.
+    """
     existing = _request_session.get()
     if existing is not None:
         # Inside a unit_of_work: reuse its session/transaction. The outer

@@ -9,6 +9,15 @@ capture the compiled ``update(IssuePipelineRuns)...returning(...)`` statement
 and assert the WHERE clause (the actual CAS guard: ``status = 'running'`` AND,
 where applicable, ``current_step = :from_step``) survived the raw-SQL → ORM
 rewrite unchanged, plus the win/lose (row returned vs. None) behavior.
+
+Review round 1 fix (Important #1): the CAS methods return the RAW
+``RETURNING *`` mapping (``.returning(*Table.columns)`` + ``.mappings()
+.first()``), NOT the string-coerced ``_run_row()`` shape ``get_run``/
+``list_runs_for_parent`` use — matching the pre-ORM
+``execute_returning_one`` behavior byte-for-byte (see the module docstring
+and ``pipelines_router.py``'s "the CAS RETURNING row is raw" comment). The
+fakes below model a ``.mappings().first()`` result, not ``.scalar_one_or_none()``
+on an ORM entity.
 """
 
 from __future__ import annotations
@@ -28,15 +37,10 @@ def _compile(stmt: Any) -> tuple[str, dict[str, Any]]:
     return str(compiled), dict(compiled.params)
 
 
-class _Obj:
-    """Stand-in ORM entity returned by ``.scalar_one_or_none()`` on a
-    ``RETURNING`` result — the CAS "winner" row."""
-
-    def __init__(self, **kw: Any) -> None:
-        self.__dict__.update(kw)
-
-
-def _run_obj(**overrides: Any) -> _Obj:
+def _run_row(**overrides: Any) -> dict[str, Any]:
+    """A RAW RETURNING row (native int/None ids, exactly what
+    ``.mappings().first()`` on ``returning(*IssuePipelineRuns.__table__
+    .columns)`` yields) — NOT the string-coerced ``_run_row()`` shape."""
     base = dict(
         id=1,
         pipeline_id=2,
@@ -50,25 +54,28 @@ def _run_obj(**overrides: Any) -> _Obj:
         completed_at=None,
     )
     base.update(overrides)
-    return _Obj(**base)
+    return base
 
 
-class _FakeResult:
-    def __init__(self, obj: Any) -> None:
-        self._obj = obj
+class _FakeMappingsResult:
+    def __init__(self, row: dict[str, Any] | None) -> None:
+        self._row = row
 
-    def scalar_one_or_none(self) -> Any:
-        return self._obj
+    def mappings(self) -> "_FakeMappingsResult":
+        return self
+
+    def first(self) -> dict[str, Any] | None:
+        return self._row
 
 
 class _FakeSession:
-    def __init__(self, obj: Any) -> None:
+    def __init__(self, row: dict[str, Any] | None) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
-        self._obj = obj
+        self._row = row
 
-    async def execute(self, stmt: Any) -> _FakeResult:
+    async def execute(self, stmt: Any) -> _FakeMappingsResult:
         self.calls.append(_compile(stmt))
-        return _FakeResult(self._obj)
+        return _FakeMappingsResult(self._row)
 
 
 class _ScopeCM:
@@ -96,7 +103,7 @@ def repo() -> PipelineRepository:
 async def test_advance_run_step_cas_where_clause(
     repo: PipelineRepository, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = _patch(monkeypatch, _run_obj(current_step=2))
+    session = _patch(monkeypatch, _run_row(current_step=2))
     row = await repo.advance_run_step(1, from_step=1, to_step=2)
     assert row is not None and row["current_step"] == 2
     sql, binds = session.calls[0]
@@ -112,7 +119,7 @@ async def test_advance_run_step_cas_where_clause(
 async def test_advance_run_step_cas_loser_returns_none(
     repo: PipelineRepository, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0 rows (another observer already advanced) → scalar_one_or_none is
+    """0 rows (another observer already advanced) → mappings().first() is
     None → the repo must surface None, not raise or fabricate a row."""
     _patch(monkeypatch, None)
     row = await repo.advance_run_step(1, from_step=1, to_step=2)
@@ -122,7 +129,7 @@ async def test_advance_run_step_cas_loser_returns_none(
 async def test_complete_run_cas_where_clause(
     repo: PipelineRepository, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = _patch(monkeypatch, _run_obj(status="completed"))
+    session = _patch(monkeypatch, _run_row(status="completed"))
     row = await repo.complete_run(1, from_step=3)
     assert row is not None and row["status"] == "completed"
     sql, binds = session.calls[0]
@@ -140,7 +147,7 @@ async def test_halt_run_cas_has_no_step_guard(
 ) -> None:
     """halt/cancel CAS only on status='running' — no current_step condition
     (a halt can fire from any step, unlike advance/complete)."""
-    session = _patch(monkeypatch, _run_obj(status="halted", halted_reason="x"))
+    session = _patch(monkeypatch, _run_row(status="halted", halted_reason="x"))
     row = await repo.halt_run(1, reason="budget exceeded")
     assert row is not None and row["halted_reason"] == "x"
     sql, binds = session.calls[0]
@@ -156,7 +163,7 @@ async def test_halt_run_cas_has_no_step_guard(
 async def test_cancel_run_cas_where_clause(
     repo: PipelineRepository, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = _patch(monkeypatch, _run_obj(status="cancelled"))
+    session = _patch(monkeypatch, _run_row(status="cancelled"))
     row = await repo.cancel_run(1)
     assert row is not None and row["status"] == "cancelled"
     sql, binds = session.calls[0]
@@ -172,3 +179,28 @@ async def test_halt_run_already_terminal_returns_none(
 ) -> None:
     _patch(monkeypatch, None)
     assert await repo.halt_run(1, reason="x") is None
+
+
+async def test_cas_methods_return_raw_unstringified_ids(
+    repo: PipelineRepository, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review round 1, Important #1: the CAS RETURNING row must stay RAW
+    (native int ids, exactly what the pre-ORM ``execute_returning_one``
+    returned) — NOT run through ``_run_row()``'s string coercion that
+    ``get_run``/``list_runs_for_parent`` use for the read-boundary shape.
+    ``pipelines_router.py``'s cancel-run handler explicitly re-``get_run()``s
+    afterward to get the string-coerced shape, on the documented assumption
+    that the CAS row is raw — this pins that contract."""
+    _patch(
+        monkeypatch, _run_row(id=99, pipeline_id=2, parent_issue_id=3, status="running")
+    )
+    row = await repo.advance_run_step(99, from_step=1, to_step=2)
+    assert row is not None
+    assert row["id"] == 99 and type(row["id"]) is int
+    assert row["pipeline_id"] == 2 and type(row["pipeline_id"]) is int
+    assert row["parent_issue_id"] == 3 and type(row["parent_issue_id"]) is int
+
+    _patch(monkeypatch, _run_row(id=99, status="cancelled"))
+    cancelled = await repo.cancel_run(99)
+    assert cancelled is not None
+    assert cancelled["id"] == 99 and type(cancelled["id"]) is int
