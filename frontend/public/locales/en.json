@@ -3806,6 +3806,7 @@
     "replying": "Replying…"
   },
   "issues": {
+    "pageTitle": "Issues",
     "needsReplyChip": "Needs your reply",
     "waitingOnYou": "Waiting on you",
     "approve": "Approve",
