@@ -165,6 +165,7 @@ export const SessionsPage: React.FC = () => {
       {/* ── Session list ── */}
       <div className="flex w-80 flex-shrink-0 flex-col min-h-0">
         <PageHeader
+          level="content"
           title={t('aiLibrary.sessions.title', 'Sessions')}
           count={sessions.length}
           className="pb-3"

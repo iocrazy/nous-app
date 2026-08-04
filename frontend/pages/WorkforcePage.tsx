@@ -185,6 +185,7 @@ export const WorkforcePage: React.FC = () => {
   return (
     <div className="max-w-6xl space-y-6 pt-6 pb-8">
       <PageHeader
+        level="content"
         title={t('workforce.title', 'Workforce')}
         subtitle={t(
           'workforce.subtitle',

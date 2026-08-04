@@ -293,6 +293,8 @@ export const InspirationPage: React.FC = () => {
     <div className="mx-auto w-full max-w-[1800px] px-6 py-6 2xl:px-10">
       <PageHeader
         className="mb-3"
+        // No secondary rail in this module, so this IS the module name.
+        level="module"
         title={t('inspiration.title', 'Inspiration')}
         actions={
           <>

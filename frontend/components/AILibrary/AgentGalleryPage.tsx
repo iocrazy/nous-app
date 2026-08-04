@@ -336,7 +336,10 @@ export const AgentGalleryPage: React.FC = () => {
   return (
     <div className="max-w-5xl pt-6 pb-12">
       <PageHeader
-        title={t('sidebar.aiLibrary', 'AI Library')}
+        level="content"
+        // "AI Library" is the rail's job; this page is the agent roster, which
+        // is also what its first tab says.
+        title={t('aiLibrary.tab.agents', 'Agents')}
         actions={
           <button
             type="button"

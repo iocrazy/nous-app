@@ -250,6 +250,7 @@ export const RecordsPage: React.FC = () => {
   return (
     <div className="dist-v4">
       <PageHeader
+        level="content"
         title={t('distribution.records.title', 'Publish Records')}
         count={tasks.length}
         subtitle={t('distribution.records.subtitle', 'Every publish task across accounts, live from Task Center.')}

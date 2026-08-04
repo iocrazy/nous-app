@@ -176,6 +176,7 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
     <div>
       {/* Header */}
       <PageHeader
+        level="content"
         title={externalTitle || t('mediatrack.projects', 'Projects')}
         actions={
           <>

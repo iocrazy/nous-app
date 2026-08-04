@@ -509,6 +509,7 @@ export const PublishPage: React.FC = () => {
   return (
     <div className="dist-v4">
       <PageHeader
+        level="content"
         title={t('distribution.publish.title', 'Publish')}
         subtitle={t('distribution.publish.subtitle', 'Send library media to your connected accounts.')}
       />
