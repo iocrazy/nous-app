@@ -30,8 +30,14 @@ from sqlalchemy import func, insert, select, update
 
 from app.db import engine as db_engine
 from app.db.session import read_scope, write_scope
-from app.models import ScriptOps, ScriptScenes
+from app.models import ScriptOps, ScriptProjects, ScriptScenes
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
+from app.services.script.scene_numbering import (
+    compute_locked_insert_number,
+    derive_scene_number,
+    parse_scene_number,
+    scene_number_sort_key,
+)
 from app.services.script.scene_ops import apply_ops, extract_text
 
 # Sparse-ordering step. New scenes land at MAX+STEP; moves bisect neighbours,
@@ -89,6 +95,24 @@ def _row(obj: Any) -> Dict[str, Any]:
     return _parity(_orm_obj_to_dict(obj, _SCENES_N2A))
 
 
+def _effective_number(
+    scene_number: Optional[str], index: int, is_locked: bool
+) -> Optional[str]:
+    """The ``scene_no_in_episode`` value for one scene: the locked
+    ``scene_number`` when set, else the writing-phase number DERIVED from
+    canonical position (never persisted) — UNLESS the script is already
+    locked, in which case a scene with no ``scene_number`` yet is one
+    created after lock but not yet positioned (``create_after_lock`` hasn't
+    run for it), and deriving a positional guess for it could collide with a
+    real locked number. ``None`` in that one case is honest: it has no
+    number yet."""
+    if scene_number is not None:
+        return scene_number
+    if is_locked:
+        return None
+    return derive_scene_number(index)
+
+
 def _scene_write_values(data: Dict[str, Any]) -> Dict[str, Any]:
     """Build the write ``values()`` dict: keep only mapped columns (graceful
     no-op for unknown keys, REST parity) and bigint-coerce the id/FK fields."""
@@ -142,24 +166,47 @@ class ScriptSceneRepository:
 
     async def list_by_script(self, script_id: str) -> List[Dict[str, Any]]:
         """All scenes for a script, ordered by chapter_id NULLS LAST, then
-        sort_order (the canonical read order for the editor / scene list)."""
+        sort_order (the canonical read order for the editor / scene list).
+
+        Every scene dict carries ``scene_no_in_episode`` (agent-layer spec
+        §4.3's honest field name — never the ambiguous ``current_scene``):
+        the locked ``scene_number`` when set, else the writing-phase number
+        DERIVED from this canonical position (never persisted), else ``None``
+        for a scene created after lock but not yet positioned (deriving a
+        guess there could collide with a real locked number)."""
         try:
+            sid = _bigint(script_id)
             async with read_scope() as session:
+                locked_at = await session.scalar(
+                    select(ScriptProjects.numbering_locked_at).where(
+                        ScriptProjects.id == sid
+                    )
+                )
+                is_locked = locked_at is not None
                 result = await session.execute(
                     select(ScriptScenes)
-                    .where(ScriptScenes.script_id == _bigint(script_id))
+                    .where(ScriptScenes.script_id == sid)
                     .order_by(
                         ScriptScenes.chapter_id.asc().nulls_last(),
                         ScriptScenes.sort_order.asc(),
                     )
                 )
-                return [_row(r) for r in result.scalars().all()]
+                rows = result.scalars().all()
+            out: List[Dict[str, Any]] = []
+            for index, r in enumerate(rows):
+                d = _row(r)
+                d["scene_no_in_episode"] = _effective_number(
+                    d["scene_number"], index, is_locked
+                )
+                out.append(d)
+            return out
         except Exception as e:
             logger.error(f"Failed to list scenes for script {script_id}: {e}")
             return []
 
     async def get_by_id(self, scene_id: str) -> Optional[Dict[str, Any]]:
-        """A single scene by id, or None."""
+        """A single scene by id, or None. Carries ``scene_no_in_episode`` —
+        see ``list_by_script`` for the derivation rule."""
         try:
             async with read_scope() as session:
                 result = await session.execute(
@@ -168,7 +215,41 @@ class ScriptSceneRepository:
                     .limit(1)
                 )
                 row = result.scalars().first()
-                return _row(row) if row else None
+                if row is None:
+                    return None
+                out = _row(row)
+                if out["scene_number"] is not None:
+                    out["scene_no_in_episode"] = out["scene_number"]
+                    return out
+
+                locked_at = await session.scalar(
+                    select(ScriptProjects.numbering_locked_at).where(
+                        ScriptProjects.id == row.script_id
+                    )
+                )
+                is_locked = locked_at is not None
+                if is_locked:
+                    out["scene_no_in_episode"] = None
+                    return out
+
+                ids = (
+                    (
+                        await session.execute(
+                            select(ScriptScenes.id)
+                            .where(ScriptScenes.script_id == row.script_id)
+                            .order_by(
+                                ScriptScenes.chapter_id.asc().nulls_last(),
+                                ScriptScenes.sort_order.asc(),
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                out["scene_no_in_episode"] = derive_scene_number(
+                    list(ids).index(row.id)
+                )
+                return out
         except Exception as e:
             logger.error(f"Failed to get scene {scene_id}: {e}")
             return None
@@ -346,15 +427,54 @@ class ScriptSceneRepository:
             logger.error(f"Failed to update scene meta {scene_id}: {e}")
             raise
 
-    async def delete(self, scene_id: str) -> bool:
-        """Delete a scene (its ops cascade via FK ON DELETE CASCADE)."""
+    async def delete(self, scene_id: str) -> Dict[str, Any]:
+        """Delete a scene — hard DELETE while the script's numbering is
+        unlocked (writing phase; ops cascade via FK ON DELETE CASCADE, same
+        as before mig 403). Once the script is LOCKED, this instead OMITS
+        the scene in place (agent-layer spec §4.2's "delete after lock"):
+        stamps ``omitted_at`` and keeps the row + its ``scene_number`` —
+        the printed-script "3 OMITTED" convention — so the number stays
+        reserved forever and no downstream shot-id reference rots.
+
+        Returns ``{"deleted": bool, "omitted": bool, "scene": dict | None}``.
+        A missing scene is a quiet no-op (``deleted=False, omitted=False``),
+        matching the previous method's idempotent-DELETE behavior.
+        """
+        sid = _bigint(scene_id)
         try:
             async with write_scope() as session:
+                scene = (
+                    await session.execute(
+                        select(ScriptScenes.script_id).where(ScriptScenes.id == sid)
+                    )
+                ).first()
+                if scene is None:
+                    return {"deleted": False, "omitted": False, "scene": None}
+
+                locked_at = await session.scalar(
+                    select(ScriptProjects.numbering_locked_at).where(
+                        ScriptProjects.id == scene.script_id
+                    )
+                )
+                is_locked = locked_at is not None
+
+                if is_locked:
+                    result = await session.execute(
+                        update(ScriptScenes)
+                        .where(ScriptScenes.id == sid)
+                        .values(omitted_at=func.now())
+                        .returning(ScriptScenes)
+                    )
+                    row = result.scalars().first()
+                    out = _row(row) if row else None
+                    logger.info(f"Omitted scene {scene_id} (numbering locked)")
+                    return {"deleted": False, "omitted": True, "scene": out}
+
                 await session.execute(
-                    sa_delete(ScriptScenes).where(ScriptScenes.id == _bigint(scene_id))
+                    sa_delete(ScriptScenes).where(ScriptScenes.id == sid)
                 )
             logger.info(f"Deleted scene {scene_id}")
-            return True
+            return {"deleted": True, "omitted": False, "scene": None}
         except Exception as e:
             logger.error(f"Failed to delete scene {scene_id}: {e}")
             raise
@@ -590,6 +710,222 @@ class ScriptSceneRepository:
             await session.execute(
                 update(ScriptScenes).where(ScriptScenes.id == eid).values(**values)
             )
+
+    # ------------------------------------------------------------------ #
+    # Scene numbering — lock freeze + post-lock insert (agent-layer §4).
+    # ------------------------------------------------------------------ #
+
+    async def lock_numbering(self, script_id: str) -> Dict[str, Any]:
+        """Freeze scene numbering for a script (spec §4.2 "锁定拍摄稿").
+
+        Derives every scene's number from its CURRENT canonical order
+        (chapter_id NULLS LAST, then sort_order ASC — same order
+        ``list_by_script`` reads) and writes it into ``scene_number``, then
+        stamps ``script_projects.numbering_locked_at`` — all in one
+        transaction, so a crash mid-lock can never leave some scenes numbered
+        and the project flag unset (or vice versa).
+
+        Idempotent: locking an ALREADY-locked script is a no-op (returns the
+        current scenes unchanged) — re-deriving would defeat the entire
+        point of a freeze, silently reshuffling numbers a second `lock` call
+        was never meant to touch.
+        """
+        sid = _bigint(script_id)
+        async with write_scope() as session:
+            project = (
+                await session.execute(
+                    select(ScriptProjects.numbering_locked_at).where(
+                        ScriptProjects.id == sid
+                    )
+                )
+            ).first()
+            if project is None:
+                raise ValueError(f"script {script_id} not found")
+
+            if project.numbering_locked_at is not None:
+                existing = await self.list_by_script(script_id)
+                return {"already_locked": True, "scenes": existing}
+
+            result = await session.execute(
+                select(ScriptScenes)
+                .where(ScriptScenes.script_id == sid)
+                .order_by(
+                    ScriptScenes.chapter_id.asc().nulls_last(),
+                    ScriptScenes.sort_order.asc(),
+                )
+            )
+            rows = result.scalars().all()
+            updated: List[Dict[str, Any]] = []
+            for index, row in enumerate(rows):
+                number = derive_scene_number(index)
+                await session.execute(
+                    update(ScriptScenes)
+                    .where(ScriptScenes.id == row.id)
+                    .values(scene_number=number)
+                )
+                out = _row(row)
+                out["scene_number"] = number
+                out["scene_no_in_episode"] = number
+                updated.append(out)
+
+            await session.execute(
+                update(ScriptProjects)
+                .where(ScriptProjects.id == sid)
+                .values(numbering_locked_at=func.now())
+            )
+        logger.info(
+            f"Locked scene numbering for script {script_id} ({len(updated)} scenes)"
+        )
+        return {"already_locked": False, "scenes": updated}
+
+    @staticmethod
+    async def _locked_neighbour_numbers(script_id: Any, scene_id: Any) -> tuple:
+        """Fresh script-wide siblings (canonical order) plus ``scene_id``'s
+        OWN current immediate-neighbour numbers and the full existing-number
+        set. Shared by ``create_after_lock``'s initial placement AND its
+        same-base-corner reposition (below) so both read the CURRENT
+        physical position rather than a stale one computed before a second
+        ``move_scene()`` call."""
+        async with read_scope() as session:
+            sib_stmt = (
+                select(
+                    ScriptScenes.id, ScriptScenes.sort_order, ScriptScenes.scene_number
+                )
+                .where(ScriptScenes.script_id == script_id)
+                .order_by(
+                    ScriptScenes.chapter_id.asc().nulls_last(),
+                    ScriptScenes.sort_order.asc(),
+                )
+            )
+            siblings = [
+                (r[0], r[1], r[2]) for r in (await session.execute(sib_stmt)).all()
+            ]
+        existing_numbers = [s[2] for s in siblings if s[2] is not None]
+        ids = [s[0] for s in siblings]
+        idx = ids.index(_bigint(scene_id))
+        prev_number = siblings[idx - 1][2] if idx > 0 else None
+        next_number = siblings[idx + 1][2] if idx + 1 < len(siblings) else None
+        return prev_number, next_number, existing_numbers, siblings
+
+    async def create_after_lock(
+        self,
+        data: Dict[str, Any],
+        *,
+        before_scene_id: Optional[str] = None,
+        after_scene_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create + number a NEW scene under an ALREADY-LOCKED script (spec
+        §4.2 "锁定后插入").
+
+        Composed from the existing, separately-tested primitives —
+        ``create()`` (lands the row; sort_order = chapter-group tail) then
+        ``move_scene()`` (bisects it to the requested slot when anchors are
+        given, reusing its exact gap-exhaustion renumber) — rather than
+        duplicating their sort_order logic here. Neither ``create()`` nor
+        ``move_scene()`` is modified by this addition, so their existing
+        capture-style tests (which assert an EXACT statement sequence) are
+        unaffected. This method's own job is just: AFTER placement, re-read
+        the script-wide siblings in canonical order, find the new scene's
+        OWN final position among them (its immediate neighbours there, not
+        the before/after ids as originally given — this also makes the
+        anchor-less tail-append case work with the same lookup), then
+        compute + write ``scene_number`` via ``compute_locked_insert_number``
+        — NEVER touching any existing scene's own number.
+
+        Omitting both anchors is a tail append (the common "just keep
+        writing past the locked draft" case): the new scene continues the
+        plain integer sequence, no letter needed.
+
+        SAME-BASE CORNER (fixed, was previously a real bug — see git blame):
+        when the requested slot falls BETWEEN two neighbours that share an
+        integer base (e.g. between "3" and "3A", or between "3A" and "3B"),
+        no letter suffix can sort there — ``compute_locked_insert_number``
+        always assigns "the next unused suffix across the WHOLE base",
+        which necessarily sorts AFTER every existing member of that base's
+        run, including ``next_number``. Left at the physically-requested
+        slot, the row would display out of order relative to its own label
+        (e.g. ``list_by_script`` rendering "3, 3B, 3A, 4"). Detected via
+        ``base(prev_number) == base(next_number)`` and fixed by a SECOND
+        ``move_scene()`` call that repositions the row to sit immediately
+        after the base's current last member instead — ``new_number`` was
+        already computed as exactly the right label for THAT position, so
+        only the physical placement needs to move to agree with it.
+
+        Raises ``ValueError`` if the script is not locked yet — pre-lock
+        creation goes through plain ``create()``, which never touches
+        ``scene_number`` (writing-phase numbers stay derived, not stored).
+        """
+        script_id = _scene_write_values(data)["script_id"]
+        async with read_scope() as session:
+            locked = await session.scalar(
+                select(ScriptProjects.numbering_locked_at).where(
+                    ScriptProjects.id == script_id
+                )
+            )
+        if locked is None:
+            raise ValueError(
+                f"script {script_id} numbering is not locked; use create()"
+            )
+
+        created = await self.create(data)
+        scene_id = created["id"]
+
+        if before_scene_id is not None or after_scene_id is not None:
+            created = await self.move_scene(
+                scene_id,
+                chapter_id=created.get("chapter_id"),
+                before_scene_id=before_scene_id,
+                after_scene_id=after_scene_id,
+            )
+
+        prev_number, next_number, existing_numbers, siblings = (
+            await self._locked_neighbour_numbers(script_id, scene_id)
+        )
+
+        # SAME-BASE CORNER: reposition BEFORE assigning, so the row that
+        # ends up under scene_id's id is the one actually holding the final
+        # slot (the number, computed below, already matches that slot).
+        if prev_number is not None and next_number is not None:
+            base_prev, _ = parse_scene_number(prev_number)
+            base_next, _ = parse_scene_number(next_number)
+            if base_prev == base_next:
+                same_base = [
+                    (sid, num)
+                    for sid, _order, num in siblings
+                    if sid != _bigint(scene_id)
+                    and num is not None
+                    and parse_scene_number(num)[0] == base_prev
+                ]
+                last_member_id, _ = max(
+                    same_base, key=lambda pair: scene_number_sort_key(pair[1])
+                )
+                created = await self.move_scene(
+                    scene_id,
+                    chapter_id=created.get("chapter_id"),
+                    after_scene_id=str(last_member_id),
+                )
+                prev_number, next_number, existing_numbers, _siblings = (
+                    await self._locked_neighbour_numbers(script_id, scene_id)
+                )
+
+        new_number = compute_locked_insert_number(
+            prev_number, next_number, existing_numbers
+        )
+
+        async with write_scope() as session:
+            result = await session.execute(
+                update(ScriptScenes)
+                .where(ScriptScenes.id == _bigint(scene_id))
+                .values(scene_number=new_number)
+                .returning(ScriptScenes)
+            )
+            row = result.scalars().first()
+        out = _row(row) if row else created
+        out["scene_no_in_episode"] = new_number
+        logger.info(
+            f"Assigned scene_number {new_number} to scene {scene_id} (post-lock insert)"
+        )
+        return out
 
 
 def get_script_scene_repository() -> "ScriptSceneRepository":

@@ -113,8 +113,64 @@ async def test_reassign_within_same_project_ok(client, monkeypatch):
     async def fake_update(self, record_id, data):
         return {"id": record_id, "episode_id": data.get("episode_id")}
 
+    async def fake_get_by_episode_unowned(self, episode_id):
+        return None  # nobody owns this episode yet
+
     monkeypatch.setattr(ScriptProjectRepository, "update", fake_update)
+    monkeypatch.setattr(
+        ScriptProjectRepository, "get_by_episode", fake_get_by_episode_unowned
+    )
 
     resp = await client.put("/api/v1/scripts/projects/9001", json={"episode_id": "555"})
     assert resp.status_code == 200
     assert resp.json()["data"]["episode_id"] == "555"
+
+
+@pytest.mark.asyncio
+async def test_reassign_to_episode_owned_by_same_script_ok(client, monkeypatch):
+    """Re-saving the episode_id a script already owns (a no-op reassign)
+    must NOT be rejected as "already owned" — the owner check excludes the
+    requesting script itself."""
+    _patch_repos(monkeypatch, script_project_id=700, episode_project_id=700)
+
+    from app.repositories.script_repository import ScriptProjectRepository
+
+    async def fake_update(self, record_id, data):
+        return {"id": record_id, "episode_id": data.get("episode_id")}
+
+    async def fake_get_by_episode_self(self, episode_id):
+        return {"id": "9001", "episode_id": episode_id}  # owned by THIS script
+
+    monkeypatch.setattr(ScriptProjectRepository, "update", fake_update)
+    monkeypatch.setattr(
+        ScriptProjectRepository, "get_by_episode", fake_get_by_episode_self
+    )
+
+    resp = await client.put("/api/v1/scripts/projects/9001", json={"episode_id": "555"})
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_reassign_to_already_occupied_episode_rejected(client, monkeypatch):
+    """The bug this closes: a manual reassign onto an episode ANOTHER live
+    script already owns used to succeed unconditionally (a plain UPDATE,
+    no existence check) — two scripts on one episode would each derive
+    scene numbers 1, 2, 3... independently, producing two "scene 1" in the
+    same episode. Must now be rejected (409), not silently allowed."""
+    _patch_repos(monkeypatch, script_project_id=700, episode_project_id=700)
+
+    from app.repositories.script_repository import ScriptProjectRepository
+
+    async def fake_update(self, record_id, data):
+        raise AssertionError("update() must not be reached — reassign should 409 first")
+
+    async def fake_get_by_episode_occupied(self, episode_id):
+        return {"id": "8888", "episode_id": episode_id}  # a DIFFERENT script
+
+    monkeypatch.setattr(ScriptProjectRepository, "update", fake_update)
+    monkeypatch.setattr(
+        ScriptProjectRepository, "get_by_episode", fake_get_by_episode_occupied
+    )
+
+    resp = await client.put("/api/v1/scripts/projects/9001", json={"episode_id": "555"})
+    assert resp.status_code == 409

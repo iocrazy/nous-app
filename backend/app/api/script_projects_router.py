@@ -9,6 +9,7 @@ from app.core.deps import AuthDep, require_team_id
 from app.core.scope_guards import verify_script_access
 from app.repositories.episode_repository import get_episode_repository
 from app.repositories.script_repository import get_script_project_repository
+from app.repositories.script_scene_repository import get_script_scene_repository
 from app.schemas.script import ScriptProjectCreate, ScriptProjectUpdate, ViewportUpdate
 from app.services.storyboard.script.script_service import ScriptService
 
@@ -29,6 +30,24 @@ async def _assert_same_project_episode(script_id: str, episode_id: str) -> None:
     ):
         raise HTTPException(
             status_code=404, detail="Episode not in this script's project"
+        )
+
+
+async def _assert_episode_unowned(script_id: str, episode_id: str) -> None:
+    """Reassign guard (agent-layer spec §4.3's episode-scoped scene-number
+    uniqueness): reject reassigning to an episode ANOTHER live script
+    already owns. The auto-provision path (``get_or_create_for_episode``)
+    enforces "at most one script per episode" via an advisory lock; this
+    manual reassign path (a plain ``UPDATE``) had NO such check at all —
+    two scripts could end up on one episode, each numbering its own scenes
+    1, 2, 3..., producing two "scene 1" in the same episode (the exact
+    laper.ai collision A3 exists to prevent, reached through a different
+    door). 409, not 404 — the episode's existence isn't in question, only
+    whether it's free to attach to."""
+    owner = await get_script_project_repository().get_by_episode(episode_id)
+    if owner is not None and str(owner.get("id")) != str(script_id):
+        raise HTTPException(
+            status_code=409, detail="Episode already has another script attached"
         )
 
 
@@ -104,9 +123,12 @@ async def update_script_project(
     try:
         svc = ScriptService()
         data = body.model_dump(exclude_none=True)
-        # Reassigning to another episode must stay within the script's project.
+        # Reassigning to another episode must stay within the script's
+        # project AND that episode must not already be owned by a DIFFERENT
+        # live script (episode-scoped scene numbering's uniqueness promise).
         if data.get("episode_id") is not None:
             await _assert_same_project_episode(script_id, data["episode_id"])
+            await _assert_episode_unowned(script_id, data["episode_id"])
         updated = await svc.update_project(script_id, data)
         return {"success": True, "data": updated}
     except HTTPException:
@@ -145,3 +167,22 @@ async def update_viewport(
     except Exception as exc:
         logger.error(f"[Scripts] update_viewport {script_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to update viewport")
+
+
+@router.post("/{script_id}/lock-numbering")
+async def lock_numbering(
+    auth: AuthDep,
+    script_id: str,
+    _guard: None = Depends(verify_script_access),
+) -> Dict[str, Any]:
+    """Freeze scene numbering (agent-layer spec §4.2 "锁定拍摄稿"). Derives
+    every scene's number from its current order and writes it permanently;
+    idempotent — locking an already-locked script is a no-op."""
+    try:
+        result = await get_script_scene_repository().lock_numbering(script_id)
+        return {"success": True, "data": result}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"[Scripts] lock_numbering {script_id} failed: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to lock numbering")

@@ -131,6 +131,38 @@ class ScriptProjectRepository(BaseRepository):
             logger.error(f"Failed to get script_projects {record_id}: {e}")
             return None
 
+    async def get_by_episode(self, episode_id: str) -> Optional[Dict[str, Any]]:
+        """The live (non-deleted) script currently attached to an episode, if
+        any. Mirrors the "existing" lookup inside ``get_or_create_for_episode``
+        (same filter, same order) — used by the manual reassign guard
+        (``script_projects_router._assert_episode_unowned``) to reject
+        attaching a SECOND script to an already-owned episode. That reassign
+        path (a plain ``update`` with ``episode_id``) has never enforced "at
+        most one script per episode" the way the auto-provision path does
+        (advisory lock) — this closes that gap at the APPLICATION level only
+        (no new DB constraint: see ``get_or_create_for_episode``'s docstring
+        for why a DB unique index on ``episode_id`` is deliberately NOT
+        added — existing prod duplicate rows would break it under CI
+        auto-apply). An app-level check adds protection going forward
+        without touching any existing data or failing a migration."""
+        try:
+            eid = _bigint(episode_id)
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(ScriptProjects)
+                    .where(
+                        ScriptProjects.episode_id == eid,
+                        ScriptProjects.status != "deleted",
+                    )
+                    .order_by(ScriptProjects.updated_at.desc())
+                    .limit(1)
+                )
+                row = result.scalars().first()
+                return _to_dict(row, _PROJECT_N2A) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get script_projects by episode {episode_id}: {e}")
+            return None
+
     async def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
         try:
             values = _coerce_bigint_cols(data, ("id", "project_id", "team_id"))
