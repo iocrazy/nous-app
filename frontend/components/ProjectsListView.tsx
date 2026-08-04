@@ -14,6 +14,7 @@ import { ProjectSettingsPanel } from './ProjectSettingsPanel';
 import { ProjectMembersPanel } from './ProjectMembersPanel';
 import { ProjectsQueueView } from './ProjectsQueueView';
 import { UiSelect } from './ui';
+import { PageHeader } from './layout/PageHeader';
 
 interface ProjectsListViewProps {
   projects: Project[];
@@ -174,9 +175,10 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-lg font-semibold text-ink-100">{externalTitle || t('mediatrack.projects', 'Projects')}</h1>
-        <div className="flex items-center gap-2">
+      <PageHeader
+        title={externalTitle || t('mediatrack.projects', 'Projects')}
+        actions={
+          <>
           {/* Search */}
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-500" />
@@ -225,8 +227,9 @@ export const ProjectsListView: React.FC<ProjectsListViewProps> = ({
             <Plus size={14} />
             {t('mediatrack.newProject', 'New Project')}
           </button>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {/* Stats + sort + (grid-only) card/table view toggle */}
       <div className="flex items-center justify-between mb-4">

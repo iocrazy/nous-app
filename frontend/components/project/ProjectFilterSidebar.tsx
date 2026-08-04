@@ -3,6 +3,7 @@ import {
   FolderOpen, PanelLeftClose, PanelLeftOpen, GitBranch, Lightbulb,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { SecondarySidebarHeader } from '../layout/SecondarySidebarHeader';
 
 // Global entry (spec §1): Ideation topic pool, pinned bottom-left, grouped with
 // the Workflow Templates entry (added by the M1 PR-C work). Not a project
@@ -101,17 +102,19 @@ export function ProjectFilterSidebar({
   return (
     <div className={`flex w-52 flex-col border-r border-ink-800/40`}>
       {/* Header — title + inline collapse control */}
-      <div className="flex items-center justify-between px-4 pt-4 pb-3">
-        <span className="text-sm font-semibold text-ink-200">{t('mediatrack.projects')}</span>
-        <button
-          onClick={onToggleCollapse}
-          aria-label={t('projects.nav.collapseSidebar')}
-          title={t('projects.nav.collapseSidebar')}
-          className={iconBtnClass}
-        >
-          <PanelLeftClose size={16} />
-        </button>
-      </div>
+      <SecondarySidebarHeader
+        title={t('mediatrack.projects')}
+        trailing={
+          <button
+            onClick={onToggleCollapse}
+            aria-label={t('projects.nav.collapseSidebar')}
+            title={t('projects.nav.collapseSidebar')}
+            className={iconBtnClass}
+          >
+            <PanelLeftClose size={16} />
+          </button>
+        }
+      />
 
       {/* View filters */}
       <div className="px-2">
