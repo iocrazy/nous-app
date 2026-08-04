@@ -203,6 +203,17 @@ class TemplateUpdate(BaseModel):
         return self
 
 
+class WorkflowAlreadyInstantiated(Exception):
+    """Raised by ``ProjectStageNodesRepository.instantiate_from_template``
+    when called with ``expect_fresh=True`` and the project already carries
+    any instance nodes at lock-acquisition time — either a genuine prior
+    instantiation or the losing side of a concurrent attach-workflow race
+    (see the per-project ``pg_advisory_xact_lock`` in that method). The
+    create-project path never sets ``expect_fresh`` and so never raises this
+    — it keeps its historical idempotent-no-op-returns-existing behavior.
+    ``POST /projects/{id}/workflow`` (the M1.x attach path) maps this to 409."""
+
+
 # ── project workflow instance (PR-B) ────────────────────────────────────────
 
 

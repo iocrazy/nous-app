@@ -41,10 +41,21 @@ async def instantiate_project_workflow(
     method: Optional[str] = None,
     overrides: Optional[List[Dict[str, Any]]] = None,
     user_id: str,
+    expect_fresh: bool = False,
 ) -> List[Dict[str, Any]]:
     """Instantiate + set the cursor + open the first group's mirror issues.
 
     Returns the instantiated node list (empty on No-workflow / empty template).
+
+    ``expect_fresh`` threads straight through to
+    ``instantiate_from_template`` — default False keeps the create-project
+    path's historical "idempotent, never raise" behavior; the M1.x attach-
+    workflow endpoint passes True so a losing concurrent race (or a genuine
+    already-has-a-workflow project) raises ``WorkflowAlreadyInstantiated``
+    instead of silently no-op-succeeding. This function does not catch that
+    exception — it propagates to the caller (the router maps it to 409;
+    ``maybe_instantiate_project_workflow`` below never sets ``expect_fresh``
+    so it never sees it).
     """
     from app.repositories.project_stage_nodes_repository import (
         get_project_stage_nodes_repository,
@@ -59,7 +70,11 @@ async def instantiate_project_workflow(
 
     repo = get_project_stage_nodes_repository()
     nodes = await repo.instantiate_from_template(
-        project_id, template_id, method=method, overrides=overrides
+        project_id,
+        template_id,
+        method=method,
+        overrides=overrides,
+        expect_fresh=expect_fresh,
     )
     if not nodes:
         return []

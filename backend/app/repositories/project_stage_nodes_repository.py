@@ -14,7 +14,10 @@ Discipline:
     the issue→node sync hook; business code never PATCHes ``status`` directly
     (status is a projection of the mirror issue, per spec §6).
   * ``instantiate_from_template`` is idempotent: a project that already owns any
-    node is left untouched (returns its existing nodes).
+    node is left untouched (returns its existing nodes) — unless
+    ``expect_fresh=True``, in which case it raises ``WorkflowAlreadyInstantiated``
+    instead. Race-safe: a per-project ``pg_advisory_xact_lock`` inside the same
+    transaction serializes concurrent calls (see the method's own docstring).
   * ``set_node_metadata`` is the ONE writer of ``metadata`` (mig 389) — a
     shallow JSONB merge, never touching ``status``/``events``/schedule
     columns. The stage-hook workflow (M3 PR-H2) uses it to stamp
@@ -27,7 +30,7 @@ import datetime
 import uuid
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 
 from app.db.session import read_scope, write_scope
 from app.models import (
@@ -42,7 +45,7 @@ from app.models import (
     WorkflowTemplateNodeMembers,
     WorkflowTemplateNodes,
 )
-from app.schemas.workflow import DepsBackwardOnly
+from app.schemas.workflow import DepsBackwardOnly, WorkflowAlreadyInstantiated
 
 # Node-bank slugs whose skip state the method shortcut overrides (spec §2/§3):
 # Canvas is always on (常驻不可关); Shooting is on for live/hybrid, off for ai.
@@ -202,14 +205,30 @@ class ProjectStageNodesRepository:
         *,
         method: Optional[str] = None,
         overrides: Optional[List[Dict[str, Any]]] = None,
+        expect_fresh: bool = False,
     ) -> List[Dict[str, Any]]:
         """Copy a template's nodes into ``project_stage_nodes`` (idempotent).
 
         A project that already owns any node is left untouched (returns its
-        existing nodes). ``method`` (live/ai/hybrid) flips the Shooting/Canvas
-        skip state and, for hybrid, drops Shooting+Canvas into one parallel
-        group. ``overrides`` (keyed by ``source_template_node_id``) let the
-        create dialog tweak the instance without touching the template.
+        existing nodes) UNLESS ``expect_fresh`` is set, in which case that
+        case raises ``WorkflowAlreadyInstantiated`` instead (the M1.x
+        attach-workflow path opts into this so it can 409 rather than
+        silently succeed a second time). ``method`` (live/ai/hybrid) flips
+        the Shooting/Canvas skip state and, for hybrid, drops Shooting+Canvas
+        into one parallel group. ``overrides`` (keyed by
+        ``source_template_node_id``) let the create dialog tweak the
+        instance without touching the template.
+
+        Concurrency: a per-project ``pg_advisory_xact_lock`` is taken FIRST,
+        inside this same transaction, before the idempotency check below —
+        without it, two concurrent calls for the same project (double-click
+        before a button disables, a client retry, two collaborators) can both
+        read "no nodes yet" under READ COMMITTED and both insert, doubling
+        nodes AND their mirror issues. The loser blocks on the lock until the
+        winner's transaction commits, then re-reads and takes the
+        already-instantiated branch above instead of re-inserting. Same
+        per-id advisory-lock idiom as
+        ``script_repository.get_or_create_for_episode``.
         """
         pid = int(str(project_id))
         overrides_by_src: Dict[str, Dict[str, Any]] = {}
@@ -219,6 +238,19 @@ class ProjectStageNodesRepository:
                 overrides_by_src[str(key)] = ov
 
         async with write_scope() as session:
+            # Concurrency guard — see docstring above. hashtextextended(text,
+            # int8) -> int8 yields a namespaced 64-bit advisory key from the
+            # project id, so it never collides with another module's
+            # advisory-lock namespace (e.g. script_repository's
+            # 'script_provision:' prefix).
+            await session.execute(
+                text(
+                    "SELECT pg_advisory_xact_lock("
+                    "hashtextextended('project_stage_nodes_instantiate:' || :pid, 0))"
+                ),
+                {"pid": str(pid)},
+            )
+
             # Idempotency: never re-instantiate over an existing workflow.
             existing = (
                 (
@@ -232,6 +264,8 @@ class ProjectStageNodesRepository:
                 .first()
             )
             if existing is not None:
+                if expect_fresh:
+                    raise WorkflowAlreadyInstantiated()
                 return await self._list_nodes_in_session(session, pid)
 
             tpl_nodes = (

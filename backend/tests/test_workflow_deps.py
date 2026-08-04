@@ -432,9 +432,11 @@ def test_template_node_row_defaults_depends_on_to_empty_list():
 
 
 class _InstantiateFakeSession:
-    """8-call fake for one instantiate pass with non-empty deps (see the
+    """9-call fake for one instantiate pass with non-empty deps (see the
     docstring on the sibling class in test_workflow_instantiation.py for the
-    full call-order rationale)."""
+    full call-order rationale — call 1 is the leading
+    ``pg_advisory_xact_lock`` concurrency guard added by the M1.x attach-race
+    fix)."""
 
     def __init__(
         self,
@@ -456,26 +458,28 @@ class _InstantiateFakeSession:
                 obj.id = self._next_id
                 self._next_id += 1
 
-    async def execute(self, stmt: Any) -> _Result:
+    async def execute(self, stmt: Any, params: Any = None) -> _Result:
         await self.flush()
         self._calls += 1
         if self._calls == 1:
-            return _Result([])  # existing-nodes check
+            return _Result([])  # pg_advisory_xact_lock
         if self._calls == 2:
-            return _Result(self._tpl_nodes)  # template nodes select
+            return _Result([])  # existing-nodes check
         if self._calls == 3:
-            return _Result([])  # template node-members select
+            return _Result(self._tpl_nodes)  # template nodes select
         if self._calls == 4:
-            return _Result(self._tpl_deps)  # template node-deps select
+            return _Result([])  # template node-members select
         if self._calls == 5:
-            return _Result([])  # node-bank slug map select
+            return _Result(self._tpl_deps)  # template node-deps select
         if self._calls == 6:
+            return _Result([])  # node-bank slug map select
+        if self._calls == 7:
             nodes = [o for o in self.added if isinstance(o, ProjectStageNodes)]
             nodes.sort(key=lambda n: n.sort_order)
             return _Result(nodes)
-        if self._calls == 7:
-            return _Result([])  # final member listing (no members in fixture)
         if self._calls == 8:
+            return _Result([])  # final member listing (no members in fixture)
+        if self._calls == 9:
             deps = [o for o in self.added if isinstance(o, ProjectStageNodeDeps)]
             return _Result(deps)
         raise AssertionError(f"unexpected extra session.execute call #{self._calls}")

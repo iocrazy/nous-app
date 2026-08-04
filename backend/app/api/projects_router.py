@@ -65,6 +65,7 @@ from app.schemas.workflow import (
     NodeDeleteBlocked,
     NodePatch,
     ProjectWorkflowOut,
+    WorkflowAlreadyInstantiated,
 )
 from app.services.library.projects_service import ProjectsService
 
@@ -427,12 +428,16 @@ async def attach_project_workflow(
       1. ``verify_project_write_access`` (owner / team member / project
          manager-editor) — same gate every other project-mutation endpoint
          in this router uses.
-      2. 409 if the project already has any instance nodes — instantiating
-         twice would duplicate nodes and mirror issues.
-         ``instantiate_from_template`` itself is idempotent (a project that
-         already owns any node is left untouched), but that silent no-op
-         would look like a fake success to the caller; this surfaces it as
-         an explicit, actionable error instead.
+      2. A fast-path 409 if the project already has any instance nodes —
+         this is an optimization (skip team/template lookups on the common
+         "already set up" case), NOT the correctness guarantee: two
+         concurrent attaches (double-click, a client retry, two
+         collaborators) can both pass this plain SELECT before either
+         commits. The actual guarantee is ``expect_fresh=True`` below, which
+         holds a per-project Postgres advisory lock across the real
+         check-and-insert inside ``instantiate_from_template`` — the losing
+         side of a race raises ``WorkflowAlreadyInstantiated``, caught here
+         and mapped to the same 409.
       3. The chosen template must belong to the project's own scope (its
          team, or — for a personal project, team_id IS NULL — the OWNER's
          personal team, the same boundary translation
@@ -486,12 +491,16 @@ async def attach_project_workflow(
     ):
         raise HTTPException(status_code=404, detail="Template not found")
 
-    nodes = await instantiate_project_workflow(
-        project_id,
-        payload.template_id,
-        method=payload.method,
-        user_id=auth.user_id,
-    )
+    try:
+        nodes = await instantiate_project_workflow(
+            project_id,
+            payload.template_id,
+            method=payload.method,
+            user_id=auth.user_id,
+            expect_fresh=True,
+        )
+    except WorkflowAlreadyInstantiated:
+        raise HTTPException(status_code=409, detail="Project already has a workflow")
     return {"success": True, "data": nodes}
 
 

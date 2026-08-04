@@ -23,6 +23,7 @@ from app.core.deps import get_auth
 # already-built dependency graph. `app.dependency_overrides[<this object>]`
 # is the correct override seam (same idiom as the `get_auth` override below).
 from app.core.scope_guards import verify_project_write_access
+from app.schemas.workflow import WorkflowAlreadyInstantiated
 
 # See test_workflow_templates_router.py for why this can't be a plain
 # `from app.api import projects_router as pr` — app/api/__init__.py rebinds
@@ -167,11 +168,17 @@ async def test_attach_workflow_happy_path_team_project(app, monkeypatch):
         assert template_id == "tpl-1"
         return "42"
 
-    async def fake_instantiate(project_id, template_id, *, method=None, user_id=None):
+    async def fake_instantiate(
+        project_id, template_id, *, method=None, user_id=None, expect_fresh=False
+    ):
         assert project_id == "500"
         assert template_id == "tpl-1"
         assert method == "hybrid"
         assert user_id == USER_ID
+        # The atomicity fix: the attach endpoint must opt into the strict,
+        # race-safe branch (raises WorkflowAlreadyInstantiated instead of a
+        # silent idempotent no-op) — never the create-path default.
+        assert expect_fresh is True
         return [{"id": "n1", "name": "Script"}]
 
     monkeypatch.setattr(
@@ -222,7 +229,10 @@ async def test_attach_workflow_personal_project_resolves_owner_personal_team(
     async def fake_get_template_team_id(self, template_id):
         return "7777"
 
-    async def fake_instantiate(project_id, template_id, *, method=None, user_id=None):
+    async def fake_instantiate(
+        project_id, template_id, *, method=None, user_id=None, expect_fresh=False
+    ):
+        assert expect_fresh is True
         return [{"id": "n1", "name": "Script"}]
 
     monkeypatch.setattr(
@@ -253,3 +263,58 @@ async def test_attach_workflow_personal_project_resolves_owner_personal_team(
         )
     assert resp.status_code == 200
     assert resp.json()["data"] == [{"id": "n1", "name": "Script"}]
+
+
+@pytest.mark.asyncio
+async def test_attach_workflow_409s_on_concurrent_race_loser(app, monkeypatch):
+    """The atomicity fix's router-level half: the fast pre-check
+    (``list_nodes``) is not the correctness guarantee — two concurrent
+    attaches can both pass it before either commits. The REAL guarantee is
+    the per-project advisory lock inside ``instantiate_from_template``
+    (``expect_fresh=True``): the losing side raises
+    ``WorkflowAlreadyInstantiated`` even though THIS request's own
+    ``list_nodes`` pre-check saw an empty project. This test simulates that
+    exact race outcome — pre-check empty, but the locked instantiate call
+    still finds it already done — and asserts the router surfaces 409, not
+    a silent 200 with someone else's nodes. (See
+    tests/test_workflow_instantiation.py for the repo-level proof that the
+    lock statement actually runs first and that expect_fresh raises.)"""
+    _allow_write(app)
+
+    async def fake_get_project_by_id(self, project_id):
+        return {"id": "500", "owner_id": OWNER_ID, "team_id": "42"}
+
+    async def fake_list_nodes(self, project_id):
+        return []  # this request's own fast pre-check sees nothing yet
+
+    async def fake_get_template_team_id(self, template_id):
+        return "42"
+
+    async def fake_instantiate_raises(*args, **kwargs):
+        # Simulates the race loser: by the time the lock is acquired, the
+        # winner's transaction already committed nodes.
+        raise WorkflowAlreadyInstantiated()
+
+    monkeypatch.setattr(
+        "app.repositories.projects_repository.ProjectsRepository.get_project_by_id",
+        fake_get_project_by_id,
+    )
+    monkeypatch.setattr(
+        "app.repositories.project_stage_nodes_repository.ProjectStageNodesRepository.list_nodes",
+        fake_list_nodes,
+    )
+    monkeypatch.setattr(
+        "app.repositories.workflow_templates_repository.WorkflowTemplatesRepository.get_template_team_id",
+        fake_get_template_team_id,
+    )
+    monkeypatch.setattr(
+        "app.services.workflow.instantiation.instantiate_project_workflow",
+        fake_instantiate_raises,
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        resp = await c.post(
+            "/api/v1/projects/500/workflow", json={"template_id": "tpl-1"}
+        )
+    assert resp.status_code == 409

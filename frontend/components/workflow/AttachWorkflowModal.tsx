@@ -168,7 +168,7 @@ export const AttachWorkflowModal: React.FC<AttachWorkflowModalProps> = ({
           )}
 
           {error && (
-            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+            <div className="p-3 bg-danger-soft border border-danger-line rounded-lg text-danger text-sm">
               {error}
             </div>
           )}
@@ -186,7 +186,12 @@ export const AttachWorkflowModal: React.FC<AttachWorkflowModalProps> = ({
               onClick={() => void handleSubmit()}
               disabled={submitting || loading || !templateId}
               data-testid="attach-workflow-submit"
-              className="flex-1 px-4 py-3 text-white bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 disabled:cursor-not-allowed rounded-xl font-medium transition-colors"
+              className="flex-1 rounded-xl border px-4 py-3 font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              style={{
+                background: 'var(--accent-soft)',
+                color: 'var(--accent-text)',
+                borderColor: 'var(--accent-border)',
+              }}
             >
               {submitting
                 ? (t('common.creating') || 'Creating...')
