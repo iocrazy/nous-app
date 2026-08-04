@@ -31,13 +31,3 @@ class SocialAccountOut(BaseModel):
 
 class AccountListResponse(BaseModel):
     accounts: list[SocialAccountOut]
-
-
-class ModuleStatusResponse(BaseModel):
-    """Distribution module switches (admin-controlled via
-    ``system_settings['distribution.module']``). ``visible`` controls whether
-    the frontend shows the nav entry + routes; ``enabled`` gates the backend
-    account/OAuth API. Both default OFF (opt-in)."""
-
-    enabled: bool = False
-    visible: bool = False

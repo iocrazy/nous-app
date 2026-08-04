@@ -119,12 +119,3 @@ class SourceCreateRequest(BaseModel):
 class SourceMutationResponse(BaseModel):
     success: bool = True
     source: Optional[SourceHealthOut] = None
-
-
-class ModuleStatusResponse(BaseModel):
-    """Topic Inspiration module switches. ``visible`` controls whether the
-    frontend shows the nav entry + page; ``enabled`` reports whether the
-    backend pipeline is processing (the page shows a paused notice when off)."""
-
-    enabled: bool = True
-    visible: bool = True
