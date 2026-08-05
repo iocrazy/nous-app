@@ -3,11 +3,14 @@
 GET /projects/{project_id}/entities — project-wide Characters/Locations,
 derived from every non-deleted script's scenes. Covers the pure
 ``derive_project_entities`` matrix (dedup, empty-skip, str-typed
-content_json, episode attribution) and the repository row fetch
-(monkeypatched db_engine.fetch_all, no live DB).
+content_json, episode attribution) and the repository row fetch (Phase B5
+Task 1: migrated to the SQLAlchemy ORM — monkeypatched
+``app.db.session.read_scope``, no live DB).
 """
 
 from __future__ import annotations
+
+from contextlib import asynccontextmanager
 
 import pytest
 
@@ -142,37 +145,65 @@ def test_empty_rows_returns_empty_lists():
 # --------------------------------------------------------------------------- #
 
 
+def _compile(stmt):
+    from sqlalchemy.dialects import postgresql
+
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    return str(compiled), dict(compiled.params)
+
+
+class _FakeResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
 @pytest.mark.asyncio
 async def test_list_scene_rows_for_project_passes_project_id(monkeypatch):
     import app.repositories.script_scene_repository as mod
 
     captured: dict = {}
+    row = {"episode_id": 1, "location_text": "LOFT", "content_json": []}
 
-    async def fake_fetch_all(sql, params):
-        captured["sql"] = sql
-        captured["params"] = params
-        return [
-            {"episode_id": 1, "location_text": "LOFT", "content_json": []},
-        ]
+    class _FakeSession:
+        async def execute(self, stmt):
+            captured["stmt"] = stmt
+            return _FakeResult([row])
 
-    monkeypatch.setattr(mod.db_engine, "fetch_all", fake_fetch_all)
+    @asynccontextmanager
+    async def fake_read_scope():
+        yield _FakeSession()
+
+    monkeypatch.setattr(mod, "read_scope", fake_read_scope)
 
     rows = await ScriptSceneRepository().list_scene_rows_for_project("555")
 
-    assert captured["params"] == {"project_id": 555}
-    assert "script_projects" in captured["sql"]
-    assert "status != 'deleted'" in captured["sql"]
+    sql, binds = _compile(captured["stmt"])
+    assert binds["project_id_1"] == 555
+    assert "public.script_projects" in sql
+    assert "public.script_projects.status != " in sql
     assert len(rows) == 1
+    assert rows[0] == row
 
 
 @pytest.mark.asyncio
 async def test_list_scene_rows_for_project_empty_when_none(monkeypatch):
     import app.repositories.script_scene_repository as mod
 
-    async def fake_fetch_all(sql, params):
-        return None
+    class _FakeSession:
+        async def execute(self, stmt):
+            return _FakeResult([])
 
-    monkeypatch.setattr(mod.db_engine, "fetch_all", fake_fetch_all)
+    @asynccontextmanager
+    async def fake_read_scope():
+        yield _FakeSession()
+
+    monkeypatch.setattr(mod, "read_scope", fake_read_scope)
 
     rows = await ScriptSceneRepository().list_scene_rows_for_project("555")
     assert rows == []

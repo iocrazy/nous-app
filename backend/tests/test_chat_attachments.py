@@ -11,16 +11,18 @@ Coverage:
     4. _safe_filename strips directory traversal and replaces unsafe chars
 
 Mocking idiom (mirrors test_generated_media_register.py):
-  - monkeypatch module-level attributes (settings, db_engine) on the
+  - monkeypatch module-level attributes (settings, write_scope) on the
     service module so the real import graph is exercised
   - AsyncMock for conv_repo (get_conversation / is_member)
 """
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 # ── Service unit tests ────────────────────────────────────────────────────────
 
@@ -93,14 +95,23 @@ async def test_save_chat_image_writes_file_and_calls_insert(tmp_path, monkeypatc
     }
     captured: dict = {}
 
-    async def _fake_execute_returning_one(sql: str, params: dict):
-        captured["sql"] = sql
-        captured["params"] = params
-        return expected_row
+    class _FakeResult:
+        def mappings(self):
+            return self
 
-    monkeypatch.setattr(
-        gm_svc.db_engine, "execute_returning_one", _fake_execute_returning_one
-    )
+        def first(self):
+            return expected_row
+
+    class _FakeSession:
+        async def execute(self, stmt):
+            captured["params"] = dict(stmt.compile(dialect=postgresql.dialect()).params)
+            return _FakeResult()
+
+    @asynccontextmanager
+    async def _fake_write_scope():
+        yield _FakeSession()
+
+    monkeypatch.setattr(gm_svc, "write_scope", _fake_write_scope)
 
     result = await save_chat_image(
         conversation_id=5,

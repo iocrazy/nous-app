@@ -21,9 +21,8 @@ from sqlalchemy import and_
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, insert, select, update
 
-from app.db import engine as db_engine
 from app.db.session import read_scope, write_scope
-from app.models import Episodes, ScriptProjects
+from app.models import Episodes, ScriptProjects, ScriptScenes, ScriptShots
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 
 _EPISODES_N2A: Dict[str, str] = _name_to_attr(Episodes)
@@ -65,12 +64,12 @@ def _episode_write_values(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ------------------------------------------------------------------ #
-# Episode progress aggregate (PR-10a, spec G12) — raw SQL, not ORM. The
-# episode -> script -> scene -> shot join chain needs multiple independently
-# FILTERed counts over the same leaf table (shots_done, renders_count),
-# which doesn't map cleanly onto a single ORM group_by; this follows the
-# app.db.engine raw-SQL house idiom (see project_stages_repository.py)
-# instead of read_scope. renders_count uses a single FILTER with an OR
+# Episode progress aggregate (PR-10a, spec G12; Phase B5 Task 1: migrated
+# to the ORM). The episode -> script -> scene -> shot join chain needs
+# multiple independently FILTERed counts over the same leaf table
+# (shots_done, renders_count) — expressed here as func.count(...).filter(...)
+# per column rather than a raw SQL DISTINCT-count aggregate.
+# renders_count uses a single FILTER with an OR
 # (image_url IS NOT NULL OR video_url IS NOT NULL) rather than two summed
 # FILTERed counts — a shot can have both an image and a video (the
 # image-then-video generation flow), and summing two separate FILTERs
@@ -79,29 +78,39 @@ def _episode_write_values(data: Dict[str, Any]) -> Dict[str, Any]:
 # generic except->500 fires, same as every sibling read endpoint.
 # ------------------------------------------------------------------ #
 
-_PROGRESS_SQL = """
-    SELECT
-      e.id AS episode_id,
-      e.title AS title,
-      e.sort_order AS sort_order,
-      COUNT(DISTINCT sp.id) AS script_count,
-      COUNT(DISTINCT sc.id) AS scene_count,
-      COUNT(DISTINCT sh.id) AS shots_total,
-      COUNT(DISTINCT sh.id) FILTER (WHERE sh.status = 'done') AS shots_done,
-      COUNT(DISTINCT sh.id) FILTER (
-        WHERE sh.image_url IS NOT NULL OR sh.video_url IS NOT NULL
-      ) AS renders_count
-    FROM public.episodes e
-    LEFT JOIN public.script_projects sp
-      ON sp.episode_id = e.id AND sp.status != 'deleted'
-    LEFT JOIN public.script_scenes sc
-      ON sc.script_id = sp.id
-    LEFT JOIN public.script_shots sh
-      ON sh.scene_id = sc.id
-    WHERE e.project_id = :project_id
-    GROUP BY e.id, e.title, e.sort_order
-    ORDER BY e.sort_order ASC
-"""
+
+def _progress_stmt(project_id: Optional[int]):
+    return (
+        select(
+            Episodes.id.label("episode_id"),
+            Episodes.title.label("title"),
+            Episodes.sort_order.label("sort_order"),
+            func.count(func.distinct(ScriptProjects.id)).label("script_count"),
+            func.count(func.distinct(ScriptScenes.id)).label("scene_count"),
+            func.count(func.distinct(ScriptShots.id)).label("shots_total"),
+            func.count(func.distinct(ScriptShots.id))
+            .filter(ScriptShots.status == "done")
+            .label("shots_done"),
+            func.count(func.distinct(ScriptShots.id))
+            .filter(
+                ScriptShots.image_url.isnot(None) | ScriptShots.video_url.isnot(None)
+            )
+            .label("renders_count"),
+        )
+        .select_from(Episodes)
+        .outerjoin(
+            ScriptProjects,
+            and_(
+                ScriptProjects.episode_id == Episodes.id,
+                ScriptProjects.status != "deleted",
+            ),
+        )
+        .outerjoin(ScriptScenes, ScriptScenes.script_id == ScriptProjects.id)
+        .outerjoin(ScriptShots, ScriptShots.scene_id == ScriptScenes.id)
+        .where(Episodes.project_id == project_id)
+        .group_by(Episodes.id, Episodes.title, Episodes.sort_order)
+        .order_by(Episodes.sort_order.asc())
+    )
 
 
 def _derive_episode_status(
@@ -161,12 +170,9 @@ class EpisodeRepository:
         """Per-episode progress (script/scene/shot counts + derived status)
         for the workspace shell episodes panel (spec G12). LEFT JOINs so an
         empty episode (no scripts yet) still appears with all-zero counts."""
-        rows = (
-            await db_engine.fetch_all(
-                _PROGRESS_SQL, {"project_id": _bigint(project_id)}
-            )
-            or []
-        )
+        async with read_scope() as session:
+            result = await session.execute(_progress_stmt(_bigint(project_id)))
+            rows = result.mappings().all()
         return [_progress_row(r) for r in rows]
 
     async def list_by_project(self, project_id: str) -> List[Dict[str, Any]]:

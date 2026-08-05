@@ -53,17 +53,23 @@ async def _resolve_personal_team_id(user_id: str) -> str:
     ``scope_id or user_id`` (UUID) need this translation when scope_id
     is omitted.
     """
-    from app.db import engine as db_engine
+    from sqlalchemy import String, cast, select
 
-    row = await db_engine.fetch_one(
-        "SELECT id::text AS id FROM public.teams "
-        "WHERE owner_id::text = :uid AND kind = 'personal' "
-        "LIMIT 1",
-        {"uid": user_id},
-    )
-    if not row:
+    from app.db.session import read_scope
+    from app.models import Teams
+
+    async with read_scope() as session:
+        team_id = await session.scalar(
+            select(cast(Teams.id, String))
+            .where(
+                cast(Teams.owner_id, String) == str(user_id),
+                Teams.kind == "personal",
+            )
+            .limit(1)
+        )
+    if not team_id:
         raise ValueError(f"No personal team found for user {user_id}")
-    return row["id"]
+    return team_id
 
 
 async def _scope_type_for(scope_id: str) -> str:
@@ -75,13 +81,16 @@ async def _scope_type_for(scope_id: str) -> str:
     value. We derive it from the target team's ``kind`` (the single source
     of truth post PR-C) rather than trusting a client-supplied hint.
     """
-    from app.db import engine as db_engine
+    from sqlalchemy import String, cast, select
 
-    row = await db_engine.fetch_one(
-        "SELECT kind FROM public.teams WHERE id::text = :sid",
-        {"sid": str(scope_id)},
-    )
-    return "personal" if (row and row["kind"] == "personal") else "team"
+    from app.db.session import read_scope
+    from app.models import Teams
+
+    async with read_scope() as session:
+        kind = await session.scalar(
+            select(Teams.kind).where(cast(Teams.id, String) == str(scope_id))
+        )
+    return "personal" if kind == "personal" else "team"
 
 
 def _invalidate_media_path_cache(resource_id: str) -> None:

@@ -15,9 +15,15 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from loguru import logger
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+from app.db.session import read_scope, write_scope
+from app.models import t_worker_registry
 
 # Minted lazily, ONCE per process. Module-global so every caller in this process
 # (registry write at tick N, again at tick N+1) reports the same generation.
@@ -90,28 +96,32 @@ async def upsert_registry(db_engine: Any) -> bool:
 
     `started_at` is set on INSERT only (a refresh keeps the original boot time);
     `heartbeat_at`/`updated_at` advance every call.
+
+    ``db_engine`` is unused (ORM migration, Phase B5 Task 1) — kept as an
+    accepted-but-ignored parameter so callers (workflow_health_sweeper.py's
+    `db_engine.is_configured()` gate check) don't need touching.
     """
     from app.workflows.workflow_health_sweeper import _resolve_pinned_app_version
 
     try:
-        await db_engine.execute(
-            "INSERT INTO public.worker_registry "
-            "(executor_id, boot_generation, app_version, pid, "
-            " started_at, heartbeat_at, updated_at) "
-            "VALUES (:eid, :gen, :ver, :pid, now(), now(), now()) "
-            "ON CONFLICT (executor_id) DO UPDATE SET "
-            "  boot_generation = EXCLUDED.boot_generation, "
-            "  app_version = EXCLUDED.app_version, "
-            "  pid = EXCLUDED.pid, "
-            "  heartbeat_at = now(), "
-            "  updated_at = now()",
-            {
-                "eid": current_executor_id(),
-                "gen": boot_generation(),
-                "ver": _resolve_pinned_app_version(),
-                "pid": os.getpid(),
+        stmt = pg_insert(t_worker_registry).values(
+            executor_id=current_executor_id(),
+            boot_generation=boot_generation(),
+            app_version=_resolve_pinned_app_version(),
+            pid=os.getpid(),
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["executor_id"],
+            set_={
+                "boot_generation": stmt.excluded.boot_generation,
+                "app_version": stmt.excluded.app_version,
+                "pid": stmt.excluded.pid,
+                "heartbeat_at": func.now(),
+                "updated_at": func.now(),
             },
         )
+        async with write_scope() as session:
+            await session.execute(stmt)
         return True
     except Exception as exc:  # noqa: BLE001
         logger.opt(exception=True).debug(
@@ -123,14 +133,26 @@ async def upsert_registry(db_engine: Any) -> bool:
 async def stale_executor_ids(db_engine: Any, threshold_seconds: float) -> list[str]:
     """executor_ids whose heartbeat is older than `threshold_seconds` — i.e. a
     worker process presumed gone. P1 only LOGS these (observe); no action. The
-    current process's own row, just refreshed, is never stale."""
+    current process's own row, just refreshed, is never stale.
+
+    ``db_engine`` is unused (ORM migration, Phase B5 Task 1) — kept as an
+    accepted-but-ignored positional parameter for caller compatibility.
+
+    The cutoff is computed app-side (``datetime.now(UTC) - threshold_seconds``)
+    rather than server-side ``now() - make_interval(...)`` — SQLAlchemy's
+    ``func.make_interval`` has no named-argument form (``secs=>``), and this
+    query is observe-only (P1 logs, never acts), so the app/DB clock-skew this
+    trades away is inconsequential."""
     try:
-        rows = await db_engine.fetch_all(
-            "SELECT executor_id FROM public.worker_registry "
-            "WHERE heartbeat_at < now() - make_interval(secs => :secs)",
-            {"secs": float(threshold_seconds)},
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            seconds=float(threshold_seconds)
         )
-        return [r["executor_id"] for r in (rows or [])]
+        stmt = select(t_worker_registry.c.executor_id).where(
+            t_worker_registry.c.heartbeat_at < cutoff
+        )
+        async with read_scope() as session:
+            rows = (await session.execute(stmt)).mappings().all()
+        return [r["executor_id"] for r in rows]
     except Exception as exc:  # noqa: BLE001
         logger.opt(exception=True).debug(
             f"[worker_identity] stale query failed (non-fatal): {exc!r}"

@@ -232,11 +232,31 @@ async def test_import_from_resource_exercises_real_register_path(monkeypatch, tm
 
     inserted = {}
 
-    async def _fake_insert(query, params):
-        inserted.update(params)
-        return {**params, "id": 999}
+    from contextlib import asynccontextmanager
 
-    monkeypatch.setattr(gm.db_engine, "execute_returning_one", _fake_insert)
+    from sqlalchemy.dialects import postgresql
+
+    @asynccontextmanager
+    async def _fake_write_scope():
+        class _Result:
+            def __init__(self, row):
+                self._row = row
+
+            def mappings(self):
+                return self
+
+            def first(self):
+                return self._row
+
+        class _Session:
+            async def execute(self, stmt):
+                params = dict(stmt.compile(dialect=postgresql.dialect()).params)
+                inserted.update(params)
+                return _Result({**params, "id": 999})
+
+        yield _Session()
+
+    monkeypatch.setattr(gm, "write_scope", _fake_write_scope)
 
     # _patch_deps wholesale-mocks gm.register_generated_media; keep a
     # reference to the real one so it can be restored after — this test's

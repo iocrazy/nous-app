@@ -8,7 +8,9 @@ handling after Spec 1 PR-C.
     sweeper/iterator path) and returns the UUID needed for the
     user_settings lookup.
 
-``_resolve_personal_team_id`` still delegates to ``app.db.engine.fetch_one``.
+``_resolve_personal_team_id`` was migrated to the SQLAlchemy ORM (Phase B5
+Task 1) — its DB-touching tests patch ``app.db.session.read_scope`` instead
+of ``app.db.engine.fetch_one``.
 ``_resolve_personal_user_id`` was migrated to the SQLAlchemy ORM (Phase B2
 Task 2) — its DB-touching tests patch ``app.db.session.read_scope`` instead.
 """
@@ -50,17 +52,14 @@ def _fake_read_scope(scalar_value):
 
 @pytest.mark.asyncio
 async def test_resolve_personal_team_id_returns_snowflake():
-    with patch(
-        "app.db.engine.fetch_one",
-        new=AsyncMock(return_value={"id": TEAM_SNOWFLAKE}),
-    ):
+    with patch("app.db.session.read_scope", new=_fake_read_scope(TEAM_SNOWFLAKE)):
         result = await _resolve_personal_team_id(USER_UUID)
     assert result == TEAM_SNOWFLAKE
 
 
 @pytest.mark.asyncio
 async def test_resolve_personal_team_id_raises_when_missing():
-    with patch("app.db.engine.fetch_one", new=AsyncMock(return_value=None)):
+    with patch("app.db.session.read_scope", new=_fake_read_scope(None)):
         with pytest.raises(ValueError, match=USER_UUID):
             await _resolve_personal_team_id(USER_UUID)
 

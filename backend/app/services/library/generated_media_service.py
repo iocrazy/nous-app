@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import mimetypes
 import os
 import re
@@ -18,10 +17,12 @@ from typing import Any, AsyncIterator, Optional
 import aiofiles
 import httpx
 from loguru import logger
+from sqlalchemy import insert
 
 from app.boundary import MaxBytesExceededError, cap_aiter
 from app.core.config import settings
-from app.db import engine as db_engine
+from app.db.session import write_scope
+from app.models import GeneratedMedia
 from app.services.library.media_storage import (
     CHAT_MEDIA_BUCKET,
     chat_media_store,
@@ -34,6 +35,11 @@ from app.services.library.media_storage import (
 )
 
 _DEFAULT_MAX_BYTES = 512 * 1024 * 1024  # 512 MiB ceiling per generation
+
+# Column-level RETURNING (never entity-level select/returning fed to
+# .mappings() — that maps each row to ONE entity-named key instead of one
+# key per column; see tests/test_scheduled_master_row_shape_e2e.py).
+_GENERATED_MEDIA_COLS = tuple(GeneratedMedia.__table__.columns)
 
 
 def _date_bucket() -> str:
@@ -305,41 +311,35 @@ async def register_generated_media(
             size = await _download_to(dest, source_url)
         file_path = rel
 
-    row = await db_engine.execute_returning_one(
-        "INSERT INTO public.generated_media "
-        "(scope_id, creator_id, media_kind, mime, file_path, file_size_bytes, "
-        " origin_kind, origin_run_id, agent_id, canvas_id, node_id, prompt, model, "
-        " provider, params, cost_cents, parent_resource_id, derivation_kind, "
-        " conversation_id, content_sha256) "
-        "VALUES (:scope_id, :creator_id, :media_kind, :mime, :file_path, :file_size_bytes, "
-        " :origin_kind, :origin_run_id, :agent_id, :canvas_id, :node_id, :prompt, :model, "
-        " :provider, CAST(:params AS jsonb), :cost_cents, :parent_resource_id, :derivation_kind,"
-        " :conversation_id, :content_sha256) "
-        "RETURNING *",
-        {
-            "scope_id": scope_id,
-            "creator_id": user_id,
-            "media_kind": kind,
-            "mime": mime,
-            "file_path": file_path,
-            "file_size_bytes": size,
-            "content_sha256": content_sha256,
-            "origin_kind": origin.kind,
-            "origin_run_id": origin.run_id,
-            "agent_id": origin.agent_id,
-            "canvas_id": origin.canvas_id,
-            "node_id": origin.node_id,
-            "prompt": origin.prompt,
-            "model": origin.model,
-            "provider": origin.provider,
-            "params": json.dumps(origin.params or {}),
-            "cost_cents": origin.cost_cents,
-            "parent_resource_id": origin.parent_resource_id,
-            "derivation_kind": origin.derivation_kind,
-            "conversation_id": origin.conversation_id,
-        },
+    stmt = (
+        insert(GeneratedMedia)
+        .values(
+            scope_id=scope_id,
+            creator_id=user_id,
+            media_kind=kind,
+            mime=mime,
+            file_path=file_path,
+            file_size_bytes=size,
+            content_sha256=content_sha256,
+            origin_kind=origin.kind,
+            origin_run_id=origin.run_id,
+            agent_id=origin.agent_id,
+            canvas_id=origin.canvas_id,
+            node_id=origin.node_id,
+            prompt=origin.prompt,
+            model=origin.model,
+            provider=origin.provider,
+            params=origin.params or {},
+            cost_cents=origin.cost_cents,
+            parent_resource_id=origin.parent_resource_id,
+            derivation_kind=origin.derivation_kind,
+            conversation_id=origin.conversation_id,
+        )
+        .returning(*_GENERATED_MEDIA_COLS)
     )
-    return row or {}
+    async with write_scope() as session:
+        row = (await session.execute(stmt)).mappings().first()
+    return dict(row) if row is not None else {}
 
 
 def _safe_filename(name: str) -> str:
@@ -360,26 +360,24 @@ async def _insert_uploaded_row(
     content_sha256: Optional[str] = None,
 ) -> dict:
     """INSERT one generated_media row for an uploaded blob (path-agnostic)."""
-    row = await db_engine.execute_returning_one(
-        "INSERT INTO public.generated_media "
-        "(scope_id, creator_id, media_kind, mime, file_path, file_size_bytes, "
-        " origin_kind, conversation_id, content_sha256) "
-        "VALUES (:scope_id, :creator_id, :media_kind, :mime, :file_path, "
-        " :file_size_bytes, :origin_kind, :conversation_id, :content_sha256) "
-        "RETURNING *",
-        {
-            "scope_id": scope_id,
-            "creator_id": user_id,
-            "media_kind": kind,
-            "mime": mime,
-            "file_path": file_path,
-            "file_size_bytes": file_size_bytes,
-            "origin_kind": origin.kind,
-            "conversation_id": origin.conversation_id,
-            "content_sha256": content_sha256,
-        },
+    stmt = (
+        insert(GeneratedMedia)
+        .values(
+            scope_id=scope_id,
+            creator_id=user_id,
+            media_kind=kind,
+            mime=mime,
+            file_path=file_path,
+            file_size_bytes=file_size_bytes,
+            origin_kind=origin.kind,
+            conversation_id=origin.conversation_id,
+            content_sha256=content_sha256,
+        )
+        .returning(*_GENERATED_MEDIA_COLS)
     )
-    return row or {}
+    async with write_scope() as session:
+        row = (await session.execute(stmt)).mappings().first()
+    return dict(row) if row is not None else {}
 
 
 async def _register_uploaded_to_object_store(

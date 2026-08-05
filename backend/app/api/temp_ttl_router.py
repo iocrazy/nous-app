@@ -32,14 +32,20 @@ async def _verify_team_owner(auth: AuthDep, scope_id: str) -> None:
     so write permission must match ``PATCH /teams/{id}`` (owner-only).
     Read access stays open to all members via ``verify_scope_access``.
     """
-    from app.db import engine as db_engine
+    from sqlalchemy import select
 
-    row = await db_engine.fetch_one(
-        "SELECT role FROM public.team_members "
-        "WHERE team_id = :team_id AND user_id = :user_id",
-        {"team_id": scope_id, "user_id": auth.user_id},
-    )
-    if row is None or row.get("role") != "owner":
+    from app.db.session import read_scope
+    from app.models import TeamMembers
+
+    async with read_scope() as session:
+        result = await session.execute(
+            select(TeamMembers.role).where(
+                TeamMembers.team_id == int(scope_id),
+                TeamMembers.user_id == auth.user_id,
+            )
+        )
+        role = result.scalar()
+    if role != "owner":
         raise HTTPException(
             status_code=403,
             detail="Only the team owner can change team chat TTL",

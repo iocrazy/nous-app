@@ -3,8 +3,9 @@ spec G12, review fix 2).
 
 The unit-level ``test_episode_progress.py`` exercises the pure
 status-derivation matrix and the repository row-shaping against a
-monkeypatched ``db_engine.fetch_all`` — it proves the mapping/shape but
-never touches real SQL. This file proves the real JOIN + FILTER aggregate
+monkeypatched ``app.db.session.read_scope`` (ORM, Phase B5 Task 1) — it
+proves the mapping/shape but never touches real SQL. This file proves the
+real JOIN + FILTER aggregate
 (``EpisodeRepository.progress_by_project`` — episodes -> script_projects ->
 script_scenes -> script_shots) actually resolves against the live schema,
 and specifically that ``renders_count`` counts a shot with BOTH

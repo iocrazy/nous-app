@@ -1,13 +1,22 @@
 """Worker Foundation P1 — worker_identity helpers (observe-only).
 
 boot_generation is a stable per-process fencing token; the registry writers are
-best-effort and must never raise into the sweeper tick. No DB — the writers'
-SQL is captured via a fake engine.
+best-effort and must never raise into the sweeper tick.
+
+Phase B5 Task 1: upsert_registry/stale_executor_ids were migrated from a
+dependency-injected ``db_engine`` (still accepted — unused — for caller
+compatibility) to the SQLAlchemy ORM (``app.db.session.read_scope``/
+``write_scope``). Tests patch those scopes and assert against the COMPILED
+statement rather than a fake engine's captured SQL string.
 """
 
 import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 import app.services.infra.worker_identity as wi
 
@@ -72,53 +81,87 @@ def test_multi_worker_enabled_tracks_flag(monkeypatch):
         assert wi.multi_worker_enabled() is False
 
 
-class _FakeEngine:
-    def __init__(self, *, fetch_rows=None, raise_on=None):
-        self.executed: list[str] = []
-        self.fetched: list[str] = []
-        self._fetch_rows = fetch_rows or []
-        self._raise_on = raise_on  # "execute" | "fetch" | None
+def _compile(stmt: Any) -> tuple[str, dict[str, Any]]:
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    return str(compiled), dict(compiled.params)
 
-    async def execute(self, sql, params=None):
-        if self._raise_on == "execute":
-            raise RuntimeError("pool exhausted")
-        self.executed.append(sql)
-        return None
 
-    async def fetch_all(self, sql, params=None):
-        if self._raise_on == "fetch":
-            raise RuntimeError("db down")
-        self.fetched.append(sql)
-        return self._fetch_rows
+class _FakeResult:
+    def __init__(self, rows: list[Any] | None = None) -> None:
+        self._rows = rows if rows is not None else []
+
+    def mappings(self) -> "_FakeResult":
+        return self
+
+    def all(self) -> list[Any]:
+        return self._rows
+
+
+class _RecordingSession:
+    def __init__(self, result: _FakeResult | None = None, raise_exc=None) -> None:
+        self.calls: list[Any] = []
+        self._result = result or _FakeResult()
+        self._raise = raise_exc
+
+    async def execute(self, stmt: Any) -> _FakeResult:
+        if self._raise is not None:
+            raise self._raise
+        self.calls.append(stmt)
+        return self._result
+
+
+def _patch_scope(monkeypatch, attr: str, result=None, raise_exc=None):
+    session = _RecordingSession(result, raise_exc)
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield session
+
+    monkeypatch.setattr(f"app.services.infra.worker_identity.{attr}", fake_scope)
+    return session
 
 
 @pytest.mark.asyncio
-async def test_upsert_registry_writes_and_returns_true():
-    eng = _FakeEngine()
-    ok = await wi.upsert_registry(eng)
+async def test_upsert_registry_writes_and_returns_true(monkeypatch):
+    session = _patch_scope(monkeypatch, "write_scope")
+    ok = await wi.upsert_registry(db_engine=None)
     assert ok is True
-    sql = " ".join(eng.executed)
+
+    assert len(session.calls) == 1
+    sql, binds = _compile(session.calls[0])
     assert "INSERT INTO public.worker_registry" in sql
-    assert "ON CONFLICT (executor_id) DO UPDATE" in sql
+    assert "ON CONFLICT (executor_id) DO UPDATE SET" in sql
     assert "heartbeat_at = now()" in sql
+    assert "updated_at = now()" in sql
+    assert binds["executor_id"] == wi.current_executor_id()
+    assert binds["boot_generation"] == wi.boot_generation()
 
 
 @pytest.mark.asyncio
-async def test_upsert_registry_swallows_errors_returns_false():
+async def test_upsert_registry_swallows_errors_returns_false(monkeypatch):
     # Table missing pre-migration / pool saturated must NOT raise into the tick.
-    eng = _FakeEngine(raise_on="execute")
-    ok = await wi.upsert_registry(eng)
+    _patch_scope(monkeypatch, "write_scope", raise_exc=RuntimeError("pool exhausted"))
+    ok = await wi.upsert_registry(db_engine=None)
     assert ok is False
 
 
 @pytest.mark.asyncio
-async def test_stale_executor_ids_returns_names():
-    eng = _FakeEngine(fetch_rows=[{"executor_id": "worker"}, {"executor_id": "w2"}])
-    stale = await wi.stale_executor_ids(eng, 360)
+async def test_stale_executor_ids_returns_names(monkeypatch):
+    rows = [{"executor_id": "worker"}, {"executor_id": "w2"}]
+    session = _patch_scope(monkeypatch, "read_scope", _FakeResult(rows))
+    stale = await wi.stale_executor_ids(None, 360)
     assert stale == ["worker", "w2"]
+
+    _sql, binds = _compile(session.calls[0])
+    # app-side cutoff (no server-side make_interval — see docstring) bound as
+    # a plain timestamptz literal a little over 360s in the past.
+    cutoff = binds["heartbeat_at_1"]
+    now = datetime.now(timezone.utc)
+    assert now - cutoff >= timedelta(seconds=360)
+    assert now - cutoff < timedelta(seconds=365)
 
 
 @pytest.mark.asyncio
-async def test_stale_executor_ids_swallows_errors_returns_empty():
-    eng = _FakeEngine(raise_on="fetch")
-    assert await wi.stale_executor_ids(eng, 360) == []
+async def test_stale_executor_ids_swallows_errors_returns_empty(monkeypatch):
+    _patch_scope(monkeypatch, "read_scope", raise_exc=RuntimeError("db down"))
+    assert await wi.stale_executor_ids(None, 360) == []

@@ -8,9 +8,11 @@ suites (unchanged).
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 import app.services.library.generated_media_service as gm_svc
 from app.services.library.media_storage import CHAT_MEDIA_BUCKET
@@ -20,6 +22,38 @@ from app.services.library.media_storage import CHAT_MEDIA_BUCKET
 
 def _origin():
     return gm_svc.GenerationOrigin(kind="chat_upload", conversation_id=5)
+
+
+def _bind_params(stmt) -> dict:
+    """Compile an insert(...).returning(...) statement (postgresql dialect)
+    and return its literal bind values keyed by column name — the ORM
+    equivalent of the old ``fake_returning_one(sql, params)``'s ``params``."""
+    return dict(stmt.compile(dialect=postgresql.dialect()).params)
+
+
+class _FakeResult:
+    def __init__(self, row: dict):
+        self._row = row
+
+    def mappings(self):
+        return self
+
+    def first(self):
+        return self._row
+
+
+def _fake_write_scope(row_id, captured: dict):
+    @asynccontextmanager
+    async def _scope():
+        class _Session:
+            async def execute(self, stmt):
+                params = _bind_params(stmt)
+                captured.update(params)
+                return _FakeResult({"id": row_id, **params})
+
+        yield _Session()
+
+    return _scope
 
 
 @pytest.mark.asyncio
@@ -146,6 +180,29 @@ def _vision_fixture():
     return turn, recent, history, row
 
 
+def _fake_read_scope_returning(row: dict):
+    """ORM equivalent of the old ``db_engine.fetch_one`` mock — patches
+    ``turn.read_scope`` so ``_inject_image_blocks``'s column-level select
+    resolves to ``row`` via ``.mappings().first()``."""
+
+    class _FakeResult:
+        def mappings(self):
+            return self
+
+        def first(self):
+            return row
+
+    class _FakeSession:
+        async def execute(self, stmt):
+            return _FakeResult()
+
+    @asynccontextmanager
+    async def _scope():
+        yield _FakeSession()
+
+    return _scope
+
+
 async def test_vision_object_store_defaults_to_base64(monkeypatch):
     """No public base configured → object-store images inline as base64.
 
@@ -159,7 +216,7 @@ async def test_vision_object_store_defaults_to_base64(monkeypatch):
     store.get_bytes.return_value = b"PNGBYTES"
     with (
         patch.object(turn, "model_supports_vision", new=AsyncMock(return_value=True)),
-        patch.object(turn.db_engine, "fetch_one", new=AsyncMock(return_value=row)),
+        patch.object(turn, "read_scope", new=_fake_read_scope_returning(row)),
         patch.object(turn, "ObjectStore", return_value=store),
     ):
         n = await turn._inject_image_blocks(
@@ -190,7 +247,7 @@ async def test_vision_object_store_signed_url_when_public_base_set(monkeypatch):
     )
     with (
         patch.object(turn, "model_supports_vision", new=AsyncMock(return_value=True)),
-        patch.object(turn.db_engine, "fetch_one", new=AsyncMock(return_value=row)),
+        patch.object(turn, "read_scope", new=_fake_read_scope_returning(row)),
         patch.object(turn, "ObjectStore", return_value=store),
     ):
         n = await turn._inject_image_blocks(
@@ -217,15 +274,11 @@ async def test_vision_object_store_signed_url_when_public_base_set(monkeypatch):
 async def test_generated_image_routes_to_object_store(monkeypatch):
     captured = {}
 
-    async def fake_returning_one(sql, params):
-        captured.update(params)
-        return {"id": 5, **params}
-
-    store = AsyncMock()
-    store.exists.return_value = False
     monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
     monkeypatch.setattr(gm_svc, "_download_to_bytes", AsyncMock(return_value=b"GENIMG"))
-    monkeypatch.setattr(gm_svc.db_engine, "execute_returning_one", fake_returning_one)
+    monkeypatch.setattr(gm_svc, "write_scope", _fake_write_scope(5, captured))
+    store = AsyncMock()
+    store.exists.return_value = False
     with patch.object(gm_svc, "chat_media_store", return_value=store):
         await gm_svc.register_generated_media(
             user_id="u",
@@ -245,10 +298,6 @@ async def test_generated_video_streams_to_object_store(monkeypatch):
     temp file (put_file, not put_bytes) to avoid buffering it in memory."""
     captured = {}
 
-    async def fake_returning_one(sql, params):
-        captured.update(params)
-        return {"id": 5, **params}
-
     async def fake_download(dest_path, source_url, **k):
         from pathlib import Path
 
@@ -259,7 +308,7 @@ async def test_generated_video_streams_to_object_store(monkeypatch):
     store.exists.return_value = False
     monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
     monkeypatch.setattr(gm_svc, "_download_to", fake_download)
-    monkeypatch.setattr(gm_svc.db_engine, "execute_returning_one", fake_returning_one)
+    monkeypatch.setattr(gm_svc, "write_scope", _fake_write_scope(5, captured))
     with patch.object(gm_svc, "chat_media_store", return_value=store):
         await gm_svc.register_generated_media(
             user_id="u",
@@ -280,7 +329,14 @@ async def test_generated_video_streams_to_object_store(monkeypatch):
 async def test_generated_video_raises_on_storage_error(tmp_path, monkeypatch):
     """Storage failure on a generated video RAISES — object store is the only
     write path while the flag is on (Task 1: no filesystem fallback)."""
-    insert_mock = AsyncMock()
+    session_execute = AsyncMock()
+
+    @asynccontextmanager
+    async def _scope():
+        class _Session:
+            execute = session_execute
+
+        yield _Session()
 
     async def fake_download(dest_path, source_url, **k):
         from pathlib import Path
@@ -294,7 +350,7 @@ async def test_generated_video_raises_on_storage_error(tmp_path, monkeypatch):
     monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
     monkeypatch.setattr(gm_svc.settings, "DOWNLOAD_PATH", str(tmp_path))
     monkeypatch.setattr(gm_svc, "_download_to", fake_download)
-    monkeypatch.setattr(gm_svc.db_engine, "execute_returning_one", insert_mock)
+    monkeypatch.setattr(gm_svc, "write_scope", _scope)
     with patch.object(gm_svc, "chat_media_store", return_value=store):
         with pytest.raises(RuntimeError, match="storage down"):
             await gm_svc.register_generated_media(
@@ -304,21 +360,28 @@ async def test_generated_video_raises_on_storage_error(tmp_path, monkeypatch):
                 mime="video/mp4",
                 origin=gm_svc.GenerationOrigin(kind="canvas_run"),
             )
-    insert_mock.assert_not_awaited()
+    session_execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_generated_image_raises_on_storage_error(tmp_path, monkeypatch):
     """Storage failure on a generated image RAISES — object store is the only
     write path while the flag is on (Task 1: no filesystem fallback)."""
-    insert_mock = AsyncMock()
+    session_execute = AsyncMock()
+
+    @asynccontextmanager
+    async def _scope():
+        class _Session:
+            execute = session_execute
+
+        yield _Session()
 
     store = AsyncMock()
     store.exists.side_effect = RuntimeError("storage down")
     monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
     monkeypatch.setattr(gm_svc.settings, "DOWNLOAD_PATH", str(tmp_path))
     monkeypatch.setattr(gm_svc, "_download_to_bytes", AsyncMock(return_value=b"IMG"))
-    monkeypatch.setattr(gm_svc.db_engine, "execute_returning_one", insert_mock)
+    monkeypatch.setattr(gm_svc, "write_scope", _scope)
     with patch.object(gm_svc, "chat_media_store", return_value=store):
         with pytest.raises(RuntimeError, match="storage down"):
             await gm_svc.register_generated_media(
@@ -328,4 +391,4 @@ async def test_generated_image_raises_on_storage_error(tmp_path, monkeypatch):
                 mime="image/png",
                 origin=gm_svc.GenerationOrigin(kind="canvas_run"),
             )
-    insert_mock.assert_not_awaited()
+    session_execute.assert_not_awaited()

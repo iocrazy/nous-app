@@ -21,9 +21,11 @@ from typing import Any, Optional
 from uuid import UUID
 
 from loguru import logger
+from sqlalchemy import select
 
 from app.core.config import settings
-from app.db import engine as db_engine
+from app.db.session import read_scope
+from app.models import GeneratedMedia
 from app.repositories.agent_repository import get_agent_repository
 from app.repositories.conversation_repository import get_conversation_repository
 from app.repositories.skill_repository import get_skill_repository
@@ -149,11 +151,16 @@ async def _inject_image_blocks(
         if not gm_id:
             continue
         try:
-            row = await db_engine.fetch_one(
-                "SELECT file_path, mime, file_size_bytes, conversation_id "
-                "FROM generated_media WHERE id = :id",
-                {"id": int(gm_id)},
-            )
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(
+                        GeneratedMedia.file_path,
+                        GeneratedMedia.mime,
+                        GeneratedMedia.file_size_bytes,
+                        GeneratedMedia.conversation_id,
+                    ).where(GeneratedMedia.id == int(gm_id))
+                )
+                row = result.mappings().first()
         except (ValueError, TypeError):
             continue
         if row is None or str(row.get("conversation_id")) != str(conversation_id):

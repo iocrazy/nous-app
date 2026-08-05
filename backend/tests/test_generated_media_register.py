@@ -1,4 +1,44 @@
+from contextlib import asynccontextmanager
+
 import pytest
+from sqlalchemy.dialects import postgresql
+
+
+def _bind_params(stmt) -> dict:
+    """Compile an insert(...).returning(...) statement (postgresql dialect)
+    and return its literal bind values keyed by column name — the ORM
+    equivalent of the old ``_fake_execute_returning_one(sql, params)``'s
+    ``params`` dict."""
+    return dict(stmt.compile(dialect=postgresql.dialect()).params)
+
+
+class _FakeResult:
+    def __init__(self, row: dict):
+        self._row = row
+
+    def mappings(self):
+        return self
+
+    def first(self):
+        return self._row
+
+
+def _fake_write_scope(row_id, captured: dict):
+    """Patches app.db.session.write_scope: records the compiled bind params
+    into ``captured["params"]`` and fabricates the RETURNING row as
+    {"id": row_id, **params} — mirroring the pre-ORM mock's row shape."""
+
+    @asynccontextmanager
+    async def _scope():
+        class _Session:
+            async def execute(self, stmt):
+                params = _bind_params(stmt)
+                captured["params"] = params
+                return _FakeResult({"id": row_id, **params})
+
+        yield _Session()
+
+    return _scope
 
 
 @pytest.mark.asyncio
@@ -12,18 +52,11 @@ async def test_register_inserts_row_with_provenance(tmp_path, monkeypatch):
         Path(dest_path).write_bytes(b"img")
         return 3
 
-    captured = {}
-
-    async def _fake_execute_returning_one(sql, params):
-        captured["sql"] = sql
-        captured["params"] = params
-        return {"id": 999, **params}
+    captured: dict = {}
 
     monkeypatch.setattr(gm, "_download_to", _fake_download)
     monkeypatch.setattr(gm.settings, "DOWNLOAD_PATH", str(tmp_path))
-    monkeypatch.setattr(
-        gm.db_engine, "execute_returning_one", _fake_execute_returning_one
-    )
+    monkeypatch.setattr(gm, "write_scope", _fake_write_scope(999, captured))
 
     origin = gm.GenerationOrigin(
         kind="canvas_run",
@@ -61,17 +94,11 @@ async def test_register_source_path_filesystem_copies_local_file(tmp_path, monke
     src = tmp_path / "produced.png"
     src.write_bytes(b"\x89PNG-local-bytes")
 
-    captured = {}
-
-    async def _fake_execute_returning_one(sql, params):
-        captured["params"] = params
-        return {"id": 1, **params}
+    captured: dict = {}
 
     monkeypatch.setattr(gm.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", False)
     monkeypatch.setattr(gm.settings, "DOWNLOAD_PATH", str(tmp_path / "store"))
-    monkeypatch.setattr(
-        gm.db_engine, "execute_returning_one", _fake_execute_returning_one
-    )
+    monkeypatch.setattr(gm, "write_scope", _fake_write_scope(1, captured))
 
     row = await gm.register_generated_media(
         user_id="u1",
@@ -101,19 +128,13 @@ async def test_register_source_path_object_store_reads_file(tmp_path, monkeypatc
         assert source_path == str(src)  # reads the file, does not download
         return ("sb://chat-media/key.png", 8, "deadbeefsha")
 
-    captured = {}
-
-    async def _fake_execute_returning_one(sql, params):
-        captured["params"] = params
-        return {"id": 2, **params}
+    captured: dict = {}
 
     monkeypatch.setattr(gm.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
     monkeypatch.setattr(
         gm, "_write_local_generation_to_object_store", _fake_local_object_store
     )
-    monkeypatch.setattr(
-        gm.db_engine, "execute_returning_one", _fake_execute_returning_one
-    )
+    monkeypatch.setattr(gm, "write_scope", _fake_write_scope(2, captured))
 
     row = await gm.register_generated_media(
         user_id="u1",
