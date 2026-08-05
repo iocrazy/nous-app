@@ -26,23 +26,47 @@ def _request() -> Request:
     return Request({"type": "http", "method": "GET", "path": "/", "headers": []})
 
 
-class _FakeScopeSession:
-    """Stand-in for the ORM AsyncSession — only ``scalar()`` is used by
-    ``_backfill_scan_step``'s system_settings toggle read (Phase B2 Task 2
-    ORM rewrite); the resources claim query stays raw SQL (Phase C) and is
-    still reached via ``app.db.engine.fetch_all``."""
+class _FakeExecuteResult:
+    """Stand-in for the awaited ``session.execute(stmt)`` Result on the
+    resources-claim read path — only ``.mappings().all()`` is exercised."""
 
-    def __init__(self, scalar_value):
+    def __init__(self, rows):
+        self._rows = rows or []
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _FakeScopeSession:
+    """Stand-in for the ORM AsyncSession. Supports BOTH ``scalar()`` (the
+    system_settings toggle read) and ``execute()`` (the resources claim
+    query — migrated off raw ``db_engine.fetch_all`` onto a real ORM
+    ``select()`` in Phase C task 1) — both flow through the SAME patched
+    ``read_scope`` seam."""
+
+    def __init__(self, scalar_value, execute_rows=None, capture=None):
         self._scalar_value = scalar_value
+        self._execute_rows = execute_rows
+        self._capture = capture
 
     async def scalar(self, stmt):
         return self._scalar_value
 
+    async def execute(self, stmt):
+        if self._capture is not None:
+            self._capture.append(stmt)
+        return _FakeExecuteResult(self._execute_rows)
 
-def _fake_read_scope(scalar_value):
+
+def _fake_read_scope(scalar_value, execute_rows=None, capture=None):
     @asynccontextmanager
     async def _read_scope():
-        yield _FakeScopeSession(scalar_value)
+        yield _FakeScopeSession(
+            scalar_value, execute_rows=execute_rows, capture=capture
+        )
 
     return _read_scope
 
@@ -191,20 +215,21 @@ async def test_backfill_scan_enabled_claims_batch():
     from app.workflows.thumbnail import _backfill_scan_step
 
     rows = [{"id": 1, "file_path": "a.mp4", "mime_type": "video/mp4"}]
-    fetch_all = AsyncMock(return_value=rows)
-    with (
-        patch(
-            "app.db.session.read_scope",
-            new=_fake_read_scope({"enabled": True, "batch": 10}),
+    captured_stmts: list = []
+    with patch(
+        "app.db.session.read_scope",
+        new=_fake_read_scope(
+            {"enabled": True, "batch": 10}, execute_rows=rows, capture=captured_stmts
         ),
-        patch("app.db.engine.fetch_all", new=fetch_all),
     ):
         items = await _backfill_scan_step.__wrapped__()
 
     assert items == [
         {"resource_id": "1", "file_path": "a.mp4", "mime_type": "video/mp4"}
     ]
-    assert fetch_all.await_args.args[1] == {"batch": 10}
+    # The configured batch value reaches the compiled SELECT's LIMIT param.
+    assert len(captured_stmts) == 1
+    assert 10 in dict(captured_stmts[0].compile().params).values()
 
 
 def test_backfill_workflow_registered_in_dispatch_bundle():

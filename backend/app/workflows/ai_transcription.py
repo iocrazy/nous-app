@@ -17,32 +17,71 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import nullcontext
 from typing import Any
 
 from dbos import DBOS
 from loguru import logger
+from sqlalchemy import select
+
+from app.db.scope import is_enforced, system_request_scope
+
+
+def _transcribe_inputs_select_stmt(parsed_media_id: int):
+    """The parsed_media+resources lookup, column-level (not entity-level — the
+    B4 row-shape lesson) so ``media_row.get(...)`` below reads real column
+    values. Factored out so a real-aiosqlite row-shape test can import and
+    exercise the exact production statement."""
+    from app.models import ParsedMedia, Resources
+
+    return (
+        select(
+            ParsedMedia.id,
+            ParsedMedia.download_path,
+            ParsedMedia.extract_audio_path,
+            ParsedMedia.music_download_path,
+            ParsedMedia.platform_id,
+            Resources.id.label("resource_id"),
+        )
+        .join(Resources, Resources.media_id == ParsedMedia.id)
+        .where(ParsedMedia.id == parsed_media_id)
+        .limit(1)
+    )
 
 
 @DBOS.step()
 async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str, Any]:
     """Resolve the audio file path + the user's whisper provider config."""
-    from app.db import engine as db_engine
+    from app.db.session import read_scope
 
-    media_row = await db_engine.fetch_one(
-        "SELECT pm.id, pm.download_path, pm.extract_audio_path, "
-        "pm.music_download_path, pm.platform_id, "
-        "r.id AS resource_id "
-        "FROM public.parsed_media pm "
-        "JOIN public.resources r ON r.media_id = pm.id "
-        "WHERE pm.id = :pid LIMIT 1",
-        {"pid": parsed_media_id},
+    # Resources carries UserScoped(creator_id); SCOPE_ENFORCE_RESOURCES
+    # defaults false in code but production sets it true via
+    # secrets/backend.env (CLAUDE.md 部署陷阱). This workflow has no ambient
+    # per-request scope to inherit (it is a DBOS step, not an HTTP handler),
+    # so system_request_scope is LOAD-BEARING in production: without it the
+    # do_orm_execute choke point sees a scoped table (Resources) reached via
+    # this JOIN with no ambient scope and fail-closed raises
+    # UnscopedQueryError. Gated on is_enforced (not unconditional) to stay
+    # byte-for-byte legacy where the flag is off (this repo's local/test
+    # default).
+    scope_cm = (
+        system_request_scope(
+            reason="ai-transcription workflow: resolve media+resource for "
+            "transcription inputs"
+        )
+        if is_enforced("resources")
+        else nullcontext()
     )
+    async with scope_cm:
+        async with read_scope() as session:
+            media_row = (
+                (await session.execute(_transcribe_inputs_select_stmt(parsed_media_id)))
+                .mappings()
+                .first()
+            )
     if not media_row:
         raise RuntimeError(f"no parsed_media for id={parsed_media_id}")
 
-    from sqlalchemy import select
-
-    from app.db.session import read_scope
     from app.models import UserSettings
 
     async with read_scope() as session:
@@ -312,15 +351,28 @@ async def _run_volcengine_asr(
         # read the resource's creator_id. Avoids threading user_id through
         # every step signature. Only needed for the /media token — the
         # object-store branch above has no equivalent per-user gate.
-        from app.db import engine as db_engine
+        from app.db.session import read_scope
+        from app.models import Resources
 
-        row = await db_engine.fetch_one(
-            "SELECT creator_id FROM public.resources WHERE id = :rid",
-            {"rid": int(resource_id)},
+        # Same load-bearing rationale as load_transcribe_inputs above: this
+        # step has no ambient scope of its own, so the Resources SELECT needs
+        # the explicit system wrap once SCOPE_ENFORCE_RESOURCES is on.
+        scope_cm = (
+            system_request_scope(
+                reason="ai-transcription workflow: resolve resource creator "
+                "for volcengine ASR signed media URL"
+            )
+            if is_enforced("resources")
+            else nullcontext()
         )
-        if not row:
+        async with scope_cm:
+            async with read_scope() as session:
+                creator_id = await session.scalar(
+                    select(Resources.creator_id).where(Resources.id == int(resource_id))
+                )
+        if creator_id is None:
             raise RuntimeError(f"resource {resource_id} not found for volcengine asr")
-        user_id = str(row["creator_id"])
+        user_id = str(creator_id)
 
         # Build signed media URL (4-part HMAC, 1h TTL — same scheme as <video src>).
         now = int(time_mod.time())
@@ -380,14 +432,34 @@ async def _run_volcengine_asr(
 
 @DBOS.step()
 async def mark_transcript_completed(parsed_media_id: int) -> None:
-    """Flip resources.transcript_status='completed' for downstream consumers."""
-    from app.db import engine as db_engine
+    """Flip resources.transcript_status='completed' for downstream consumers.
 
-    await db_engine.execute(
-        "UPDATE public.resources SET transcript_status = 'completed' "
-        "WHERE media_id = :pid",
-        {"pid": parsed_media_id},
+    Bulk Core UPDATE on Resources (a UserScoped model) is FORBIDDEN under a
+    real user Scope (app/db/scope.py's write-path guard — it can't be safely
+    tenant-filtered/owner-stamped), so this MUST run under SYSTEM scope, not a
+    user scope: the workflow has no per-request caller identity to open a
+    user_session with, and this is a system-side status flip triggered by the
+    ASR pipeline completing, not a user action needing tenant filtering.
+    """
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import Resources
+
+    scope_cm = (
+        system_request_scope(
+            reason="ai-transcription workflow: mark transcript completed"
+        )
+        if is_enforced("resources")
+        else nullcontext()
     )
+    async with scope_cm:
+        async with write_scope() as session:
+            await session.execute(
+                update(Resources)
+                .where(Resources.media_id == parsed_media_id)
+                .values(transcript_status="completed")
+            )
 
 
 @DBOS.step()
@@ -398,15 +470,32 @@ async def mark_transcript_failed(parsed_media_id: int) -> None:
     Without this the workflow only marks task_tracking failed (via
     record_workflow_failure); the resource's transcript_status stays 'none'
     and VideoDetailPanel polls forever. Best-effort — a transient write
-    hiccup here must not mask the real error we're about to record."""
-    from app.db import engine as db_engine
+    hiccup here must not mask the real error we're about to record.
+
+    Same SYSTEM-scope rationale as mark_transcript_completed above (bulk
+    Core UPDATE on the UserScoped Resources model is forbidden under a real
+    user Scope)."""
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import Resources
 
     try:
-        await db_engine.execute(
-            "UPDATE public.resources SET transcript_status = 'failed' "
-            "WHERE media_id = :pid AND transcript_status <> 'completed'",
-            {"pid": parsed_media_id},
+        scope_cm = (
+            system_request_scope(
+                reason="ai-transcription workflow: mark transcript failed"
+            )
+            if is_enforced("resources")
+            else nullcontext()
         )
+        async with scope_cm:
+            async with write_scope() as session:
+                await session.execute(
+                    update(Resources)
+                    .where(Resources.media_id == parsed_media_id)
+                    .where(Resources.transcript_status != "completed")
+                    .values(transcript_status="failed")
+                )
     except Exception as e:
         logger.warning(
             f"[ai_transcription] transcript_status='failed' write for "

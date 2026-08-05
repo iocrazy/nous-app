@@ -1,25 +1,38 @@
-"""Integration tests for the two A3 ``scoped_sql``-routed creator-scoped reads on
-``ResourcesRepository``: ``get_completed_resource_by_url_and_creator`` and
-``get_owned_platform_ids``.
+"""Integration tests for the two creator-scoped reads on ``ResourcesRepository``:
+``get_completed_resource_by_url_and_creator`` and ``get_owned_platform_ids``.
 
-The choke point is blind to ``text()`` SQL, so these reads carry their tenant
-predicate as the ``scoped_sql`` form (``:scope_user_id IS NULL OR
-r.creator_id = :scope_user_id``) and bind the ambient scope via the helper.
-Proves flip-safety end-to-end against a REAL Postgres:
+Phase C task 2: both methods were migrated OFF the ``scoped_sql`` raw-``text()``
+backstop onto real SQLAlchemy ORM ``select()`` JOINs (see the docstrings in
+``app/repositories/resources_repository.py``). They no longer call
+``scoped_sql`` at all — the ambient-scope enforcement they now get (when
+``SCOPE_ENFORCE_RESOURCES`` is on) comes from the ORM choke point itself
+(``app/db/scope.py::_enforce_scope`` on ``do_orm_execute``), the same
+mechanism every other ``select(Resources...)`` call in the repo goes through.
+``creator_id`` remains an EXPLICIT filter in both statements regardless, so
+the observable behaviour this file pins is unchanged even though the
+mechanism is:
 
   * FLAG OFF (prod default): same results as legacy — A's reads see A's rows;
-    the ambient scope (== the passed creator_id) binds the identical predicate
-    value, so behaviour is byte-for-byte. (scoped_sql does NOT read the flag — it
-    binds the ambient scope regardless — so an ambient scope must be present.)
-  * FLAG ON + USER scope A: returns only A's matches (B's row excluded), even
-    though the legacy ``creator_id`` arg is still passed — the ambient scope wins.
-  * FLAG ON + no scope: fail-closed raise inside the method → the method's own
-    ``except`` returns the empty value (None / set()); the row is NOT leaked.
-  * SYSTEM scope: the ``IS NULL`` branch opens to all owners (cross-user read).
+    the explicit ``creator_id`` filter is the only one in play (the choke
+    point is inert for ``resources`` while the flag is off), so behaviour is
+    byte-for-byte.
+  * FLAG ON + USER scope A: returns only A's matches (B's row excluded). The
+    choke point additionally injects ``creator_id == scope.user_id`` — the
+    exact same predicate value the code already passes explicitly, so this is
+    redundant-but-harmless, not a behaviour change.
+  * FLAG ON + no scope: the choke point's ``do_orm_execute`` handler raises
+    ``UnscopedQueryError`` (deny-by-default — a scoped table touched with no
+    ambient scope set) *inside* the method's own ``try/except``, which
+    catches broadly and returns the fail-closed empty value (``None`` /
+    ``set()``); the row is NOT leaked. Same observable contract as the old
+    ``scoped_sql()``-raises-inside-the-try shape, different raiser.
+  * SYSTEM scope: the choke point no-ops for ``SYSTEM`` (no injection, no
+    raise) — full cross-user read, same as before.
 
-The behaviour is identical with the flag on or off because ``scoped_sql`` keys
-on the ambient scope, not ``SCOPE_ENFORCE_RESOURCES`` (the flag gates the ORM
-choke point only). We still parametrize both to pin that.
+The behaviour is identical with the flag on or off because the explicit
+``creator_id`` filter is unconditional; the flag only gates whether the choke
+point ALSO injects a (redundant) predicate. We still parametrize both to pin
+that.
 
 Setup (DSN gated, same as the sibling tests/db files):
 
@@ -202,8 +215,10 @@ async def test_completed_by_url_user_scope_sees_only_own(
 async def test_completed_by_url_no_scope_returns_none_failclosed(
     seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
-    """No ambient scope: scoped_sql raises inside the method → the method's own
-    except returns None. The row is NOT leaked."""
+    """No ambient scope: the ORM choke point (``do_orm_execute``) raises
+    ``UnscopedQueryError`` for the scoped-but-untouched Resources SELECT,
+    caught by the method's own broad ``except`` → returns None. The row is
+    NOT leaked."""
     ids = seeded
     result = await repo.get_completed_resource_by_url_and_creator(ids.url_a, ids.user_a)
     assert result is None, "no-scope raw read must fail-closed to None, not leak"
@@ -240,7 +255,8 @@ async def test_owned_platform_ids_user_scope_sees_only_own(
 async def test_owned_platform_ids_no_scope_returns_empty_failclosed(
     seeded: _Ids, repo: ResourcesRepository, enforce_on
 ):
-    """No ambient scope: scoped_sql raises → method except returns set()."""
+    """No ambient scope: the ORM choke point raises ``UnscopedQueryError`` →
+    the method's own except returns set()."""
     ids = seeded
     owned = await repo.get_owned_platform_ids([ids.pid_a, ids.pid_b], ids.user_a)
     assert owned == set(), "no-scope raw read must fail-closed to empty set"

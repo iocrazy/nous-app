@@ -20,14 +20,24 @@ as ``errors``, never as missing.
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 from dbos import DBOS
 from loguru import logger
+from sqlalchemy import BigInteger, cast, literal, null, select, union_all
 
-from app.db import engine as db_engine
+from app.db.scope import is_enforced, system_request_scope
+from app.db.session import read_scope
+from app.models import (
+    FileVersions,
+    ParsedMedia,
+    ProjectFiles,
+    Resources,
+    ResourceVersions,
+)
 
 # System-initiated batch job — no single owning end user. Matches the
 # existing SYSTEM_RUN_USER_ID convention (app/workflows/storage_migration.py,
@@ -52,51 +62,116 @@ _MISSING_CAP = 500
 # owning team's snowflake), so a byte-identical upload to a project and to
 # that team's resource library can produce one object referenced from two
 # tables neither object_gc nor this audit previously scanned.
-_COLLECT_SQL = """
-    SELECT download_path AS key, 'video' AS kind, id AS media_id,
-           NULL::bigint AS resource_id
-    FROM parsed_media WHERE download_path LIKE 'sb://%'
-    UNION ALL
-    SELECT cover_download_path, 'cover', id, NULL::bigint
-    FROM parsed_media WHERE cover_download_path LIKE 'sb://%'
-    UNION ALL
-    SELECT music_download_path, 'music', id, NULL::bigint
-    FROM parsed_media WHERE music_download_path LIKE 'sb://%'
-    UNION ALL
-    SELECT extract_audio_path, 'extract_audio', id, NULL::bigint
-    FROM parsed_media WHERE extract_audio_path LIKE 'sb://%'
-    UNION ALL
-    SELECT thumbnail_path, 'thumbnail', media_id, id
-    FROM resources WHERE thumbnail_path LIKE 'sb://%'
-    UNION ALL
-    SELECT cover_image_path, 'cover_image', media_id, id
-    FROM resources WHERE cover_image_path LIKE 'sb://%'
-    UNION ALL
-    SELECT file_path, 'file', media_id, id
-    FROM resources WHERE file_path LIKE 'sb://%'
-    UNION ALL
-    SELECT rv.hls_path, 'hls', r.media_id, rv.resource_id
-    FROM resource_versions rv JOIN resources r ON r.id = rv.resource_id
-    WHERE rv.hls_path LIKE 'sb://%'
-    UNION ALL
-    SELECT rv.file_path, 'version_file', r.media_id, rv.resource_id
-    FROM resource_versions rv JOIN resources r ON r.id = rv.resource_id
-    WHERE rv.file_path LIKE 'sb://%'
-    UNION ALL
-    SELECT file_path, 'project_file', media_id, id
-    FROM project_files WHERE file_path LIKE 'sb://%'
-    UNION ALL
-    SELECT fv.file_path, 'project_file_version', pf.media_id, fv.file_id
-    FROM file_versions fv JOIN project_files pf ON pf.id = fv.file_id
-    WHERE fv.file_path LIKE 'sb://%'
-"""
+#
+# Phase C task 2: migrated off the hand-built UNION ALL SQL string to a real
+# ORM ``union_all()`` of per-column ``select()`` arms — same 11 (column,
+# table) pairs as before, each arm projecting (key, kind, media_id,
+# resource_id) with consistent types across the union (BigInteger for the two
+# id columns, a ``CAST(NULL AS bigint)`` for the arms with no resource_id).
+_NULL_RESOURCE_ID = cast(null(), BigInteger)
+
+_COLLECT_ARMS = [
+    select(
+        ParsedMedia.download_path.label("key"),
+        literal("video").label("kind"),
+        ParsedMedia.id.label("media_id"),
+        _NULL_RESOURCE_ID.label("resource_id"),
+    ).where(ParsedMedia.download_path.like("sb://%")),
+    select(
+        ParsedMedia.cover_download_path.label("key"),
+        literal("cover").label("kind"),
+        ParsedMedia.id.label("media_id"),
+        _NULL_RESOURCE_ID.label("resource_id"),
+    ).where(ParsedMedia.cover_download_path.like("sb://%")),
+    select(
+        ParsedMedia.music_download_path.label("key"),
+        literal("music").label("kind"),
+        ParsedMedia.id.label("media_id"),
+        _NULL_RESOURCE_ID.label("resource_id"),
+    ).where(ParsedMedia.music_download_path.like("sb://%")),
+    select(
+        ParsedMedia.extract_audio_path.label("key"),
+        literal("extract_audio").label("kind"),
+        ParsedMedia.id.label("media_id"),
+        _NULL_RESOURCE_ID.label("resource_id"),
+    ).where(ParsedMedia.extract_audio_path.like("sb://%")),
+    select(
+        Resources.thumbnail_path.label("key"),
+        literal("thumbnail").label("kind"),
+        Resources.media_id.label("media_id"),
+        Resources.id.label("resource_id"),
+    ).where(Resources.thumbnail_path.like("sb://%")),
+    select(
+        Resources.cover_image_path.label("key"),
+        literal("cover_image").label("kind"),
+        Resources.media_id.label("media_id"),
+        Resources.id.label("resource_id"),
+    ).where(Resources.cover_image_path.like("sb://%")),
+    select(
+        Resources.file_path.label("key"),
+        literal("file").label("kind"),
+        Resources.media_id.label("media_id"),
+        Resources.id.label("resource_id"),
+    ).where(Resources.file_path.like("sb://%")),
+    select(
+        ResourceVersions.hls_path.label("key"),
+        literal("hls").label("kind"),
+        Resources.media_id.label("media_id"),
+        ResourceVersions.resource_id.label("resource_id"),
+    )
+    .join(Resources, Resources.id == ResourceVersions.resource_id)
+    .where(ResourceVersions.hls_path.like("sb://%")),
+    select(
+        ResourceVersions.file_path.label("key"),
+        literal("version_file").label("kind"),
+        Resources.media_id.label("media_id"),
+        ResourceVersions.resource_id.label("resource_id"),
+    )
+    .join(Resources, Resources.id == ResourceVersions.resource_id)
+    .where(ResourceVersions.file_path.like("sb://%")),
+    select(
+        ProjectFiles.file_path.label("key"),
+        literal("project_file").label("kind"),
+        ProjectFiles.media_id.label("media_id"),
+        ProjectFiles.id.label("resource_id"),
+    ).where(ProjectFiles.file_path.like("sb://%")),
+    select(
+        FileVersions.file_path.label("key"),
+        literal("project_file_version").label("kind"),
+        ProjectFiles.media_id.label("media_id"),
+        FileVersions.file_id.label("resource_id"),
+    )
+    .join(ProjectFiles, ProjectFiles.id == FileVersions.file_id)
+    .where(FileVersions.file_path.like("sb://%")),
+]
+
+_COLLECT_STMT = union_all(*_COLLECT_ARMS)
 
 
 async def collect_audit_keys_step() -> list[dict]:
-    """Fetch every sb:// key across the 9 index columns, strip the
+    """Fetch every sb:// key across the 11 index columns, strip the
     ``sb://library/`` prefix, and de-dupe (the same object can be
-    referenced from more than one column/table)."""
-    rows = await db_engine.fetch_all(_COLLECT_SQL)
+    referenced from more than one column/table).
+
+    Full-library scan by design — system scope, unconditionally correct
+    regardless of any ambient caller scope (a per-user read would silently
+    miss every other user's sb:// keys, exactly the false-missing report a
+    storage audit must never produce). Gated on ``is_enforced("resources")``
+    to stay byte-for-byte legacy (no wrap, no audit log) while enforcement is
+    off.
+    """
+    scope_cm = (
+        system_request_scope(
+            reason="storage-audit-full-library-scan: audits every user's "
+            "sb:// keys, must not be filtered to any single tenant"
+        )
+        if is_enforced("resources")
+        else nullcontext()
+    )
+    async with scope_cm:
+        async with read_scope() as session:
+            rows = (await session.execute(_COLLECT_STMT)).mappings().all()
+
     seen: set[str] = set()
     out: list[dict] = []
     for r in rows:

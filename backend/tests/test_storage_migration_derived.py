@@ -11,10 +11,16 @@ Rework(2026-07-29): 全量 dry-run 暴露旧版"只扫 derived/ 目录"的 _list
 同 rid 的 thumbnail/cover/sprite 三者共享 ``derived/{rid}/`` 前缀但 filename 不同,
 无碰撞;delete_source 只 unlink 单文件(next-to-source 缩略图和源文件同目录,
 绝不能 rmtree)。
+
+Phase C task 2: DB 读写走 ``read_scope()``/``write_scope()`` 的真实 SQLAlchemy
+ORM 语句(``select(Resources...)``/``update(Resources)...``),不再是裸
+``db_engine.fetch_all``/``execute`` —— 测试相应地 patch 这两个 ORM seam,而不是
+mock 已不存在的 ``sm.db_engine``。
 """
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -25,6 +31,67 @@ from app.workflows import storage_migration as sm
 
 # NB: asyncio_mode = "auto"(pyproject.toml)自动识别 async def 测试—— 无需
 # pytestmark,文件级打标会误伤下面的同步 registry/placeholder 测试。
+
+
+# ── Fake ORM seams (house style borrowed from test_ai_transcription_sql.py) ──
+
+
+class _FakeExecuteRowsResult:
+    """Multi-row result — supports ``.mappings().all()``."""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _FakeScopeSession:
+    def __init__(self, execute_result=None):
+        self._execute_result = execute_result
+
+    async def execute(self, stmt):
+        return self._execute_result
+
+
+def _fake_read_scope(rows):
+    @asynccontextmanager
+    async def _read_scope():
+        yield _FakeScopeSession(execute_result=_FakeExecuteRowsResult(rows))
+
+    return _read_scope
+
+
+class _CapturingWriteSession:
+    """Records every statement passed to ``execute()`` for compile-level
+    (column/param) assertions — stands in for ``write_scope()``."""
+
+    def __init__(self):
+        self.statements = []
+
+    async def execute(self, stmt):
+        self.statements.append(stmt)
+
+        class _R:
+            rowcount = 1
+
+        return _R()
+
+
+def _fake_write_scope(session):
+    @asynccontextmanager
+    async def _write_scope():
+        yield session
+
+    return _write_scope
+
+
+def _compiled(stmt):
+    compiled = stmt.compile()
+    return str(compiled), dict(compiled.params)
 
 
 # ── FakeDerivedStore —— 单文件 put_file + get_size,不是 put_dir ─────────
@@ -58,73 +125,67 @@ def _patch_store(monkeypatch, store: FakeDerivedStore) -> None:
 
 
 async def test_list_derived_rows_db_driven_thumbnail_and_cover(monkeypatch):
-    fetch_all = AsyncMock(
-        return_value=[
-            {
-                "resource_id": 100,
-                "thumbnail_path": "global/resources/web/douyin/100/thumbnail.webp",
-                "cover_image_path": None,
-            },
-            {
-                "resource_id": 200,
-                "thumbnail_path": None,
-                "cover_image_path": "teams/42/derived/covers/200/cover.jpg",
-            },
-        ]
-    )
-    monkeypatch.setattr(sm.db_engine, "fetch_all", fetch_all)
+    rows = [
+        {
+            "resource_id": 100,
+            "thumbnail_path": "global/resources/web/douyin/100/thumbnail.webp",
+            "cover_image_path": None,
+        },
+        {
+            "resource_id": 200,
+            "thumbnail_path": None,
+            "cover_image_path": "teams/42/derived/covers/200/cover.jpg",
+        },
+    ]
+    monkeypatch.setattr(sm, "read_scope", _fake_read_scope(rows))
 
-    rows = await sm._list_derived_rows(None, limit=100)
+    result = await sm._list_derived_rows(None, limit=100)
 
     assert {
         "resource_id": 100,
         "column": "thumbnail_path",
         "rel_path": "global/resources/web/douyin/100/thumbnail.webp",
-    } in rows
+    } in result
     assert {
         "resource_id": 200,
         "column": "cover_image_path",
         "rel_path": "teams/42/derived/covers/200/cover.jpg",
-    } in rows
-    assert len(rows) == 2
+    } in result
+    assert len(result) == 2
 
 
 async def test_list_derived_rows_skips_already_sb_columns(monkeypatch):
-    fetch_all = AsyncMock(
-        return_value=[
-            {
-                "resource_id": 100,
-                "thumbnail_path": "sb://library/derived/100/thumbnail.webp",
-                "cover_image_path": None,
-            }
-        ]
-    )
-    monkeypatch.setattr(sm.db_engine, "fetch_all", fetch_all)
+    rows = [
+        {
+            "resource_id": 100,
+            "thumbnail_path": "sb://library/derived/100/thumbnail.webp",
+            "cover_image_path": None,
+        }
+    ]
+    monkeypatch.setattr(sm, "read_scope", _fake_read_scope(rows))
 
-    rows = await sm._list_derived_rows(None, limit=100)
+    result = await sm._list_derived_rows(None, limit=100)
 
-    assert rows == []
+    assert result == []
 
 
 async def test_list_derived_rows_same_resource_both_columns(monkeypatch):
     """一个 resource 同时有 thumbnail_path + cover_image_path 非 sb —— 两个
     独立行,不是合并成一行。"""
-    fetch_all = AsyncMock(
-        return_value=[
-            {
-                "resource_id": 100,
-                "thumbnail_path": "global/resources/web/douyin/100/thumbnail.webp",
-                "cover_image_path": "global/resources/web/douyin/100/cover.jpg",
-            }
-        ]
-    )
-    monkeypatch.setattr(sm.db_engine, "fetch_all", fetch_all)
+    rows = [
+        {
+            "resource_id": 100,
+            "thumbnail_path": "global/resources/web/douyin/100/thumbnail.webp",
+            "cover_image_path": "global/resources/web/douyin/100/cover.jpg",
+        }
+    ]
+    monkeypatch.setattr(sm, "read_scope", _fake_read_scope(rows))
 
-    rows = await sm._list_derived_rows(None, limit=100)
+    result = await sm._list_derived_rows(None, limit=100)
 
-    columns = {r["column"] for r in rows}
+    columns = {r["column"] for r in result}
     assert columns == {"thumbnail_path", "cover_image_path"}
-    assert all(r["resource_id"] == 100 for r in rows)
+    assert all(r["resource_id"] == 100 for r in result)
 
 
 async def test_list_derived_rows_disk_walk_finds_sprite(tmp_path, monkeypatch):
@@ -135,11 +196,11 @@ async def test_list_derived_rows_disk_walk_finds_sprite(tmp_path, monkeypatch):
     sprite_dir.mkdir(parents=True)
     (sprite_dir / "preview_sprite.jpg").write_bytes(b"sprite-bytes")
 
-    monkeypatch.setattr(sm.db_engine, "fetch_all", AsyncMock(return_value=[]))
+    monkeypatch.setattr(sm, "read_scope", _fake_read_scope([]))
 
-    rows = await sm._list_derived_rows(None, limit=100)
+    result = await sm._list_derived_rows(None, limit=100)
 
-    assert rows == [
+    assert result == [
         {
             "resource_id": "555",
             "column": None,
@@ -155,11 +216,11 @@ async def test_list_derived_rows_disk_walk_skips_empty_dirs(tmp_path, monkeypatc
     empty_dir = tmp_path / "derived" / "thumbnails" / "999"
     empty_dir.mkdir(parents=True)
 
-    monkeypatch.setattr(sm.db_engine, "fetch_all", AsyncMock(return_value=[]))
+    monkeypatch.setattr(sm, "read_scope", _fake_read_scope([]))
 
-    rows = await sm._list_derived_rows(None, limit=100)
+    result = await sm._list_derived_rows(None, limit=100)
 
-    assert rows == []
+    assert result == []
 
 
 async def test_list_derived_rows_combines_db_and_sprite_same_resource(
@@ -174,21 +235,19 @@ async def test_list_derived_rows_combines_db_and_sprite_same_resource(
     sprite_dir.mkdir(parents=True)
     (sprite_dir / "preview_sprite.jpg").write_bytes(b"sprite-bytes")
 
-    fetch_all = AsyncMock(
-        return_value=[
-            {
-                "resource_id": 100,
-                "thumbnail_path": "global/resources/web/douyin/100/thumbnail.webp",
-                "cover_image_path": "global/resources/web/douyin/100/cover.jpg",
-            }
-        ]
-    )
-    monkeypatch.setattr(sm.db_engine, "fetch_all", fetch_all)
+    rows = [
+        {
+            "resource_id": 100,
+            "thumbnail_path": "global/resources/web/douyin/100/thumbnail.webp",
+            "cover_image_path": "global/resources/web/douyin/100/cover.jpg",
+        }
+    ]
+    monkeypatch.setattr(sm, "read_scope", _fake_read_scope(rows))
 
-    rows = await sm._list_derived_rows(None, limit=100)
+    result = await sm._list_derived_rows(None, limit=100)
 
-    assert len(rows) == 3
-    columns = {r["column"] for r in rows}
+    assert len(result) == 3
+    columns = {r["column"] for r in result}
     assert columns == {"thumbnail_path", "cover_image_path", None}
 
 
@@ -201,11 +260,11 @@ async def test_list_derived_rows_respects_limit_after_union(tmp_path, monkeypatc
         d.mkdir(parents=True)
         (d / "preview_sprite.jpg").write_bytes(b"s")
 
-    monkeypatch.setattr(sm.db_engine, "fetch_all", AsyncMock(return_value=[]))
+    monkeypatch.setattr(sm, "read_scope", _fake_read_scope([]))
 
-    rows = await sm._list_derived_rows(None, limit=2)
+    result = await sm._list_derived_rows(None, limit=2)
 
-    assert len(rows) == 2
+    assert len(result) == 2
 
 
 async def test_list_derived_rows_rejects_scope_id():
@@ -231,8 +290,8 @@ async def test_migrate_derived_row_thumbnail_next_to_source(tmp_path, monkeypatc
 
     store = FakeDerivedStore()
     _patch_store(monkeypatch, store)
-    execute = AsyncMock(return_value=0)
-    monkeypatch.setattr(sm.db_engine, "execute", execute)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     outcome = await sm._migrate_derived_row(
         {
@@ -248,11 +307,11 @@ async def test_migrate_derived_row_thumbnail_next_to_source(tmp_path, monkeypatc
     key, local_path, mime = store.put_file_calls[0]
     assert key == "derived/100/thumbnail.webp"
     assert mime == "image/webp"
-    execute.assert_awaited_once()
-    sql_arg, params_arg = execute.call_args.args
-    assert "thumbnail_path" in sql_arg
-    assert params_arg["path"] == "sb://library/derived/100/thumbnail.webp"
-    assert params_arg["resource_id"] == 100
+    assert len(session.statements) == 1
+    sql, params = _compiled(session.statements[0])
+    assert "resources" in sql
+    assert params["thumbnail_path"] == "sb://library/derived/100/thumbnail.webp"
+    assert params["id_1"] == 100
     # next-to-source 缩略图,视频文件必须原地不动(没碰 delete_source)。
     assert (video_dir / "video.mp4").is_file()
 
@@ -267,8 +326,8 @@ async def test_migrate_derived_row_cover_image(tmp_path, monkeypatch):
 
     store = FakeDerivedStore()
     _patch_store(monkeypatch, store)
-    execute = AsyncMock(return_value=0)
-    monkeypatch.setattr(sm.db_engine, "execute", execute)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     outcome = await sm._migrate_derived_row(
         {
@@ -283,9 +342,11 @@ async def test_migrate_derived_row_cover_image(tmp_path, monkeypatch):
     assert outcome == "migrated"
     key, _, _ = store.put_file_calls[0]
     assert key == "derived/200/cover.jpg"
-    sql_arg, params_arg = execute.call_args.args
-    assert "cover_image_path" in sql_arg
-    assert params_arg["path"] == "sb://library/derived/200/cover.jpg"
+    assert len(session.statements) == 1
+    sql, params = _compiled(session.statements[0])
+    assert "resources" in sql
+    assert params["cover_image_path"] == "sb://library/derived/200/cover.jpg"
+    assert params["id_1"] == 200
 
 
 async def test_migrate_derived_row_sprite_no_column_update(tmp_path, monkeypatch):
@@ -299,8 +360,8 @@ async def test_migrate_derived_row_sprite_no_column_update(tmp_path, monkeypatch
 
     store = FakeDerivedStore()
     _patch_store(monkeypatch, store)
-    execute = AsyncMock(return_value=0)
-    monkeypatch.setattr(sm.db_engine, "execute", execute)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     outcome = await sm._migrate_derived_row(
         {
@@ -315,7 +376,7 @@ async def test_migrate_derived_row_sprite_no_column_update(tmp_path, monkeypatch
     assert outcome == "migrated"
     key, _, _ = store.put_file_calls[0]
     assert key == "derived/555/preview_sprite.jpg"
-    execute.assert_not_called()
+    assert session.statements == []
 
 
 async def test_migrate_derived_row_same_rid_three_kinds_no_key_collision(
@@ -336,7 +397,8 @@ async def test_migrate_derived_row_same_rid_three_kinds_no_key_collision(
 
     store = FakeDerivedStore()
     _patch_store(monkeypatch, store)
-    monkeypatch.setattr(sm.db_engine, "execute", AsyncMock(return_value=0))
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     outcome_thumb = await sm._migrate_derived_row(
         {
@@ -378,6 +440,8 @@ async def test_migrate_derived_row_same_rid_three_kinds_no_key_collision(
         "derived/100/preview_sprite.jpg",
     ]
     assert len(set(keys)) == 3
+    # sprite row has no column to sync — only thumbnail + cover hit the DB.
+    assert len(session.statements) == 2
 
 
 async def test_migrate_derived_row_missing_file_returns_missing(tmp_path, monkeypatch):
@@ -386,8 +450,8 @@ async def test_migrate_derived_row_missing_file_returns_missing(tmp_path, monkey
     monkeypatch.setattr(settings, "DOWNLOAD_PATH", str(tmp_path))
     store = FakeDerivedStore()
     _patch_store(monkeypatch, store)
-    execute = AsyncMock(return_value=0)
-    monkeypatch.setattr(sm.db_engine, "execute", execute)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     outcome = await sm._migrate_derived_row(
         {
@@ -400,7 +464,7 @@ async def test_migrate_derived_row_missing_file_returns_missing(tmp_path, monkey
     )
 
     assert outcome == "missing"
-    execute.assert_not_called()
+    assert session.statements == []
     assert store.put_file_calls == []
 
 
@@ -414,8 +478,8 @@ async def test_migrate_derived_row_dry_run_never_mutates(tmp_path, monkeypatch):
 
     store = FakeDerivedStore()
     _patch_store(monkeypatch, store)
-    execute = AsyncMock(return_value=0)
-    monkeypatch.setattr(sm.db_engine, "execute", execute)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     outcome = await sm._migrate_derived_row(
         {
@@ -430,7 +494,7 @@ async def test_migrate_derived_row_dry_run_never_mutates(tmp_path, monkeypatch):
     assert outcome == "dry_run_ok"
     # put_file 发生了(dedup-safe,可重放)但不更新 DB、不删源文件。
     assert len(store.put_file_calls) == 1
-    execute.assert_not_called()
+    assert session.statements == []
     assert (video_dir / "thumbnail.webp").is_file()
 
 
@@ -449,7 +513,8 @@ async def test_migrate_derived_row_delete_source_unlinks_single_file_not_dir(
 
     store = FakeDerivedStore()
     _patch_store(monkeypatch, store)
-    monkeypatch.setattr(sm.db_engine, "execute", AsyncMock(return_value=0))
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     outcome = await sm._migrate_derived_row(
         {
@@ -480,8 +545,8 @@ async def test_migrate_derived_row_size_mismatch_raises_before_mutation(
 
     store = FakeDerivedStore(size_offset=-1)  # 模拟上传后 size 对不上
     _patch_store(monkeypatch, store)
-    execute = AsyncMock(return_value=0)
-    monkeypatch.setattr(sm.db_engine, "execute", execute)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     with pytest.raises(RuntimeError, match="size mismatch"):
         await sm._migrate_derived_row(
@@ -494,7 +559,7 @@ async def test_migrate_derived_row_size_mismatch_raises_before_mutation(
             delete_source=True,
         )
 
-    execute.assert_not_called()
+    assert session.statements == []
     assert (video_dir / "thumbnail.webp").is_file()
 
 

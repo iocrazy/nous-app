@@ -11,10 +11,13 @@ bypasses:
   * ``get_statistics``     — select_from(resources) JOIN parsed_media
   * ``get_pending_downloads`` — EXISTS(select Resources ...) correlated subquery
 
-(The only ``resources``-touching media reads that are raw ``text()`` and thus
-choke-point bypasses live in the ai_transcription WORKFLOW, not the media repo:
-``ai_transcription.load_transcribe_inputs`` JOIN + ``_run_volcengine_asr``
-SELECT — already part of the known text()/REST-bypass deferral.)
+(``ai_transcription.load_transcribe_inputs`` JOIN + ``_run_volcengine_asr``
+SELECT — previously the only ``resources``-touching media reads that were raw
+``text()`` choke-point bypasses — were migrated to ORM ``select()`` statements
+in Phase C task 1 (2026-08-05), each wrapped in an ``is_enforced("resources")``-
+gated ``system_request_scope``; see ``tests/db/test_scope_enforcement_regression_c1.py``
+for their choke-point coverage. No remaining ``resources``-touching media read
+is a raw ``text()`` bypass.)
 
 Because the four media-repo reads are ORM, flipping ``SCOPE_ENFORCE_RESOURCES``
 under a USER scope injects ``resources.creator_id == scope.user_id`` into the

@@ -31,10 +31,13 @@ audio is not downloaded music).
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any, Optional
 
 from dbos import DBOS
 from loguru import logger
+
+from app.db.scope import is_enforced, system_request_scope
 
 
 @DBOS.step()
@@ -79,14 +82,34 @@ async def mark_transcript_failed_step(resource_id: str) -> None:
     transcription never runs — so without this write transcript_status
     stays 'none' and the spinner never resolves. Best-effort — must not
     mask the extraction error we're about to raise."""
-    from app.db import engine as db_engine
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import Resources
 
     try:
-        await db_engine.execute(
-            "UPDATE public.resources SET transcript_status = 'failed' "
-            "WHERE id = :rid AND transcript_status <> 'completed'",
-            {"rid": int(resource_id)},
+        # Resources carries UserScoped(creator_id); bulk Core UPDATE on a
+        # scoped model is FORBIDDEN under a real user Scope (app/db/scope.py's
+        # write-path guard). This step has no ambient per-request scope of
+        # its own (it's a DBOS step reacting to an extraction failure), so
+        # SYSTEM is correct — mirrors ai_transcription's mark_transcript_*
+        # rationale. Gated on is_enforced to stay byte-for-byte legacy where
+        # the flag is off.
+        scope_cm = (
+            system_request_scope(
+                reason="extract_audio workflow: mark transcript status failed"
+            )
+            if is_enforced("resources")
+            else nullcontext()
         )
+        async with scope_cm:
+            async with write_scope() as session:
+                await session.execute(
+                    update(Resources)
+                    .where(Resources.id == int(resource_id))
+                    .where(Resources.transcript_status != "completed")
+                    .values(transcript_status="failed")
+                )
     except Exception as e:
         logger.warning(
             f"[extract_audio] transcript_status='failed' write for "

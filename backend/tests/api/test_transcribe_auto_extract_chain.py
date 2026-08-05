@@ -371,35 +371,59 @@ class TestExtractAudioChainFailurePropagation:
 
     @pytest.mark.asyncio
     async def test_mark_transcript_failed_step_keys_on_resource_id(self) -> None:
+        from contextlib import asynccontextmanager
         from unittest.mock import patch
 
         import app.workflows.extract_audio as m
 
-        cap = {}
+        class _FakeWriteResult:
+            rowcount = 1
 
-        async def fake_execute(sql, params=None):
-            cap["sql"] = sql
-            cap["params"] = params
-            return 1
+        class _CapturingWriteSession:
+            def __init__(self) -> None:
+                self.statements: list = []
 
-        with patch("app.db.engine.execute", fake_execute):
+            async def execute(self, stmt):
+                self.statements.append(stmt)
+                return _FakeWriteResult()
+
+        session = _CapturingWriteSession()
+
+        @asynccontextmanager
+        async def _fake_write_scope():
+            yield session
+
+        # Phase C task 1: migrated off raw db_engine.execute onto a real ORM
+        # update(Resources) statement run through write_scope().
+        with patch("app.db.session.write_scope", _fake_write_scope):
             await m.mark_transcript_failed_step("555")
 
-        assert "WHERE id = :rid" in cap["sql"]
-        assert "transcript_status = 'failed'" in cap["sql"]
-        assert "transcript_status <> 'completed'" in cap["sql"]
-        assert cap["params"] == {"rid": 555}
+        assert len(session.statements) == 1
+        sql_text, params = str(session.statements[0].compile()), dict(
+            session.statements[0].compile().params
+        )
+        assert "resources.id" in sql_text
+        assert sql_text.count("transcript_status") >= 2  # SET + <> 'completed' guard
+        assert 555 in params.values()
+        assert "failed" in params.values()
+        assert "completed" in params.values()
 
     @pytest.mark.asyncio
     async def test_mark_transcript_failed_step_swallows_write_error(self) -> None:
+        from contextlib import asynccontextmanager
         from unittest.mock import patch
 
         import app.workflows.extract_audio as m
 
-        async def boom(sql, params=None):
-            raise RuntimeError("pg down")
+        class _BoomWriteSession:
+            async def execute(self, stmt):
+                raise RuntimeError("pg down")
 
-        with patch("app.db.engine.execute", boom):
+        @asynccontextmanager
+        async def _fake_write_scope():
+            yield _BoomWriteSession()
+
+        with patch("app.db.session.write_scope", _fake_write_scope):
             await m.mark_transcript_failed_step("1")  # must not raise
 
     def test_both_failure_branches_propagate_when_chained(self) -> None:

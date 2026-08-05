@@ -12,13 +12,18 @@ scope 来自 resource_items(通过 resources.media_id 反查,LEFT JOIN LATERAL,
 resource 无 resource_items scope)拿到 scope_id=NULL,必须 skip 而不是 raise
 (一个孤儿不该拖垮整批)。
 
-column 名只能是白名单三列之一,通过固定字典映射 UPDATE SQL,绝不字符串插值
-列名 —— 防 SQL 注入。
+column 名只能是白名单三列之一(``_PM_ASSETS_COLUMNS_WHITELIST``),绝不字符串
+插值列名 —— 防 SQL 注入。
+
+Phase C task 2: DB 读写走 ``read_scope()``/``write_scope()`` 的真实 SQLAlchemy
+ORM 语句(``select(ParsedMedia...)``/``update(ParsedMedia)...``),不再是裸
+``db_engine.fetch_all``/``execute`` —— 测试相应地 patch 这两个 ORM seam。
 """
 
 from __future__ import annotations
 
 import hashlib
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -28,6 +33,67 @@ from app.services.library import media_storage
 from app.workflows import storage_migration as sm
 
 # NB: asyncio_mode = "auto"(pyproject.toml)自动识别 async def 测试。
+
+
+# ── Fake ORM seams (house style borrowed from test_ai_transcription_sql.py) ──
+
+
+class _FakeExecuteRowsResult:
+    """Multi-row result — supports ``.mappings().all()``."""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _FakeScopeSession:
+    def __init__(self, execute_result=None):
+        self._execute_result = execute_result
+
+    async def execute(self, stmt):
+        return self._execute_result
+
+
+def _fake_read_scope(rows):
+    @asynccontextmanager
+    async def _read_scope():
+        yield _FakeScopeSession(execute_result=_FakeExecuteRowsResult(rows))
+
+    return _read_scope
+
+
+class _CapturingWriteSession:
+    """Records every statement passed to ``execute()`` for compile-level
+    (column/param) assertions — stands in for ``write_scope()``."""
+
+    def __init__(self):
+        self.statements = []
+
+    async def execute(self, stmt):
+        self.statements.append(stmt)
+
+        class _R:
+            rowcount = 1
+
+        return _R()
+
+
+def _fake_write_scope(session):
+    @asynccontextmanager
+    async def _write_scope():
+        yield session
+
+    return _write_scope
+
+
+def _compiled(stmt):
+    compiled = stmt.compile()
+    return str(compiled), dict(compiled.params)
 
 
 # ── FakePmAssetsStore —— exists/put_file/get_size,支持预置"已存在"的 key ──
@@ -74,22 +140,20 @@ def _expected_key(scope_id: int, data: bytes, ext: str) -> str:
 
 
 async def test_list_pm_assets_rows_single_column_fans_to_one_unit(monkeypatch):
-    fetch_all = AsyncMock(
-        return_value=[
-            {
-                "pm_id": 1,
-                "cover_download_path": "global/resources/web/douyin/1/cover.jpg",
-                "music_download_path": None,
-                "extract_audio_path": None,
-                "scope_id": 42,
-            }
-        ]
-    )
-    monkeypatch.setattr(sm.db_engine, "fetch_all", fetch_all)
+    rows = [
+        {
+            "pm_id": 1,
+            "cover_download_path": "global/resources/web/douyin/1/cover.jpg",
+            "music_download_path": None,
+            "extract_audio_path": None,
+            "scope_id": 42,
+        }
+    ]
+    monkeypatch.setattr(sm, "read_scope", _fake_read_scope(rows))
 
-    rows = await sm._list_pm_assets_rows(None, limit=100)
+    result = await sm._list_pm_assets_rows(None, limit=100)
 
-    assert rows == [
+    assert result == [
         {
             "pm_id": 1,
             "column": "cover_download_path",
@@ -101,113 +165,112 @@ async def test_list_pm_assets_rows_single_column_fans_to_one_unit(monkeypatch):
 
 
 async def test_list_pm_assets_rows_three_columns_fan_to_three_units(monkeypatch):
-    fetch_all = AsyncMock(
-        return_value=[
-            {
-                "pm_id": 7,
-                "cover_download_path": "global/resources/web/douyin/7/cover.jpg",
-                "music_download_path": "global/resources/web/douyin/7/music.m4a",
-                "extract_audio_path": "global/resources/web/douyin/7/audio.m4a",
-                "scope_id": 99,
-            }
-        ]
-    )
-    monkeypatch.setattr(sm.db_engine, "fetch_all", fetch_all)
+    rows = [
+        {
+            "pm_id": 7,
+            "cover_download_path": "global/resources/web/douyin/7/cover.jpg",
+            "music_download_path": "global/resources/web/douyin/7/music.m4a",
+            "extract_audio_path": "global/resources/web/douyin/7/audio.m4a",
+            "scope_id": 99,
+        }
+    ]
+    monkeypatch.setattr(sm, "read_scope", _fake_read_scope(rows))
 
-    rows = await sm._list_pm_assets_rows(None, limit=100)
+    result = await sm._list_pm_assets_rows(None, limit=100)
 
-    assert len(rows) == 3
-    columns = {r["column"] for r in rows}
+    assert len(result) == 3
+    columns = {r["column"] for r in result}
     assert columns == {
         "cover_download_path",
         "music_download_path",
         "extract_audio_path",
     }
-    mimes = {r["column"]: r["mime"] for r in rows}
+    mimes = {r["column"]: r["mime"] for r in result}
     assert mimes["cover_download_path"] == "image/jpeg"
     assert mimes["music_download_path"] == "audio/mp4"
     assert mimes["extract_audio_path"] == "audio/mp4"
-    assert all(r["pm_id"] == 7 and r["scope_id"] == 99 for r in rows)
+    assert all(r["pm_id"] == 7 and r["scope_id"] == 99 for r in result)
 
 
 async def test_list_pm_assets_rows_skips_already_sb_columns(monkeypatch):
-    fetch_all = AsyncMock(
-        return_value=[
-            {
-                "pm_id": 1,
-                "cover_download_path": "sb://library/t1/ab/cd/deadbeef.jpg",
-                "music_download_path": None,
-                "extract_audio_path": None,
-                "scope_id": 1,
-            }
-        ]
-    )
-    monkeypatch.setattr(sm.db_engine, "fetch_all", fetch_all)
+    rows = [
+        {
+            "pm_id": 1,
+            "cover_download_path": "sb://library/t1/ab/cd/deadbeef.jpg",
+            "music_download_path": None,
+            "extract_audio_path": None,
+            "scope_id": 1,
+        }
+    ]
+    monkeypatch.setattr(sm, "read_scope", _fake_read_scope(rows))
 
-    rows = await sm._list_pm_assets_rows(None, limit=100)
+    result = await sm._list_pm_assets_rows(None, limit=100)
 
-    assert rows == []
+    assert result == []
 
 
 async def test_list_pm_assets_rows_preserves_null_scope_for_orphans(monkeypatch):
     """孤儿 parsed_media(无 resource / 无 resource_items scope)—— scope_id
     在扇出时保留为 None,不在这里 raise/skip;实际的 skip 决策留给
     ``_migrate_pm_assets_row``(它才是决定"孤儿 skip 不 raise"的地方)。"""
-    fetch_all = AsyncMock(
-        return_value=[
-            {
-                "pm_id": 5,
-                "cover_download_path": "global/resources/web/douyin/5/cover.jpg",
-                "music_download_path": None,
-                "extract_audio_path": None,
-                "scope_id": None,
-            }
-        ]
-    )
-    monkeypatch.setattr(sm.db_engine, "fetch_all", fetch_all)
+    rows = [
+        {
+            "pm_id": 5,
+            "cover_download_path": "global/resources/web/douyin/5/cover.jpg",
+            "music_download_path": None,
+            "extract_audio_path": None,
+            "scope_id": None,
+        }
+    ]
+    monkeypatch.setattr(sm, "read_scope", _fake_read_scope(rows))
 
-    rows = await sm._list_pm_assets_rows(None, limit=100)
+    result = await sm._list_pm_assets_rows(None, limit=100)
 
-    assert len(rows) == 1
-    assert rows[0]["scope_id"] is None
+    assert len(result) == 1
+    assert result[0]["scope_id"] is None
 
 
 async def test_list_pm_assets_rows_limit_applied_after_fanout(monkeypatch):
     """2 行、每行 3 列非 sb → 扇出 6 个 unit,但 limit=4 时必须裁到 4 个,
     不是让每行各自的 SELECT LIMIT 起作用(同 derived 的 union-limit 语义)。"""
-    fetch_all = AsyncMock(
-        return_value=[
-            {
-                "pm_id": 1,
-                "cover_download_path": "a/cover.jpg",
-                "music_download_path": "a/music.m4a",
-                "extract_audio_path": "a/audio.m4a",
-                "scope_id": 1,
-            },
-            {
-                "pm_id": 2,
-                "cover_download_path": "b/cover.jpg",
-                "music_download_path": "b/music.m4a",
-                "extract_audio_path": "b/audio.m4a",
-                "scope_id": 2,
-            },
-        ]
-    )
-    monkeypatch.setattr(sm.db_engine, "fetch_all", fetch_all)
+    rows = [
+        {
+            "pm_id": 1,
+            "cover_download_path": "a/cover.jpg",
+            "music_download_path": "a/music.m4a",
+            "extract_audio_path": "a/audio.m4a",
+            "scope_id": 1,
+        },
+        {
+            "pm_id": 2,
+            "cover_download_path": "b/cover.jpg",
+            "music_download_path": "b/music.m4a",
+            "extract_audio_path": "b/audio.m4a",
+            "scope_id": 2,
+        },
+    ]
+    monkeypatch.setattr(sm, "read_scope", _fake_read_scope(rows))
 
-    rows = await sm._list_pm_assets_rows(None, limit=4)
+    result = await sm._list_pm_assets_rows(None, limit=4)
 
-    assert len(rows) == 4
+    assert len(result) == 4
 
 
 async def test_list_pm_assets_rows_forwards_scope_id_and_limit(monkeypatch):
-    fetch_all = AsyncMock(return_value=[])
-    monkeypatch.setattr(sm.db_engine, "fetch_all", fetch_all)
+    seen_args = {}
+    original_select_stmt = sm._pm_assets_select_stmt
+
+    def spy_select_stmt(scope_id, limit):
+        seen_args["scope_id"] = scope_id
+        seen_args["limit"] = limit
+        return original_select_stmt(scope_id, limit)
+
+    monkeypatch.setattr(sm, "_pm_assets_select_stmt", spy_select_stmt)
+    monkeypatch.setattr(sm, "read_scope", _fake_read_scope([]))
 
     await sm._list_pm_assets_rows(42, limit=10)
 
-    _, params = fetch_all.call_args.args
-    assert params == {"scope_id": 42, "limit": 10}
+    assert seen_args == {"scope_id": 42, "limit": 10}
 
 
 # ── _migrate_pm_assets_row —— content-addressed store_local_file + verify ──
@@ -224,8 +287,8 @@ async def test_migrate_pm_assets_row_cover_column(tmp_path, monkeypatch):
 
     store = FakePmAssetsStore()
     _patch_store(monkeypatch, store)
-    execute = AsyncMock(return_value=0)
-    monkeypatch.setattr(sm.db_engine, "execute", execute)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     outcome = await sm._migrate_pm_assets_row(
         {
@@ -243,11 +306,12 @@ async def test_migrate_pm_assets_row_cover_column(tmp_path, monkeypatch):
     key, local_path, mime = store.put_file_calls[0]
     assert key == _expected_key(42, data, ".jpg")
     assert mime == "image/jpeg"
-    execute.assert_awaited_once()
-    sql_arg, params_arg = execute.call_args.args
-    assert "cover_download_path" in sql_arg
-    assert params_arg["pm_id"] == 1
-    assert params_arg["fp"] == f"sb://library/{key}"
+    assert len(session.statements) == 1
+    sql, params = _compiled(session.statements[0])
+    assert "cover_download_path" in sql
+    assert "parsed_media" in sql
+    assert params["id_1"] == 1
+    assert params["cover_download_path"] == f"sb://library/{key}"
 
 
 async def test_migrate_pm_assets_row_music_column(tmp_path, monkeypatch):
@@ -261,8 +325,8 @@ async def test_migrate_pm_assets_row_music_column(tmp_path, monkeypatch):
 
     store = FakePmAssetsStore()
     _patch_store(monkeypatch, store)
-    execute = AsyncMock(return_value=0)
-    monkeypatch.setattr(sm.db_engine, "execute", execute)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     outcome = await sm._migrate_pm_assets_row(
         {
@@ -280,9 +344,9 @@ async def test_migrate_pm_assets_row_music_column(tmp_path, monkeypatch):
     key, _, mime = store.put_file_calls[0]
     assert key == _expected_key(99, data, ".m4a")
     assert mime == "audio/mp4"
-    sql_arg, params_arg = execute.call_args.args
-    assert "music_download_path" in sql_arg
-    assert params_arg["pm_id"] == 7
+    sql, params = _compiled(session.statements[0])
+    assert "music_download_path" in sql
+    assert params["id_1"] == 7
 
 
 async def test_migrate_pm_assets_row_extract_audio_column(tmp_path, monkeypatch):
@@ -296,8 +360,8 @@ async def test_migrate_pm_assets_row_extract_audio_column(tmp_path, monkeypatch)
 
     store = FakePmAssetsStore()
     _patch_store(monkeypatch, store)
-    execute = AsyncMock(return_value=0)
-    monkeypatch.setattr(sm.db_engine, "execute", execute)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     outcome = await sm._migrate_pm_assets_row(
         {
@@ -312,9 +376,9 @@ async def test_migrate_pm_assets_row_extract_audio_column(tmp_path, monkeypatch)
     )
 
     assert outcome == "migrated"
-    sql_arg, params_arg = execute.call_args.args
-    assert "extract_audio_path" in sql_arg
-    assert params_arg["pm_id"] == 7
+    sql, params = _compiled(session.statements[0])
+    assert "extract_audio_path" in sql
+    assert params["id_1"] == 7
 
 
 async def test_migrate_pm_assets_row_one_row_three_units_three_migrates(
@@ -334,8 +398,8 @@ async def test_migrate_pm_assets_row_one_row_three_units_three_migrates(
 
     store = FakePmAssetsStore()
     _patch_store(monkeypatch, store)
-    execute = AsyncMock(return_value=0)
-    monkeypatch.setattr(sm.db_engine, "execute", execute)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     units = [
         {
@@ -368,11 +432,11 @@ async def test_migrate_pm_assets_row_one_row_three_units_three_migrates(
 
     assert outcomes == ["migrated", "migrated", "migrated"]
     assert len(store.put_file_calls) == 3
-    assert execute.await_count == 3
-    updated_columns = {c.args[0] for c in execute.await_args_list}
-    assert any("cover_download_path" in sql for sql in updated_columns)
-    assert any("music_download_path" in sql for sql in updated_columns)
-    assert any("extract_audio_path" in sql for sql in updated_columns)
+    assert len(session.statements) == 3
+    updated_sqls = [_compiled(stmt)[0] for stmt in session.statements]
+    assert any("cover_download_path" in sql for sql in updated_sqls)
+    assert any("music_download_path" in sql for sql in updated_sqls)
+    assert any("extract_audio_path" in sql for sql in updated_sqls)
 
 
 async def test_migrate_pm_assets_row_content_addressed_dedup_skips_put(
@@ -394,8 +458,8 @@ async def test_migrate_pm_assets_row_content_addressed_dedup_skips_put(
     key = _expected_key(42, data, ".jpg")
     store.seed_existing(key, len(data))
     _patch_store(monkeypatch, store)
-    execute = AsyncMock(return_value=0)
-    monkeypatch.setattr(sm.db_engine, "execute", execute)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     outcome = await sm._migrate_pm_assets_row(
         {
@@ -411,9 +475,9 @@ async def test_migrate_pm_assets_row_content_addressed_dedup_skips_put(
 
     assert outcome == "migrated"
     assert store.put_file_calls == []  # dedup skip-PUT
-    execute.assert_awaited_once()
-    _, params_arg = execute.call_args.args
-    assert params_arg["fp"] == f"sb://library/{key}"
+    assert len(session.statements) == 1
+    _, params = _compiled(session.statements[0])
+    assert params["cover_download_path"] == f"sb://library/{key}"
 
 
 async def test_migrate_pm_assets_row_missing_file_returns_missing(
@@ -424,8 +488,8 @@ async def test_migrate_pm_assets_row_missing_file_returns_missing(
     monkeypatch.setattr(settings, "DOWNLOAD_PATH", str(tmp_path))
     store = FakePmAssetsStore()
     _patch_store(monkeypatch, store)
-    execute = AsyncMock(return_value=0)
-    monkeypatch.setattr(sm.db_engine, "execute", execute)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     outcome = await sm._migrate_pm_assets_row(
         {
@@ -440,7 +504,7 @@ async def test_migrate_pm_assets_row_missing_file_returns_missing(
     )
 
     assert outcome == "missing"
-    execute.assert_not_called()
+    assert session.statements == []
     assert store.put_file_calls == []
 
 
@@ -457,8 +521,8 @@ async def test_migrate_pm_assets_row_orphan_null_scope_skips_not_raises(
 
     store = FakePmAssetsStore()
     _patch_store(monkeypatch, store)
-    execute = AsyncMock(return_value=0)
-    monkeypatch.setattr(sm.db_engine, "execute", execute)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     outcome = await sm._migrate_pm_assets_row(
         {
@@ -473,7 +537,7 @@ async def test_migrate_pm_assets_row_orphan_null_scope_skips_not_raises(
     )
 
     assert outcome == "skipped_no_scope"
-    execute.assert_not_called()
+    assert session.statements == []
     assert store.put_file_calls == []
 
 
@@ -487,8 +551,8 @@ async def test_migrate_pm_assets_row_dry_run_never_mutates(tmp_path, monkeypatch
 
     store = FakePmAssetsStore()
     _patch_store(monkeypatch, store)
-    execute = AsyncMock(return_value=0)
-    monkeypatch.setattr(sm.db_engine, "execute", execute)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     outcome = await sm._migrate_pm_assets_row(
         {
@@ -505,7 +569,7 @@ async def test_migrate_pm_assets_row_dry_run_never_mutates(tmp_path, monkeypatch
     assert outcome == "dry_run_ok"
     # put 发生了(dedup-safe,可重放)但不更新 DB、不删源文件。
     assert len(store.put_file_calls) == 1
-    execute.assert_not_called()
+    assert session.statements == []
     assert (media_dir / "cover.jpg").is_file()
 
 
@@ -524,7 +588,8 @@ async def test_migrate_pm_assets_row_delete_source_unlinks_single_file_not_dir(
 
     store = FakePmAssetsStore()
     _patch_store(monkeypatch, store)
-    monkeypatch.setattr(sm.db_engine, "execute", AsyncMock(return_value=0))
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     outcome = await sm._migrate_pm_assets_row(
         {
@@ -556,8 +621,8 @@ async def test_migrate_pm_assets_row_size_mismatch_raises_before_mutation(
 
     store = FakePmAssetsStore(size_offset=-1)  # 模拟上传后 size 对不上
     _patch_store(monkeypatch, store)
-    execute = AsyncMock(return_value=0)
-    monkeypatch.setattr(sm.db_engine, "execute", execute)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     with pytest.raises(RuntimeError, match="size mismatch"):
         await sm._migrate_pm_assets_row(
@@ -572,7 +637,7 @@ async def test_migrate_pm_assets_row_size_mismatch_raises_before_mutation(
             delete_source=True,
         )
 
-    execute.assert_not_called()
+    assert session.statements == []
     assert (media_dir / "cover.jpg").is_file()
 
 
@@ -639,15 +704,12 @@ async def test_migrate_pm_assets_row_rejects_unknown_column():
 # ── column whitelist / registry wiring ───────────────────────────────────
 
 
-def test_pm_assets_column_update_sql_is_whitelisted_dict():
-    assert set(sm._PM_ASSETS_COLUMN_UPDATE_SQL) == {
+def test_pm_assets_columns_whitelist_tuple():
+    assert set(sm._PM_ASSETS_COLUMNS_WHITELIST) == {
         "cover_download_path",
         "music_download_path",
         "extract_audio_path",
     }
-    for column, sql in sm._PM_ASSETS_COLUMN_UPDATE_SQL.items():
-        assert column in sql
-        assert "parsed_media" in sql
 
 
 def test_pm_assets_module_registered_with_list_rows():
@@ -711,7 +773,7 @@ async def test_storage_migration_workflow_dispatches_pm_assets_module(monkeypatc
         "pm_assets",
         sm.ModuleConfig(
             name="pm_assets",
-            select_sql=sm._MODULES["pm_assets"].select_sql,
+            select_stmt=sm._MODULES["pm_assets"].select_stmt,
             extract=sm._MODULES["pm_assets"].extract,
             update_row=sm._MODULES["pm_assets"].update_row,
             list_rows=list_rows,

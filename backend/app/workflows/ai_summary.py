@@ -12,27 +12,75 @@ IDENTITY/SOUL/AGENT prompt + AgentRunner + RunRecorder so:
 
 from __future__ import annotations
 
-import json
+from contextlib import nullcontext
 from typing import Any, Optional
 
 from dbos import DBOS
+from sqlalchemy import select
+
+from app.db.scope import is_enforced, system_request_scope
+
+
+def _summary_inputs_select_stmt(parsed_media_id: int, user_id: str):
+    """The transcript+resource lookup, column-level (not entity-level — the
+    B4 row-shape lesson) so ``row["transcript"]``/``row.get("title")`` below
+    read real column values. Already filters ``r.creator_id = :uid`` — this
+    predicate is the query's OWN tenant filter (pre-dating the ORM choke
+    point), kept as-is; the ``system_request_scope`` wrap at the call site
+    only prevents a REDUNDANT fail-closed raise from the choke point (this
+    step has no ambient per-request scope to open a real user session with),
+    it does not change which rows are visible. Factored out so a real-
+    aiosqlite row-shape test can import and exercise the exact production
+    statement."""
+    from app.models import ParsedMedia, Resources, ResourceTranscripts
+
+    return (
+        select(
+            ResourceTranscripts.full_text.label("transcript"),
+            ParsedMedia.id.label("pm_id"),
+            ParsedMedia.title.label("title"),
+            Resources.id.label("resource_id"),
+        )
+        .join(Resources, Resources.media_id == ParsedMedia.id)
+        .join(ResourceTranscripts, ResourceTranscripts.resource_id == Resources.id)
+        .where(ParsedMedia.id == parsed_media_id)
+        .where(ResourceTranscripts.full_text.is_not(None))
+        .where(Resources.creator_id == user_id)
+        .limit(1)
+    )
 
 
 @DBOS.step()
 async def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, Any]:
     """Load transcript + user's preferred provider config + media title."""
-    from app.db import engine as db_engine
+    from app.db.session import read_scope
 
-    row = await db_engine.fetch_one(
-        "SELECT rt.full_text AS transcript, pm.id AS pm_id, pm.title AS title, "
-        "r.id AS resource_id "
-        "FROM public.parsed_media pm "
-        "JOIN public.resources r ON r.media_id = pm.id "
-        "JOIN public.resource_transcripts rt ON rt.resource_id = r.id "
-        "WHERE pm.id = :pid AND rt.full_text IS NOT NULL "
-        "AND r.creator_id = :uid LIMIT 1",
-        {"pid": parsed_media_id, "uid": user_id},
+    # Resources carries UserScoped(creator_id); SCOPE_ENFORCE_RESOURCES
+    # defaults false in code but production sets it true via
+    # secrets/backend.env (CLAUDE.md 部署陷阱). This step has no ambient
+    # per-request scope of its own (it's a DBOS step), so the wrap is
+    # LOAD-BEARING once the flag is on — without it the JOIN through
+    # Resources fail-closed raises UnscopedQueryError. Gated on is_enforced
+    # to stay byte-for-byte legacy where the flag is off.
+    scope_cm = (
+        system_request_scope(
+            reason="ai-summary workflow: resolve transcript+resource for "
+            "summary inputs"
+        )
+        if is_enforced("resources")
+        else nullcontext()
     )
+    async with scope_cm:
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        _summary_inputs_select_stmt(parsed_media_id, user_id)
+                    )
+                )
+                .mappings()
+                .first()
+            )
     if not row:
         raise RuntimeError(
             f"no transcript for parsed_media={parsed_media_id} user={user_id}"
@@ -107,54 +155,72 @@ async def persist_summary(
     topics: list[str],
 ) -> dict[str, Any]:
     """Persist summary to resource_summaries + parsed_media.ai_rewrite_text +
-    resources.summary_status, atomically (one transaction)."""
-    from sqlalchemy import text
+    resources.summary_status, atomically (one transaction).
 
-    from app.db import engine as db_engine
+    Uses ``write_scope()`` (not a bare ``engine.begin()``) so the three
+    writes still commit together in ONE transaction — ``write_scope()``
+    opens its own ``session.begin()`` (or joins an ambient unit_of_work) and
+    commits once at block exit, preserving the prior raw-engine.begin()
+    atomicity guarantee exactly. Do NOT split this into three separate
+    ``write_scope()`` calls or you lose atomicity (same rationale the
+    removed raw-SQL comment gave for the original ``engine.begin()``).
+    """
+    from sqlalchemy import func, update
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-    payload_kp = json.dumps(key_points or [])
-    payload_tp = json.dumps(topics or [])
-    rid = int(resource_id)  # resources.id is bigint; asyncpg needs int, not str
+    from app.db.session import write_scope
+    from app.models import ParsedMedia, Resources, ResourceSummaries
 
-    # Uses raw engine.begin() (not the db_engine.execute helper) on purpose:
-    # the three writes must land in ONE transaction. The helpers open a
-    # separate committed transaction per call — do NOT "simplify" this into
-    # three db_engine.execute() calls or you lose atomicity.
-    eng = db_engine.get_engine()
-    async with eng.begin() as conn:
-        await conn.execute(
-            text(
-                "INSERT INTO public.resource_summaries "
-                "(resource_id, summary_type, summary_text, key_points, topics) "
-                "VALUES (:rid, :stype, :stext, CAST(:kp AS jsonb), CAST(:tp AS jsonb)) "
-                "ON CONFLICT (resource_id) DO UPDATE SET "
-                "summary_text = EXCLUDED.summary_text, "
-                "key_points = EXCLUDED.key_points, "
-                "topics = EXCLUDED.topics, "
-                "summary_type = EXCLUDED.summary_type"
-            ),
-            {
-                "rid": rid,
-                "stype": "agent",
-                "stext": summary,
-                "kp": payload_kp,
-                "tp": payload_tp,
+    rid = int(resource_id)  # resources.id is bigint; the ORM needs int, not str
+
+    async with write_scope() as session:
+        # resource_summaries / parsed_media carry no scope mixin — no wrap.
+        insert_stmt = pg_insert(ResourceSummaries).values(
+            resource_id=rid,
+            summary_type="agent",
+            summary_text=summary,
+            # Native list/dict values — the JSONB bind processor serializes
+            # them; no json.dumps()+CAST(... AS jsonb) round-trip needed.
+            key_points=key_points or [],
+            topics=topics or [],
+        )
+        insert_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[ResourceSummaries.resource_id],
+            set_={
+                "summary_text": insert_stmt.excluded.summary_text,
+                "key_points": insert_stmt.excluded.key_points,
+                "topics": insert_stmt.excluded.topics,
+                "summary_type": insert_stmt.excluded.summary_type,
             },
         )
-        await conn.execute(
-            text(
-                "UPDATE public.parsed_media SET ai_rewrite_text = :txt, "
-                "ai_generated_at = now() WHERE id = :pid"
-            ),
-            {"txt": summary, "pid": parsed_media_id},
+        await session.execute(insert_stmt)
+
+        await session.execute(
+            update(ParsedMedia)
+            .where(ParsedMedia.id == parsed_media_id)
+            .values(ai_rewrite_text=summary, ai_generated_at=func.now())
         )
-        await conn.execute(
-            text(
-                "UPDATE public.resources SET summary_status = 'completed' "
-                "WHERE id = :rid"
-            ),
-            {"rid": rid},
+
+        # Resources carries UserScoped(creator_id); bulk Core UPDATE on a
+        # scoped model is FORBIDDEN under a real user Scope (app/db/scope.py's
+        # write-path guard). This is a system-side status flip (the summarize
+        # agent just finished, no per-request caller identity here), so
+        # SYSTEM is correct — mirrors ai_transcription's mark_transcript_*
+        # rationale. Wrap scoped to just this one statement (not the whole
+        # transaction), per the minimal-wrap convention.
+        scope_cm = (
+            system_request_scope(
+                reason="ai-summary workflow: mark summary status completed"
+            )
+            if is_enforced("resources")
+            else nullcontext()
         )
+        async with scope_cm:
+            await session.execute(
+                update(Resources)
+                .where(Resources.id == rid)
+                .values(summary_status="completed")
+            )
 
     return {
         "parsed_media_id": parsed_media_id,

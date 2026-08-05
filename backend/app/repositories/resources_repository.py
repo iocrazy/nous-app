@@ -98,11 +98,12 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.pg_coerce import coerce_datetime_strings
 from app.db.repository_base import AsyncpgRepository
-from app.db.scope import is_enforced, scoped_sql, system_request_scope
+from app.db.scope import is_enforced, system_request_scope
 from app.db.session import read_scope, write_scope
 from app.models import (
     Folders,
     GalleryItems,
+    ParsedMedia,
     ResourceItems,
     Resources,
     ResourceTags,
@@ -415,37 +416,37 @@ class ResourcesRepository(AsyncpgRepository):
         parsed_media: {id, platform_id, original_url, ...}}`` so call sites
         read the inner dict the same way.
 
-        A3: the tenant predicate is BUILT by ``scoped_sql`` (the ambient-scope
-        raw-SQL choke-point backstop) and AND-spliced into the WHERE, NOT the
-        passed-in ``:creator_id`` bind. The ``creator_id`` arg stays in the
-        signature for interface stability but is SUPERSEDED by the ambient scope
-        (on every real call path the acting user IS ``creator_id``, so the bound
-        value is identical — verified by the flag-off parity test). Under SYSTEM
-        the predicate opens to all owners; under no scope (or an empty-identity
-        user scope) ``scoped_sql`` fail-closes."""
+        Phase C task 2: migrated off the ``scoped_sql`` raw-``text()`` backstop
+        to a real ORM JOIN (Resources INNER JOIN ParsedMedia). ``creator_id``
+        is kept as an EXPLICIT filter — the same predicate the pre-A3 code
+        used — so this stays byte-for-byte correct regardless of
+        ``SCOPE_ENFORCE_RESOURCES``: flag-off, this is the only filter (legacy
+        behaviour, unconditionally correct); flag-on, the do_orm_execute choke
+        point additionally injects ``creator_id == scope.user_id`` from the
+        ambient scope, redundant-but-harmless because it's the exact same
+        value (the acting user IS ``creator_id`` on every real call path). No
+        explicit ``system_request_scope``/``user_session`` wrap here — the
+        single caller (``media_fetch_helpers.py``) already opens
+        ``request_scope(Scope(user_id=auth.user_id))`` around this call, so an
+        ambient USER scope is always present when enforcement is on."""
         try:
-            # scoped_sql owns the predicate shape (CAST(:scope_user_id AS uuid)
-            # IS NULL OR r.creator_id = ...): the caller can only AND it in, never
-            # park a bare token in a non-filtering position. The f-string splice
-            # is safe — ``pred`` is helper-built and "r.creator_id" is a hardcoded
-            # literal; the user value travels only via the bound :scope_user_id
-            # param. Built INSIDE the try so a fail-closed raise (no scope / empty
-            # identity) degrades to None here rather than propagating — preserving
-            # the legacy "probe failure is non-fatal" contract of this L2 dedup.
-            pred, params = scoped_sql("r.creator_id", {"url": url})
-            sql = (
-                "SELECT r.id AS r_id, r.media_id AS r_media_id, "
-                "       p.id AS p_id, p.platform_id, p.original_url, "
-                "       p.video_download_status, p.image_download_status, "
-                "       p.media_type "
-                "FROM resources r "
-                "INNER JOIN parsed_media p ON r.media_id = p.id "
-                f"WHERE {pred} "
-                "  AND p.original_url = :url "
-                "LIMIT 1"
-            )
             async with read_scope() as session:
-                result = await session.execute(text(sql), params)
+                result = await session.execute(
+                    select(
+                        Resources.id.label("r_id"),
+                        Resources.media_id.label("r_media_id"),
+                        ParsedMedia.id.label("p_id"),
+                        ParsedMedia.platform_id,
+                        ParsedMedia.original_url,
+                        ParsedMedia.video_download_status,
+                        ParsedMedia.image_download_status,
+                        ParsedMedia.media_type,
+                    )
+                    .join(ParsedMedia, Resources.media_id == ParsedMedia.id)
+                    .where(Resources.creator_id == creator_id)
+                    .where(ParsedMedia.original_url == url)
+                    .limit(1)
+                )
                 row = result.mappings().first()
             if not row:
                 return None
@@ -458,8 +459,8 @@ class ResourcesRepository(AsyncpgRepository):
                 if is_image
                 else row.get("video_download_status")
             )
-            # Statuses come back as the PG enum's text value (str) via text();
-            # funnel through _plain in case the driver hands back a member.
+            # ORM Enum(DownloadStatus) columns read back as enum MEMBERS, not
+            # bare str (unlike the retired text() path) — _plain unwraps them.
             if _plain(status) != "completed":
                 return None
 
@@ -495,31 +496,27 @@ class ResourcesRepository(AsyncpgRepository):
         batched query for the whole list — no N+1. Empty input short-circuits
         to ``set()`` without a query.
 
-        A3: the tenant predicate is BUILT by ``scoped_sql`` and AND-spliced in,
-        NOT the passed-in ``:creator_id`` bind. The ``creator_id`` arg is kept for
-        interface stability but SUPERSEDED by the ambient scope (acting user ==
-        creator_id on every real path; identical bound value — see flag-off
-        parity test). SYSTEM opens to all owners; no scope (or empty-identity user
-        scope) fail-closes."""
+        Phase C task 2: migrated off the ``scoped_sql`` raw-``text()`` backstop
+        to a real ORM JOIN, same rationale as ``get_completed_resource_by_url_
+        and_creator`` above — ``creator_id`` stays an EXPLICIT filter (correct
+        regardless of ``SCOPE_ENFORCE_RESOURCES``), no explicit scope wrap
+        here because the single caller (``media_soda_router.py``) already
+        declares ``_scope: ScopedRequestDep`` on the endpoint, which opens an
+        ambient USER scope for the whole request."""
         if not platform_ids:
             return set()
         try:
-            # scoped_sql owns the predicate shape (see get_completed_resource_by_
-            # url_and_creator). Safe f-string splice: helper-built pred + literal
-            # column. Built INSIDE the try so a fail-closed raise (no scope /
-            # empty identity) degrades to set() rather than propagating.
-            pred, params = scoped_sql("r.creator_id", {"pids": list(platform_ids)})
-            sql = (
-                "SELECT DISTINCT p.platform_id "
-                "FROM resources r "
-                "INNER JOIN parsed_media p ON r.media_id = p.id "
-                f"WHERE {pred} "
-                "  AND p.platform_id = ANY(:pids) "
-                "  AND r.file_path IS NOT NULL"
-            )
             async with read_scope() as session:
-                result = await session.execute(text(sql), params)
-                return {r["platform_id"] for r in result.mappings().all()}
+                result = await session.execute(
+                    select(ParsedMedia.platform_id)
+                    .distinct()
+                    .select_from(Resources)
+                    .join(ParsedMedia, Resources.media_id == ParsedMedia.id)
+                    .where(Resources.creator_id == creator_id)
+                    .where(ParsedMedia.platform_id.in_(list(platform_ids)))
+                    .where(Resources.file_path.isnot(None))
+                )
+                return {r[0] for r in result.all()}
         except Exception as e:
             logger.error(
                 f"Failed to resolve owned platform_ids for creator "
@@ -808,29 +805,54 @@ class ResourcesRepository(AsyncpgRepository):
     async def _resource_ids_for_platforms(self, platforms: List[str]) -> List[str]:
         """Resource ids whose linked parsed_media.source_platform is in
         ``platforms``. Two-step lookup retained for parity. Returns list[str]
-        (the get_resource_items path feeds it into a bigint-coerced ANY())."""
+        (the get_resource_items path feeds it into a bigint-coerced ANY()).
+
+        Phase C task 3: migrated off raw ``text()`` SQL to ORM ``select()``s.
+
+        ⚠️ SECURITY AUDIT NOTE (flagged, not resolved, by this migration): the
+        ``resources`` SELECT below carries NO ``creator_id`` (or any other
+        tenant) filter — it returns every resource across every user matching
+        ``media_id``, byte-for-byte the same as the pre-migration raw SQL
+        (Phase C policy: a pure ORM port must never add/remove a filter). The
+        only caller (``get_resource_items``) uses the result purely as an ID
+        pre-filter that is later AND-intersected with a properly
+        ``resource_items.scope_id``-scoped query, so this has not been
+        observed to leak data in practice — but it IS a genuine cross-tenant
+        read and should get a dedicated security audit in a follow-up task.
+        Wrapped in ``system_request_scope`` (gated by ``is_enforced``) to
+        preserve this unconditionally-cross-tenant behaviour rather than
+        accidentally filtering to one owner or fail-closed raising once
+        enforcement flips on.
+        """
         cleaned = [p.strip() for p in platforms if p and p.strip()]
         if not cleaned:
             return []
         try:
-            async with read_scope() as session:
-                media_rows = await session.execute(
-                    text(
-                        "SELECT id FROM parsed_media "
-                        "WHERE source_platform = ANY(:platforms)"
-                    ),
-                    {"platforms": cleaned},
+            scope_cm = (
+                system_request_scope(
+                    reason="resource-ids-for-platforms: pre-filter helper "
+                    "with no tenant column filter (see docstring) — "
+                    "preserved as-is, flagged for a future security audit"
                 )
-                media_ids_int = [r["id"] for r in media_rows.mappings().all()]
-                if not media_ids_int:
-                    return []
-                resource_rows = await session.execute(
-                    text(
-                        "SELECT id FROM resources " "WHERE media_id = ANY(:media_ids)"
-                    ),
-                    {"media_ids": media_ids_int},
-                )
-                return [str(r["id"]) for r in resource_rows.mappings().all()]
+                if is_enforced("resources")
+                else nullcontext()
+            )
+            async with scope_cm:
+                async with read_scope() as session:
+                    media_rows = await session.execute(
+                        select(ParsedMedia.id).where(
+                            ParsedMedia.source_platform.in_(cleaned)
+                        )
+                    )
+                    media_ids_int = [r[0] for r in media_rows.all()]
+                    if not media_ids_int:
+                        return []
+                    resource_rows = await session.execute(
+                        select(Resources.id).where(
+                            Resources.media_id.in_(media_ids_int)
+                        )
+                    )
+                    return [str(r[0]) for r in resource_rows.all()]
         except Exception as e:
             logger.error(f"Failed to resolve resource ids for platforms: {e}")
             return []
@@ -979,24 +1001,44 @@ class ResourcesRepository(AsyncpgRepository):
         proposed children belong to the caller's scope and are actually images.
 
         Empty input short-circuits to ``set()`` without a query. Returns a set
-        of the ids AS PASSED (str) so the caller can diff against its input."""
+        of the ids AS PASSED (str) so the caller can diff against its input.
+
+        Phase C task 3: migrated off raw ``text()`` SQL to an ORM
+        INNER JOIN. The authorization boundary here is
+        ``resource_items.scope_id`` (team/project scope), NOT
+        ``resources.creator_id`` — a resource_items row can be shared by
+        every member of a team, so filtering by creator_id would wrongly
+        reject a team member validating a sibling's upload. No creator_id
+        filter is added (byte-for-byte equivalent to the pre-migration SQL).
+        Wrapped in ``system_request_scope`` (gated by ``is_enforced``) since
+        Resources IS a UserScoped model and this legitimately needs to see
+        every owner's rows within the given scope_id.
+        """
         if not image_ids:
             return set()
         try:
             id_ints = self._bigint_list(image_ids)
-            async with read_scope() as session:
-                result = await session.execute(
-                    text(
-                        "SELECT DISTINCT r.id "
-                        "FROM resources r "
-                        "INNER JOIN resource_items i ON i.resource_id = r.id "
-                        "WHERE r.id = ANY(:ids) "
-                        "  AND i.scope_id = :scope_id "
-                        "  AND r.mime_type LIKE 'image/%'"
-                    ),
-                    {"ids": id_ints, "scope_id": self._bigint(scope_id)},
+            scope_cm = (
+                system_request_scope(
+                    reason="validate-scope-image-ids: authorization boundary "
+                    "is resource_items.scope_id (team/project), not "
+                    "creator_id — no per-owner filter by design"
                 )
-                found = {int(row["id"]) for row in result.mappings().all()}
+                if is_enforced("resources")
+                else nullcontext()
+            )
+            async with scope_cm:
+                async with read_scope() as session:
+                    result = await session.execute(
+                        select(Resources.id)
+                        .distinct()
+                        .select_from(Resources)
+                        .join(ResourceItems, ResourceItems.resource_id == Resources.id)
+                        .where(Resources.id.in_(id_ints))
+                        .where(ResourceItems.scope_id == self._bigint(scope_id))
+                        .where(Resources.mime_type.like("image/%"))
+                    )
+                    found = {int(row[0]) for row in result.all()}
             # Map back to the caller's original str/int representation.
             return {orig for orig in image_ids if self._bigint(orig) in found}
         except Exception as e:
@@ -1788,7 +1830,19 @@ class ResourcesRepository(AsyncpgRepository):
     async def restore_folder_cascade(self, folder_id: str) -> Dict[str, int]:
         """Restore a folder + all trashed descendants + their resources, in
         ONE transaction (write_scope commits once). The multi-statement
-        cascade is atomic — any raise rolls back all of it."""
+        cascade is atomic — any raise rolls back all of it.
+
+        Phase C task 3: the ``resources`` UPDATE below is migrated off raw
+        ``text()`` SQL to ORM. Bulk Core UPDATE on ``Resources`` (a
+        UserScoped model) is forbidden under a real user ``Scope``
+        (``app/db/scope.py::_forbid_scoped_bulk_dml``) — must run as SYSTEM.
+        No per-owner filter here BY DESIGN: folder membership (via
+        ``resource_items.folder_id``), not ``creator_id``, is the
+        authorization boundary for a folder cascade — a folder can hold
+        resources from multiple contributors and restoring must not silently
+        skip a co-contributor's resource. The ``folders`` UPDATE and the
+        WITH RECURSIVE subtree lookup above stay raw ``text()`` (out of this
+        task's scope — ``folders`` carries no scope mixin)."""
         try:
             async with write_scope() as session:
                 folder_ids_rows = await session.execute(
@@ -1808,19 +1862,30 @@ class ResourcesRepository(AsyncpgRepository):
                 if not all_ids:
                     return {"restored_folders": 0, "restored_resources": 0}
 
-                restored_resources_rows = await session.execute(
-                    text(
-                        "UPDATE resources SET is_trashed = false, "
-                        "       trashed_at = NULL "
-                        "WHERE is_trashed = true "
-                        "  AND id IN ("
-                        "    SELECT resource_id FROM resource_items "
-                        "    WHERE folder_id = ANY(:ids)"
-                        "  ) RETURNING id"
-                    ),
-                    {"ids": all_ids},
+                scope_cm = (
+                    system_request_scope(
+                        reason="restore-folder-cascade: bulk resources "
+                        "UPDATE, no per-owner filter — folder membership is "
+                        "the authorization boundary, not creator_id"
+                    )
+                    if is_enforced("resources")
+                    else nullcontext()
                 )
-                restored_resources = len(restored_resources_rows.mappings().all())
+                async with scope_cm:
+                    restored_resources_rows = await session.execute(
+                        update(Resources)
+                        .where(Resources.is_trashed.is_(True))
+                        .where(
+                            Resources.id.in_(
+                                select(ResourceItems.resource_id).where(
+                                    ResourceItems.folder_id.in_(all_ids)
+                                )
+                            )
+                        )
+                        .values(is_trashed=False, trashed_at=None)
+                        .returning(Resources.id)
+                    )
+                    restored_resources = len(restored_resources_rows.all())
 
                 restored_folders_rows = await session.execute(
                     text(
@@ -1854,7 +1919,16 @@ class ResourcesRepository(AsyncpgRepository):
         PR-E 4c dropped ``resource_items.scope_type``; the legacy supabase-py
         impl no longer reads/snapshots it (restore uses last_scope_id + folder/
         library). We match that — the retired asyncpg impl still referenced
-        ``i.scope_type`` and would 42703 against the current schema."""
+        ``i.scope_type`` and would 42703 against the current schema.
+
+        Phase C task 3: the ``resources`` UPDATE below is migrated off raw
+        ``text()`` SQL (an ``UPDATE ... FROM``) to ORM — referencing
+        ``ResourceItems`` columns in ``.where()``/``.values()`` makes
+        SQLAlchemy render the same native Postgres ``UPDATE ... FROM``
+        shape. Same bulk-DML-on-scoped-model rationale as
+        ``restore_folder_cascade``: forbidden under a real user Scope, must
+        run as SYSTEM; no per-owner filter by design (folder membership,
+        not creator_id, is the authorization boundary)."""
         try:
             async with write_scope() as session:
                 folder_ids_rows = await session.execute(
@@ -1873,22 +1947,31 @@ class ResourcesRepository(AsyncpgRepository):
                 if not all_ids:
                     return {"trashed_folders": 0, "trashed_resources": 0}
 
-                trashed_resources_rows = await session.execute(
-                    text(
-                        "UPDATE resources r SET "
-                        "  is_trashed = true, "
-                        "  trashed_at = now(), "
-                        "  last_folder_id = i.folder_id, "
-                        "  last_library_id = i.library_id, "
-                        "  last_scope_id = i.scope_id "
-                        "FROM resource_items i "
-                        "WHERE r.id = i.resource_id "
-                        "  AND i.folder_id = ANY(:ids) "
-                        "  AND r.is_trashed = false RETURNING r.id"
-                    ),
-                    {"ids": all_ids},
+                scope_cm = (
+                    system_request_scope(
+                        reason="trash-folder-cascade: bulk resources "
+                        "UPDATE, no per-owner filter — folder membership is "
+                        "the authorization boundary, not creator_id"
+                    )
+                    if is_enforced("resources")
+                    else nullcontext()
                 )
-                trashed_resources = len(trashed_resources_rows.mappings().all())
+                async with scope_cm:
+                    trashed_resources_rows = await session.execute(
+                        update(Resources)
+                        .where(Resources.id == ResourceItems.resource_id)
+                        .where(ResourceItems.folder_id.in_(all_ids))
+                        .where(Resources.is_trashed.is_(False))
+                        .values(
+                            is_trashed=True,
+                            trashed_at=func.now(),
+                            last_folder_id=ResourceItems.folder_id,
+                            last_library_id=ResourceItems.library_id,
+                            last_scope_id=ResourceItems.scope_id,
+                        )
+                        .returning(Resources.id)
+                    )
+                    trashed_resources = len(trashed_resources_rows.all())
 
                 trashed_folders_rows = await session.execute(
                     text(

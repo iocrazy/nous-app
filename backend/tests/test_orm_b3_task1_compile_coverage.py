@@ -256,11 +256,11 @@ async def test_reap_pass_a_marks_dbos_error_rows_failed(monkeypatch):
         # exception) — one errored row to drive the ORM write below.
         return [{"dbos_workflow_id": "wf-err", "error": None}]
 
-    async def fake_engine_execute(sql, params=None):
-        return 1  # resources-status loop (Phase C, untouched)
-
     monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
-    monkeypatch.setattr("app.db.engine.execute", fake_engine_execute)
+    # The resources-status loop (Phase C task 1: migrated off raw
+    # db_engine.execute onto update(Resources) through write_scope()) now
+    # flows through the SAME _patch_scopes session as every other write in
+    # this test — no separate db_engine.execute mock needed.
     session = _patch_scopes(monkeypatch)
 
     result = await scheduled_recovery.reap_stuck_pending_tasks_step()
@@ -290,11 +290,10 @@ async def test_reap_pass_b_not_exists_dbos_subquery_is_raw_text_fragment(monkeyp
     async def fake_fetch_all(sql, params=None):
         return []  # no errored rows — only Pass B's write matters here
 
-    async def fake_engine_execute(sql, params=None):
-        return 1
-
     monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
-    monkeypatch.setattr("app.db.engine.execute", fake_engine_execute)
+    # The resources-status loop (Phase C task 1) now runs update(Resources)
+    # through the SAME _patch_scopes session — no separate db_engine.execute
+    # mock needed (see the sibling Pass A test above).
     session = _patch_scopes(monkeypatch, [_FakeResult(rowcount=3)])
 
     result = await scheduled_recovery.reap_stuck_pending_tasks_step()

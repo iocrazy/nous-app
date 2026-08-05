@@ -1,4 +1,4 @@
-"""Admin storage 只读端点的数据逻辑测试(monkeypatch db_engine,不起 HTTP)。
+"""Admin storage 只读端点的数据逻辑测试(monkeypatch read_scope,不起 HTTP)。
 
 House convention (see test_admin_storage_migration_router.py): reach the
 submodule via importlib, not ``from app.api.admin import storage_router``.
@@ -6,11 +6,20 @@ submodule via importlib, not ``from app.api.admin import storage_router``.
 storage_router`` to mount the router, which REBINDS the package attribute
 ``storage_router`` to the APIRouter instance — shadowing the submodule of the
 same name. A plain ``from app.api.admin import storage_router`` therefore
-resolves to the router object (no ``db_engine``/``_fetch_*`` attributes),
+resolves to the router object (no ``read_scope``/``_fetch_*`` attributes),
 not this module.
+
+Phase C task 2: ``_fetch_stats``/``_fetch_media_status``/``_fetch_media_detail``
+were migrated off ``db_engine.fetch_one``/``fetch_all`` raw SQL to real ORM
+``select()`` statements executed through ``app.db.session.read_scope()``
+(LATERAL joins via ``_pm_r_rv_lateral()``, ``_fs_cond()`` for the fs-residue
+predicate). ``_fetch_stats`` issues 4 sequential ``session.execute()`` calls
+(videos / fs_residue / orphans / hls_ready) against the SAME session, so its
+fake needs to hand back a DIFFERENT canned result per call, in order.
 """
 
 import importlib
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -18,6 +27,51 @@ import pytest
 from fastapi import HTTPException
 
 sr = importlib.import_module("app.api.admin.storage_router")
+
+
+class _FakeExecuteResult:
+    """Stand-in for the awaited ``session.execute(stmt)`` Result — supports
+    both ``.mappings().first()`` (single-row reads) and ``.mappings().all()``
+    (``_fetch_media_status``'s multi-row read)."""
+
+    def __init__(self, row=None, rows=None):
+        self._row = row
+        self._rows = rows if rows is not None else ([row] if row is not None else [])
+
+    def mappings(self):
+        return self
+
+    def first(self):
+        return self._row
+
+    def all(self):
+        return self._rows
+
+
+class _FakeMultiExecuteSession:
+    """Hands back ``results`` in order, one per ``execute()`` call — needed
+    because ``_fetch_stats`` issues 4 distinct queries against the same
+    session. ``calls`` (mutated in place) records every statement passed to
+    ``execute()`` so tests can compile/inspect the exact ORM statement a
+    call produced (e.g. the fs-residue predicate)."""
+
+    def __init__(self, results: list, calls: list):
+        self._results = list(results)
+        self._calls = calls
+
+    async def execute(self, stmt):
+        self._calls.append(stmt)
+        return self._results.pop(0)
+
+
+def _fake_read_scope(results: list, calls: list | None = None):
+    calls = calls if calls is not None else []
+
+    @asynccontextmanager
+    async def _read_scope():
+        yield _FakeMultiExecuteSession(results, calls)
+
+    return _read_scope
 
 
 def _auth():
@@ -45,21 +99,15 @@ def _http_status_error(status_code: int) -> httpx.HTTPStatusError:
 
 @pytest.mark.asyncio
 async def test_fetch_stats_shapes(monkeypatch):
-    async def fake_fetch_one(sql, params=None):
-        s = " ".join(sql.split()).lower()
-        if "sum(storage_size)" in s:
-            return {"count": 1079, "size_bytes": 36507222016}
-        # Precise match on the dedicated hls_ready COUNT ("hls_path LIKE
-        # 'sb://%'") — NOT a bare "hls_path" substring, which would also
-        # match the fs_residue query's "hls_path NOT LIKE 'sb://%'"
-        # condition (that query legitimately checks the same column for
-        # filesystem residue, so it necessarily mentions the column name
-        # too; only the LIKE/NOT LIKE distinction tells the two apart).
-        if "hls_path like 'sb://%'" in s:
-            return {"n": 108}
-        if "orphan" in s or "r.id is null" in s:
-            return {"n": 0}
-        return {"n": 0}  # fs_residue
+    """_fetch_stats issues 4 sequential session.execute() calls, in this
+    exact order (see the function body): videos (count + sum(storage_size)),
+    fs_residue (count), orphans (count), hls_ready (count)."""
+    results = [
+        _FakeExecuteResult({"count": 1079, "size_bytes": 36507222016}),  # videos
+        _FakeExecuteResult({"n": 0}),  # fs_residue
+        _FakeExecuteResult({"n": 0}),  # orphans
+        _FakeExecuteResult({"n": 108}),  # hls_ready
+    ]
 
     async def fake_latest_audit():
         return {
@@ -77,7 +125,7 @@ async def test_fetch_stats_shapes(monkeypatch):
             ],
         }
 
-    monkeypatch.setattr(sr.db_engine, "fetch_one", fake_fetch_one)
+    monkeypatch.setattr(sr, "read_scope", _fake_read_scope(results))
     monkeypatch.setattr(sr, "_fetch_latest_audit", fake_latest_audit)
     out = await sr._fetch_stats()
     assert out["videos"] == {"count": 1079, "size_bytes": 36507222016}
@@ -133,10 +181,9 @@ async def test_media_status_derivation(monkeypatch):
         },
     ]
 
-    async def fake_fetch_all(sql, params=None):
-        return rows
-
-    monkeypatch.setattr(sr.db_engine, "fetch_all", fake_fetch_all)
+    monkeypatch.setattr(
+        sr, "read_scope", _fake_read_scope([_FakeExecuteResult(rows=rows)])
+    )
     out = await sr._fetch_media_status([1, 2, 3])
     by = {r["media_id"]: r for r in out}
     assert (
@@ -148,19 +195,18 @@ async def test_media_status_derivation(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_media_detail_assets(monkeypatch):
-    async def fake_fetch_one(sql, params=None):
-        return {
-            "media_id": 7,
-            "download_path": "sb://library/t5/aa/bb/v.mp4",
-            "storage_size": 197_000_000,
-            "cover_download_path": "sb://library/derived/70/cover.jpg",
-            "resource_id": 70,
-            "thumbnail_path": "sb://library/derived/70/thumbnail.webp",
-            "hls_path": "sb://library/hls/70/71/master.m3u8",
-            "scope_id": 5,
-        }
+    row = {
+        "media_id": 7,
+        "download_path": "sb://library/t5/aa/bb/v.mp4",
+        "storage_size": 197_000_000,
+        "cover_download_path": "sb://library/derived/70/cover.jpg",
+        "resource_id": 70,
+        "thumbnail_path": "sb://library/derived/70/thumbnail.webp",
+        "hls_path": "sb://library/hls/70/71/master.m3u8",
+        "scope_id": 5,
+    }
 
-    monkeypatch.setattr(sr.db_engine, "fetch_one", fake_fetch_one)
+    monkeypatch.setattr(sr, "read_scope", _fake_read_scope([_FakeExecuteResult(row)]))
     out = await sr._fetch_media_detail(7)
     kinds = {a["kind"]: a for a in out["assets"]}
     assert (
@@ -289,25 +335,59 @@ def test_find_running_audit_sql_caps_by_time(monkeypatch):
     assert "created_at >" in sql
 
 
-def test_fs_residue_where_covers_nine_columns():
+@pytest.mark.asyncio
+async def test_fs_residue_where_covers_nine_columns(monkeypatch):
     """I4: fs_residue must also catch the two extra parsed_media columns
     storage_migration's pm_assets module migrated to S3 (music_download_path,
     extract_audio_path) — previously only cover_download_path was covered,
     so a leftover filesystem path in either column would silently never
-    surface as fs_residue."""
-    assert sr._FS_RESIDUE_WHERE.count(" OR ") == 8  # 9 conditions, 8 joins
+    surface as fs_residue.
+
+    ORM successor of the deleted ``_FS_RESIDUE_WHERE`` string constant: the
+    predicate is now built inline inside ``_fetch_stats`` (``or_(_fs_cond(...),
+    ...)`` over 9 columns) rather than exposed as a module attribute, so this
+    captures the actual fs-residue statement _fetch_stats issues (the 2nd of
+    its 4 session.execute() calls) and compiles it for real."""
+    calls: list = []
+    results = [
+        _FakeExecuteResult({"count": 0, "size_bytes": 0}),  # videos
+        _FakeExecuteResult({"n": 0}),  # fs_residue — the statement we inspect
+        _FakeExecuteResult({"n": 0}),  # orphans
+        _FakeExecuteResult({"n": 0}),  # hls_ready
+    ]
+    monkeypatch.setattr(sr, "read_scope", _fake_read_scope(results, calls))
+    monkeypatch.setattr(
+        sr,
+        "_fetch_latest_audit",
+        AsyncMock(
+            return_value={
+                "status": "none",
+                "scanned": 0,
+                "errors": 0,
+                "scanned_at": None,
+                "missing": [],
+            }
+        ),
+    )
+
+    await sr._fetch_stats()
+
+    assert len(calls) == 4
+    fs_stmt = calls[1]
+    sql = " ".join(str(fs_stmt.compile(compile_kwargs={"literal_binds": True})).split())
+    assert sql.count(" OR ") == 8  # 9 conditions, 8 joins
     for col in (
-        "pm.download_path",
-        "pm.cover_download_path",
-        "pm.music_download_path",
-        "pm.extract_audio_path",
-        "r.thumbnail_path",
-        "r.cover_image_path",
+        "parsed_media.download_path",
+        "parsed_media.cover_download_path",
+        "parsed_media.music_download_path",
+        "parsed_media.extract_audio_path",
+        "thumbnail_path",
+        "cover_image_path",
         "r.file_path",
-        "rv.hls_path",
+        "hls_path",
         "rv.file_path",
     ):
-        assert col in sr._FS_RESIDUE_WHERE, col
+        assert col in sql, col
 
 
 @pytest.mark.asyncio

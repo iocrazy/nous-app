@@ -9,22 +9,43 @@ import pytest
 from app.services.ai.governance.ai_governance import AIModuleGovernance
 
 
-class _FakeScopeSession:
-    """Stand-in for the ORM AsyncSession — only ``scalar()`` is exercised by
-    ``load_transcribe_inputs``'s user_settings.settings_json read (Phase B2
-    Task 2 ORM rewrite; see ``tests/test_ai_transcription_sql.py``)."""
+class _FakeExecuteResult:
+    """Stand-in for the awaited ``session.execute(stmt)`` Result on the
+    parsed_media+resources JOIN read path — only ``.mappings().first()`` is
+    exercised (mirrors ``load_transcribe_inputs``'s real read)."""
 
-    def __init__(self, scalar_value):
+    def __init__(self, row):
+        self._row = row
+
+    def mappings(self):
+        return self
+
+    def first(self):
+        return self._row
+
+
+class _FakeScopeSession:
+    """Stand-in for the ORM AsyncSession. Supports BOTH ``execute()`` (the
+    parsed_media+resources JOIN read — migrated off raw ``db_engine.fetch_one``
+    onto the ORM in Phase C task 1) and ``scalar()`` (the
+    user_settings.settings_json read, Phase B2 Task 2) — both flow through
+    the SAME patched ``read_scope`` seam now."""
+
+    def __init__(self, scalar_value, execute_row=None):
         self._scalar_value = scalar_value
+        self._execute_row = execute_row
 
     async def scalar(self, stmt):
         return self._scalar_value
 
+    async def execute(self, stmt):
+        return _FakeExecuteResult(self._execute_row)
 
-def _fake_read_scope(scalar_value):
+
+def _fake_read_scope(scalar_value, execute_row=None):
     @asynccontextmanager
     async def _read_scope():
-        yield _FakeScopeSession(scalar_value)
+        yield _FakeScopeSession(scalar_value, execute_row=execute_row)
 
     return _read_scope
 
@@ -196,11 +217,10 @@ async def test_transcription_nous_ref_routes_to_platform_config():
         "app.services.ai.governance.ai_governance.get_module_governance",
         new=AsyncMock(return_value=AIModuleGovernance(allowed=True)),
     ):
-        with (
-            patch("app.db.engine.fetch_one", side_effect=[fake_media_row]),
-            patch(
-                "app.db.session.read_scope",
-                new=_fake_read_scope(fake_settings_row["settings_json"]),
+        with patch(
+            "app.db.session.read_scope",
+            new=_fake_read_scope(
+                fake_settings_row["settings_json"], execute_row=fake_media_row
             ),
         ):
             with patch(

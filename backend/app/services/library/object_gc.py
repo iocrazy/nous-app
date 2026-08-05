@@ -38,16 +38,26 @@ was short-circuiting on ``is_prefix`` before ever reaching the query.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Optional
 
 from loguru import logger
+from sqlalchemy import select, union_all
 
-from app.db import engine as db_engine
+from app.db.scope import is_enforced, system_request_scope
+from app.db.session import read_scope
+from app.models import (
+    FileVersions,
+    ParsedMedia,
+    ProjectFiles,
+    Resources,
+    ResourceVersions,
+)
 from app.services.library.media_storage import ObjectStore, resolve_media_source
 
 # ── Reference check ──────────────────────────────────────────────────────
 #
-# Same 11 index columns as ``app.workflows.storage_audit._COLLECT_SQL`` — keep
+# Same 11 index columns as ``app.workflows.storage_audit._COLLECT_ARMS`` — keep
 # both lists in sync; a column added to one and not the other lets a route
 # either leak objects (missing here) or delete a still-referenced one
 # (missing there is less dangerous, but still a drift). The two modules
@@ -82,56 +92,81 @@ def _int_ids(values) -> list[int]:
     return [int(str(v)) for v in values]
 
 
-def _build_reference_query(raw_path: str, exclude: Optional[dict]) -> tuple[str, dict]:
+def _build_reference_query(raw_path: str, exclude: Optional[dict]):
     """Build the UNION ALL existence query for one raw ``sb://`` value.
 
     ``exclude`` lets the caller declare "these rows are being deleted right
     now (or already are) — don't count them as a reference": e.g.
     ``{"resources": [rid]}``, ``{"resource_versions": [vid]}``,
     ``{"parsed_media": [pmid]}`` — any combination. Only non-empty exclude
-    lists add a ``<> ALL(...)`` clause; this repo's established convention
+    lists add a ``.notin_(...)`` clause; this repo's established convention
     (see resource_ref_resolver.py / project_stages_repository.py / others)
     is to never bind an empty array to ``ANY``/``ALL`` — the exclusion
     clause for a table is simply omitted when there is nothing to exclude.
+
+    Phase C task 2: migrated off the hand-built UNION ALL SQL string to a
+    real ORM ``union_all()`` of per-column ``select(pk)`` statements — each
+    arm projects the owning model's PK column (not a bare ``literal(1)``) so
+    Resources/ResourceVersions land in the columns clause the choke point's
+    positive compile-check probes, matching the "project a scoped column"
+    shape ``app/db/scope.py`` recommends for an injectable read.
     """
     exclude = exclude or {}
     pm_ids = _int_ids(exclude.get("parsed_media") or [])
     resource_ids = _int_ids(exclude.get("resources") or [])
     version_ids = _int_ids(exclude.get("resource_versions") or [])
-
-    params: dict = {"raw_path": raw_path}
-    parts: list[str] = []
-
-    def add(
-        table: str, column: str, pk_col: str, ids: list[int], param_key: str
-    ) -> None:
-        clause = f"SELECT 1 FROM {table} WHERE {column} = :raw_path"
-        if ids:
-            params[param_key] = ids
-            clause += f" AND {pk_col} <> ALL(:{param_key})"
-        parts.append(clause)
-
     project_file_ids = _int_ids(exclude.get("project_files") or [])
     file_version_ids = _int_ids(exclude.get("file_versions") or [])
 
-    for col in _PARSED_MEDIA_COLS:
-        add("parsed_media", col, "id", pm_ids, "pm_ids")
-    for col in _RESOURCES_COLS:
-        add("resources", col, "id", resource_ids, "resource_ids")
-    for col in _RESOURCE_VERSIONS_COLS:
-        add("resource_versions", col, "id", version_ids, "version_ids")
-    for col in _PROJECT_FILES_COLS:
-        add("project_files", col, "id", project_file_ids, "project_file_ids")
-    for col in _FILE_VERSIONS_COLS:
-        add("file_versions", col, "id", file_version_ids, "file_version_ids")
+    selects = []
 
-    sql = " UNION ALL ".join(parts) + " LIMIT 1"
-    return sql, params
+    def add(pk_col, column_attr, ids: list[int]) -> None:
+        stmt = select(pk_col).where(column_attr == raw_path)
+        if ids:
+            stmt = stmt.where(pk_col.notin_(ids))
+        selects.append(stmt)
+
+    for col in _PARSED_MEDIA_COLS:
+        add(ParsedMedia.id, getattr(ParsedMedia, col), pm_ids)
+    for col in _RESOURCES_COLS:
+        add(Resources.id, getattr(Resources, col), resource_ids)
+    for col in _RESOURCE_VERSIONS_COLS:
+        add(ResourceVersions.id, getattr(ResourceVersions, col), version_ids)
+    for col in _PROJECT_FILES_COLS:
+        add(ProjectFiles.id, getattr(ProjectFiles, col), project_file_ids)
+    for col in _FILE_VERSIONS_COLS:
+        add(FileVersions.id, getattr(FileVersions, col), file_version_ids)
+
+    return union_all(*selects).limit(1)
 
 
 async def _is_referenced(raw_path: str, exclude: Optional[dict]) -> bool:
-    sql, params = _build_reference_query(raw_path, exclude)
-    row = await db_engine.fetch_one(sql, params)
+    """Whether ANY row (across every user/tenant) still references ``raw_path``.
+
+    C1 / the module docstring: this MUST be a cross-tenant check — deleting
+    the last user-visible reference to a content-addressed object must not
+    let a USER-scoped read hide another user's reference to the SAME object
+    (that would delete a still-referenced object, the exact data-loss bug
+    this module exists to prevent). Wrapped in ``system_request_scope`` —
+    unconditionally correct regardless of the caller's ambient scope — gated
+    on ``is_enforced("resources")`` to stay byte-for-byte legacy (no wrap,
+    no audit log) while enforcement is off, same convention as
+    ``resources_repository.count_resources_by_media_id``'s
+    ``media-refcount-gc`` wrap.
+    """
+    stmt = _build_reference_query(raw_path, exclude)
+    scope_cm = (
+        system_request_scope(
+            reason="object-gc-reference-check: cross-tenant by design — "
+            "the last deletable reference to a content-addressed object "
+            "must be visible regardless of which user is deleting"
+        )
+        if is_enforced("resources")
+        else nullcontext()
+    )
+    async with scope_cm:
+        async with read_scope() as session:
+            row = (await session.execute(stmt)).first()
     return row is not None
 
 

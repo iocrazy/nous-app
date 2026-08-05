@@ -57,7 +57,11 @@ class FakeAlbumStore:
 def _album_module_cfg(update_row=None):
     return sm.ModuleConfig(
         name="downloads",
-        select_sql="SELECT 1",
+        # Never executed by these tests (they only exercise extract()/
+        # update_row() via _migrate_row) — a dummy callable satisfies
+        # ModuleConfig's required field shape without needing a real
+        # sqlalchemy.Select.
+        select_stmt=lambda scope_id, limit: None,
         extract=_downloads_extract,
         update_row=update_row or AsyncMock(return_value=None),
     )

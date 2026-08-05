@@ -45,6 +45,12 @@ class _Result:
     def mappings(self) -> _Mappings:
         return _Mappings(self._rows)
 
+    def all(self) -> List[Any]:
+        """Bare (non-``.mappings()``) row access — the shape a real ORM
+        ``select(col)`` result returns (tuple-like rows indexable by
+        position), used by ``validate_scope_image_ids`` post Phase C task 3."""
+        return self._rows
+
 
 class _CapSession:
     """Records ``(stmt, params)`` and hands back queued rowsets (default [])."""
@@ -227,19 +233,31 @@ async def test_validate_scope_image_ids_empty_short_circuits(
 async def test_validate_scope_image_ids_maps_back_to_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Phase C task 3: ``validate_scope_image_ids`` is now a real ORM
+    INNER JOIN (``select(Resources.id).distinct().join(ResourceItems, ...)``)
+    instead of raw ``text()`` — the fake session hands back tuple rows
+    (``.all()``, not ``.mappings().all()``) and assertions compile the
+    captured statement instead of substring-matching SQL text."""
     # DB says 10 and 30 are valid images in scope; 20 is not.
-    session = _CapSession(rowsets=[[{"id": 10}, {"id": 30}]])
+    session = _CapSession(rowsets=[[(10,), (30,)]])
     monkeypatch.setattr(repo_mod, "read_scope", lambda: _fake_scope(session))
     repo = ResourcesRepository()
 
     valid = await repo.validate_scope_image_ids("500", ["10", "20", "30"])
     assert valid == {"10", "30"}  # returned as the caller's str reps
-    stmt, params = session.calls[-1]
-    sql = str(stmt)
-    assert "r.mime_type LIKE 'image/%'" in sql
-    assert "i.scope_id = :scope_id" in sql
-    assert params["scope_id"] == 500
-    assert params["ids"] == [10, 20, 30]
+
+    stmt, _ = session.calls[-1]
+    compiled = stmt.compile()
+    sql = str(compiled)
+    params = dict(compiled.params)
+    assert "resources" in sql
+    assert "resource_items" in sql
+    assert "mime_type" in sql
+    # scope_id bound literally; the id list bound as an expanding IN() param.
+    assert 500 in params.values()
+    assert any(
+        isinstance(v, (list, tuple)) and set(v) == {10, 20, 30} for v in params.values()
+    )
 
 
 # ─── _build_mime_sql: gallery category ────────────────────────────────

@@ -20,11 +20,14 @@
 from __future__ import annotations
 
 import os
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from dbos import DBOS
 from loguru import logger
+
+from app.db.scope import is_enforced, system_request_scope
 
 # Shared DBOS-ownership decision (G3) — single source of truth so the
 # sweeper and the reaper never drift on what "DBOS still owns it" means.
@@ -249,10 +252,10 @@ async def reap_stuck_pending_tasks_step() -> dict[str, Any]:
     # Surface the actual workflow error instead of letting them fall
     # through to the generic "never claimed" lost text below — that
     # text told users to Retry tasks that had genuinely run and failed.
-    from sqlalchemy import text, update
+    from sqlalchemy import String, cast, select, text, update
 
     from app.db.session import write_scope
-    from app.models import TaskTracking
+    from app.models import Resources, TaskTracking
 
     errored_failed = 0
     try:
@@ -325,26 +328,65 @@ async def reap_stuck_pending_tasks_step() -> dict[str, Any]:
         )
     tasks_reaped = result.rowcount
 
+    # Phase C task 1: migrated off the raw CTE (`WITH live AS (...) UPDATE
+    # resources ...`) to a single ORM UPDATE with a NOT IN subquery — same
+    # single-statement atomicity as the CTE (one UPDATE, one WHERE, no
+    # read-then-write race). task_tracking.resource_id is already TEXT (no
+    # cast needed on that side); Resources.id is BigInteger so it is cast to
+    # TEXT to match the original `id::text` comparison. An empty `live_subq`
+    # renders `NOT IN (subquery)`, not a literal empty list, so it is exempt
+    # from the "empty .in_() list" footgun and behaves like the original CTE
+    # (NOT IN over zero rows matches every candidate row).
+    live_subq = (
+        select(TaskTracking.resource_id)
+        .where(TaskTracking.status.in_(["pending", "processing", "running"]))
+        .where(
+            TaskTracking.task_type.in_(
+                [
+                    "ai_extract",
+                    "ai_transcription",
+                    "ai_summary",
+                    "ai_pipeline",
+                    "ai_visual_analysis",
+                ]
+            )
+        )
+        .where(TaskTracking.resource_id.is_not(None))
+        .distinct()
+    )
+
     resources_reaped = 0
     for field in ("transcript_status", "summary_status", "visual_analysis_status"):
         # field is one of three hardcoded column names (not user input).
-        # The engine runs raw SQL directly — no exec_sql RPC wrapper needed.
-        sql = f"""
-        WITH live AS (
-          SELECT DISTINCT resource_id::text AS rid
-          FROM public.task_tracking
-          WHERE status IN ('pending','processing','running')
-            AND task_type IN ('ai_extract','ai_transcription','ai_summary','ai_pipeline','ai_visual_analysis')
-            AND resource_id IS NOT NULL
+        field_col = getattr(Resources, field)
+        stmt = (
+            update(Resources)
+            .where(field_col == "pending")
+            .where(Resources.updated_at < cutoff)
+            .where(cast(Resources.id, String).not_in(live_subq))
+            .values(**{field: "failed"})
         )
-        UPDATE public.resources
-           SET {field} = 'failed'
-         WHERE {field} = 'pending'
-           AND updated_at < NOW() - INTERVAL '1 hour'
-           AND id::text NOT IN (SELECT rid FROM live)
-        """
         try:
-            resources_reaped += await db_engine.execute(sql)
+            # Resources carries UserScoped(creator_id); bulk Core UPDATE on a
+            # scoped model is FORBIDDEN under a real user Scope. This reaper
+            # is a cross-tenant system sweep (flips a stale pending AI status
+            # to failed when no live task_tracking row claims the resource,
+            # regardless of owner) — not a per-user request — so SYSTEM is
+            # correct. Gated on is_enforced to stay byte-for-byte legacy
+            # where the flag is off.
+            scope_cm = (
+                system_request_scope(
+                    reason="reap_stuck_pending_tasks: flip stale pending AI "
+                    "status with no live task_tracking claim — cross-tenant "
+                    "system sweep, not a per-user request"
+                )
+                if is_enforced("resources")
+                else nullcontext()
+            )
+            async with scope_cm:
+                async with write_scope() as session:
+                    field_result = await session.execute(stmt)
+            resources_reaped += field_result.rowcount
         except Exception:
             break
 

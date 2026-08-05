@@ -23,24 +23,47 @@ from app.services.ai.governance.ai_governance import (
 )
 
 
-class _SettingsJsonSession:
-    """Fake ORM session whose scalar() returns a fixed settings_json value —
-    stands in for the ``resolve_summarization_config`` user_settings read
-    (Phase B2 Task 1: moved off ``db_engine.fetch_one`` onto the ORM)."""
+class _FakeExecuteResult:
+    """Stand-in for the awaited ``session.execute(stmt)`` Result on the
+    transcript+resource JOIN read path — only ``.mappings().first()`` is
+    exercised (mirrors ``load_summary_inputs``'s real read)."""
 
-    def __init__(self, settings_json: Any) -> None:
+    def __init__(self, row: Any) -> None:
+        self._row = row
+
+    def mappings(self) -> "_FakeExecuteResult":
+        return self
+
+    def first(self) -> Any:
+        return self._row
+
+
+class _SettingsJsonSession:
+    """Fake ORM session. Supports BOTH ``execute()`` (the
+    parsed_media+resources+resource_transcripts JOIN read — migrated off raw
+    ``db_engine.fetch_one`` onto the ORM in Phase C task 1) and ``scalar()``
+    (the user_settings.settings_json read used by
+    ``resolve_summarization_config``, Phase B2 Task 1) — both flow through
+    the SAME patched ``read_scope`` seam now."""
+
+    def __init__(self, settings_json: Any = None, execute_row: Any = None) -> None:
         self._settings_json = settings_json
+        self._execute_row = execute_row
 
     async def scalar(self, _stmt: Any) -> Any:
         return self._settings_json
 
+    async def execute(self, _stmt: Any) -> _FakeExecuteResult:
+        return _FakeExecuteResult(self._execute_row)
+
 
 class _SettingsJsonScope:
-    def __init__(self, settings_json: Any) -> None:
+    def __init__(self, settings_json: Any = None, execute_row: Any = None) -> None:
         self._settings_json = settings_json
+        self._execute_row = execute_row
 
     async def __aenter__(self) -> _SettingsJsonSession:
-        return _SettingsJsonSession(self._settings_json)
+        return _SettingsJsonSession(self._settings_json, execute_row=self._execute_row)
 
     async def __aexit__(self, *exc: Any) -> bool:
         return False
@@ -97,9 +120,10 @@ async def test_summarization_locked_returns_admin_config():
         "app.services.ai.governance.ai_governance.get_module_governance",
         new=AsyncMock(return_value=governance),
     ):
-        with patch(
-            "app.db.engine.fetch_one",
-            side_effect=[fake_row, fake_settings_row],
+        with patch.object(
+            db_session,
+            "read_scope",
+            lambda: _SettingsJsonScope(fake_settings_row, execute_row=fake_row),
         ):
             result = await summary_mod.load_summary_inputs(1, "user-1")
 
@@ -135,7 +159,9 @@ async def test_summarization_locked_provider_key_derived_from_model():
         "app.services.ai.governance.ai_governance.get_module_governance",
         new=AsyncMock(return_value=governance),
     ):
-        with patch("app.db.engine.fetch_one", side_effect=[fake_row, None]):
+        with patch.object(
+            db_session, "read_scope", lambda: _SettingsJsonScope(execute_row=fake_row)
+        ):
             result = await summary_mod.load_summary_inputs(2, "user-2")
 
     assert result["provider_key"] == "doubao"
@@ -165,7 +191,9 @@ async def test_summarization_locked_unknown_model_prefix_falls_back():
         "app.services.ai.governance.ai_governance.get_module_governance",
         new=AsyncMock(return_value=governance),
     ):
-        with patch("app.db.engine.fetch_one", side_effect=[fake_row, None]):
+        with patch.object(
+            db_session, "read_scope", lambda: _SettingsJsonScope(execute_row=fake_row)
+        ):
             result = await summary_mod.load_summary_inputs(3, "user-3")
 
     assert result["provider_key"] == ""
@@ -200,7 +228,9 @@ async def test_summarization_locked_no_key_fails_closed():
         "app.services.ai.governance.ai_governance.get_module_governance",
         new=AsyncMock(return_value=governance),
     ):
-        with patch("app.db.engine.fetch_one", side_effect=[fake_row, None]):
+        with patch.object(
+            db_session, "read_scope", lambda: _SettingsJsonScope(execute_row=fake_row)
+        ):
             with pytest.raises(RuntimeError, match="admin-locked"):
                 await summary_mod.load_summary_inputs(1, "user-1")
 
@@ -228,7 +258,9 @@ async def test_summarization_locked_blank_key_fails_closed():
         "app.services.ai.governance.ai_governance.get_module_governance",
         new=AsyncMock(return_value=governance),
     ):
-        with patch("app.db.engine.fetch_one", side_effect=[fake_row, None]):
+        with patch.object(
+            db_session, "read_scope", lambda: _SettingsJsonScope(execute_row=fake_row)
+        ):
             with pytest.raises(RuntimeError, match="admin-locked"):
                 await summary_mod.load_summary_inputs(1, "user-1")
 
@@ -270,13 +302,14 @@ async def test_summarization_allowed_user_path_executes():
         "app.services.ai.governance.ai_governance.get_module_governance",
         new=AsyncMock(return_value=governance),
     ):
-        with patch("app.db.engine.fetch_one", AsyncMock(return_value=fake_row)):
-            with patch.object(
-                db_session,
-                "read_scope",
-                lambda: _SettingsJsonScope(fake_settings_row["settings_json"]),
-            ):
-                result = await summary_mod.load_summary_inputs(1, "user-1")
+        with patch.object(
+            db_session,
+            "read_scope",
+            lambda: _SettingsJsonScope(
+                fake_settings_row["settings_json"], execute_row=fake_row
+            ),
+        ):
+            result = await summary_mod.load_summary_inputs(1, "user-1")
 
     # User's provider must be used.
     assert result["provider_key"] == "qwen"
@@ -318,7 +351,9 @@ async def test_summarization_locked_to_catalog_model_uses_platform_config():
                 )
             ),
         ),
-        patch("app.db.engine.fetch_one", side_effect=[fake_row, None]),
+        patch.object(
+            db_session, "read_scope", lambda: _SettingsJsonScope(execute_row=fake_row)
+        ),
     ):
         result = await summary_mod.load_summary_inputs(1, "user-1")
 

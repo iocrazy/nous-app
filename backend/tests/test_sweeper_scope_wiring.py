@@ -37,6 +37,7 @@ NOT marked ``integration`` so it runs in the unit suite.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -248,32 +249,46 @@ async def test_cleanup_orphan_storage_step_establishes_system_scope(
     monkeypatch, tmp_path
 ):
     """``cleanup_orphan_storage_step`` (async) establishes SYSTEM scope inside its
-    inner ``_load_resource_ids`` coroutine before calling ``db_engine.fetch_all``.
+    inner ``_load_resource_ids`` coroutine before its ``resources`` read.
 
-    Note: ``db_engine.fetch_all`` is RAW SQL and currently bypasses the ORM choke
-    point — so the scope is a defensive entry-boundary annotation for now (a
-    later task A3 will add the raw-SQL backstop). The wiring is still required so
-    the entry boundary is consistent once A3 lands.
-
-    SYSTEM scope is correct under both flag states.
+    Phase C task 1 (2026-08-05): the raw ``db_engine.fetch_all`` read was
+    migrated to a real ORM ``select(Resources.id)`` — now subject to the
+    choke point — and the previously-UNCONDITIONAL ``system_request_scope``
+    wrap became ``is_enforced("resources")``-gated (matching the main.py
+    convention every other Phase C wrap follows: byte-for-byte legacy when
+    the flag is off, no compile/log overhead). So this test now flips
+    ``SCOPE_ENFORCE_RESOURCES`` on to observe the wrap in effect, mirroring
+    ``tests/db/test_scope_enforcement_regression_c1.py``'s ``enforce_resources_on``
+    fixture convention.
     """
     from app.workflows.scheduled_cleanup import cleanup_orphan_storage_step
 
+    monkeypatch.setattr(scope_mod.settings, "SCOPE_ENFORCE_RESOURCES", True)
+
     captured: dict[str, object] = {}
 
-    async def _fake_fetch_all(sql, *args, **kwargs):
-        captured["scope"] = current_scope()
-        return []
+    class _FakeIdsResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    class _ScopeCapturingReadSession:
+        async def execute(self, stmt):
+            captured["scope"] = current_scope()
+            return _FakeIdsResult()
+
+    @asynccontextmanager
+    async def _fake_read_scope():
+        yield _ScopeCapturingReadSession()
 
     with (
         patch(
             "app.core.utils.Utils.get_download_base_path",
             return_value=str(tmp_path),
         ),
-        patch(
-            "app.db.engine.fetch_all",
-            side_effect=_fake_fetch_all,
-        ),
+        patch("app.db.session.read_scope", _fake_read_scope),
     ):
         result = await cleanup_orphan_storage_step()
 
@@ -307,36 +322,52 @@ async def test_cleanup_orphan_storage_step_scope_reset_on_no_download_path():
 
 
 @pytest.mark.asyncio
-async def test_cleanup_orphan_storage_step_scope_inside_async_step(tmp_path):
-    """PINS that SYSTEM scope wraps the ``db_engine.fetch_all`` read inside the
-    async ``_load_resource_ids`` coroutine (same loop as the DB call).
+async def test_cleanup_orphan_storage_step_scope_inside_async_step(
+    monkeypatch, tmp_path
+):
+    """PINS that SYSTEM scope wraps the ``resources`` read inside the async
+    ``_load_resource_ids`` coroutine (same loop as the DB call).
 
     Post §2.4b there is no ``run_async`` thread-hop; the ``async with
     system_request_scope`` sits directly around the read. A refactor that moves it
-    off the read path would capture a non-SYSTEM scope here.
+    off the read path would capture a non-SYSTEM scope here. Phase C task 1
+    migrated the read off raw ``db_engine.fetch_all`` onto a real ORM
+    ``select(Resources.id)`` and gated the wrap on ``is_enforced("resources")``
+    (see the sibling test above) — flip the flag on to observe it.
     """
     from app.workflows.scheduled_cleanup import cleanup_orphan_storage_step
 
+    monkeypatch.setattr(scope_mod.settings, "SCOPE_ENFORCE_RESOURCES", True)
+
     captured: dict[str, object] = {}
 
-    async def _fake_fetch_all(sql, *args, **kwargs):
-        captured["scope"] = current_scope()
-        return []
+    class _FakeIdsResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    class _ScopeCapturingReadSession:
+        async def execute(self, stmt):
+            captured["scope"] = current_scope()
+            return _FakeIdsResult()
+
+    @asynccontextmanager
+    async def _fake_read_scope():
+        yield _ScopeCapturingReadSession()
 
     with (
         patch(
             "app.core.utils.Utils.get_download_base_path",
             return_value=str(tmp_path),
         ),
-        patch(
-            "app.db.engine.fetch_all",
-            side_effect=_fake_fetch_all,
-        ),
+        patch("app.db.session.read_scope", _fake_read_scope),
     ):
         await cleanup_orphan_storage_step()
 
     assert captured.get("scope") is SYSTEM, (
-        "scope at db_engine.fetch_all was not SYSTEM — the async step must enter "
+        "scope at the resources read was not SYSTEM — the async step must enter "
         "system_request_scope around the resource-ids read."
     )
     assert current_scope() is None, "scope leaked after cleanup_orphan_storage_step"
