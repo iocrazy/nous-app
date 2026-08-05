@@ -1614,6 +1614,35 @@ export interface AgentChatPermissions {
   allowed_team_ids?: number[];
 }
 
+/** Write-level tiers for high-risk grants. `propose` produces changes a human
+ *  accepts; it does not write to storage. `none` is the fail-closed default —
+ *  even read-tier screenwriting tools must be granted explicitly. */
+export type AgentWriteLevel = 'none' | 'read' | 'propose' | 'write';
+
+export interface AgentMediaCaps {
+  image?: boolean;
+  video?: boolean;
+  /** Per-turn ceiling on paid generations. Backend clamps to 0..100. */
+  max_calls_per_turn?: number;
+}
+
+/**
+ * High-risk capability grants (spec §2), stored under
+ * `capability_profile.capabilities` and enforced fail-closed by the backend.
+ *
+ * Used for BOTH directions: as a partial PATCH body (omit a field to leave it
+ * unchanged) and as the resolved read projection on `AILibraryAgent`, where the
+ * API always fills every field. Send `false` / `'none'` to revoke — omitting a
+ * field never revokes anything.
+ */
+export interface AgentCapabilities {
+  write_level?: AgentWriteLevel;
+  delete?: boolean;
+  media?: AgentMediaCaps;
+  cross_episode_read?: boolean;
+  external_publish?: boolean;
+}
+
 export interface AILibraryAgent {
   id: string;
   slug: string;
@@ -1652,6 +1681,10 @@ export interface AILibraryAgent {
   // (review C1 — capability_profile itself is NOT exposed on the wire).
   // Always present from the API (defaults all-false); optional here for forward-compat.
   chat_permissions?: AgentChatPermissions;
+  // A8: resolved (fail-closed) high-risk grants, served by AgentOut.capabilities.
+  // Always present from the API (defaults all-denied); optional here for
+  // forward-compat with responses predating the field.
+  capabilities?: AgentCapabilities;
   // Agent-overrides (mig 341). Single-get: which layer produced this merged
   // view + the fields it replaced. List: override_scopes marks presets the
   // caller (or their teams) customized — drives the sidebar badge.

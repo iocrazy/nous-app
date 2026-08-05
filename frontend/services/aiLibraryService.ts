@@ -14,6 +14,7 @@
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 import type {
+  AgentCapabilities,
   AgentChatPermissions,
   AgentDashboard,
   AgentRunDetail,
@@ -155,6 +156,24 @@ export const aiLibraryService = {
     perms: AgentChatPermissions,
   ): Promise<AILibraryAgent> {
     return this.updateAgent(slug, { chat_permissions: perms } as Partial<AILibraryAgent>);
+  },
+
+  /**
+   * Grant/revoke high-risk capabilities and chat perms in ONE PATCH.
+   *
+   * They live in sibling subtrees of the same `capability_profile` JSONB and
+   * the backend deep-merges both without clobbering either, so a single
+   * request keeps the permissions tab's Save atomic — two sequential PATCHes
+   * could half-apply if the second failed.
+   *
+   * Omitting a capability field leaves it unchanged; revoking needs an
+   * explicit `false` / `'none'`.
+   */
+  async updateAgentPermissions(
+    slug: string,
+    perms: { chat_permissions?: AgentChatPermissions; capabilities?: AgentCapabilities },
+  ): Promise<AILibraryAgent> {
+    return this.updateAgent(slug, perms as Partial<AILibraryAgent>);
   },
 
   async createAgent(payload: CreateAgentPayload): Promise<AILibraryAgent> {

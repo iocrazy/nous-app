@@ -6,7 +6,14 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    model_validator,
+)
 
 # ---------- Agents ----------
 
@@ -45,6 +52,105 @@ class ChatPermissionsOut(BaseModel):
             read_team_resources=caps.read_team_resources,
             auto_broadcast=caps.auto_broadcast,
             allowed_team_ids=list(caps.allowed_team_ids),
+        )
+
+
+# Sanity ceiling for the per-turn media cap. Not an enforcement limit (the
+# gate reads whatever number is stored); purely a guard so a fat-fingered
+# grant can't ask for thousands of paid generations in one turn.
+MAX_MEDIA_CALLS_PER_TURN = 100
+
+
+class MediaCapsIn(BaseModel):
+    """Partial patch for capability_profile.capabilities.media (A1/A8).
+
+    Deep-merged by the router, so a client toggling ``image`` alone keeps the
+    stored ``max_calls_per_turn``. ``None`` means "leave unchanged".
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    image: Optional[StrictBool] = None
+    video: Optional[StrictBool] = None
+    # StrictInt, not int: lax mode would turn `true` into 1 and `"4"` into 4.
+    # high_risk_caps._as_media_cap explicitly rejects bool for the same reason.
+    # ge=0 mirrors that reader too — it treats a negative as malformed and
+    # falls back to its conservative default, so accepting one here would let
+    # the client believe it set a cap it didn't.
+    max_calls_per_turn: Optional[StrictInt] = Field(
+        default=None, ge=0, le=MAX_MEDIA_CALLS_PER_TURN
+    )
+
+
+class CapabilitiesIn(BaseModel):
+    """Partial grant patch merged into capability_profile.capabilities (A8).
+
+    The counterpart write path to ``high_risk_caps.high_risk_caps`` — every
+    field name and value here is exactly what that fail-closed reader parses,
+    so a successful PATCH provably changes enforcement (spec §2).
+
+    Strictness matters more here than anywhere else in this file: the reader
+    defaults every unparseable value to DENIED, so a payload we accept but the
+    reader rejects would look like a grant and behave like a denial. Hence
+    ``extra="forbid"`` (a misspelled dimension 422s instead of writing a dead
+    key) and exact Literals for write_level (``"admin"`` etc. are rejected at
+    the schema, never coerced into something permissive).
+
+    Booleans are ``StrictBool`` on purpose. Pydantic's default lax mode
+    coerces ``"yes"`` / ``1`` / ``"true"`` into ``True``, which here would mean
+    a sloppy client payload silently produces a REAL grant — while
+    high_risk_caps._as_bool grants only on a literal JSON ``true``. Strict
+    types keep the two ends of the wire agreeing on what "granted" means.
+
+    ``None`` means "leave unchanged"; ``write_level="none"`` / ``false`` are
+    the explicit REVOKE values.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    write_level: Optional[Literal["none", "read", "propose", "write"]] = None
+    delete: Optional[StrictBool] = None
+    media: Optional[MediaCapsIn] = None
+    cross_episode_read: Optional[StrictBool] = None
+    external_publish: Optional[StrictBool] = None
+
+
+class MediaCapsOut(BaseModel):
+    """Resolved (fail-closed) media caps — mirrors high_risk_caps.MediaCaps."""
+
+    image: bool = False
+    video: bool = False
+    max_calls_per_turn: int = 4
+
+
+class CapabilitiesOut(BaseModel):
+    """Read shape on AgentOut — the resolved (fail-closed) high-risk caps.
+
+    Built from ``high_risk_caps`` so the wire value matches enforcement
+    exactly, the same discipline ChatPermissionsOut follows for the ``chat``
+    subtree. Still NOT the raw capability_profile: the low-risk tuning keys
+    (tool_blacklist / allowed_skills / ...) stay server-side.
+    """
+
+    write_level: Literal["none", "read", "propose", "write"] = "none"
+    delete: bool = False
+    media: MediaCapsOut = Field(default_factory=MediaCapsOut)
+    cross_episode_read: bool = False
+    external_publish: bool = False
+
+    @classmethod
+    def from_caps(cls, caps: Any) -> CapabilitiesOut:
+        """Build from a HighRiskCaps instance (duck-typed, avoids circular import)."""
+        return cls(
+            write_level=caps.write_level,
+            delete=caps.delete,
+            media=MediaCapsOut(
+                image=caps.media.image,
+                video=caps.media.video,
+                max_calls_per_turn=caps.media.max_calls_per_turn,
+            ),
+            cross_episode_read=caps.cross_episode_read,
+            external_publish=caps.external_publish,
         )
 
 
@@ -98,6 +204,11 @@ class AgentOut(AgentBase):
     # the router from agent_chat_caps(row); defaults to all-false so clients
     # never have to guess. NOT the raw capability_profile (no internal-gating leak).
     chat_permissions: ChatPermissionsOut = Field(default_factory=ChatPermissionsOut)
+    # A8: resolved (fail-closed) HIGH-RISK capabilities, populated by the router
+    # from high_risk_caps(row). Without this the settings UI could offer no
+    # toggles — it can't render state it can't read. Same no-leak rule as
+    # chat_permissions: only the granted dimensions, never capability_profile.
+    capabilities: CapabilitiesOut = Field(default_factory=CapabilitiesOut)
     # Agent-overrides (mig 341). On single-get/patch: which layer produced the
     # merged view ('user' beats 'team') + which fields it replaced. On list:
     # override_scopes marks agents the caller (or their teams) customized —
@@ -141,6 +252,13 @@ class AgentUpdate(BaseModel):
     # (deep-merge, never clobbers the Phase 4.5 keys). Allowed even on
     # system-preset agents (permissions are governance, not content).
     chat_permissions: Optional[ChatPermissionsIn] = None
+    # A8: merged into capability_profile.capabilities by the router (deep-merge
+    # down to media.*, never clobbers the sibling `chat` subtree). This is the
+    # ONLY write path for the A1 high-risk gate — before it existed every
+    # screenwriting tool was permanently denied because nothing could set the
+    # keys high_risk_caps reads. Gated exactly like chat_permissions: granting
+    # a high-risk capability must never be easier than editing the prompt.
+    capabilities: Optional[CapabilitiesIn] = None
 
 
 class AgentCreate(BaseModel):
