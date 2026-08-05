@@ -395,6 +395,34 @@ async def _audit(
     and swallowed, never raised — an audit-write outage must not block (or
     break) a resolution decision that has already been made.
     """
+    await audit_resolution(
+        scope,
+        resource_type,
+        requested_id,
+        granted=not isinstance(result, Denied),
+        detail_code=detail_code,
+    )
+
+
+async def audit_resolution(
+    scope: AgentRunScope,
+    resource_type: str,
+    requested_id: str,
+    *,
+    granted: bool,
+    detail_code: str,
+) -> None:
+    """The audit row itself, callable by resolution steps that are NOT one of
+    the three id resolvers above.
+
+    A5's ``script_selection.resolve_selection`` is the first such caller: a
+    selection is resolved in two stages — the scene id (audited by
+    ``resolve_scene``) and then the ELEMENT ids inside it, which no id
+    resolver covers because they are not rows. A foreign or fabricated
+    element id is exactly the kind of attempt the plan wants on the record
+    ("malformed / foreign / stale element ids → rejected … audited"), so it
+    gets a row here rather than a second, differently-shaped audit path.
+    See ``_audit`` above for why this table and not the transcript one."""
     try:
         rid = int(str(scope.run_id))
     except (TypeError, ValueError, AttributeError):
@@ -404,7 +432,6 @@ async def _audit(
         # (mirrors CostAuditorHook's convention).
         return
 
-    granted = not isinstance(result, Denied)
     payload = {
         "run_id": rid,
         "iteration": 0,  # not a tool-loop iteration — a resolver-level audit row
@@ -446,6 +473,7 @@ __all__ = [
     "ResolvedScene",
     "ResolvedShot",
     "ResolvedEpisode",
+    "audit_resolution",
     "resolve_scene",
     "resolve_shot",
     "resolve_episode",

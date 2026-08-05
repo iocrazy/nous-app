@@ -151,6 +151,50 @@ def update_shot_spec() -> dict:
     }
 
 
+# Shared by ProposeEdit and ApplyEdit — they take the SAME target, and a
+# model that learned one shape must not have to learn a second (A5).
+_EDIT_PARAMS: dict[str, dict] = {
+    "scene_id": _SCENE_ID,
+    "element_ids": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": (
+            "element_id values from ReadScene naming the passage you are "
+            "rewriting. Ignored when the writer attached a selection to this "
+            "turn — theirs wins."
+        ),
+    },
+    "edits": {
+        "type": "array",
+        "description": (
+            "The replacement text, bound to the element it replaces. One "
+            "entry per element you are changing."
+        ),
+        "items": {
+            "type": "object",
+            "properties": {
+                "element_id": {"type": "string"},
+                "text": {"type": "string"},
+            },
+            "required": ["element_id", "text"],
+        },
+    },
+    "rationale": {
+        "type": "string",
+        "description": "One sentence: why this change.",
+    },
+    "base_content_version": {
+        "type": "integer",
+        "description": (
+            "The content_version ReadScene returned for this scene. This is "
+            "the proof you are rewriting the text you actually read: if the "
+            "writer changed those same elements meanwhile, the edit is "
+            "refused instead of overwriting them."
+        ),
+    },
+}
+
+
 def propose_edit_spec() -> dict:
     return {
         "type": "function",
@@ -160,38 +204,45 @@ def propose_edit_spec() -> dict:
                 "Propose a revision to specific elements of a scene, for the "
                 "writer to accept or reject. This does NOT change the script "
                 "— it returns a reviewable proposal anchored to the "
-                "element_ids you name. Quote the content_version you got from "
-                "ReadScene so the proposal can be detected as stale if the "
-                "writer edits the scene meanwhile."
+                "element_ids you name, having checked that the proposal could "
+                "be applied right now. Quote the content_version you got from "
+                "ReadScene so a proposal the writer has already overtaken "
+                "comes back flagged stale."
             ),
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "scene_id": _SCENE_ID,
-                    "element_ids": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": (
-                            "element_id values from ReadScene that this "
-                            "proposal replaces."
-                        ),
-                    },
-                    "proposed_text": {
-                        "type": "string",
-                        "description": "The replacement text you are proposing.",
-                    },
-                    "rationale": {
-                        "type": "string",
-                        "description": "One sentence: why this change.",
-                    },
-                    "base_content_version": {
-                        "type": "integer",
-                        "description": (
-                            "The content_version ReadScene returned for this " "scene."
-                        ),
-                    },
-                },
-                "required": ["scene_id", "element_ids", "proposed_text"],
+                "properties": dict(_EDIT_PARAMS),
+                "required": ["scene_id", "element_ids", "edits"],
+            },
+        },
+    }
+
+
+def apply_edit_spec() -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": "ApplyEdit",
+            "description": (
+                "Write a revision into the script, replacing the text of the "
+                "elements you name. Read the scene first and pass the "
+                "content_version it returned as base_content_version — it is "
+                "REQUIRED. If the writer changed those same elements while "
+                "you were working, nothing is written and you get their "
+                "current text back to rebase on; if they changed something "
+                "else in the scene, your edit is applied on top of their "
+                "work. Element type is preserved — you can rewrite a line of "
+                "dialogue, not turn it into an action line."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": dict(_EDIT_PARAMS),
+                "required": [
+                    "scene_id",
+                    "element_ids",
+                    "edits",
+                    "base_content_version",
+                ],
             },
         },
     }
@@ -206,6 +257,7 @@ SCREENWRITING_TOOL_SPECS = {
     "CreateShot": create_shot_spec,
     "UpdateShot": update_shot_spec,
     "ProposeEdit": propose_edit_spec,
+    "ApplyEdit": apply_edit_spec,
 }
 
 

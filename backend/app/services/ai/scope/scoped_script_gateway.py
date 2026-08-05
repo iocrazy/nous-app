@@ -35,6 +35,27 @@ the bypass the guard was written to close.
 The one function that does NOT take a handle — ``list_scenes_in_scope`` —
 takes no entity id at all: it derives everything from ``scope`` itself
 (server-bound) plus an OPTIONAL already-resolved episode.
+
+A5 ADDS ONE IMPORT THIS MODULE PREVIOUSLY AVOIDED — the scene REPOSITORY,
+for EXACTLY ONE method. The note on ``_SORT_ORDER_STEP`` explains why A4
+copied an integer rather than import ``script_shot_repository``: pulling a
+repository in would drag its unscoped getters into the agent-tool import
+graph. That reasoning still holds for everything A4 needed, and it does NOT
+hold for ``apply_element_ops``. That method IS the ops channel — one
+transaction that version-guards ``content_json``, appends the op AND its
+inverse to ``script_ops``, and raises the ``VersionConflict`` the editor's
+own optimistic-concurrency path already speaks. Re-implementing it here to
+avoid an import would create exactly the second, drifting write path spec
+§5.2 forbids ("agent 的写入应当走同一条 ops 通道,而不是新开一条旁路").
+
+So A5 imports it, and pays for the widened allow-list entry in
+``test_scope_resolver_single_choke_point.py`` with a MECHANICAL check rather
+than the prose promise the first cut offered (A5 review, Important 3):
+``test_scoped_script_gateway_calls_only_the_ops_channel`` AST-scans this file
+and fails if the set of repository methods called here is anything other than
+``{apply_element_ops}``. The authorization argument is unchanged from this
+module's ORM entry — that call takes ``scene.id`` off an already-resolved
+``ResolvedScene``, never a model-supplied id.
 """
 
 from __future__ import annotations
@@ -47,12 +68,19 @@ from sqlalchemy import func, insert, select, update
 
 from app.db.session import read_scope, write_scope
 from app.models import ScriptProjects, ScriptScenes, ScriptShots
+from app.repositories.script_scene_repository import (
+    VersionConflict,
+    get_script_scene_repository,
+)
 from app.services.script.scene_numbering import (
     derive_shot_label,
     effective_scene_number,
 )
+from app.services.script.scene_ops import OpError
+from app.services.script.version_service import diff_scenes
 
 from .agent_run_scope import AgentRunScope
+from .scene_observations import observed_scene, record_scene_read
 from .scope_resolver import ResolvedEpisode, ResolvedScene, ResolvedShot
 
 logger = logging.getLogger(__name__)
@@ -316,7 +344,17 @@ async def read_scene_elements(
     no second query, and no chance of reading a DIFFERENT row than the one
     that was authorized. ``element_id`` is surfaced under that name (not the
     raw ``id`` key) because it is the anchor A5's edit contract and
-    ``ProposeEdit`` both address elements by."""
+    ``ProposeEdit`` both address elements by.
+
+    THIS IS ALSO THE ONE PLACE THAT RECORDS WHAT A RUN HAS SEEN (A5). The
+    record has to be written exactly where scene content is handed to a
+    model, or it stops describing what the model actually read — which is the
+    single thing A5's precondition trusts. Recording the RAW elements, not
+    the projection below: the write-time comparison runs ``diff_scenes`` over
+    whole elements, and storing the trimmed view would blind it to any key
+    the projection drops."""
+    raw = _elements(scene.content_json)
+    record_scene_read(scope.run_id, scene.id, scene.content_version, raw)
     return [
         {
             "element_id": el.get("id"),
@@ -324,9 +362,380 @@ async def read_scene_elements(
             "text": el.get("text"),
             "character_id": el.get("character_id"),
         }
-        for el in _elements(scene.content_json)
+        for el in raw
         if el.get("id")
     ]
+
+
+# --------------------------------------------------------------------------- #
+# A5 — the edit-safety contract (spec §5.2).
+#
+# GRANULARITY: element-level, not the whole-scene watermark. The plan made this
+# the implementer's call and told them to measure first, so here is what was
+# measured (production, 2026-08-04) and — as importantly — what it does and
+# does not establish.
+#
+#   * agent turn length (``agent_runs``, n=99): p50 4.9s, p90 26.4s, max 122s
+#     — the exposure window between the agent's read and its write;
+#   * editor op inter-arrival WITHIN one scene (``script_ops``, 409 gaps):
+#     median 1.4s, 328/409 (80%) under 30s;
+#   * op rows touching exactly one element: 407/423 (96%).
+#
+# WHAT THAT SUPPORTS: a whole-scene watermark would refuse OFTEN during active
+# writing. The exposure window is an order of magnitude longer than the gap
+# between keystroke-debounced ops, so a writer who is mid-scene — which is
+# precisely when they ask for help — moves ``content_version`` under nearly
+# every agent turn.
+#
+# WHAT IT DOES NOT SUPPORT, and the comment previously overclaimed (A5 review,
+# Important 2): it does NOT establish that element-level granularity is
+# sufficient, or even that it helps much in this corpus.
+#   - of 18 scenes, 6 hold exactly ONE element and 3 hold two; where a scene
+#     has one element, element-level IS whole-scene and buys nothing;
+#   - "96% of ops touch one element" is close to tautological when ops are
+#     keystroke-debounce granularity and scenes average 2.1 elements;
+#   - op gaps are conditional on an op having happened; they cannot answer
+#     "was the author typing WHILE the agent ran";
+#   - 417/423 ops come from a single actor, so the corpus contains no
+#     human-agent (and no human-human) concurrency sample at all.
+#
+# Element-level is kept because the fail-closed direction is right and it is
+# ~100 lines, not because the data proves it necessary. Revisit with real
+# concurrency data.
+#
+# WHAT IT IS NOT is a second write channel: the write goes through
+# ``apply_element_ops`` with a ``content_version``, lands one ``script_ops``
+# row with its inverse, and raises the existing ``VersionConflict``. No new
+# column, no new table, no migration, and nothing the editor's own path has to
+# learn about.
+#
+# THE PRECONDITION'S INPUT IS THE SERVER'S OWN RECORD, NEVER THE MODEL'S
+# (A5 review, Critical). The first cut compared the scene against a
+# ``base_content_version`` the MODEL supplied, and skipped the element check
+# entirely when that number equalled the current version — while ProposeEdit
+# and every conflict refusal helpfully handed the model exactly that number.
+# Quoting it back turned the guard off and overwrote the author in silence.
+# See ``scene_observations`` for the full write-up; the short version is that
+# spec §5.2's "content_version is already a watermark" reasoning holds for the
+# editor (which necessarily submits the version it read) and not for an LLM
+# (which can emit any integer). Same mechanism, different trust boundary.
+#
+# So: ``ReadScene`` records what it showed this run, and the comparison runs
+# against THAT. The shape is a bounded rebase, applied at most once:
+#   nothing this run read     -> REFUSE ("read the scene first")
+#   targets unchanged since   -> submit at CURRENT (rebase; the author's edits
+#                                elsewhere in the scene survive)
+#   any target changed/moved/ -> REFUSE, explicitly
+#     removed since
+# "At most once" is deliberate. Retrying until it sticks would livelock
+# against a fast typist, and each silent retry is another chance to land on
+# content nobody re-read. One rebase, then refuse.
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class EditApplied:
+    """An agent edit that landed.
+
+    ``rebased_from`` is non-None when the scene had moved since the agent read
+    it and the write was rebased onto the newer version (every targeted
+    element having been verified unchanged first). ``quoted_base_version`` is
+    what the MODEL claimed it read — carried for observability only; see
+    ``apply_element_edit`` on why it is not load-bearing."""
+
+    scene_id: int
+    element_ids: tuple[str, ...]
+    content_version: int
+    rebased_from: Optional[int]
+    observed_version: int
+    quoted_base_version: Optional[int] = None
+
+    @property
+    def quoted_base_mismatch(self) -> bool:
+        """The model quoted a version other than the one the server last
+        showed it. Not an error — it may simply have read twice — but worth
+        surfacing, because a persistent mismatch means the model is
+        synthesising the number rather than reporting one."""
+        return (
+            self.quoted_base_version is not None
+            and self.quoted_base_version != self.observed_version
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "scene_id": str(self.scene_id),
+            "element_ids": list(self.element_ids),
+            "content_version": self.content_version,
+            "rebased_from": self.rebased_from,
+            "observed_content_version": self.observed_version,
+            "quoted_base_mismatch": self.quoted_base_mismatch,
+        }
+
+
+@dataclass(frozen=True)
+class EditRefused:
+    """An agent edit that was NOT applied, and why.
+
+    Both audiences are served by one object on purpose (spec §5.2: 冲突必须
+    明示). ``code`` is what the model branches on; ``message`` is a sentence a
+    human can act on; ``current_elements`` is the passage AS IT IS NOW, so the
+    panel can show the writer what changed under them.
+
+    Handing back the current text is safe precisely BECAUSE the precondition
+    no longer reads anything the model says: the model cannot turn this
+    payload into a successful retry, since the server's record still holds the
+    old text until ``ReadScene`` refreshes it. "Re-read the scene" is therefore
+    literal, not advisory."""
+
+    code: str
+    message: str
+    scene_id: int
+    element_ids: tuple[str, ...]
+    observed_version: Optional[int]
+    current_version: int
+    conflicting_element_ids: tuple[str, ...] = ()
+    current_elements: tuple[dict[str, Any], ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "applied": False,
+            "error_code": self.code,
+            "error": self.message,
+            "scene_id": str(self.scene_id),
+            "element_ids": list(self.element_ids),
+            "observed_content_version": self.observed_version,
+            "current_content_version": self.current_version,
+            "conflicting_element_ids": list(self.conflicting_element_ids),
+            "current_elements": [dict(el) for el in self.current_elements],
+        }
+
+
+EditOutcome = Any  # EditApplied | EditRefused — narrowed by isinstance at use
+
+# How a diff_scenes change class reads to a human. "moved" is in here rather
+# than being tolerated (A5 review, M1): the previous cut compared element
+# DICTS, which carry no position, so an element the author reordered looked
+# untouched. ``version_service.diff_scenes`` — the same classifier the version
+# history uses — treats a genuine reorder as a change, and this defers to it
+# rather than keeping a second, looser opinion.
+_CHANGE_WORDING = {
+    "changed": "changed after you read them",
+    "moved": "were moved to a different place in the scene",
+    "removed": "no longer exist in that scene",
+    "added": "changed after you read them",
+}
+
+
+def _by_id(elements: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {el["id"]: el for el in elements if el.get("id")}
+
+
+def _conflict_message(conflicts: dict[str, str]) -> str:
+    """The sentence a human reads. Groups by WHAT happened rather than saying
+    "conflict", because the writer's next action differs: a changed passage
+    can be re-read and rebased, a deleted one cannot."""
+    parts = []
+    for kind in ("changed", "moved", "removed", "added"):
+        ids = sorted(e for e, k in conflicts.items() if k == kind)
+        if ids:
+            parts.append(
+                f"{len(ids)} of the passages you were rewriting "
+                f"({', '.join(ids[:5])}) {_CHANGE_WORDING[kind]}"
+            )
+    return (
+        "Nothing was written. "
+        + " and ".join(parts)
+        + ". Re-read the scene and rebase your edit on the current text before "
+        "offering it again."
+    )
+
+
+async def _current_scene_state(scene_id: int) -> tuple[int, list[dict[str, Any]]]:
+    """``(content_version, elements)`` read fresh at write time.
+
+    Deliberately NOT taken off ``ResolvedScene``: the resolver's snapshot was
+    correct when the id was authorized, and the whole point of this module is
+    that time passes between then and the write. Any drift between THIS read
+    and the UPDATE is still caught — ``apply_element_ops`` re-guards on
+    ``content_version`` inside its own transaction, so there is no TOCTOU
+    window this read could open."""
+    async with read_scope() as session:
+        row = (
+            await session.execute(
+                select(ScriptScenes.content_version, ScriptScenes.content_json).where(
+                    ScriptScenes.id == scene_id
+                )
+            )
+        ).first()
+    if row is None:  # pragma: no cover — resolver proved the row exists
+        return 0, []
+    return int(row.content_version or 0), _elements(row.content_json)
+
+
+async def apply_element_edit(
+    scope: AgentRunScope,
+    scene: ResolvedScene,
+    edits: dict[str, str],
+    *,
+    quoted_base_version: Optional[int] = None,
+    actor: str,
+) -> EditOutcome:
+    """Rewrite the text of specific elements of an already-resolved scene,
+    under the element-level precondition documented above.
+
+    ``edits`` maps element_id -> replacement text; every id must have been
+    validated against the scene by the caller (``ProposeEdit`` / ``ApplyEdit``
+    do this via ``resolve_selection``, so an id the model invented never
+    reaches here). The ops emitted are ``update`` ops carrying only ``text``,
+    so an element's ``type`` / ``character_id`` survive — an agent rewriting a
+    line of dialogue must not be able to turn it into an action line.
+
+    ``quoted_base_version`` is what the model SAYS it read. It is recorded and
+    reported, never used to decide anything: the precondition compares against
+    ``scene_observations``, i.e. what this run was actually shown. See the
+    Critical note above for what happened when it was load-bearing.
+
+    Returns ``EditApplied`` or ``EditRefused``; never raises for a conflict.
+    """
+    target_ids = tuple(edits)
+    current_version, current_elements = await _current_scene_state(scene.id)
+    current_by_id = _by_id(current_elements)
+
+    observation = observed_scene(scope.run_id, scene.id)
+    if observation is None:
+        # "You cannot write what you never read." Also the fail-closed answer
+        # when a record was evicted or the run spans processes — the model
+        # re-reads and proceeds, which is exactly what it should do anyway.
+        return EditRefused(
+            code="scene_not_read",
+            message=(
+                "Nothing was written. You have not read that scene in this "
+                "run, so there is no record of the text you are rewriting. "
+                "Call ReadScene first, then edit what it returns."
+            ),
+            scene_id=scene.id,
+            element_ids=target_ids,
+            observed_version=None,
+            current_version=current_version,
+            current_elements=tuple(
+                current_by_id[e] for e in target_ids if e in current_by_id
+            ),
+        )
+
+    # The comparison, against what the server showed — never against a number
+    # the model produced. diff_scenes classifies added/removed/changed/moved
+    # over the whole element arrays; a target appearing in ANY class means the
+    # passage moved under the agent.
+    changes = {
+        change["id"]: change["kind"]
+        for change in diff_scenes(list(observation.elements), current_elements)
+    }
+    conflicts = {eid: changes[eid] for eid in target_ids if eid in changes}
+    if conflicts:
+        logger.info(
+            "[scoped_script_gateway] edit refused run=%s scene=%s "
+            "observed=%s current=%s conflicts=%s",
+            scope.run_id,
+            scene.id,
+            observation.content_version,
+            current_version,
+            conflicts,
+        )
+        return EditRefused(
+            code="version_conflict",
+            message=_conflict_message(conflicts),
+            scene_id=scene.id,
+            element_ids=target_ids,
+            observed_version=observation.content_version,
+            current_version=current_version,
+            conflicting_element_ids=tuple(sorted(conflicts)),
+            current_elements=tuple(
+                current_by_id[e] for e in target_ids if e in current_by_id
+            ),
+        )
+
+    # Every targeted element is exactly as this run was shown it. Anything the
+    # author changed is elsewhere in the scene, so rebase onto their work
+    # rather than throwing away a good edit.
+    rebased_from = (
+        observation.content_version
+        if observation.content_version != current_version
+        else None
+    )
+    if quoted_base_version is not None and quoted_base_version != (
+        observation.content_version
+    ):
+        logger.info(
+            "[scoped_script_gateway] quoted base %s != observed %s "
+            "(run=%s scene=%s) — observation governs",
+            quoted_base_version,
+            observation.content_version,
+            scope.run_id,
+            scene.id,
+        )
+
+    ops = [
+        {"op": "update", "element_id": eid, "payload": {"text": text}}
+        for eid, text in edits.items()
+    ]
+    repo = get_script_scene_repository()
+    try:
+        result = await repo.apply_element_ops(
+            str(scene.id), ops, expected_version=current_version, actor=actor
+        )
+    except VersionConflict as conflict:
+        # A writer won the race between _current_scene_state and the UPDATE.
+        # This is the SAME exception the editor's own path raises; we do not
+        # retry (see the "at most once" note above).
+        fresh = _by_id([el for el in conflict.elements if isinstance(el, dict)])
+        return EditRefused(
+            code="version_conflict",
+            message=(
+                "Nothing was written. That scene was edited in the moment "
+                "between reading it and writing — re-read it and try again."
+            ),
+            scene_id=scene.id,
+            element_ids=target_ids,
+            observed_version=observation.content_version,
+            current_version=conflict.current_version,
+            conflicting_element_ids=target_ids,
+            current_elements=tuple(fresh[e] for e in target_ids if e in fresh),
+        )
+    except OpError as op_error:
+        # The protocol rejected the batch (e.g. the element vanished between
+        # our precondition check and the transaction). Surfaced with its own
+        # code so the model does not read a malformed-op bug as a conflict.
+        return EditRefused(
+            code="op_rejected",
+            message=(
+                "Nothing was written. The script rejected the edit: "
+                f"{op_error.message}"
+            ),
+            scene_id=scene.id,
+            element_ids=target_ids,
+            observed_version=observation.content_version,
+            current_version=current_version,
+        )
+
+    logger.info(
+        "[scoped_script_gateway] edit applied run=%s scene=%s v%s->%s "
+        "elements=%s rebased_from=%s",
+        scope.run_id,
+        scene.id,
+        current_version,
+        result["content_version"],
+        list(target_ids),
+        rebased_from,
+    )
+    return EditApplied(
+        scene_id=scene.id,
+        element_ids=target_ids,
+        content_version=int(result["content_version"]),
+        rebased_from=rebased_from,
+        observed_version=observation.content_version,
+        quoted_base_version=quoted_base_version,
+    )
 
 
 async def list_shots_for_scene(
@@ -514,7 +923,10 @@ async def episode_id_for_script(script_id: Any) -> Optional[int]:
 
 __all__ = [
     "MAX_LIST_SCENES",
+    "EditApplied",
+    "EditRefused",
     "SceneSummary",
+    "apply_element_edit",
     "create_shot",
     "episode_id_for_script",
     "list_scenes_in_scope",

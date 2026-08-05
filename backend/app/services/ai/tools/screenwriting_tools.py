@@ -1,5 +1,5 @@
-"""A4 screenwriting tool handlers — ListScenes / ReadScene / CreateShot /
-UpdateShot / ProposeEdit (agent-layer spec §5.1).
+"""Screenwriting tool handlers — ListScenes / ReadScene / CreateShot /
+UpdateShot (A4) / ProposeEdit / ApplyEdit (A5) — agent-layer spec §5.1.
 
 Every handler follows the same three steps, in this order, with no
 exceptions:
@@ -11,7 +11,12 @@ exceptions:
        model's id into an authorized row, or a ``Denied``. These handlers
        never query ``script_scenes`` / ``script_shots`` / ``script_projects``
        themselves; ``tests/test_scope_resolver_single_choke_point.py`` fails
-       the build if they start to.
+       the build if they start to. The two edit tools go through
+       ``resolve_selection`` (A5), which is not a fourth resolver but a
+       WRAPPER around ``resolve_scene`` that additionally checks the element
+       ids are in the scene it just authorized — see
+       ``scope/script_selection.py`` for why that second question needs an
+       answer of its own.
     3. ``scoped_script_gateway`` — the actual read/write, taking the
        ``Resolved*`` handle from step 2 (never a raw id).
 
@@ -49,6 +54,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from app.schemas.script_selection import MAX_SELECTION_ELEMENTS, SelectionRejected
 from app.services.ai.scope import scoped_script_gateway as gateway
 from app.services.ai.scope.agent_run_scope import AgentRunScope, scope_for_run
 from app.services.ai.scope.scope_resolver import (
@@ -56,6 +62,11 @@ from app.services.ai.scope.scope_resolver import (
     resolve_episode,
     resolve_scene,
     resolve_shot,
+)
+from app.services.ai.scope.script_selection import (
+    ResolvedSelection,
+    resolve_selection,
+    selection_from_run_context,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,7 +85,10 @@ _UNBOUND = {
     "error_code": "scope_unbound",
 }
 
-_MAX_ELEMENT_IDS = 50
+# Imported rather than re-declared: the HTTP selection path and this tool
+# path must refuse at the SAME size, or one silently truncates what the other
+# accepted. A4 had its own literal 50 here; A5 gives the constant one home.
+_MAX_ELEMENT_IDS = MAX_SELECTION_ELEMENTS
 
 
 def _denied(result: Denied) -> dict[str, Any]:
@@ -82,6 +96,113 @@ def _denied(result: Denied) -> dict[str, Any]:
         "ok": False,
         "error": f"{result.resource_type} {result.requested_id}: {result.reason}",
         "error_code": "scope_denied",
+    }
+
+
+def _edit_actor(scope: AgentRunScope) -> str:
+    """The ``script_ops.actor`` an agent edit is stamped with.
+
+    ``agent:<run_id>`` rather than the user's uuid: the column is free-form
+    varchar and already carries a non-uuid actor (``version_service`` writes
+    ``copilot``), and the run id resolves to the agent, the user AND the
+    scope via one join on ``agent_runs``. Attributing the op to the user
+    directly would be a lie the editor's own history panel would repeat —
+    the writer did not type this, and the ledger is what A7 reads to say so.
+    """
+    return f"agent:{scope.run_id}"
+
+
+def _parse_edits(args: dict, selection: "ResolvedSelection") -> Any:
+    """``{element_id: replacement_text}`` from the model's arguments.
+
+    Two accepted shapes, and the difference matters (spec §5.3: the payload
+    must be a HANDLE, not a blob):
+
+      * ``edits: [{element_id, text}, ...]`` — the precise form. Each
+        replacement is bound to the element it replaces.
+      * ``proposed_text: "..."`` — A4's original shape, kept working but
+        ONLY when the selection names exactly one element. With two or more
+        it is ambiguous which one the text replaces, and the old code
+        resolved that ambiguity by not resolving it at all (it returned the
+        blob and let a human sort it out). Guessing here would put the
+        agent's text in the wrong line of dialogue, so it is refused.
+
+    Returns the mapping, or an error dict.
+    """
+    raw_edits = args.get("edits")
+    allowed = set(selection.element_ids)
+    edits: dict[str, str] = {}
+
+    if isinstance(raw_edits, list) and raw_edits:
+        # Malformed entries are COUNTED, not skipped (A5 review, M2). Dropping
+        # them silently meant 3 edits with 1 malformed wrote 2 and reported
+        # success — the model would believe a revision landed that never did,
+        # and so would the writer reading the transcript.
+        malformed = 0
+        for item in raw_edits[:_MAX_ELEMENT_IDS]:
+            if not isinstance(item, dict):
+                malformed += 1
+                continue
+            eid = str(item.get("element_id") or "").strip()
+            text = item.get("text")
+            if not eid or text is None:
+                malformed += 1
+                continue
+            edits[eid] = str(text)
+        if malformed:
+            return {
+                "ok": False,
+                "error": (
+                    f"{malformed} of {len(raw_edits)} edits are malformed — "
+                    "each must be an object with a non-empty element_id and a "
+                    "text field. Nothing was written; resend the whole batch."
+                ),
+                "error_code": "invalid_args",
+            }
+        stray = sorted(set(edits) - allowed)
+        if stray:
+            return {
+                "ok": False,
+                "error": (
+                    "edits name elements outside the selection: "
+                    f"{', '.join(stray[:10])}. Every edit must target one of "
+                    f"{', '.join(selection.element_ids)}."
+                ),
+                "error_code": "unknown_element",
+            }
+        if not edits:
+            return {
+                "ok": False,
+                "error": (
+                    "edits must be a list of {element_id, text} objects with "
+                    "both fields set."
+                ),
+                "error_code": "invalid_args",
+            }
+        return edits
+
+    proposed_text = args.get("proposed_text")
+    if proposed_text is not None and str(proposed_text).strip():
+        if len(selection.element_ids) != 1:
+            return {
+                "ok": False,
+                "error": (
+                    f"proposed_text is ambiguous across "
+                    f"{len(selection.element_ids)} elements — it would be "
+                    "guesswork which one it replaces. Use edits: "
+                    "[{element_id, text}, ...] to say explicitly."
+                ),
+                "error_code": "invalid_args",
+            }
+        return {selection.element_ids[0]: str(proposed_text)}
+
+    return {
+        "ok": False,
+        "error": (
+            "Nothing to write: pass edits as [{element_id, text}, ...] "
+            "naming the replacement text for each element."
+        ),
+        "error_code": "invalid_args",
     }
 
 
@@ -204,89 +325,197 @@ class ScreenwritingTools:
             }
         return {"ok": True, "shot": updated}
 
+    # ------------------------------------------------------------------ #
+    # A5 — the edit-safety contract. ProposeEdit and ApplyEdit share ONE
+    # preparation path (``_prepare_edit``) and differ in exactly one thing:
+    # whether the write is executed. That is on purpose.
+    #
+    # WHY TWO TOOLS RATHER THAN ONE THAT SOMETIMES WRITES. A1 graded
+    # ProposeEdit at "propose" and made the tiers ordinal precisely so that
+    # "an agent trusted to suggest revisions is not thereby trusted to
+    # commit them". A single tool whose behaviour depended on the caller's
+    # grading would have to ask "what may I do?" INSIDE the handler — the
+    # second, drifting source of truth this module's docstring refuses. Two
+    # tool names let the existing gate answer it, per call, in the executor,
+    # by the only mechanism the model cannot talk its way around: ApplyEdit
+    # requires "write", ProposeEdit requires "propose", and a propose-only
+    # agent simply never reaches the write path.
+    #
+    # Both run the SAME validation, so a proposal that came back clean is a
+    # proposal that would have applied — a propose-graded agent gets honest
+    # feedback rather than a rubber stamp that fails later in someone else's
+    # hands.
+    # ------------------------------------------------------------------ #
+
+    async def _prepare_edit(
+        self, args: dict, run_context: dict, scope: AgentRunScope
+    ) -> Any:
+        """Resolve the target passage and the per-element replacement text.
+
+        Returns ``(ResolvedSelection, {element_id: text}, base_version)`` or
+        an error dict. ``base_version`` is ``None`` when the model quoted
+        none — legal for ProposeEdit (nothing is at stake), refused by
+        ApplyEdit (see ``apply_edit``).
+        """
+        # The writer's actual selection outranks the model's recollection of
+        # it. When A7's panel attaches one, ids the model typed are ignored
+        # rather than merged: a half-model half-human target is a passage
+        # nobody chose.
+        attached = selection_from_run_context(run_context)
+        raw_selection = attached or {
+            "scene_id": args.get("scene_id"),
+            "element_ids": args.get("element_ids"),
+            "summary_text": args.get("summary_text") or "",
+        }
+
+        selection = await resolve_selection(raw_selection, scope)
+        if isinstance(selection, Denied):
+            return _denied(selection)
+        if isinstance(selection, SelectionRejected):
+            return {
+                "ok": False,
+                "error": selection.message,
+                "error_code": selection.code,
+            }
+
+        edits = _parse_edits(args, selection)
+        if isinstance(edits, dict) and edits.get("ok") is False:
+            return edits
+
+        base_version = args.get("base_content_version")
+        if base_version is not None and not isinstance(base_version, bool):
+            try:
+                base_version = int(base_version)
+            except (TypeError, ValueError):
+                return {
+                    "ok": False,
+                    "error": (
+                        "base_content_version must be the integer "
+                        "content_version ReadScene returned."
+                    ),
+                    "error_code": "invalid_args",
+                }
+        else:
+            base_version = None
+
+        return selection, edits, base_version
+
     async def propose_edit(self, args: dict, run_context: dict) -> dict:
         """Produce a REVIEWABLE proposal; write nothing.
 
-        A4's deliberate boundary (A5 owns the apply path): the proposal is
-        validated against the scene the resolver authorized — every
-        ``element_id`` must actually exist in that scene's ``content_json``,
-        and the scene's current ``content_version`` is captured — then
-        returned for a human to accept or reject. Persisting it would need
-        an approvals table and an accept/reject UI, both of which are A5/A7
-        work; returning it keeps the proposal in the transcript (where A7
-        renders it) instead of half-building a store nobody reads yet.
+        Runs the full contract short of the write: the scene is authorized,
+        every element id is verified to be in it, and the replacement text is
+        bound per element.
 
-        The staleness check is the *cheap half* of spec §5.2: comparing the
-        model's ``base_content_version`` against the scene's current one
-        catches "the writer edited while the agent was thinking" at propose
-        time. The authoritative check still happens at apply time through the
-        existing ops channel's ``VersionConflict`` — this one just avoids
-        showing the writer a proposal that is already known to be stale.
+        IT DOES NOT ECHO THE SCENE'S CURRENT ``content_version`` (A5 review,
+        Critical). The first cut returned it under ``base_content_version``,
+        which meant a model whose proposal came back ``stale`` was handed, in
+        the same payload, the exact number that used to switch the write
+        precondition off. The proposal now carries back the model's OWN quoted
+        value — echoing what it told us costs nothing and reveals nothing.
+        This is defence in depth rather than the fix: the precondition no
+        longer reads any model-supplied number at all (see
+        ``scene_observations``), so quoting the current version buys an
+        attacker nothing today. Not handing it over keeps it that way.
+
+        ``stale`` stays a whole-scene comparison: at propose time it costs one
+        comparison and answers "is there any point showing this to the
+        writer". The authoritative, element-level precondition runs in
+        ``ApplyEdit``, where a false alarm would cost a real edit rather than
+        a re-read.
         """
         scope = await _bound_scope(run_context)
         if scope is None:
             return _UNBOUND
 
-        scene = await resolve_scene(args.get("scene_id"), scope)
-        if isinstance(scene, Denied):
-            return _denied(scene)
+        prepared = await self._prepare_edit(args, run_context, scope)
+        if isinstance(prepared, dict):
+            return prepared
+        selection, edits, base_version = prepared
+        scene = selection.scene
 
-        raw_ids = args.get("element_ids")
-        if isinstance(raw_ids, str):
-            raw_ids = [raw_ids]
-        if not isinstance(raw_ids, list) or not raw_ids:
-            return {
-                "ok": False,
-                "error": "element_ids must be a non-empty list of element ids",
-                "error_code": "invalid_args",
-            }
-        element_ids = [str(e) for e in raw_ids[:_MAX_ELEMENT_IDS]]
-
-        proposed_text = str(args.get("proposed_text") or "").strip()
-        if not proposed_text:
-            return {
-                "ok": False,
-                "error": "proposed_text is required",
-                "error_code": "invalid_args",
-            }
-
-        known = {
-            el["element_id"]
-            for el in await gateway.read_scene_elements(scope, scene)
-            if el.get("element_id")
-        }
-        unknown = [e for e in element_ids if e not in known]
-        if unknown:
-            return {
-                "ok": False,
-                "error": (
-                    "these element_ids are not in that scene: "
-                    f"{', '.join(unknown[:10])}. Re-read the scene and anchor "
-                    "the proposal to ids it actually contains."
-                ),
-                "error_code": "unknown_element",
-            }
-
-        base_version = args.get("base_content_version")
-        stale = isinstance(base_version, int) and base_version != scene.content_version
-
+        stale = base_version is not None and base_version != scene.content_version
         return {
             "ok": True,
+            "applied": False,
             "proposal": {
                 "scene_id": str(scene.id),
                 "scene_no_in_episode": await gateway.scene_no_for(scope, scene),
-                "element_ids": element_ids,
-                "proposed_text": proposed_text,
+                "element_ids": list(selection.element_ids),
+                "edits": [
+                    {"element_id": eid, "text": text} for eid, text in edits.items()
+                ],
                 "rationale": str(args.get("rationale") or "").strip() or None,
-                "base_content_version": scene.content_version,
+                # The model's own quoted value, echoed back — never the
+                # server's current one. See the docstring.
+                "base_content_version": base_version,
             },
-            "applied": False,
             "stale": stale,
             "note": (
-                "The scene changed since you read it — re-read it and rebase "
-                "this proposal before offering it."
+                "The scene changed since you read it — call ReadScene again "
+                "and rebase this proposal before offering it."
                 if stale
                 else "Proposal recorded for review; the script is unchanged."
+            ),
+        }
+
+    async def apply_edit(self, args: dict, run_context: dict) -> dict:
+        """Write the revision into the script through the existing ops
+        channel, under the element-level precondition (spec §5.2).
+
+        "You cannot write what you never read" is enforced by the SERVER's
+        record of what this run was shown, not by anything in ``args`` (A5
+        review, Critical). ``base_content_version`` stays required — it is
+        cheap, it is already in the tool spec, and a persistent mismatch
+        against the record is a useful signal that the model is synthesising
+        the number — but it decides nothing. The precondition compares the
+        scene against ``scene_observations``; a run that never called
+        ``ReadScene`` has no record and is refused there, with a message
+        telling it to read first.
+        """
+        scope = await _bound_scope(run_context)
+        if scope is None:
+            return _UNBOUND
+
+        prepared = await self._prepare_edit(args, run_context, scope)
+        if isinstance(prepared, dict):
+            return prepared
+        selection, edits, base_version = prepared
+        scene = selection.scene
+
+        if base_version is None:
+            return {
+                "ok": False,
+                "error": (
+                    "base_content_version is required to write. Call ReadScene "
+                    "first and quote the content_version it returned — it is "
+                    "what proves you are rewriting the text you actually read."
+                ),
+                "error_code": "missing_precondition",
+            }
+
+        outcome = await gateway.apply_element_edit(
+            scope,
+            scene,
+            edits,
+            quoted_base_version=base_version,
+            actor=_edit_actor(scope),
+        )
+        if isinstance(outcome, gateway.EditRefused):
+            return outcome.as_dict()
+
+        return {
+            "ok": True,
+            "applied": True,
+            "scene_no_in_episode": await gateway.scene_no_for(scope, scene),
+            **outcome.as_dict(),
+            "note": (
+                "Applied. The writer had edited elsewhere in the scene "
+                f"(version {outcome.rebased_from} -> "
+                f"{outcome.content_version}); their changes were kept and "
+                "yours rebased on top."
+                if outcome.rebased_from is not None
+                else "Applied to the scene."
             ),
         }
 
@@ -302,6 +531,7 @@ SCREENWRITING_HANDLERS = {
     "CreateShot": SCREENWRITING_TOOLS.create_shot,
     "UpdateShot": SCREENWRITING_TOOLS.update_shot,
     "ProposeEdit": SCREENWRITING_TOOLS.propose_edit,
+    "ApplyEdit": SCREENWRITING_TOOLS.apply_edit,
 }
 
 
