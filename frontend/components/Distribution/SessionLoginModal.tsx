@@ -4,7 +4,9 @@ import {
   AlertTriangle, CheckCircle2, Loader2, QrCode, RefreshCw, ShieldAlert, Smartphone, X,
 } from 'lucide-react';
 import { getSupabaseClient } from '../../supabaseClient';
-import { cancelSessionLogin, startSessionLogin, submitSmsCode } from '../../services/distributionService';
+import {
+  SMS_CODE_PATTERN, cancelSessionLogin, startSessionLogin, submitSmsCode,
+} from '../../services/distributionService';
 import { SessionLoginState, SessionLoginStatus } from '../../types';
 import { PLATFORM_LABEL } from './platform';
 
@@ -27,19 +29,27 @@ import { PLATFORM_LABEL } from './platform';
  *    the server-side timeout, so every non-terminal exit path cancels.
  */
 
-/** Statuses after which the workflow is done and there is nothing to cancel. */
-const TERMINAL: ReadonlySet<string> = new Set<SessionLoginStatus>([
-  'success', 'timeout', 'failed', 'proxy_failed',
-]);
+/**
+ * Local-only phases. Three precede the first `metadata.login` write;
+ * `session_ended` is what a 409 from /sms means — the task went terminal (TTL,
+ * cancel, failure) while the form sat open, which is the one path where the
+ * user finds out by acting rather than by watching.
+ */
+type ViewStatus =
+  | SessionLoginStatus
+  | 'starting' | 'connecting' | 'start_failed' | 'session_ended';
 
-/** Local-only phases that precede the first `metadata.login` write. */
-type ViewStatus = SessionLoginStatus | 'starting' | 'connecting' | 'start_failed';
+/** Statuses after which the workflow is done and there is nothing to cancel. */
+const TERMINAL: ReadonlySet<ViewStatus> = new Set<ViewStatus>([
+  'success', 'timeout', 'failed', 'proxy_failed', 'session_ended',
+]);
 
 /** Semantic tone per state — drives the dot/border color, never a hue name. */
 const TONE: Record<ViewStatus, 'info' | 'ok' | 'warn' | 'danger'> = {
   starting: 'info',
   connecting: 'info',
   start_failed: 'danger',
+  session_ended: 'warn',
   waiting_scan: 'info',
   scanned: 'info',
   qrcode_expired: 'warn',
@@ -68,6 +78,9 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
   const [taskId, setTaskId] = useState<string | null>(null);
   const [login, setLogin] = useState<SessionLoginState | null>(null);
   const [startFailed, setStartFailed] = useState(false);
+  // Set when /sms answers 409 — the task is already terminal server-side, so
+  // Realtime will never deliver another status for it.
+  const [sessionEnded, setSessionEnded] = useState(false);
   const [smsCode, setSmsCode] = useState('');
   const [smsBusy, setSmsBusy] = useState(false);
   const [smsError, setSmsError] = useState<string | null>(null);
@@ -75,7 +88,9 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
 
   const reported: ViewStatus = startFailed
     ? 'start_failed'
-    : login?.status ?? (taskId ? 'connecting' : 'starting');
+    : sessionEnded
+      ? 'session_ended'
+      : login?.status ?? (taskId ? 'connecting' : 'starting');
   // The router seeds the row with a placeholder `waiting_scan` before the
   // browser has produced an image. Rendering that verbatim would tell the user
   // to scan an empty box, so it reads as "still fetching" until a QR arrives.
@@ -98,6 +113,7 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
   const begin = useCallback(async () => {
     cancelledRef.current = false;
     setStartFailed(false);
+    setSessionEnded(false);
     setLogin(null);
     setSmsCode('');
     setSmsError(null);
@@ -230,13 +246,18 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
     cancelPending(id, done);
   }, [cancelPending]);
 
+  // The backend rejects anything but 4–8 digits with a FastAPI 422, whose body
+  // is a pydantic error list rather than a SessionOpResult — so gate on the
+  // same rule here instead of letting the user hit a shape we can't read.
+  const smsValid = SMS_CODE_PATTERN.test(smsCode);
+
   const onSubmitSms = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!taskId || !smsCode.trim()) return;
+    if (!taskId || !smsValid) return;
     setSmsBusy(true);
     setSmsError(null);
     try {
-      const res = await submitSmsCode(taskId, smsCode.trim());
+      const res = await submitSmsCode(taskId, smsCode);
       // A 200 with success:false is the platform saying no — showing nothing
       // here would leave the user staring at an unchanged form.
       if (res && res.success === false) {
@@ -251,7 +272,28 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
       setSmsCode('');
     } catch (err) {
       console.error('distribution: submit sms code failed', err);
-      setSmsError(t('distribution.session.smsFailed', 'That code was rejected — check it and try again'));
+      // Three different failures, three different fixes. Collapsing them into
+      // "that code was rejected" is worse than useless for the first one:
+      //   409 — the login already ended (QR expired / workflow finished /
+      //         cancelled) and the browser context is gone. No code will ever
+      //         work now, so telling the user to re-check theirs traps them
+      //         re-entering it forever. They need to start over.
+      //   422 — malformed. `smsValid` should make this unreachable, but if the
+      //         server's rule tightens, say what shape it wants rather than
+      //         blaming the digits the user typed.
+      //   else — the platform genuinely rejected the code.
+      const status = (err as { status?: number } | null)?.status;
+      if (status === 409) {
+        // Flip the whole modal rather than just annotating the form: no
+        // further Realtime update is coming for this task, and leaving the
+        // code input on screen implies retrying it might work. The
+        // session_ended view puts "Get a new code" in front of the user.
+        setSessionEnded(true);
+      } else if (status === 422) {
+        setSmsError(t('distribution.session.smsInvalid', 'Enter the 4-8 digit code'));
+      } else {
+        setSmsError(t('distribution.session.smsFailed', 'That code was rejected — check it and try again'));
+      }
     } finally {
       setSmsBusy(false);
     }
@@ -263,6 +305,7 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
     starting: t('distribution.session.startingLabel', 'Preparing a browser session'),
     connecting: t('distribution.session.connectingLabel', 'Fetching the QR code'),
     start_failed: t('distribution.session.startFailedLabel', 'Could not start sign-in'),
+    session_ended: t('distribution.session.sessionEndedLabel', 'This sign-in has ended'),
     waiting_scan: t('distribution.session.waitingScanLabel', 'Waiting for the scan'),
     scanned: t('distribution.session.scannedLabel', 'Scanned — confirm on your phone'),
     qrcode_expired: t('distribution.session.qrcodeExpiredLabel', 'QR code expired'),
@@ -277,6 +320,7 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
     starting: t('distribution.session.startingHint', 'Opening an isolated browser for this account.'),
     connecting: t('distribution.session.connectingHint', 'The sign-in page is loading — the code appears in a moment.'),
     start_failed: t('distribution.session.startFailedHint', 'The request never reached the server. Check your connection and try again.'),
+    session_ended: t('distribution.session.sessionEndedHint', 'The code expired while this was open, so the verification code can no longer be used. Get a new code and scan again.'),
     waiting_scan: t('distribution.session.waitingScanHint', 'Open the app on your phone and scan the code to link this account.'),
     scanned: t('distribution.session.scannedHint', 'Tap Confirm in the app to finish signing in.'),
     qrcode_expired: t('distribution.session.qrcodeExpiredHint', 'Codes are short-lived. A fresh one is being fetched — or request it now.'),
@@ -331,7 +375,7 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
                 {status === 'proxy_failed' && <ShieldAlert size={30} />}
                 {(status === 'failed' || status === 'timeout' || status === 'start_failed') && <AlertTriangle size={30} />}
                 {busy && <Loader2 size={30} className="spin" />}
-                {status === 'qrcode_expired' && <QrCode size={30} />}
+                {(status === 'qrcode_expired' || status === 'session_ended') && <QrCode size={30} />}
                 {status === 'sms_required' && <Smartphone size={30} />}
               </div>
             )}
@@ -364,20 +408,29 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
                     value={smsCode}
                     inputMode="numeric"
                     autoComplete="one-time-code"
-                    placeholder={t('distribution.session.smsPlaceholder', '6-digit code')}
-                    onChange={(e) => setSmsCode(e.target.value)}
+                    maxLength={8}
+                    aria-invalid={smsCode.length > 0 && !smsValid}
+                    placeholder={t('distribution.session.smsPlaceholder', '4-8 digit code')}
+                    // Strip anything the server would 422 on as it is typed —
+                    // paste included.
+                    onChange={(e) => setSmsCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
                     disabled={smsBusy}
                   />
                   <button
                     type="submit"
                     className="btn btn-tint-indigo btn-sm"
-                    disabled={smsBusy || !smsCode.trim()}
+                    disabled={smsBusy || !smsValid}
                   >
                     {smsBusy
                       ? t('distribution.session.smsSubmitting', 'Sending...')
                       : t('distribution.session.smsSubmit', 'Submit')}
                   </button>
                 </div>
+                {smsCode.length > 0 && !smsValid && (
+                  <p className="sess-detail tone-warn">
+                    {t('distribution.session.smsInvalid', 'Enter the 4-8 digit code')}
+                  </p>
+                )}
                 {smsError && <p className="sess-detail tone-danger">{smsError}</p>}
               </form>
             )}

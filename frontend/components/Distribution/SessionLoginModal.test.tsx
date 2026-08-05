@@ -10,7 +10,11 @@ const startSessionLogin = vi.fn();
 const submitSmsCode = vi.fn();
 const cancelSessionLogin = vi.fn();
 
-vi.mock('../../services/distributionService', () => ({
+// Spread the real module so SMS_CODE_PATTERN stays the one the service and
+// the backend agree on — a hand-copied literal here would let the submit gate
+// drift away from what the endpoint accepts without any test noticing.
+vi.mock('../../services/distributionService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../services/distributionService')>()),
   startSessionLogin: (...a: unknown[]) => startSessionLogin(...a),
   submitSmsCode: (...a: unknown[]) => submitSmsCode(...a),
   cancelSessionLogin: (...a: unknown[]) => cancelSessionLogin(...a),
@@ -162,6 +166,70 @@ describe('SessionLoginModal', () => {
       fireEvent.click(screen.getByRole('button', { name: /^Submit$/i }));
     });
     expect(submitSmsCode).toHaveBeenCalledWith('task-1', '123456');
+  });
+
+  it('will not send a code the server would 422 on', async () => {
+    // The endpoint requires ^\d{4,8}$. A shorter or non-numeric value comes
+    // back as a FastAPI pydantic body, which has no `success`/`message` — so
+    // the form must never let it out.
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({ status: 'sms_required' });
+    const input = screen.getByLabelText(/Verification code/i) as HTMLInputElement;
+    const submit = screen.getByRole('button', { name: /^Submit$/i });
+
+    expect(submit).toBeDisabled();
+    fireEvent.change(input, { target: { value: '12a3' } });
+    expect(input.value).toBe('123');            // letters stripped as typed
+    expect(submit).toBeDisabled();              // 3 digits is still too short
+    expect(screen.getByText(/Enter the 4-8 digit code/i)).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: '1234567890' } });
+    expect(input.value).toBe('12345678');       // capped at the 8-digit max
+    expect(submit).toBeEnabled();
+
+    await act(async () => { fireEvent.click(submit); });
+    expect(submitSmsCode).toHaveBeenCalledWith('task-1', '12345678');
+  });
+
+  it('turns a 409 into "start over", not "check your code"', async () => {
+    // The real path: the user sits on the code form past the 5-minute TTL.
+    // The browser context is gone and no code will ever work, so telling them
+    // to re-check their digits would trap them re-entering it forever.
+    submitSmsCode.mockRejectedValueOnce(
+      Object.assign(new Error('distribution api failed: 409'), { status: 409 }),
+    );
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({ status: 'sms_required' });
+    fireEvent.change(screen.getByLabelText(/Verification code/i), { target: { value: '123456' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Submit$/i }));
+    });
+
+    expect(await screen.findByText(/This sign-in has ended/i)).toBeInTheDocument();
+    expect(screen.queryByText(/That code was rejected/i)).toBeNull();
+    // The code form is gone and the only useful action is offered instead.
+    expect(screen.queryByLabelText(/Verification code/i)).toBeNull();
+    expect(screen.getByRole('button', { name: /Get a new code/i })).toBeInTheDocument();
+    // Terminal server-side — a DELETE here would 404.
+    const closers = screen.getAllByRole('button', { name: /^Close$/i });
+    await act(async () => { fireEvent.click(closers[closers.length - 1]); });
+    expect(cancelSessionLogin).not.toHaveBeenCalled();
+  });
+
+  it('names a 422 as a format problem, not a wrong code', async () => {
+    const err = Object.assign(new Error('distribution api failed: 422'), { status: 422 });
+    submitSmsCode.mockRejectedValueOnce(err);
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({ status: 'sms_required' });
+    fireEvent.change(screen.getByLabelText(/Verification code/i), { target: { value: '123456' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Submit$/i }));
+    });
+    expect(await screen.findByText(/Enter the 4-8 digit code/i)).toBeInTheDocument();
+    expect(screen.queryByText(/That code was rejected/i)).toBeNull();
   });
 
   it('surfaces a 200-with-success:false SMS rejection', async () => {

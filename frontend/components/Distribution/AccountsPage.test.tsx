@@ -10,7 +10,8 @@ vi.mock('react-i18next', () => ({
 const connectAccount = vi.fn();
 const startSessionLogin = vi.fn();
 
-vi.mock('../../services/distributionService', () => ({
+vi.mock('../../services/distributionService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../services/distributionService')>()),
   listAccounts: vi.fn().mockResolvedValue([
     {
       id: '727145299382534145', scope_type: 'user', scope_id: 'u1', platform: 'douyin',

@@ -2,13 +2,26 @@ import { SocialAccount, PublishRequest, PublishTask, LibraryVideo } from '../typ
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 
+/**
+ * Carries the HTTP status alongside the message so callers can tell apart
+ * failures that need different words. Additive: the message format is
+ * unchanged, so existing `catch (err) { console.error(err) }` sites behave
+ * exactly as before.
+ */
+export class DistributionApiError extends Error {
+  constructor(public readonly status: number, path: string) {
+    super(`distribution api ${path} failed: ${status}`);
+    this.name = 'DistributionApiError';
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${getApiUrl()}/api/v1/distribution${path}`, {
     ...init,
     headers: { ...(await getAuthHeaders()), ...(init?.headers ?? {}) },
   });
   if (!res.ok) {
-    throw new Error(`distribution api ${path} failed: ${res.status}`);
+    throw new DistributionApiError(res.status, path);
   }
   return res.status === 204 ? (undefined as T) : res.json();
 }
@@ -57,6 +70,14 @@ export interface SessionOpResult {
   message: string;
   detail?: { error_kind?: string } & Record<string, unknown>;
 }
+
+/**
+ * What the backend (and, verbatim, the browser container's `SmsCodeRequest`)
+ * will accept. Enforced client-side too: anything else comes back as a
+ * FastAPI 422 pydantic body, which is NOT a `SessionOpResult` and would land
+ * the modal on `undefined.success`.
+ */
+export const SMS_CODE_PATTERN = /^\d{4,8}$/;
 
 /** Answer the platform's SMS challenge (`status === 'sms_required'`). */
 export const submitSmsCode = (taskId: string, code: string): Promise<SessionOpResult> =>
