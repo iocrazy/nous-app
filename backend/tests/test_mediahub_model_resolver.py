@@ -1,11 +1,32 @@
 # backend/tests/test_nous_resolver.py
 """Shared nous resolver: platform config on match, fail-closed otherwise."""
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.services.ai.governance.ai_governance import AIModuleGovernance
+
+
+class _FakeScopeSession:
+    """Stand-in for the ORM AsyncSession — only ``scalar()`` is exercised by
+    ``load_transcribe_inputs``'s user_settings.settings_json read (Phase B2
+    Task 2 ORM rewrite; see ``tests/test_ai_transcription_sql.py``)."""
+
+    def __init__(self, scalar_value):
+        self._scalar_value = scalar_value
+
+    async def scalar(self, stmt):
+        return self._scalar_value
+
+
+def _fake_read_scope(scalar_value):
+    @asynccontextmanager
+    async def _read_scope():
+        yield _FakeScopeSession(scalar_value)
+
+    return _read_scope
 
 
 def _enabled_row():
@@ -175,9 +196,12 @@ async def test_transcription_nous_ref_routes_to_platform_config():
         "app.services.ai.governance.ai_governance.get_module_governance",
         new=AsyncMock(return_value=AIModuleGovernance(allowed=True)),
     ):
-        with patch(
-            "app.db.engine.fetch_one",
-            side_effect=[fake_media_row, fake_settings_row],
+        with (
+            patch("app.db.engine.fetch_one", side_effect=[fake_media_row]),
+            patch(
+                "app.db.session.read_scope",
+                new=_fake_read_scope(fake_settings_row["settings_json"]),
+            ),
         ):
             with patch(
                 "app.services.ai.providers.ai_provider_helpers.resolve_mediahub_model",
