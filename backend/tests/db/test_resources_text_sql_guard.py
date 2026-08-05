@@ -251,21 +251,44 @@ def test_every_resources_text_sql_is_scoped_or_allowlisted():
     )
 
 
-def test_both_rerouted_methods_route_through_builder():
-    """Positive pin: the two A3-rerouted creator-scoped reads MUST route through
-    ``scoped_sql`` (so a future edit reverting them to a hand-written
-    ``:creator_id`` filter is caught here, not just by the negative guard)."""
-    scanned = {method: calls for _, method, _sql, calls in _scan()}
+def test_both_rerouted_methods_no_longer_use_text_or_scoped_sql():
+    """Positive pin (Phase C task 2): the two former A3 scoped_sql()/text()
+    creator-scoped reads were migrated to real SQLAlchemy ORM ``select()``
+    statements run through ``read_scope()`` — do_orm_execute's ambient scope
+    injection covers them now, so they no longer need the scoped_sql
+    backstop at all. Assert neither method calls ``text()`` NOR
+    ``scoped_sql()`` any more (and that each builds a ``select()``), so a
+    future edit reverting them to raw SQL is caught here instead of silently
+    reopening the choke-point bypass this file exists to guard against."""
+    tree = ast.parse(_REPO_FILE.read_text(encoding="utf-8"), filename=str(_REPO_FILE))
+    methods_by_name = {
+        n.name: n
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
     for method in (
         "get_completed_resource_by_url_and_creator",
         "get_owned_platform_ids",
     ):
-        assert (
-            method in scanned
-        ), f"{method} no longer has a resources text() — re-check"
-        assert scanned[method], (
-            f"{method} no longer routes through {_SCOPED_SQL_FN}() — it would "
-            "bypass the choke point (or hand-write a misplaceable predicate)"
+        assert method in methods_by_name, f"{method} not found in {_REPO_FILE.name}"
+        method_node = methods_by_name[method]
+        called_names = {
+            _called_name(n)
+            for n in ast.walk(method_node)
+            if isinstance(n, ast.Call)
+        }
+        assert "text" not in called_names, (
+            f"{method} calls text() again — it was migrated to ORM select() in "
+            "Phase C task 2; a raw text() here needs scoped_sql() routing (see "
+            "the negative guard above), not this positive-ORM pin"
+        )
+        assert _SCOPED_SQL_FN not in called_names, (
+            f"{method} calls {_SCOPED_SQL_FN}() again — expected a pure ORM "
+            "select() now that it no longer runs raw SQL"
+        )
+        assert "select" in called_names, (
+            f"{method} should build a SQLAlchemy select() statement (ORM JOIN) "
+            "now — none found"
         )
 
 

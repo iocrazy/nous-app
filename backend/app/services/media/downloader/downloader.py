@@ -181,7 +181,7 @@ async def _upload_album_to_s3(
 # 不是 resources.file_path。重指块只更新了 resources.file_path,retry 场景
 # (rv 已存在、仍指着文件系统)_resolve_album_location 永远拿不到 sb:// 前缀,
 # slides 端点 404。这条 UPDATE 同时把该 resource 当前版本的 rv.file_path
-# 刷成 album_path——与 storage_migration._DOWNLOADS_UPDATE_SQL 同表同步的
+# 刷成 album_path——与 storage_migration._downloads_update_row 同表同步的
 # 做法一致。条件 `file_path NOT LIKE 'sb://%'` 使其对已迁移的行无害幂等;
 # 首次下载时 rv 尚不存在,UPDATE 0 行——首下的 rv 由
 # finalize_post_download_step 从 pm.download_path 建,那时 pm.download_path

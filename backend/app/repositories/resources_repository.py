@@ -98,11 +98,12 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.pg_coerce import coerce_datetime_strings
 from app.db.repository_base import AsyncpgRepository
-from app.db.scope import is_enforced, scoped_sql, system_request_scope
+from app.db.scope import is_enforced, system_request_scope
 from app.db.session import read_scope, write_scope
 from app.models import (
     Folders,
     GalleryItems,
+    ParsedMedia,
     ResourceItems,
     Resources,
     ResourceTags,
@@ -415,37 +416,37 @@ class ResourcesRepository(AsyncpgRepository):
         parsed_media: {id, platform_id, original_url, ...}}`` so call sites
         read the inner dict the same way.
 
-        A3: the tenant predicate is BUILT by ``scoped_sql`` (the ambient-scope
-        raw-SQL choke-point backstop) and AND-spliced into the WHERE, NOT the
-        passed-in ``:creator_id`` bind. The ``creator_id`` arg stays in the
-        signature for interface stability but is SUPERSEDED by the ambient scope
-        (on every real call path the acting user IS ``creator_id``, so the bound
-        value is identical — verified by the flag-off parity test). Under SYSTEM
-        the predicate opens to all owners; under no scope (or an empty-identity
-        user scope) ``scoped_sql`` fail-closes."""
+        Phase C task 2: migrated off the ``scoped_sql`` raw-``text()`` backstop
+        to a real ORM JOIN (Resources INNER JOIN ParsedMedia). ``creator_id``
+        is kept as an EXPLICIT filter — the same predicate the pre-A3 code
+        used — so this stays byte-for-byte correct regardless of
+        ``SCOPE_ENFORCE_RESOURCES``: flag-off, this is the only filter (legacy
+        behaviour, unconditionally correct); flag-on, the do_orm_execute choke
+        point additionally injects ``creator_id == scope.user_id`` from the
+        ambient scope, redundant-but-harmless because it's the exact same
+        value (the acting user IS ``creator_id`` on every real call path). No
+        explicit ``system_request_scope``/``user_session`` wrap here — the
+        single caller (``media_fetch_helpers.py``) already opens
+        ``request_scope(Scope(user_id=auth.user_id))`` around this call, so an
+        ambient USER scope is always present when enforcement is on."""
         try:
-            # scoped_sql owns the predicate shape (CAST(:scope_user_id AS uuid)
-            # IS NULL OR r.creator_id = ...): the caller can only AND it in, never
-            # park a bare token in a non-filtering position. The f-string splice
-            # is safe — ``pred`` is helper-built and "r.creator_id" is a hardcoded
-            # literal; the user value travels only via the bound :scope_user_id
-            # param. Built INSIDE the try so a fail-closed raise (no scope / empty
-            # identity) degrades to None here rather than propagating — preserving
-            # the legacy "probe failure is non-fatal" contract of this L2 dedup.
-            pred, params = scoped_sql("r.creator_id", {"url": url})
-            sql = (
-                "SELECT r.id AS r_id, r.media_id AS r_media_id, "
-                "       p.id AS p_id, p.platform_id, p.original_url, "
-                "       p.video_download_status, p.image_download_status, "
-                "       p.media_type "
-                "FROM resources r "
-                "INNER JOIN parsed_media p ON r.media_id = p.id "
-                f"WHERE {pred} "
-                "  AND p.original_url = :url "
-                "LIMIT 1"
-            )
             async with read_scope() as session:
-                result = await session.execute(text(sql), params)
+                result = await session.execute(
+                    select(
+                        Resources.id.label("r_id"),
+                        Resources.media_id.label("r_media_id"),
+                        ParsedMedia.id.label("p_id"),
+                        ParsedMedia.platform_id,
+                        ParsedMedia.original_url,
+                        ParsedMedia.video_download_status,
+                        ParsedMedia.image_download_status,
+                        ParsedMedia.media_type,
+                    )
+                    .join(ParsedMedia, Resources.media_id == ParsedMedia.id)
+                    .where(Resources.creator_id == creator_id)
+                    .where(ParsedMedia.original_url == url)
+                    .limit(1)
+                )
                 row = result.mappings().first()
             if not row:
                 return None
@@ -458,8 +459,8 @@ class ResourcesRepository(AsyncpgRepository):
                 if is_image
                 else row.get("video_download_status")
             )
-            # Statuses come back as the PG enum's text value (str) via text();
-            # funnel through _plain in case the driver hands back a member.
+            # ORM Enum(DownloadStatus) columns read back as enum MEMBERS, not
+            # bare str (unlike the retired text() path) — _plain unwraps them.
             if _plain(status) != "completed":
                 return None
 
@@ -495,31 +496,27 @@ class ResourcesRepository(AsyncpgRepository):
         batched query for the whole list — no N+1. Empty input short-circuits
         to ``set()`` without a query.
 
-        A3: the tenant predicate is BUILT by ``scoped_sql`` and AND-spliced in,
-        NOT the passed-in ``:creator_id`` bind. The ``creator_id`` arg is kept for
-        interface stability but SUPERSEDED by the ambient scope (acting user ==
-        creator_id on every real path; identical bound value — see flag-off
-        parity test). SYSTEM opens to all owners; no scope (or empty-identity user
-        scope) fail-closes."""
+        Phase C task 2: migrated off the ``scoped_sql`` raw-``text()`` backstop
+        to a real ORM JOIN, same rationale as ``get_completed_resource_by_url_
+        and_creator`` above — ``creator_id`` stays an EXPLICIT filter (correct
+        regardless of ``SCOPE_ENFORCE_RESOURCES``), no explicit scope wrap
+        here because the single caller (``media_soda_router.py``) already
+        declares ``_scope: ScopedRequestDep`` on the endpoint, which opens an
+        ambient USER scope for the whole request."""
         if not platform_ids:
             return set()
         try:
-            # scoped_sql owns the predicate shape (see get_completed_resource_by_
-            # url_and_creator). Safe f-string splice: helper-built pred + literal
-            # column. Built INSIDE the try so a fail-closed raise (no scope /
-            # empty identity) degrades to set() rather than propagating.
-            pred, params = scoped_sql("r.creator_id", {"pids": list(platform_ids)})
-            sql = (
-                "SELECT DISTINCT p.platform_id "
-                "FROM resources r "
-                "INNER JOIN parsed_media p ON r.media_id = p.id "
-                f"WHERE {pred} "
-                "  AND p.platform_id = ANY(:pids) "
-                "  AND r.file_path IS NOT NULL"
-            )
             async with read_scope() as session:
-                result = await session.execute(text(sql), params)
-                return {r["platform_id"] for r in result.mappings().all()}
+                result = await session.execute(
+                    select(ParsedMedia.platform_id)
+                    .distinct()
+                    .select_from(Resources)
+                    .join(ParsedMedia, Resources.media_id == ParsedMedia.id)
+                    .where(Resources.creator_id == creator_id)
+                    .where(ParsedMedia.platform_id.in_(list(platform_ids)))
+                    .where(Resources.file_path.isnot(None))
+                )
+                return {r[0] for r in result.all()}
         except Exception as e:
             logger.error(
                 f"Failed to resolve owned platform_ids for creator "

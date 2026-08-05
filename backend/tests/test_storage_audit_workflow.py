@@ -1,11 +1,48 @@
-"""storage_audit:key 收集(UNION 去重只收 sb://)与探测(missing/errors/截断)。"""
+"""storage_audit:key 收集(UNION 去重只收 sb://)与探测(missing/errors/截断)。
+
+Phase C task 2: ``collect_audit_keys_step`` reads via ``_COLLECT_STMT`` (a
+real ``union_all()`` of ``_COLLECT_ARMS``) executed through
+``app.db.session.read_scope()`` — the old hand-built ``_COLLECT_SQL`` string
++ ``db_engine.fetch_all`` is gone."""
 
 import asyncio
 import inspect
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+
+
+class _FakeExecuteRowsResult:
+    """Stand-in for the awaited ``session.execute(stmt)`` Result — supports
+    ``.mappings().all()`` (mirrors ``collect_audit_keys_step``'s own
+    ``(await session.execute(_COLLECT_STMT)).mappings().all()`` call)."""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _FakeScopeSession:
+    def __init__(self, rows):
+        self._rows = rows
+
+    async def execute(self, stmt):
+        return _FakeExecuteRowsResult(self._rows)
+
+
+def _fake_read_scope(rows):
+    @asynccontextmanager
+    async def _read_scope():
+        yield _FakeScopeSession(rows)
+
+    return _read_scope
 
 
 def _http_status_error(status_code: int) -> httpx.HTTPStatusError:
@@ -22,29 +59,28 @@ def _http_status_error(status_code: int) -> httpx.HTTPStatusError:
 async def test_collect_keys_union_dedup(monkeypatch):
     from app.workflows import storage_audit as sa
 
-    async def fake_fetch_all(sql, params=None):
-        return [
-            {
-                "key": "sb://library/t5/aa/bb/v.mp4",
-                "kind": "video",
-                "media_id": 1,
-                "resource_id": None,
-            },
-            {
-                "key": "sb://library/t5/aa/bb/v.mp4",
-                "kind": "version_file",
-                "media_id": None,
-                "resource_id": 9,
-            },  # 同 key 不同来源 → 去重保留一条
-            {
-                "key": "sb://library/derived/9/t.webp",
-                "kind": "thumbnail",
-                "media_id": None,
-                "resource_id": 9,
-            },
-        ]
+    fake_rows = [
+        {
+            "key": "sb://library/t5/aa/bb/v.mp4",
+            "kind": "video",
+            "media_id": 1,
+            "resource_id": None,
+        },
+        {
+            "key": "sb://library/t5/aa/bb/v.mp4",
+            "kind": "version_file",
+            "media_id": None,
+            "resource_id": 9,
+        },  # 同 key 不同来源 → 去重保留一条
+        {
+            "key": "sb://library/derived/9/t.webp",
+            "kind": "thumbnail",
+            "media_id": None,
+            "resource_id": 9,
+        },
+    ]
 
-    monkeypatch.setattr(sa.db_engine, "fetch_all", fake_fetch_all)
+    monkeypatch.setattr(sa, "read_scope", _fake_read_scope(fake_rows))
     rows = await sa.collect_audit_keys_step()
     keys = [r["key"] for r in rows]
     assert keys == ["t5/aa/bb/v.mp4", "derived/9/t.webp"]  # 去前缀 + 去重
@@ -141,8 +177,28 @@ def test_missing_truncation():
     assert len(capped2) == 10 and truncated2 is False
 
 
+def _compiled_collect_sql() -> str:
+    """Flattened, literal-bound compile of the real ``_COLLECT_STMT`` (a
+    ``union_all()`` of ``_COLLECT_ARMS``) — the ORM successor to the deleted
+    ``_COLLECT_SQL`` string constant."""
+    from app.workflows.storage_audit import _COLLECT_STMT
+
+    return " ".join(
+        str(_COLLECT_STMT.compile(compile_kwargs={"literal_binds": True})).split()
+    )
+
+
+def test_collect_arms_has_eleven_sources():
+    """Regression guard on the arm count itself — a column added to one of
+    object_gc's 11 index columns without a matching arm here (or vice versa)
+    lets the audit + reference-safe delete silently drift apart."""
+    from app.workflows.storage_audit import _COLLECT_ARMS
+
+    assert len(_COLLECT_ARMS) == 11
+
+
 def test_collect_sql_wires_media_id_for_resource_and_version_sources():
-    """I2 regression guard: 5 of the 9 sources come from `resources` /
+    """I2 regression guard: 5 of the 11 sources come from `resources` /
     `resource_versions` — before the fix those hardcoded
     ``NULL::bigint AS media_id``, so a broken thumbnail/cover_image/file/
     hls/version_file object could never be matched back to a media row
@@ -151,30 +207,48 @@ def test_collect_sql_wires_media_id_for_resource_and_version_sources():
 
     ``resources`` rows must select their own ``media_id`` column;
     ``resource_versions`` rows must JOIN resources to inherit it — neither
-    source may still emit a literal ``NULL::bigint`` for media_id."""
-    from app.workflows.storage_audit import _COLLECT_SQL
+    source may still emit a NULL cast for media_id."""
+    sql = _compiled_collect_sql()
 
-    sql = " ".join(_COLLECT_SQL.split())
-
-    # None of the 9 UNION branches may hardcode NULL::bigint as media_id —
-    # only resource_id may be NULL::bigint (parsed_media-sourced rows have
-    # no resource row at all).
-    assert "NULL::bigint AS media_id" not in sql
-    assert sql.count("NULL::bigint") == 4  # the 4 parsed_media-sourced kinds
+    # None of the 11 UNION arms may hardcode a NULL cast as media_id — only
+    # resource_id may be NULL (parsed_media-sourced rows have no resource
+    # row at all).
+    assert "CAST(NULL AS BIGINT) AS media_id" not in sql
+    assert (
+        sql.count("CAST(NULL AS BIGINT) AS resource_id") == 4
+    )  # the 4 parsed_media-sourced kinds
 
     # resources-sourced kinds select their own media_id column directly.
-    assert "SELECT thumbnail_path, 'thumbnail', media_id, id FROM resources" in sql
-    assert "SELECT cover_image_path, 'cover_image', media_id, id FROM resources" in sql
-    assert "SELECT file_path, 'file', media_id, id FROM resources" in sql
+    assert (
+        "public.resources.thumbnail_path AS key, 'thumbnail' AS kind, "
+        "public.resources.media_id AS media_id, public.resources.id AS resource_id "
+        "FROM public.resources" in sql
+    )
+    assert (
+        "public.resources.cover_image_path AS key, 'cover_image' AS kind, "
+        "public.resources.media_id AS media_id, public.resources.id AS resource_id "
+        "FROM public.resources" in sql
+    )
+    assert (
+        "public.resources.file_path AS key, 'file' AS kind, "
+        "public.resources.media_id AS media_id, public.resources.id AS resource_id "
+        "FROM public.resources" in sql
+    )
 
     # resource_versions-sourced kinds JOIN resources to inherit media_id.
     assert (
-        "SELECT rv.hls_path, 'hls', r.media_id, rv.resource_id "
-        "FROM resource_versions rv JOIN resources r ON r.id = rv.resource_id" in sql
+        "public.resource_versions.hls_path AS key, 'hls' AS kind, "
+        "public.resources.media_id AS media_id, "
+        "public.resource_versions.resource_id AS resource_id "
+        "FROM public.resource_versions JOIN public.resources "
+        "ON public.resources.id = public.resource_versions.resource_id" in sql
     )
     assert (
-        "SELECT rv.file_path, 'version_file', r.media_id, rv.resource_id "
-        "FROM resource_versions rv JOIN resources r ON r.id = rv.resource_id" in sql
+        "public.resource_versions.file_path AS key, 'version_file' AS kind, "
+        "public.resources.media_id AS media_id, "
+        "public.resource_versions.resource_id AS resource_id "
+        "FROM public.resource_versions JOIN public.resources "
+        "ON public.resources.id = public.resource_versions.resource_id" in sql
     )
 
 
@@ -186,20 +260,25 @@ def test_collect_sql_covers_project_files_and_file_versions():
     to that team's resource library can produce one object referenced from
     two tables neither the audit nor object_gc's reference query previously
     scanned. Guard both new sources are present, and (mirroring the existing
-    NULL::bigint guard above) that they inherit media_id via a real column /
-    JOIN rather than hardcoding NULL::bigint."""
-    from app.workflows.storage_audit import _COLLECT_SQL
-
-    sql = " ".join(_COLLECT_SQL.split())
-    assert "SELECT file_path, 'project_file', media_id, id " "FROM project_files" in sql
+    NULL guard above) that they inherit media_id via a real column / JOIN
+    rather than hardcoding a NULL cast."""
+    sql = _compiled_collect_sql()
     assert (
-        "SELECT fv.file_path, 'project_file_version', pf.media_id, fv.file_id "
-        "FROM file_versions fv JOIN project_files pf ON pf.id = fv.file_id" in sql
+        "public.project_files.file_path AS key, 'project_file' AS kind, "
+        "public.project_files.media_id AS media_id, "
+        "public.project_files.id AS resource_id FROM public.project_files" in sql
     )
-    # Still exactly the 4 parsed_media-sourced NULL::bigint occurrences — the
-    # two new sources must NOT add a fifth (they select real id/media_id
+    assert (
+        "public.file_versions.file_path AS key, 'project_file_version' AS kind, "
+        "public.project_files.media_id AS media_id, "
+        "public.file_versions.file_id AS resource_id "
+        "FROM public.file_versions JOIN public.project_files "
+        "ON public.project_files.id = public.file_versions.file_id" in sql
+    )
+    # Still exactly the 4 parsed_media-sourced NULL-resource_id occurrences —
+    # the two new sources must NOT add a fifth (they select real id/media_id
     # columns, same pattern as the resources/resource_versions sources).
-    assert sql.count("NULL::bigint") == 4
+    assert sql.count("CAST(NULL AS BIGINT) AS resource_id") == 4
 
 
 def test_collect_sql_covers_music_and_extract_audio_kinds():
@@ -208,15 +287,16 @@ def test_collect_sql_covers_music_and_extract_audio_kinds():
     music_download_path, extract_audio_path) but the audit's collect SQL
     only ever covered download_path + cover_download_path. Guard both new
     kinds are present, sourced from parsed_media with media_id=pm.id."""
-    from app.workflows.storage_audit import _COLLECT_SQL
-
-    sql = " ".join(_COLLECT_SQL.split())
+    sql = _compiled_collect_sql()
     assert (
-        "SELECT music_download_path, 'music', id, NULL::bigint FROM parsed_media" in sql
+        "public.parsed_media.music_download_path AS key, 'music' AS kind, "
+        "public.parsed_media.id AS media_id, "
+        "CAST(NULL AS BIGINT) AS resource_id FROM public.parsed_media" in sql
     )
     assert (
-        "SELECT extract_audio_path, 'extract_audio', id, NULL::bigint "
-        "FROM parsed_media" in sql
+        "public.parsed_media.extract_audio_path AS key, 'extract_audio' AS kind, "
+        "public.parsed_media.id AS media_id, "
+        "CAST(NULL AS BIGINT) AS resource_id FROM public.parsed_media" in sql
     )
 
 

@@ -77,9 +77,19 @@ from typing import Any, Awaitable, Callable, Optional
 
 from dbos import DBOS
 from loguru import logger
+from sqlalchemy import and_, or_, select, true, update
 
 from app.core.config import settings
-from app.db import engine as db_engine
+from app.db.scope import system_request_scope
+from app.db.session import read_scope, write_scope
+from app.models import (
+    FileVersions,
+    ParsedMedia,
+    ProjectFiles,
+    Resources,
+    ResourceItems,
+    ResourceVersions,
+)
 from app.services.library import media_storage
 from app.services.media.transcode.hls_publisher import HlsPublisher
 
@@ -123,16 +133,22 @@ class ModuleConfig:
     comment below): its "rows" are a UNION of a DB SELECT (thumbnail_path/
     cover_image_path — real columns) and a filesystem walk
     (``preview_sprite.jpg`` has no DB column anywhere, so there is nothing to
-    SELECT it FROM) — no single ``select_sql`` string can express that, so
+    SELECT it FROM) — no single ``select_stmt`` builder can express that, so
     ``list_rows`` owns the whole thing instead. When ``list_rows`` is set,
-    ``storage_migration_workflow`` calls it instead of
-    ``db_engine.fetch_all(select_sql, ...)`` to produce the batch; ``extract``/
+    ``storage_migration_workflow`` calls it instead of executing
+    ``select_stmt(scope_id, limit)`` to produce the batch; ``extract``/
     ``update_row`` are unused in that case (the module's own migrate function
     handles both directly) and are given no-op/raising placeholders.
+
+    Phase C task 2: ``select_sql`` (a raw SQL string) is now ``select_stmt`` —
+    a ``(scope_id, limit) -> Select`` builder returning a real ORM statement,
+    executed via ``read_scope()`` inside the workflow's ambient
+    ``system_request_scope`` (admin-initiated migration, cross-tenant by
+    design).
     """
 
     name: str
-    select_sql: str
+    select_stmt: Callable[[Optional[int], int], Any]
     extract: Callable[[dict], RowExtract]
     update_row: Callable[[dict, str, Optional[str]], Awaitable[None]]
     list_rows: Optional[Callable[[Optional[int], int], Awaitable[list[dict]]]] = None
@@ -149,38 +165,51 @@ class ModuleConfig:
 # membership) — the scope only affects the storage key prefix, not
 # correctness.
 
-_UPLOADS_SELECT_SQL = """
-    SELECT
-        rv.id,
-        rv.resource_id,
-        rv.version_number,
-        rv.file_path,
-        rv.filename,
-        rv.mime_type,
-        r.current_version,
-        r.filename AS resource_filename,
-        r.mime_type AS resource_mime_type,
-        ri.scope_id
-    FROM resource_versions rv
-    JOIN resources r ON r.id = rv.resource_id
-    LEFT JOIN LATERAL (
-        SELECT scope_id FROM resource_items
-        WHERE resource_id = r.id ORDER BY id LIMIT 1
-    ) ri ON true
-    WHERE rv.file_path IS NOT NULL
-      AND rv.file_path NOT LIKE 'sb://%'
-      -- Library assets only. source_type='web' rows are the DOWNLOAD
-      -- pipeline (global/resources/web/... and the legacy date-bucket
-      -- layout) — handled by the sibling ``downloads`` module below, not
-      -- here. The first prod dry-run (2026-07-12) pulled them into THIS
-      -- module and 70/880 rows failed with IsADirectoryError: some are
-      -- album DIRECTORIES, not files, which this module's extract/
-      -- update_row never accounted for.
-      AND r.source_type IN ('upload', 'generated', 'derived')
-      AND (CAST(:scope_id AS bigint) IS NULL OR ri.scope_id = :scope_id)
-    ORDER BY rv.id
-    LIMIT :limit
-"""
+def _uploads_select_stmt(scope_id: Optional[int], limit: int):
+    """ORM port of the former ``_UPLOADS_SELECT_SQL`` string. ``scope_id``
+    is a plain Python filter (applied only when given) rather than the
+    ``CAST(:scope_id AS bigint) IS NULL OR ...`` SQL idiom — this repo's
+    established convention (object_gc.py et al.) for an optional filter
+    resolved once per call, not per-row."""
+    ri = (
+        select(ResourceItems.scope_id)
+        .where(ResourceItems.resource_id == Resources.id)
+        .order_by(ResourceItems.id)
+        .limit(1)
+        .lateral("ri")
+    )
+    stmt = (
+        select(
+            ResourceVersions.id,
+            ResourceVersions.resource_id,
+            ResourceVersions.version_number,
+            ResourceVersions.file_path,
+            ResourceVersions.filename,
+            ResourceVersions.mime_type,
+            Resources.current_version,
+            Resources.filename.label("resource_filename"),
+            Resources.mime_type.label("resource_mime_type"),
+            ri.c.scope_id,
+        )
+        .select_from(ResourceVersions)
+        .join(Resources, Resources.id == ResourceVersions.resource_id)
+        .join(ri, true(), isouter=True)
+        .where(ResourceVersions.file_path.isnot(None))
+        .where(ResourceVersions.file_path.notlike("sb://%"))
+        # Library assets only. source_type='web' rows are the DOWNLOAD
+        # pipeline (global/resources/web/... and the legacy date-bucket
+        # layout) — handled by the sibling ``downloads`` module below, not
+        # here. The first prod dry-run (2026-07-12) pulled them into THIS
+        # module and 70/880 rows failed with IsADirectoryError: some are
+        # album DIRECTORIES, not files, which this module's extract/
+        # update_row never accounted for.
+        .where(Resources.source_type.in_(["upload", "generated", "derived"]))
+        .order_by(ResourceVersions.id)
+        .limit(limit)
+    )
+    if scope_id is not None:
+        stmt = stmt.where(ri.c.scope_id == scope_id)
+    return stmt
 
 
 def _uploads_extract(row: dict) -> RowExtract:
@@ -199,38 +228,30 @@ def _uploads_extract(row: dict) -> RowExtract:
     )
 
 
-# Child + parent sync as ONE data-modifying CTE statement → one implicit
-# transaction (db_engine has no cross-statement transaction helper; every
-# db_engine.execute opens its own engine.begin()). Two separate autocommit
-# UPDATEs left a crash window that permanently orphaned the parent's
-# file_path: the replayed batch SELECT excludes the already-sb child, so
-# the parent would never get synced. ``:sync_parent`` gates the parent leg
-# (false → the outer UPDATE matches nothing; the CTE still runs).
-_UPLOADS_UPDATE_SQL = """
-    WITH v AS (
-        UPDATE resource_versions
-        SET file_path = :file_path, file_hash = :sha256
-        WHERE id = :id
-        RETURNING resource_id
-    )
-    UPDATE resources r
-    SET file_path = :file_path, file_hash = :sha256
-    FROM v
-    WHERE r.id = v.resource_id
-      AND CAST(:sync_parent AS boolean)
-"""
-
-
+# Child + parent sync as TWO ORM UPDATEs inside ONE ``write_scope()`` session
+# → one transaction, one commit (write_scope's session.begin() owns it) —
+# same atomicity guarantee the former CTE gave via a single autocommit
+# ``db_engine.execute``. ``row["resource_id"]`` is already known from the
+# batch SELECT (it's the CTE's own RETURNING value), so no RETURNING
+# round-trip is needed — the parent UPDATE's WHERE just uses it directly.
+# Both UPDATEs are on models that are either unscoped (ResourceVersions) or
+# bulk-UPDATE-forbidden-except-under-SYSTEM (Resources) — both fine here
+# since the whole workflow runs under ``system_request_scope`` (see
+# ``storage_migration_workflow``).
 async def _uploads_update_row(row: dict, file_path: str, sha256: Optional[str]) -> None:
-    await db_engine.execute(
-        _UPLOADS_UPDATE_SQL,
-        {
-            "file_path": file_path,
-            "sha256": sha256,
-            "id": row["id"],
-            "sync_parent": row.get("version_number") == row.get("current_version"),
-        },
-    )
+    sync_parent = row.get("version_number") == row.get("current_version")
+    async with write_scope() as session:
+        await session.execute(
+            update(ResourceVersions)
+            .where(ResourceVersions.id == row["id"])
+            .values(file_path=file_path, file_hash=sha256)
+        )
+        if sync_parent:
+            await session.execute(
+                update(Resources)
+                .where(Resources.id == row["resource_id"])
+                .values(file_path=file_path, file_hash=sha256)
+            )
 
 
 # ── project_files: file_versions (+ project_files.file_path sync) ──────
@@ -244,26 +265,31 @@ async def _uploads_update_row(row: dict, file_path: str, sha256: Optional[str]) 
 # file_hash column (unlike resources/resource_versions), so update_row
 # only ever touches file_path.
 
-_PROJECT_FILES_SELECT_SQL = """
-    SELECT
-        fv.id,
-        fv.file_id,
-        fv.version_number,
-        fv.file_path,
-        fv.filename,
-        fv.mime_type,
-        pf.current_version,
-        pf.project_id,
-        pf.filename AS file_filename,
-        pf.mime_type AS file_mime_type
-    FROM file_versions fv
-    JOIN project_files pf ON pf.id = fv.file_id
-    WHERE fv.file_path IS NOT NULL
-      AND fv.file_path NOT LIKE 'sb://%'
-      AND (CAST(:scope_id AS bigint) IS NULL OR pf.project_id = :scope_id)
-    ORDER BY fv.id
-    LIMIT :limit
-"""
+def _project_files_select_stmt(scope_id: Optional[int], limit: int):
+    """ORM port of the former ``_PROJECT_FILES_SELECT_SQL`` string."""
+    stmt = (
+        select(
+            FileVersions.id,
+            FileVersions.file_id,
+            FileVersions.version_number,
+            FileVersions.file_path,
+            FileVersions.filename,
+            FileVersions.mime_type,
+            ProjectFiles.current_version,
+            ProjectFiles.project_id,
+            ProjectFiles.filename.label("file_filename"),
+            ProjectFiles.mime_type.label("file_mime_type"),
+        )
+        .select_from(FileVersions)
+        .join(ProjectFiles, ProjectFiles.id == FileVersions.file_id)
+        .where(FileVersions.file_path.isnot(None))
+        .where(FileVersions.file_path.notlike("sb://%"))
+        .order_by(FileVersions.id)
+        .limit(limit)
+    )
+    if scope_id is not None:
+        stmt = stmt.where(ProjectFiles.project_id == scope_id)
+    return stmt
 
 
 def _project_files_extract(row: dict) -> RowExtract:
@@ -282,33 +308,25 @@ def _project_files_extract(row: dict) -> RowExtract:
     )
 
 
-# Same single-statement CTE atomicity rationale as _UPLOADS_UPDATE_SQL.
-_PROJECT_FILES_UPDATE_SQL = """
-    WITH v AS (
-        UPDATE file_versions
-        SET file_path = :file_path
-        WHERE id = :id
-        RETURNING file_id
-    )
-    UPDATE project_files pf
-    SET file_path = :file_path
-    FROM v
-    WHERE pf.id = v.file_id
-      AND CAST(:sync_parent AS boolean)
-"""
-
-
+# Same two-UPDATE-in-one-write_scope() atomicity rationale as
+# _uploads_update_row above. Neither table has a file_hash column, so no
+# sha256 is written.
 async def _project_files_update_row(
     row: dict, file_path: str, sha256: Optional[str]
 ) -> None:
-    await db_engine.execute(
-        _PROJECT_FILES_UPDATE_SQL,
-        {
-            "file_path": file_path,
-            "id": row["id"],
-            "sync_parent": row.get("version_number") == row.get("current_version"),
-        },
-    )
+    sync_parent = row.get("version_number") == row.get("current_version")
+    async with write_scope() as session:
+        await session.execute(
+            update(FileVersions)
+            .where(FileVersions.id == row["id"])
+            .values(file_path=file_path)
+        )
+        if sync_parent:
+            await session.execute(
+                update(ProjectFiles)
+                .where(ProjectFiles.id == row["file_id"])
+                .values(file_path=file_path)
+            )
 
 
 # ── downloads: resource_versions where source_type='web' ───────────────
@@ -323,22 +341,39 @@ async def _project_files_update_row(
 # object (which is exactly the IsADirectoryError the first prod dry-run hit
 # — see the ``uploads`` SELECT comment above).
 
-_DOWNLOADS_SELECT_SQL = """
-    SELECT rv.id, rv.resource_id, rv.version_number, rv.file_path,
-           rv.filename, rv.mime_type, r.current_version, ri.scope_id
-    FROM resource_versions rv
-    JOIN resources r ON r.id = rv.resource_id
-    LEFT JOIN LATERAL (
-      SELECT scope_id FROM resource_items WHERE resource_id = r.id
-      ORDER BY id LIMIT 1
-    ) ri ON true
-    WHERE rv.file_path IS NOT NULL
-      AND rv.file_path NOT LIKE 'sb://%'
-      AND rv.storage_status = 'ok'
-      AND r.source_type = 'web'
-      AND (CAST(:scope_id AS bigint) IS NULL OR ri.scope_id = :scope_id)
-    ORDER BY rv.id LIMIT :limit
-"""
+def _downloads_select_stmt(scope_id: Optional[int], limit: int):
+    """ORM port of the former ``_DOWNLOADS_SELECT_SQL`` string."""
+    ri = (
+        select(ResourceItems.scope_id)
+        .where(ResourceItems.resource_id == Resources.id)
+        .order_by(ResourceItems.id)
+        .limit(1)
+        .lateral("ri")
+    )
+    stmt = (
+        select(
+            ResourceVersions.id,
+            ResourceVersions.resource_id,
+            ResourceVersions.version_number,
+            ResourceVersions.file_path,
+            ResourceVersions.filename,
+            ResourceVersions.mime_type,
+            Resources.current_version,
+            ri.c.scope_id,
+        )
+        .select_from(ResourceVersions)
+        .join(Resources, Resources.id == ResourceVersions.resource_id)
+        .join(ri, true(), isouter=True)
+        .where(ResourceVersions.file_path.isnot(None))
+        .where(ResourceVersions.file_path.notlike("sb://%"))
+        .where(ResourceVersions.storage_status == "ok")
+        .where(Resources.source_type == "web")
+        .order_by(ResourceVersions.id)
+        .limit(limit)
+    )
+    if scope_id is not None:
+        stmt = stmt.where(ri.c.scope_id == scope_id)
+    return stmt
 
 
 def _downloads_extract(row: dict) -> RowExtract:
@@ -357,39 +392,27 @@ def _downloads_extract(row: dict) -> RowExtract:
     )
 
 
-# Same single-statement CTE atomicity rationale as _UPLOADS_UPDATE_SQL.
-# ``sha256`` is None for an album (no single content hash applies — see
-# ``_migrate_album_row``), so COALESCE leaves any existing file_hash alone
-# instead of clobbering it with NULL.
-_DOWNLOADS_UPDATE_SQL = """
-    WITH v AS (
-        UPDATE resource_versions
-        SET file_path = :file_path,
-            file_hash = COALESCE(:sha256, file_hash)
-        WHERE id = :id
-        RETURNING resource_id
-    )
-    UPDATE resources r
-    SET file_path = :file_path,
-        file_hash = COALESCE(:sha256, r.file_hash)
-    FROM v
-    WHERE r.id = v.resource_id
-      AND CAST(:sync_parent AS boolean)
-"""
-
-
+# Same two-UPDATE-in-one-write_scope() atomicity rationale as
+# _uploads_update_row above. ``sha256`` is None for an album (no single
+# content hash applies — see ``_migrate_album_row``) — omitting file_hash
+# from ``.values()`` entirely (rather than binding NULL) leaves any existing
+# value alone, the ORM equivalent of the former ``COALESCE(:sha256,
+# file_hash)``.
 async def _downloads_update_row(
     row: dict, file_path: str, sha256: Optional[str]
 ) -> None:
-    await db_engine.execute(
-        _DOWNLOADS_UPDATE_SQL,
-        {
-            "file_path": file_path,
-            "sha256": sha256,
-            "id": row["id"],
-            "sync_parent": row.get("version_number") == row.get("current_version"),
-        },
-    )
+    sync_parent = row.get("version_number") == row.get("current_version")
+    values: dict = {"file_path": file_path}
+    if sha256 is not None:
+        values["file_hash"] = sha256
+    async with write_scope() as session:
+        await session.execute(
+            update(ResourceVersions).where(ResourceVersions.id == row["id"]).values(**values)
+        )
+        if sync_parent:
+            await session.execute(
+                update(Resources).where(Resources.id == row["resource_id"]).values(**values)
+            )
 
 
 # ── hls: resource_versions.hls_path (filesystem → HlsPublisher) ────────
@@ -410,20 +433,36 @@ async def _downloads_update_row(
 # from hls_path itself (via resolve_media_source, in _migrate_hls_row),
 # independent of which naming convention produced it.
 
-_HLS_SELECT_SQL = """
-    SELECT rv.id, rv.resource_id, rv.version_number, rv.hls_path, ri.scope_id
-    FROM resource_versions rv
-    LEFT JOIN LATERAL (
-        SELECT scope_id FROM resource_items
-        WHERE resource_id = rv.resource_id ORDER BY id LIMIT 1
-    ) ri ON true
-    WHERE rv.hls_path IS NOT NULL
-      AND rv.hls_path NOT LIKE 'sb://%'
-      AND rv.storage_status = 'ok'
-      AND (CAST(:scope_id AS bigint) IS NULL OR ri.scope_id = :scope_id)
-    ORDER BY rv.id
-    LIMIT :limit
-"""
+def _hls_select_stmt(scope_id: Optional[int], limit: int):
+    """ORM port of the former ``_HLS_SELECT_SQL`` string. ``ri`` correlates
+    directly to ``rv.resource_id`` — no join to Resources here (unlike
+    uploads/downloads), matching the original SQL exactly."""
+    ri = (
+        select(ResourceItems.scope_id)
+        .where(ResourceItems.resource_id == ResourceVersions.resource_id)
+        .order_by(ResourceItems.id)
+        .limit(1)
+        .lateral("ri")
+    )
+    stmt = (
+        select(
+            ResourceVersions.id,
+            ResourceVersions.resource_id,
+            ResourceVersions.version_number,
+            ResourceVersions.hls_path,
+            ri.c.scope_id,
+        )
+        .select_from(ResourceVersions)
+        .join(ri, true(), isouter=True)
+        .where(ResourceVersions.hls_path.isnot(None))
+        .where(ResourceVersions.hls_path.notlike("sb://%"))
+        .where(ResourceVersions.storage_status == "ok")
+        .order_by(ResourceVersions.id)
+        .limit(limit)
+    )
+    if scope_id is not None:
+        stmt = stmt.where(ri.c.scope_id == scope_id)
+    return stmt
 
 
 def _hls_extract(row: dict) -> RowExtract:
@@ -456,17 +495,15 @@ def _hls_extract(row: dict) -> RowExtract:
     )
 
 
-_HLS_UPDATE_SQL = """
-    UPDATE resource_versions
-    SET hls_path = :file_path
-    WHERE id = :id
-"""
-
-
 async def _hls_update_row(row: dict, file_path: str, sha256: Optional[str]) -> None:
     # sha256 is always None for hls (no single content hash for a directory
     # tree) — kept only to match ModuleConfig.update_row's shared signature.
-    await db_engine.execute(_HLS_UPDATE_SQL, {"file_path": file_path, "id": row["id"]})
+    async with write_scope() as session:
+        await session.execute(
+            update(ResourceVersions)
+            .where(ResourceVersions.id == row["id"])
+            .values(hls_path=file_path)
+        )
 
 
 # ── derived: thumbnail_path/cover_image_path (DB-column-driven) + sprite
@@ -513,24 +550,41 @@ async def _hls_update_row(row: dict, file_path: str, sha256: Optional[str]) -> N
 
 _DERIVED_COLUMNS = ("thumbnail_path", "cover_image_path")
 
-# Coarse SQL filter only (row-level ``resolve_media_source`` in
+# Coarse filter only (row-level ``resolve_media_source`` in
 # ``_migrate_derived_row`` is still the real authority) — mirrors every other
 # module's SELECT convention. A resource can appear at most once here even
 # though it may contribute up to two rows (one per non-sb column) once
 # ``_list_derived_rows`` fans it out below.
-_DERIVED_DB_SELECT_SQL = """
-    SELECT id AS resource_id, thumbnail_path, cover_image_path
-    FROM resources
-    WHERE (thumbnail_path IS NOT NULL AND thumbnail_path NOT LIKE 'sb://%')
-       OR (cover_image_path IS NOT NULL AND cover_image_path NOT LIKE 'sb://%')
-    ORDER BY id
-    LIMIT :limit
-"""
+def _derived_db_select_stmt(limit: int):
+    """ORM port of the former ``_DERIVED_DB_SELECT_SQL`` string."""
+    return (
+        select(
+            Resources.id.label("resource_id"),
+            Resources.thumbnail_path,
+            Resources.cover_image_path,
+        )
+        .where(
+            or_(
+                and_(
+                    Resources.thumbnail_path.isnot(None),
+                    Resources.thumbnail_path.notlike("sb://%"),
+                ),
+                and_(
+                    Resources.cover_image_path.isnot(None),
+                    Resources.cover_image_path.notlike("sb://%"),
+                ),
+            )
+        )
+        .order_by(Resources.id)
+        .limit(limit)
+    )
 
-_DERIVED_COLUMN_UPDATE_SQL = {
-    "thumbnail_path": "UPDATE resources SET thumbnail_path = :path WHERE id = :resource_id",
-    "cover_image_path": "UPDATE resources SET cover_image_path = :path WHERE id = :resource_id",
-}
+
+# Whitelist: the ONLY two columns ``_migrate_derived_row`` is allowed to
+# write, each mapped to its own attribute name — same defense-in-depth
+# rationale as ``_PM_ASSETS_COLUMN_UPDATE_SQL`` below (never build an
+# update from an unexpected column value).
+_DERIVED_COLUMNS_WHITELIST = ("thumbnail_path", "cover_image_path")
 
 
 async def _list_derived_rows(scope_id: Optional[int], limit: int) -> list[dict]:
@@ -554,7 +608,10 @@ async def _list_derived_rows(scope_id: Optional[int], limit: int) -> list[dict]:
 
     rows: list[dict] = []
 
-    db_rows = await db_engine.fetch_all(_DERIVED_DB_SELECT_SQL, {"limit": limit})
+    async with read_scope() as session:
+        db_rows = (
+            (await session.execute(_derived_db_select_stmt(limit))).mappings().all()
+        )
     for db_row in db_rows:
         resource_id = db_row["resource_id"]
         for column in _DERIVED_COLUMNS:
@@ -671,13 +728,20 @@ async def _migrate_derived_row(row: dict, *, dry_run: bool, delete_source: bool)
         return "dry_run_ok"
 
     if column:
-        await db_engine.execute(
-            _DERIVED_COLUMN_UPDATE_SQL[column],
-            {
-                "path": media_storage.to_file_path(store.bucket, key),
-                "resource_id": int(resource_id),
-            },
-        )
+        if column not in _DERIVED_COLUMNS_WHITELIST:
+            # Defensive — should be unreachable: _list_derived_rows only ever
+            # emits one of the two whitelisted columns. Raise loudly rather
+            # than silently building an update from an unexpected value.
+            raise RuntimeError(
+                f"derived: column {column!r} is not in the update whitelist "
+                f"({_DERIVED_COLUMNS_WHITELIST}) — refusing to migrate"
+            )
+        async with write_scope() as session:
+            await session.execute(
+                update(Resources)
+                .where(Resources.id == int(resource_id))
+                .values(**{column: media_storage.to_file_path(store.bucket, key)})
+            )
 
     if delete_source:
         # Single-file unlink, NEVER rmtree: a next-to-source thumbnail lives
@@ -724,10 +788,11 @@ async def _migrate_derived_row(row: dict, *, dry_run: bool, delete_source: bool)
 # (``skipped_no_scope``) rather than raising — one orphan must not fail the
 # whole batch.
 #
-# Column name only ever comes from the fixed ``_PM_ASSETS_COLUMN_UPDATE_SQL``
-# dict below (never string-interpolated into SQL) — a defense-in-depth
-# whitelist even though the only caller (``_list_pm_assets_rows``) can only
-# ever emit one of the three known keys.
+# Column name only ever comes from the fixed whitelist below (never
+# string-interpolated into SQL, and never passed as an arbitrary ``.values()``
+# kwarg without the membership check in ``_migrate_pm_assets_row``) — a
+# defense-in-depth whitelist even though the only caller
+# (``_list_pm_assets_rows``) can only ever emit one of the three known keys.
 
 _PM_ASSETS_MIME: dict[str, str] = {
     "cover_download_path": "image/jpeg",
@@ -735,51 +800,64 @@ _PM_ASSETS_MIME: dict[str, str] = {
     "extract_audio_path": "audio/mp4",
 }
 
-# Whitelist: the ONLY three columns this module is allowed to write, each
-# mapped to its own fixed UPDATE statement. ``_migrate_pm_assets_row`` looks
-# the column up in this dict (raising on a miss) instead of ever building
-# ``f"UPDATE parsed_media SET {column} = ..."`` from row data — row data is
-# untrusted-ish legacy input and must never reach a SQL string directly.
-_PM_ASSETS_COLUMN_UPDATE_SQL: dict[str, str] = {
-    "cover_download_path": (
-        "UPDATE parsed_media SET cover_download_path = :fp WHERE id = :pm_id"
-    ),
-    "music_download_path": (
-        "UPDATE parsed_media SET music_download_path = :fp WHERE id = :pm_id"
-    ),
-    "extract_audio_path": (
-        "UPDATE parsed_media SET extract_audio_path = :fp WHERE id = :pm_id"
-    ),
-}
+# Whitelist: the ONLY three columns this module is allowed to write.
+# ``_migrate_pm_assets_row`` checks membership (raising on a miss) instead of
+# ever building ``update(ParsedMedia).values(**{column: ...})`` from an
+# unvetted column value — row data is untrusted-ish legacy input and must
+# never reach a write unchecked.
+_PM_ASSETS_COLUMNS_WHITELIST = (
+    "cover_download_path",
+    "music_download_path",
+    "extract_audio_path",
+)
 
-# Coarse SQL filter only (row-level resolve_media_source in
-# _migrate_pm_assets_row is still the real authority) — mirrors every other
-# module's SELECT convention. The three ``OR``-ed column checks are grouped
-# in their own parens so the trailing scope_id AND applies to the whole
-# group, not just the last column (operator precedence: AND binds tighter
-# than OR).
-_PM_ASSETS_SELECT_SQL = """
-    SELECT
-        pm.id AS pm_id,
-        pm.cover_download_path,
-        pm.music_download_path,
-        pm.extract_audio_path,
-        ri.scope_id
-    FROM parsed_media pm
-    LEFT JOIN resources r ON r.media_id = pm.id
-    LEFT JOIN LATERAL (
-        SELECT scope_id FROM resource_items
-        WHERE resource_id = r.id ORDER BY id LIMIT 1
-    ) ri ON true
-    WHERE (
-        (pm.cover_download_path IS NOT NULL AND pm.cover_download_path NOT LIKE 'sb://%')
-        OR (pm.music_download_path IS NOT NULL AND pm.music_download_path NOT LIKE 'sb://%')
-        OR (pm.extract_audio_path IS NOT NULL AND pm.extract_audio_path NOT LIKE 'sb://%')
+
+def _pm_assets_select_stmt(scope_id: Optional[int], limit: int):
+    """ORM port of the former ``_PM_ASSETS_SELECT_SQL`` string. The
+    ``resources`` join stays a PLAIN (non-LATERAL) LEFT JOIN — same as the
+    legacy SQL — so a media_id with more than one resources row fans out
+    exactly like the original; only ``ri`` (resource_items) is a
+    deterministic LATERAL pick."""
+    ri = (
+        select(ResourceItems.scope_id)
+        .where(ResourceItems.resource_id == Resources.id)
+        .order_by(ResourceItems.id)
+        .limit(1)
+        .lateral("ri")
     )
-    AND (CAST(:scope_id AS bigint) IS NULL OR ri.scope_id = :scope_id)
-    ORDER BY pm.id
-    LIMIT :limit
-"""
+    stmt = (
+        select(
+            ParsedMedia.id.label("pm_id"),
+            ParsedMedia.cover_download_path,
+            ParsedMedia.music_download_path,
+            ParsedMedia.extract_audio_path,
+            ri.c.scope_id,
+        )
+        .select_from(ParsedMedia)
+        .join(Resources, Resources.media_id == ParsedMedia.id, isouter=True)
+        .join(ri, true(), isouter=True)
+        .where(
+            or_(
+                and_(
+                    ParsedMedia.cover_download_path.isnot(None),
+                    ParsedMedia.cover_download_path.notlike("sb://%"),
+                ),
+                and_(
+                    ParsedMedia.music_download_path.isnot(None),
+                    ParsedMedia.music_download_path.notlike("sb://%"),
+                ),
+                and_(
+                    ParsedMedia.extract_audio_path.isnot(None),
+                    ParsedMedia.extract_audio_path.notlike("sb://%"),
+                ),
+            )
+        )
+        .order_by(ParsedMedia.id)
+        .limit(limit)
+    )
+    if scope_id is not None:
+        stmt = stmt.where(ri.c.scope_id == scope_id)
+    return stmt
 
 
 async def _list_pm_assets_rows(scope_id: Optional[int], limit: int) -> list[dict]:
@@ -794,15 +872,18 @@ async def _list_pm_assets_rows(scope_id: Optional[int], limit: int) -> list[dict
     (not skipped/raised) — the skip decision for a NULL scope belongs to
     ``_migrate_pm_assets_row``, not this listing function.
     """
-    db_rows = await db_engine.fetch_all(
-        _PM_ASSETS_SELECT_SQL, {"scope_id": scope_id, "limit": limit}
-    )
+    async with read_scope() as session:
+        db_rows = (
+            (await session.execute(_pm_assets_select_stmt(scope_id, limit)))
+            .mappings()
+            .all()
+        )
 
     rows: list[dict] = []
     for db_row in db_rows:
         pm_id = db_row["pm_id"]
         row_scope_id = db_row.get("scope_id")
-        for column in _PM_ASSETS_COLUMN_UPDATE_SQL:
+        for column in _PM_ASSETS_COLUMNS_WHITELIST:
             value = db_row.get(column)
             if value and not value.startswith("sb://"):
                 rows.append(
@@ -867,14 +948,13 @@ async def _migrate_pm_assets_row(
     scope_id = row.get("scope_id")
     mime = row["mime"]
 
-    if column not in _PM_ASSETS_COLUMN_UPDATE_SQL:
+    if column not in _PM_ASSETS_COLUMNS_WHITELIST:
         # Defensive — should be unreachable: _list_pm_assets_rows only ever
         # emits one of the three whitelisted columns. Raise loudly rather
-        # than silently falling through to build a SQL string from an
-        # unexpected column value.
+        # than silently building an update from an unexpected column value.
         raise RuntimeError(
-            f"pm_assets: column {column!r} is not in the update-SQL whitelist "
-            f"({sorted(_PM_ASSETS_COLUMN_UPDATE_SQL)}) — refusing to migrate"
+            f"pm_assets: column {column!r} is not in the update whitelist "
+            f"({_PM_ASSETS_COLUMNS_WHITELIST}) — refusing to migrate"
         )
 
     if scope_id is None:
@@ -932,10 +1012,12 @@ async def _migrate_pm_assets_row(
     if dry_run:
         return "dry_run_ok"
 
-    await db_engine.execute(
-        _PM_ASSETS_COLUMN_UPDATE_SQL[column],
-        {"fp": stored.file_path, "pm_id": int(pm_id)},
-    )
+    async with write_scope() as session:
+        await session.execute(
+            update(ParsedMedia)
+            .where(ParsedMedia.id == int(pm_id))
+            .values(**{column: stored.file_path})
+        )
 
     if delete_source:
         # Single-file unlink, NEVER rmtree — cover/audio sit NEXT TO the
@@ -980,8 +1062,8 @@ async def _migrate_pm_assets_row(
 # Bypasses the generic ``_migrate_row``/``extract()``/``update_row()`` path
 # (same reason as ``derived``/``pm_assets``: this module's own function owns
 # the whole 4-step ordering directly) — but unlike those two, rows still come
-# from a plain SQL SELECT (``select_sql``, no ``list_rows``), since there's
-# no fan-out or filesystem walk here to justify one.
+# from a plain SELECT (``select_stmt``, no ``list_rows``), since there's no
+# fan-out or filesystem walk here to justify one.
 #
 # ONLY ``resources.file_path`` is written here. ``parsed_media.download_path``
 # (also set on qishui rows) is intentionally NOT touched — that column is
@@ -989,27 +1071,42 @@ async def _migrate_pm_assets_row(
 # keeping the two write paths separate avoids this module needing to resolve
 # resources → parsed_media on top of everything else it already does).
 
-_WEB_RESOURCE_FILES_SELECT_SQL = """
-    SELECT
-        r.id AS resource_id,
-        r.file_path,
-        ri.scope_id
-    FROM resources r
-    LEFT JOIN LATERAL (
-        SELECT scope_id FROM resource_items
-        WHERE resource_id = r.id ORDER BY id LIMIT 1
-    ) ri ON true
-    WHERE r.source_type = 'web'
-      AND r.file_path IS NOT NULL
-      AND r.file_path NOT LIKE 'sb://%'
-      AND r.is_trashed IS NOT TRUE
-      AND NOT EXISTS (
-        SELECT 1 FROM resource_versions rv WHERE rv.resource_id = r.id
-      )
-      AND (CAST(:scope_id AS bigint) IS NULL OR ri.scope_id = :scope_id)
-    ORDER BY r.id
-    LIMIT :limit
-"""
+
+def _web_resource_files_select_stmt(scope_id: Optional[int], limit: int):
+    """ORM port of the former ``_WEB_RESOURCE_FILES_SELECT_SQL`` string. The
+    ``NOT EXISTS (SELECT 1 FROM resource_versions ...)`` structural split
+    from ``downloads`` becomes an ``~exists()`` correlated subquery."""
+    ri = (
+        select(ResourceItems.scope_id)
+        .where(ResourceItems.resource_id == Resources.id)
+        .order_by(ResourceItems.id)
+        .limit(1)
+        .lateral("ri")
+    )
+    no_versions = ~(
+        select(ResourceVersions.id)
+        .where(ResourceVersions.resource_id == Resources.id)
+        .exists()
+    )
+    stmt = (
+        select(
+            Resources.id.label("resource_id"),
+            Resources.file_path,
+            ri.c.scope_id,
+        )
+        .select_from(Resources)
+        .join(ri, true(), isouter=True)
+        .where(Resources.source_type == "web")
+        .where(Resources.file_path.isnot(None))
+        .where(Resources.file_path.notlike("sb://%"))
+        .where(Resources.is_trashed.isnot(True))
+        .where(no_versions)
+        .order_by(Resources.id)
+        .limit(limit)
+    )
+    if scope_id is not None:
+        stmt = stmt.where(ri.c.scope_id == scope_id)
+    return stmt
 
 
 def _web_resource_files_extract(row: dict) -> RowExtract:
@@ -1035,14 +1132,6 @@ async def _web_resource_files_update_row(
         "_migrate_web_resource_files_row directly, not the generic "
         "update_row() path"
     )
-
-
-_WEB_RESOURCE_FILES_UPDATE_SQL = """
-    UPDATE resources
-    SET file_path = :fp,
-        file_hash = COALESCE(:sha, file_hash)
-    WHERE id = :rid
-"""
 
 
 async def _migrate_web_resource_files_row(
@@ -1127,11 +1216,16 @@ async def _migrate_web_resource_files_row(
         return "dry_run_ok"
 
     # ONLY resources.file_path — parsed_media.download_path is refreshed by a
-    # post-migration SQL pass, not here (see module comment above).
-    await db_engine.execute(
-        _WEB_RESOURCE_FILES_UPDATE_SQL,
-        {"fp": stored.file_path, "sha": stored.sha256, "rid": int(resource_id)},
-    )
+    # post-migration SQL pass, not here (see module comment above). file_hash
+    # omitted from .values() when sha256 is None — ORM equivalent of the
+    # former ``COALESCE(:sha, file_hash)`` (leave any existing value alone).
+    values: dict = {"file_path": stored.file_path}
+    if stored.sha256 is not None:
+        values["file_hash"] = stored.sha256
+    async with write_scope() as session:
+        await session.execute(
+            update(Resources).where(Resources.id == int(resource_id)).values(**values)
+        )
 
     if delete_source:
         # Single-file unlink, NEVER rmtree — the resource's directory may
@@ -1143,28 +1237,39 @@ async def _migrate_web_resource_files_row(
 
 # storyboard: SKIPPED — see module docstring above. Do not add an entry.
 
+def _no_select_stmt(scope_id: Optional[int], limit: int):
+    # Never executed — this module's rows come from its own list_rows
+    # function (see the module comment above), not select_stmt. Raises
+    # loudly rather than silently returning an empty/wrong statement if some
+    # future refactor accidentally calls it.
+    raise RuntimeError(
+        "this module's rows come from list_rows, not select_stmt — should "
+        "be unreachable"
+    )
+
+
 _MODULES: dict[str, ModuleConfig] = {
     "uploads": ModuleConfig(
         name="uploads",
-        select_sql=_UPLOADS_SELECT_SQL,
+        select_stmt=_uploads_select_stmt,
         extract=_uploads_extract,
         update_row=_uploads_update_row,
     ),
     "project_files": ModuleConfig(
         name="project_files",
-        select_sql=_PROJECT_FILES_SELECT_SQL,
+        select_stmt=_project_files_select_stmt,
         extract=_project_files_extract,
         update_row=_project_files_update_row,
     ),
     "downloads": ModuleConfig(
         name="downloads",
-        select_sql=_DOWNLOADS_SELECT_SQL,
+        select_stmt=_downloads_select_stmt,
         extract=_downloads_extract,
         update_row=_downloads_update_row,
     ),
     "hls": ModuleConfig(
         name="hls",
-        select_sql=_HLS_SELECT_SQL,
+        select_stmt=_hls_select_stmt,
         extract=_hls_extract,
         update_row=_hls_update_row,
     ),
@@ -1172,8 +1277,8 @@ _MODULES: dict[str, ModuleConfig] = {
         name="derived",
         # Never executed — this module's rows come from _list_derived_rows
         # (DB-column-driven for thumbnail/cover, disk walk for sprite; see
-        # the module comment above), not this placeholder SQL.
-        select_sql="-- derived module: rows come from _list_derived_rows, not SQL",
+        # the module comment above), not select_stmt.
+        select_stmt=_no_select_stmt,
         extract=_derived_extract,
         update_row=_derived_update_row,
         list_rows=_list_derived_rows,
@@ -1182,15 +1287,15 @@ _MODULES: dict[str, ModuleConfig] = {
         name="pm_assets",
         # Never executed — this module's rows come from _list_pm_assets_rows
         # (DB-column-driven fan-out over the 3 parsed_media asset columns;
-        # see the module comment above), not this placeholder SQL.
-        select_sql="-- pm_assets module: rows come from _list_pm_assets_rows, not SQL",
+        # see the module comment above), not select_stmt.
+        select_stmt=_no_select_stmt,
         extract=_pm_assets_extract,
         update_row=_pm_assets_update_row,
         list_rows=_list_pm_assets_rows,
     ),
     "web_resource_files": ModuleConfig(
         name="web_resource_files",
-        select_sql=_WEB_RESOURCE_FILES_SELECT_SQL,
+        select_stmt=_web_resource_files_select_stmt,
         extract=_web_resource_files_extract,
         update_row=_web_resource_files_update_row,
     ),
@@ -1468,59 +1573,74 @@ async def storage_migration_workflow(
     except Exception as e:
         logger.warning(f"[storage-migration] start {task_id}: {e}")
 
-    # ``derived`` has no single SQL SELECT to run — its rows come from
-    # ``module_cfg.list_rows`` (DB-column-driven for thumbnail/cover, disk
-    # walk for sprite). Every other module fetches via the shared SQL path.
-    if module_cfg.list_rows is not None:
-        rows = await module_cfg.list_rows(scope_id, limit)
-    else:
-        rows = await db_engine.fetch_all(
-            module_cfg.select_sql, {"scope_id": scope_id, "limit": limit}
-        )
+    # Admin-triggered, cross-tenant batch migration by design (see module
+    # docstring) — the whole read+migrate pass runs under ONE
+    # system_request_scope so the tenant-scoped Resources model is neither
+    # filtered (a per-user scope would silently skip other users' legacy
+    # rows) nor fail-closed RAISEd, and the bulk Core UPDATEs inside each
+    # module's update_row (forbidden on Resources under a real user Scope)
+    # are allowed. Nested read_scope()/write_scope() calls in the row-level
+    # migrate functions don't set scope themselves — they see this ambient
+    # SYSTEM scope via the ContextVar for the whole workflow body.
+    async with system_request_scope(
+        reason=f"admin-initiated storage migration: module={module}"
+    ):
+        # ``derived``/``pm_assets`` have no single SELECT to run — their rows
+        # come from ``module_cfg.list_rows`` (DB-column-driven fan-out / disk
+        # walk). Every other module fetches via the shared select_stmt path.
+        if module_cfg.list_rows is not None:
+            rows = await module_cfg.list_rows(scope_id, limit)
+        else:
+            async with read_scope() as session:
+                rows = (
+                    (await session.execute(module_cfg.select_stmt(scope_id, limit)))
+                    .mappings()
+                    .all()
+                )
 
-    counts: dict[str, int] = {
-        "migrated": 0,
-        "skipped": 0,
-        "missing": 0,
-        "dry_run_ok": 0,
-        "failed": 0,
-    }
-    total = len(rows)
-    for i, row in enumerate(rows, start=1):
-        try:
-            if module == "derived":
-                outcome = await _migrate_derived_row(
-                    row, dry_run=dry_run, delete_source=delete_source
-                )
-            elif module == "pm_assets":
-                outcome = await _migrate_pm_assets_row(
-                    row, dry_run=dry_run, delete_source=delete_source
-                )
-            elif module == "web_resource_files":
-                outcome = await _migrate_web_resource_files_row(
-                    row, dry_run=dry_run, delete_source=delete_source
-                )
-            else:
-                outcome = await _migrate_row(
-                    row, module_cfg, dry_run=dry_run, delete_source=delete_source
-                )
-            counts[outcome] = counts.get(outcome, 0) + 1
-        except Exception as e:
-            counts["failed"] += 1
-            row_ref = row.get("id", row.get("resource_id", row.get("pm_id")))
-            logger.warning(
-                f"[storage-migration] module={module} row={row_ref} "
-                f"failed (batch continues): {e!r}"
-            )
-        if i % _PROGRESS_EVERY == 0 or i == total:
+        counts: dict[str, int] = {
+            "migrated": 0,
+            "skipped": 0,
+            "missing": 0,
+            "dry_run_ok": 0,
+            "failed": 0,
+        }
+        total = len(rows)
+        for i, row in enumerate(rows, start=1):
             try:
-                await manager.update_progress(
-                    task_id, int(i * 100 / total) if total else 100
-                )
+                if module == "derived":
+                    outcome = await _migrate_derived_row(
+                        row, dry_run=dry_run, delete_source=delete_source
+                    )
+                elif module == "pm_assets":
+                    outcome = await _migrate_pm_assets_row(
+                        row, dry_run=dry_run, delete_source=delete_source
+                    )
+                elif module == "web_resource_files":
+                    outcome = await _migrate_web_resource_files_row(
+                        row, dry_run=dry_run, delete_source=delete_source
+                    )
+                else:
+                    outcome = await _migrate_row(
+                        row, module_cfg, dry_run=dry_run, delete_source=delete_source
+                    )
+                counts[outcome] = counts.get(outcome, 0) + 1
             except Exception as e:
-                logger.debug(
-                    f"[storage-migration] progress update failed (non-fatal): {e}"
+                counts["failed"] += 1
+                row_ref = row.get("id", row.get("resource_id", row.get("pm_id")))
+                logger.warning(
+                    f"[storage-migration] module={module} row={row_ref} "
+                    f"failed (batch continues): {e!r}"
                 )
+            if i % _PROGRESS_EVERY == 0 or i == total:
+                try:
+                    await manager.update_progress(
+                        task_id, int(i * 100 / total) if total else 100
+                    )
+                except Exception as e:
+                    logger.debug(
+                        f"[storage-migration] progress update failed (non-fatal): {e}"
+                    )
 
     result: dict[str, Any] = {"module": module, "total": total, **counts}
 

@@ -7,21 +7,24 @@ dry_run stops before mutation, DB UPDATE before local delete.
 
 The workflow body is driven the same way test_upload_postprocess_workflow.py
 drives upload_postprocess_workflow — ``inspect.unwrap`` past @DBOS.workflow,
-db_engine.fetch_all/execute + get_task_manager patched so no real DB/DBOS
-runtime is needed.
+``read_scope``/``write_scope`` (the ORM seam, Phase C task 2) + get_task_manager
+patched so no real DB/DBOS runtime is needed.
 
 The real ``uploads`` / ``project_files`` ``update_row`` closures (current-
 version parent-sync) are exercised directly against a recording fake
-db_engine.execute — no ORM/DB needed since they only build parameterized
-SQL text.
+``write_scope`` session — no real DB needed since we only inspect the compiled
+ORM statements.
 """
 
 from __future__ import annotations
 
 import inspect
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy import literal, select
+from sqlalchemy.dialects import postgresql
 
 from app.services.library import media_storage
 from app.workflows import storage_migration as sm
@@ -54,14 +57,78 @@ def _patch_store(monkeypatch, fake: FakeStore) -> None:
     monkeypatch.setattr(media_storage, "library_store", lambda: fake)
 
 
-def _module_cfg(update_row=None, extract=None):
+def _module_cfg(update_row=None, extract=None, select_stmt=None):
     return sm.ModuleConfig(
         name="test",
-        select_sql="SELECT 1",
+        select_stmt=select_stmt or (lambda scope_id, limit: select(literal(1))),
         extract=extract
         or (lambda row: sm.RowExtract(scope_id=1, mime="video/mp4", filename="a.mp4")),
         update_row=update_row or AsyncMock(return_value=None),
     )
+
+
+# ── Fake ORM seams (house style borrowed from test_ai_transcription_sql.py) ──
+
+
+class _FakeExecuteRowsResult:
+    """Multi-row result — supports ``.mappings().all()``, mirroring the real
+    ``session.execute(stmt)).mappings().all()`` the workflow body calls."""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _FakeScopeSession:
+    def __init__(self, execute_result=None):
+        self._execute_result = execute_result
+
+    async def execute(self, stmt):
+        return self._execute_result
+
+
+def _fake_read_scope(execute_result):
+    @asynccontextmanager
+    async def _read_scope():
+        yield _FakeScopeSession(execute_result=execute_result)
+
+    return _read_scope
+
+
+class _CapturingWriteSession:
+    """Records every statement passed to ``execute()`` for compile-level
+    (column/param) assertions — stands in for ``write_scope()``."""
+
+    def __init__(self):
+        self.statements = []
+
+    async def execute(self, stmt):
+        self.statements.append(stmt)
+
+        class _R:
+            rowcount = 1
+
+        return _R()
+
+
+def _fake_write_scope(session):
+    @asynccontextmanager
+    async def _write_scope():
+        yield session
+
+    return _write_scope
+
+
+def _compiled(stmt):
+    """Compile an UPDATE statement to (sql_text, bound_params) — dialect
+    agnostic (default/generic compiler is enough, no live DB needed)."""
+    compiled = stmt.compile()
+    return str(compiled), dict(compiled.params)
 
 
 # ── 1. idempotent skip ──────────────────────────────────────────────────
@@ -244,7 +311,7 @@ async def test_migrate_row_delete_source_true_deletes_after_update(
     assert not f.exists()
 
 
-# ── 6. scope filter reaches the SELECT params ───────────────────────────
+# ── 6. scope filter reaches select_stmt ─────────────────────────────────
 
 
 def _body():
@@ -270,17 +337,23 @@ async def test_workflow_passes_scope_id_to_select(monkeypatch):
     )
     seen_params = {}
 
-    async def fake_fetch_all(sql, params=None):
-        seen_params.update(params or {})
-        return []
+    def spy_select_stmt(scope_id, limit):
+        seen_params["scope_id"] = scope_id
+        seen_params["limit"] = limit
+        return select(literal(1))
 
-    monkeypatch.setattr(sm.db_engine, "fetch_all", fake_fetch_all)
-    monkeypatch.setitem(sm._MODULES, "uploads", _module_cfg())
+    monkeypatch.setattr(sm, "read_scope", _fake_read_scope(_FakeExecuteRowsResult([])))
+    monkeypatch.setitem(
+        sm._MODULES, "uploads", _module_cfg(select_stmt=spy_select_stmt)
+    )
 
     result = await _body()(
         module="uploads", scope_id=42, limit=10, dry_run=False, delete_source=False
     )
 
+    # scope_id/limit are now plain Python args passed straight to the
+    # select_stmt callable — not SQL bind params — so the assertion is "was
+    # the callable invoked with these args", not "were these in a params dict".
     assert seen_params == {"scope_id": 42, "limit": 10}
     assert result["total"] == 0
     manager.complete.assert_awaited_once()
@@ -316,10 +389,7 @@ async def test_workflow_row_failure_does_not_abort_but_batch_raises(
         {"id": 2, "file_path": bad_rel},
     ]
 
-    async def fake_fetch_all(sql, params=None):
-        return rows
-
-    monkeypatch.setattr(sm.db_engine, "fetch_all", fake_fetch_all)
+    monkeypatch.setattr(sm, "read_scope", _fake_read_scope(_FakeExecuteRowsResult(rows)))
     update_row = AsyncMock(return_value=None)
     monkeypatch.setitem(sm._MODULES, "uploads", _module_cfg(update_row=update_row))
 
@@ -346,119 +416,112 @@ async def test_workflow_row_failure_does_not_abort_but_batch_raises(
 
 # ── 8. current_version parent-sync (real module update_row closures) ────
 #
-# Atomicity pin: child UPDATE + parent sync must be ONE statement (one
-# db_engine.execute call = one implicit transaction — db_engine has no
-# cross-statement transaction API). Two autocommit UPDATEs left a crash
-# window that permanently orphaned the parent's file_path (replay excludes
-# the already-sb child). The parent leg is gated by :sync_parent.
-
-
-def _record_execute(monkeypatch) -> list[tuple[str, dict]]:
-    calls: list[tuple[str, dict]] = []
-
-    async def fake_execute(sql, params=None):
-        calls.append((sql, params or {}))
-        return 1
-
-    monkeypatch.setattr(sm.db_engine, "execute", fake_execute)
-    return calls
+# Atomicity pin: child UPDATE + parent sync must land in ONE ``write_scope()``
+# session (one transaction, one commit — write_scope's session.begin() owns
+# it). Two separate transactions left a crash window that permanently
+# orphaned the parent's file_path (replay excludes the already-sb child).
+# The parent leg is gated by ``sync_parent`` — a plain Python branch now,
+# not a SQL-side boolean flag.
 
 
 async def test_uploads_update_row_syncs_resources_on_current_version(monkeypatch):
-    calls = _record_execute(monkeypatch)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     row = {"id": 10, "resource_id": 100, "version_number": 2, "current_version": 2}
     await sm._uploads_update_row(row, "sb://library/t1/ab/cd/x.mp4", "deadbeef")
 
-    # ONE statement covering both tables — child + parent same transaction.
-    assert len(calls) == 1
-    sql, params = calls[0]
-    assert "WITH" in sql
-    assert "resource_versions" in sql
-    assert "UPDATE resources" in sql
-    assert params["id"] == 10
-    assert params["sync_parent"] is True
+    # TWO statements — child update, then parent sync — same write_scope
+    # session/transaction.
+    assert len(session.statements) == 2
+    child_stmt, parent_stmt = session.statements
+
+    child_sql, child_params = _compiled(child_stmt)
+    assert "resource_versions" in child_sql
+    assert child_params["file_path"] == "sb://library/t1/ab/cd/x.mp4"
+    assert child_params["file_hash"] == "deadbeef"
+    assert child_params["id_1"] == 10
+
+    parent_sql, parent_params = _compiled(parent_stmt)
+    assert "UPDATE public.resources" in parent_sql or "resources" in parent_sql
+    assert parent_params["file_path"] == "sb://library/t1/ab/cd/x.mp4"
+    assert parent_params["file_hash"] == "deadbeef"
+    assert parent_params["id_1"] == 100
 
 
 async def test_uploads_update_row_skips_resources_when_not_current(monkeypatch):
-    calls = _record_execute(monkeypatch)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     row = {"id": 10, "resource_id": 100, "version_number": 1, "current_version": 2}
     await sm._uploads_update_row(row, "sb://library/t1/ab/cd/x.mp4", "deadbeef")
 
-    assert len(calls) == 1
-    assert calls[0][1]["sync_parent"] is False  # parent leg gated off
+    # Only the child update ran — the parent UPDATE never executes at all
+    # (the new implementation guards it with a plain `if sync_parent:` in
+    # Python, rather than a SQL-side boolean short-circuit).
+    assert len(session.statements) == 1
+    sql, _ = _compiled(session.statements[0])
+    assert "resource_versions" in sql
 
 
 async def test_project_files_update_row_syncs_on_current_version(monkeypatch):
-    calls = _record_execute(monkeypatch)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     row = {"id": 20, "file_id": 200, "version_number": 3, "current_version": 3}
     await sm._project_files_update_row(row, "sb://library/t1/ab/cd/y.mp4", "cafebabe")
 
-    assert len(calls) == 1
-    sql, params = calls[0]
-    assert "WITH" in sql
-    assert "file_versions" in sql
-    assert "UPDATE project_files" in sql
-    assert params["id"] == 20
-    assert params["sync_parent"] is True
+    assert len(session.statements) == 2
+    child_stmt, parent_stmt = session.statements
+
+    child_sql, child_params = _compiled(child_stmt)
+    assert "file_versions" in child_sql
+    assert child_params["file_path"] == "sb://library/t1/ab/cd/y.mp4"
+    assert child_params["id_1"] == 20
+    # project_files/file_versions have no file_hash column.
+    assert "file_hash" not in child_params
+
+    parent_sql, parent_params = _compiled(parent_stmt)
+    assert "project_files" in parent_sql
+    assert parent_params["file_path"] == "sb://library/t1/ab/cd/y.mp4"
+    assert parent_params["id_1"] == 200
 
 
 async def test_project_files_update_row_skips_parent_when_not_current(monkeypatch):
-    calls = _record_execute(monkeypatch)
+    session = _CapturingWriteSession()
+    monkeypatch.setattr(sm, "write_scope", _fake_write_scope(session))
 
     row = {"id": 20, "file_id": 200, "version_number": 1, "current_version": 3}
     await sm._project_files_update_row(row, "sb://library/t1/ab/cd/y.mp4", "cafebabe")
 
-    assert len(calls) == 1
-    assert calls[0][1]["sync_parent"] is False
+    assert len(session.statements) == 1
+    sql, _ = _compiled(session.statements[0])
+    assert "file_versions" in sql
 
 
-# ─── SQL bind-compilation tripwire ───────────────────────────────────
+# ─── ORM statement compile tripwire ───────────────────────────────────
 #
-# The first prod dispatch died with PostgresSyntaxError: SQLAlchemy text()
-# mis-parses a bind param immediately followed by a `::` cast
-# (`:scope_id::bigint`), leaking a bare `:` to Postgres. The unit tests
-# mocked db_engine so nothing ever compiled the SQL. Compile every module
-# statement against the real asyncpg dialect so a reintroduced param-cast
-# can never reach prod again.
+# The first prod dispatch (pre-ORM era) died with PostgresSyntaxError: raw
+# SQL text() mis-parsed a bind param immediately followed by a `::` cast.
+# That failure mode doesn't exist anymore now that every SELECT is a real
+# SQLAlchemy ORM statement (SQLAlchemy owns bind rendering end to end) — but
+# we still want a tripwire proving every registered module's select_stmt
+# actually compiles against the real asyncpg dialect, so a future module
+# addition can't silently ship an uncompilable statement.
 
 
-def _compilable(sql: str) -> str:
-    from sqlalchemy import text
-    from sqlalchemy.dialects import postgresql
-
-    return str(text(sql).compile(dialect=postgresql.asyncpg.dialect()))
-
-
-def test_module_select_sql_compiles_with_expected_binds():
-    from app.workflows import storage_migration as sm
-
+def test_module_select_stmt_compiles_for_asyncpg_dialect():
     for name, cfg in sm._MODULES.items():
-        compiled = _compilable(cfg.select_sql)
-        # asyncpg dialect renders binds as $n — a surviving bare `:word`
-        # means text() failed to recognize a param (the prod failure shape).
-        import re
-
-        stray = re.findall(r"(?<!:):[a-z_]+", compiled)
-        assert not stray, f"{name}: unparsed binds {stray} in\n{compiled}"
-
-
-def test_update_sql_compiles_with_expected_binds():
-    import re
-
-    from app.workflows import storage_migration as sm
-
-    for sql in (
-        sm._UPLOADS_UPDATE_SQL,
-        sm._PROJECT_FILES_UPDATE_SQL,
-        sm._DOWNLOADS_UPDATE_SQL,
-        sm._HLS_UPDATE_SQL,
-    ):
-        compiled = _compilable(sql)
-        stray = re.findall(r"(?<!:):[a-z_]+", compiled)
-        assert not stray, f"unparsed binds {stray} in\n{compiled}"
+        if cfg.select_stmt is sm._no_select_stmt:
+            # derived/pm_assets get their rows from list_rows, not
+            # select_stmt — calling it is expected to raise loudly.
+            with pytest.raises(RuntimeError):
+                cfg.select_stmt(None, 10)
+            continue
+        stmt = cfg.select_stmt(None, 10)
+        # Must compile cleanly against the real driver dialect used in prod.
+        compiled = stmt.compile(dialect=postgresql.asyncpg.dialect())
+        assert str(compiled)  # non-empty — smoke that compilation succeeded
 
 
 def test_uploads_select_excludes_download_pipeline():
@@ -468,7 +531,9 @@ def test_uploads_select_excludes_download_pipeline():
     assumptions (70/880 rows IsADirectoryError on the first prod dry-run).
     source_type='web' is instead handled by the sibling ``downloads`` module,
     which branches on is_album — see test_storage_migration_downloads.py."""
-    from app.workflows import storage_migration as sm
-
-    sql = sm._UPLOADS_SELECT_SQL
-    assert "r.source_type IN ('upload', 'generated', 'derived')" in sql
+    stmt = sm._uploads_select_stmt(None, 10)
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "'upload'" in sql
+    assert "'generated'" in sql
+    assert "'derived'" in sql
+    assert "'web'" not in sql

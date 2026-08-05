@@ -21,13 +21,17 @@ sb:// object now goes through
 key (content addressing + the global download cache), and an unconditional
 remove used to destroy that resource's file out from under it. Every test
 here that expects an actual delete now patches
-``app.services.library.object_gc.db_engine.fetch_one`` to return ``None``
-(no other row references the key); ``test_sb_download_path_kept_when_still_referenced``
-is the new regression guard for the opposite case.
+``app.services.library.object_gc.read_scope`` (Phase C task 2: the
+reference check is a real ORM ``union_all`` select, not a raw-SQL
+``db_engine.fetch_one`` anymore) to yield a session whose lone
+``execute(stmt).first()`` returns ``None`` (no other row references the
+key); ``test_sb_download_path_kept_when_still_referenced`` is the new
+regression guard for the opposite case.
 """
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -44,6 +48,38 @@ SB_VIDEO_PATH = "sb://library/331438215859255/ab/cd/deadbeef1234.mp4"
 
 def _auth() -> AuthContext:
     return AuthContext(user_id="u1", auth_type="jwt")
+
+
+class _FakeExecuteResult:
+    """Supports the single ``.first()`` call ``object_gc._is_referenced``
+    makes on the union_all reference-check statement's result."""
+
+    def __init__(self, row):
+        self._row = row
+
+    def first(self):
+        return self._row
+
+
+class _FakeReadSession:
+    def __init__(self, row):
+        self._row = row
+
+    async def execute(self, stmt):
+        return _FakeExecuteResult(self._row)
+
+
+def _fake_read_scope(row):
+    """Patches ``object_gc.read_scope`` (Phase C task 2: ``_is_referenced``
+    now runs a real ORM ``union_all`` select through ``read_scope()``/
+    ``session.execute(stmt).first()`` — it no longer calls
+    ``db_engine.fetch_one``)."""
+
+    @asynccontextmanager
+    async def _read_scope():
+        yield _FakeReadSession(row)
+
+    return _read_scope
 
 
 def _video(**over):
@@ -70,8 +106,8 @@ def _patch_no_reference():
     """The reference-safe primitive's DB check: no other row references the
     key — the happy "go ahead and delete" path most tests below want."""
     return patch(
-        "app.services.library.object_gc.db_engine.fetch_one",
-        new=AsyncMock(return_value=None),
+        "app.services.library.object_gc.read_scope",
+        new=_fake_read_scope(None),
     )
 
 
@@ -111,11 +147,12 @@ async def test_sb_download_path_kept_when_still_referenced():
     repo_patch, repo = _patch_repo(video)
     remove = AsyncMock()
     # Another live row references the same raw sb:// value.
-    fetch_one = AsyncMock(return_value={"?column?": 1})
-
     with (
         repo_patch,
-        patch("app.services.library.object_gc.db_engine.fetch_one", new=fetch_one),
+        patch(
+            "app.services.library.object_gc.read_scope",
+            new=_fake_read_scope({"?column?": 1}),
+        ),
         patch("app.services.library.media_storage.ObjectStore.remove", new=remove),
     ):
         result = await delete_video(
@@ -238,11 +275,13 @@ async def test_sb_album_prefix_kept_when_still_referenced():
     remove_prefix = AsyncMock()
     # Another live row (e.g. resources.file_path) references the same album
     # prefix string.
-    fetch_one = AsyncMock(return_value={"?column?": 1})
 
     with (
         repo_patch,
-        patch("app.services.library.object_gc.db_engine.fetch_one", new=fetch_one),
+        patch(
+            "app.services.library.object_gc.read_scope",
+            new=_fake_read_scope({"?column?": 1}),
+        ),
         patch(
             "app.services.library.media_storage.ObjectStore.remove_prefix",
             new=remove_prefix,
@@ -325,11 +364,13 @@ async def test_audio_object_kept_when_still_referenced():
     video = _video(music_download_path=SB_MUSIC_PATH)
     repo_patch, repo = _patch_repo(video)
     remove = AsyncMock()
-    fetch_one = AsyncMock(return_value={"?column?": 1})  # 仍被引用
 
     with (
         repo_patch,
-        patch("app.services.library.object_gc.db_engine.fetch_one", new=fetch_one),
+        patch(
+            "app.services.library.object_gc.read_scope",
+            new=_fake_read_scope({"?column?": 1}),  # 仍被引用
+        ),
         patch("app.services.library.media_storage.ObjectStore.remove", new=remove),
     ):
         result = await delete_video(

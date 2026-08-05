@@ -6,51 +6,87 @@ verification lives in Task 3 (same file). Read logic is module-level
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 from fastapi import APIRouter, HTTPException, Request, status
+from sqlalchemy import and_, func, or_, select, true
 
 from app.core.admin_deps import AdminAuthDep
-from app.db import engine as db_engine
+from app.db.scope import is_enforced, system_request_scope
+from app.db.session import read_scope
+from app.models import ParsedMedia, ResourceItems, Resources, ResourceVersions
 from app.utils.admin_helpers import create_audit_log
 
 router = APIRouter()
 
 
-def _fs_cond(col: str) -> str:
-    return f"({col} IS NOT NULL AND {col} LIKE '%/%' AND {col} NOT LIKE 'sb://%')"
+def _fs_cond(col):
+    """ORM equivalent of the legacy ``(col IS NOT NULL AND col LIKE '%/%'
+    AND col NOT LIKE 'sb://%')`` fs-residue predicate — a path that still
+    looks like a filesystem path (has a ``/``) but is not an ``sb://`` key."""
+    return and_(col.isnot(None), col.like("%/%"), col.notlike("sb://%"))
 
 
-_FS_RESIDUE_WHERE = " OR ".join(
-    [
-        _fs_cond("pm.download_path"),
-        _fs_cond("pm.cover_download_path"),
-        _fs_cond("pm.music_download_path"),
-        _fs_cond("pm.extract_audio_path"),
-        _fs_cond("r.thumbnail_path"),
-        _fs_cond("r.cover_image_path"),
-        _fs_cond("r.file_path"),
-        _fs_cond("rv.hls_path"),
-        _fs_cond("rv.file_path"),
-    ]
-)
+def _resource_lateral():
+    """LATERAL pick of ONE resources row per parsed_media (deterministic via
+    ORDER BY id LIMIT 1). ``resources.media_id`` is NOT unique in prod
+    (verified: 2 media_id values have 2 matching resources rows each) — a
+    plain JOIN would fan a media row out into >1 row for those ids, and
+    ``_fetch_media_status`` would silently drop all but the last one when the
+    frontend collapses by media_id, potentially hiding a real fs_residue row
+    behind a later ok-looking one."""
+    return (
+        select(
+            Resources.id,
+            Resources.thumbnail_path,
+            Resources.cover_image_path,
+            Resources.file_path,
+        )
+        .where(Resources.media_id == ParsedMedia.id)
+        .order_by(Resources.id)
+        .limit(1)
+        .lateral("r")
+    )
 
-# resources.media_id is NOT unique in prod (verified: 2 media_id values have
-# 2 matching resources rows each) — a plain LEFT JOIN fans a media row out
-# into >1 row for those ids, and _fetch_media_status silently drops all but
-# the last one when the frontend collapses by media_id, potentially hiding a
-# real fs_residue row behind a later ok-looking one. LATERAL + LIMIT 1 keeps
-# it to one row per pm, same deterministic-pick convention as the rv/ri
-# LATERALs below.
-_JOINS = """
-    FROM parsed_media pm
-    LEFT JOIN LATERAL (
-        SELECT id, thumbnail_path, cover_image_path, file_path FROM resources
-        WHERE media_id = pm.id ORDER BY id LIMIT 1
-    ) r ON true
-    LEFT JOIN LATERAL (
-        SELECT hls_path, file_path FROM resource_versions
-        WHERE resource_id = r.id ORDER BY id DESC LIMIT 1
-    ) rv ON true
-"""
+
+def _resource_version_lateral(r_lateral):
+    """LATERAL pick of the newest resource_versions row for the resource
+    picked above (ORDER BY id DESC LIMIT 1) — same deterministic-pick
+    convention as ``_resource_lateral``."""
+    return (
+        select(ResourceVersions.hls_path, ResourceVersions.file_path)
+        .where(ResourceVersions.resource_id == r_lateral.c.id)
+        .order_by(ResourceVersions.id.desc())
+        .limit(1)
+        .lateral("rv")
+    )
+
+
+def _pm_r_rv_lateral() -> tuple:
+    """Fresh (r, rv) LATERAL pair shared by all three storage-observability
+    reads below — Phase C task 2 ORM port of the former ``_JOINS`` raw-SQL
+    string. Built fresh per call (never module-cached) since each caller
+    embeds them in its own top-level statement."""
+    r = _resource_lateral()
+    rv = _resource_version_lateral(r)
+    return r, rv
+
+
+def _resources_scope_cm(reason: str):
+    """``system_request_scope``, gated on ``is_enforced("resources")``.
+
+    Every read below LEFT JOINs Resources (a scoped model) so an unmatched
+    parsed_media row (no resource created yet) is preserved — the choke
+    point treats an OUTER JOIN target as non-filtering (the tenant predicate
+    would land in the row-preserving ON clause, not a real filter) and
+    fail-closed RAISEs under a real user ``Scope``, so these admin-only
+    cross-tenant reads must run as SYSTEM. Admin authorization is already
+    enforced at the route layer (``AdminAuthDep``) — this is a global
+    storage-observability view by design, not a per-user one. Gated so the
+    flag-off path stays byte-for-byte legacy (no wrap, no audit log)."""
+    return (
+        system_request_scope(reason=reason) if is_enforced("resources") else nullcontext()
+    )
 
 
 async def _fetch_latest_audit() -> dict:
@@ -107,24 +143,78 @@ async def _fetch_latest_audit() -> dict:
 
 
 async def _fetch_stats() -> dict:
-    videos = await db_engine.fetch_one(
-        """
-        SELECT count(*) AS count, COALESCE(sum(storage_size),0)::bigint AS size_bytes
-        FROM parsed_media WHERE download_path LIKE 'sb://%'
-        """
-    )
-    fs = await db_engine.fetch_one(
-        f"SELECT count(*) AS n {_JOINS} WHERE {_FS_RESIDUE_WHERE}"
-    )
-    orphans = await db_engine.fetch_one(
-        """
-        SELECT count(*) AS n FROM parsed_media pm
-        LEFT JOIN resources r ON r.media_id = pm.id WHERE r.id IS NULL
-        """
-    )
-    hls = await db_engine.fetch_one(
-        "SELECT count(*) AS n FROM resource_versions WHERE hls_path LIKE 'sb://%'"
-    )
+    async with _resources_scope_cm("admin-storage-stats: cross-tenant by design"):
+        async with read_scope() as session:
+            videos = (
+                (
+                    await session.execute(
+                        select(
+                            func.count().label("count"),
+                            func.coalesce(func.sum(ParsedMedia.storage_size), 0).label(
+                                "size_bytes"
+                            ),
+                        ).where(ParsedMedia.download_path.like("sb://%"))
+                    )
+                )
+                .mappings()
+                .first()
+            )
+
+            r, rv = _pm_r_rv_lateral()
+            fs_where = or_(
+                _fs_cond(ParsedMedia.download_path),
+                _fs_cond(ParsedMedia.cover_download_path),
+                _fs_cond(ParsedMedia.music_download_path),
+                _fs_cond(ParsedMedia.extract_audio_path),
+                _fs_cond(r.c.thumbnail_path),
+                _fs_cond(r.c.cover_image_path),
+                _fs_cond(r.c.file_path),
+                _fs_cond(rv.c.hls_path),
+                _fs_cond(rv.c.file_path),
+            )
+            fs = (
+                (
+                    await session.execute(
+                        select(func.count().label("n"))
+                        .select_from(ParsedMedia)
+                        .join(r, true(), isouter=True)
+                        .join(rv, true(), isouter=True)
+                        .where(fs_where)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+
+            orphans = (
+                (
+                    await session.execute(
+                        select(func.count().label("n"))
+                        .select_from(ParsedMedia)
+                        .join(
+                            Resources,
+                            Resources.media_id == ParsedMedia.id,
+                            isouter=True,
+                        )
+                        .where(Resources.id.is_(None))
+                    )
+                )
+                .mappings()
+                .first()
+            )
+
+            hls = (
+                (
+                    await session.execute(
+                        select(func.count().label("n")).where(
+                            ResourceVersions.hls_path.like("sb://%")
+                        )
+                    )
+                )
+                .mappings()
+                .first()
+            )
+
     audit = await _fetch_latest_audit()
     return {
         "videos": {
@@ -157,23 +247,37 @@ def _is_fs(v) -> bool:
 
 
 async def _fetch_media_status(media_ids: list[int]) -> list[dict]:
-    rows = await db_engine.fetch_all(
-        f"""
-        SELECT pm.id AS media_id, pm.download_path AS video_key,
-               pm.storage_size AS video_size, pm.video_download_status,
-               pm.cover_download_path AS cover_path,
-               r.thumbnail_path, r.cover_image_path AS res_cover_image,
-               r.file_path AS res_file_path,
-               rv.hls_path, rv.file_path AS rv_file_path, ri.scope_id
-        {_JOINS}
-        LEFT JOIN LATERAL (
-            SELECT scope_id FROM resource_items
-            WHERE resource_id = r.id ORDER BY id LIMIT 1
-        ) ri ON true
-        WHERE pm.id = ANY(:ids)
-        """,
-        {"ids": media_ids},
-    )
+    async with _resources_scope_cm("admin-storage-media-status: cross-tenant by design"):
+        async with read_scope() as session:
+            r, rv = _pm_r_rv_lateral()
+            ri = (
+                select(ResourceItems.scope_id)
+                .where(ResourceItems.resource_id == r.c.id)
+                .order_by(ResourceItems.id)
+                .limit(1)
+                .lateral("ri")
+            )
+            stmt = (
+                select(
+                    ParsedMedia.id.label("media_id"),
+                    ParsedMedia.download_path.label("video_key"),
+                    ParsedMedia.storage_size.label("video_size"),
+                    ParsedMedia.video_download_status,
+                    ParsedMedia.cover_download_path.label("cover_path"),
+                    r.c.thumbnail_path,
+                    r.c.cover_image_path.label("res_cover_image"),
+                    r.c.file_path.label("res_file_path"),
+                    rv.c.hls_path,
+                    rv.c.file_path.label("rv_file_path"),
+                    ri.c.scope_id,
+                )
+                .select_from(ParsedMedia)
+                .join(r, true(), isouter=True)
+                .join(rv, true(), isouter=True)
+                .join(ri, true(), isouter=True)
+                .where(ParsedMedia.id.in_(media_ids))
+            )
+            rows = (await session.execute(stmt)).mappings().all()
     out = []
     for row in rows:
         fs = any(
@@ -212,18 +316,33 @@ async def _fetch_media_status(media_ids: list[int]) -> list[dict]:
 
 
 async def _fetch_media_detail(media_id: int) -> dict:
-    row = await db_engine.fetch_one(
-        f"""
-        SELECT pm.id AS media_id, pm.download_path, pm.storage_size,
-               pm.cover_download_path, r.id AS resource_id, r.thumbnail_path,
-               rv.hls_path,
-               (SELECT scope_id FROM resource_items
-                WHERE resource_id = r.id ORDER BY id LIMIT 1) AS scope_id
-        {_JOINS}
-        WHERE pm.id = :mid
-        """,
-        {"mid": media_id},
-    )
+    async with _resources_scope_cm("admin-storage-media-detail: cross-tenant by design"):
+        async with read_scope() as session:
+            r, rv = _pm_r_rv_lateral()
+            scope_id_subq = (
+                select(ResourceItems.scope_id)
+                .where(ResourceItems.resource_id == r.c.id)
+                .order_by(ResourceItems.id)
+                .limit(1)
+                .scalar_subquery()
+            )
+            stmt = (
+                select(
+                    ParsedMedia.id.label("media_id"),
+                    ParsedMedia.download_path,
+                    ParsedMedia.storage_size,
+                    ParsedMedia.cover_download_path,
+                    r.c.id.label("resource_id"),
+                    r.c.thumbnail_path,
+                    rv.c.hls_path,
+                    scope_id_subq.label("scope_id"),
+                )
+                .select_from(ParsedMedia)
+                .join(r, true(), isouter=True)
+                .join(rv, true(), isouter=True)
+                .where(ParsedMedia.id == media_id)
+            )
+            row = (await session.execute(stmt)).mappings().first()
     if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Media not found"
