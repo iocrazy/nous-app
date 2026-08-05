@@ -32,18 +32,32 @@
 
 BEGIN;
 
--- `execution_state` is service_role-only (mig 170's issues_update_allowlist
--- trigger authorizes on current_user). The CI runner connects as `postgres`
--- (run-migration.yml: `psql -U postgres`), which is NOT in that trigger's
--- bypass set — without this the UPDATE below aborts with
--- `insufficient_privilege`.
+-- `execution_state` is service_role-only: mig 170's issues_update_allowlist
+-- trigger raises `insufficient_privilege` unless current_user is service_role
+-- or supabase_admin, and every runner of this file connects as `postgres`
+-- (run-migration.yml and the schema-drift gate both use `psql -U postgres`).
 --
--- SET **LOCAL** ROLE, deliberately: run-migration.yml concatenates pending
--- migrations into one batch file and feeds it to a single psql session, so a
--- bare `SET ROLE` would leak into every migration that follows in the batch.
--- That is exactly how migration 176 silently failed to drop a postgres-owned
--- table for months (see 365's post-mortem). LOCAL reverts at COMMIT.
-SET LOCAL ROLE service_role;
+-- Suppress the trigger rather than switching role. `SET LOCAL ROLE
+-- service_role` is the obvious move and it is what this migration did first —
+-- it works against prod but FAILS the schema-drift gate with `permission
+-- denied for table issues`, because supabase/ci_bootstrap.sql creates
+-- service_role as a bare `CREATE ROLE ... NOLOGIN NOINHERIT` with no GRANTs
+-- (on real Supabase the platform grants them, so the ephemeral DB has the
+-- role's name but none of its privileges). Staying `postgres` and turning the
+-- trigger off for this transaction needs no grants and behaves identically in
+-- both environments.
+--
+-- Both settings are **LOCAL** deliberately: run-migration.yml concatenates
+-- pending migrations into one batch file and feeds it to a single psql
+-- session, so a session-scoped SET would leak into every migration that
+-- follows in the batch. That is exactly how migration 176 silently failed to
+-- drop a postgres-owned table for months (see 365's post-mortem). LOCAL
+-- reverts at COMMIT.
+--
+-- Side effect, accepted: this also suppresses issues_touch_updated_at, so the
+-- repaired rows keep their original updated_at. That is the desirable
+-- behaviour for an internal data repair — it must not look like a user edit.
+SET LOCAL session_replication_role = replica;
 
 UPDATE public.issues
    SET execution_state = execution_state - 'error_code' - 'error_message'
