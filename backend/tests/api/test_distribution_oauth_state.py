@@ -1,13 +1,20 @@
 """Unit tests for the distribution OAuth-state helpers (Phase B5 Task 1).
 
 ``_save_oauth_state``/``_pop_oauth_state`` were migrated from a broken
-``accounts_repo.execute(...)`` call (SocialAccountsRepository dropped its
-generic ``.execute()`` in an earlier ORM migration batch, silently orphaning
-this INSERT — no test exercised the real call, only a wholesale mock of
-``_save_oauth_state`` itself in test_distribution_flag_gate.py) and a raw
-``db_engine.execute_returning_one(...)`` DELETE...RETURNING, to the
-SQLAlchemy ORM (``app.db.session.write_scope`` + the ``DistributionOauthStates``
-model). Tests patch ``write_scope`` and assert against the COMPILED statement.
+``accounts_repo.execute(...)`` call and a raw ``db_engine.execute_returning_one
+(...)`` DELETE...RETURNING, to the SQLAlchemy ORM (``app.db.session.write_scope``
++ the ``DistributionOauthStates`` model).
+
+``accounts_repo.execute(...)`` was never a real method, not something a later
+migration removed: ``git log --follow --reverse`` shows ``_save_oauth_state``
+was introduced in the very same commit (f137bf0) that created
+``SocialAccountsRepository`` — and that class was ORM-only (read_scope/
+write_scope) from its first line, with no generic ``.execute()`` passthrough
+ever defined on it. The call was dead code from day one, silently orphaning
+this INSERT — no test caught it because the only prior coverage
+(test_distribution_flag_gate.py) mocked ``_save_oauth_state`` wholesale rather
+than exercising the real call. Tests here patch ``write_scope`` and assert
+against the COMPILED statement.
 """
 
 from __future__ import annotations

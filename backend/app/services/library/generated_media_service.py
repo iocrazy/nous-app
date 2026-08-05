@@ -42,6 +42,14 @@ _DEFAULT_MAX_BYTES = 512 * 1024 * 1024  # 512 MiB ceiling per generation
 _GENERATED_MEDIA_COLS = tuple(GeneratedMedia.__table__.columns)
 
 
+def _generated_media_insert_stmt(**values: Any):
+    """The one INSERT...RETURNING statement shape shared by
+    register_generated_media and _insert_uploaded_row — factored out so
+    tests can import and execute the REAL production statement (not a
+    locally reconstructed one) against a real engine."""
+    return insert(GeneratedMedia).values(**values).returning(*_GENERATED_MEDIA_COLS)
+
+
 def _date_bucket() -> str:
     """UTC yyyy/mm/dd path segment for new media writes.
 
@@ -311,31 +319,27 @@ async def register_generated_media(
             size = await _download_to(dest, source_url)
         file_path = rel
 
-    stmt = (
-        insert(GeneratedMedia)
-        .values(
-            scope_id=scope_id,
-            creator_id=user_id,
-            media_kind=kind,
-            mime=mime,
-            file_path=file_path,
-            file_size_bytes=size,
-            content_sha256=content_sha256,
-            origin_kind=origin.kind,
-            origin_run_id=origin.run_id,
-            agent_id=origin.agent_id,
-            canvas_id=origin.canvas_id,
-            node_id=origin.node_id,
-            prompt=origin.prompt,
-            model=origin.model,
-            provider=origin.provider,
-            params=origin.params or {},
-            cost_cents=origin.cost_cents,
-            parent_resource_id=origin.parent_resource_id,
-            derivation_kind=origin.derivation_kind,
-            conversation_id=origin.conversation_id,
-        )
-        .returning(*_GENERATED_MEDIA_COLS)
+    stmt = _generated_media_insert_stmt(
+        scope_id=scope_id,
+        creator_id=user_id,
+        media_kind=kind,
+        mime=mime,
+        file_path=file_path,
+        file_size_bytes=size,
+        content_sha256=content_sha256,
+        origin_kind=origin.kind,
+        origin_run_id=origin.run_id,
+        agent_id=origin.agent_id,
+        canvas_id=origin.canvas_id,
+        node_id=origin.node_id,
+        prompt=origin.prompt,
+        model=origin.model,
+        provider=origin.provider,
+        params=origin.params or {},
+        cost_cents=origin.cost_cents,
+        parent_resource_id=origin.parent_resource_id,
+        derivation_kind=origin.derivation_kind,
+        conversation_id=origin.conversation_id,
     )
     async with write_scope() as session:
         row = (await session.execute(stmt)).mappings().first()
@@ -360,20 +364,16 @@ async def _insert_uploaded_row(
     content_sha256: Optional[str] = None,
 ) -> dict:
     """INSERT one generated_media row for an uploaded blob (path-agnostic)."""
-    stmt = (
-        insert(GeneratedMedia)
-        .values(
-            scope_id=scope_id,
-            creator_id=user_id,
-            media_kind=kind,
-            mime=mime,
-            file_path=file_path,
-            file_size_bytes=file_size_bytes,
-            origin_kind=origin.kind,
-            conversation_id=origin.conversation_id,
-            content_sha256=content_sha256,
-        )
-        .returning(*_GENERATED_MEDIA_COLS)
+    stmt = _generated_media_insert_stmt(
+        scope_id=scope_id,
+        creator_id=user_id,
+        media_kind=kind,
+        mime=mime,
+        file_path=file_path,
+        file_size_bytes=file_size_bytes,
+        origin_kind=origin.kind,
+        conversation_id=origin.conversation_id,
+        content_sha256=content_sha256,
     )
     async with write_scope() as session:
         row = (await session.execute(stmt)).mappings().first()

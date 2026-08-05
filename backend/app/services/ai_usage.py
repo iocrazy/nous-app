@@ -160,12 +160,50 @@ _BUDGET_COLS = (
 )
 
 
+def _team_budget_select_stmt(team_id: Optional[int]):
+    """Column-level SELECT (never entity-level select(TeamAiBudgets) fed to
+    .mappings() — that maps each row to ONE entity-named key instead of one
+    key per column; see tests/test_scheduled_master_row_shape_e2e.py).
+    Factored out so tests can import and execute the REAL production
+    statement against a real engine."""
+    return select(*_BUDGET_COLS).where(TeamAiBudgets.team_id == team_id)
+
+
 async def get_team_budget(team_id: Any) -> Optional[dict[str, Any]]:
     """Return the team_ai_budgets row as a dict, or None if unset."""
-    stmt = select(*_BUDGET_COLS).where(TeamAiBudgets.team_id == _coerce_bigint(team_id))
+    stmt = _team_budget_select_stmt(_coerce_bigint(team_id))
     async with read_scope() as session:
         row = (await session.execute(stmt)).mappings().first()
     return dict(row) if row is not None else None
+
+
+def _team_budget_upsert_stmt(
+    team_id: Optional[int],
+    *,
+    monthly_budget_cents: Optional[Decimal],
+    updated_by_user_id: Optional[UUID],
+):
+    """ON CONFLICT (team_id) DO UPDATE, column-level RETURNING. Factored out
+    so tests can import and execute the REAL production statement against a
+    real engine (see _team_budget_select_stmt's docstring)."""
+    return (
+        pg_insert(TeamAiBudgets)
+        .values(
+            team_id=team_id,
+            monthly_budget_cents=monthly_budget_cents,
+            updated_by_user_id=updated_by_user_id,
+            updated_at=func.now(),
+        )
+        .on_conflict_do_update(
+            index_elements=[TeamAiBudgets.team_id],
+            set_={
+                "monthly_budget_cents": monthly_budget_cents,
+                "updated_by_user_id": updated_by_user_id,
+                "updated_at": func.now(),
+            },
+        )
+        .returning(*_BUDGET_COLS)
+    )
 
 
 async def upsert_team_budget(
@@ -180,23 +218,10 @@ async def upsert_team_budget(
         Decimal(str(monthly_budget_cents)) if monthly_budget_cents is not None else None
     )
     uid = UUID(str(updated_by_user_id)) if updated_by_user_id is not None else None
-    stmt = (
-        pg_insert(TeamAiBudgets)
-        .values(
-            team_id=_coerce_bigint(team_id),
-            monthly_budget_cents=budget,
-            updated_by_user_id=uid,
-            updated_at=func.now(),
-        )
-        .on_conflict_do_update(
-            index_elements=[TeamAiBudgets.team_id],
-            set_={
-                "monthly_budget_cents": budget,
-                "updated_by_user_id": uid,
-                "updated_at": func.now(),
-            },
-        )
-        .returning(*_BUDGET_COLS)
+    stmt = _team_budget_upsert_stmt(
+        _coerce_bigint(team_id),
+        monthly_budget_cents=budget,
+        updated_by_user_id=uid,
     )
     async with write_scope() as session:
         row = (await session.execute(stmt)).mappings().first()
