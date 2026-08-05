@@ -137,3 +137,71 @@ class LoginStateResponse(BaseModel):
 
 class LoginCloseResponse(BaseModel):
     closed: bool
+
+
+# --- publish (S3) -----------------------------------------------------------
+#
+# The intent is described in *channel* terms, never in a platform's own
+# vocabulary: "visibility: friends", not Douyin's `private_status` integer.
+# Translating that into whatever the platform's editor calls it is the job of
+# each publisher (design doc 6.1a). A field that only one platform understands
+# belongs in `platform_options`, which is passed through untouched.
+
+
+class MediaItem(BaseModel):
+    """One downloadable asset.
+
+    `url` is a short-lived signed URL issued by nous-backend and resolvable on
+    the docker network. This service never sees a filesystem path or a bucket
+    key: it has no storage volume, by design (design doc 4.2 step 4).
+    """
+
+    kind: str = Field(min_length=1, max_length=16)
+    url: str = Field(min_length=1, max_length=4096)
+    filename: str = Field(min_length=1, max_length=255)
+    content_type: str | None = None
+    size_bytes: int | None = None
+
+
+class PublishIntent(BaseModel):
+    content_type: str = Field(min_length=1, max_length=32)
+    media: list[MediaItem] = Field(default_factory=list)
+    title: str = ""
+    description: str = ""
+    topics: list[str] = Field(default_factory=list)
+    visibility: str = "public"
+    allow_download: bool = True
+    cover: MediaItem | None = None
+    # S3 publishes immediately. A non-null value is answered with `failed`
+    # rather than silently published now - a post that goes out twelve hours
+    # early is not a smaller failure than one that does not go out at all.
+    scheduled_at: datetime | None = None
+    platform_options: dict[str, Any] = Field(default_factory=dict)
+
+
+class PublishRequest(BaseModel):
+    platform: str = Field(min_length=1, max_length=32)
+    # Plaintext, decrypted by the backend. Memory only (spec 7.6).
+    storage_state: dict[str, Any]
+    environment: EnvironmentConfig | None = None
+    intent: PublishIntent
+
+
+class PublishResponse(BaseModel):
+    """A superset of `SessionResult`, so a caller that only knows the smaller
+    shape still parses the four fields it cares about."""
+
+    success: bool
+    status: SessionStatus
+    message: str
+    detail: dict[str, Any] = Field(default_factory=dict)
+    platform_item_id: str | None = None
+    published_url: str | None = None
+    # **The field that decides how often a user has to re-scan a QR code.**
+    # Platform sessions slide forward on use: the server hands back refreshed
+    # cookies every time. Dropping them means every publish spends down the
+    # original grant instead of renewing it, turning a three-month session into
+    # a two-week one (design doc 4.2 step 6). Returned on failure too, whenever
+    # a context got far enough to have one - the renewal may already have
+    # happened before whatever went wrong.
+    updated_storage_state: dict[str, Any] | None = None

@@ -15,6 +15,7 @@ from ..schemas import EnvironmentConfig, SessionResult
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle: login imports schemas only
     from ..login import LoginFlowSpec
+    from ..publish import Publisher
 
 SessionValidator = Callable[
     [dict[str, Any], "EnvironmentConfig | None"], Awaitable[SessionResult]
@@ -22,6 +23,7 @@ SessionValidator = Callable[
 
 _VALIDATORS: dict[str, SessionValidator] = {}
 _LOGIN_FLOWS: dict[str, "LoginFlowSpec"] = {}
+_PUBLISHERS: dict[str, "Publisher"] = {}
 
 
 def register(platform: str, validator: SessionValidator) -> None:
@@ -62,5 +64,28 @@ def login_platforms() -> list[str]:
     return sorted(_LOGIN_FLOWS)
 
 
+# Publishing is a third independent registry, and stores a coroutine rather than
+# a description of DOM steps. Design doc 6.1c: the second platform (Xiaohongshu)
+# is expected *not* to publish through the DOM at all - the browser signs the
+# request and the upload goes over plain HTTP. An abstraction that assumed
+# "publish == a sequence of clicks" would have to be rebuilt to accept it.
+
+
+def register_publisher(platform: str, publisher: "Publisher") -> None:
+    key = platform.strip().lower()
+    if key in _PUBLISHERS:
+        raise ValueError(f"publisher for '{key}' is already registered")
+    _PUBLISHERS[key] = publisher
+
+
+def get_publisher(platform: str) -> "Publisher | None":
+    return _PUBLISHERS.get((platform or "").strip().lower())
+
+
+def publish_platforms() -> list[str]:
+    return sorted(_PUBLISHERS)
+
+
 # Importing the module performs its registration.
 from . import douyin as _douyin  # noqa: E402,F401
+from . import douyin_publish as _douyin_publish  # noqa: E402,F401

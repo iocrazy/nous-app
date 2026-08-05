@@ -1,9 +1,14 @@
 """nous-browser HTTP surface.
 
-A health probe that actually probes, session validation (S1), and the QR login
-endpoints (S2). The service never touches the database and never sees an
-encryption key - it receives plaintext storage_state, computes, and forgets.
-That boundary is the security design, not an accident of staging.
+A health probe that actually probes, session validation (S1), the QR login
+endpoints (S2), and publishing (S3). The service never touches the database and
+never sees an encryption key - it receives plaintext storage_state, computes,
+and forgets. That boundary is the security design, not an accident of staging.
+
+The one thing it hands *back* is a refreshed `storage_state` after a publish.
+That is not a leak of the boundary but the point of it: the platform renews the
+session on use, and the caller is the only party that can encrypt and store the
+renewal.
 
 Error-shape rule, uniform across every endpoint: **a non-2xx body is always a
 `SessionResult`.** Callers parse one thing on the failure path no matter which
@@ -33,10 +38,13 @@ from .login_sessions import (
 )
 from .platforms import (
     get_login_flow,
+    get_publisher,
     get_validator,
     login_platforms,
+    publish_platforms,
     supported_platforms,
 )
+from .publish import run_publish
 from .redaction import scrub
 from .schemas import (
     HealthResponse,
@@ -45,6 +53,8 @@ from .schemas import (
     LoginStartResponse,
     LoginStateResponse,
     LoginStatusResponse,
+    PublishRequest,
+    PublishResponse,
     SessionResult,
     SessionStatus,
     SessionValidateRequest,
@@ -87,6 +97,24 @@ def _slots() -> asyncio.Semaphore:
     return _browser_slots
 
 
+def _error(
+    http_status: int,
+    session_status: SessionStatus,
+    message: str,
+    **detail: Any,
+) -> JSONResponse:
+    """The one non-2xx body shape, shared by every route."""
+    return JSONResponse(
+        status_code=http_status,
+        content=SessionResult(
+            success=False,
+            status=session_status,
+            message=message,
+            detail=detail,
+        ).model_dump(mode="json"),
+    )
+
+
 @app.get("/healthz", response_model=HealthResponse)
 async def healthz(response: Response) -> HealthResponse:
     """Report what is actually true.
@@ -125,14 +153,11 @@ async def post_session_validate(
         # Not a validation outcome - the caller asked for a platform we do not
         # implement. Same body shape so callers parse one thing, HTTP 400 so it
         # is not mistaken for "this account's session is bad".
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content=SessionResult(
-                success=False,
-                status=SessionStatus.FAILED,
-                message=f"unsupported platform '{request.platform}'",
-                detail={"supported": supported_platforms()},
-            ).model_dump(mode="json"),
+        return _error(
+            status.HTTP_400_BAD_REQUEST,
+            SessionStatus.FAILED,
+            f"unsupported platform '{request.platform}'",
+            supported=supported_platforms(),
         )
 
     slots = _slots()
@@ -165,24 +190,96 @@ async def post_session_validate(
         slots.release()
 
 
-# --- QR login (S2) ----------------------------------------------------------
+# --- publish (S3) -----------------------------------------------------------
+#
+# Slack over the orchestrator's own deadline. `run_publish` is cooperative - it
+# checks the clock between steps and returns, so the refreshed cookies still
+# make it back. This ceiling exists only for the case where a single Playwright
+# call wedges below that granularity, and firing it *does* forfeit the
+# storage_state write-back, which is why it sits well above the real budget
+# rather than near it.
+PUBLISH_HARD_TIMEOUT_SLACK_S = 120
 
 
-def _error(
-    http_status: int,
-    session_status: SessionStatus,
-    message: str,
-    **detail: Any,
-) -> JSONResponse:
-    return JSONResponse(
-        status_code=http_status,
-        content=SessionResult(
+@app.post(
+    "/session/publish",
+    response_model=PublishResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def post_session_publish(request: PublishRequest) -> Any:
+    """Publish one post through a platform's own web UI.
+
+    Long-running by nature: a few hundred megabytes of video, a form that only
+    renders once the transfer finishes, and a redirect to wait on. Every stage
+    inside is bounded, and the request as a whole is bounded twice over.
+    """
+    publisher = get_publisher(request.platform)
+    if publisher is None:
+        # Same `SessionResult` body as every other non-2xx here, and a 400 so it
+        # cannot be read as a verdict about the account.
+        return _error(
+            status.HTTP_400_BAD_REQUEST,
+            SessionStatus.FAILED,
+            f"no publisher for platform '{request.platform}'",
+            supported=publish_platforms(),
+        )
+
+    settings = get_settings()
+    slots = _slots()
+    try:
+        await asyncio.wait_for(slots.acquire(), timeout=settings.browser_slot_wait_s)
+    except asyncio.TimeoutError:
+        # Back-pressure, not a publish failure. A publish holds its slot for
+        # minutes, so saturation here is ordinary and the caller should requeue.
+        return PublishResponse(
             success=False,
-            status=session_status,
-            message=message,
-            detail=detail,
-        ).model_dump(mode="json"),
-    )
+            status=SessionStatus.FAILED,
+            message="browser pool saturated; no slot became available",
+            detail={
+                "error_kind": "pool_saturated",
+                "stage": "admission",
+                "platform": request.platform,
+            },
+        )
+
+    try:
+        return await asyncio.wait_for(
+            run_publish(
+                request.platform,
+                publisher,
+                request.storage_state,
+                request.environment,
+                request.intent,
+            ),
+            timeout=settings.publish_total_timeout_s + PUBLISH_HARD_TIMEOUT_SLACK_S,
+        )
+    except asyncio.TimeoutError:
+        logger.error("publish exceeded its hard ceiling for platform=%s", request.platform)
+        return PublishResponse(
+            success=False,
+            status=SessionStatus.TIMEOUT,
+            message="publish exceeded its hard timeout and was abandoned",
+            detail={
+                "stage": "hard_timeout",
+                "platform": request.platform,
+                # Say so explicitly: the session may have been renewed by the
+                # platform and this run threw that renewal away.
+                "storage_state_forfeited": True,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - run_publish is total; this is a bug net
+        logger.exception("publish raised for platform=%s", request.platform)
+        return PublishResponse(
+            success=False,
+            status=SessionStatus.FAILED,
+            message=scrub(f"{type(exc).__name__}: {exc}"),
+            detail={"stage": "endpoint", "platform": request.platform},
+        )
+    finally:
+        slots.release()
+
+
+# --- QR login (S2) ----------------------------------------------------------
 
 
 def _require_session(login_session_id: str) -> LoginSession | JSONResponse:

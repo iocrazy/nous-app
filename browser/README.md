@@ -224,6 +224,98 @@ longer would help.
 
 `{"closed": true}`. Idempotent. `404` for an unknown handle.
 
+### `POST /session/publish`
+
+Publishes one post through the platform's own web UI. Header
+`X-Internal-Token` — required. **Minutes, not seconds**: a few hundred megabytes
+of upload, a form that only renders once the transfer finishes, and a redirect
+to wait on.
+
+```json
+{
+  "platform": "douyin",
+  "storage_state": { "cookies": [], "origins": [] },
+  "environment": { "…": "same shape as /session/validate" },
+  "intent": {
+    "content_type": "video",
+    "media": [{"kind": "video", "url": "http://nous-kong:8000/…",
+               "filename": "clip.mp4", "content_type": "video/mp4",
+               "size_bytes": 12345678}],
+    "title": "Launch Day Recap",
+    "description": "…",
+    "topics": ["travel", "food"],
+    "visibility": "public",
+    "allow_download": true,
+    "cover": null,
+    "scheduled_at": null,
+    "platform_options": {}
+  }
+}
+```
+
+The intent is stated in **channel** terms, never a platform's own vocabulary
+(`visibility: "friends"`, not Douyin's native enum). Translating it is each
+publisher's job (design doc §6.1a); anything only one platform understands goes
+in `platform_options`, which is passed through untouched.
+
+Response (`200`), a superset of `SessionResult` so a caller that only knows the
+smaller shape still parses the four fields it cares about:
+
+```json
+{
+  "success": true,
+  "status": "published",
+  "message": "video published",
+  "detail": {"editor_variant": "version_2", "final_url": "…", "platform": "douyin"},
+  "platform_item_id": null,
+  "published_url": null,
+  "updated_storage_state": {"cookies": [ … ]}
+}
+```
+
+`status` is one of `published` / `session_invalid` / `timeout` / `proxy_failed` /
+`failed` — a subset of the same platform-neutral enum, asserted by a test that
+greps the publish modules for any status outside it.
+
+**`updated_storage_state` is the field that matters most.** Platform sessions
+slide forward on use: the server hands back refreshed cookies every time an
+authenticated page loads. Dropping them means every publish spends down the
+original grant instead of renewing it, turning a three-month session into a
+two-week one — with **no error anywhere** (design doc §4.2 step 6). It is
+therefore collected in a `finally`, so a publish that died at the last click
+still returns the renewal it earned. `null` means no context ever got far enough
+to have one; the field is always present, so a caller never has to tell "no
+renewal" from "field missing".
+
+**`platform_item_id` and `published_url` are null for Douyin.** Its
+post-publish redirect lands on the content manager and carries no identifier for
+the post just created. Reading the newest card off that list would be wrong for
+any account with a scheduled or concurrently-published post, so the fields stay
+null and `detail.final_url` carries what is actually known. Callers must tolerate
+this rather than treat it as a failed publish.
+
+Notable typed refusals:
+
+| `detail.reason` | When |
+|---|---|
+| `scheduling_not_supported` | `scheduled_at` is non-null. Refused, **not** published immediately — a post that goes out twelve hours early has already been seen by the time anyone notices |
+| `missing_video` / `too_many_videos` / `empty_title` | caught before any browser exists (§7.7) |
+| `bad_video_url` / `unsupported_video_type` | ditto; `file://` is rejected at the pure layer so no code path opens a URL with one |
+| `visibility_control_missing` | a **non-default** visibility had no control on the page. Refused rather than published with the platform default — see below |
+| `sms_verification_required` | the platform demanded an SMS code to publish; this endpoint has no channel to supply one |
+| `session_lost_during_publish` | bounced to a login screen mid-flight ⇒ `session_invalid`, not `timeout` |
+
+| Code | When | Body |
+|------|------|------|
+| `400` | platform has no publisher | `SessionResult` shape |
+| `401` / `503` | token missing / unset | FastAPI `detail` |
+| `422` | body fails schema validation | FastAPI `detail` |
+
+Pool saturation answers `200` with `failed` and `detail.error_kind =
+"pool_saturated"` — back-pressure, not a verdict on the account. A publish holds
+its browser slot for minutes, so saturation is ordinary and the caller should
+requeue.
+
 ## Keeping a login alive without leaking browsers
 
 A QR code is not data — it is a view of a live browser context, and the moment
@@ -347,6 +439,93 @@ admission to either browser pool is bounded; the QR read is a fixed number of
 attempts; the per-session lock wait is bounded. A saturated service fails fast
 instead of queueing forever.
 
+## How publishing works
+
+Same split again. `app/publish.py` owns the platform-neutral orchestration,
+`app/assets.py` the media staging, and `app/platforms/douyin_publish.py` the DOM
+work plus a set of **pure** judgements (`judge_editor_arrival`,
+`judge_upload_state`, `judge_publish_outcome`) that decide what state the page is
+in without touching Playwright.
+
+The registry stores a **coroutine**, not a list of DOM steps. Design doc §6.1c
+makes that a hard requirement: the second platform is expected to publish
+*without* the DOM at all — the browser signs the request and the upload goes
+over plain HTTP. An abstraction that assumed "publish == a sequence of clicks"
+would have to be rebuilt to accept it.
+
+The four stages run in this order because each is a filter that makes the next
+one cheaper, and the tests assert it by giving the later stages tripwires:
+
+1. **Check the intent** — pure, no I/O. A typo must not cost a browser launch.
+2. **Check the session**, by calling the platform's *one* registered validator
+   (§7.1), never a publish-flavoured second copy. Uploading a few hundred
+   megabytes and only then finding nobody is logged in is the most expensive
+   failure available here.
+3. **Stage the assets** — after the session check, so a dead account costs no
+   bandwidth. Downloaded into a temp directory; the **directory** is removed in
+   a `finally`, so an interrupted partial download leaves nothing behind either.
+4. **Hand off to the publisher.**
+
+Every stage draws from one shared `Deadline` rather than owning an independent
+timeout. Bounded stages that each restart the clock add up to an unbounded
+whole, which is the failure §7.2 is really about.
+
+### DOM notes (from the reference project's 2026-06 field record, §7.4)
+
+Each is marked at its point of use in `douyin_publish.py`, not just here — a note
+in a header is a note nobody reads while deleting the line it explains.
+
+- **The cover dialog has four hidden file inputs, and `.first` is the wrong
+  one.** `[0]`/`[1]` belong to the "AI reference image" panel; `[2]`/`[3]` are
+  the real cover upload. Using `.first` uploads successfully, reports success,
+  and produces a post with **no cover on it** — visible only on the published
+  feed. The code takes `.nth(1)` and *refuses to publish* if the dialog exposes
+  fewer inputs than expected, rather than falling back to a guess.
+- **Two publish-page URLs run in parallel gray releases** and the account does
+  not get to pick, so both are polled. Watching only one hangs about half the
+  time — and it hangs after the upload is already paid for.
+- **Onboarding coach-marks (`shepherd`) and the topic dropdown intercept
+  clicks.** They are *removed* before each attempt, not clicked through: a
+  forced click still lands on whatever is underneath, which on this page is
+  another control. Re-stripped every pass, because they are re-injected on
+  re-render.
+- **Semi renders a radio's label as `.semi-radio-addon`, often with
+  `pointer-events: none`.** Clicking it does not fail fast — it waits out the
+  full actionability timeout and *then* fails, which reads like a hung page. The
+  interactive element is the `.semi-radio` wrapper.
+- **Some controls are `visibility: hidden` yet functional** (the reference's
+  "use this BGM" button). `dom.click_element` escalates plain → `force` → DOM
+  `click()` via JS, in that order; the JS step is last because it skips every
+  actionability guarantee.
+- **Upload failures self-heal**: the failed card carries its own replacement
+  input, re-fed a bounded number of times.
+- **The editor form only renders once the video has finished transferring**
+  (~40s measured), so the form wait is minutes, not the conventional 30s — that
+  ceiling fails on every real video.
+
+One deliberate deviation from the reference: when the "upload failed" and
+"replace video" markers are *both* visible, this code judges **failed**. The
+mistakes are not symmetric — reading a failed upload as complete publishes a
+broken post a human then has to find and delete, while the other way costs one
+bounded re-upload.
+
+### Options fail closed
+
+`visibility` and `allow_download` are applied only when they **differ from the
+platform default** (`public`, downloads allowed). If a non-default value has no
+control on the page, the publish is **refused** rather than completed with the
+default.
+
+The asymmetry is the point: a post the user marked `private` going out publicly
+cannot be taken back, while a refusal leaves a draft that costs an inspection.
+Requests that already match the default are satisfied by touching nothing, so
+this only ever bites when the answer matters.
+
+⚠️ **These two controls are the least verified part of the file.** The reference
+project implements neither, so their selectors are inference from Semi Design's
+markup rather than observation — which is precisely why the missing-control path
+refuses instead of guessing.
+
 ## Configuration
 
 | Env var | Default | Meaning |
@@ -374,6 +553,19 @@ instead of queueing forever.
 | `BROWSER_LOGIN_REAPER_INTERVAL_S` | `15` | How often expired sessions are swept |
 | `BROWSER_LOGIN_TERMINAL_GRACE_S` | `120` | How long a released session stays queryable as a tombstone |
 | `BROWSER_LOGIN_STATE_GRACE_S` | `60` | One-shot extension granted on success, to collect `storage_state` |
+| `BROWSER_PUBLISH_TOTAL_TIMEOUT_S` | `1200` | Whole-publish budget; every stage below draws from it |
+| `BROWSER_PUBLISH_EDITOR_WAIT_S` | `180` | Wait for the upload page to hand over to the post editor |
+| `BROWSER_PUBLISH_UPLOAD_WAIT_S` | `900` | Wait for the video bytes to finish transferring |
+| `BROWSER_PUBLISH_UPLOAD_RETRIES` | `2` | Re-uploads after the page reports a failure |
+| `BROWSER_PUBLISH_POLL_INTERVAL_S` | `2.0` | Page-state sampling interval in the upload / publish loops |
+| `BROWSER_PUBLISH_FORM_TIMEOUT_MS` | `120000` | Wait for a form field to render (the editor renders only after the upload — a 30s ceiling fails on every real video) |
+| `BROWSER_PUBLISH_CLICK_TIMEOUT_MS` | `10000` | Per click/fill ceiling on the editor |
+| `BROWSER_PUBLISH_SETTLE_MS` | `1500` | Settle after an action whose effect is asynchronous |
+| `BROWSER_PUBLISH_CONFIRM_ATTEMPTS` | `20` | Publish-button attempts, each one self-healing |
+| `BROWSER_PUBLISH_CONFIRM_WAIT_S` | `5` | Per-attempt wait for the post-publish redirect |
+| `BROWSER_ASSET_DOWNLOAD_TIMEOUT_S` | `600` | Whole-file download budget per asset |
+| `BROWSER_ASSET_MAX_BYTES` | `2147483648` | Refuse anything larger, enforced against bytes actually received |
+| `BROWSER_ASSET_CHUNK_BYTES` | `1048576` | Streaming chunk size (assets are never held in memory whole) |
 
 ## Running locally
 
@@ -478,11 +670,25 @@ the container fails at runtime with `Executable doesn't exist`.
   makes launch scope equal account scope, and it avoids Chromium's requirement
   that per-context proxying be declared globally up front. S6's long-lived
   browser model has to move this down to `new_context()`.
-- **`/publish` is not implemented** — S3. Its first task is emitting
-  `published`, which the enum here already defines.
+- **No publish has ever reached a live account from here.** `/session/publish`
+  is exercised by unit tests against fakes, and its selectors come from the
+  reference project's field record rather than from a run against
+  `creator.douyin.com` — there is no account in this environment to run one
+  with. The **first real publish is the acceptance test**, and the two places to
+  watch are the cover dialog's input index and the visibility / download
+  controls (§"Options fail closed"). Everything else in the flow at least has a
+  documented sighting behind it.
+- **Publishing is video-only.** Image posts (图文), scheduling and BGM are
+  separate increments; `scheduled_at` is refused rather than approximated.
 - **No account-level serialisation yet** (design doc §7.5). Two concurrent
   sessions for one account can knock each other offline; the lock belongs on the
   backend side, which is the component that knows about accounts.
+- **The publish hard timeout forfeits the session renewal.** `run_publish` is
+  cooperative — it checks its deadline between steps and returns, so the
+  refreshed cookies still come back. The outer ceiling in `main.py` exists only
+  for a single Playwright call wedging below that granularity, and firing it
+  loses the renewal. It sits well above the real budget for that reason, and
+  says so via `detail.storage_state_forfeited`.
 - **`scanned` has not been observed against the live platform.** Reaching it
   needs a real phone scanning a real code, which no automated test here can do.
   The marker texts (`扫码成功` / `请在手机上确认` / …) are educated guesses; if

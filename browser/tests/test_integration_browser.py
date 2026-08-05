@@ -148,3 +148,80 @@ async def test_an_abandoned_login_really_closes_its_browser():
     # Not "the registry entry is gone" - the browser process itself.
     assert browser.is_connected() is False
     await registry.shutdown()
+
+
+# --- publish ----------------------------------------------------------------
+#
+# Only the pre-upload half is exercisable here: everything past the session
+# check needs a real logged-in account, and there is none in CI. That half is
+# still the one worth pinning against a real browser, because it is where the
+# expensive mistakes are avoided.
+
+
+def _publish_intent(media_url: str = "https://127.0.0.1:1/never-fetched.mp4"):
+    from app.schemas import MediaItem, PublishIntent
+
+    return PublishIntent(
+        content_type="video",
+        media=[MediaItem(kind="video", url=media_url, filename="clip.mp4")],
+        title="Integration Probe",
+    )
+
+
+@requires_browser
+async def test_a_publish_with_a_dead_session_stops_before_downloading_anything():
+    """The asset URL here is unreachable on purpose.
+
+    If the precheck ever moved after staging, this test would fail with a
+    download error instead of a precheck verdict - which is exactly the
+    regression worth catching, because in production the same reordering just
+    looks like slower failures and wasted bandwidth on dead accounts.
+    """
+    from app.platforms import get_publisher
+    from app.publish import run_publish
+
+    state = {
+        "cookies": [
+            {
+                "name": "sessionid",
+                "value": "definitely-not-a-real-session",
+                "domain": ".douyin.com",
+                "path": "/",
+            }
+        ],
+        "origins": [],
+    }
+    response = await run_publish(
+        "douyin", get_publisher("douyin"), state, None, _publish_intent()
+    )
+
+    assert response.success is False
+    assert response.detail["stage"] == "precheck"
+    assert response.status in {
+        SessionStatus.SESSION_INVALID,
+        SessionStatus.TIMEOUT,
+        SessionStatus.FAILED,
+        SessionStatus.PROXY_FAILED,
+    }
+
+
+@requires_browser
+async def test_a_publish_behind_a_dead_proxy_is_reported_as_a_proxy_failure():
+    """`proxy_failed`, never `session_invalid`: a proxy outage that reads as an
+    account problem sends every account behind that proxy off to re-scan a QR
+    code for something the user cannot fix."""
+    from app.platforms import get_publisher
+    from app.publish import run_publish
+    from app.schemas import EnvironmentConfig
+
+    state = {"cookies": [{"name": "sessionid", "value": "x", "domain": ".douyin.com", "path": "/"}]}
+    response = await run_publish(
+        "douyin",
+        get_publisher("douyin"),
+        state,
+        EnvironmentConfig(proxy_url="http://127.0.0.1:1"),
+        _publish_intent(),
+    )
+
+    assert response.status is SessionStatus.PROXY_FAILED
+    assert response.detail["stage"] == "precheck"

@@ -119,3 +119,139 @@ def driver_factory(driver: Any):
         return driver
 
     return factory
+
+
+# --- publish-side fakes -----------------------------------------------------
+#
+# The publish driver reads a page through a small, fixed slice of Playwright's
+# locator surface. Faking that slice is what lets the upload/editor/confirm
+# loops - where the deadline and the retry budget live - be tested without a
+# Chromium and without a Douyin account.
+#
+# Page *state* is scripted, not individual locators: a test says "these
+# selectors are on screen right now", optionally as a function of what the
+# driver has already done, which is how a self-healing retry is expressed
+# without inventing a call-order protocol.
+
+
+class FakeLocator:
+    """The locator methods the publish driver calls, and nothing else."""
+
+    def __init__(self, page: "FakePage", selector: str, *, index: int = 0):
+        self.page = page
+        self.selector = selector
+        self.index = index
+
+    @property
+    def first(self) -> "FakeLocator":
+        return self
+
+    def nth(self, index: int) -> "FakeLocator":
+        return FakeLocator(self.page, self.selector, index=index)
+
+    def locator(self, selector: str) -> "FakeLocator":
+        return FakeLocator(self.page, selector)
+
+    def filter(self, **_kwargs: Any) -> "FakeLocator":
+        return self
+
+    def get_by_text(self, text: str, exact: bool = False) -> "FakeLocator":
+        return FakeLocator(self.page, f"text={text}")
+
+    def get_by_role(self, _role: str, name: str = "", exact: bool = False) -> "FakeLocator":
+        return FakeLocator(self.page, f"text={name}")
+
+    async def count(self) -> int:
+        return self.page.count_of(self.selector)
+
+    async def is_visible(self) -> bool:
+        return self.selector in self.page.visible_now()
+
+    async def wait_for(self, state: str = "visible", timeout: Any = None) -> None:
+        self.page.waits.append((self.selector, state, timeout))
+        if not self.page.count_of(self.selector):
+            raise TimeoutError(f"Timeout waiting for {self.selector}")
+
+    async def click(self, timeout: Any = None, force: bool = False) -> None:
+        self.page.clicks.append(self.selector)
+
+    async def evaluate(self, _expression: str) -> None:
+        self.page.clicks.append(self.selector)
+
+    async def set_input_files(self, path: str, timeout: Any = None) -> None:
+        self.page.file_inputs.append((self.selector, path, self.index))
+
+    async def get_attribute(self, name: str) -> str | None:
+        return self.page.attributes.get(self.selector, {}).get(name)
+
+
+class FakeKeyboard:
+    def __init__(self) -> None:
+        self.typed: list[str] = []
+        self.pressed: list[str] = []
+
+    async def type(self, text: str) -> None:
+        self.typed.append(text)
+
+    async def press(self, key: str) -> None:
+        self.pressed.append(key)
+
+
+class FakePage:
+    """A scripted page.
+
+    `url` and `visible` accept either a value or a callable taking the page, so
+    a test can describe a page whose state depends on what the driver has done
+    to it so far (a retried upload, a click that landed) without scripting a
+    call sequence.
+    """
+
+    def __init__(
+        self,
+        url: Any = "https://creator.douyin.com/creator-micro/content/upload",
+        visible: Any = (),
+        counts: dict[str, int] | None = None,
+        attributes: dict[str, dict[str, str]] | None = None,
+    ):
+        self._url = url
+        self._visible = visible
+        self.counts = dict(counts or {})
+        self.attributes = attributes or {}
+        self.clicks: list[str] = []
+        self.file_inputs: list[tuple[str, str, int]] = []
+        self.waits: list[tuple[str, str, Any]] = []
+        self.navigations: list[str] = []
+        self.removed_overlays = 0
+        self.keyboard = FakeKeyboard()
+
+    @property
+    def url(self) -> str:
+        return self._url(self) if callable(self._url) else self._url
+
+    def visible_now(self) -> set[str]:
+        value = self._visible(self) if callable(self._visible) else self._visible
+        return set(value)
+
+    def count_of(self, selector: str) -> int:
+        if selector in self.counts:
+            return self.counts[selector]
+        return 1 if selector in self.visible_now() else 0
+
+    def locator(self, selector: str) -> FakeLocator:
+        return FakeLocator(self, selector)
+
+    def get_by_text(self, text: str, exact: bool = False) -> FakeLocator:
+        return FakeLocator(self, f"text={text}")
+
+    def get_by_role(self, _role: str, name: str = "", exact: bool = False) -> FakeLocator:
+        return FakeLocator(self, f"text={name}")
+
+    async def goto(self, url: str, **_kwargs: Any) -> None:
+        self.navigations.append(url)
+
+    async def evaluate(self, _script: str, _arg: Any = None) -> int:
+        self.removed_overlays += 1
+        return 0
+
+    async def wait_for_timeout(self, _ms: Any) -> None:
+        return None

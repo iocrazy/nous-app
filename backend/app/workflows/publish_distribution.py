@@ -1,4 +1,4 @@
-"""publish_distribution DBOS workflow — dual-channel publish (PR-D2).
+"""publish_distribution DBOS workflow — multi-channel publish (PR-D2 + S3).
 
 One workflow run = ONE publish batch (publish_tasks row). It iterates the
 batch's publish_task_accounts and publishes each via the account's channel:
@@ -8,6 +8,13 @@ batch's publish_task_accounts and publishes each via the account's channel:
   - 'h5': DouyinAdapter.generate_share_url → schema URL, status='pending_share'
     (the user finishes on their phone; the douyin webhook later flips the row
     to 'success' via share_id — see distribution_webhook.py)
+  - 'session' (spec 2026-08-04 §4.2): SessionAdapter.publish → nous-browser
+    drives the platform's own web UI with the account's storage_state →
+    status='success' immediately (nothing to wait for — unlike h5 there is no
+    second device in the loop). Three obligations ride with it, all in
+    ``_settle_session_outcome``: write the refreshed storage_state back, mark
+    ONLY genuinely-dead sessions needs_relogin, and never touch account status
+    on an infra failure.
 
 路线 C discipline (CLAUDE.md 任务系统架构纪律):
   - task_tracking is the UI's ONLY execution source. This module drives it via
@@ -51,9 +58,19 @@ def classify_batch(statuses: list[str]) -> str:
 
 
 def decide_channel(task_channel: str, account: dict) -> str:
-    """The official open API needs a live access_token; without one we can only
-    do the H5 share handoff. Requested 'official' with no token falls back to
-    'h5' rather than guaranteeing a failure."""
+    """Resolve which channel this row actually publishes through.
+
+    'session' (spec §4.2) requires the account to be session-bound — the
+    browser channel's whole credential IS the account's storage_state, so a
+    row asking for 'session' on an OAuth account has nothing to drive a browser
+    with. It degrades to 'h5' by the same logic 'official' does: the share
+    handoff is the one path that needs no per-account credential at all.
+
+    The official open API needs a live access_token; without one we can only do
+    the H5 share handoff. Requested 'official' with no token falls back to 'h5'
+    rather than guaranteeing a failure."""
+    if task_channel == "session" and account.get("auth_type") == "session":
+        return "session"
     if task_channel == "official" and account.get("access_token"):
         return "official"
     return "h5"
@@ -235,6 +252,239 @@ async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
         return "failed"
 
 
+# ── session channel (spec §4.2) ───────────────────────────────────────────
+
+
+def _media_filename(url: str) -> str:
+    """Filename for a servable media URL — what fail-fast checks the extension
+    of (§7.7). Derived from the URL path because that is what
+    ``get_resource_media_url`` hands back for BOTH shapes it produces (the
+    signed ``/media/<rel_path>`` URL and the object-store signed URL keep the
+    real path, extension included); asking the DB for ``resources.filename``
+    separately would be a second round-trip that can disagree with the URL
+    actually being published."""
+    from urllib.parse import unquote, urlparse
+
+    return unquote(urlparse(url).path).rsplit("/", 1)[-1] or "media"
+
+
+async def _build_publish_intent(account: dict, task: dict, repo):
+    """Batch row + account row → a platform-agnostic ``PublishIntent``.
+
+    Media URLs come from ``repo.get_resource_media_url`` — the SAME entry point
+    official/h5 use (spec §8 item 5, measured reachable from the browser
+    container). No new URL-signing logic: a second signer would drift from this
+    one's TTL and auth semantics, and the drift would only show up as an
+    expired link mid-upload.
+
+    ``visibility`` passes through as the SEMANTIC word, not Douyin's
+    ``private_status`` int — translating to platform-native values is the
+    browser-side uploader's job (§6.1 a/b). ``scheduled_at`` is deliberately NOT
+    forwarded: ``publish_tasks.scheduled_at`` has no dispatcher honouring it
+    today, so handing it to the platform's own scheduler would silently turn a
+    dead column into real scheduled posts nobody asked for.
+    """
+    from app.services.distribution.session_adapter import PublishIntent, PublishMedia
+
+    opts = _account_publish_opts(account, task)
+    content_type = task.get("content_type") or "video"
+    if content_type == "images":
+        urls = await _resolve_image_urls(task, repo)
+        if not urls:
+            raise RuntimeError("no servable media URL for resource")
+        media = tuple(
+            PublishMedia(kind="image", url=u, filename=_media_filename(u)) for u in urls
+        )
+    else:
+        url = await _resolve_video_url(account, task, repo)
+        if not url:
+            raise RuntimeError("no servable media URL for resource")
+        media = (PublishMedia(kind="video", url=url, filename=_media_filename(url)),)
+
+    cover = None
+    cover_id = task.get("cover_vertical_resource_id") or task.get(
+        "cover_horizontal_resource_id"
+    )
+    if cover_id:
+        cover_url = await repo.get_resource_media_url(int(cover_id))
+        if cover_url:
+            cover = PublishMedia(
+                kind="image", url=cover_url, filename=_media_filename(cover_url)
+            )
+
+    return PublishIntent(
+        content_type=content_type,
+        media=media,
+        title=opts["title"],
+        description=opts["description"],
+        topics=tuple(opts["topics"]),
+        visibility=task.get("visibility") or "public",
+        allow_download=opts["allow_download"],
+        cover=cover,
+    )
+
+
+async def _settle_session_outcome(
+    outcome, *, account_row_id: int, account_id: int, repo, accounts_repo
+) -> str:
+    """Persist everything one session publish produced, return the row status.
+
+    Three writes, in this order, each with its own reason for existing:
+
+    1. **storage_state write-back** (spec §4.2 step 6) whenever the browser
+       returned a fresh one — including on a FAILED publish, because the
+       platform rotates cookies on use regardless of whether the post landed.
+       Skipping it spends the original session's remaining life instead of
+       extending it: the difference between rescanning a QR code fortnightly
+       and quarterly.
+    2. **account status** — ``session_invalid`` means the account genuinely
+       needs a rescan. But an INFRA failure (container down, token not
+       configured, decrypt failed) means we never got an answer at all, and
+       must leave account status alone: one container outage would otherwise
+       mark every account in the batch as logged-out and make users rescan a
+       hundred healthy sessions (§7.8).
+    3. **publish row business status** — route C: business state lives in
+       ``publish_task_accounts.status``, never in the DBOS phase columns.
+    """
+    import json
+
+    from app.services.distribution.browser_client import SessionStatus, is_infra_failure
+
+    result = outcome.result.to_dict()
+    status = result["status"]
+    infra = is_infra_failure(result)
+
+    if outcome.updated_storage_state:
+        await accounts_repo.update_session_state(
+            account_id,
+            json.dumps(outcome.updated_storage_state, ensure_ascii=False),
+        )
+
+    if status == SessionStatus.SESSION_INVALID.value and not infra:
+        logger.warning(
+            f"[publish.session] account {account_id} session died — needs_relogin"
+        )
+        await accounts_repo.mark_needs_relogin(account_id)
+
+    if status == SessionStatus.PUBLISHED.value:
+        from datetime import datetime, timezone
+
+        await repo.set_account_status(
+            account_row_id,
+            "success",
+            platform_item_id=outcome.platform_item_id,
+            published_url=outcome.published_url,
+            # datetime OBJECT — same binding constraint as the official branch.
+            published_at=datetime.now(timezone.utc),
+        )
+        return "success"
+
+    detail = result.get("detail") or {}
+    # Why it failed must survive into the row: the UI's only handle on a failed
+    # account is this string, and 'proxy_failed' vs 'session_invalid' vs
+    # 'unreachable' lead the user to three different actions.
+    cause = detail.get("error_kind") or detail.get("reason") or status
+    message = result.get("message") or status
+    await repo.set_account_status(
+        account_row_id,
+        "failed",
+        error_message=f"[{cause}] {message}"[:500],
+    )
+    return "failed"
+
+
+async def _publish_one_account_session(
+    account: dict, task: dict, repo, accounts_repo, *, adapter=None, lock=None
+) -> str:
+    """Publish one account through the browser session channel.
+
+    Never raises (same contract as ``_publish_one_account``): one account's
+    failure is business state, and the loop must give every OTHER account its
+    chance. The workflow body still raises on a non-clean batch (§7.3).
+
+    Ordering is deliberate — everything that can fail cheaply happens BEFORE
+    the lock and the browser:
+
+        decrypt check → build intent (resolve media URLs) → fail-fast validate
+        → **acquire account lock** → publish → settle → release
+
+    ``validate_publish_intent`` before the lock is §7.7: opening a headed
+    browser and pushing a few hundred MB takes minutes, and a too-long title
+    must not cost that. Holding the lock for only the browser call keeps the
+    idle-in-transaction window (see ``session_lock``) as short as the work
+    allows.
+    """
+    from app.repositories.social_accounts_repository import (
+        SESSION_STATE_DECRYPT_FAILED,
+    )
+    from app.services.distribution.registry import get_session_adapter
+    from app.services.distribution.session_adapter import (
+        PublishOutcome,
+        SessionOpResult,
+        decrypt_failure_result,
+    )
+    from app.services.distribution.session_lock import account_session_lock
+
+    account_row_id = int(account["id"])
+    account_id = int(account["account_id"])
+    lock = lock or account_session_lock
+    try:
+        if account.get(SESSION_STATE_DECRYPT_FAILED):
+            # Ciphertext was there and would not open. INFRA failure, so
+            # _settle leaves account status alone — the platform session is
+            # probably fine, our key is not.
+            outcome = PublishOutcome(
+                result=SessionOpResult(
+                    **decrypt_failure_result(
+                        "session_state could not be decrypted",
+                        account_id=account_id,
+                    )
+                )
+            )
+            return await _settle_session_outcome(
+                outcome,
+                account_row_id=account_row_id,
+                account_id=account_id,
+                repo=repo,
+                accounts_repo=accounts_repo,
+            )
+
+        adapter = adapter or get_session_adapter(account.get("platform", "douyin"))
+        intent = await _build_publish_intent(account, task, repo)
+        problems = adapter.validate_publish_intent(intent)
+        if problems:
+            raise RuntimeError("publish intent rejected: " + "; ".join(problems))
+
+        async with lock(account_id) as acquired:
+            if not acquired:
+                # Another browser session holds this account. Two contexts on
+                # one account get each other kicked out (§7.5) — failing this
+                # row is strictly better than burning the session.
+                raise RuntimeError(
+                    "another browser session is already running for this account"
+                )
+            outcome = await adapter.publish(account, intent)
+            return await _settle_session_outcome(
+                outcome,
+                account_row_id=account_row_id,
+                account_id=account_id,
+                repo=repo,
+                accounts_repo=accounts_repo,
+            )
+    except Exception as e:  # noqa: BLE001 — per-account failure, keep looping
+        logger.warning(f"[publish.session] account row {account_row_id} failed: {e}")
+        await repo.set_account_status(
+            account_row_id, "failed", error_message=str(e)[:500]
+        )
+        return "failed"
+    finally:
+        # Belt and braces against a credential ever outliving this frame: the
+        # plaintext storage_state lives in this dict for the length of one
+        # publish and nowhere else (§7.6 — never on disk, never in a log, never
+        # in a DBOS step's input/output).
+        account.pop("session_state", None)
+
+
 @DBOS.step()
 async def mark_publish_processing_step(
     workflow_id: str, user_id: str | None = None
@@ -262,6 +512,7 @@ async def run_publish_accounts_step(task_id: int) -> dict[str, Any]:
     from app.repositories.publish_tasks_repository import PublishTasksRepository
     from app.repositories.social_accounts_repository import SocialAccountsRepository
     from app.services.distribution.credentials import get_douyin_credentials
+    from app.services.workflow_heartbeat import async_heartbeat_loop
 
     repo = PublishTasksRepository()
     accounts_repo = SocialAccountsRepository()
@@ -273,7 +524,14 @@ async def run_publish_accounts_step(task_id: int) -> dict[str, Any]:
         raise RuntimeError(f"publish task {task_id} has no accounts")
 
     creds = await get_douyin_credentials()
-    statuses = await _run_accounts(rows, accounts_repo, creds, task, repo)
+    # Heartbeat (§7.2): the session channel turns this step from "a few HTTP
+    # calls" into "one headed browser + one full video upload PER ACCOUNT",
+    # i.e. tens of minutes for a batch. Without a heartbeat the health
+    # classifier has only wall-clock to go on and must choose between killing
+    # legitimate long batches and staying silent long after a worker dies.
+    # Tolerates an empty workflow_id (unit tests, no DBOS runtime).
+    async with async_heartbeat_loop(workflow_id=DBOS.workflow_id or ""):
+        statuses = await _run_accounts(rows, accounts_repo, creds, task, repo)
     return {"statuses": statuses}
 
 
@@ -290,7 +548,19 @@ async def _run_accounts(rows, accounts_repo, creds, task: dict, repo) -> list[st
     only republishes what was reset. Any other status (success,
     pending_share, failed, cancelled) is carried straight through unchanged.
     Extracted from the @DBOS.step so it's unit-testable with fakes.
+
+    Channel dispatch reads the account through DIFFERENT secret boundaries:
+    'session' rows need the decrypted storage_state (``get_with_session``),
+    OAuth rows need the decrypted access_token (``get_with_tokens``). The two
+    reads deliberately don't overlap — each drops the other's secret columns,
+    so a row can never carry a credential its channel has no business with.
+    Only the few fields the channel needs are merged onto the publish row; a
+    blanket ``{**row, **account}`` would let ``social_accounts.id`` overwrite
+    the publish_task_accounts row id and settle the WRONG row.
     """
+    from app.repositories.social_accounts_repository import (
+        SESSION_STATE_DECRYPT_FAILED,
+    )
     from app.services.distribution.registry import get_adapter
 
     statuses: list[str] = []
@@ -299,9 +569,33 @@ async def _run_accounts(rows, accounts_repo, creds, task: dict, repo) -> list[st
         if status != "pending":
             statuses.append(status)
             continue
-        # get_with_tokens returns decrypted access_token for the publish call.
-        tokens = await accounts_repo.get_with_tokens(int(row["account_id"])) or {}
-        merged = {**row, "access_token": tokens.get("access_token")}
+        account_id = int(row["account_id"])
+        task_channel = row.get("channel", "h5")
+        if task_channel == "session":
+            acct = await accounts_repo.get_with_session(account_id) or {}
+            merged = {
+                **row,
+                "auth_type": acct.get("auth_type"),
+                "session_state": acct.get("session_state"),
+                SESSION_STATE_DECRYPT_FAILED: acct.get(SESSION_STATE_DECRYPT_FAILED),
+                "environment": acct.get("environment"),
+            }
+        else:
+            # get_with_tokens returns decrypted access_token for the publish call.
+            tokens = await accounts_repo.get_with_tokens(account_id) or {}
+            merged = {
+                **row,
+                "access_token": tokens.get("access_token"),
+                "auth_type": tokens.get("auth_type"),
+            }
+        if decide_channel(task_channel, merged) == "session":
+            statuses.append(
+                await _publish_one_account_session(merged, task, repo, accounts_repo)
+            )
+            continue
+        # Everything else (including a 'session' row that degraded — see
+        # decide_channel) goes down the OAuth/H5 path, which re-runs
+        # decide_channel on the same dict and therefore agrees with us.
         adapter = get_adapter(row.get("platform", "douyin"), creds)
         statuses.append(await _publish_one_account(merged, adapter, task, repo))
     return statuses

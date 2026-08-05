@@ -16,6 +16,7 @@ import pytest
 
 from app.core import secret_box
 from app.services.distribution.browser_client import (
+    PublishResult,
     SessionEnvironment,
     SessionErrorKind,
     SessionOpResult,
@@ -58,6 +59,26 @@ class FakeBrowserClient:
             }
         )
         return self.result
+
+    async def publish(self, platform, storage_state, intent, environment=None):
+        self.calls.append(
+            {
+                "op": "publish",
+                "platform": platform,
+                "storage_state": storage_state,
+                "intent": intent,
+                "environment": environment,
+            }
+        )
+        return self.publish_result
+
+
+class FakePublishClient(FakeBrowserClient):
+    """``publish`` 的返回可预设；``validate_session`` 继承自基类。"""
+
+    def __init__(self, publish_result):
+        super().__init__()
+        self.publish_result = publish_result
 
 
 def _account(**over) -> dict:
@@ -353,10 +374,86 @@ def test_intent_payload_has_no_dom_mechanism_fields():
 # ── 抽象形状 / registry ─────────────────────────────────────
 
 
-async def test_publish_signature_is_fixed_but_lands_in_s3():
-    # 一个 publish() 覆盖全部内容形态（intent.content_type），不是每种一个方法
-    with pytest.raises(NotImplementedError):
-        await _adapter().publish(_account(), _video_intent())
+# ── publish (S3) ────────────────────────────────────────────
+
+
+def _published(**over) -> PublishResult:
+    base = dict(
+        result=SessionOpResult(
+            success=True, status=SessionStatus.PUBLISHED.value, message="ok"
+        ),
+        platform_item_id="item-1",
+        published_url="https://www.douyin.com/video/item-1",
+        updated_storage_state={"cookies": [{"name": "sessionid", "value": "rotated"}]},
+    )
+    base.update(over)
+    return PublishResult(**base)  # type: ignore[arg-type]
+
+
+async def test_publish_sends_plaintext_state_and_intent_payload():
+    client = FakePublishClient(_published())
+    outcome = await _adapter(client).publish(_account(), _video_intent())
+
+    call = client.calls[0]
+    assert call["op"] == "publish"
+    assert call["storage_state"] == STORAGE_STATE  # 明文对象，密钥不出 backend
+    # 送出去的是 intent 的 payload（"发什么"），不是 PublishIntent 对象本身
+    assert call["intent"]["title"] == "Launch"
+    assert call["intent"]["media"][0]["url"] == "https://s3/x.mp4"
+    assert outcome.result.status == SessionStatus.PUBLISHED.value
+    assert outcome.platform_item_id == "item-1"
+    assert outcome.updated_storage_state["cookies"][0]["value"] == "rotated"
+
+
+async def test_publish_carries_updated_storage_state_even_on_failure():
+    """会话滑动续期与"这次发成功了没有"无关 —— 失败也要把新 cookie 带回来，
+    否则失败一次就白白烧掉一截会话寿命（§4.2 第 6 步）。"""
+    client = FakePublishClient(
+        _published(
+            result=SessionOpResult(
+                success=False, status=SessionStatus.FAILED.value, message="dom timeout"
+            ),
+            platform_item_id=None,
+            published_url=None,
+        )
+    )
+    outcome = await _adapter(client).publish(_account(), _video_intent())
+
+    assert outcome.result.success is False
+    assert outcome.updated_storage_state is not None
+
+
+async def test_publish_rejects_bad_intent_before_calling_the_browser():
+    """§7.7 fail-fast：参数错误不该等到浏览器起来、视频传完才发现。"""
+    client = FakePublishClient(_published())
+    outcome = await _adapter(client).publish(_account(), _video_intent(title="  "))
+
+    assert client.calls == []  # 浏览器一次都没被调用
+    assert outcome.result.status == SessionStatus.FAILED.value
+    assert outcome.result.detail["reason"] == "invalid_publish_intent"
+    assert is_infra_failure(outcome.result.to_dict()) is False
+
+
+async def test_publish_without_session_state_is_session_invalid_not_infra():
+    client = FakePublishClient(_published())
+    outcome = await _adapter(client).publish(
+        _account(session_state=None), _video_intent()
+    )
+
+    assert client.calls == []
+    assert outcome.result.status == SessionStatus.SESSION_INVALID.value
+    assert outcome.result.detail["reason"] == "no_session_state"
+
+
+async def test_publish_on_oauth_account_fails_without_touching_the_browser():
+    client = FakePublishClient(_published())
+    outcome = await _adapter(client).publish(
+        _account(auth_type="oauth"), _video_intent()
+    )
+
+    assert client.calls == []
+    assert outcome.result.status == SessionStatus.FAILED.value
+    assert outcome.result.detail["reason"] == "auth_type_mismatch"
 
 
 def test_unsupported_platform_rejected_at_construction():

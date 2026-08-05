@@ -61,6 +61,11 @@ DEFAULT_LOGIN_START_TIMEOUT_SECONDS = 90.0
 DEFAULT_LOGIN_POLL_TIMEOUT_SECONDS = 20.0
 DEFAULT_LOGIN_STATE_TIMEOUT_SECONDS = 30.0
 DEFAULT_LOGIN_CLOSE_TIMEOUT_SECONDS = 15.0
+# 发布 (S3)。一次调用里包含：起 context + 会话校验 + 下载素材到 /tmp +
+# DOM 上传（几百 MB）+ 等发布页表单渲染（§7.4 实测约 40s，等待给到 120s）+
+# 提交。因此它比其余端点大一个量级 —— 但**仍然有上界**（§7.2）：15 分钟没
+# 回来就是卡住了，继续等只会把 DBOS step 也一起挂死。
+DEFAULT_PUBLISH_TIMEOUT_SECONDS = 900.0
 # 连接握手与业务处理分开设上界：容器没起来时应当 5s 内就报 unreachable，
 # 而不是耗满 90s 的读超时。
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 5.0
@@ -115,6 +120,12 @@ class SessionErrorKind(str, Enum):
     TIMEOUT = "timeout"  # 超过上界仍未返回
     SERVER_ERROR = "server_error"  # 5xx
     BAD_RESPONSE = "bad_response"  # 非 JSON / 缺字段 / 非法 status 值
+    # 浏览器容器的并发槽位耗尽（browser/app/main.py 的 admission 背压）。它由
+    # **对端**产生，backend 只是必须认得：不在本枚举里的 error_kind 会让
+    # ``is_infra_failure`` 判 False，等于把"没排上队"当成一个真实结论。今天
+    # 它恰好配 status=failed 所以不会误伤账号，但那是巧合而非保证 —— 一旦对端
+    # 改成配 session_invalid，饱和的那一轮就会把账号集体标成掉线。
+    POOL_SATURATED = "pool_saturated"
     # Fernet 密钥错配 / 轮换没做完。**由 repository 层产生**：
     # SocialAccountsRepository.get_with_session 解 session_state 失败时抛错，
     # 调用方（S3 发布 step / S5 巡检）捕获后调
@@ -137,6 +148,20 @@ _VALIDATE_STATUSES = frozenset(
     }
 )
 
+
+# /session/publish 允许返回的 status 值（契约已定死）。
+# ``published`` 是 S3 才出现的终态 —— §7.8 的「已知待办」明写它必须在 S3
+# 第一时间补进两侧枚举，否则**发布成功会被判成未知状态**（然后按坏响应处理，
+# 于是一次真实成功的发布被记成失败，用户很可能手动重发一遍）。
+_PUBLISH_STATUSES = frozenset(
+    {
+        SessionStatus.PUBLISHED.value,
+        SessionStatus.SESSION_INVALID.value,
+        SessionStatus.TIMEOUT.value,
+        SessionStatus.PROXY_FAILED.value,
+        SessionStatus.FAILED.value,
+    }
+)
 
 # 扫码登录 (/session/login/*) 允许返回的 status 值（契约已定死）。
 LOGIN_STATUSES = frozenset(
@@ -341,6 +366,47 @@ class LoginState:
 
 
 @dataclass(frozen=True)
+class PublishResult:
+    """``POST /session/publish`` 的传输层结果 —— 信封 + 三个发布专属字段。
+
+    与 ``LoginState`` 同款分层：本模块拥有**传输形态**，业务形态是
+    ``session_adapter.PublishOutcome``（同样三个字段，由 adapter 包一层）。
+    两者不合并，是为了让"浏览器回了什么"与"业务该怎么办"各有一个可独立
+    演进的类型 —— 例如将来加平台侧统计字段时，只动这里不惊动业务层。
+
+    ``updated_storage_state`` 是**明文凭证**（spec §7.6）：只允许流向
+    ``secret_box.encrypt`` 后入库。``__repr__`` 因此把它整个抹掉 —— loguru
+    的 f-string 会把 repr 带进日志，是最容易的泄漏路径。
+    """
+
+    result: SessionOpResult
+    platform_item_id: Optional[str] = None
+    published_url: Optional[str] = None
+    updated_storage_state: Optional[dict[str, Any]] = None
+
+    @property
+    def success(self) -> bool:
+        return self.result.success
+
+    @property
+    def status(self) -> str:
+        return self.result.status
+
+    @property
+    def is_infra_failure(self) -> bool:
+        return self.result.is_infra_failure
+
+    def __repr__(self) -> str:  # pragma: no cover - 防呆
+        return (
+            f"PublishResult(status={self.status!r}, "
+            f"platform_item_id={self.platform_item_id!r}, "
+            f"published_url={'set' if self.published_url else 'none'}, "
+            f"updated_storage_state="
+            f"{'set' if self.updated_storage_state else 'none'})"
+        )
+
+
+@dataclass(frozen=True)
 class BrowserHealth:
     """``GET /healthz`` 的类型化结果 —— 同样不抛异常。
 
@@ -413,6 +479,7 @@ class BrowserClient:
         validate_timeout: float = DEFAULT_VALIDATE_TIMEOUT_SECONDS,
         health_timeout: float = DEFAULT_HEALTH_TIMEOUT_SECONDS,
         connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+        publish_timeout: float = DEFAULT_PUBLISH_TIMEOUT_SECONDS,
     ) -> None:
         from app.core.config import settings
 
@@ -423,6 +490,7 @@ class BrowserClient:
         self._validate_timeout = validate_timeout
         self._health_timeout = health_timeout
         self._connect_timeout = connect_timeout
+        self._publish_timeout = publish_timeout
 
     # ── 配置 ────────────────────────────────────────────────
 
@@ -646,6 +714,103 @@ class BrowserClient:
             status=raw_status,
             message=str(data.get("message") or ""),
             detail=detail,
+        )
+
+    # ── /session/publish (S3 发布) ──────────────────────────
+
+    async def publish(
+        self,
+        platform: str,
+        storage_state: Mapping[str, Any],
+        intent: Mapping[str, Any],
+        environment: Optional[SessionEnvironment] = None,
+    ) -> PublishResult:
+        """``POST /session/publish``。
+
+        ``intent`` 是 ``session_adapter.PublishIntent.to_payload()`` 的产物：
+        平台无关的"发什么"，**不含任何执行指令**。浏览器侧按 ``platform``
+        选执行档位（DOM 木偶戏 / 签名机+裸 HTTP / 外包 CLI），本模块不知道也
+        不需要知道用的是哪一档（§6.1 硬要求 b）。
+
+        与 ``validate_session`` 的两点不同：
+
+        1. **读超时大一个量级**（``DEFAULT_PUBLISH_TIMEOUT_SECONDS``），因为
+           一次调用要传完整个视频。仍然是上界，不是"等到好为止"。
+        2. **回程带 ``updated_storage_state``** —— 平台会话滑动续期，这是
+           spec §4.2 第 6 步"决定账号是两周还是三个月扫一次码"的那一行。
+           调用方拿到后必须重新加密入库。
+
+        永不抛传输异常；参数非法才 raise ``ValueError``。
+        """
+        if not isinstance(storage_state, Mapping) or not storage_state:
+            raise ValueError("storage_state must be a non-empty JSON object")
+        if not isinstance(intent, Mapping) or not intent:
+            raise ValueError("intent must be a non-empty object")
+        env = environment or SessionEnvironment()
+        payload = {
+            "platform": platform,
+            "storage_state": dict(storage_state),
+            "environment": env.to_payload(),
+            "intent": dict(intent),
+        }
+        try:
+            data = await self._call(
+                "POST",
+                "/session/publish",
+                read_timeout=self._publish_timeout,
+                payload=payload,
+            )
+        except _TransportFailure as failure:
+            logger.warning(
+                f"[browser.publish] platform={platform} "
+                f"{failure.kind.value}: {failure.message}"
+            )
+            # 传输失败 == 我们不知道那边发出去了没有。仍然报 error_kind（基建
+            # 失败 → 账号状态一律不动）—— 把一次容器重启记成"账号掉线"，会让
+            # 用户为一个健康的会话重扫码。
+            return PublishResult(result=self._transport_result(failure))
+
+        raw_status = data.get("status")
+        if raw_status not in _PUBLISH_STATUSES:
+            # 不猜。猜错的方向两边都很坏：把 published 猜成失败会诱发重复发布，
+            # 把失败猜成 published 会让用户以为发出去了。
+            logger.warning(
+                f"[browser.publish] platform={platform} illegal status={raw_status!r}"
+            )
+            return PublishResult(
+                result=_failure(
+                    SessionStatus.FAILED,
+                    SessionErrorKind.BAD_RESPONSE,
+                    f"browser service returned unknown status {raw_status!r}",
+                )
+            )
+
+        # success 由 status 推导（与 validate_session / _login_snapshot 同款单一
+        # 真相源）：只有 published 算成功。
+        detail = data.get("detail")
+        detail = dict(detail) if isinstance(detail, Mapping) else {}
+        updated = data.get("updated_storage_state")
+        # 空对象按"没有回传"处理：写一个空 storage_state 回库等于把账号的会话
+        # 抹掉，比不写回坏得多。
+        updated_state = (
+            dict(updated) if isinstance(updated, Mapping) and updated else None
+        )
+        item_id = data.get("platform_item_id")
+        published_url = data.get("published_url")
+        logger.info(
+            f"[browser.publish] platform={platform} status={raw_status} "
+            f"state_refreshed={bool(updated_state)}"
+        )
+        return PublishResult(
+            result=SessionOpResult(
+                success=raw_status == SessionStatus.PUBLISHED.value,
+                status=raw_status,
+                message=str(data.get("message") or ""),
+                detail=detail,
+            ),
+            platform_item_id=str(item_id) if item_id else None,
+            published_url=str(published_url) if published_url else None,
+            updated_storage_state=updated_state,
         )
 
     # ── /session/login/* (S2 扫码登录) ──────────────────────
@@ -933,6 +1098,7 @@ __all__ = [
     "DEFAULT_LOGIN_POLL_TIMEOUT_SECONDS",
     "DEFAULT_LOGIN_STATE_TIMEOUT_SECONDS",
     "DEFAULT_LOGIN_CLOSE_TIMEOUT_SECONDS",
+    "DEFAULT_PUBLISH_TIMEOUT_SECONDS",
     "INTERNAL_TOKEN_HEADER",
     "LOGIN_FAILURE_STATUSES",
     "LOGIN_PENDING_STATUSES",
@@ -941,6 +1107,7 @@ __all__ = [
     "BrowserHealth",
     "LoginSnapshot",
     "LoginState",
+    "PublishResult",
     "SessionEnvironment",
     "SessionErrorKind",
     "SessionOpResult",

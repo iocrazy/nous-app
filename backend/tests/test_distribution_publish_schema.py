@@ -101,3 +101,13 @@ def test_video_one_to_one_still_enforces_resource_count():
             account_ids=["1", "2"],
             distribution_mode="one_to_one",
         )
+
+
+def test_session_is_an_accepted_publish_channel():
+    """mig 403 早就让 publish_task_accounts.channel 收 'session'；请求 schema
+    不放行的话，唯一能走到浏览器发布路径的取值会被静默拒绝，整条通道从 API
+    看等于不存在。"""
+    body = PublishTaskCreate(
+        title="Launch", account_ids=["1"], resource_ids=["30"], channel="session"
+    )
+    assert body.channel == "session"
