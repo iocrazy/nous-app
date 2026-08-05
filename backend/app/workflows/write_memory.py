@@ -36,18 +36,36 @@ async def load_recent_messages_step(session_id: str) -> dict[str, list[str]]:
     sender_type→role and body->>'text'→content so the downstream shape
     stays identical to what the legacy table used to hand back.
     """
-    from app.db import engine as db_engine
+    from sqlalchemy import case, func, select
+
+    from app.db.session import read_scope
+    from app.models import Messages
 
     sid = int(session_id)
-    rows = await db_engine.fetch_all(
-        "SELECT CASE WHEN sender_type = 'agent' THEN 'assistant' "
-        "            ELSE sender_type END AS role, "
-        "       COALESCE(body->>'text', '') AS content "
-        "FROM public.messages "
-        "WHERE conversation_id = :sid AND deleted_at IS NULL "
-        "ORDER BY seq DESC LIMIT :lim",
-        {"sid": sid, "lim": _RECENT_TURNS_PER_CHANNEL * 4},
-    )
+    async with read_scope() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(
+                        case(
+                            (Messages.sender_type == "agent", "assistant"),
+                            else_=Messages.sender_type,
+                        ).label("role"),
+                        func.coalesce(Messages.body["text"].astext, "").label(
+                            "content"
+                        ),
+                    )
+                    .where(
+                        Messages.conversation_id == sid,
+                        Messages.deleted_at.is_(None),
+                    )
+                    .order_by(Messages.seq.desc())
+                    .limit(_RECENT_TURNS_PER_CHANNEL * 4)
+                )
+            )
+            .mappings()
+            .all()
+        )
     user_msgs: list[str] = []
     asst_msgs: list[str] = []
     for row in rows:
@@ -206,13 +224,24 @@ async def _resolve_team_workspace(session_id: str) -> Optional[str]:
     lookup fails — never blocks the write on a metadata read.
     """
     try:
-        from app.db import engine as db_engine
+        from sqlalchemy import select
 
-        row = await db_engine.fetch_one(
-            "SELECT scope_id AS team_id FROM public.conversations WHERE id = :sid",
-            # BIGINT snowflake carried as str — coerce for asyncpg (mig 232)
-            {"sid": int(session_id)},
-        )
+        from app.db.session import read_scope
+        from app.models import Conversations
+
+        # BIGINT snowflake carried as str — coerce for asyncpg (mig 232)
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(Conversations.scope_id.label("team_id")).where(
+                            Conversations.id == int(session_id)
+                        )
+                    )
+                )
+                .mappings()
+                .first()
+            )
         team_id = row.get("team_id") if row else None
         return f"team-{team_id}" if team_id else None
     except Exception:  # noqa: BLE001

@@ -46,20 +46,30 @@ async def reconcile_stranded_runs() -> dict[str, int]:
 
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=HEARTBEAT_DEAD_SECONDS)
 
-    # Single UPDATE (direct PG via SQLAlchemy): mark every stranded run dead;
-    # rowcount = how many we touched. Replaces the supabase-py
-    # select-then-update (httpx CLOSE_WAIT leak, Issue #199 Bug C).
-    n = await db_engine.execute(
-        "UPDATE public.agent_runs SET liveness_state = 'dead', "
-        "status = 'failed', ended_at = :ended, error_code = 'stranded_on_restart', "
-        "error_message = :msg "
-        "WHERE status = 'running' AND heartbeat_at < :cutoff",
-        {
-            "ended": datetime.now(timezone.utc),
-            "msg": "Backend restarted while this run was in flight; no heartbeat for >2 minutes.",
-            "cutoff": cutoff,
-        },
-    )
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import AgentRuns
+
+    # Single UPDATE (ORM, Phase B4): mark every stranded run dead; rowcount =
+    # how many we touched. Replaces the supabase-py select-then-update (httpx
+    # CLOSE_WAIT leak, Issue #199 Bug C).
+    async with write_scope() as session:
+        result = await session.execute(
+            update(AgentRuns)
+            .where(AgentRuns.status == "running", AgentRuns.heartbeat_at < cutoff)
+            .values(
+                liveness_state="dead",
+                status="failed",
+                ended_at=datetime.now(timezone.utc),
+                error_code="stranded_on_restart",
+                error_message=(
+                    "Backend restarted while this run was in flight; no "
+                    "heartbeat for >2 minutes."
+                ),
+            )
+        )
+        n = result.rowcount
     if n > 0:
         logger.warning(
             f"[liveness-reconcile] marked {n} stranded run(s) dead on startup"

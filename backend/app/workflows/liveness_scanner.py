@@ -68,7 +68,7 @@ SCANNER_LOCK_ID = 0xA8050001
 async def liveness_scan_step() -> dict[str, Any]:
     """One pass over running agent_runs. Returns counts per transition
     so the operator dashboard / logs can see scanner activity."""
-    # Counts via the asyncpg pool (direct PG, no httpx) — supabase-py's
+    # ORM read (Phase B4) via the SQLAlchemy engine/session — supabase-py's
     # PostgREST/Kong path leaked a CLOSE_WAIT connection per call (known
     # httpcore bug; Issue #199 Bug C / 2026-05-22 incident). At-most-once
     # write per row is enforced by the WHERE liveness_state = <expected>
@@ -90,14 +90,33 @@ async def liveness_scan_step() -> dict[str, Any]:
     if not db_engine.is_configured():
         return counts
 
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import AgentRuns
+
     # Pull the candidate set in one trip (cap at 200 — in practice
     # mediahub doesn't have hundreds of running agent_runs at once).
-    rows = await db_engine.fetch_all(
-        "SELECT id, status, liveness_state, heartbeat_at, "
-        "last_useful_action_at, liveness_changed_at, continuation_attempt "
-        "FROM public.agent_runs "
-        "WHERE status = 'running' LIMIT 200"
-    )
+    async with read_scope() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(
+                        AgentRuns.id,
+                        AgentRuns.status,
+                        AgentRuns.liveness_state,
+                        AgentRuns.heartbeat_at,
+                        AgentRuns.last_useful_action_at,
+                        AgentRuns.liveness_changed_at,
+                        AgentRuns.continuation_attempt,
+                    )
+                    .where(AgentRuns.status == "running")
+                    .limit(200)
+                )
+            )
+            .mappings()
+            .all()
+        )
     counts["scanned"] = len(rows)
 
     for row in rows:
@@ -168,14 +187,18 @@ def _parse_ts(value: Optional[str]) -> Optional[datetime]:
 async def _transition(run_id: Any, expected: str, target: str) -> None:
     """CAS update — only writes if liveness_state is still `expected`.
     Idempotent under concurrent scanners."""
-    from app.db import engine as db_engine
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import AgentRuns
 
     try:
-        await db_engine.execute(
-            "UPDATE public.agent_runs SET liveness_state = :target "
-            "WHERE id = :id AND liveness_state = :expected",
-            {"target": target, "id": run_id, "expected": expected},
-        )
+        async with write_scope() as session:
+            await session.execute(
+                update(AgentRuns)
+                .where(AgentRuns.id == run_id, AgentRuns.liveness_state == expected)
+                .values(liveness_state=target)
+            )
     except Exception as exc:
         logger.warning(
             f"[liveness-scanner] transition {run_id} {expected}->{target} failed: {exc}"
@@ -187,16 +210,21 @@ async def _recover_from_stuck(run_id: Any) -> None:
     recovery from stuck counts toward MAX_CONTINUATIONS so a chronically-flapping
     run is eventually judged dead. Idempotent under concurrent scanners (CAS on
     liveness_state='stuck')."""
-    from app.db import engine as db_engine
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import AgentRuns
 
     try:
-        await db_engine.execute(
-            "UPDATE public.agent_runs "
-            "SET liveness_state = 'running', "
-            "continuation_attempt = continuation_attempt + 1 "
-            "WHERE id = :id AND liveness_state = 'stuck'",
-            {"id": run_id},
-        )
+        async with write_scope() as session:
+            await session.execute(
+                update(AgentRuns)
+                .where(AgentRuns.id == run_id, AgentRuns.liveness_state == "stuck")
+                .values(
+                    liveness_state="running",
+                    continuation_attempt=AgentRuns.continuation_attempt + 1,
+                )
+            )
     except Exception as exc:
         logger.warning(f"[liveness-scanner] recover-from-stuck {run_id} failed: {exc}")
 
@@ -205,22 +233,28 @@ async def _mark_dead(run_id: Any, expected_state: str, *, reason: str) -> None:
     """Mark a run dead + flip status='failed' with the liveness reason.
     The bridge trigger from migration 206 picks this up and emits a
     chat row into any associated issue thread."""
-    from app.db import engine as db_engine
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import AgentRuns
 
     try:
-        await db_engine.execute(
-            "UPDATE public.agent_runs SET liveness_state = 'dead', "
-            "status = 'failed', ended_at = :ended, error_code = :reason, "
-            "error_message = :msg "
-            "WHERE id = :id AND liveness_state = :expected AND status = 'running'",
-            {
-                "ended": datetime.now(timezone.utc),
-                "reason": reason,
-                "msg": f"Marked dead by liveness scanner: {reason}",
-                "id": run_id,
-                "expected": expected_state,
-            },
-        )
+        async with write_scope() as session:
+            await session.execute(
+                update(AgentRuns)
+                .where(
+                    AgentRuns.id == run_id,
+                    AgentRuns.liveness_state == expected_state,
+                    AgentRuns.status == "running",
+                )
+                .values(
+                    liveness_state="dead",
+                    status="failed",
+                    ended_at=datetime.now(timezone.utc),
+                    error_code=reason,
+                    error_message=f"Marked dead by liveness scanner: {reason}",
+                )
+            )
     except Exception as exc:
         logger.warning(f"[liveness-scanner] mark dead {run_id} failed: {exc}")
 

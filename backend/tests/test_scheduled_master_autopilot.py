@@ -2,16 +2,26 @@
 
 Covers the pure helpers (timezone-aware next-fire, stale detection) and the
 consecutive-failure state machine (reset on success, untouched by skips,
-auto-pause at threshold) with a faked db engine — no real DB.
+auto-pause at threshold) with a faked ORM session — no real DB.
+
+ORM (Phase B4): all user_schedules reads/writes moved from raw
+db_engine.fetch_all/execute calls to SQLAlchemy Core through
+app.db.session.read_scope()/write_scope(). The harness patches those scopes
+with a recording session and inspects the compiled statement instead of the
+raw SQL string, mirroring tests/test_orm_b3_task1_compile_coverage.py.
 """
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
+import app.db.session as db_session
 from app.workflows import scheduled_master as sm
 
 # ── timezone-aware next-fire ────────────────────────────────────────────────
@@ -69,71 +79,123 @@ def test_is_stale_boundaries():
     )
 
 
+# ── ORM session harness (mirrors test_orm_b3_task1_compile_coverage.py) ─────
+
+
+def _compile(stmt: Any) -> tuple[str, dict[str, Any]]:
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    return str(compiled), dict(compiled.params)
+
+
+class _FakeResult:
+    def __init__(self, rows: list[Any] | None = None) -> None:
+        self._rows = rows if rows is not None else []
+
+    def mappings(self) -> "_FakeResult":
+        return self
+
+    def all(self) -> list[Any]:
+        return self._rows
+
+
+class _RecordingSession:
+    def __init__(self, calls: list[Any], results: list[_FakeResult] | None = None):
+        self.calls = calls
+        self._results = list(results or [])
+        self._default = _FakeResult()
+
+    async def execute(self, stmt: Any) -> _FakeResult:
+        self.calls.append(_compile(stmt))
+        return self._results.pop(0) if self._results else self._default
+
+
+class _ScopeCM:
+    def __init__(self, session: _RecordingSession) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> _RecordingSession:
+        return self._session
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
+
+
+def _patch_scopes(
+    monkeypatch: pytest.MonkeyPatch, results: list[_FakeResult] | None = None
+) -> _RecordingSession:
+    calls: list[Any] = []
+    session = _RecordingSession(calls, results)
+    monkeypatch.setattr(db_session, "read_scope", lambda: _ScopeCM(session))
+    monkeypatch.setattr(db_session, "write_scope", lambda: _ScopeCM(session))
+    return session
+
+
 # ── consecutive-failure bookkeeping ─────────────────────────────────────────
 
 
-def _capture_execute(monkeypatch):
-    calls: list = []
-
-    async def fake_execute(sql, params=None):
-        calls.append((sql, params))
-        return 1
-
-    monkeypatch.setattr("app.db.engine.execute", fake_execute)
-    return calls
-
-
 @pytest.mark.asyncio
-async def test_record_dispatch_failure_increments_without_pause(monkeypatch):
-    calls = _capture_execute(monkeypatch)
+async def test_record_dispatch_failure_increments_without_pause(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    session = _patch_scopes(monkeypatch)
     paused = await sm._record_dispatch_failure(
         {"id": "s1", "consecutive_fails": 2}, "boom"
     )
     assert paused is False
-    assert len(calls) == 1
-    sql, params = calls[0]
-    assert params["cf"] == 3
-    assert "enabled = false" not in sql
-    assert "paused_at" not in sql
+    assert len(session.calls) == 1
+    sql, binds = session.calls[0]
+    assert "user_schedules" in sql
+    assert binds["consecutive_fails"] == 3
+    assert "enabled" not in binds
+    assert "paused_at" not in binds
 
 
 @pytest.mark.asyncio
-async def test_record_dispatch_failure_auto_pauses_at_threshold(monkeypatch):
-    calls = _capture_execute(monkeypatch)
+async def test_record_dispatch_failure_auto_pauses_at_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    session = _patch_scopes(monkeypatch)
     # 4 + 1 == 5 == _AUTO_PAUSE_THRESHOLD.
     paused = await sm._record_dispatch_failure(
         {"id": "s1", "consecutive_fails": 4}, "boom" * 200
     )
     assert paused is True
-    sql, params = calls[0]
-    assert "enabled = false" in sql
-    assert "paused_at = :now" in sql
-    assert params["cf"] == 5
-    assert params["reason"].startswith("auto-paused after 5 consecutive failures")
-    assert len(params["reason"]) <= 500  # truncated
+    sql, binds = session.calls[0]
+    assert binds["enabled"] is False
+    assert "paused_at" in binds
+    assert binds["consecutive_fails"] == 5
+    assert binds["pause_reason"].startswith("auto-paused after 5 consecutive failures")
+    assert len(binds["pause_reason"]) <= 500  # truncated
 
 
 @pytest.mark.asyncio
-async def test_reset_consecutive_fails_skips_when_zero(monkeypatch):
-    calls = _capture_execute(monkeypatch)
+async def test_reset_consecutive_fails_skips_when_zero(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    session = _patch_scopes(monkeypatch)
     await sm._reset_consecutive_fails({"id": "s1", "consecutive_fails": 0})
-    assert calls == []  # no needless write
+    assert session.calls == []  # no needless write
 
 
 @pytest.mark.asyncio
-async def test_reset_consecutive_fails_clears_when_nonzero(monkeypatch):
-    calls = _capture_execute(monkeypatch)
+async def test_reset_consecutive_fails_clears_when_nonzero(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    session = _patch_scopes(monkeypatch)
     await sm._reset_consecutive_fails({"id": "s1", "consecutive_fails": 3})
-    assert len(calls) == 1
-    assert "consecutive_fails = 0" in calls[0][0]
+    assert len(session.calls) == 1
+    _sql, binds = session.calls[0]
+    assert binds["consecutive_fails"] == 0
 
 
 # ── stale discard through _dispatch_one ─────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_dispatch_one_stale_discard_increments_skipped_not_fired(monkeypatch):
-    calls = _capture_execute(monkeypatch)
+async def test_dispatch_one_stale_discard_increments_skipped_not_fired(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    session = _patch_scopes(monkeypatch)
     now = datetime.now(timezone.utc)
     row = {
         "id": "s1",
@@ -149,10 +211,10 @@ async def test_dispatch_one_stale_discard_increments_skipped_not_fired(monkeypat
     assert result == {"outcome": "skipped"}
     # Exactly one UPDATE: advance + skipped_count++. No fire_count bump, no
     # dispatch.
-    assert len(calls) == 1
-    sql, _ = calls[0]
-    assert "skipped_count = skipped_count + 1" in sql
-    assert "fire_count" not in sql
+    assert len(session.calls) == 1
+    sql, binds = session.calls[0]
+    assert "skipped_count=(public.user_schedules.skipped_count +" in sql
+    assert "fire_count" not in binds
 
 
 # ── fire_due_schedules_step state machine ───────────────────────────────────
@@ -160,11 +222,7 @@ async def test_dispatch_one_stale_discard_increments_skipped_not_fired(monkeypat
 
 def _configure_due_rows(monkeypatch, rows):
     monkeypatch.setattr("app.db.engine.is_configured", lambda: True)
-
-    async def fake_fetch_all(sql, params=None):
-        return rows
-
-    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
+    _patch_scopes(monkeypatch, [_FakeResult(rows=rows)])
 
 
 @pytest.mark.asyncio
