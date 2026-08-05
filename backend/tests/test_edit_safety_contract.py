@@ -37,6 +37,7 @@ from uuid import UUID
 
 import pytest
 
+import app.services.ai.scope.scene_observations as observations_mod
 import app.services.ai.scope.scoped_script_gateway as gateway_mod
 import app.services.ai.scope.script_selection as selection_mod
 import app.services.ai.tools.screenwriting_tools as tools_mod
@@ -191,6 +192,16 @@ class _FakeSceneRepo:
         }
 
 
+def _observe(elements, version, run_id=_RUN_ID, scene_id=_SCENE_ID):
+    """Seed the server's record of what this run was SHOWN.
+
+    Every write test goes through here rather than passing a version as an
+    argument, because that is now the only thing the precondition trusts —
+    a test that could set the base directly would not be testing the
+    contract that shipped."""
+    observations_mod.record_scene_read(run_id, scene_id, version, list(elements))
+
+
 def _patched_gateway(repo, *, current_version, current_elements):
     """Patch the two IO seams: the fresh read at write time and the
     repository behind the ops channel."""
@@ -202,6 +213,15 @@ def _patched_gateway(repo, *, current_version, current_elements):
         ),
         patch.object(gateway_mod, "get_script_scene_repository", lambda: repo),
     )
+
+
+@pytest.fixture(autouse=True)
+def _clean_observations():
+    """No record leaks between tests — a stale one would silently satisfy a
+    precondition the test meant to leave unmet."""
+    observations_mod._reset_for_tests()
+    yield
+    observations_mod._reset_for_tests()
 
 
 # ===================================================================== #
@@ -220,6 +240,7 @@ async def test_a_third_party_edit_to_the_SAME_element_refuses_and_writes_nothing
     ``repo.calls == []`` and not merely on the returned error."""
     repo = _FakeSceneRepo(_ledger(_writer_typed_in("el_2", "Actually, I lied.", 3)))
     current = [dict(_EL_1), {**_EL_2, "text": "Actually, I lied."}]
+    _observe([_EL_1, _EL_2], 2)
 
     patches = _patched_gateway(repo, current_version=3, current_elements=current)
     with patches[0], patches[1]:
@@ -227,7 +248,7 @@ async def test_a_third_party_edit_to_the_SAME_element_refuses_and_writes_nothing
             _scope(),
             _resolved_scene(),
             {"el_2": "A rewrite of text the writer has already replaced."},
-            base_content_version=2,
+            quoted_base_version=2,
             actor="agent:test",
         )
 
@@ -259,6 +280,7 @@ async def test_a_third_party_edit_to_a_DIFFERENT_element_rebases_and_applies():
         new_version=4,
     )
     current = [{**_EL_1, "text": "She waits by the door instead."}, dict(_EL_2)]
+    _observe([_EL_1, _EL_2], 2)
 
     patches = _patched_gateway(repo, current_version=3, current_elements=current)
     with patches[0], patches[1]:
@@ -266,7 +288,7 @@ async def test_a_third_party_edit_to_a_DIFFERENT_element_rebases_and_applies():
             _scope(),
             _resolved_scene(),
             {"el_2": "You said that last time."},
-            base_content_version=2,
+            quoted_base_version=2,
             actor="agent:test",
         )
 
@@ -285,6 +307,7 @@ async def test_an_untouched_scene_applies_at_the_version_the_agent_read():
     the write carries exactly the version the agent quoted."""
     repo = _FakeSceneRepo(_ledger(), new_version=3)
     current = [dict(_EL_1), dict(_EL_2)]
+    _observe([_EL_1, _EL_2], 2)
 
     patches = _patched_gateway(repo, current_version=2, current_elements=current)
     with patches[0], patches[1]:
@@ -292,7 +315,7 @@ async def test_an_untouched_scene_applies_at_the_version_the_agent_read():
             _scope(),
             _resolved_scene(),
             {"el_2": "You said that last time."},
-            base_content_version=2,
+            quoted_base_version=2,
             actor="agent:test",
         )
 
@@ -315,13 +338,14 @@ async def test_a_targeted_element_the_writer_deleted_is_refused_as_gone():
         )
     )
 
+    _observe([_EL_1, _EL_2], 2)
     patches = _patched_gateway(repo, current_version=3, current_elements=[dict(_EL_1)])
     with patches[0], patches[1]:
         outcome = await gateway_mod.apply_element_edit(
             _scope(),
             _resolved_scene(),
             {"el_2": "A rewrite of a line that is gone."},
-            base_content_version=2,
+            quoted_base_version=2,
             actor="agent:test",
         )
 
@@ -343,6 +367,7 @@ async def test_a_conflict_raised_INSIDE_the_ops_channel_is_surfaced_not_swallowe
         raises=VersionConflict(7, [dict(_EL_1), {**_EL_2, "text": "Racing edit."}]),
     )
 
+    _observe([_EL_1, _EL_2], 2)
     patches = _patched_gateway(
         repo, current_version=2, current_elements=[dict(_EL_1), dict(_EL_2)]
     )
@@ -351,7 +376,7 @@ async def test_a_conflict_raised_INSIDE_the_ops_channel_is_surfaced_not_swallowe
             _scope(),
             _resolved_scene(),
             {"el_2": "You said that last time."},
-            base_content_version=2,
+            quoted_base_version=2,
             actor="agent:test",
         )
 
@@ -366,10 +391,42 @@ async def test_a_conflict_raised_INSIDE_the_ops_channel_is_surfaced_not_swallowe
 
 
 @pytest.mark.asyncio
-async def test_a_base_version_newer_than_the_scene_is_refused():
-    """A model that quotes a version the table has never reached is not
-    rebasing onto anything. Trusting the number over the row would be
-    trusting model output as a precondition."""
+async def test_a_model_quoted_version_does_not_govern_anything():
+    """A5 review, Critical — the demotion, asserted directly.
+
+    The model quotes a version that matches NOTHING it was shown (and that
+    happens to equal the scene's current version, which is exactly the value
+    the old code treated as "no drift, skip the check"). The server's record
+    still says the agent read v2 and that el_2 said something else, so the
+    edit is refused. The number the model supplied changes nothing."""
+    repo = _FakeSceneRepo(_ledger())
+    current = [dict(_EL_1), {**_EL_2, "text": "Actually, I lied."}]
+    _observe([_EL_1, _EL_2], 2)
+
+    patches = _patched_gateway(repo, current_version=3, current_elements=current)
+    with patches[0], patches[1]:
+        outcome = await gateway_mod.apply_element_edit(
+            _scope(),
+            _resolved_scene(),
+            {"el_2": "A rewrite of text the author has already replaced."},
+            quoted_base_version=3,  # == current: the old bypass
+            actor="agent:test",
+        )
+
+    assert isinstance(outcome, gateway_mod.EditRefused)
+    assert outcome.code == "version_conflict"
+    assert outcome.conflicting_element_ids == ("el_2",)
+    assert repo.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_run_that_never_read_the_scene_cannot_write_to_it():
+    """ "You cannot write what you never read" — enforced, not asserted.
+
+    No observation means no basis for any precondition, so there is nothing
+    to compare and nothing to trust. This is also the fail-closed answer when
+    a record was evicted or the run spans processes: refuse, tell the model to
+    read, and let it proceed on the next call."""
     repo = _FakeSceneRepo(_ledger())
     patches = _patched_gateway(
         repo, current_version=2, current_elements=[dict(_EL_1), dict(_EL_2)]
@@ -379,13 +436,107 @@ async def test_a_base_version_newer_than_the_scene_is_refused():
             _scope(),
             _resolved_scene(),
             {"el_2": "..."},
-            base_content_version=99,
+            quoted_base_version=2,
             actor="agent:test",
         )
 
     assert isinstance(outcome, gateway_mod.EditRefused)
-    assert outcome.code == "version_conflict"
+    assert outcome.code == "scene_not_read"
+    assert "ReadScene" in outcome.message
     assert repo.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_is_not_a_retry_oracle():
+    """The refusal hands back the author's current text so the panel can show
+    it and the model can rebase. That must not be enough to then succeed: the
+    server's record still holds the OLD text until ReadScene refreshes it, so
+    a model that copies the returned text/version straight into a retry is
+    refused again. "Re-read the scene" is literal."""
+    repo = _FakeSceneRepo(_ledger())
+    current = [dict(_EL_1), {**_EL_2, "text": "Actually, I lied."}]
+    _observe([_EL_1, _EL_2], 2)
+    patches = _patched_gateway(repo, current_version=3, current_elements=current)
+
+    with patches[0], patches[1]:
+        first = await gateway_mod.apply_element_edit(
+            _scope(),
+            _resolved_scene(),
+            {"el_2": "v1"},
+            quoted_base_version=2,
+            actor="agent:test",
+        )
+        # Retry quoting everything the refusal just disclosed.
+        retry = await gateway_mod.apply_element_edit(
+            _scope(),
+            _resolved_scene(),
+            {"el_2": "v2"},
+            quoted_base_version=first.current_version,
+            actor="agent:test",
+        )
+
+    assert isinstance(first, gateway_mod.EditRefused)
+    assert isinstance(retry, gateway_mod.EditRefused)
+    assert repo.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_target_the_author_only_MOVED_is_treated_as_changed():
+    """A5 review, M1. Comparing element dicts alone is position-blind, so a
+    reordered target used to read as untouched. The comparison defers to
+    ``version_service.diff_scenes`` — the same classifier the version history
+    uses — which counts a genuine reorder as a change."""
+    repo = _FakeSceneRepo(_ledger())
+    el_3 = {"id": "el_3", "type": "action", "text": "A third beat."}
+    el_4 = {"id": "el_4", "type": "action", "text": "A fourth beat."}
+    _observe([_EL_1, _EL_2, el_3, el_4], 2)
+    # Same four elements, same text — el_2 has been dragged to the end.
+    current = [dict(_EL_1), dict(el_3), dict(el_4), dict(_EL_2)]
+
+    patches = _patched_gateway(repo, current_version=3, current_elements=current)
+    with patches[0], patches[1]:
+        outcome = await gateway_mod.apply_element_edit(
+            _scope(),
+            _resolved_scene(),
+            {"el_2": "A rewrite of a moved line."},
+            quoted_base_version=2,
+            actor="agent:test",
+        )
+
+    assert isinstance(outcome, gateway_mod.EditRefused)
+    assert outcome.conflicting_element_ids == ("el_2",)
+    assert "moved" in outcome.message
+    assert repo.calls == []
+
+
+@pytest.mark.asyncio
+async def test_an_author_INSERTING_elsewhere_does_not_block_the_edit():
+    """The boundary of M1's strictness, pinned so nobody tightens it by
+    accident.
+
+    ``diff_scenes`` uses an LCS, so an element the author inserted somewhere
+    else reports as ``added`` and leaves untouched elements in place — it does
+    NOT cascade a "moved" onto everything after it. That matters: inserts are
+    the single most common op in production (1146 of 1519), and treating a
+    position shift as a conflict would refuse most legitimate rebases while
+    protecting nothing — the agent's target still says exactly what it said."""
+    repo = _FakeSceneRepo(_ledger(), new_version=4)
+    _observe([_EL_1, _EL_2], 2)
+    inserted = {"id": "el_new", "type": "action", "text": "A new beat above."}
+    current = [dict(_EL_1), inserted, dict(_EL_2)]
+
+    patches = _patched_gateway(repo, current_version=3, current_elements=current)
+    with patches[0], patches[1]:
+        outcome = await gateway_mod.apply_element_edit(
+            _scope(),
+            _resolved_scene(),
+            {"el_2": "You said that last time."},
+            quoted_base_version=2,
+            actor="agent:test",
+        )
+
+    assert isinstance(outcome, gateway_mod.EditApplied)
+    assert outcome.rebased_from == 2
 
 
 @pytest.mark.asyncio
@@ -394,6 +545,7 @@ async def test_the_write_carries_only_text_so_element_type_survives():
     into an action line, or reassign the character speaking it. The ops it
     emits carry ``text`` and nothing else."""
     repo = _FakeSceneRepo(_ledger(), new_version=3)
+    _observe([_EL_1, _EL_2], 2)
     patches = _patched_gateway(
         repo, current_version=2, current_elements=[dict(_EL_1), dict(_EL_2)]
     )
@@ -402,7 +554,7 @@ async def test_the_write_carries_only_text_so_element_type_survives():
             _scope(),
             _resolved_scene(),
             {"el_2": "You said that last time."},
-            base_content_version=2,
+            quoted_base_version=2,
             actor="agent:run-9",
         )
 
@@ -427,6 +579,7 @@ async def test_an_op_protocol_rejection_gets_its_own_code_not_conflict():
     repo = _FakeSceneRepo(
         _ledger(), raises=OpError("unknown_element", "element 'el_2' not found")
     )
+    _observe([_EL_1, _EL_2], 2)
     patches = _patched_gateway(
         repo, current_version=2, current_elements=[dict(_EL_1), dict(_EL_2)]
     )
@@ -435,7 +588,7 @@ async def test_an_op_protocol_rejection_gets_its_own_code_not_conflict():
             _scope(),
             _resolved_scene(),
             {"el_2": "..."},
-            base_content_version=2,
+            quoted_base_version=2,
             actor="agent:test",
         )
 
@@ -456,10 +609,10 @@ def test_the_conflict_result_is_machine_readable_and_human_actionable():
     failure this contract forbids."""
     refused = gateway_mod.EditRefused(
         code="version_conflict",
-        message=gateway_mod._conflict_message(["el_2"], []),
+        message=gateway_mod._conflict_message({"el_2": "changed"}),
         scene_id=_SCENE_ID,
         element_ids=("el_2",),
-        base_content_version=2,
+        observed_version=2,
         current_version=3,
         conflicting_element_ids=("el_2",),
         current_elements=({**_EL_2, "text": "Actually, I lied."},),
@@ -470,7 +623,7 @@ def test_the_conflict_result_is_machine_readable_and_human_actionable():
     assert payload["ok"] is False
     assert payload["applied"] is False
     assert payload["error_code"] == "version_conflict"
-    assert payload["base_content_version"] == 2
+    assert payload["observed_content_version"] == 2
     assert payload["current_content_version"] == 3
     assert payload["conflicting_element_ids"] == ["el_2"]
     assert payload["current_elements"][0]["text"] == "Actually, I lied."
@@ -708,13 +861,18 @@ async def test_apply_edit_without_a_quoted_version_refuses_rather_than_defaultin
 
 
 @pytest.mark.asyncio
-async def test_apply_edit_passes_the_quoted_version_through_as_the_precondition():
+async def test_apply_edit_forwards_the_quoted_version_as_a_cross_check_only():
+    """The tool still requires and forwards ``base_content_version``, but it
+    arrives at the gateway under a name that says what it is — a claim to be
+    checked against the server's record, not the precondition itself."""
     applied = AsyncMock(
         return_value=gateway_mod.EditApplied(
             scene_id=_SCENE_ID,
             element_ids=("el_2",),
             content_version=4,
             rebased_from=2,
+            observed_version=2,
+            quoted_base_version=2,
         )
     )
     patches = _tool_patches()
@@ -734,7 +892,7 @@ async def test_apply_edit_passes_the_quoted_version_through_as_the_precondition(
             _RUN_CONTEXT,
         )
 
-    assert applied.await_args.kwargs["base_content_version"] == 2
+    assert applied.await_args.kwargs["quoted_base_version"] == 2
     assert applied.await_args.args[2] == {"el_2": "New line."}
     assert result["ok"] is True and result["applied"] is True
     # A rebase is reported to the human as their work being kept, not as a
@@ -838,3 +996,136 @@ async def test_an_attached_selection_outranks_ids_the_model_supplied():
     assert resolve.await_args.args[0] == str(_SCENE_ID)
     assert result["ok"] is True
     assert result["proposal"]["element_ids"] == ["el_2"]
+
+
+@pytest.mark.asyncio
+async def test_propose_edit_never_hands_back_the_scenes_current_version():
+    """A5 review, Critical — the disclosure half.
+
+    The first cut set ``proposal.base_content_version`` to the scene's CURRENT
+    version, so a model told "your proposal is stale" received, in the same
+    payload, the number that used to switch the write precondition off. It now
+    echoes only what the model itself quoted. (The precondition no longer reads
+    any model-supplied number, so this is defence in depth — but there is no
+    reason to hand the number over, so we don't.)"""
+    patches = _tool_patches(_resolved_scene(version=9))
+    with patches[0], patches[1], patches[2]:
+        stale = await SCREENWRITING_HANDLERS["ProposeEdit"](
+            {
+                "scene_id": str(_SCENE_ID),
+                "element_ids": ["el_2"],
+                "edits": [{"element_id": "el_2", "text": "New line."}],
+                "base_content_version": 7,
+            },
+            _RUN_CONTEXT,
+        )
+
+    assert stale["stale"] is True
+    assert stale["proposal"]["base_content_version"] == 7  # the model's own
+    assert 9 not in stale["proposal"].values()
+    assert "9" not in stale["note"]
+
+
+@pytest.mark.asyncio
+async def test_a_partly_malformed_edit_batch_writes_nothing_and_says_so():
+    """A5 review, M2. Dropping bad entries silently meant 3 edits with 1
+    malformed wrote 2 and reported success — the model would believe a
+    revision landed that never did, and so would the writer reading the
+    transcript."""
+    applied = AsyncMock()
+    patches = _tool_patches()
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patch.object(gateway_mod, "apply_element_edit", applied),
+    ):
+        result = await SCREENWRITING_HANDLERS["ApplyEdit"](
+            {
+                "scene_id": str(_SCENE_ID),
+                "element_ids": ["el_1", "el_2"],
+                "edits": [
+                    {"element_id": "el_1", "text": "Fine."},
+                    {"element_id": "el_2"},  # no text
+                ],
+                "base_content_version": 2,
+            },
+            _RUN_CONTEXT,
+        )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "invalid_args"
+    assert "1 of 2 edits are malformed" in result["error"]
+    applied.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_read_scene_is_what_records_the_observation():
+    """The record has to be written where content is handed to the model, or
+    it stops describing what the model actually read. Asserted through the
+    real gateway function rather than by calling the store directly — the
+    wiring is the thing that can rot."""
+    scene = _resolved_scene(version=5)
+    elements = await gateway_mod.read_scene_elements(_scope(), scene)
+
+    assert [el["element_id"] for el in elements] == ["el_1", "el_2"]
+    observation = observations_mod.observed_scene(_RUN_ID, _SCENE_ID)
+    assert observation is not None
+    assert observation.content_version == 5
+    # RAW elements, not the trimmed {element_id,type,text} projection — the
+    # write-time diff compares whole elements.
+    assert observation.elements[1]["character_id"] == "ch_9"
+    assert observation.elements[1]["id"] == "el_2"
+
+
+@pytest.mark.asyncio
+async def test_re_reading_a_scene_replaces_the_record():
+    """ "Re-read the scene and rebase" has to actually clear the conflict, or
+    the retry loop never terminates."""
+    _observe([_EL_1, _EL_2], 2)
+    moved_on = [dict(_EL_1), {**_EL_2, "text": "Actually, I lied."}]
+    repo = _FakeSceneRepo(_ledger(), new_version=4)
+
+    patches = _patched_gateway(repo, current_version=3, current_elements=moved_on)
+    with patches[0], patches[1]:
+        refused = await gateway_mod.apply_element_edit(
+            _scope(),
+            _resolved_scene(),
+            {"el_2": "v1"},
+            quoted_base_version=2,
+            actor="agent:test",
+        )
+        # The model does what it was told: reads the scene again.
+        await gateway_mod.read_scene_elements(
+            _scope(), _resolved_scene(content=moved_on, version=3)
+        )
+        after = await gateway_mod.apply_element_edit(
+            _scope(),
+            _resolved_scene(),
+            {"el_2": "v2 based on the new text"},
+            quoted_base_version=3,
+            actor="agent:test",
+        )
+
+    assert isinstance(refused, gateway_mod.EditRefused)
+    assert isinstance(after, gateway_mod.EditApplied)
+    assert repo.calls[0]["ops"][0]["payload"]["text"] == "v2 based on the new text"
+
+
+def test_the_observation_store_is_bounded_and_per_run():
+    """Two runs never see each other's records, and the map cannot grow
+    without limit. Eviction degrades to "read the scene again", never to a
+    bypass — but only if it is actually bounded."""
+    observations_mod.record_scene_read("run-a", "s1", 1, [dict(_EL_1)])
+    observations_mod.record_scene_read("run-b", "s1", 2, [dict(_EL_2)])
+    assert observations_mod.observed_scene("run-a", "s1").content_version == 1
+    assert observations_mod.observed_scene("run-b", "s1").content_version == 2
+    assert observations_mod.observed_scene("run-c", "s1") is None
+
+    for i in range(observations_mod.MAX_SCENES_PER_RUN + 10):
+        observations_mod.record_scene_read("run-a", f"scene-{i}", 1, [dict(_EL_1)])
+    assert (
+        len(observations_mod._OBSERVED["run-a"]) == observations_mod.MAX_SCENES_PER_RUN
+    )
+    # The oldest went first (LRU), and an evicted entry reads as "never read".
+    assert observations_mod.observed_scene("run-a", "scene-0") is None

@@ -795,9 +795,16 @@ async def test_propose_edit_writes_nothing_and_flags_a_stale_base_version():
     assert fresh["ok"] is True
     assert fresh["applied"] is False
     assert fresh["stale"] is False
+    # A5 (review, Critical): the proposal echoes the version the MODEL quoted,
+    # never the scene's current one — handing back the current value is what
+    # used to let a model turn off the write precondition. Same number here
+    # only because this proposal is not stale.
     assert fresh["proposal"]["base_content_version"] == 9
     assert stale["stale"] is True
-    assert "re-read" in stale["note"]
+    assert stale["proposal"]["base_content_version"] == 7  # NOT the scene's 9
+    # "Re-read" is now literal: only ReadScene refreshes the server-side
+    # record that the write precondition compares against.
+    assert "ReadScene" in stale["note"]
 
 
 @pytest.mark.asyncio

@@ -134,14 +134,31 @@ def _parse_edits(args: dict, selection: "ResolvedSelection") -> Any:
     edits: dict[str, str] = {}
 
     if isinstance(raw_edits, list) and raw_edits:
+        # Malformed entries are COUNTED, not skipped (A5 review, M2). Dropping
+        # them silently meant 3 edits with 1 malformed wrote 2 and reported
+        # success — the model would believe a revision landed that never did,
+        # and so would the writer reading the transcript.
+        malformed = 0
         for item in raw_edits[:_MAX_ELEMENT_IDS]:
             if not isinstance(item, dict):
+                malformed += 1
                 continue
             eid = str(item.get("element_id") or "").strip()
             text = item.get("text")
             if not eid or text is None:
+                malformed += 1
                 continue
             edits[eid] = str(text)
+        if malformed:
+            return {
+                "ok": False,
+                "error": (
+                    f"{malformed} of {len(raw_edits)} edits are malformed — "
+                    "each must be an object with a non-empty element_id and a "
+                    "text field. Nothing was written; resend the whole batch."
+                ),
+                "error_code": "invalid_args",
+            }
         stray = sorted(set(edits) - allowed)
         if stray:
             return {
@@ -387,18 +404,25 @@ class ScreenwritingTools:
         """Produce a REVIEWABLE proposal; write nothing.
 
         Runs the full contract short of the write: the scene is authorized,
-        every element id is verified to be in it, the replacement text is
-        bound per element, and the quoted ``base_content_version`` is checked
-        against the scene as it stands. What comes back is therefore a
-        proposal that is known to be applicable right now — or an explicit
-        statement of why it is not.
+        every element id is verified to be in it, and the replacement text is
+        bound per element.
 
-        The staleness flag here is the CHEAP half of spec §5.2 and remains
-        whole-scene on purpose: at propose time it costs one comparison and
-        answers "is there any point showing this to the writer". The
-        authoritative, element-level precondition runs in ``ApplyEdit`` (see
-        ``scoped_script_gateway.apply_element_edit``), where a false alarm
-        would cost a real edit rather than a re-read.
+        IT DOES NOT ECHO THE SCENE'S CURRENT ``content_version`` (A5 review,
+        Critical). The first cut returned it under ``base_content_version``,
+        which meant a model whose proposal came back ``stale`` was handed, in
+        the same payload, the exact number that used to switch the write
+        precondition off. The proposal now carries back the model's OWN quoted
+        value — echoing what it told us costs nothing and reveals nothing.
+        This is defence in depth rather than the fix: the precondition no
+        longer reads any model-supplied number at all (see
+        ``scene_observations``), so quoting the current version buys an
+        attacker nothing today. Not handing it over keeps it that way.
+
+        ``stale`` stays a whole-scene comparison: at propose time it costs one
+        comparison and answers "is there any point showing this to the
+        writer". The authoritative, element-level precondition runs in
+        ``ApplyEdit``, where a false alarm would cost a real edit rather than
+        a re-read.
         """
         scope = await _bound_scope(run_context)
         if scope is None:
@@ -422,12 +446,14 @@ class ScreenwritingTools:
                     {"element_id": eid, "text": text} for eid, text in edits.items()
                 ],
                 "rationale": str(args.get("rationale") or "").strip() or None,
-                "base_content_version": scene.content_version,
+                # The model's own quoted value, echoed back — never the
+                # server's current one. See the docstring.
+                "base_content_version": base_version,
             },
             "stale": stale,
             "note": (
-                "The scene changed since you read it — re-read it and rebase "
-                "this proposal before offering it."
+                "The scene changed since you read it — call ReadScene again "
+                "and rebase this proposal before offering it."
                 if stale
                 else "Proposal recorded for review; the script is unchanged."
             ),
@@ -437,13 +463,15 @@ class ScreenwritingTools:
         """Write the revision into the script through the existing ops
         channel, under the element-level precondition (spec §5.2).
 
-        ``base_content_version`` is MANDATORY here and there is no fallback.
-        Defaulting it to the scene's current version would make the
-        precondition compare a value to itself and pass unconditionally —
-        i.e. it would restore exactly the silent-clobber this whole stage
-        exists to prevent, while looking like it had a guard. An agent that
-        did not read the scene has nothing to rebase and no business writing
-        to it.
+        "You cannot write what you never read" is enforced by the SERVER's
+        record of what this run was shown, not by anything in ``args`` (A5
+        review, Critical). ``base_content_version`` stays required — it is
+        cheap, it is already in the tool spec, and a persistent mismatch
+        against the record is a useful signal that the model is synthesising
+        the number — but it decides nothing. The precondition compares the
+        scene against ``scene_observations``; a run that never called
+        ``ReadScene`` has no record and is refused there, with a message
+        telling it to read first.
         """
         scope = await _bound_scope(run_context)
         if scope is None:
@@ -470,7 +498,7 @@ class ScreenwritingTools:
             scope,
             scene,
             edits,
-            base_content_version=base_version,
+            quoted_base_version=base_version,
             actor=_edit_actor(scope),
         )
         if isinstance(outcome, gateway.EditRefused):

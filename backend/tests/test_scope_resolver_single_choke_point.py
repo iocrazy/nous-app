@@ -139,19 +139,21 @@ REPO_LAYER_ALLOWED_PATHS: dict[str, str] = {
     "repositories/script_shot_repository.py": "repository implementation itself",
     "services/ai/scope/scoped_script_gateway.py": (
         "A5, and the ONLY agent-path entry here. Narrow on purpose: the "
-        "module calls exactly two scene-repository methods — "
-        "``apply_element_ops`` (THE ops channel: one transaction that "
+        "module calls exactly ONE scene-repository method, "
+        "``apply_element_ops`` — THE ops channel (one transaction that "
         "version-guards content_json, writes the script_ops row plus its "
         "inverse, and raises the same VersionConflict the editor's own "
-        "optimistic-concurrency path speaks) and ``list_ops_by_scene`` (the "
-        "ledger read that the element-level precondition replays). "
-        "Re-implementing either to keep this list short would create the "
-        "second, drifting write path agent-layer spec §5.2 exists to "
-        "forbid. The authorization argument is unchanged from this module's "
-        "ORM_ALLOWED_PATHS entry: both calls take ``scene.id`` off an "
-        "already-resolved ResolvedScene, never a model-supplied id, and "
-        "test_scoped_script_gateway_takes_only_resolved_handles enforces it "
-        "by signature introspection."
+        "optimistic-concurrency path speaks). Re-implementing it to keep "
+        "this list short would create the second, drifting write path "
+        "agent-layer spec §5.2 exists to forbid. "
+        "THIS ENTRY IS A MECHANISM, NOT A PROMISE (A5 review, Important 3): "
+        "the path-level scan below would let ANY repo method through once "
+        "this file is listed — including get_by_id(<model-supplied id>) — so "
+        "test_scoped_script_gateway_calls_only_the_ops_channel AST-scans the "
+        "file and fails if the called-method set is anything but "
+        "{apply_element_ops}. The authorization argument is unchanged from "
+        "this module's ORM_ALLOWED_PATHS entry: that call takes ``scene.id`` "
+        "off an already-resolved ResolvedScene, never a model-supplied id."
     ),
     "services/library/projects_service.py": "pre-A2 project service, authenticated REST path",
     "services/script/version_service.py": "pre-A2 script version service, authenticated REST path",
@@ -478,3 +480,81 @@ def test_guard_catches_a_join_split_across_two_physical_lines():
         )
     finally:
         planted.unlink(missing_ok=True)
+
+
+# The repository methods scoped_script_gateway.py is allowed to call. ONE
+# entry: the ops channel. See REPO_LAYER_ALLOWED_PATHS' entry for that file.
+_GATEWAY_ALLOWED_REPO_METHODS = {"apply_element_ops"}
+
+# Everything the scene repository exposes. A call to any of these on an object
+# the gateway got from get_script_scene_repository() is what the scan looks
+# for; naming them explicitly (rather than "any attribute call") keeps the
+# check from tripping over ordinary local-object method calls.
+_SCENE_REPO_METHODS = {
+    "apply_element_ops",
+    "create",
+    "delete",
+    "get_by_id",
+    "list_by_script",
+    "list_ops_by_scene",
+    "move_scene",
+    "persist_scenes",
+    "update_meta",
+}
+
+
+def test_scoped_script_gateway_calls_only_the_ops_channel():
+    """A5 review (Important 3): the allow-list entry above is path-level, so
+    once ``scoped_script_gateway.py`` is listed, ``repo.update_meta(...)`` or
+    ``repo.get_by_id(<model-supplied id>)`` inside it trips nothing — the same
+    gap the ORM rule closes for that file via signature introspection.
+
+    This closes it for the repository layer: walk the file's AST, collect every
+    ``<something>.<scene-repo-method>(...)`` call, and require the set to be
+    exactly ``{apply_element_ops}``. Widening it is then a deliberate edit to
+    ``_GATEWAY_ALLOWED_REPO_METHODS`` with a reviewer looking, rather than a
+    line that slips in under an entry whose prose still claims otherwise."""
+    import ast
+
+    path = BACKEND_APP / "services" / "ai" / "scope" / "scoped_script_gateway.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+
+    called = {
+        node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _SCENE_REPO_METHODS
+    }
+
+    assert called == _GATEWAY_ALLOWED_REPO_METHODS, (
+        f"scoped_script_gateway.py calls scene-repository methods {sorted(called)}, "
+        f"expected exactly {sorted(_GATEWAY_ALLOWED_REPO_METHODS)}.\n\n"
+        "That file is allow-listed in REPO_LAYER_ALLOWED_PATHS for ONE reason: "
+        "apply_element_ops is the ops channel and re-implementing it would fork "
+        "the write path. Every other repository method reachable from there is "
+        "unscoped (see script_scene_repository's own docstrings) and would be "
+        "callable with a model-supplied id. Route the new need through the "
+        "resolver, or justify widening _GATEWAY_ALLOWED_REPO_METHODS here."
+    )
+
+
+def test_the_ops_channel_guard_fires_on_a_planted_second_call():
+    """The guard above must actually detect a widened call set — a scan that
+    silently matches nothing would pass forever."""
+    import ast
+
+    tree = ast.parse(
+        "async def f(repo, scene_id):\n"
+        "    await repo.apply_element_ops(scene_id, [], 1, 'a')\n"
+        "    return await repo.get_by_id(scene_id)\n"
+    )
+    called = {
+        node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _SCENE_REPO_METHODS
+    }
+    assert called == {"apply_element_ops", "get_by_id"}
+    assert called != _GATEWAY_ALLOWED_REPO_METHODS
