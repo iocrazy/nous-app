@@ -40,13 +40,21 @@ def _member_quotas_reset_stmt(next_reset: datetime, now: datetime):
 def _grant_daily_free_points_stmt(amount: int, today):
     """SELECT wrapping the ``grant_daily_free_points_batch`` stored function
     (migration 287) as a table-valued expression — ``func.public.<name>(...)
-    .table_valued("granted", "skipped")`` renders identically to the legacy
-    ``SELECT granted, skipped FROM public.grant_daily_free_points_batch(...)``
-    but is built via the SQLAlchemy expression language (bind params handled
-    by the ORM layer) instead of a hand-written SQL string. The function
-    itself still does real INSERT/UPDATE work server-side (idempotent via the
-    daily_point_gifts UNIQUE constraint) — this call must run inside a
-    write_scope() so that work commits."""
+    .table_valued("granted", "skipped")`` compiles to the SAME SELECT text as
+    the legacy ``SELECT granted, skipped FROM public.grant_daily_free_points_
+    batch(...)`` string, but is built via the SQLAlchemy expression language
+    (bind params handled by the ORM layer) instead of a hand-written SQL
+    string.
+
+    The SELECT TEXT is equivalent; the CALLING CONVENTION is not — this is
+    NOT a behavior-preserving rewrite. The function does real INSERT/UPDATE
+    work server-side (idempotent via the daily_point_gifts UNIQUE
+    constraint), and the legacy call site ran it via ``db_engine.fetch_one()``
+    — a non-committing ``engine.connect()`` — so every one of those writes was
+    silently rolled back in production (confirmed via a fresh-container
+    reproduction + a live daily_point_gifts read showing no new row since
+    2026-06-11). The caller MUST use ``write_scope()`` (explicit
+    ``session.begin()``/commit) — that is the fix, not incidental plumbing."""
     from sqlalchemy import func, select
 
     return select(
@@ -59,8 +67,12 @@ def _grant_daily_free_points_stmt(amount: int, today):
 def _reclaim_daily_free_points_stmt(yesterday):
     """SELECT wrapping the ``reclaim_daily_free_points_batch`` stored function
     (migration 287) — same table-valued-function shape as
-    ``_grant_daily_free_points_stmt``; also does real UPDATE/INSERT work
-    server-side, so it must run inside a write_scope()."""
+    ``_grant_daily_free_points_stmt``, and the same calling-convention fix
+    applies: the function does real UPDATE/INSERT work server-side, the
+    legacy ``db_engine.fetch_one()`` call site silently rolled it back on a
+    non-committing connection, and the caller MUST use ``write_scope()`` for
+    that work to actually commit — see ``_grant_daily_free_points_stmt``'s
+    docstring for the production evidence."""
     from sqlalchemy import func, select
 
     return select(
@@ -106,6 +118,11 @@ async def grant_daily_free_points_step() -> dict[str, Any]:
 
     today = datetime.now(timezone.utc).date()  # DATE column → bind a date object
 
+    # Must be write_scope() (explicit session.begin()/commit), never a bare
+    # engine.connect()-backed read — the legacy db_engine.fetch_one() call this
+    # replaced ran on a non-committing connection, so the function's internal
+    # INSERT/UPDATEs were silently rolled back on every invocation (undetected
+    # in production from ~2026-06-11 until this migration).
     async with write_scope() as session:
         row = (
             (await session.execute(_grant_daily_free_points_stmt(amount, today)))
@@ -134,6 +151,9 @@ async def reclaim_daily_free_points_step() -> dict[str, Any]:
 
     yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
 
+    # Must be write_scope() — see grant_daily_free_points_step's comment above:
+    # the legacy db_engine.fetch_one() call ran on a non-committing connection,
+    # silently rolling back this function's INSERT/UPDATEs every run.
     async with write_scope() as session:
         row = (
             (await session.execute(_reclaim_daily_free_points_stmt(yesterday)))

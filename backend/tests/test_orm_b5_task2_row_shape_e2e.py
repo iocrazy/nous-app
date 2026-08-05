@@ -623,6 +623,11 @@ async def test_eligible_projects_stmt_yields_column_keyed_row_against_real_sqlit
 # pinned at compile time instead: ``.table_valued("granted", "skipped")``
 # IS what determines the output column names (there's no select(Entity)
 # ambiguity possible for a table-valued function call).
+#
+# NOT tested here (out of scope for row-shape/compile assertions, needs a
+# real Postgres): that the caller wraps these in write_scope(), not a bare
+# read connection. That's the actual bug fix in this migration — see
+# _grant_daily_free_points_stmt's docstring for the production evidence.
 
 
 def test_grant_daily_free_points_stmt_selects_named_columns():
