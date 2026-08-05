@@ -196,19 +196,31 @@ async def _scope_of_conversation(conversation_id: Any) -> DispatchScope:
     if cid is None:
         return DispatchScope()
 
-    from app.db import engine as db_engine
+    from sqlalchemy import select
+
+    from app.models import ConversationAiMeta, Conversations
 
     try:
-        row = await db_engine.fetch_one(
-            """
-            SELECT c.project_id, m.context_type, m.context_id
-              FROM public.conversations c
-              LEFT JOIN public.conversation_ai_meta m
-                     ON m.conversation_id = c.id
-             WHERE c.id = :cid
-            """,
-            {"cid": cid},
-        )
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        select(
+                            Conversations.project_id,
+                            ConversationAiMeta.context_type,
+                            ConversationAiMeta.context_id,
+                        )
+                        .select_from(Conversations)
+                        .outerjoin(
+                            ConversationAiMeta,
+                            ConversationAiMeta.conversation_id == Conversations.id,
+                        )
+                        .where(Conversations.id == cid)
+                    )
+                )
+                .mappings()
+                .first()
+            )
     except Exception:  # noqa: BLE001 — never break a dispatch over telemetry-ish lookup
         logger.exception("[scope_binding] conversation lookup failed id=%s", cid)
         return DispatchScope()

@@ -749,21 +749,41 @@ async def test_list_sessions_passes_search_through_to_store() -> None:
 @pytest.mark.asyncio
 async def test_store_search_builds_escaped_ilike() -> None:
     """ConversationsAiStore escapes LIKE metacharacters and adds the ILIKE
-    clause only when a search term is given."""
+    clause only when a search term is given.
+
+    ORM (Phase B4): list_sessions reads through ``app.db.session.read_scope()``
+    now, not ``db_engine.fetch_all`` — the harness patches read_scope and
+    inspects the compiled statement/binds instead of a raw SQL string.
+    """
+    from contextlib import asynccontextmanager
+
+    from sqlalchemy.dialects import postgresql
+
+    import app.db.session as db_session
     from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
 
     store = ConversationsAiStore()
     seen: Dict[str, Any] = {}
 
-    async def fake_fetch_all(sql: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
-        seen["sql"] = sql
-        seen["params"] = params
-        return []
+    class _FakeResult:
+        def mappings(self) -> "_FakeResult":
+            return self
 
-    with patch(
-        "app.services.ai.chat.conversations_ai_store.db_engine.fetch_all",
-        new=fake_fetch_all,
-    ):
+        def all(self) -> List[Dict[str, Any]]:
+            return []
+
+    class _FakeSession:
+        async def execute(self, stmt: Any) -> _FakeResult:
+            compiled = stmt.compile(dialect=postgresql.dialect())
+            seen["sql"] = str(compiled)
+            seen["params"] = dict(compiled.params)
+            return _FakeResult()
+
+    @asynccontextmanager
+    async def fake_read_scope():
+        yield _FakeSession()
+
+    with patch.object(db_session, "read_scope", fake_read_scope):
         await store.list_sessions(
             user_id=str(uuid4()),
             agent_slug=None,
@@ -772,15 +792,12 @@ async def test_store_search_builds_escaped_ilike() -> None:
             search="50%_done",
         )
 
-    assert "c.title ILIKE :search" in seen["sql"]
+    assert "public.conversations.title ILIKE" in seen["sql"]
     # % and _ must arrive escaped so user input matches literally.
-    assert seen["params"]["search"] == "%50\\%\\_done%"
+    assert seen["params"]["title_1"] == "%50\\%\\_done%"
 
     # No search → no ILIKE clause at all.
-    with patch(
-        "app.services.ai.chat.conversations_ai_store.db_engine.fetch_all",
-        new=fake_fetch_all,
-    ):
+    with patch.object(db_session, "read_scope", fake_read_scope):
         await store.list_sessions(
             user_id=str(uuid4()), agent_slug=None, project_id=None, limit=50
         )

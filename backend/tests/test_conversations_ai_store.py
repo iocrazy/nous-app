@@ -1,13 +1,18 @@
 """Unit + integration tests for ConversationsAiStore (Task 3 — session half).
 
-Unit tests (default, no DB): capture SQL/params via the fake-engine harness
-copied from ``test_conversation_repository.py`` (transactional ``eng.begin()``
-calls) plus direct patches of the ``app.db.engine.fetch_one`` /
-``fetch_all`` / ``execute`` module-level helpers (single-statement reads
-and writes) — the same transport ``ConversationRepository`` uses.
+Unit tests (default, no DB): capture compiled SQL/binds via a fake
+``AsyncSession`` harness that patches ``app.db.session.read_scope`` /
+``write_scope`` (Phase B4 ORM conversion) — the same technique as
+``tests/test_write_memory_load_recent_messages.py``. Session-level
+``send_message`` calls (append_user_message/append_assistant_message) are
+still faked at the ``ConversationRepository`` boundary — that repo itself
+keeps its raw-SQL body per the ORM convergence doctrine and was not touched
+by this conversion.
 
 Integration test (skippable): requires ``INTEGRATION_DATABASE_URL``,
 mirroring the ``conv_for_smoke`` pattern in ``test_conversation_repository.py``.
+Unaffected by the ORM conversion — it drives the store's public methods
+against a real DB and doesn't reach into the read_scope/write_scope seam.
 
 Minimum assertions (brief §Step 1):
   - create_session resolves personal team when team_id is None; ValueError
@@ -29,61 +34,75 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
-# ── Fake engine helpers (copied from test_conversation_repository.py) ──────────
+# ── Fake session helpers (Phase B4: ORM read_scope()/write_scope()) ────────
+
+
+def _compile(stmt: Any) -> tuple[str, dict[str, Any]]:
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    return str(compiled), dict(compiled.params)
 
 
 class _MappingResult:
-    """Mimics a SQLAlchemy result that supports .mappings().one()/.first()/.all()."""
+    """Mimics a SQLAlchemy result that supports .mappings().one()/.first()/.all().
 
-    def __init__(self, d: dict) -> None:
-        self._d = d
+    ``rows=None`` -> no row (first() -> None); a single dict -> one()/first();
+    a list of dicts -> all().
+    """
+
+    def __init__(self, rows: Any = None) -> None:
+        if rows is None:
+            self._rows: list[dict] = []
+        elif isinstance(rows, list):
+            self._rows = rows
+        else:
+            self._rows = [rows]
 
     def mappings(self) -> "_MappingResult":  # noqa: D102
         return self
 
     def one(self) -> dict:  # noqa: D102
-        return self._d
+        return self._rows[0]
 
-    def first(self) -> dict:  # noqa: D102
-        return self._d
+    def first(self) -> dict | None:  # noqa: D102
+        return self._rows[0] if self._rows else None
 
     def all(self) -> list[dict]:  # noqa: D102
-        return [self._d]
+        return list(self._rows)
 
 
-class _FakeConn:
-    """Records every execute() call and returns queued results in FIFO order."""
+class _RecordingSession:
+    """Records every execute() call (compiled SQL + binds) and returns queued
+    fake results in FIFO order — the ORM-era replacement for _FakeConn."""
 
     def __init__(self, *results: Any) -> None:
         self._results = list(results)
         self._i = 0
         self.calls: list[dict] = []
 
-    async def execute(self, stmt: Any, params: dict | None = None) -> Any:  # noqa: D102
-        self.calls.append({"sql": str(stmt), "params": params or {}})
-        result = self._results[self._i]
+    async def execute(self, stmt: Any) -> Any:  # noqa: D102
+        sql, params = _compile(stmt)
+        self.calls.append({"sql": sql, "params": params})
+        result = self._results[self._i] if self._i < len(self._results) else None
         self._i += 1
         return result
 
 
-class _FakeEngine:
-    """Minimal SQLAlchemy async engine stub that wraps a _FakeConn."""
-
-    def __init__(self, conn: _FakeConn) -> None:
-        self._conn = conn
-
-    def begin(self) -> Any:  # noqa: D102
-        @asynccontextmanager
-        async def _ctx() -> Any:
-            yield self._conn
-
-        return _ctx()
+def _make_session(*results: Any) -> _RecordingSession:
+    return _RecordingSession(*results)
 
 
-def _make_engine(*results: Any) -> tuple[_FakeEngine, _FakeConn]:
-    conn = _FakeConn(*results)
-    return _FakeEngine(conn), conn
+def _install_scope(attr: str, session: _RecordingSession):
+    """Patch app.db.session.<attr> ('read_scope' or 'write_scope') to yield
+    *session* for the duration of the `with` block."""
+    import app.db.session as db_session
+
+    @asynccontextmanager
+    async def _fake_scope():
+        yield session
+
+    return patch.object(db_session, attr, _fake_scope)
 
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -153,7 +172,7 @@ def _store():
 async def test_create_session_resolves_personal_team_when_team_id_none() -> None:
     """team_id=None must call _resolve_personal_team_id and use its result as scope_id."""
     store = _store()
-    eng, conn = _make_engine(
+    session = _make_session(
         _MappingResult(_CONV_ROW),
         None,  # user member insert
         None,  # agent member insert
@@ -165,7 +184,7 @@ async def test_create_session_resolves_personal_team_when_team_id_none() -> None
         return str(_TEAM_ID)
 
     with (
-        patch("app.db.engine.get_engine", return_value=eng),
+        _install_scope("write_scope", session),
         patch(
             "app.services.ai.chat.conversations_ai_store._resolve_personal_team_id",
             fake_resolve,
@@ -182,8 +201,8 @@ async def test_create_session_resolves_personal_team_when_team_id_none() -> None
             context_id=None,
         )
 
-    insert_sql = conn.calls[0]["sql"]
-    assert conn.calls[0]["params"]["scope_id"] == _TEAM_ID
+    insert_sql = session.calls[0]["sql"]
+    assert session.calls[0]["params"]["scope_id"] == _TEAM_ID
     assert "conversations" in insert_sql
     assert result["team_id"] == _TEAM_ID
 
@@ -192,7 +211,7 @@ async def test_create_session_resolves_personal_team_when_team_id_none() -> None
 async def test_create_session_uses_explicit_team_id_without_resolving() -> None:
     """An explicit team_id must skip the personal-team resolver entirely."""
     store = _store()
-    eng, conn = _make_engine(
+    session = _make_session(
         _MappingResult(_CONV_ROW),
         None,
         None,
@@ -205,7 +224,7 @@ async def test_create_session_uses_explicit_team_id_without_resolving() -> None:
         )
 
     with (
-        patch("app.db.engine.get_engine", return_value=eng),
+        _install_scope("write_scope", session),
         patch(
             "app.services.ai.chat.conversations_ai_store._resolve_personal_team_id",
             fail_resolve,
@@ -222,7 +241,7 @@ async def test_create_session_uses_explicit_team_id_without_resolving() -> None:
             context_id=None,
         )
 
-    assert conn.calls[0]["params"]["scope_id"] == _TEAM_ID
+    assert session.calls[0]["params"]["scope_id"] == _TEAM_ID
 
 
 @pytest.mark.asyncio
@@ -254,17 +273,17 @@ async def test_create_session_propagates_value_error_from_resolver() -> None:
 async def test_create_session_inserts_conversation_two_members_and_meta_in_one_txn() -> (
     None
 ):
-    """create_session must run exactly 4 statements inside a single eng.begin() txn:
+    """create_session must run exactly 4 statements inside a single write_scope() txn:
     conversation INSERT, user-member INSERT, agent-member INSERT, meta INSERT."""
     store = _store()
-    eng, conn = _make_engine(
+    session = _make_session(
         _MappingResult(_CONV_ROW),
         None,
         None,
         _MappingResult(_META_ROW),
     )
 
-    with patch("app.db.engine.get_engine", return_value=eng):
+    with _install_scope("write_scope", session):
         result = await store.create_session(
             user_id=_USER_ID,
             agent_slug=_AGENT_SLUG,
@@ -276,28 +295,30 @@ async def test_create_session_inserts_conversation_two_members_and_meta_in_one_t
             context_id="abc",
         )
 
-    assert len(conn.calls) == 4
+    assert len(session.calls) == 4
 
-    conv_sql = conn.calls[0]["sql"]
+    conv_sql = session.calls[0]["sql"]
     assert "INSERT" in conv_sql and "public.conversations" in conv_sql
-    assert "'direct_agent'" in conv_sql
+    assert session.calls[0]["params"]["type"] == "direct_agent"
 
-    user_member_sql = conn.calls[1]["sql"]
+    user_member_sql = session.calls[1]["sql"]
     assert "conversation_members" in user_member_sql
-    assert "'user'" in user_member_sql
-    assert "'owner'" in user_member_sql
-    assert conn.calls[1]["params"]["uid"] == _USER_ID
+    assert "ON CONFLICT DO NOTHING" in user_member_sql
+    assert session.calls[1]["params"]["member_type"] == "user"
+    assert session.calls[1]["params"]["role"] == "owner"
+    assert session.calls[1]["params"]["user_id"] == _USER_ID
 
-    agent_member_sql = conn.calls[2]["sql"]
+    agent_member_sql = session.calls[2]["sql"]
     assert "conversation_members" in agent_member_sql
-    assert "'agent'" in agent_member_sql
-    assert conn.calls[2]["params"]["agent_id"] == _AGENT_ID
+    assert "ON CONFLICT DO NOTHING" in agent_member_sql
+    assert session.calls[2]["params"]["member_type"] == "agent"
+    assert session.calls[2]["params"]["agent_id"] == _AGENT_ID
 
-    meta_sql = conn.calls[3]["sql"]
+    meta_sql = session.calls[3]["sql"]
     assert "conversation_ai_meta" in meta_sql
-    assert conn.calls[3]["params"]["agent_slug"] == _AGENT_SLUG
-    assert conn.calls[3]["params"]["context_type"] == "script"
-    assert conn.calls[3]["params"]["context_id"] == "abc"
+    assert session.calls[3]["params"]["agent_slug"] == _AGENT_SLUG
+    assert session.calls[3]["params"]["context_type"] == "script"
+    assert session.calls[3]["params"]["context_id"] == "abc"
 
     # Returned dict carries the legacy shape
     assert _LEGACY_KEYS <= result.keys()
@@ -312,29 +333,27 @@ async def test_create_session_inserts_conversation_two_members_and_meta_in_one_t
 
 @pytest.mark.asyncio
 async def test_list_sessions_sql_has_type_and_archived_filters_and_ordering() -> None:
-    captured: dict = {}
-
-    async def fake_fetch_all(sql: str, params: dict | None = None) -> list:
-        captured["sql"] = sql
-        captured["params"] = params
-        return [_JOINED_ROW]
-
     store = _store()
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
+    session = _make_session(_MappingResult([_JOINED_ROW]))
+
+    with _install_scope("read_scope", session):
         result = await store.list_sessions(
             user_id=_USER_ID, agent_slug=None, project_id=None, limit=50
         )
 
-    sql = captured["sql"]
-    assert "c.type = 'direct_agent'" in sql
-    assert "c.archived_at IS NULL" in sql
+    assert len(session.calls) == 1
+    sql = session.calls[0]["sql"]
+    params = session.calls[0]["params"]
+    assert "public.conversations.type" in sql
+    assert "public.conversations.archived_at IS NULL" in sql
     assert "conversation_members" in sql
-    assert "member_type = 'user'" in sql
-    assert "cm.user_id = :uid" in sql
-    assert "ORDER BY m.updated_at DESC" in sql
-    assert "LIMIT :limit" in sql
-    assert captured["params"]["uid"] == _USER_ID
-    assert captured["params"]["limit"] == 50
+    assert "member_type" in sql
+    assert "public.conversation_members.user_id" in sql
+    assert "ORDER BY public.conversation_ai_meta.updated_at DESC" in sql
+    assert params["type_1"] == "direct_agent"
+    assert params["member_type_1"] == "user"
+    assert params["user_id_1"] == _USER_ID
+    assert params["param_1"] == 50
 
     assert len(result) == 1
     assert _LEGACY_KEYS <= result[0].keys()
@@ -347,24 +366,20 @@ async def test_list_sessions_sql_has_type_and_archived_filters_and_ordering() ->
 
 @pytest.mark.asyncio
 async def test_list_sessions_applies_agent_slug_and_project_id_filters() -> None:
-    captured: dict = {}
-
-    async def fake_fetch_all(sql: str, params: dict | None = None) -> list:
-        captured["sql"] = sql
-        captured["params"] = params
-        return []
-
     store = _store()
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
+    session = _make_session(_MappingResult([]))
+
+    with _install_scope("read_scope", session):
         await store.list_sessions(
             user_id=_USER_ID, agent_slug=_AGENT_SLUG, project_id=42, limit=10
         )
 
-    sql = captured["sql"]
-    assert "m.agent_slug = :agent_slug" in sql
-    assert "c.project_id = :project_id" in sql
-    assert captured["params"]["agent_slug"] == _AGENT_SLUG
-    assert captured["params"]["project_id"] == 42
+    sql = session.calls[0]["sql"]
+    params = session.calls[0]["params"]
+    assert "public.conversation_ai_meta.agent_slug" in sql
+    assert "public.conversations.project_id" in sql
+    assert params["agent_slug_1"] == _AGENT_SLUG
+    assert params["project_id_1"] == 42
 
 
 # ── get_session ──────────────────────────────────────────────────────────────
@@ -372,29 +387,27 @@ async def test_list_sessions_applies_agent_slug_and_project_id_filters() -> None
 
 @pytest.mark.asyncio
 async def test_get_session_returns_none_when_row_missing_or_archived() -> None:
-    async def fake_fetch_one(sql: str, params: dict | None = None) -> None:
-        # archived rows are filtered out in SQL (archived_at IS NULL), so a
-        # missing/archived session simply yields no row.
-        assert "c.archived_at IS NULL" in sql
-        return None
-
     store = _store()
-    with patch("app.db.engine.fetch_one", fake_fetch_one):
+    session = _make_session(_MappingResult(None))
+
+    with _install_scope("read_scope", session):
         result = await store.get_session(session_id=_CONV_ID)
 
+    # archived rows are filtered out in SQL (archived_at IS NULL), so a
+    # missing/archived session simply yields no row.
+    assert "public.conversations.archived_at IS NULL" in session.calls[0]["sql"]
     assert result is None
 
 
 @pytest.mark.asyncio
 async def test_get_session_maps_joined_row_to_legacy_shape() -> None:
-    async def fake_fetch_one(sql: str, params: dict | None = None) -> dict:
-        assert params["cid"] == _CONV_ID
-        return _JOINED_ROW
-
     store = _store()
-    with patch("app.db.engine.fetch_one", fake_fetch_one):
+    session = _make_session(_MappingResult(_JOINED_ROW))
+
+    with _install_scope("read_scope", session):
         result = await store.get_session(session_id=_CONV_ID)
 
+    assert session.calls[0]["params"]["id_1"] == _CONV_ID
     assert result is not None
     assert _LEGACY_KEYS <= result.keys()
     assert result["id"] == _CONV_ID
@@ -412,22 +425,23 @@ async def test_get_session_maps_joined_row_to_legacy_shape() -> None:
 @pytest.mark.asyncio
 async def test_rename_session_updates_title_and_touches_meta_then_returns_row() -> None:
     store = _store()
-    eng, conn = _make_engine(None, None)  # UPDATE conversations, UPDATE meta
-
-    async def fake_fetch_one(sql: str, params: dict | None = None) -> dict:
-        return {**_JOINED_ROW, "title": "Renamed"}
+    write_session = _make_session(None, None)  # UPDATE conversations, UPDATE meta
+    read_session = _make_session(_MappingResult({**_JOINED_ROW, "title": "Renamed"}))
 
     with (
-        patch("app.db.engine.get_engine", return_value=eng),
-        patch("app.db.engine.fetch_one", fake_fetch_one),
+        _install_scope("write_scope", write_session),
+        _install_scope("read_scope", read_session),
     ):
         result = await store.rename_session(session_id=_CONV_ID, title="Renamed")
 
-    assert len(conn.calls) == 2
-    assert "UPDATE" in conn.calls[0]["sql"] and "conversations" in conn.calls[0]["sql"]
-    assert conn.calls[0]["params"]["title"] == "Renamed"
-    assert "conversation_ai_meta" in conn.calls[1]["sql"]
-    assert "updated_at = now()" in conn.calls[1]["sql"]
+    assert len(write_session.calls) == 2
+    assert (
+        "UPDATE" in write_session.calls[0]["sql"]
+        and "conversations" in write_session.calls[0]["sql"]
+    )
+    assert write_session.calls[0]["params"]["title"] == "Renamed"
+    assert "conversation_ai_meta" in write_session.calls[1]["sql"]
+    assert "updated_at=now()" in write_session.calls[1]["sql"]
 
     assert result["title"] == "Renamed"
     assert _LEGACY_KEYS <= result.keys()
@@ -438,20 +452,16 @@ async def test_rename_session_updates_title_and_touches_meta_then_returns_row() 
 
 @pytest.mark.asyncio
 async def test_soft_delete_session_sets_archived_at() -> None:
-    captured: dict = {}
-
-    async def fake_execute(sql: str, params: dict | None = None) -> int:
-        captured["sql"] = sql
-        captured["params"] = params
-        return 1
-
     store = _store()
-    with patch("app.db.engine.execute", fake_execute):
+    session = _make_session(None)
+
+    with _install_scope("write_scope", session):
         await store.soft_delete_session(session_id=_CONV_ID)
 
-    assert "conversations" in captured["sql"]
-    assert "archived_at = now()" in captured["sql"]
-    assert captured["params"]["cid"] == _CONV_ID
+    sql = session.calls[0]["sql"]
+    assert "conversations" in sql
+    assert "archived_at=now()" in sql
+    assert session.calls[0]["params"]["id_1"] == _CONV_ID
 
 
 # ── bump_counters ────────────────────────────────────────────────────────────
@@ -461,26 +471,22 @@ async def test_soft_delete_session_sets_archived_at() -> None:
 async def test_bump_counters_writes_given_absolutes_not_increment() -> None:
     """bump_counters must write the passed values as-is (SET x = :x), NOT
     SET x = x + :x — the service already computes prior + turn."""
-    captured: dict = {}
-
-    async def fake_execute(sql: str, params: dict | None = None) -> int:
-        captured["sql"] = sql
-        captured["params"] = params
-        return 1
-
     store = _store()
-    with patch("app.db.engine.execute", fake_execute):
+    session = _make_session(None)
+
+    with _install_scope("write_scope", session):
         await store.bump_counters(session_id=_CONV_ID, add_tokens=555, add_messages=9)
 
-    sql = captured["sql"]
+    sql = session.calls[0]["sql"]
+    params = session.calls[0]["params"]
     assert "conversation_ai_meta" in sql
-    assert "total_tokens = :total_tokens" in sql
-    assert "total_tokens = total_tokens +" not in sql
-    assert "message_count = :message_count" in sql
-    assert "message_count = message_count +" not in sql
-    assert captured["params"]["total_tokens"] == 555
-    assert captured["params"]["message_count"] == 9
-    assert captured["params"]["cid"] == _CONV_ID
+    assert "total_tokens=%(total_tokens)s" in sql
+    assert "total_tokens=public.conversation_ai_meta.total_tokens +" not in sql
+    assert "message_count=%(message_count)s" in sql
+    assert "message_count=public.conversation_ai_meta.message_count +" not in sql
+    assert params["total_tokens"] == 555
+    assert params["message_count"] == 9
+    assert params["conversation_id_1"] == _CONV_ID
 
 
 # ── Messages (Task 4) ────────────────────────────────────────────────────────
@@ -711,25 +717,20 @@ async def test_append_assistant_message_rejects_reserved_metadata_keys() -> None
 
 @pytest.mark.asyncio
 async def test_get_messages_sql_orders_by_seq_asc_and_excludes_deleted() -> None:
-    captured: dict = {}
-
-    async def fake_fetch_all(sql: str, params: dict | None = None) -> list:
-        captured["sql"] = sql
-        captured["params"] = params
-        return []
-
     store = _store()
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
+    session = _make_session(_MappingResult([]))
+
+    with _install_scope("read_scope", session):
         await store.get_messages(session_id=_CONV_ID, limit=50)
 
-    sql = captured["sql"]
+    sql = session.calls[0]["sql"]
+    params = session.calls[0]["params"]
     assert "public.messages" in sql
-    assert "conversation_id = :cid" in sql
-    assert "deleted_at IS NULL" in sql
-    assert "ORDER BY seq ASC" in sql
-    assert "LIMIT :limit" in sql
-    assert captured["params"]["cid"] == _CONV_ID
-    assert captured["params"]["limit"] == 50
+    assert "public.messages.conversation_id" in sql
+    assert "public.messages.deleted_at IS NULL" in sql
+    assert "ORDER BY public.messages.seq ASC" in sql
+    assert params["conversation_id_1"] == _CONV_ID
+    assert params["param_1"] == 50
 
 
 @pytest.mark.asyncio
@@ -773,11 +774,10 @@ async def test_get_messages_maps_role_content_and_strips_meta_decoration() -> No
         },
     ]
 
-    async def fake_fetch_all(sql: str, params: dict | None = None) -> list:
-        return rows
-
     store = _store()
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
+    session = _make_session(_MappingResult(rows))
+
+    with _install_scope("read_scope", session):
         result = await store.get_messages(session_id=_CONV_ID)
 
     assert len(result) == 2
@@ -828,11 +828,10 @@ async def test_get_messages_defensive_json_loads_when_body_is_str() -> None:
         }
     ]
 
-    async def fake_fetch_all(sql: str, params: dict | None = None) -> list:
-        return rows
-
     store = _store()
-    with patch("app.db.engine.fetch_all", fake_fetch_all):
+    session = _make_session(_MappingResult(rows))
+
+    with _install_scope("read_scope", session):
         result = await store.get_messages(session_id=_CONV_ID)
 
     assert result[0]["content"] == "raw json text"
@@ -853,14 +852,14 @@ async def test_create_session_return_dict_carries_store_kind_key() -> None:
     (not just the class attribute) so the service can dispatch RunRecorder's
     session_id vs conversation_id choice off the session row alone."""
     store = _store()
-    eng, conn = _make_engine(
+    session = _make_session(
         _MappingResult(_CONV_ROW),
         None,
         None,
         _MappingResult(_META_ROW),
     )
 
-    with patch("app.db.engine.get_engine", return_value=eng):
+    with _install_scope("write_scope", session):
         result = await store.create_session(
             user_id=_USER_ID,
             agent_slug=_AGENT_SLUG,
@@ -878,12 +877,10 @@ async def test_create_session_return_dict_carries_store_kind_key() -> None:
 @pytest.mark.asyncio
 async def test_get_session_return_dict_carries_store_kind_key() -> None:
     """Task 6: get_session's returned row must carry a 'store_kind' key."""
-
-    async def fake_fetch_one(sql: str, params: dict | None = None) -> dict:
-        return _JOINED_ROW
-
     store = _store()
-    with patch("app.db.engine.fetch_one", fake_fetch_one):
+    session = _make_session(_MappingResult(_JOINED_ROW))
+
+    with _install_scope("read_scope", session):
         result = await store.get_session(session_id=_CONV_ID)
 
     assert result["store_kind"] == "conversations"

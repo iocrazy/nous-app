@@ -34,18 +34,17 @@ _PDF_EXTS = {".pdf"}
 async def _get_session_team_id(session_id: str) -> Optional[int]:
     """Return the ``team_id`` for *session_id*, or ``None`` if not team-scoped.
 
-    Uses the SQLAlchemy async engine (``app.db.engine``) which is the
-    canonical async DB-read pattern in this codebase (see write_memory.py,
-    workflow_health_sweeper.py, etc.).  The import is deferred inside the
-    function so it follows the same lazy-import convention used across all
-    DBOS step and workflow modules.
+    Uses the ORM ``read_scope()`` session (``app.db.session``), the
+    canonical async DB-read pattern in this codebase (Phase B4). The import
+    is deferred inside the function so it follows the same lazy-import
+    convention used across all DBOS step and workflow modules.
 
     Conversations-only (Conversations Phase 3, Task 6 collapsed the
     compatibility layer — the legacy ``ai_sessions`` fallback this used to
     try after a conversations miss is gone; the legacy table itself is
     dropped in Wave 2).
 
-    The conversations column is ``scope_id`` (aliased ``AS team_id``
+    The conversations column is ``scope_id`` (returned as ``team_id``
     below), NOT a literal ``team_id`` column — that name only existed on
     the legacy ``ai_sessions`` table. A ``conversations`` row for a
     ``direct_agent`` session ALWAYS has a non-NULL ``scope_id`` (Phase 2
@@ -55,19 +54,24 @@ async def _get_session_team_id(session_id: str) -> Optional[int]:
     for a personal conversation, not a signal that the session is
     legacy-personal.
     """
-    from app.db import engine as db_engine  # deferred — matches codebase convention
+    from sqlalchemy import select
+
+    from app.db.session import read_scope  # deferred — matches codebase convention
+    from app.models import Conversations
 
     sid = int(session_id)
     # conversations.id is a BIGINT snowflake carried as str (mig 232) —
     # asyncpg rejects str binds on int8.
-    row = await db_engine.fetch_one(
-        "SELECT scope_id AS team_id FROM public.conversations WHERE id = :id",
-        {"id": sid},
-    )
+    async with read_scope() as session:
+        row = (
+            await session.execute(
+                select(Conversations.scope_id).where(Conversations.id == sid)
+            )
+        ).first()
     if row is None:
         logger.debug(f"[chat_upload] session {session_id!r} not found")
         return None
-    team_id = row.get("team_id")
+    team_id = row[0]
     return int(team_id) if team_id is not None else None
 
 

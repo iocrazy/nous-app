@@ -9,19 +9,59 @@ index — that's a point lookup, not a range scan, so it doesn't need the rollup
 from __future__ import annotations
 
 import datetime
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
-# group_by value → the ai_usage_hourly column expression (rendered as text so
-# heterogeneous keys — uuid agent_id, bigint project_id — serialize uniformly).
-_GROUP_KEY_EXPR = {
-    "agent": "agent_id::text",
-    "model": "model",
-    "module": "module",
-    "project": "project_id::text",
-    "attribution": "attribution",
+
+# group_by value -> a zero-arg factory building the ai_usage_hourly column
+# expression for that attribution dimension (agent_id/project_id are UUID/
+# BIGINT columns cast to text so heterogeneous group keys serialize
+# uniformly, matching the legacy raw-SQL `::text` casts). Factories rather
+# than pre-built expressions: summarize() calls the factory twice (groups +
+# daily queries) and a Label instance must not be reused across two separate
+# SELECTs.
+def _agent_key():
+    from sqlalchemy import String, cast
+
+    from app.models import AiUsageHourly
+
+    return cast(AiUsageHourly.agent_id, String)
+
+
+def _model_key():
+    from app.models import AiUsageHourly
+
+    return AiUsageHourly.model
+
+
+def _module_key():
+    from app.models import AiUsageHourly
+
+    return AiUsageHourly.module
+
+
+def _project_key():
+    from sqlalchemy import String, cast
+
+    from app.models import AiUsageHourly
+
+    return cast(AiUsageHourly.project_id, String)
+
+
+def _attribution_key():
+    from app.models import AiUsageHourly
+
+    return AiUsageHourly.attribution
+
+
+_GROUP_KEY_FACTORY: dict[str, Callable[[], Any]] = {
+    "agent": _agent_key,
+    "model": _model_key,
+    "module": _module_key,
+    "project": _project_key,
+    "attribution": _attribution_key,
 }
 
-VALID_GROUP_BY = frozenset(_GROUP_KEY_EXPR)
+VALID_GROUP_BY = frozenset(_GROUP_KEY_FACTORY)
 
 
 def _coerce_bigint(value: Any) -> Optional[int]:
@@ -40,88 +80,165 @@ async def summarize(
     """Aggregate ai_usage_hourly for one team over [frm, to) grouped by one
     attribution dimension. Returns totals, per-group totals, and a per-day
     series (for the stacked chart)."""
-    from app.db import engine as db_engine
+    from sqlalchemy import func, select
 
-    if group_by not in _GROUP_KEY_EXPR:
+    from app.db.session import read_scope
+    from app.models import AiUsageHourly
+
+    if group_by not in _GROUP_KEY_FACTORY:
         group_by = "model"
-    key_expr = _GROUP_KEY_EXPR[group_by]
 
-    params = {
-        "tid": _coerce_bigint(team_id),
-        "frm": frm,
-        "to": to,
+    where_clause = (
+        AiUsageHourly.team_id == _coerce_bigint(team_id),
+        AiUsageHourly.bucket_hour >= frm,
+        AiUsageHourly.bucket_hour < to,
+    )
+
+    async with read_scope() as session:
+        total = (
+            (
+                await session.execute(
+                    select(
+                        func.coalesce(func.sum(AiUsageHourly.prompt_tokens), 0).label(
+                            "prompt_tokens"
+                        ),
+                        func.coalesce(
+                            func.sum(AiUsageHourly.completion_tokens), 0
+                        ).label("completion_tokens"),
+                        func.coalesce(func.sum(AiUsageHourly.total_tokens), 0).label(
+                            "total_tokens"
+                        ),
+                        func.coalesce(
+                            func.sum(AiUsageHourly.cached_input_tokens), 0
+                        ).label("cached_input_tokens"),
+                        func.coalesce(func.sum(AiUsageHourly.cost_cents), 0).label(
+                            "cost_cents"
+                        ),
+                        func.coalesce(func.sum(AiUsageHourly.event_count), 0).label(
+                            "event_count"
+                        ),
+                    ).where(*where_clause)
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+        # Label instances reused between the SELECT list and the
+        # GROUP BY/ORDER BY clauses below so ORDER BY renders the output
+        # alias (`ORDER BY cost_cents DESC ...`) rather than repeating the
+        # full aggregate expression — matches the legacy raw SQL's
+        # alias-based ORDER BY exactly. GROUP BY still expands to the full
+        # expression (SQLAlchemy does not alias-reference GROUP BY), which
+        # is a different SQL string but an identical grouping.
+        grp_label = _GROUP_KEY_FACTORY[group_by]().label("grp")
+        cost_label = func.coalesce(func.sum(AiUsageHourly.cost_cents), 0).label(
+            "cost_cents"
+        )
+        total_tokens_label = func.coalesce(
+            func.sum(AiUsageHourly.total_tokens), 0
+        ).label("total_tokens")
+        groups = (
+            (
+                await session.execute(
+                    select(
+                        grp_label,
+                        func.coalesce(func.sum(AiUsageHourly.prompt_tokens), 0).label(
+                            "prompt_tokens"
+                        ),
+                        func.coalesce(
+                            func.sum(AiUsageHourly.completion_tokens), 0
+                        ).label("completion_tokens"),
+                        total_tokens_label,
+                        cost_label,
+                        func.coalesce(func.sum(AiUsageHourly.event_count), 0).label(
+                            "event_count"
+                        ),
+                    )
+                    .where(*where_clause)
+                    .group_by(grp_label)
+                    .order_by(cost_label.desc().nulls_last(), total_tokens_label.desc())
+                )
+            )
+            .mappings()
+            .all()
+        )
+
+        day_label = func.to_char(
+            func.date_trunc("day", AiUsageHourly.bucket_hour), "YYYY-MM-DD"
+        ).label("day")
+        daily_grp_label = _GROUP_KEY_FACTORY[group_by]().label("grp")
+        daily = (
+            (
+                await session.execute(
+                    select(
+                        day_label,
+                        daily_grp_label,
+                        func.coalesce(func.sum(AiUsageHourly.total_tokens), 0).label(
+                            "total_tokens"
+                        ),
+                        func.coalesce(func.sum(AiUsageHourly.cost_cents), 0).label(
+                            "cost_cents"
+                        ),
+                    )
+                    .where(*where_clause)
+                    .group_by(day_label, daily_grp_label)
+                    .order_by(day_label.asc())
+                )
+            )
+            .mappings()
+            .all()
+        )
+
+    return {
+        "total": dict(total) if total else {},
+        "groups": [dict(g) for g in groups],
+        "daily": [dict(d) for d in daily],
     }
-    where = (
-        "WHERE team_id = :tid AND bucket_hour >= :frm AND bucket_hour < :to"
-    )
-
-    total = await db_engine.fetch_one(
-        f"""
-        SELECT COALESCE(SUM(prompt_tokens), 0)       AS prompt_tokens,
-               COALESCE(SUM(completion_tokens), 0)   AS completion_tokens,
-               COALESCE(SUM(total_tokens), 0)        AS total_tokens,
-               COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
-               COALESCE(SUM(cost_cents), 0)          AS cost_cents,
-               COALESCE(SUM(event_count), 0)         AS event_count
-          FROM public.ai_usage_hourly
-          {where}
-        """,
-        params,
-    )
-
-    groups = await db_engine.fetch_all(
-        f"""
-        SELECT {key_expr}                            AS grp,
-               COALESCE(SUM(prompt_tokens), 0)       AS prompt_tokens,
-               COALESCE(SUM(completion_tokens), 0)   AS completion_tokens,
-               COALESCE(SUM(total_tokens), 0)        AS total_tokens,
-               COALESCE(SUM(cost_cents), 0)          AS cost_cents,
-               COALESCE(SUM(event_count), 0)         AS event_count
-          FROM public.ai_usage_hourly
-          {where}
-          GROUP BY grp
-          ORDER BY cost_cents DESC NULLS LAST, total_tokens DESC
-        """,
-        params,
-    )
-
-    daily = await db_engine.fetch_all(
-        f"""
-        SELECT to_char(date_trunc('day', bucket_hour), 'YYYY-MM-DD') AS day,
-               {key_expr}                            AS grp,
-               COALESCE(SUM(total_tokens), 0)        AS total_tokens,
-               COALESCE(SUM(cost_cents), 0)          AS cost_cents
-          FROM public.ai_usage_hourly
-          {where}
-          GROUP BY day, grp
-          ORDER BY day ASC
-        """,
-        params,
-    )
-
-    return {"total": total or {}, "groups": groups, "daily": daily}
 
 
 async def issue_totals(issue_id: Any) -> dict[str, Any]:
     """Per-issue AI spend, summed from agent_runs by the issue_id index."""
-    from app.db import engine as db_engine
+    from sqlalchemy import func, select
 
-    row = await db_engine.fetch_one(
-        """
-        SELECT COALESCE(SUM(prompt_tokens), 0)                     AS prompt_tokens,
-               COALESCE(SUM(completion_tokens), 0)                 AS completion_tokens,
-               COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total_tokens,
-               COALESCE(SUM(cost_cents), 0)                        AS cost_cents,
-               COUNT(*)                                            AS run_count
-          FROM public.agent_runs
-         WHERE issue_id = :iid
-        """,
-        {"iid": _coerce_bigint(issue_id)},
+    from app.db.session import read_scope
+    from app.models import AgentRuns
+
+    async with read_scope() as session:
+        row = (
+            (
+                await session.execute(
+                    select(
+                        func.coalesce(func.sum(AgentRuns.prompt_tokens), 0).label(
+                            "prompt_tokens"
+                        ),
+                        func.coalesce(func.sum(AgentRuns.completion_tokens), 0).label(
+                            "completion_tokens"
+                        ),
+                        func.coalesce(
+                            func.sum(
+                                AgentRuns.prompt_tokens + AgentRuns.completion_tokens
+                            ),
+                            0,
+                        ).label("total_tokens"),
+                        func.coalesce(func.sum(AgentRuns.cost_cents), 0).label(
+                            "cost_cents"
+                        ),
+                        func.count().label("run_count"),
+                    ).where(AgentRuns.issue_id == _coerce_bigint(issue_id))
+                )
+            )
+            .mappings()
+            .one()
+        )
+    return (
+        dict(row)
+        if row
+        else {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "cost_cents": 0,
+            "run_count": 0,
+        }
     )
-    return row or {
-        "prompt_tokens": 0,
-        "completion_tokens": 0,
-        "total_tokens": 0,
-        "cost_cents": 0,
-        "run_count": 0,
-    }
