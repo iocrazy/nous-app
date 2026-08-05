@@ -23,12 +23,16 @@ import { relativeTime } from '../../utils/taskDisplay';
 import { useToast } from '../Toast';
 import { useElapsedSeconds } from '../../hooks/useElapsedSeconds';
 
+// `finished` uses the semantic `info` token (K1 §2.3 — the convention for new
+// code) rather than a success green: the whole point of the state is to be
+// told apart at a glance from `running`, which already owns the green dot.
 const LIVENESS_VISUAL: Record<AgentLivenessState, { dot: string; label: string; tooltip: string }> = {
   running:   { dot: 'bg-emerald-500', label: 'running',   tooltip: 'Agent is making progress' },
   silent:    { dot: 'bg-amber-400',   label: 'silent',    tooltip: 'No useful action recently — watching' },
   stuck:     { dot: 'bg-orange-500',  label: 'stuck',     tooltip: 'Stuck long enough to attempt continuation' },
   dead:      { dot: 'bg-rose-500',    label: 'dead',      tooltip: 'Marked dead by liveness scanner' },
   cancelled: { dot: 'bg-ink-500',    label: 'cancelled', tooltip: 'Cancelled by user / system' },
+  finished:  { dot: 'bg-info',        label: 'finished',  tooltip: 'Run completed normally' },
 };
 
 const LivenessPill: React.FC<{ state: AgentLivenessState }> = ({ state }) => {

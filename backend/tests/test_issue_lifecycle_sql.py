@@ -12,6 +12,7 @@ call re-imports the current attribute value (same idiom as
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import patch
 
@@ -142,6 +143,15 @@ async def test_set_status_in_progress_sets_started_at(monkeypatch):
     assert "started_at" in binds and binds["id_1"] == 7
 
 
+def _state_payload(binds: dict[str, Any]) -> str:
+    """The json.dumps(state) string handed to the jsonb merge operand."""
+    return next(
+        v
+        for v in binds.values()
+        if isinstance(v, str) and v.startswith("{") and v != "{}"
+    )
+
+
 async def test_set_status_blocked_writes_jsonb_error_state(monkeypatch):
     import app.workflows.issue_lifecycle as il
 
@@ -151,12 +161,133 @@ async def test_set_status_blocked_writes_jsonb_error_state(monkeypatch):
     await il.set_status(7, "blocked", error_code="x", error_message="boom")
 
     sql, binds = _last_update_call(session)
-    assert "execution_state=CAST(" in sql
-    # find the jsonb-cast param — its value is the json.dumps(state) string
-    state_param = next(
-        v for v in binds.values() if isinstance(v, str) and "error_code" in v
+    assert "execution_state=" in sql and "CAST(" in sql
+    assert '"error_code": "x"' in _state_payload(binds)
+    # Writing an error must not also strip the keys it is writing.
+    assert "error_code" not in [v for v in binds.values() if v == "error_code"]
+
+
+# --------------------------------------------------------------------------
+# execution_state ownership (2026-08-03 needs_input E2E follow-up)
+#
+# Two defects, one column: the write used to be a whole-column assignment
+# that clobbered other writers' keys, and it skipped the column entirely on
+# transitions that carried no error/outcome — so a resumed issue kept the
+# error that blocked it. See set_status's docstring.
+# --------------------------------------------------------------------------
+
+
+async def test_set_status_resume_removes_stale_error_keys(monkeypatch):
+    """blocked → in_progress must drop the previous run's error."""
+    import app.workflows.issue_lifecycle as il
+
+    session = _FakeSession()
+    _patch_scopes(monkeypatch, session)
+
+    await il.set_status(7, "in_progress")
+
+    sql, binds = _last_update_call(session)
+    assert "execution_state=" in sql, "column must be written on a bare resume"
+    removed = [v for v in binds.values() if v in ("error_code", "error_message")]
+    assert sorted(removed) == ["error_code", "error_message"]
+
+
+async def test_set_status_resume_preserves_other_writers_keys(monkeypatch):
+    """The removal is a subtraction on the existing column, not an
+    assignment — `turn` / `awaiting_input` must survive a resume."""
+    import app.workflows.issue_lifecycle as il
+
+    session = _FakeSession()
+    _patch_scopes(monkeypatch, session)
+
+    await il.set_status(7, "in_progress")
+
+    sql, _ = _last_update_call(session)
+    assert "coalesce(public.issues.execution_state" in sql.lower()
+
+
+async def test_set_status_outcome_merges_instead_of_overwriting(monkeypatch):
+    """An outcome-carrying transition merges, so a concurrently-written
+    awaiting_input marker is not wiped."""
+    import app.workflows.issue_lifecycle as il
+
+    session = _FakeSession()
+    _patch_scopes(monkeypatch, session)
+
+    await il.set_status(
+        7, "needs_followup", agent_outcome="needs_input", outcome_reason="Mon or Wed?"
     )
-    assert '"error_code": "x"' in state_param
+
+    sql, binds = _last_update_call(session)
+    assert "||" in sql, "must be a jsonb merge"
+    assert "coalesce(public.issues.execution_state" in sql.lower()
+    assert json.loads(_state_payload(binds)) == {
+        "agent_outcome": "needs_input",
+        "outcome_reason": "Mon or Wed?",
+    }
+
+
+async def test_set_status_outcome_without_error_also_clears_stale_error(monkeypatch):
+    """A non-error outcome must not inherit a previous run's error — the old
+    assignment dropped it as a side effect, the merge has to do it on
+    purpose."""
+    import app.workflows.issue_lifecycle as il
+
+    session = _FakeSession()
+    _patch_scopes(monkeypatch, session)
+
+    await il.set_status(7, "in_review", agent_outcome="completed")
+
+    sql, binds = _last_update_call(session)
+    removed = [v for v in binds.values() if v in ("error_code", "error_message")]
+    assert sorted(removed) == ["error_code", "error_message"]
+    assert '"agent_outcome": "completed"' in _state_payload(binds)
+
+
+async def test_set_status_error_write_builds_on_existing_column(monkeypatch):
+    """The defect that hurt most: writing an error used to ASSIGN the whole
+    column, taking awaiting_input / turn / stranded_* with it. Two structural
+    guarantees are asserted here — the new value is built FROM the column
+    itself, and the payload carries only the keys set_status owns, so there
+    is nothing in the statement capable of dropping a foreign key.
+
+    The semantic proof (keys actually present in the row afterwards) needs a
+    real jsonb engine and lives in
+    tests/migrations/test_405_execution_state_key_preservation.py."""
+    import app.workflows.issue_lifecycle as il
+
+    session = _FakeSession()
+    _patch_scopes(monkeypatch, session)
+
+    await il.set_status(7, "blocked", error_code="x", error_message="boom")
+
+    sql, binds = _last_update_call(session)
+    assert "coalesce(public.issues.execution_state" in sql.lower()
+    assert "||" in sql
+    assert set(json.loads(_state_payload(binds))) == {"error_code", "error_message"}
+
+
+async def test_set_status_error_and_outcome_merge_together(monkeypatch):
+    import app.workflows.issue_lifecycle as il
+
+    session = _FakeSession()
+    _patch_scopes(monkeypatch, session)
+
+    await il.set_status(
+        7,
+        "blocked",
+        error_code="TIMEOUT",
+        error_message="took too long",
+        agent_outcome="continue_capped",
+    )
+
+    sql, binds = _last_update_call(session)
+    assert json.loads(_state_payload(binds)) == {
+        "error_code": "TIMEOUT",
+        "error_message": "took too long",
+        "agent_outcome": "continue_capped",
+    }
+    assert "coalesce(public.issues.execution_state" in sql.lower()
 
 
 async def test_set_status_done_sets_completed_at(monkeypatch):

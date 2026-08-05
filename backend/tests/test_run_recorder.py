@@ -487,3 +487,98 @@ async def test_below_concurrency_cap_proceeds() -> None:
             pass
 
     assert len(table.insert_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# liveness_state terminal value (2026-08-03 needs_input E2E follow-up)
+#
+# A normally-completed run used to leave liveness_state='running' forever —
+# the column had no "finished normally" value at all (mig 207 only modelled
+# the running→silent→stuck→dead degradation path plus 'cancelled').
+#
+# 'dead' is NOT the fix: every writer of dead pairs it atomically with
+# status='failed' (liveness_scanner._mark_dead, liveness/reconcile), the
+# stuck/dead pair drives the agent fault badge, and
+# AgentRunsRepository.mark_empty_output's docstring explicitly records an
+# earlier attempt to reuse 'dead' here as the wrong call. Hence a new
+# terminal value, 'finished' (mig 406).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_completed_run_gets_finished_liveness_state() -> None:
+    table = _FakeTable()
+    p_read, p_write = _patched(table)
+
+    with p_read, p_write:
+        rec = RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
+        async with rec:
+            pass
+
+    finish = table.update_calls[-1]
+    assert finish["status"] == "completed"
+    assert finish["liveness_state"] == "finished"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_run_mirrors_cancelled_liveness_state() -> None:
+    """mig 207 defined 'cancelled' as "mirrors agent_runs.status" but nothing
+    ever wrote it — the cancel path left liveness_state='running' too."""
+    table = _FakeTable(cancel_requested=True)
+    p_read, p_write = _patched(table)
+
+    with p_read, p_write:
+        rec = RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
+        async with rec:
+            assert await rec.check_cancelled() is True
+
+    finish = table.update_calls[-1]
+    assert finish["status"] == "cancelled"
+    assert finish["liveness_state"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_failed_run_also_gets_finished_liveness_state() -> None:
+    """`finished` means "wound up in an orderly way", not "succeeded" —
+    liveness is orthogonal to status. A body that raised still returned
+    control to the recorder and closed its own row, so a failed row left on
+    'running' is exactly as wrong as a completed one."""
+    table = _FakeTable()
+    p_read, p_write = _patched(table)
+
+    with p_read, p_write:
+        rec = RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
+        with pytest.raises(RuntimeError):
+            async with rec:
+                raise RuntimeError("boom")
+
+    finish = table.update_calls[-1]
+    assert finish["status"] == "failed"
+    assert finish["liveness_state"] == "finished"
+
+
+@pytest.mark.asyncio
+async def test_no_finish_path_ever_writes_dead() -> None:
+    """The red line. dead ⟺ failed is a whole-DB invariant: both writers of
+    dead (liveness_scanner._mark_dead, services/liveness/reconcile) set
+    status='failed' in the SAME statement, and dead means "the process
+    actually died". The agent fault badge reads liveness_state IN
+    ('stuck','dead') — minting dead for ordinary outcomes would light up
+    every agent."""
+    for cancel_requested, raises in ((False, False), (False, True), (True, False)):
+        table = _FakeTable(cancel_requested=cancel_requested)
+        p_read, p_write = _patched(table)
+
+        with p_read, p_write:
+            rec = RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
+            if raises:
+                with pytest.raises(RuntimeError):
+                    async with rec:
+                        raise RuntimeError("boom")
+            else:
+                async with rec:
+                    if cancel_requested:
+                        await rec.check_cancelled()
+
+        finish = table.update_calls[-1]
+        assert finish.get("liveness_state") != "dead"

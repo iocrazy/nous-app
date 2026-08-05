@@ -576,11 +576,13 @@ class AgentRunsRepository(AsyncpgRepository):
         ``status='completed' + liveness_state='dead'`` combo and pollute that
         invariant for ops triage. The EMPTY_OUTPUT typing is already fully
         carried by ``error_code``/``error_message`` — no liveness_state write
-        needed. (The "liveness_state stays 'running' after completion" probe
-        observation is a real but separate gap: it needs its own terminal
-        value + migration, out of scope here — do not "fix" it by reaching
-        for 'dead'.) Never raises — best-effort annotation on an
-        already-finished row."""
+        needed. (The "liveness_state stays 'running' after completion" gap
+        this docstring used to flag as needing its own terminal value is now
+        closed: migration 406 added ``'finished'`` and ``RunRecorder._finish``
+        writes it. This row is already ``'finished'`` by the time we get here
+        — which is correct, the run DID complete; the EMPTY_OUTPUT typing
+        lives on the error columns, not on liveness.) Never raises —
+        best-effort annotation on an already-finished row."""
         try:
             async with write_scope() as session:
                 await session.execute(
