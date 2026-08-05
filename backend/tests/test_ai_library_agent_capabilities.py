@@ -342,47 +342,152 @@ def test_malformed_grant_is_422_and_writes_nothing():
         assert captured == {}, f"{bad} wrote {captured}"
 
 
-def test_non_owner_cannot_grant_capabilities():
-    captured: dict = {}
-    stranger = {
-        **_owned_agent(),
-        "user_id": "99999999-9999-9999-9999-999999999999",
-    }
-    app, repo = _client_with_repo(stranger, captured)
+# --- Authorization: the REAL gate runs -------------------------------------
+#
+# These deliberately do NOT patch `_can_edit_chat_permissions`. Mocking the gate
+# would only prove "when the gate says no, the endpoint 403s" — it would pass
+# even if the gate itself let strangers through, which is the whole property
+# under test. Instead we stub only the two DB-touching leaves
+# (`_is_team_owner` / `_user_is_admin`) with the answers the database would give
+# for that identity, and let the gate's real composition decide.
+#
+# Each denial is paired with a positive control on the SAME setup, so a 403 has
+# to come from the identity change rather than from anything else in the
+# request failing.
+
+_STRANGER = "99999999-9999-9999-9999-999999999999"
+_TEAM_ID = 42
+
+
+def _patch_agent_as(
+    existing: Dict[str, Any],
+    body: Dict[str, Any],
+    captured: dict,
+    *,
+    is_team_owner: bool = False,
+    is_admin: bool = False,
+):
+    """PATCH with the real authorization gate in play; only DB lookups stubbed."""
+    app, repo = _client_with_repo(existing, captured)
     with (
         _patch("app.api.ai_library_router._repos", return_value=(repo, None)),
         _patch(
-            "app.api.ai_library_router._can_edit_chat_permissions",
-            new=AsyncMock(return_value=False),
+            "app.api.ai_library_router._enrich_agents_with_scope_names",
+            new=AsyncMock(side_effect=lambda rows: rows),
+        ),
+        _patch(
+            "app.api.ai_library_router._is_team_owner",
+            new=AsyncMock(return_value=is_team_owner),
+        ),
+        _patch(
+            "app.api.ai_library_router._user_is_admin",
+            new=AsyncMock(return_value=is_admin),
         ),
     ):
+
+        def _refresh():
+            if "updates" in captured and "capability_profile" in captured["updates"]:
+                return {
+                    **existing,
+                    "capability_profile": captured["updates"]["capability_profile"],
+                }
+            return existing
+
+        repo.get_by_slug.side_effect = lambda *a, **k: _refresh()
         client = TestClient(app)
-        resp = client.patch(
-            "/api/v1/ai-library/agents/storyboard",
-            json={"capabilities": {"write_level": "write"}},
-        )
+        return client.patch("/api/v1/ai-library/agents/storyboard", json=body)
+
+
+def test_non_owner_cannot_grant_capabilities():
+    """A stranger (not owner, not team owner, not admin) is stopped by the gate."""
+    captured: dict = {}
+    stranger_owned = {**_owned_agent(), "user_id": _STRANGER}
+    resp = _patch_agent_as(
+        stranger_owned, {"capabilities": {"write_level": "write"}}, captured
+    )
+    assert resp.status_code == 403
+    assert captured == {}, "a denied grant must not reach storage"
+
+
+def test_owner_can_grant_capabilities_positive_control():
+    """Same request, same stubs — only the owner differs. Proves the 403 above
+    came from the ownership check and not from something unrelated."""
+    captured: dict = {}
+    resp = _patch_agent_as(
+        _owned_agent(), {"capabilities": {"write_level": "write"}}, captured
+    )
+    assert resp.status_code == 200, resp.text
+    assert captured["updates"]["capability_profile"]["capabilities"] == {
+        "write_level": "write"
+    }
+
+
+def test_team_member_who_is_not_team_owner_cannot_grant():
+    captured: dict = {}
+    team_agent = {**_owned_agent(), "user_id": _STRANGER, "team_id": _TEAM_ID}
+    resp = _patch_agent_as(
+        team_agent,
+        {"capabilities": {"delete": True}},
+        captured,
+        is_team_owner=False,
+    )
     assert resp.status_code == 403
     assert captured == {}
 
 
-def test_preset_grant_requires_the_same_gate():
-    """System presets are shared rows: only the admin branch of the gate passes.
-    Denied here means denied — no fallback to the override layer for grants."""
+def test_team_owner_can_grant_positive_control():
+    captured: dict = {}
+    team_agent = {**_owned_agent(), "user_id": _STRANGER, "team_id": _TEAM_ID}
+    resp = _patch_agent_as(
+        team_agent, {"capabilities": {"delete": True}}, captured, is_team_owner=True
+    )
+    assert resp.status_code == 200, resp.text
+    assert captured["updates"]["capability_profile"]["capabilities"]["delete"] is True
+
+
+def test_preset_grant_denied_for_non_admin():
+    """System presets are shared rows (no user_id, no team_id), so ONLY the
+    admin branch of the gate can pass. A non-admin is refused outright — grants
+    deliberately do not fall back to the mig-341 per-user override layer, which
+    would otherwise be a self-grant escalation path."""
     captured: dict = {}
     preset = {**_owned_agent(), "is_system_preset": True, "user_id": None}
-    app, repo = _client_with_repo(preset, captured)
-    with (
-        _patch("app.api.ai_library_router._repos", return_value=(repo, None)),
-        _patch(
-            "app.api.ai_library_router._can_edit_chat_permissions",
-            new=AsyncMock(return_value=False),
-        ),
-    ):
-        client = TestClient(app)
-        resp = client.patch(
-            "/api/v1/ai-library/agents/storyboard",
-            json={"capabilities": {"delete": True}},
-        )
+    resp = _patch_agent_as(
+        preset, {"capabilities": {"delete": True}}, captured, is_admin=False
+    )
+    assert resp.status_code == 403
+    assert captured == {}
+
+
+def test_preset_grant_allowed_for_platform_admin():
+    """Positive control for the preset path: same row, admin identity → 200."""
+    captured: dict = {}
+    preset = {**_owned_agent(), "is_system_preset": True, "user_id": None}
+    resp = _patch_agent_as(
+        preset, {"capabilities": {"delete": True}}, captured, is_admin=True
+    )
+    assert resp.status_code == 200, resp.text
+    # Landed on the BASE row (presets are shared), not an override layer.
+    assert captured["updates"]["capability_profile"]["capabilities"]["delete"] is True
+
+
+def test_stranger_denied_before_any_write_even_with_valid_payload():
+    """The gate runs ahead of the merge: a perfectly valid grant from a stranger
+    still writes nothing (403, not 422 — the payload is fine, the caller isn't)."""
+    captured: dict = {}
+    stranger_owned = {**_owned_agent(), "user_id": _STRANGER}
+    resp = _patch_agent_as(
+        stranger_owned,
+        {
+            "capabilities": {
+                "write_level": "write",
+                "delete": True,
+                "media": {"image": True, "video": True},
+                "external_publish": True,
+            }
+        },
+        captured,
+    )
     assert resp.status_code == 403
     assert captured == {}
 
