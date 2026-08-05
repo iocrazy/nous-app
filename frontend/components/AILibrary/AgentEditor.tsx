@@ -21,6 +21,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type {
+  AgentCapabilities,
   AgentChatPermissions,
   AILibraryAgent,
   AILibrarySkill,
@@ -166,6 +167,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
   );
   const [draft, setDraft] = useState<Partial<AILibraryAgent>>({});
   const [permDraft, setPermDraft] = useState<AgentChatPermissions>(() => ({}));
+  const [capsDraft, setCapsDraft] = useState<AgentCapabilities>(() => ({}));
   const [localSkillIds, setLocalSkillIds] = useState<number[]>([]);
   const [allSkills, setAllSkills] = useState<AILibrarySkill[] | null>(null);
   const [skillsLoading, setSkillsLoading] = useState(false);
@@ -191,6 +193,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
         setDraft(buildDraft(a));
         setLocalSkillIds(a.skill_ids);
         setPermDraft(a.chat_permissions ?? {});
+        setCapsDraft(a.capabilities ?? {});
       })
       .catch((err) => {
         if (cancelled) return;
@@ -415,22 +418,29 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
   };
 
   /**
-   * Chat permissions save their own way: a dedicated endpoint with its own
-   * role gate, deliberately NOT folded into the header Save (permissions are
-   * governance, editable even on presets whose content is locked).
+   * Permissions save their own way: their own role gate, deliberately NOT
+   * folded into the header Save (permissions are governance, editable even on
+   * presets whose content is locked).
+   *
+   * Chat perms and high-risk capabilities go in ONE PATCH — they are sibling
+   * subtrees the backend merges independently, and one request keeps the tab's
+   * Save atomic. Both drafts are re-seeded from the response so a value the
+   * server clamped or refused shows up immediately instead of the UI keeping a
+   * grant that never landed.
    */
   const savePermissions = async (): Promise<void> => {
     setPermSaving(true);
     try {
-      const updated = await aiLibraryService.updateAgentChatPermissions(
-        agent.slug,
-        permDraft,
-      );
+      const updated = await aiLibraryService.updateAgentPermissions(agent.slug, {
+        chat_permissions: permDraft,
+        capabilities: capsDraft,
+      });
       setAgent(updated);
       setPermDraft(updated.chat_permissions ?? {});
+      setCapsDraft(updated.capabilities ?? {});
       addToast(t('aiLibrary.agents.saved', 'Agent saved'), 'success');
     } catch (err) {
-      console.error('[AgentEditor] updateAgentChatPermissions failed:', err);
+      console.error('[AgentEditor] updateAgentPermissions failed:', err);
       addToast(t('aiLibrary.agents.saveError', { error: friendlyError(err) }), 'error');
     } finally {
       setPermSaving(false);
@@ -624,7 +634,12 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
 
       {sub === 'permissions' && (
         <section className="max-w-2xl">
-          <PermissionsSection value={permDraft} onChange={setPermDraft} />
+          <PermissionsSection
+            value={permDraft}
+            onChange={setPermDraft}
+            capabilities={capsDraft}
+            onCapabilitiesChange={setCapsDraft}
+          />
           <div className="mt-4 flex justify-end">
             <button
               type="button"

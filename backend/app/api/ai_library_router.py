@@ -63,6 +63,7 @@ from app.schemas.ai_library import (
     AgentOut,
     AgentStatsResponse,
     AgentUpdate,
+    CapabilitiesOut,
     ChatPermissionsOut,
     SkillCreate,
     SkillFileOut,
@@ -80,6 +81,7 @@ from app.schemas.ai_library_chat import (
 )
 from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
 from app.services.ai.permissions.agent_chat_caps import agent_chat_caps
+from app.services.ai.permissions.high_risk_caps import high_risk_caps
 from app.services.ai.runner.seed_loader import SeedLoader
 from app.services.modules.gate import require_module
 
@@ -408,7 +410,7 @@ async def list_agents(request: Request, auth: AuthDep) -> List[Dict[str, Any]]:
             continue
         skill_ids = await agent_repo.get_skill_ids(agent_uuid)
         enriched_with_skills.append(
-            _with_chat_permissions(
+            _with_resolved_permissions(
                 {
                     **row,
                     "skill_ids": skill_ids,
@@ -526,7 +528,7 @@ async def get_agent(slug: str, auth: AuthDep) -> Dict[str, Any]:
             status_code=status.HTTP_404_NOT_FOUND, detail="agent not found"
         )
     agent_uuid = UUID(str(agent["id"]))
-    agent = _with_chat_permissions(
+    agent = _with_resolved_permissions(
         {**agent, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
     )
     enriched = await _enrich_agents_with_scope_names([agent])
@@ -674,10 +676,17 @@ async def update_agent(
     agent_uuid = UUID(str(agent["id"]))
     # Single coercion shared by both the role gate and the write path below.
     user_uuid = _coerce_user_uuid(auth.user_id)
-    # Content fields (everything except skill bindings and chat permissions).
+    # Content fields (everything except skill bindings and the two permission
+    # subtrees, which merge into capability_profile further down).
     updates = payload.model_dump(
         exclude_none=True,
-        exclude={"skill_ids", "chat_permissions", "override_scope", "override_team_id"},
+        exclude={
+            "skill_ids",
+            "chat_permissions",
+            "capabilities",
+            "override_scope",
+            "override_team_id",
+        },
     )
 
     # System presets (mig 341): content edits land in the caller's OVERRIDE
@@ -714,24 +723,66 @@ async def update_agent(
                 detail="not allowed to change this agent's chat permissions",
             )
 
+    # A8: the same gate governs HIGH-RISK capability grants (write/delete/media/
+    # cross-episode/publish). Deliberately not a looser one — handing an agent
+    # the ability to overwrite or delete a user's scenes is strictly more
+    # privileged than editing its prompt, so a non-owner must never reach it.
+    # For system presets this resolves to platform-admin-only (no user_id, no
+    # team_id ⇒ only the admin branch can pass), which is what we want: preset
+    # rows are shared, a grant there would apply to everyone.
+    if payload.capabilities is not None:
+        if not await _can_edit_chat_permissions(agent_repo, agent, user_uuid):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="not allowed to change this agent's capabilities",
+            )
+
     # Budget "unlimited" convention: 0 from the client means "clear the cap".
     for budget_field in ("monthly_token_budget", "monthly_cost_cents_budget"):
         if updates.get(budget_field) == 0:
             updates[budget_field] = None
 
-    # Deep-merge chat permissions into capability_profile.chat — never clobber
+    # Deep-merge permission subtrees into capability_profile — never clobber
     # the existing Phase 4.5 keys (CHAT-PERM-01, lesson: user_settings clobber).
+    # `chat` (governance) and `capabilities` (A8 high-risk grants) are siblings
+    # and can arrive in the SAME request, so both merge into one shared copy of
+    # the profile; two independent `updates["capability_profile"] = ...`
+    # assignments would make the later block silently drop the earlier one.
     chat_audit: dict | None = None
-    if payload.chat_permissions is not None:
+    caps_audit: dict | None = None
+    if payload.chat_permissions is not None or payload.capabilities is not None:
         existing_profile = agent.get("capability_profile")
         if not isinstance(existing_profile, dict):
             existing_profile = {}
-        raw_chat = existing_profile.get("chat")
-        before_chat = dict(raw_chat) if isinstance(raw_chat, dict) else {}
-        existing_chat = dict(before_chat)
-        existing_chat.update(payload.chat_permissions.model_dump(exclude_none=True))
-        updates["capability_profile"] = {**existing_profile, "chat": existing_chat}
-        chat_audit = {"before": before_chat, "after": existing_chat}
+        merged_profile = dict(existing_profile)
+
+        if payload.chat_permissions is not None:
+            raw_chat = merged_profile.get("chat")
+            before_chat = dict(raw_chat) if isinstance(raw_chat, dict) else {}
+            existing_chat = dict(before_chat)
+            existing_chat.update(payload.chat_permissions.model_dump(exclude_none=True))
+            merged_profile["chat"] = existing_chat
+            chat_audit = {"before": before_chat, "after": existing_chat}
+
+        if payload.capabilities is not None:
+            raw_caps = merged_profile.get("capabilities")
+            before_caps = dict(raw_caps) if isinstance(raw_caps, dict) else {}
+            merged_caps = dict(before_caps)
+            patch = payload.capabilities.model_dump(exclude_none=True)
+            # `media` is the one nested dimension — merge it a level deeper so
+            # toggling `image` alone doesn't wipe a stored max_calls_per_turn
+            # (which high_risk_caps would then re-derive from its default).
+            media_patch = patch.pop("media", None)
+            merged_caps.update(patch)
+            if media_patch is not None:
+                raw_media = merged_caps.get("media")
+                merged_media = dict(raw_media) if isinstance(raw_media, dict) else {}
+                merged_media.update(media_patch)
+                merged_caps["media"] = merged_media
+            merged_profile["capabilities"] = merged_caps
+            caps_audit = {"before": before_caps, "after": merged_caps}
+
+        updates["capability_profile"] = merged_profile
 
     override_team_ctx: Optional[int] = None
     if override_updates:
@@ -783,6 +834,10 @@ async def update_agent(
         logger.info(
             f"chat_permissions changed by {auth.user_id} on agent {agent['slug']}: {chat_audit}"
         )
+    if caps_audit is not None:
+        logger.info(
+            f"capabilities granted/changed by {auth.user_id} on agent {agent['slug']}: {caps_audit}"
+        )
 
     refreshed = await agent_repo.get_by_slug(
         slug,
@@ -794,7 +849,7 @@ async def update_agent(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="agent disappeared after update",
         )
-    row = _with_chat_permissions(
+    row = _with_resolved_permissions(
         {**refreshed, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
     )
     enriched = await _enrich_agents_with_scope_names([row])
@@ -891,7 +946,7 @@ async def delete_agent_override(
     refreshed = await agent_repo.get_by_slug(
         slug, override_user_id=user_uuid, override_team_id=team_id
     )
-    row = _with_chat_permissions(
+    row = _with_resolved_permissions(
         {**refreshed, "skill_ids": await agent_repo.get_skill_ids(agent_uuid)}
     )
     enriched = await _enrich_agents_with_scope_names([row])
@@ -1359,12 +1414,24 @@ async def _can_edit_chat_permissions(
         return False
 
 
-def _with_chat_permissions(row: Dict[str, Any]) -> Dict[str, Any]:
-    """Inject the resolved (fail-closed) chat perms so AgentOut.chat_permissions
+def _with_resolved_permissions(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Inject the resolved (fail-closed) permission subtrees so AgentOut
     reflects storage. AgentOut has no capability_profile field, so without this
-    the response would always serialize the all-false default."""
-    caps = agent_chat_caps(row)
-    return {**row, "chat_permissions": ChatPermissionsOut.from_caps(caps).model_dump()}
+    the response would always serialize the all-denied defaults — and the
+    settings UI would render toggles that never show what is actually granted.
+
+    Both projections are built by the SAME parsers the gates enforce with
+    (``agent_chat_caps`` / ``high_risk_caps``), so what a client reads back is
+    what the runtime will allow — not an independent re-reading of the JSONB
+    that could drift from enforcement.
+    """
+    chat = agent_chat_caps(row)
+    high_risk = high_risk_caps(row)
+    return {
+        **row,
+        "chat_permissions": ChatPermissionsOut.from_caps(chat).model_dump(),
+        "capabilities": CapabilitiesOut.from_caps(high_risk).model_dump(),
+    }
 
 
 @router.delete(
