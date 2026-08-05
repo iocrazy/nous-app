@@ -41,25 +41,35 @@ from typing import Any
 from dbos import DBOS
 from loguru import logger
 
-from app.db import engine as db_engine
-
 SYSTEM_RUN_USER_ID = "00000000-0000-0000-0000-000000000000"
 
-# Projects mis-stamped with their OWN owner's personal team. The owner-match in
-# the JOIN is what makes this safe: a project legitimately attached to a
-# collaborative team (or, defensively, one pointing at another user's team) is
-# never selected.
-_MISSTAMPED_PERSONAL_PROJECTS_SQL = """
-SELECT p.id AS project_id
-FROM public.projects p
-JOIN public.teams t
-  ON t.id = p.team_id
- AND t.kind = 'personal'
- AND t.owner_id = p.owner_id
-WHERE p.team_id IS NOT NULL
-ORDER BY p.id
-LIMIT :limit
-"""
+
+def _misstamped_personal_projects_stmt(limit: int):
+    """Projects mis-stamped with their OWN owner's personal team. The
+    owner-match in the JOIN is what makes this safe: a project legitimately
+    attached to a collaborative team (or, defensively, one pointing at
+    another user's team) is never selected.
+
+    ``Projects.id.label("project_id")`` — a single explicit column, so
+    ``.mappings()`` yields ``row["project_id"]`` matching the consumer below
+    (not the entity-keyed shape ``select(Projects)`` would give)."""
+    from sqlalchemy import select
+
+    from app.models import Projects, Teams
+
+    return (
+        select(Projects.id.label("project_id"))
+        .select_from(Projects)
+        .join(
+            Teams,
+            (Teams.id == Projects.team_id)
+            & (Teams.kind == "personal")
+            & (Teams.owner_id == Projects.owner_id),
+        )
+        .where(Projects.team_id.is_not(None))
+        .order_by(Projects.id)
+        .limit(limit)
+    )
 
 
 async def run_backfill(dry_run: bool = True, limit: int = 500) -> dict[str, Any]:
@@ -68,6 +78,7 @@ async def run_backfill(dry_run: bool = True, limit: int = 500) -> dict[str, Any]
     Undecorated body so tests can drive it without a DBOS runtime; the workflow
     below is the thin DBOS shell.
     """
+    from app.db.session import read_scope
     from app.repositories.projects_repository import get_projects_repository
     from app.services.infra.unified_task_manager import get_task_manager
 
@@ -95,9 +106,12 @@ async def run_backfill(dry_run: bool = True, limit: int = 500) -> dict[str, Any]
     except Exception as e:
         logger.warning(f"[backfill-normalize-projects] start {task_id}: {e}")
 
-    rows = await db_engine.fetch_all(
-        _MISSTAMPED_PERSONAL_PROJECTS_SQL, {"limit": limit}
-    )
+    async with read_scope() as session:
+        rows = (
+            (await session.execute(_misstamped_personal_projects_stmt(limit)))
+            .mappings()
+            .all()
+        )
     result: dict[str, Any] = {
         "dry_run": dry_run,
         "scanned": len(rows),

@@ -1,4 +1,11 @@
-"""Unit tests for the personal-project team_id normalization backfill loop."""
+"""Unit tests for the personal-project team_id normalization backfill loop.
+
+Phase B5 Task 2: the scan query moved from ``db_engine.fetch_all`` (raw SQL)
+to an ORM select executed inside ``read_scope()`` — the harness patches
+``app.db.session.read_scope`` instead of the retired ``db_engine`` module.
+"""
+
+from contextlib import asynccontextmanager
 
 import pytest
 
@@ -36,15 +43,35 @@ _ROWS = [
 ]
 
 
+class _FakeResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _FakeSession:
+    def __init__(self, rows):
+        self._rows = rows
+
+    async def execute(self, stmt):
+        return _FakeResult(self._rows)
+
+
 @pytest.fixture
 def harness(monkeypatch):
     def _install(*, rows):
         projects = _FakeProjectsRepo()
 
-        async def fake_fetch_all(sql, params=None):
-            return rows
+        @asynccontextmanager
+        async def fake_read_scope():
+            yield _FakeSession(rows)
 
-        monkeypatch.setattr(wf.db_engine, "fetch_all", fake_fetch_all)
+        monkeypatch.setattr("app.db.session.read_scope", fake_read_scope)
         monkeypatch.setattr(
             "app.repositories.projects_repository.get_projects_repository",
             lambda: projects,

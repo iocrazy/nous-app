@@ -1,19 +1,25 @@
 """autopilot_sweep — the 5-minute backstop sweep (task O2, review adjacent
 minor fix: the eligible-project SQL's boolean check).
+
+Phase B5 Task 2: the eligible-project scan moved from a raw
+``_ELIGIBLE_PROJECTS_SQL`` string to ``_eligible_projects_stmt()``, an ORM
+select executed inside ``read_scope()``.
 """
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any, Dict, List
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from app.workflows import autopilot_sweep
 
 pytestmark = pytest.mark.asyncio
 
 
-def test_eligible_projects_sql_uses_string_equality_not_boolean_cast():
+def test_eligible_projects_stmt_uses_string_equality_not_boolean_cast():
     """Review adjacent-minor fix: a ``::boolean`` cast RAISES on any row
     whose ``events->>'auto_start'`` isn't a Postgres-recognized boolean
     literal, and that raise aborts the ENTIRE query — one dirty row would
@@ -21,9 +27,22 @@ def test_eligible_projects_sql_uses_string_equality_not_boolean_cast():
     equality never raises; Pydantic's ``WorkflowNodeEvents.auto_start: bool``
     always serializes as the JSON literal ``true``/``false`` so no real match
     is lost."""
-    sql = autopilot_sweep._ELIGIBLE_PROJECTS_SQL
-    assert "::boolean" not in sql
-    assert "events->>'auto_start' = 'true'" in sql
+    sql = str(
+        autopilot_sweep._eligible_projects_stmt(200).compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert "CAST" not in sql.upper() or "::boolean" not in sql
+    assert "events ->> 'auto_start') = 'true'" in sql
+
+
+def test_eligible_projects_stmt_is_column_level_not_entity_level():
+    """``select(Projects.id)`` — a single explicit column — not
+    ``select(Projects)``, which would map each row to an entity-keyed
+    ``{"Projects": <instance>}`` instead of ``{"id": ...}`` (see
+    tests/test_orm_b5_task2_row_shape_e2e.py for the real-engine proof)."""
+    stmt = autopilot_sweep._eligible_projects_stmt(200)
+    assert list(stmt.selected_columns.keys()) == ["id"]
 
 
 def test_query_step_never_enqueues_from_inside_a_dbos_step():
@@ -52,15 +71,36 @@ async def test_query_step_skips_gracefully_when_db_not_configured(monkeypatch):
 
 
 async def test_query_step_returns_eligible_project_ids(monkeypatch):
+    """Phase B5 Task 2: the scan moved from ``db_engine.fetch_all`` (raw SQL)
+    to an ORM select executed inside ``read_scope()`` — patch the session
+    scope, not the retired db_engine call."""
     from app.db import engine as db_engine
 
     monkeypatch.setattr(db_engine, "is_configured", lambda: True)
 
-    async def _fake_fetch_all(sql, params=None):
-        assert "auto_start" in sql
-        return [{"id": 100}, {"id": 200}]
+    class _FakeResult:
+        def mappings(self):
+            return self
 
-    monkeypatch.setattr(db_engine, "fetch_all", _fake_fetch_all)
+        def all(self):
+            return [{"id": 100}, {"id": 200}]
+
+    class _FakeSession:
+        async def execute(self, stmt):
+            sql = str(
+                stmt.compile(
+                    dialect=postgresql.dialect(),
+                    compile_kwargs={"literal_binds": True},
+                )
+            )
+            assert "auto_start" in sql
+            return _FakeResult()
+
+    @asynccontextmanager
+    async def fake_read_scope():
+        yield _FakeSession()
+
+    monkeypatch.setattr("app.db.session.read_scope", fake_read_scope)
 
     assert await autopilot_sweep.list_eligible_autopilot_projects_step() == [
         "100",
@@ -73,10 +113,15 @@ async def test_query_step_returns_empty_when_scan_fails(monkeypatch):
 
     monkeypatch.setattr(db_engine, "is_configured", lambda: True)
 
-    async def _boom(sql, params=None):
-        raise RuntimeError("scan blew up")
+    class _FakeSession:
+        async def execute(self, stmt):
+            raise RuntimeError("scan blew up")
 
-    monkeypatch.setattr(db_engine, "fetch_all", _boom)
+    @asynccontextmanager
+    async def fake_read_scope():
+        yield _FakeSession()
+
+    monkeypatch.setattr("app.db.session.read_scope", fake_read_scope)
 
     assert await autopilot_sweep.list_eligible_autopilot_projects_step() == []
 

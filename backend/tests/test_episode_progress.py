@@ -2,13 +2,16 @@
 
 GET /projects/{project_id}/episodes/progress — per-episode script/scene/
 shot counts + a derived pipeline status. Covers the pure status-derivation
-matrix and the repository row-shaping (monkeypatched db_engine.fetch_all,
-no live DB).
+matrix and the repository row-shaping. Phase B5 Task 1: migrated to the
+SQLAlchemy ORM (monkeypatched ``app.db.session.read_scope``, no live DB).
 """
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from app.repositories.episode_repository import (
     EpisodeRepository,
@@ -107,78 +110,108 @@ def test_progress_row_coerces_none_counts_to_zero():
 # --------------------------------------------------------------------------- #
 
 
-def test_progress_sql_uses_single_or_filter_for_renders_count():
+def test_progress_stmt_uses_single_or_filter_for_renders_count():
     """Regression guard for the double-count bug: renders_count must be one
     FILTER with an OR over (image_url, video_url), not two independent
     FILTERed counts summed together — a shot with BOTH urls (the
     image-then-video generation flow) would otherwise be counted twice."""
     import app.repositories.episode_repository as mod
 
-    sql = mod._PROGRESS_SQL
+    sql = str(mod._progress_stmt(999).compile(dialect=postgresql.dialect()))
     assert (
-        "WHERE sh.image_url IS NOT NULL OR sh.video_url IS NOT NULL" in sql
+        "FILTER (WHERE public.script_shots.image_url IS NOT NULL OR "
+        "public.script_shots.video_url IS NOT NULL) AS renders_count" in sql
     ), "renders_count must use a single OR-combined FILTER, not two summed FILTERs"
     # Guard against a regression back to the old "COUNT(...) + COUNT(...)"
     # double-FILTER shape landing again.
     renders_count_clause = sql.split("AS renders_count")[0].rsplit(
-        "COUNT(DISTINCT sh.id) FILTER", 1
+        "count(distinct(public.script_shots.id)) FILTER", 1
     )[-1]
     assert "+" not in renders_count_clause
+
+
+def _compile(stmt):
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    return str(compiled), dict(compiled.params)
+
+
+class _FakeResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+def _fake_read_scope(rows=None, raise_exc=None):
+    captured: dict = {}
+
+    class _FakeSession:
+        async def execute(self, stmt):
+            captured["stmt"] = stmt
+            if raise_exc is not None:
+                raise raise_exc
+            return _FakeResult(rows or [])
+
+    @asynccontextmanager
+    async def _scope():
+        yield _FakeSession()
+
+    return _scope, captured
 
 
 @pytest.mark.asyncio
 async def test_progress_by_project_maps_rows_and_passes_project_id(monkeypatch):
     import app.repositories.episode_repository as mod
 
-    captured: dict = {}
-
-    async def fake_fetch_all(sql, params):
-        captured["sql"] = sql
-        captured["params"] = params
-        return [
-            {
-                "episode_id": 111,
-                "title": "Ep 1",
-                "sort_order": 0,
-                "script_count": 1,
-                "scene_count": 2,
-                "shots_total": 4,
-                "shots_done": 4,
-                "renders_count": 1,
-            },
-            {
-                "episode_id": 222,
-                "title": "Ep 2",
-                "sort_order": 1,
-                "script_count": 0,
-                "scene_count": 0,
-                "shots_total": 0,
-                "shots_done": 0,
-                "renders_count": 0,
-            },
-            {
-                # A shot with BOTH image_url and video_url (image-then-video
-                # flow) must be reflected by the mocked DB as renders_count=1
-                # here — this fixture documents the row shape the real
-                # OR-FILTER SQL is expected to produce; the actual SQL
-                # aggregation is proven for real in
-                # tests/integration/test_episodes_progress_db.py.
-                "episode_id": 333,
-                "title": "Ep 3",
-                "sort_order": 2,
-                "script_count": 1,
-                "scene_count": 1,
-                "shots_total": 1,
-                "shots_done": 1,
-                "renders_count": 1,
-            },
-        ]
-
-    monkeypatch.setattr(mod.db_engine, "fetch_all", fake_fetch_all)
+    rows = [
+        {
+            "episode_id": 111,
+            "title": "Ep 1",
+            "sort_order": 0,
+            "script_count": 1,
+            "scene_count": 2,
+            "shots_total": 4,
+            "shots_done": 4,
+            "renders_count": 1,
+        },
+        {
+            "episode_id": 222,
+            "title": "Ep 2",
+            "sort_order": 1,
+            "script_count": 0,
+            "scene_count": 0,
+            "shots_total": 0,
+            "shots_done": 0,
+            "renders_count": 0,
+        },
+        {
+            # A shot with BOTH image_url and video_url (image-then-video
+            # flow) must be reflected by the mocked DB as renders_count=1
+            # here — this fixture documents the row shape the real
+            # OR-FILTER SQL is expected to produce; the actual SQL
+            # aggregation is proven for real in
+            # tests/integration/test_episodes_progress_db.py.
+            "episode_id": 333,
+            "title": "Ep 3",
+            "sort_order": 2,
+            "script_count": 1,
+            "scene_count": 1,
+            "shots_total": 1,
+            "shots_done": 1,
+            "renders_count": 1,
+        },
+    ]
+    fake_scope, captured = _fake_read_scope(rows)
+    monkeypatch.setattr(mod, "read_scope", fake_scope)
 
     items = await EpisodeRepository().progress_by_project("999")
 
-    assert captured["params"] == {"project_id": 999}
+    _sql, binds = _compile(captured["stmt"])
+    assert binds["project_id_1"] == 999
     assert len(items) == 3
     assert items[0]["episode_id"] == "111"
     assert items[0]["status"] == "rendered"
@@ -193,10 +226,8 @@ async def test_progress_by_project_maps_rows_and_passes_project_id(monkeypatch):
 async def test_progress_by_project_empty_when_no_rows(monkeypatch):
     import app.repositories.episode_repository as mod
 
-    async def fake_fetch_all(sql, params):
-        return []
-
-    monkeypatch.setattr(mod.db_engine, "fetch_all", fake_fetch_all)
+    fake_scope, _captured = _fake_read_scope([])
+    monkeypatch.setattr(mod, "read_scope", fake_scope)
 
     items = await EpisodeRepository().progress_by_project("999")
     assert items == []
@@ -209,10 +240,8 @@ async def test_progress_by_project_propagates_failure(monkeypatch):
     task's 'failures may 500 normally like siblings' contract)."""
     import app.repositories.episode_repository as mod
 
-    async def fake_fetch_all(sql, params):
-        raise RuntimeError("db down")
-
-    monkeypatch.setattr(mod.db_engine, "fetch_all", fake_fetch_all)
+    fake_scope, _captured = _fake_read_scope(raise_exc=RuntimeError("db down"))
+    monkeypatch.setattr(mod, "read_scope", fake_scope)
 
     with pytest.raises(RuntimeError):
         await EpisodeRepository().progress_by_project("999")

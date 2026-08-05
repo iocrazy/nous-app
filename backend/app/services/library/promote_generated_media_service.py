@@ -8,8 +8,12 @@ import shutil
 from pathlib import Path
 
 from loguru import logger
+from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.config import settings
+from app.db.session import write_scope
+from app.models import CanvasResourceRefs
 from app.repositories.conversation_repository import get_conversation_repository
 from app.repositories.generated_media_repository import GeneratedMediaRepository
 from app.repositories.resources_repository import ResourcesRepository
@@ -184,19 +188,21 @@ class PromoteGeneratedMediaService:
         # canvas-origin → surface under its canvas
         if gen.get("canvas_id"):
             try:
-                from app.db import engine as db_engine
-
-                await db_engine.execute_as_service_role(
-                    "INSERT INTO canvas_resource_refs "
-                    "(canvas_id, resource_id, role, node_id) "
-                    "VALUES (:cid, :rid, 'generated', :nid) "
-                    "ON CONFLICT (canvas_id, resource_id, node_id) DO NOTHING",
-                    {
-                        "cid": int(gen["canvas_id"]),
-                        "rid": int(resource_id),
-                        "nid": gen.get("node_id") or "",
-                    },
+                # canvas_resource_refs RLS is locked to service_role (mig 290)
+                # — SET LOCAL ROLE first, same pattern as issue_lifecycle.py's
+                # service_role-only issues.execution_state writes.
+                stmt = pg_insert(CanvasResourceRefs).values(
+                    canvas_id=int(gen["canvas_id"]),
+                    resource_id=int(resource_id),
+                    role="generated",
+                    node_id=gen.get("node_id") or "",
                 )
+                stmt = stmt.on_conflict_do_nothing(
+                    index_elements=["canvas_id", "resource_id", "node_id"]
+                )
+                async with write_scope() as session:
+                    await session.execute(text("SET LOCAL ROLE service_role"))
+                    await session.execute(stmt)
             except Exception as exc:  # noqa: BLE001
                 logger.opt(exception=True).warning(
                     "[genmedia] canvas_ref on promote failed (non-fatal): {}", exc

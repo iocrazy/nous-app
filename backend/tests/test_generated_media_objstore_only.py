@@ -10,9 +10,11 @@ environments without object storage configured) as a regression anchor.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 import app.services.library.generated_media_service as gm_svc
 
@@ -21,14 +23,42 @@ def _origin() -> gm_svc.GenerationOrigin:
     return gm_svc.GenerationOrigin(kind="canvas_run")
 
 
+def _bind_params(stmt) -> dict:
+    """Compile an insert(...).returning(...) statement (postgresql dialect)
+    and return its literal bind values keyed by column name — the ORM
+    equivalent of the old ``fake_returning_one(sql, params)``'s ``params``."""
+    return dict(stmt.compile(dialect=postgresql.dialect()).params)
+
+
+class _FakeResult:
+    def __init__(self, row: dict):
+        self._row = row
+
+    def mappings(self):
+        return self
+
+    def first(self):
+        return self._row
+
+
+def _fake_write_scope(row_id, captured: dict):
+    @asynccontextmanager
+    async def _scope():
+        class _Session:
+            async def execute(self, stmt):
+                params = _bind_params(stmt)
+                captured.update(params)
+                return _FakeResult({"id": row_id, **params})
+
+        yield _Session()
+
+    return _scope
+
+
 @pytest.mark.asyncio
 async def test_small_local_image_routes_to_object_store(monkeypatch, tmp_path):
     """flag-on + small image local source → put_bytes, sb:// path, no DOWNLOAD_PATH write."""
-    captured = {}
-
-    async def fake_returning_one(sql, params):
-        captured.update(params)
-        return {"id": 1, **params}
+    captured: dict = {}
 
     src = tmp_path / "small.png"
     src.write_bytes(b"PNGDATA")
@@ -38,7 +68,7 @@ async def test_small_local_image_routes_to_object_store(monkeypatch, tmp_path):
     store.exists.return_value = False
     monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
     monkeypatch.setattr(gm_svc.settings, "DOWNLOAD_PATH", str(download_path))
-    monkeypatch.setattr(gm_svc.db_engine, "execute_returning_one", fake_returning_one)
+    monkeypatch.setattr(gm_svc, "write_scope", _fake_write_scope(1, captured))
 
     with patch.object(gm_svc, "chat_media_store", return_value=store):
         await gm_svc.register_generated_media(
@@ -58,11 +88,7 @@ async def test_small_local_image_routes_to_object_store(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_large_local_image_streams_via_put_file(monkeypatch, tmp_path):
     """flag-on + LARGE image local source → put_file (streaming path), still sb://, no fallback."""
-    captured = {}
-
-    async def fake_returning_one(sql, params):
-        captured.update(params)
-        return {"id": 1, **params}
+    captured: dict = {}
 
     src = tmp_path / "big.png"
     src.write_bytes(b"X" * (gm_svc._OBJECT_STORE_IMAGE_MAX_BYTES + 1))
@@ -72,7 +98,7 @@ async def test_large_local_image_streams_via_put_file(monkeypatch, tmp_path):
     store.exists.return_value = False
     monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
     monkeypatch.setattr(gm_svc.settings, "DOWNLOAD_PATH", str(download_path))
-    monkeypatch.setattr(gm_svc.db_engine, "execute_returning_one", fake_returning_one)
+    monkeypatch.setattr(gm_svc, "write_scope", _fake_write_scope(1, captured))
 
     with patch.object(gm_svc, "chat_media_store", return_value=store):
         await gm_svc.register_generated_media(
@@ -102,8 +128,17 @@ async def test_object_store_write_failure_raises_and_skips_db_insert(
     store.exists.return_value = False
     store.put_bytes.side_effect = RuntimeError("storage-api unreachable")
     monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", True)
-    insert_mock = AsyncMock()
-    monkeypatch.setattr(gm_svc.db_engine, "execute_returning_one", insert_mock)
+
+    session_execute = AsyncMock()
+
+    @asynccontextmanager
+    async def _scope():
+        class _Session:
+            execute = session_execute
+
+        yield _Session()
+
+    monkeypatch.setattr(gm_svc, "write_scope", _scope)
 
     with patch.object(gm_svc, "chat_media_store", return_value=store):
         with pytest.raises(RuntimeError, match="storage-api unreachable"):
@@ -115,17 +150,13 @@ async def test_object_store_write_failure_raises_and_skips_db_insert(
                 origin=_origin(),
             )
 
-    insert_mock.assert_not_awaited()
+    session_execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_flag_off_stays_on_filesystem(monkeypatch, tmp_path):
     """flag-off → filesystem path, file_path is a relative path (current-behavior anchor)."""
-    captured = {}
-
-    async def fake_returning_one(sql, params):
-        captured.update(params)
-        return {"id": 1, **params}
+    captured: dict = {}
 
     src = tmp_path / "small.png"
     src.write_bytes(b"PNGDATA")
@@ -134,7 +165,7 @@ async def test_flag_off_stays_on_filesystem(monkeypatch, tmp_path):
     store = AsyncMock()
     monkeypatch.setattr(gm_svc.settings, "FEATURE_CHAT_MEDIA_OBJECT_STORE", False)
     monkeypatch.setattr(gm_svc.settings, "DOWNLOAD_PATH", str(download_path))
-    monkeypatch.setattr(gm_svc.db_engine, "execute_returning_one", fake_returning_one)
+    monkeypatch.setattr(gm_svc, "write_scope", _fake_write_scope(1, captured))
 
     with patch.object(gm_svc, "chat_media_store", return_value=store):
         await gm_svc.register_generated_media(

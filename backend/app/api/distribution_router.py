@@ -5,9 +5,12 @@ from __future__ import annotations
 import logging
 import secrets
 import uuid as _uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import insert
 
 from app.core.config import settings
 
@@ -15,7 +18,8 @@ from app.core.config import settings
 # already binds Depends(get_current_user) internally) — imported so tests can
 # target the same dependency callable via ``dr.get_current_user`` overrides.
 from app.core.deps import CurrentUserDep, get_current_user  # noqa: F401
-from app.db import engine as db_engine
+from app.db.session import write_scope
+from app.models import DistributionOauthStates
 from app.repositories.publish_tasks_repository import (
     PublishTasksRepository,
     aggregate_task_status,
@@ -96,34 +100,38 @@ async def _authorize_account(account_id: int, user: dict) -> dict:
 
 
 async def _save_oauth_state(state, user_id, platform, scope_type, scope_id) -> None:
-    await accounts_repo.execute(
-        """
-        INSERT INTO distribution_oauth_states (state, user_id, platform, scope_type, scope_id)
-        VALUES ($1,$2,$3,$4,$5)
-        """,
-        state,
-        user_id,
-        platform,
-        scope_type,
-        scope_id,
-    )
+    async with write_scope() as session:
+        await session.execute(
+            insert(DistributionOauthStates).values(
+                state=state,
+                user_id=user_id,
+                platform=platform,
+                scope_type=scope_type,
+                scope_id=scope_id,
+            )
+        )
+
+
+_OAUTH_STATE_COLS = tuple(DistributionOauthStates.__table__.columns)
 
 
 async def _pop_oauth_state(state: str) -> dict | None:
     # COMMITTING path required: this DELETE ... RETURNING consumes a row.
-    # accounts_repo.fetch_one runs on eng.connect() (no transaction) and
-    # would SILENTLY ROLL BACK the delete on connection close (the #498
-    # silent-rollback class) — the state would never actually be consumed,
-    # making it replayable. Use db_engine.execute_returning_one (eng.begin(),
-    # auto-commit) instead.
-    return await db_engine.execute_returning_one(
-        """
-        DELETE FROM distribution_oauth_states
-        WHERE state = :s AND created_at > NOW() - INTERVAL '10 minutes'
-        RETURNING *
-        """,
-        {"s": state},
+    # write_scope() commits (unlike a bare read_scope/connect()), so the state
+    # is actually consumed rather than silently rolled back and replayable
+    # (the #498 silent-rollback class).
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+    stmt = (
+        sa_delete(DistributionOauthStates)
+        .where(
+            DistributionOauthStates.state == state,
+            DistributionOauthStates.created_at > cutoff,
+        )
+        .returning(*_OAUTH_STATE_COLS)
     )
+    async with write_scope() as session:
+        row = (await session.execute(stmt)).mappings().first()
+    return dict(row) if row is not None else None
 
 
 @router.get(

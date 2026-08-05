@@ -29,25 +29,41 @@ from loguru import logger
 # ceiling; this is a generous multiple of that.
 _BATCH_SIZE = 200
 
-_ELIGIBLE_PROJECTS_SQL = """
-SELECT DISTINCT p.id
-FROM public.projects p
-JOIN public.project_stage_nodes n ON n.project_id = p.id
-WHERE p.autopilot_enabled = true
-  AND n.status = 'pending'
-  AND n.skipped = false
-  AND n.events->>'auto_start' = 'true'
-LIMIT :limit
-"""
-# Plain string equality, NOT ``(n.events->>'auto_start')::boolean`` (review
-# adjacent-minor fix): a ``::boolean`` cast RAISES on any row whose value
-# isn't one of Postgres's recognized boolean literals, and — unlike a
-# per-row filter mismatch — that raise aborts the ENTIRE query, so one dirty
-# row (a hand-edited events blob, a future migration bug) would take down
-# the global sweep for every OTHER project too. Pydantic's
-# ``WorkflowNodeEvents.auto_start: bool`` always serializes as the JSON
-# literal ``true``/``false``, so string equality never loses a real match —
-# it degrades a bad row to "not eligible" instead of a global 500.
+
+def _eligible_projects_stmt(limit: int):
+    """Column-level select of every project with a currently-eligible
+    auto_start node. ``select(Projects.id)`` — a single explicit column, so
+    ``.mappings()``/scalar rows stay column-keyed (matching
+    ``list_eligible_autopilot_projects_step``'s ``str(r["id"])`` read), never
+    the entity-keyed shape ``select(Projects)`` would give.
+
+    Plain string equality on ``events->>'auto_start'``, NOT
+    ``(...)::boolean`` (review adjacent-minor fix): a ``::boolean`` cast
+    RAISES on any row whose value isn't one of Postgres's recognized boolean
+    literals, and — unlike a per-row filter mismatch — that raise aborts the
+    ENTIRE query, so one dirty row (a hand-edited events blob, a future
+    migration bug) would take down the global sweep for every OTHER project
+    too. Pydantic's ``WorkflowNodeEvents.auto_start: bool`` always
+    serializes as the JSON literal ``true``/``false``, so string equality
+    never loses a real match — it degrades a bad row to "not eligible"
+    instead of a global 500."""
+    from sqlalchemy import select
+
+    from app.models import Projects, ProjectStageNodes
+
+    return (
+        select(Projects.id)
+        .distinct()
+        .select_from(Projects)
+        .join(ProjectStageNodes, ProjectStageNodes.project_id == Projects.id)
+        .where(
+            Projects.autopilot_enabled.is_(True),
+            ProjectStageNodes.status == "pending",
+            ProjectStageNodes.skipped.is_(False),
+            ProjectStageNodes.events["auto_start"].astext == "true",
+        )
+        .limit(limit)
+    )
 
 
 @DBOS.step()
@@ -67,12 +83,18 @@ async def list_eligible_autopilot_projects_step() -> list[str]:
     calls directly (workflow → workflow start is allowed).
     """
     from app.db import engine as db_engine
+    from app.db.session import read_scope
 
     if not db_engine.is_configured():
         return []
 
     try:
-        rows = await db_engine.fetch_all(_ELIGIBLE_PROJECTS_SQL, {"limit": _BATCH_SIZE})
+        async with read_scope() as session:
+            rows = (
+                (await session.execute(_eligible_projects_stmt(_BATCH_SIZE)))
+                .mappings()
+                .all()
+            )
     except Exception as exc:  # noqa: BLE001 — a scan failure must not crash the sweep
         logger.warning(f"[autopilot_sweep] eligible-project scan failed: {exc!r}")
         return []

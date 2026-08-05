@@ -28,6 +28,11 @@ from typing import Any, Optional
 from uuid import UUID
 
 from loguru import logger
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+from app.db.session import read_scope, write_scope
+from app.models import AiUsageHourly, TeamAiBudgets
 
 # origin_kind values that mean "an automation fired this on the owner's behalf".
 # Everything else (manual, chat_delegate, agent_dispatch, escalation, …) is a
@@ -54,26 +59,27 @@ def _coerce_bigint(value: Any) -> Optional[int]:
     return int(value)
 
 
-_UPSERT_HOURLY_SQL = """
-INSERT INTO public.ai_usage_hourly
-    (id, bucket_hour, team_id, project_id, agent_id, model, module, attribution,
-     prompt_tokens, completion_tokens, cached_input_tokens, cost_cents,
-     event_count, updated_at)
-VALUES
-    (generate_snowflake_id(), :bucket_hour, :team_id, :project_id,
-     CAST(:agent_id AS uuid), :model, :module, :attribution,
-     :prompt_tokens, :completion_tokens, :cached_input_tokens, :cost_cents,
-     1, now())
-ON CONFLICT ON CONSTRAINT ai_usage_hourly_dims_uq DO UPDATE SET
-    prompt_tokens = ai_usage_hourly.prompt_tokens + EXCLUDED.prompt_tokens,
-    completion_tokens =
-        ai_usage_hourly.completion_tokens + EXCLUDED.completion_tokens,
-    cached_input_tokens =
-        ai_usage_hourly.cached_input_tokens + EXCLUDED.cached_input_tokens,
-    cost_cents = ai_usage_hourly.cost_cents + EXCLUDED.cost_cents,
-    event_count = ai_usage_hourly.event_count + EXCLUDED.event_count,
-    updated_at = now()
-"""
+def _hourly_upsert_stmt(values: dict[str, Any]):
+    """ON CONFLICT ON CONSTRAINT ai_usage_hourly_dims_uq DO UPDATE — additive
+    accumulators (tokens/cost/event_count) add EXCLUDED onto the existing row;
+    id/created_at are never touched on conflict (server_default handles the
+    insert path; the row already has an id on the update path)."""
+    stmt = pg_insert(AiUsageHourly).values(**values)
+    return stmt.on_conflict_do_update(
+        constraint="ai_usage_hourly_dims_uq",
+        set_={
+            "prompt_tokens": AiUsageHourly.prompt_tokens + stmt.excluded.prompt_tokens,
+            "completion_tokens": (
+                AiUsageHourly.completion_tokens + stmt.excluded.completion_tokens
+            ),
+            "cached_input_tokens": (
+                AiUsageHourly.cached_input_tokens + stmt.excluded.cached_input_tokens
+            ),
+            "cost_cents": AiUsageHourly.cost_cents + stmt.excluded.cost_cents,
+            "event_count": AiUsageHourly.event_count + stmt.excluded.event_count,
+            "updated_at": func.now(),
+        },
+    )
 
 
 async def record_usage(
@@ -108,15 +114,12 @@ async def record_usage(
         attr = attribution if attribution in _VALID_ATTRIBUTION else "direct_human"
         cost = Decimal(str(cost_cents)) if cost_cents is not None else Decimal(0)
 
-        from app.db import engine as db_engine
-
-        await db_engine.execute(
-            _UPSERT_HOURLY_SQL,
+        stmt = _hourly_upsert_stmt(
             {
                 "bucket_hour": bucket_hour,
                 "team_id": _coerce_bigint(team_id),
                 "project_id": _coerce_bigint(project_id),
-                "agent_id": str(agent_id) if agent_id is not None else None,
+                "agent_id": UUID(str(agent_id)) if agent_id is not None else None,
                 "model": model,
                 "module": module or "unknown",
                 "attribution": attr,
@@ -124,8 +127,11 @@ async def record_usage(
                 "completion_tokens": int(completion_tokens or 0),
                 "cached_input_tokens": int(cached_input_tokens or 0),
                 "cost_cents": cost,
-            },
+                "event_count": 1,
+            }
         )
+        async with write_scope() as session:
+            await session.execute(stmt)
     except Exception as exc:  # noqa: BLE001 — boundary swallow, must not break the run
         logger.error(
             "[ai_usage] record_usage failed (non-fatal): "
@@ -136,32 +142,67 @@ async def record_usage(
 async def get_team_month_spend_cents(team_id: Any) -> Decimal:
     """Sum ai_usage_hourly.cost_cents for the team over the current calendar
     month (server clock). Returns Decimal(0) when there is no spend."""
-    from app.db import engine as db_engine
-
-    val = await db_engine.fetch_val(
-        """
-        SELECT COALESCE(SUM(cost_cents), 0)
-          FROM public.ai_usage_hourly
-         WHERE team_id = :tid
-           AND bucket_hour >= date_trunc('month', now())
-        """,
-        {"tid": _coerce_bigint(team_id)},
+    stmt = select(func.coalesce(func.sum(AiUsageHourly.cost_cents), 0)).where(
+        AiUsageHourly.team_id == _coerce_bigint(team_id),
+        AiUsageHourly.bucket_hour >= func.date_trunc("month", func.now()),
     )
+    async with read_scope() as session:
+        val = (await session.execute(stmt)).scalar()
     return Decimal(str(val)) if val is not None else Decimal(0)
+
+
+_BUDGET_COLS = (
+    TeamAiBudgets.team_id,
+    TeamAiBudgets.monthly_budget_cents,
+    TeamAiBudgets.updated_by_user_id,
+    TeamAiBudgets.created_at,
+    TeamAiBudgets.updated_at,
+)
+
+
+def _team_budget_select_stmt(team_id: Optional[int]):
+    """Column-level SELECT (never entity-level select(TeamAiBudgets) fed to
+    .mappings() — that maps each row to ONE entity-named key instead of one
+    key per column; see tests/test_scheduled_master_row_shape_e2e.py).
+    Factored out so tests can import and execute the REAL production
+    statement against a real engine."""
+    return select(*_BUDGET_COLS).where(TeamAiBudgets.team_id == team_id)
 
 
 async def get_team_budget(team_id: Any) -> Optional[dict[str, Any]]:
     """Return the team_ai_budgets row as a dict, or None if unset."""
-    from app.db import engine as db_engine
+    stmt = _team_budget_select_stmt(_coerce_bigint(team_id))
+    async with read_scope() as session:
+        row = (await session.execute(stmt)).mappings().first()
+    return dict(row) if row is not None else None
 
-    return await db_engine.fetch_one(
-        """
-        SELECT team_id, monthly_budget_cents, updated_by_user_id,
-               created_at, updated_at
-          FROM public.team_ai_budgets
-         WHERE team_id = :tid
-        """,
-        {"tid": _coerce_bigint(team_id)},
+
+def _team_budget_upsert_stmt(
+    team_id: Optional[int],
+    *,
+    monthly_budget_cents: Optional[Decimal],
+    updated_by_user_id: Optional[UUID],
+):
+    """ON CONFLICT (team_id) DO UPDATE, column-level RETURNING. Factored out
+    so tests can import and execute the REAL production statement against a
+    real engine (see _team_budget_select_stmt's docstring)."""
+    return (
+        pg_insert(TeamAiBudgets)
+        .values(
+            team_id=team_id,
+            monthly_budget_cents=monthly_budget_cents,
+            updated_by_user_id=updated_by_user_id,
+            updated_at=func.now(),
+        )
+        .on_conflict_do_update(
+            index_elements=[TeamAiBudgets.team_id],
+            set_={
+                "monthly_budget_cents": monthly_budget_cents,
+                "updated_by_user_id": updated_by_user_id,
+                "updated_at": func.now(),
+            },
+        )
+        .returning(*_BUDGET_COLS)
     )
 
 
@@ -173,31 +214,18 @@ async def upsert_team_budget(
 ) -> Optional[dict[str, Any]]:
     """Insert or update a team's monthly budget. monthly_budget_cents None =
     unlimited. Returns the resulting row."""
-    from app.db import engine as db_engine
-
     budget = (
-        Decimal(str(monthly_budget_cents))
-        if monthly_budget_cents is not None
-        else None
+        Decimal(str(monthly_budget_cents)) if monthly_budget_cents is not None else None
     )
-    return await db_engine.execute_returning_one(
-        """
-        INSERT INTO public.team_ai_budgets
-            (team_id, monthly_budget_cents, updated_by_user_id, updated_at)
-        VALUES (:tid, :budget, CAST(:uid AS uuid), now())
-        ON CONFLICT (team_id) DO UPDATE SET
-            monthly_budget_cents = EXCLUDED.monthly_budget_cents,
-            updated_by_user_id = EXCLUDED.updated_by_user_id,
-            updated_at = now()
-        RETURNING team_id, monthly_budget_cents, updated_by_user_id,
-                  created_at, updated_at
-        """,
-        {
-            "tid": _coerce_bigint(team_id),
-            "budget": budget,
-            "uid": str(updated_by_user_id) if updated_by_user_id is not None else None,
-        },
+    uid = UUID(str(updated_by_user_id)) if updated_by_user_id is not None else None
+    stmt = _team_budget_upsert_stmt(
+        _coerce_bigint(team_id),
+        monthly_budget_cents=budget,
+        updated_by_user_id=uid,
     )
+    async with write_scope() as session:
+        row = (await session.execute(stmt)).mappings().first()
+    return dict(row) if row is not None else None
 
 
 async def is_team_over_budget(team_id: Optional[Any]) -> bool:
@@ -216,7 +244,9 @@ async def is_team_over_budget(team_id: Optional[Any]) -> bool:
             return False
         spend = await get_team_month_spend_cents(team_id)
         return spend >= Decimal(str(ceiling))
-    except Exception as exc:  # noqa: BLE001 — fail-open so telemetry can't wedge dispatch
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 — fail-open so telemetry can't wedge dispatch
         logger.error(f"[ai_usage] is_team_over_budget failed (fail-open): {exc}")
         return False
 

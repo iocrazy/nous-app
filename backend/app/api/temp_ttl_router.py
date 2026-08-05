@@ -31,15 +31,38 @@ async def _verify_team_owner(auth: AuthDep, scope_id: str) -> None:
     The TTL setting decides when OTHER team members' uploads get deleted,
     so write permission must match ``PATCH /teams/{id}`` (owner-only).
     Read access stays open to all members via ``verify_scope_access``.
-    """
-    from app.db import engine as db_engine
 
-    row = await db_engine.fetch_one(
-        "SELECT role FROM public.team_members "
-        "WHERE team_id = :team_id AND user_id = :user_id",
-        {"team_id": scope_id, "user_id": auth.user_id},
-    )
-    if row is None or row.get("role") != "owner":
+    ``int(scope_id)`` is NOT optional cleanup — it's the fix for a bug this
+    ORM migration silently closed. The pre-migration raw SQL bound
+    ``scope_id`` (a ``str`` — see ``TempTtlUpdate.scope_id``) directly against
+    ``team_members.team_id`` (``BigInteger``); asyncpg's int8 codec is strict
+    about str-vs-int (same trap documented in
+    ``app.services.ai_usage._coerce_bigint``), so that query raised
+    ``asyncpg.exceptions.DataError`` on every call, since ``scope_id`` is
+    always a str here (an int bind would have worked — that is exactly what
+    the ``int(...)`` coercion below restores). Because
+    ``put_temp_ttl`` has no try/except around this call, the exception went
+    straight through FastAPI to a 500 — meaning this owner-only gate had
+    NEVER executed successfully once since it was introduced: legitimate team
+    owners got a 500 trying to set their own team's TTL, and non-owners also
+    got a 500 (never a clean 403). Confirmed via a disposable-container
+    reproduction of the pre-migration call shape (2026-08-05). Do not remove
+    the ``int(...)`` coercion — reverting to a bare ``scope_id`` reopens this.
+    """
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TeamMembers
+
+    async with read_scope() as session:
+        result = await session.execute(
+            select(TeamMembers.role).where(
+                TeamMembers.team_id == int(scope_id),
+                TeamMembers.user_id == auth.user_id,
+            )
+        )
+        role = result.scalar()
+    if role != "owner":
         raise HTTPException(
             status_code=403,
             detail="Only the team owner can change team chat TTL",

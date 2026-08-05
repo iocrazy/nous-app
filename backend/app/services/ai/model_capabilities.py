@@ -45,16 +45,27 @@ async def _fetch_capabilities() -> list[dict]:
     """Pull the capability map from ai_model_prices. One row per (model,
     provider) pair — we collapse duplicate effective_at rows by picking
     the latest. Returns a list of {model, provider, supports_vision} dicts."""
-    from app.db import engine as db_engine  # deferred — matches codebase convention
+    from sqlalchemy import select
 
-    sql = (
-        "SELECT DISTINCT ON (model, provider) "
-        "model, provider, supports_vision "
-        "FROM public.ai_model_prices "
-        "ORDER BY model, provider, effective_at DESC"
+    from app.db.session import read_scope  # deferred — matches codebase convention
+    from app.models import AiModelPrices
+
+    stmt = (
+        select(
+            AiModelPrices.model,
+            AiModelPrices.provider,
+            AiModelPrices.supports_vision,
+        )
+        .distinct(AiModelPrices.model, AiModelPrices.provider)
+        .order_by(
+            AiModelPrices.model,
+            AiModelPrices.provider,
+            AiModelPrices.effective_at.desc(),
+        )
     )
-    rows = await db_engine.fetch_all(sql, {})
-    return rows or []
+    async with read_scope() as session:
+        rows = (await session.execute(stmt)).mappings().all()
+    return [dict(r) for r in rows]
 
 
 def _matches_fallback_prefix(model_lower: str) -> bool:

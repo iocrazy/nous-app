@@ -104,9 +104,6 @@ async def test_promote_creates_resource_and_marks(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_promote_canvas_origin(monkeypatch, tmp_path):
-    import sys
-    import types
-
     import app.services.library.promote_generated_media_service as svc_mod
 
     # source file on disk (same setup as happy-path test)
@@ -144,29 +141,43 @@ async def test_promote_canvas_origin(monkeypatch, tmp_path):
     monkeypatch.setattr(svc.res_repo, "create_resource_item", _create_item)
     monkeypatch.setattr(svc.res_repo, "update_resource", _update_resource_canvas)
 
-    # capture canvas_resource_refs insert via a fake app.db.engine
-    db_calls = []
+    # capture the canvas_resource_refs insert via a fake write_scope() —
+    # the ORM statement (Phase B5 Task 1) replaces the old raw
+    # db_engine.execute_as_service_role(sql, params) call.
+    from contextlib import asynccontextmanager
 
-    async def _execute_as_service_role(sql, params):
-        db_calls.append(params)
+    from sqlalchemy.dialects import postgresql
 
-    fake_engine = types.SimpleNamespace(
-        execute_as_service_role=_execute_as_service_role
-    )
-    fake_db_mod = types.ModuleType("app.db")
-    fake_db_mod.engine = fake_engine
-    monkeypatch.setitem(sys.modules, "app.db", fake_db_mod)
+    session_calls = []
+
+    class _FakeSession:
+        async def execute(self, stmt):
+            session_calls.append(stmt)
+
+    @asynccontextmanager
+    async def _fake_write_scope():
+        yield _FakeSession()
+
+    monkeypatch.setattr(svc_mod, "write_scope", _fake_write_scope)
 
     out = await svc.promote(gen_id=7, user_id="u-uuid", target_scope_id=42)
 
     # resource created normally
     assert out["id"] == 555
 
-    # canvas_resource_refs INSERT called exactly once with expected params
-    assert len(db_calls) == 1
-    assert db_calls[0]["cid"] == 99
-    assert db_calls[0]["rid"] == 555
-    assert db_calls[0]["nid"] == "n1"
+    # SET LOCAL ROLE service_role, THEN the canvas_resource_refs INSERT —
+    # RLS on that table is locked to service_role (mig 290).
+    assert len(session_calls) == 2
+    role_sql = str(session_calls[0].compile(dialect=postgresql.dialect()))
+    assert role_sql == "SET LOCAL ROLE service_role"
+
+    insert_stmt = session_calls[1]
+    compiled = insert_stmt.compile(dialect=postgresql.dialect())
+    binds = dict(compiled.params)
+    assert "INSERT INTO public.canvas_resource_refs" in str(compiled)
+    assert binds["canvas_id"] == 99
+    assert binds["resource_id"] == 555
+    assert binds["node_id"] == "n1"
 
 
 @pytest.mark.asyncio

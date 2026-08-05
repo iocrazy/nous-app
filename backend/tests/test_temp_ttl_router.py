@@ -1,4 +1,5 @@
 import importlib
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
 import pytest
@@ -74,6 +75,67 @@ async def test_put_temp_ttl_scope_access_denied(monkeypatch):
             auth=_Auth(),
             payload=r.TempTtlUpdate(scope_type="team", scope_id="42", ttl_days=7),
         )
+    assert e.value.status_code == 403
+
+
+def _fake_read_scope_returning(role):
+    class _FakeResult:
+        def scalar(self):
+            return role
+
+    class _FakeSession:
+        async def execute(self, stmt):
+            return _FakeResult()
+
+    @asynccontextmanager
+    async def _scope():
+        yield _FakeSession()
+
+    return _scope
+
+
+@pytest.mark.asyncio
+async def test_verify_team_owner_allows_owner(monkeypatch):
+    """Phase B5 Task 1: _verify_team_owner's team_members.role lookup —
+    migrated from raw db_engine.fetch_one to the ORM. Exercises the real
+    function (not mocked away, unlike the other tests in this file).
+
+    Undisclosed behavior fix (final review Finding 1, 2026-08-05): the
+    pre-migration raw SQL bound scope_id (a str) directly against
+    team_members.team_id (BigInteger) with no int() coercion — asyncpg's
+    strict int8 codec raised DataError on every call, so this owner-only
+    gate 500'd unconditionally and had never once executed successfully.
+    The ORM version's int(scope_id) (see the function's docstring) is what
+    makes it actually reachable for the first time, not incidental cleanup."""
+    import app.db.session as db_session
+
+    # _verify_team_owner does a function-local ``from app.db.session import
+    # read_scope`` (deferred import, per-call) — patch the source attribute
+    # so it resolves at call time, not a (nonexistent) module-level name on
+    # the router module.
+    monkeypatch.setattr(db_session, "read_scope", _fake_read_scope_returning("owner"))
+    await r._verify_team_owner(_Auth(), "42")  # must not raise
+
+
+@pytest.mark.asyncio
+async def test_verify_team_owner_rejects_member_role(monkeypatch):
+    import app.db.session as db_session
+
+    monkeypatch.setattr(db_session, "read_scope", _fake_read_scope_returning("member"))
+    with pytest.raises(HTTPException) as e:
+        await r._verify_team_owner(_Auth(), "42")
+    assert e.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_verify_team_owner_rejects_when_no_membership_row(monkeypatch):
+    """No matching team_members row (scalar() → None) is refused identically
+    to a non-owner role, not a 500."""
+    import app.db.session as db_session
+
+    monkeypatch.setattr(db_session, "read_scope", _fake_read_scope_returning(None))
+    with pytest.raises(HTTPException) as e:
+        await r._verify_team_owner(_Auth(), "42")
     assert e.value.status_code == 403
 
 

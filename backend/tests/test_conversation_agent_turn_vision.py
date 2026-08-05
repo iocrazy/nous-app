@@ -11,6 +11,7 @@ Pins the contract that lets group-chat agents SEE uploaded images:
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -23,6 +24,30 @@ from app.services.chat.conversation_agent_turn import (
 )
 
 CONV_ID = 42
+
+
+def _fake_read_scope_returning(row: dict | None):
+    """ORM equivalent of the old ``db_engine.fetch_one`` mock (Phase B5
+    Task 1) — patches ``conversation_agent_turn.read_scope`` so
+    ``_inject_image_blocks``'s column-level select resolves to ``row`` via
+    ``.mappings().first()``."""
+
+    class _FakeResult:
+        def mappings(self):
+            return self
+
+        def first(self):
+            return row
+
+    class _FakeSession:
+        async def execute(self, stmt):
+            return _FakeResult()
+
+    @asynccontextmanager
+    async def _scope():
+        yield _FakeSession()
+
+    return _scope
 
 
 def _image_msg(gm_id: int = 7, alt: str = "photo.png") -> dict:
@@ -72,8 +97,8 @@ async def test_injects_data_url_for_vision_model(tmp_path) -> None:
             new=AsyncMock(return_value=True),
         ),
         patch(
-            "app.services.chat.conversation_agent_turn.db_engine.fetch_one",
-            new=AsyncMock(return_value=row),
+            "app.services.chat.conversation_agent_turn.read_scope",
+            new=_fake_read_scope_returning(row),
         ),
         patch("app.services.chat.conversation_agent_turn.settings") as mock_settings,
     ):
@@ -126,8 +151,8 @@ async def test_cross_conversation_media_is_skipped(tmp_path) -> None:
             new=AsyncMock(return_value=True),
         ),
         patch(
-            "app.services.chat.conversation_agent_turn.db_engine.fetch_one",
-            new=AsyncMock(return_value=row),
+            "app.services.chat.conversation_agent_turn.read_scope",
+            new=_fake_read_scope_returning(row),
         ),
     ):
         n = await _inject_image_blocks(
@@ -152,8 +177,8 @@ async def test_oversize_file_is_skipped(tmp_path) -> None:
             new=AsyncMock(return_value=True),
         ),
         patch(
-            "app.services.chat.conversation_agent_turn.db_engine.fetch_one",
-            new=AsyncMock(return_value=row),
+            "app.services.chat.conversation_agent_turn.read_scope",
+            new=_fake_read_scope_returning(row),
         ),
     ):
         n = await _inject_image_blocks(
@@ -176,8 +201,8 @@ async def test_missing_media_row_is_skipped() -> None:
             new=AsyncMock(return_value=True),
         ),
         patch(
-            "app.services.chat.conversation_agent_turn.db_engine.fetch_one",
-            new=AsyncMock(return_value=None),
+            "app.services.chat.conversation_agent_turn.read_scope",
+            new=_fake_read_scope_returning(None),
         ),
     ):
         n = await _inject_image_blocks(

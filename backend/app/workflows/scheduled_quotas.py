@@ -22,10 +22,70 @@ from dbos import DBOS
 from loguru import logger
 
 
+def _member_quotas_reset_stmt(next_reset: datetime, now: datetime):
+    """UPDATE statement for the monthly reset — module-level so tests can
+    import + compile the REAL production statement (Phase B5 fix-round
+    convention, see tests/test_orm_b5_task1_row_shape_e2e.py)."""
+    from sqlalchemy import update
+
+    from app.models import MemberQuotas
+
+    return (
+        update(MemberQuotas)
+        .where(MemberQuotas.points_used_this_month >= 0)  # match all rows
+        .values(points_used_this_month=0, reset_at=next_reset, updated_at=now)
+    )
+
+
+def _grant_daily_free_points_stmt(amount: int, today):
+    """SELECT wrapping the ``grant_daily_free_points_batch`` stored function
+    (migration 287) as a table-valued expression — ``func.public.<name>(...)
+    .table_valued("granted", "skipped")`` compiles to the SAME SELECT text as
+    the legacy ``SELECT granted, skipped FROM public.grant_daily_free_points_
+    batch(...)`` string, but is built via the SQLAlchemy expression language
+    (bind params handled by the ORM layer) instead of a hand-written SQL
+    string.
+
+    The SELECT TEXT is equivalent; the CALLING CONVENTION is not — this is
+    NOT a behavior-preserving rewrite. The function does real INSERT/UPDATE
+    work server-side (idempotent via the daily_point_gifts UNIQUE
+    constraint), and the legacy call site ran it via ``db_engine.fetch_one()``
+    — a non-committing ``engine.connect()`` — so every one of those writes was
+    silently rolled back in production (confirmed via a fresh-container
+    reproduction + a live daily_point_gifts read showing no new row since
+    2026-06-11). The caller MUST use ``write_scope()`` (explicit
+    ``session.begin()``/commit) — that is the fix, not incidental plumbing."""
+    from sqlalchemy import func, select
+
+    return select(
+        func.public.grant_daily_free_points_batch(amount, today).table_valued(
+            "granted", "skipped"
+        )
+    )
+
+
+def _reclaim_daily_free_points_stmt(yesterday):
+    """SELECT wrapping the ``reclaim_daily_free_points_batch`` stored function
+    (migration 287) — same table-valued-function shape as
+    ``_grant_daily_free_points_stmt``, and the same calling-convention fix
+    applies: the function does real UPDATE/INSERT work server-side, the
+    legacy ``db_engine.fetch_one()`` call site silently rolled it back on a
+    non-committing connection, and the caller MUST use ``write_scope()`` for
+    that work to actually commit — see ``_grant_daily_free_points_stmt``'s
+    docstring for the production evidence."""
+    from sqlalchemy import func, select
+
+    return select(
+        func.public.reclaim_daily_free_points_batch(yesterday).table_valued(
+            "reclaimed_count", "total_reclaimed"
+        )
+    )
+
+
 @DBOS.step()
 async def reset_monthly_quotas_step() -> dict[str, Any]:
     """Zero member_quotas.points_used_this_month + advance reset_at."""
-    from app.db import engine as db_engine
+    from app.db.session import write_scope
 
     # tz-aware UTC so the timestamptz columns aren't bound in the
     # connection's local TZ (asyncpg binds datetimes as timestamptz).
@@ -35,12 +95,9 @@ async def reset_monthly_quotas_step() -> dict[str, Any]:
     else:
         next_reset = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
 
-    count = await db_engine.execute(
-        "UPDATE public.member_quotas SET points_used_this_month = 0, "
-        "reset_at = :reset_at, updated_at = :now "
-        "WHERE points_used_this_month >= 0",  # match all rows
-        {"reset_at": next_reset, "now": now},
-    )
+    async with write_scope() as session:
+        result = await session.execute(_member_quotas_reset_stmt(next_reset, now))
+        count = result.rowcount
     return {"status": "success", "count": count}
 
 
@@ -53,7 +110,7 @@ async def grant_daily_free_points_step() -> dict[str, Any]:
     function claims a daily_point_gifts row per (user_id, gift_date)
     FIRST (UNIQUE constraint), so a re-run can never double-credit."""
     from app.core.config import settings
-    from app.db import engine as db_engine
+    from app.db.session import write_scope
 
     amount = settings.DAILY_FREE_POINTS
     if amount <= 0:
@@ -61,11 +118,17 @@ async def grant_daily_free_points_step() -> dict[str, Any]:
 
     today = datetime.now(timezone.utc).date()  # DATE column → bind a date object
 
-    row = await db_engine.fetch_one(
-        "SELECT granted, skipped "
-        "FROM public.grant_daily_free_points_batch(:amt, :today)",
-        {"amt": amount, "today": today},
-    )
+    # Must be write_scope() (explicit session.begin()/commit), never a bare
+    # engine.connect()-backed read — the legacy db_engine.fetch_one() call this
+    # replaced ran on a non-committing connection, so the function's internal
+    # INSERT/UPDATEs were silently rolled back on every invocation (undetected
+    # in production from ~2026-06-11 until this migration).
+    async with write_scope() as session:
+        row = (
+            (await session.execute(_grant_daily_free_points_stmt(amount, today)))
+            .mappings()
+            .first()
+        )
     if row is None:
         raise RuntimeError("grant_daily_free_points_batch returned no row")
     return {
@@ -84,15 +147,19 @@ async def reclaim_daily_free_points_step() -> dict[str, Any]:
     team's current balance, records a negative 'daily_gift_reclaim'
     transaction only when > 0, and flips every processed gift to
     status='reclaimed'."""
-    from app.db import engine as db_engine
+    from app.db.session import write_scope
 
     yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
 
-    row = await db_engine.fetch_one(
-        "SELECT reclaimed_count, total_reclaimed "
-        "FROM public.reclaim_daily_free_points_batch(:yesterday)",
-        {"yesterday": yesterday},
-    )
+    # Must be write_scope() — see grant_daily_free_points_step's comment above:
+    # the legacy db_engine.fetch_one() call ran on a non-committing connection,
+    # silently rolling back this function's INSERT/UPDATEs every run.
+    async with write_scope() as session:
+        row = (
+            (await session.execute(_reclaim_daily_free_points_stmt(yesterday)))
+            .mappings()
+            .first()
+        )
     if row is None:
         raise RuntimeError("reclaim_daily_free_points_batch returned no row")
     return {

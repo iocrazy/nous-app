@@ -1,7 +1,9 @@
 # backend/tests/test_model_capabilities.py
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from app.services.ai import model_capabilities as m
 
@@ -116,6 +118,52 @@ async def test_db_row_with_supports_vision_false_overrides_prefix_match(monkeypa
     )
     # 'qwen-vl' prefix would say True via heuristic, but DB row wins.
     assert await m.model_supports_vision("qwen-vl-broken", "qwen") is False
+
+
+@pytest.mark.asyncio
+async def test_fetch_capabilities_uses_distinct_on_model_provider(monkeypatch):
+    """Phase B5 Task 1: _fetch_capabilities itself (not mocked away) — the
+    real ORM statement must compile to DISTINCT ON (model, provider) ordered
+    by effective_at DESC (picks the latest row per pair), and consumers
+    (_ensure_loaded) read row['model']/['provider']/['supports_vision'] via
+    a column-level select+.mappings(), never an entity-level select()."""
+    row = {"model": "gpt-4o", "provider": "openai", "supports_vision": True}
+
+    class _FakeResult:
+        def mappings(self):
+            return self
+
+        def all(self):
+            return [row]
+
+    captured = {}
+
+    class _FakeSession:
+        async def execute(self, stmt):
+            captured["stmt"] = stmt
+            return _FakeResult()
+
+    @asynccontextmanager
+    async def fake_read_scope():
+        yield _FakeSession()
+
+    import app.db.session as db_session
+
+    # _fetch_capabilities does a function-local ``from app.db.session import
+    # read_scope`` (deferred import, per-call) — patch the source attribute
+    # so it resolves at call time, not a (nonexistent) module-level name.
+    monkeypatch.setattr(db_session, "read_scope", fake_read_scope)
+
+    rows = await m._fetch_capabilities()
+    assert rows == [row]
+
+    sql = str(captured["stmt"].compile(dialect=postgresql.dialect()))
+    assert "SELECT DISTINCT ON (public.ai_model_prices.model, " in sql
+    assert "public.ai_model_prices.provider) " in sql
+    assert (
+        "ORDER BY public.ai_model_prices.model, public.ai_model_prices.provider, "
+        "public.ai_model_prices.effective_at DESC" in sql
+    )
 
 
 @pytest.mark.asyncio

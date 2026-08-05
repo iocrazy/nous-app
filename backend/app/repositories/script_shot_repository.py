@@ -31,7 +31,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, insert, select, update
 
 from app.db.session import read_scope, write_scope
-from app.models import ScriptShots
+from app.models import ScriptProjects, ScriptScenes, ScriptShots
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 
 # Sparse-ordering step. New shots land at MAX+STEP; moves bisect neighbours,
@@ -62,22 +62,37 @@ _UPDATE_FIELDS = frozenset(
 # update_status() whitelist — the status machine + its produced media URLs.
 _STATUS_FIELDS = ("status", "image_url", "thumbnail_url", "video_url")
 
+
 # Storyboard-progress rollup — shot completion counts across ALL non-deleted
 # scripts of a project (script_projects → script_scenes → script_shots).
-_STORYBOARD_PROGRESS_SQL = """
-    SELECT
-        COUNT(sh.id)                                             AS total,
-        COUNT(sh.id) FILTER (WHERE sh.status = 'done')          AS done,
-        COUNT(sh.id) FILTER (WHERE sh.status = 'empty')         AS empty,
-        COUNT(sh.id) FILTER (WHERE sh.status = 'generating')    AS generating,
-        COUNT(sh.id) FILTER (WHERE sh.status = 'failed')        AS failed,
-        COUNT(DISTINCT sp.id)                                    AS script_count,
-        COUNT(DISTINCT sc.id)                                    AS scene_count
-    FROM public.script_projects sp
-    LEFT JOIN public.script_scenes sc ON sc.script_id = sp.id
-    LEFT JOIN public.script_shots  sh ON sh.scene_id  = sc.id
-    WHERE sp.project_id = :pid AND sp.status != 'deleted'
-"""
+def _storyboard_progress_stmt(project_id: int):
+    return (
+        select(
+            func.count(ScriptShots.id).label("total"),
+            func.count(ScriptShots.id)
+            .filter(ScriptShots.status == "done")
+            .label("done"),
+            func.count(ScriptShots.id)
+            .filter(ScriptShots.status == "empty")
+            .label("empty"),
+            func.count(ScriptShots.id)
+            .filter(ScriptShots.status == "generating")
+            .label("generating"),
+            func.count(ScriptShots.id)
+            .filter(ScriptShots.status == "failed")
+            .label("failed"),
+            func.count(func.distinct(ScriptProjects.id)).label("script_count"),
+            func.count(func.distinct(ScriptScenes.id)).label("scene_count"),
+        )
+        .select_from(ScriptProjects)
+        .outerjoin(ScriptScenes, ScriptScenes.script_id == ScriptProjects.id)
+        .outerjoin(ScriptShots, ScriptShots.scene_id == ScriptScenes.id)
+        .where(
+            ScriptProjects.project_id == project_id,
+            ScriptProjects.status != "deleted",
+        )
+    )
+
 
 _ZERO_PROGRESS = {
     "total": 0,
@@ -89,17 +104,22 @@ _ZERO_PROGRESS = {
     "scene_count": 0,
 }
 
+
 # Empty-shot-id fan-out — every 'empty' shot across the project's non-deleted
 # scripts (Task 4 — batch generate-missing-frames dispatch source).
-_EMPTY_SHOT_IDS_SQL = """
-    SELECT sh.id
-    FROM public.script_projects sp
-    JOIN public.script_scenes sc ON sc.script_id = sp.id
-    JOIN public.script_shots  sh ON sh.scene_id  = sc.id
-    WHERE sp.project_id = :pid AND sp.status != 'deleted'
-      AND sh.status = 'empty'
-    ORDER BY sh.id
-"""
+def _empty_shot_ids_stmt(project_id: int):
+    return (
+        select(ScriptShots.id)
+        .select_from(ScriptProjects)
+        .join(ScriptScenes, ScriptScenes.script_id == ScriptProjects.id)
+        .join(ScriptShots, ScriptShots.scene_id == ScriptScenes.id)
+        .where(
+            ScriptProjects.project_id == project_id,
+            ScriptProjects.status != "deleted",
+            ScriptShots.status == "empty",
+        )
+        .order_by(ScriptShots.id)
+    )
 
 
 def _bigint(v: Any) -> Optional[int]:
@@ -182,12 +202,12 @@ class ScriptShotRepository:
         any failure returns the all-zero shape so the suggestion card degrades
         to a navigation nudge instead of 500ing the workbench.
         """
-        from app.db import engine as db_engine
-
         try:
-            row = await db_engine.fetch_one(
-                _STORYBOARD_PROGRESS_SQL, {"pid": int(project_id)}
-            )
+            async with read_scope() as session:
+                result = await session.execute(
+                    _storyboard_progress_stmt(int(project_id))
+                )
+                row = result.mappings().first()
             if not row:
                 return dict(_ZERO_PROGRESS)
             return {k: int(row[k] or 0) for k in _ZERO_PROGRESS}
@@ -204,10 +224,10 @@ class ScriptShotRepository:
         Best-effort is NOT applied here (unlike storyboard_progress_for_project)
         — a failed read must surface to the caller rather than silently
         dispatching zero workflows."""
-        from app.db import engine as db_engine
-
-        rows = await db_engine.fetch_all(_EMPTY_SHOT_IDS_SQL, {"pid": int(project_id)})
-        return [str(r["id"]) for r in rows]
+        async with read_scope() as session:
+            result = await session.execute(_empty_shot_ids_stmt(int(project_id)))
+            ids = result.scalars().all()
+        return [str(i) for i in ids]
 
     # ------------------------------------------------------------------ #
     # Writes — create / create_many / update / update_status / delete
