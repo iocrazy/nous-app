@@ -44,6 +44,35 @@ from loguru import logger
 HEARTBEAT_STALENESS_SECONDS = 120
 
 
+def _agents_budget_scan_stmt(agent_ids):
+    """Column-level select of the budget fields for a batch of agent ids.
+
+    ``select(*AiAgents.__table__.c)`` — NOT ``select(AiAgents)``. The
+    entity-level form maps each result row to a single 'AiAgents' key (the
+    ORM instance), not one key per column, so every ``agent.get('paused_
+    reason')``/``agent['id']`` consumer below would silently return None /
+    raise KeyError instead of the legacy column-keyed dict shape (see
+    tests/test_orm_b5_task2_row_shape_e2e.py for the real-engine proof)."""
+    from sqlalchemy import select
+
+    from app.models import AiAgents
+
+    return select(*AiAgents.__table__.c).where(AiAgents.id.in_(agent_ids))
+
+
+def _agent_pause_stmt(agent_id, paused_reason):
+    """UPDATE ai_agents.paused_reason for one agent (budget pause/unpause)."""
+    from sqlalchemy import update
+
+    from app.models import AiAgents
+
+    return (
+        update(AiAgents)
+        .where(AiAgents.id == agent_id)
+        .values(paused_reason=paused_reason)
+    )
+
+
 @DBOS.step()
 async def mark_heartbeat_lost_step() -> int:
     """Flip running rows whose heartbeat is older than 2 minutes."""
@@ -60,7 +89,10 @@ async def mark_heartbeat_lost_step() -> int:
 async def recompute_monthly_budgets_step() -> int:
     """Sum this month's spend per agent, flip paused_reason='budget' on
     overrun. Returns count of agents whose paused_reason transitioned."""
+    from uuid import UUID
+
     from app.db import engine as db_engine
+    from app.db.session import read_scope, write_scope
     from app.repositories.agent_runs_repository import get_agent_runs_repository
 
     if not db_engine.is_configured():
@@ -86,15 +118,20 @@ async def recompute_monthly_budgets_step() -> int:
     if not totals:
         return 0
 
-    agents = await db_engine.fetch_all(
-        "SELECT id, monthly_token_budget, monthly_cost_cents_budget, paused_reason "
-        "FROM public.ai_agents WHERE id = ANY(:ids)",
-        {"ids": list(totals.keys())},
-    )
+    # agent_runs.agent_id is a uuid column round-tripped as str (see the
+    # VALUE-TYPE PARITY note at the top of agent_runs_repository.py) —
+    # AiAgents.id is a native Uuid column, so bind real uuid.UUID objects.
+    agent_ids = [UUID(aid) for aid in totals.keys()]
+    async with read_scope() as session:
+        agents = (
+            (await session.execute(_agents_budget_scan_stmt(agent_ids)))
+            .mappings()
+            .all()
+        )
 
     transitions = 0
     for agent in agents:
-        aid = agent["id"]
+        aid = str(agent["id"])
         t = totals.get(aid, {"tokens": 0, "cost_cents": 0.0})
         token_budget = agent.get("monthly_token_budget")
         cost_budget = agent.get("monthly_cost_cents_budget")
@@ -107,21 +144,16 @@ async def recompute_monthly_budgets_step() -> int:
         if should_pause and paused_reason != "budget":
             # Don't clobber a manual pause.
             if paused_reason is None:
-                await db_engine.execute(
-                    "UPDATE public.ai_agents SET paused_reason = 'budget' "
-                    "WHERE id = :id",
-                    {"id": aid},
-                )
+                async with write_scope() as session:
+                    await session.execute(_agent_pause_stmt(agent["id"], "budget"))
                 transitions += 1
                 logger.info(
                     f"[sweeper] agent {aid} paused_by_budget "
                     f"(tokens={t['tokens']}, cost={t['cost_cents']})"
                 )
         elif not should_pause and paused_reason == "budget":
-            await db_engine.execute(
-                "UPDATE public.ai_agents SET paused_reason = NULL WHERE id = :id",
-                {"id": aid},
-            )
+            async with write_scope() as session:
+                await session.execute(_agent_pause_stmt(agent["id"], None))
             transitions += 1
             logger.info(f"[sweeper] agent {aid} unpaused (budget cleared)")
 

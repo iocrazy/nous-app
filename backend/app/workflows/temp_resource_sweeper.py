@@ -32,11 +32,35 @@ def _build_repo():
     return ResourcesRepository()
 
 
+def _temp_folder_scopes_stmt():
+    """Column-level select for every scope that owns a non-trashed ``temp``
+    folder, with scope_type derived from ``teams.kind`` (LEFT JOIN — see
+    docstring below on why an unresolved team must not drop the row).
+
+    Explicit ``Folders.scope_id`` + a ``case().label("scope_type")`` — not
+    ``select(Folders)`` — so ``.mappings()`` yields one key per output column
+    (``row["scope_id"]``/``row["scope_type"]``), matching what ``_iter_scopes``
+    consumes below."""
+    from sqlalchemy import case, select
+
+    from app.models import Folders, Teams
+
+    return (
+        select(
+            Folders.scope_id,
+            case((Teams.kind == "personal", "personal"), else_="team").label(
+                "scope_type"
+            ),
+        )
+        .distinct()
+        .select_from(Folders)
+        .join(Teams, Teams.id == Folders.scope_id, isouter=True)
+        .where(Folders.name == TEMP_FOLDER_NAME, Folders.is_trashed.is_(False))
+    )
+
+
 async def _iter_scopes() -> AsyncIterator[Tuple[str, str]]:
     """Yield ``(scope_type, scope_id)`` pairs for all scopes with a temp folder.
-
-    Uses the SQLAlchemy engine (``db_engine.fetch_all``) so it works even when
-    the Supabase-py client isn't available in background jobs.
 
     PR-E 4c: ``folders.scope_type`` is being dropped, so we enumerate every
     non-trashed ``temp`` folder directly and derive scope_type from
@@ -44,16 +68,10 @@ async def _iter_scopes() -> AsyncIterator[Tuple[str, str]]:
     routing — the UUID-keyed user_settings KEEP exception). scope_id is always
     a teams.id snowflake post PR-C, so the join always resolves.
     """
-    from app.db import engine as db_engine
+    from app.db.session import read_scope
 
-    rows = await db_engine.fetch_all(
-        "SELECT DISTINCT f.scope_id::text AS scope_id, "
-        "  CASE WHEN t.kind = 'personal' THEN 'personal' ELSE 'team' END AS scope_type "
-        "FROM public.folders f "
-        "LEFT JOIN public.teams t ON t.id::text = f.scope_id::text "
-        "WHERE f.name = :name AND f.is_trashed = false",
-        {"name": TEMP_FOLDER_NAME},
-    )
+    async with read_scope() as session:
+        rows = (await session.execute(_temp_folder_scopes_stmt())).mappings().all()
     for row in rows or []:
         yield (str(row["scope_type"]), str(row["scope_id"]))
 

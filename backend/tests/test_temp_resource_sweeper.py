@@ -76,16 +76,39 @@ async def test_iter_scopes_yields_all_personal_and_team(monkeypatch):
     PR-E 4c: a single query lists all temp folders and derives scope_type
     from teams.kind (folders.scope_type is being dropped). The iterator yields
     the (scope_type, scope_id) pairs from that query verbatim.
+
+    Phase B5 Task 2: the query moved from ``db_engine.fetch_all`` (raw SQL) to
+    an ORM select executed inside ``read_scope()`` — patch the session scope,
+    not the retired db_engine call.
     """
-    fake_fetch = AsyncMock(
-        return_value=[
-            {"scope_id": "pt1", "scope_type": "personal"},
-            {"scope_id": "pt2", "scope_type": "personal"},
-            {"scope_id": "42", "scope_type": "team"},
-            {"scope_id": "99", "scope_type": "team"},
-        ]
-    )
-    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch)
+    from contextlib import asynccontextmanager
+
+    class _FakeResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def mappings(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+    class _FakeSession:
+        async def execute(self, stmt):
+            return _FakeResult(
+                [
+                    {"scope_id": "pt1", "scope_type": "personal"},
+                    {"scope_id": "pt2", "scope_type": "personal"},
+                    {"scope_id": "42", "scope_type": "team"},
+                    {"scope_id": "99", "scope_type": "team"},
+                ]
+            )
+
+    @asynccontextmanager
+    async def fake_read_scope():
+        yield _FakeSession()
+
+    monkeypatch.setattr("app.db.session.read_scope", fake_read_scope)
     scopes = [s async for s in m._iter_scopes()]
     assert set(scopes) == {
         ("personal", "pt1"),
