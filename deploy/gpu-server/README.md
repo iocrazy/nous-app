@@ -20,7 +20,9 @@ P0 计划：`docs/superpowers/plans/2026-07-20-p0-gpu-server-cloudflare-tunnel.m
 ├── .mounted                        # nofail 挂载防护 marker（起栈前检查）
 ├── data/                           # P1 起的持久卷：postgres / redis / storage / runner
 └── secrets/
-    └── cloudflared/                # cert.pem + <TUNNEL_ID>.json（owner 65532，mode 600）
+    ├── cloudflared/                # cert.pem + <TUNNEL_ID>.json（owner 65532，mode 600）
+    ├── backend.env                 # backend / worker / gateway 共用
+    └── browser.env                 # 仅 nous-browser：只放 BROWSER_INTERNAL_TOKEN
 ```
 
 **重装系统恢复路径**：装 Docker（下方前置条件）→ 恢复 fstab 数据盘条目 → clone 本仓库 → `docker compose up -d`。数据与密钥全程在 2T 盘上不动。
@@ -43,6 +45,24 @@ touch /media/heygo/program/datahub/nous/.mounted
 ```
 
 其余前置：Cloudflare zone `nous.ink` active + Zero Trust 权限。
+
+### ⚠️ `nous-browser` 一次性密钥前置（发布模块会话通道，S1 起）
+
+`nous-browser` 的 `env_file` 指向 `secrets/browser.env`。**该文件不存在时 `docker compose up` 会直接拒绝起栈**，连带 backend 也发不出去 —— 所以 S1 合入前必须先在 gpupc 上执行一次：
+
+```bash
+TOKEN=$(openssl rand -hex 32)
+umask 077
+printf 'BROWSER_INTERNAL_TOKEN=%s\n' "$TOKEN" \
+  > /media/heygo/program/datahub/nous/secrets/browser.env
+# 同一个值给调用方（backend / worker）
+printf 'BROWSER_INTERNAL_TOKEN=%s\n' "$TOKEN" \
+  >> /media/heygo/program/datahub/nous/secrets/backend.env
+```
+
+**为什么不让 browser 直接共用 `backend.env`**（gateway 就是共用的）：`backend.env` 里有 `SUPABASE_SERVICE_ROLE_KEY`、`MEDIAHUB_TOKEN_ENCRYPTION_KEY`（解密所有账号 `session_state` 的主密钥）和带密码的 PG DSN。而 `nous-browser` 的全部工作就是驱动 Chromium 去加载抖音等外部站点。把主密钥注入这个进程，等于让一次渲染器逃逸把「单账号会话泄露」升级成「全库沦陷」，spec §7.6 的加密存储也就白做了。代价是这个 token 要在两个文件里各写一份；写歪了 browser 返回 401，是可见的类型化失败，比密钥过度暴露这种静默风险好诊断。
+
+改完 env 文件必须 `docker compose up -d`（不是 `restart`）才会重读，见 CLAUDE.md「部署陷阱」。
 
 ## 首次搭建（P0 Task 3-4；tunnel 名 nous-gpu）
 

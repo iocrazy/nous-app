@@ -1,0 +1,527 @@
+"""SessionAdapter —— 会话通道 (spec 2026-08-04) 的 backend 侧适配器。
+
+与 ``DouyinAdapter``(OAuth) **并列**，不替换：``official``/``h5`` 走官方
+开放平台，``session`` 走"平台 web 会话 + nous-browser 容器"。
+
+为什么不继承 ``PlatformAdapter``
+================================
+``PlatformAdapter`` 的抽象方法全是 OAuth 形状（``get_auth_url`` /
+``exchange_token`` / ``refresh_token`` / ``get_user_info(access_token,
+open_id)``）。会话通道一个都没有：它没有 authorize URL，没有 code
+换 token，凭证是扫码得来的 storage_state。硬套会得到一排
+``NotImplementedError``，把"这两条通道形状不同"这个事实藏起来。两者的
+共同点是"能发布"，而不是"能 OAuth"，所以它们是**兄弟**而非父子；
+``registry.resolve_adapter()`` 负责按 ``auth_type`` 把调用方分流。
+
+为什么没有 ``DouyinSessionAdapter``
+===================================
+spec §6.1 三条硬要求的直接后果。第一个平台约 80% 的工作量是平台无关的
+基建，而**平台差异几乎全部落在浏览器容器里**（DOM 选择器 / 签名函数 /
+外包 CLI）。backend 这一侧的工作只有：解密 → 组装平台无关的意图 → 内网
+HTTP → 结果映射，逐字相同。因此这里是**一个泛型 ``SessionAdapter(platform)``**，
+不存在按平台分的子类：
+
+a) 返回契约用 ``SessionStatus``（通道级枚举），不出现平台专属状态值；
+b) 平台无关逻辑（加密存储、素材传递、结果映射、fail-fast）全在本模块，
+   没有一行落在 ``douyin_*`` 命名的地方；
+c) **给「档位 2」留位置**：本模块从不描述"怎么发"，只描述"发什么"
+   —— 见 ``PublishIntent`` 与 ``publish()`` 的注释。
+
+给「档位 2」留的三个位置 (spec §1.3 / §6.1 c)
+=============================================
+小红书那一档是"浏览器只当签名机（``window._webmsxyw`` 算 ``x-s``/``x-t``）
++ 上传走裸 HTTP"，与抖音的纯 DOM 木偶戏完全不同。若抽象假设"发布 == DOM
+操作序列"，接它就要返工基建。所以：
+
+1. **意图而非机制**。``PublishIntent`` 描述的是"发什么"（素材、标题、
+   话题、可见性），没有任何"点哪个按钮 / 等哪个选择器"。执行档位是浏览器
+   侧按 ``platform`` 选的策略，backend 不知道也不需要知道。
+2. **会话物料是不透明的**。``storage_state`` 全程当作黑盒 JSON 对象透传，
+   本模块**不检查内部结构**。小红书的会话主要在 localStorage/origins 而
+   非 cookies，任何 ``storage_state["cookies"]`` 断言都会挡死它。
+3. **素材以 URL 交付，不以"上传动作"交付**。``PublishMedia.url`` 是
+   presigned URL：DOM 档需要它下载到 /tmp 再 ``set_input_files``，裸 HTTP
+   档直接拿它做流式 PUT，CLI 档（B 站 biliup）拿它当参数。同一个字段服务
+   三档，没有一档被特殊照顾。
+
+另外 ``PublishOutcome.updated_storage_state`` 是所有档位共有的（平台会话
+滑动续期，spec §4.2 第 6 步），所以它在信封里而不是某一档的副作用。
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Iterable, Mapping, Optional
+
+from loguru import logger
+
+from app.services.distribution.browser_client import (
+    DEFAULT_LOCALE,
+    DEFAULT_TIMEZONE_ID,
+    BrowserClient,
+    SessionEnvironment,
+    SessionErrorKind,
+    SessionOpResult,
+    SessionStatus,
+    is_infra_failure,
+)
+
+AUTH_TYPE_SESSION = "session"
+
+# 业务原因（非基建失败）—— 走 detail["reason"]，与 detail["error_kind"] 分开。
+# 两者混用会让巡检把"容器挂了"误判成"账号掉线"，见 browser_client 的说明。
+REASON_NO_SESSION_STATE = "no_session_state"
+REASON_MALFORMED_SESSION_STATE = "malformed_session_state"
+REASON_AUTH_TYPE_MISMATCH = "auth_type_mismatch"
+
+
+class SessionStateError(RuntimeError):
+    """明文 ``session_state`` 解析不出 storage_state。
+
+    只携带 ``reason``（业务原因，账号该重扫码）—— 解密失败**不走这里**，
+    它发生在 repository，由 ``decrypt_failure_result()`` 转成基建失败。
+    两者严格分开正是为了不让"读不出来"被误判成"账号掉线"。
+    """
+
+    def __init__(self, message: str, *, reason: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+# ── 发布意图（平台无关、执行档位无关） ──────────────────────────
+
+
+@dataclass(frozen=True)
+class PublishMedia:
+    """一个待发素材。
+
+    ``url`` 是浏览器容器可直接取到的 presigned URL —— 容器**不挂载任何
+    存储卷**（spec §4.2 第 4 步），素材只经 HTTP 流转。
+    """
+
+    kind: str  # "video" | "image"
+    url: str
+    filename: str
+    content_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "url": self.url,
+            "filename": self.filename,
+            "content_type": self.content_type,
+            "size_bytes": self.size_bytes,
+        }
+
+
+@dataclass(frozen=True)
+class PublishIntent:
+    """一次发布要表达的全部内容 —— **只说发什么，不说怎么发**。
+
+    ``visibility`` 刻意用语义词（``public``/``private``/``friends``）而不是
+    抖音的 ``private_status`` 整数枚举：那个 0/1/2 是平台私有的，而且抖音
+    自己的官方 create API 与 H5 schema 就有两套不同的 ``download_type``
+    映射（见 ``douyin_adapter``）。把 int 枚举放进通道契约，等于把抖音焊死
+    进基建（违反 §6.1 a/b）。翻译成平台原生值是浏览器侧 uploader 的职责。
+
+    ``platform_options`` 是逃生舱：平台独有且无法通用化的字段（图文笔记
+    类型、封面选择策略、合集 id 等）放这里，键名由各平台 uploader 自定，
+    backend 只透传不解释。
+    """
+
+    content_type: str  # "video" | "images"
+    media: tuple[PublishMedia, ...]
+    title: str
+    description: Optional[str] = None
+    topics: tuple[str, ...] = ()
+    visibility: str = "public"
+    allow_download: bool = True
+    cover: Optional[PublishMedia] = None
+    scheduled_at: Optional[datetime] = None
+    platform_options: Mapping[str, Any] = field(default_factory=dict)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "content_type": self.content_type,
+            "media": [m.to_payload() for m in self.media],
+            "title": self.title,
+            "description": self.description,
+            "topics": list(self.topics),
+            "visibility": self.visibility,
+            "allow_download": self.allow_download,
+            "cover": self.cover.to_payload() if self.cover else None,
+            "scheduled_at": (
+                self.scheduled_at.isoformat() if self.scheduled_at else None
+            ),
+            "platform_options": dict(self.platform_options),
+        }
+
+
+@dataclass(frozen=True)
+class PublishOutcome:
+    """S3 发布的返回信封 —— ``SessionOpResult`` 加两组发布专属字段。
+
+    ``updated_storage_state`` 是会话寿命的决定因素（spec §4.2 第 6 步）：
+    平台会话滑动续期，每次使用后服务端下发新 cookie，不回写等于一直在消耗
+    初始那份的剩余寿命。它属于**所有**执行档位，所以在信封里。
+    """
+
+    result: SessionOpResult
+    platform_item_id: Optional[str] = None
+    published_url: Optional[str] = None
+    updated_storage_state: Optional[Mapping[str, Any]] = None
+
+
+# ── 每平台的 fail-fast 画像（数据，不是代码分支） ─────────────────
+
+
+@dataclass(frozen=True)
+class PlatformSessionProfile:
+    """会话通道支持哪些平台、各自的 fail-fast 约束 (spec §7.7)。
+
+    参数校验必须在**起浏览器之前**完成：开一次有头浏览器 + 传一个几百 MB
+    的视频要几十秒到几分钟，标题超长这种错误不该等到那时才发现。
+
+    数值上界故意留 ``None`` = 不设限：S1 阶段没有实测过抖音创作页的真实
+    上限，凭空写一个数字会静默拒掉合法内容（比放行更糟）。S3 接 DOM 时
+    照实填。**只校验确定的事**是这里的口径。
+    """
+
+    platform: str
+    content_types: frozenset[str]
+    video_extensions: frozenset[str]
+    image_extensions: frozenset[str]
+    max_title_len: Optional[int] = None
+    max_topics: Optional[int] = None
+    max_images: Optional[int] = None
+
+
+SESSION_PLATFORM_PROFILES: dict[str, PlatformSessionProfile] = {
+    "douyin": PlatformSessionProfile(
+        platform="douyin",
+        content_types=frozenset({"video", "images"}),
+        video_extensions=frozenset({".mp4", ".mov", ".webm"}),
+        image_extensions=frozenset({".jpg", ".jpeg", ".png"}),
+        # 上限待 S3 对着 creator.douyin.com 实测后填入（见 docstring）。
+    ),
+    # 第二个平台建议是小红书（档位 2），正因为它与抖音最不同 —— 见 spec §6.1。
+}
+
+
+def supported_session_platforms() -> frozenset[str]:
+    return frozenset(SESSION_PLATFORM_PROFILES)
+
+
+# ── 环境组装 ──────────────────────────────────────────────
+
+
+def build_environment(row: Optional[Mapping[str, Any]]) -> SessionEnvironment:
+    """把一行 ``account_environments``（spec §3.2）变成 ``SessionEnvironment``。
+
+    ``row`` 来自 repository 对 ``social_accounts`` 的 LEFT JOIN，列名即
+    §3.2 的建表列：``proxy_url`` / ``user_agent`` / ``locale`` /
+    ``timezone_id`` / ``geo_lat`` / ``geo_lng``。
+
+    解密职责划分（两处都有明确归属，不重叠）：
+
+    - ``session_state`` 归 **repository** 解（与 ``access_token`` 同一条
+      secret 边界），本模块只 ``json.loads`` —— 见 ``parse_session_state``。
+    - ``proxy_url`` 归 **本函数** 解。它属于环境配置而非账号凭证，
+      repository 保持密文原样返回，密钥仍然不出 backend（浏览器服务拿到
+      的是明文代理串，但从不接触 Fernet 密钥）。
+
+    解不开时降级为直连而不是整个失败：代理配错不该让一个健康账号连校验
+    都做不了。降级会 warn，且**绝不打印密文/明文本身**。
+
+    ``row`` 为 None（账号还没配环境）时返回全默认：直连 + zh-CN +
+    Asia/Shanghai。S3 之前本来就不接代理 (spec §6)。
+    """
+    from app.core import secret_box
+
+    if not row:
+        return SessionEnvironment()
+    proxy = row.get("proxy_url")
+    if proxy:
+        try:
+            proxy = secret_box.decrypt(proxy)
+        except Exception:
+            # 只报"哪个账号的代理解不开"，绝不打印密文/明文本身。
+            logger.warning(
+                f"[session.env] account={row.get('account_id')} "
+                "proxy_url decrypt failed — falling back to direct connection"
+            )
+            proxy = None
+    lat = row.get("geo_lat")
+    lng = row.get("geo_lng")
+    return SessionEnvironment(
+        proxy_url=proxy or None,
+        user_agent=row.get("user_agent") or None,
+        locale=row.get("locale") or DEFAULT_LOCALE,
+        timezone_id=row.get("timezone_id") or DEFAULT_TIMEZONE_ID,
+        geo_lat=float(lat) if lat is not None else None,
+        geo_lng=float(lng) if lng is not None else None,
+    )
+
+
+def parse_session_state(account: Mapping[str, Any]) -> dict[str, Any]:
+    """``account["session_state"]``（**已解密的明文 JSON 字符串**）→ dict。
+
+    入参契约
+    ========
+    ``session_state`` 到这里时**必须已经是明文** —— 解密是 repository 的
+    责任（``SocialAccountsRepository.get_with_session`` 的
+    ``_decrypt_secret_cols``，与 ``access_token`` 同一条边界）。本函数只做
+    ``json.loads`` + 结构校验，**不调 ``secret_box``**。
+
+    为什么不在这里兜一层解密：``secret_box.decrypt`` 对不以 ``gAAAAA``
+    开头的输入原样返回，那是 legacy 明文兼容分支，其注释明写 "Once all
+    rows are encrypted, this branch never fires" —— 设计者认为它迟早被
+    删。真在这里兜一层，删除那天会话通道会突然全线崩溃，而报错点在这里，
+    排查要绕一圈。解密只在一处发生。
+
+    两种失败（都是业务原因，账号该重扫码）：
+
+    - 没有 session_state → ``no_session_state``：账号没绑过会话。
+    - 不是非空 JSON 对象 → ``malformed_session_state``：数据坏了。
+
+    解密失败（Fernet 密钥错配）不在本函数的责任范围 —— 它发生在
+    repository，调用方捕获后映射成 ``decrypt_failure_result()``，见该函数。
+
+    对 storage_state 的**内部结构零校验**（只要求是非空对象）—— 见模块
+    docstring「给档位 2 留的位置」第 2 条。
+    """
+    raw = account.get("session_state")
+    if not raw:
+        raise SessionStateError(
+            "account has no session_state", reason=REASON_NO_SESSION_STATE
+        )
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+    except ValueError as exc:
+        raise SessionStateError(
+            "session_state is not valid JSON", reason=REASON_MALFORMED_SESSION_STATE
+        ) from exc
+    if not isinstance(parsed, dict) or not parsed:
+        raise SessionStateError(
+            "session_state must be a non-empty JSON object",
+            reason=REASON_MALFORMED_SESSION_STATE,
+        )
+    return parsed
+
+
+def decrypt_failure_result(
+    message: str, *, account_id: Optional[Any] = None
+) -> dict[str, Any]:
+    """repository 层 ``session_state`` 解密失败 → §7.8 信封。
+
+    ``SessionErrorKind.DECRYPT_FAILED`` 的**唯一生产入口**。发布 step
+    (S3) 与巡检 (S5) 调 ``get_with_session`` 时捕获解密异常后调用它。
+
+    结论是 ``failed`` 而**不是** ``session_invalid``：密钥错配时平台会话
+    本身可能完全健康，我们只是读不出来。标成 needs_relogin 会让用户白扫
+    一次码，密钥轮换没做完时更是全量误伤。``is_infra_failure`` 为真。
+    """
+    logger.error(f"[session.state] account={account_id} decrypt_failed: {message}")
+    return SessionOpResult(
+        success=False,
+        status=SessionStatus.FAILED.value,
+        message=message,
+        detail={"error_kind": SessionErrorKind.DECRYPT_FAILED.value},
+    ).to_dict()
+
+
+# ── Adapter ───────────────────────────────────────────────
+
+
+class SessionAdapter:
+    """会话通道适配器 —— 每个平台一个实例，逻辑同一份。
+
+    职责边界刻意很窄：解析已解密的会话、组装平台无关的请求、调
+    nous-browser、把结果映射成 §7.8 信封。平台差异（DOM / 签名 / CLI）全在
+    浏览器容器里；``session_state`` 的解密在 repository 层。
+    """
+
+    auth_type = AUTH_TYPE_SESSION
+
+    def __init__(
+        self, platform: str, *, client: Optional[BrowserClient] = None
+    ) -> None:
+        profile = SESSION_PLATFORM_PROFILES.get(platform)
+        if profile is None:
+            raise ValueError(f"Session channel not supported for platform: {platform}")
+        self.platform_name = platform
+        self._profile = profile
+        self._client = client or BrowserClient()
+
+    @property
+    def profile(self) -> PlatformSessionProfile:
+        return self._profile
+
+    # ── 会话校验 (S1) ───────────────────────────────────────
+
+    async def validate_session(
+        self,
+        account: Mapping[str, Any],
+        *,
+        environment: Optional[SessionEnvironment] = None,
+    ) -> dict[str, Any]:
+        """校验一个账号的会话是否还活着。
+
+        spec §7.1：每平台的会话校验必须是**唯一一个函数** —— 反面教材是
+        sau 把同一功能写了两份（CLI/web），同一个 bug 只修了一半，web 端
+        长期把好账号判死。这里的唯一实现是浏览器侧的
+        ``/session/validate``，backend 只有这一个入口能到达它。
+
+        返回 §7.8 信封 dict。``detail["error_kind"]`` 存在时表示基建失败
+        （用 ``browser_client.is_infra_failure`` 判定），调用方**不得**据此
+        改动 ``status`` / ``session_checked_at``。
+
+        ``environment`` 未显式传入时取 ``account["environment"]``（S1-data
+        的 join 结果），没有就用全默认（直连）。
+        """
+        auth_type = account.get("auth_type")
+        if auth_type is not None and auth_type != AUTH_TYPE_SESSION:
+            # 路由错了。不静默 no-op，也不 raise 打断巡检循环 —— 给类型化失败。
+            logger.warning(
+                f"[session.validate] account={account.get('id')} "
+                f"routed to session channel but auth_type={auth_type!r}"
+            )
+            return SessionOpResult(
+                success=False,
+                status=SessionStatus.FAILED.value,
+                message=f"account auth_type is {auth_type!r}, not 'session'",
+                detail={"reason": REASON_AUTH_TYPE_MISMATCH},
+            ).to_dict()
+
+        try:
+            storage_state = parse_session_state(account)
+        except SessionStateError as exc:
+            return self._session_state_failure(account, exc).to_dict()
+
+        env = environment or build_environment(account.get("environment"))
+        result = await self._client.validate_session(
+            self.platform_name, storage_state, env
+        )
+        logger.info(
+            f"[session.validate] platform={self.platform_name} "
+            f"account={account.get('id')} status={result.status}"
+        )
+        return result.to_dict()
+
+    @staticmethod
+    def _session_state_failure(
+        account: Mapping[str, Any], exc: SessionStateError
+    ) -> SessionOpResult:
+        """把 ``SessionStateError`` 映射成 §7.8 信封。
+
+        缺失/损坏都是业务原因 → ``session_invalid`` + reason，账号该重扫码。
+        密钥错配走的是另一条路（repository 抛 → ``decrypt_failure_result``），
+        永远不会到这里。
+        """
+        logger.warning(f"[session.validate] account={account.get('id')} {exc}")
+        return SessionOpResult(
+            success=False,
+            status=SessionStatus.SESSION_INVALID.value,
+            message=str(exc),
+            detail={"reason": exc.reason},
+        )
+
+    # ── fail-fast 参数校验 (§7.7) ───────────────────────────
+
+    def validate_publish_intent(self, intent: PublishIntent) -> list[str]:
+        """起浏览器**之前**跑的纯校验，返回问题清单（空 = 通过）。
+
+        纯函数、无 IO —— 发布 step 应在调 ``publish()`` 前先跑它，把参数
+        错误挡在几分钟的浏览器+上传开销之外。
+        """
+        problems: list[str] = []
+        p = self._profile
+        if intent.content_type not in p.content_types:
+            problems.append(
+                f"content_type {intent.content_type!r} not supported on "
+                f"{p.platform} session channel"
+            )
+        if not intent.media:
+            problems.append("no media to publish")
+        if not (intent.title or "").strip():
+            problems.append("title is empty")
+        if p.max_title_len is not None and len(intent.title) > p.max_title_len:
+            problems.append(
+                f"title exceeds {p.max_title_len} characters ({len(intent.title)})"
+            )
+        if p.max_topics is not None and len(intent.topics) > p.max_topics:
+            problems.append(f"too many topics ({len(intent.topics)} > {p.max_topics})")
+        images = [m for m in intent.media if m.kind == "image"]
+        if p.max_images is not None and len(images) > p.max_images:
+            problems.append(f"too many images ({len(images)} > {p.max_images})")
+        problems.extend(self._extension_problems(intent.media))
+        if intent.visibility not in ("public", "private", "friends"):
+            problems.append(f"unknown visibility {intent.visibility!r}")
+        return problems
+
+    def _extension_problems(self, media: Iterable[PublishMedia]) -> list[str]:
+        problems: list[str] = []
+        for item in media:
+            allowed = (
+                self._profile.video_extensions
+                if item.kind == "video"
+                else self._profile.image_extensions
+            )
+            name = (item.filename or "").lower()
+            if not any(name.endswith(ext) for ext in allowed):
+                problems.append(
+                    f"{item.kind} {item.filename!r} is not one of " f"{sorted(allowed)}"
+                )
+        return problems
+
+    # ── 发布 (S3) ───────────────────────────────────────────
+
+    async def publish(
+        self,
+        account: Mapping[str, Any],
+        intent: PublishIntent,
+        *,
+        environment: Optional[SessionEnvironment] = None,
+    ) -> PublishOutcome:
+        """发布一次内容。**S3 实现**，签名在此定死。
+
+        故意叫 ``publish`` 而不是 OAuth 那侧的 ``publish_video``：内容形态
+        由 ``intent.content_type`` 承载（video / images / 将来的其它），
+        一个方法覆盖全部，避免"每加一种内容形态就加一个方法"的形状僵化。
+
+        S3 的实现是 ``POST /publish``，流程见 spec §4.2：
+        解密 storage_state → 组装 environment → 浏览器侧校验会话（失败
+        直接返回 ``session_invalid``，**不尝试发布**）→ 执行（档位由平台
+        决定）→ 回传新的 storage_state 供 backend 重新加密入库。
+
+        调用方拿到 ``PublishOutcome`` 后必须：
+        1. 先看 ``result.status``；``session_invalid`` → 账号标 needs_relogin
+        2. ``is_infra_failure(result.to_dict())`` 为真 → 账号状态一律不动
+        3. ``updated_storage_state`` 非空 → 重新 Fernet 加密写回（§4.2 第 6 步）
+        """
+        raise NotImplementedError(
+            "SessionAdapter.publish lands in S3 (spec §6) — S1 只做 /session/validate"
+        )
+
+
+__all__ = [
+    "AUTH_TYPE_SESSION",
+    "SESSION_PLATFORM_PROFILES",
+    "PlatformSessionProfile",
+    "PublishIntent",
+    "PublishMedia",
+    "PublishOutcome",
+    "SessionAdapter",
+    "SessionEnvironment",
+    "SessionOpResult",
+    "SessionStateError",
+    "SessionStatus",
+    "build_environment",
+    "decrypt_failure_result",
+    "parse_session_state",
+    "is_infra_failure",
+    "supported_session_platforms",
+]

@@ -1,8 +1,11 @@
 """Distribution (multi-platform publish) domain ORM models.
 
-  * ``SocialAccounts``       — social_accounts (mig 351; OAuth-bound platform
-    accounts; ``access_token``/``refresh_token`` hold Fernet ciphertext — the
-    encrypt/decrypt boundary lives in social_accounts_repository)
+  * ``SocialAccounts``       — social_accounts (mig 351; platform accounts bound
+    by OAuth or, since mig 401, by a browser session;
+    ``access_token``/``refresh_token``/``session_state`` hold Fernet ciphertext
+    — the encrypt/decrypt boundary lives in social_accounts_repository)
+  * ``AccountEnvironments``  — account_environments (mig 402; the pinned browser
+    environment of a session-bound account; ``proxy_url`` is ciphertext too)
   * ``PublishTasks``         — publish_tasks (mig 356)
   * ``PublishTaskAccounts``  — publish_task_accounts (mig 356; per-account
     business status, layered apart from the DBOS phase per route C)
@@ -21,6 +24,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Double,
     ForeignKeyConstraint,
     Index,
     PrimaryKeyConstraint,
@@ -37,7 +41,8 @@ from app.db.orm_base import Base
 
 
 class SocialAccounts(Base):
-    """An OAuth-bound platform account (mig 351). Token columns store Fernet
+    """A bound platform account — by OAuth (mig 351) or by a browser session
+    (mig 401, ``auth_type='session'``). Token and session columns store Fernet
     ciphertext; the repo strips them on the public read path."""
 
     __tablename__ = "social_accounts"
@@ -54,7 +59,11 @@ class SocialAccounts(Base):
             "scope_type IN ('user', 'team')", name="social_accounts_scope_type_check"
         ),
         CheckConstraint(
-            "status IN ('active', 'expired')", name="social_accounts_status_check"
+            "status IN ('active', 'expired', 'needs_relogin')",
+            name="social_accounts_status_check",
+        ),
+        CheckConstraint(
+            "auth_type IN ('oauth', 'session')", name="social_accounts_auth_type_check"
         ),
         {"schema": "public"},
     )
@@ -76,7 +85,60 @@ class SocialAccounts(Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default=text("'active'::character varying")
     )
+    auth_type: Mapped[str] = mapped_column(
+        String(10), nullable=False, server_default=text("'oauth'::character varying")
+    )
+    # Fernet ciphertext of Playwright's storage_state JSON — plaintext exists
+    # only inside the nous-browser process (spec §7.6).
+    session_state: Mapped[str | None] = mapped_column(Text)
+    session_checked_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(True))
     created_by: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+
+
+class AccountEnvironments(Base):
+    """The pinned browser environment of a session-bound account (mig 402).
+
+    1:1 with social_accounts (UNIQUE account_id) and meant to stay put — a
+    fingerprint that changes every run is itself the risk signal. ``proxy_url``
+    holds Fernet ciphertext (it embeds proxy credentials).
+    """
+
+    __tablename__ = "account_environments"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["account_id"],
+            ["public.social_accounts.id"],
+            ondelete="CASCADE",
+            name="account_environments_account_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="account_environments_pkey"),
+        UniqueConstraint("account_id", name="account_environments_account_id_key"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        server_default=text("generate_snowflake_id()"),
+    )
+    account_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    proxy_url: Mapped[str | None] = mapped_column(Text)
+    user_agent: Mapped[str | None] = mapped_column(Text)
+    locale: Mapped[str | None] = mapped_column(
+        String(20), server_default=text("'zh-CN'::character varying")
+    )
+    timezone_id: Mapped[str | None] = mapped_column(
+        String(50), server_default=text("'Asia/Shanghai'::character varying")
+    )
+    geo_lat: Mapped[float | None] = mapped_column(Double(53))
+    geo_lng: Mapped[float | None] = mapped_column(Double(53))
+    fingerprint_profile_id: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )

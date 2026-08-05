@@ -25,7 +25,14 @@ class SocialAccountOut(BaseModel):
     username: str
     avatar_url: Optional[str] = None
     token_expires_at: Optional[datetime] = None
+    # mig 398 — 'oauth' | 'session'. Kept as str (not Literal) so a row written
+    # by a newer migration can never 500 the list endpoint; the frontend owns
+    # the narrow union. Defaulted so pre-398 callers keep constructing this.
+    auth_type: str = "oauth"
+    # 'active' | 'expired' | 'needs_relogin' (mig 398).
     status: str
+    # Last successful session validation; None for oauth accounts (mig 398).
+    session_checked_at: Optional[datetime] = None
     created_at: datetime
 
 

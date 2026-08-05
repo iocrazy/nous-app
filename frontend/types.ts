@@ -2320,7 +2320,14 @@ export interface SocialAccount {
   username: string;
   avatar_url: string | null;
   token_expires_at: string | null;
-  status: 'active' | 'expired';
+  // How the account is bound (mig 398). 'oauth' = open-platform token;
+  // 'session' = browser session, the only channel that can publish unattended.
+  auth_type: 'oauth' | 'session';
+  // Both 'expired' (oauth token) and 'needs_relogin' (dead browser session)
+  // are actionable — anything counting "needs attention" must include both.
+  status: 'active' | 'expired' | 'needs_relogin';
+  // Last successful session validation; null = never checked (session accounts only).
+  session_checked_at?: string | null;
   created_at: string;
 }
 
@@ -2329,7 +2336,9 @@ export interface PublishTaskAccount {
   account_id: string;
   username: string;
   avatar_url: string | null;
-  channel: 'official' | 'h5';
+  // Mirrors publish_task_accounts.channel (mig 400). A 'session' row never
+  // reaches 'pending_share' — that state only exists for the H5 phone handoff.
+  channel: 'official' | 'h5' | 'session';
   status: 'pending' | 'pending_share' | 'publishing' | 'success' | 'failed' | 'cancelled';
   error_message: string | null;
   published_url: string | null;

@@ -48,6 +48,12 @@ services:
       # materialize S3 读通缓存(spec 2026-08-02-s3-materialize-disk-cache):
       # 必须指向本地 NVMe——放 CIFS 比直接拉 S3 还慢(145 vs 266 MB/s)。
       - MEDIA_S3_CACHE_DIR=/app/s3cache
+      # 会话通道的浏览器执行器(见下方 browser service)。地址不是密钥,放这里;
+      # 配套的 BROWSER_INTERNAL_TOKEN 是共享密钥,放 secrets/backend.env。
+      # ⚠️ browser 侧**不共用**这个 env_file(理由见 browser service 的注释),
+      # 所以同一个 token 值要在 backend.env 与 browser.env 里各写一份。写歪了
+      # 表现为 browser 返回 401 —— 可见的类型化失败,不是静默 no-op。
+      - BROWSER_SERVICE_URL=http://nous-browser:8090
     volumes:
       - /mnt/heytime/Sources/nous/media:/app/downloads
       - /media/heygo/program/datahub/nous/data/s3cache:/app/s3cache
@@ -55,6 +61,9 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       - redis
+    # 刻意不 depends_on browser:browser 冷启动 ~2min(Xvfb + chromium 预热),
+    # 挂上去会把 API 可用时间绑死在浏览器身上。调用方本就必须容忍 browser 不
+    # 可用并返回类型化失败(spec §7.8),不能靠启动顺序兜底。
     # 覆盖 Dockerfile 的 /health(硬编码 {"status":"healthy"},DBOS 挂了照样 200
     # —— 2026-07-22 起静默 3 天就是因为它)。readyz 在 DBOS_DATABASE_URL 配了
     # 却 init 失败时返回 503 degraded。
@@ -67,6 +76,76 @@ services:
       timeout: 10s
       start_period: 90s
       retries: 3
+    restart: unless-stopped
+
+  # 发布模块「会话通道」的浏览器执行器(spec 2026-08-04-distribution-session-channel)。
+  # 独立容器的三个理由(spec §2.1):镜像 ~1.5GB 不该拖慢每次后端部署;浏览器是内存
+  # 黑洞需独立限流;浏览器 OOM 不能带死 API 进程。
+  browser:
+    build:
+      # 自包含目录,context 就是 browser/ 本身(同 admin service 风格)。
+      # 不用仓库根:根 .dockerignore 没排除 browser/,但会把整个 backend/ +
+      # nous-core/ 塞进上下文,构建平白慢几十秒。
+      context: ../../browser
+      dockerfile: Dockerfile
+    image: nous-browser:local
+    container_name: nous-browser
+    # ⚠️ 故意不写 ports —— 该服务持有解密后的平台会话(cookie/storage_state),
+    # 绝不能对宿主机或 ZeroTier 网段可达。backend/worker 走 docker 内网
+    # http://nous-browser:8090。
+    # 注意 nous-net 是 external 共享网络,supabase 全家桶也挂在上面,所以"内网"
+    # 并不等于"只有 backend 能访问" —— 真正的边界是 BROWSER_INTERNAL_TOKEN,
+    # 服务端必须强校验(缺 token 应启动即 fail,不得 fallback 放行)。
+    #
+    # ⚠️ 刻意**不复用** secrets/backend.env(gateway 那种共用法在这里是危险的)。
+    # backend.env 里有 SUPABASE_SERVICE_ROLE_KEY、MEDIAHUB_TOKEN_ENCRYPTION_KEY、
+    # 带密码的 PG DSN —— 而本容器的全部工作就是让 Chromium 去加载抖音等外部
+    # 站点的敏感页面。把"解密所有用户 session_state 的主密钥"注入这个进程,
+    # 等于让一次渲染器逃逸/SSRF 直接升级成全库沦陷,§7.6 的加密存储也就白做了。
+    # 因此单开一个只含 BROWSER_INTERNAL_TOKEN 的最小 env 文件。
+    # 📌 首次部署前需在 gpupc 上手工创建(否则 compose 会拒绝起栈,见 README):
+    #    printf 'BROWSER_INTERNAL_TOKEN=%s\n' "$(openssl rand -hex 32)" \
+    #      > /media/heygo/program/datahub/nous/secrets/browser.env
+    #    chmod 600 /media/heygo/program/datahub/nous/secrets/browser.env
+    #    # 同一个值再追加到 secrets/backend.env(调用方 backend/worker 要用)
+    # 代价是两个文件要放同一个值;漂移时 browser 返回 401,是可见的类型化失败,
+    # 比"密钥过度暴露"这种静默风险好诊断得多。
+    env_file: /media/heygo/program/datahub/nous/secrets/browser.env
+    environment:
+      # Xvfb 虚拟帧缓冲:必须有头运行,headless 的可检测特征会被抖音级风控查出来
+      # (spec §2.4)。DISPLAY 与镜像内 Xvfb 启动的显示号一致。
+      - DISPLAY=:99
+    # Chromium 默认 /dev/shm 只有 64MB,渲染进程会随机崩("Target closed")。
+    # 1g 是 Playwright 官方 docker 建议档位;tmpfs 按需分配,只是上限不预留。
+    #
+    # ⚠️ 与 app/browser_runtime.py 的 LAUNCH_ARGS 成对存在,改一处必须看另一处:
+    # 那边**刻意不传** `--disable-dev-shm-usage`。该 flag 会让 Chromium 改用
+    # /tmp 存共享内存段,而容器没挂 volume,/tmp 落在 overlay 可写层 = 真磁盘;
+    # /dev/shm 则始终是 tmpfs = 内存。对一个专门加载已登录页面的浏览器,把渲染
+    # 缓冲写上磁盘与 spec §7.6「凭证不落盘」方向相反。所以这里给足 shm、那边
+    # 不传 flag。把 shm_size 缩掉而不同时恢复 flag,会把随机崩溃带回来。
+    shm_size: 1gb
+    # chromium 会留一串子进程,没有 PID 1 收割就攒僵尸,最终耗尽 pid。
+    init: true
+    # 内存上限的目的不是省内存(gpupc 有 123G),而是兑现 spec §2.1 的崩溃隔离:
+    # 浏览器泄漏时必须自己被 OOM-kill + restart,不能把 nous-backend / nous-db
+    # 拖下水。取值依据:playwright+chromium 常驻约 0.5G,每个 account context
+    # 0.2–0.4G,发布页缓冲几百 MB 视频;S1–S5 是单账号串行(1–2 context),6g 有
+    # 约 10x 头寸;同时只占宿主 5%,失控也伤不到别人。S6 起并发上调时同步调大。
+    mem_limit: 6g
+    # 与 mem_limit 相等 == 禁用 swap:宁可快速 OOM 重启,也不要浏览器把 8G swap
+    # 打满拖慢整机(内存黑洞类服务 swap thrash 比崩溃更难诊断)。
+    memswap_limit: 6g
+    # ⚠️ 不挂任何 volume(spec §7.6 凭证不落盘):session_state 明文只允许存在于
+    # 本进程内存。附带好处是彻底绕开"容器 uid ≠ 宿主目录属主"这个历史上炸过
+    # 四次的故障模式 —— 没有 bind mount 就没有 chmod 755 待办。
+    # ⚠️ 刻意**不覆盖** healthcheck —— 与 backend/gateway 的处理相反,原因要说清:
+    # backend 那两处覆盖是因为 Dockerfile 探针是假的(硬编码 {"status":"healthy"},
+    # DBOS 挂了照样 200)。而 browser/Dockerfile 的 HEALTHCHECK 是真探针:它会
+    # 实打实拉起一次 Chromium,Xvfb/浏览器不可用时返回 503,并按此调好了超时
+    # (timeout 20s / urlopen 15s —— 起浏览器远慢于一次 HTTP)。在 compose 里再抄
+    # 一份只会两处漂移,而且外部抄的版本必然比作者那版更容易把超时写窄。
+    # 判据仍是「探针探真信号」,不是「谁定义的」。
     restart: unless-stopped
 
   gateway:
@@ -107,6 +186,9 @@ services:
       - MEDIAHUB_ROLE=worker
       # 同 backend:materialize S3 读通缓存,共享同一宿主机 NVMe 目录。
       - MEDIA_S3_CACHE_DIR=/app/s3cache
+      # 同 backend:session 通道的发布/校验 workflow 实际跑在 worker 上,
+      # 所以这条对 worker 才是必需的。token 同样来自共享的 secrets/backend.env。
+      - BROWSER_SERVICE_URL=http://nous-browser:8090
     volumes:
       - /mnt/heytime/Sources/nous/media:/app/downloads
       - /media/heygo/program/datahub/nous/data/s3cache:/app/s3cache

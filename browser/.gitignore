@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# uv.lock IS committed on purpose. The Dockerfile does `COPY uv.lock` +
+# `uv sync --frozen`, so ignoring it here would break the image build at
+# CI checkout time. It also pins patchright/playwright across rebuilds —
+# a silent minor bump changes the browser fingerprint and the DOM these
+# validators read, which shows up as "sessions randomly judged dead".

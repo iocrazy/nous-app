@@ -372,6 +372,27 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ============================================
+    # Distribution — session channel (nous-browser)
+    # See docs/superpowers/specs/2026-08-04-distribution-session-channel-design.md
+    # ============================================
+    BROWSER_SERVICE_URL: str = Field(
+        default="http://nous-browser:8090",
+        description="nous-browser (Playwright + Xvfb) base URL — docker "
+        "internal network only, never mapped to a host port. Used by the "
+        "distribution session channel for cookie-session validation, QR "
+        "login and DOM publishing.",
+    )
+    BROWSER_INTERNAL_TOKEN: str = Field(
+        default="",
+        description="Shared secret sent as the X-Internal-Token header on "
+        "every nous-browser call. Machine-specific secret — belongs in "
+        "secrets/backend.env, NOT config.yml. Empty means the session "
+        "channel is disabled: BrowserClient fails loud with "
+        "error_kind='not_configured' rather than calling unauthenticated "
+        "(the service holds DECRYPTED platform sessions).",
+    )
+
     model_config = SettingsConfigDict(
         env_file=str(ROOT_DIR / ".env"),
         env_file_encoding="utf-8",

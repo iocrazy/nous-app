@@ -83,6 +83,7 @@ from app.models.chat import (  # noqa: F401
     Messages,
 )
 from app.models.distribution import (  # noqa: F401
+    AccountEnvironments,
     DistributionOauthStates,
     PublishTaskAccounts,
     PublishTasks,
@@ -386,6 +387,7 @@ __all__ = [
     "MessageRefs",
     "Messages",
     # distribution
+    "AccountEnvironments",
     "DistributionOauthStates",
     "PublishTaskAccounts",
     "PublishTasks",
