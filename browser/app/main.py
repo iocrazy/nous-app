@@ -1,15 +1,23 @@
 """nous-browser HTTP surface.
 
-Two endpoints in S1: a health probe that actually probes, and session
-validation. The service never touches the database and never sees an encryption
-key - it receives plaintext storage_state, computes, and forgets. That boundary
-is the security design, not an accident of staging.
+A health probe that actually probes, session validation (S1), and the QR login
+endpoints (S2). The service never touches the database and never sees an
+encryption key - it receives plaintext storage_state, computes, and forgets.
+That boundary is the security design, not an accident of staging.
+
+Error-shape rule, uniform across every endpoint: **a non-2xx body is always a
+`SessionResult`.** Callers parse one thing on the failure path no matter which
+route they hit. The polling routes go further and answer 200 with their own
+shape even for typed failures, so a status poll never has to branch on HTTP
+code before it can read `status`.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import Depends, FastAPI, Response, status
 from fastapi.responses import JSONResponse
@@ -17,19 +25,54 @@ from fastapi.responses import JSONResponse
 from . import SERVICE_VERSION
 from .browser_runtime import probe_browser_ready, xvfb_ready
 from .config import get_settings
-from .platforms import get_validator, supported_platforms
+from .login_sessions import (
+    LoginCapacityError,
+    LoginError,
+    LoginSession,
+    get_registry,
+)
+from .platforms import (
+    get_login_flow,
+    get_validator,
+    login_platforms,
+    supported_platforms,
+)
 from .redaction import scrub
 from .schemas import (
     HealthResponse,
+    LoginCloseResponse,
+    LoginStartRequest,
+    LoginStartResponse,
+    LoginStateResponse,
+    LoginStatusResponse,
     SessionResult,
     SessionStatus,
     SessionValidateRequest,
+    SmsCodeRequest,
+    SmsCodeResponse,
 )
 from .security import require_internal_token
 
 logger = logging.getLogger("nous_browser")
 
-app = FastAPI(title="nous-browser", version=SERVICE_VERSION)
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Start the login reaper; close every browser on the way out.
+
+    Shutdown teardown is not politeness. A container restart that leaves
+    Chromium children behind accumulates them across deploys, and the symptom
+    (memory pressure hours later) points nowhere near the cause.
+    """
+    registry = get_registry()
+    registry.start_reaper()
+    try:
+        yield
+    finally:
+        await registry.shutdown()
+
+
+app = FastAPI(title="nous-browser", version=SERVICE_VERSION, lifespan=lifespan)
 
 # Headed Chromium is a memory hog; without a ceiling a burst of validations OOMs
 # the container. Bounded wait, so a saturated pool fails fast instead of piling
@@ -120,3 +163,203 @@ async def post_session_validate(
         )
     finally:
         slots.release()
+
+
+# --- QR login (S2) ----------------------------------------------------------
+
+
+def _error(
+    http_status: int,
+    session_status: SessionStatus,
+    message: str,
+    **detail: Any,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=http_status,
+        content=SessionResult(
+            success=False,
+            status=session_status,
+            message=message,
+            detail=detail,
+        ).model_dump(mode="json"),
+    )
+
+
+def _require_session(login_session_id: str) -> LoginSession | JSONResponse:
+    session = get_registry().get(login_session_id)
+    if session is None:
+        # Unknown *or* purged. The tombstone grace period exists so that a
+        # caller polling around the deadline gets a typed `timeout` instead of
+        # this; a 404 means the handle is genuinely gone.
+        return _error(
+            status.HTTP_404_NOT_FOUND,
+            SessionStatus.FAILED,
+            "unknown login_session_id",
+            reason="unknown_login_session",
+        )
+    return session
+
+
+@app.post(
+    "/session/login/start",
+    response_model=LoginStartResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def post_login_start(request: LoginStartRequest) -> Any:
+    """Open a browser on the platform's login page and hold it open.
+
+    This is the one endpoint that deliberately leaks state past the response:
+    the returned QR code is only meaningful while the context behind it lives.
+    Everything that keeps that from becoming a resource leak - TTL, reaper,
+    concurrency ceiling - is in `login_sessions`.
+    """
+    spec = get_login_flow(request.platform)
+    if spec is None:
+        return _error(
+            status.HTTP_400_BAD_REQUEST,
+            SessionStatus.FAILED,
+            f"no login flow for platform '{request.platform}'",
+            supported=login_platforms(),
+        )
+
+    try:
+        session = await get_registry().start(spec, request.environment)
+    except LoginCapacityError as exc:
+        # 503 + Retry-After, not a 500: this is back-pressure, and the caller
+        # should queue rather than treat the account as unbindable.
+        response = _error(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            exc.status,
+            exc.message,
+            **exc.detail,
+        )
+        response.headers["Retry-After"] = str(get_settings().login_reaper_interval_s)
+        return response
+    except LoginError as exc:
+        # Launch/navigation failure. `status` carries whether it was the proxy,
+        # a timeout or something else - the distinction that keeps a proxy
+        # outage from being reported to the user as "re-scan your QR code".
+        return _error(
+            status.HTTP_502_BAD_GATEWAY,
+            exc.status,
+            exc.message,
+            platform=request.platform,
+            **exc.detail,
+        )
+
+    return LoginStartResponse(
+        login_session_id=session.id,
+        status=session.status,
+        qrcode_data_url=session.qrcode_data_url or "",
+        expires_at=session.expires_at,
+    )
+
+
+@app.get(
+    "/session/login/{login_session_id}/status",
+    response_model=LoginStatusResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def get_login_status(login_session_id: str) -> Any:
+    """One snapshot of the live page. Returns immediately, always.
+
+    No waiting here by design (spec 7.2): the bounded polling loop belongs to
+    the backend workflow, which owns the task record and writes the heartbeats.
+    An endpoint that blocked until the user scanned would pin an HTTP worker for
+    minutes and make the wait invisible to everything that monitors it.
+    """
+    session = _require_session(login_session_id)
+    if isinstance(session, JSONResponse):
+        return session
+
+    try:
+        snapshot = await session.poll_status()
+    except LoginError as exc:
+        # Still 200 with the status shape: a poller must never have to read the
+        # HTTP code to find out what happened to the login.
+        return LoginStatusResponse(
+            status=exc.status,
+            qrcode_data_url=None,
+            message=exc.message,
+            detail={**exc.detail, "terminal": True},
+        )
+
+    return LoginStatusResponse(
+        status=snapshot.status,
+        qrcode_data_url=snapshot.qrcode_data_url,
+        message=snapshot.message,
+        detail=snapshot.detail,
+    )
+
+
+@app.post(
+    "/session/login/{login_session_id}/sms",
+    response_model=SmsCodeResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def post_login_sms(login_session_id: str, request: SmsCodeRequest) -> Any:
+    session = _require_session(login_session_id)
+    if isinstance(session, JSONResponse):
+        return session
+
+    try:
+        snapshot = await session.submit_sms(request.code)
+    except LoginError as exc:
+        return SmsCodeResponse(status=exc.status, message=exc.message)
+
+    return SmsCodeResponse(status=snapshot.status, message=snapshot.message)
+
+
+@app.get(
+    "/session/login/{login_session_id}/state",
+    response_model=LoginStateResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def get_login_state(login_session_id: str) -> Any:
+    """Plaintext storage_state. The sensitive one.
+
+    Nothing in this handler logs the response, and nothing may start: the whole
+    point of the boundary is that credentials exist here in memory only, on
+    their way to being encrypted by the caller (spec 7.6).
+    """
+    session = _require_session(login_session_id)
+    if isinstance(session, JSONResponse):
+        return session
+
+    try:
+        state, profile = await session.collect_state()
+    except LoginError as exc:
+        # 409, not 400: the request is fine, the session is simply not there
+        # yet. The body's `status` says whether waiting longer would help.
+        return _error(
+            status.HTTP_409_CONFLICT,
+            exc.status,
+            exc.message,
+            platform=session.platform,
+            **exc.detail,
+        )
+
+    return LoginStateResponse(
+        storage_state=state,
+        platform_user_id=profile.platform_user_id,
+        username=profile.username,
+        avatar_url=profile.avatar_url,
+    )
+
+
+@app.post(
+    "/session/login/{login_session_id}/close",
+    response_model=LoginCloseResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def post_login_close(login_session_id: str) -> Any:
+    """Release the browser now rather than at the deadline. Idempotent."""
+    closed = await get_registry().close(login_session_id)
+    if not closed:
+        return _error(
+            status.HTTP_404_NOT_FOUND,
+            SessionStatus.FAILED,
+            "unknown login_session_id",
+            reason="unknown_login_session",
+        )
+    return LoginCloseResponse(closed=True)

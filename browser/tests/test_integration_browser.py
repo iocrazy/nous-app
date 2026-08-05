@@ -80,3 +80,71 @@ async def test_dead_proxy_is_reported_as_proxy_failed():
     env = EnvironmentConfig(proxy_url="http://127.0.0.1:1")
     result = await validate_session(state, env)
     assert result.status is SessionStatus.PROXY_FAILED
+
+
+# --- QR login ---------------------------------------------------------------
+
+
+@requires_browser
+async def test_login_start_against_the_real_platform_yields_a_scannable_code():
+    """The one thing no unit test can cover: do the QR selectors still match?
+
+    Selector rot is silent and total - the judge, the registry and the TTL all
+    keep working perfectly while every login fails at `read_qrcode`. Network
+    restrictions make a hard assertion impossible here, so the test asserts the
+    *typed* outcome and prints which way it went; run it inside the container to
+    verify the selectors for real.
+    """
+    from app.login_sessions import LoginError, LoginSessionRegistry
+    from app.platforms.douyin import LOGIN_SPEC
+
+    registry = LoginSessionRegistry()
+    try:
+        session = await registry.start(LOGIN_SPEC, None)
+    except LoginError as exc:
+        # Reachable without network: what must not happen is an untyped crash.
+        assert exc.status in {
+            SessionStatus.FAILED,
+            SessionStatus.TIMEOUT,
+            SessionStatus.PROXY_FAILED,
+        }
+        pytest.skip(f"could not reach the login page: {exc.status.value} - {exc.message}")
+
+    try:
+        assert session.qrcode_data_url.startswith("data:image")
+        snapshot = await session.poll_status()
+        assert snapshot.status in {
+            SessionStatus.WAITING_SCAN,
+            SessionStatus.QRCODE_EXPIRED,
+        }
+    finally:
+        await registry.shutdown()
+
+
+@requires_browser
+async def test_an_abandoned_login_really_closes_its_browser():
+    """The leak this whole design exists to prevent, checked end to end against
+    a real Chromium rather than a fake driver."""
+    from datetime import timedelta
+
+    from app.login import LoginDriver
+    from app.login_sessions import LoginError, LoginSessionRegistry, SessionPhase
+    from app.platforms.douyin import LOGIN_SPEC
+
+    registry = LoginSessionRegistry()
+    try:
+        session = await registry.start(LOGIN_SPEC, None)
+    except LoginError as exc:
+        pytest.skip(f"could not reach the login page: {exc.status.value}")
+
+    driver: LoginDriver = session._driver
+    browser = driver._browser
+    assert browser.is_connected()
+
+    session.expires_at = session.created_at - timedelta(seconds=1)
+    assert await registry.sweep() == 1
+
+    assert session.phase is SessionPhase.RELEASED
+    # Not "the registry entry is gone" - the browser process itself.
+    assert browser.is_connected() is False
+    await registry.shutdown()

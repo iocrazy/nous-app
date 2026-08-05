@@ -25,6 +25,11 @@ from app.schemas.distribution import (
     AccountListResponse,
     ConnectAccountRequest,
     ConnectAccountResponse,
+    SessionLoginCancelResponse,
+    SessionLoginRequest,
+    SessionLoginResponse,
+    SessionOpResponse,
+    SessionSmsRequest,
 )
 from app.schemas.distribution_publish import (
     PublishTaskCreate,
@@ -44,6 +49,8 @@ from app.workflows.publish_distribution import (
     publish_distribution_workflow,
     visibility_to_private_status,
 )
+from app.workflows.session_login import TASK_TYPE as SESSION_LOGIN_TASK_TYPE
+from app.workflows.session_login import session_login_workflow
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +138,27 @@ async def list_accounts(user: CurrentUserDep):
     return {"accounts": accounts}
 
 
+async def _resolve_bind_scope(scope_type: str, scope_id: str, uid: str) -> str:
+    """Resolve the scope an account binding may land in — the single guard both
+    binding channels (OAuth connect, session QR login) go through.
+
+    IDOR guard: never trust a client-supplied scope_id for user scope — force
+    it to the caller's own id unconditionally. Otherwise a client could pass
+    another user's uuid (team co-members can read peers' user_id via GET
+    /teams/{id}/members) and have the binding land under the victim's personal
+    scope. Team scope requires membership.
+
+    Shared by both channels on purpose: a session-bound account is exactly as
+    publish-capable as an OAuth one, so a weaker check on the newer endpoint
+    would be the whole hole, and a copy of the check is a copy that drifts.
+    """
+    if scope_type == "user":
+        return uid
+    if scope_id not in await _user_team_ids(uid):
+        raise HTTPException(status_code=403, detail="Not a member of this team")
+    return scope_id
+
+
 @router.post(
     "/accounts/connect",
     response_model=ConnectAccountResponse,
@@ -138,17 +166,7 @@ async def list_accounts(user: CurrentUserDep):
 )
 async def connect_account(body: ConnectAccountRequest, user: CurrentUserDep):
     uid = str(user["id"])
-    if body.scope_type == "user":
-        # IDOR guard: never trust a client-supplied scope_id for user scope —
-        # force it to the caller's own id unconditionally. Otherwise a client
-        # could pass another user's uuid (team co-members can read peers'
-        # user_id via GET /teams/{id}/members) and have the later oauth
-        # callback bind the attacker's token under the victim's personal scope.
-        scope_id = uid
-    else:  # team
-        scope_id = body.scope_id
-        if scope_id not in await _user_team_ids(uid):
-            raise HTTPException(status_code=403, detail="Not a member of this team")
+    scope_id = await _resolve_bind_scope(body.scope_type, body.scope_id, uid)
     try:
         creds = await get_douyin_credentials()
     except CredentialsNotConfigured:
@@ -236,6 +254,209 @@ async def refresh_account(account_id: int, user: CurrentUserDep):
 async def delete_account(account_id: int, user: CurrentUserDep):
     await _authorize_account(account_id, user)
     await accounts_repo.delete(account_id)
+
+
+# ── Session channel — QR login (S2, spec §4.1) ────────────────────────
+
+
+async def _load_login_task(task_id: str, user: dict) -> dict:
+    """Load a session-login task row + IDOR guard.
+
+    Returns ``{"phase", "metadata"}``. 404 (not 403) on a foreign task so
+    existence isn't leaked — same posture as ``_authorize_task``.
+
+    Reads ``task_tracking`` (route-C rule 1: the UI's only execution source);
+    the caller-vs-owner comparison happens in Python because ``user_id`` is a
+    UUID column and a malformed id in the WHERE clause would 500 instead of
+    404.
+    """
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TaskTracking
+
+    async with read_scope() as session:
+        row = (
+            await session.execute(
+                select(TaskTracking)
+                .where(TaskTracking.dbos_workflow_id == task_id)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        # Read the attributes INSIDE the session, and off the ORM object rather
+        # than a .mappings() row: the metadata column is mapped as ``metadata_``
+        # (the ORM reserves ``metadata``), so a mappings() lookup by either name
+        # is a coin flip that returns None on the wrong guess — and a None here
+        # degrades into "login session not ready yet" forever, which looks like
+        # a browser problem rather than a key typo.
+        found = (
+            None
+            if row is None
+            else {
+                "user_id": row.user_id,
+                "phase": row.phase,
+                "task_type": row.task_type,
+                "metadata": row.metadata_ or {},
+            }
+        )
+    if not found or found["task_type"] != SESSION_LOGIN_TASK_TYPE:
+        raise HTTPException(status_code=404, detail="Login task not found")
+    if str(found["user_id"]) != str(user["id"]):
+        raise HTTPException(status_code=404, detail="Login task not found")
+    return {"phase": found["phase"], "metadata": found["metadata"]}
+
+
+def _login_session_id(task: dict) -> str:
+    """Pull the browser-side login session id out of the task's metadata.
+
+    The workflow writes it under ``metadata.session_login`` (NOT inside the
+    ``metadata.login`` blob, which is the frontend's rendering contract and
+    must stay exactly the shape the spec fixed). 409 while it's absent: the
+    workflow has been dispatched but hasn't opened the browser context yet, so
+    there is genuinely nothing to talk to — an explicit "not ready" beats a
+    500 or, worse, a silent no-op.
+    """
+    session_login = (task.get("metadata") or {}).get("session_login") or {}
+    login_session_id = session_login.get("login_session_id")
+    if not login_session_id:
+        raise HTTPException(status_code=409, detail="Login session is not ready yet")
+    return str(login_session_id)
+
+
+@router.post(
+    "/accounts/session/login",
+    response_model=SessionLoginResponse,
+    dependencies=[Depends(require_distribution)],
+)
+async def start_session_login(body: SessionLoginRequest, user: CurrentUserDep):
+    """Start a QR-code login for one account. Returns immediately with the
+    task id; the scan happens inside ``session_login_workflow`` and surfaces
+    through ``task_tracking.metadata.login`` over Realtime (spec §4.1)."""
+    from app.services.distribution.browser_client import BrowserClient
+    from app.services.distribution.session_adapter import supported_session_platforms
+
+    uid = str(user["id"])
+    scope_id = await _resolve_bind_scope(body.scope_type, body.scope_id, uid)
+
+    if body.platform not in supported_session_platforms():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Session channel not supported for platform: {body.platform}",
+        )
+    # Fail fast on a missing BROWSER_SERVICE_URL / token instead of dispatching
+    # a workflow that can only fail: the user would watch a task appear and die
+    # with an infra error they can't act on. 503 says "server side, not you".
+    if not BrowserClient().is_configured:
+        raise HTTPException(
+            status_code=503,
+            detail="Browser service not configured (BROWSER_SERVICE_URL / token)",
+        )
+
+    # 路线 C: the SAME wf_id keys the task_tracking row and the dispatched
+    # workflow — create the row first so the QR modal can subscribe to it
+    # before the workflow writes the first metadata patch.
+    wf_id = str(_uuid.uuid4())
+    await get_task_manager().create(
+        user_id=uid,
+        task_type=SESSION_LOGIN_TASK_TYPE,
+        title=f"Connect {body.platform}"[:200],
+        subtitle="Opening the QR code",
+        dbos_workflow_id=wf_id,
+        metadata={
+            "login": {
+                "platform": body.platform,
+                "status": "waiting_scan",
+                "qrcode_data_url": None,
+                "expires_at": None,
+                "message": "Opening the QR code",
+            }
+        },
+    )
+    await start_workflow_routed(
+        SESSION_LOGIN_TASK_TYPE,
+        dbos_workflow_callable=session_login_workflow,
+        dbos_workflow_kwargs={
+            "platform": body.platform,
+            "scope_type": body.scope_type,
+            "scope_id": scope_id,
+            "user_id": uid,
+        },
+        workflow_id=wf_id,
+    )
+    return {"task_id": wf_id}
+
+
+@router.post(
+    "/accounts/session/login/{task_id}/sms",
+    response_model=SessionOpResponse,
+    dependencies=[Depends(require_distribution)],
+)
+async def submit_session_login_sms(
+    task_id: str, body: SessionSmsRequest, user: CurrentUserDep
+):
+    """Hand an SMS verification code to the live browser context.
+
+    Goes straight to nous-browser rather than through the workflow: the code is
+    only meaningful to that context, and the user gets the platform's verdict
+    ("code rejected") in this response instead of having to watch a metadata
+    field flip. The workflow's poll loop picks up the resulting status change
+    on its next tick either way.
+    """
+    from app.services.distribution.browser_client import BrowserClient
+
+    task = await _load_login_task(task_id, user)
+    if task["phase"] not in ("queued", "in_progress"):
+        # A terminal task's browser context is already released — submitting a
+        # code would 404 inside the container. Say so instead of pretending.
+        raise HTTPException(status_code=409, detail="Login task is no longer active")
+    snapshot = await BrowserClient().submit_login_sms(
+        _login_session_id(task), body.code
+    )
+    return snapshot.result.to_dict()
+
+
+@router.delete(
+    "/accounts/session/login/{task_id}",
+    response_model=SessionLoginCancelResponse,
+    dependencies=[Depends(require_distribution)],
+)
+async def cancel_session_login(task_id: str, user: CurrentUserDep):
+    """User abandoned the scan: cancel the task and release the browser context.
+
+    Both halves matter and neither can be skipped:
+
+    - ``manager.cancel`` flips task_tracking to cancelled, which is what the
+      workflow's poll loop watches to stop early (it would otherwise keep
+      polling for the full 5-minute TTL).
+    - the ``close`` call releases the context now. The workflow's ``finally``
+      would also close it, but only after its current poll returns, and the
+      browser-side TTL only fires if the worker died — closing here is what
+      makes "Cancel" feel like cancel.
+
+    Closing twice is harmless (the second close finds nothing); leaking a
+    headed-browser context for minutes is not.
+    """
+    from app.services.distribution.browser_client import BrowserClient
+
+    task = await _load_login_task(task_id, user)
+    session_login = (task.get("metadata") or {}).get("session_login") or {}
+    login_session_id = session_login.get("login_session_id")
+
+    await get_task_manager().cancel(task_id, str(user["id"]))
+    closed = True
+    if login_session_id:
+        # Never raises — a cleanup failure must not turn "cancelled" into a 500
+        # for the user, and the workflow's finally still gets its own attempt.
+        closed = await BrowserClient().close_login(str(login_session_id))
+    return {
+        "cancelled": True,
+        "context_released": closed,
+        "message": (
+            "Login cancelled"
+            if closed
+            else "Login cancelled; browser context release unconfirmed"
+        ),
+    }
 
 
 # ── Publish tasks (PR-D2) ─────────────────────────────────────────────

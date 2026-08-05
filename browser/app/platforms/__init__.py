@@ -9,15 +9,19 @@ be expressible without reshaping the registry.
 
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from ..schemas import EnvironmentConfig, SessionResult
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle: login imports schemas only
+    from ..login import LoginFlowSpec
 
 SessionValidator = Callable[
     [dict[str, Any], "EnvironmentConfig | None"], Awaitable[SessionResult]
 ]
 
 _VALIDATORS: dict[str, SessionValidator] = {}
+_LOGIN_FLOWS: dict[str, "LoginFlowSpec"] = {}
 
 
 def register(platform: str, validator: SessionValidator) -> None:
@@ -35,6 +39,27 @@ def get_validator(platform: str) -> SessionValidator | None:
 
 def supported_platforms() -> list[str]:
     return sorted(_VALIDATORS)
+
+
+# Login is a *separate* registry rather than a second field on one entry: a
+# platform can be validatable without being bindable here (an account imported
+# by hand, or one whose login is not a QR scan at all), and forcing both to
+# arrive together would mean stubbing one of them.
+
+
+def register_login(platform: str, spec: "LoginFlowSpec") -> None:
+    key = platform.strip().lower()
+    if key in _LOGIN_FLOWS:
+        raise ValueError(f"login flow for '{key}' is already registered")
+    _LOGIN_FLOWS[key] = spec
+
+
+def get_login_flow(platform: str) -> "LoginFlowSpec | None":
+    return _LOGIN_FLOWS.get((platform or "").strip().lower())
+
+
+def login_platforms() -> list[str]:
+    return sorted(_LOGIN_FLOWS)
 
 
 # Importing the module performs its registration.

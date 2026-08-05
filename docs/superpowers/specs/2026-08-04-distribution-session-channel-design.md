@@ -184,12 +184,12 @@ POST /distribution/accounts/session/login   (backend)
               → browser 起 context（带环境配置），goto creator.douyin.com，
                 抓二维码 data:image，返回 {login_session_id, qrcode_data_url}
                 context 在 browser 容器内**保活**（TTL 5min，超时自毁）
-       step2  manager 标 needs_input；二维码写 task_tracking.metadata jsonb
-              → Task Center 实时显示二维码，用户手机扫
+       step2  manager.update_progress(subtitle=..., metadata_patch={"login": {...}})
+              → 二维码进 task_tracking.metadata.login，前端 Realtime 渲染
        step3  循环轮询 GET /session/login/{id}/status（有上界！见 §7.2）
-              ├─ scanned            → 更新 subtitle
+              ├─ waiting_scan / scanned → patch metadata.login.status
               ├─ qrcode_expired     → browser 侧自动点刷新，返回新二维码 → 回 step2
-              ├─ sms_required       → 再来一轮 needs_input 收验证码 → POST 提交
+              ├─ sms_required       → patch metadata.login，等前端 POST 验证码
               └─ success            → 继续
        step4  GET /session/login/{id}/state → storage_state JSON
               → Fernet 加密 → social_accounts.session_state
@@ -198,7 +198,32 @@ POST /distribution/accounts/session/login   (backend)
        失败 raise（绝不 return failed dict）
 ```
 
-`needs_input` 在这里只承担 **UI 状态 + 二维码/验证码投递**，不承担 workflow 生命周期控制。
+#### ⚠️ 更正（2026-08-05，S2 实施前核对发现）
+
+本节初稿写的「manager 标 needs_input」**在 `task_tracking` 上不存在**。`needs_input` 是 issues 侧的机制（`issues.status='needs_followup'` + `execution_state.agent_outcome`），任务表的 `phase` 只有 `queued / in_progress / completed / failed / cancelled / lost`，且由 trigger 全权同步、**业务代码禁止 PATCH**（路线 C 纪律 2）。
+
+正确做法（也更简单）：**workflow 全程保持 `in_progress`，扫码状态只写 `metadata` jsonb**（业务装饰字段，路线 C 纪律 3 明确允许业务代码写）。用：
+
+- `manager.patch_metadata(task_id, patch)` —— 纯写 metadata
+- `manager.update_progress(task_id, ..., subtitle=..., metadata_patch=...)` —— 同时更新 subtitle；**该方法不改 phase**，注释里写明了
+
+注意 `update_progress` 对同一 task 有 **1 write/sec 节流**。轮询间隔 ≥2s 时无影响，但不要把轮询压到亚秒级，否则状态更新会被丢弃。
+
+#### `metadata.login` 结构（前后端契约）
+
+```json
+{
+  "login": {
+    "platform": "douyin",
+    "status": "waiting_scan",
+    "qrcode_data_url": "data:image/png;base64,...",
+    "expires_at": "2026-08-05T01:30:00Z",
+    "message": "Scan with the Douyin app"
+  }
+}
+```
+
+前端订阅 `task_tracking` 的 Realtime，读 `metadata.login` 渲染二维码与状态；不新建 SSE 通道。
 
 **浏览器容器侧的 login session 必须有 TTL 自毁**，否则用户放弃扫码会永久泄漏一个 context。
 
@@ -401,8 +426,11 @@ sau 的 `while True`（`main.py:693` / `718` / `762`）没有任何上界，页�
 | `proxy_failed` | S1 | 代理不通（**不是**账号问题，不得据此标 needs_relogin） |
 | `timeout` | S1 | 操作超时 |
 | `failed` | S1 | 其它失败，看 message / detail |
-| `qrcode_expired` | S2 | 二维码失效（已自动刷新） |
+| `waiting_scan` | S2 | 二维码已展示，等待用户扫描 |
+| `scanned` | S2 | 已扫描，等待用户在手机上确认 |
+| `qrcode_expired` | S2 | 二维码失效（browser 侧已自动刷新，同响应带回新码） |
 | `sms_required` | S2 | 需要短信验证码 |
+| `success` | S2 | 登录完成，可取 storage_state |
 | `published` | S3 | 发布成功 |
 
 每个操作只使用其中一个子集（如 `/session/validate` 只用前 5 个），但**枚举定义两侧必须全集对齐** —— 否则某一侧提前返回了对方不认识的值，会被降级成 `failed`，把可操作的信息丢掉。

@@ -370,8 +370,68 @@
 @keyframes dist-v4-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .dist-v4 .pi-busy .spin { animation: none; } }
 
+/* ═══ session channel (QR binding) ═══
+   New surface, so it uses the K1 semantic tokens (ok/warn/danger/info) rather
+   than this module's ported hue vars — state color here has to mean the same
+   thing it means everywhere else in the app. */
+.dist-v4 .chip-info { color: var(--info); background: var(--info-soft); border-color: var(--info-line); }
+.dist-v4 .chip-warn { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-line); }
+.dist-v4 .tone-ok { color: var(--ok); }
+.dist-v4 .tone-warn { color: var(--warn); }
+.dist-v4 .tone-danger { color: var(--danger); }
+.dist-v4 .tone-info { color: var(--info); }
+
+/* platform card — one line per binding method, each with its own state color */
+.dist-v4 .plat-methods { display: flex; flex-direction: column; gap: 2px; margin-top: 3px; }
+.dist-v4 .plat .pm { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 500; }
+.dist-v4 .plat .pm.ok { color: var(--ok); }
+.dist-v4 .plat .pm.warn { color: var(--warn); }
+.dist-v4 .plat.ready small.plat-methods { color: inherit; }
+
+/* binding-method chooser */
+.dist-v4 .picker.method { width: min(560px, 100%); }
+.dist-v4 .method-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 16px 18px 18px; }
+.dist-v4 .method-card { display: flex; flex-direction: column; gap: 6px; text-align: left; font: inherit; color: inherit; padding: 15px 15px 14px; border-radius: 13px; border: 1px solid var(--line); background: var(--island-2); cursor: pointer; transition: border-color .12s, background .12s; }
+.dist-v4 .method-card:hover { border-color: var(--line-strong); }
+.dist-v4 .method-card b { font-size: 13px; font-weight: 600; color: var(--content); letter-spacing: -.005em; }
+.dist-v4 .method-card > span:not(.mc-ic) { font-size: 11.5px; line-height: 1.5; color: var(--content-4); }
+.dist-v4 .method-card em { font-style: normal; font-size: 11px; font-weight: 550; margin-top: 2px; }
+.dist-v4 .mc-ic { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 9px; background: var(--island); border: 1px solid var(--line); }
+
+/* QR login modal */
+.dist-v4 .picker.sess { width: min(520px, 100%); }
+.dist-v4 .sess-body { display: flex; gap: 18px; padding: 18px; align-items: flex-start; }
+.dist-v4 .sess-qr { width: 168px; height: 168px; flex-shrink: 0; border-radius: 13px; border: 1px solid var(--line-strong); background: #fff; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.dist-v4 .sess-qr img { width: 100%; height: 100%; object-fit: contain; }
+.dist-v4 .sess-qr.tone-warn { border-color: var(--warn-line); }
+.dist-v4 .sess-qr.tone-danger { border-color: var(--danger-line); }
+.dist-v4 .sess-qr.tone-ok { border-color: var(--ok-line); }
+/* Placeholder face — no QR to show yet (or ever, on a terminal state). */
+.dist-v4 .sess-qr-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: var(--island-2); color: var(--content-4); }
+.dist-v4 .sess-qr.tone-ok .sess-qr-ph { color: var(--ok); }
+.dist-v4 .sess-qr.tone-warn .sess-qr-ph { color: var(--warn); }
+.dist-v4 .sess-qr.tone-danger .sess-qr-ph { color: var(--danger); }
+.dist-v4 .sess-qr-ph .spin { animation: dist-v4-spin 1s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .dist-v4 .sess-qr-ph .spin { animation: none; } }
+.dist-v4 .sess-info { flex: 1; min-width: 0; }
+.dist-v4 .sess-status { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; letter-spacing: -.005em; }
+.dist-v4 .sess-status .d { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.dist-v4 .sess-hint { margin: 7px 0 0; font-size: 11.5px; line-height: 1.55; color: var(--content-4); }
+.dist-v4 .sess-detail { margin: 7px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--content-3); }
+.dist-v4 .sess-expiry { margin: 8px 0 0; font-size: 11px; color: var(--content-4); font-variant-numeric: tabular-nums; }
+.dist-v4 .sess-sms { margin-top: 13px; }
+.dist-v4 .sess-sms label { display: block; font-size: 10px; font-weight: 600; color: var(--content-4); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
+.dist-v4 .sess-sms-row { display: flex; gap: 8px; align-items: center; }
+.dist-v4 .sess-sms-row .input { flex: 1; min-width: 0; }
+
 /* ═══ responsive ═══ */
 @media (max-width: 900px) {
   .dist-v4 .pub-cols { flex-direction: column; }
   .dist-v4 .pub-rail { position: static; min-width: 0; width: 100%; }
+}
+
+@media (max-width: 560px) {
+  .dist-v4 .method-row { grid-template-columns: 1fr; }
+  .dist-v4 .sess-body { flex-direction: column; align-items: center; }
+  .dist-v4 .sess-info { width: 100%; }
 }

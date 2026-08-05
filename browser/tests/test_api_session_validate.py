@@ -158,7 +158,18 @@ def test_proxy_credentials_never_appear_in_a_response(client, monkeypatch):
 
 
 def test_returned_statuses_stay_inside_the_shared_enum(client, monkeypatch):
-    """Platform-specific status values would break every caller's branching."""
+    """The enum is the whole spec 7.8 table - not "whatever this stage emits".
+
+    Both services carry their own copy (no shared Python package across a
+    container boundary), so the table is the contract and each side must hold
+    all of it. A member missing on one side means the other's answer arrives
+    unrecognised and gets flattened to `failed`, throwing away exactly the part
+    that told the user what to do. That is why `published` is here in S2 even
+    though nothing in this service can produce it until S3.
+
+    Platform-specific values would break every caller's branching and are
+    forbidden outright (design doc 6.1a).
+    """
     from app.platforms import supported_platforms
 
     assert supported_platforms() == ["douyin"]
@@ -166,9 +177,13 @@ def test_returned_statuses_stay_inside_the_shared_enum(client, monkeypatch):
     assert allowed == {
         "session_valid",
         "session_invalid",
+        "proxy_failed",
+        "timeout",
+        "failed",
+        "waiting_scan",
+        "scanned",
         "qrcode_expired",
         "sms_required",
-        "timeout",
-        "proxy_failed",
-        "failed",
+        "success",
+        "published",
     }
