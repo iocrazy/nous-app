@@ -57,13 +57,32 @@ async def _fetch_latest_audit() -> dict:
     """Most recent storage_audit run, read from task_tracking (route C: never
     query dbos.workflow_status). Returns the audit dict the /audit endpoint
     serves; status 'none' when no scan has ever run."""
-    row = await db_engine.fetch_one(
-        """
-        SELECT phase, metadata, completed_at FROM task_tracking
-        WHERE task_type = 'storage_audit'
-        ORDER BY created_at DESC LIMIT 1
-        """
-    )
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TaskTracking
+
+    async with read_scope() as session:
+        row = (
+            (
+                await session.execute(
+                    select(
+                        TaskTracking.phase,
+                        # Label back to the DB column name ("metadata"): the
+                        # ORM attribute is metadata_ (reserved-name collision
+                        # avoidance) and would otherwise change the mapping
+                        # key downstream code reads via row.get("metadata").
+                        TaskTracking.metadata_.label("metadata"),
+                        TaskTracking.completed_at,
+                    )
+                    .where(TaskTracking.task_type == "storage_audit")
+                    .order_by(TaskTracking.created_at.desc())
+                    .limit(1)
+                )
+            )
+            .mappings()
+            .first()
+        )
     if not row:
         return {
             "status": "none",
@@ -309,14 +328,31 @@ async def _find_running_audit() -> str | None:
     every future /verify dispatch forever — a full-library scan realistically
     finishes in minutes, so anything older than 2h is presumed dead and
     should self-heal rather than block new dispatches indefinitely."""
-    row = await db_engine.fetch_one(
-        """
-        SELECT dbos_workflow_id FROM task_tracking
-        WHERE task_type = 'storage_audit' AND phase IN ('queued','in_progress')
-          AND created_at > now() - interval '2 hours'
-        ORDER BY created_at DESC LIMIT 1
-        """
-    )
+    from sqlalchemy import func, select, text
+
+    from app.db.session import read_scope
+    from app.models import TaskTracking
+
+    async with read_scope() as session:
+        row = (
+            (
+                await session.execute(
+                    select(TaskTracking.dbos_workflow_id)
+                    .where(TaskTracking.task_type == "storage_audit")
+                    .where(TaskTracking.phase.in_(["queued", "in_progress"]))
+                    # INTERVAL literal via a text() fragment (structural
+                    # exception, non-full-statement) — no ORM interval type.
+                    .where(
+                        TaskTracking.created_at
+                        > func.now() - text("interval '2 hours'")
+                    )
+                    .order_by(TaskTracking.created_at.desc())
+                    .limit(1)
+                )
+            )
+            .mappings()
+            .first()
+        )
     return row["dbos_workflow_id"] if row else None
 
 

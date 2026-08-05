@@ -119,3 +119,38 @@ async def test_start_selfheal_create_failure_is_swallowed(monkeypatch, patch_sco
 
     # Must not raise.
     await m.start("wf-missing", user_id="u-1")
+
+
+class _FakeRedisLockHeld:
+    """Stands in for the sync Redis client `acquire_or_subscribe` drives via
+    `asyncio.to_thread` — `.set(nx=True)` returning False means "lock already
+    held", forcing the call past the dedup lock into the DB checks below."""
+
+    def set(self, *args, **kwargs):
+        return False
+
+
+async def test_acquire_or_subscribe_completed_check_does_not_raise(
+    monkeypatch, patch_scopes
+):
+    """F821 regression (unified_task_manager.py:1419): the recent-completion
+    cutoff computed ``datetime.now(timezone.utc) - timedelta(...)`` but the
+    module only imported ``datetime``/``timezone`` — a real NameError the
+    first time a dedup-locked, no-active-row submit reached this branch.
+    Exercises exactly that path: lock not acquired, no active row, no
+    recently-completed row -> must fall through to a fresh "created", not
+    crash on the cutoff line."""
+    m = UnifiedTaskManager()
+    monkeypatch.setattr(m, "_get_redis", lambda: _FakeRedisLockHeld())
+    # execute() call order: active-row SELECT (None) -> completed-row SELECT
+    # (None) -> falls through to force-acquire + "created".
+    patch_scopes([None, None])
+
+    result = await m.acquire_or_subscribe(
+        task_type="download",
+        dedup_identifier="abc123",
+        user_id="u-1",
+        resource_id="r-1",
+    )
+
+    assert result["action"] == "created"
