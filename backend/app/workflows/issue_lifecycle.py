@@ -74,8 +74,29 @@ async def set_status(
 
     Spec-2: ``agent_outcome`` / ``outcome_reason`` record the agent's FinishIssue
     self-report into execution_state so the UI can distinguish "agent reports
-    done" from "agent merely stopped"."""
-    from sqlalchemy import cast, literal, text, update
+    done" from "agent merely stopped".
+
+    ``execution_state`` is written on EVERY transition, always as a jsonb
+    MERGE onto the existing value, never as an assignment:
+
+    * **Merge, not overwrite.** Three other writers own their own keys in this
+      column — ``input_gate.mark_awaiting_input`` (``awaiting_input``),
+      ``mark_turn_progress`` (``turn`` / ``turn_started_at``) and
+      ``stranded_issue_monitor`` (``stranded_*``) — and all three already
+      merge. This used to assign the whole column, so any error/outcome
+      transition silently dropped their keys; both of those writers carry
+      docstrings describing how they sequence themselves around that hazard.
+    * **The two error keys are owned here.** Every transition either writes
+      them (an explicit ``error_code``/``error_message`` argument) or removes
+      them. Without the removal a ``blocked`` issue that later resumed to
+      ``in_progress`` kept its stale error forever — the column was only
+      touched when an argument was passed, so a plain resume left it behind
+      (2026-08-03 needs_input E2E). The removal must also cover the
+      outcome-carrying transitions: the old assignment dropped stale errors as
+      a side effect, and switching to a merge would otherwise start preserving
+      them.
+    """
+    from sqlalchemy import Text, cast, func, literal, text, update
     from sqlalchemy.dialects.postgresql import JSONB
 
     from app.db.session import write_scope
@@ -90,15 +111,27 @@ async def set_status(
     elif status == "cancelled":
         values["cancelled_at"] = now_dt
     state: dict[str, Any] = {}
-    if error_code or error_message:
+    writes_error = bool(error_code or error_message)
+    if writes_error:
         state["error_code"] = error_code
         state["error_message"] = error_message
     if agent_outcome:
         state["agent_outcome"] = agent_outcome
     if outcome_reason:
         state["outcome_reason"] = outcome_reason
+
+    # COALESCE(execution_state, '{}') [- 'error_code' - 'error_message'] [|| :state]
+    # Operands are explicitly cast: an untyped bind against jsonb's overloaded
+    # `-` (text / text[] / integer) is ambiguous to the planner.
+    exec_state = func.coalesce(Issues.execution_state, cast(literal("{}"), JSONB))
+    if not writes_error:
+        for key in ("error_code", "error_message"):
+            exec_state = exec_state.op("-", return_type=JSONB)(cast(literal(key), Text))
     if state:
-        values["execution_state"] = cast(literal(json.dumps(state)), JSONB)
+        exec_state = exec_state.op("||", return_type=JSONB)(
+            cast(literal(json.dumps(state)), JSONB)
+        )
+    values["execution_state"] = exec_state
     # may write execution_state (service_role-only via issues_update_allowlist)
     async with write_scope() as session:
         await session.execute(text("SET LOCAL ROLE service_role"))
