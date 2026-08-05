@@ -72,9 +72,6 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import text
-
-from app.db import engine as db_engine
 from app.services.library.resources_service import _resolve_personal_team_id
 
 # public.messages.sender_type -> legacy ai_messages.role
@@ -134,25 +131,65 @@ class ConversationsAiStore:
             "store_kind": ConversationsAiStore.store_kind,
         }
 
-    _JOIN_SELECT = """
-        SELECT c.id, c.scope_id, c.project_id, c.title, c.created_at,
-               m.agent_slug, m.agent_id, m.total_tokens, m.message_count,
-               m.context_type, m.context_id, m.updated_at,
-               cm.user_id
-          FROM public.conversations c
-          JOIN public.conversation_ai_meta m ON m.conversation_id = c.id
-          JOIN public.conversation_members cm ON cm.conversation_id = c.id
-           AND cm.member_type = 'user'
-    """
+    @staticmethod
+    def _joined_query():
+        """ORM equivalent of the legacy ``_JOIN_SELECT`` string (Phase B4):
+        conversations JOIN conversation_ai_meta JOIN conversation_members
+        (member_type='user'). Callers append their own WHERE/ORDER
+        BY/LIMIT on top of the returned Select."""
+        from sqlalchemy import select
+
+        from app.models import ConversationAiMeta, ConversationMembers, Conversations
+
+        return (
+            select(
+                Conversations.id,
+                Conversations.scope_id,
+                Conversations.project_id,
+                Conversations.title,
+                Conversations.created_at,
+                ConversationAiMeta.agent_slug,
+                ConversationAiMeta.agent_id,
+                ConversationAiMeta.total_tokens,
+                ConversationAiMeta.message_count,
+                ConversationAiMeta.context_type,
+                ConversationAiMeta.context_id,
+                ConversationAiMeta.updated_at,
+                ConversationMembers.user_id,
+            )
+            .select_from(Conversations)
+            .join(
+                ConversationAiMeta,
+                ConversationAiMeta.conversation_id == Conversations.id,
+            )
+            .join(
+                ConversationMembers,
+                (ConversationMembers.conversation_id == Conversations.id)
+                & (ConversationMembers.member_type == "user"),
+            )
+        )
 
     async def _fetch_by_id(self, session_id: int) -> Optional[Dict[str, Any]]:
-        row = await db_engine.fetch_one(
-            self._JOIN_SELECT
-            + " WHERE c.id = :cid AND c.archived_at IS NULL"
-            + " LIMIT 1",
-            {"cid": _bigint(session_id)},
-        )
-        return self._to_legacy_shape(row) if row else None
+        from app.db.session import read_scope
+        from app.models import Conversations
+
+        cid = _bigint(session_id)
+        async with read_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        self._joined_query()
+                        .where(
+                            Conversations.id == cid,
+                            Conversations.archived_at.is_(None),
+                        )
+                        .limit(1)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return self._to_legacy_shape(dict(row)) if row else None
 
     # ------------------------------------------------------------------
     # Sessions
@@ -178,33 +215,39 @@ class ConversationsAiStore:
         ``ValueError`` when unresolvable — that propagates untouched (the
         router maps bare ValueError → 400).
         """
+        from sqlalchemy import insert
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        from app.db.session import write_scope
+        from app.models import ConversationAiMeta, ConversationMembers, Conversations
+
         scope_id = (
             _bigint(team_id)
             if team_id is not None
             else _bigint(await _resolve_personal_team_id(user_id))
         )
 
-        eng = db_engine.get_engine()
-        async with eng.begin() as conn:
+        async with write_scope() as session:
             conv_row = (
                 (
-                    await conn.execute(
-                        text(
-                            """
-                            INSERT INTO public.conversations
-                              (type, scope_id, project_id, title, created_by)
-                            VALUES ('direct_agent', :scope_id, :project_id, :title, :created_by)
-                            RETURNING id, scope_id, project_id, title, created_at
-                            """
-                        ),
-                        {
-                            "scope_id": scope_id,
-                            "project_id": (
+                    await session.execute(
+                        insert(Conversations)
+                        .values(
+                            type="direct_agent",
+                            scope_id=scope_id,
+                            project_id=(
                                 _bigint(project_id) if project_id is not None else None
                             ),
-                            "title": title,
-                            "created_by": user_id,
-                        },
+                            title=title,
+                            created_by=user_id,
+                        )
+                        .returning(
+                            Conversations.id,
+                            Conversations.scope_id,
+                            Conversations.project_id,
+                            Conversations.title,
+                            Conversations.created_at,
+                        )
                     )
                 )
                 .mappings()
@@ -212,46 +255,47 @@ class ConversationsAiStore:
             )
             cid = conv_row["id"]
 
-            await conn.execute(
-                text(
-                    """
-                    INSERT INTO public.conversation_members
-                      (conversation_id, member_type, user_id, role)
-                    VALUES (:cid, 'user', :uid, 'owner')
-                    ON CONFLICT DO NOTHING
-                    """
-                ),
-                {"cid": cid, "uid": user_id},
+            # Bare ON CONFLICT DO NOTHING (no index_elements) — matches the
+            # legacy raw SQL: conversation_members has no real PK, only the
+            # expression index uq_conversation_members(conversation_id,
+            # member_type, COALESCE(user_id, agent_id)), which SQLAlchemy
+            # cannot name by column list.
+            await session.execute(
+                pg_insert(ConversationMembers)
+                .values(
+                    conversation_id=cid,
+                    member_type="user",
+                    user_id=user_id,
+                    role="owner",
+                )
+                .on_conflict_do_nothing()
             )
-            await conn.execute(
-                text(
-                    """
-                    INSERT INTO public.conversation_members
-                      (conversation_id, member_type, agent_id, added_by)
-                    VALUES (:cid, 'agent', :agent_id, :added_by)
-                    ON CONFLICT DO NOTHING
-                    """
-                ),
-                {"cid": cid, "agent_id": agent_id, "added_by": user_id},
+            await session.execute(
+                pg_insert(ConversationMembers)
+                .values(
+                    conversation_id=cid,
+                    member_type="agent",
+                    agent_id=agent_id,
+                    added_by=user_id,
+                )
+                .on_conflict_do_nothing()
             )
             meta_row = (
                 (
-                    await conn.execute(
-                        text(
-                            """
-                            INSERT INTO public.conversation_ai_meta
-                              (conversation_id, agent_slug, agent_id, context_type, context_id)
-                            VALUES (:cid, :agent_slug, :agent_id, :context_type, :context_id)
-                            RETURNING total_tokens, message_count, updated_at
-                            """
-                        ),
-                        {
-                            "cid": cid,
-                            "agent_slug": agent_slug,
-                            "agent_id": agent_id,
-                            "context_type": context_type,
-                            "context_id": context_id,
-                        },
+                    await session.execute(
+                        insert(ConversationAiMeta)
+                        .values(
+                            conversation_id=cid,
+                            agent_slug=agent_slug,
+                            agent_id=agent_id,
+                            context_type=context_type,
+                            context_id=context_id,
+                        )
+                        .returning(
+                            ConversationAiMeta.total_tokens,
+                            ConversationAiMeta.message_count,
+                            ConversationAiMeta.updated_at,
+                        )
                     )
                 )
                 .mappings()
@@ -292,30 +336,32 @@ class ConversationsAiStore:
         ``search`` is a case-insensitive title substring filter applied in
         SQL (ILIKE) — the whole history is searchable, not just one page.
         """
-        sql = (
-            self._JOIN_SELECT
-            + " AND cm.user_id = :uid"
-            + " WHERE c.type = 'direct_agent' AND c.archived_at IS NULL"
+        from app.db.session import read_scope
+        from app.models import ConversationAiMeta, ConversationMembers, Conversations
+
+        stmt = self._joined_query().where(
+            Conversations.type == "direct_agent",
+            Conversations.archived_at.is_(None),
+            ConversationMembers.user_id == user_id,
         )
-        params: Dict[str, Any] = {"uid": user_id, "limit": limit}
         if agent_slug is not None:
-            sql += " AND m.agent_slug = :agent_slug"
-            params["agent_slug"] = agent_slug
+            stmt = stmt.where(ConversationAiMeta.agent_slug == agent_slug)
         if project_id is not None:
-            sql += " AND c.project_id = :project_id"
-            params["project_id"] = _bigint(project_id)
+            stmt = stmt.where(Conversations.project_id == _bigint(project_id))
         if search:
             # Escape LIKE metacharacters so user input matches literally
-            # (backslash is Postgres' default ILIKE escape char).
+            # (backslash is Postgres' default ILIKE escape char — ilike()
+            # with no explicit `escape=` kwarg emits no ESCAPE clause, which
+            # matches the legacy raw SQL exactly).
             escaped = (
                 search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             )
-            sql += " AND c.title ILIKE :search"
-            params["search"] = f"%{escaped}%"
-        sql += " ORDER BY m.updated_at DESC LIMIT :limit"
+            stmt = stmt.where(Conversations.title.ilike(f"%{escaped}%"))
+        stmt = stmt.order_by(ConversationAiMeta.updated_at.desc()).limit(limit)
 
-        rows = await db_engine.fetch_all(sql, params)
-        return [self._to_legacy_shape(r) for r in rows]
+        async with read_scope() as session:
+            rows = (await session.execute(stmt)).mappings().all()
+        return [self._to_legacy_shape(dict(r)) for r in rows]
 
     async def get_session(self, *, session_id: int) -> Optional[Dict[str, Any]]:
         """Fetch a single session row (joined), or None.
@@ -337,29 +383,36 @@ class ConversationsAiStore:
     async def rename_session(self, *, session_id: int, title: str) -> Dict[str, Any]:
         """Update the conversation's title, touch the meta sidecar's
         updated_at, and return the refreshed legacy-shaped row."""
+        from sqlalchemy import func, update
+
+        from app.db.session import write_scope
+        from app.models import ConversationAiMeta, Conversations
+
         cid = _bigint(session_id)
-        eng = db_engine.get_engine()
-        async with eng.begin() as conn:
-            await conn.execute(
-                text("UPDATE public.conversations SET title = :title WHERE id = :cid"),
-                {"title": title, "cid": cid},
+        async with write_scope() as session:
+            await session.execute(
+                update(Conversations).where(Conversations.id == cid).values(title=title)
             )
-            await conn.execute(
-                text(
-                    "UPDATE public.conversation_ai_meta"
-                    " SET updated_at = now()"
-                    " WHERE conversation_id = :cid"
-                ),
-                {"cid": cid},
+            await session.execute(
+                update(ConversationAiMeta)
+                .where(ConversationAiMeta.conversation_id == cid)
+                .values(updated_at=func.now())
             )
         return await self._fetch_by_id(cid)
 
     async def soft_delete_session(self, *, session_id: int) -> None:
         """Archive the conversation (``archived_at = now()``)."""
-        await db_engine.execute(
-            "UPDATE public.conversations SET archived_at = now() WHERE id = :cid",
-            {"cid": _bigint(session_id)},
-        )
+        from sqlalchemy import func, update
+
+        from app.db.session import write_scope
+        from app.models import Conversations
+
+        async with write_scope() as session:
+            await session.execute(
+                update(Conversations)
+                .where(Conversations.id == _bigint(session_id))
+                .values(archived_at=func.now())
+            )
 
     async def bump_counters(
         self, *, session_id: int, add_tokens: int, add_messages: int
@@ -375,20 +428,21 @@ class ConversationsAiStore:
         writes the given absolutes as-is per the Protocol's
         write-what-you're-given contract.
         """
-        await db_engine.execute(
-            """
-            UPDATE public.conversation_ai_meta
-               SET total_tokens = :total_tokens,
-                   message_count = :message_count,
-                   updated_at = now()
-             WHERE conversation_id = :cid
-            """,
-            {
-                "total_tokens": add_tokens,
-                "message_count": add_messages,
-                "cid": _bigint(session_id),
-            },
-        )
+        from sqlalchemy import func, update
+
+        from app.db.session import write_scope
+        from app.models import ConversationAiMeta
+
+        async with write_scope() as session:
+            await session.execute(
+                update(ConversationAiMeta)
+                .where(ConversationAiMeta.conversation_id == _bigint(session_id))
+                .values(
+                    total_tokens=add_tokens,
+                    message_count=add_messages,
+                    updated_at=func.now(),
+                )
+            )
 
     # ------------------------------------------------------------------
     # Messages (Task 4)
@@ -470,18 +524,38 @@ class ConversationsAiStore:
         self, *, session_id: int, limit: int = 200
     ) -> List[Dict[str, Any]]:
         """Chronological (seq ASC), non-deleted messages for a conversation."""
-        rows = await db_engine.fetch_all(
-            """
-            SELECT id, conversation_id, seq, sender_type, sender_id,
-                   from_agent_id, type, body, created_at
-              FROM public.messages
-             WHERE conversation_id = :cid AND deleted_at IS NULL
-             ORDER BY seq ASC
-             LIMIT :limit
-            """,
-            {"cid": _bigint(session_id), "limit": limit},
-        )
-        return [self._to_legacy_message_shape(r) for r in rows]
+        from sqlalchemy import select
+
+        from app.db.session import read_scope
+        from app.models import Messages
+
+        async with read_scope() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(
+                            Messages.id,
+                            Messages.conversation_id,
+                            Messages.seq,
+                            Messages.sender_type,
+                            Messages.sender_id,
+                            Messages.from_agent_id,
+                            Messages.type,
+                            Messages.body,
+                            Messages.created_at,
+                        )
+                        .where(
+                            Messages.conversation_id == _bigint(session_id),
+                            Messages.deleted_at.is_(None),
+                        )
+                        .order_by(Messages.seq.asc())
+                        .limit(limit)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+        return [self._to_legacy_message_shape(dict(r)) for r in rows]
 
     @staticmethod
     def display_attachments(

@@ -1,13 +1,24 @@
 """W3c budget breaker in the autopilot scheduler.
 
 Over budget → _fire_agent_routine skips the fire (returns None), bumps
-skipped_count, and never creates/dispatches an issue. DB + budget lookup faked.
+skipped_count, and never creates/dispatches an issue.
+
+ORM (Phase B4): the owner→personal-team lookup and the skipped_count bump
+moved from raw db_engine.fetch_val/execute calls to SQLAlchemy Core through
+app.db.session.read_scope()/write_scope() — the harness patches those scopes
+with a recording session (mirrors test_orm_b3_task1_compile_coverage.py)
+instead of the raw engine helpers.
 """
 
 from __future__ import annotations
 
-import pytest
+from contextlib import asynccontextmanager
+from typing import Any
 
+import pytest
+from sqlalchemy.dialects import postgresql
+
+import app.db.session as db_session
 from app.workflows import scheduled_master as sm
 
 
@@ -24,17 +35,50 @@ def _row():
     }
 
 
+class _FakeResult:
+    def __init__(self, rows: list[Any] | None = None, scalar: Any = None) -> None:
+        self._rows = rows if rows is not None else []
+        self._scalar = scalar
+
+    def mappings(self) -> "_FakeResult":
+        return self
+
+    def first(self) -> Any:
+        return self._rows[0] if self._rows else None
+
+    def scalar(self) -> Any:
+        return self._scalar
+
+
+class _RecordingSession:
+    def __init__(self, results: list[_FakeResult] | None = None) -> None:
+        self.calls: list[Any] = []
+        self._results = list(results or [])
+        self._default = _FakeResult()
+
+    async def execute(self, stmt: Any) -> _FakeResult:
+        self.calls.append(stmt)
+        return self._results.pop(0) if self._results else self._default
+
+
+def _patch_scopes(
+    monkeypatch: pytest.MonkeyPatch, results: list[_FakeResult] | None = None
+) -> _RecordingSession:
+    session = _RecordingSession(results)
+
+    @asynccontextmanager
+    async def fake_scope():
+        yield session
+
+    monkeypatch.setattr(db_session, "read_scope", fake_scope)
+    monkeypatch.setattr(db_session, "write_scope", fake_scope)
+    return session
+
+
 @pytest.mark.asyncio
 async def test_over_budget_skips_and_bumps_skipped_count(monkeypatch):
-    executed: list = []
-
-    async def fake_fetch_val(sql, params=None):
-        # the owner→personal-team resolution
-        return 900123  # resolved personal team
-
-    async def fake_execute(sql, params=None):
-        executed.append((sql, params))
-        return 1
+    # budget_team_id lookup (scalar) then the skipped_count UPDATE.
+    session = _patch_scopes(monkeypatch, [_FakeResult(scalar=900123)])
 
     async def over_budget(team_id):
         assert team_id == 900123
@@ -48,8 +92,6 @@ async def test_over_budget_skips_and_bumps_skipped_count(monkeypatch):
             called["created"] = True
             return {"id": 1}
 
-    monkeypatch.setattr("app.db.engine.fetch_val", fake_fetch_val)
-    monkeypatch.setattr("app.db.engine.execute", fake_execute)
     monkeypatch.setattr("app.services.ai_usage.is_team_over_budget", over_budget)
     import app.repositories.issue_repository as ir
 
@@ -59,34 +101,29 @@ async def test_over_budget_skips_and_bumps_skipped_count(monkeypatch):
 
     assert result is None  # skipped, no dispatch order
     assert called["created"] is False  # no paid issue created
-    assert len(executed) == 1
-    assert "skipped_count = skipped_count + 1" in executed[0][0]
-    assert executed[0][1]["id"] == 900555
+    assert len(session.calls) == 2
+    update_sql, update_params = _compile(session.calls[1])
+    assert "skipped_count=(public.user_schedules.skipped_count +" in update_sql
+    assert update_params["id_1"] == 900555
+
+
+def _compile(stmt: Any) -> tuple[str, dict[str, Any]]:
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    return str(compiled), dict(compiled.params)
 
 
 @pytest.mark.asyncio
 async def test_under_budget_passes_gate(monkeypatch):
     """Not over budget → the gate is a no-op; execution proceeds past it (proven
     by reaching the agent lookup, which we stub to a not-found RuntimeError)."""
-
-    async def fake_fetch_val(sql, params=None):
-        return 900123
+    # First read_scope call is the budget_team_id lookup (scalar); second is
+    # the delivery-gate/agent lookup (mappings().first() → None → not found).
+    _patch_scopes(monkeypatch, [_FakeResult(scalar=900123), _FakeResult(rows=[])])
 
     async def under_budget(team_id):
         return False
 
-    # First fetch_one after the gate is the delivery-gate check; then the agent
-    # lookup. Return None agent → RuntimeError proves we passed the budget gate.
-    calls = {"n": 0}
-
-    async def fake_fetch_one(sql, params=None):
-        calls["n"] += 1
-        return None
-
-    monkeypatch.setattr("app.db.engine.fetch_val", fake_fetch_val)
-    monkeypatch.setattr("app.db.engine.fetch_one", fake_fetch_one)
     monkeypatch.setattr("app.services.ai_usage.is_team_over_budget", under_budget)
 
     with pytest.raises(RuntimeError, match="not found"):
         await sm._fire_agent_routine(_row())
-    assert calls["n"] >= 1  # advanced past the budget gate

@@ -42,16 +42,31 @@ _SCRIPT = 700100000000000004
 _USER_ID = "22222222-2222-2222-2222-222222222222"
 
 
+class _MappingWrapper:
+    """Mimics ``result.mappings()`` — ``_scope_of_conversation`` (Phase B4
+    ORM) does ``(await session.execute(stmt)).mappings().first()``."""
+
+    def __init__(self, row):
+        self._row = row
+
+    def first(self):
+        return self._row
+
+
 class _FakeResult:
-    def __init__(self, first_row=None, scalar=None):
+    def __init__(self, first_row=None, scalar=None, mapping_row=None):
         self._first_row = first_row
         self._scalar = scalar
+        self._mapping_row = mapping_row
 
     def first(self):
         return self._first_row
 
     def scalar(self):
         return self._scalar
+
+    def mappings(self):
+        return _MappingWrapper(self._mapping_row)
 
 
 class _Session:
@@ -60,6 +75,16 @@ class _Session:
 
     async def execute(self, stmt):
         return self._results.pop(0) if self._results else _FakeResult()
+
+
+class _RaisingSession:
+    """A session whose execute() always raises — for lookup-failure tests."""
+
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    async def execute(self, stmt):
+        raise self._exc
 
 
 class _Ctx:
@@ -98,8 +123,10 @@ async def test_an_explicit_project_survives_a_failed_conversation_lookup():
     ``count_auto_dispatches_today`` filters on, so the autopilot daily quota
     would have silently stopped counting. An explicit project must never
     depend on a lookup."""
-    with patch(
-        "app.db.engine.fetch_one", AsyncMock(side_effect=RuntimeError("db down"))
+    with patch.object(
+        binding_mod,
+        "read_scope",
+        lambda: _Ctx(_RaisingSession(RuntimeError("db down"))),
     ):
         scope = await resolve_dispatch_scope(
             project_id=_PROJECT, conversation_id=_CONVERSATION
@@ -113,8 +140,9 @@ async def test_an_explicit_project_still_picks_up_the_conversations_episode():
     """The other half: passing the project explicitly must not cost the
     episode dimension, or the primary chat surface stays unnarrowed."""
     row = {"project_id": _PROJECT, "context_type": "script", "context_id": _SCRIPT}
+    session = _Session([_FakeResult(mapping_row=row)])
     with (
-        patch("app.db.engine.fetch_one", AsyncMock(return_value=row)),
+        patch.object(binding_mod, "read_scope", lambda: _Ctx(session)),
         patch(
             "app.services.ai.scope.scoped_script_gateway.episode_id_for_script",
             AsyncMock(return_value=_EPISODE),
@@ -132,8 +160,9 @@ async def test_an_episode_from_a_different_project_is_ignored_not_adopted():
     episode describes something else. Narrowing to it would deny every
     resolution; declining to narrow merely fails to help."""
     row = {"project_id": 12345, "context_type": "script", "context_id": _SCRIPT}
+    session = _Session([_FakeResult(mapping_row=row)])
     with (
-        patch("app.db.engine.fetch_one", AsyncMock(return_value=row)),
+        patch.object(binding_mod, "read_scope", lambda: _Ctx(session)),
         patch(
             "app.services.ai.scope.scoped_script_gateway.episode_id_for_script",
             AsyncMock(return_value=_EPISODE),
@@ -185,7 +214,8 @@ async def test_missing_parent_run_yields_no_scope_rather_than_a_guess():
 @pytest.mark.asyncio
 async def test_conversation_binds_its_project():
     row = {"project_id": _PROJECT, "context_type": "issue", "context_id": 1}
-    with patch("app.db.engine.fetch_one", AsyncMock(return_value=row)):
+    session = _Session([_FakeResult(mapping_row=row)])
+    with patch.object(binding_mod, "read_scope", lambda: _Ctx(session)):
         scope = await resolve_dispatch_scope(conversation_id=_CONVERSATION)
     assert scope.project_id == _PROJECT
     # An 'issue' context resolves to no episode — declining to narrow is
@@ -196,8 +226,9 @@ async def test_conversation_binds_its_project():
 @pytest.mark.asyncio
 async def test_conversation_with_a_script_context_also_binds_the_episode():
     row = {"project_id": _PROJECT, "context_type": "script", "context_id": _SCRIPT}
+    session = _Session([_FakeResult(mapping_row=row)])
     with (
-        patch("app.db.engine.fetch_one", AsyncMock(return_value=row)),
+        patch.object(binding_mod, "read_scope", lambda: _Ctx(session)),
         patch(
             "app.services.ai.scope.scoped_script_gateway.episode_id_for_script",
             AsyncMock(return_value=_EPISODE),
@@ -213,8 +244,9 @@ async def test_cross_episode_read_suppresses_the_episode_narrowing():
     explicitly allowed to work across episodes must not be pinned to one.
     It widens to project scope — never past it."""
     row = {"project_id": _PROJECT, "context_type": "script", "context_id": _SCRIPT}
+    session = _Session([_FakeResult(mapping_row=row)])
     with (
-        patch("app.db.engine.fetch_one", AsyncMock(return_value=row)),
+        patch.object(binding_mod, "read_scope", lambda: _Ctx(session)),
         patch(
             "app.services.ai.scope.scoped_script_gateway.episode_id_for_script",
             AsyncMock(return_value=_EPISODE),
@@ -229,7 +261,8 @@ async def test_cross_episode_read_suppresses_the_episode_narrowing():
 @pytest.mark.asyncio
 async def test_conversation_without_a_project_stays_unbound():
     row = {"project_id": None, "context_type": None, "context_id": None}
-    with patch("app.db.engine.fetch_one", AsyncMock(return_value=row)):
+    session = _Session([_FakeResult(mapping_row=row)])
+    with patch.object(binding_mod, "read_scope", lambda: _Ctx(session)):
         assert await resolve_dispatch_scope(conversation_id=1) == DispatchScope()
 
 
@@ -237,7 +270,9 @@ async def test_conversation_without_a_project_stays_unbound():
 async def test_a_lookup_failure_degrades_to_unbound_instead_of_raising():
     """Binding is best-effort: a DB hiccup costs the run its screenwriting
     tools, it must never take down the dispatch."""
-    with patch("app.db.engine.fetch_one", AsyncMock(side_effect=RuntimeError("boom"))):
+    with patch.object(
+        binding_mod, "read_scope", lambda: _Ctx(_RaisingSession(RuntimeError("boom")))
+    ):
         assert await resolve_dispatch_scope(conversation_id=1) == DispatchScope()
 
 

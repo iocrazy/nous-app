@@ -641,13 +641,18 @@ async def _resolve_session_project(session_id: Optional[str]) -> Optional[str]:
     except (TypeError, ValueError):
         return None
     try:
-        from app.db import engine as db_engine
+        from sqlalchemy import select
 
-        row = await db_engine.fetch_one(
-            "SELECT project_id FROM public.conversations WHERE id = :sid",
-            {"sid": sid},
-        )
-        project_id = row.get("project_id") if row else None
+        from app.db.session import read_scope
+        from app.models import Conversations
+
+        async with read_scope() as session:
+            row = (
+                await session.execute(
+                    select(Conversations.project_id).where(Conversations.id == sid)
+                )
+            ).first()
+        project_id = row[0] if row else None
         return str(project_id) if project_id else None
     except Exception:  # noqa: BLE001
         return None

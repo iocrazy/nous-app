@@ -57,7 +57,6 @@ from typing import Any, Optional
 from dbos import DBOS
 from loguru import logger
 
-from app.db import engine as db_engine
 from app.repositories.agent_memory_promotion_repository import (
     insert_proposal,
     resolve_promotion_target,
@@ -76,102 +75,192 @@ MIN_NEW_MESSAGES = 6
 MAX_ENTRIES_PER_PAIR = 10
 _LOOKBACK_DAYS = 7
 
-# Distinct active (user, agent, team, project) contexts with their recent
-# message count.  Filtered in Python after fetch so MIN_NEW_MESSAGES stays a
-# module constant rather than embedded in SQL.
-#
-# Conversations-only (P3 Task 2): reads public.conversations +
-# conversation_ai_meta (agent binding, mig 332) + conversation_members
-# (owning user, member_type='user') + public.messages. teams.kind='personal'
-# maps a personal 1:1 chat's scope_id back to NULL team_id so scope
-# derivation (_derive_scope) matches legacy ai_sessions semantics exactly.
-_ACTIVE_PAIRS_SQL = f"""
-SELECT
-    cm.user_id::text  AS user_id,
-    m.agent_id::text  AS agent_id,
-    CASE WHEN t.kind = 'personal' THEN NULL ELSE c.scope_id END AS team_id,
-    c.project_id      AS project_id,
-    COUNT(msg.id)::int AS msg_count
-FROM public.conversations c
-JOIN public.conversation_ai_meta m ON m.conversation_id = c.id
-JOIN public.conversation_members cm
-    ON cm.conversation_id = c.id AND cm.member_type = 'user'
-JOIN public.teams t ON t.id = c.scope_id
-JOIN public.messages msg
-    ON msg.conversation_id = c.id AND msg.deleted_at IS NULL
-WHERE c.type        = 'direct_agent'
-  AND c.archived_at IS NULL
-  AND m.updated_at  >= now() - interval '{_LOOKBACK_DAYS} days'
-  AND m.agent_id    IS NOT NULL
-  AND cm.user_id    IS NOT NULL
-  AND msg.created_at >= now() - interval '{_LOOKBACK_DAYS} days'
-GROUP BY cm.user_id, m.agent_id, t.kind, c.scope_id, c.project_id
-"""
 
-# Recent messages for one (user, agent, team, project) context, ascending,
-# capped at 40 to bound the prompt size.  NULL-safe context match via
-# IS NOT DISTINCT FROM so a NULL-team context only loads NULL-team rows.
-# role/content mapping mirrors write_memory.py::load_recent_messages_step
-# (sender_type='agent' -> 'assistant', body->>'text' -> content).
-_RECENT_MESSAGES_SQL = f"""
-SELECT
-    CASE WHEN msg.sender_type = 'agent' THEN 'assistant' ELSE msg.sender_type END AS role,
-    COALESCE(msg.body->>'text', '') AS content
-FROM public.messages msg
-JOIN public.conversations c ON c.id = msg.conversation_id
-JOIN public.conversation_ai_meta m ON m.conversation_id = c.id
-JOIN public.conversation_members cm
-    ON cm.conversation_id = c.id AND cm.member_type = 'user'
-JOIN public.teams t ON t.id = c.scope_id
-WHERE c.type     = 'direct_agent'
-  AND cm.user_id = :user_id
-  AND m.agent_id = :agent_id
-  AND (CASE WHEN t.kind = 'personal' THEN NULL ELSE c.scope_id END)
-      IS NOT DISTINCT FROM :team_id
-  AND c.project_id  IS NOT DISTINCT FROM :project_id
-  AND msg.deleted_at IS NULL
-  AND msg.created_at >= now() - interval '{_LOOKBACK_DAYS} days'
-ORDER BY msg.created_at ASC
-LIMIT 40
-"""
+def _team_id_case():
+    """CASE WHEN t.kind = 'personal' THEN NULL ELSE c.scope_id END — a personal
+    team's scope_id maps back to NULL so the 'agent_user' vs 'team' scope split
+    in _derive_scope stays identical to the legacy ai_sessions behaviour."""
+    from sqlalchemy import case
 
-# Existing memory titles to supply to the /dream prompt so the model
-# knows which topics are already covered.  Must be context-scoped (NULL-safe)
-# so a project-scope run does NOT see personal or other-team titles as already
-# covered — that would cause the LLM to skip generating the same topic for this
-# context, defeating Phase C0's "same topic in different contexts → distinct
-# memories" goal.  Mirrors the IS NOT DISTINCT FROM predicate used by the
-# fingerprint dedup layer (_FINGERPRINTS_SQL in agent_memory_repository.py).
-_EXISTING_TITLES_SQL = """
-SELECT title
-FROM public.agent_memory
-WHERE owner_user_id = :user_id
-  AND agent_id      = :agent_id
-  AND team_id       IS NOT DISTINCT FROM :team_id
-  AND project_id    IS NOT DISTINCT FROM :project_id
-  AND status        = 'active'
-ORDER BY created_at DESC
-LIMIT 50
-"""
+    from app.models import Conversations, Teams
 
-# Distinct contexts for a (user, agent) pair — used by _consolidate_pair
-# (admin manual trigger) to enumerate what to consolidate.
-# Conversations-only (P3 Task 2) — see _ACTIVE_PAIRS_SQL for the join shape
-# and the personal-team → NULL team_id mapping rationale.
-_PAIR_CONTEXTS_SQL = """
-SELECT DISTINCT
-    CASE WHEN t.kind = 'personal' THEN NULL ELSE c.scope_id END AS team_id,
-    c.project_id AS project_id
-FROM public.conversations c
-JOIN public.conversation_ai_meta m ON m.conversation_id = c.id
-JOIN public.conversation_members cm
-    ON cm.conversation_id = c.id AND cm.member_type = 'user'
-JOIN public.teams t ON t.id = c.scope_id
-WHERE c.type       = 'direct_agent'
-  AND c.archived_at IS NULL
-  AND cm.user_id   = :user_id
-  AND m.agent_id   = :agent_id
-"""
+    return case((Teams.kind == "personal", None), else_=Conversations.scope_id)
+
+
+def _active_pairs_stmt():
+    """Distinct active (user, agent, team, project) contexts with their recent
+    message count (ORM, Phase B4). Conversations-only (P3 Task 2): reads
+    public.conversations + conversation_ai_meta (agent binding, mig 332) +
+    conversation_members (owning user, member_type='user') + public.messages.
+    """
+    from sqlalchemy import Integer, String, cast, func, select, text
+
+    from app.models import (
+        ConversationAiMeta,
+        ConversationMembers,
+        Conversations,
+        Messages,
+        Teams,
+    )
+
+    return (
+        select(
+            cast(ConversationMembers.user_id, String).label("user_id"),
+            cast(ConversationAiMeta.agent_id, String).label("agent_id"),
+            _team_id_case().label("team_id"),
+            Conversations.project_id.label("project_id"),
+            cast(func.count(Messages.id), Integer).label("msg_count"),
+        )
+        .select_from(Conversations)
+        .join(
+            ConversationAiMeta,
+            ConversationAiMeta.conversation_id == Conversations.id,
+        )
+        .join(
+            ConversationMembers,
+            (ConversationMembers.conversation_id == Conversations.id)
+            & (ConversationMembers.member_type == "user"),
+        )
+        .join(Teams, Teams.id == Conversations.scope_id)
+        .join(
+            Messages,
+            (Messages.conversation_id == Conversations.id)
+            & (Messages.deleted_at.is_(None)),
+        )
+        .where(
+            Conversations.type == "direct_agent",
+            Conversations.archived_at.is_(None),
+            ConversationAiMeta.updated_at
+            >= func.now() - text(f"interval '{_LOOKBACK_DAYS} days'"),
+            ConversationAiMeta.agent_id.isnot(None),
+            ConversationMembers.user_id.isnot(None),
+            Messages.created_at
+            >= func.now() - text(f"interval '{_LOOKBACK_DAYS} days'"),
+        )
+        .group_by(
+            ConversationMembers.user_id,
+            ConversationAiMeta.agent_id,
+            Teams.kind,
+            Conversations.scope_id,
+            Conversations.project_id,
+        )
+    )
+
+
+def _recent_messages_stmt(
+    user_id: str, agent_id: str, team_id: Optional[int], project_id: Optional[int]
+):
+    """Recent messages for one (user, agent, team, project) context, ascending,
+    capped at 40 to bound the prompt size. NULL-safe context match via
+    IS NOT DISTINCT FROM so a NULL-team context only loads NULL-team rows.
+    role/content mapping mirrors write_memory.py::load_recent_messages_step
+    (sender_type='agent' -> 'assistant', body->>'text' -> content)."""
+    from sqlalchemy import case, func, select, text
+
+    from app.models import (
+        ConversationAiMeta,
+        ConversationMembers,
+        Conversations,
+        Messages,
+        Teams,
+    )
+
+    role_case = case(
+        (Messages.sender_type == "agent", "assistant"), else_=Messages.sender_type
+    )
+    return (
+        select(
+            role_case.label("role"),
+            func.coalesce(Messages.body["text"].astext, "").label("content"),
+        )
+        .select_from(Messages)
+        .join(Conversations, Conversations.id == Messages.conversation_id)
+        .join(
+            ConversationAiMeta,
+            ConversationAiMeta.conversation_id == Conversations.id,
+        )
+        .join(
+            ConversationMembers,
+            (ConversationMembers.conversation_id == Conversations.id)
+            & (ConversationMembers.member_type == "user"),
+        )
+        .join(Teams, Teams.id == Conversations.scope_id)
+        .where(
+            Conversations.type == "direct_agent",
+            ConversationMembers.user_id == user_id,
+            ConversationAiMeta.agent_id == agent_id,
+            _team_id_case().isnot_distinct_from(team_id),
+            Conversations.project_id.isnot_distinct_from(project_id),
+            Messages.deleted_at.is_(None),
+            Messages.created_at
+            >= func.now() - text(f"interval '{_LOOKBACK_DAYS} days'"),
+        )
+        .order_by(Messages.created_at.asc())
+        .limit(40)
+    )
+
+
+def _existing_titles_stmt(
+    user_id: str, agent_id: str, team_id: Optional[int], project_id: Optional[int]
+):
+    """Existing memory titles to supply to the /dream prompt so the model
+    knows which topics are already covered. Must be context-scoped (NULL-safe)
+    so a project-scope run does NOT see personal or other-team titles as
+    already covered — that would cause the LLM to skip generating the same
+    topic for this context, defeating Phase C0's "same topic in different
+    contexts → distinct memories" goal. Mirrors the IS NOT DISTINCT FROM
+    predicate used by the fingerprint dedup layer (agent_memory_repository.py)."""
+    from sqlalchemy import select
+
+    from app.models import AgentMemory
+
+    return (
+        select(AgentMemory.title)
+        .where(
+            AgentMemory.owner_user_id == user_id,
+            AgentMemory.agent_id == agent_id,
+            AgentMemory.team_id.isnot_distinct_from(team_id),
+            AgentMemory.project_id.isnot_distinct_from(project_id),
+            AgentMemory.status == "active",
+        )
+        .order_by(AgentMemory.created_at.desc())
+        .limit(50)
+    )
+
+
+def _pair_contexts_stmt(user_id: str, agent_id: str):
+    """Distinct contexts for a (user, agent) pair — used by _consolidate_pair
+    (admin manual trigger) to enumerate what to consolidate. See
+    _active_pairs_stmt for the join shape and the personal-team → NULL
+    team_id mapping rationale."""
+    from sqlalchemy import select
+
+    from app.models import ConversationAiMeta, ConversationMembers, Conversations, Teams
+
+    return (
+        select(
+            _team_id_case().label("team_id"),
+            Conversations.project_id.label("project_id"),
+        )
+        .distinct()
+        .select_from(Conversations)
+        .join(
+            ConversationAiMeta,
+            ConversationAiMeta.conversation_id == Conversations.id,
+        )
+        .join(
+            ConversationMembers,
+            (ConversationMembers.conversation_id == Conversations.id)
+            & (ConversationMembers.member_type == "user"),
+        )
+        .join(Teams, Teams.id == Conversations.scope_id)
+        .where(
+            Conversations.type == "direct_agent",
+            Conversations.archived_at.is_(None),
+            ConversationMembers.user_id == user_id,
+            ConversationAiMeta.agent_id == agent_id,
+        )
+    )
 
 
 def _derive_scope(team_id: Optional[int], project_id: Optional[int]) -> tuple[str, str]:
@@ -205,18 +294,21 @@ async def _consolidate_context(
     Returns {"written": n, "skipped": m}.
     Best-effort: any exception is caught, logged, and returns zeros.
     """
+    from app.db.session import read_scope
+
     scope, scope_id = _derive_scope(team_id, project_id)
     try:
         # 1. Load recent messages for this exact context (NULL-safe).
-        messages = await db_engine.fetch_all(
-            _RECENT_MESSAGES_SQL,
-            {
-                "user_id": user_id,
-                "agent_id": agent_id,
-                "team_id": team_id,
-                "project_id": project_id,
-            },
-        )
+        async with read_scope() as session:
+            messages = (
+                (
+                    await session.execute(
+                        _recent_messages_stmt(user_id, agent_id, team_id, project_id)
+                    )
+                )
+                .mappings()
+                .all()
+            )
         if len(messages) < MIN_NEW_MESSAGES:
             logger.debug(
                 f"[consolidate_agent_memory] context user={user_id} agent={agent_id} "
@@ -236,15 +328,16 @@ async def _consolidate_context(
 
         # 3. Existing memory titles (prompt context: skip these topics).
         #    Context-scoped so project/team runs don't bleed into each other.
-        title_rows = await db_engine.fetch_all(
-            _EXISTING_TITLES_SQL,
-            {
-                "user_id": user_id,
-                "agent_id": agent_id,
-                "team_id": team_id,
-                "project_id": project_id,
-            },
-        )
+        async with read_scope() as session:
+            title_rows = (
+                (
+                    await session.execute(
+                        _existing_titles_stmt(user_id, agent_id, team_id, project_id)
+                    )
+                )
+                .mappings()
+                .all()
+            )
         existing_titles = [r["title"] for r in title_rows if r.get("title")]
 
         # 4. Existing fingerprints (context-scoped dedup lookup).
@@ -372,10 +465,14 @@ async def _consolidate_pair(user_id: str, agent_id: str) -> dict[str, Any]:
     caught there; this helper catches any unexpected outer failure.
     """
     try:
-        context_rows = await db_engine.fetch_all(
-            _PAIR_CONTEXTS_SQL,
-            {"user_id": user_id, "agent_id": agent_id},
-        )
+        from app.db.session import read_scope
+
+        async with read_scope() as session:
+            context_rows = (
+                (await session.execute(_pair_contexts_stmt(user_id, agent_id)))
+                .mappings()
+                .all()
+            )
         total_written = 0
         total_skipped = 0
         total_proposed = 0
@@ -433,7 +530,10 @@ async def enumerate_active_pairs_step() -> list[dict]:
     Fetches all active contexts then filters in Python so the
     MIN_NEW_MESSAGES constant stays in this module rather than embedded in SQL.
     """
-    rows = await db_engine.fetch_all(_ACTIVE_PAIRS_SQL)
+    from app.db.session import read_scope
+
+    async with read_scope() as session:
+        rows = (await session.execute(_active_pairs_stmt())).mappings().all()
     return [r for r in rows if (r.get("msg_count") or 0) >= MIN_NEW_MESSAGES]
 
 

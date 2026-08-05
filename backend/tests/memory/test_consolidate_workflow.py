@@ -1,7 +1,14 @@
 """Workflow-level tests for agent-memory consolidation (Phase B — Task 3).
 
+ORM (Phase B4): the raw ``app.db.engine.fetch_all`` reads (messages +
+existing titles + active pairs + pair contexts) moved to SQLAlchemy Core
+through ``app.db.session.read_scope()``. The harness patches ``read_scope``
+with a small recording/queueing fake session instead of the raw engine call —
+each queued ``_FakeResult`` corresponds to one ``session.execute(...)`` call,
+in the same order the legacy ``fake_fetch_all`` counter used to branch on.
+
 Patches applied at the consolidate_agent_memory module boundary:
-  - app.db.engine.fetch_all               (SQL: messages + existing titles)
+  - app.db.session.read_scope               (SQL: messages + existing titles)
   - app.workflows.consolidate_agent_memory.existing_fingerprints
   - app.workflows.consolidate_agent_memory.write_memory_row
   - app.workflows.consolidate_agent_memory.default_consolidator
@@ -11,9 +18,53 @@ All tests run without a real DB or LLM.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+import app.db.session as db_session
+
+
+class _FakeResult:
+    def __init__(self, rows: list[Any] | None = None) -> None:
+        self._rows = rows if rows is not None else []
+
+    def mappings(self) -> "_FakeResult":
+        return self
+
+    def all(self) -> list[Any]:
+        return self._rows
+
+
+class _RecordingSession:
+    """Pops one queued ``_FakeResult`` per ``execute()`` call, in order —
+    mirrors the legacy ``call_idx`` counter the raw ``fake_fetch_all``
+    functions used, but driven by ``app.db.session.read_scope()`` instead."""
+
+    def __init__(self, results: list[_FakeResult] | None = None) -> None:
+        self.calls: list[Any] = []
+        self._results = list(results or [])
+        self._default = _FakeResult()
+
+    async def execute(self, stmt: Any) -> _FakeResult:
+        self.calls.append(stmt)
+        return self._results.pop(0) if self._results else self._default
+
+
+def _patch_read_scope(
+    monkeypatch: pytest.MonkeyPatch, results: list[_FakeResult] | None = None
+) -> _RecordingSession:
+    session = _RecordingSession(results)
+
+    @asynccontextmanager
+    async def fake_read_scope():
+        yield session
+
+    monkeypatch.setattr(db_session, "read_scope", fake_read_scope)
+    return session
+
 
 # ---------------------------------------------------------------------------
 # _consolidate_context: non-dup draft is written (personal scope)
@@ -41,14 +92,8 @@ async def test_consolidate_pair_writes_non_dup_drafts(
     ]
 
     written_calls: list[dict] = []
-    call_idx = [0]
 
-    async def fake_fetch_all(sql: str, params=None) -> list:
-        idx = call_idx[0]
-        call_idx[0] += 1
-        if idx == 0:
-            return messages  # first call = recent messages
-        return []  # second call = existing titles
+    _patch_read_scope(monkeypatch, [_FakeResult(rows=messages), _FakeResult(rows=[])])
 
     async def fake_existing_fps(
         *, owner_user_id: str, agent_id: str, scope: str, team_id, project_id
@@ -86,7 +131,6 @@ async def test_consolidate_pair_writes_non_dup_drafts(
             '"when_to_use":"when deploying","kind":"procedure"}]'
         )
 
-    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
     monkeypatch.setattr(
         "app.workflows.consolidate_agent_memory.existing_fingerprints",
         fake_existing_fps,
@@ -162,12 +206,8 @@ async def test_consolidate_pair_skips_dup_fingerprint(
     dup_fp = make_fingerprint("u1", "a1", "agent_user", "", dup_draft)
 
     written_calls: list = []
-    call_idx = [0]
 
-    async def fake_fetch_all(sql: str, params=None) -> list:
-        idx = call_idx[0]
-        call_idx[0] += 1
-        return messages if idx == 0 else []
+    _patch_read_scope(monkeypatch, [_FakeResult(rows=messages), _FakeResult(rows=[])])
 
     async def fake_existing_fps(
         *, owner_user_id: str, agent_id: str, scope: str, team_id, project_id
@@ -184,7 +224,6 @@ async def test_consolidate_pair_skips_dup_fingerprint(
             '"when_to_use":"when deploying","kind":"procedure"}]'
         )
 
-    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
     monkeypatch.setattr(
         "app.workflows.consolidate_agent_memory.existing_fingerprints",
         fake_existing_fps,
@@ -229,14 +268,12 @@ async def test_consolidate_pair_too_few_messages_returns_zero(
 
     write_called = [False]
 
-    async def fake_fetch_all(sql: str, params=None) -> list:
-        return few_messages
+    _patch_read_scope(monkeypatch, [_FakeResult(rows=few_messages)])
 
     async def fake_write(**kwargs) -> bool:
         write_called[0] = True
         return True
 
-    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
     monkeypatch.setattr(
         "app.workflows.consolidate_agent_memory.write_memory_row",
         fake_write,
@@ -269,10 +306,7 @@ async def test_enumerate_active_pairs_filters_by_min_messages(
         {"user_id": "u3", "agent_id": "a3", "msg_count": MIN_NEW_MESSAGES + 5},
     ]
 
-    async def fake_fetch_all(sql: str, params=None) -> list:
-        return rows
-
-    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
+    _patch_read_scope(monkeypatch, [_FakeResult(rows=rows)])
 
     pairs = await enumerate_active_pairs_step()
 
@@ -329,14 +363,8 @@ async def test_consolidate_context_project_scope_writes_with_context(
     ]
 
     written_calls: list[dict] = []
-    call_idx = [0]
 
-    async def fake_fetch_all(sql: str, params=None) -> list:
-        idx = call_idx[0]
-        call_idx[0] += 1
-        if idx == 0:
-            return messages
-        return []
+    _patch_read_scope(monkeypatch, [_FakeResult(rows=messages), _FakeResult(rows=[])])
 
     async def fake_existing_fps(
         *, owner_user_id: str, agent_id: str, scope: str, team_id, project_id
@@ -378,7 +406,6 @@ async def test_consolidate_context_project_scope_writes_with_context(
     async def fake_resolve(*args, **kwargs):
         return None
 
-    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
     monkeypatch.setattr(
         "app.workflows.consolidate_agent_memory.existing_fingerprints",
         fake_existing_fps,
@@ -423,14 +450,8 @@ async def test_consolidate_context_team_scope(
     ]
 
     written_calls: list[dict] = []
-    call_idx = [0]
 
-    async def fake_fetch_all(sql: str, params=None) -> list:
-        idx = call_idx[0]
-        call_idx[0] += 1
-        if idx == 0:
-            return messages
-        return []
+    _patch_read_scope(monkeypatch, [_FakeResult(rows=messages), _FakeResult(rows=[])])
 
     async def fake_existing_fps(
         *, owner_user_id: str, agent_id: str, scope: str, team_id, project_id
@@ -466,7 +487,6 @@ async def test_consolidate_context_team_scope(
     async def fake_resolve(*args, **kwargs):
         return None
 
-    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
     monkeypatch.setattr(
         "app.workflows.consolidate_agent_memory.existing_fingerprints",
         fake_existing_fps,
@@ -510,14 +530,8 @@ async def test_consolidate_context_personal_scope(
     ]
 
     written_calls: list[dict] = []
-    call_idx = [0]
 
-    async def fake_fetch_all(sql: str, params=None) -> list:
-        idx = call_idx[0]
-        call_idx[0] += 1
-        if idx == 0:
-            return messages
-        return []
+    _patch_read_scope(monkeypatch, [_FakeResult(rows=messages), _FakeResult(rows=[])])
 
     async def fake_existing_fps(
         *, owner_user_id: str, agent_id: str, scope: str, team_id, project_id
@@ -548,7 +562,6 @@ async def test_consolidate_context_personal_scope(
             '"when_to_use":"personal","kind":"fact"}]'
         )
 
-    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
     monkeypatch.setattr(
         "app.workflows.consolidate_agent_memory.existing_fingerprints",
         fake_existing_fps,
@@ -581,7 +594,8 @@ async def test_consolidate_context_personal_scope(
 async def test_enumerate_active_pairs_includes_context_columns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """enumerate_active_pairs_step passes through team_id / project_id from SQL."""
+    """enumerate_active_pairs_step passes through team_id / project_id from
+    the query."""
     from app.workflows.consolidate_agent_memory import (
         MIN_NEW_MESSAGES,
         enumerate_active_pairs_step,
@@ -612,10 +626,7 @@ async def test_enumerate_active_pairs_includes_context_columns(
         },
     ]
 
-    async def fake_fetch_all(sql: str, params=None) -> list:
-        return rows
-
-    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
+    _patch_read_scope(monkeypatch, [_FakeResult(rows=rows)])
 
     pairs = await enumerate_active_pairs_step()
 
@@ -648,8 +659,7 @@ async def test_consolidate_pair_enumerates_contexts(
 
     context_calls: list[tuple] = []
 
-    async def fake_fetch_all(sql: str, params=None) -> list:
-        return context_rows
+    _patch_read_scope(monkeypatch, [_FakeResult(rows=context_rows)])
 
     async def fake_consolidate_context(
         user_id: str, agent_id: str, team_id, project_id
@@ -657,7 +667,6 @@ async def test_consolidate_pair_enumerates_contexts(
         context_calls.append((user_id, agent_id, team_id, project_id))
         return {"written": 1, "skipped": 0}
 
-    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
     monkeypatch.setattr(
         "app.workflows.consolidate_agent_memory._consolidate_context",
         fake_consolidate_context,
@@ -697,7 +706,7 @@ async def test_trigger_consolidation_endpoint_maps_contexts() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Phase C0 (Task 2 — Important finding): _EXISTING_TITLES_SQL must be
+# Phase C0 (Task 2 — Important finding): the existing-titles read must be
 # context-scoped so project/team consolidation runs do NOT see titles from
 # the user's personal (or another team's) memories as already covered.
 # ---------------------------------------------------------------------------
@@ -707,8 +716,8 @@ async def test_trigger_consolidation_endpoint_maps_contexts() -> None:
 async def test_existing_titles_query_is_context_scoped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The SECOND fetch_all call (existing-titles query) must carry
-    team_id=10 and project_id=55 in its params dict when called with a
+    """The SECOND read_scope call (existing-titles query) must carry
+    team_id=10 and project_id=55 in its compiled params when called with a
     project context.  Without the fix the params only had user_id/agent_id,
     causing cross-context title bleed.
     """
@@ -721,17 +730,9 @@ async def test_existing_titles_query_is_context_scoped(
         {"role": "user", "content": f"msg {i}"} for i in range(MIN_NEW_MESSAGES)
     ]
 
-    # Capture every (sql, params) pair passed to db_engine.fetch_all.
-    fetch_calls: list[dict] = []
-    call_idx = [0]
-
-    async def fake_fetch_all(sql: str, params=None) -> list:
-        fetch_calls.append({"sql": sql, "params": dict(params) if params else {}})
-        idx = call_idx[0]
-        call_idx[0] += 1
-        if idx == 0:
-            return messages  # first call = recent messages
-        return []  # second call = existing titles (what we're testing)
+    session = _patch_read_scope(
+        monkeypatch, [_FakeResult(rows=messages), _FakeResult(rows=[])]
+    )
 
     async def fake_existing_fps(
         *, owner_user_id: str, agent_id: str, scope: str, team_id, project_id
@@ -751,7 +752,6 @@ async def test_existing_titles_query_is_context_scoped(
     async def fake_resolve(*args, **kwargs):
         return None
 
-    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
     monkeypatch.setattr(
         "app.workflows.consolidate_agent_memory.existing_fingerprints",
         fake_existing_fps,
@@ -771,24 +771,25 @@ async def test_existing_titles_query_is_context_scoped(
 
     await _consolidate_context("u1", "a1", team_id=10, project_id=55)
 
-    # Must have made exactly 2 fetch_all calls:
-    #   [0] = _RECENT_MESSAGES_SQL  (message load)
-    #   [1] = _EXISTING_TITLES_SQL  (title context for /dream prompt)
-    assert len(fetch_calls) == 2, (
-        f"Expected 2 fetch_all calls but got {len(fetch_calls)}: "
-        f"{[c['sql'][:40] for c in fetch_calls]}"
-    )
+    # Must have made exactly 2 read_scope().execute() calls:
+    #   [0] = recent-messages statement (message load)
+    #   [1] = existing-titles statement (title context for /dream prompt)
+    assert (
+        len(session.calls) == 2
+    ), f"Expected 2 read_scope calls but got {len(session.calls)}"
 
-    title_call_params = fetch_calls[1]["params"]
+    from sqlalchemy.dialects import postgresql
 
-    assert title_call_params.get("team_id") == 10, (
-        f"_EXISTING_TITLES_SQL must be scoped by team_id=10; "
-        f"got params={title_call_params}"
-    )
-    assert title_call_params.get("project_id") == 55, (
-        f"_EXISTING_TITLES_SQL must be scoped by project_id=55; "
-        f"got params={title_call_params}"
-    )
+    title_stmt = session.calls[1]
+    compiled = title_stmt.compile(dialect=postgresql.dialect())
+    params = dict(compiled.params)
+
+    assert (
+        10 in params.values()
+    ), f"existing-titles query must be scoped by team_id=10; got params={params}"
+    assert (
+        55 in params.values()
+    ), f"existing-titles query must be scoped by project_id=55; got params={params}"
 
 
 # ---------------------------------------------------------------------------
@@ -822,14 +823,8 @@ async def test_consolidate_context_team_scope_creates_proposal(
     messages = [
         {"role": "user", "content": f"msg {i}"} for i in range(MIN_NEW_MESSAGES)
     ]
-    call_idx = [0]
 
-    async def fake_fetch_all(sql: str, params=None) -> list:
-        idx = call_idx[0]
-        call_idx[0] += 1
-        if idx == 0:
-            return messages
-        return []
+    _patch_read_scope(monkeypatch, [_FakeResult(rows=messages), _FakeResult(rows=[])])
 
     async def fake_existing_fps(
         *, owner_user_id: str, agent_id: str, scope: str, team_id, project_id
@@ -868,7 +863,6 @@ async def test_consolidate_context_team_scope_creates_proposal(
     mock_evaluate = AsyncMock(return_value=verdict)
     mock_insert = AsyncMock(return_value=True)
 
-    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
     monkeypatch.setattr(
         "app.workflows.consolidate_agent_memory.existing_fingerprints",
         fake_existing_fps,
@@ -944,14 +938,8 @@ async def test_consolidate_context_personal_scope_never_runs_gate(
     messages = [
         {"role": "user", "content": f"msg {i}"} for i in range(MIN_NEW_MESSAGES)
     ]
-    call_idx = [0]
 
-    async def fake_fetch_all(sql: str, params=None) -> list:
-        idx = call_idx[0]
-        call_idx[0] += 1
-        if idx == 0:
-            return messages
-        return []
+    _patch_read_scope(monkeypatch, [_FakeResult(rows=messages), _FakeResult(rows=[])])
 
     async def fake_existing_fps(
         *, owner_user_id: str, agent_id: str, scope: str, team_id, project_id
@@ -983,7 +971,6 @@ async def test_consolidate_context_personal_scope_never_runs_gate(
     mock_evaluate = AsyncMock()
     mock_insert = AsyncMock()
 
-    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
     monkeypatch.setattr(
         "app.workflows.consolidate_agent_memory.existing_fingerprints",
         fake_existing_fps,
@@ -1037,20 +1024,15 @@ async def test_consolidate_pair_sums_proposed_count(
         {"team_id": None, "project_id": None},
     ]
 
-    call_count = [0]
-
-    async def fake_fetch_all(sql: str, params=None) -> list:
-        return context_rows
+    _patch_read_scope(monkeypatch, [_FakeResult(rows=context_rows)])
 
     async def fake_consolidate_context(
         user_id: str, agent_id: str, team_id, project_id
     ) -> dict:
-        call_count[0] += 1
         if team_id == 10:
             return {"written": 1, "skipped": 0, "proposed": 1}
         return {"written": 1, "skipped": 0, "proposed": 0}
 
-    monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
     monkeypatch.setattr(
         "app.workflows.consolidate_agent_memory._consolidate_context",
         fake_consolidate_context,
@@ -1094,6 +1076,10 @@ async def test_trigger_consolidation_endpoint_maps_proposed() -> None:
 
 # ---------------------------------------------------------------------------
 # Phase C1 (Task 3): write_memory_row_returning_id repository unit test
+#
+# Out of B4 Task 1 scope: agent_memory_repository.py itself is not one of
+# the 6 migrated files, so this repository call still goes through its own
+# write_scope() usage — untouched by this batch.
 # ---------------------------------------------------------------------------
 
 

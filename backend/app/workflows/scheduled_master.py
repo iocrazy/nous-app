@@ -54,6 +54,35 @@ _AUTO_PAUSE_THRESHOLD = 5
 _DEFAULT_STALE_AFTER_MINUTES = 60
 
 
+def _due_schedules_stmt(now: datetime):
+    """Statement for the due-rows scan (enabled=true + next_fire_at <= now).
+
+    ``select(*UserSchedules.__table__.c)`` — NOT ``select(UserSchedules)``.
+    The entity-level form maps each result row to a single 'UserSchedules'
+    key (the ORM instance), not one key per column; ``.mappings()`` on it
+    then yields ``RowMapping({'UserSchedules': <instance>})`` instead of a
+    column-keyed dict, so every ``row.get('task_type')``/``row['id']``
+    consumer below would silently return None / raise KeyError (legacy
+    ``SELECT *`` returned a column-keyed dict). The column-list form
+    reproduces that shape exactly — verified against a real SQLAlchemy
+    Result in tests/test_scheduled_master_row_shape_e2e.py (not just the
+    compiled SQL text, which looks identical either way).
+    """
+    from sqlalchemy import select
+
+    from app.models import UserSchedules
+
+    return (
+        select(*UserSchedules.__table__.c)
+        .where(
+            UserSchedules.enabled.is_(True),
+            UserSchedules.next_fire_at <= now,
+        )
+        .order_by(UserSchedules.next_fire_at)
+        .limit(_BATCH_SIZE)
+    )
+
+
 @DBOS.step()
 async def fire_due_schedules_step() -> Dict[str, Any]:
     """Scan user_schedules for due rows; dispatch each; advance
@@ -61,7 +90,7 @@ async def fire_due_schedules_step() -> Dict[str, Any]:
     `orders` — routine dispatch orders the WORKFLOW body must start
     (DBOS forbids start_workflow from inside a step — the empty-string
     AssertionError of PR #495; never dispatch workflows in here)."""
-    # Direct PG via SQLAlchemy engine (no httpx) — supabase-py's PostgREST
+    # Direct PG via the SQLAlchemy engine (no httpx) — supabase-py's PostgREST
     # path leaked a CLOSE_WAIT connection per call (Issue #199 Bug C).
     from app.db import engine as db_engine
 
@@ -72,14 +101,13 @@ async def fire_due_schedules_step() -> Dict[str, Any]:
 
     now = datetime.now(timezone.utc)
 
-    # Pull due rows. enabled=true + next_fire_at <= now.
+    from app.db.session import read_scope
+
+    # Pull due rows. See _due_schedules_stmt's docstring for why this must be
+    # a column-level select, not select(UserSchedules).
     try:
-        rows = await db_engine.fetch_all(
-            "SELECT * FROM public.user_schedules "
-            "WHERE enabled = true AND next_fire_at <= :now "
-            "ORDER BY next_fire_at LIMIT :limit",
-            {"now": now, "limit": _BATCH_SIZE},
-        )
+        async with read_scope() as session:
+            rows = (await session.execute(_due_schedules_stmt(now))).mappings().all()
     except Exception as exc:
         logger.opt(exception=True).warning(f"[scheduled_master] fetch failed: {exc}")
         return {"due": 0, "fired": 0, "skipped": 0, "errors": 1}
@@ -146,34 +174,43 @@ async def _record_dispatch_failure(row: Dict[str, Any], err: str) -> bool:
     auto-pause the row (enabled=false, paused_at=now, pause_reason=...) so a
     permanently broken routine stops firing every minute. Returns True when
     the row was auto-paused."""
-    from app.db import engine as db_engine
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import UserSchedules
 
     new_consec = (row.get("consecutive_fails") or 0) + 1
     if new_consec >= _AUTO_PAUSE_THRESHOLD:
         reason = f"auto-paused after {new_consec} consecutive failures: {err[:200]}"
-        await db_engine.execute(
-            "UPDATE public.user_schedules SET fail_count = fail_count + 1, "
-            "consecutive_fails = :cf, last_error = :err, enabled = false, "
-            "paused_at = :now, pause_reason = :reason WHERE id = :id",
-            {
-                "cf": new_consec,
-                "err": err[:500],
-                "now": datetime.now(timezone.utc),
-                "reason": reason[:500],
-                "id": row["id"],
-            },
-        )
+        async with write_scope() as session:
+            await session.execute(
+                update(UserSchedules)
+                .where(UserSchedules.id == row["id"])
+                .values(
+                    fail_count=UserSchedules.fail_count + 1,
+                    consecutive_fails=new_consec,
+                    last_error=err[:500],
+                    enabled=False,
+                    paused_at=datetime.now(timezone.utc),
+                    pause_reason=reason[:500],
+                )
+            )
         logger.warning(
             f"[scheduled_master] schedule {row.get('id')} auto-paused after "
             f"{new_consec} consecutive failures"
         )
         return True
 
-    await db_engine.execute(
-        "UPDATE public.user_schedules SET fail_count = fail_count + 1, "
-        "consecutive_fails = :cf, last_error = :err WHERE id = :id",
-        {"cf": new_consec, "err": err[:500], "id": row["id"]},
-    )
+    async with write_scope() as session:
+        await session.execute(
+            update(UserSchedules)
+            .where(UserSchedules.id == row["id"])
+            .values(
+                fail_count=UserSchedules.fail_count + 1,
+                consecutive_fails=new_consec,
+                last_error=err[:500],
+            )
+        )
     return False
 
 
@@ -182,13 +219,18 @@ async def _reset_consecutive_fails(row: Dict[str, Any]) -> None:
     already zero (the common case) to avoid a needless write every tick."""
     if (row.get("consecutive_fails") or 0) == 0:
         return
-    from app.db import engine as db_engine
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import UserSchedules
 
     try:
-        await db_engine.execute(
-            "UPDATE public.user_schedules SET consecutive_fails = 0 WHERE id = :id",
-            {"id": row["id"]},
-        )
+        async with write_scope() as session:
+            await session.execute(
+                update(UserSchedules)
+                .where(UserSchedules.id == row["id"])
+                .values(consecutive_fails=0)
+            )
     except Exception as exc:
         logger.warning(
             f"[scheduled_master] reset consecutive_fails failed (non-fatal): {exc}"
@@ -228,7 +270,10 @@ async def _dispatch_one(row: Dict[str, Any]) -> Dict[str, Any]:
     tz_name = row.get("timezone") or "UTC"
     cron_expr = row.get("cron_expr") or "* * * * *"
 
-    from app.db import engine as db_engine
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import UserSchedules
 
     now = datetime.now(timezone.utc)
     prev_fire_at = row.get("next_fire_at")
@@ -244,11 +289,15 @@ async def _dispatch_one(row: Dict[str, Any]) -> Dict[str, Any]:
     if stale_after is None:
         stale_after = _DEFAULT_STALE_AFTER_MINUTES
     if _is_stale(prev_fire_at, now, stale_after):
-        await db_engine.execute(
-            "UPDATE public.user_schedules SET next_fire_at = :next, "
-            "skipped_count = skipped_count + 1 WHERE id = :id",
-            {"next": next_at, "id": sched_id},
-        )
+        async with write_scope() as session:
+            await session.execute(
+                update(UserSchedules)
+                .where(UserSchedules.id == sched_id)
+                .values(
+                    next_fire_at=next_at,
+                    skipped_count=UserSchedules.skipped_count + 1,
+                )
+            )
         logger.info(
             f"[scheduled_master] schedule {sched_id} fire discarded as stale "
             f"(due {prev_fire_at}, now {now}, >{stale_after}m) — "
@@ -263,11 +312,15 @@ async def _dispatch_one(row: Dict[str, Any]) -> Dict[str, Any]:
     if task_type != "agent_routine":
         workflow_callable = await _resolve_workflow_callable(task_type)
         if workflow_callable is None:
-            await db_engine.execute(
-                "UPDATE public.user_schedules SET next_fire_at = :next, "
-                "skipped_count = skipped_count + 1 WHERE id = :id",
-                {"next": next_at, "id": sched_id},
-            )
+            async with write_scope() as session:
+                await session.execute(
+                    update(UserSchedules)
+                    .where(UserSchedules.id == sched_id)
+                    .values(
+                        next_fire_at=next_at,
+                        skipped_count=UserSchedules.skipped_count + 1,
+                    )
+                )
             logger.warning(
                 f"[scheduled_master] unknown task_type={task_type!r} for "
                 f"schedule {sched_id} — skipping"
@@ -281,17 +334,17 @@ async def _dispatch_one(row: Dict[str, Any]) -> Dict[str, Any]:
     # on (id, next_fire_at). Acceptable here because task_type dispatchers are
     # idempotent (agent_routine via the unique index; generic via the pinned
     # workflow_id below) so a double-fire dedups.
-    await db_engine.execute(
-        "UPDATE public.user_schedules SET last_fired_at = :fired, "
-        "next_fire_at = :next, fire_count = :fc, last_error = NULL "
-        "WHERE id = :id",
-        {
-            "fired": now,
-            "next": next_at,
-            "fc": (row.get("fire_count") or 0) + 1,
-            "id": sched_id,
-        },
-    )
+    async with write_scope() as session:
+        await session.execute(
+            update(UserSchedules)
+            .where(UserSchedules.id == sched_id)
+            .values(
+                last_fired_at=now,
+                next_fire_at=next_at,
+                fire_count=(row.get("fire_count") or 0) + 1,
+                last_error=None,
+            )
+        )
 
     # paperclip R1: agent routines don't dispatch a media workflow — a fire
     # creates an issue assigned to the agent (origin_kind='routine') and
@@ -362,8 +415,6 @@ async def _fire_agent_routine(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     import json as _json
     import uuid as _uuid
 
-    from app.db import engine as db_engine
-
     payload = row.get("payload") or {}
     if isinstance(payload, str):  # asyncpg may hand jsonb back as str
         payload = _json.loads(payload)
@@ -386,32 +437,48 @@ async def _fire_agent_routine(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # dispatch failure) instead of creating + dispatching more paid agent work.
     # An unresolvable team yields is_team_over_budget(None) == False, so the
     # gate is a no-op for users without a personal team / budget row.
+    from sqlalchemy import select, text, update
+
+    from app.db.session import read_scope, write_scope
+    from app.models import Teams, UserSchedules
     from app.services.ai_usage import is_team_over_budget
 
-    budget_team_id = await db_engine.fetch_val(
-        "SELECT id FROM public.teams "
-        "WHERE owner_id = CAST(:uid AS uuid) AND kind = 'personal' LIMIT 1",
-        {"uid": str(user_id)},
-    )
+    async with read_scope() as session:
+        budget_team_id = (
+            await session.execute(
+                select(Teams.id)
+                .where(Teams.owner_id == str(user_id), Teams.kind == "personal")
+                .limit(1)
+            )
+        ).scalar()
     if await is_team_over_budget(budget_team_id):
-        await db_engine.execute(
-            "UPDATE public.user_schedules "
-            "SET skipped_count = skipped_count + 1 WHERE id = :id",
-            {"id": sched_id},
-        )
+        async with write_scope() as session:
+            await session.execute(
+                update(UserSchedules)
+                .where(UserSchedules.id == sched_id)
+                .values(skipped_count=UserSchedules.skipped_count + 1)
+            )
         logger.info(
             f"[scheduled_master] routine {sched_id} budget-paused — team "
             f"{budget_team_id} over monthly AI budget; fire skipped"
         )
         return None
 
+    from app.models import AiAgents, Issues
+
     # Delivery gate: previous fire's issue still open → skip quietly.
     last_issue_id = payload.get("last_issue_id")
     if policy == "skip_if_active" and last_issue_id:
-        prev = await db_engine.fetch_one(
-            "SELECT status FROM public.issues WHERE id = :iid",
-            {"iid": int(last_issue_id)},
-        )
+        async with read_scope() as session:
+            prev = (
+                (
+                    await session.execute(
+                        select(Issues.status).where(Issues.id == int(last_issue_id))
+                    )
+                )
+                .mappings()
+                .first()
+            )
         if prev and prev.get("status") not in _ROUTINE_TERMINAL_ISSUE_STATUSES:
             logger.info(
                 f"[scheduled_master] routine {sched_id} skipped — previous "
@@ -419,10 +486,18 @@ async def _fire_agent_routine(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             )
             return
 
-    agent = await db_engine.fetch_one(
-        "SELECT id, name FROM public.ai_agents WHERE slug = :slug",
-        {"slug": agent_slug},
-    )
+    async with read_scope() as session:
+        agent = (
+            (
+                await session.execute(
+                    select(AiAgents.id, AiAgents.name).where(
+                        AiAgents.slug == agent_slug
+                    )
+                )
+            )
+            .mappings()
+            .first()
+        )
     if not agent:
         raise RuntimeError(f"agent_routine {sched_id}: agent '{agent_slug}' not found")
 
@@ -479,14 +554,17 @@ async def _fire_agent_routine(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # the actual dispatch (same path as POST /issues/{id}/dispatch).
     # dbos_workflow_id is guarded by the mig-170 column-allowlist trigger
     # (service_role only) — and the repository writes via the app-role engine
-    # too, so neither raw execute nor repo.update passes. execute_as_service_role
-    # (SET LOCAL ROLE service_role) is the established pattern (see
+    # too, so neither a plain ORM update nor repo.update passes. SET LOCAL
+    # ROLE service_role inside write_scope() is the established pattern (see
     # issue_lifecycle.py execution-field writes).
     workflow_id = f"issue-{issue_id}-{_uuid.uuid4().hex[:12]}"
-    await db_engine.execute_as_service_role(
-        "UPDATE public.issues SET dbos_workflow_id = :wf WHERE id = :iid",
-        {"wf": workflow_id, "iid": issue_id},
-    )
+    async with write_scope() as session:
+        await session.execute(text("SET LOCAL ROLE service_role"))
+        await session.execute(
+            update(Issues)
+            .where(Issues.id == issue_id)
+            .values(dbos_workflow_id=workflow_id)
+        )
 
     # Task Center visibility: create a task_tracking row pinned to the
     # workflow id — the mirror trigger syncs phase/status as execute_issue
@@ -515,11 +593,12 @@ async def _fire_agent_routine(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # Stash last_issue_id for the next fire's delivery gate (merge, never
     # replace — the payload also carries the routine's config).
     merged = {**payload, "last_issue_id": issue_id}
-    await db_engine.execute(
-        "UPDATE public.user_schedules SET payload = CAST(:p AS jsonb) "
-        "WHERE id = :id",
-        {"p": _json.dumps(merged), "id": sched_id},
-    )
+    async with write_scope() as session:
+        await session.execute(
+            update(UserSchedules)
+            .where(UserSchedules.id == sched_id)
+            .values(payload=merged)
+        )
     logger.info(
         f"[scheduled_master] routine {sched_id} fired → issue {issue_id} "
         f"(agent={agent_slug}, wf={workflow_id}) — dispatch deferred to workflow"
@@ -613,13 +692,20 @@ async def record_routine_dispatch_error_step(sched_id: str, err: str) -> None:
     """Persist a routine dispatch failure onto its schedule row so the
     Routines UI surfaces it (the in-step error path can't see workflow-
     level dispatch failures)."""
-    from app.db import engine as db_engine
+    from sqlalchemy import update
 
-    await db_engine.execute(
-        "UPDATE public.user_schedules SET fail_count = fail_count + 1, "
-        "last_error = :err WHERE id = :id",
-        {"err": err[:500], "id": sched_id},
-    )
+    from app.db.session import write_scope
+    from app.models import UserSchedules
+
+    async with write_scope() as session:
+        await session.execute(
+            update(UserSchedules)
+            .where(UserSchedules.id == sched_id)
+            .values(
+                fail_count=UserSchedules.fail_count + 1,
+                last_error=err[:500],
+            )
+        )
 
 
 async def _dispatch_routine_orders(

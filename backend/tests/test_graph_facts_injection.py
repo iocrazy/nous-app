@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from typing import Any
 from uuid import UUID
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 from app.services.ai.memory.graph_memory import (
     GraphFact,
@@ -15,6 +18,49 @@ from app.services.ai.prompts.prompt_composer import (
     CACHE_BOUNDARY_MARKER,
     PromptComposer,
 )
+
+
+def _compile(stmt: Any) -> tuple[str, dict[str, Any]]:
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    return str(compiled), dict(compiled.params)
+
+
+class _FakeResult:
+    def __init__(self, row: Any) -> None:
+        self._row = row
+
+    def first(self) -> Any:  # noqa: D102
+        return self._row
+
+
+class _RecordingSession:
+    def __init__(self, row: Any) -> None:
+        self._result = _FakeResult(row)
+        self.calls: list[tuple[str, dict]] = []
+
+    async def execute(self, stmt: Any) -> Any:  # noqa: D102
+        self.calls.append(_compile(stmt))
+        return self._result
+
+
+def _install_read_scope_row(
+    monkeypatch: pytest.MonkeyPatch, *, row: Any
+) -> tuple[_RecordingSession, list[tuple[str, dict]]]:
+    """Patch app.db.session.read_scope to yield a session whose single
+    execute() returns *row* (a plain tuple, matching a single-column SELECT,
+    or None for "missing"). Used by the _resolve_session_project tests
+    (ai_library_chat_wiring.py, Phase B4 ORM conversion)."""
+    import app.db.session as db_session
+
+    session = _RecordingSession(row)
+
+    @asynccontextmanager
+    async def fake_read_scope():
+        yield session
+
+    monkeypatch.setattr(db_session, "read_scope", fake_read_scope)
+    return session, session.calls
+
 
 AGENT = {
     "id": "00000000-0000-0000-0000-000000000001",
@@ -153,20 +199,20 @@ async def test_resolve_session_project_binds_int(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Conversations-only lookup (Task 6 collapsed the compatibility layer —
-    the legacy ai_sessions fallback this used to try is gone)."""
+    the legacy ai_sessions fallback this used to try is gone).
+
+    ORM (Phase B4): the raw fetch_one became
+    ``select(Conversations.project_id).where(...)`` through
+    ``app.db.session.read_scope()``.
+    """
     from app.services.ai.chat import ai_library_chat_wiring as wiring
 
-    calls: list[dict] = []
-
-    async def fake_fetch_one(sql: str, params=None):
-        calls.append({"sql": sql, "params": params})
-        return {"project_id": 777}
-
-    monkeypatch.setattr("app.db.engine.fetch_one", fake_fetch_one)
+    session, calls = _install_read_scope_row(monkeypatch, row=(777,))
     assert await wiring._resolve_session_project("888") == "777"
     assert len(calls) == 1
-    assert "public.conversations" in calls[0]["sql"]
-    assert calls[0]["params"] == {"sid": 888}
+    sql, binds = calls[0]
+    assert "public.conversations" in sql
+    assert binds == {"id_1": 888}
 
 
 @pytest.mark.asyncio
@@ -177,16 +223,10 @@ async def test_resolve_session_project_returns_none_when_null_project(
     project" answer."""
     from app.services.ai.chat import ai_library_chat_wiring as wiring
 
-    calls: list[dict] = []
-
-    async def fake_fetch_one(sql: str, params=None):
-        calls.append({"sql": sql, "params": params})
-        return {"project_id": None}
-
-    monkeypatch.setattr("app.db.engine.fetch_one", fake_fetch_one)
+    session, calls = _install_read_scope_row(monkeypatch, row=(None,))
     assert await wiring._resolve_session_project("888") is None
     assert len(calls) == 1
-    assert "public.conversations" in calls[0]["sql"]
+    assert "public.conversations" in calls[0][0]
 
 
 @pytest.mark.asyncio
@@ -195,10 +235,7 @@ async def test_resolve_session_project_returns_none_when_session_missing(
 ) -> None:
     from app.services.ai.chat import ai_library_chat_wiring as wiring
 
-    async def fake_fetch_one(sql: str, params=None):
-        return None
-
-    monkeypatch.setattr("app.db.engine.fetch_one", fake_fetch_one)
+    _install_read_scope_row(monkeypatch, row=None)
     assert await wiring._resolve_session_project("888") is None
 
 

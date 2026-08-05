@@ -354,11 +354,15 @@ async def test_workflow_resolves_team_workspace(
 async def test_resolve_team_workspace_handles_lookup_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from contextlib import asynccontextmanager
+
+    import app.db.session as db_session
     from app.workflows.write_memory import _resolve_team_workspace
 
-    class BoomEngine:
-        async def fetch_one(self, *a, **k):
-            raise RuntimeError("db down")
+    @asynccontextmanager
+    async def boom_read_scope():
+        raise RuntimeError("db down")
+        yield  # pragma: no cover — unreachable, keeps this a generator
 
-    monkeypatch.setattr("app.db.engine.fetch_one", BoomEngine().fetch_one)
+    monkeypatch.setattr(db_session, "read_scope", boom_read_scope)
     assert await _resolve_team_workspace("999") is None

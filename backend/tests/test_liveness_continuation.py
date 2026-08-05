@@ -3,41 +3,91 @@
 _recover_from_stuck must atomically flip stuck→running AND bump
 continuation_attempt, so a run that keeps flapping stuck→running burns through
 MAX_CONTINUATIONS and is finally judged dead (closes the flap-forever hole).
+
+ORM (Phase B4): _recover_from_stuck now writes via app.db.session.write_scope()
++ SQLAlchemy Core update(AgentRuns) instead of a raw db_engine.execute() call —
+the harness patches write_scope and inspects the compiled statement.
+
+Final review (2026-08-05, F3): _transition's CAS guard — the module
+docstring's stated correctness basis for "at-most-once" writes, replacing an
+advisory lock — previously had zero test coverage (a dropped
+``AgentRuns.liveness_state == expected`` guard went unnoticed by the whole
+suite). test_transition_cas_guards_on_expected_state below closes that gap.
 """
 
 from __future__ import annotations
 
-import pytest
+from contextlib import asynccontextmanager
 
+import pytest
+from sqlalchemy.dialects import postgresql
+
+import app.db.session as db_session
 from app.workflows import liveness_scanner as ls
+
+
+class _FakeResult:
+    rowcount = 1
+
+
+class _RecordingSession:
+    def __init__(self) -> None:
+        self.calls: list = []
+
+    async def execute(self, stmt):
+        compiled = stmt.compile(dialect=postgresql.dialect())
+        self.calls.append((str(compiled), dict(compiled.params)))
+        return _FakeResult()
 
 
 @pytest.mark.asyncio
 async def test_recover_from_stuck_bumps_continuation_and_cas_guards(monkeypatch):
-    captured = {}
+    session = _RecordingSession()
 
-    class _FakeEngine:
-        async def execute(self, sql, params):
-            captured["sql"] = sql
-            captured["params"] = params
-            return 1
+    @asynccontextmanager
+    async def fake_write_scope():
+        yield session
 
-    monkeypatch.setattr("app.db.engine", _FakeEngine(), raising=False)
-    # _recover_from_stuck imports `from app.db import engine as db_engine`
-    import app.db as _appdb
-
-    monkeypatch.setattr(_appdb, "engine", _FakeEngine(), raising=False)
+    monkeypatch.setattr(db_session, "write_scope", fake_write_scope)
 
     await ls._recover_from_stuck(42)
 
-    sql = captured["sql"]
+    assert len(session.calls) == 1
+    sql, binds = session.calls[0]
+    assert "agent_runs" in sql
     # increments the counter
-    assert "continuation_attempt = continuation_attempt + 1" in sql
+    assert "continuation_attempt=(public.agent_runs.continuation_attempt +" in sql
     # flips to running
-    assert "liveness_state = 'running'" in sql
+    assert binds["liveness_state"] == "running"
     # CAS-guards on the stuck precondition (idempotent under concurrent scans)
-    assert "liveness_state = 'stuck'" in sql
-    assert captured["params"] == {"id": 42}
+    assert binds["liveness_state_1"] == "stuck"
+    assert binds["id_1"] == 42
+
+
+@pytest.mark.asyncio
+async def test_transition_cas_guards_on_expected_state(monkeypatch):
+    """_transition's CAS UPDATE sets liveness_state=<target> but GUARDS on
+    liveness_state=<expected> — same column name on both sides of a
+    running->silent transition. Without the guard, two concurrent scanner
+    ticks could both apply a stale transition (the "at-most-once write"
+    correctness basis the module docstring claims, replacing an advisory
+    lock)."""
+    session = _RecordingSession()
+
+    @asynccontextmanager
+    async def fake_write_scope():
+        yield session
+
+    monkeypatch.setattr(db_session, "write_scope", fake_write_scope)
+
+    await ls._transition(7, "running", "silent")
+
+    assert len(session.calls) == 1
+    sql, binds = session.calls[0]
+    assert "agent_runs" in sql
+    assert binds["liveness_state"] == "silent"  # SET target
+    assert binds["liveness_state_1"] == "running"  # WHERE guard — distinct key
+    assert binds["id_1"] == 7
 
 
 def test_should_auto_continue_is_gone():
