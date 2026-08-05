@@ -545,6 +545,25 @@ Schema (schemas/)      — Pydantic 请求/响应模型
 - **回滚只回镜像，不回配置**。锚点是 docker image tag，而 compose 文件、`nginx-gateway/` 模板来自本次 checkout。所以「compose/配置改错导致 smoke 失败」这一类，回滚后仍会用同一份坏配置重启，需人工介入。`gateway`（上游 nginx 镜像 + 仓库配置）完全不在回滚覆盖内。
 - **验收口径必须探 `/api/v1/readyz`，不是 `/health` 也不是 `docker ps`**。见下方「验收纪律」。
 
+### 构建可复现性与磁盘回收（2026-08-05 立约）
+
+同一天两次部署接连挂在 `Build & restart backend stack`，失败点不同（一次 crates.io `SSL_ERROR_SYSCALL`，一次 apt 跑满 986 秒），病根是同一个：**构建要从国外源下载几百 MB，而这台机器拉不动**。平时不出事只是因为那些层一直命中缓存。
+
+三条现在是硬约定：
+
+1. **基础镜像必须按 digest pin，不用浮动 tag**。`FROM python:3.13-slim` 这类写法意味着上游一推安全快照，**下面每一层缓存全部失效** —— 包括装 chromium + ffmpeg + CJK 字体那层。升级基础镜像应该是一次明确的、可 review 的改动，而不是某天悄悄发生。取新 digest：
+   ```bash
+   docker buildx imagetools inspect python:3.13-slim --format '{{.Manifest.Digest}}'
+   ```
+
+2. **外网源走国内镜像，且用 `ARG` 可覆盖**。实测（gpupc 直连）：`deb.debian.org` 0.29 MB/s vs `mirrors.aliyun.com` 8.1 MB/s（28×）；crates.io **拉不动真实 crate**（返回 277 字节错误体），rsproxy.cn 正常。Dockerfile 里是 `APT_MIRROR` / `CARGO_MIRROR` 两个 ARG，海外构建传空值或官方域名即可回退。注意 Debian 13 用 deb822 格式，要改的是 `/etc/apt/sources.list.d/debian.sources` 而非经典 `sources.list`。
+
+3. **磁盘回收是部署链的一环，不是想起来才做的运维动作**。`Tag current images as rollback point` 会让**上上个**版本失去全部 tag 变成 dangling，而在此之前没有任何人回收它 —— 增长率就是「部署频率 × 镜像大小(~6GB)」。2026-08-05 实测已积到 166GB dangling 镜像 + 62GB 可回收缓存。`deploy-gpu.yml` 现在有两步兜住：
+   - **`Disk guard`**（构建前）：可用 <150GB 就先回收。空间见底的表现**不是**"磁盘满"这种好认的错，而是 buildkit 悄悄 GC 掉构建缓存，于是下次构建从零重下 —— 正是上面那两次超时的成因。
+   - **`Reclaim disk`**（`if: success()`）：清 48h 以上的 dangling 镜像 + 缓存上限 60GB。只在成功后跑，失败时保留现场；全部 `|| true`，回收失败不该把一次成功的部署判成失败。
+
+   保留 48h 而不是全清，是为了「`:rollback` 本身也坏了」时还能手动退到更早一版。`:local` / `:rollback` 带 tag，天然不在 dangling 之列，不会被误清（已验证）。
+
 ### 已退役的 NAS 老线（⚠️ 扳手当前是坏的）
 
 `deploy-backend.yml`（ACR + watchtower → `mediahub-app-backend/worker`）与 `deploy-admin.yml` 已去掉 push 自动触发，只留 `workflow_dispatch`。

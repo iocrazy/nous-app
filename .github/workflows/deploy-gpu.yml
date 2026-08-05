@@ -40,6 +40,23 @@ jobs:
       # 全是绝对路径;build context `../..` 在任何 checkout 下同样成立。
       - uses: actions/checkout@v4
 
+      # 构建前的容量守卫。每次部署会产出一个 ~6GB 的镜像,空间见底时的表现
+      # **不是**"磁盘满"这种好认的错,而是 buildkit 悄悄 GC 掉构建缓存 ——
+      # 于是下一次构建要从零重下 chromium/ffmpeg/crates,在这台机器的出网速度
+      # 下就是 2026-08-05 那两次超时失败。宁可在这里花 30 秒回收。
+      - name: Disk guard
+        run: |
+          avail() { df -BG --output=avail / | tail -1 | tr -dc '0-9'; }
+          BEFORE=$(avail)
+          echo "可用空间: ${BEFORE}GB"
+          # 150GB:一次完整构建(镜像 ~6GB + 中间层 + 依赖下载)的数倍余量。
+          if [ "$BEFORE" -lt 150 ]; then
+            echo "::warning::可用 ${BEFORE}GB < 150GB —— 构建前提前回收"
+            docker image prune -f || true
+            docker builder prune -f --keep-storage 60GB || true
+            echo "回收后: $(avail)GB"
+          fi
+
       # smoke 失败时要能退回上一个镜像,所以先留锚点。
       # `|| true`:首次部署时对应的 :local 还不存在。
       # ⚠️ 本 job 会换掉的**每一个**自建镜像都必须在这里留锚点,否则回滚只回一半。
@@ -149,3 +166,24 @@ jobs:
             fi
             sleep 3
           done
+
+      # 部署成功后回收。这一步补上了这条链一直缺的环节:
+      # `tag :local -> :rollback` 会让**上上个**版本失去全部 tag 变成 dangling,
+      # 而没有任何人回收它。增长率 = 部署频率 x 镜像大小(~6GB),2026-08-05 实测
+      # 已积到 166GB dangling 镜像 + 62GB 可回收缓存。
+      #
+      # 只在 success() 跑:失败时保留现场便于诊断,也不去动回滚要用的东西。
+      # 全部 `|| true` —— 回收不成功不该把一次成功的部署判成失败。
+      - name: Reclaim disk
+        if: success()
+        run: |
+          avail() { df -BG --output=avail / | tail -1 | tr -dc '0-9'; }
+          BEFORE=$(avail)
+          # until=48h 而不是全清:留两天的历史镜像,万一 :rollback 本身也坏了
+          # 还能手动退到更早的一版。:local / :rollback 带 tag,不在 dangling 之列,
+          # 不受影响(已验证)。
+          docker image prune -f --filter "until=48h" || true
+          # 缓存上限 60GB。国内源就位后从零重建的代价可接受,不必囤两百 G。
+          docker builder prune -f --keep-storage 60GB || true
+          echo "回收: ${BEFORE}GB -> $(avail)GB 可用"
+          docker system df || true
