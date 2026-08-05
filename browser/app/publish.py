@@ -38,7 +38,6 @@ from .assets import (
     validate_media_url,
 )
 from .config import get_settings
-from .platforms import get_validator
 from .redaction import scrub
 from .schemas import (
     EnvironmentConfig,
@@ -233,6 +232,14 @@ async def run_publish(
             ),
             platform,
         )
+
+    # Imported here, not at module scope: `platforms/__init__` imports every
+    # platform module, and `douyin_publish` imports this one for `PublishJob` /
+    # `Deadline`. At module scope that cycle resolves only when `app.platforms`
+    # happens to be imported first, so `import app.publish` on a cold
+    # interpreter (a test, a script, a future module) fails on an import order
+    # nobody chose.
+    from .platforms import get_validator
 
     validator = get_validator(platform)
     if validator is None:

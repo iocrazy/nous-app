@@ -152,7 +152,13 @@ class PublishIntent:
             "content_type": self.content_type,
             "media": [m.to_payload() for m in self.media],
             "title": self.title,
-            "description": self.description,
+            # 空描述发 ``""`` 而不是 ``null``：浏览器侧把它声明为
+            # ``description: str = ""``（非 Optional），送 null 会被 pydantic
+            # 拒成 422 —— 而 422 回的是 FastAPI 的 detail 形状而非 SessionResult，
+            # 于是"没写简介"这种最常见的批次会被记成基建失败。两端语义等价
+            # （空串即没有简介），所以在发出前抹平，而不是让契约留一个只在
+            # 少数字段上成立的可空性。
+            "description": self.description or "",
             "topics": list(self.topics),
             "visibility": self.visibility,
             "allow_download": self.allow_download,

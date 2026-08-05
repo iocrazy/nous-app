@@ -346,6 +346,8 @@ async def _settle_session_outcome(
     3. **publish row business status** — route C: business state lives in
        ``publish_task_accounts.status``, never in the DBOS phase columns.
     """
+    import json
+
     from app.services.distribution.browser_client import SessionStatus, is_infra_failure
 
     result = outcome.result.to_dict()
@@ -353,8 +355,6 @@ async def _settle_session_outcome(
     infra = is_infra_failure(result)
 
     if outcome.updated_storage_state:
-        import json
-
         await accounts_repo.update_session_state(
             account_id,
             json.dumps(outcome.updated_storage_state, ensure_ascii=False),

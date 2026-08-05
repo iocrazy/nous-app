@@ -182,3 +182,74 @@ def test_backend_reads_every_publish_response_field(browser):
         assert (
             field in source
         ), f"browser 返回 {field!r} 但 backend/browser_client.py 没有读它"
+
+
+def test_publish_intent_with_nothing_optional_filled_still_validates(browser):
+    """**最常见的批次**：没写简介、没话题、没封面、不定时。
+
+    上面那条用例把每个字段都填满了，于是从没走到可空性这一维 —— 而浏览器侧
+    把 ``description`` 声明为 ``str = ""``（非 Optional），backend 送 ``null``
+    会被拒成 422。422 回的是 FastAPI 的 detail 形状而非 SessionResult，调用方
+    读 ``status`` 拿不到可处理的失败，只会记成一次基建故障。契约用例必须覆盖
+    "什么都没填"，否则守卫只守住了幸福路径。
+    """
+    from app.services.distribution.session_adapter import PublishIntent, PublishMedia
+
+    payload = PublishIntent(
+        content_type="video",
+        media=(PublishMedia(kind="video", url="http://x/a.mp4", filename="a.mp4"),),
+        title="Title",
+    ).to_payload()
+
+    assert payload["description"] is not None
+    parsed = browser.PublishIntent.model_validate(payload)
+    assert parsed.description == ""
+    assert parsed.cover is None
+    assert parsed.scheduled_at is None
+
+
+def test_publish_request_envelope_matches(browser):
+    """信封的四个键（platform / storage_state / environment / intent）也必须
+    对齐 —— intent 本身合法但外层键名错了，同样是每次发布都 422。"""
+    from app.services.distribution.browser_client import SessionEnvironment
+    from app.services.distribution.session_adapter import PublishIntent, PublishMedia
+
+    envelope = {
+        "platform": "douyin",
+        "storage_state": {"cookies": []},
+        "environment": SessionEnvironment().to_payload(),
+        "intent": PublishIntent(
+            content_type="video",
+            media=(PublishMedia(kind="video", url="http://x/a.mp4", filename="a.mp4"),),
+            title="T",
+        ).to_payload(),
+    }
+    assert set(envelope) == set(browser.PublishRequest.model_fields)
+    browser.PublishRequest.model_validate(envelope)
+
+
+def test_every_error_kind_browser_emits_is_known_to_backend():
+    """``detail["error_kind"]`` 的值域也会漂，而且漂了不报错 —— 只是
+    ``is_infra_failure`` 悄悄返回 False，把"我们没问出结论"当成一个结论。
+
+    browser 侧没有 error_kind 枚举（是散落的字符串字面量），所以这里只能扫
+    源码里 ``"error_kind": "x"`` 这一种确定形状。它比按缩进猜字段名的正则窄
+    得多：字面量写法变了会漏报，但不会误报。
+    """
+    import re
+
+    from app.services.distribution.browser_client import SessionErrorKind
+
+    browser_app = _BROWSER_SCHEMAS.parent
+    known = {k.value for k in SessionErrorKind}
+    emitted: set[str] = set()
+    for path in browser_app.rglob("*.py"):
+        emitted.update(
+            re.findall(r'"error_kind":\s*"([a-z_]+)"', path.read_text(encoding="utf-8"))
+        )
+
+    assert emitted, "扫不到任何 error_kind —— 字面量写法变了，这条守卫已失效"
+    assert emitted <= known, (
+        f"browser 会发出 backend 不认识的 error_kind: {sorted(emitted - known)}"
+        " —— is_infra_failure 会对它们返回 False"
+    )

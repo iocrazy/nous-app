@@ -120,6 +120,12 @@ class SessionErrorKind(str, Enum):
     TIMEOUT = "timeout"  # 超过上界仍未返回
     SERVER_ERROR = "server_error"  # 5xx
     BAD_RESPONSE = "bad_response"  # 非 JSON / 缺字段 / 非法 status 值
+    # 浏览器容器的并发槽位耗尽（browser/app/main.py 的 admission 背压）。它由
+    # **对端**产生，backend 只是必须认得：不在本枚举里的 error_kind 会让
+    # ``is_infra_failure`` 判 False，等于把"没排上队"当成一个真实结论。今天
+    # 它恰好配 status=failed 所以不会误伤账号，但那是巧合而非保证 —— 一旦对端
+    # 改成配 session_invalid，饱和的那一轮就会把账号集体标成掉线。
+    POOL_SATURATED = "pool_saturated"
     # Fernet 密钥错配 / 轮换没做完。**由 repository 层产生**：
     # SocialAccountsRepository.get_with_session 解 session_state 失败时抛错，
     # 调用方（S3 发布 step / S5 巡检）捕获后调

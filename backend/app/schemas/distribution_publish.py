@@ -2,8 +2,8 @@
 
 Ported from the media-router prototype (models/schemas.py TaskCreate /
 TaskResponse) and rewritten to mediahub conventions: BIGINT ids serialize as
-str (JS 2^53), dual-channel ('official'|'h5'), visibility triad matching the
-publish_tasks CHECK constraint.
+str (JS 2^53), multi-channel ('official'|'h5'|'session'), visibility triad
+matching the publish_tasks CHECK constraint.
 """
 
 from __future__ import annotations
@@ -16,7 +16,12 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 ContentType = Literal["video", "images", "article"]
 Visibility = Literal["public", "friends", "private"]
 DistributionMode = Literal["broadcast", "one_to_one"]
-Channel = Literal["official", "h5"]
+# 'session' (spec 2026-08-04 §4.2) — publish by driving the platform's own web
+# UI with the account's stored browser session. Migration 403 already accepts it
+# on publish_task_accounts.channel; without it here the request schema silently
+# rejects the only value that reaches the session publish path, leaving the whole
+# channel unreachable from the API.
+Channel = Literal["official", "h5", "session"]
 
 # Topics == Douyin hashtags (话题). The UI collects them as chips and the
 # workflow delivers them to Douyin (H5 hashtag_list JsonArray / official post

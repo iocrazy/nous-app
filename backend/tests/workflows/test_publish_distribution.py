@@ -526,3 +526,519 @@ async def test_run_accounts_only_republishes_pending_rows(monkeypatch):
     # only one account status write happened (for the pending row)
     assert len(repo.updates) == 1
     assert repo.updates[0][0] == "pending_share"
+
+
+# ── session channel (spec §4.2) ───────────────────────────────────────────
+
+
+def test_decide_channel_session_needs_a_session_bound_account():
+    assert decide_channel("session", {"auth_type": "session"}) == "session"
+    # session 通道的凭证就是账号自己的 storage_state；OAuth 账号没有可驱动
+    # 浏览器的东西 → 与 official 缺 token 同样降级到 h5
+    assert decide_channel("session", {"auth_type": "oauth"}) == "h5"
+    assert decide_channel("session", {}) == "h5"
+
+
+def test_decide_channel_does_not_disturb_official_or_h5():
+    """新增一档不得改动既有两档的行为。"""
+    assert decide_channel("official", {"access_token": "act"}) == "official"
+    assert decide_channel("official", {"access_token": None}) == "h5"
+    assert decide_channel("h5", {"access_token": "act"}) == "h5"
+    # session 账号跑 official 任务时仍按 token 判定，不被 auth_type 抢走
+    assert (
+        decide_channel("official", {"auth_type": "session", "access_token": "act"})
+        == "official"
+    )
+
+
+def _outcome(status, **over):
+    from app.services.distribution.browser_client import SessionOpResult
+    from app.services.distribution.session_adapter import PublishOutcome
+
+    detail = over.pop("detail", {})
+    base = dict(
+        result=SessionOpResult(
+            success=status == "published",
+            status=status,
+            message=over.pop("message", status),
+            detail=detail,
+        )
+    )
+    base.update(over)
+    return PublishOutcome(**base)
+
+
+class _FakeSessionAdapter:
+    """记录 publish 入参；validate_publish_intent 委托给真适配器，这样
+    fail-fast 的判定逻辑不会因为 fake 而被绕过。"""
+
+    def __init__(self, outcome=None, *, problems=None):
+        from app.services.distribution.session_adapter import SessionAdapter
+
+        self._real = SessionAdapter("douyin")
+        self.outcome = outcome or _outcome(
+            "published",
+            platform_item_id="item-1",
+            published_url="https://www.douyin.com/video/item-1",
+            updated_storage_state={"cookies": [{"name": "sid", "value": "rotated"}]},
+        )
+        self._problems = problems
+        self.publish_calls: list = []
+
+    def validate_publish_intent(self, intent):
+        return (
+            self._problems
+            if self._problems is not None
+            else (self._real.validate_publish_intent(intent))
+        )
+
+    async def publish(self, account, intent, *, environment=None):
+        self.publish_calls.append({"account": account, "intent": intent})
+        return self.outcome
+
+
+class _FakeAccountsRepo:
+    def __init__(self, account=None):
+        self.account = account or {
+            "id": "900",
+            "auth_type": "session",
+            "session_state": '{"cookies": []}',
+            "environment": None,
+        }
+        self.state_writes: list = []
+        self.relogin_marks: list = []
+        self.session_reads: list = []
+        self.token_reads: list = []
+
+    async def get_with_session(self, account_id):
+        self.session_reads.append(account_id)
+        return dict(self.account)
+
+    async def get_with_tokens(self, account_id):
+        self.token_reads.append(account_id)
+        return {"access_token": "act", "auth_type": "oauth"}
+
+    async def update_session_state(self, account_id, session_state=None, **kw):
+        self.state_writes.append((account_id, session_state))
+
+    async def mark_needs_relogin(self, account_id):
+        self.relogin_marks.append(account_id)
+
+
+def _session_account(**over):
+    base = {
+        "id": "1",  # publish_task_accounts row id
+        "account_id": "900",
+        "channel": "session",
+        "auth_type": "session",
+        "platform": "douyin",
+        "session_state": '{"cookies": [{"name": "sid", "value": "s3cr3t"}]}',
+        "environment": None,
+        "resource_id": "30",
+    }
+    base.update(over)
+    return base
+
+
+def _session_task(**over):
+    base = {"title": "Launch", "description": None, "resource_ids": ["30"]}
+    base.update(over)
+    return base
+
+
+def _always_free_lock():
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _lock(account_id):
+        yield True
+
+    return _lock
+
+
+def _always_busy_lock():
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _lock(account_id):
+        yield False
+
+    return _lock
+
+
+@pytest.mark.asyncio
+async def test_session_publish_success_writes_state_back_and_settles_row():
+    from app.workflows.publish_distribution import _publish_one_account_session
+
+    repo, accounts_repo = _FakeRepo(), _FakeAccountsRepo()
+    adapter = _FakeSessionAdapter()
+
+    status = await _publish_one_account_session(
+        _session_account(),
+        _session_task(),
+        repo,
+        accounts_repo,
+        adapter=adapter,
+        lock=_always_free_lock(),
+    )
+
+    assert status == "success"
+    assert repo.updates[-1][0] == "success"
+    assert repo.updates[-1][1]["platform_item_id"] == "item-1"
+    assert repo.updates[-1][1]["published_at"] is not None
+    # §4.2 第 6 步：滚动续期的新 storage_state 必须回写，否则账号从"三个月
+    # 扫一次码"退化成"两周一次"
+    assert accounts_repo.state_writes == [
+        (900, '{"cookies": [{"name": "sid", "value": "rotated"}]}')
+    ]
+    assert accounts_repo.relogin_marks == []
+
+
+@pytest.mark.asyncio
+async def test_session_publish_writes_state_back_even_when_publish_failed():
+    """平台按"用过"续期，与本次发成功与否无关。"""
+    from app.workflows.publish_distribution import _publish_one_account_session
+
+    repo, accounts_repo = _FakeRepo(), _FakeAccountsRepo()
+    adapter = _FakeSessionAdapter(
+        outcome=_outcome(
+            "failed",
+            message="dom timeout",
+            updated_storage_state={"cookies": [{"name": "sid", "value": "rotated"}]},
+        )
+    )
+
+    status = await _publish_one_account_session(
+        _session_account(),
+        _session_task(),
+        repo,
+        accounts_repo,
+        adapter=adapter,
+        lock=_always_free_lock(),
+    )
+
+    assert status == "failed"
+    assert len(accounts_repo.state_writes) == 1
+    # 发布失败 ≠ 会话失效 —— 账号状态不动
+    assert accounts_repo.relogin_marks == []
+
+
+@pytest.mark.asyncio
+async def test_session_invalid_marks_account_needs_relogin():
+    from app.workflows.publish_distribution import _publish_one_account_session
+
+    repo, accounts_repo = _FakeRepo(), _FakeAccountsRepo()
+    adapter = _FakeSessionAdapter(
+        outcome=_outcome("session_invalid", message="bounced to login")
+    )
+
+    status = await _publish_one_account_session(
+        _session_account(),
+        _session_task(),
+        repo,
+        accounts_repo,
+        adapter=adapter,
+        lock=_always_free_lock(),
+    )
+
+    assert status == "failed"
+    assert accounts_repo.relogin_marks == [900]
+    # 失败原因必须留在行上 —— 前端只有这一个抓手
+    assert "session_invalid" in repo.updates[-1][1]["error_message"]
+
+
+@pytest.mark.asyncio
+async def test_infra_failure_never_touches_account_status():
+    """容器不可达时一整批账号会同时失败。若据此标 needs_relogin，一次宕机
+    就要求用户重扫一百次码（§7.8）。"""
+    from app.services.distribution.browser_client import SessionErrorKind
+    from app.workflows.publish_distribution import _publish_one_account_session
+
+    repo, accounts_repo = _FakeRepo(), _FakeAccountsRepo()
+    adapter = _FakeSessionAdapter(
+        outcome=_outcome(
+            "failed",
+            message="browser service unreachable",
+            detail={"error_kind": SessionErrorKind.UNREACHABLE.value},
+        )
+    )
+
+    status = await _publish_one_account_session(
+        _session_account(),
+        _session_task(),
+        repo,
+        accounts_repo,
+        adapter=adapter,
+        lock=_always_free_lock(),
+    )
+
+    assert status == "failed"
+    assert accounts_repo.relogin_marks == []
+    assert accounts_repo.state_writes == []
+    assert "unreachable" in repo.updates[-1][1]["error_message"]
+
+
+@pytest.mark.asyncio
+async def test_session_invalid_under_infra_failure_still_spares_the_account():
+    """两个维度正交：status 说"掉线"但带着 error_kind 时，结论并不成立。"""
+    from app.services.distribution.browser_client import SessionErrorKind
+    from app.workflows.publish_distribution import _publish_one_account_session
+
+    repo, accounts_repo = _FakeRepo(), _FakeAccountsRepo()
+    adapter = _FakeSessionAdapter(
+        outcome=_outcome(
+            "session_invalid",
+            detail={"error_kind": SessionErrorKind.SERVER_ERROR.value},
+        )
+    )
+
+    await _publish_one_account_session(
+        _session_account(),
+        _session_task(),
+        repo,
+        accounts_repo,
+        adapter=adapter,
+        lock=_always_free_lock(),
+    )
+    assert accounts_repo.relogin_marks == []
+
+
+@pytest.mark.asyncio
+async def test_decrypt_failure_is_infra_not_a_dead_session():
+    """Fernet 密钥错配下平台会话可能好得很 —— 标 needs_relogin 会让用户白扫
+    一次码，密钥轮换没做完时更是全量误伤。"""
+    from app.repositories.social_accounts_repository import (
+        SESSION_STATE_DECRYPT_FAILED,
+    )
+    from app.workflows.publish_distribution import _publish_one_account_session
+
+    repo, accounts_repo = _FakeRepo(), _FakeAccountsRepo()
+    adapter = _FakeSessionAdapter()
+
+    status = await _publish_one_account_session(
+        _session_account(**{SESSION_STATE_DECRYPT_FAILED: True, "session_state": None}),
+        _session_task(),
+        repo,
+        accounts_repo,
+        adapter=adapter,
+        lock=_always_free_lock(),
+    )
+
+    assert status == "failed"
+    assert adapter.publish_calls == []  # 浏览器压根没被叫起来
+    assert accounts_repo.relogin_marks == []
+    assert "decrypt_failed" in repo.updates[-1][1]["error_message"]
+
+
+@pytest.mark.asyncio
+async def test_fail_fast_blocks_the_browser_before_it_starts():
+    """§7.7：起一次有头浏览器 + 传几百 MB 要几分钟，标题为空这种错误不该等
+    到那时才发现。"""
+    from app.workflows.publish_distribution import _publish_one_account_session
+
+    repo, accounts_repo = _FakeRepo(), _FakeAccountsRepo()
+    adapter = _FakeSessionAdapter()
+
+    status = await _publish_one_account_session(
+        _session_account(),
+        _session_task(title=""),  # 空标题 → profile 校验不过
+        repo,
+        accounts_repo,
+        adapter=adapter,
+        lock=_always_free_lock(),
+    )
+
+    assert status == "failed"
+    assert adapter.publish_calls == []
+    assert "title is empty" in repo.updates[-1][1]["error_message"]
+
+
+@pytest.mark.asyncio
+async def test_fail_fast_rejects_a_non_video_extension():
+    from app.workflows.publish_distribution import _publish_one_account_session
+
+    class _AviRepo(_FakeRepo):
+        async def get_resource_media_url(self, rid):
+            return "https://cdn/clip.avi?token=abc"
+
+    repo, accounts_repo = _AviRepo(), _FakeAccountsRepo()
+    adapter = _FakeSessionAdapter()
+
+    status = await _publish_one_account_session(
+        _session_account(),
+        _session_task(),
+        repo,
+        accounts_repo,
+        adapter=adapter,
+        lock=_always_free_lock(),
+    )
+
+    assert status == "failed"
+    assert adapter.publish_calls == []
+    # 签名 URL 的 query 不该混进扩展名判定
+    assert "clip.avi" in repo.updates[-1][1]["error_message"]
+
+
+@pytest.mark.asyncio
+async def test_busy_account_fails_the_row_instead_of_opening_a_second_context():
+    """§7.5：同一账号两个 context 会互相踢下线，失败这一行远好过烧掉会话。"""
+    from app.workflows.publish_distribution import _publish_one_account_session
+
+    repo, accounts_repo = _FakeRepo(), _FakeAccountsRepo()
+    adapter = _FakeSessionAdapter()
+
+    status = await _publish_one_account_session(
+        _session_account(),
+        _session_task(),
+        repo,
+        accounts_repo,
+        adapter=adapter,
+        lock=_always_busy_lock(),
+    )
+
+    assert status == "failed"
+    assert adapter.publish_calls == []
+    assert "already running" in repo.updates[-1][1]["error_message"]
+
+
+@pytest.mark.asyncio
+async def test_session_intent_uses_the_shared_media_url_entry_point():
+    """素材 URL 复用 official/h5 的同一个入口（spec §8 第 5 条，已实测浏览器
+    容器可达）—— 不新写签发逻辑。"""
+    from app.workflows.publish_distribution import _publish_one_account_session
+
+    repo, accounts_repo = _FakeRepo(), _FakeAccountsRepo()
+    adapter = _FakeSessionAdapter()
+
+    await _publish_one_account_session(
+        _session_account(),
+        _session_task(topics=["city"], visibility="friends", allow_download=False),
+        repo,
+        accounts_repo,
+        adapter=adapter,
+        lock=_always_free_lock(),
+    )
+
+    intent = adapter.publish_calls[0]["intent"]
+    assert intent.media[0].url == "https://cdn/x.mp4"
+    assert intent.media[0].filename == "x.mp4"
+    # 通道契约里是语义词，不是抖音的 private_status 整数枚举
+    assert intent.visibility == "friends"
+    assert intent.allow_download is False
+    assert intent.topics == ("city",)
+
+
+@pytest.mark.asyncio
+async def test_session_publish_never_leaves_plaintext_state_in_the_row():
+    """§7.6：明文凭证只在一次发布的作用域内存在。"""
+    from app.workflows.publish_distribution import _publish_one_account_session
+
+    repo, accounts_repo = _FakeRepo(), _FakeAccountsRepo()
+    account = _session_account()
+    await _publish_one_account_session(
+        account,
+        _session_task(),
+        repo,
+        accounts_repo,
+        adapter=_FakeSessionAdapter(),
+        lock=_always_free_lock(),
+    )
+    assert "session_state" not in account
+
+
+# ── _run_accounts routing / idempotency for session rows ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_run_accounts_routes_session_rows_to_the_session_path(monkeypatch):
+    seen: list = []
+
+    async def _fake_session_publish(account, task, repo, accounts_repo, **kw):
+        seen.append(account)
+        return "success"
+
+    monkeypatch.setattr(
+        "app.workflows.publish_distribution._publish_one_account_session",
+        _fake_session_publish,
+    )
+    accounts_repo = _FakeAccountsRepo()
+    rows = [
+        {
+            "id": "1",
+            "account_id": "900",
+            "status": "pending",
+            "platform": "douyin",
+            "channel": "session",
+            "resource_id": "30",
+        }
+    ]
+    statuses = await _run_accounts(
+        rows, accounts_repo, creds={}, task=_session_task(), repo=_FakeRepo()
+    )
+
+    assert statuses == ["success"]
+    # session 行走 get_with_session（要 storage_state），不走 token 边界
+    assert accounts_repo.session_reads == [900] and accounts_repo.token_reads == []
+    # publish_task_accounts 行 id 不能被 social_accounts.id 覆盖掉
+    assert seen[0]["id"] == "1"
+    assert seen[0]["account_id"] == "900"
+
+
+@pytest.mark.asyncio
+async def test_run_accounts_idempotency_guard_covers_session_rows(monkeypatch):
+    """重试同一 task 不得重复发布已 settled 的行 —— session 行落在同一个守卫内。"""
+
+    async def _boom(*a, **kw):
+        raise AssertionError("must not re-publish an already-settled session row")
+
+    monkeypatch.setattr(
+        "app.workflows.publish_distribution._publish_one_account_session", _boom
+    )
+    accounts_repo = _FakeAccountsRepo()
+    rows = [
+        {
+            "id": "1",
+            "account_id": "900",
+            "status": "success",
+            "platform": "douyin",
+            "channel": "session",
+        }
+    ]
+    statuses = await _run_accounts(
+        rows, accounts_repo, creds={}, task=_session_task(), repo=_FakeRepo()
+    )
+    assert statuses == ["success"]
+    assert accounts_repo.session_reads == []
+
+
+@pytest.mark.asyncio
+async def test_run_accounts_degrades_session_row_on_an_oauth_account(monkeypatch):
+    """账号不是 session 绑定的 → decide_channel 降级到 h5，不进浏览器路径。"""
+
+    async def _boom(*a, **kw):
+        raise AssertionError("an oauth account has nothing to drive a browser with")
+
+    monkeypatch.setattr(
+        "app.workflows.publish_distribution._publish_one_account_session", _boom
+    )
+    monkeypatch.setattr(
+        "app.services.distribution.registry.get_adapter",
+        lambda platform, creds: _FakeAdapter(),
+    )
+    accounts_repo = _FakeAccountsRepo(
+        account={"id": "900", "auth_type": "oauth", "session_state": None}
+    )
+    rows = [
+        {
+            "id": "1",
+            "account_id": "900",
+            "status": "pending",
+            "platform": "douyin",
+            "channel": "session",
+            "resource_id": "30",
+        }
+    ]
+    statuses = await _run_accounts(
+        rows, accounts_repo, creds={}, task=_session_task(), repo=_FakeRepo()
+    )
+    assert statuses == ["pending_share"]
