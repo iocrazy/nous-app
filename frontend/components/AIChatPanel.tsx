@@ -29,6 +29,15 @@ import type {
   ResourceSearchResult,
 } from '../types';
 import { AgentSelector } from './AgentSelector';
+import { AgentIdentityHeader } from './agentActivity/AgentIdentityHeader';
+import {
+  ContextCapsule,
+  type ContextCapsuleValue,
+} from './agentActivity/ContextCapsule';
+import {
+  QuickActions,
+  type QuickActionContext,
+} from './agentActivity/QuickActions';
 import { SessionList, type SessionItem } from './SessionList';
 import { MessageBubble } from './chat/AIChatBubble';
 import { TypingIndicator } from './chat/TypingIndicator';
@@ -225,43 +234,39 @@ export function AIChatPanel({
   // scene), then the input is focused so the user can instruct the AI about it.
   // The composer editor mounts a frame or two after the panel opens, so retry
   // over a few frames until chatEditorRef is live; only then consume the quote.
+  //
+  // A7 (design §D): the selection is now held as a CAPSULE above the composer
+  // instead of being spliced into it as a blockquote. Splicing meant the
+  // user's instruction and the quoted script became one blob they had to edit
+  // around; as a capsule it stays labelled, stays removable, and keeps its
+  // scene/element ids attached until send.
   const pendingQuote = useGlobalChatStore((s) => s.pendingQuote);
+  const [contextCapsule, setContextCapsule] = useState<ContextCapsuleValue | null>(null);
   useEffect(() => {
     if (!pendingQuote) return;
+    setContextCapsule({
+      text: pendingQuote.text,
+      sceneLabel: pendingQuote.sceneLabel,
+      sceneId: pendingQuote.sceneId,
+      elementId: pendingQuote.elementId,
+      elementType: pendingQuote.elementType,
+      crossScene: pendingQuote.crossScene,
+    });
+    useGlobalChatStore.getState().consumePendingQuote();
+    // The composer mounts a frame or two after the panel opens, so retry over
+    // a few frames before giving up on focusing it.
     let raf = 0;
     let tries = 0;
-    const inject = () => {
+    const focusComposer = () => {
       const editor = chatEditorRef.current;
       if (!editor) {
         if (tries++ > 30) return; // give up quietly rather than loop forever
-        raf = requestAnimationFrame(inject);
+        raf = requestAnimationFrame(focusComposer);
         return;
       }
-      const scene = pendingQuote.sceneLabel;
-      const label = scene
-        ? t('chat.selectionFrom', 'Selection from {{scene}}', { scene })
-        : t('chat.selection', 'Selection');
-      const labelLine = pendingQuote.crossScene ? `${label} +` : label;
-      // Split the selected text on blank lines so a multi-line (cross-element)
-      // selection becomes multiple paragraphs inside the quote — ProseMirror
-      // text nodes don't carry hard newlines cleanly.
-      const paras = pendingQuote.text
-        .split(/\n+/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .map((line) => ({ type: 'paragraph', content: [{ type: 'text', text: line }] }));
-      editor
-        .chain()
-        .focus('end')
-        .insertContent([
-          { type: 'paragraph', content: [{ type: 'text', text: labelLine }] },
-          { type: 'blockquote', content: paras.length ? paras : [{ type: 'paragraph' }] },
-          { type: 'paragraph' },
-        ])
-        .run();
-      useGlobalChatStore.getState().consumePendingQuote();
+      editor.chain().focus('end').run();
     };
-    inject();
+    focusComposer();
     return () => {
       if (raf) cancelAnimationFrame(raf);
     };
@@ -550,8 +555,24 @@ export function AIChatPanel({
   );
 
   const handleSend = useCallback(
-    async (text: string, refAttachments: ResourceRefAttachment[] = []) => {
+    async (rawText: string, refAttachments: ResourceRefAttachment[] = []) => {
       if (!activeSessionId || sending) return;
+
+      // Fold the context capsule into the outgoing message and clear it — one
+      // selection travels with one turn, exactly like the blockquote it
+      // replaced, but the user could see and drop it first.
+      const capsule = contextCapsule;
+      const text = capsule
+        ? `${
+            capsule.sceneLabel
+              ? t('chat.selectionFrom', 'Selection from {{scene}}', {
+                  scene: capsule.sceneLabel,
+                })
+              : t('chat.selection', 'Selection')
+          }:\n${capsule.text}\n\n${rawText}`
+        : rawText;
+      if (capsule) setContextCapsule(null);
+
       setSending(true);
       setAttachmentFailureCount(undefined);
 
@@ -694,7 +715,7 @@ export function AIChatPanel({
     // doesn't capture stale values when the user changes mode or
     // adds/removes attachments between renders.
     [activeSessionId, sending, effectiveAgentSlug, lockedAgent, numericProjectId,
-     addToast, planMode, stagedAttachments],
+     addToast, planMode, stagedAttachments, contextCapsule, t],
   );
 
   const handleSuggest = useCallback(
@@ -808,21 +829,47 @@ export function AIChatPanel({
     [agents],
   );
 
+  /** The agent the header identifies. Null until the roster loads. */
+  const activeAgent = useMemo(
+    () => agents.find((a) => a.slug === effectiveAgentSlug) ?? null,
+    [agents, effectiveAgentSlug],
+  );
+
+  /** Quick actions follow what is on screen — see QuickActions' docstring. */
+  const quickActionContext: QuickActionContext = contextCapsule
+    ? 'selection'
+    : contextType === 'script' || contextType === 'storyboard'
+      ? 'script'
+      : 'none';
+
+  const handleQuickAction = useCallback((prompt: string) => {
+    // Seed the composer rather than sending: the user keeps the last word
+    // before an agent with write tools touches their script.
+    chatEditorRef.current?.chain().focus('end').insertContent(prompt).run();
+  }, []);
+
   const hasMessages = messages.length > 0 || sending;
 
   return (
     <div className="relative w-full h-full flex-1 flex flex-col bg-ink-900 overflow-hidden min-h-0">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-ink-800 flex-shrink-0">
-        <span className="text-sm font-medium text-ink-200 flex-1">AI Chat</span>
-
-        {!lockedAgent && (
-          <AgentSelector
-            agents={agentOptions}
-            selectedId={selectedAgentSlug}
-            onSelect={setSelectedAgentSlug}
-          />
-        )}
+        {/* Identity, not a generic "AI Chat" title: with write tools in play,
+            WHO is answering determines what happens to the user's script. */}
+        <AgentIdentityHeader
+          name={activeAgent?.name}
+          description={activeAgent?.description}
+          icon={activeAgent?.icon}
+          action={
+            !lockedAgent ? (
+              <AgentSelector
+                agents={agentOptions}
+                selectedId={selectedAgentSlug}
+                onSelect={setSelectedAgentSlug}
+              />
+            ) : undefined
+          }
+        />
 
         <button
           type="button"
@@ -1065,6 +1112,18 @@ export function AIChatPanel({
               activeIndex={mentionActiveIndex}
             />
           </div>
+        )}
+
+        {/* A7 §D: the injected selection sits above the composer as a closable
+            capsule, with quick actions matched to what is on screen. */}
+        {contextCapsule && (
+          <ContextCapsule
+            value={contextCapsule}
+            onDismiss={() => setContextCapsule(null)}
+          />
+        )}
+        {activeSessionId && effectiveAgentSlug && (
+          <QuickActions context={quickActionContext} onPick={handleQuickAction} />
         )}
 
         {/* Chat input + B: attachment picker (when no staged chips above) */}
