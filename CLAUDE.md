@@ -589,6 +589,17 @@ docker exec nous-db psql -U postgres -p 55434 -d postgres -c \
   docker exec nous-backend /app/.venv/bin/python -c \
     "from app.core.config import settings; print(settings.CORS_ORIGINS)"  # 实际生效值
   ```
+- **迁移里不要写 `SET ROLE service_role`** —— 它是**主动降权**，不是提权。所有 runner（`run-migration.yml`、`schema-drift.yml`）都以 `psql -U postgres` 超管连接，切到 service_role 只会把权限交出去。之所以在 prod 看着能用，是因为那边的 service_role 有 Supabase 平台发的真 grant；而 `supabase/ci_bootstrap.sql` 把它裸建成 `CREATE ROLE ... NOLOGIN NOINHERIT`（**只有角色名，没有任何 GRANT**），所以同一句在 schema-drift 门禁里必然 `permission denied`。
+  ⚠️ **仓库里 175 / 176 / 177 那三个 `SET ROLE service_role;` 是反面教材，别照抄**（166 只在注释里描述过这个模式，没有真的执行）。baseline watermark 是 364，它们早被烤进 `schema_baseline.sql`，**在 CI 里一次都没执行过** —— "有先例"不等于"验证过"。watermark 之上唯一相关的先例 365 结论正好相反，原文：*"This migration therefore does NOT `SET ROLE`. It runs as the connecting role (postgres in CI = the owner). That single difference is the fix."*
+  **要写受保护的列**（`issues.execution_state` 等被 mig 170 allowlist trigger 挡住的），用事务级 trigger 抑制，不要切角色：
+  ```sql
+  BEGIN;
+  SET LOCAL session_replication_role = replica;  -- 不碰系统目录，COMMIT 时自动恢复
+  UPDATE public.issues SET ... ;
+  COMMIT;
+  ```
+  必须是 `SET **LOCAL**`：`run-migration.yml` 把待跑迁移拼成一个批次文件喂给同一个 psql session，session 级 SET 会泄漏到后续每一条迁移（176 就是这么静默失败了几个月）。比 `ALTER TABLE ... DISABLE TRIGGER` 安全 —— 后者要改系统目录、拿 ACCESS EXCLUSIVE 锁，中途失败还可能把 trigger 留在关闭状态。副作用是同时抑制 `issues_touch_updated_at`（被修的行保留原 `updated_at`），对内部数据修复而言是想要的：修复不该伪装成用户编辑。
+  **改完自查**：跑完确认 `SHOW session_replication_role` 回到 `origin`、目标表 `pg_trigger.tgenabled` 仍是 `'O'`，再以 postgres 跑一次同样的 UPDATE 确认**被拦**（正向对照，证明抑制只限于那一个事务）。两次撞墙记录：365（176 的 SET ROLE 导致 DROP TABLE 权限不足）、405（PR #1695，同一句在 ephemeral 库 `permission denied for table issues`）。
 - **`env_file` 改动必须 `docker compose up -d` 重建容器**，`docker restart` 不会重读。同理 compose 的 service/env/volume/ports 改动也必须 `up -d`。
 - **self-hosted runner 会僵死**。网络抖动导致 session 失效后 runner 不会自愈（日志里刷 `broker.actions.githubusercontent.com` 500 或 `unexpected EOF`），GitHub 侧显示 `offline` 而进程还活着。修：`sudo systemctl restart actions.runner.iocrazy-nous-app.gpu-runner.service`。查状态：`gh api /repos/iocrazy/nous-app/actions/runners`。
 - **托管 runner 依赖账户付款正常**。付款失败时所有 `ubuntu-latest` job 会在 2 秒内 failure 且**零步骤执行**（`runner_name` 为空），annotation 里写着 `recent account payments have failed`。此时 `CI`/`actionlint`/`pr-behind-check` 全红、前端链也发不出去，但 **self-hosted 的后端链不受影响**（不计费）。
