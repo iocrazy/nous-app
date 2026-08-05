@@ -3,9 +3,35 @@ the psycopg→engine migration."""
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import patch
 
 import pytest
+
+
+class _FakeScopeSession:
+    """Minimal stand-in for the ORM AsyncSession — only ``scalar()`` is
+    exercised by ``load_transcribe_inputs``'s user_settings.settings_json
+    read (the Phase B2 Task 2 ORM rewrite)."""
+
+    def __init__(self, scalar_value=None):
+        self._scalar_value = scalar_value
+
+    async def scalar(self, stmt):
+        return self._scalar_value
+
+
+def _fake_read_scope(scalar_value=None):
+    """Factory for a zero-arg ``read_scope()`` replacement yielding a session
+    whose ``scalar()`` always returns ``scalar_value`` — used where the test
+    doesn't care about the settings_json content (the assertion under test
+    fires before or independently of it)."""
+
+    @asynccontextmanager
+    async def _read_scope():
+        yield _FakeScopeSession(scalar_value)
+
+    return _read_scope
 
 
 async def test_load_transcribe_inputs_raises_when_no_media():
@@ -32,7 +58,10 @@ async def test_load_transcribe_inputs_raises_when_no_audio_path():
             "resource_id": 5,
         }
 
-    with patch("app.db.engine.fetch_one", fake_fetch_one):
+    with (
+        patch("app.db.engine.fetch_one", fake_fetch_one),
+        patch("app.db.session.read_scope", _fake_read_scope(None)),
+    ):
         with pytest.raises(RuntimeError, match="no audio_path"):
             await m.load_transcribe_inputs(1, "u")
 
@@ -63,6 +92,7 @@ async def test_load_transcribe_inputs_gallery_uses_music_download_path():
     )
     with (
         patch("app.db.engine.fetch_one", AsyncMock(return_value=media_row)),
+        patch("app.db.session.read_scope", _fake_read_scope(None)),
         patch(
             "app.services.ai.providers.ai_provider_helpers."
             "resolve_transcription_config",
@@ -99,6 +129,7 @@ async def test_load_transcribe_inputs_video_prefers_extract_audio_path():
     )
     with (
         patch("app.db.engine.fetch_one", AsyncMock(return_value=media_row)),
+        patch("app.db.session.read_scope", _fake_read_scope(None)),
         patch(
             "app.services.ai.providers.ai_provider_helpers."
             "resolve_transcription_config",
@@ -339,6 +370,7 @@ async def test_load_transcribe_inputs_locked_to_catalog_model():
     )
     with (
         patch("app.db.engine.fetch_one", AsyncMock(return_value=media_row)),
+        patch("app.db.session.read_scope", _fake_read_scope(None)),
         patch(
             "app.services.ai.governance.ai_governance.get_module_governance",
             AsyncMock(return_value=gov),

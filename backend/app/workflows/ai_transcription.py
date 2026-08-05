@@ -40,10 +40,15 @@ async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str
     if not media_row:
         raise RuntimeError(f"no parsed_media for id={parsed_media_id}")
 
-    settings_row = await db_engine.fetch_one(
-        "SELECT settings_json FROM public.user_settings WHERE user_id = :uid",
-        {"uid": user_id},
-    )
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import UserSettings
+
+    async with read_scope() as session:
+        settings_json = await session.scalar(
+            select(UserSettings.settings_json).where(UserSettings.user_id == user_id)
+        )
 
     # Audio-source precedence:
     #   1. extract_audio_path — ffmpeg-extracted audio from a video (present
@@ -68,16 +73,13 @@ async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str
     # user_settings" raise, the gated nous:<model> path, and the BYOK fallback.
     # The transcription model-selection STRING (provider:model / raw picker) is
     # carried on ResolvedAIConfig.model — it becomes this dict's task_assignment,
-    # threaded downstream to run_whisper. `settings_row["settings_json"]` is
-    # passed to avoid a second DB read.
+    # threaded downstream to run_whisper. `settings_json` is passed to avoid a
+    # second DB read.
     from app.services.ai.providers.ai_provider_helpers import (
         resolve_transcription_config,
     )
 
-    cfg = await resolve_transcription_config(
-        user_id,
-        settings_json=(settings_row.get("settings_json") if settings_row else None),
-    )
+    cfg = await resolve_transcription_config(user_id, settings_json=settings_json)
 
     # language: governance short-circuits to "auto" (user settings not
     # consulted); the user path reads preferred_language from the same settings
@@ -85,7 +87,7 @@ async def load_transcribe_inputs(parsed_media_id: int, user_id: str) -> dict[str
     if cfg.origin == "governance":
         language = "auto"
     else:
-        settings = settings_row["settings_json"]
+        settings = settings_json
         if isinstance(settings, str):
             settings = json.loads(settings)
         language = settings.get("ai_settings", {}).get("preferred_language", "auto")

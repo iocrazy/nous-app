@@ -10,11 +10,13 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
 import pytest
 from cryptography.fernet import Fernet
+from sqlalchemy.dialects import postgresql
 
 from app.core import secret_box
 from app.core.secure_settings import (
@@ -36,8 +38,51 @@ def _dev_encrypt(plaintext: str) -> str:
     )
 
 
+def _compile(stmt: Any) -> tuple[str, dict[str, Any]]:
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    return str(compiled), dict(compiled.params)
+
+
+class _FakeResult:
+    def __init__(self, rows: list[Any] | None = None, scalar_value: Any = None) -> None:
+        self._rows = rows or []
+        self._scalar_value = scalar_value
+
+    def mappings(self) -> "_FakeResult":
+        return self
+
+    def all(self) -> list[Any]:
+        return self._rows
+
+
+class _FakeOrmSession:
+    def __init__(self, db: "_FakeDB") -> None:
+        self._db = db
+
+    async def execute(self, stmt: Any) -> _FakeResult:
+        return self._db._dispatch(stmt)
+
+    async def scalar(self, stmt: Any) -> Any:
+        return self._db._dispatch(stmt)._scalar_value
+
+
+class _ScopeCM:
+    def __init__(self, session: _FakeOrmSession) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> _FakeOrmSession:
+        return self._session
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
+
+
 class _FakeDB:
-    """Answers the exact SQL shapes the selfheal module emits."""
+    """Answers the ORM statements the selfheal module emits (Phase B2 Task 2
+    raw-SQL → ORM rewrite) by compiling each statement to SQL text and
+    pattern-matching the known shapes — same technique the compile-level
+    coverage tests use, applied here as a functional in-memory fake instead
+    of an assertion. Kept in-memory so tests stay DB-free."""
 
     def __init__(self) -> None:
         self.system_settings: dict[str, Any] = {}
@@ -51,62 +96,75 @@ class _FakeDB:
     def is_configured(self) -> bool:
         return True
 
-    async def fetch_all(self, sql: str, params: dict | None = None):
-        params = params or {}
-        if "FROM public.system_settings" in sql and "IN (" in sql:
-            wanted = set(params.values())
-            return [
-                {"key": k, "value": v}
-                for k, v in self.system_settings.items()
-                if k in wanted
-            ]
-        if "FROM public.mediahub_models" in sql:
-            return [
-                {"id": i, "api_key": v} for i, v in self.mediahub_models.items() if v
-            ]
-        if "FROM public.user_mcp_servers" in sql:
-            return [
-                {"id": i, "bearer_token": v}
-                for i, v in self.user_mcp_servers.items()
-                if v
-            ]
-        if "FROM public.user_settings" in sql:
-            rows = []
-            for uid, blob in self.user_settings.items():
-                providers = (blob.get("ai_settings") or {}).get("ai_providers")
-                if providers is not None:
-                    rows.append({"user_id": uid, "ai_providers": providers})
-            return rows
-        raise AssertionError(f"unexpected fetch_all: {sql}")
+    def read_scope(self) -> _ScopeCM:
+        return _ScopeCM(_FakeOrmSession(self))
 
-    async def fetch_val(self, sql: str, params: dict | None = None):
-        params = params or {}
-        if "FROM public.system_settings" in sql:
-            return self.system_settings.get(params["k"])
-        raise AssertionError(f"unexpected fetch_val: {sql}")
+    def write_scope(self) -> _ScopeCM:
+        return _ScopeCM(_FakeOrmSession(self))
 
-    async def execute(self, sql: str, params: dict | None = None) -> int:
-        import json
+    def _dispatch(self, stmt: Any) -> _FakeResult:
+        sql, params = _compile(stmt)
 
-        params = params or {}
-        self.writes += 1
-        if "UPDATE public.system_settings" in sql:
-            self.system_settings[params["k"]] = json.loads(params["v"])
-            return 1
-        if "UPDATE public.mediahub_models" in sql:
-            self.mediahub_models[params["id"]] = params["v"]
-            return 1
-        if "UPDATE public.user_mcp_servers" in sql:
-            self.user_mcp_servers[params["id"]] = params["v"]
-            return 1
-        if "UPDATE public.user_settings" in sql:
-            # Emulates jsonb_set(settings_json, '{ai_settings,ai_providers}', v)
-            # — replaces ONLY that subtree, every sibling key survives.
-            blob = self.user_settings.setdefault(params["uid"], {})
-            ai_settings = blob.setdefault("ai_settings", {})
-            ai_settings["ai_providers"] = json.loads(params["v"])
-            return 1
-        raise AssertionError(f"unexpected execute: {sql}")
+        if sql.startswith("SELECT"):
+            if "public.system_settings.key IN" in sql:
+                wanted = set(params["key_1"])
+                rows = [
+                    {"key": k, "value": v}
+                    for k, v in self.system_settings.items()
+                    if k in wanted
+                ]
+                return _FakeResult(rows=rows)
+            if "SELECT public.system_settings.value" in sql:
+                return _FakeResult(
+                    scalar_value=self.system_settings.get(params["key_1"])
+                )
+            if "public.mediahub_models.id, public.mediahub_models.api_key" in sql:
+                rows = [
+                    {"id": i, "api_key": v}
+                    for i, v in self.mediahub_models.items()
+                    if v
+                ]
+                return _FakeResult(rows=rows)
+            if (
+                "public.user_mcp_servers.id, public.user_mcp_servers.bearer_token"
+                in sql
+            ):
+                rows = [
+                    {"id": i, "bearer_token": v}
+                    for i, v in self.user_mcp_servers.items()
+                    if v
+                ]
+                return _FakeResult(rows=rows)
+            if "AS ai_providers" in sql:
+                rows = []
+                for uid, blob in self.user_settings.items():
+                    providers = (blob.get("ai_settings") or {}).get("ai_providers")
+                    if providers is not None:
+                        rows.append({"user_id": uid, "ai_providers": providers})
+                return _FakeResult(rows=rows)
+            raise AssertionError(f"unexpected SELECT: {sql}")
+
+        if sql.startswith("UPDATE"):
+            self.writes += 1
+            if "UPDATE public.system_settings" in sql:
+                self.system_settings[params["key_1"]] = params["value"]
+                return _FakeResult()
+            if "UPDATE public.mediahub_models" in sql:
+                self.mediahub_models[params["id_1"]] = params["api_key"]
+                return _FakeResult()
+            if "UPDATE public.user_mcp_servers" in sql:
+                self.user_mcp_servers[params["id_1"]] = params["bearer_token"]
+                return _FakeResult()
+            if "UPDATE public.user_settings" in sql:
+                # Emulates jsonb_set(settings_json, '{ai_settings,ai_providers}',
+                # v) — replaces ONLY that subtree, every sibling key survives.
+                blob = self.user_settings.setdefault(params["user_id_1"], {})
+                ai_settings = blob.setdefault("ai_settings", {})
+                ai_settings["ai_providers"] = json.loads(params["param_3"])
+                return _FakeResult()
+            raise AssertionError(f"unexpected UPDATE: {sql}")
+
+        raise AssertionError(f"unexpected statement: {sql}")
 
 
 @pytest.fixture
@@ -114,11 +172,11 @@ def fake_db(monkeypatch: pytest.MonkeyPatch) -> _FakeDB:
     db = _FakeDB()
 
     import app.db.engine as engine_mod
+    from app.db import session as db_session
 
     monkeypatch.setattr(engine_mod, "is_configured", db.is_configured)
-    monkeypatch.setattr(engine_mod, "fetch_all", db.fetch_all)
-    monkeypatch.setattr(engine_mod, "fetch_val", db.fetch_val)
-    monkeypatch.setattr(engine_mod, "execute", db.execute)
+    monkeypatch.setattr(db_session, "read_scope", db.read_scope)
+    monkeypatch.setattr(db_session, "write_scope", db.write_scope)
     return db
 
 

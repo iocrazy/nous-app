@@ -68,13 +68,17 @@ async def direct_serve_config() -> Optional[DirectServeConfig]:
     try:
         secret = os.environ.get("NGINX_SECURE_LINK_SECRET", "")
         if secret:
-            from app.db import engine as db_engine
+            from sqlalchemy import select
 
-            row = await db_engine.fetch_one(
-                "SELECT value FROM public.system_settings WHERE key = :k",
-                {"k": _SETTINGS_KEY},
-            )
-            value = row.get("value") if row else None
+            from app.db.session import read_scope
+            from app.models import SystemSettings
+
+            async with read_scope() as session:
+                value = await session.scalar(
+                    select(SystemSettings.value).where(
+                        SystemSettings.key == _SETTINGS_KEY
+                    )
+                )
             if isinstance(value, str):
                 try:
                     value = json.loads(value)

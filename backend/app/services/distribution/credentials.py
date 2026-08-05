@@ -36,22 +36,24 @@ async def get_douyin_credentials() -> DouyinCredentials:
     with encrypting ``client_secret`` at rest later; today it's plaintext —
     see the module-level note in the PR).
 
-    ``db_engine.fetch_all`` runs raw SQL via ``text()`` with no Core JSON type
-    registered, so asyncpg may hand the jsonb ``value`` column back as a JSON
-    string rather than an already-decoded dict (same shape asyncpg returns to
-    ``app.workflows.thumbnail._read_backfill_config``) — be tolerant of both.
-    ``json.loads`` runs BEFORE ``reveal`` so that any ``enc:v1:``-marked
-    sub-fields are recognized as nested dict values, not buried inside an
-    un-decoded JSON string (which ``reveal`` would pass through unchanged).
+    The ORM read normally hands the jsonb ``value`` column back as an
+    already-decoded dict, but stay tolerant of the JSON-string shape too
+    (same defensive fallback as ``app.workflows.thumbnail._backfill_scan_step``)
+    in case a driver/codec path ever returns the raw text. ``json.loads`` runs
+    BEFORE ``reveal`` so that any ``enc:v1:``-marked sub-fields are recognized
+    as nested dict values, not buried inside an un-decoded JSON string (which
+    ``reveal`` would pass through unchanged).
     """
-    from app.core.secure_settings import reveal
-    from app.db import engine as db_engine
+    from sqlalchemy import select
 
-    rows = await db_engine.fetch_all(
-        "SELECT key, value FROM public.system_settings WHERE key = :k",
-        {"k": SETTINGS_KEY},
-    )
-    raw = rows[0]["value"] if rows else None
+    from app.core.secure_settings import reveal
+    from app.db.session import read_scope
+    from app.models import SystemSettings
+
+    async with read_scope() as session:
+        raw = await session.scalar(
+            select(SystemSettings.value).where(SystemSettings.key == SETTINGS_KEY)
+        )
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
