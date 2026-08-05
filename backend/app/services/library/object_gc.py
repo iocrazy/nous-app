@@ -57,7 +57,7 @@ from app.services.library.media_storage import ObjectStore, resolve_media_source
 
 # ── Reference check ──────────────────────────────────────────────────────
 #
-# Same 11 index columns as ``app.workflows.storage_audit._COLLECT_SQL`` — keep
+# Same 11 index columns as ``app.workflows.storage_audit._COLLECT_ARMS`` — keep
 # both lists in sync; a column added to one and not the other lets a route
 # either leak objects (missing here) or delete a still-referenced one
 # (missing there is less dangerous, but still a drift). The two modules

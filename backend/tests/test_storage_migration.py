@@ -359,6 +359,48 @@ async def test_workflow_passes_scope_id_to_select(monkeypatch):
     manager.complete.assert_awaited_once()
 
 
+async def test_workflow_scope_wrap_is_gated_by_is_enforced(monkeypatch):
+    """Final review Finding 1: the workflow-body ``system_request_scope`` wrap
+    must be gated on ``is_enforced("resources")`` like every other site in
+    this batch — an accidentally-unconditional wrap means a future second
+    scoped table would default to a silent SYSTEM view instead of a loud
+    fail-closed raise while the flag is off. Verified via ``current_scope()``
+    observed from inside ``select_stmt``, for both enforcement states."""
+    import app.db.scope as scope_module
+    from app.db.scope import SYSTEM, current_scope
+
+    manager = _make_manager()
+    monkeypatch.setattr(
+        "app.services.infra.unified_task_manager.get_task_manager",
+        lambda: manager,
+    )
+
+    seen_scope = {}
+
+    def spy_select_stmt(scope_id, limit):
+        seen_scope["value"] = current_scope()
+        return select(literal(1))
+
+    monkeypatch.setattr(sm, "read_scope", _fake_read_scope(_FakeExecuteRowsResult([])))
+    monkeypatch.setitem(
+        sm._MODULES, "uploads", _module_cfg(select_stmt=spy_select_stmt)
+    )
+
+    # enforcement OFF → nullcontext() → no ambient scope set by the wrap.
+    monkeypatch.setattr(scope_module.settings, "SCOPE_ENFORCE_RESOURCES", False)
+    await _body()(
+        module="uploads", scope_id=None, limit=10, dry_run=False, delete_source=False
+    )
+    assert seen_scope["value"] is None
+
+    # enforcement ON → real system_request_scope → SYSTEM ambient scope.
+    monkeypatch.setattr(scope_module.settings, "SCOPE_ENFORCE_RESOURCES", True)
+    await _body()(
+        module="uploads", scope_id=None, limit=10, dry_run=False, delete_source=False
+    )
+    assert seen_scope["value"] is SYSTEM
+
+
 # ── 7. one row failing doesn't abort the batch, but failed>0 raises ─────
 
 

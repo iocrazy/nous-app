@@ -71,6 +71,7 @@ from __future__ import annotations
 import mimetypes
 import os
 import shutil
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
@@ -80,7 +81,7 @@ from loguru import logger
 from sqlalchemy import and_, or_, select, true, update
 
 from app.core.config import settings
-from app.db.scope import system_request_scope
+from app.db.scope import is_enforced, system_request_scope
 from app.db.session import read_scope, write_scope
 from app.models import (
     FileVersions,
@@ -591,7 +592,7 @@ def _derived_db_select_stmt(limit: int):
 
 # Whitelist: the ONLY two columns ``_migrate_derived_row`` is allowed to
 # write, each mapped to its own attribute name — same defense-in-depth
-# rationale as ``_PM_ASSETS_COLUMN_UPDATE_SQL`` below (never build an
+# rationale as ``_PM_ASSETS_COLUMNS_WHITELIST`` below (never build an
 # update from an unexpected column value).
 _DERIVED_COLUMNS_WHITELIST = ("thumbnail_path", "cover_image_path")
 
@@ -1592,9 +1593,25 @@ async def storage_migration_workflow(
     # are allowed. Nested read_scope()/write_scope() calls in the row-level
     # migrate functions don't set scope themselves — they see this ambient
     # SYSTEM scope via the ContextVar for the whole workflow body.
-    async with system_request_scope(
-        reason=f"admin-initiated storage migration: module={module}"
-    ):
+    #
+    # Gated on is_enforced("resources") (Final Review Finding 1): every
+    # other system_request_scope site in this batch is gated the same way
+    # (fail-open to nullcontext() while the flag is off) — this one was
+    # accidentally left unconditional. Whole-workflow-body scope, rather
+    # than per-statement, is kept deliberately (not narrowed to Finding 1's
+    # suggested minimal-block shape): the bulk Core UPDATEs inside
+    # update_row are forbidden under ANY real user Scope regardless
+    # (_forbid_scoped_bulk_dml), and an admin-triggered full-library
+    # migration has no per-user identity to narrow to in the first place —
+    # wrapping 12 call sites individually would only add noise, not safety.
+    scope_cm = (
+        system_request_scope(
+            reason=f"admin-initiated storage migration: module={module}"
+        )
+        if is_enforced("resources")
+        else nullcontext()
+    )
+    async with scope_cm:
         # ``derived``/``pm_assets`` have no single SELECT to run — their rows
         # come from ``module_cfg.list_rows`` (DB-column-driven fan-out / disk
         # walk). Every other module fetches via the shared select_stmt path.
