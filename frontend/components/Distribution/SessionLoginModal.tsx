@@ -37,11 +37,24 @@ import { PLATFORM_LABEL } from './platform';
  */
 type ViewStatus =
   | SessionLoginStatus
-  | 'starting' | 'connecting' | 'start_failed' | 'session_ended';
+  | 'starting' | 'connecting' | 'start_failed' | 'start_unavailable' | 'session_ended';
 
 /** Statuses after which the workflow is done and there is nothing to cancel. */
 const TERMINAL: ReadonlySet<ViewStatus> = new Set<ViewStatus>([
   'success', 'timeout', 'failed', 'proxy_failed', 'session_ended',
+]);
+
+/**
+ * States where "get a new code" is the right next action — i.e. where a retry
+ * can plausibly succeed.
+ *
+ * `start_unavailable` is deliberately absent: a 503 means the server has no
+ * BROWSER_SERVICE_URL / token configured, so retrying is guaranteed to fail
+ * and a button inviting it just farms clicks on a problem the user cannot
+ * solve. `success` is absent for the obvious reason.
+ */
+const RETRYABLE: ReadonlySet<ViewStatus> = new Set<ViewStatus>([
+  'start_failed', 'qrcode_expired', 'timeout', 'failed', 'proxy_failed', 'session_ended',
 ]);
 
 /** Semantic tone per state — drives the dot/border color, never a hue name. */
@@ -49,6 +62,7 @@ const TONE: Record<ViewStatus, 'info' | 'ok' | 'warn' | 'danger'> = {
   starting: 'info',
   connecting: 'info',
   start_failed: 'danger',
+  start_unavailable: 'danger',
   session_ended: 'warn',
   waiting_scan: 'info',
   scanned: 'info',
@@ -77,7 +91,10 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
   const { t } = useTranslation();
   const [taskId, setTaskId] = useState<string | null>(null);
   const [login, setLogin] = useState<SessionLoginState | null>(null);
-  const [startFailed, setStartFailed] = useState(false);
+  // Two shapes of start failure, because only one of them is worth retrying:
+  // a 503 means the server has no browser service configured at all.
+  const [startError, setStartError] =
+    useState<'start_failed' | 'start_unavailable' | null>(null);
   // Set when /sms answers 409 — the task is already terminal server-side, so
   // Realtime will never deliver another status for it.
   const [sessionEnded, setSessionEnded] = useState(false);
@@ -86,11 +103,10 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
   const [smsError, setSmsError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
-  const reported: ViewStatus = startFailed
-    ? 'start_failed'
-    : sessionEnded
+  const reported: ViewStatus = startError
+    ?? (sessionEnded
       ? 'session_ended'
-      : login?.status ?? (taskId ? 'connecting' : 'starting');
+      : login?.status ?? (taskId ? 'connecting' : 'starting'));
   // The router seeds the row with a placeholder `waiting_scan` before the
   // browser has produced an image. Rendering that verbatim would tell the user
   // to scan an empty box, so it reads as "still fetching" until a QR arrives.
@@ -112,7 +128,7 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
   // ── start / restart ──────────────────────────────────────────────────
   const begin = useCallback(async () => {
     cancelledRef.current = false;
-    setStartFailed(false);
+    setStartError(null);
     setSessionEnded(false);
     setLogin(null);
     setSmsCode('');
@@ -125,7 +141,15 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
     } catch (err) {
       console.error('distribution: start session login failed', err);
       setTaskId(null);
-      setStartFailed(true);
+      // 503 = the endpoint's deliberate fail-fast on a missing
+      // BROWSER_SERVICE_URL / token. It never becomes true by retrying, so it
+      // gets its own state (and no retry button) rather than being lumped in
+      // with transient network failures.
+      setStartError(
+        (err as { status?: number } | null)?.status === 503
+          ? 'start_unavailable'
+          : 'start_failed',
+      );
     }
   }, [platform, scopeType, scopeId]);
 
@@ -283,7 +307,11 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
       //         blaming the digits the user typed.
       //   else — the platform genuinely rejected the code.
       const status = (err as { status?: number } | null)?.status;
-      if (status === 409) {
+      // 404 joins 409: the backend returns it when the task row is gone, is
+      // not a login task, or belongs to someone else. Whatever the cause, this
+      // task id is dead for this user and the remedy is identical — start over.
+      // (Only 409 is reachable from the normal flow; 404 needs a stale id.)
+      if (status === 409 || status === 404) {
         // Flip the whole modal rather than just annotating the form: no
         // further Realtime update is coming for this task, and leaving the
         // code input on screen implies retrying it might work. The
@@ -305,6 +333,7 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
     starting: t('distribution.session.startingLabel', 'Preparing a browser session'),
     connecting: t('distribution.session.connectingLabel', 'Fetching the QR code'),
     start_failed: t('distribution.session.startFailedLabel', 'Could not start sign-in'),
+    start_unavailable: t('distribution.session.startUnavailableLabel', 'QR sign-in is not set up on this server'),
     session_ended: t('distribution.session.sessionEndedLabel', 'This sign-in has ended'),
     waiting_scan: t('distribution.session.waitingScanLabel', 'Waiting for the scan'),
     scanned: t('distribution.session.scannedLabel', 'Scanned — confirm on your phone'),
@@ -320,6 +349,7 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
     starting: t('distribution.session.startingHint', 'Opening an isolated browser for this account.'),
     connecting: t('distribution.session.connectingHint', 'The sign-in page is loading — the code appears in a moment.'),
     start_failed: t('distribution.session.startFailedHint', 'The request never reached the server. Check your connection and try again.'),
+    start_unavailable: t('distribution.session.startUnavailableHint', 'The browser service this needs has not been configured. Retrying will not help — ask an administrator to set it up, or use Official Authorization instead.'),
     session_ended: t('distribution.session.sessionEndedHint', 'The code expired while this was open, so the verification code can no longer be used. Get a new code and scan again.'),
     waiting_scan: t('distribution.session.waitingScanHint', 'Open the app on your phone and scan the code to link this account.'),
     scanned: t('distribution.session.scannedHint', 'Tap Confirm in the app to finish signing in.'),
@@ -334,7 +364,9 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
   const tone = TONE[status];
   const busy = status === 'starting' || status === 'connecting';
   const showQr = Boolean(login?.qrcode_data_url) && (status === 'waiting_scan' || status === 'scanned');
-  const canRetry = terminal || status === 'start_failed' || status === 'qrcode_expired';
+  const canRetry = RETRYABLE.has(status);
+  // "Cancel" only when there is a live login to abandon; otherwise "Close".
+  const canCancel = Boolean(taskId) && !terminal;
 
   return (
     <div className="picker-overlay" role="presentation" onClick={close}>
@@ -372,7 +404,7 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
               <div className="sess-qr-ph">
                 {status === 'success' && <CheckCircle2 size={30} />}
                 {status === 'scanned' && <Smartphone size={30} />}
-                {status === 'proxy_failed' && <ShieldAlert size={30} />}
+                {(status === 'proxy_failed' || status === 'start_unavailable') && <ShieldAlert size={30} />}
                 {(status === 'failed' || status === 'timeout' || status === 'start_failed') && <AlertTriangle size={30} />}
                 {busy && <Loader2 size={30} className="spin" />}
                 {(status === 'qrcode_expired' || status === 'session_ended') && <QrCode size={30} />}
@@ -439,11 +471,11 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
 
         <div className="picker-foot">
           <button type="button" className="btn btn-ghost btn-sm" onClick={close}>
-            {terminal
-              ? t('common.close', 'Close')
-              : t('common.cancel', 'Cancel')}
+            {canCancel
+              ? t('common.cancel', 'Cancel')
+              : t('common.close', 'Close')}
           </button>
-          {canRetry && status !== 'success' && (
+          {canRetry && (
             <button type="button" className="btn btn-tint-indigo btn-sm" onClick={() => void restart()}>
               <RefreshCw size={13} /> {t('distribution.session.retry', 'Get a new code')}
             </button>

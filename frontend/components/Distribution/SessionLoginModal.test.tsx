@@ -218,6 +218,27 @@ describe('SessionLoginModal', () => {
     expect(cancelSessionLogin).not.toHaveBeenCalled();
   });
 
+  it('treats a 404 the same as a 409 — the id is dead either way', async () => {
+    // The backend answers 404 when the task row is gone, is not a login task,
+    // or belongs to another user. All three mean this id is unusable for this
+    // user, and the remedy is the same one 409 gets: start over. Showing
+    // "check your code" would be just as much of a dead end.
+    submitSmsCode.mockRejectedValueOnce(
+      Object.assign(new Error('distribution api failed: 404'), { status: 404 }),
+    );
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({ status: 'sms_required' });
+    fireEvent.change(screen.getByLabelText(/Verification code/i), { target: { value: '123456' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Submit$/i }));
+    });
+
+    expect(await screen.findByText(/This sign-in has ended/i)).toBeInTheDocument();
+    expect(screen.queryByText(/That code was rejected/i)).toBeNull();
+    expect(screen.queryByLabelText(/Verification code/i)).toBeNull();
+  });
+
   it('names a 422 as a format problem, not a wrong code', async () => {
     const err = Object.assign(new Error('distribution api failed: 422'), { status: 422 });
     submitSmsCode.mockRejectedValueOnce(err);
@@ -373,5 +394,21 @@ describe('SessionLoginModal', () => {
     mount();
     expect(await screen.findByText(/Could not start sign-in/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Get a new code/i })).toBeInTheDocument();
+  });
+
+  it('does not offer a retry when the server has no browser service', async () => {
+    // 503 is the endpoint's deliberate fail-fast on a missing
+    // BROWSER_SERVICE_URL / token. Retrying can never succeed, so offering the
+    // button would just farm clicks on a problem the user cannot fix.
+    startSessionLogin.mockRejectedValueOnce(
+      Object.assign(new Error('distribution api failed: 503'), { status: 503 }),
+    );
+    mount();
+    expect(await screen.findByText(/not set up on this server/i)).toBeInTheDocument();
+    expect(screen.getByText(/Retrying will not help/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Get a new code/i })).toBeNull();
+    expect(screen.queryByText(/Could not start sign-in/i)).toBeNull();
+    // Nothing was ever dispatched, so there is nothing to "Cancel".
+    expect(screen.queryByRole('button', { name: /^Cancel$/i })).toBeNull();
   });
 });

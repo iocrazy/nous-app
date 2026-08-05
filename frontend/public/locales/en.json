@@ -245,6 +245,8 @@
       "connectingHint": "The sign-in page is loading — the code appears in a moment.",
       "startFailedLabel": "Could not start sign-in",
       "startFailedHint": "The request never reached the server. Check your connection and try again.",
+      "startUnavailableLabel": "QR sign-in is not set up on this server",
+      "startUnavailableHint": "The browser service this needs has not been configured. Retrying will not help — ask an administrator to set it up, or use Official Authorization instead.",
       "sessionEndedLabel": "This sign-in has ended",
       "sessionEndedHint": "The code expired while this was open, so the verification code can no longer be used. Get a new code and scan again.",
       "waitingScanLabel": "Waiting for the scan",

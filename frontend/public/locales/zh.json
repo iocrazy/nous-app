@@ -245,6 +245,8 @@
       "connectingHint": "登录页加载中，二维码马上出现。",
       "startFailedLabel": "无法发起扫码登录",
       "startFailedHint": "请求没有到达服务器，请检查网络后重试。",
+      "startUnavailableLabel": "本服务器未启用扫码登录",
+      "startUnavailableHint": "扫码登录依赖的浏览器服务尚未配置。重试没有用 —— 请联系管理员完成配置，或改用官方授权。",
       "sessionEndedLabel": "本次登录已结束",
       "sessionEndedHint": "二维码在此期间已过期，验证码不再有效。请重新获取二维码后再扫一次。",
       "waitingScanLabel": "等待扫码",
