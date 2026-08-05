@@ -113,59 +113,40 @@ async def get_queue_status() -> dict:
         # over Kong/PostgREST (httpx) each call leaked a CLOSE_WAIT connection
         # (known httpcore bug — Issue #199 Bug C / 2026-05-22 incident),
         # exhausting the ephemeral port range. The SQLAlchemy async engine
-        # (Issue #199 target) pools cleanly. Falls back to supabase-py only
-        # when Supavisor isn't configured (dev).
-        from app.db import engine as db_engine
+        # (Issue #199 target) pools cleanly.
+        #
+        # Phase B5 Task 2 fix2: this used to branch on db_engine.is_configured()
+        # — a raw eng.connect() + text() path for "prod" and this ORM path for
+        # "dev" — but both branches resolve to the SAME get_engine() singleton
+        # (read_scope()'s sessionmaker binds to it too), which raises
+        # RuntimeError itself when unconfigured. The branch was dead weight:
+        # collapsed to the one ORM path both "sides" already ran through.
+        from sqlalchemy import func, select
 
-        if db_engine.is_configured():
-            from sqlalchemy import text
+        from app.db.session import read_scope
+        from app.models import TaskTracking
 
-            eng = db_engine.get_engine()
-            async with eng.connect() as conn:
-                active = (
-                    await conn.execute(
-                        text(
-                            "SELECT count(*) FROM public.task_tracking "
-                            "WHERE phase = 'processing'"
-                        )
+        async with read_scope() as session:
+            active_count = int(
+                (
+                    await session.execute(
+                        select(func.count())
+                        .select_from(TaskTracking)
+                        .where(TaskTracking.phase == "processing")
                     )
                 ).scalar()
-                pending = (
-                    await conn.execute(
-                        text(
-                            "SELECT count(*) FROM public.task_tracking "
-                            "WHERE phase = 'queued'"
-                        )
+                or 0
+            )
+            pending_count = int(
+                (
+                    await session.execute(
+                        select(func.count())
+                        .select_from(TaskTracking)
+                        .where(TaskTracking.phase == "queued")
                     )
                 ).scalar()
-            active_count, pending_count = int(active or 0), int(pending or 0)
-        else:
-            from sqlalchemy import func, select
-
-            from app.db.session import read_scope
-            from app.models import TaskTracking
-
-            async with read_scope() as session:
-                active_count = int(
-                    (
-                        await session.execute(
-                            select(func.count())
-                            .select_from(TaskTracking)
-                            .where(TaskTracking.phase == "processing")
-                        )
-                    ).scalar()
-                    or 0
-                )
-                pending_count = int(
-                    (
-                        await session.execute(
-                            select(func.count())
-                            .select_from(TaskTracking)
-                            .where(TaskTracking.phase == "queued")
-                        )
-                    ).scalar()
-                    or 0
-                )
+                or 0
+            )
         result = {
             "active": active_count,
             "pending": pending_count,
@@ -242,41 +223,30 @@ async def get_queue_breakdown() -> list[dict]:
 
     rows: list[dict] = []
     try:
-        from app.db import engine as db_engine
+        # Phase B5 Task 2 fix2: collapsed the db_engine.is_configured() branch
+        # (raw eng.connect() + text()) into this one ORM path — see
+        # get_queue_status's matching comment for why that split was dead
+        # weight (both branches resolve to the same get_engine() singleton).
+        from sqlalchemy import select
 
-        if db_engine.is_configured():
-            from sqlalchemy import text
+        from app.db.session import read_scope
+        from app.models import TaskTracking
 
-            eng = db_engine.get_engine()
-            async with eng.connect() as conn:
-                res = await conn.execute(
-                    text(
-                        "SELECT task_type, phase, created_at FROM public.task_tracking "
-                        "WHERE phase IN ('processing', 'queued')"
+        async with read_scope() as session:
+            rows = [
+                dict(m)
+                for m in (
+                    await session.execute(
+                        select(
+                            TaskTracking.task_type,
+                            TaskTracking.phase,
+                            TaskTracking.created_at,
+                        ).where(TaskTracking.phase.in_(["processing", "queued"]))
                     )
                 )
-                rows = [dict(m) for m in res.mappings().all()]
-        else:
-            from sqlalchemy import select
-
-            from app.db.session import read_scope
-            from app.models import TaskTracking
-
-            async with read_scope() as session:
-                rows = [
-                    dict(m)
-                    for m in (
-                        await session.execute(
-                            select(
-                                TaskTracking.task_type,
-                                TaskTracking.phase,
-                                TaskTracking.created_at,
-                            ).where(TaskTracking.phase.in_(["processing", "queued"]))
-                        )
-                    )
-                    .mappings()
-                    .all()
-                ]
+                .mappings()
+                .all()
+            ]
 
         result = _aggregate_breakdown(rows, datetime.now(timezone.utc))
         _breakdown_cache.update(data=result, timestamp=current_time)

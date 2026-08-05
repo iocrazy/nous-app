@@ -98,7 +98,15 @@ def _fake_read_scope_returning(role):
 async def test_verify_team_owner_allows_owner(monkeypatch):
     """Phase B5 Task 1: _verify_team_owner's team_members.role lookup —
     migrated from raw db_engine.fetch_one to the ORM. Exercises the real
-    function (not mocked away, unlike the other tests in this file)."""
+    function (not mocked away, unlike the other tests in this file).
+
+    Undisclosed behavior fix (final review Finding 1, 2026-08-05): the
+    pre-migration raw SQL bound scope_id (a str) directly against
+    team_members.team_id (BigInteger) with no int() coercion — asyncpg's
+    strict int8 codec raised DataError on every call, so this owner-only
+    gate 500'd unconditionally and had never once executed successfully.
+    The ORM version's int(scope_id) (see the function's docstring) is what
+    makes it actually reachable for the first time, not incidental cleanup."""
     import app.db.session as db_session
 
     # _verify_team_owner does a function-local ``from app.db.session import

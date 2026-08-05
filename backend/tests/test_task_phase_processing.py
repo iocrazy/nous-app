@@ -40,17 +40,19 @@ def test_taskphase_processing_value_is_processing():
 def test_get_queue_status_filters_on_processing():
     """`get_queue_status` must filter active tasks by phase='processing'
     — this is the regression we're guarding. Ported from a supabase-py
-    `.eq("phase", "processing")` check to the two ORM/raw-SQL branches
-    the function now has (direct-engine `text()` branch + ORM
-    `read_scope()` branch, chosen by ``db_engine.is_configured()``): look
-    for the actual 'processing' phase filter in each, rather than a naked
-    substring, so the docstring discussing the historical 'in_progress'
-    typo doesn't false-positive against itself."""
+    `.eq("phase", "processing")` check, through an interim state with two
+    ORM/raw-SQL branches (direct-engine `text()` for "prod" + ORM
+    `read_scope()` for "dev", chosen by ``db_engine.is_configured()``), to
+    the single ORM path Phase B5 Task 2 fix2 collapsed them into (both
+    branches bound to the same get_engine() singleton, so the split was
+    dead weight): look for the actual 'processing' phase filter, rather
+    than a naked substring, so the docstring discussing the historical
+    'in_progress' typo doesn't false-positive against itself."""
     from app.services.infra import system_monitor_service
 
     src = inspect.getsource(system_monitor_service.get_queue_status)
-    assert "WHERE phase = 'processing'" in src  # direct-engine text() branch
-    assert 'TaskTracking.phase == "processing"' in src  # ORM read_scope() branch
+    assert 'TaskTracking.phase == "processing"' in src  # ORM read_scope() path
+    assert "WHERE phase = 'processing'" not in src  # the old text() branch is gone
 
 
 def test_parse_workflow_calls_mark_processing():

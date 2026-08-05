@@ -31,6 +31,21 @@ async def _verify_team_owner(auth: AuthDep, scope_id: str) -> None:
     The TTL setting decides when OTHER team members' uploads get deleted,
     so write permission must match ``PATCH /teams/{id}`` (owner-only).
     Read access stays open to all members via ``verify_scope_access``.
+
+    ``int(scope_id)`` is NOT optional cleanup — it's the fix for a bug this
+    ORM migration silently closed. The pre-migration raw SQL bound
+    ``scope_id`` (a ``str`` — see ``TempTtlUpdate.scope_id``) directly against
+    ``team_members.team_id`` (``BigInteger``); asyncpg's int8 codec is strict
+    about str-vs-int (same trap documented in
+    ``app.services.ai_usage._coerce_bigint``), so that query raised
+    ``asyncpg.exceptions.DataError`` for every call, str or int alike. Because
+    ``put_temp_ttl`` has no try/except around this call, the exception went
+    straight through FastAPI to a 500 — meaning this owner-only gate had
+    NEVER executed successfully once since it was introduced: legitimate team
+    owners got a 500 trying to set their own team's TTL, and non-owners also
+    got a 500 (never a clean 403). Confirmed via a disposable-container
+    reproduction of the pre-migration call shape (2026-08-05). Do not remove
+    the ``int(...)`` coercion — reverting to a bare ``scope_id`` reopens this.
     """
     from sqlalchemy import select
 
