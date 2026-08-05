@@ -87,6 +87,15 @@ class ToolRequirement:
 TOOL_REQUIREMENTS: dict[str, ToolRequirement] = {
     "GenerateImage": ToolRequirement(media="image"),
     "GenerateVideo": ToolRequirement(media="video"),
+    # A6. Dispatches the existing script_shot_generate DBOS workflow for one
+    # shot — real provider spend per call, so it is graded exactly like
+    # GenerateImage: same capability (media.image), same per-turn cap, same
+    # kill switch. It carries NO write_level requirement (write_level is a
+    # different axis — editing script content — from spending money on an
+    # image), which is why it lives outside the ordinal write-grading ladder
+    # above despite being dispatched through the same screenwriting-tool
+    # plumbing as ListScenes/CreateShot/etc. (see screenwriting_tools.py).
+    "GenerateShotImage": ToolRequirement(media="image"),
     "ListScenes": ToolRequirement(write_level="read"),
     "ReadScene": ToolRequirement(write_level="read"),
     "CreateShot": ToolRequirement(write_level="write"),

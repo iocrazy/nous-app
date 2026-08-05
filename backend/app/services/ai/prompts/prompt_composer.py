@@ -392,12 +392,29 @@ class PromptComposer:
         if delegate_feature_enabled():
             tools.append(self._delegate_tool_spec())
         if agent is not None:
-            from app.services.ai.permissions.high_risk_caps import high_risk_caps
+            from app.services.ai.permissions.high_risk_caps import (
+                high_risk_caps,
+                media_kill_switch_engaged,
+            )
             from app.services.ai.tools.screenwriting_specs import (
                 screenwriting_tool_specs,
             )
 
-            tools.extend(screenwriting_tool_specs(high_risk_caps(agent).write_level))
+            caps = high_risk_caps(agent)
+            # GenerateShotImage (A6) rides the write_level-filtered list but is
+            # gated on a different capability (media.image) — see
+            # screenwriting_tool_specs' docstring. Both the grant AND the
+            # install-wide kill switch are checked here, mirroring the
+            # media-tool registration block in ai_library_chat_service.py, so
+            # a killed-switch or ungranted agent never even sees the tool
+            # advertised (enforcement still lives in HighRiskCapabilityGateHook
+            # regardless of what this UX filter decides).
+            media_image_allowed = caps.media.image and not media_kill_switch_engaged()
+            tools.extend(
+                screenwriting_tool_specs(
+                    caps.write_level, media_image_allowed=media_image_allowed
+                )
+            )
         return tools
 
     def _skill_tool_spec(self) -> dict:

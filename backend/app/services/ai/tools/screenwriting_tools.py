@@ -219,7 +219,7 @@ async def _bound_scope(run_context: dict) -> Optional[AgentRunScope]:
 
 
 class ScreenwritingTools:
-    """Handlers for the five A4 tools. Stateless — one instance per turn is
+    """Handlers for the five A4 tools plus A6's GenerateShotImage. Stateless — one instance per turn is
     fine, and so is a module-level singleton; all per-run state comes from
     ``run_context``."""
 
@@ -294,6 +294,154 @@ class ScreenwritingTools:
                 "error_code": "write_failed",
             }
         return {"ok": True, "scene_id": str(scene.id), "shot": shot}
+
+    async def generate_shot_image(self, args: dict, run_context: dict) -> dict:
+        """Dispatch the existing ``script_shot_generate`` DBOS workflow for
+        one shot (A6, spec §5.1). Deliberately thin: this function's only job
+        is AUTHORIZATION (resolve the id through THIS run's scope) plus
+        DISPATCH — it does not touch the workflow's own logic
+        (``script_shot_generate.py``), which is unchanged.
+
+        The id is resolved through ``resolve_shot`` BEFORE the workflow ever
+        sees it (A2 review follow-up, closed here): the workflow is handed a
+        shot_id that has already been proven, against this run's server-bound
+        scope, to belong to it — never a raw model-supplied id passed
+        straight through to the workflow's own (unscoped) internal lookup.
+
+        Asynchronous, on purpose (spec §4.5): this call only confirms
+        DISPATCH. It does not wait for the image, and it does not report
+        success/failure of the generation itself — that lands on the shot row
+        later, written by the workflow's own steps. Nothing here is a
+        precondition for anything else; there is no model-asserted value
+        anywhere in this path that gates a later authorization decision.
+
+        Cost control: the per-call spend cap lives in
+        ``HighRiskCapabilityGateHook`` (media.max_calls_per_turn, checked
+        BEFORE this handler is ever entered — same mechanism, same turn
+        scope, as GenerateImage/GenerateVideo). On top of that, this handler
+        flips the shot to ``status='generating'`` BEFORE dispatch and rolls
+        back to ``'empty'`` if dispatch itself fails — mirroring
+        ``script_shots_router.py``'s human ``/shots/{shot_id}/generate`` REST
+        endpoint exactly (see ``gateway.set_shot_status``'s docstring for why
+        this is a different write surface from ``UpdateShot``'s, not a
+        loosening of it) — so two calls for the SAME shot cannot both slip
+        through and pay twice: the second sees ``status == 'generating'``
+        (see the check below) and is refused, a SERVER fact rather than
+        anything the model asserted.
+        """
+        scope = await _bound_scope(run_context)
+        if scope is None:
+            return _UNBOUND
+
+        from app.core.config import settings
+
+        if not settings.FEATURE_SHOT_GENERATE:
+            return {
+                "ok": False,
+                "error": "Shot image generation is currently disabled.",
+                "error_code": "feature_disabled",
+            }
+
+        shot = await resolve_shot(args.get("shot_id"), scope)
+        if isinstance(shot, Denied):
+            return _denied(shot)
+
+        # A generation already in flight for this EXACT shot — from a
+        # human's click via the REST endpoint, or an earlier agent dispatch
+        # that already flipped this same flag below — refuses a second one
+        # rather than racing it and paying twice.
+        if shot.status == "generating":
+            return {
+                "ok": False,
+                "error": (
+                    "This shot is already generating an image — wait for it "
+                    "to finish (re-read the scene) before dispatching another."
+                ),
+                "error_code": "already_generating",
+            }
+
+        # Claim the shot BEFORE dispatch (closes the same-turn race two
+        # back-to-back calls could otherwise both win: without this, both
+        # would see status='empty' above and both would proceed to dispatch).
+        try:
+            await gateway.set_shot_status(scope, shot, "generating")
+        except Exception as exc:  # noqa: BLE001 — never raise into the loop
+            logger.exception(
+                "[screenwriting] GenerateShotImage status claim failed shot=%s",
+                shot.id,
+            )
+            return {
+                "ok": False,
+                "error": f"could not claim the shot for generation: {exc.__class__.__name__}",
+                "error_code": "status_claim_failed",
+            }
+
+        import uuid as _uuid
+
+        from app.services.infra.dbos_orchestrator import start_workflow_routed
+        from app.services.infra.unified_task_manager import get_task_manager
+        from app.workflows.script_shot_generate import script_shot_generate_workflow
+
+        try:
+            mgr = get_task_manager()
+            wf_id = str(_uuid.uuid4())
+            task_id = await mgr.create(
+                user_id=scope.user_id,
+                task_type="shot_generate",  # ≤20 chars: task_tracking.task_type is VARCHAR(20)
+                title="Generate shot image (agent)",
+                dbos_workflow_id=wf_id,
+                metadata={"trigger": "agent_tool", "run_id": scope.run_id},
+            )
+            await start_workflow_routed(
+                "script_shot_generate",
+                dbos_workflow_callable=script_shot_generate_workflow,
+                dbos_workflow_kwargs={
+                    # The RESOLVED id, not args["shot_id"] — the whole point
+                    # of routing through resolve_shot first.
+                    "shot_id": str(shot.id),
+                    "user_id": scope.user_id,
+                },
+                workflow_id=wf_id,
+            )
+        except Exception as exc:  # noqa: BLE001 — never raise into the loop
+            logger.exception(
+                "[screenwriting] GenerateShotImage dispatch failed shot=%s", shot.id
+            )
+            # Dispatch failed AFTER the status claim above — roll back to the
+            # honest pre-dispatch state, same as script_shots_router.py's
+            # /generate endpoint does on the same failure mode. Without this
+            # the shot would be stuck 'generating' forever with no live task.
+            try:
+                await gateway.set_shot_status(scope, shot, "empty")
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "[screenwriting] GenerateShotImage status rollback failed "
+                    "shot=%s",
+                    shot.id,
+                )
+            return {
+                "ok": False,
+                "error": f"could not dispatch image generation: {exc.__class__.__name__}",
+                "error_code": "dispatch_failed",
+            }
+
+        logger.info(
+            "[screenwriting] GenerateShotImage run=%s shot=%s task=%s",
+            scope.run_id,
+            shot.id,
+            task_id,
+        )
+        return {
+            "ok": True,
+            "dispatched": True,
+            "shot_id": str(shot.id),
+            "task_id": task_id,
+            "note": (
+                "Generation dispatched asynchronously — it is not done yet. "
+                "The shot's image will update once it completes; this call "
+                "does not wait and does not know the outcome."
+            ),
+        }
 
     async def update_shot(self, args: dict, run_context: dict) -> dict:
         scope = await _bound_scope(run_context)
@@ -532,6 +680,7 @@ SCREENWRITING_HANDLERS = {
     "UpdateShot": SCREENWRITING_TOOLS.update_shot,
     "ProposeEdit": SCREENWRITING_TOOLS.propose_edit,
     "ApplyEdit": SCREENWRITING_TOOLS.apply_edit,
+    "GenerateShotImage": SCREENWRITING_TOOLS.generate_shot_image,
 }
 
 
