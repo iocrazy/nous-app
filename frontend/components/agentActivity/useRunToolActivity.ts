@@ -1,0 +1,94 @@
+/**
+ * Fetch one run's tool calls from ``agent_run_transcript_events``.
+ *
+ * Used by the collaboration timeline, which — unlike the chat panel — has only
+ * an ``agent_run_id`` and no in-hand trace. The panel must NOT use this hook:
+ * it would render every call a second time (see toolActivity.ts's docstring).
+ *
+ * A finished run's transcript is immutable, so it is fetched once and cached
+ * process-wide; a timeline with twenty runs in it would otherwise refetch on
+ * every re-render of the thread. Live runs poll until they settle.
+ */
+
+import { useEffect, useState } from 'react';
+
+import { aiLibraryService } from '../../services/aiLibraryService';
+import { fromTranscriptEvents, type ToolActivity } from './toolActivity';
+
+const LIVE_POLL_MS = 5_000;
+
+/** runId -> activities, for runs already known to be finished. */
+const settledCache = new Map<string, ToolActivity[]>();
+
+/** Exposed for tests — module-level caches otherwise leak between cases. */
+export function __clearRunToolActivityCache(): void {
+  settledCache.clear();
+}
+
+export interface UseRunToolActivityResult {
+  activities: ToolActivity[];
+  loaded: boolean;
+}
+
+export function useRunToolActivity(
+  runId: string | null | undefined,
+  isRunning = false,
+): UseRunToolActivityResult {
+  const [activities, setActivities] = useState<ToolActivity[]>(() =>
+    runId ? (settledCache.get(runId) ?? []) : [],
+  );
+  const [loaded, setLoaded] = useState(() =>
+    Boolean(runId && settledCache.has(runId)),
+  );
+
+  useEffect(() => {
+    if (!runId) {
+      setActivities([]);
+      setLoaded(true);
+      return;
+    }
+
+    const cached = settledCache.get(runId);
+    if (cached && !isRunning) {
+      setActivities(cached);
+      setLoaded(true);
+      return;
+    }
+
+    let cancelled = false;
+
+    const fetchOnce = async (): Promise<void> => {
+      try {
+        // Always fetch from seq 0 and rebuild: the transcript is small (one
+        // run's events) and a full rebuild through fromTranscriptEvents —
+        // which dedupes on the DB's UNIQUE(run_id, seq) — cannot double-count
+        // the way an append-on-poll accumulator can.
+        const resp = await aiLibraryService.getRunEvents(runId, 0);
+        if (cancelled) return;
+        const next = fromTranscriptEvents(resp.items ?? []);
+        if (!isRunning) settledCache.set(runId, next);
+        setActivities(next);
+      } catch (err) {
+        // A run owned by another user reads as 404 — the chips just don't
+        // render for them. Not an error worth surfacing in the thread.
+        if (!cancelled) console.error('[useRunToolActivity] fetch failed:', err);
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    };
+
+    void fetchOnce();
+
+    if (!isRunning) return () => {
+      cancelled = true;
+    };
+
+    const timer = window.setInterval(() => void fetchOnce(), LIVE_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [runId, isRunning]);
+
+  return { activities, loaded };
+}

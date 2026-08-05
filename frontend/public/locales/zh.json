@@ -3847,5 +3847,38 @@
   "moduleDisabled": {
     "title": "功能不可用",
     "message": "该功能当前已被管理员停用。"
+  },
+  "agentActivity": {
+    "tool": {
+      "ListScenes": "列出剧本场次",
+      "ReadScene": "读取剧本场景",
+      "CreateShot": "创建镜头卡",
+      "UpdateShot": "更新镜头卡",
+      "ProposeEdit": "提出修改建议",
+      "ApplyEdit": "应用剧本修改",
+      "GenerateShotImage": "生成分镜图"
+    },
+    "failed": "失败",
+    "wroteShots_one": "本轮写入 {{count}} 张镜头卡",
+    "wroteShots_other": "本轮写入 {{count}} 张镜头卡",
+    "wroteEdits_one": "本轮应用 {{count}} 处剧本修改",
+    "wroteEdits_other": "本轮应用 {{count}} 处剧本修改",
+    "alsoEdits_one": "+ {{count}} 处剧本修改",
+    "alsoEdits_other": "+ {{count}} 处剧本修改",
+    "revealShot": "在分镜中显示这个镜头",
+    "shotNoDescription": "暂无描述",
+    "chooseAgent": "选择一个 Agent",
+    "chooseAgentHint": "挑选你想合作的对象",
+    "noDescription": "暂无描述",
+    "crossScene": "跨多个场景",
+    "dropContext": "移除该选区",
+    "quick": {
+      "tighten": "精简这段内容，但不要丢失原意。",
+      "alternatives": "给我两个这段内容的备选版本。",
+      "toShots": "把这段内容拆成镜头卡。",
+      "listScenes": "列出本集场次，并标出偏弱的那些。",
+      "shotList": "为我当前所在的场次起草一份镜头表。",
+      "continuity": "检查本集是否存在连贯性问题。"
+    }
   }
 }

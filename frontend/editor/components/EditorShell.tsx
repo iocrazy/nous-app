@@ -97,6 +97,7 @@ import type { RemoteOpRow } from '../useSceneSync';
 import { reportError } from '../../services/errorReporter';
 import { SelectionAiChatButton } from '../selection/SelectionAiChatButton';
 import { Loading } from '../../components/common/Loading';
+import { onShotFocus } from '../../components/agentActivity/shotFocusBus';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -231,6 +232,7 @@ export function EditorShell({
   // with how railView already gates the centre pane.
   const [diffCommit, setDiffCommit] = useState<ScriptCommit | null>(null);
   const [pendingOpenSceneId, setPendingOpenSceneId] = useState<string | null>(null);
+  const [pendingFocusShotId, setPendingFocusShotId] = useState<string | null>(null);
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [typeCommand, setTypeCommand] = useState<TypeCommand | null>(null);
@@ -511,6 +513,34 @@ export function EditorShell({
     }
     setPendingOpenSceneId(null);
   }, [pendingOpenSceneId, railView, scenes]);
+
+  // A7: the chat panel's "the agent wrote these shot cards" summary lives in a
+  // sibling component tree (FloatingChatWidget), so it reaches us through a
+  // module-level bus rather than a prop. Same two-step shape as
+  // handleOpenScene above — switch the rail first, scroll once the storyboard
+  // has actually rendered.
+  useEffect(
+    () =>
+      onShotFocus((shotId) => {
+        selectRailView('storyboard');
+        setPendingFocusShotId(shotId);
+      }),
+    [selectRailView],
+  );
+
+  useEffect(() => {
+    if (!pendingFocusShotId || railView !== 'storyboard') return;
+    // ShotCard already emits data-shot-id (editor/storyboard/ShotCard.tsx).
+    const card = shellRef.current?.querySelector<HTMLElement>(
+      `[data-shot-id="${pendingFocusShotId}"]`,
+    );
+    if (card) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.classList.add('mh-diff-jump-flash');
+      window.setTimeout(() => card.classList.remove('mh-diff-jump-flash'), 1400);
+    }
+    setPendingFocusShotId(null);
+  }, [pendingFocusShotId, railView, scenes]);
 
   // Focusing an element line raises the editing-state flag, which the shell
   // exposes as data-editing="true" — a pure CSS hook that lights up the element
