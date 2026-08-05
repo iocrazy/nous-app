@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { KeyRound, Plus, QrCode, RefreshCw, Trash2, X } from 'lucide-react';
 import { useToast } from '../Toast';
 import {
   connectAccount, deleteAccount, listAccounts, listPublishTasks, refreshAccount,
@@ -8,9 +8,28 @@ import {
 import { SocialAccount, PublishTask } from '../../types';
 import { PLATFORM_BADGE, PLATFORM_LABEL, gradientFor } from './platform';
 import { PageHeader } from '../layout/PageHeader';
+import SessionLoginModal from './SessionLoginModal';
 import './distribution-v4.css';
 
 const WEEK_MS = 7 * 86_400_000;
+
+/**
+ * Two statuses mean "this account cannot publish right now": `expired` is an
+ * OAuth token that lapsed, `needs_relogin` is a dead browser session. Any
+ * count or filter that means "needs attention" must cover both — treating
+ * only `expired` as actionable makes the stat read 0 while session accounts
+ * are offline, which is exactly the silent no-op CLAUDE.md forbids.
+ */
+const isActionable = (a: SocialAccount) =>
+  a.status === 'expired' || a.status === 'needs_relogin';
+
+/** Which binding flow to start — chosen in the Connect modal. */
+type SessionLoginTarget = {
+  platform: string;
+  scopeType: 'user' | 'team';
+  scopeId: string;
+  relinkUsername?: string;
+};
 
 export const AccountsPage: React.FC = () => {
   const { t } = useTranslation();
@@ -18,6 +37,9 @@ export const AccountsPage: React.FC = () => {
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [tasks, setTasks] = useState<PublishTask[]>([]);
   const [loading, setLoading] = useState(true);
+  // Both binding entry points funnel through here: pick a method, then run it.
+  const [methodPicker, setMethodPicker] = useState<string | null>(null);
+  const [sessionLogin, setSessionLogin] = useState<SessionLoginTarget | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -38,10 +60,20 @@ export const AccountsPage: React.FC = () => {
 
   useEffect(() => { void reload(); }, [reload]);
 
-  const onConnect = async () => {
+  /**
+   * Every "connect" affordance opens the method picker rather than jumping
+   * straight to OAuth: the two channels differ in what they can do (only a
+   * session account publishes unattended / picks its own account server-side)
+   * and Douyin's official capability review has not passed, so silently
+   * choosing OAuth for the user would pick the weaker one.
+   */
+  const onConnect = (platform = 'douyin') => setMethodPicker(platform);
+
+  const startOAuth = async (platform: string) => {
+    setMethodPicker(null);
     try {
       const { auth_url } = await connectAccount({
-        platform: 'douyin', scope_type: 'user', scope_id: 'self',
+        platform, scope_type: 'user', scope_id: 'self',
       });
       window.location.href = auth_url;
     } catch (err) {
@@ -49,6 +81,19 @@ export const AccountsPage: React.FC = () => {
       addToast(t('distribution.connectFailed', 'Could not start Douyin authorization'), 'error');
     }
   };
+
+  const startSession = (platform: string) => {
+    setMethodPicker(null);
+    setSessionLogin({ platform, scopeType: 'user', scopeId: 'self' });
+  };
+
+  /** Re-link a dead browser session — same modal, account-scoped copy. */
+  const onRelogin = (a: SocialAccount) => setSessionLogin({
+    platform: a.platform,
+    scopeType: a.scope_type,
+    scopeId: a.scope_id,
+    relinkUsername: a.username,
+  });
 
   const onRefresh = async (id: string) => {
     try {
@@ -73,7 +118,13 @@ export const AccountsPage: React.FC = () => {
 
   // ── stats derived from real publish tasks ──
   const expiredCount = useMemo(
-    () => accounts.filter((a) => a.status === 'expired').length,
+    () => accounts.filter(isActionable).length,
+    [accounts],
+  );
+  // Split so the stat can say *which* kind of attention is needed — "3
+  // authorizations expired" and "3 sessions need a new scan" are different jobs.
+  const reloginCount = useMemo(
+    () => accounts.filter((a) => a.status === 'needs_relogin').length,
     [accounts],
   );
   const platformCount = useMemo(
@@ -105,7 +156,7 @@ export const AccountsPage: React.FC = () => {
         count={accounts.length}
         subtitle={t('distribution.accountsSubtitle', 'Connect social accounts to publish from Nous')}
         actions={
-          <button type="button" className="btn btn-tint-indigo" onClick={onConnect}>
+          <button type="button" className="btn btn-tint-indigo" onClick={() => onConnect()}>
             <Plus size={15} /> {t('distribution.connectAccount', 'Connect Account')}
           </button>
         }
@@ -129,7 +180,15 @@ export const AccountsPage: React.FC = () => {
           <div className="v">
             {expiredCount}
             {' '}
-            {expiredCount > 0 && <small>{t('distribution.statsExpiredDesc', 'authorization expired')}</small>}
+            {expiredCount > 0 && (
+              <small>
+                {reloginCount === expiredCount
+                  ? t('distribution.statsReloginDesc', 'sessions need a new scan')
+                  : reloginCount > 0
+                    ? t('distribution.statsMixedDesc', 'expired or signed out')
+                    : t('distribution.statsExpiredDesc', 'authorization expired')}
+              </small>
+            )}
           </div>
         </div>
       </div>
@@ -139,7 +198,9 @@ export const AccountsPage: React.FC = () => {
       ) : (
         <div className="acct-grid">
           {accounts.map((a) => {
-            const expired = a.status === 'expired';
+            const needsRelogin = a.status === 'needs_relogin';
+            const expired = isActionable(a);
+            const isSession = a.auth_type === 'session';
             const badge = PLATFORM_BADGE[a.platform];
             const posts = postsByAccount.get(a.id) ?? 0;
             return (
@@ -157,10 +218,30 @@ export const AccountsPage: React.FC = () => {
                   </div>
                 </div>
                 <div className="chips">
-                  {expired ? (
+                  {needsRelogin ? (
+                    <span className="chip chip-warn"><span className="d" />{t('distribution.needsRelogin', 'Session signed out')}</span>
+                  ) : expired ? (
                     <span className="chip chip-amber"><span className="d" />{t('distribution.expired', 'Authorization expired')}</span>
                   ) : (
                     <span className="chip chip-green"><span className="d" />{t('distribution.active', 'Active')}</span>
+                  )}
+                  {/* Binding method is not cosmetic: only a session account can
+                      publish unattended, and the two fail (and recover) in
+                      completely different ways. */}
+                  {isSession ? (
+                    <span
+                      className="chip chip-info"
+                      title={t('distribution.authSessionHint', 'Browser session — can publish unattended on a schedule')}
+                    >
+                      <QrCode size={11} />{t('distribution.authSession', 'QR session')}
+                    </span>
+                  ) : (
+                    <span
+                      className="chip chip-mute"
+                      title={t('distribution.authOauthHint', 'Official authorization — the app must be open on your phone to finish a post')}
+                    >
+                      <KeyRound size={11} />{t('distribution.authOauth', 'Official')}
+                    </span>
                   )}
                   {a.scope_type === 'team' ? (
                     <span className="chip chip-violet">{t('distribution.teamScope', 'Team')}</span>
@@ -174,7 +255,14 @@ export const AccountsPage: React.FC = () => {
                       ? t('distribution.metaPosts', '{{n}} posts', { n: posts })
                       : t('distribution.metaNoPosts', 'No posts yet')}
                   </span>
-                  {expired ? (
+                  {/* Recovery differs by binding method — an OAuth token is
+                      refreshed at the platform, a dead session can only be
+                      revived by scanning a new QR code. */}
+                  {needsRelogin ? (
+                    <button type="button" className="btn btn-tint-amber btn-sm" onClick={() => onRelogin(a)}>
+                      <QrCode size={13} /> {t('distribution.rescan', 'Scan again')}
+                    </button>
+                  ) : expired ? (
                     <button type="button" className="btn btn-tint-amber btn-sm" onClick={() => onRefresh(a.id)}>
                       <RefreshCw size={13} /> {t('distribution.reauthorize', 'Reauthorize')}
                     </button>
@@ -187,7 +275,7 @@ export const AccountsPage: React.FC = () => {
               </div>
             );
           })}
-          <button type="button" className="acct ghost" onClick={onConnect}>
+          <button type="button" className="acct ghost" onClick={() => onConnect()}>
             <Plus size={18} />
             {t('distribution.connectAnother', 'Connect another account')}
           </button>
@@ -196,11 +284,25 @@ export const AccountsPage: React.FC = () => {
 
       <div className="panel">
         <h3>{t('distribution.platformPanelTitle', 'Connect a platform')}</h3>
-        <p className="hint">{t('distribution.platformPanelHint', 'Douyin ships first — other platforms reuse the same adapter and light up one by one.')}</p>
+        <p className="hint">{t('distribution.platformPanelHint', 'Each platform can be bound two ways, and they do not ship together — other platforms reuse the same adapters and light up one by one.')}</p>
         <div className="plat-row">
-          <button type="button" className="plat ready" onClick={onConnect}>
+          {/* "Ready" used to mean "OAuth is wired up", which overstated it:
+              Douyin's publishing capability review has not passed, so the
+              official channel can only hand a post off to the phone. State
+              each method's real availability instead of one blanket badge. */}
+          <button type="button" className="plat ready" onClick={() => onConnect('douyin')}>
             <span className="pbadge lg" style={{ background: PLATFORM_BADGE.douyin.bg }}>{PLATFORM_BADGE.douyin.icon}</span>
-            <div>Douyin<small>{t('distribution.platReady', 'Ready')}</small></div>
+            <div>
+              Douyin
+              <small className="plat-methods">
+                <span className="pm ok">
+                  <QrCode size={10} /> {t('distribution.platQrReady', 'QR sign-in ready')}
+                </span>
+                <span className="pm warn">
+                  <KeyRound size={10} /> {t('distribution.platOauthLimited', 'Official: hand-off only')}
+                </span>
+              </small>
+            </div>
           </button>
           <div className="plat soon">
             <span className="pbadge lg" style={{ background: PLATFORM_BADGE.kuaishou.bg }}>{PLATFORM_BADGE.kuaishou.icon}</span>
@@ -212,6 +314,62 @@ export const AccountsPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {methodPicker && (
+        <div className="picker-overlay" role="presentation" onClick={() => setMethodPicker(null)}>
+          <div
+            className="picker method"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('distribution.methodTitle', 'Choose how to connect')}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="picker-head">
+              <div>
+                <h3>{t('distribution.methodTitle', 'Choose how to connect')}</h3>
+                <p>
+                  {t('distribution.methodSubtitle', 'Both bind a {{platform}} account, but they can do different things.', {
+                    platform: PLATFORM_LABEL[methodPicker] ?? methodPicker,
+                  })}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="picker-close"
+                aria-label={t('distribution.methodClose', 'Close')}
+                onClick={() => setMethodPicker(null)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="method-row">
+              <button type="button" className="method-card" onClick={() => startSession(methodPicker)}>
+                <span className="mc-ic tone-info"><QrCode size={17} /></span>
+                <b>{t('distribution.methodSession', 'QR Code Login')}</b>
+                <span>{t('distribution.methodSessionDesc', 'Scan once with the app. Publishes unattended on a schedule and picks the account server-side.')}</span>
+                <em className="tone-ok">{t('distribution.methodSessionNote', 'Recommended for matrix accounts')}</em>
+              </button>
+              <button type="button" className="method-card" onClick={() => void startOAuth(methodPicker)}>
+                <span className="mc-ic tone-warn"><KeyRound size={17} /></span>
+                <b>{t('distribution.methodOauth', 'Official Authorization')}</b>
+                <span>{t('distribution.methodOauthDesc', 'Sign in on the platform’s own page. Nothing to maintain, but every post is finished by hand in the app.')}</span>
+                <em className="tone-warn">{t('distribution.methodOauthNote', 'No unattended publishing yet')}</em>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sessionLogin && (
+        <SessionLoginModal
+          platform={sessionLogin.platform}
+          scopeType={sessionLogin.scopeType}
+          scopeId={sessionLogin.scopeId}
+          relinkUsername={sessionLogin.relinkUsername}
+          onClose={() => setSessionLogin(null)}
+          onBound={() => { void reload(); }}
+        />
+      )}
     </div>
   );
 };

@@ -2,13 +2,26 @@ import { SocialAccount, PublishRequest, PublishTask, LibraryVideo } from '../typ
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 
+/**
+ * Carries the HTTP status alongside the message so callers can tell apart
+ * failures that need different words. Additive: the message format is
+ * unchanged, so existing `catch (err) { console.error(err) }` sites behave
+ * exactly as before.
+ */
+export class DistributionApiError extends Error {
+  constructor(public readonly status: number, path: string) {
+    super(`distribution api ${path} failed: ${status}`);
+    this.name = 'DistributionApiError';
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${getApiUrl()}/api/v1/distribution${path}`, {
     ...init,
     headers: { ...(await getAuthHeaders()), ...(init?.headers ?? {}) },
   });
   if (!res.ok) {
-    throw new Error(`distribution api ${path} failed: ${res.status}`);
+    throw new DistributionApiError(res.status, path);
   }
   return res.status === 204 ? (undefined as T) : res.json();
 }
@@ -24,6 +37,69 @@ export const connectAccount = (body: {
   request<{ auth_url: string }>('/accounts/connect', {
     method: 'POST',
     body: JSON.stringify(body),
+  });
+
+/**
+ * Start a QR-code (browser session) binding. Returns immediately with the
+ * `task_tracking` row id — the scan itself runs in a DBOS workflow, and the
+ * QR image plus every state change arrive over Supabase Realtime in
+ * `task_tracking.metadata.login` (see `SessionLoginState`). There is no
+ * response body to poll and no SSE channel.
+ */
+export const startSessionLogin = (body: {
+  platform: string;
+  scope_type: 'user' | 'team';
+  scope_id: string;
+}): Promise<{ task_id: string }> =>
+  request<{ task_id: string }>('/accounts/session/login', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+/**
+ * Typed result envelope the session endpoints return (backend
+ * `SessionOpResponse`). A 200 with `success: false` is a real failure — the
+ * platform rejected the input — so callers must branch on the flag rather
+ * than on the HTTP status. `detail.error_kind` present means the failure was
+ * infrastructural (browser container unreachable / unconfigured), which is a
+ * different message to the user than "wrong code".
+ */
+export interface SessionOpResult {
+  success: boolean;
+  status: string;
+  message: string;
+  detail?: { error_kind?: string } & Record<string, unknown>;
+}
+
+/**
+ * What the backend (and, verbatim, the browser container's `SmsCodeRequest`)
+ * will accept. Enforced client-side too: anything else comes back as a
+ * FastAPI 422 pydantic body, which is NOT a `SessionOpResult` and would land
+ * the modal on `undefined.success`.
+ */
+export const SMS_CODE_PATTERN = /^\d{4,8}$/;
+
+/** Answer the platform's SMS challenge (`status === 'sms_required'`). */
+export const submitSmsCode = (taskId: string, code: string): Promise<SessionOpResult> =>
+  request<SessionOpResult>(`/accounts/session/login/${encodeURIComponent(taskId)}/sms`, {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  });
+
+/**
+ * Abandon a login. MUST be called when the user closes the modal mid-scan —
+ * the browser container holds a live context per pending login, and without
+ * this it spins until the server-side timeout.
+ *
+ * `context_released: false` means the task is cancelled but the headless-less
+ * browser context outlives it until its TTL — worth a log, not worth blocking
+ * the user's close.
+ */
+export const cancelSessionLogin = (
+  taskId: string,
+): Promise<{ cancelled: boolean; context_released: boolean; message: string }> =>
+  request(`/accounts/session/login/${encodeURIComponent(taskId)}`, {
+    method: 'DELETE',
   });
 
 export const refreshAccount = (id: string): Promise<SocialAccount> =>

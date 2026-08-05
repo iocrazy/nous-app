@@ -2320,7 +2320,7 @@ export interface SocialAccount {
   username: string;
   avatar_url: string | null;
   token_expires_at: string | null;
-  // How the account is bound (mig 398). 'oauth' = open-platform token;
+  // How the account is bound (mig 401). 'oauth' = open-platform token;
   // 'session' = browser session, the only channel that can publish unattended.
   auth_type: 'oauth' | 'session';
   // Both 'expired' (oauth token) and 'needs_relogin' (dead browser session)
@@ -2331,12 +2331,43 @@ export interface SocialAccount {
   created_at: string;
 }
 
+/**
+ * QR-login progress, as written by the session_login workflow into
+ * `task_tracking.metadata.login`. The frontend reads it over Supabase
+ * Realtime — there is deliberately no SSE/polling channel for this.
+ *
+ * Every member of the union is terminal-or-actionable, and the modal must
+ * render an action for each one (CLAUDE.md: a trigger path with no typed,
+ * user-visible failure branch is a silent no-op). In particular
+ * `proxy_failed` is split out from `failed` because "your egress proxy is
+ * down" and "the platform rejected this account" need different fixes.
+ */
+export type SessionLoginStatus =
+  | 'waiting_scan'
+  | 'scanned'
+  | 'qrcode_expired'
+  | 'sms_required'
+  | 'success'
+  | 'timeout'
+  | 'failed'
+  | 'proxy_failed';
+
+export interface SessionLoginState {
+  platform: string;
+  status: SessionLoginStatus;
+  /** `data:image/png;base64,…` — absent once the code is scanned or dead. */
+  qrcode_data_url?: string | null;
+  expires_at?: string | null;
+  /** Server-authored detail (English); shown verbatim under the status line. */
+  message?: string | null;
+}
+
 export interface PublishTaskAccount {
   id: string;
   account_id: string;
   username: string;
   avatar_url: string | null;
-  // Mirrors publish_task_accounts.channel (mig 400). A 'session' row never
+  // Mirrors publish_task_accounts.channel (mig 403). A 'session' row never
   // reaches 'pending_share' — that state only exists for the H5 phone handoff.
   channel: 'official' | 'h5' | 'session';
   status: 'pending' | 'pending_share' | 'publishing' | 'success' | 'failed' | 'cancelled';

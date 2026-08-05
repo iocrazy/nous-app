@@ -21,6 +21,16 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
+def _float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class Settings:
     # Shared secret for X-Internal-Token. Empty means "not configured" and the
@@ -48,6 +58,40 @@ class Settings:
     # a Chromium per hit.
     health_probe_ttl_s: int
 
+    # --- QR login (S2) -----------------------------------------------------
+    # Hard lifetime of a login session. A QR code belongs to a live browser
+    # context, so this is also the ceiling on how long an abandoned scan can
+    # cost us a Chromium.
+    login_ttl_s: int
+    # Concurrent live login sessions. Separate from max_concurrent_browsers on
+    # purpose: a login holds its browser for minutes, and letting logins draw
+    # from the validation pool would let three idle QR codes starve session
+    # checks for the whole TTL.
+    login_max_sessions: int
+    # Budget for launch + navigate + first paint of the login page.
+    login_start_timeout_s: int
+    # Max wait for the per-session lock. Bounds how long a second request queues
+    # behind a page operation that is stuck.
+    login_lock_wait_s: int
+    # QR code read: attempts x interval. The login card is injected by
+    # client-side JS well after domcontentloaded, so the first read usually
+    # misses on a cold page.
+    login_qrcode_attempts: int
+    login_qrcode_poll_s: float
+    # Per-click/fill ceiling for login page interactions.
+    login_click_timeout_ms: int
+    # Pause after submitting a code, so the sampled state is the platform's
+    # answer rather than the pre-submit page.
+    login_sms_settle_s: float
+    # How often the reaper looks for expired sessions.
+    login_reaper_interval_s: int
+    # How long a released session stays queryable as a tombstone, so a caller
+    # polling once more gets a typed status instead of a bare 404.
+    login_terminal_grace_s: int
+    # Bounded extension granted when a login succeeds, so a scan that lands at
+    # the very end of the TTL still leaves time to collect storage_state.
+    login_state_grace_s: int
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
@@ -62,4 +106,15 @@ def get_settings() -> Settings:
         max_concurrent_browsers=max(1, _int_env("BROWSER_MAX_CONCURRENT", 4)),
         browser_slot_wait_s=_int_env("BROWSER_SLOT_WAIT_S", 30),
         health_probe_ttl_s=_int_env("BROWSER_HEALTH_PROBE_TTL_S", 60),
+        login_ttl_s=max(30, _int_env("BROWSER_LOGIN_TTL_S", 300)),
+        login_max_sessions=max(1, _int_env("BROWSER_LOGIN_MAX_SESSIONS", 3)),
+        login_start_timeout_s=_int_env("BROWSER_LOGIN_START_TIMEOUT_S", 90),
+        login_lock_wait_s=_int_env("BROWSER_LOGIN_LOCK_WAIT_S", 20),
+        login_qrcode_attempts=max(1, _int_env("BROWSER_LOGIN_QRCODE_ATTEMPTS", 15)),
+        login_qrcode_poll_s=_float_env("BROWSER_LOGIN_QRCODE_POLL_S", 1.0),
+        login_click_timeout_ms=_int_env("BROWSER_LOGIN_CLICK_TIMEOUT_MS", 10_000),
+        login_sms_settle_s=_float_env("BROWSER_LOGIN_SMS_SETTLE_S", 3.0),
+        login_reaper_interval_s=max(1, _int_env("BROWSER_LOGIN_REAPER_INTERVAL_S", 15)),
+        login_terminal_grace_s=max(0, _int_env("BROWSER_LOGIN_TERMINAL_GRACE_S", 120)),
+        login_state_grace_s=max(0, _int_env("BROWSER_LOGIN_STATE_GRACE_S", 60)),
     )

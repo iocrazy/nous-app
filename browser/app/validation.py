@@ -26,6 +26,7 @@ from .browser_runtime import (
     build_launch_kwargs,
 )
 from .config import get_settings
+from .dom import visible_marker_texts
 from .redaction import scrub
 from .schemas import EnvironmentConfig, SessionResult, SessionStatus
 
@@ -114,29 +115,6 @@ def storage_state_is_empty(storage_state: dict[str, Any]) -> bool:
     return not storage_state.get("cookies") and not storage_state.get("origins")
 
 
-async def _visible_login_texts(page: Any, markers: Sequence[str]) -> list[str]:
-    """Which logout markers are actually visible on the settled page.
-
-    `count()` alone is not enough: Douyin keeps hidden login nodes in the DOM of
-    the authenticated app shell, so a count-based check reports "logged out" for
-    a perfectly good session.
-    """
-    found: list[str] = []
-    for marker in markers:
-        # Substring, not exact: platforms decorate button labels ("手机号登录 >",
-        # trailing icons/whitespace) and an exact matcher silently stops finding
-        # the marker after a copy tweak - failing open, which is the worse
-        # direction here. Visibility is what does the real discriminating.
-        locator = page.get_by_text(marker, exact=False).first
-        try:
-            if await locator.count() and await locator.is_visible():
-                found.append(marker)
-        except Exception:
-            # A locator that races with a re-render is not evidence of logout.
-            continue
-    return found
-
-
 async def _probe_once(
     spec: DomValidationSpec,
     storage_state: dict[str, Any],
@@ -178,7 +156,7 @@ async def _probe_once(
                 await page.wait_for_timeout(settings.settle_ms)
 
                 final_url = page.url
-                visible = await _visible_login_texts(page, spec.login_text_markers)
+                visible = await visible_marker_texts(page, spec.login_text_markers)
                 judgement = spec.judge(final_url, visible)
                 return ProbeOutcome(
                     kind=ProbeKind.VALID if judgement.valid else ProbeKind.INVALID,

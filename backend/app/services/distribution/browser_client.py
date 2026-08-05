@@ -54,6 +54,13 @@ from loguru import logger
 # §7.2「所有轮询必须有上界」的同族纪律：任何等待都必须能超时收敛。
 DEFAULT_VALIDATE_TIMEOUT_SECONDS = 90.0
 DEFAULT_HEALTH_TIMEOUT_SECONDS = 5.0
+# 扫码登录 (S2)。/start 要起 context + goto 平台页 + 等二维码渲染，与校验同量级；
+# 其余三个只是查/写浏览器容器里那个**已经存在**的 login session，必须短 ——
+# 状态轮询卡住 60s 会让整条轮询循环失去意义（§7.2 的上界纪律）。
+DEFAULT_LOGIN_START_TIMEOUT_SECONDS = 90.0
+DEFAULT_LOGIN_POLL_TIMEOUT_SECONDS = 20.0
+DEFAULT_LOGIN_STATE_TIMEOUT_SECONDS = 30.0
+DEFAULT_LOGIN_CLOSE_TIMEOUT_SECONDS = 15.0
 # 连接握手与业务处理分开设上界：容器没起来时应当 5s 内就报 unreachable，
 # 而不是耗满 90s 的读超时。
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 5.0
@@ -79,8 +86,15 @@ class SessionStatus(str, Enum):
 
     SESSION_VALID = "session_valid"
     SESSION_INVALID = "session_invalid"
+    # S2 扫码登录的四个过程态 + 一个终态。WAITING_SCAN / SCANNED / SUCCESS 是
+    # S2 补齐的：spec §7.8 明写"两侧枚举必须全集对齐"，而 S1 只落了它当时用得到
+    # 的子集 —— 少一个值的后果不是报错而是**降级成 failed**，把"已扫码，等你在
+    # 手机上确认"变成"登录失败了"，用户会重扫一遍已经生效的码。
+    WAITING_SCAN = "waiting_scan"
+    SCANNED = "scanned"
     QRCODE_EXPIRED = "qrcode_expired"
     SMS_REQUIRED = "sms_required"
+    SUCCESS = "success"
     PUBLISHED = "published"
     TIMEOUT = "timeout"
     PROXY_FAILED = "proxy_failed"
@@ -119,6 +133,42 @@ _VALIDATE_STATUSES = frozenset(
         SessionStatus.SESSION_INVALID.value,
         SessionStatus.PROXY_FAILED.value,
         SessionStatus.TIMEOUT.value,
+        SessionStatus.FAILED.value,
+    }
+)
+
+
+# 扫码登录 (/session/login/*) 允许返回的 status 值（契约已定死）。
+LOGIN_STATUSES = frozenset(
+    {
+        SessionStatus.WAITING_SCAN.value,
+        SessionStatus.SCANNED.value,
+        SessionStatus.QRCODE_EXPIRED.value,
+        SessionStatus.SMS_REQUIRED.value,
+        SessionStatus.SUCCESS.value,
+        SessionStatus.TIMEOUT.value,
+        SessionStatus.PROXY_FAILED.value,
+        SessionStatus.FAILED.value,
+    }
+)
+
+# 登录流程里"还在进行中"的状态 —— 轮询循环见到它们要继续等。
+# qrcode_expired 也在其中：浏览器侧**已经自动点了刷新**并在同一响应里带回新码
+# (spec §7.8)，所以它是一次画面更新，不是终点。
+LOGIN_PENDING_STATUSES = frozenset(
+    {
+        SessionStatus.WAITING_SCAN.value,
+        SessionStatus.SCANNED.value,
+        SessionStatus.QRCODE_EXPIRED.value,
+        SessionStatus.SMS_REQUIRED.value,
+    }
+)
+
+# 登录失败的三个终态。与 SUCCESS 一起构成轮询的出口。
+LOGIN_FAILURE_STATUSES = frozenset(
+    {
+        SessionStatus.TIMEOUT.value,
+        SessionStatus.PROXY_FAILED.value,
         SessionStatus.FAILED.value,
     }
 )
@@ -212,6 +262,85 @@ class SessionEnvironment:
 
 
 @dataclass(frozen=True)
+class LoginSnapshot:
+    """扫码登录的一次状态快照 —— ``/start`` / ``/status`` / ``/sms`` 共用。
+
+    信封仍然是 ``SessionOpResult``（§7.8），额外三个字段是**画面**：二维码图片
+    与它的失效时刻。它们随每次快照一起回来，因为 ``qrcode_expired`` 时浏览器侧
+    会自动刷新并带回新码 —— 若二维码只在 ``/start`` 返回一次，刷新后的码就没有
+    通路送到前端，用户会一直盯着一张已经作废的图。
+    """
+
+    result: SessionOpResult
+    login_session_id: Optional[str] = None
+    qrcode_data_url: Optional[str] = None
+    expires_at: Optional[str] = None
+
+    @property
+    def status(self) -> str:
+        return self.result.status
+
+    @property
+    def message(self) -> str:
+        return self.result.message
+
+    @property
+    def detail(self) -> dict[str, Any]:
+        return dict(self.result.detail)
+
+    @property
+    def success(self) -> bool:
+        return self.result.success
+
+    @property
+    def is_infra_failure(self) -> bool:
+        return self.result.is_infra_failure
+
+    def __repr__(self) -> str:  # pragma: no cover - 防呆
+        # 二维码是几十 KB 的 base64，且扫一下就等于把一个平台账号绑进本系统 ——
+        # 它既撑爆日志也不该进日志。只报"有没有"。
+        return (
+            f"LoginSnapshot(status={self.status!r}, "
+            f"session={'set' if self.login_session_id else 'none'}, "
+            f"qrcode={'set' if self.qrcode_data_url else 'none'}, "
+            f"expires_at={self.expires_at!r})"
+        )
+
+
+@dataclass(frozen=True)
+class LoginState:
+    """``GET /session/login/{id}/state`` —— 登录成功后取会话物料。
+
+    ``storage_state`` 是**明文凭证**。它到 backend 只为了立刻走
+    ``secret_box.encrypt`` 入库（spec §7.6：不落盘、不进日志、不进 DBOS 的
+    input/output）。本类的 ``__repr__`` 因此把它整个抹掉 —— loguru 的 f-string
+    会把 repr 带进日志，这是最容易的泄漏路径。
+    """
+
+    result: SessionOpResult
+    storage_state: Optional[dict[str, Any]] = None
+    platform_user_id: Optional[str] = None
+    username: Optional[str] = None
+    avatar_url: Optional[str] = None
+
+    @property
+    def success(self) -> bool:
+        return self.result.success
+
+    @property
+    def status(self) -> str:
+        return self.result.status
+
+    def __repr__(self) -> str:  # pragma: no cover - 防呆
+        return (
+            f"LoginState(status={self.status!r}, "
+            f"storage_state={'set' if self.storage_state else 'none'}, "
+            f"platform_user_id={self.platform_user_id!r}, "
+            f"username={self.username!r})"
+        )
+
+
+@dataclass(frozen=True)
 class BrowserHealth:
     """``GET /healthz`` 的类型化结果 —— 同样不抛异常。
 
@@ -242,11 +371,24 @@ class _TransportFailure(Exception):
     """内部信号 —— 在 ``_call`` 内抛出，公开方法统一转成类型化结果。
     绝不逃逸出本模块。"""
 
-    def __init__(self, kind: SessionErrorKind, message: str, **extra: Any) -> None:
+    def __init__(
+        self,
+        kind: SessionErrorKind,
+        message: str,
+        *,
+        body: Optional[Mapping[str, Any]] = None,
+        **extra: Any,
+    ) -> None:
         super().__init__(message)
         self.kind = kind
         self.message = message
         self.extra = extra
+        # 错误响应的 JSON body（若有）。浏览器侧的登录端点在 4xx/5xx 上仍然
+        # 回一个**类型化信封**（如 502 + status=proxy_failed），丢掉它就会把
+        # "代理不通"降级成"browser service returned HTTP 502"，而这正是
+        # §7.8 反复强调不能混的两类东西。放在独立属性而不是 extra 里：extra
+        # 会整个进 detail，把一坨响应体塞进日志与 UI 不是我们要的。
+        self.body = body
 
 
 class BrowserClient:
@@ -369,16 +511,26 @@ class BrowserClient:
                 f"browser service rejected internal token (HTTP {code})",
                 status_code=code,
             )
-        if code >= 500:
-            raise _TransportFailure(
-                SessionErrorKind.SERVER_ERROR,
-                f"browser service returned HTTP {code}",
-                status_code=code,
-            )
         if code >= 400:
+            # 错误响应的 body 也带上（见 _TransportFailure.body）。浏览器侧的
+            # 登录端点在 502/503/404 上返回的是完整的 §7.8 信封，调用方拿它
+            # 才能区分「代理不通」与「我们这边挂了」。解析失败就当没有。
+            error_body: Optional[dict[str, Any]] = None
+            try:
+                parsed = response.json()
+                if isinstance(parsed, dict):
+                    error_body = parsed
+            except (ValueError, json.JSONDecodeError):
+                error_body = None
+            kind = (
+                SessionErrorKind.SERVER_ERROR
+                if code >= 500
+                else SessionErrorKind.BAD_RESPONSE
+            )
             raise _TransportFailure(
-                SessionErrorKind.BAD_RESPONSE,
+                kind,
                 f"browser service returned HTTP {code}",
+                body=error_body,
                 status_code=code,
             )
         try:
@@ -496,14 +648,299 @@ class BrowserClient:
             detail=detail,
         )
 
+    # ── /session/login/* (S2 扫码登录) ──────────────────────
+
+    async def start_login(
+        self,
+        platform: str,
+        environment: Optional[SessionEnvironment] = None,
+    ) -> LoginSnapshot:
+        """``POST /session/login/start`` —— 起一个**保活**的登录 context。
+
+        与 ``validate_session`` 的关键区别：这一调用返回后浏览器容器里那个
+        context **仍然活着**（二维码属于它，context 一销毁码就作废，spec §4.1）。
+        因此调用方对返回的 ``login_session_id`` 负有释放义务 —— 成功、失败、
+        取消、超时四条路径都必须走 ``close_login``。浏览器侧的 TTL 自毁只是
+        进程死掉时的兜底，不是常规释放路径。
+
+        永不抛传输异常。
+        """
+        env = environment or SessionEnvironment()
+        payload = {"platform": platform, "environment": env.to_payload()}
+        try:
+            data = await self._call(
+                "POST",
+                "/session/login/start",
+                read_timeout=DEFAULT_LOGIN_START_TIMEOUT_SECONDS,
+                payload=payload,
+            )
+        except _TransportFailure as failure:
+            typed = self._typed_failure_snapshot(failure)
+            if typed is not None:
+                # 浏览器侧对"起不来"的分类（proxy_failed / timeout / 容量不足）
+                # 比 HTTP 码有用得多 —— 把代理故障报成"重扫二维码"是纯粹的误导。
+                logger.warning(
+                    f"[browser.login.start] platform={platform} "
+                    f"rejected: {typed.status} {typed.message}"
+                )
+                return typed
+            logger.warning(
+                f"[browser.login.start] platform={platform} "
+                f"{failure.kind.value}: {failure.message}"
+            )
+            return LoginSnapshot(result=self._transport_result(failure))
+
+        snapshot = self._login_snapshot(data)
+        if snapshot.success and not snapshot.login_session_id:
+            # 没有 id 就无法轮询、更无法释放 —— 会永久泄漏一个 context。
+            # 当作坏响应，而不是"先跑起来再说"。
+            logger.warning(
+                f"[browser.login.start] platform={platform} "
+                "response has no login_session_id"
+            )
+            return LoginSnapshot(
+                result=_failure(
+                    SessionStatus.FAILED,
+                    SessionErrorKind.BAD_RESPONSE,
+                    "browser service returned no login_session_id",
+                )
+            )
+        logger.info(
+            f"[browser.login.start] platform={platform} status={snapshot.status}"
+        )
+        return snapshot
+
+    async def get_login_status(self, login_session_id: str) -> LoginSnapshot:
+        """``GET /session/login/{id}/status``。永不抛传输异常。
+
+        ``qrcode_data_url`` 在 ``qrcode_expired`` 时会带回**新**码（浏览器侧
+        已自动点了刷新），其余状态可能为 null —— 调用方保留上一张即可。
+        """
+        try:
+            data = await self._call(
+                "GET",
+                f"/session/login/{login_session_id}/status",
+                read_timeout=DEFAULT_LOGIN_POLL_TIMEOUT_SECONDS,
+            )
+        except _TransportFailure as failure:
+            # 带类型化 body 的错误（典型：404 —— login session 已经不存在了）
+            # 是**结论**，不是抖动：那个 context 真的没了，重试三轮也变不回来。
+            typed = self._typed_failure_snapshot(failure, login_session_id)
+            if typed is not None:
+                logger.warning(f"[browser.login.status] rejected: {typed.status}")
+                return typed
+            # 其余传输失败**不等于**登录失败：容器重启/网络抖动都会走到这里，
+            # 而用户手机上那次扫码可能已经成功。调用方按 is_infra_failure
+            # 决定"再试一轮"还是"放弃"，别在这里替它决定。
+            logger.warning(
+                f"[browser.login.status] {failure.kind.value}: {failure.message}"
+            )
+            return LoginSnapshot(result=self._transport_result(failure))
+        return self._login_snapshot(data, login_session_id=login_session_id)
+
+    async def submit_login_sms(self, login_session_id: str, code: str) -> LoginSnapshot:
+        """``POST /session/login/{id}/sms`` —— 提交短信验证码。
+
+        返回的仍是状态快照：验证码错时浏览器侧回 ``sms_required`` +
+        message（"code rejected"之类），而不是 HTTP 4xx —— 这样"码错了"和
+        "容器挂了"在调用方看来是两件不同的事（§7.8 的整条设计）。
+        """
+        if not (code or "").strip():
+            raise ValueError("sms code must be a non-empty string")
+        try:
+            data = await self._call(
+                "POST",
+                f"/session/login/{login_session_id}/sms",
+                read_timeout=DEFAULT_LOGIN_POLL_TIMEOUT_SECONDS,
+                payload={"code": code},
+            )
+        except _TransportFailure as failure:
+            typed = self._typed_failure_snapshot(failure, login_session_id)
+            if typed is not None:
+                logger.warning(f"[browser.login.sms] rejected: {typed.status}")
+                return typed
+            logger.warning(
+                f"[browser.login.sms] {failure.kind.value}: {failure.message}"
+            )
+            return LoginSnapshot(result=self._transport_result(failure))
+        # 验证码本身绝不进日志。
+        snapshot = self._login_snapshot(data, login_session_id=login_session_id)
+        logger.info(f"[browser.login.sms] status={snapshot.status}")
+        return snapshot
+
+    async def get_login_state(self, login_session_id: str) -> LoginState:
+        """``GET /session/login/{id}/state`` —— 取登录成功后的会话物料。
+
+        只在 ``status == success`` 之后调用。返回的 ``storage_state`` 是明文
+        凭证，调用方必须在同一个作用域内加密入库，**不得**放进 DBOS step 的
+        返回值（会被持久化进引擎表，spec §7.6）。
+        """
+        try:
+            data = await self._call(
+                "GET",
+                f"/session/login/{login_session_id}/state",
+                read_timeout=DEFAULT_LOGIN_STATE_TIMEOUT_SECONDS,
+            )
+        except _TransportFailure as failure:
+            logger.warning(
+                f"[browser.login.state] {failure.kind.value}: {failure.message}"
+            )
+            return LoginState(result=self._transport_result(failure))
+
+        storage_state = data.get("storage_state")
+        if not isinstance(storage_state, Mapping) or not storage_state:
+            # 到这一步没有会话物料 == 白扫了一次码。必须失败，不能建一个
+            # session_state 为空的账号行 —— 那种账号在发布时才会暴露，
+            # 而那时用户已经以为绑定成功了。
+            logger.warning("[browser.login.state] response has no storage_state")
+            return LoginState(
+                result=_failure(
+                    SessionStatus.FAILED,
+                    SessionErrorKind.BAD_RESPONSE,
+                    "browser service returned no storage_state",
+                )
+            )
+        platform_user_id = data.get("platform_user_id")
+        if not platform_user_id:
+            # 没有平台用户 id 就没有 upsert 的自然键，重扫会建出重复账号行。
+            logger.warning("[browser.login.state] response has no platform_user_id")
+            return LoginState(
+                result=_failure(
+                    SessionStatus.FAILED,
+                    SessionErrorKind.BAD_RESPONSE,
+                    "browser service returned no platform_user_id",
+                )
+            )
+        return LoginState(
+            result=SessionOpResult(
+                success=True,
+                status=SessionStatus.SUCCESS.value,
+                message=str(data.get("message") or "ok"),
+                detail={},
+            ),
+            storage_state=dict(storage_state),
+            platform_user_id=str(platform_user_id),
+            username=str(data.get("username") or "") or None,
+            avatar_url=str(data.get("avatar_url") or "") or None,
+        )
+
+    async def close_login(self, login_session_id: str) -> bool:
+        """``POST /session/login/{id}/close`` —— 释放浏览器 context。
+
+        返回是否**确认**释放。永不抛异常，因为它总是在 ``finally`` 里被调用：
+        清理失败绝不能盖掉正在传播的真实错误。返回 False 只意味着"我们没能
+        确认"，浏览器侧的 TTL 自毁仍会兜底（spec §4.1）。
+        """
+        try:
+            data = await self._call(
+                "POST",
+                f"/session/login/{login_session_id}/close",
+                read_timeout=DEFAULT_LOGIN_CLOSE_TIMEOUT_SECONDS,
+            )
+        except _TransportFailure as failure:
+            if failure.extra.get("status_code") == 404:
+                # 浏览器侧不认识这个 id == 那个 context 已经不存在（TTL 自毁、
+                # 或者 workflow 的 finally 先关过一次）。这就是"已释放"，
+                # 报 False 会让取消端点对用户说一句吓人的"释放未确认"。
+                logger.info("[browser.login.close] already released")
+                return True
+            logger.warning(
+                f"[browser.login.close] {failure.kind.value}: {failure.message}"
+            )
+            return False
+        closed = bool(data.get("closed"))
+        logger.info(f"[browser.login.close] closed={closed}")
+        return closed
+
+    # ── 登录响应的公共映射 ──────────────────────────────────
+
+    @staticmethod
+    def _typed_failure_snapshot(
+        failure: _TransportFailure, login_session_id: Optional[str] = None
+    ) -> Optional[LoginSnapshot]:
+        """4xx/5xx 的 body 里若带着合法的通道 status，就以它为准。
+
+        浏览器侧对登录端点的约定是"HTTP 码表达传输层，body 表达通道结论"：
+        502 + ``proxy_failed``、503 + 容量不足、404 + login session 不存在。
+        只看 HTTP 码会把这三种都塌缩成"browser service returned HTTP 5xx"
+        + ``error_kind``，于是它们全部变成"基建失败"—— 而基建失败的语义是
+        "我们没能问出结论、别动账号状态"，正好把三个**确定**的结论丢掉。
+
+        401/403 不走这里（token 错配没有通道结论可言），因为它抛的是
+        UNAUTHORIZED 且 body 里没有 status 字段。
+        """
+        body = failure.body
+        if not isinstance(body, Mapping):
+            return None
+        if body.get("status") not in LOGIN_STATUSES:
+            return None
+        return BrowserClient._login_snapshot(body, login_session_id=login_session_id)
+
+    @staticmethod
+    def _transport_result(failure: _TransportFailure) -> SessionOpResult:
+        """传输失败 → §7.8 信封。TIMEOUT 有同名业务 status，其余归 failed。"""
+        status = (
+            SessionStatus.TIMEOUT
+            if failure.kind is SessionErrorKind.TIMEOUT
+            else SessionStatus.FAILED
+        )
+        return _failure(status, failure.kind, failure.message, **failure.extra)
+
+    @staticmethod
+    def _login_snapshot(
+        data: Mapping[str, Any], *, login_session_id: Optional[str] = None
+    ) -> LoginSnapshot:
+        """登录响应 JSON → ``LoginSnapshot``。
+
+        非法 status 一律判 BAD_RESPONSE 而不猜 —— 猜错的代价是把"等你确认"
+        显示成"失败了"。``success`` 由 status 推导（单一真相源，与
+        ``validate_session`` 同款）：进行中的四个状态都算"问到了结论"，
+        只有三个失败终态才是 False。
+        """
+        raw_status = data.get("status")
+        if raw_status not in LOGIN_STATUSES:
+            logger.warning(f"[browser.login] illegal status={raw_status!r}")
+            return LoginSnapshot(
+                result=_failure(
+                    SessionStatus.FAILED,
+                    SessionErrorKind.BAD_RESPONSE,
+                    f"browser service returned unknown status {raw_status!r}",
+                )
+            )
+        detail = data.get("detail")
+        detail = dict(detail) if isinstance(detail, Mapping) else {}
+        qrcode = data.get("qrcode_data_url")
+        expires_at = data.get("expires_at")
+        return LoginSnapshot(
+            result=SessionOpResult(
+                success=raw_status not in LOGIN_FAILURE_STATUSES,
+                status=raw_status,
+                message=str(data.get("message") or ""),
+                detail=detail,
+            ),
+            login_session_id=str(data.get("login_session_id") or login_session_id or "")
+            or None,
+            qrcode_data_url=str(qrcode) if qrcode else None,
+            expires_at=str(expires_at) if expires_at else None,
+        )
+
 
 __all__ = [
     "DEFAULT_LOCALE",
     "DEFAULT_TIMEZONE_ID",
     "DEFAULT_VALIDATE_TIMEOUT_SECONDS",
+    "DEFAULT_LOGIN_START_TIMEOUT_SECONDS",
+    "DEFAULT_LOGIN_POLL_TIMEOUT_SECONDS",
+    "DEFAULT_LOGIN_STATE_TIMEOUT_SECONDS",
+    "DEFAULT_LOGIN_CLOSE_TIMEOUT_SECONDS",
     "INTERNAL_TOKEN_HEADER",
+    "LOGIN_FAILURE_STATUSES",
+    "LOGIN_PENDING_STATUSES",
+    "LOGIN_STATUSES",
     "BrowserClient",
     "BrowserHealth",
+    "LoginSnapshot",
+    "LoginState",
     "SessionEnvironment",
     "SessionErrorKind",
     "SessionOpResult",
