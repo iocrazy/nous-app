@@ -54,6 +54,35 @@ _AUTO_PAUSE_THRESHOLD = 5
 _DEFAULT_STALE_AFTER_MINUTES = 60
 
 
+def _due_schedules_stmt(now: datetime):
+    """Statement for the due-rows scan (enabled=true + next_fire_at <= now).
+
+    ``select(*UserSchedules.__table__.c)`` — NOT ``select(UserSchedules)``.
+    The entity-level form maps each result row to a single 'UserSchedules'
+    key (the ORM instance), not one key per column; ``.mappings()`` on it
+    then yields ``RowMapping({'UserSchedules': <instance>})`` instead of a
+    column-keyed dict, so every ``row.get('task_type')``/``row['id']``
+    consumer below would silently return None / raise KeyError (legacy
+    ``SELECT *`` returned a column-keyed dict). The column-list form
+    reproduces that shape exactly — verified against a real SQLAlchemy
+    Result in tests/test_scheduled_master_row_shape_e2e.py (not just the
+    compiled SQL text, which looks identical either way).
+    """
+    from sqlalchemy import select
+
+    from app.models import UserSchedules
+
+    return (
+        select(*UserSchedules.__table__.c)
+        .where(
+            UserSchedules.enabled.is_(True),
+            UserSchedules.next_fire_at <= now,
+        )
+        .order_by(UserSchedules.next_fire_at)
+        .limit(_BATCH_SIZE)
+    )
+
+
 @DBOS.step()
 async def fire_due_schedules_step() -> Dict[str, Any]:
     """Scan user_schedules for due rows; dispatch each; advance
@@ -72,29 +101,13 @@ async def fire_due_schedules_step() -> Dict[str, Any]:
 
     now = datetime.now(timezone.utc)
 
-    from sqlalchemy import select
-
     from app.db.session import read_scope
-    from app.models import UserSchedules
 
-    # Pull due rows. enabled=true + next_fire_at <= now.
+    # Pull due rows. See _due_schedules_stmt's docstring for why this must be
+    # a column-level select, not select(UserSchedules).
     try:
         async with read_scope() as session:
-            rows = (
-                (
-                    await session.execute(
-                        select(UserSchedules)
-                        .where(
-                            UserSchedules.enabled.is_(True),
-                            UserSchedules.next_fire_at <= now,
-                        )
-                        .order_by(UserSchedules.next_fire_at)
-                        .limit(_BATCH_SIZE)
-                    )
-                )
-                .mappings()
-                .all()
-            )
+            rows = (await session.execute(_due_schedules_stmt(now))).mappings().all()
     except Exception as exc:
         logger.opt(exception=True).warning(f"[scheduled_master] fetch failed: {exc}")
         return {"due": 0, "fired": 0, "skipped": 0, "errors": 1}
