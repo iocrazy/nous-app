@@ -105,14 +105,20 @@ async def load_content_fetch_config() -> ContentFetchConfig:
     Service-role engine read. Never raises — failure/missing key → defaults
     (which are disabled, so a config-read failure can't start fetching)."""
     try:
+        from sqlalchemy import select
+
         from app.db import engine as db_engine
+        from app.db.session import read_scope
+        from app.models import SystemSettings
 
         if not db_engine.is_configured():
             return default_content_fetch_config()
-        raw = await db_engine.fetch_val(
-            "SELECT value FROM public.system_settings WHERE key = :k",
-            {"k": CONTENT_FETCH_CONFIG_KEY},
-        )
+        async with read_scope() as session:
+            raw = await session.scalar(
+                select(SystemSettings.value).where(
+                    SystemSettings.key == CONTENT_FETCH_CONFIG_KEY
+                )
+            )
         return merge_content_fetch_config(raw)
     except Exception:  # noqa: BLE001
         logger.warning("[content-fetch] config read failed — using code defaults")

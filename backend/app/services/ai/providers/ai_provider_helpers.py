@@ -627,15 +627,17 @@ async def resolve_transcription_config(
 
     # ── User path — user_settings required from here on ───────────────────
     if settings_json is None:
-        from app.db import engine as db_engine
+        from sqlalchemy import select
 
-        settings_row = await db_engine.fetch_one(
-            "SELECT settings_json FROM public.user_settings WHERE user_id = :uid",
-            {"uid": user_id},
-        )
-        if not settings_row:
-            raise RuntimeError(f"no user_settings for {user_id}")
-        settings_json = settings_row["settings_json"]
+        from app.db.session import read_scope
+        from app.models import UserSettings
+
+        async with read_scope() as session:
+            settings_json = await session.scalar(
+                select(UserSettings.settings_json).where(
+                    UserSettings.user_id == user_id
+                )
+            )
     if not settings_json:
         raise RuntimeError(f"no user_settings for {user_id}")
 
@@ -755,15 +757,17 @@ async def resolve_summarization_config(
 
     # ── User path — user_settings required from here on ───────────────────
     if settings_json is None:
-        from app.db import engine as db_engine
+        from sqlalchemy import select
 
-        settings_row = await db_engine.fetch_one(
-            "SELECT settings_json FROM public.user_settings WHERE user_id = :uid",
-            {"uid": user_id},
-        )
-        if not settings_row:
-            raise RuntimeError(f"no user_settings for {user_id}")
-        settings_json = settings_row["settings_json"]
+        from app.db.session import read_scope
+        from app.models import UserSettings
+
+        async with read_scope() as session:
+            settings_json = await session.scalar(
+                select(UserSettings.settings_json).where(
+                    UserSettings.user_id == user_id
+                )
+            )
     if not settings_json:
         raise RuntimeError(f"no user_settings for {user_id}")
 

@@ -104,18 +104,22 @@ async def _read_settings() -> Dict[str, Any]:
     time by ``SystemSettingsRepository``). Fail-soft — see ``reveal``'s
     docstring."""
     try:
+        from sqlalchemy import select
+
         from app.core.secure_settings import reveal
         from app.db import engine as db_engine
+        from app.db.session import read_scope
+        from app.models import SystemSettings
 
         if not db_engine.is_configured():
             return {}
-        placeholders = ",".join(f":k{i}" for i in range(len(_KEYS)))
-        params = {f"k{i}": k for i, k in enumerate(_KEYS)}
-        rows = await db_engine.fetch_all(
-            f"SELECT key, value FROM public.system_settings "
-            f"WHERE key IN ({placeholders})",
-            params,
-        )
+        async with read_scope() as session:
+            result = await session.execute(
+                select(SystemSettings.key, SystemSettings.value).where(
+                    SystemSettings.key.in_(_KEYS)
+                )
+            )
+            rows = result.mappings().all()
         return {r["key"]: reveal(r["value"]) for r in rows}
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning(f"[embedding_config] settings read failed: {exc}")

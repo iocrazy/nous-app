@@ -62,14 +62,19 @@ async def _langfuse_settings_reader(key: str) -> Optional[object]:
     (encrypted at write time by ``SystemSettingsRepository``). Fail-soft —
     see ``reveal``'s docstring."""
     try:
+        from sqlalchemy import select
+
         from app.core.secure_settings import reveal
         from app.db import engine as db_engine
+        from app.db.session import read_scope
+        from app.models import SystemSettings
 
         if not db_engine.is_configured():
             return None
-        value = await db_engine.fetch_val(
-            "SELECT value FROM public.system_settings WHERE key = :k", {"k": key}
-        )
+        async with read_scope() as session:
+            value = await session.scalar(
+                select(SystemSettings.value).where(SystemSettings.key == key)
+            )
         return reveal(value) if value is not None else None
     except Exception:  # noqa: BLE001 — settings read must never raise
         logger.warning(f"[langfuse] system_settings read failed: {key}")

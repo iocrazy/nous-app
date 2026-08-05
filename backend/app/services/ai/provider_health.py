@@ -34,18 +34,50 @@ _PROVIDER_KEY_RE = re.compile(r"^[a-z0-9_\-]+$")
 _MAX_KEY_LEN = 40
 _MAX_DETAIL_LEN = 300
 
+
 # jsonb_set twice: first ensure the ``ai_provider_health`` object exists, then
-# set the per-provider entry. ``:pk`` is a BOUND parameter (never interpolated)
-# so it cannot inject into the jsonb path. If no user_settings row exists the
-# UPDATE is a no-op (best-effort telemetry — we do NOT insert rows).
-_UPSERT_HEALTH_SQL = (
-    "UPDATE public.user_settings SET settings_json = "
-    "jsonb_set("
-    "jsonb_set(COALESCE(settings_json, '{}'::jsonb), '{ai_provider_health}', "
-    "COALESCE(settings_json->'ai_provider_health', '{}'::jsonb), true), "
-    "ARRAY['ai_provider_health', :pk], CAST(:val AS jsonb), true) "
-    "WHERE user_id = :uid"
-)
+# set the per-provider entry. The provider key is bound via ``postgresql.array``
+# (a real bind parameter, never interpolated) so it cannot inject into the
+# jsonb path. If no user_settings row exists the UPDATE is a no-op (best-effort
+# telemetry — we do NOT insert rows).
+#
+# ORM equivalent of the legacy SQL:
+#   UPDATE public.user_settings SET settings_json =
+#     jsonb_set(
+#       jsonb_set(COALESCE(settings_json, '{}'::jsonb), '{ai_provider_health}',
+#         COALESCE(settings_json->'ai_provider_health', '{}'::jsonb), true),
+#       ARRAY['ai_provider_health', :pk], CAST(:val AS jsonb), true)
+#     WHERE user_id = :uid
+def _upsert_health_stmt(user_id: str, provider_key: str, entry: dict):
+    from sqlalchemy import cast, func, literal
+    from sqlalchemy import update as sa_update
+    from sqlalchemy.dialects.postgresql import JSONB, array
+
+    from app.models import UserSettings
+
+    empty_jsonb = cast(literal(json.dumps({})), JSONB)
+    entry_jsonb = cast(literal(json.dumps(entry)), JSONB)
+    existing_health = func.coalesce(
+        UserSettings.settings_json.op("->", return_type=JSONB)("ai_provider_health"),
+        empty_jsonb,
+    )
+    with_health_key = func.jsonb_set(
+        func.coalesce(UserSettings.settings_json, empty_jsonb),
+        array(["ai_provider_health"]),
+        existing_health,
+        True,
+    )
+    with_entry = func.jsonb_set(
+        with_health_key,
+        array(["ai_provider_health", provider_key]),
+        entry_jsonb,
+        True,
+    )
+    return (
+        sa_update(UserSettings)
+        .where(UserSettings.user_id == user_id)
+        .values(settings_json=with_entry)
+    )
 
 
 class InvalidProviderKey(ValueError):
@@ -88,7 +120,7 @@ async def persist_provider_health(
     """Best-effort write of a single provider's health entry. Never raises.
 
     Validates the key, ensures the engine is configured, then runs one atomic
-    ``UPDATE ... jsonb_set`` via the committing ``db_engine.execute`` primitive.
+    ``UPDATE ... jsonb_set`` via the committing ``write_scope()`` ORM session.
     Any failure — bad key, engine unconfigured, DB error, no row — is swallowed
     with a warning and returns ``False``; the connection test it decorates must
     never fail because telemetry could not be stored.
@@ -100,6 +132,7 @@ async def persist_provider_health(
 
         from app.core.cache import user_settings_cache
         from app.db import engine as db_engine
+        from app.db.session import write_scope
 
         if not db_engine.is_configured():
             logger.warning(
@@ -110,10 +143,11 @@ async def persist_provider_health(
             return False
 
         entry = _health_entry(status, detail)
-        rowcount = await db_engine.execute(
-            _UPSERT_HEALTH_SQL,
-            {"uid": user_id, "pk": provider_key, "val": json.dumps(entry)},
-        )
+        async with write_scope() as session:
+            result = await session.execute(
+                _upsert_health_stmt(user_id, provider_key, entry)
+            )
+            rowcount = result.rowcount
         # settings_json changed under the repo's 30s cache — drop the cached
         # copy so the next GET /ai/settings reflects the fresh health entry.
         user_settings_cache.invalidate(user_id)

@@ -1,11 +1,42 @@
 """ai_summary steps hit the SQLAlchemy engine with correct SQL/params after the
-psycopg→engine migration. Patches the engine helpers + captures calls."""
+psycopg→engine migration. Patches the engine helpers + captures calls.
+
+Phase B2 Task 1 (2026-08-04): the SECOND read (user_settings.settings_json,
+consulted by ``resolve_summarization_config`` when no ``settings_json`` was
+passed in) moved off ``db_engine.fetch_one`` onto the ORM ``read_scope()``
+session — see ``app/services/ai/providers/ai_provider_helpers.py``. The
+transcript read (FIRST call, ``app/workflows/ai_summary.py`` itself) is
+untouched raw SQL (out of this migration batch) and is still mocked via
+``db_engine.fetch_one``.
+"""
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import patch
 
 import pytest
+
+from app.db import session as db_session
+
+
+class _SettingsJsonSession:
+    def __init__(self, settings_json: Any) -> None:
+        self._settings_json = settings_json
+
+    async def scalar(self, _stmt: Any) -> Any:
+        return self._settings_json
+
+
+class _SettingsJsonScope:
+    def __init__(self, settings_json: Any) -> None:
+        self._settings_json = settings_json
+
+    async def __aenter__(self) -> _SettingsJsonSession:
+        return _SettingsJsonSession(self._settings_json)
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
 
 
 async def test_load_summary_inputs_raises_when_no_transcript():
@@ -22,45 +53,39 @@ async def test_load_summary_inputs_raises_when_no_transcript():
 async def test_load_summary_inputs_raises_when_no_user_settings():
     import app.workflows.ai_summary as m
 
-    calls = {"n": 0}
-
     async def fake_fetch_one(sql, params=None):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return {"transcript": "t", "title": "x", "resource_id": 123}
-        return None  # user_settings row missing
+        return {"transcript": "t", "title": "x", "resource_id": 123}
 
     with patch("app.db.engine.fetch_one", fake_fetch_one):
-        with pytest.raises(RuntimeError, match="no user_settings"):
-            await m.load_summary_inputs(1, "u")
+        with patch.object(db_session, "read_scope", lambda: _SettingsJsonScope(None)):
+            with pytest.raises(RuntimeError, match="no user_settings"):
+                await m.load_summary_inputs(1, "u")
 
 
 async def test_load_summary_inputs_picks_first_enabled_provider():
     import app.workflows.ai_summary as m
 
-    calls = {"n": 0}
-
     async def fake_fetch_one(sql, params=None):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return {"transcript": "t", "title": "Title", "resource_id": 999}
-        return {
-            "settings_json": {
-                "ai_settings": {
-                    "ai_providers": {
-                        # doubao absent → qwen is the first enabled match
-                        "qwen": {
-                            "api_key": "k",
-                            "enabled": True,
-                            "selected_model": "qwen-x",
-                        }
-                    }
+        return {"transcript": "t", "title": "Title", "resource_id": 999}
+
+    settings_json = {
+        "ai_settings": {
+            "ai_providers": {
+                # doubao absent → qwen is the first enabled match
+                "qwen": {
+                    "api_key": "k",
+                    "enabled": True,
+                    "selected_model": "qwen-x",
                 }
             }
         }
+    }
 
     with patch("app.db.engine.fetch_one", fake_fetch_one):
-        out = await m.load_summary_inputs(1, "u")
+        with patch.object(
+            db_session, "read_scope", lambda: _SettingsJsonScope(settings_json)
+        ):
+            out = await m.load_summary_inputs(1, "u")
 
     assert out["provider_key"] == "qwen"
     assert out["resource_id"] == "999"  # bigint id surfaced as str for DBOS memo

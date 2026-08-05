@@ -128,14 +128,20 @@ async def load_prefilter_config() -> PrefilterConfig:
     over code defaults. Service-role engine read. Never raises — any failure /
     missing key returns the code defaults (current AI-keyword behavior)."""
     try:
+        from sqlalchemy import select
+
         from app.db import engine as db_engine
+        from app.db.session import read_scope
+        from app.models import SystemSettings
 
         if not db_engine.is_configured():
             return default_prefilter_config()
-        raw = await db_engine.fetch_val(
-            "SELECT value FROM public.system_settings WHERE key = :k",
-            {"k": PREFILTER_CONFIG_KEY},
-        )
+        async with read_scope() as session:
+            raw = await session.scalar(
+                select(SystemSettings.value).where(
+                    SystemSettings.key == PREFILTER_CONFIG_KEY
+                )
+            )
         return merge_prefilter_config(raw)
     except Exception:  # noqa: BLE001
         logger.warning("[prefilter] config read failed — using code defaults")

@@ -122,14 +122,19 @@ async def _default_settings_reader(key: str) -> Optional[str]:
     write time by ``SystemSettingsRepository``). Fail-soft — see
     ``reveal``'s docstring."""
     try:
+        from sqlalchemy import select
+
         from app.core.secure_settings import reveal
         from app.db import engine as db_engine
+        from app.db.session import read_scope
+        from app.models import SystemSettings
 
         if not db_engine.is_configured():
             return None
-        value = await db_engine.fetch_val(
-            "SELECT value FROM public.system_settings WHERE key = :k", {"k": key}
-        )
+        async with read_scope() as session:
+            value = await session.scalar(
+                select(SystemSettings.value).where(SystemSettings.key == key)
+            )
         if value is None:
             return None
         value = reveal(value)

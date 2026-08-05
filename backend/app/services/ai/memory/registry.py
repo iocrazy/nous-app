@@ -23,12 +23,15 @@ from app.services.ai.memory.providers.honcho_provider import HonchoProvider
 async def _read_provider_setting(key: str, default: str) -> str:
     """Read a memory.* provider setting; ``default`` on any miss/error."""
     try:
-        from app.db import engine as db_engine
+        from sqlalchemy import select
 
-        value = await db_engine.fetch_val(
-            "SELECT value FROM public.system_settings WHERE key = :k",
-            {"k": key},
-        )
+        from app.db.session import read_scope
+        from app.models import SystemSettings
+
+        async with read_scope() as session:
+            value = await session.scalar(
+                select(SystemSettings.value).where(SystemSettings.key == key)
+            )
         if value is None:
             return default
         # system_settings.value is JSONB — a quoted string here. asyncpg may

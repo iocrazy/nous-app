@@ -154,14 +154,20 @@ async def load_scoring_config() -> ScoringConfig:
     merged over code defaults. Service-role engine read (bypasses RLS). Never
     raises — any failure / missing key returns the code defaults."""
     try:
+        from sqlalchemy import select
+
         from app.db import engine as db_engine
+        from app.db.session import read_scope
+        from app.models import SystemSettings
 
         if not db_engine.is_configured():
             return default_scoring_config()
-        raw = await db_engine.fetch_val(
-            "SELECT value FROM public.system_settings WHERE key = :k",
-            {"k": SCORING_CONFIG_KEY},
-        )
+        async with read_scope() as session:
+            raw = await session.scalar(
+                select(SystemSettings.value).where(
+                    SystemSettings.key == SCORING_CONFIG_KEY
+                )
+            )
         return merge_scoring_config(raw)
     except Exception:  # noqa: BLE001
         logger.warning("[scoring] config read failed — using code defaults")
