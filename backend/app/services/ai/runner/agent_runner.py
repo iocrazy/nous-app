@@ -81,8 +81,26 @@ _DEFAULT_COMPACTOR = ContextCompactor()
 # which every path shares) but inert. Authorization does NOT depend on this:
 # the A1 capability gate runs in the PreToolUse chain and the A2 resolver runs
 # inside each handler.
+#
+# GenerateShotImage (A6) joins this set even though it is graded on a
+# different capability axis (media.image, not write_level — see
+# high_risk_capability_gate.py's TOOL_REQUIREMENTS): it still needs a shot id
+# resolved through THIS run's scope before it may dispatch the
+# script_shot_generate DBOS workflow, and that resolve-then-act shape is
+# exactly what _dispatch_screenwriting already provides (gate-presence check,
+# scope-for-run, resolver, never-raise-into-the-loop). A separate dispatch
+# branch (like GenerateImage/GenerateVideo's injected-handler pattern) would
+# have to re-implement all of that for one tool.
 SCREENWRITING_TOOL_NAMES: frozenset[str] = frozenset(
-    {"ListScenes", "ReadScene", "CreateShot", "UpdateShot", "ProposeEdit", "ApplyEdit"}
+    {
+        "ListScenes",
+        "ReadScene",
+        "CreateShot",
+        "UpdateShot",
+        "ProposeEdit",
+        "ApplyEdit",
+        "GenerateShotImage",
+    }
 )
 
 SUPPORTED_TOOLS: frozenset[str] = frozenset(

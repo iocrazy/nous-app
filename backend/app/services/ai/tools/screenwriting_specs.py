@@ -218,6 +218,38 @@ def propose_edit_spec() -> dict:
     }
 
 
+def generate_shot_image_spec() -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": "GenerateShotImage",
+            "description": (
+                "Dispatch AI image generation for one existing shot card, "
+                "using its cinematography tags, description, and scene "
+                "heading as the prompt. This call is ASYNCHRONOUS: it only "
+                "confirms the generation was dispatched — the produced image "
+                "lands on the shot some time after this call returns, not in "
+                "its result. It costs real money per call, so do not call it "
+                "again for the same shot_id just because you have not seen "
+                "the result yet; wait and re-read the shot instead."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "shot_id": {
+                        "type": "string",
+                        "description": (
+                            "Shot handle from ReadScene's shots list or "
+                            "CreateShot's result. Never construct or guess one."
+                        ),
+                    },
+                },
+                "required": ["shot_id"],
+            },
+        },
+    }
+
+
 def apply_edit_spec() -> dict:
     return {
         "type": "function",
@@ -258,11 +290,15 @@ SCREENWRITING_TOOL_SPECS = {
     "UpdateShot": update_shot_spec,
     "ProposeEdit": propose_edit_spec,
     "ApplyEdit": apply_edit_spec,
+    "GenerateShotImage": generate_shot_image_spec,
 }
 
 
-def screenwriting_tool_specs(write_level: str) -> list[dict]:
-    """Specs to advertise to an agent granted ``write_level``.
+def screenwriting_tool_specs(
+    write_level: str, *, media_image_allowed: bool = False
+) -> list[dict]:
+    """Specs to advertise to an agent granted ``write_level`` (+ optionally
+    the ``media.image`` capability, for ``GenerateShotImage``).
 
     A UX filter ONLY — don't dangle a tool the agent cannot use in front of
     the model (same reasoning as the media-tool registration block in
@@ -278,6 +314,16 @@ def screenwriting_tool_specs(write_level: str) -> list[dict]:
     ``AgentRunner._dispatch_screenwriting`` refuses the call outright. Either
     way the answer is a refusal, never an ungated execution; do not read the
     filter below as the thing keeping an ungranted agent out.
+
+    ``GenerateShotImage`` (A6) is graded on a DIFFERENT axis than the other
+    five tools — ``TOOL_REQUIREMENTS["GenerateShotImage"].write_level`` is
+    ``None`` (it costs money, it does not write script content), so the
+    ordinal ``write_level`` filter below would advertise it unconditionally
+    at every level including "none". ``media_image_allowed`` is therefore a
+    SEPARATE, explicit gate the caller must compute (capability grant AND
+    kill switch — mirrors the media-tool registration block in
+    ai_library_chat_service.py) and pass in; a tool requiring ``media`` is
+    only ever included when that flag is true, regardless of write_level.
     """
     from app.services.ai.permissions.high_risk_caps import HighRiskCaps
     from app.services.infra.hooks.high_risk_capability_gate import TOOL_REQUIREMENTS
@@ -286,6 +332,10 @@ def screenwriting_tool_specs(write_level: str) -> list[dict]:
     out: list[dict] = []
     for name, build in SCREENWRITING_TOOL_SPECS.items():
         requirement = TOOL_REQUIREMENTS.get(name)
+        if requirement is not None and requirement.media is not None:
+            if media_image_allowed:
+                out.append(build())
+            continue
         needed = requirement.write_level if requirement else None
         if needed is None or caps.meets_write_level(needed):
             out.append(build())
