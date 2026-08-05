@@ -48,6 +48,16 @@ _SECRET_COLS = _TOKEN_COLS + _SESSION_COLS
 # hundred accounts don't spawn a hundred browser contexts in one tick.
 SESSION_CHECK_BATCH = 20
 
+# Set on a ``get_with_session`` row when the ciphertext was there but would not
+# decrypt (Fernet key mismatch / rotation half-done). WITHOUT this flag the
+# caller sees ``session_state=None`` and cannot tell it apart from "this account
+# never bound a session" — and those two demand opposite handling: the latter is
+# a business reason (mark needs_relogin, ask for a rescan), the former is an
+# INFRA failure where the platform session is probably fine and touching account
+# status would mass-mislabel every account at once (spec §7.8, and exactly what
+# ``session_adapter.decrypt_failure_result`` exists to express).
+SESSION_STATE_DECRYPT_FAILED = "session_state_decrypt_failed"
+
 _SA_COLS = tuple(SocialAccounts.__table__.columns)
 
 # mig 402 — the account's pinned browser environment, LEFT JOINed onto the two
@@ -250,6 +260,13 @@ class SocialAccountsRepository:
             stays CIPHERTEXT, because ``build_environment`` owns that decrypt
             and its fall-back-to-direct logging.
           * OAuth token columns are dropped — this path has no use for them.
+          * ``session_state_decrypt_failed`` is True when the row HAD ciphertext
+            that would not decrypt. ``_decrypt_secret_cols`` degrades a failed
+            decrypt to None (it must not raise — that would take the whole
+            health sweep down), which erases the difference between "key
+            mismatch" and "never bound". Callers branch on those two in opposite
+            directions, so the distinction is restored here rather than left to
+            be guessed downstream.
         """
         async with read_scope() as session:
             row = (
@@ -266,7 +283,11 @@ class SocialAccountsRepository:
         if not row:
             return None
         base, env = _split_environment(dict(row))
+        had_ciphertext = base.get("session_state") is not None
         out = _decrypt_secret_cols(base, _SESSION_COLS)
+        out[SESSION_STATE_DECRYPT_FAILED] = (
+            had_ciphertext and out.get("session_state") is None
+        )
         for col in _TOKEN_COLS:
             out.pop(col, None)
         out["environment"] = env
@@ -415,4 +436,8 @@ class SocialAccountsRepository:
             )
 
 
-__all__ = ["SocialAccountsRepository"]
+__all__ = [
+    "SESSION_CHECK_BATCH",
+    "SESSION_STATE_DECRYPT_FAILED",
+    "SocialAccountsRepository",
+]

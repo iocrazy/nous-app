@@ -460,5 +460,16 @@ sau 的 `while True`（`main.py:693` / `718` / `762`）没有任何上界，页�
 2. **patchright vs playwright**：sau 用 patchright（反检测 fork，`pyproject.toml` 里是 `patchright==1.58.2`）。需评估其维护活跃度与是否值得作为生产依赖。注意 sau 自身的 `requirements.txt` 仍写着 `playwright==1.52.0`，两种装法得到不同环境 —— 我们必须单一来源。
 3. **`nous-browser` 的鉴权**：内网调用是否需要 token。倾向需要 —— 该服务持有解密后的会话，不能裸奔。
 4. **S6 并发模型**：上百账号的调度策略（队列 + 并发上限 + 每账号最小发布间隔）需单独设计。
-5. **素材传递**：presigned URL 需确认 SeaweedFS S3 网关签发的 URL 在 browser 容器内可达（走内网还是公网出口）。
+5. ~~**素材传递**~~ → **已验证（2026-08-05，S3 实施前实测）**：可达，且无需新设计。
+
+   `PublishTasksRepository.get_resource_media_url()` 已经是 official / h5 两个通道的**共用单一入口**，它按 `resources.file_path` 的形态派生 URL：文件系统路径 → 短 TTL HMAC 签名的 `/media/` URL；对象存储路径（`sb://bucket/key`）→ Supabase Storage 签名 URL。
+
+   实测在 `nous-browser` 容器内直接下载成功：
+
+   ```
+   host = nous-kong:8000   （docker 内网，不出公网）
+   HTTP 200  content-type=video/mp4  首块 65536 字节
+   ```
+
+   两个容器同在 `nous-net`，所以 S3 的素材传递**直接复用该方法**，不引入新的签发逻辑 —— 也就自然继承了它的 TTL 与鉴权口径。
 6. **Xvfb 下的并发密度**：有头模式每 context 内存开销高于 headless，需实测 gpupc 上单容器能承载多少并发 context，作为 S6 限流参数的依据。

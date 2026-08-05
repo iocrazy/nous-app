@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 import respx
@@ -327,3 +329,145 @@ async def test_health_not_configured():
     health = await BrowserClient(base_url="", token="").health()
     assert health.ok is False
     assert health.error_kind == SessionErrorKind.NOT_CONFIGURED.value
+
+
+# ── /session/publish (S3) ───────────────────────────────────
+
+INTENT = {
+    "content_type": "video",
+    "media": [{"kind": "video", "url": "https://cdn/x.mp4", "filename": "x.mp4"}],
+    "title": "Launch",
+}
+ROTATED = {"cookies": [{"name": "sessionid", "value": "rotated"}]}
+
+
+@respx.mock
+async def test_publish_maps_published_to_success():
+    route = respx.post(f"{BASE}/session/publish").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "success": True,
+                "status": "published",
+                "message": "ok",
+                "detail": {},
+                "platform_item_id": "item-9",
+                "published_url": "https://www.douyin.com/video/item-9",
+                "updated_storage_state": ROTATED,
+            },
+        )
+    )
+    result = await _client().publish("douyin", STORAGE_STATE, INTENT)
+
+    assert result.success is True
+    assert result.status == SessionStatus.PUBLISHED.value
+    assert result.platform_item_id == "item-9"
+    assert result.updated_storage_state == ROTATED
+    sent = route.calls[0].request
+    assert sent.headers[INTERNAL_TOKEN_HEADER] == "tok_test"
+    body = json.loads(sent.content)
+    # 契约的四个键，storage_state 与 intent 都原样送达
+    assert set(body) == {"platform", "storage_state", "environment", "intent"}
+    assert body["intent"]["title"] == "Launch"
+
+
+@respx.mock
+async def test_publish_session_invalid_is_a_conclusion_not_infra():
+    """账号真掉线 → 调用方该标 needs_relogin；不能带 error_kind。"""
+    respx.post(f"{BASE}/session/publish").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "success": False,
+                "status": "session_invalid",
+                "message": "bounced to login",
+                "detail": {},
+            },
+        )
+    )
+    result = await _client().publish("douyin", STORAGE_STATE, INTENT)
+
+    assert result.status == SessionStatus.SESSION_INVALID.value
+    assert result.is_infra_failure is False
+
+
+@respx.mock
+async def test_publish_unreachable_is_infra_failure():
+    """容器挂了 == 没问出结论。批量发布时这必须与"账号掉线"分开，否则一次
+    宕机会把整批账号误标成需要重扫码。"""
+    respx.post(f"{BASE}/session/publish").mock(side_effect=httpx.ConnectError("down"))
+    result = await _client().publish("douyin", STORAGE_STATE, INTENT)
+
+    assert result.status == SessionStatus.FAILED.value
+    assert result.is_infra_failure is True
+    assert result.result.detail["error_kind"] == SessionErrorKind.UNREACHABLE.value
+    assert result.updated_storage_state is None
+
+
+@respx.mock
+async def test_publish_timeout_maps_to_timeout_status():
+    respx.post(f"{BASE}/session/publish").mock(side_effect=httpx.ReadTimeout("slow"))
+    result = await _client().publish("douyin", STORAGE_STATE, INTENT)
+
+    assert result.status == SessionStatus.TIMEOUT.value
+    assert result.result.detail["error_kind"] == SessionErrorKind.TIMEOUT.value
+
+
+@respx.mock
+async def test_publish_unknown_status_is_bad_response_never_guessed():
+    """S1 时 browser 侧还没有 published —— 若某天回一个我们不认识的值，宁可
+    判坏响应也不能猜：猜成失败会诱发重复发布，猜成成功会骗用户。"""
+    respx.post(f"{BASE}/session/publish").mock(
+        return_value=httpx.Response(
+            200, json={"success": True, "status": "posted", "message": "?"}
+        )
+    )
+    result = await _client().publish("douyin", STORAGE_STATE, INTENT)
+
+    assert result.success is False
+    assert result.result.detail["error_kind"] == SessionErrorKind.BAD_RESPONSE.value
+
+
+@respx.mock
+async def test_publish_empty_updated_state_is_treated_as_absent():
+    """空对象写回库等于把账号会话抹掉 —— 比不写回坏得多。"""
+    respx.post(f"{BASE}/session/publish").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "success": True,
+                "status": "published",
+                "message": "ok",
+                "updated_storage_state": {},
+            },
+        )
+    )
+    result = await _client().publish("douyin", STORAGE_STATE, INTENT)
+    assert result.updated_storage_state is None
+
+
+async def test_publish_result_repr_never_leaks_the_session():
+    from app.services.distribution.browser_client import PublishResult, SessionOpResult
+
+    result = PublishResult(
+        result=SessionOpResult(True, "published", "ok"),
+        updated_storage_state={"cookies": [{"name": "sessionid", "value": "s3cr3t"}]},
+    )
+    assert "s3cr3t" not in repr(result)
+    assert "set" in repr(result)
+
+
+async def test_publish_rejects_empty_intent():
+    with pytest.raises(ValueError):
+        await _client().publish("douyin", STORAGE_STATE, {})
+
+
+async def test_publish_timeout_has_an_upper_bound():
+    """§7.2：任何等待都必须能超时收敛。发布比校验大一个量级，但仍有上界。"""
+    from app.services.distribution.browser_client import (
+        DEFAULT_PUBLISH_TIMEOUT_SECONDS,
+        DEFAULT_VALIDATE_TIMEOUT_SECONDS,
+    )
+
+    assert DEFAULT_PUBLISH_TIMEOUT_SECONDS > DEFAULT_VALIDATE_TIMEOUT_SECONDS
+    assert DEFAULT_PUBLISH_TIMEOUT_SECONDS < 3600

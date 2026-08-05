@@ -75,6 +75,10 @@ AUTH_TYPE_SESSION = "session"
 REASON_NO_SESSION_STATE = "no_session_state"
 REASON_MALFORMED_SESSION_STATE = "malformed_session_state"
 REASON_AUTH_TYPE_MISMATCH = "auth_type_mismatch"
+# fail-fast 拦下的参数错误（§7.7）。是业务原因而非基建失败 —— 但它**不该**
+# 让账号进 needs_relogin：会话好得很，是这一次的入参不合法。调用方按
+# status=failed 处理（见 publish() 的说明）。
+REASON_INVALID_INTENT = "invalid_publish_intent"
 
 
 class SessionStateError(RuntimeError):
@@ -501,14 +505,73 @@ class SessionAdapter:
         1. 先看 ``result.status``；``session_invalid`` → 账号标 needs_relogin
         2. ``is_infra_failure(result.to_dict())`` 为真 → 账号状态一律不动
         3. ``updated_storage_state`` 非空 → 重新 Fernet 加密写回（§4.2 第 6 步）
+
+        三道门在**起浏览器之前**依次拦：auth_type 路由错 → 会话读不出来 →
+        参数不合法（§7.7 fail-fast）。三者都返回类型化信封而不抛异常，因为
+        调用方是一个"一个账号失败不能拖垮整批"的循环（§7.3 / 路线 C）。
+
+        ``validate_publish_intent`` 在这里**又跑了一遍**，尽管发布 step 已经
+        先跑过：那一遍是为了给用户更早、更具体的报错，这一遍是为了让任何
+        绕过 step 的调用方也不可能把非法参数送进浏览器。纯函数、无 IO，重复
+        一次的代价是零。
         """
-        raise NotImplementedError(
-            "SessionAdapter.publish lands in S3 (spec §6) — S1 只做 /session/validate"
+        auth_type = account.get("auth_type")
+        if auth_type is not None and auth_type != AUTH_TYPE_SESSION:
+            logger.warning(
+                f"[session.publish] account={account.get('id')} "
+                f"routed to session channel but auth_type={auth_type!r}"
+            )
+            return PublishOutcome(
+                result=SessionOpResult(
+                    success=False,
+                    status=SessionStatus.FAILED.value,
+                    message=f"account auth_type is {auth_type!r}, not 'session'",
+                    detail={"reason": REASON_AUTH_TYPE_MISMATCH},
+                )
+            )
+
+        try:
+            storage_state = parse_session_state(account)
+        except SessionStateError as exc:
+            return PublishOutcome(result=self._session_state_failure(account, exc))
+
+        problems = self.validate_publish_intent(intent)
+        if problems:
+            logger.warning(
+                f"[session.publish] account={account.get('id')} "
+                f"intent rejected before opening a browser: {len(problems)} problem(s)"
+            )
+            return PublishOutcome(
+                result=SessionOpResult(
+                    success=False,
+                    status=SessionStatus.FAILED.value,
+                    message="publish intent rejected: " + "; ".join(problems),
+                    detail={"reason": REASON_INVALID_INTENT, "problems": problems},
+                )
+            )
+
+        env = environment or build_environment(account.get("environment"))
+        published = await self._client.publish(
+            self.platform_name, storage_state, intent.to_payload(), env
+        )
+        logger.info(
+            f"[session.publish] platform={self.platform_name} "
+            f"account={account.get('id')} status={published.status}"
+        )
+        return PublishOutcome(
+            result=published.result,
+            platform_item_id=published.platform_item_id,
+            published_url=published.published_url,
+            updated_storage_state=published.updated_storage_state,
         )
 
 
 __all__ = [
     "AUTH_TYPE_SESSION",
+    "REASON_AUTH_TYPE_MISMATCH",
+    "REASON_INVALID_INTENT",
+    "REASON_MALFORMED_SESSION_STATE",
+    "REASON_NO_SESSION_STATE",
     "SESSION_PLATFORM_PROFILES",
     "PlatformSessionProfile",
     "PublishIntent",

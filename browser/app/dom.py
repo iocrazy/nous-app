@@ -73,6 +73,98 @@ async def first_visible_attribute(
     return None
 
 
+_REMOVE_NODES_JS = """
+(selectors) => {
+  let removed = 0;
+  for (const selector of selectors) {
+    for (const node of document.querySelectorAll(selector)) {
+      node.remove();
+      removed += 1;
+    }
+  }
+  return removed;
+}
+"""
+
+
+async def remove_nodes(page: Any, selectors: Sequence[str]) -> int:
+    """Delete matching nodes outright. Returns how many went.
+
+    For overlays that *intercept clicks* rather than merely sit on the page -
+    an onboarding coach-mark, a topic autocomplete dropdown. Playwright's
+    actionability check reports these as "element intercepts pointer events"
+    after burning the full click timeout, and no amount of waiting clears them
+    because they are waiting on the user (design doc 7.4).
+
+    Removing beats clicking through with `force`: a forced click still lands on
+    whatever is underneath the overlay, which on a publish page is another
+    control.
+    """
+    if not selectors:
+        return 0
+    try:
+        return int(await page.evaluate(_REMOVE_NODES_JS, list(selectors)))
+    except Exception:
+        # The overlay may simply not be there. Never a reason to fail a publish.
+        return 0
+
+
+async def click_element(locator: Any, timeout_ms: int) -> bool:
+    """Click through three escalating strategies. False = none of them worked.
+
+    The escalation is not superstition; each step answers a specific observed
+    behaviour:
+
+    1. a plain click, which also waits for actionability;
+    2. `force`, for controls the platform styles as non-interactive while still
+       wiring a handler to them (Semi's `.semi-radio-addon` carries
+       `pointer-events: none` and a plain click sits there until it times out);
+    3. a DOM `click()` via JS, for controls that are `visibility: hidden` and
+       therefore never actionable at all - Playwright refuses, the browser does
+       not (the reference project's "use this BGM" button is the known case).
+
+    Strategy 3 skips every actionability guarantee, which is why it is last:
+    it will happily click something that is covered, disabled or off-screen.
+    """
+    try:
+        await locator.click(timeout=timeout_ms)
+        return True
+    except Exception:
+        pass
+
+    try:
+        await locator.click(timeout=timeout_ms, force=True)
+        return True
+    except Exception:
+        pass
+
+    try:
+        await locator.evaluate("el => el.click()")
+        return True
+    except Exception:
+        return False
+
+
+async def click_first(
+    root: Any, selectors: Sequence[str], *, timeout_ms: int
+) -> str | None:
+    """Click the first selector that resolves to something. Returns which one.
+
+    `root` is a page or a locator, so a modal can be searched without leaking
+    into identically-classed nodes on the page behind it.
+    """
+    for selector in selectors:
+        try:
+            locator = root.locator(selector).first
+            if not await locator.count():
+                continue
+        except Exception:
+            continue
+        if await click_element(locator, timeout_ms):
+            return selector
+    return None
+
+
 async def first_text(page: Any, selectors: Sequence[str]) -> str | None:
     for selector in selectors:
         try:
