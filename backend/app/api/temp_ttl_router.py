@@ -38,7 +38,9 @@ async def _verify_team_owner(auth: AuthDep, scope_id: str) -> None:
     ``team_members.team_id`` (``BigInteger``); asyncpg's int8 codec is strict
     about str-vs-int (same trap documented in
     ``app.services.ai_usage._coerce_bigint``), so that query raised
-    ``asyncpg.exceptions.DataError`` for every call, str or int alike. Because
+    ``asyncpg.exceptions.DataError`` on every call, since ``scope_id`` is
+    always a str here (an int bind would have worked — that is exactly what
+    the ``int(...)`` coercion below restores). Because
     ``put_temp_ttl`` has no try/except around this call, the exception went
     straight through FastAPI to a 500 — meaning this owner-only gate had
     NEVER executed successfully once since it was introduced: legitimate team
