@@ -318,13 +318,16 @@ class ScreenwritingTools:
         Cost control: the per-call spend cap lives in
         ``HighRiskCapabilityGateHook`` (media.max_calls_per_turn, checked
         BEFORE this handler is ever entered — same mechanism, same turn
-        scope, as GenerateImage/GenerateVideo). The one thing added here,
-        cheaply, is a same-shot in-flight check using the ALREADY-FETCHED
-        ``shot.status`` from the resolver's own read — a SERVER fact, not
-        anything the model said — to refuse dispatching a second generation
-        onto a shot whose previous one has not finished (see the docstring on
-        the status check below for why this does not go further and mark the
-        shot 'generating' itself).
+        scope, as GenerateImage/GenerateVideo). On top of that, this handler
+        flips the shot to ``status='generating'`` BEFORE dispatch and rolls
+        back to ``'empty'`` if dispatch itself fails — mirroring
+        ``script_shots_router.py``'s human ``/shots/{shot_id}/generate`` REST
+        endpoint exactly (see ``gateway.set_shot_status``'s docstring for why
+        this is a different write surface from ``UpdateShot``'s, not a
+        loosening of it) — so two calls for the SAME shot cannot both slip
+        through and pay twice: the second sees ``status == 'generating'``
+        (see the check below) and is refused, a SERVER fact rather than
+        anything the model asserted.
         """
         scope = await _bound_scope(run_context)
         if scope is None:
@@ -343,17 +346,10 @@ class ScreenwritingTools:
         if isinstance(shot, Denied):
             return _denied(shot)
 
-        # Read-only dedup, no write: this handler deliberately does NOT set
-        # shot.status='generating' before dispatch (unlike the HTTP endpoint
-        # in script_shots_router.py) — scoped_script_gateway.update_shot's own
-        # docstring draws that status/url lane as belonging exclusively to
-        # "the generate workflow", and writing it from a second, agent-only
-        # path would cross that boundary for a saving (a transient status
-        # value) that is not worth widening the gateway's write surface for.
-        # What this check buys instead: if ANYTHING already in flight for
-        # this exact shot (a human's click via the REST endpoint, or an
-        # earlier agent dispatch) has not yet completed, a second dispatch
-        # here is refused rather than racing it and paying twice.
+        # A generation already in flight for this EXACT shot — from a
+        # human's click via the REST endpoint, or an earlier agent dispatch
+        # that already flipped this same flag below — refuses a second one
+        # rather than racing it and paying twice.
         if shot.status == "generating":
             return {
                 "ok": False,
@@ -362,6 +358,22 @@ class ScreenwritingTools:
                     "to finish (re-read the scene) before dispatching another."
                 ),
                 "error_code": "already_generating",
+            }
+
+        # Claim the shot BEFORE dispatch (closes the same-turn race two
+        # back-to-back calls could otherwise both win: without this, both
+        # would see status='empty' above and both would proceed to dispatch).
+        try:
+            await gateway.set_shot_status(scope, shot, "generating")
+        except Exception as exc:  # noqa: BLE001 — never raise into the loop
+            logger.exception(
+                "[screenwriting] GenerateShotImage status claim failed shot=%s",
+                shot.id,
+            )
+            return {
+                "ok": False,
+                "error": f"could not claim the shot for generation: {exc.__class__.__name__}",
+                "error_code": "status_claim_failed",
             }
 
         import uuid as _uuid
@@ -395,6 +407,18 @@ class ScreenwritingTools:
             logger.exception(
                 "[screenwriting] GenerateShotImage dispatch failed shot=%s", shot.id
             )
+            # Dispatch failed AFTER the status claim above — roll back to the
+            # honest pre-dispatch state, same as script_shots_router.py's
+            # /generate endpoint does on the same failure mode. Without this
+            # the shot would be stuck 'generating' forever with no live task.
+            try:
+                await gateway.set_shot_status(scope, shot, "empty")
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "[screenwriting] GenerateShotImage status rollback failed "
+                    "shot=%s",
+                    shot.id,
+                )
             return {
                 "ok": False,
                 "error": f"could not dispatch image generation: {exc.__class__.__name__}",

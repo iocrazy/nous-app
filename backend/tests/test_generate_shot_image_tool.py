@@ -29,6 +29,7 @@ from uuid import UUID
 import pytest
 
 import app.services.ai.scope.scope_resolver as resolver_mod
+import app.services.ai.scope.scoped_script_gateway as gateway_mod
 import app.services.ai.tools.screenwriting_tools as tools_mod
 from app.services.ai.scope.agent_run_scope import AgentRunScope
 from app.services.ai.tools.screenwriting_tools import SCREENWRITING_HANDLERS
@@ -378,6 +379,7 @@ async def test_successful_dispatch_uses_the_resolved_id_and_the_actual_user():
                 )
             ),
         ),
+        patch.object(gateway_mod, "set_shot_status", AsyncMock()) as mock_set_status,
         patch(
             "app.services.infra.dbos_orchestrator.start_workflow_routed",
             new=AsyncMock(),
@@ -394,6 +396,10 @@ async def test_successful_dispatch_uses_the_resolved_id_and_the_actual_user():
     assert result["ok"] is True
     assert result["dispatched"] is True
     assert result["task_id"] == "task-1"
+    # Claimed BEFORE dispatch, mirroring script_shots_router.py's REST
+    # endpoint — pinned by call order below, not just call presence.
+    mock_set_status.assert_called_once()
+    assert mock_set_status.call_args.args[2] == "generating"
     mock_dispatch.assert_called_once()
     _, kwargs = mock_dispatch.call_args
     assert kwargs["dbos_workflow_kwargs"]["shot_id"] == str(_SHOT_ID)
@@ -403,12 +409,13 @@ async def test_successful_dispatch_uses_the_resolved_id_and_the_actual_user():
 
 @pytest.mark.asyncio
 async def test_already_generating_shot_refuses_a_second_dispatch():
-    """Cheap, read-only in-flight dedup: the resolver's own read of
-    shot.status (a server fact, never a model assertion) is enough to refuse
-    a second dispatch onto a shot that has one in flight already — without
-    this handler taking on a write to the status lane, which
-    scoped_script_gateway.update_shot's own docstring reserves for the
-    generate workflow alone."""
+    """The resolver's own read of shot.status (a server fact, never a model
+    assertion) refuses a dispatch when a generation is ALREADY recorded as
+    in flight for this exact shot — whether that flag was set by a human's
+    click via the REST endpoint or an earlier agent dispatch's own status
+    claim (see test_two_back_to_back_calls_only_one_dispatches below for the
+    latter, which this read-only check alone would not catch without the
+    write)."""
     from app.core.config import settings
 
     with (
@@ -442,6 +449,66 @@ async def test_already_generating_shot_refuses_a_second_dispatch():
     assert result["ok"] is False
     assert result["error_code"] == "already_generating"
     mock_dispatch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_two_back_to_back_calls_only_one_dispatches():
+    """The actual race the status claim exists to close (review fix): two
+    GenerateShotImage calls for the SAME shot in one turn, back-to-back.
+
+    Fakes just enough shared state to make this a real race rather than a
+    tautology — ``resolve_shot`` reads the CURRENT status out of a shared
+    dict, and ``set_shot_status`` writes to that same dict, so the second
+    call's resolution genuinely observes the first call's write. Without
+    the status claim in the handler (i.e. the pre-fix, read-only-only
+    version), both calls would observe status='empty' and both would
+    dispatch — this test is the one that would have failed against that
+    version."""
+    from app.core.config import settings
+
+    shot_state = {"status": "empty"}
+
+    async def _fake_resolve_shot(shot_id, scope):
+        return resolver_mod.ResolvedShot(
+            id=_SHOT_ID,
+            scene_id=_SCENE_ID,
+            project_id=_PROJECT_A,
+            team_id=_TEAM_A,
+            episode_id=None,
+            shot_number=1,
+            shot_type="MS",
+            status=shot_state["status"],
+        )
+
+    async def _fake_set_shot_status(scope, shot, status):
+        shot_state["status"] = status
+
+    with (
+        patch.object(settings, "FEATURE_SHOT_GENERATE", True),
+        patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=_scope())),
+        patch.object(tools_mod, "resolve_shot", _fake_resolve_shot),
+        patch.object(gateway_mod, "set_shot_status", _fake_set_shot_status),
+        patch(
+            "app.services.infra.dbos_orchestrator.start_workflow_routed",
+            new=AsyncMock(),
+        ) as mock_dispatch,
+        patch(
+            "app.services.infra.unified_task_manager.get_task_manager",
+            return_value=_task_manager_mock("task-race"),
+        ),
+    ):
+        first = await SCREENWRITING_HANDLERS["GenerateShotImage"](
+            {"shot_id": str(_SHOT_ID)}, _RUN_CONTEXT
+        )
+        second = await SCREENWRITING_HANDLERS["GenerateShotImage"](
+            {"shot_id": str(_SHOT_ID)}, _RUN_CONTEXT
+        )
+
+    assert first["ok"] is True
+    assert first["dispatched"] is True
+    assert second["ok"] is False
+    assert second["error_code"] == "already_generating"
+    mock_dispatch.assert_called_once()
 
 
 @pytest.mark.asyncio

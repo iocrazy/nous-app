@@ -895,6 +895,41 @@ async def update_shot(
     return _shot_dict(row, await scene_no_for_shot(scope, shot))
 
 
+async def set_shot_status(
+    scope: AgentRunScope, shot: ResolvedShot, status: str
+) -> None:
+    """Flip an already-resolved shot's ``status`` column. Dispatch-lifecycle
+    use only — see ``generate_shot_image`` in ``screenwriting_tools.py`` (A6
+    review fix).
+
+    This is a DIFFERENT write surface from ``update_shot`` above, not a
+    loosening of it. ``update_shot``'s docstring reserves ``status`` (and the
+    image/video URLs) from the fields it accepts because THAT function backs
+    the model-facing ``UpdateShot`` tool — a parameter edit must never let the
+    model declare a card "done" or swap in its own url. It says nothing about
+    the DISPATCH path itself flipping a transient 'generating' flag before
+    kicking off the real generation, which is a distinct, narrower concern
+    with its own precedent: ``script_shots_router.py``'s human
+    ``/shots/{shot_id}/generate`` REST endpoint does exactly this (`repo.
+    update_status(shot_id, "generating")` before dispatch, rolled back to
+    ``"empty"`` on dispatch failure) to close the same same-shot race this
+    function exists to close for the agent path. Mirroring that shape here —
+    via a raw ORM statement against ``ScriptShots``, like ``create_shot``/
+    ``update_shot`` already do in this file, rather than a new
+    ``get_script_shot_repository()`` call — keeps the write inside this
+    file's existing ORM-allowed surface instead of adding a new repository
+    dependency for one column.
+
+    No return value and no field whitelist: the caller decides the exact
+    status string, there is nothing here for a model to influence (the
+    handler passes a literal ``"generating"``/``"empty"``, never anything
+    from ``args``)."""
+    async with write_scope() as session:
+        await session.execute(
+            update(ScriptShots).where(ScriptShots.id == shot.id).values(status=status)
+        )
+
+
 async def episode_id_for_script(script_id: Any) -> Optional[int]:
     """The ``episode_id`` of one script, for DISPATCH-TIME scope derivation
     only (``scope_binding.resolve_dispatch_scope``).
@@ -934,5 +969,6 @@ __all__ = [
     "read_scene_elements",
     "scene_no_for",
     "scene_no_for_shot",
+    "set_shot_status",
     "update_shot",
 ]
