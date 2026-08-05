@@ -53,14 +53,26 @@ ALTER TABLE public.agent_runs
     ('running','silent','stuck','dead','cancelled','finished'));
 
 -- Backfill: rows that reached a terminal status before this value existed.
--- Idempotent (the liveness_state predicate makes a re-run a no-op) and
--- narrow: only rows still parked on 'running', so a row the scanner
--- legitimately left at silent/stuck/dead is never rewritten.
 --
--- Observed on the dev DB at authoring time: 68 completed rows on 'running'.
+-- `finished` means "the run wound up in an orderly way", NOT "the run
+-- succeeded" — liveness is orthogonal to status, so FAILED rows get it too.
+-- A run whose body raised still returned control to RunRecorder and closed
+-- its own row; leaving it on 'running' is exactly as wrong as leaving a
+-- completed one there.
+--
+-- Idempotent (the liveness_state predicate makes a re-run a no-op) and
+-- narrow in two ways that matter:
+--   * only rows still parked on 'running', so a row the scanner legitimately
+--     left at silent/stuck/dead is never rewritten — in particular the
+--     failed+dead rows written by _mark_dead / reconcile are excluded, so
+--     this cannot erase a real "the process died" signal;
+--   * status='heartbeat_lost' is not in scope (mark_heartbeat_lost owns it).
+--
+-- Observed on the dev DB at authoring time: 68 completed + 30 failed rows
+-- stranded on 'running'.
 UPDATE public.agent_runs
    SET liveness_state = 'finished'
- WHERE status = 'completed'
+ WHERE status IN ('completed', 'failed')
    AND liveness_state = 'running';
 
 -- 'cancelled' was defined by 207 as "mirrors agent_runs.status" but no writer
@@ -71,20 +83,15 @@ UPDATE public.agent_runs
  WHERE status = 'cancelled'
    AND liveness_state = 'running';
 
--- NOT backfilled, deliberately: status='failed' rows stay on 'running'.
--- Mapping them to 'dead' would break the dead ⟺ failed ops contract described
--- above (an application-level exception is a different event from "the
--- process died", and would flood the agent fault badge). Typing the failed
--- path is a separate decision with its own value, not a side effect of this
--- migration. Dev DB currently has 30 such rows.
-
 COMMENT ON COLUMN public.agent_runs.liveness_state IS
-  'paperclip-style liveness, orthogonal to status.
+  'paperclip-style liveness, orthogonal to status — it describes HOW the run
+   ended (or is going), never WHETHER it succeeded.
    running→silent→stuck→dead is the degradation ladder driven by the scanner
    in app/workflows/liveness_scanner.py (heartbeat_at + last_useful_action_at
-   thresholds). finished = ran to completion normally, written by RunRecorder
-   alongside status=completed. cancelled mirrors status=cancelled.
-   dead is reserved for "the process actually died" and is always written
-   together with status=failed — do not use it as a generic terminal value.';
+   thresholds). finished = wound up in an orderly way, written by RunRecorder
+   for status=completed AND status=failed alike. cancelled mirrors
+   status=cancelled. dead is reserved for "the process actually died" and is
+   always written together with status=failed in the same statement — never
+   use it as a generic terminal value.';
 
 COMMIT;

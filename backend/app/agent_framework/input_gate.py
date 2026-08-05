@@ -104,9 +104,14 @@ async def mark_awaiting_input(
     ``set_status`` 写的 agent_outcome/outcome_reason 键）——2026-08-03 E2E
     实测 issue dispatch **没有** task_tracking 行（spec 的落点假设错了），
     标记写在那里等于没写，回复分流永远降级旧路径并撞上 dispatch 自己持有
-    的 execution_locked_at。写时序与 set_status 兼容：挂起入口先
-    route_finish_outcome（覆盖式写 execution_state）再本函数 merge；唤醒
-    时 clear 在 set_status(in_progress)（无 state 不写列）之前。
+    的 execution_locked_at。
+
+    这里曾经有一段"写时序与 set_status 兼容"的说明（挂起入口先
+    route_finish_outcome 覆盖式写、本函数后 merge；唤醒时 clear 必须排在
+    set_status(in_progress) 之前）。那是在绕开 ``set_status`` 的整列覆盖写：
+    顺序错了标记就没了。``set_status`` 现在恒为 jsonb merge 且只接管
+    ``error_code``/``error_message`` 两个键，不再碰 ``awaiting_input``，
+    所以两处顺序都不再是正确性前提。
 
     task_tracking.metadata 同步 best-effort 装饰写保留（今天恒 0 行，若
     未来 dispatch 建了 task 行，Task Center 行高亮即自动点亮）。"""

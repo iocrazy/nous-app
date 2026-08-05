@@ -538,12 +538,11 @@ async def test_cancelled_run_mirrors_cancelled_liveness_state() -> None:
 
 
 @pytest.mark.asyncio
-async def test_failed_run_does_not_write_liveness_state() -> None:
-    """dead ⟺ failed is a whole-DB invariant the sweeper and the agent fault
-    badge (dead_run_reasons_by_agent: liveness_state IN ('stuck','dead'))
-    depend on. An ordinary application-level failure is NOT the same event as
-    "the process died", so the fail path deliberately leaves liveness_state
-    alone rather than minting dead here — see the deviation note in the PR."""
+async def test_failed_run_also_gets_finished_liveness_state() -> None:
+    """`finished` means "wound up in an orderly way", not "succeeded" —
+    liveness is orthogonal to status. A body that raised still returned
+    control to the recorder and closed its own row, so a failed row left on
+    'running' is exactly as wrong as a completed one."""
     table = _FakeTable()
     p_read, p_write = _patched(table)
 
@@ -555,4 +554,31 @@ async def test_failed_run_does_not_write_liveness_state() -> None:
 
     finish = table.update_calls[-1]
     assert finish["status"] == "failed"
-    assert "liveness_state" not in finish
+    assert finish["liveness_state"] == "finished"
+
+
+@pytest.mark.asyncio
+async def test_no_finish_path_ever_writes_dead() -> None:
+    """The red line. dead ⟺ failed is a whole-DB invariant: both writers of
+    dead (liveness_scanner._mark_dead, services/liveness/reconcile) set
+    status='failed' in the SAME statement, and dead means "the process
+    actually died". The agent fault badge reads liveness_state IN
+    ('stuck','dead') — minting dead for ordinary outcomes would light up
+    every agent."""
+    for cancel_requested, raises in ((False, False), (False, True), (True, False)):
+        table = _FakeTable(cancel_requested=cancel_requested)
+        p_read, p_write = _patched(table)
+
+        with p_read, p_write:
+            rec = RunRecorder(agent_id=uuid4(), user_id=uuid4(), trigger="chat")
+            if raises:
+                with pytest.raises(RuntimeError):
+                    async with rec:
+                        raise RuntimeError("boom")
+            else:
+                async with rec:
+                    if cancel_requested:
+                        await rec.check_cancelled()
+
+        finish = table.update_calls[-1]
+        assert finish.get("liveness_state") != "dead"

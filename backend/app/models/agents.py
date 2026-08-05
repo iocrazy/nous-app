@@ -281,14 +281,16 @@ class AgentRuns(Base):
         nullable=False,
         server_default=text("'running'::text"),
         comment=(
-            "paperclip-style liveness, orthogonal to status.\n"
+            "paperclip-style liveness, orthogonal to status — describes HOW\n"
+            "   the run ended, never WHETHER it succeeded.\n"
             "   running→silent→stuck→dead is the degradation ladder driven by\n"
             "   the scanner in app/workflows/liveness_scanner.py based on\n"
             "   heartbeat_at + last_useful_action_at thresholds.\n"
-            "   finished = ran to completion normally (RunRecorder, mig 406);\n"
+            "   finished = wound up in an orderly way (RunRecorder, mig 406),\n"
+            "   written for status=completed AND status=failed alike;\n"
             "   cancelled mirrors status=cancelled. dead is reserved for 'the\n"
             "   process actually died' and is always written together with\n"
-            "   status=failed — not a generic terminal value."
+            "   status=failed — never a generic terminal value."
         ),
     )
     continuation_attempt: Mapped[int] = mapped_column(

@@ -244,6 +244,29 @@ async def test_set_status_outcome_without_error_also_clears_stale_error(monkeypa
     assert '"agent_outcome": "completed"' in _state_payload(binds)
 
 
+async def test_set_status_error_write_builds_on_existing_column(monkeypatch):
+    """The defect that hurt most: writing an error used to ASSIGN the whole
+    column, taking awaiting_input / turn / stranded_* with it. Two structural
+    guarantees are asserted here — the new value is built FROM the column
+    itself, and the payload carries only the keys set_status owns, so there
+    is nothing in the statement capable of dropping a foreign key.
+
+    The semantic proof (keys actually present in the row afterwards) needs a
+    real jsonb engine and lives in
+    tests/migrations/test_405_execution_state_key_preservation.py."""
+    import app.workflows.issue_lifecycle as il
+
+    session = _FakeSession()
+    _patch_scopes(monkeypatch, session)
+
+    await il.set_status(7, "blocked", error_code="x", error_message="boom")
+
+    sql, binds = _last_update_call(session)
+    assert "coalesce(public.issues.execution_state" in sql.lower()
+    assert "||" in sql
+    assert set(json.loads(_state_payload(binds))) == {"error_code", "error_message"}
+
+
 async def test_set_status_error_and_outcome_merge_together(monkeypatch):
     import app.workflows.issue_lifecycle as il
 

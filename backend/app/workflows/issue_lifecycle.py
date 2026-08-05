@@ -733,11 +733,14 @@ async def route_finish_outcome(
 
 
 async def mark_turn_progress(issue_id: int, turn: int) -> None:
-    """A1-2 逐轮进度装饰写。jsonb merge——绝不覆盖 set_status 写的键。
+    """A1-2 逐轮进度装饰写。jsonb merge——绝不覆盖别的写入方的键。
 
-    ``set_status`` writes ``execution_state`` wholesale, so this must merge
-    (``||``) rather than assign. Being clobbered by a later ``set_status`` is
-    accepted by design: a terminal row shows no turn counter.
+    Every writer of ``execution_state`` merges (``||``) rather than assigns;
+    each owns its own keys and leaves the rest alone. ``set_status`` used to
+    be the exception — it assigned the whole column, so a later transition
+    silently dropped this turn counter, which this docstring used to record
+    as "accepted by design". It merges now (see ``set_status``), so the
+    counter survives; a terminal row simply stops updating it.
     """
     from sqlalchemy import Integer, cast, func, literal, literal_column, text, update
     from sqlalchemy.dialects.postgresql import JSONB
