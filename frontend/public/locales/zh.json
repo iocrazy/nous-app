@@ -3859,8 +3859,11 @@
       "GenerateShotImage": "生成分镜图"
     },
     "failed": "失败",
+    "wroteShots_one": "本轮写入 {{count}} 张镜头卡",
     "wroteShots_other": "本轮写入 {{count}} 张镜头卡",
+    "wroteEdits_one": "本轮应用 {{count}} 处剧本修改",
     "wroteEdits_other": "本轮应用 {{count}} 处剧本修改",
+    "alsoEdits_one": "+ {{count}} 处剧本修改",
     "alsoEdits_other": "+ {{count}} 处剧本修改",
     "revealShot": "在分镜中显示这个镜头",
     "shotNoDescription": "暂无描述",
