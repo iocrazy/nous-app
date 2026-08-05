@@ -86,8 +86,8 @@ from app.models import (
     FileVersions,
     ParsedMedia,
     ProjectFiles,
-    Resources,
     ResourceItems,
+    Resources,
     ResourceVersions,
 )
 from app.services.library import media_storage
@@ -164,6 +164,7 @@ class ModuleConfig:
 # resource has more than one resource_items row (folder/library
 # membership) — the scope only affects the storage key prefix, not
 # correctness.
+
 
 def _uploads_select_stmt(scope_id: Optional[int], limit: int):
     """ORM port of the former ``_UPLOADS_SELECT_SQL`` string. ``scope_id``
@@ -265,6 +266,7 @@ async def _uploads_update_row(row: dict, file_path: str, sha256: Optional[str]) 
 # file_hash column (unlike resources/resource_versions), so update_row
 # only ever touches file_path.
 
+
 def _project_files_select_stmt(scope_id: Optional[int], limit: int):
     """ORM port of the former ``_PROJECT_FILES_SELECT_SQL`` string."""
     stmt = (
@@ -341,6 +343,7 @@ async def _project_files_update_row(
 # object (which is exactly the IsADirectoryError the first prod dry-run hit
 # — see the ``uploads`` SELECT comment above).
 
+
 def _downloads_select_stmt(scope_id: Optional[int], limit: int):
     """ORM port of the former ``_DOWNLOADS_SELECT_SQL`` string."""
     ri = (
@@ -407,11 +410,15 @@ async def _downloads_update_row(
         values["file_hash"] = sha256
     async with write_scope() as session:
         await session.execute(
-            update(ResourceVersions).where(ResourceVersions.id == row["id"]).values(**values)
+            update(ResourceVersions)
+            .where(ResourceVersions.id == row["id"])
+            .values(**values)
         )
         if sync_parent:
             await session.execute(
-                update(Resources).where(Resources.id == row["resource_id"]).values(**values)
+                update(Resources)
+                .where(Resources.id == row["resource_id"])
+                .values(**values)
             )
 
 
@@ -432,6 +439,7 @@ async def _downloads_update_row(
 # fail the way path parsing can. The directory to migrate is still resolved
 # from hls_path itself (via resolve_media_source, in _migrate_hls_row),
 # independent of which naming convention produced it.
+
 
 def _hls_select_stmt(scope_id: Optional[int], limit: int):
     """ORM port of the former ``_HLS_SELECT_SQL`` string. ``ri`` correlates
@@ -549,6 +557,7 @@ async def _hls_update_row(row: dict, file_path: str, sha256: Optional[str]) -> N
 # path resolved to one real file on disk.
 
 _DERIVED_COLUMNS = ("thumbnail_path", "cover_image_path")
+
 
 # Coarse filter only (row-level ``resolve_media_source`` in
 # ``_migrate_derived_row`` is still the real authority) — mirrors every other
@@ -1236,6 +1245,7 @@ async def _migrate_web_resource_files_row(
 
 
 # storyboard: SKIPPED — see module docstring above. Do not add an entry.
+
 
 def _no_select_stmt(scope_id: Optional[int], limit: int):
     # Never executed — this module's rows come from its own list_rows

@@ -50,17 +50,29 @@ class _Result:
     def mappings(self) -> _Mappings:
         return _Mappings(self._rows)
 
+    def all(self) -> List[Any]:
+        """Bare (non-``.mappings()``) row access — the shape a real ORM
+        ``select(col)`` result returns (tuple-like rows indexable by
+        position), used by ``_resource_ids_for_platforms`` post Phase C
+        task 3."""
+        return self._rows
+
 
 class _CapSession:
     """Records every ``execute(stmt, params)`` as ``(sql_text, params)`` and
-    hands back a queued rowset (default empty)."""
+    hands back a queued rowset (default empty). ``raw_calls`` additionally
+    keeps the RAW statement object (not stringified) for the ORM sites (Phase
+    C task 3) whose bind params are compiled into the statement itself rather
+    than passed as a separate runtime dict."""
 
     def __init__(self, rowsets: Optional[List[List[Dict[str, Any]]]] = None) -> None:
         self._rowsets = list(rowsets or [])
         self.calls: List[tuple[str, Dict[str, Any]]] = []
+        self.raw_calls: List[Any] = []
 
     async def execute(self, stmt: Any, params: Any = None) -> _Result:
         self.calls.append((str(stmt), dict(params or {})))
+        self.raw_calls.append(stmt)
         rows = self._rowsets.pop(0) if self._rowsets else []
         return _Result(rows)
 
@@ -695,20 +707,35 @@ async def test_resource_ids_for_platforms_empty_input_returns_empty(
 async def test_resource_ids_for_platforms_two_step_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Phase C task 3: migrated off raw ``text()`` SQL to two ORM
+    ``select()``s. The fake session hands back tuple rows (the real ORM
+    ``.all()`` shape) and assertions compile the captured RAW statements
+    (``raw_calls``) rather than substring-matching a params dict that no
+    longer exists at the ``session.execute()`` call boundary (ORM binds are
+    embedded in the compiled statement, not passed separately)."""
     # Step 1 → parsed_media ids; step 2 → resources ids.
-    session = _CapSession(rowsets=[[{"id": 1}, {"id": 2}], [{"id": 100}, {"id": 200}]])
+    session = _CapSession(rowsets=[[(1,), (2,)], [(100,), (200,)]])
     monkeypatch.setattr(repo_mod, "read_scope", lambda: _fake_scope(session))
     repo = ResourcesRepository()
 
     result = await repo._resource_ids_for_platforms(["douyin", "youtube"])
     assert result == ["100", "200"]
 
-    first_sql, first_params = session.calls[0]
-    second_sql, second_params = session.calls[1]
-    assert "FROM parsed_media" in first_sql
-    assert first_params["platforms"] == ["douyin", "youtube"]
-    assert "FROM resources" in second_sql
-    assert second_params["media_ids"] == [1, 2]
+    assert len(session.raw_calls) == 2
+    first_compiled = session.raw_calls[0].compile()
+    second_compiled = session.raw_calls[1].compile()
+    first_sql, first_params = str(first_compiled), dict(first_compiled.params)
+    second_sql, second_params = str(second_compiled), dict(second_compiled.params)
+    assert "parsed_media" in first_sql
+    assert any(
+        isinstance(v, (list, tuple)) and list(v) == ["douyin", "youtube"]
+        for v in first_params.values()
+    )
+    assert "resources" in second_sql
+    assert any(
+        isinstance(v, (list, tuple)) and list(v) == [1, 2]
+        for v in second_params.values()
+    )
 
 
 @pytest.mark.asyncio

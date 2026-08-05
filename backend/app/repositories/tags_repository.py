@@ -71,6 +71,7 @@ from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from app.db.scope import Scope, request_scope
 from app.db.session import read_scope, write_scope
 from app.models import Resources, ResourceTags, TagGroups, Tags
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
@@ -772,34 +773,45 @@ class TagsRepository:
 
         NOTE: the primary path's ``get_user_tag_counts`` RPC (the half of
         ``get_tag_counts`` above this fallback) is addressed separately in
-        migration 256 — do NOT touch the RPC call here."""
-        async with read_scope() as session:
-            result = await session.execute(
-                text("SELECT id FROM resources WHERE creator_id = CAST(:uid AS uuid)"),
-                {"uid": str(user_id)},
-            )
-            resource_ids = [r[0] for r in result.all()]
-            if not resource_ids:
-                return []
+        migration 256 — do NOT touch the RPC call here.
 
-            rows = (
-                await session.execute(
-                    select(
-                        Tags.id,
-                        Tags.name,
-                        Tags.color,
-                        Tags.icon,
-                        Tags.type,
-                        func.count().label("count"),
-                    )
-                    .select_from(ResourceTags)
-                    .join(Tags, Tags.id == ResourceTags.tag_id)
-                    .where(ResourceTags.resource_id.in_(resource_ids))
-                    .group_by(Tags.id, Tags.name, Tags.color, Tags.icon, Tags.type)
-                    .order_by(func.count().desc())
-                    .limit(limit)
+        Phase C task 3: migrated off the raw ``text()`` SELECT to a real ORM
+        ``select(Resources.id)``. The caller (``tags_router.get_tag_statistics``)
+        opens no ambient scope of its own (no ``ScopedRequestDep``), so this
+        method opens a real per-user ``request_scope(Scope(user_id=user_id))``
+        around just this query — a real user boundary (not
+        ``system_request_scope``), since ``user_id`` is exactly the
+        ``creator_id`` this already filters on; this only satisfies the
+        do_orm_execute choke point once ``SCOPE_ENFORCE_RESOURCES`` is on, it
+        does not change which rows are returned (the explicit filter below is
+        unconditionally the same predicate)."""
+        async with request_scope(Scope(user_id=str(user_id))):
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(Resources.id).where(Resources.creator_id == str(user_id))
                 )
-            ).all()
+                resource_ids = [r[0] for r in result.all()]
+                if not resource_ids:
+                    return []
+
+                rows = (
+                    await session.execute(
+                        select(
+                            Tags.id,
+                            Tags.name,
+                            Tags.color,
+                            Tags.icon,
+                            Tags.type,
+                            func.count().label("count"),
+                        )
+                        .select_from(ResourceTags)
+                        .join(Tags, Tags.id == ResourceTags.tag_id)
+                        .where(ResourceTags.resource_id.in_(resource_ids))
+                        .group_by(Tags.id, Tags.name, Tags.color, Tags.icon, Tags.type)
+                        .order_by(func.count().desc())
+                        .limit(limit)
+                    )
+                ).all()
 
         return [
             {

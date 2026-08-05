@@ -85,7 +85,9 @@ def _resources_scope_cm(reason: str):
     storage-observability view by design, not a per-user one. Gated so the
     flag-off path stays byte-for-byte legacy (no wrap, no audit log)."""
     return (
-        system_request_scope(reason=reason) if is_enforced("resources") else nullcontext()
+        system_request_scope(reason=reason)
+        if is_enforced("resources")
+        else nullcontext()
     )
 
 
@@ -247,7 +249,9 @@ def _is_fs(v) -> bool:
 
 
 async def _fetch_media_status(media_ids: list[int]) -> list[dict]:
-    async with _resources_scope_cm("admin-storage-media-status: cross-tenant by design"):
+    async with _resources_scope_cm(
+        "admin-storage-media-status: cross-tenant by design"
+    ):
         async with read_scope() as session:
             r, rv = _pm_r_rv_lateral()
             ri = (
@@ -316,7 +320,9 @@ async def _fetch_media_status(media_ids: list[int]) -> list[dict]:
 
 
 async def _fetch_media_detail(media_id: int) -> dict:
-    async with _resources_scope_cm("admin-storage-media-detail: cross-tenant by design"):
+    async with _resources_scope_cm(
+        "admin-storage-media-detail: cross-tenant by design"
+    ):
         async with read_scope() as session:
             r, rv = _pm_r_rv_lateral()
             scope_id_subq = (

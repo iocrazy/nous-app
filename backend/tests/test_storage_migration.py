@@ -389,7 +389,9 @@ async def test_workflow_row_failure_does_not_abort_but_batch_raises(
         {"id": 2, "file_path": bad_rel},
     ]
 
-    monkeypatch.setattr(sm, "read_scope", _fake_read_scope(_FakeExecuteRowsResult(rows)))
+    monkeypatch.setattr(
+        sm, "read_scope", _fake_read_scope(_FakeExecuteRowsResult(rows))
+    )
     update_row = AsyncMock(return_value=None)
     monkeypatch.setitem(sm._MODULES, "uploads", _module_cfg(update_row=update_row))
 

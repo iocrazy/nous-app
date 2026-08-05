@@ -235,9 +235,7 @@ def test_distinct_dedupes_multiple_resource_rows_for_same_platform_id():
                 original = repo_mod.read_scope
                 repo_mod.read_scope = _fake_read_scope  # type: ignore[assignment]
                 try:
-                    return await repo.get_owned_platform_ids(
-                        ["vid_a"], _UID_A
-                    )
+                    return await repo.get_owned_platform_ids(["vid_a"], _UID_A)
                 finally:
                     repo_mod.read_scope = original  # type: ignore[assignment]
         finally:

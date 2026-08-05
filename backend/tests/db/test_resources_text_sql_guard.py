@@ -64,32 +64,24 @@ _REPO_FILE = (
 # Methods whose raw text() on ``resources`` is scoped by folder/resource_items
 # MEMBERSHIP (scope_id / folder_id), not by creator_id — forcing creator scope
 # would break team-library + shared-folder semantics. Each carries its reason.
+#
+# Phase C task 3 migrated FOUR former allowlist entries
+# (_resource_ids_for_platforms / validate_scope_image_ids /
+# restore_folder_cascade / trash_folder_cascade) off raw text() to real ORM
+# select()/update() — they no longer trip this scanner at all (no text() call
+# left touching `resources`), so they are REMOVED here rather than kept as
+# stale allowlist entries. Positive pins for all four live in
+# test_four_task3_methods_no_longer_use_text_on_resources below (same
+# style as test_both_rerouted_methods_no_longer_use_text_or_scoped_sql for
+# Task 2's two methods) so a future regression back to raw SQL is caught.
 _ALLOWLIST: dict[str, str] = {
     "get_resource_items": (
         "JOIN resources via resource_items filtered by i.scope_id (library/folder "
         "membership), not creator_id"
     ),
-    "_resource_ids_for_platforms": (
-        "resolves resource ids by media_id platform lookup; scoped downstream by "
-        "the membership-filtered get_resource_items that consumes the ids"
-    ),
     "get_trashed_resources": (
         "JOIN resources via resource_items filtered by i.scope_id (scope membership), "
         "not creator_id"
-    ),
-    "restore_folder_cascade": (
-        "UPDATE resources by folder subtree membership (resource_items.folder_id), "
-        "not creator_id"
-    ),
-    "trash_folder_cascade": (
-        "UPDATE resources by folder subtree membership (resource_items.folder_id), "
-        "not creator_id"
-    ),
-    "validate_scope_image_ids": (
-        "JOIN resources via resource_items filtered by i.scope_id (scope membership) "
-        "to validate a gallery's proposed child images — same membership scoping as "
-        "get_resource_items; creator_id would wrongly reject team members' images in "
-        "a shared team scope"
     ),
     "get_gallery_items": (
         "JOIN resources via gallery_items filtered by gi.gallery_id (gallery "
@@ -273,9 +265,7 @@ def test_both_rerouted_methods_no_longer_use_text_or_scoped_sql():
         assert method in methods_by_name, f"{method} not found in {_REPO_FILE.name}"
         method_node = methods_by_name[method]
         called_names = {
-            _called_name(n)
-            for n in ast.walk(method_node)
-            if isinstance(n, ast.Call)
+            _called_name(n) for n in ast.walk(method_node) if isinstance(n, ast.Call)
         }
         assert "text" not in called_names, (
             f"{method} calls text() again — it was migrated to ORM select() in "
@@ -288,6 +278,61 @@ def test_both_rerouted_methods_no_longer_use_text_or_scoped_sql():
         )
         assert "select" in called_names, (
             f"{method} should build a SQLAlchemy select() statement (ORM JOIN) "
+            "now — none found"
+        )
+
+
+def test_four_task3_methods_no_longer_use_text_on_resources():
+    """Positive pin (Phase C task 3): the four former membership-scoped
+    allowlist entries (_resource_ids_for_platforms / validate_scope_image_ids
+    / restore_folder_cascade / trash_folder_cascade) were migrated off raw
+    ``text()`` to real SQLAlchemy ORM ``select()``/``update()`` statements —
+    for the RESOURCES-touching statement specifically. The two folder-cascade
+    methods still legitimately call ``text()`` for the ``folders`` WITH
+    RECURSIVE subtree lookup and the ``folders`` UPDATE (out of Task 3's
+    scope — ``folders`` carries no scope mixin), so the check here is "no
+    text() call whose SQL touches `resources`" (reusing this file's own
+    ``_references_resources`` classifier), not "no text() at all". A future
+    regression that reintroduces a raw ``resources`` text() in any of these
+    four methods — which would silently reopen the allowlist bypass this
+    file exists to guard against, now that they're removed from
+    ``_ALLOWLIST`` — is caught here instead of falling through with no
+    signal at all."""
+    tree = ast.parse(_REPO_FILE.read_text(encoding="utf-8"), filename=str(_REPO_FILE))
+    methods_by_name = {
+        n.name: n
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    expected_builder_calls = {
+        "_resource_ids_for_platforms": "select",
+        "validate_scope_image_ids": "select",
+        "restore_folder_cascade": "update",
+        "trash_folder_cascade": "update",
+    }
+    for method, expected_call in expected_builder_calls.items():
+        assert method in methods_by_name, f"{method} not found in {_REPO_FILE.name}"
+        method_node = methods_by_name[method]
+        called_names = {
+            _called_name(n) for n in ast.walk(method_node) if isinstance(n, ast.Call)
+        }
+        for text_call in ast.walk(method_node):
+            if not isinstance(text_call, ast.Call) or _called_name(text_call) != "text":
+                continue
+            arg = text_call.args[0] if text_call.args else None
+            readable = _literal_parts(arg) if arg is not None else ""
+            if isinstance(arg, ast.Name):
+                readable = (readable + " " + _in_function_sql(method_node)).strip()
+            assert not _references_resources(readable), (
+                f"{method} still has a raw text() touching `resources` at "
+                f"line {text_call.lineno} — it was migrated to ORM in Phase "
+                "C task 3; if it needs raw SQL again it must route through "
+                "scoped_sql() (see the negative guard above) or be re-added "
+                "to _ALLOWLIST with a reason, not silently reintroduce a "
+                "bare text()"
+            )
+        assert expected_call in called_names, (
+            f"{method} should build a SQLAlchemy {expected_call}() statement "
             "now — none found"
         )
 

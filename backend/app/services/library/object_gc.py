@@ -46,7 +46,13 @@ from sqlalchemy import select, union_all
 
 from app.db.scope import is_enforced, system_request_scope
 from app.db.session import read_scope
-from app.models import FileVersions, ParsedMedia, ProjectFiles, Resources, ResourceVersions
+from app.models import (
+    FileVersions,
+    ParsedMedia,
+    ProjectFiles,
+    Resources,
+    ResourceVersions,
+)
 from app.services.library.media_storage import ObjectStore, resolve_media_source
 
 # ── Reference check ──────────────────────────────────────────────────────

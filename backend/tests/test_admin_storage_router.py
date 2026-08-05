@@ -181,7 +181,9 @@ async def test_media_status_derivation(monkeypatch):
         },
     ]
 
-    monkeypatch.setattr(sr, "read_scope", _fake_read_scope([_FakeExecuteResult(rows=rows)]))
+    monkeypatch.setattr(
+        sr, "read_scope", _fake_read_scope([_FakeExecuteResult(rows=rows)])
+    )
     out = await sr._fetch_media_status([1, 2, 3])
     by = {r["media_id"]: r for r in out}
     assert (
@@ -372,9 +374,7 @@ async def test_fs_residue_where_covers_nine_columns(monkeypatch):
 
     assert len(calls) == 4
     fs_stmt = calls[1]
-    sql = " ".join(
-        str(fs_stmt.compile(compile_kwargs={"literal_binds": True})).split()
-    )
+    sql = " ".join(str(fs_stmt.compile(compile_kwargs={"literal_binds": True})).split())
     assert sql.count(" OR ") == 8  # 9 conditions, 8 joins
     for col in (
         "parsed_media.download_path",

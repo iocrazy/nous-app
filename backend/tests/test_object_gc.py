@@ -366,9 +366,7 @@ def test_reference_query_covers_all_eleven_index_columns():
     reference-safe delete never misses a live reference (which would cause
     over-deletion) and the audit + GC lists never drift apart."""
     stmt = object_gc._build_reference_query("sb://library/x", None)
-    sql = " ".join(
-        str(stmt.compile(compile_kwargs={"literal_binds": True})).split()
-    )
+    sql = " ".join(str(stmt.compile(compile_kwargs={"literal_binds": True})).split())
 
     assert "parsed_media.download_path = 'sb://library/x'" in sql
     assert "parsed_media.cover_download_path = 'sb://library/x'" in sql
@@ -442,7 +440,13 @@ async def _real_engine_with_cross_user_rows():
     user (A id=1001, B id=1002) — both pointing at the exact same
     content-addressed ``sb://`` key (the dedup scenario the module's
     docstring measured in production: 991/967 co-referenced groups)."""
-    from app.models import FileVersions, ParsedMedia, ProjectFiles, Resources, ResourceVersions
+    from app.models import (
+        FileVersions,
+        ParsedMedia,
+        ProjectFiles,
+        Resources,
+        ResourceVersions,
+    )
 
     engine = create_async_engine("sqlite+aiosqlite://")
     engine = engine.execution_options(schema_translate_map={"public": None})

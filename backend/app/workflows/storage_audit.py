@@ -31,7 +31,13 @@ from sqlalchemy import BigInteger, cast, literal, null, select, union_all
 
 from app.db.scope import is_enforced, system_request_scope
 from app.db.session import read_scope
-from app.models import FileVersions, ParsedMedia, ProjectFiles, Resources, ResourceVersions
+from app.models import (
+    FileVersions,
+    ParsedMedia,
+    ProjectFiles,
+    Resources,
+    ResourceVersions,
+)
 
 # System-initiated batch job — no single owning end user. Matches the
 # existing SYSTEM_RUN_USER_ID convention (app/workflows/storage_migration.py,
