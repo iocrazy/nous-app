@@ -2,12 +2,48 @@
 # Frontend is deployed separately to Vercel
 
 # ============================================
+# Build inputs — both exist because this image is built in mainland China
+# ============================================
+#
+# PYTHON_BASE is pinned by digest, not by the floating `python:3.13-slim` tag.
+# That tag is rebuilt often (Debian security snapshots), and every rebuild
+# invalidates EVERY layer below it — including the apt layer that pulls
+# chromium + ffmpeg + nodejs + CJK fonts. Two deploys failed this way on
+# 2026-08-05: the tag moved, the cache died, and apt spent 986s before giving
+# up. Pinning makes that a deliberate, reviewable change instead of a random
+# one. To upgrade:
+#   docker buildx imagetools inspect python:3.13-slim --format '{{.Manifest.Digest}}'
+#
+# APT_MIRROR exists because deb.debian.org measures ~0.29 MB/s from this
+# machine while mirrors.aliyun.com measures ~8.1 MB/s (28x). Overridable so a
+# build outside China is not forced through a Chinese mirror:
+#   docker build --build-arg APT_MIRROR=deb.debian.org .
+#
+# CARGO_MIRROR is the same story one layer down. Fetching a real crate from
+# crates.io on this machine returns a 277-byte error body rather than the
+# 78 KB file; rsproxy.cn serves it at ~100 KB/s. That is what killed the
+# rust-builder stage with `SSL_ERROR_SYSCALL` before apt ever got a turn.
+# Set it empty to use crates.io directly:
+#   docker build --build-arg CARGO_MIRROR= .
+ARG PYTHON_BASE=python:3.13-slim@sha256:99569264a52f7665899b7bc0fb48e72a2712b850b129f63c4733af1e939accfb
+ARG APT_MIRROR=mirrors.aliyun.com
+ARG CARGO_MIRROR=sparse+https://rsproxy.cn/index/
+
+# ============================================
 # Stage 1: Build Rust nous-core module
 # Use python:3.13 as base so maturin builds cp313 wheels
 # ============================================
-FROM python:3.13-slim AS rust-builder
+FROM ${PYTHON_BASE} AS rust-builder
 
-RUN apt-get update && apt-get install -y \
+# ARGs declared before the first FROM are global; a stage that wants one has to
+# re-declare it (Docker semantics, not a typo).
+ARG APT_MIRROR
+
+# Debian 13 ships deb822 sources, so this rewrites debian.sources rather than
+# the classic sources.list. Both URIs (debian + debian-security) are covered by
+# the single host substitution.
+RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y \
     curl \
     build-essential \
     --no-install-recommends \
@@ -15,6 +51,17 @@ RUN apt-get update && apt-get install -y \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.84.0
 
 ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Point cargo at the mirror before any crate is fetched. Empty CARGO_MIRROR
+# leaves the default (crates.io) in place, so a build outside China is not
+# routed through a Chinese proxy.
+ARG CARGO_MIRROR
+RUN if [ -n "${CARGO_MIRROR}" ]; then \
+      mkdir -p /root/.cargo \
+      && printf '[source.crates-io]\nreplace-with = "mirror"\n\n[source.mirror]\nregistry = "%s"\n' \
+           "${CARGO_MIRROR}" > /root/.cargo/config.toml \
+      && echo "cargo registry -> ${CARGO_MIRROR}"; \
+    fi
 
 RUN pip install maturin
 
@@ -25,12 +72,18 @@ RUN maturin build --release
 # ============================================
 # Stage 2: Final Python application
 # ============================================
-FROM python:3.13-slim
+FROM ${PYTHON_BASE}
+
+ARG APT_MIRROR
 
 # Install Chrome, ffmpeg, Node.js, build tools and dependencies.
 # Node.js is required by the ABogus parser tier (services/douyin_parse/env.js)
 # which runs douyin_bdms.js to compute the a_bogus request signature.
-RUN apt-get update && apt-get install -y \
+#
+# This is the layer that hurts when the cache misses — several hundred MB of
+# chromium + ffmpeg + fonts. See the APT_MIRROR note at the top.
+RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y \
     wget \
     curl \
     gnupg \
