@@ -123,7 +123,7 @@ class AgentRuns(Base):
     __table_args__ = (
         CheckConstraint(
             "liveness_state = ANY (ARRAY['running'::text, 'silent'::text, 'stuck'::text,"
-            " 'dead'::text, 'cancelled'::text])",
+            " 'dead'::text, 'cancelled'::text, 'finished'::text])",
             name="agent_runs_liveness_state_check",
         ),
         CheckConstraint(
@@ -281,10 +281,14 @@ class AgentRuns(Base):
         nullable=False,
         server_default=text("'running'::text"),
         comment=(
-            "paperclip-style 5-state liveness orthogonal to status.\n"
-            "   running→silent→stuck→dead transitions are driven by the scanner\n"
-            "   in app/workflows/liveness_scanner.py based on heartbeat_at +\n"
-            "   last_useful_action_at thresholds."
+            "paperclip-style liveness, orthogonal to status.\n"
+            "   running→silent→stuck→dead is the degradation ladder driven by\n"
+            "   the scanner in app/workflows/liveness_scanner.py based on\n"
+            "   heartbeat_at + last_useful_action_at thresholds.\n"
+            "   finished = ran to completion normally (RunRecorder, mig 406);\n"
+            "   cancelled mirrors status=cancelled. dead is reserved for 'the\n"
+            "   process actually died' and is always written together with\n"
+            "   status=failed — not a generic terminal value."
         ),
     )
     continuation_attempt: Mapped[int] = mapped_column(

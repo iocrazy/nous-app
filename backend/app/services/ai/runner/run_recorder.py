@@ -726,6 +726,21 @@ class RunRecorder:
             "skill_slugs_used": self._skill_slugs_used,
             "attribution": effective_attribution,
         }
+        # Terminal liveness (mig 406). Without this a finished run sat at
+        # liveness_state='running' forever — this is the only writer on the
+        # happy path, so nothing else ever closed the column out.
+        #
+        # The failed path is deliberately absent: dead ⟺ failed is a whole-DB
+        # invariant (liveness_scanner._mark_dead and liveness/reconcile both
+        # write dead + status='failed' atomically, and the agent fault badge
+        # reads liveness_state IN ('stuck','dead')). An application-level
+        # exception is not "the process died", so typing it is a separate
+        # decision with its own value — reusing 'dead' here would corrupt the
+        # ops signal. Such rows stay on 'running'; see the migration.
+        if status == "completed":
+            updates["liveness_state"] = "finished"
+        elif status == "cancelled":
+            updates["liveness_state"] = "cancelled"
         if cost_cents is not None:
             updates["cost_cents"] = cost_cents
         if self._output_summary is not None:

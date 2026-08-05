@@ -13,7 +13,19 @@ import { getAuthHeaders } from './parserService';
 
 export type IssueMessageKind = 'comment' | 'agent_run' | 'system_status';
 
-export type AgentLivenessState = 'running' | 'silent' | 'stuck' | 'dead' | 'cancelled';
+/**
+ * Mirrors the agent_runs.liveness_state CHECK constraint (mig 207, extended
+ * by mig 406). `running`/`silent`/`stuck`/`dead` are the degradation ladder
+ * the backend liveness scanner walks; `finished` and `cancelled` are terminal
+ * values written by RunRecorder when the run ends normally / is cancelled.
+ */
+export type AgentLivenessState =
+  | 'running'
+  | 'silent'
+  | 'stuck'
+  | 'dead'
+  | 'cancelled'
+  | 'finished';
 
 export interface IssueMessage {
   id: string;
