@@ -356,6 +356,49 @@ class SystemStatus(Base):
     )
 
 
+class DbosWorkflowRouting(Base):
+    """Per-task_type DBOS dispatch kill-switch (migration 169).
+
+    ``app/services/infra/dbos_orchestrator.py::_refresh_routing_cache`` reads
+    this table to decide whether a task_type dispatches via DBOS ('dbos') or
+    is disabled (any other value — 'celery'/'shadow' are historical, kept only
+    as the CHECK constraint's allowed values from the pre-Celery-removal
+    migration window). No app model existed for this table before Phase C
+    (it was a deliberate ``test_schema_drift.py`` exclusion); the raw-SQL
+    reader is migrated to ORM in the same change that adds this model."""
+
+    __tablename__ = "dbos_workflow_routing"
+    __table_args__ = (
+        CheckConstraint(
+            "mode = ANY (ARRAY['celery'::text, 'shadow'::text, 'dbos'::text])",
+            name="dbos_workflow_routing_mode_check",
+        ),
+        PrimaryKeyConstraint("task_type", name="dbos_workflow_routing_pkey"),
+        {
+            "comment": (
+                "Per-task_type DBOS routing. mode controls which executor "
+                "handles the task: celery (legacy), shadow (DBOS parallel-run, "
+                "output discarded), dbos (DBOS canonical). FastAPI lifespan "
+                "loads this table at boot + refreshes on tick. Schema "
+                "PR-D2.1, design doc P11."
+            ),
+            "schema": "public",
+        },
+    )
+
+    task_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    mode: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'celery'::text")
+    )
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )
+    updated_by: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'migration'::text")
+    )
+
+
 class TaskTracking(Base):
     __tablename__ = "task_tracking"
     __table_args__ = (

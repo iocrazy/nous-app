@@ -9,12 +9,14 @@ crash skip the ffmpeg pass on the second attempt.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any
 
 from dbos import DBOS
 from loguru import logger
+from sqlalchemy import select
 
-from app.db.scope import system_request_scope
+from app.db.scope import is_enforced, system_request_scope
 
 
 @DBOS.step(retries_allowed=True, max_attempts=2)
@@ -70,6 +72,25 @@ _BACKFILL_DEFAULT_BATCH = 60
 _BACKFILL_MAX_BATCH = 500
 
 
+def _backfill_candidates_stmt(batch: int):
+    """Thumbnail-less resources eligible for backfill, column-level (not
+    entity-level — the B4 row-shape lesson) so the dict comprehension below
+    reads real column values. Factored out so a real-aiosqlite row-shape
+    test can import and exercise the exact production statement."""
+    from app.models import Resources
+
+    return (
+        select(Resources.id, Resources.file_path, Resources.mime_type)
+        .where(Resources.thumbnail_path.is_(None))
+        .where(Resources.media_id.is_(None))
+        .where(Resources.is_trashed.is_(False))
+        .where(Resources.file_path.is_not(None))
+        .where(Resources.file_path.notlike("http%"))
+        .order_by(Resources.id)
+        .limit(batch)
+    )
+
+
 @DBOS.step(retries_allowed=False)
 async def _backfill_scan_step() -> list[dict[str, Any]]:
     """Read the toggle + claim a batch of thumbnail-less resources.
@@ -80,9 +101,6 @@ async def _backfill_scan_step() -> list[dict[str, Any]]:
     """
     import json
 
-    from sqlalchemy import select
-
-    from app.db import engine as db_engine
     from app.db.session import read_scope
     from app.models import SystemSettings
 
@@ -109,20 +127,28 @@ async def _backfill_scan_step() -> list[dict[str, Any]]:
     except (TypeError, ValueError):
         batch = _BACKFILL_DEFAULT_BATCH
 
-    rows = await db_engine.fetch_all(
-        """
-        SELECT id, file_path, mime_type
-          FROM public.resources
-         WHERE thumbnail_path IS NULL
-           AND media_id IS NULL
-           AND is_trashed = false
-           AND file_path IS NOT NULL
-           AND file_path NOT LIKE 'http%'
-         ORDER BY id
-         LIMIT :batch
-        """,
-        {"batch": batch},
+    # Resources carries UserScoped(creator_id); SCOPE_ENFORCE_RESOURCES
+    # defaults false in code but production sets it true via
+    # secrets/backend.env (CLAUDE.md 部署陷阱). This is the OPTIONAL sweeper's
+    # own scheduled scan across ALL users' resources — deliberately
+    # cross-tenant by design (it drains a backlog, not a per-user request),
+    # so SYSTEM is the correct treatment, gated on is_enforced to stay
+    # byte-for-byte legacy where the flag is off.
+    scope_cm = (
+        system_request_scope(
+            reason="thumbnail backfill sweeper: scan for thumbnail-less "
+            "resources across all users"
+        )
+        if is_enforced("resources")
+        else nullcontext()
     )
+    async with scope_cm:
+        async with read_scope() as session:
+            rows = (
+                (await session.execute(_backfill_candidates_stmt(batch)))
+                .mappings()
+                .all()
+            )
     return [
         {
             "resource_id": str(r["id"]),

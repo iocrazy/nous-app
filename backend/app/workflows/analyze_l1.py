@@ -10,9 +10,13 @@ We delegate to the existing service code; the DBOS layer adds idempotency
 from __future__ import annotations
 
 import os
+from contextlib import nullcontext
 from typing import Any, Optional
 
 from dbos import DBOS
+from sqlalchemy import select
+
+from app.db.scope import is_enforced, system_request_scope
 
 
 def _dsn() -> str:
@@ -20,6 +24,25 @@ def _dsn() -> str:
     if not url:
         raise RuntimeError("DBOS_DATABASE_URL not configured")
     return url + ("&" if "?" in url else "?") + "sslmode=disable"
+
+
+def _analyze_resource_lookup_stmt(media_id: int, user_id: Optional[str]):
+    """resources.id for a parsed_media, preferring the triggering user's own
+    resource (falls back to the media's earliest resource). Column-level
+    select (not entity-level — the B4 row-shape lesson). Factored out so a
+    real-aiosqlite row-shape test can import and exercise the exact
+    production statement."""
+    from app.models import ParsedMedia, Resources
+
+    creator_match = Resources.creator_id == user_id
+    return (
+        select(Resources.id.label("resource_id"))
+        .select_from(ParsedMedia)
+        .join(Resources, Resources.media_id == ParsedMedia.id)
+        .where(ParsedMedia.id == media_id)
+        .order_by(creator_match.desc().nulls_last(), Resources.created_at.asc())
+        .limit(1)
+    )
 
 
 @DBOS.step()
@@ -65,7 +88,10 @@ async def call_analyze_l1(
 
     PR #237 audit: was sync ``def`` with ``asyncio.run(_analyze())``
     inside. Now async — same fix as workflow_health_sweeper / sweeper."""
-    from app.db import engine as db_engine
+    from sqlalchemy import update
+
+    from app.db.session import read_scope, write_scope
+    from app.models import Resources
     from app.repositories.analysis_repository import get_analysis_repository
     from app.repositories.tags_repository import get_tags_repository
     from app.services.ai.providers.embedding_service import EmbeddingService
@@ -77,29 +103,54 @@ async def call_analyze_l1(
     # FK to resources.id would reject a parsed_media.id). Resolve media → the
     # triggering user's resource (falling back to the media's earliest resource),
     # exactly like the working ai_transcription pipeline does.
-    media_row = await db_engine.fetch_one(
-        "SELECT r.id AS resource_id "
-        "FROM public.parsed_media pm "
-        "JOIN public.resources r ON r.media_id = pm.id "
-        "WHERE pm.id = :pid "
-        "ORDER BY (r.creator_id = :uid) DESC NULLS LAST, r.created_at ASC "
-        "LIMIT 1",
-        {"pid": media_id, "uid": user_id},
+    #
+    # Resources carries UserScoped(creator_id); SCOPE_ENFORCE_RESOURCES
+    # defaults false in code but production sets it true via
+    # secrets/backend.env (CLAUDE.md 部署陷阱). This step has no ambient
+    # per-request scope of its own (it's a DBOS step), so the wrap is
+    # LOAD-BEARING once the flag is on. Gated on is_enforced to stay
+    # byte-for-byte legacy where the flag is off.
+    scope_cm = (
+        system_request_scope(
+            reason="analyze_l1 workflow: resolve resource for parsed_media"
+        )
+        if is_enforced("resources")
+        else nullcontext()
     )
-    if not media_row:
+    async with scope_cm:
+        async with read_scope() as session:
+            resource_id_val = await session.scalar(
+                _analyze_resource_lookup_stmt(media_id, user_id)
+            )
+    if resource_id_val is None:
         raise RuntimeError(f"no resource for parsed_media id={media_id}")
-    resource_id = int(media_row["resource_id"])
+    resource_id = int(resource_id_val)
 
     # Make resources.visual_analysis_status authoritative for the whole run:
     # 'processing' now, 'completed' on success (below), 'failed' on the no-result
     # path. The UI keys its Visual Analysis panel off this column, so a terminal
     # value here is what unsticks the "Analyzing…" state (instead of relying on
     # the frontend's optimistic local flag, which never resolved on failure).
-    await db_engine.execute(
-        "UPDATE public.resources SET visual_analysis_status = 'processing' "
-        "WHERE id = :rid",
-        {"rid": resource_id},
+    #
+    # Bulk Core UPDATE on Resources (a UserScoped model) is FORBIDDEN under a
+    # real user Scope (app/db/scope.py's write-path guard) — this is a
+    # system-side status flip triggered by the analysis pipeline, not a user
+    # action, so SYSTEM scope is correct (same rationale as ai_transcription's
+    # mark_transcript_* steps).
+    scope_cm = (
+        system_request_scope(
+            reason="analyze_l1 workflow: mark visual_analysis_status processing"
+        )
+        if is_enforced("resources")
+        else nullcontext()
     )
+    async with scope_cm:
+        async with write_scope() as session:
+            await session.execute(
+                update(Resources)
+                .where(Resources.id == resource_id)
+                .values(visual_analysis_status="processing")
+            )
 
     analysis_service = VisualAnalysisService(
         provider_key=provider_key,
@@ -136,12 +187,22 @@ async def call_analyze_l1(
     )
     if not result:
         # Mark the resource failed so the UI's existing 'failed' branch (retry
-        # button) shows instead of a stuck "Analyzing…".
-        await db_engine.execute(
-            "UPDATE public.resources SET visual_analysis_status = 'failed' "
-            "WHERE id = :rid",
-            {"rid": resource_id},
+        # button) shows instead of a stuck "Analyzing…". Same SYSTEM-scope
+        # rationale as the 'processing' write above.
+        scope_cm = (
+            system_request_scope(
+                reason="analyze_l1 workflow: mark visual_analysis_status failed"
+            )
+            if is_enforced("resources")
+            else nullcontext()
         )
+        async with scope_cm:
+            async with write_scope() as session:
+                await session.execute(
+                    update(Resources)
+                    .where(Resources.id == resource_id)
+                    .values(visual_analysis_status="failed")
+                )
         # No result == the provider call failed (VisualAnalysisService caught the
         # error, logged it, and returned None — e.g. the assigned provider is
         # unreachable OR is not a vision/multimodal model). RAISE rather than
@@ -171,11 +232,21 @@ async def call_analyze_l1(
     )
 
     # Reflect completion in the per-user status column the UI reads (mig 067).
-    await db_engine.execute(
-        "UPDATE public.resources SET visual_analysis_status = 'completed' "
-        "WHERE id = :rid",
-        {"rid": resource_id},
+    # Same SYSTEM-scope rationale as the 'processing'/'failed' writes above.
+    scope_cm = (
+        system_request_scope(
+            reason="analyze_l1 workflow: mark visual_analysis_status completed"
+        )
+        if is_enforced("resources")
+        else nullcontext()
     )
+    async with scope_cm:
+        async with write_scope() as session:
+            await session.execute(
+                update(Resources)
+                .where(Resources.id == resource_id)
+                .values(visual_analysis_status="completed")
+            )
 
     if result.category and result.category != "Other":
         tag = await tags_repo.get_tag_by_name(result.category)

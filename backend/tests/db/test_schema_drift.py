@@ -41,13 +41,15 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 _TEST_DSN = os.environ.get("INTEGRATION_DATABASE_URL", "").strip()
 
 # ── Permanently excluded public tables (non-domain / infra) ─────────────
-# These 3 tables exist in public but are deliberately NOT mapped as ORM models.
+# These 2 tables exist in public but are deliberately NOT mapped as ORM models.
 # They must never be flagged as "unmapped" drift.
+# ``dbos_workflow_routing`` used to be a 3rd entry here; it is now mapped
+# (``DbosWorkflowRouting``, Phase C task 1) so it is removed from this
+# exclusion set — gates 1-4 now check it like every other table.
 _EXCLUDED_TABLES: frozenset[str] = frozenset(
     {
         "_scratch_dbos",
         "_scratch_test",
-        "dbos_workflow_routing",
     }
 )
 
@@ -576,7 +578,7 @@ async def test_no_unmapped_inscope_tables(
 ) -> None:
     """No in-scope public BASE TABLE should be unmapped.
 
-    In-scope = live public BASE TABLEs minus the 3 permanently excluded tables.
+    In-scope = live public BASE TABLEs minus the 2 permanently excluded tables.
     Drift: a migration added a new table but no model was created.
 
     The live BASE TABLE set is derived from the live_schema fixture

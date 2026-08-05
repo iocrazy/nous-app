@@ -16,6 +16,7 @@ all hit DB at midnight together.
 from __future__ import annotations
 
 import os
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -250,16 +251,31 @@ async def cleanup_orphan_storage_step() -> dict[str, Any]:
         return {"status": "skipped", "reason": "download dir missing"}
 
     async def _load_resource_ids() -> set[int]:
-        from app.db import engine as db_engine
+        from sqlalchemy import select
 
-        # system_request_scope is entered inside this coroutine so the
-        # ContextVar lands in the step's event-loop context, wrapping the read.
-        # NOTE: db_engine.fetch_all is RAW SQL and currently bypasses the
-        # ORM choke point — this scope is a defensive entry-boundary
-        # annotation for consistency; the raw-SQL backstop lands in task A3.
-        async with system_request_scope(reason="cleanup-orphan-storage"):
-            rows = await db_engine.fetch_all("SELECT id FROM public.resources")
-            return {row["id"] for row in rows if row.get("id") is not None}
+        from app.db.scope import is_enforced
+        from app.db.session import read_scope
+        from app.models import Resources
+
+        # Phase C task 1: migrated off raw db_engine.fetch_all (which bypassed
+        # the ORM choke point entirely) to a real ORM SELECT, now subject to
+        # do_orm_execute. Resources carries UserScoped(creator_id); this is a
+        # cross-tenant system scan (every resource id, to find storage
+        # orphans no single user's scope could see), so SYSTEM is correct —
+        # gated on is_enforced to stay byte-for-byte legacy where the flag is
+        # off, matching the wrap convention used elsewhere in Phase C.
+        scope_cm = (
+            system_request_scope(
+                reason="cleanup-orphan-storage: trash TTL sweep, "
+                "cross-tenant by design"
+            )
+            if is_enforced("resources")
+            else nullcontext()
+        )
+        async with scope_cm:
+            async with read_scope() as session:
+                ids = (await session.execute(select(Resources.id))).scalars().all()
+            return {rid for rid in ids if rid is not None}
 
     valid_ids = await _load_resource_ids()
     min_age_seconds = ORPHAN_STORAGE_MIN_AGE_DAYS * 86400.0

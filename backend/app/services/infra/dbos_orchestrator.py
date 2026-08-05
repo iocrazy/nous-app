@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from loguru import logger
+from sqlalchemy import select
 
 # DBOS instance — set by `init_dbos`; None until lifespan startup runs.
 # NOTE: assigned BEFORE any DB connection happens, so a non-None `_dbos` says
@@ -52,18 +53,30 @@ class RoutingDecision:
     notes: Optional[str] = None
 
 
+def _routing_select_stmt():
+    """The routing-cache SELECT, column-level (not entity-level — B4 lesson:
+    ``select(DbosWorkflowRouting)`` maps each row to one key, the entity name,
+    instead of one key per column, silently breaking the dict-style
+    ``row["task_type"]`` read below). Factored out so a real-aiosqlite row-
+    shape test can import and exercise the exact production statement."""
+    from app.models import DbosWorkflowRouting
+
+    return select(DbosWorkflowRouting.task_type, DbosWorkflowRouting.mode)
+
+
 async def _refresh_routing_cache() -> None:
-    """Reload dbos_workflow_routing into the in-process cache."""
+    """Reload dbos_workflow_routing into the in-process cache.
+
+    ``dbos_workflow_routing`` carries no scope mixin (a global routing config
+    table, not per-tenant) — no ``system_request_scope`` wrap needed here,
+    unlike the ``resources``-touching sites elsewhere in Phase C.
+    """
     global _routing_cache, _routing_loaded_at
     try:
-        from sqlalchemy import text
-
         from app.db.session import read_scope
 
         async with read_scope() as session:
-            result = await session.execute(
-                text("SELECT task_type, mode FROM public.dbos_workflow_routing")
-            )
+            result = await session.execute(_routing_select_stmt())
             rows = result.mappings().all()
         _routing_cache = {row["task_type"]: row["mode"] for row in rows}
         _routing_loaded_at = asyncio.get_event_loop().time()
