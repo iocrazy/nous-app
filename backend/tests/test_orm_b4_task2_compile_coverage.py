@@ -41,8 +41,10 @@ This file pins the batch's highest-risk rewrite points:
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
+import pytest
 from sqlalchemy.dialects import postgresql
 
 from app.repositories import usage_repository
@@ -52,6 +54,50 @@ from app.services.ai.chat.conversations_ai_store import ConversationsAiStore
 def _compile(stmt: Any) -> tuple[str, dict[str, Any]]:
     compiled = stmt.compile(dialect=postgresql.dialect())
     return str(compiled), dict(compiled.params)
+
+
+class _FakeResult:
+    """Records nothing itself — supports whatever access pattern the
+    production code needs (``.mappings().one()/.first()``), or is simply
+    discarded for a write whose result the caller never reads."""
+
+    def __init__(self, row: Any = None) -> None:
+        self._row = row
+
+    def mappings(self) -> "_FakeResult":
+        return self
+
+    def one(self) -> Any:
+        return self._row
+
+    def first(self) -> Any:
+        return self._row
+
+
+class _RecordingSession:
+    """Records every statement OBJECT (not a re-derived SQL string) handed
+    to execute(), and returns queued fake results in FIFO order — fix-round
+    style (tests/test_orm_b4_task1_compile_coverage.py's ``_patch_scopes``):
+    the captured statement is compiled AFTER the real production code has
+    built it, so a change to that code is what the assertions see."""
+
+    def __init__(self, *results: Any) -> None:
+        self._results = list(results)
+        self.calls: list[Any] = []
+
+    async def execute(self, stmt: Any) -> Any:
+        self.calls.append(stmt)
+        return self._results.pop(0) if self._results else _FakeResult()
+
+
+def _patch_scope(
+    monkeypatch: pytest.MonkeyPatch, module: Any, attr: str, session: _RecordingSession
+) -> None:
+    @asynccontextmanager
+    async def fake_scope():
+        yield session
+
+    monkeypatch.setattr(module, attr, fake_scope)
 
 
 # ── conversations_ai_store.py — shared joined query ────────────────────────
@@ -102,28 +148,60 @@ def test_joined_query_selects_all_thirteen_legacy_shape_columns():
 # ── conversations_ai_store.py — bare ON CONFLICT DO NOTHING ────────────────
 
 
-def test_conversation_members_insert_uses_bare_on_conflict_do_nothing():
+@pytest.mark.asyncio
+async def test_conversation_members_insert_uses_bare_on_conflict_do_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """conversation_members has NO real primary key — only the expression
     index uq_conversation_members(conversation_id, member_type,
     COALESCE(user_id, agent_id)), which SQLAlchemy cannot name via
     index_elements=[...]. Both member inserts (user + agent) must therefore
-    use a BARE ON CONFLICT DO NOTHING with no index/constraint target."""
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    use a BARE ON CONFLICT DO NOTHING with no index/constraint target.
 
-    from app.models import ConversationMembers
+    Drives the REAL production path (``ConversationsAiStore.create_session``)
+    end-to-end — not a locally reconstructed statement — and captures what
+    it actually executes. (Fix round 1 / F3: the prior version rebuilt
+    ``pg_insert(...).on_conflict_do_nothing()`` inline, so it could never
+    fail no matter what create_session actually does — reverse-injection
+    confirmed a regression there went undetected.)"""
+    conv_row = {
+        "id": 1,
+        "scope_id": 900,
+        "project_id": None,
+        "title": "t",
+        "created_at": "2026-01-01T00:00:00",
+    }
+    meta_row = {
+        "total_tokens": 0,
+        "message_count": 0,
+        "updated_at": "2026-01-01T00:00:00",
+    }
+    session = _RecordingSession(
+        _FakeResult(conv_row), None, None, _FakeResult(meta_row)
+    )
+    import app.db.session as db_session
 
-    user_stmt = (
-        pg_insert(ConversationMembers)
-        .values(conversation_id=1, member_type="user", user_id="u1", role="owner")
-        .on_conflict_do_nothing()
+    _patch_scope(monkeypatch, db_session, "write_scope", session)
+
+    store = ConversationsAiStore()
+    await store.create_session(
+        user_id="u1",
+        agent_slug="script_ai",
+        agent_id="a1",
+        title="t",
+        project_id=None,
+        team_id=900,
+        context_type=None,
+        context_id=None,
     )
-    agent_stmt = (
-        pg_insert(ConversationMembers)
-        .values(conversation_id=1, member_type="agent", agent_id="a1", added_by="u1")
-        .on_conflict_do_nothing()
-    )
-    for stmt in (user_stmt, agent_stmt):
+
+    # calls[0] = conversations INSERT, [1] = user member, [2] = agent
+    # member, [3] = conversation_ai_meta INSERT (create_session's fixed
+    # statement order — see its docstring).
+    assert len(session.calls) == 4
+    for stmt in (session.calls[1], session.calls[2]):
         sql, _binds = _compile(stmt)
+        assert "conversation_members" in sql
         assert sql.rstrip().endswith("ON CONFLICT DO NOTHING")
         # No index/constraint target rendered before the DO NOTHING clause.
         assert "ON CONFLICT (" not in sql
@@ -176,43 +254,66 @@ def test_group_key_factory_casts_uuid_and_bigint_dimensions_to_text():
         assert "CAST(" not in sql
 
 
-def test_issue_totals_counts_with_bare_count_star():
+@pytest.mark.asyncio
+async def test_issue_totals_counts_with_bare_count_star(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """func.count() (no args) must render as count(*), matching the legacy
     COUNT(*) — count() with an explicit column argument would silently
-    exclude NULL rows from the run_count tally."""
-    from sqlalchemy import func, select
+    exclude NULL rows from the run_count tally.
 
-    from app.models import AgentRuns
+    Drives the REAL ``usage_repository.issue_totals()`` and captures the
+    statement it actually executes. (Fix round 1 / F3: the prior version
+    rebuilt ``select(func.count()...)`` inline, which stayed green even
+    when a reverse injection changed the production call to
+    ``func.count(AgentRuns.id)``.)"""
+    row = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "cost_cents": 0,
+        "run_count": 0,
+    }
+    session = _RecordingSession(_FakeResult(row))
+    import app.db.session as db_session
 
-    stmt = select(func.count().label("run_count")).where(AgentRuns.issue_id == 1)
-    sql, _binds = _compile(stmt)
+    _patch_scope(monkeypatch, db_session, "read_scope", session)
+
+    await usage_repository.issue_totals(123)
+
+    assert len(session.calls) == 1
+    sql, binds = _compile(session.calls[0])
+    assert "public.agent_runs" in sql
     assert "count(*)" in sql
+    assert binds["issue_id_1"] == 123
 
 
 # ── scope_binding.py — LEFT OUTER JOIN for the ai_meta sidecar ─────────────
 
 
-def test_scope_of_conversation_query_is_a_left_outer_join():
+@pytest.mark.asyncio
+async def test_scope_of_conversation_query_is_a_left_outer_join(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A conversation's project binding must survive even when it has no
     conversation_ai_meta sidecar row (non direct_agent conversations don't
     carry one) — an INNER join would silently drop those rows and degrade
-    every such dispatch to an unbound scope."""
-    from sqlalchemy import select
+    every such dispatch to an unbound scope.
 
-    from app.models import ConversationAiMeta, Conversations
+    Drives the REAL ``resolve_dispatch_scope(conversation_id=...)`` (which
+    calls ``scope_binding._scope_of_conversation`` internally) and captures
+    the statement it actually executes. (Fix round 1 / F3: the prior
+    version rebuilt the outerjoin inline, so swapping the production
+    ``.outerjoin(`` for ``.join(`` left this test green.)"""
+    import app.services.ai.scope.scope_binding as binding_mod
 
-    stmt = (
-        select(
-            Conversations.project_id,
-            ConversationAiMeta.context_type,
-            ConversationAiMeta.context_id,
-        )
-        .select_from(Conversations)
-        .outerjoin(
-            ConversationAiMeta,
-            ConversationAiMeta.conversation_id == Conversations.id,
-        )
-        .where(Conversations.id == 1)
-    )
-    sql, _binds = _compile(stmt)
+    row = {"project_id": 777, "context_type": None, "context_id": None}
+    session = _RecordingSession(_FakeResult(row))
+    _patch_scope(monkeypatch, binding_mod, "read_scope", session)
+
+    scope = await binding_mod.resolve_dispatch_scope(conversation_id=1)
+
+    assert len(session.calls) == 1
+    sql, _binds = _compile(session.calls[0])
     assert "LEFT OUTER JOIN public.conversation_ai_meta" in sql
+    assert scope.project_id == 777
