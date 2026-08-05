@@ -7,7 +7,7 @@
  * agentsMap / userLabel passed in by the parent page.
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Zap, ChevronRight, ChevronDown, Paperclip } from 'lucide-react';
@@ -22,6 +22,10 @@ import type { IssueStatus } from '../../services/issuesService';
 import { relativeTime } from '../../utils/taskDisplay';
 import { useToast } from '../Toast';
 import { useElapsedSeconds } from '../../hooks/useElapsedSeconds';
+import { ToolActivityChips } from '../agentActivity/ToolActivityChips';
+import { TurnWriteSummary } from '../agentActivity/TurnWriteSummary';
+import { summarizeWrites } from '../agentActivity/toolActivity';
+import { useRunToolActivity } from '../agentActivity/useRunToolActivity';
 
 const LIVENESS_VISUAL: Record<AgentLivenessState, { dot: string; label: string; tooltip: string }> = {
   running:   { dot: 'bg-emerald-500', label: 'running',   tooltip: 'Agent is making progress' },
@@ -213,11 +217,38 @@ const AgentRunEvent: React.FC<{ msg: IssueMessage; agentsById: Record<string, Ag
         </span>
       </div>
       <RunMetaLine msg={msg} />
+      <RunToolActivity runId={msg.agent_run_id} isRunning={isRunning} />
       {msg.body && (
         <div className="ml-7 rounded border border-ink-800/80 bg-ink-900/50 p-3 text-[14px] text-ink-300 leading-relaxed whitespace-pre-wrap break-words">
           {msg.body}
         </div>
       )}
+    </div>
+  );
+};
+
+/**
+ * The tools this run actually called, as chips, plus the shot cards it wrote.
+ *
+ * Sourced from `agent_run_transcript_events` — unlike the chat panel, an
+ * IssueMessage carries no tool-call trace, only `agent_run_id`. Renders once
+ * per run: a standalone `agent_run` row shows it, and an EXPANDED run group
+ * shows it via the same `AgentRunEvent` it renders per member.
+ *
+ * Shot rows are non-interactive here: the storyboard editor isn't mounted on
+ * the issues route, so there is nowhere to jump to.
+ */
+const RunToolActivity: React.FC<{ runId: string | null; isRunning: boolean }> = ({
+  runId,
+  isRunning,
+}) => {
+  const { activities } = useRunToolActivity(runId, isRunning);
+  const writes = useMemo(() => summarizeWrites(activities), [activities]);
+  if (activities.length === 0) return null;
+  return (
+    <div className="ml-7 mb-1.5 space-y-1.5">
+      <ToolActivityChips activities={activities} />
+      <TurnWriteSummary summary={writes} interactive={false} />
     </div>
   );
 };

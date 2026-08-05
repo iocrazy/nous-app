@@ -7,6 +7,13 @@ import type { AIChatMessageAttachment, ChatToolCall } from '../../types';
 import { getResourceCoverUrl } from '../../services/resourceService';
 import { ApprovalCard, type AwaitingApproval } from './ApprovalCard';
 import { SubTaskList } from './SubTaskCard';
+import { ToolActivityChips } from '../agentActivity/ToolActivityChips';
+import { TurnWriteSummary } from '../agentActivity/TurnWriteSummary';
+import {
+  fromChatToolCalls,
+  isScreenwritingTool,
+  summarizeWrites,
+} from '../agentActivity/toolActivity';
 
 export interface MessageBubbleProps {
   role: 'user' | 'assistant';
@@ -93,6 +100,19 @@ export function MessageBubble({
   const { t } = useTranslation();
   const [copied, setCopied] = React.useState(false);
 
+  // Split the turn's trace by renderer. The two arrays are disjoint and
+  // together cover every call, so nothing is duplicated and nothing is lost.
+  const { screenwritingActivities, otherCalls, writeSummary } = React.useMemo(() => {
+    const calls = toolCalls ?? [];
+    const screenwriting = calls.filter((c) => isScreenwritingTool(c.name));
+    const activities = fromChatToolCalls(screenwriting);
+    return {
+      screenwritingActivities: activities,
+      otherCalls: calls.filter((c) => !isScreenwritingTool(c.name)),
+      writeSummary: summarizeWrites(activities),
+    };
+  }, [toolCalls]);
+
   const handleCopy = useCallback(() => {
     const plain = content.replace(/<[^>]+>/g, '');
     navigator.clipboard.writeText(plain).catch(() => {});
@@ -128,7 +148,17 @@ export function MessageBubble({
           </div>
         )}
 
-        <SubTaskList calls={toolCalls ?? []} />
+        {/* The trace is PARTITIONED, never rendered twice: screenwriting tools
+            become chips + a write summary, everything else (Delegate / Skill /
+            future tools) keeps the existing sub-task cards. */}
+        <SubTaskList calls={otherCalls} />
+
+        {screenwritingActivities.length > 0 && (
+          <div className="space-y-1.5 px-3 pt-2">
+            <ToolActivityChips activities={screenwritingActivities} />
+            <TurnWriteSummary summary={writeSummary} />
+          </div>
+        )}
 
         {awaitingApproval && <ApprovalCard approval={awaitingApproval} />}
 
