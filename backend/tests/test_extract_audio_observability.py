@@ -58,7 +58,17 @@ class TestReadableDbosError:
 
 @pytest.fixture
 def engine_rec(monkeypatch: pytest.MonkeyPatch) -> dict:
-    rec: dict = {"fetch_all": [], "execute": [], "errored_rows": []}
+    """Phase B3: the two task_tracking writes in
+    ``reap_stuck_pending_tasks_step`` moved to the ORM session boundary
+    (``app.db.session.write_scope``); the dbos.workflow_status JOIN read and
+    the resources-status loop (Phase C, untouched) still go through the raw
+    ``app.db.engine`` helpers. ``orm_writes`` captures (compiled_sql, binds)
+    for every ORM write; ``execute`` keeps the raw resources-loop writes so
+    the step still runs end to end.
+    """
+    from sqlalchemy.dialects import postgresql
+
+    rec: dict = {"fetch_all": [], "execute": [], "orm_writes": [], "errored_rows": []}
 
     async def fake_fetch_all(sql: str, params=None):
         rec["fetch_all"].append({"sql": sql, "params": params})
@@ -70,6 +80,28 @@ def engine_rec(monkeypatch: pytest.MonkeyPatch) -> dict:
 
     monkeypatch.setattr("app.db.engine.fetch_all", fake_fetch_all)
     monkeypatch.setattr("app.db.engine.execute", fake_execute)
+
+    class _Result:
+        rowcount = 1
+
+    class _Session:
+        async def execute(self, stmt):
+            compiled = stmt.compile(dialect=postgresql.dialect())
+            rec["orm_writes"].append((str(compiled), dict(compiled.params)))
+            return _Result()
+
+    session = _Session()
+
+    class _Scope:
+        async def __aenter__(self):
+            return session
+
+        async def __aexit__(self, *exc):
+            return False
+
+    import app.db.session as dbs
+
+    monkeypatch.setattr(dbs, "write_scope", lambda: _Scope())
     # Boot grace would short-circuit the whole step.
     monkeypatch.setattr("app.workflows.sweep_guard.within_boot_grace", lambda: False)
     return rec
@@ -88,11 +120,15 @@ async def test_reap_converts_dbos_error_rows_to_failed(engine_rec: dict) -> None
 
     assert result["errored_failed"] == 1
     failed_updates = [
-        c for c in engine_rec["execute"] if "error_code = 'DBOS_ERROR'" in c["sql"]
+        (sql, binds)
+        for sql, binds in engine_rec["orm_writes"]
+        if binds.get("error_code") == "DBOS_ERROR"
     ]
     assert len(failed_updates) == 1
-    assert "audio extraction failed for 123" in failed_updates[0]["params"]["msg"]
-    assert failed_updates[0]["params"]["wid"] == "wf-1"
+    sql, binds = failed_updates[0]
+    assert "task_tracking" in sql
+    assert "audio extraction failed for 123" in binds["error_msg"]
+    assert binds["dbos_workflow_id_1"] == "wf-1"
 
 
 @pytest.mark.asyncio
@@ -101,12 +137,20 @@ async def test_reap_lost_pass_excludes_terminal_dbos_rows(engine_rec: dict) -> N
 
     await reap_stuck_pending_tasks_step()
 
-    lost_updates = [c for c in engine_rec["execute"] if "'lost'" in c["sql"]]
+    lost_updates = [
+        (sql, binds)
+        for sql, binds in engine_rec["orm_writes"]
+        if binds.get("status") == "lost"
+    ]
     assert len(lost_updates) == 1
+    sql, _binds = lost_updates[0]
     # ERROR rows belong to pass A; SUCCESS rows must never read "never
-    # claimed" — both excluded from the generic lost sweep.
-    assert "'ERROR'" in lost_updates[0]["sql"]
-    assert "'SUCCESS'" in lost_updates[0]["sql"]
+    # claimed" — both excluded from the generic lost sweep. The NOT EXISTS
+    # guard against dbos.workflow_status stays a raw text() fragment (no ORM
+    # model for that schema), so these are literal substrings in the SQL,
+    # not bind params.
+    assert "'ERROR'" in sql
+    assert "'SUCCESS'" in sql
 
 
 # ============================================================

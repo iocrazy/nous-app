@@ -79,18 +79,21 @@ def cleanup_temp_files_step() -> dict[str, Any]:
 @DBOS.step()
 async def cleanup_old_task_tracking_step() -> dict[str, Any]:
     """Drop task_tracking rows in terminal state older than 7 days."""
-    from app.db import engine as db_engine
+    from sqlalchemy import delete
+
+    from app.db.session import write_scope
+    from app.models import TaskTracking
 
     # See scheduled_recovery.reap_stuck_pending_tasks_step for why
     # this MUST be timezone-aware UTC, not naive local time.
     cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-    deleted = await db_engine.execute(
-        "DELETE FROM public.task_tracking "
-        "WHERE status IN ('completed', 'failed', 'cancelled') "
-        "AND updated_at < :cutoff",
-        {"cutoff": cutoff},
-    )
-    return {"status": "success", "deleted": deleted}
+    async with write_scope() as session:
+        result = await session.execute(
+            delete(TaskTracking)
+            .where(TaskTracking.status.in_(["completed", "failed", "cancelled"]))
+            .where(TaskTracking.updated_at < cutoff)
+        )
+    return {"status": "success", "deleted": result.rowcount}
 
 
 @DBOS.step()

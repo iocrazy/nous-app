@@ -64,14 +64,19 @@ async def classify_and_act_step() -> Dict[str, int]:
     contributed to the parse-failure / slow-workflow symptoms reported
     after #176 deployed.
     """
-    # Direct PG via SQLAlchemy engine (no httpx) — supabase-py's PostgREST
-    # path leaked a CLOSE_WAIT connection per call (Issue #199 Bug C).
+    # ORM read (Phase B3) — see app.db.session.read_scope. is_configured()
+    # still gated via the raw engine handle (no query issued through it).
     from app.db import engine as db_engine
 
     # Skip gracefully when Supavisor isn't configured (dev/CI) instead of
     # crash-looping every 2 min on the engine's RuntimeError.
     if not db_engine.is_configured():
         return _zero_counters()
+
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TaskTracking
 
     # Fetch active rows with the columns the classifier needs.
     #
@@ -80,12 +85,29 @@ async def classify_and_act_step() -> Dict[str, int]:
     # against prod task_tracking. The old 'in_progress' literal never matched,
     # so the sweeper silently skipped every running workflow (no LOST /
     # USER_TIMEOUT detection for in-flight work). Mirrors get_queue_status.
-    rows = await db_engine.fetch_all(
-        "SELECT dbos_workflow_id, task_type, phase, started_at, "
-        "heartbeat_at, progress, updated_at, max_duration_minutes, "
-        "do_not_auto_cancel, health_status, user_id, title "
-        "FROM public.task_tracking WHERE phase IN ('queued', 'processing')"
-    )
+    async with read_scope() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(
+                        TaskTracking.dbos_workflow_id,
+                        TaskTracking.task_type,
+                        TaskTracking.phase,
+                        TaskTracking.started_at,
+                        TaskTracking.heartbeat_at,
+                        TaskTracking.progress,
+                        TaskTracking.updated_at,
+                        TaskTracking.max_duration_minutes,
+                        TaskTracking.do_not_auto_cancel,
+                        TaskTracking.health_status,
+                        TaskTracking.user_id,
+                        TaskTracking.title,
+                    ).where(TaskTracking.phase.in_(["queued", "processing"]))
+                )
+            )
+            .mappings()
+            .all()
+        )
     if not rows:
         return _zero_counters()
 
@@ -187,10 +209,27 @@ async def _refresh_policy() -> Dict[str, Dict[str, int]]:
         return _POLICY_CACHE
     if not db_engine.is_configured():
         return _POLICY_CACHE
-    policy_rows = await db_engine.fetch_all(
-        "SELECT task_type, expected_duration_seconds, hard_ceiling_seconds, "
-        "heartbeat_stale_seconds FROM public.workflow_timeout_policy"
-    )
+
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import WorkflowTimeoutPolicy
+
+    async with read_scope() as session:
+        policy_rows = (
+            (
+                await session.execute(
+                    select(
+                        WorkflowTimeoutPolicy.task_type,
+                        WorkflowTimeoutPolicy.expected_duration_seconds,
+                        WorkflowTimeoutPolicy.hard_ceiling_seconds,
+                        WorkflowTimeoutPolicy.heartbeat_stale_seconds,
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
     cache: Dict[str, Dict[str, int]] = {}
     for r in policy_rows:
         cache[r["task_type"]] = {
@@ -434,14 +473,18 @@ async def _persist_classification(row: Dict[str, Any], classification: str) -> N
     the write when nothing changed to avoid Realtime fanout noise."""
     if row.get("health_status") == classification:
         return
-    from app.db import engine as db_engine
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import TaskTracking
 
     try:
-        await db_engine.execute(
-            "UPDATE public.task_tracking SET health_status = :cls "
-            "WHERE dbos_workflow_id = :wid",
-            {"cls": classification, "wid": row["dbos_workflow_id"]},
-        )
+        async with write_scope() as session:
+            await session.execute(
+                update(TaskTracking)
+                .where(TaskTracking.dbos_workflow_id == row["dbos_workflow_id"])
+                .values(health_status=classification)
+            )
     except Exception as exc:
         logger.opt(exception=True).debug(
             f"[workflow_health] persist failed for "
@@ -458,17 +501,27 @@ async def _mark_lost(row: Dict[str, Any]) -> None:
     terminal status is 'lost' (retryable), NOT 'failed' (which means a real
     bug). 'failed' is reserved for E1 (a real DBOS ERROR, with the decoded
     reason) — see scheduled_recovery.reap_stuck_pending_tasks_step Pass A."""
-    from app.db import engine as db_engine
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import TaskTracking
 
     try:
-        await db_engine.execute(
-            "UPDATE public.task_tracking SET phase = 'lost', "
-            "status = 'lost', error_code = 'worker_lost', "
-            "error_msg = 'Worker died / went silent — nobody was running this "
-            "task. Not a fault; use Retry to re-queue.', "
-            "completed_at = :done WHERE dbos_workflow_id = :wid",
-            {"done": datetime.now(timezone.utc), "wid": row["dbos_workflow_id"]},
-        )
+        async with write_scope() as session:
+            await session.execute(
+                update(TaskTracking)
+                .where(TaskTracking.dbos_workflow_id == row["dbos_workflow_id"])
+                .values(
+                    phase="lost",
+                    status="lost",
+                    error_code="worker_lost",
+                    error_msg=(
+                        "Worker died / went silent — nobody was running this "
+                        "task. Not a fault; use Retry to re-queue."
+                    ),
+                    completed_at=datetime.now(timezone.utc),
+                )
+            )
         logger.warning(
             f"[workflow_health] marked LOST: workflow_id={row['dbos_workflow_id']} "
             f"task_type={row.get('task_type')} title={row.get('title')!r}"
@@ -482,17 +535,27 @@ async def _mark_lost(row: Dict[str, Any]) -> None:
 async def _cancel_orphan(row: Dict[str, Any]) -> None:
     """Cancel an ORPHAN_PENDING row (DBOS executor never picked it up).
     Safe because the workflow body never executed — no partial state."""
-    from app.db import engine as db_engine
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import TaskTracking
 
     try:
-        await db_engine.execute(
-            "UPDATE public.task_tracking SET phase = 'cancelled', "
-            "status = 'cancelled', error_code = 'executor_orphan', "
-            "error_msg = 'Workflow stuck PENDING beyond hard ceiling x 3; "
-            "DBOS executor never picked it up.', "
-            "completed_at = :done WHERE dbos_workflow_id = :wid",
-            {"done": datetime.now(timezone.utc), "wid": row["dbos_workflow_id"]},
-        )
+        async with write_scope() as session:
+            await session.execute(
+                update(TaskTracking)
+                .where(TaskTracking.dbos_workflow_id == row["dbos_workflow_id"])
+                .values(
+                    phase="cancelled",
+                    status="cancelled",
+                    error_code="executor_orphan",
+                    error_msg=(
+                        "Workflow stuck PENDING beyond hard ceiling x 3; "
+                        "DBOS executor never picked it up."
+                    ),
+                    completed_at=datetime.now(timezone.utc),
+                )
+            )
         logger.warning(
             f"[workflow_health] cancelled ORPHAN: workflow_id={row['dbos_workflow_id']} "
             f"task_type={row.get('task_type')}"
@@ -506,23 +569,27 @@ async def _cancel_orphan(row: Dict[str, Any]) -> None:
 async def _mark_timed_out(row: Dict[str, Any]) -> None:
     """Mark a USER_TIMEOUT row as timed_out. User opted in via
     max_duration_minutes; this is consensual auto-cancel."""
-    from app.db import engine as db_engine
+    from sqlalchemy import update
+
+    from app.db.session import write_scope
+    from app.models import TaskTracking
 
     error_msg = (
         f"Exceeded user-set max_duration_minutes={row.get('max_duration_minutes')}."
     )
     try:
-        await db_engine.execute(
-            "UPDATE public.task_tracking SET phase = 'timed_out', "
-            "status = 'failed', error_code = 'user_timeout', "
-            "error_msg = :msg, completed_at = :done "
-            "WHERE dbos_workflow_id = :wid",
-            {
-                "msg": error_msg,
-                "done": datetime.now(timezone.utc),
-                "wid": row["dbos_workflow_id"],
-            },
-        )
+        async with write_scope() as session:
+            await session.execute(
+                update(TaskTracking)
+                .where(TaskTracking.dbos_workflow_id == row["dbos_workflow_id"])
+                .values(
+                    phase="timed_out",
+                    status="failed",
+                    error_code="user_timeout",
+                    error_msg=error_msg,
+                    completed_at=datetime.now(timezone.utc),
+                )
+            )
         logger.warning(
             f"[workflow_health] timed out: workflow_id={row['dbos_workflow_id']} "
             f"max_min={row.get('max_duration_minutes')}"
@@ -622,20 +689,34 @@ async def _cancel_dbos_zombie(workflow_uuid: "str | None") -> bool:
         )
         if not n:
             return False  # raced — another tick / the engine already finalized it
+
+        from sqlalchemy import update
+
+        from app.db.session import write_scope
+        from app.models import TaskTracking
+
         # Reconcile the UI row to the same terminal state _mark_lost writes.
         # A version-orphan (E2) is infra-drop — the worker redeployed and no
         # executor of that version will ever run it — NOT a fault. So status
         # is 'lost' (retryable), NOT 'failed'. phase='lost' is the operator
         # signal. Guard against clobbering a genuinely-completed row whose
         # lifecycle trigger lagged.
-        await db_engine.execute(
-            "UPDATE public.task_tracking SET phase = 'lost', status = 'lost', "
-            "error_code = 'worker_lost', error_msg = 'Worker redeployed before "
-            "this ran — nobody executed it. Not a fault; use Retry to re-queue.', "
-            "completed_at = :done WHERE dbos_workflow_id = :wid "
-            "AND status <> 'completed'",
-            {"done": datetime.now(timezone.utc), "wid": workflow_uuid},
-        )
+        async with write_scope() as session:
+            await session.execute(
+                update(TaskTracking)
+                .where(TaskTracking.dbos_workflow_id == workflow_uuid)
+                .where(TaskTracking.status != "completed")
+                .values(
+                    phase="lost",
+                    status="lost",
+                    error_code="worker_lost",
+                    error_msg=(
+                        "Worker redeployed before this ran — nobody executed "
+                        "it. Not a fault; use Retry to re-queue."
+                    ),
+                    completed_at=datetime.now(timezone.utc),
+                )
+            )
         return True
     except Exception as exc:
         logger.opt(exception=True).warning(
@@ -702,18 +783,32 @@ async def _cancel_owner_dead_orphan(workflow_uuid: "str | None") -> bool:
         )
         if not n:
             return False  # raced — another tick / the engine already finalized it
+
+        from sqlalchemy import update
+
+        from app.db.session import write_scope
+        from app.models import TaskTracking
+
         # E3 infra-drop, same treatment as _mark_lost / _cancel_dbos_zombie: the
         # owning worker went offline, NOT a fault → 'lost' (retryable), never
         # 'failed'. Guard against clobbering a genuinely-completed row whose
         # lifecycle trigger lagged.
-        await db_engine.execute(
-            "UPDATE public.task_tracking SET phase = 'lost', status = 'lost', "
-            "error_code = 'worker_lost', error_msg = 'Owning worker went offline "
-            "— task interrupted. Not a fault; use Retry to re-queue.', "
-            "completed_at = :done WHERE dbos_workflow_id = :wid "
-            "AND status <> 'completed'",
-            {"done": datetime.now(timezone.utc), "wid": workflow_uuid},
-        )
+        async with write_scope() as session:
+            await session.execute(
+                update(TaskTracking)
+                .where(TaskTracking.dbos_workflow_id == workflow_uuid)
+                .where(TaskTracking.status != "completed")
+                .values(
+                    phase="lost",
+                    status="lost",
+                    error_code="worker_lost",
+                    error_msg=(
+                        "Owning worker went offline — task interrupted. Not a "
+                        "fault; use Retry to re-queue."
+                    ),
+                    completed_at=datetime.now(timezone.utc),
+                )
+            )
         return True
     except Exception as exc:
         logger.opt(exception=True).warning(

@@ -249,8 +249,16 @@ async def reap_stuck_pending_tasks_step() -> dict[str, Any]:
     # Surface the actual workflow error instead of letting them fall
     # through to the generic "never claimed" lost text below — that
     # text told users to Retry tasks that had genuinely run and failed.
+    from sqlalchemy import text, update
+
+    from app.db.session import write_scope
+    from app.models import TaskTracking
+
     errored_failed = 0
     try:
+        # dbos.workflow_status is a structural exception (route C: never ORM
+        # it) — this JOIN stays raw SQL. Only the resulting task_tracking
+        # write below moves to ORM.
         errored = await db_engine.fetch_all(
             "SELECT tt.dbos_workflow_id, ws.error "
             "FROM public.task_tracking tt "
@@ -262,17 +270,18 @@ async def reap_stuck_pending_tasks_step() -> dict[str, Any]:
             {"cutoff": cutoff},
         )
         for row in errored:
-            await db_engine.execute(
-                "UPDATE public.task_tracking SET status = 'failed', "
-                "phase = 'failed', error_msg = :msg, "
-                "error_code = 'DBOS_ERROR', updated_at = :now "
-                "WHERE dbos_workflow_id = :wid",
-                {
-                    "msg": _readable_dbos_error(row.get("error")),
-                    "now": now_dt,
-                    "wid": row["dbos_workflow_id"],
-                },
-            )
+            async with write_scope() as session:
+                await session.execute(
+                    update(TaskTracking)
+                    .where(TaskTracking.dbos_workflow_id == row["dbos_workflow_id"])
+                    .values(
+                        status="failed",
+                        phase="failed",
+                        error_msg=_readable_dbos_error(row.get("error")),
+                        error_code="DBOS_ERROR",
+                        updated_at=now_dt,
+                    )
+                )
             errored_failed += 1
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[reap] DBOS-error pass failed (non-fatal): {e!r}")
@@ -286,27 +295,35 @@ async def reap_stuck_pending_tasks_step() -> dict[str, Any]:
     # the lifecycle trigger mirrors the real outcome. Only flip rows DBOS
     # has no live/queued claim on (terminal status, or no row at all).
     # (Rows with ws.status='ERROR' were converted to real failures above.)
-    tasks_reaped = await db_engine.execute(
-        "UPDATE public.task_tracking tt SET status = 'lost', phase = 'lost', "
-        "error_msg = :msg, error_code = 'WORKER_LOST', updated_at = :now "
-        "WHERE tt.status = 'pending' AND tt.phase = 'queued' "
-        "AND tt.started_at IS NULL AND tt.created_at < :cutoff "
-        "AND NOT EXISTS ("
-        "  SELECT 1 FROM dbos.workflow_status ws "
-        "  WHERE ws.workflow_uuid = tt.dbos_workflow_id "
-        # ERROR rows belong to the pass above (real failure, real msg);
-        # SUCCESS rows must never read "never claimed" either — if the
-        # trigger missed one, lost would be a lie twice over.
-        "  AND ws.status IN ('PENDING', 'ENQUEUED', 'ERROR', 'SUCCESS')" ")",
-        {
-            "msg": (
-                "Worker never claimed this task within 1h — DBOS workflow "
-                "may have crashed or never executed. Use Retry to re-queue."
-            ),
-            "now": now_dt,
-            "cutoff": cutoff,
-        },
+    #
+    # dbos.workflow_status has no ORM model (structural exception) — the
+    # NOT EXISTS subquery stays a raw text() fragment embedded in the
+    # otherwise-ORM UPDATE, same allowed pattern as an INTERVAL literal.
+    not_dbos_claimed = text(
+        "NOT EXISTS (SELECT 1 FROM dbos.workflow_status ws "
+        "WHERE ws.workflow_uuid = public.task_tracking.dbos_workflow_id "
+        "AND ws.status IN ('PENDING', 'ENQUEUED', 'ERROR', 'SUCCESS'))"
     )
+    async with write_scope() as session:
+        result = await session.execute(
+            update(TaskTracking)
+            .where(TaskTracking.status == "pending")
+            .where(TaskTracking.phase == "queued")
+            .where(TaskTracking.started_at.is_(None))
+            .where(TaskTracking.created_at < cutoff)
+            .where(not_dbos_claimed)
+            .values(
+                status="lost",
+                phase="lost",
+                error_msg=(
+                    "Worker never claimed this task within 1h — DBOS workflow "
+                    "may have crashed or never executed. Use Retry to re-queue."
+                ),
+                error_code="WORKER_LOST",
+                updated_at=now_dt,
+            )
+        )
+    tasks_reaped = result.rowcount
 
     resources_reaped = 0
     for field in ("transcript_status", "summary_status", "visual_analysis_status"):
@@ -361,29 +378,51 @@ async def recover_stale_orchestrator_locks_step() -> dict[str, Any]:
         return {"status": "success", "recovered": 0, "skipped_boot_grace": True}
 
     mgr = get_task_manager()
-    from app.db import engine as db_engine
+
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import TaskTracking
 
     # Pull a generous window — 2h covers the longest configured ceiling
     # (ai_visual_analysis = 60min) plus headroom; per-row filtering by
     # task_type ceiling happens below. tz-aware datetimes (not isoformat
     # strings) so the engine binds them as timestamptz.
     broad_cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
-    stale = await db_engine.fetch_all(
-        "SELECT dbos_workflow_id, dedup_key, task_type, started_at "
-        "FROM public.task_tracking WHERE phase = 'processing' "
-        "AND started_at < :cutoff",
-        {"cutoff": broad_cutoff},
+    stale_cols = (
+        TaskTracking.dbos_workflow_id,
+        TaskTracking.dedup_key,
+        TaskTracking.task_type,
+        TaskTracking.started_at,
     )
+    async with read_scope() as session:
+        stale = (
+            (
+                await session.execute(
+                    select(*stale_cols)
+                    .where(TaskTracking.phase == "processing")
+                    .where(TaskTracking.started_at < broad_cutoff)
+                )
+            )
+            .mappings()
+            .all()
+        )
 
     # Also catch tasks past their per-type ceiling but inside the broad
     # cutoff. Two-window query: broad + narrow per type.
     narrow_cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
-    narrow = await db_engine.fetch_all(
-        "SELECT dbos_workflow_id, dedup_key, task_type, started_at "
-        "FROM public.task_tracking WHERE phase = 'processing' "
-        "AND started_at < :cutoff",
-        {"cutoff": narrow_cutoff},
-    )
+    async with read_scope() as session:
+        narrow = (
+            (
+                await session.execute(
+                    select(*stale_cols)
+                    .where(TaskTracking.phase == "processing")
+                    .where(TaskTracking.started_at < narrow_cutoff)
+                )
+            )
+            .mappings()
+            .all()
+        )
 
     # Dedup the union by dbos_workflow_id
     seen: set[str] = set()

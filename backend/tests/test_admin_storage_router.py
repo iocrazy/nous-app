@@ -219,18 +219,53 @@ async def test_verify_keys_exists_missing_uncertain():
     assert "hls" not in by
 
 
+def _patch_read_scope(monkeypatch, results):
+    """Fake ``app.db.session.read_scope`` yielding one queued mapping-row
+    result (or None) per ``session.execute()`` call, in order — matches the
+    ``_FakeSession``/``patch_scopes`` idiom established in Phase B1/B2 (see
+    tests/test_issue_lifecycle_sql.py)."""
+    from contextlib import asynccontextmanager
+
+    class _Result:
+        def __init__(self, row):
+            self._row = row
+
+        def mappings(self):
+            return self
+
+        def first(self):
+            return self._row
+
+    class _Session:
+        def __init__(self):
+            self._results = list(results)
+            self.calls: list = []
+
+        async def execute(self, stmt):
+            self.calls.append(stmt)
+            return _Result(self._results.pop(0) if self._results else None)
+
+    session = _Session()
+
+    @asynccontextmanager
+    async def _scope():
+        yield session
+
+    import app.db.session as dbs
+
+    monkeypatch.setattr(dbs, "read_scope", _scope)
+    return session
+
+
 @pytest.mark.asyncio
 async def test_deep_verify_dedups_running(monkeypatch):
     """task_tracking's PK column is dbos_workflow_id, not task_id (verified
     against app/models/ops.py::TaskTracking — the brief's ⚠️ note flagged
     this needed confirming against real code)."""
+    _patch_read_scope(
+        monkeypatch, [{"dbos_workflow_id": "wf-123"}]
+    )  # 已有 queued/in_progress 的 storage_audit
 
-    async def fake_fetch_one(sql, params=None):
-        return {
-            "dbos_workflow_id": "wf-123"
-        }  # 已有 queued/in_progress 的 storage_audit
-
-    monkeypatch.setattr(sr.db_engine, "fetch_one", fake_fetch_one)
     out = await sr._find_running_audit()
     assert out == "wf-123"
 
@@ -238,19 +273,20 @@ async def test_deep_verify_dedups_running(monkeypatch):
 def test_find_running_audit_sql_caps_by_time(monkeypatch):
     """M4: a queued/in_progress storage_audit stuck forever (crashed worker)
     must not dedup every future /verify dispatch indefinitely — the query
-    must bound itself to a recent window so a stale run self-heals."""
-    captured = {}
+    must bound itself to a recent window so a stale run self-heals. INTERVAL
+    literal stays a raw text() fragment (no ORM interval type), so the
+    compiled SQL still contains it verbatim."""
+    from sqlalchemy.dialects import postgresql
 
-    async def fake_fetch_one(sql, params=None):
-        captured["sql"] = " ".join(sql.split())
-        return None
-
-    monkeypatch.setattr(sr.db_engine, "fetch_one", fake_fetch_one)
+    session = _patch_read_scope(monkeypatch, [None])
     import asyncio
 
     asyncio.run(sr._find_running_audit())
-    assert "interval '2 hours'" in captured["sql"]
-    assert "created_at >" in captured["sql"]
+
+    assert len(session.calls) == 1
+    sql = str(session.calls[0].compile(dialect=postgresql.dialect()))
+    assert "interval '2 hours'" in sql
+    assert "created_at >" in sql
 
 
 def test_fs_residue_where_covers_nine_columns():
