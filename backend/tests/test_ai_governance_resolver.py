@@ -12,11 +12,32 @@ to avoid live DB calls.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.services.ai.governance.ai_governance import AIModuleGovernance
+
+
+class _FakeScopeSession:
+    """Stand-in for the ORM AsyncSession — only ``scalar()`` is exercised by
+    ``load_transcribe_inputs``'s user_settings.settings_json read (Phase B2
+    Task 2 ORM rewrite; see ``tests/test_ai_transcription_sql.py``)."""
+
+    def __init__(self, scalar_value):
+        self._scalar_value = scalar_value
+
+    async def scalar(self, stmt):
+        return self._scalar_value
+
+
+def _fake_read_scope(scalar_value):
+    @asynccontextmanager
+    async def _read_scope():
+        yield _FakeScopeSession(scalar_value)
+
+    return _read_scope
 
 
 def _locked_governance(
@@ -265,14 +286,19 @@ async def test_transcription_locked_returns_admin_config():
 
     # Patch DB reads and governance.
     # db_engine is a local import inside load_transcribe_inputs, so patch
-    # the underlying engine method directly.
+    # the underlying engine method directly. The user_settings.settings_json
+    # read was migrated to the ORM (Phase B2 Task 2) — patch
+    # app.db.session.read_scope instead of a second db_engine.fetch_one.
     with patch(
         "app.services.ai.governance.ai_governance.get_module_governance",
         new=AsyncMock(return_value=governance),
     ):
-        with patch(
-            "app.db.engine.fetch_one",
-            side_effect=[fake_media_row, fake_settings_row],
+        with (
+            patch("app.db.engine.fetch_one", side_effect=[fake_media_row]),
+            patch(
+                "app.db.session.read_scope",
+                new=_fake_read_scope(fake_settings_row["settings_json"]),
+            ),
         ):
             result = await trans_mod.load_transcribe_inputs(1, "user-1")
 
@@ -307,9 +333,9 @@ async def test_transcription_locked_no_key_fails_closed():
         "app.services.ai.governance.ai_governance.get_module_governance",
         new=AsyncMock(return_value=governance),
     ):
-        with patch(
-            "app.db.engine.fetch_one",
-            side_effect=[fake_media_row, {}],
+        with (
+            patch("app.db.engine.fetch_one", side_effect=[fake_media_row]),
+            patch("app.db.session.read_scope", new=_fake_read_scope(None)),
         ):
             with pytest.raises(RuntimeError, match="admin-locked"):
                 await trans_mod.load_transcribe_inputs(1, "user-1")

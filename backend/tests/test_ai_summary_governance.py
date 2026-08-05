@@ -10,15 +10,41 @@ Tests that:
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.db import session as db_session
 from app.services.ai.governance.ai_governance import (
     ALL_MODULES,
     TASK_MODULES,
     AIModuleGovernance,
 )
+
+
+class _SettingsJsonSession:
+    """Fake ORM session whose scalar() returns a fixed settings_json value —
+    stands in for the ``resolve_summarization_config`` user_settings read
+    (Phase B2 Task 1: moved off ``db_engine.fetch_one`` onto the ORM)."""
+
+    def __init__(self, settings_json: Any) -> None:
+        self._settings_json = settings_json
+
+    async def scalar(self, _stmt: Any) -> Any:
+        return self._settings_json
+
+
+class _SettingsJsonScope:
+    def __init__(self, settings_json: Any) -> None:
+        self._settings_json = settings_json
+
+    async def __aenter__(self) -> _SettingsJsonSession:
+        return _SettingsJsonSession(self._settings_json)
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
+
 
 # ---------------------------------------------------------------------------
 # T6-a: "summarization" membership in module sets
@@ -244,11 +270,13 @@ async def test_summarization_allowed_user_path_executes():
         "app.services.ai.governance.ai_governance.get_module_governance",
         new=AsyncMock(return_value=governance),
     ):
-        with patch(
-            "app.db.engine.fetch_one",
-            side_effect=[fake_row, fake_settings_row],
-        ):
-            result = await summary_mod.load_summary_inputs(1, "user-1")
+        with patch("app.db.engine.fetch_one", AsyncMock(return_value=fake_row)):
+            with patch.object(
+                db_session,
+                "read_scope",
+                lambda: _SettingsJsonScope(fake_settings_row["settings_json"]),
+            ):
+                result = await summary_mod.load_summary_inputs(1, "user-1")
 
     # User's provider must be used.
     assert result["provider_key"] == "qwen"

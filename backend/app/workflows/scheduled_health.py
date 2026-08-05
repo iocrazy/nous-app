@@ -104,12 +104,16 @@ async def health_check_step() -> dict[str, Any]:
         checks["redis"] = f"error: {str(e)[:50]}"
 
     try:
-        # Lightweight DB liveness probe via the SQLAlchemy engine (direct PG,
+        # Lightweight DB liveness probe via the SQLAlchemy ORM (direct PG,
         # no httpx). A one-row SELECT against system_settings gives the RTT
         # signal without user-scoping.
-        from app.db import engine as db_engine
+        from sqlalchemy import select
 
-        await db_engine.fetch_val("SELECT key FROM public.system_settings LIMIT 1")
+        from app.db.session import read_scope
+        from app.models import SystemSettings
+
+        async with read_scope() as session:
+            await session.scalar(select(SystemSettings.key).limit(1))
         checks["supabase"] = "ok"
     except Exception as e:
         checks["supabase"] = f"error: {str(e)[:50]}"

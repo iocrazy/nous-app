@@ -12,12 +12,30 @@ nous-pick — its user path scans a HARDCODED provider priority
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.db import session as db_session
 from app.services.ai.governance.ai_governance import AIModuleGovernance
 from app.services.ai.providers import ai_provider_helpers as helpers
+
+
+class _NoUserSettingsSession:
+    """Fake ORM session whose scalar() reads always miss (no user_settings row)."""
+
+    async def scalar(self, _stmt: Any) -> None:
+        return None
+
+
+class _NoUserSettingsScope:
+    async def __aenter__(self) -> _NoUserSettingsSession:
+        return _NoUserSettingsSession()
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
+
 
 pytestmark = pytest.mark.asyncio
 
@@ -266,15 +284,15 @@ async def test_raises_when_no_user_settings():
             "app.services.ai.governance.ai_governance.get_module_governance",
             AsyncMock(return_value=_unlocked()),
         ),
-        patch("app.db.engine.fetch_one", AsyncMock(return_value=None)),
+        patch.object(db_session, "read_scope", lambda: _NoUserSettingsScope()),
     ):
         with pytest.raises(RuntimeError, match="no user_settings"):
             await helpers.resolve_summarization_config("u", settings_json=None)
 
 
 async def test_governance_short_circuits_before_user_settings():
-    """Locked module must NOT consult user settings — fetch_one is never hit."""
-    fetch = AsyncMock(return_value=None)
+    """Locked module must NOT consult user settings — read_scope() is never hit."""
+    read_scope_mock = AsyncMock()
     with (
         patch(
             "app.services.ai.governance.ai_governance.get_module_governance",
@@ -284,9 +302,9 @@ async def test_governance_short_circuits_before_user_settings():
             "app.services.ai.providers.ai_provider_helpers.resolve_platform_model",
             AsyncMock(return_value=None),
         ),
-        patch("app.db.engine.fetch_one", fetch),
+        patch.object(db_session, "read_scope", read_scope_mock),
     ):
         cfg = await helpers.resolve_summarization_config("u", settings_json=None)
 
     assert cfg.origin == "governance"
-    fetch.assert_not_awaited()
+    read_scope_mock.assert_not_called()

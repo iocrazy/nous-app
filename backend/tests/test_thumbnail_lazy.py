@@ -7,6 +7,7 @@ the backfill sweeper's toggle/batch/step-vs-dispatch discipline.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -23,6 +24,27 @@ from app.api.resources_crud_router import (
 def _request() -> Request:
     """Minimal ASGI Request for handlers routed through serve_stored_file."""
     return Request({"type": "http", "method": "GET", "path": "/", "headers": []})
+
+
+class _FakeScopeSession:
+    """Stand-in for the ORM AsyncSession — only ``scalar()`` is used by
+    ``_backfill_scan_step``'s system_settings toggle read (Phase B2 Task 2
+    ORM rewrite); the resources claim query stays raw SQL (Phase C) and is
+    still reached via ``app.db.engine.fetch_all``."""
+
+    def __init__(self, scalar_value):
+        self._scalar_value = scalar_value
+
+    async def scalar(self, stmt):
+        return self._scalar_value
+
+
+def _fake_read_scope(scalar_value):
+    @asynccontextmanager
+    async def _read_scope():
+        yield _FakeScopeSession(scalar_value)
+
+    return _read_scope
 
 
 def _resource(**over):
@@ -160,10 +182,7 @@ def test_placeholder_varies_by_media_class():
 async def test_backfill_scan_disabled_returns_empty():
     from app.workflows.thumbnail import _backfill_scan_step
 
-    with patch(
-        "app.db.engine.fetch_one",
-        new=AsyncMock(return_value={"value": '{"enabled": false}'}),
-    ):
+    with patch("app.db.session.read_scope", new=_fake_read_scope('{"enabled": false}')):
         assert await _backfill_scan_step.__wrapped__() == []
 
 
@@ -175,8 +194,8 @@ async def test_backfill_scan_enabled_claims_batch():
     fetch_all = AsyncMock(return_value=rows)
     with (
         patch(
-            "app.db.engine.fetch_one",
-            new=AsyncMock(return_value={"value": {"enabled": True, "batch": 10}}),
+            "app.db.session.read_scope",
+            new=_fake_read_scope({"enabled": True, "batch": 10}),
         ),
         patch("app.db.engine.fetch_all", new=fetch_all),
     ):

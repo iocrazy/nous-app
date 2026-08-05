@@ -80,15 +80,20 @@ async def _backfill_scan_step() -> list[dict[str, Any]]:
     """
     import json
 
-    from app.db import engine as db_engine
+    from sqlalchemy import select
 
-    row = await db_engine.fetch_one(
-        "SELECT value FROM public.system_settings WHERE key = :k",
-        {"k": _BACKFILL_SETTINGS_KEY},
-    )
-    if not row:
+    from app.db import engine as db_engine
+    from app.db.session import read_scope
+    from app.models import SystemSettings
+
+    async with read_scope() as session:
+        value = await session.scalar(
+            select(SystemSettings.value).where(
+                SystemSettings.key == _BACKFILL_SETTINGS_KEY
+            )
+        )
+    if value is None:
         return []
-    value = row.get("value")
     # asyncpg hands jsonb back as a JSON string; be tolerant of both shapes.
     if isinstance(value, str):
         try:

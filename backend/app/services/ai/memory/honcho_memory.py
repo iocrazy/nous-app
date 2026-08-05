@@ -58,13 +58,18 @@ _HONCHO_SETTINGS_MAP: dict[str, tuple[str, str]] = {
 async def _honcho_settings_reader(key: str) -> Optional[str]:
     """Read one system_settings value (service-role engine). None on miss/error."""
     try:
+        from sqlalchemy import select
+
         from app.db import engine as db_engine
+        from app.db.session import read_scope
+        from app.models import SystemSettings
 
         if not db_engine.is_configured():
             return None
-        value = await db_engine.fetch_val(
-            "SELECT value FROM public.system_settings WHERE key = :k", {"k": key}
-        )
+        async with read_scope() as session:
+            value = await session.scalar(
+                select(SystemSettings.value).where(SystemSettings.key == key)
+            )
         return None if value is None else str(value)
     except Exception:  # noqa: BLE001 — settings read must never raise
         logger.warning(f"[honcho] system_settings read failed: {key}")

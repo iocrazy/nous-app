@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -74,14 +75,32 @@ async def test_config_disabled_without_secret_env(monkeypatch):
     fetch.assert_not_awaited()  # no secret → never even hits the DB
 
 
+class _FakeScopeSession:
+    """Stand-in for the ORM AsyncSession — only ``scalar()`` is used by
+    ``direct_serve_config``'s system_settings read (Phase B2 Task 2 ORM
+    rewrite)."""
+
+    def __init__(self, scalar_value):
+        self._scalar_value = scalar_value
+
+    async def scalar(self, stmt):
+        return self._scalar_value
+
+
+def _fake_read_scope(scalar_value):
+    @asynccontextmanager
+    async def _read_scope():
+        yield _FakeScopeSession(scalar_value)
+
+    return _read_scope
+
+
 @pytest.mark.asyncio
 async def test_config_reads_db_toggle(monkeypatch):
     monkeypatch.setenv("NGINX_SECURE_LINK_SECRET", "s3cret")
     with patch(
-        "app.db.engine.fetch_one",
-        new=AsyncMock(
-            return_value={"value": '{"enabled": true, "base_url": "https://h:8081/"}'}
-        ),
+        "app.db.session.read_scope",
+        new=_fake_read_scope('{"enabled": true, "base_url": "https://h:8081/"}'),
     ):
         cfg = await direct_serve_config()
     assert cfg is not None

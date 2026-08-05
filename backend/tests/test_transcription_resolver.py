@@ -9,14 +9,31 @@ module-level ``resolve_mediahub_model`` (gated nous pick). No DB.
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.db import session as db_session
 from app.services.ai.governance.ai_governance import AIModuleGovernance
 from app.services.ai.providers import ai_provider_helpers as helpers
 
 pytestmark = pytest.mark.asyncio
+
+
+class _NoUserSettingsSession:
+    """Fake ORM session whose scalar() reads always miss (no user_settings row)."""
+
+    async def scalar(self, _stmt: Any) -> None:
+        return None
+
+
+class _NoUserSettingsScope:
+    async def __aenter__(self) -> _NoUserSettingsSession:
+        return _NoUserSettingsSession()
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
 
 
 def _locked(model: str = "mediahub-volc-asr") -> AIModuleGovernance:
@@ -167,7 +184,7 @@ async def test_raises_when_no_user_settings():
             "app.services.ai.governance.ai_governance.get_module_governance",
             AsyncMock(return_value=_unlocked()),
         ),
-        patch("app.db.engine.fetch_one", AsyncMock(return_value=None)),
+        patch.object(db_session, "read_scope", lambda: _NoUserSettingsScope()),
     ):
         with pytest.raises(RuntimeError, match="no user_settings"):
             await helpers.resolve_transcription_config("u", settings_json=None)

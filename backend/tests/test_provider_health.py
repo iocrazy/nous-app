@@ -9,16 +9,61 @@ Covers:
 - ``POST /ai/test-connection`` persists on success and failure, and still
   returns 200 when persistence blows up.
 - ``GET /ai/settings`` surfaces the stored ``provider_health`` map.
+
+Phase B2 Task 1 (2026-08-04): ``persist_provider_health`` moved off
+``db_engine.execute`` raw SQL onto the ORM ``write_scope()`` session (nested
+``jsonb_set`` expression — see ``tests/test_orm_b2_task1_compile_coverage.py``
+for the dedicated operator-equivalence coverage). The success/failure tests
+below patch ``app.db.session.write_scope`` with a fake session instead of
+``app.db.engine.execute``; the no-row / DB-error / unconfigured-engine tests
+were untouched (they only assert the swallow-and-return-False contract, which
+still holds because ``write_scope()`` raises the same way a bad ``execute()``
+did).
 """
 
 from __future__ import annotations
 
 import json
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
+from app.db import session as db_session
 from app.services.ai import provider_health as ph
+
+
+def _compile(stmt: Any) -> tuple[str, dict[str, Any]]:
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    return str(compiled), dict(compiled.params)
+
+
+class _FakeResult:
+    def __init__(self, rowcount: int = 1) -> None:
+        self.rowcount = rowcount
+
+
+class _FakeSession:
+    def __init__(self, rowcount: int = 1) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self._rowcount = rowcount
+
+    async def execute(self, stmt: Any) -> _FakeResult:
+        self.calls.append(_compile(stmt))
+        return _FakeResult(self._rowcount)
+
+
+class _ScopeCM:
+    def __init__(self, session: _FakeSession) -> None:
+        self._session = session
+
+    async def __aenter__(self) -> _FakeSession:
+        return self._session
+
+    async def __aexit__(self, *exc: Any) -> bool:
+        return False
+
 
 # ---------------------------------------------------------------------------
 # validate_provider_key
@@ -59,42 +104,38 @@ def test_validate_rejects_non_string():
 # ---------------------------------------------------------------------------
 
 
-def _patch_engine(execute_mock):
-    """Patch the db_engine + cache imports used inside persist_provider_health.
+class _RaisingSession:
+    """A fake session whose execute() raises — simulates a DB error mid-write."""
 
-    Returns a context-manager stack tuple of patchers already started; caller
-    stops them. We patch at the source module so the in-function imports
-    resolve to our mocks.
-    """
-    return patch.multiple(
-        "app.db.engine",
-        is_configured=MagicMock(return_value=True),
-        execute=execute_mock,
-    )
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    async def execute(self, stmt: Any) -> Any:
+        raise self._exc
 
 
 @pytest.mark.asyncio
 async def test_persist_success_writes_jsonb_set_path():
-    captured = {}
-
-    async def _execute(sql, params):
-        captured["sql"] = sql
-        captured["params"] = params
-        return 1
-
-    with _patch_engine(AsyncMock(side_effect=_execute)):
-        with patch("app.core.cache.user_settings_cache.invalidate") as inval:
-            ok = await ph.persist_provider_health(
-                "user-1", "openai", "ok", "5 models available"
-            )
+    with patch("app.db.engine.is_configured", MagicMock(return_value=True)):
+        session = _FakeSession(rowcount=1)
+        with patch.object(db_session, "write_scope", lambda: _ScopeCM(session)):
+            with patch("app.core.cache.user_settings_cache.invalidate") as inval:
+                ok = await ph.persist_provider_health(
+                    "user-1", "openai", "ok", "5 models available"
+                )
 
     assert ok is True
     inval.assert_called_once_with("user-1")
-    assert "jsonb_set" in captured["sql"]
-    assert "ai_provider_health" in captured["sql"]
-    assert captured["params"]["uid"] == "user-1"
-    assert captured["params"]["pk"] == "openai"
-    val = json.loads(captured["params"]["val"])
+    sql = "\n".join(s for s, _ in session.calls)
+    binds: list[Any] = []
+    for _s, params in session.calls:
+        binds.extend(params.values())
+    assert "jsonb_set" in sql
+    assert "ai_provider_health" in binds
+    assert "user-1" in binds
+    assert "openai" in binds
+    val_json = next(v for v in binds if isinstance(v, str) and v.startswith('{"'))
+    val = json.loads(val_json)
     assert val["status"] == "ok"
     assert val["detail"] == "5 models available"
     assert val["tested_at"].endswith("+00:00") or val["tested_at"].endswith("Z")
@@ -102,36 +143,40 @@ async def test_persist_success_writes_jsonb_set_path():
 
 @pytest.mark.asyncio
 async def test_persist_failure_status_and_truncation():
-    captured = {}
-
-    async def _execute(sql, params):
-        captured["params"] = params
-        return 1
-
     long_detail = "x" * 500
-    with _patch_engine(AsyncMock(side_effect=_execute)):
-        with patch("app.core.cache.user_settings_cache.invalidate"):
-            await ph.persist_provider_health("u", "doubao", "fail", long_detail)
+    with patch("app.db.engine.is_configured", MagicMock(return_value=True)):
+        session = _FakeSession(rowcount=1)
+        with patch.object(db_session, "write_scope", lambda: _ScopeCM(session)):
+            with patch("app.core.cache.user_settings_cache.invalidate"):
+                await ph.persist_provider_health("u", "doubao", "fail", long_detail)
 
-    val = json.loads(captured["params"]["val"])
+    binds: list[Any] = []
+    for _s, params in session.calls:
+        binds.extend(params.values())
+    val_json = next(v for v in binds if isinstance(v, str) and v.startswith('{"'))
+    val = json.loads(val_json)
     assert val["status"] == "fail"
     assert len(val["detail"]) == 300  # truncated to _MAX_DETAIL_LEN
 
 
 @pytest.mark.asyncio
 async def test_persist_no_row_returns_false():
-    with _patch_engine(AsyncMock(return_value=0)):
-        with patch("app.core.cache.user_settings_cache.invalidate"):
-            ok = await ph.persist_provider_health("nobody", "openai", "ok", "")
+    with patch("app.db.engine.is_configured", MagicMock(return_value=True)):
+        session = _FakeSession(rowcount=0)  # no matching user_settings row
+        with patch.object(db_session, "write_scope", lambda: _ScopeCM(session)):
+            with patch("app.core.cache.user_settings_cache.invalidate"):
+                ok = await ph.persist_provider_health("nobody", "openai", "ok", "")
     assert ok is False
 
 
 @pytest.mark.asyncio
 async def test_persist_swallows_db_error():
     """A DB failure must NOT propagate — telemetry is best-effort."""
-    with _patch_engine(AsyncMock(side_effect=RuntimeError("db down"))):
-        with patch("app.core.cache.user_settings_cache.invalidate"):
-            ok = await ph.persist_provider_health("u", "openai", "ok", "")
+    with patch("app.db.engine.is_configured", MagicMock(return_value=True)):
+        session = _RaisingSession(RuntimeError("db down"))
+        with patch.object(db_session, "write_scope", lambda: _ScopeCM(session)):
+            with patch("app.core.cache.user_settings_cache.invalidate"):
+                ok = await ph.persist_provider_health("u", "openai", "ok", "")
     assert ok is False  # no exception
 
 

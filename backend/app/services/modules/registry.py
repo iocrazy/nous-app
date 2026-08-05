@@ -158,14 +158,18 @@ async def _read_raw(key: str) -> Any:
     """Service-role engine read of the config blob; never raises — any failure
     returns None so the parser falls back to the module's defaults."""
     try:
+        from sqlalchemy import select
+
         from app.db import engine as db_engine
+        from app.db.session import read_scope
+        from app.models import SystemSettings
 
         if not db_engine.is_configured():
             return None
-        return await db_engine.fetch_val(
-            "SELECT value FROM public.system_settings WHERE key = :k",
-            {"k": key},
-        )
+        async with read_scope() as session:
+            return await session.scalar(
+                select(SystemSettings.value).where(SystemSettings.key == key)
+            )
     except Exception:  # noqa: BLE001
         logger.warning("[modules] config read failed for {} — using defaults", key)
         return None

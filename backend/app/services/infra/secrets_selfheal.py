@@ -135,25 +135,31 @@ def _heal_bearer_token(value: Any) -> Optional[str]:
 
 async def _heal_system_settings_flat() -> int:
     """Rewrite plaintext/dev-keyed values of the flat secret keys."""
-    from app.db import engine as db_engine
+    from sqlalchemy import select
+    from sqlalchemy import update as sa_update
+
+    from app.db.session import read_scope, write_scope
+    from app.models import SystemSettings
+
+    async with read_scope() as session:
+        result = await session.execute(
+            select(SystemSettings.key, SystemSettings.value).where(
+                SystemSettings.key.in_(SECRET_SETTING_KEYS)
+            )
+        )
+        rows = result.mappings().all()
 
     rewritten = 0
-    placeholders = ",".join(f":k{i}" for i in range(len(SECRET_SETTING_KEYS)))
-    params = {f"k{i}": k for i, k in enumerate(sorted(SECRET_SETTING_KEYS))}
-    rows = await db_engine.fetch_all(
-        f"SELECT key, value FROM public.system_settings "
-        f"WHERE key IN ({placeholders})",
-        params,
-    )
     for row in rows:
         healed = _heal_marked_value(row["value"])
         if healed is None:
             continue
-        await db_engine.execute(
-            "UPDATE public.system_settings SET value = CAST(:v AS jsonb) "
-            "WHERE key = :k",
-            {"v": json.dumps(healed), "k": row["key"]},
-        )
+        async with write_scope() as session:
+            await session.execute(
+                sa_update(SystemSettings)
+                .where(SystemSettings.key == row["key"])
+                .values(value=healed)
+            )
         rewritten += 1
     return rewritten
 
@@ -161,12 +167,18 @@ async def _heal_system_settings_flat() -> int:
 async def _heal_platform_providers() -> int:
     """Rewrite plaintext/dev-keyed api_key/app_id fields inside
     platform.ai_providers. Counts rewritten FIELDS."""
-    from app.db import engine as db_engine
+    from sqlalchemy import select
+    from sqlalchemy import update as sa_update
 
-    raw = await db_engine.fetch_val(
-        "SELECT value FROM public.system_settings WHERE key = :k",
-        {"k": PLATFORM_PROVIDERS_KEY},
-    )
+    from app.db.session import read_scope, write_scope
+    from app.models import SystemSettings
+
+    async with read_scope() as session:
+        raw = await session.scalar(
+            select(SystemSettings.value).where(
+                SystemSettings.key == PLATFORM_PROVIDERS_KEY
+            )
+        )
     if not isinstance(raw, dict):
         return 0
     secret_fields = JSONB_SECRET_KEYS[PLATFORM_PROVIDERS_KEY]
@@ -184,30 +196,41 @@ async def _heal_platform_providers() -> int:
                 rewritten += 1
         merged[name] = new_entry
     if rewritten:
-        await db_engine.execute(
-            "UPDATE public.system_settings SET value = CAST(:v AS jsonb) "
-            "WHERE key = :k",
-            {"v": json.dumps(merged), "k": PLATFORM_PROVIDERS_KEY},
-        )
+        async with write_scope() as session:
+            await session.execute(
+                sa_update(SystemSettings)
+                .where(SystemSettings.key == PLATFORM_PROVIDERS_KEY)
+                .values(value=merged)
+            )
     return rewritten
 
 
 async def _heal_mediahub_models() -> int:
-    from app.db import engine as db_engine
+    from sqlalchemy import select
+    from sqlalchemy import update as sa_update
 
-    rows = await db_engine.fetch_all(
-        "SELECT id, api_key FROM public.mediahub_models "
-        "WHERE api_key IS NOT NULL AND api_key <> ''"
-    )
+    from app.db.session import read_scope, write_scope
+    from app.models import MediahubModels
+
+    async with read_scope() as session:
+        result = await session.execute(
+            select(MediahubModels.id, MediahubModels.api_key).where(
+                MediahubModels.api_key.isnot(None), MediahubModels.api_key != ""
+            )
+        )
+        rows = result.mappings().all()
+
     rewritten = 0
     for row in rows:
         healed = _heal_marked_value(row["api_key"])
         if healed is None:
             continue
-        await db_engine.execute(
-            "UPDATE public.mediahub_models SET api_key = :v WHERE id = :id",
-            {"v": healed, "id": row["id"]},
-        )
+        async with write_scope() as session:
+            await session.execute(
+                sa_update(MediahubModels)
+                .where(MediahubModels.id == row["id"])
+                .values(api_key=healed)
+            )
         rewritten += 1
     return rewritten
 
@@ -292,13 +315,26 @@ async def _heal_user_settings_ai_providers() -> int:
     (``parse_mode``, General settings) and every other ``ai_settings`` field
     (``whisper_provider``, ``task_assignment``, ...) survives untouched (the
     #485 clobber rule)."""
-    from app.db import engine as db_engine
+    from sqlalchemy import cast, func, literal, select
+    from sqlalchemy import update as sa_update
+    from sqlalchemy.dialects.postgresql import JSONB, array
 
-    rows = await db_engine.fetch_all(
-        "SELECT user_id, settings_json -> 'ai_settings' -> 'ai_providers' "
-        "AS ai_providers FROM public.user_settings "
-        "WHERE settings_json -> 'ai_settings' -> 'ai_providers' IS NOT NULL"
-    )
+    from app.db.session import read_scope, write_scope
+    from app.models import UserSettings
+
+    # ORM equivalent of: settings_json -> 'ai_settings' -> 'ai_providers'
+    ai_providers_expr = UserSettings.settings_json.op("->", return_type=JSONB)(
+        "ai_settings"
+    ).op("->", return_type=JSONB)("ai_providers")
+
+    async with read_scope() as session:
+        result = await session.execute(
+            select(UserSettings.user_id, ai_providers_expr.label("ai_providers")).where(
+                ai_providers_expr.isnot(None)
+            )
+        )
+        rows = result.mappings().all()
+
     total_rewritten = 0
     for row in rows:
         raw = row["ai_providers"]
@@ -318,32 +354,49 @@ async def _heal_user_settings_ai_providers() -> int:
                     row_rewritten += 1
             merged[name] = new_entry
         if row_rewritten:
-            await db_engine.execute(
-                "UPDATE public.user_settings SET settings_json = jsonb_set("
-                "settings_json, '{ai_settings,ai_providers}', CAST(:v AS jsonb)"
-                ") WHERE user_id = :uid",
-                {"v": json.dumps(merged), "uid": row["user_id"]},
-            )
+            async with write_scope() as session:
+                await session.execute(
+                    sa_update(UserSettings)
+                    .where(UserSettings.user_id == row["user_id"])
+                    .values(
+                        settings_json=func.jsonb_set(
+                            UserSettings.settings_json,
+                            array(["ai_settings", "ai_providers"]),
+                            cast(literal(json.dumps(merged)), JSONB),
+                        )
+                    )
+                )
             total_rewritten += row_rewritten
     return total_rewritten
 
 
 async def _heal_user_mcp_servers() -> int:
-    from app.db import engine as db_engine
+    from sqlalchemy import select
+    from sqlalchemy import update as sa_update
 
-    rows = await db_engine.fetch_all(
-        "SELECT id, bearer_token FROM public.user_mcp_servers "
-        "WHERE bearer_token IS NOT NULL AND bearer_token <> ''"
-    )
+    from app.db.session import read_scope, write_scope
+    from app.models import UserMcpServers
+
+    async with read_scope() as session:
+        result = await session.execute(
+            select(UserMcpServers.id, UserMcpServers.bearer_token).where(
+                UserMcpServers.bearer_token.isnot(None),
+                UserMcpServers.bearer_token != "",
+            )
+        )
+        rows = result.mappings().all()
+
     rewritten = 0
     for row in rows:
         healed = _heal_bearer_token(row["bearer_token"])
         if healed is None:
             continue
-        await db_engine.execute(
-            "UPDATE public.user_mcp_servers SET bearer_token = :v WHERE id = :id",
-            {"v": healed, "id": row["id"]},
-        )
+        async with write_scope() as session:
+            await session.execute(
+                sa_update(UserMcpServers)
+                .where(UserMcpServers.id == row["id"])
+                .values(bearer_token=healed)
+            )
         rewritten += 1
     return rewritten
 

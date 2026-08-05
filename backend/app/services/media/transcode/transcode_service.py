@@ -541,21 +541,25 @@ class TranscodeService:
     async def _get_db_setting(key: str) -> Optional[str]:
         """Read a single value from system_settings.
 
-        Direct PG via the SQLAlchemy engine (Issue #199). §2.4b: async-native
+        Direct PG via the SQLAlchemy ORM (Issue #199). §2.4b: async-native
         — awaited from the async ``transcode_version`` / ``_select_tiers`` on
-        their own event loop, instead of bridging ``db_engine.fetch_val``
-        through a fresh-loop ``run_async`` shim (ORM-incompatible: asyncpg
-        connections are event-loop-bound).
+        their own event loop, instead of bridging through a fresh-loop
+        ``run_async`` shim (ORM-incompatible: asyncpg connections are
+        event-loop-bound).
         """
         try:
+            from sqlalchemy import select
+
             from app.db import engine as db_engine
+            from app.db.session import read_scope
+            from app.models import SystemSettings
 
             if not db_engine.is_configured():
                 return None
-            value = await db_engine.fetch_val(
-                "SELECT value FROM public.system_settings WHERE key = :k",
-                {"k": key},
-            )
+            async with read_scope() as session:
+                value = await session.scalar(
+                    select(SystemSettings.value).where(SystemSettings.key == key)
+                )
             # system_settings.value is jsonb: a JSON boolean/number deserializes
             # to a Python bool/int, not a str. Every consumer here treats the
             # result as a string (`.lower()`, `.split(",")`, int(...)), so a
