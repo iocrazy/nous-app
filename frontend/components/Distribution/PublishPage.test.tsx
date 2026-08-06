@@ -382,3 +382,165 @@ describe('PublishPage', () => {
       expect(screen.queryByLabelText('clip-a.mp4')).toBeNull());
   });
 });
+
+// ── Douyin form fields the creator page has and we lacked (mig 407) ──
+
+import { scheduleProblem } from './PublishPage';
+
+// datetime-local values are LOCAL wall clock, so build them the same way the
+// component's min/max do — an ISO string here would be off by the tz offset.
+const localInput = (msFromNow: number): string => {
+  const d = new Date(Date.now() + msFromNow);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+    + `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+
+describe('scheduleProblem', () => {
+  // The effective floor is the platform's 2h PLUS a 10 min upload margin —
+  // the browser service enforces the same number, and a looser bound here
+  // would produce "accepted here, refused there" in the 2h00–2h10 band.
+  const now = Date.parse('2026-08-06T12:00:00Z');
+  const at = (ms: number) => new Date(now + ms).toISOString();
+
+  it('rejects anything under 2h10m and anything over 14 days', () => {
+    expect(scheduleProblem(at(1.98 * HOUR), now)).toBe('tooSoon');
+    expect(scheduleProblem(at(2 * HOUR), now)).toBe('tooSoon');
+    expect(scheduleProblem(at(2 * HOUR + 5 * 60 * 1000), now)).toBe('tooSoon');
+    expect(scheduleProblem(at(2 * HOUR + 10 * 60 * 1000), now)).toBeNull();
+    expect(scheduleProblem(at(13 * DAY), now)).toBeNull();
+    expect(scheduleProblem(at(14 * DAY), now)).toBeNull();
+    expect(scheduleProblem(at(14 * DAY + 60 * 1000), now)).toBe('tooFar');
+  });
+
+  it('treats an empty or unparseable value as unfinished, not as valid', () => {
+    expect(scheduleProblem('', now)).toBe('empty');
+    expect(scheduleProblem('not a date', now)).toBe('empty');
+  });
+});
+
+describe('PublishPage form fields', () => {
+  const pickContentAndAccount = async () => {
+    fireEvent.click(screen.getByRole('button', { name: /Add from Library/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /clip-a\.mp4/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Done$/i }));
+    fireEvent.click(screen.getByText('HEYGO'));
+    fireEvent.change(screen.getByPlaceholderText(/Add a title/i), {
+      target: { value: 'Form fields' },
+    });
+  };
+
+  it('preselects the AI declaration when the AI toggle goes on, and sends it', async () => {
+    // The product decision: `ai_content` existed for two releases and never
+    // reached the platform. Flipping it now fills in the matching declaration.
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+
+    const select = screen.getByLabelText(/Self declaration/i) as HTMLSelectElement;
+    expect(select.value).toBe('');
+    fireEvent.click(screen.getByRole('switch', { name: /AI-generated content/i }));
+    expect(select.value).toBe('内容由AI生成');
+
+    await pickContentAndAccount();
+    fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
+    await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+    const arg = createPublishTask.mock.calls.at(-1)?.[0];
+    expect(arg.ai_content).toBe(true);
+    // The wire value is the platform's own wording — the browser matches this
+    // text on the page, so a translated value would select nothing.
+    expect(arg.self_declaration).toBe('内容由AI生成');
+  });
+
+  it('lets an explicit declaration override the AI toggle and flags the conflict', async () => {
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('switch', { name: /AI-generated content/i }));
+    fireEvent.change(screen.getByLabelText(/Self declaration/i), {
+      target: { value: '内容为转载信息' },
+    });
+    // Disagreeing controls are surfaced, not silently resolved.
+    expect(screen.getByText(/declares something else/i)).toBeInTheDocument();
+
+    await pickContentAndAccount();
+    fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
+    await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+    expect(createPublishTask.mock.calls.at(-1)?.[0].self_declaration).toBe('内容为转载信息');
+  });
+
+  it('omits the declaration entirely when nothing is chosen', async () => {
+    // Omitted ≠ '无需添加自主声明': one leaves the control alone, the other is
+    // an explicit declaration the platform records.
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+    await pickContentAndAccount();
+    fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
+
+    await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+    const arg = createPublishTask.mock.calls.at(-1)?.[0];
+    expect(arg.self_declaration).toBeUndefined();
+    expect(arg.scheduled_at).toBeUndefined();
+    expect(arg.collection_name).toBeUndefined();
+  });
+
+  it('blocks publishing until the scheduled time is inside the window', async () => {
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+    await pickContentAndAccount();
+
+    const publishBtn = screen.getByRole('button', { name: /Publish now/i });
+    expect(publishBtn).not.toBeDisabled();
+
+    // Switching to Schedule with nothing picked must not publish "now".
+    fireEvent.click(screen.getByRole('button', { name: /^Schedule$/i }));
+    expect(publishBtn).toBeDisabled();
+
+    // Inside the 2h10m floor → rejected before submitting, with the reason.
+    fireEvent.change(screen.getByLabelText(/Scheduled time/i), {
+      target: { value: localInput(1 * HOUR) },
+    });
+    expect(screen.getByText(/at least 2 hours 10 minutes/i)).toBeInTheDocument();
+    expect(publishBtn).toBeDisabled();
+
+    // Beyond 14 days → same treatment, different reason.
+    fireEvent.change(screen.getByLabelText(/Scheduled time/i), {
+      target: { value: localInput(15 * DAY) },
+    });
+    expect(screen.getByText(/within 14 days/i)).toBeInTheDocument();
+    expect(publishBtn).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/Scheduled time/i), {
+      target: { value: localInput(6 * HOUR) },
+    });
+    expect(publishBtn).not.toBeDisabled();
+    fireEvent.click(publishBtn);
+
+    await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+    const arg = createPublishTask.mock.calls.at(-1)?.[0];
+    // Sent as an absolute instant — the backend refuses a value with no offset.
+    expect(arg.scheduled_at).toMatch(/Z$/);
+    expect(new Date(arg.scheduled_at).getTime() - Date.now()).toBeGreaterThan(5 * HOUR);
+  });
+
+  it('sends a trimmed collection name and warns about accounts that cannot honour it', async () => {
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+    await pickContentAndAccount();
+
+    fireEvent.change(screen.getByLabelText(/^Collection$/i), {
+      target: { value: '  Summer Trip  ' },
+    });
+    // Only the QR-bound account is selected so far — no warning yet.
+    expect(screen.queryByText(/connected by QR code/i)).toBeNull();
+    // Adding an OAuth account makes it a real problem: that row will fail
+    // rather than publish with the collection dropped.
+    fireEvent.click(screen.getByText('OAuth One'));
+    expect(screen.getByText(/connected by QR code/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
+    await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+    expect(createPublishTask.mock.calls.at(-1)?.[0].collection_name).toBe('Summer Trip');
+  });
+});

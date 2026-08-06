@@ -194,6 +194,12 @@
 .dist-v4 .toggle.on::after { left: 16px; }
 .dist-v4 .sched-input { display: inline-flex; align-items: center; gap: 8px; background: var(--island-2); border: 1px solid var(--line-strong); border-radius: 10px; padding: 7px 12px; font-size: 12.5px; color: var(--content); font-variant-numeric: tabular-nums; opacity: .55; }
 .dist-v4 .sched-input svg { width: 14px; height: 14px; color: var(--content-3); }
+/* Inline field feedback (schedule window, declaration conflict). Semantic
+   tokens, not hue names — see the K1 palette remap. */
+.dist-v4 .field-err { margin: 7px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--danger); }
+.dist-v4 .field-warn { margin: 7px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--warn); }
+.dist-v4 select.input { appearance: none; cursor: pointer; }
+.dist-v4 .opt-row .input { flex-shrink: 0; font-size: 12.5px; padding: 6px 10px; }
 
 /* ═══ distribution mode cards ═══ */
 .dist-v4 .mode-cards { display: flex; gap: 10px; }
@@ -318,6 +324,9 @@
 .dist-v4 .sub-row .who { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
 .dist-v4 .sub-row .who small { color: var(--content-4); font-weight: 400; }
 .dist-v4 .sub-row .err { font-size: 11.5px; color: var(--red); }
+/* A published row can still carry a caveat (collection not applied) — warn,
+   not danger: the post did go out. */
+.dist-v4 .sub-row .note { font-size: 11.5px; color: var(--warn); }
 .dist-v4 .sub-row a, .dist-v4 .rec-head a { color: var(--t-indigo); text-decoration: none; font-size: 11.5px; font-weight: 550; white-space: nowrap; }
 .dist-v4 .sub-row a:hover, .dist-v4 .rec-head a:hover { text-decoration: underline; }
 .dist-v4 .pulse { animation: dist-v4-pulse 1.6s ease-in-out infinite; }

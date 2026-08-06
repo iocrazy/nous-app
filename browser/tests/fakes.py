@@ -168,15 +168,27 @@ class FakeLocator:
         return self.selector in self.page.visible_now()
 
     async def wait_for(self, state: str = "visible", timeout: Any = None) -> None:
+        """Honours the direction of the wait.
+
+        `hidden` / `detached` are not "visible with extra steps": a dialog that
+        must *close* before the driver may trust the choice it just made is a
+        real assertion, and a fake that satisfied it by having the dialog still
+        on screen would pass exactly the case the driver exists to catch.
+        """
         self.page.waits.append((self.selector, state, timeout))
-        if not self.page.count_of(self.selector):
-            raise TimeoutError(f"Timeout waiting for {self.selector}")
+        present = bool(self.page.count_of(self.selector))
+        wants_gone = state in ("hidden", "detached")
+        if wants_gone == present:
+            raise TimeoutError(f"Timeout waiting for {self.selector} to be {state}")
 
     async def click(self, timeout: Any = None, force: bool = False) -> None:
         self.page.clicks.append(self.selector)
 
     async def evaluate(self, _expression: str) -> None:
         self.page.clicks.append(self.selector)
+
+    async def fill(self, value: str, timeout: Any = None) -> None:
+        self.page.fills.append((self.selector, value))
 
     async def set_input_files(self, path: str, timeout: Any = None) -> None:
         self.page.file_inputs.append((self.selector, path, self.index))
@@ -218,6 +230,7 @@ class FakePage:
         self.counts = dict(counts or {})
         self.attributes = attributes or {}
         self.clicks: list[str] = []
+        self.fills: list[tuple[str, str]] = []
         self.file_inputs: list[tuple[str, str, int]] = []
         self.waits: list[tuple[str, str, Any]] = []
         self.navigations: list[str] = []

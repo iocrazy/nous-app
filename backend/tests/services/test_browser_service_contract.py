@@ -228,6 +228,63 @@ def test_publish_request_envelope_matches(browser):
     browser.PublishRequest.model_validate(envelope)
 
 
+def test_self_declaration_labels_are_identical_on_both_sides():
+    """自主声明的六个原文，两侧必须逐字一致。
+
+    这是 ``platform_options`` 里第一个**有值域**的键，也是最不能漂的一个：
+    浏览器侧靠这串文本做 DOM 匹配，backend 少一个字，用户看到的不是报错，
+    而是"声明没选上但作品发出去了" —— 合规字段静默丢失。
+
+    browser 侧没有集中的枚举（值散落在 uploader 的选择器里），所以按**字面量**
+    扫源码，不依赖变量名。三态：
+      - 一个都扫不到 → skip：browser 侧还没实现自主声明（S3 并行开发中）。
+      - 扫到一部分 → **失败**：这才是真漂移（对面认识 5 个，第 6 个会静默失效）。
+      - 六个齐全 → 通过。
+    """
+    from app.services.distribution.publish_options import SELF_DECLARATIONS
+
+    sources = "\n".join(
+        p.read_text(encoding="utf-8") for p in _BROWSER_SCHEMAS.parent.rglob("*.py")
+    )
+    found = {label for label in SELF_DECLARATIONS if label in sources}
+    if not found:
+        pytest.skip("browser 侧尚未实现自主声明（platform_options.self_declaration）")
+    assert found == set(SELF_DECLARATIONS), (
+        "自主声明原文漂移：browser 侧缺 "
+        f"{sorted(set(SELF_DECLARATIONS) - found)} —— 这几项会静默选不上"
+    )
+
+
+def test_publish_intent_with_the_new_form_fields_validates(browser):
+    """定时 + 自主声明 + 合集一起发出时，browser 的 schema 仍然接得住。
+
+    ``scheduled_at`` 此前只在"永远是 null"的形态下被覆盖过（另一条用例），
+    而它现在会带真值 —— 契约用例必须覆盖真的送了值的那一支，否则守卫只守住
+    了"这个字段永远为空"这一个假设。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.distribution.publish_options import SELF_DECLARATION_AI
+    from app.services.distribution.session_adapter import PublishIntent, PublishMedia
+
+    when = datetime.now(timezone.utc) + timedelta(hours=6)
+    payload = PublishIntent(
+        content_type="video",
+        media=(PublishMedia(kind="video", url="http://x/a.mp4", filename="a.mp4"),),
+        title="Title",
+        scheduled_at=when,
+        platform_options={
+            "self_declaration": SELF_DECLARATION_AI,
+            "collection": "Summer Trip",
+        },
+    ).to_payload()
+
+    parsed = browser.PublishIntent.model_validate(payload)
+    assert parsed.scheduled_at == when
+    assert parsed.platform_options["self_declaration"] == SELF_DECLARATION_AI
+    assert parsed.platform_options["collection"] == "Summer Trip"
+
+
 def test_every_error_kind_browser_emits_is_known_to_backend():
     """``detail["error_kind"]`` 的值域也会漂，而且漂了不报错 —— 只是
     ``is_infra_failure`` 悄悄返回 False，把"我们没问出结论"当成一个结论。

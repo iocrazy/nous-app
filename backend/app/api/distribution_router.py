@@ -514,6 +514,9 @@ def _task_out(task: dict, accounts: list[dict]) -> PublishTaskOut:
         distribution_mode=task.get("distribution_mode", "broadcast"),
         status=rollup,
         created_at=task["created_at"],
+        scheduled_at=task.get("scheduled_at"),
+        self_declaration=task.get("self_declaration"),
+        collection_name=task.get("collection_name"),
         accounts=[
             TaskAccountOut(
                 id=a["id"],
@@ -567,6 +570,9 @@ async def create_task(body: PublishTaskCreate, user: CurrentUserDep):
         ai_content=body.ai_content,
         allow_download=body.allow_download,
         distribution_mode=body.distribution_mode,
+        scheduled_at=body.scheduled_at,
+        self_declaration=body.self_declaration,
+        collection_name=body.collection_name,
     )
     task_id = int(task["id"])
 

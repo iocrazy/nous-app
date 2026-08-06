@@ -172,10 +172,24 @@ class PublishIntent(BaseModel):
     visibility: str = "public"
     allow_download: bool = True
     cover: MediaItem | None = None
-    # S3 publishes immediately. A non-null value is answered with `failed`
-    # rather than silently published now - a post that goes out twelve hours
-    # early is not a smaller failure than one that does not go out at all.
+    # Offset-aware ISO 8601, or null for "publish now". A naive value is
+    # **refused**, not assumed to be UTC: reading a wall-clock time in the wrong
+    # zone is an eight-hour error in a field nobody re-checks, and the post is
+    # already out by the time anyone notices.
+    #
+    # Whether a value is legal at all is the platform's to say - Douyin accepts
+    # 2 hours to 14 days out - so the window is enforced by that platform's
+    # `PlatformIntentRules`, before a browser starts (spec 7.7). A platform that
+    # registers no rules cannot schedule: absence means refusal, never "publish
+    # it now", because a post that goes out twelve hours early is not a smaller
+    # failure than one that does not go out at all.
     scheduled_at: datetime | None = None
+    # Passed through untouched, and read only by the platform that understands
+    # it. Douyin reads `self_declaration` (one of the platform's six declaration
+    # strings verbatim) and `collection` (a collection name). An absent key
+    # means "leave that control alone" - which for `self_declaration` is
+    # distinct from the user choosing 无需添加自主声明, a declaration the
+    # platform actually records.
     platform_options: dict[str, Any] = Field(default_factory=dict)
 
 

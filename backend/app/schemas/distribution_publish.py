@@ -13,7 +13,18 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.services.distribution.publish_options import (
+    SELF_DECLARATIONS,
+    normalize_collection,
+    validate_scheduled_at,
+)
+
 ContentType = Literal["video", "images", "article"]
+# 「自主声明」的六个合法值 —— 直接由 publish_options 的原文元组构造，所以
+# 白名单只有一份。``Literal[tuple]`` 在运行时与逐个写出来完全等价（下标本来
+# 就收一个 tuple），静态检查器不认，故 type: ignore。这样 OpenAPI 里就带上了
+# enum，前端下拉与后端校验共用同一份契约。
+SelfDeclaration = Literal[SELF_DECLARATIONS]  # type: ignore[valid-type]
 Visibility = Literal["public", "friends", "private"]
 DistributionMode = Literal["broadcast", "one_to_one"]
 # 'session' (spec 2026-08-04 §4.2) — publish by driving the platform's own web
@@ -81,11 +92,24 @@ class PublishTaskCreate(BaseModel):
     account_configs: dict[str, AccountConfigOverride] = Field(default_factory=dict)
     cover_vertical_resource_id: Optional[str] = None
     cover_horizontal_resource_id: Optional[str] = None
+    # ── 抖音发布页的平台原生字段（mig 407） ──
+    # self_declaration 是「自主声明」下拉的**原文**（六个之一）。None = 不碰
+    # 那个控件；与 ai_content 的关系（自动映射 + 允许覆盖）见
+    # services/distribution/publish_options.py::resolve_self_declaration。
+    self_declaration: Optional[SelfDeclaration] = None
+    collection_name: Optional[str] = None
+    # 定时发布。必须带时区（naive 会被拒），窗口 2h~14d —— 见 _validate_content。
+    scheduled_at: Optional[datetime] = None
 
     @field_validator("topics")
     @classmethod
     def _clean_topics(cls, v: list[str]) -> list[str]:
         return normalize_topics(v)
+
+    @field_validator("collection_name")
+    @classmethod
+    def _clean_collection(cls, v: Optional[str]) -> Optional[str]:
+        return normalize_collection(v)
 
     @model_validator(mode="after")
     def _validate_content(self) -> "PublishTaskCreate":
@@ -102,6 +126,12 @@ class PublishTaskCreate(BaseModel):
             and len(self.resource_ids) < len(self.account_ids)
         ):
             raise ValueError("one_to_one needs at least as many resources as accounts")
+        # 定时窗口在**提交这一刻**就拒（§7.7 fail-fast 的第一道）。让用户填完
+        # 一切、点了发布、等浏览器起来、传完几百 MB 视频才被平台拒绝，是这条
+        # 路径上最差的体验；而这一道只要一次纯计算。
+        problem = validate_scheduled_at(self.scheduled_at)
+        if problem:
+            raise ValueError(problem)
         return self
 
 
@@ -128,6 +158,12 @@ class PublishTaskOut(BaseModel):
     distribution_mode: str = "broadcast"
     status: str  # aggregated display status (see aggregate_task_status)
     created_at: datetime
+    # 回显新表单字段：记录页要能说清"这一批到底定时到了什么时候、声明选了
+    # 哪一项"。写进去却读不回来，是 CLAUDE.md「触发路径必须类型化回显」在
+    # 表单字段上的同族问题 —— ai_content 正是这么静默了两个版本。
+    scheduled_at: Optional[datetime] = None
+    self_declaration: Optional[str] = None
+    collection_name: Optional[str] = None
     accounts: list[TaskAccountOut] = Field(default_factory=list)
 
 

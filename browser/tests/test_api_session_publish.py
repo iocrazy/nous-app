@@ -105,11 +105,12 @@ def test_unknown_platform_answers_in_the_session_result_shape(client):
         assert key in body
 
 
-def test_scheduled_publish_is_refused_rather_than_silently_published_now(client):
-    """S3 不实现定时。收到 scheduled_at 必须**明确拒绝**。
+def test_a_schedule_outside_the_platform_window_is_refused_before_the_browser(client):
+    """定时**已支持**,但窗口外的时间要在起浏览器之前就挡下(§7.7)。
 
     最坏的实现是忽略这个字段照常发 —— 用户以为排到了明早八点,实际此刻
-    就发出去了,而且撤不回来。宁可报错。
+    就发出去了,而且撤不回来。次坏的是把它送进浏览器,等视频传完几百兆
+    之后才被平台拒绝。这里两种都不允许:请求根本没走到浏览器。
     """
     resp = client.post(
         "/session/publish",
@@ -119,7 +120,36 @@ def test_scheduled_publish_is_refused_rather_than_silently_published_now(client)
     body = resp.json()
     assert body["success"] is False
     assert body["status"] == SessionStatus.FAILED.value
-    assert "scheduled" in body["message"].lower()
+    assert body["detail"]["reason"] == "schedule_too_far"
+    assert body["detail"]["stage"] == "intent"
+
+
+def test_a_naive_scheduled_time_is_refused_rather_than_guessed_at(client):
+    """没有时区的时间戳 = 差八小时的赌局,而且赌输了帖子已经发出去了。"""
+    resp = client.post(
+        "/session/publish",
+        json=_body(intent=_intent(scheduled_at="2099-01-01T08:00:00")),
+        headers=_auth(),
+    )
+    body = resp.json()
+    assert body["success"] is False
+    assert body["detail"]["reason"] == "schedule_naive_datetime"
+
+
+def test_an_illegal_self_declaration_is_refused_before_the_browser(client):
+    """自主声明只认平台原文那六个。非法值在入口就拒 —— 走到弹窗里才发现
+    的话,视频已经传完了,而唯一能做的还是放弃这一次发布。"""
+    resp = client.post(
+        "/session/publish",
+        json=_body(
+            intent=_intent(platform_options={"self_declaration": "AI generated"})
+        ),
+        headers=_auth(),
+    )
+    body = resp.json()
+    assert body["success"] is False
+    assert body["detail"]["reason"] == "unknown_self_declaration"
+    assert body["detail"]["stage"] == "intent"
 
 
 def test_publish_response_always_carries_the_envelope(client):

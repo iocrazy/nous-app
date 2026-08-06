@@ -15,7 +15,7 @@ from ..schemas import EnvironmentConfig, SessionResult
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle: login imports schemas only
     from ..login import LoginFlowSpec
-    from ..publish import Publisher
+    from ..publish import PlatformIntentRules, Publisher
 
 SessionValidator = Callable[
     [dict[str, Any], "EnvironmentConfig | None"], Awaitable[SessionResult]
@@ -24,6 +24,7 @@ SessionValidator = Callable[
 _VALIDATORS: dict[str, SessionValidator] = {}
 _LOGIN_FLOWS: dict[str, "LoginFlowSpec"] = {}
 _PUBLISHERS: dict[str, "Publisher"] = {}
+_INTENT_RULES: dict[str, "PlatformIntentRules"] = {}
 
 
 def register(platform: str, validator: SessionValidator) -> None:
@@ -84,6 +85,28 @@ def get_publisher(platform: str) -> "Publisher | None":
 
 def publish_platforms() -> list[str]:
     return sorted(_PUBLISHERS)
+
+
+# A fourth registry, and the only one holding something *pure*. It is separate
+# from the publisher rather than a field on it because it must be reachable
+# without the publisher: `run_publish` consults it before a browser exists, and
+# a test wanting to check "would this intent be accepted" should not have to
+# construct a publish job to ask.
+#
+# Absence is meaningful here. `validate_intent` reads a missing entry as "this
+# platform cannot schedule", so a publisher that forgets to register rules
+# degrades into refusing scheduled posts - not into publishing them now.
+
+
+def register_intent_rules(platform: str, rules: "PlatformIntentRules") -> None:
+    key = platform.strip().lower()
+    if key in _INTENT_RULES:
+        raise ValueError(f"intent rules for '{key}' are already registered")
+    _INTENT_RULES[key] = rules
+
+
+def get_intent_rules(platform: str) -> "PlatformIntentRules | None":
+    return _INTENT_RULES.get((platform or "").strip().lower())
 
 
 # Importing the module performs its registration.

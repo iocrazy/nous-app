@@ -111,6 +111,32 @@ def _account_publish_opts(account: dict, task: dict) -> dict:
     }
 
 
+def unsupported_options(task: dict, channel: str) -> list[str]:
+    """本次批次里 ``channel`` 这条通道**接不住**的表单字段。
+
+    定时发布 / 自主声明 / 合集全都是"在创作页上操作"的能力，只有会话通道
+    （浏览器真的在页面上点）能做到。official 走开放平台 create API（无这些
+    参数），h5 把内容甩给用户手机上的抖音 App（我们连页面都碰不到）。
+
+    返回非空时调用方**让这一行失败**，而不是把字段丢掉照发。理由与浏览器侧
+    对 ``scheduled_at`` 的处理一致：一条本该十二小时后发出、却立刻发出去的
+    作品，不是一个更小的失败；少了自主声明的作品更是合规问题。silent no-op
+    在这条路径上不可接受（CLAUDE.md「触发路径必须类型化失败回显」）。
+
+    纯函数，可单测。
+    """
+    if channel == "session":
+        return []
+    unsupported: list[str] = []
+    if task.get("scheduled_at"):
+        unsupported.append("scheduled publishing")
+    if task.get("self_declaration"):
+        unsupported.append("self declaration")
+    if (task.get("collection_name") or "").strip():
+        unsupported.append("collection")
+    return unsupported
+
+
 def _title_with_hashtags(title: str, topics: list[str]) -> str:
     """Append topics to the official-post title as Douyin hashtags. The create
     API has no dedicated hashtag field — topics ride in the post text as
@@ -171,6 +197,13 @@ async def _publish_one_account(account: dict, adapter, task: dict, repo) -> str:
     private_status = opts["private_status"]
     allow_download = opts["allow_download"]
     try:
+        blocked = unsupported_options(task, channel)
+        if blocked:
+            # 这一行本来就没法兑现用户填的东西 —— 说清楚，别偷偷少发一半。
+            raise RuntimeError(
+                f"{', '.join(blocked)} needs an account connected by QR code "
+                f"(this one publishes via {channel})"
+            )
         if content_type == "images":
             # Images publish only through the H5 note handoff for now. The
             # official create API has no image-post path yet, so an account
@@ -279,11 +312,22 @@ async def _build_publish_intent(account: dict, task: dict, repo):
 
     ``visibility`` passes through as the SEMANTIC word, not Douyin's
     ``private_status`` int — translating to platform-native values is the
-    browser-side uploader's job (§6.1 a/b). ``scheduled_at`` is deliberately NOT
-    forwarded: ``publish_tasks.scheduled_at`` has no dispatcher honouring it
-    today, so handing it to the platform's own scheduler would silently turn a
-    dead column into real scheduled posts nobody asked for.
+    browser-side uploader's job (§6.1 a/b).
+
+    ``scheduled_at`` IS forwarded now (it used to be deliberately dropped while
+    the column had no writer): the schedule is set in the platform's own creator
+    page by the browser, so there is no dispatcher on our side to build — the
+    2h..14d window is the platform's, and it is checked in three places before
+    a browser ever opens (request schema → this intent's fail-fast → the form).
+
+    ``self_declaration`` / ``collection`` ride in ``platform_options`` because
+    they are platform-native controls with no channel-level meaning. The
+    declaration is RESOLVED here rather than read straight off the column —
+    ``ai_content`` alone must still produce a real click on the page (see
+    ``resolve_self_declaration``); leaving that mapping to the browser would
+    put a product decision in the DOM layer where nobody would find it.
     """
+    from app.services.distribution.publish_options import resolve_self_declaration
     from app.services.distribution.session_adapter import PublishIntent, PublishMedia
 
     opts = _account_publish_opts(account, task)
@@ -312,6 +356,19 @@ async def _build_publish_intent(account: dict, task: dict, repo):
                 kind="image", url=cover_url, filename=_media_filename(cover_url)
             )
 
+    # platform_options 只放**真的有值**的键：None 与"键不存在"在浏览器侧语义
+    # 不同（不碰控件 vs 显式设置），送一个 None 进去等于让对面去猜。
+    platform_options: dict[str, Any] = {}
+    declaration = resolve_self_declaration(
+        ai_content=bool(task.get("ai_content")),
+        self_declaration=task.get("self_declaration"),
+    )
+    if declaration:
+        platform_options["self_declaration"] = declaration
+    collection = (task.get("collection_name") or "").strip()
+    if collection:
+        platform_options["collection"] = collection
+
     return PublishIntent(
         content_type=content_type,
         media=media,
@@ -321,7 +378,32 @@ async def _build_publish_intent(account: dict, task: dict, repo):
         visibility=task.get("visibility") or "public",
         allow_download=opts["allow_download"],
         cover=cover,
+        scheduled_at=task.get("scheduled_at"),
+        platform_options=platform_options,
     )
+
+
+#: browser 侧 ``detail["collection"]`` 里表示"发布成功了，但合集没挂上"的三个值
+#: （另外两个是 ``applied`` / ``not_requested``，都不需要回显）。
+#: 合集在浏览器侧是**类型化降级**而不是失败（跨服务约定 2026-08-06）：视频这时
+#: 已经传完，为了一个可以事后在平台后台补挂的归档字段而把作品废掉，代价不对称。
+#: 但降级必须**看得见** —— 不读这三个值，它就退化成 CLAUDE.md 明令禁止的
+#: silent no-op。与自主声明相反：那个是合规、上线后撤不回，浏览器侧任何一步
+#: 失败都直接 raise。
+_COLLECTION_DEGRADED = {"not_found", "control_missing", "error"}
+
+
+def collection_note(detail: dict) -> Optional[str]:
+    """browser 的 ``detail`` → 一句给用户看的"发了，但合集没挂上"。纯函数。
+
+    ``None`` = 合集挂上了、或者本来就没要求合集。
+    """
+    state = (detail or {}).get("collection")
+    if state not in _COLLECTION_DEGRADED:
+        return None
+    requested = (detail or {}).get("collection_requested")
+    named = f" '{requested}'" if requested else ""
+    return f"[collection_{state}] published, but the collection{named} was not applied"
 
 
 async def _settle_session_outcome(
@@ -366,6 +448,8 @@ async def _settle_session_outcome(
         )
         await accounts_repo.mark_needs_relogin(account_id)
 
+    detail = result.get("detail") or {}
+
     if status == SessionStatus.PUBLISHED.value:
         from datetime import datetime, timezone
 
@@ -376,10 +460,14 @@ async def _settle_session_outcome(
             published_url=outcome.published_url,
             # datetime OBJECT — same binding constraint as the official branch.
             published_at=datetime.now(timezone.utc),
+            # 成功行上写 error_message 看着别扭，但这一列**是** UI 唯一能显示
+            # 的自由文本。合集没挂上不该把整行标 failed（作品真的发出去了），
+            # 也不该无声无息 —— 记录页把 success + 非空 error_message 渲染成
+            # 一条提示而不是错误。
+            error_message=collection_note(detail),
         )
         return "success"
 
-    detail = result.get("detail") or {}
     # Why it failed must survive into the row: the UI's only handle on a failed
     # account is this string, and 'proxy_failed' vs 'session_invalid' vs
     # 'unreachable' lead the user to three different actions.

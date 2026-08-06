@@ -139,6 +139,12 @@ class PublishTasksRepository(AsyncpgRepository):
                 ai_content=bool(f.get("ai_content", False)),
                 allow_download=bool(f.get("allow_download", True)),
                 distribution_mode=f.get("distribution_mode", "broadcast"),
+                # mig 407 — 平台原生表单字段。三者都可为 NULL，语义各不相同：
+                # scheduled_at NULL = 立即发；self_declaration NULL = 不碰声明
+                # 控件（≠ '无需添加自主声明'）；collection_name NULL = 不选合集。
+                scheduled_at=f.get("scheduled_at"),
+                self_declaration=f.get("self_declaration"),
+                collection_name=f.get("collection_name"),
             )
             .returning(*_TASK_COLS)
         )

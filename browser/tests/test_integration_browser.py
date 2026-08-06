@@ -168,6 +168,32 @@ def _publish_intent(media_url: str = "https://127.0.0.1:1/never-fetched.mp4"):
     )
 
 
+def _publish_job(**overrides):
+    """A `PublishJob` for the form steps, which never look at the assets."""
+    from app.assets import StagedAsset
+    from app.publish import PublishJob
+    from app.schemas import MediaItem, PublishIntent
+
+    return PublishJob(
+        platform="douyin",
+        storage_state={"cookies": []},
+        environment=overrides.pop("environment", None),
+        intent=PublishIntent(
+            content_type="video",
+            media=[
+                MediaItem(kind="video", url="https://127.0.0.1:1/x.mp4", filename="clip.mp4")
+            ],
+            title="Integration Probe",
+            **overrides,
+        ),
+        assets={
+            "video": StagedAsset(
+                role="video", path="/tmp/none.mp4", filename="clip.mp4", size_bytes=1
+            )
+        },
+    )
+
+
 @requires_browser
 async def test_a_publish_with_a_dead_session_stops_before_downloading_anything():
     """The asset URL here is unreachable on purpose.
@@ -225,3 +251,142 @@ async def test_a_publish_behind_a_dead_proxy_is_reported_as_a_proxy_failure():
 
     assert response.status is SessionStatus.PROXY_FAILED
     assert response.detail["stage"] == "precheck"
+
+
+# --- the publish form's new fields ------------------------------------------
+#
+# These run against synthetic markup, not against Douyin. That is the point:
+# the *selectors* cannot be verified without a logged-in account, but the
+# *Playwright technique* can, and it is the half the fake page silently
+# approves of. `FakePage` accepts any locator call that exists on it, so a wrong
+# key name, an unsupported `exact=` on a role query, or a `wait_for(state=...)`
+# the real API rejects all pass the unit suite and fail once, in production,
+# three minutes into a publish.
+
+
+SEMI_LIKE_FORM = """
+<!doctype html><html><body>
+  <div class="radio"><label class="semi-radio"><input type="radio" name="when">
+    <span class="semi-radio-addon" style="pointer-events:none">立即发布</span>
+  </label></div>
+  <div class="radio"><label class="semi-radio"><input type="radio" name="when">
+    <span class="semi-radio-addon" style="pointer-events:none">定时发布</span>
+  </label></div>
+  <input class="semi-input" placeholder="日期和时间" />
+</body></html>
+"""
+
+SEMI_LIKE_DECLARATION = """
+<!doctype html><html><body>
+  <div>请选择自主声明</div>
+  <div class="semi-modal-content">
+    <div>对作品内容添加声明</div>
+    <label class="semi-radio"><input type="radio" name="d">
+      <span class="semi-radio-addon" style="pointer-events:none">内容由AI生成</span></label>
+    <label class="semi-radio"><input type="radio" name="d">
+      <span class="semi-radio-addon" style="pointer-events:none">虚构演绎，仅供娱乐</span></label>
+    <label class="semi-radio"><input type="radio" name="d">
+      <span class="semi-radio-addon" style="pointer-events:none">无需添加自主声明</span></label>
+    <button>取消</button><button>确定</button>
+  </div>
+  <script>
+    document.querySelectorAll('button')[1].addEventListener('click', () => {
+      document.querySelector('.semi-modal-content').style.display = 'none';
+    });
+  </script>
+</body></html>
+"""
+
+
+async def _page_with(content: str):
+    """A real Chromium page holding `content`. Caller closes the browser."""
+    from playwright.async_api import async_playwright
+
+    playwright = await async_playwright().start()
+    browser = await playwright.chromium.launch(headless=True)
+    page = await (await browser.new_context()).new_page()
+    await page.set_content(content)
+    return playwright, browser, page
+
+
+@requires_browser
+async def test_the_scheduled_time_really_lands_in_a_semi_style_field():
+    """Click, select-all, type, Enter - against a real keyboard implementation.
+
+    `Control+KeyA` is the part no fake can check. Get that key name wrong and
+    the select-all silently does nothing, so the typed timestamp is *appended*
+    to the picker's own default rather than replacing it - which produces a
+    valid-looking string, a schedule nobody chose, and no error anywhere.
+    """
+    from datetime import datetime, timezone
+
+    from app.platforms import douyin_publish as dp
+    from app.publish import Deadline
+
+    playwright, browser, page = await _page_with(SEMI_LIKE_FORM)
+    try:
+        # Pre-seed the field the way the platform's picker does, so a
+        # select-all that fails to select shows up as a concatenation.
+        await page.locator('.semi-input[placeholder="日期和时间"]').fill("2026-01-01 00:00")
+
+        job = _publish_job(scheduled_at=datetime(2026, 8, 8, 4, 0, tzinfo=timezone.utc))
+        result = await dp._set_schedule(page, job, Deadline(30))
+
+        assert result["scheduled_input"] == "2026-08-08 12:00"
+        value = await page.locator('.semi-input[placeholder="日期和时间"]').input_value()
+        assert value == "2026-08-08 12:00", f"select-all did not replace the seed: {value!r}"
+        # And the radio the caption belongs to is the one that got selected,
+        # despite `pointer-events: none` on that caption (§7.4).
+        assert await page.locator(".semi-radio").nth(1).locator("input").is_checked()
+    finally:
+        await browser.close()
+        await playwright.stop()
+
+
+@requires_browser
+async def test_the_declaration_dialog_chain_uses_a_real_playwright_api():
+    """Every locator call in the declaration step, executed for real.
+
+    Specifically: `.filter(has_text=...)` scoping to the modal, `get_by_text`
+    with `exact=True`, `get_by_role("button", name="确定", exact=True)` reaching
+    the right one of two buttons, and `wait_for(state="hidden")` actually
+    resolving once the dialog closes. A publish that raises `AttributeError`
+    here fails as an untyped crash, after the upload.
+    """
+    from app.platforms import douyin_publish as dp
+    from app.publish import Deadline
+
+    playwright, browser, page = await _page_with(SEMI_LIKE_DECLARATION)
+    try:
+        job = _publish_job(platform_options={"self_declaration": "虚构演绎,仅供娱乐"})
+        result = await dp._set_self_declaration(page, job, Deadline(30))
+
+        # The half-width comma the caller sent was folded onto the platform's
+        # own copy, and that is what got clicked.
+        assert result["self_declaration_value"] == "虚构演绎，仅供娱乐"
+        assert await page.locator(".semi-radio").nth(1).locator("input").is_checked()
+    finally:
+        await browser.close()
+        await playwright.stop()
+
+
+@requires_browser
+async def test_a_declaration_the_dialog_does_not_offer_fails_typed_not_crashed():
+    """The failure path through the same real API. It must arrive as a
+    `StepFailure` carrying what the dialog *did* offer - an untyped exception
+    here reaches the endpoint as a generic 500-shaped answer and loses the one
+    detail that makes it fixable."""
+    from app.platforms import douyin_publish as dp
+    from app.publish import Deadline
+
+    playwright, browser, page = await _page_with(SEMI_LIKE_DECLARATION)
+    try:
+        job = _publish_job(platform_options={"self_declaration": "内容为转载信息"})
+        with pytest.raises(dp.StepFailure) as excinfo:
+            await dp._set_self_declaration(page, job, Deadline(30))
+
+        assert excinfo.value.detail["reason"] == "self_declaration_option_missing"
+        assert "内容由AI生成" in excinfo.value.detail["options_on_screen"]
+    finally:
+        await browser.close()
+        await playwright.stop()
