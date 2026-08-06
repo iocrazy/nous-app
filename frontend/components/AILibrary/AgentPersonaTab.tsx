@@ -23,6 +23,7 @@ import type { AILibraryAgent, AILibrarySkill } from '../../types';
 import { MarkdownEditor } from './MarkdownEditor';
 import { AgentIconPicker } from './AgentIconPicker';
 import { renderModelSelect, type ProviderModelGroup } from './agentEditorModel';
+import { hasPersonalOverride, overrideFieldCount } from './agentOverride';
 
 type PersonaDoc = 'identity_md' | 'soul_md' | 'agent_md';
 
@@ -75,6 +76,24 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
       {readOnly && (
         <div className="rounded-lg border border-warn-line bg-warn-soft px-3 py-2 text-xs text-warn">
           {t('aiLibrary.agents.presetReadOnly')}
+        </div>
+      )}
+
+      {/* Personal override (mig 341). Editing a system preset writes to the
+          caller's own layer, not the template — without this line the edit
+          looks like it changed the official agent for everyone. Reset lives in
+          the header's "..." menu, one step away from an accidental click. */}
+      {hasPersonalOverride(agent) && (
+        <div
+          data-testid="agent-override-banner"
+          data-override-count={overrideFieldCount(agent)}
+          className="rounded-lg border border-warn-line bg-warn-soft px-3 py-2 text-xs text-warn"
+        >
+          {t(
+            'aiLibrary.agents.overrideActive',
+            'You have {{count}} personal change(s) overriding this system template — only you see them.',
+            { count: overrideFieldCount(agent) },
+          )}
         </div>
       )}
 

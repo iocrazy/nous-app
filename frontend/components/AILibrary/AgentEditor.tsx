@@ -197,6 +197,8 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [permSaving, setPermSaving] = useState(false);
+  // Declared with the other hooks on purpose — see the file-header WARNING.
+  const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forkModalOpen, setForkModalOpen] = useState(false);
   const [allAgents, setAllAgents] = useState<AILibraryAgent[]>([]);
@@ -361,12 +363,45 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
   };
 
   /**
-   * Resume from a paused state (budget or manual). Clears `paused_reason`
-   * via a dedicated endpoint so the PATCH route's exclude-null semantics
-   * stay uniform. If the agent is still over its monthly budget, the
-   * sweeper will re-pause within ~60 s — callers should bump the budget
-   * first to avoid the flap.
+   * 复位 (mig 341): drop the caller's personal override layer so this system
+   * preset falls back to the admin/system defaults. The endpoint returns the
+   * refreshed MERGED agent, so the draft is re-seeded from the response
+   * rather than from a second GET — the reset and what the form shows can't
+   * drift apart.
+   *
+   * scope='user' (the service default) is the only reachable layer here: the
+   * single-agent GET never merges a team override, so nothing the editor
+   * displays can have come from one.
    */
+  const handleResetOverride = async (): Promise<void> => {
+    if (resetting) return;
+    if (!window.confirm(
+      t('aiLibrary.agents.overrideResetConfirm',
+        'Discard your personal changes and restore this system template? Your edits cannot be recovered.'),
+    )) return;
+    setResetting(true);
+    try {
+      const updated = await aiLibraryService.deleteAgentOverride(slug);
+      setAgent(updated);
+      setDraft(buildDraft(updated));
+      addToast(
+        t('aiLibrary.agents.overrideResetToast', 'Restored system defaults'),
+        'success',
+      );
+      // The sidebar keeps its own list, whose "customized" badge reads
+      // override_scopes — this agent just left that set.
+      window.dispatchEvent(new CustomEvent('ai-library:agents-changed'));
+    } catch (err) {
+      console.error('[AgentEditor] deleteAgentOverride failed:', err);
+      addToast(
+        t('aiLibrary.agents.saveError', { error: friendlyError(err) }),
+        'error',
+      );
+    } finally {
+      setResetting(false);
+    }
+  };
+
   // Hard-delete this user-owned agent (presets never see the menu item).
   const handleDeleteAgent = async (): Promise<void> => {
     // eslint-disable-next-line no-alert
@@ -513,6 +548,7 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
             }}
             onDuplicate={openForkModal}
             onDelete={isPreset ? undefined : handleDeleteAgent}
+            onResetOverride={handleResetOverride}
           />
 
           <div className="flex items-center gap-2">

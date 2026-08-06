@@ -137,3 +137,30 @@ describe('AgentPersonaTab — 技能绑定开关行', () => {
     expect(unbound.querySelector('[aria-label="Move up"]')).toBeNull();
   });
 });
+
+/**
+ * The banner is the only place the user learns their preset edits went into a
+ * personal layer rather than into the template. It carries the field count so
+ * "I changed one word" and "I rewrote all three documents" don't read alike.
+ */
+describe('AgentPersonaTab — personal override banner', () => {
+  const preset = (over: Partial<AILibraryAgent>): AILibraryAgent =>
+    ({ ...agent, is_system_preset: true, ...over }) as AILibraryAgent;
+
+  it('announces the override on a customized system preset', () => {
+    const el = renderTab({
+      agent: preset({ override_scope: 'user', override_fields: ['soul_md', 'model'] }),
+    }).getByTestId('agent-override-banner');
+    expect(el.getAttribute('data-override-count')).toBe('2');
+  });
+
+  it('stays hidden on a preset the caller never customized', () => {
+    renderTab({ agent: preset({ override_fields: [] }) });
+    expect(screen.queryByTestId('agent-override-banner')).toBeNull();
+  });
+
+  it('stays hidden on a user-owned agent — its edits are the row itself', () => {
+    renderTab({ agent: { ...agent, override_fields: ['soul_md'] } as AILibraryAgent });
+    expect(screen.queryByTestId('agent-override-banner')).toBeNull();
+  });
+});
