@@ -30,10 +30,12 @@ ASCII — how write_scope decides:
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.engine import get_engine
@@ -174,3 +176,48 @@ async def unit_of_work() -> AsyncIterator[AsyncSession]:
                 yield session
             finally:
                 _request_session.reset(token)
+
+
+@asynccontextmanager
+async def caller_scope(user_id: str) -> AsyncIterator[AsyncSession]:
+    """RLS-enforced session that runs as the CALLING USER, not ``postgres``.
+
+    The DB-layer backstop (RLS 第三层, spec §3.2③): the agent-tool data path
+    normally runs on the ``postgres`` superuser connection, which BYPASSes RLS,
+    so the mig-408 tenant policies are inert for it. Running the tool's scene /
+    shot access inside this scope switches the transaction to the ``authenticated``
+    role — NOT a superuser, so RLS is enforced and every row is tenant-filtered.
+
+    THREE load-bearing properties:
+
+    1. **Own transaction, NEVER an ambient ``unit_of_work()``.** Unlike
+       ``read_scope``/``write_scope`` (which join an ambient UoW when present),
+       this ALWAYS opens its own session + ``begin()``. That is what makes the
+       ``SET LOCAL ROLE`` + injected ``request.jwt.claims`` scoped to exactly
+       this transaction — they auto-reset on commit/rollback and can never leak
+       into an outer service/postgres transaction (the footgun ``write_scope``'s
+       docstring warns about). Do NOT refactor this to reuse ``_request_session``.
+
+    2. **``user_id`` is the SERVER-BOUND scope's user** (from ``scope_for_run`` /
+       ``AgentRunScope``), NEVER a model-asserted value. RLS-as-backstop is only
+       meaningful because the identity is server-owned — the whole trust-boundary
+       principle (spec §4.5).
+
+    3. **Wrap ONLY the tenant-scoped data access.** Infra queries that read
+       ``agent_runs`` etc. to DERIVE the scope must run as ``postgres`` (they need
+       to see rows RLS would hide from ``authenticated``); resolve the scope /
+       ``user_id`` FIRST on the normal connection, THEN enter ``caller_scope`` for
+       the scene/shot reads+writes. Same engine — Supavisor / NullPool /
+       ``statement_cache_size=0`` unchanged, no new pool.
+    """
+    claims = json.dumps({"sub": str(user_id), "role": "authenticated"})
+    async with get_sessionmaker()() as session:
+        async with session.begin():
+            # LOCAL → auto-reset when this (own) transaction ends. authenticated
+            # loses BYPASSRLS, so mig-408 policies filter every subsequent row.
+            await session.execute(text("SET LOCAL ROLE authenticated"))
+            await session.execute(
+                text("SELECT set_config('request.jwt.claims', :claims, true)"),
+                {"claims": claims},
+            )
+            yield session
