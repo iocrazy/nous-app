@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Copy, GitFork, MoreHorizontal, Pause, Play, Plus,
-  Trash2,
+  RotateCcw, Trash2,
 } from 'lucide-react';
 import type { AILibraryAgent } from '../../types';
 import { aiLibraryService } from '../../services/aiLibraryService';
+import { hasPersonalOverride } from './agentOverride';
 import { createIssue } from '../../services/issuesService';
 import { NewIssueDialog } from '../Todolist/NewIssueDialog';
 import { useToast } from '../Toast';
@@ -71,10 +72,16 @@ interface AgentActionBarProps {
   onDuplicate?: () => void;
   /** Deletes this user-owned agent (hidden for system presets). */
   onDelete?: () => void;
+  /**
+   * Drops the caller's personal override layer on a system preset (mig 341).
+   * The item only renders when the agent actually carries one — see
+   * `hasPersonalOverride`.
+   */
+  onResetOverride?: () => void;
 }
 
 export const AgentActionBar: React.FC<AgentActionBarProps> = ({
-  agent, readOnly, onAgentUpdated, onDuplicate, onDelete,
+  agent, readOnly, onAgentUpdated, onDuplicate, onDelete, onResetOverride,
 }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -185,6 +192,20 @@ export const AgentActionBar: React.FC<AgentActionBarProps> = ({
                 >
                   <GitFork size={12} />
                   {t('aiLibrary.agents.duplicate', 'Duplicate')}
+                </button>
+              )}
+              {onResetOverride && hasPersonalOverride(agent) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onResetOverride();
+                  }}
+                  data-testid="agent-reset-override"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-warn hover:bg-warn-soft"
+                >
+                  <RotateCcw size={12} />
+                  {t('aiLibrary.agents.resetToDefaults', 'Reset to defaults')}
                 </button>
               )}
               {onDelete && !agent.is_system_preset && (

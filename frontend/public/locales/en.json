@@ -2842,9 +2842,10 @@
         "freqCustom": "Custom",
         "resultHint": "Each run creates an issue assigned to this agent; its answer arrives as a reply there."
       },
-      "overrideActive": "Customized ({{scope}} layer) — your edits apply only to you; the system default is untouched.",
+      "overrideActive": "You have {{count}} personal change(s) overriding this system template — only you see them; the template itself is untouched.",
       "presetOverrideHint": "System agent — edits are saved as your personal customization (visible only to you) and can be reset anytime.",
       "resetToDefaults": "Reset to defaults",
+      "overrideResetConfirm": "Discard your personal changes and restore this system template? Your edits cannot be recovered.",
       "overrideResetToast": "Restored system defaults",
       "delete": "Delete agent",
       "deleteConfirm": "Delete this agent? Its runs and skill bindings are removed; chat history stays readable.",

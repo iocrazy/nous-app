@@ -2842,9 +2842,10 @@
         "freqCustom": "自定义",
         "resultHint": "每次执行都会创建一个指派给该智能体的 issue，结果作为回复落在那里。"
       },
-      "overrideActive": "已自定义（{{scope}} 层）— 修改仅对你生效，系统默认参数不受影响。",
+      "overrideActive": "你有 {{count}} 处个人修改覆盖了系统模板 — 仅你自己可见，模板本身不受影响。",
       "presetOverrideHint": "系统智能体 — 修改将保存为你的个人自定义（仅自己可见），可随时恢复默认。",
-      "resetToDefaults": "恢复默认",
+      "resetToDefaults": "恢复系统默认",
+      "overrideResetConfirm": "放弃你的个人修改并恢复系统模板？修改无法找回。",
       "overrideResetToast": "已恢复系统默认",
       "delete": "删除智能体",
       "deleteConfirm": "删除该智能体?其运行记录与技能绑定将被移除;聊天历史仍可查看。",

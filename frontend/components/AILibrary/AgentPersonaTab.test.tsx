@@ -137,3 +137,36 @@ describe('AgentPersonaTab — 技能绑定开关行', () => {
     expect(unbound.querySelector('[aria-label="Move up"]')).toBeNull();
   });
 });
+
+/**
+ * The banner is the only place the user learns that editing a system template
+ * writes to a personal layer instead of to the template. Two lines, one per
+ * moment: the preventive one before there is anything to reset, the warn-toned
+ * one (with the field count, so "changed one word" and "rewrote all three
+ * documents" don't read alike) once there is.
+ */
+describe('AgentPersonaTab — persona hint banner', () => {
+  const preset = (over: Partial<AILibraryAgent>): AILibraryAgent =>
+    ({ ...agent, is_system_preset: true, ...over }) as AILibraryAgent;
+
+  it('announces the override on a customized system preset', () => {
+    const el = renderTab({
+      agent: preset({ override_scope: 'user', override_fields: ['soul_md', 'model'] }),
+    }).getByTestId('agent-override-banner');
+    expect(el.getAttribute('data-override-count')).toBe('2');
+    // Exclusive — the preventive line has nothing left to prevent.
+    expect(screen.queryByTestId('agent-preset-hint-banner')).toBeNull();
+  });
+
+  it('explains where edits will land on a preset that has none yet', () => {
+    renderTab({ agent: preset({ override_fields: [] }) });
+    expect(screen.getByTestId('agent-preset-hint-banner')).toBeTruthy();
+    expect(screen.queryByTestId('agent-override-banner')).toBeNull();
+  });
+
+  it('says nothing on a user-owned agent — its edits are the row itself', () => {
+    renderTab({ agent: { ...agent, override_fields: ['soul_md'] } as AILibraryAgent });
+    expect(screen.queryByTestId('agent-override-banner')).toBeNull();
+    expect(screen.queryByTestId('agent-preset-hint-banner')).toBeNull();
+  });
+});
