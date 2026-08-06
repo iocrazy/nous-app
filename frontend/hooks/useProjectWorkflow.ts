@@ -15,13 +15,16 @@ interface UseProjectWorkflow {
   reload: () => Promise<void>;
 }
 
-export function useProjectWorkflow(projectId: string): UseProjectWorkflow {
+export function useProjectWorkflow(
+  projectId: string,
+  episodeId?: string | null,
+): UseProjectWorkflow {
   const [workflow, setWorkflow] = useState<ProjectWorkflow | null>(null);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
     try {
-      const wf = await fetchProjectWorkflow(projectId);
+      const wf = await fetchProjectWorkflow(projectId, episodeId ?? undefined);
       setWorkflow(wf);
     } catch (err) {
       console.error('[useProjectWorkflow] fetch failed', err);
@@ -29,12 +32,12 @@ export function useProjectWorkflow(projectId: string): UseProjectWorkflow {
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, episodeId]);
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    fetchProjectWorkflow(projectId)
+    fetchProjectWorkflow(projectId, episodeId ?? undefined)
       .then((wf) => {
         if (alive) setWorkflow(wf);
       })
@@ -48,7 +51,7 @@ export function useProjectWorkflow(projectId: string): UseProjectWorkflow {
     return () => {
       alive = false;
     };
-  }, [projectId]);
+  }, [projectId, episodeId]);
 
   return { workflow, loading, reload };
 }
