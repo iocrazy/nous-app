@@ -145,7 +145,14 @@ function AgentCard({
 
   return (
     <div
-      className="group/card rounded-xl border border-ink-800/60 bg-ink-900/20 p-3 transition-colors hover:border-ink-700"
+      // 整卡可点进详情（设计稿 §01 "点卡片进入"；2026-08-05 用户回归：只有
+      // 名称文字可点，卡片空白处无反应）。内部按钮各有自己的动作——凡事件
+      // 起点落在 button 上就让位，避免"点对话同时又跳详情"的双触发。
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest('button, a')) return;
+        openEditor();
+      }}
+      className="group/card cursor-pointer rounded-xl border border-ink-800/60 bg-ink-900/20 p-3 transition-colors hover:border-ink-700"
       data-testid="agent-card"
       data-slug={agent.slug}
     >
