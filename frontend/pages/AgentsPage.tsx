@@ -18,7 +18,14 @@ export const AgentsPage: React.FC = () => {
     : '/agents';
 
   return (
-    <div className="flex-1 h-full min-h-0 overflow-hidden">
+    // Grows with its content instead of `h-full … overflow-hidden`. That combo
+    // pinned this box to the viewport and clipped, which left AgentsTab's own
+    // `overflow-y-auto` as the only thing that could scroll — a second scroll
+    // container nested inside AILibraryLayout's. The scrollbar therefore
+    // rendered inside the page gutter (flush against the Persona tab's
+    // attributes card) and came and went per tab, jogging the column sideways
+    // on every switch. AILibraryLayout owns the page scroll; this just flows.
+    <div className="flex-1 min-w-0">
       <AgentsTab
         slug={urlSlug}
         onSlugChange={(next) => navigate(`${prefix}${agentsBase}/${next}`)}

@@ -108,6 +108,12 @@ class RunGroupItem(BaseModel):
     group_key: str
     # conversations.id as numeric string; NULL for single non-chat runs.
     conversation_id: Optional[str] = None
+    # Display name for the row: conversation title → issue title → first user
+    # message (60-char cap). NULL for pipeline runs that name no conversation;
+    # the client supplies the translated fallback label in that case. Derived
+    # in list_groups_by_agent — see its docstring for why the client cannot
+    # get this from latest_output_summary.
+    title: Optional[str] = None
     run_count: int
     prompt_tokens: int = 0
     completion_tokens: int = 0

@@ -2618,7 +2618,8 @@
         "workbench": "Workbench",
         "persona": "Persona & Skills",
         "profile": "Profile",
-        "permissions": "Permissions"
+        "permissions": "Permissions",
+        "cost": "Cost"
       },
       "loadErrorPrefix": "Failed to load agent",
       "listLoadError": "Failed to load agents",
@@ -2832,8 +2833,10 @@
       "deleteConfirm": "Delete this agent? Its runs and skill bindings are removed; chat history stays readable.",
       "deletedToast": "Agent deleted",
       "attributes": "Attributes",
-      "costSection": "Cost & limits",
+      "limitsSection": "Budget & limits",
       "waitingReplies": "{{count}} issue(s) waiting for your reply",
+      "waitingRepliesTitle": "Waiting on you",
+      "waitingRepliesEmpty": "Nothing waiting for your reply",
       "goAnswer": "Go answer",
       "viewInIssues": "View in Issues",
       "backToOverview": "Back to overview",

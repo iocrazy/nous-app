@@ -28,6 +28,7 @@ deletes them after each test even on failure.
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -272,6 +273,180 @@ async def test_list_groups_by_agent_collapses_conversation(
     assert all(int(r["conversation_id"]) == conv_id for r in turns["items"])
 
     # Cleanup the seeded conversation (agent_runs rows cascade via ai_agents).
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        await conn.execute("DELETE FROM conversations WHERE id = $1", conv_id)
+    finally:
+        await conn.close()
+
+
+async def test_list_groups_title_prefers_conversation_then_issue_then_ask(
+    integration_db_url, patched_engine, cleanup_test_rows
+):
+    """``title`` names the row. Three sources in priority order, and NULL when
+    none apply.
+
+    Why not derive it client-side from ``latest_output_summary``: that column
+    is the tail of the agent's output, so it is prose only by luck. On prod,
+    44 of 99 runs have no summary and 20 more end in a JSON payload — which is
+    exactly how every row came to read "Untitled conversation". Each branch
+    below is one of the shapes that used to land there."""
+    conn = await asyncpg.connect(integration_db_url)
+    conv_ids: list[int] = []
+    issue_id = None
+    try:
+        agent_id, user_id = await _seed_agent_and_user(conn)
+        team_id = await conn.fetchval("SELECT id FROM teams LIMIT 1")
+        if team_id is None:
+            pytest.skip("No teams rows to satisfy conversations.scope_id FK")
+
+        async def _conv(title: str | None) -> int:
+            cid = await conn.fetchval(
+                """INSERT INTO conversations (type, scope_id, created_by, title)
+                   VALUES ('direct_agent', $1, $2, $3) RETURNING id""",
+                team_id,
+                user_id,
+                title,
+            )
+            conv_ids.append(cid)
+            return cid
+
+        base = datetime.now(timezone.utc)
+
+        # (1) Conversation title wins — even though the run's own summary is
+        #     a JSON dump, which is what the client used to render.
+        titled = await _conv("Write the opening scene of the pilot")
+        await _insert_run(
+            conn,
+            agent_id,
+            user_id,
+            conversation_id=titled,
+            trigger="chat",
+            output_summary='{"shots": [{"title": "wide"}]}',
+            started_at=base,
+        )
+
+        # (2) No conversation at all, but the run came from an issue.
+        issue_id = await conn.fetchval(
+            """INSERT INTO issues (issue_number, identifier, title, status,
+                                   priority, origin_kind, created_by_user_id,
+                                   assignee_agent_id)
+               VALUES ((SELECT COALESCE(MAX(issue_number), 0) + 1 FROM issues),
+                       $1, $2, 'todo', 'medium', 'agent_dispatch', $3, $4)
+               RETURNING id""",
+            f"B2R2-{uuid.uuid4().hex[:8]}",
+            "Ask which colour scheme to use",
+            user_id,
+            agent_id,
+        )
+        await _insert_run(
+            conn,
+            agent_id,
+            user_id,
+            issue_id=issue_id,
+            trigger="issue_dispatch",
+            started_at=base - timedelta(minutes=1),
+        )
+
+        # (3) Untitled conversation → the first thing the user actually asked.
+        #     The leading agent message and the leading JSON-ish user message
+        #     must both be skipped: neither names the chat.
+        asked = await _conv(None)
+        for seq, (sender, body) in enumerate(
+            [
+                ("agent", "Ready when you are."),
+                ("user", '{"paste": "a payload, not a question"}'),
+                ("user", "Draft the montage for act two"),
+                ("user", "and then tighten it"),
+            ],
+            start=1,
+        ):
+            await conn.execute(
+                """INSERT INTO messages (conversation_id, seq, sender_type, body)
+                   VALUES ($1, $2, $3, $4::jsonb)""",
+                asked,
+                seq,
+                sender,
+                f'{{"text": {json.dumps(body)}}}',
+            )
+        await _insert_run(
+            conn,
+            agent_id,
+            user_id,
+            conversation_id=asked,
+            trigger="chat",
+            started_at=base - timedelta(minutes=2),
+        )
+
+        # (4) A pipeline run: no conversation, no issue, nothing to name it.
+        await _insert_run(
+            conn,
+            agent_id,
+            user_id,
+            trigger="visual_analysis_l1",
+            output_summary='```json\n{"prompt_en": "..."}',
+            started_at=base - timedelta(minutes=3),
+        )
+    finally:
+        await conn.close()
+
+    result = await _repo().list_groups_by_agent(agent_id=agent_id, user_id=user_id)
+    titles = [row["title"] for row in result["items"]]  # newest activity first
+    assert titles == [
+        "Write the opening scene of the pilot",
+        "Ask which colour scheme to use",
+        "Draft the montage for act two",
+        # NULL, not "" — the client owns the translated fallback label.
+        None,
+    ]
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        if conv_ids:
+            await conn.execute(
+                "DELETE FROM conversations WHERE id = ANY($1::bigint[])", conv_ids
+            )
+        if issue_id is not None:
+            await conn.execute("DELETE FROM issues WHERE id = $1", issue_id)
+    finally:
+        await conn.close()
+
+
+async def test_list_groups_title_truncates_a_long_first_ask(
+    integration_db_url, patched_engine, cleanup_test_rows
+):
+    """The fallback ask is capped so one pasted paragraph cannot dominate the
+    row's width or its accessible name."""
+    conn = await asyncpg.connect(integration_db_url)
+    conv_id = None
+    try:
+        agent_id, user_id = await _seed_agent_and_user(conn)
+        team_id = await conn.fetchval("SELECT id FROM teams LIMIT 1")
+        if team_id is None:
+            pytest.skip("No teams rows to satisfy conversations.scope_id FK")
+        conv_id = await conn.fetchval(
+            """INSERT INTO conversations (type, scope_id, created_by, title)
+               VALUES ('direct_agent', $1, $2, NULL) RETURNING id""",
+            team_id,
+            user_id,
+        )
+        await conn.execute(
+            """INSERT INTO messages (conversation_id, seq, sender_type, body)
+               VALUES ($1, 1, 'user', $2::jsonb)""",
+            conv_id,
+            f'{{"text": {json.dumps("x" * 400)}}}',
+        )
+        await _insert_run(
+            conn, agent_id, user_id, conversation_id=conv_id, trigger="chat"
+        )
+    finally:
+        await conn.close()
+
+    result = await _repo().list_groups_by_agent(agent_id=agent_id, user_id=user_id)
+    title = result["items"][0]["title"]
+    assert len(title) == 60
+    assert title.endswith("…")
+
     conn = await asyncpg.connect(integration_db_url)
     try:
         await conn.execute("DELETE FROM conversations WHERE id = $1", conv_id)

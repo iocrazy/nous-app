@@ -1,13 +1,15 @@
 // frontend/components/AILibrary/AgentEditor.tsx
-// Agent detail shell — three tabs (B2, spec 2026-08-02 §B2).
+// Agent detail shell — five tabs (B2, spec 2026-08-02 §B2).
 //
-//   Workbench  what it's doing      → AgentWorkbenchTab
-//   Persona    who it is            → AgentPersonaTab
-//   Profile    its paperwork        → AgentProfileTab
+//   Workbench    what it's doing     → AgentWorkbenchTab
+//   Persona      who it is           → AgentPersonaTab
+//   Permissions  who may talk to it  → PermissionsSection
+//   Cost         what it has spent   → AgentCostTab
+//   Profile      its paperwork       → AgentProfileTab
 //
 // Eight sub-tabs used to sit here; LEGACY_TAB_MAP keeps old ``?tab=`` links
 // working. This file keeps what the tabs share: loading the agent, the draft
-// and its single Save, the paused/override banners, and tab routing.
+// and its Save, the provider-preflight banner, and tab routing.
 //
 // Draft state is local; `save()` PATCHes via aiLibraryService and replaces
 // the hydrated agent immutably on success.
@@ -15,7 +17,7 @@
 // WARNING: Every hook stays ABOVE the loading/error early-returns. A useState below
 // them changes the hook count between the loading and loaded renders and
 // blows up with React #310 on every agent open — that regression shipped
-// once already (see resetOverride's note).
+// once already, via a `useState` declared next to a handler down in the body.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -31,11 +33,11 @@ import { aiLibraryService } from '../../services/aiLibraryService';
 import { getNousModels, getAIGovernance } from '../../services/aiService';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../Toast';
-import { AlertTriangle, Play } from 'lucide-react';
 import { NewAgentModal } from './NewAgentModal';
 import { AgentActionBar } from './AgentActionBar';
 import { AgentWorkbenchTab } from './AgentWorkbenchTab';
 import { AgentPersonaTab } from './AgentPersonaTab';
+import { AgentCostTab } from './AgentCostTab';
 import { AgentProfileTab } from './AgentProfileTab';
 import PermissionsSection from './PermissionsSection';
 import { PROVIDER_DISPLAY_NAMES, getAvailableModels } from './agentEditorModel';
@@ -43,15 +45,20 @@ import { GROUP_AVATAR, agentGroupOf } from './agentStatus';
 import { getAgentIcon } from './agentIcons';
 import { useGlobalChatStore } from '../../stores/globalChatStore';
 
-type SubTab = 'workbench' | 'persona' | 'permissions' | 'profile';
+type SubTab = 'workbench' | 'persona' | 'permissions' | 'cost' | 'profile';
 
 /**
  * Where each of the old eight sub-tabs went (B2, spec 2026-08-02 §B2).
  * Bookmarks and in-app links carrying the old ``?tab=`` values keep working
  * instead of silently landing on the default tab.
+ *
+ * ``dashboard`` follows its CONTENT, not its old position: it was the 14-day
+ * charts + spend breakdown, which rode into Profile during the rebuild and now
+ * lives on Cost. Pointing it at the workbench would land the user on a tab
+ * that shares none of what they bookmarked.
  */
 export const LEGACY_TAB_MAP: Record<string, SubTab> = {
-  dashboard: 'workbench',
+  dashboard: 'cost',
   runs: 'workbench',
   routines: 'workbench',
   overview: 'persona',
@@ -60,7 +67,23 @@ export const LEGACY_TAB_MAP: Record<string, SubTab> = {
   versions: 'profile',
 };
 
-export const SUB_TABS: SubTab[] = ['workbench', 'persona', 'permissions', 'profile'];
+/**
+ * Reading order: what it is doing → who it is → who may talk to it → what it
+ * costs → its paperwork.
+ *
+ * Cost is its own step rather than a block inside Profile. Profile was
+ * answering two unrelated questions in one scroll — "how has spend been
+ * trending" (charts, usage, 14-day rollup) and "what did this prompt look like
+ * last week" (version history) — and the budget inputs at the top made the
+ * whole thing read as one page about money that then wasn't.
+ */
+export const SUB_TABS: SubTab[] = [
+  'workbench',
+  'persona',
+  'permissions',
+  'cost',
+  'profile',
+];
 
 /** English fallbacks: `t()` with no default renders the raw key path when a
  *  locale is missing one, which in a tab strip looks like a broken label. */
@@ -68,6 +91,7 @@ const SUB_TAB_LABELS: Record<SubTab, string> = {
   workbench: 'Workbench',
   persona: 'Persona & Skills',
   permissions: 'Permissions',
+  cost: 'Cost',
   profile: 'Profile',
 };
 
@@ -173,11 +197,9 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [permSaving, setPermSaving] = useState(false);
-  const [resuming, setResuming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forkModalOpen, setForkModalOpen] = useState(false);
   const [allAgents, setAllAgents] = useState<AILibraryAgent[]>([]);
-  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -367,56 +389,6 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
     }
   };
 
-  // 复位: drop the caller's override layer so the preset falls back to the
-  // admin/system defaults (DELETE /agents/{slug}/override). NOTE: its
-  // `resetting` state is declared with the other hooks at the top — a
-  // useState down here sat AFTER the loading/error early-returns and blew
-  // up every agent open with React #310 (hooks count changed between the
-  // loading render and the loaded render).
-  const resetOverride = async (): Promise<void> => {
-    setResetting(true);
-    try {
-      const updated = await aiLibraryService.deleteAgentOverride(slug);
-      setAgent(updated);
-      setDraft(buildDraft(updated));
-      addToast(
-        t('aiLibrary.agents.overrideResetToast', 'Restored system defaults'),
-        'success',
-      );
-    } catch (err) {
-      console.error('[AgentEditor] deleteAgentOverride failed:', err);
-      addToast(
-        t('aiLibrary.agents.saveError', { error: friendlyError(err) }),
-        'error',
-      );
-    } finally {
-      setResetting(false);
-    }
-  };
-
-  const handleResume = async (): Promise<void> => {
-    if (catalogLocked) return;
-    setResuming(true);
-    setError(null);
-    try {
-      const updated = await aiLibraryService.resumeAgent(slug);
-      setAgent(updated);
-      setDraft(buildDraft(updated));
-      addToast(
-        t('aiLibrary.agents.budget.resumedToast', 'Agent resumed'),
-        'success',
-      );
-    } catch (err) {
-      console.error('[AgentEditor] resumeAgent failed:', err);
-      addToast(
-        t('aiLibrary.agents.resumeError', { error: friendlyError(err) }),
-        'error',
-      );
-    } finally {
-      setResuming(false);
-    }
-  };
-
   /**
    * Permissions save their own way: their own role gate, deliberately NOT
    * folded into the header Save (permissions are governance, editable even on
@@ -524,7 +496,14 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
             <span>{agent.model}</span>
           </div>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        {/* Three groups, weakest first, separated by a gap twice the size of
+            the one inside a group: [state + overflow] · [secondary] · [primary].
+            Everything used to sit in one flat gap-2 row — Assign Task, Pause,
+            the status chip, "...", Save and Start chat all reading as peers,
+            with Save appearing and disappearing in the middle of the row and
+            shuffling its neighbours sideways. */}
+        <div className="ml-auto flex items-center gap-4">
+          {/* State and low-frequency menu items: read, or reach for rarely. */}
           <AgentActionBar
             agent={agent}
             readOnly={catalogLocked}
@@ -535,24 +514,33 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
             onDuplicate={openForkModal}
             onDelete={isPreset ? undefined : handleDeleteAgent}
           />
-          {/* Save only exists on the tab that has a draft. Workbench and
-              Profile edit nothing through this button. */}
-          {sub === 'persona' && (
+
+          <div className="flex items-center gap-2">
+            {/* Save only exists on the tab that owns a draft. Permissions have
+                their own Save (separate endpoint, separate role gate);
+                Workbench, Cost and Profile's version list edit nothing through
+                this button — Profile's budget fields are the exception and are
+                covered by Persona's save of the same draft object. */}
+            {sub === 'persona' && (
+              <button
+                onClick={save}
+                disabled={saving}
+                data-testid="agent-save-changes"
+                className="rounded-lg border border-ink-700 bg-ink-800 px-4 py-2 text-sm font-medium text-ink-200 hover:bg-ink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+              >
+                {saving ? t('common.saving') : t('aiLibrary.agents.saveChanges')}
+              </button>
+            )}
+            {/* The one thing you came here to do, and the only filled button. */}
             <button
-              onClick={save}
-              disabled={saving}
-              className="rounded-lg border border-ink-700 bg-ink-800 px-4 py-2 text-sm font-medium text-ink-200 hover:bg-ink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+              type="button"
+              onClick={() => requestChat(agent.slug)}
+              data-testid="agent-start-chat"
+              className="rounded-lg bg-ok px-5 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 whitespace-nowrap"
             >
-              {saving ? t('common.saving') : t('aiLibrary.agents.saveChanges')}
+              {t('aiLibrary.agents.startChat', 'Start chat')}
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => requestChat(agent.slug)}
-            className="rounded-lg bg-ok px-5 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 whitespace-nowrap"
-          >
-            {t('aiLibrary.agents.startChat', 'Start chat')}
-          </button>
+          </div>
         </div>
       </header>
 
@@ -653,6 +641,8 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
         </section>
       )}
 
+      {sub === 'cost' && <AgentCostTab slug={slug} />}
+
       {sub === 'profile' && (
         <AgentProfileTab
           agent={agent}
@@ -660,6 +650,8 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
           draft={draft}
           updateDraft={updateDraft}
           catalogLocked={catalogLocked}
+          onSave={save}
+          saving={saving}
           onRollback={() => {
             void aiLibraryService.getAgent(slug).then((a) => {
               setAgent(a);
@@ -755,71 +747,4 @@ function buildDraft(a: AILibraryAgent): Partial<AILibraryAgent> {
 }
 
 
-/**
- * Top-of-Overview banner shown when the agent has a `paused_reason` set.
- *
- * - `'budget'` (amber): the sweeper found spend over the cap. Resume clears
- *   the flag, but if the budget isn't raised first, the sweeper will
- *   re-pause within ~60 s — the copy says so.
- * - `'manual'` (zinc): an admin / owner hit Pause. Resume re-enables.
- *
- * The Resume button is also disabled for preset agents (readOnly) since
- * Phase 1 policy blocks writes on system presets.
- */
-const PausedBanner: React.FC<{
-  reason: 'budget' | 'manual';
-  disabled: boolean;
-  resuming: boolean;
-  onResume: () => void;
-}> = ({ reason, disabled, resuming, onResume }) => {
-  const { t } = useTranslation();
-  const isBudget = reason === 'budget';
-  const wrap = isBudget
-    ? 'border-amber-500/40 bg-amber-500/10 text-warn-soft'
-    : 'border-ink-700 bg-ink-800 text-ink-200';
-  const icon = isBudget ? 'text-amber-400' : 'text-ink-400';
-  const title = isBudget
-    ? t('aiLibrary.agents.budget.pausedTitleBudget', 'Paused — monthly budget exceeded')
-    : t('aiLibrary.agents.budget.pausedTitleManual', 'Paused manually');
-  const body = isBudget
-    ? t(
-        'aiLibrary.agents.budget.pausedBodyBudget',
-        'The sweeper detected this agent ran over its token or cost budget this month. Raise the budget below before resuming — otherwise the sweeper will re-pause within a minute.',
-      )
-    : t(
-        'aiLibrary.agents.budget.pausedBodyManual',
-        'An owner or admin paused this agent. Click Resume to re-enable.',
-      );
-  return (
-    <div className={`flex items-start gap-3 rounded-lg border px-3 py-3 text-xs ${wrap}`}>
-      <AlertTriangle size={16} className={`flex-shrink-0 mt-0.5 ${icon}`} />
-      <div className="flex-1 min-w-0">
-        <div className="font-medium">{title}</div>
-        <p className="mt-0.5 opacity-90">{body}</p>
-      </div>
-      <button
-        type="button"
-        onClick={onResume}
-        disabled={disabled}
-        className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40 whitespace-nowrap"
-      >
-        <Play size={12} />
-        {resuming
-          ? t('aiLibrary.agents.budget.resuming', 'Resuming...')
-          : t('aiLibrary.agents.budget.resume', 'Resume')}
-      </button>
-    </div>
-  );
-};
-
-/**
- * Budget input row. Two numeric fields: monthly token budget and monthly
- * cost budget (in cents). Empty / 0 means unlimited (the backend normalizes
- * 0 → NULL before persisting, so the sweeper's `is not None` cap check
- * treats both the same way).
- *
- * Uses string-valued inputs internally so the user can cleanly delete all
- * digits without React emitting spurious 0s or NaN — we parse on change and
- * send `null` back up when the field is empty.
- */
 export default AgentEditor;

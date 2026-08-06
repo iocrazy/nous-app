@@ -9,14 +9,35 @@ import { createIssue } from '../../services/issuesService';
 import { NewIssueDialog } from '../Todolist/NewIssueDialog';
 import { useToast } from '../Toast';
 
-// Paperclip-style agent header action bar: [Assign Task] [Pause/Resume]
-// [status chip]. "Run Heartbeat" from paperclip is intentionally NOT ported —
-// mediahub agents are service/chat agents without a per-agent heartbeat
-// worker loop, so there is no equivalent on-demand wakeup to invoke.
+// Agent header action bar, in two groups: what the agent IS ([status chip]
+// ["..." overflow]) then what you can DO to it ([Assign Task] [Pause/Resume]).
+// The caller adds the primary action to the right of both, so the row reads
+// state → secondary → primary instead of six equal-weight controls in a line.
+//
+// "Run Heartbeat" from paperclip is intentionally NOT ported — mediahub agents
+// are service/chat agents without a per-agent heartbeat worker loop, so there
+// is no equivalent on-demand wakeup to invoke.
 
 const STATUS_POLL_MS = 10_000;
 
-type ChipStatus = 'idle' | 'running' | 'paused';
+const CHIP_STATUSES = ['idle', 'running', 'paused'] as const;
+type ChipStatus = (typeof CHIP_STATUSES)[number];
+
+/**
+ * Narrow whatever `/status` returned to a status we can render.
+ *
+ * The chip is built entirely out of the value: both its palette lookup and
+ * its i18n key. An unexpected value therefore does not degrade — it indexes
+ * `styles` with `undefined` (unstyled span) and asks i18next for
+ * `aiLibrary.agents.statusChip.undefined`, which has no translation, so the
+ * chip renders that raw key path as its label. Observed in the header as a
+ * literal "aiLibrary.agents.statusChip.undefined". Treat anything unknown as
+ * idle: this is a decorative chip, and a wrong-but-plausible state beats a
+ * key path sitting in the page furniture.
+ */
+function toChipStatus(raw: unknown): ChipStatus {
+  return CHIP_STATUSES.includes(raw as ChipStatus) ? (raw as ChipStatus) : 'idle';
+}
 
 const StatusChip: React.FC<{ status: ChipStatus }> = ({ status }) => {
   const { t } = useTranslation();
@@ -80,7 +101,7 @@ export const AgentActionBar: React.FC<AgentActionBarProps> = ({
   const refreshStatus = useCallback(async () => {
     try {
       const s = await aiLibraryService.getAgentStatus(agent.slug);
-      setStatus(s.status);
+      setStatus(toChipStatus(s?.status));
     } catch (err) {
       // Status chip is decorative — log, keep last value.
       console.error('[AgentActionBar] getAgentStatus failed:', err);
@@ -124,83 +145,91 @@ export const AgentActionBar: React.FC<AgentActionBarProps> = ({
   };
 
   return (
-    <div className="flex items-center gap-2">
-      <button
-        type="button"
-        onClick={() => setAssignOpen(true)}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm font-medium text-ink-200 hover:bg-ink-700 transition-colors whitespace-nowrap"
-      >
-        <Plus size={14} />
-        {t('aiLibrary.agents.assignTask', 'Assign Task')}
-      </button>
+    <div className="flex items-center gap-4" data-testid="agent-action-bar">
+      {/* ── State: what the agent IS, plus the rarely-used menu ──────────── */}
+      <div className="flex items-center gap-2" data-testid="agent-state-group">
+        <StatusChip status={status} />
 
-      {!readOnly && (
-        <button
-          type="button"
-          onClick={() => void togglePause()}
-          disabled={busy}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm font-medium text-ink-200 hover:bg-ink-700 disabled:opacity-50 transition-colors whitespace-nowrap"
-        >
-          {paused ? <Play size={14} /> : <Pause size={14} />}
-          {paused
-            ? t('aiLibrary.agents.resume', 'Resume')
-            : t('aiLibrary.agents.pause', 'Pause')}
-        </button>
-      )}
-
-      <StatusChip status={status} />
-
-      {/* Overflow menu (paperclip R5): Copy agent ID / Duplicate. */}
-      <div className="relative" ref={menuRef}>
-        <button
-          type="button"
-          onClick={() => setMenuOpen((v) => !v)}
-          className="rounded-lg border border-ink-700 bg-ink-800 p-2 text-ink-300 hover:bg-ink-700 transition-colors"
-          aria-label={t('common.more', 'More')}
-        >
-          <MoreHorizontal size={14} />
-        </button>
-        {menuOpen && (
-          <div className="absolute right-0 top-full z-20 mt-1 w-44 overflow-hidden rounded-lg border border-ink-700 bg-ink-900 shadow-xl">
-            <button
-              type="button"
-              onClick={() => {
-                navigator.clipboard.writeText(agent.id);
-                addToast(t('aiLibrary.agents.idCopied', 'Agent ID copied'), 'success');
-                setMenuOpen(false);
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-ink-300 hover:bg-ink-800"
-            >
-              <Copy size={12} />
-              {t('aiLibrary.agents.copyId', 'Copy agent ID')}
-            </button>
-            {onDuplicate && (
+        {/* Overflow menu (paperclip R5): Copy agent ID / Duplicate. */}
+        <div className="relative" ref={menuRef}>
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            className="rounded-lg border border-ink-700 bg-ink-800 p-2 text-ink-300 hover:bg-ink-700 transition-colors"
+            aria-label={t('common.more', 'More')}
+          >
+            <MoreHorizontal size={14} />
+          </button>
+          {menuOpen && (
+            <div className="absolute right-0 top-full z-20 mt-1 w-44 overflow-hidden rounded-lg border border-ink-700 bg-ink-900 shadow-xl">
               <button
                 type="button"
                 onClick={() => {
+                  navigator.clipboard.writeText(agent.id);
+                  addToast(t('aiLibrary.agents.idCopied', 'Agent ID copied'), 'success');
                   setMenuOpen(false);
-                  onDuplicate();
                 }}
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-ink-300 hover:bg-ink-800"
               >
-                <GitFork size={12} />
-                {t('aiLibrary.agents.duplicate', 'Duplicate')}
+                <Copy size={12} />
+                {t('aiLibrary.agents.copyId', 'Copy agent ID')}
               </button>
-            )}
-            {onDelete && !agent.is_system_preset && (
-              <button
-                type="button"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onDelete();
-                }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-red-400 hover:bg-red-500/10"
-              >
-                <Trash2 size={12} />
-                {t('aiLibrary.agents.delete', 'Delete agent')}
-              </button>
-            )}
-          </div>
+              {onDuplicate && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onDuplicate();
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-ink-300 hover:bg-ink-800"
+                >
+                  <GitFork size={12} />
+                  {t('aiLibrary.agents.duplicate', 'Duplicate')}
+                </button>
+              )}
+              {onDelete && !agent.is_system_preset && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onDelete();
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-red-400 hover:bg-red-500/10"
+                >
+                  <Trash2 size={12} />
+                  {t('aiLibrary.agents.delete', 'Delete agent')}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Secondary actions: real work, but not why you opened the page ── */}
+      <div className="flex items-center gap-2" data-testid="agent-secondary-group">
+        <button
+          type="button"
+          onClick={() => setAssignOpen(true)}
+          data-testid="agent-assign-task"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm font-medium text-ink-200 hover:bg-ink-700 transition-colors whitespace-nowrap"
+        >
+          <Plus size={14} />
+          {t('aiLibrary.agents.assignTask', 'Assign Task')}
+        </button>
+
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={() => void togglePause()}
+            disabled={busy}
+            data-testid="agent-toggle-pause"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-800 px-3 py-2 text-sm font-medium text-ink-200 hover:bg-ink-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+          >
+            {paused ? <Play size={14} /> : <Pause size={14} />}
+            {paused
+              ? t('aiLibrary.agents.resume', 'Resume')
+              : t('aiLibrary.agents.pause', 'Pause')}
+          </button>
         )}
       </div>
 

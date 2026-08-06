@@ -38,7 +38,10 @@ export const SkillsPage: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 h-full min-h-0 overflow-hidden">
+    // Same fix as AgentsPage: `h-full … overflow-hidden` pinned this box to
+    // the viewport and clipped, so SkillEditor's own `overflow-y-auto` became
+    // a second scroll container nested inside AILibraryLayout's. Flow instead.
+    <div className="flex-1 min-w-0">
       <SkillsTab
         slug={urlSlug}
         filePath={filePath}

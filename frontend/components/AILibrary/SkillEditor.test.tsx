@@ -130,3 +130,23 @@ describe('SkillEditor versions panel', () => {
     expect(screen.getByTestId('version-panel')).toBeTruthy();
   });
 });
+
+describe('SkillEditor scroll ownership', () => {
+  beforeEach(() => getSkill.mockReset());
+
+  it('opens no scroll container of its own — AILibraryLayout owns the page scroll', async () => {
+    // Identical defect to the agent detail page: this root was
+    // `h-full … overflow-y-auto`, nested inside SkillsPage's
+    // `h-full min-h-0 overflow-hidden`, so the inner box did the scrolling.
+    // That puts the scrollbar inside the page gutter instead of at the page
+    // margin, and makes it appear only when the current skill's content
+    // overflows — so opening a skill with more files jogged the column
+    // sideways by the scrollbar's width.
+    await renderEditor(skill());
+    expect(
+      document.body.querySelectorAll(
+        '[class*="overflow-y-auto"], [class*="overflow-auto"]',
+      ),
+    ).toHaveLength(0);
+  });
+});
