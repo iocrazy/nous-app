@@ -361,6 +361,21 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
     proxy_failed: t('distribution.session.proxyFailedHint', 'The egress proxy for this account could not be reached — the account itself is fine. Fix the proxy, then retry.'),
   };
 
+  // `failed` covers two very different things, and saying "the platform
+  // refused the sign-in" for both sends the user hunting in the wrong place.
+  // On 2026-08-06 a dead Xvfb inside the browser container produced exactly
+  // that: the sign-in never reached Douyin at all, but the copy blamed Douyin,
+  // and the first guess it prompted was "is our proxy being rejected?".
+  // `detail.error_kind` is the backend's own marker for "this is ours, not the
+  // account's" (spec 7.8) — when it is present, say so.
+  const infraKind = status === 'failed' ? login?.detail?.error_kind : undefined;
+  const hint = infraKind
+    ? t(
+      'distribution.session.failedInfraHint',
+      'This failed on our side before reaching the platform — the account is fine. Retry in a moment; if it persists the browser service needs looking at.',
+    )
+    : STATUS_HINT[status];
+
   const tone = TONE[status];
   const busy = status === 'starting' || status === 'connecting';
   const showQr = Boolean(login?.qrcode_data_url) && (status === 'waiting_scan' || status === 'scanned');
@@ -418,7 +433,7 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
               <span className="d" />
               {STATUS_LABEL[status]}
             </div>
-            <p className="sess-hint">{STATUS_HINT[status]}</p>
+            <p className="sess-hint">{hint}</p>
             {/* Server-authored detail always wins over the generic hint —
                 it is the only place a platform-specific reason surfaces. */}
             {login?.message && <p className="sess-detail">{login.message}</p>}
