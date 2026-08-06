@@ -30,12 +30,13 @@ def _node(
     node_id: str,
     *,
     sort_order: int,
-    parallel_group: Optional[int] = None,
+    parallel_group: Optional[Any] = None,
     review_required: bool = False,
     deliverable_required: bool = False,
     skipped: bool = False,
     owner_agent_id: Optional[str] = None,
     folder_id: Optional[str] = None,
+    episode_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     return {
         "id": node_id,
@@ -49,6 +50,8 @@ def _node(
         "owner_agent_id": owner_agent_id,
         "planned_due": None,
         "folder_id": folder_id,
+        # B2 T1: episode-scoped fakes filter on this; None → legacy project node.
+        "episode_id": episode_id,
     }
 
 
@@ -72,11 +75,39 @@ class _FakeNodesRepo:
     async def list_nodes(self, project_id):
         return list(self._nodes)
 
+    async def list_nodes_by_episode(self, project_id, episode_id):
+        # B2 T1 episode path: only this episode's nodes (mirrors the real
+        # ``list_nodes_by_episode`` which excludes other episodes / NULL rows).
+        return [n for n in self._nodes if str(n.get("episode_id")) == str(episode_id)]
+
     async def set_current_node_id(self, project_id, node_id):
         self.current_node_id_calls.append((project_id, node_id))
 
     async def list_folder_files(self, folder_id):
         return [f for f in self._files if str(f.get("folder_id")) == str(folder_id)]
+
+
+class _FakeEpisodesRepo:
+    """B2 T1: per-episode cursor store, keyed by (episode_id) → current_node_id.
+
+    Backs the episode path's ``get_by_id`` (cursor read) and
+    ``set_current_node_id`` (cursor write). ``set_current_node_id_calls`` lets a
+    test assert EXACTLY which episode's cursor moved (and that the sibling
+    episode's did not).
+    """
+
+    def __init__(self, cursors: Dict[str, Optional[str]]):
+        self._cursors: Dict[str, Optional[str]] = {
+            str(k): v for k, v in cursors.items()
+        }
+        self.set_current_node_id_calls: List[Any] = []
+
+    async def get_by_id(self, episode_id):
+        return {"current_node_id": self._cursors.get(str(episode_id))}
+
+    async def set_current_node_id(self, episode_id, node_id):
+        self.set_current_node_id_calls.append((str(episode_id), node_id))
+        self._cursors[str(episode_id)] = node_id
 
 
 class _FakeProjectsRepo:
@@ -132,12 +163,20 @@ def _install(
     projects_repo: _FakeProjectsRepo,
     issue_repo: _FakeIssueRepo,
     role: Optional[str] = "manager",
+    episodes_repo: Optional[_FakeEpisodesRepo] = None,
 ):
     monkeypatch.setattr(
         "app.repositories.project_stage_nodes_repository."
         "get_project_stage_nodes_repository",
         lambda: nodes_repo,
     )
+    # B2 T1: only the episode path resolves the episode repo (lazy import inside
+    # the shim helpers), so a project-path test can leave episodes_repo None.
+    if episodes_repo is not None:
+        monkeypatch.setattr(
+            "app.repositories.episode_repository.get_episode_repository",
+            lambda: episodes_repo,
+        )
     monkeypatch.setattr(
         "app.repositories.projects_repository.get_projects_repository",
         lambda: projects_repo,
@@ -679,3 +718,112 @@ async def test_execute_back_moves_cursor_and_reopens_issues(monkeypatch):
     assert result.will_advance is True
     assert nodes_repo.current_node_id_calls == [(_PROJECT, "1")]
     assert issue_repo.transitions == [(501, "in_progress")]
+
+
+# ── B2 T1: episode-scoped path (double-path shim) ───────────────────────────
+#
+# A 2-episode project is mandatory here — the P0 陷阱① bug (推进一集=推进所有集)
+# is invisible in a single episode. Both episodes carry a node sharing the same
+# ``parallel_group`` value ("draft"), exactly as instantiate_from_template's
+# byte-for-byte clone produces — so if the code ever fell back to the project-
+# wide ``list_nodes`` the two episodes' twins would collapse into one group.
+
+_EP1 = "8001"
+_EP2 = "8002"
+
+
+@pytest.mark.asyncio
+async def test_episode_path_execute_forward_moves_only_that_episode_cursor(
+    monkeypatch,
+):
+    """execute_advance(episode_id=EP1) writes EP1's episode cursor ONLY — the
+    sibling episode's cursor and the legacy project cursor stay untouched."""
+    # Two episodes, both with a "draft" parallel_group node (陷阱① collision).
+    ep1_a = _node("11", sort_order=1, parallel_group="draft", episode_id=_EP1)
+    ep1_b = _node("12", sort_order=2, episode_id=_EP1)
+    ep2_a = _node("21", sort_order=1, parallel_group="draft", episode_id=_EP2)
+    ep2_b = _node("22", sort_order=2, episode_id=_EP2)
+    nodes_repo = _FakeNodesRepo([ep1_a, ep1_b, ep2_a, ep2_b])
+    projects_repo = _FakeProjectsRepo(None)  # project cursor irrelevant here
+    issue_repo = _FakeIssueRepo()
+    episodes_repo = _FakeEpisodesRepo({_EP1: None, _EP2: None})
+    _install(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        issue_repo=issue_repo,
+        episodes_repo=episodes_repo,
+    )
+
+    result = await advance_service.execute_advance(
+        _PROJECT, _USER, "forward", episode_id=_EP1
+    )
+
+    assert result.will_advance is True
+    # EP1 cursor advanced to its second group's node; EP2 never written.
+    assert episodes_repo.set_current_node_id_calls == [(_EP1, "12")]
+    # The legacy project cursor must NOT be touched on the episode path.
+    assert nodes_repo.current_node_id_calls == []
+
+
+@pytest.mark.asyncio
+async def test_episode_path_build_groups_sees_only_single_episode_nodes(monkeypatch):
+    """_build_groups / preview on the episode path must see ONLY that episode's
+    nodes — a sibling episode's same-parallel_group twin must never join the
+    active group (陷阱①)."""
+    # EP1: 11 & 12 share "draft" → one group; 13 is the next group.
+    ep1_a = _node("11", sort_order=1, parallel_group="draft", episode_id=_EP1)
+    ep1_b = _node("12", sort_order=2, parallel_group="draft", episode_id=_EP1)
+    ep1_c = _node("13", sort_order=3, episode_id=_EP1)
+    # EP2 also has a "draft" node — it would contaminate the group if the code
+    # ever read project-wide nodes.
+    ep2_a = _node("21", sort_order=1, parallel_group="draft", episode_id=_EP2)
+    nodes_repo = _FakeNodesRepo([ep1_a, ep1_b, ep1_c, ep2_a])
+    projects_repo = _FakeProjectsRepo(None)
+    issue_repo = _FakeIssueRepo()
+    episodes_repo = _FakeEpisodesRepo({_EP1: None, _EP2: None})
+    _install(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        issue_repo=issue_repo,
+        episodes_repo=episodes_repo,
+    )
+
+    preview = await advance_service.compute_advance_preview(
+        _PROJECT, _USER, "forward", episode_id=_EP1
+    )
+
+    assert preview.will_advance is True
+    # Closing group is EP1's draft pair ONLY — EP2's node "21" must be absent.
+    assert {r.node_id for r in preview.closing} == {"11", "12"}
+    assert preview.creating[0].node_id == "13"
+
+
+@pytest.mark.asyncio
+async def test_episode_path_execute_back_moves_only_that_episode_cursor(monkeypatch):
+    """Retreat on the episode path writes EP1's cursor back; EP2 untouched."""
+    ep1_a = _node("11", sort_order=1, episode_id=_EP1)
+    ep1_b = _node("12", sort_order=2, episode_id=_EP1)
+    ep2_a = _node("21", sort_order=1, episode_id=_EP2)
+    nodes_repo = _FakeNodesRepo([ep1_a, ep1_b, ep2_a])
+    projects_repo = _FakeProjectsRepo(None)
+    issue_repo = _FakeIssueRepo(by_node={"11": [{"id": 701, "status": "done"}]})
+    # EP1 cursor is on its 2nd group (node 12); EP2 sits on node 21.
+    episodes_repo = _FakeEpisodesRepo({_EP1: "12", _EP2: "21"})
+    _install(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        issue_repo=issue_repo,
+        episodes_repo=episodes_repo,
+    )
+
+    result = await advance_service.execute_advance(
+        _PROJECT, _USER, "back", episode_id=_EP1
+    )
+
+    assert result.will_advance is True
+    assert episodes_repo.set_current_node_id_calls == [(_EP1, "11")]
+    assert nodes_repo.current_node_id_calls == []
+    assert issue_repo.transitions == [(701, "in_progress")]

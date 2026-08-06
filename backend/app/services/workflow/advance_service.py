@@ -134,7 +134,9 @@ async def _review_satisfied(project_id: str, node: Dict[str, Any]) -> bool:
     return any(i.get("status") == "done" for i in issues)
 
 
-async def _deliverable_present(project_id: str, node: Dict[str, Any]) -> bool:
+async def _deliverable_present(
+    project_id: str, node: Dict[str, Any], episode_id: Optional[str] = None
+) -> bool:
     """Whether the node's stage deliverable has been filed.
 
     Primary path (M2-W1): the node carries an explicit ``folder_id`` (its stage
@@ -148,6 +150,13 @@ async def _deliverable_present(project_id: str, node: Dict[str, Any]) -> bool:
     file counts when it lives in a project folder whose name matches the node
     name; absent such a folder, ANY non-trashed project file counts. Server-
     side, never trusts the client.
+
+    ``episode_id`` (B2 T1 double-path shim, reserved): the primary path keys off
+    the node's own ``folder_id`` so it is already episode-correct once the
+    stage folders carry an episode prefix (that folder-naming fix is B2 T2, in
+    ``node_folders.py`` — deliberately NOT touched here). It is threaded through
+    now so the episode-scoped fallback can use it without another signature
+    churn; today it does not change behaviour. Removed / promoted by B6.
     """
     from app.repositories.project_stage_nodes_repository import (
         get_project_stage_nodes_repository,
@@ -330,15 +339,97 @@ async def _open_subissue_warnings(
     return warnings
 
 
-async def compute_advance_preview(
-    project_id: str, user_id: str, direction: str
-) -> AdvancePreview:
-    """Pure-read ruling on a forward/back move. Never mutates."""
+# ── B2 T1 double-path shim ──────────────────────────────────────────────────
+#
+# advance_service was born project-scoped (one cursor per project). B2 lowers
+# the workflow cursor to per-episode (``episodes.current_node_id``, mig 402).
+# To land T1 without touching its callers (the /advance* endpoints are B2 T3,
+# the autopilot engine is B2 T4), every public entry gained an optional
+# ``episode_id`` and forks here:
+#
+#   episode_id is None  → the byte-for-byte LEGACY project path — reads
+#       ``list_nodes`` + ``projects.current_node_id``, writes the legacy
+#       ``ProjectStageNodesRepository.set_current_node_id`` cursor. Every
+#       not-yet-migrated caller (and the whole existing test suite) stays on
+#       this path with identical behaviour.
+#   episode_id given    → the NEW per-episode path — reads
+#       ``list_nodes_by_episode`` (single-episode node set, so group-building
+#       and active-index math can never fold a sibling episode's template-
+#       cloned twins in — B2 陷阱①) + ``episodes.current_node_id``, and writes
+#       the cursor through ``EpisodeRepository.set_current_node_id``.
+#
+# The ``None`` branch is transitional. Once T3/T4 make every caller pass an
+# episode_id, B6 deletes it and ``episode_id`` becomes required.
+
+
+async def _load_scoped_nodes_and_cursor(
+    project_id: str, episode_id: Optional[str]
+) -> tuple[List[Dict[str, Any]], Optional[Any]]:
+    """Return ``(nodes, current_node_id)`` for the requested scope.
+
+    See the module-level shim note. ``episode_id is None`` reproduces the
+    legacy project-level read exactly; a given ``episode_id`` reads only that
+    episode's nodes and that episode's own cursor.
+    """
     from app.repositories.project_stage_nodes_repository import (
         get_project_stage_nodes_repository,
     )
-    from app.repositories.projects_repository import get_projects_repository
 
+    nodes_repo = get_project_stage_nodes_repository()
+
+    if episode_id is None:
+        from app.repositories.projects_repository import get_projects_repository
+
+        nodes = await nodes_repo.list_nodes(str(project_id))
+        project = await get_projects_repository().get_project_by_id(
+            int(str(project_id))
+        )
+        return nodes, (project or {}).get("current_node_id")
+
+    from app.repositories.episode_repository import get_episode_repository
+
+    nodes = await nodes_repo.list_nodes_by_episode(str(project_id), str(episode_id))
+    episode = await get_episode_repository().get_by_id(str(episode_id))
+    return nodes, (episode or {}).get("current_node_id")
+
+
+async def _write_cursor(
+    project_id: str, episode_id: Optional[str], node_id: str
+) -> None:
+    """Move the active-group cursor for the requested scope.
+
+    See the module-level shim note. ``episode_id is None`` writes the legacy
+    ``projects.current_node_id`` (via ``ProjectStageNodesRepository``); a given
+    ``episode_id`` writes ``episodes.current_node_id`` (via
+    ``EpisodeRepository``, which never touches the project column).
+    """
+    if episode_id is None:
+        from app.repositories.project_stage_nodes_repository import (
+            get_project_stage_nodes_repository,
+        )
+
+        await get_project_stage_nodes_repository().set_current_node_id(
+            str(project_id), str(node_id)
+        )
+        return
+
+    from app.repositories.episode_repository import get_episode_repository
+
+    await get_episode_repository().set_current_node_id(str(episode_id), str(node_id))
+
+
+async def compute_advance_preview(
+    project_id: str,
+    user_id: str,
+    direction: str,
+    episode_id: Optional[str] = None,
+) -> AdvancePreview:
+    """Pure-read ruling on a forward/back move. Never mutates.
+
+    ``episode_id`` selects the scope (see the module-level double-path shim
+    note). Role resolution stays PROJECT-level regardless — permissions are a
+    project-wide concern and do not descend to the episode (B2 ruling).
+    """
     direction = "back" if direction == "back" else "forward"
 
     role = await resolve_effective_role(str(user_id), project_id=str(project_id))
@@ -349,12 +440,8 @@ async def compute_advance_preview(
             blocked_reason=BLOCK_NOT_MANAGER_OR_EDITOR,
         )
 
-    nodes_repo = get_project_stage_nodes_repository()
-    nodes = await nodes_repo.list_nodes(str(project_id))
+    nodes, current_node_id = await _load_scoped_nodes_and_cursor(project_id, episode_id)
     groups = _build_groups(nodes)
-
-    project = await get_projects_repository().get_project_by_id(int(str(project_id)))
-    current_node_id = (project or {}).get("current_node_id")
     idx = _active_index(groups, current_node_id)
 
     if idx < 0:
@@ -365,9 +452,9 @@ async def compute_advance_preview(
         )
 
     if direction == "back":
-        return await _preview_back(project_id, groups, idx)
+        return await _preview_back(project_id, groups, idx, episode_id)
     node_by_id = {str(n["id"]): n for n in nodes}
-    return await _preview_forward(project_id, groups, idx, node_by_id)
+    return await _preview_forward(project_id, groups, idx, node_by_id, episode_id)
 
 
 async def _preview_forward(
@@ -375,7 +462,14 @@ async def _preview_forward(
     groups: List[List[Dict[str, Any]]],
     idx: int,
     node_by_id: Dict[str, Dict[str, Any]],
+    episode_id: Optional[str] = None,
 ) -> AdvancePreview:
+    # ``episode_id`` is transparently threaded to ``_deliverable_present`` (B2
+    # T1 shim). ``groups``/``node_by_id`` are already episode-scoped by the
+    # caller when episode_id is given, so Gate 4's "no next group" here means
+    # "this episode is finished" — the cross-episode "whole series done" roll-
+    # up is B5, not this function; each episode simply BLOCK_NO_NEXTs on its own
+    # last group.
     active = groups[idx]
 
     # Gate 1: review-required nodes' mirror issues must be done.
@@ -397,7 +491,7 @@ async def _preview_forward(
         n
         for n in active
         if n.get("deliverable_required")
-        and not await _deliverable_present(project_id, n)
+        and not await _deliverable_present(project_id, n, episode_id)
     ]
     if missing_deliverable:
         return AdvancePreview(
@@ -475,8 +569,16 @@ async def _preview_forward(
 
 
 async def _preview_back(
-    project_id: str, groups: List[List[Dict[str, Any]]], idx: int
+    project_id: str,
+    groups: List[List[Dict[str, Any]]],
+    idx: int,
+    episode_id: Optional[str] = None,
 ) -> AdvancePreview:
+    # ``episode_id`` accepted for signature symmetry with ``_preview_forward``
+    # (B2 T1 shim); retreat previews are computed purely from the already-
+    # episode-scoped ``groups`` the caller passed, so nothing downstream needs
+    # it today.
+    del episode_id
     if idx <= 0:
         return AdvancePreview(
             direction="back",
@@ -493,32 +595,43 @@ async def _preview_back(
 
 
 async def execute_advance(
-    project_id: str, user_id: str, direction: str
+    project_id: str,
+    user_id: str,
+    direction: str,
+    episode_id: Optional[str] = None,
 ) -> AdvancePreview:
     """Compute the preview, then (only if it clears) perform the move.
 
     Returns the SAME preview object — blocked when ``will_advance`` is False (no
     mutation happened), else the executed plan. Router maps a blocked preview to
     a 409.
+
+    ``episode_id`` selects the scope (see the module-level double-path shim
+    note). When given, the node set, active-index cursor read, and the cursor
+    WRITE are all episode-scoped; the six other side-effects (mirror-issue
+    close/reopen, ``ensure_node_issues`` / ``ensure_node_folders``,
+    notifications, stage-hook dispatch, autopilot tick) run against the same
+    episode-scoped node groups but stay keyed by (project_id, node) — node ids
+    are globally unique, so those helpers need no episode awareness. The
+    autopilot tick stays PROJECT-level (its per-project re-entrancy guard must
+    not descend to the episode — that is B2 T4's concern).
     """
     from app.repositories.issue_repository import get_issue_repository
-    from app.repositories.project_stage_nodes_repository import (
-        get_project_stage_nodes_repository,
-    )
     from app.repositories.projects_repository import get_projects_repository
     from app.workflows.stage_hook import enqueue_stage_hook_dispatch
 
-    preview = await compute_advance_preview(project_id, user_id, direction)
+    preview = await compute_advance_preview(project_id, user_id, direction, episode_id)
     if not preview.will_advance:
         return preview
 
-    nodes_repo = get_project_stage_nodes_repository()
     issues_repo = get_issue_repository()
-    nodes = await nodes_repo.list_nodes(str(project_id))
+    nodes, current_node_id = await _load_scoped_nodes_and_cursor(project_id, episode_id)
     groups = _build_groups(nodes)
-    project = await get_projects_repository().get_project_by_id(int(str(project_id)))
-    idx = _active_index(groups, (project or {}).get("current_node_id"))
+    idx = _active_index(groups, current_node_id)
 
+    # The project row is still read PROJECT-level — notifications carry the
+    # project's name / team, which do not descend to the episode.
+    project = await get_projects_repository().get_project_by_id(int(str(project_id)))
     project_name = (project or {}).get("name") or "Project"
     team_id = (project or {}).get("team_id")
 
@@ -532,7 +645,7 @@ async def execute_advance(
                 if issue.get("status") not in _TERMINAL:
                     await issues_repo.transition_status(int(issue["id"]), "done")
         next_group = groups[idx + 1]
-        await nodes_repo.set_current_node_id(str(project_id), str(next_group[0]["id"]))
+        await _write_cursor(project_id, episode_id, str(next_group[0]["id"]))
         await ensure_node_issues(int(str(project_id)), next_group, str(user_id))
         await ensure_node_folders(str(project_id), next_group, str(user_id))
 
@@ -577,7 +690,7 @@ async def execute_advance(
         await _enqueue_autopilot_tick_best_effort(str(project_id))
     else:
         prev_group = groups[idx - 1]
-        await nodes_repo.set_current_node_id(str(project_id), str(prev_group[0]["id"]))
+        await _write_cursor(project_id, episode_id, str(prev_group[0]["id"]))
         # Ensure the previous group's mirror issues exist, then reopen them
         # (transition → in_progress fires the status回流 hook → node in_progress).
         await ensure_node_issues(int(str(project_id)), prev_group, str(user_id))
