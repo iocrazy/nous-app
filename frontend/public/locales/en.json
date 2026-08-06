@@ -1404,6 +1404,14 @@
     }
   },
   "projects": {
+    "episodeViews": {
+      "script": "Script",
+      "beats": "Beats",
+      "storyboard": "Storyboard",
+      "canvas": "Canvas",
+      "shotlist": "Shot List",
+      "renders": "Renders"
+    },
     "title": "All Projects",
     "recentEmpty": "No recent items",
     "view": {

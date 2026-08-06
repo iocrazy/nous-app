@@ -1404,6 +1404,14 @@
     }
   },
   "projects": {
+    "episodeViews": {
+      "script": "剧本",
+      "beats": "节拍",
+      "storyboard": "分镜",
+      "canvas": "画布",
+      "shotlist": "分镜列表",
+      "renders": "成片"
+    },
     "title": "全部项目",
     "recentEmpty": "暂无最近编辑",
     "view": {
