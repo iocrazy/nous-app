@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import contextvars
 import time
+from math import ceil
 from typing import Any, Dict, List, Optional
 
 from dbos import DBOS
@@ -104,6 +105,52 @@ _MAX_CASCADE_STEPS = 50
 # anything beyond that is a pathological template, so cap and flag it rather
 # than spin.
 _MAX_TICK_PASSES = 10
+
+# Per-episode dispatch floor (P0 §3.3). When a project has many episodes the
+# even split ``daily_auto_runs / active_episodes`` can round down below a
+# usable amount; every episode still gets at least this many dispatches per
+# tick so a single tick can meaningfully move each episode forward. The
+# project-level daily hard cap (``budget.project_exhausted``) is ALWAYS the
+# outer bound — this floor never lets an episode's slice push the project
+# total past ``daily_auto_runs``.
+_MIN_PER_EPISODE_CAP = 3
+
+
+class _DispatchBudget:
+    """Shared, in-process agent-dispatch counter for ONE tick — the project's
+    daily hard cap (task-system discipline §3.3: one project total gate shared
+    by every episode, NEVER a per-episode re-allocation of the project quota).
+
+    Read once at tick start (``count_auto_dispatches_today``) and incremented
+    in-process on every dispatch: the ``agent_runs`` row each dispatch produces
+    is written asynchronously by the DBOS workflow it kicks off, so a same-tick
+    re-query would race it — counting in-process keeps the project boundary
+    correct across ALL episodes within the one tick regardless of that lag."""
+
+    def __init__(self, used: int, project_limit: int):
+        self.used = used
+        self.project_limit = project_limit
+
+    @property
+    def project_exhausted(self) -> bool:
+        return self.used >= self.project_limit
+
+
+class _EpisodeBudget:
+    """Per-episode dispatch sub-cap for one tick (P0 §3.3). Bounds how many of
+    the shared project budget a SINGLE episode may consume this tick so one
+    spinning/looping episode can't drain the whole project quota and starve its
+    siblings — each episode stops at its own ``cap`` and lets the others
+    continue (until the shared project budget itself is exhausted)."""
+
+    def __init__(self, cap: int):
+        self.cap = cap
+        self.dispatched = 0
+
+    @property
+    def cap_reached(self) -> bool:
+        return self.dispatched >= self.cap
+
 
 # Re-entrancy guard (brief: "级联推进...幂等防重入"). ``_cascade_pass`` calls
 # ``execute_advance`` directly (in-process, same task) rather than enqueueing
@@ -187,27 +234,56 @@ def _eligible_auto_start_candidates(
     ]
 
 
-async def _auto_start_pass(project_id: str, project: Dict[str, Any]) -> None:
+async def _auto_start_pass(
+    project_id: str,
+    project: Dict[str, Any],
+    *,
+    episode_id: Optional[str] = None,
+    budget: Optional["_DispatchBudget"] = None,
+    ep_budget: Optional["_EpisodeBudget"] = None,
+) -> None:
     """Spec §2 step 2. Re-fetches the live node list fresh (idempotency: a
     node another tick already started is no longer ``status == 'pending'``,
-    so it silently drops out of the candidate list on the next call)."""
+    so it silently drops out of the candidate list on the next call).
+
+    Two scoping modes (B2 T4):
+      * Legacy / project-level — ``episode_id is None`` and ``budget is None``:
+        exact pre-episode behavior. Lists ALL project nodes and reads the daily
+        quota fresh each call (kept identical so a project with no episodes
+        rows behaves byte-for-byte as before).
+      * Episode-scoped — ``episode_id`` + a shared ``budget`` (project daily
+        hard cap) + a per-episode ``ep_budget`` (this episode's sub-cap): lists
+        only that episode's nodes and meters dispatches against BOTH caps. The
+        episode's own cap being the tighter, more specific bound is checked
+        first so its pause copy names the per-episode limit; only when the
+        episode is still under its own cap but the shared project total is
+        drained does the daily-limit copy apply.
+    """
     from app.repositories.project_stage_nodes_repository import (
         get_project_stage_nodes_repository,
     )
 
     nodes_repo = get_project_stage_nodes_repository()
-    nodes = await nodes_repo.list_nodes(str(project_id))
+    if episode_id is None:
+        nodes = await nodes_repo.list_nodes(str(project_id))
+    else:
+        nodes = await nodes_repo.list_nodes_by_episode(str(project_id), str(episode_id))
     node_by_id = {str(n["id"]): n for n in nodes}
     candidates = _eligible_auto_start_candidates(nodes)
     if not candidates:
         return
 
-    from app.repositories.agent_runs_repository import get_agent_runs_repository
+    # Legacy path reads the quota fresh each call; episode path uses the shared
+    # in-process budget threaded by the tick (see _DispatchBudget's docstring).
+    quota_limit = 0
+    used = 0
+    if budget is None:
+        from app.repositories.agent_runs_repository import get_agent_runs_repository
 
-    quota_limit = await _daily_auto_runs_limit()
-    used = await get_agent_runs_repository().count_auto_dispatches_today(
-        str(project_id)
-    )
+        quota_limit = await _daily_auto_runs_limit()
+        used = await get_agent_runs_repository().count_auto_dispatches_today(
+            str(project_id)
+        )
 
     for node in candidates:
         # A start-ahead node's deps must ACTUALLY be done/skipped — no
@@ -221,16 +297,34 @@ async def _auto_start_pass(project_id: str, project: Dict[str, Any]) -> None:
         dispatch = False
         prepare_title: Optional[str] = None
         if node.get("owner_agent_id"):
-            if used < quota_limit:
-                dispatch = True
-                used += 1  # in-process running count — the agent_runs row
-                # this dispatch produces is written asynchronously by the
-                # DBOS workflow it kicks off, so a same-tick re-query of the
-                # DB would race it; counting in-process keeps the 20→21
-                # boundary correct within one tick regardless of that lag.
-            else:
-                node_name = node.get("name") or "Stage"
+            node_name = node.get("name") or "Stage"
+            if budget is None:
+                # Legacy project-level metering — unchanged.
+                if used < quota_limit:
+                    dispatch = True
+                    used += 1  # in-process running count — the agent_runs row
+                    # this dispatch produces is written asynchronously by the
+                    # DBOS workflow it kicks off, so a same-tick re-query of the
+                    # DB would race it; counting in-process keeps the 20→21
+                    # boundary correct within one tick regardless of that lag.
+                else:
+                    prepare_title = (
+                        f'Autopilot paused: daily limit reached — "{node_name}"'
+                    )
+            elif ep_budget is not None and ep_budget.cap_reached:
+                # This episode has spent its per-episode slice — pause it here
+                # (per-episode cap) and let the tick move on to its siblings.
+                prepare_title = (
+                    f'Autopilot paused: per-episode limit reached — "{node_name}"'
+                )
+            elif budget.project_exhausted:
+                # Under its own cap, but the shared project daily total is drained.
                 prepare_title = f'Autopilot paused: daily limit reached — "{node_name}"'
+            else:
+                dispatch = True
+                budget.used += 1  # shared project total (across all episodes)
+                if ep_budget is not None:
+                    ep_budget.dispatched += 1  # this episode's own slice
 
         try:
             await start_node_now(
@@ -334,11 +428,22 @@ async def _notify_cascade_blocked_once(
     )
 
 
-async def _cascade_pass(project_id: str, project: Dict[str, Any]) -> bool:
+async def _cascade_pass(
+    project_id: str,
+    project: Dict[str, Any],
+    *,
+    episode_id: Optional[str] = None,
+) -> bool:
     """Spec §2 step 3. Loops ``execute_advance`` — the SAME predicate
     ``compute_advance_preview``/``execute_advance`` share (#1400) — until
     blocked or there's nothing left to advance into. Never a parallel
     advance path.
+
+    ``episode_id`` (B2 T4) confines the advance to a single episode's node
+    chain: each ``execute_advance`` call is scoped to that episode (its own
+    cursor + single-episode node list), so the run this advance dispatches is
+    branded with the SAME episode it is actually moving. ``episode_id is None``
+    keeps the legacy project-level cursor path unchanged.
 
     The acting user for this system-driven advance is the project owner
     (there is no human actor for an automated cascade) — same "acts on the
@@ -365,7 +470,10 @@ async def _cascade_pass(project_id: str, project: Dict[str, Any]) -> bool:
         for _ in range(_MAX_CASCADE_STEPS):
             try:
                 preview = await execute_advance(
-                    str(project_id), actor_user_id, "forward"
+                    str(project_id),
+                    actor_user_id,
+                    "forward",
+                    episode_id=episode_id,
                 )
             except Exception as exc:  # noqa: BLE001 — cascade is best-effort
                 logger.warning(
@@ -416,22 +524,88 @@ async def _cascade_pass(project_id: str, project: Dict[str, Any]) -> bool:
         _cascade_active.reset(token)
 
 
-async def _autopilot_tick_impl(project_id: str) -> None:
-    """One tick: re-checks ``autopilot_enabled`` fresh, then runs the
-    (auto-start pass → cascade pass) sequence to a fixpoint. Fully idempotent
-    — safe to call any number of times for the same project, concurrently or
-    not.
+async def _list_active_episodes(project_id: str) -> List[Dict[str, Any]]:
+    """The project's episodes, ordered by ``sort_order`` (P0 §3.3), or ``[]``
+    for a legacy project with no episode rows. Best-effort: any read failure
+    degrades to ``[]`` so the tick falls back to the legacy project-level path
+    rather than failing outright — a legacy project genuinely has no episodes,
+    and a transient episodes-table hiccup must never stall autopilot."""
+    try:
+        from app.repositories.episode_repository import get_episode_repository
 
-    Why a LOOP and not one pass of each: a cascade that opens a new group can
-    itself make that group's ``auto_start`` nodes eligible, and nothing else
-    will notice within this tick. ``execute_advance``'s own tail enqueue is
-    (correctly) suppressed by the ``cascade_in_progress()`` re-entrancy guard,
-    so no nested tick re-checks the newly-opened group; the node then sits
-    ``pending`` until an unrelated later trigger happens to fire. Re-running
-    the auto-start pass after every cascade that actually advanced closes that
-    gap in-tick. Each pass re-reads live state, so a run that changes nothing
-    converges immediately (the common case is exactly two iterations: work,
-    then a no-op confirmation).
+        return await get_episode_repository().list_by_project(str(project_id))
+    except Exception as exc:  # noqa: BLE001 — degrade to legacy path, never raise
+        logger.warning(
+            f"[autopilot] episode list failed for project {project_id}: {exc!r}"
+        )
+        return []
+
+
+async def _run_episode_fixpoint(
+    project_id: str,
+    project: Dict[str, Any],
+    *,
+    episode_id: str,
+    budget: "_DispatchBudget",
+    ep_budget: "_EpisodeBudget",
+) -> None:
+    """The (auto-start pass → cascade pass) fixpoint for ONE episode. Loops
+    because a cascade that opens a new group can itself make that group's
+    ``auto_start`` nodes eligible, and nothing else will notice within this
+    tick (``execute_advance``'s own tail enqueue is suppressed by the
+    ``cascade_in_progress()`` re-entrancy guard, so no nested tick re-checks the
+    newly-opened group). Re-running the auto-start pass after every cascade that
+    actually advanced closes that gap in-tick.
+
+    Stops early once this episode has spent its per-episode dispatch slice
+    (``ep_budget.cap_reached``) or the shared project daily total is drained
+    (``budget.project_exhausted``) — a spinning episode yields the tick to its
+    siblings instead of running to the pass ceiling and monopolizing the
+    project quota."""
+    for _ in range(_MAX_TICK_PASSES):
+        await _auto_start_pass(
+            project_id,
+            project,
+            episode_id=episode_id,
+            budget=budget,
+            ep_budget=ep_budget,
+        )
+        if ep_budget.cap_reached:
+            return  # this episode used its slice — let siblings run
+        if budget.project_exhausted:
+            return  # project daily hard cap hit — nothing more to dispatch
+        if not await _cascade_pass(project_id, project, episode_id=episode_id):
+            return
+    logger.warning(
+        f"[autopilot] fixpoint for project {project_id} episode {episode_id} "
+        f"hit the {_MAX_TICK_PASSES}-pass ceiling without reaching a fixpoint "
+        "— possible cyclic/pathological workflow template"
+    )
+
+
+async def _autopilot_tick_impl(project_id: str) -> None:
+    """One tick: re-checks ``autopilot_enabled`` fresh, then advances the
+    project to a fixpoint. Fully idempotent — safe to call any number of times
+    for the same project, concurrently or not.
+
+    Granularity (B2 T4 铁律): the tick STAYS one-per-project — it is never
+    sharded into one-tick-per-episode. The dispatch counters are in-process and
+    the ``cascade_in_progress()`` re-entrancy guard is per-tick; sharding would
+    make the project daily hard cap racy (each shard reading its own stale
+    ``used``) and could blow the project total past ``daily_auto_runs``.
+    Instead the ONE tick loops over the project's episodes internally.
+
+    Two shapes:
+      * Legacy (no episode rows): the original project-level fixpoint,
+        byte-for-byte unchanged (``episode_id=None``, quota read fresh).
+      * Episode-aware: one shared ``_DispatchBudget`` (the project daily hard
+        cap — the outer total gate every episode shares) plus a per-episode
+        ``_EpisodeBudget`` sub-cap. Episodes run in ``(episode.sort_order,
+        node.sort_order)`` order — the outer loop takes them in ``sort_order``,
+        each inner auto-start pass orders that episode's own nodes by
+        ``sort_order``. A single spinning episode stops at its per-episode cap
+        and yields to its siblings, so one looping episode can't drain the
+        whole project quota and starve the others.
     """
     from app.repositories.projects_repository import get_projects_repository
 
@@ -441,15 +615,43 @@ async def _autopilot_tick_impl(project_id: str) -> None:
     if not project.get("autopilot_enabled", True):
         return
 
-    for _ in range(_MAX_TICK_PASSES):
-        await _auto_start_pass(project_id, project)
-        if not await _cascade_pass(project_id, project):
-            return
-    logger.warning(
-        f"[autopilot] tick for project {project_id} hit the "
-        f"{_MAX_TICK_PASSES}-pass ceiling without reaching a fixpoint — "
-        "possible cyclic/pathological workflow template"
+    episodes = await _list_active_episodes(project_id)
+    if not episodes:
+        # Legacy project-level path — byte-for-byte the original fixpoint.
+        for _ in range(_MAX_TICK_PASSES):
+            await _auto_start_pass(project_id, project)
+            if not await _cascade_pass(project_id, project):
+                return
+        logger.warning(
+            f"[autopilot] tick for project {project_id} hit the "
+            f"{_MAX_TICK_PASSES}-pass ceiling without reaching a fixpoint — "
+            "possible cyclic/pathological workflow template"
+        )
+        return
+
+    from app.repositories.agent_runs_repository import get_agent_runs_repository
+
+    quota_limit = await _daily_auto_runs_limit()
+    used = await get_agent_runs_repository().count_auto_dispatches_today(
+        str(project_id)
     )
+    budget = _DispatchBudget(used, quota_limit)
+    per_episode_cap = max(_MIN_PER_EPISODE_CAP, ceil(quota_limit / len(episodes)))
+
+    for episode in episodes:  # list_by_project orders by sort_order asc
+        if budget.project_exhausted:
+            # Project daily cap already drained by earlier episodes — remaining
+            # episodes have no dispatch budget left this tick; stop rather than
+            # re-prepare every node under a daily-limit banner.
+            break
+        ep_budget = _EpisodeBudget(per_episode_cap)
+        await _run_episode_fixpoint(
+            project_id,
+            project,
+            episode_id=str(episode["id"]),
+            budget=budget,
+            ep_budget=ep_budget,
+        )
 
 
 @DBOS.workflow()
