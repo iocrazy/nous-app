@@ -201,6 +201,7 @@ def _sample_group_row(**overrides) -> dict:
         "latest_output_summary": "Sure — here is the analysis.",
         "latest_error_code": None,
         "latest_ended_at": datetime(2026, 7, 3, 10, 1, tzinfo=timezone.utc),
+        "title": "Second act, draft three",
     }
     base.update(overrides)
     return base
@@ -274,6 +275,57 @@ async def test_list_run_groups_envelope_and_cost_coercion() -> None:
     assert grouped["run_count"] == 3
     assert single["conversation_id"] is None
     assert single["cost_cents"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_run_groups_carries_title_through_the_envelope() -> None:
+    """The row's display name is projected by the repo and must survive the
+    router + response_model hop, including the NULL case.
+
+    Without it the client falls back to ``latest_output_summary``, which on
+    prod data is empty or a JSON payload for two thirds of runs — the
+    "every conversation is called Untitled" report. NULL is a legitimate
+    value (a captioning run names no conversation); the client owns the
+    translated fallback label, so the field must not be coerced to "" here."""
+    from app.api.ai_library_router import list_agent_run_groups
+    from app.schemas.agent_runs import RunGroupListResponse
+
+    agent_id = uuid4()
+    mock_agent_repo = MagicMock(
+        get_by_slug=AsyncMock(return_value={"id": str(agent_id), "slug": "x"})
+    )
+    page = {
+        "items": [
+            _sample_group_row(title="Write the opening scene of the pilot"),
+            # Pipeline run: no conversation, no issue, no user message.
+            _sample_group_row(
+                group_key="run:800002",
+                conversation_id=None,
+                trigger="visual_analysis_l1",
+                title=None,
+            ),
+        ],
+        "total": 2,
+    }
+    with (
+        patch(
+            "app.api.ai_library_router._repos",
+            return_value=(mock_agent_repo, MagicMock()),
+        ),
+        patch("app.repositories.agent_runs_repository.AgentRunsRepository") as runs_cls,
+    ):
+        runs_cls.return_value.list_groups_by_agent = AsyncMock(return_value=page)
+        result = await list_agent_run_groups("x", _fake_auth(), limit=10, offset=0)
+
+    named, unnamed = result["items"]
+    assert named["title"] == "Write the opening scene of the pilot"
+    assert unnamed["title"] is None
+
+    # The declared response_model is what actually reaches the browser —
+    # a field the router forwards but the schema drops is invisible to it.
+    validated = RunGroupListResponse.model_validate(result)
+    assert validated.items[0].title == "Write the opening scene of the pilot"
+    assert validated.items[1].title is None
 
 
 # ------------------------------- get run -------------------------------

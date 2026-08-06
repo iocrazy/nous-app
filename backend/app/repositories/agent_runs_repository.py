@@ -80,6 +80,11 @@ _USAGE_COLS = (
 # pass through unchanged.
 _USAGE_STR_COLS = ("agent_id", "user_id", "cost_cents")
 
+# Cap for the last-resort conversation title (first user message). The
+# workbench row is one truncated line, so anything past this only costs
+# payload bytes and accessible-name noise. See list_groups_by_agent.
+_TITLE_MAX_LEN = 60
+
 
 def _usage_row_to_dict(row: Any) -> Dict[str, Any]:
     """One monthly_usage_by_agent row → dict with REST value-type parity.
@@ -186,7 +191,27 @@ class AgentRunsRepository(AsyncpgRepository):
         conversation (chat) or per run (everything else), newest activity
         first, with per-group token/cost rollups and the latest run's display
         fields for the list card. Returns {"items": [...], "total": N} where
-        total counts GROUPS, not runs."""
+        total counts GROUPS, not runs.
+
+        ``title`` is the group's DISPLAY NAME, projected here rather than
+        derived on the client from ``latest_output_summary``. That summary is
+        the tail of whatever the agent produced, so on this data it is prose
+        only by luck — measured against prod: 44 of 99 runs have no summary at
+        all and another 20 end in a JSON payload, i.e. two thirds of the list
+        could only ever render the client's neutral fallback. Hence the chain
+        below, ordered by how directly each source names the conversation:
+
+          1. ``conversations.title`` — what the chat is called everywhere else
+             in the app, and (for issue-born conversations) already a copy of
+             the issue title. Covers every ``conv:`` group.
+          2. ``issues.title`` via ``agent_runs.issue_id`` — for issue-born runs
+             that never got a conversation row.
+          3. First non-empty, non-JSON user message, capped at 60 chars — the
+             ask, when a conversation somehow carries no title.
+
+        NULL when none apply (pipeline runs: storyboard, captioning, vision —
+        those have no conversation to name). The client owns the neutral
+        fallback label so it stays translatable."""
         page_sql = text(
             f"""
             WITH g AS (
@@ -214,17 +239,42 @@ class AgentRunsRepository(AsyncpgRepository):
                    r.model           AS model,
                    r.output_summary  AS latest_output_summary,
                    r.error_code      AS latest_error_code,
-                   r.ended_at        AS latest_ended_at
+                   r.ended_at        AS latest_ended_at,
+                   COALESCE(
+                       NULLIF(btrim(c.title), ''),
+                       NULLIF(btrim(i.title), ''),
+                       m.first_user_text
+                   )                 AS title
             FROM g
             JOIN LATERAL (
                 SELECT id, status, trigger, model, output_summary,
-                       error_code, ended_at
+                       error_code, ended_at, issue_id
                 FROM agent_runs r2
                 WHERE r2.agent_id = :agent_id AND r2.user_id = :user_id
                   AND {self._group_key_sql('r2')} = g.group_key
                 ORDER BY r2.started_at DESC
                 LIMIT 1
             ) r ON TRUE
+            -- g.conversation_id is MAX(...)::text (kept as text so BIGINT
+            -- snowflakes survive the JSON hop); cast back for the join.
+            LEFT JOIN conversations c ON c.id = g.conversation_id::bigint
+            LEFT JOIN issues i ON i.id = r.issue_id
+            LEFT JOIN LATERAL (
+                SELECT CASE
+                           WHEN length(btrim(msg.body ->> 'text')) > {_TITLE_MAX_LEN}
+                           THEN left(btrim(msg.body ->> 'text'), {_TITLE_MAX_LEN - 1}) || '…'
+                           ELSE btrim(msg.body ->> 'text')
+                       END AS first_user_text
+                FROM messages msg
+                WHERE msg.conversation_id = g.conversation_id::bigint
+                  AND msg.sender_type = 'user'
+                  AND msg.deleted_at IS NULL
+                  AND btrim(COALESCE(msg.body ->> 'text', '')) <> ''
+                  -- A pasted payload names the chat no better than a run id.
+                  AND left(btrim(msg.body ->> 'text'), 1) NOT IN ('{{', '[')
+                ORDER BY msg.seq ASC
+                LIMIT 1
+            ) m ON TRUE
             ORDER BY g.last_started_at DESC
             LIMIT :limit OFFSET :offset
             """
