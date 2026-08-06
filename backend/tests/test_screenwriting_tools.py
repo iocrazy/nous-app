@@ -875,6 +875,118 @@ async def test_list_scenes_returns_nothing_for_an_unbound_scope():
 
 
 # ====================================================================== #
+# RLS 第三层 (PR-2b) — the caller_scope boundary. The scope is derived on
+# postgres FIRST (it reads agent_runs, which authenticated has no RLS grant
+# on), and ONLY the tenant scene/shot access runs inside caller_scope.
+# ====================================================================== #
+
+
+@pytest.mark.asyncio
+async def test_scope_is_resolved_on_postgres_before_caller_scope_is_entered():
+    """The load-bearing ordering: ``scope_for_run`` (agent_runs — infra, no RLS
+    grant for authenticated) must resolve on the normal postgres connection
+    BEFORE ``caller_scope`` drops to authenticated, and the tenant scene read
+    must run INSIDE caller_scope. A caller_scope that swallowed scope_for_run
+    would make the run's own scope invisible to itself and break every tool."""
+    from contextlib import asynccontextmanager
+
+    order: list[str] = []
+
+    async def _scope_for_run(run_id):
+        order.append("scope_for_run")
+        return _scope()
+
+    @asynccontextmanager
+    async def _spy_caller_scope(user_id):
+        # the SERVER-BOUND scope's user, never a model-supplied value
+        assert user_id == _USER_ID
+        order.append("caller_scope_enter")
+        try:
+            yield object()
+        finally:
+            order.append("caller_scope_exit")
+
+    async def _scene_no(scope, scene):
+        order.append("gateway_read_inside_caller_scope")
+        return "2"
+
+    with (
+        patch.object(tools_mod, "scope_for_run", _scope_for_run),
+        patch.object(tools_mod, "caller_scope", _spy_caller_scope),
+        patch.object(
+            tools_mod, "resolve_scene", AsyncMock(return_value=_resolved_scene())
+        ),
+        patch.object(gateway_mod, "scene_no_for", _scene_no),
+        patch.object(gateway_mod, "read_scene_elements", AsyncMock(return_value=[])),
+        patch.object(gateway_mod, "list_shots_for_scene", AsyncMock(return_value=[])),
+    ):
+        result = await SCREENWRITING_HANDLERS["ReadScene"](
+            {"scene_id": str(_SCENE_ID)}, _RUN_CONTEXT
+        )
+
+    assert result["ok"] is True
+    assert order == [
+        "scope_for_run",
+        "caller_scope_enter",
+        "gateway_read_inside_caller_scope",
+        "caller_scope_exit",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_apply_edit_runs_the_ops_write_inside_caller_scope():
+    """The write path's boundary: resolve_selection (which also writes audit
+    rows to agent_run_events — infra) runs on postgres, and the ops-channel
+    write runs inside caller_scope so mig-408's WITH CHECK enforces tenancy."""
+    from contextlib import asynccontextmanager
+
+    order: list[str] = []
+
+    @asynccontextmanager
+    async def _spy_caller_scope(user_id):
+        order.append("enter")
+        try:
+            yield object()
+        finally:
+            order.append("exit")
+
+    async def _apply(scope, scene, edits, *, quoted_base_version, actor):
+        order.append("apply_element_edit")
+        return gateway_mod.EditApplied(
+            scene_id=_SCENE_ID,
+            element_ids=tuple(edits),
+            content_version=10,
+            rebased_from=None,
+            observed_version=9,
+            quoted_base_version=quoted_base_version,
+        )
+
+    with (
+        patch.object(tools_mod, "scope_for_run", AsyncMock(return_value=_scope())),
+        patch.object(tools_mod, "caller_scope", _spy_caller_scope),
+        patch.object(
+            selection_mod, "resolve_scene", AsyncMock(return_value=_resolved_scene())
+        ),
+        patch.object(selection_mod, "audit_resolution", AsyncMock()),
+        patch.object(gateway_mod, "apply_element_edit", _apply),
+        patch.object(gateway_mod, "scene_no_for", AsyncMock(return_value="2")),
+    ):
+        result = await SCREENWRITING_HANDLERS["ApplyEdit"](
+            {
+                "scene_id": str(_SCENE_ID),
+                "element_ids": ["el_1"],
+                "proposed_text": "New line.",
+                "base_content_version": 9,
+            },
+            _RUN_CONTEXT,
+        )
+
+    assert result["ok"] is True and result["applied"] is True
+    # the write happened strictly between enter and exit
+    assert order == ["enter", "apply_element_edit", "exit"]
+
+
+# ====================================================================== #
 # Spec advertising — a UX filter, never the enforcement.
 # ====================================================================== #
 

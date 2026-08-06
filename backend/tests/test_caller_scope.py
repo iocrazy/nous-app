@@ -97,3 +97,55 @@ async def test_caller_scope_never_joins_ambient_unit_of_work():
         assert any("SET LOCAL ROLE authenticated" in t for t, _ in own.executed)
     finally:
         session_mod._request_session.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_caller_scope_publishes_itself_as_the_ambient_session():
+    """PR-2b: caller_scope BECOMES the ambient _request_session inside the
+    block, so repo / gateway read_scope()/write_scope() calls made within it
+    JOIN this authenticated transaction (and thus run under RLS) instead of
+    opening a competing postgres transaction. This is the whole reason RLS
+    reaches the ORM path."""
+    from app.db import session as session_mod
+
+    own = _SpySession()
+    maker = MagicMock(return_value=own)
+
+    assert session_mod._request_session.get() is None
+    with patch.object(session_mod, "get_sessionmaker", return_value=maker):
+        async with session_mod.caller_scope("user-xyz") as s:
+            # the ambient session repos join IS caller_scope's own session
+            assert session_mod._request_session.get() is s is own
+            # read_scope()/write_scope() therefore yield THAT session and open
+            # NO second transaction of their own (they join the ambient one)
+            async with session_mod.read_scope() as rs:
+                assert rs is own
+            async with session_mod.write_scope() as ws:
+                assert ws is own
+
+    # torn down before the block's own begin() commits — ambient restored
+    assert session_mod._request_session.get() is None
+    # exactly ONE transaction: read/write scope joined, never began a new one
+    assert own.began and own.committed
+
+
+@pytest.mark.asyncio
+async def test_caller_scope_restores_the_outer_session_on_exit():
+    """When entered inside an outer unit_of_work(), caller_scope temporarily
+    points _request_session at its OWN session and restores the outer one via
+    reset(token) — never set(None) — on exit."""
+    from app.db import session as session_mod
+
+    outer = _SpySession()
+    own = _SpySession()
+    token = session_mod._request_session.set(outer)
+    try:
+        maker = MagicMock(return_value=own)
+        with patch.object(session_mod, "get_sessionmaker", return_value=maker):
+            async with session_mod.caller_scope("u"):
+                # inside: the ambient is caller_scope's own session, NOT outer
+                assert session_mod._request_session.get() is own
+            # after: the OUTER session is restored (reset by token, not None)
+            assert session_mod._request_session.get() is outer
+    finally:
+        session_mod._request_session.reset(token)

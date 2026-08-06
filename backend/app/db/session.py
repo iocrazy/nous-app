@@ -190,13 +190,24 @@ async def caller_scope(user_id: str) -> AsyncIterator[AsyncSession]:
 
     THREE load-bearing properties:
 
-    1. **Own transaction, NEVER an ambient ``unit_of_work()``.** Unlike
-       ``read_scope``/``write_scope`` (which join an ambient UoW when present),
-       this ALWAYS opens its own session + ``begin()``. That is what makes the
-       ``SET LOCAL ROLE`` + injected ``request.jwt.claims`` scoped to exactly
-       this transaction — they auto-reset on commit/rollback and can never leak
-       into an outer service/postgres transaction (the footgun ``write_scope``'s
-       docstring warns about). Do NOT refactor this to reuse ``_request_session``.
+    1. **Own transaction that BECOMES the ambient session (PR-2b).** This
+       ALWAYS opens its OWN session + ``begin()`` — it never REUSES an outer
+       ``unit_of_work()``/postgres transaction (doing so would let the
+       ``SET LOCAL ROLE`` escalation leak into statements it was not meant to
+       guard, the footgun ``write_scope``'s docstring warns about). But once
+       its own transaction is open, it PUBLISHES that session as the ambient
+       ``_request_session`` (same pattern as ``unit_of_work``): so the repo /
+       gateway ``read_scope()``/``write_scope()`` calls made INSIDE this block
+       join THIS authenticated transaction and run under RLS. The distinction
+       from ``write_scope``'s warning: this joins nobody — it makes itself the
+       thing others join, and tears that down (``_request_session.reset``)
+       before its own ``begin()`` commits, so the ``SET LOCAL ROLE`` +
+       ``request.jwt.claims`` are still scoped to exactly this transaction and
+       auto-reset on commit/rollback — they never outlive it or reach an outer
+       postgres transaction. If ``caller_scope`` is itself entered inside an
+       outer UoW, it still opens its own session and only TEMPORARILY points
+       ``_request_session`` at itself, restoring the outer session via the
+       ``reset(token)`` on exit.
 
     2. **``user_id`` is the SERVER-BOUND scope's user** (from ``scope_for_run`` /
        ``AgentRunScope``), NEVER a model-asserted value. RLS-as-backstop is only
@@ -204,11 +215,14 @@ async def caller_scope(user_id: str) -> AsyncIterator[AsyncSession]:
        principle (spec §4.5).
 
     3. **Wrap ONLY the tenant-scoped data access.** Infra queries that read
-       ``agent_runs`` etc. to DERIVE the scope must run as ``postgres`` (they need
-       to see rows RLS would hide from ``authenticated``); resolve the scope /
-       ``user_id`` FIRST on the normal connection, THEN enter ``caller_scope`` for
-       the scene/shot reads+writes. Same engine — Supavisor / NullPool /
-       ``statement_cache_size=0`` unchanged, no new pool.
+       ``agent_runs`` etc. to DERIVE the scope — AND the scope resolvers, which
+       additionally write best-effort audit rows to ``agent_run_events``
+       (``authenticated`` has no RLS grant there) — must run as ``postgres``
+       (they need to see rows RLS would hide from ``authenticated``); resolve
+       the scope / ``user_id`` and authorize the ids FIRST on the normal
+       connection, THEN enter ``caller_scope`` for the scene/shot reads+writes.
+       Same engine — Supavisor / NullPool / ``statement_cache_size=0``
+       unchanged, no new pool.
     """
     claims = json.dumps({"sub": str(user_id), "role": "authenticated"})
     async with get_sessionmaker()() as session:
@@ -220,4 +234,12 @@ async def caller_scope(user_id: str) -> AsyncIterator[AsyncSession]:
                 text("SELECT set_config('request.jwt.claims', :claims, true)"),
                 {"claims": claims},
             )
-            yield session
+            # Publish this authenticated session as the ambient one so repo /
+            # gateway read_scope()/write_scope() calls inside the block join it
+            # (and therefore run under RLS). Reset in finally — BEFORE begin()
+            # commits — restoring any outer session, exactly like unit_of_work.
+            token = _request_session.set(session)
+            try:
+                yield session
+            finally:
+                _request_session.reset(token)

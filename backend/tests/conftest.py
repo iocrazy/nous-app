@@ -1,6 +1,8 @@
 """Shared test fixtures for the MediaHub backend test suite."""
 
 import os
+from contextlib import asynccontextmanager as _asynccontextmanager
+from unittest.mock import MagicMock as _MagicMock
 
 import pytest
 
@@ -43,6 +45,43 @@ def _isolate_proxy_env():
         yield
     finally:
         os.environ.update(saved)
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "real_caller_scope: use the real app.db.session.caller_scope (needs a "
+        "SUPAVISOR_DATABASE_URL); the default autouse fixture stubs it inert for "
+        "the engine-less unit suite.",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _inert_caller_scope(request, monkeypatch):
+    """RLS 第三层 PR-2b: the screenwriting handlers wrap their tenant scene/shot
+    reads+writes in ``caller_scope(user_id)``, which opens a REAL authenticated
+    DB session (``SET LOCAL ROLE authenticated`` + injected
+    ``request.jwt.claims``). Its privilege-drop mechanism is unit-tested in
+    ``test_caller_scope.py`` and its RLS enforcement against nous-db in
+    ``test_screenwriting_tools_rls.py``. The rest of the (engine-less) suite
+    only exercises handler logic, so stub the binding the handlers call to an
+    inert async context manager — otherwise every handler test that reaches the
+    gateway would raise ``RuntimeError: SUPAVISOR_DATABASE_URL is not
+    configured``. Tests that need the real thing (or their own recording spy)
+    opt out with ``@pytest.mark.real_caller_scope`` or override the attribute
+    themselves inside the test."""
+    if request.node.get_closest_marker("real_caller_scope"):
+        return
+    try:
+        import app.services.ai.tools.screenwriting_tools as _tools
+    except Exception:  # pragma: no cover — module import is a hard dep in practice
+        return
+
+    @_asynccontextmanager
+    async def _inert(user_id):
+        yield _MagicMock(name="authenticated_session")
+
+    monkeypatch.setattr(_tools, "caller_scope", _inert, raising=False)
 
 
 @pytest.fixture
