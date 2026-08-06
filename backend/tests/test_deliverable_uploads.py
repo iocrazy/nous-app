@@ -146,6 +146,143 @@ async def test_ensure_folder_skips_nameless_node(monkeypatch):
     assert projects_repo.created == []
 
 
+# ── ensure_node_folder: per-episode scoping (B2 T2) ─────────────────────────
+
+
+class _StatefulProjectsRepo:
+    """A projects repo whose ``get_folders`` reflects folders created via
+    ``create_folder`` — needed to prove same-episode idempotent reuse (a second
+    ensure call must name-match the folder the first one created, not mint a
+    duplicate)."""
+
+    def __init__(self):
+        self._folders: List[Dict[str, Any]] = []
+        self.created: List[Dict[str, Any]] = []
+        self._next = 1
+
+    async def get_folders(self, project_id):
+        return list(self._folders)
+
+    async def create_folder(self, data):
+        row = {"id": str(1000 + self._next), **data}
+        self._next += 1
+        self._folders.append(row)
+        self.created.append(data)
+        return row
+
+
+class _FakeEpisodeRepo:
+    def __init__(self, titles: Optional[Dict[str, str]] = None):
+        self._titles = titles or {}
+
+    async def get_by_id(self, episode_id):
+        title = self._titles.get(str(episode_id))
+        return {"id": str(episode_id), "title": title} if title else None
+
+
+def _patch_episode_repo(monkeypatch, episode_repo):
+    monkeypatch.setattr(
+        "app.repositories.episode_repository.get_episode_repository",
+        lambda: episode_repo,
+    )
+
+
+@pytest.mark.asyncio
+async def test_episode_nodes_get_distinct_folders_across_episodes(monkeypatch):
+    """Two episodes' same-named 'Script' node must land in DIFFERENT folders —
+    the P0 trap② fix: without a per-episode prefix Ep2's Script would reuse
+    Ep1's folder (case-insensitive name match) and gate2 would misfire."""
+    projects_repo = _StatefulProjectsRepo()
+    nodes_repo = _FakeNodesRepo()
+    _patch_repos(monkeypatch, projects_repo=projects_repo, nodes_repo=nodes_repo)
+    _patch_episode_repo(
+        monkeypatch, _FakeEpisodeRepo({"501": "Episode One", "502": "Episode Two"})
+    )
+
+    ep1 = {"id": "11", "name": "Script", "folder_id": None, "episode_id": "501"}
+    ep2 = {"id": "21", "name": "Script", "folder_id": None, "episode_id": "502"}
+
+    f1 = await node_folders.ensure_node_folder(_PROJECT, ep1, _USER)
+    f2 = await node_folders.ensure_node_folder(_PROJECT, ep2, _USER)
+
+    assert f1 is not None and f2 is not None
+    assert f1 != f2  # per-episode isolation — no cross-episode reuse
+    # Two distinct folders created, each carrying its episode's scoped name.
+    assert len(projects_repo.created) == 2
+    names = {c["name"] for c in projects_repo.created}
+    assert len(names) == 2
+    # Node name still present in each scoped folder name.
+    assert all("Script" in n for n in names)
+
+
+@pytest.mark.asyncio
+async def test_same_episode_node_reuses_its_own_folder(monkeypatch):
+    """Repeated ensure calls for the SAME episode's node hit the same folder —
+    the scoped name used for CREATE must equal the one used for MATCH, else
+    every call mints a duplicate."""
+    projects_repo = _StatefulProjectsRepo()
+    nodes_repo = _FakeNodesRepo()
+    _patch_repos(monkeypatch, projects_repo=projects_repo, nodes_repo=nodes_repo)
+    _patch_episode_repo(monkeypatch, _FakeEpisodeRepo({"501": "Episode One"}))
+
+    node = {"id": "11", "name": "Script", "folder_id": None, "episode_id": "501"}
+    first = await node_folders.ensure_node_folder(_PROJECT, node, _USER)
+    second = await node_folders.ensure_node_folder(_PROJECT, node, _USER)
+
+    assert first == second
+    assert len(projects_repo.created) == 1  # no duplicate on the second call
+
+
+@pytest.mark.asyncio
+async def test_episode_node_scoped_name_unique_even_for_duplicate_titles(monkeypatch):
+    """Two episodes sharing a title still get distinct folders — uniqueness is
+    anchored on episode_id, not the (user-editable, non-unique) title."""
+    projects_repo = _StatefulProjectsRepo()
+    nodes_repo = _FakeNodesRepo()
+    _patch_repos(monkeypatch, projects_repo=projects_repo, nodes_repo=nodes_repo)
+    _patch_episode_repo(monkeypatch, _FakeEpisodeRepo({"501": "Pilot", "502": "Pilot"}))
+
+    ep1 = {"id": "11", "name": "Script", "folder_id": None, "episode_id": "501"}
+    ep2 = {"id": "21", "name": "Script", "folder_id": None, "episode_id": "502"}
+    f1 = await node_folders.ensure_node_folder(_PROJECT, ep1, _USER)
+    f2 = await node_folders.ensure_node_folder(_PROJECT, ep2, _USER)
+
+    assert f1 != f2
+    assert len(projects_repo.created) == 2
+
+
+@pytest.mark.asyncio
+async def test_episode_node_falls_back_to_id_when_title_unavailable(monkeypatch):
+    """A missing/unfetchable episode title degrades to an episode_id-based
+    scoped name (still unique + stable), never raising or blocking."""
+    projects_repo = _StatefulProjectsRepo()
+    nodes_repo = _FakeNodesRepo()
+    _patch_repos(monkeypatch, projects_repo=projects_repo, nodes_repo=nodes_repo)
+    _patch_episode_repo(monkeypatch, _FakeEpisodeRepo({}))  # no titles
+
+    node = {"id": "11", "name": "Script", "folder_id": None, "episode_id": "777"}
+    folder = await node_folders.ensure_node_folder(_PROJECT, node, _USER)
+
+    assert folder is not None
+    name = projects_repo.created[0]["name"]
+    assert "777" in name and "Script" in name
+
+
+@pytest.mark.asyncio
+async def test_legacy_none_episode_node_keeps_bare_node_name(monkeypatch):
+    """Backward-compat: a node with episode_id=None (or absent) is filed under
+    the bare node name, byte-for-byte as before — no prefix, no episode fetch."""
+    projects_repo = _StatefulProjectsRepo()
+    nodes_repo = _FakeNodesRepo()
+    _patch_repos(monkeypatch, projects_repo=projects_repo, nodes_repo=nodes_repo)
+
+    node = {"id": "1", "name": "Script", "folder_id": None, "episode_id": None}
+    folder = await node_folders.ensure_node_folder(_PROJECT, node, _USER)
+
+    assert folder is not None
+    assert projects_repo.created[0]["name"] == "Script"  # exact, no prefix
+
+
 # ── resolve_deliverable_folder ───────────────────────────────────────────────
 
 
