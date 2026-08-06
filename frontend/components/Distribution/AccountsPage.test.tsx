@@ -9,10 +9,11 @@ vi.mock('react-i18next', () => ({
 
 const connectAccount = vi.fn();
 const startSessionLogin = vi.fn();
+// Hoisted so a test can count refetches — the close-path reload is only
+// observable as "listAccounts ran again".
+const listAccounts = vi.fn();
 
-vi.mock('../../services/distributionService', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../services/distributionService')>()),
-  listAccounts: vi.fn().mockResolvedValue([
+const ACCOUNTS = [
     {
       id: '727145299382534145', scope_type: 'user', scope_id: 'u1', platform: 'douyin',
       platform_user_id: 'op1', username: 'HEYGO', avatar_url: null,
@@ -37,7 +38,11 @@ vi.mock('../../services/distributionService', async (importOriginal) => ({
       token_expires_at: null, auth_type: 'session', status: 'active',
       session_checked_at: '2026-08-03T00:00:00Z', created_at: '2026-07-04T00:00:00Z',
     },
-  ]),
+];
+
+vi.mock('../../services/distributionService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../services/distributionService')>()),
+  listAccounts: (...a: unknown[]) => listAccounts(...a),
   listPublishTasks: vi.fn().mockResolvedValue([
     {
       id: '900', content_type: 'video', title: 'Launch', description: null,
@@ -89,6 +94,7 @@ const mount = () => render(
 describe('AccountsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    listAccounts.mockResolvedValue(ACCOUNTS);
     connectAccount.mockResolvedValue({ auth_url: 'https://open.douyin.com/oauth' });
     startSessionLogin.mockResolvedValue({ task_id: 'task-1' });
   });
@@ -145,6 +151,33 @@ describe('AccountsPage', () => {
       platform: 'douyin', scope_type: 'user', scope_id: 'u1',
     }));
     expect(connectAccount).not.toHaveBeenCalled();
+  });
+
+  it('refetches the list when the QR dialog closes, not only when it succeeds', async () => {
+    // A user bound an account and the card appeared only after refreshing the
+    // page by hand. The backend was clean: the row commits ~200ms BEFORE
+    // `status: success` is broadcast, so any refetch after that sees it. The
+    // gap was that the only refetch hung off a single websocket event — miss
+    // it (dropped frame, re-subscribe, dialog closed a beat early) and the
+    // list quietly stays stale.
+    //
+    // Closing is the last moment to repair that for free, so both paths
+    // refetch. What this pins is the redundancy: `onBound` alone passed the
+    // old tests and still shipped the bug.
+    mount();
+    await waitFor(() => expect(screen.getByText('Matrix One')).toBeInTheDocument());
+    const before = listAccounts.mock.calls.length;
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Scan again/i }));
+    });
+    expect(await screen.findByText(/Sign in with QR code/i)).toBeInTheDocument();
+
+    const closers = screen.getAllByRole('button', { name: /^(Close|Cancel)$/i });
+    await act(async () => { fireEvent.click(closers[closers.length - 1]); });
+
+    await waitFor(() =>
+      expect(listAccounts.mock.calls.length).toBeGreaterThan(before));
   });
 
   it('asks which binding method to use instead of jumping to OAuth', async () => {

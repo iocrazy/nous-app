@@ -366,7 +366,22 @@ export const AccountsPage: React.FC = () => {
           scopeType={sessionLogin.scopeType}
           scopeId={sessionLogin.scopeId}
           relinkUsername={sessionLogin.relinkUsername}
-          onClose={() => setSessionLogin(null)}
+          // Reload on BOTH paths, deliberately.
+          //
+          // `onBound` fires the moment the modal sees `status: success`, which
+          // is the fast path and the one that makes the new card appear while
+          // the modal is still up. But it is one event on one websocket: miss
+          // it — a dropped frame, a re-subscribe, the user closing the dialog a
+          // beat early — and the list silently keeps showing the old accounts,
+          // which is exactly what a user reported (bound fine, appeared only
+          // after a manual refresh). The backend was in the clear: the account
+          // row is committed ~200ms BEFORE success is broadcast, so any reload
+          // after that point sees it.
+          //
+          // Closing is the last moment we can still fix that for free, and a
+          // second list fetch costs one request against a page the user is
+          // already looking at.
+          onClose={() => { setSessionLogin(null); void reload(); }}
           onBound={() => { void reload(); }}
         />
       )}
