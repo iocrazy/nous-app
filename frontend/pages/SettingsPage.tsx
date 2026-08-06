@@ -5,7 +5,7 @@ import { useNavigation } from '../hooks/useNavigation';
 import { useTeamContext } from '../contexts/TeamContext';
 
 const DEEP_LINK_TABS = [
-  'general', 'api', 'logs', 'monitor', 'tasks', 'tags', 'ai', 'docs',
+  'general', 'api', 'logs', 'monitor', 'tasks', 'tags', 'ai', 'docs', 'workflow',
 ] as const;
 type SettingsTab = (typeof DEEP_LINK_TABS)[number];
 

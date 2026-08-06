@@ -8,8 +8,7 @@ import { useWorkspaceScope } from '../hooks/useWorkspaceScope';
 import { useModuleStatus } from '../hooks/useModuleStatus';
 import { fetchProjects, fetchRecentItems } from '../services/projectsService';
 import { ProjectsListView } from '../components/ProjectsListView';
-import { ProjectFilterSidebar, WORKFLOW_TEMPLATES_FILTER, IDEATION_FILTER } from '../components/project/ProjectFilterSidebar';
-import { WorkflowTemplatesModal } from '../components/workflow/WorkflowTemplatesModal';
+import { ProjectFilterSidebar, IDEATION_FILTER } from '../components/project/ProjectFilterSidebar';
 import { IdeationBoard } from '../components/ideation/IdeationBoard';
 import { RecentItemsList } from '../components/project/RecentItemsList';
 import { VideoReviewPage } from '../components/VideoReviewPage';
@@ -39,9 +38,6 @@ export function ProjectsPage() {
   // Ideation → Create project: the source topic seeds the modal (name + topic_id).
   const [createFromTopic, setCreateFromTopic] = useState<Topic | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  // Workflow Templates present as a settings-style dialog, not a main-pane
-  // view — the sidebar entry toggles this instead of becoming activeFilter.
-  const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeFilter, setActiveFilter] = useState('all');
   const [recentItems, setRecentItems] = useState<RecentItem[]>([]);
@@ -262,10 +258,6 @@ export function ProjectsPage() {
         <ProjectFilterSidebar
           activeFilter={activeFilter}
           onFilterChange={(filter) => {
-            if (filter === WORKFLOW_TEMPLATES_FILTER) {
-              setIsTemplatesModalOpen(true);
-              return;
-            }
             setActiveFilter(filter);
           }}
           folders={folders}
@@ -317,11 +309,6 @@ export function ProjectsPage() {
           refreshProjects();
           navigate(teamId ? `/team/${teamId}/projects/${project.id}` : `/projects/${project.id}`);
         }}
-      />
-      <WorkflowTemplatesModal
-        isOpen={isTemplatesModalOpen}
-        onClose={() => setIsTemplatesModalOpen(false)}
-        teamId={effectiveTeamId}
       />
     </>
   );

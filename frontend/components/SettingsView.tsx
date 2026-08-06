@@ -4,7 +4,7 @@ import { UserSettings, ApiKey, AISettings as AISettingsType } from '../types';
 import AISettings from './AISettings';
 import {
   Save, Key, Plus, Trash2, Copy, Calendar, Shield, X, CheckSquare, Square, Edit2,
-  CheckCircle, Power, Zap, Check, Loader2, AlertCircle, SunMoon
+  CheckCircle, Power, Zap, Check, Loader2, AlertCircle, SunMoon, GitBranch
 } from 'lucide-react';
 import { Loading } from './common/Loading';
 import { useTranslation } from 'react-i18next';
@@ -19,11 +19,13 @@ import { CookiesSettings } from './CookiesSettings';
 import * as apiKeyService from '../services/apiKeyService';
 import { useConfirm } from './ConfirmDialog';
 import { ChatTempTtlPanel } from './ChatTempTtlPanel';
+import { WorkflowTemplateEditor } from './workflow/WorkflowTemplateEditor';
+import { useWorkspaceScope } from '../hooks/useWorkspaceScope';
 
 interface SettingsViewProps {
   settings: UserSettings;
   onUpdateSettings: (s: UserSettings) => void;
-  activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'docs' | 'cookies';
+  activeTab: 'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'docs' | 'cookies' | 'workflow';
   aiSettings?: AISettingsType;
   onSaveAISettings?: (settings: AISettingsType) => void;
   /** When true, hides the outer wrapper/header for embedding in a modal */
@@ -58,6 +60,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
   const confirmDialog = useConfirm();
   const { t } = useTranslation();
   const { preference, setPreference } = useTheme();
+  // Workflow Templates are configured here (B5): the workspace only does
+  // creation, the editor lives in Settings. teamId resolves from the active
+  // workspace scope (URL team → personal team fallback).
+  const { effectiveTeamId } = useWorkspaceScope();
   const [localSettings, setLocalSettings] = useState<UserSettings>(settings);
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
   const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
@@ -783,6 +789,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onUpdateSe
       {/* Cookies Tab */}
       {activeTab === 'cookies' && (
         <CookiesSettings />
+      )}
+
+      {/* Workflow Templates Tab (B5) — moved here from the projects sidebar so
+          the workspace stays creation-only. Reuses the shared editor. */}
+      {activeTab === 'workflow' && (
+        <section className="bg-ink-900 border border-ink-800 rounded-xl overflow-hidden animate-in fade-in duration-300">
+          <div className="px-6 py-4 border-b border-ink-800 bg-ink-900/50 flex items-center gap-3">
+            <div className="p-2 bg-[var(--accent-soft)] rounded-lg text-[var(--accent-text)]">
+              <GitBranch size={20} />
+            </div>
+            <h2 className="font-semibold text-ink-200">{t('projects.workflow.templatesEntry')}</h2>
+          </div>
+          <div className="h-[70vh] p-4 bg-app-bg">
+            <WorkflowTemplateEditor teamId={effectiveTeamId} />
+          </div>
+        </section>
       )}
 
       {/* Wave animation keyframes */}
