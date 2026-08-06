@@ -1210,6 +1210,15 @@ export interface ProjectStageNode {
   deliverable_required: boolean;
   deliverable_label: string | null;
   skipped: boolean;
+  /** Creative surface this node maps to (B1, mig 402) — copied-frozen at
+   * instantiation from the template. `'script' | 'storyboard' | 'renders'`
+   * name a real creative face; `null` (or absent, on legacy pre-mig-402
+   * instance rows) means a deliverable-only node (upload / version / review).
+   * Optional like `form_schema?` so existing `ProjectStageNode` literals keep
+   * compiling; `normalizeInstanceNode` fills a real value once data flows
+   * through it, defaulting missing → `null` (the most conservative degrade,
+   * spec §5③). Drives B5's episode view tabs + deliverable-node dashed border. */
+  surface?: 'script' | 'storyboard' | 'renders' | null;
   // Deliverable folder link + filed-file count (M2-W1).
   folder_id?: string | null;
   deliverable_file_count?: number;

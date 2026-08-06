@@ -112,6 +112,11 @@ const normalizeInstanceNode = (
   // mig 391 (M3 PR-J): dependency edges — real, stable instance node ids.
   // Tolerate a pre-mig-391 row the same way as the fields above.
   depends_on: node.depends_on ?? [],
+  // mig 402 (B1): the frozen creative surface. Missing (legacy instance rows
+  // pre-mig-402) degrades to `null` = deliverable-only node (spec §5③, the
+  // most conservative fallback). B5 reads this for episode view tabs + the
+  // deliverable-node dashed border.
+  surface: node.surface ?? null,
   // mig 395 (M4 Autopilot, task O1/O2): pre-work notes — CurrentNodeCard's
   // and WorkspaceStageBoard's brief textareas seed straight off this and must
   // never see `undefined` (the defaulted-seed idiom, StageNodeForm's
