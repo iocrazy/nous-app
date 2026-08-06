@@ -82,4 +82,32 @@ describe('AgentsTab', () => {
     await waitFor(() => expect(screen.getByText(/Pick an agent/)).toBeTruthy());
     expect(screen.queryByRole('button', { name: /Skills/ })).toBeNull();
   });
+
+  it('opens no scroll container of its own — AILibraryLayout owns the page scroll', async () => {
+    // This wrapper used to be `h-full overflow-y-auto`, nested inside
+    // AILibraryLayout's own `flex-1 overflow-y-auto px-8`. `h-full` pinned it
+    // to exactly the outer height, so the INNER box was the one that scrolled
+    // and the outer never did. Two user-visible consequences, both reported
+    // as separate bugs:
+    //
+    //   - the scrollbar rendered at the inner box's right edge, i.e. flush
+    //     against the Persona tab's attributes card rather than at the page
+    //     margin ("紧贴右缘的内部滚动条");
+    //   - it appeared and disappeared per tab (measured: Workbench 786px of
+    //     content vs 786px of box → none; Persona 887, Permissions 1233,
+    //     Cost/Profile taller → one), so switching tabs jogged the whole
+    //     column sideways by the scrollbar's width. That flicker is the
+    //     "残影" between the Permissions and Profile tabs — it was never a
+    //     stray node in the tab strip, which is a plain 5-button map.
+    //
+    // Asserted structurally because the symptom needs real layout to see.
+    const { container } = renderTab('script_ai');
+    await waitFor(() => expect(screen.getByTestId('agent-editor')).toBeTruthy());
+
+    const scrollers = container.querySelectorAll(
+      '[class*="overflow-y-auto"], [class*="overflow-auto"], [class*="overflow-y-scroll"]',
+    );
+    expect(scrollers).toHaveLength(0);
+    expect(container.querySelector('[class*="h-full"]')).toBeNull();
+  });
 });

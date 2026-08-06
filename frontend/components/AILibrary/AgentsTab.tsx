@@ -58,7 +58,10 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({ slug, onSlugChange, onAgen
 
   if (!slug) {
     return (
-      <div className="flex h-full items-center justify-center p-6 text-sm text-ink-500">
+      // `min-h-[60vh]` rather than `h-full`: nothing in this page's chain pins
+      // a height any more (see AgentsPage), so `h-full` would resolve to auto
+      // and collapse the centring to a line of text under the header.
+      <div className="flex min-h-[60vh] items-center justify-center p-6 text-sm text-ink-500">
         {agentCount === 0
           ? t('aiLibrary.agents.selectAgent', 'No agents yet — use + to create one.')
           : t('aiLibrary.agents.pickFromSidebar', 'Pick an agent from the sidebar.')}
@@ -67,7 +70,23 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({ slug, onSlugChange, onAgen
   }
 
   return (
-    <div className="h-full overflow-y-auto pt-6 pb-8">
+    // NO scroll container here. This was `h-full overflow-y-auto`, nested
+    // inside AILibraryLayout's own `flex-1 overflow-y-auto px-8`: `h-full`
+    // pinned it to exactly the outer height, so the inner box was the one that
+    // scrolled and the outer never did. Both of the layout bugs reported
+    // against this page came out of that one line —
+    //
+    //   - the scrollbar sat at the INNER box's right edge, inside the page
+    //     gutter, so on the Persona tab it ran flush against the attributes
+    //     card instead of at the page margin;
+    //   - it appeared per tab, not per page (Workbench content fits, Persona /
+    //     Permissions / Cost / Profile do not), so every tab switch jogged the
+    //     column sideways by the scrollbar's width — the "ghost" gap between
+    //     the Permissions and Profile tabs. The tab strip itself is a plain
+    //     5-button map with no stray nodes; it was never the cause.
+    //
+    // One scroll container per scrollable region: the layout's.
+    <div className="pt-6 pb-8">
       {/* The agent detail page had no strip at all, so opening an agent was a
           one-way trip — the only route back to the gallery was the browser
           button. Same mount and same rule as the skill editor. */}

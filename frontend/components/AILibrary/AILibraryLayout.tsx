@@ -26,7 +26,13 @@ export const AILibraryLayout: React.FC = () => {
         onToggleCollapse={() => setCollapsed((v) => !v)}
       />
       <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
-        <div className={'flex-1 overflow-y-auto px-8 pb-8'}>
+        {/* The one scroll container for everything to the right of the rail.
+            `scrollbar-gutter: stable` reserves its track whether or not the
+            current view overflows — without it the agent detail page changed
+            width on every tab switch (Workbench fits, Persona / Permissions /
+            Cost do not), which is the phantom gap that kept getting reported
+            between the Permissions and Profile tabs. */}
+        <div className="flex-1 overflow-y-auto px-8 pb-8 [scrollbar-gutter:stable]">
           <Outlet />
         </div>
       </div>
