@@ -1,19 +1,20 @@
 // frontend/components/AILibrary/AgentProfileTab.tsx
 // B2 — "this agent's paperwork" (spec 2026-08-02 §B2).
 //
-// The cold half of the detail page: spend limits, run limits, actual spend,
-// and the version history you reach for when a prompt edit went wrong.
-// Absorbs the old Versions sub-tab, the budget block that used to sit at the
-// bottom of Overview, and — since this rebuild — the whole old dashboard
-// (14-day charts, cost breakdown, runs table, "used by"). Those answer "how
-// has it been trending", which is audit material, not the landing question
-// "what is it doing right now" that the Workbench now owns.
+// The cold half of the detail page: the caps you set on it (spend budget, run
+// timeout, concurrency) and the version history you reach for when a prompt
+// edit went wrong. Absorbs the old Versions sub-tab and the budget block that
+// used to sit at the bottom of Overview.
+//
+// What it no longer holds is the dashboard — 14-day charts, spend breakdown,
+// "used by". That is ACTUAL spend, a different question from the LIMITS here,
+// and stacking them made this page read as one long thing about money that
+// then turned into version history. It has its own tab now: AgentCostTab.
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AILibraryAgent } from '../../types';
 import { VersionHistoryPanel } from './VersionHistoryPanel';
-import { AgentDashboardTab } from './AgentDashboardTab';
 
 interface AgentProfileTabProps {
   agent: AILibraryAgent;
@@ -21,6 +22,13 @@ interface AgentProfileTabProps {
   draft: Partial<AILibraryAgent>;
   updateDraft: <K extends keyof AILibraryAgent>(key: K, value: AILibraryAgent[K]) => void;
   catalogLocked: boolean;
+  /**
+   * PATCH the shared draft. Owned by AgentEditor — the same call its header
+   * Save makes, surfaced here because the header button is Persona-only and
+   * these fields are the one editable thing on this tab.
+   */
+  onSave: () => void | Promise<void>;
+  saving: boolean;
   /** Refetch the agent after a rollback so the editor picks up the content. */
   onRollback: () => void;
 }
@@ -31,14 +39,19 @@ export const AgentProfileTab: React.FC<AgentProfileTabProps> = ({
   draft,
   updateDraft,
   catalogLocked,
+  onSave,
+  saving,
   onRollback,
 }) => {
   const { t } = useTranslation();
   return (
     <div className="space-y-6">
       <section className="space-y-4 text-sm">
+        {/* "Cost & limits" until the actual-spend half moved to the Cost tab;
+            what is left is only the caps, and the old title now points at a
+            different tab's content. */}
         <h3 className="text-sm font-semibold text-ink-200">
-          {t('aiLibrary.agents.costSection', 'Cost & limits')}
+          {t('aiLibrary.agents.limitsSection', 'Budget & limits')}
         </h3>
         <BudgetFields
           tokenBudget={draft.monthly_token_budget ?? null}
@@ -58,6 +71,24 @@ export const AgentProfileTab: React.FC<AgentProfileTabProps> = ({
           {t('aiLibrary.agents.boundSkills')}:{' '}
           <span className="font-medium text-ink-200">{agent.skill_ids.length}</span>
         </div>
+
+        {/* These four inputs are the only editable thing on this tab, and the
+            header Save renders on Persona only — so without a button here the
+            fields accept typing and quietly discard it on tab switch. Same
+            shape as the Permissions tab's own Save. */}
+        {!catalogLocked && (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => void onSave()}
+              disabled={saving}
+              data-testid="profile-save-limits"
+              className="rounded-lg border border-ink-700 bg-ink-800 px-4 py-2 text-sm font-medium text-ink-200 transition-colors hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? t('common.saving') : t('common.save', 'Save')}
+            </button>
+          </div>
+        )}
       </section>
 
       {/* Same single-heading rule as the skill editor: the panel brings its own
@@ -66,11 +97,6 @@ export const AgentProfileTab: React.FC<AgentProfileTabProps> = ({
       <section className="overflow-hidden rounded-lg border border-ink-800">
         <VersionHistoryPanel kind="agent" slug={slug} onRollback={onRollback} />
       </section>
-
-      {/* Actual spend + activity history. `onOpenRuns` is a no-op here: the
-          runs surface lives on the Workbench, and a link that jumps tabs
-          under you reads as a bug. */}
-      <AgentDashboardTab slug={slug} onOpenRuns={undefined} />
     </div>
   );
 };

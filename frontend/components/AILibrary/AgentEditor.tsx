@@ -36,6 +36,7 @@ import { NewAgentModal } from './NewAgentModal';
 import { AgentActionBar } from './AgentActionBar';
 import { AgentWorkbenchTab } from './AgentWorkbenchTab';
 import { AgentPersonaTab } from './AgentPersonaTab';
+import { AgentCostTab } from './AgentCostTab';
 import { AgentProfileTab } from './AgentProfileTab';
 import PermissionsSection from './PermissionsSection';
 import { PROVIDER_DISPLAY_NAMES, getAvailableModels } from './agentEditorModel';
@@ -43,15 +44,20 @@ import { GROUP_AVATAR, agentGroupOf } from './agentStatus';
 import { getAgentIcon } from './agentIcons';
 import { useGlobalChatStore } from '../../stores/globalChatStore';
 
-type SubTab = 'workbench' | 'persona' | 'permissions' | 'profile';
+type SubTab = 'workbench' | 'persona' | 'permissions' | 'cost' | 'profile';
 
 /**
  * Where each of the old eight sub-tabs went (B2, spec 2026-08-02 §B2).
  * Bookmarks and in-app links carrying the old ``?tab=`` values keep working
  * instead of silently landing on the default tab.
+ *
+ * ``dashboard`` follows its CONTENT, not its old position: it was the 14-day
+ * charts + spend breakdown, which rode into Profile during the rebuild and now
+ * lives on Cost. Pointing it at the workbench would land the user on a tab
+ * that shares none of what they bookmarked.
  */
 export const LEGACY_TAB_MAP: Record<string, SubTab> = {
-  dashboard: 'workbench',
+  dashboard: 'cost',
   runs: 'workbench',
   routines: 'workbench',
   overview: 'persona',
@@ -60,7 +66,23 @@ export const LEGACY_TAB_MAP: Record<string, SubTab> = {
   versions: 'profile',
 };
 
-export const SUB_TABS: SubTab[] = ['workbench', 'persona', 'permissions', 'profile'];
+/**
+ * Reading order: what it is doing → who it is → who may talk to it → what it
+ * costs → its paperwork.
+ *
+ * Cost is its own step rather than a block inside Profile. Profile was
+ * answering two unrelated questions in one scroll — "how has spend been
+ * trending" (charts, usage, 14-day rollup) and "what did this prompt look like
+ * last week" (version history) — and the budget inputs at the top made the
+ * whole thing read as one page about money that then wasn't.
+ */
+export const SUB_TABS: SubTab[] = [
+  'workbench',
+  'persona',
+  'permissions',
+  'cost',
+  'profile',
+];
 
 /** English fallbacks: `t()` with no default renders the raw key path when a
  *  locale is missing one, which in a tab strip looks like a broken label. */
@@ -68,6 +90,7 @@ const SUB_TAB_LABELS: Record<SubTab, string> = {
   workbench: 'Workbench',
   persona: 'Persona & Skills',
   permissions: 'Permissions',
+  cost: 'Cost',
   profile: 'Profile',
 };
 
@@ -524,7 +547,14 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
             <span>{agent.model}</span>
           </div>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        {/* Three groups, weakest first, separated by a gap twice the size of
+            the one inside a group: [state + overflow] · [secondary] · [primary].
+            Everything used to sit in one flat gap-2 row — Assign Task, Pause,
+            the status chip, "...", Save and Start chat all reading as peers,
+            with Save appearing and disappearing in the middle of the row and
+            shuffling its neighbours sideways. */}
+        <div className="ml-auto flex items-center gap-4">
+          {/* State and low-frequency menu items: read, or reach for rarely. */}
           <AgentActionBar
             agent={agent}
             readOnly={catalogLocked}
@@ -535,24 +565,33 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
             onDuplicate={openForkModal}
             onDelete={isPreset ? undefined : handleDeleteAgent}
           />
-          {/* Save only exists on the tab that has a draft. Workbench and
-              Profile edit nothing through this button. */}
-          {sub === 'persona' && (
+
+          <div className="flex items-center gap-2">
+            {/* Save only exists on the tab that owns a draft. Permissions have
+                their own Save (separate endpoint, separate role gate);
+                Workbench, Cost and Profile's version list edit nothing through
+                this button — Profile's budget fields are the exception and are
+                covered by Persona's save of the same draft object. */}
+            {sub === 'persona' && (
+              <button
+                onClick={save}
+                disabled={saving}
+                data-testid="agent-save-changes"
+                className="rounded-lg border border-ink-700 bg-ink-800 px-4 py-2 text-sm font-medium text-ink-200 hover:bg-ink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+              >
+                {saving ? t('common.saving') : t('aiLibrary.agents.saveChanges')}
+              </button>
+            )}
+            {/* The one thing you came here to do, and the only filled button. */}
             <button
-              onClick={save}
-              disabled={saving}
-              className="rounded-lg border border-ink-700 bg-ink-800 px-4 py-2 text-sm font-medium text-ink-200 hover:bg-ink-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+              type="button"
+              onClick={() => requestChat(agent.slug)}
+              data-testid="agent-start-chat"
+              className="rounded-lg bg-ok px-5 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 whitespace-nowrap"
             >
-              {saving ? t('common.saving') : t('aiLibrary.agents.saveChanges')}
+              {t('aiLibrary.agents.startChat', 'Start chat')}
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => requestChat(agent.slug)}
-            className="rounded-lg bg-ok px-5 py-2 text-sm font-semibold text-white transition-colors hover:opacity-90 whitespace-nowrap"
-          >
-            {t('aiLibrary.agents.startChat', 'Start chat')}
-          </button>
+          </div>
         </div>
       </header>
 
@@ -653,6 +692,8 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
         </section>
       )}
 
+      {sub === 'cost' && <AgentCostTab slug={slug} />}
+
       {sub === 'profile' && (
         <AgentProfileTab
           agent={agent}
@@ -660,6 +701,8 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
           draft={draft}
           updateDraft={updateDraft}
           catalogLocked={catalogLocked}
+          onSave={save}
+          saving={saving}
           onRollback={() => {
             void aiLibraryService.getAgent(slug).then((a) => {
               setAgent(a);

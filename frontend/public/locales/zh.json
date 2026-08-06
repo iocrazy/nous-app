@@ -2618,7 +2618,8 @@
         "workbench": "工作台",
         "persona": "人格与技能",
         "profile": "档案",
-        "permissions": "权限"
+        "permissions": "权限",
+        "cost": "成本"
       },
       "loadErrorPrefix": "加载智能体失败",
       "listLoadError": "加载智能体列表失败",
@@ -2832,8 +2833,10 @@
       "deleteConfirm": "删除该智能体?其运行记录与技能绑定将被移除;聊天历史仍可查看。",
       "deletedToast": "智能体已删除",
       "attributes": "属性",
-      "costSection": "成本与限额",
+      "limitsSection": "预算与限额",
       "waitingReplies": "{{count}} 条待你回复",
+      "waitingRepliesTitle": "等你回复",
+      "waitingRepliesEmpty": "暂无等待回复",
       "goAnswer": "去回复",
       "viewInIssues": "去 Issues 查看",
       "backToOverview": "返回概览",

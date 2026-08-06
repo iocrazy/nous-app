@@ -94,19 +94,18 @@ describe('getAvailableModels', () => {
 });
 
 describe('resolveSubTab', () => {
-  it('accepts the four current tabs', () => {
+  it('accepts the five current tabs', () => {
     expect(resolveSubTab('workbench')).toBe('workbench');
     expect(resolveSubTab('persona')).toBe('persona');
     expect(resolveSubTab('permissions')).toBe('permissions');
+    expect(resolveSubTab('cost')).toBe('cost');
     expect(resolveSubTab('profile')).toBe('profile');
   });
 
   it('maps every one of the old eight tabs somewhere', () => {
     // Bookmarks and older in-app links carry these; landing them all on the
     // default tab would silently lose the user's place.
-    expect(
-      ['dashboard', 'runs', 'routines'].map(resolveSubTab),
-    ).toEqual(['workbench', 'workbench', 'workbench']);
+    expect(['runs', 'routines'].map(resolveSubTab)).toEqual(['workbench', 'workbench']);
     expect(
       ['overview', 'files', 'skills'].map(resolveSubTab),
     ).toEqual(['persona', 'persona', 'persona']);
@@ -118,14 +117,23 @@ describe('resolveSubTab', () => {
     expect(LEGACY_TAB_MAP.permissions).toBeUndefined();
   });
 
-  it('carries permissions as its own tab, in reading order', () => {
-    // Chat permissions used to be a block at the bottom of the persona tab,
-    // where their descriptions wrapped into each other in a 1fr column.
-    // Order matters: what it does → who it is → who may talk to it → history.
+  it('re-points the old dashboard link at Cost, where its content went', () => {
+    // `?tab=dashboard` was the 14-day charts + spend breakdown. That block
+    // rode along into Profile during the B2 rebuild and now has its own tab,
+    // so the legacy link should follow the CONTENT rather than keep pointing
+    // at the workbench, which shares none of it.
+    expect(resolveSubTab('dashboard')).toBe('cost');
+  });
+
+  it('orders the tabs as the questions are asked', () => {
+    // What is it doing → who is it → who may talk to it → what does it cost
+    // → its paperwork. Cost is its own step because Profile was answering two
+    // unrelated questions (spend trend vs version history) in one scroll.
     expect(SUB_TABS).toEqual([
       'workbench',
       'persona',
       'permissions',
+      'cost',
       'profile',
     ]);
   });
