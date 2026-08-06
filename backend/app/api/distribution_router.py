@@ -115,13 +115,14 @@ async def _save_oauth_state(state, user_id, platform, scope_type, scope_id) -> N
 _OAUTH_STATE_COLS = tuple(DistributionOauthStates.__table__.columns)
 
 
-async def _pop_oauth_state(state: str) -> dict | None:
-    # COMMITTING path required: this DELETE ... RETURNING consumes a row.
-    # write_scope() commits (unlike a bare read_scope/connect()), so the state
-    # is actually consumed rather than silently rolled back and replayable
-    # (the #498 silent-rollback class).
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
-    stmt = (
+def _pop_oauth_state_stmt(state: str, cutoff: datetime):
+    """The DELETE ... RETURNING statement itself, column-level (not
+    entity-level — the B4 row-shape lesson) via ``_OAUTH_STATE_COLS`` so
+    ``_pop_oauth_state``'s ``dict(row)`` reads real column values. ``cutoff``
+    is passed in (not computed here) so a real-aiosqlite row-shape test can
+    import and exercise the exact production statement against a
+    deterministic cutoff instead of a live wall-clock read."""
+    return (
         sa_delete(DistributionOauthStates)
         .where(
             DistributionOauthStates.state == state,
@@ -129,8 +130,38 @@ async def _pop_oauth_state(state: str) -> dict | None:
         )
         .returning(*_OAUTH_STATE_COLS)
     )
+
+
+async def _pop_oauth_state(state: str) -> dict | None:
+    # COMMITTING path required: this DELETE ... RETURNING consumes a row.
+    # write_scope() commits (unlike a bare read_scope/connect()), so the state
+    # is actually consumed rather than silently rolled back and replayable
+    # (the #498 silent-rollback class).
+    #
+    # The cutoff is computed app-side (``datetime.now(UTC) - timedelta``)
+    # rather than server-side ``NOW() - INTERVAL '10 minutes'`` (the raw-SQL
+    # predecessor's shape). Unlike worker_identity.py::stale_executor_ids
+    # (observe-only logging, clock-skew irrelevant), this cutoff is a real
+    # security boundary — the OAuth state replay window — so the app/DB
+    # clock-skew trade needs its own substantive justification, not a copy
+    # of that rationale: nous-backend and nous-db run as containers on the
+    # SAME host (gpupc; see CLAUDE.md's DBOS 直连端口 note), sharing that
+    # host's NTP-disciplined system clock — any drift between the two
+    # processes' clocks is sub-second, not the seconds-to-minutes skew a
+    # cross-machine deployment could see. Against that, the window itself
+    # carries a full 10-minute margin (an OAuth redirect round-trip is
+    # normally single-digit seconds), so even a pathological few-second
+    # drift cannot flip a legitimate in-flight callback into "expired" or
+    # let a truly-stale state slip through as "still fresh". If backend and
+    # DB are ever split across hosts, re-derive this as a server-side
+    # ``func.now() - text("interval '10 minutes'")`` predicate instead.
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
     async with write_scope() as session:
-        row = (await session.execute(stmt)).mappings().first()
+        row = (
+            (await session.execute(_pop_oauth_state_stmt(state, cutoff)))
+            .mappings()
+            .first()
+        )
     return dict(row) if row is not None else None
 
 

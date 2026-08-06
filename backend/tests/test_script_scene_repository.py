@@ -23,17 +23,24 @@ The invariants under test are the load-bearing ones from the plan Task 4:
 from __future__ import annotations
 
 import datetime as _dt
+import uuid as _uuid_mod
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import insert as _sa_insert
+from sqlalchemy import select as _sa_select
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+from sqlalchemy.ext.asyncio import async_sessionmaker as _async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine
 
 import app.repositories.script_scene_repository as scene_mod
-from app.models.scripts import ScriptScenes
+from app.models.scripts import ScriptProjects, ScriptScenes
 from app.repositories.script_scene_repository import (
     ScriptSceneRepository,
     VersionConflict,
+    _project_scene_rows_stmt,
 )
 from app.services.script.scene_ops import OpError
 
@@ -780,3 +787,128 @@ async def test_create_after_lock_skips_an_omitted_scenes_number():
     assert out["scene_number"] == "3B"
     upd_sql, upd_params = _rendered(session.statements[-1])
     assert "3B" in upd_params.values()
+
+
+# ── Real-aiosqlite row-shape regression (B5 review leftover — deferred
+# minors batch, Minor 4) ─────────────────────────────────────────────────
+#
+# Every test above fakes the Result (_FakeResult), so the B4 row-shape bug
+# class (a JOIN select of individually-labeled columns vs an accidental
+# select(Entity)/select(*Entity.__table__.c) collapsing the mapping to one
+# key) has no coverage for list_scene_rows_for_project's fetch->consume
+# chain (``.mappings().all()`` -> ``dict(r)`` in the repository method).
+# Mirrors tests/test_orm_b5_task1_row_shape_e2e.py's positive/negative-
+# control pair with a genuine aiosqlite engine.
+
+_SCRIPT_PROJECTS_DDL = """
+CREATE TABLE script_projects (
+    id INTEGER PRIMARY KEY, project_id INTEGER, team_id INTEGER,
+    name TEXT, created_by TEXT, display_code TEXT, description TEXT,
+    settings_json TEXT, viewport_json TEXT, status TEXT,
+    created_at TIMESTAMP, updated_at TIMESTAMP, episode_id INTEGER,
+    numbering_locked_at TIMESTAMP
+)
+"""
+_SCRIPT_SCENES_DDL = """
+CREATE TABLE script_scenes (
+    id INTEGER PRIMARY KEY, script_id INTEGER, chapter_id INTEGER,
+    heading_int_ext TEXT, location_text TEXT, location_id INTEGER,
+    time_of_day TEXT, content_json TEXT, content TEXT,
+    content_version INTEGER, position_x REAL, position_y REAL,
+    width REAL, height REAL, sort_order INTEGER,
+    created_at TIMESTAMP, updated_at TIMESTAMP, scene_number TEXT,
+    omitted_at TIMESTAMP
+)
+"""
+
+
+async def _seed_project_scene_pipeline(engine) -> None:
+    async with engine.begin() as conn:
+        await conn.exec_driver_sql(_SCRIPT_PROJECTS_DDL)
+        await conn.exec_driver_sql(_SCRIPT_SCENES_DDL)
+        await conn.execute(
+            _sa_insert(ScriptProjects.__table__).values(
+                id=10,
+                project_id=99,
+                team_id=1,
+                name="Script A",
+                created_by=_uuid_mod.uuid4(),
+                status="active",
+                episode_id=5,
+            )
+        )
+        await conn.execute(
+            _sa_insert(ScriptScenes.__table__).values(
+                id=100,
+                script_id=10,
+                location_text="INT. HOUSE - DAY",
+                content_json=[{"type": "action", "text": "hi"}],
+                content="",
+                content_version=0,
+                sort_order=0,
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_project_scene_rows_stmt_yields_column_keyed_row_against_real_sqlite():
+    """The REAL production statement (``_project_scene_rows_stmt``, imported
+    — not reconstructed here) round-tripped through a genuine aiosqlite
+    ``Result`` gives a column-keyed RowMapping matching
+    ``list_scene_rows_for_project``'s ``dict(r)`` consumption — including a
+    real JSONB round-trip for ``content_json`` (a Python list survives, not
+    a serialized string)."""
+    engine = _create_async_engine("sqlite+aiosqlite://")
+    engine = engine.execution_options(schema_translate_map={"public": None})
+    await _seed_project_scene_pipeline(engine)
+
+    sessionmaker = _async_sessionmaker(
+        engine, class_=_AsyncSession, expire_on_commit=False
+    )
+    try:
+        async with sessionmaker() as session:
+            rows = (
+                (await session.execute(_project_scene_rows_stmt(99))).mappings().all()
+            )
+    finally:
+        await engine.dispose()
+
+    assert len(rows) == 1
+    row = dict(rows[0])  # exact consumption shape used by the repository
+    assert row["episode_id"] == 5
+    assert row["location_text"] == "INT. HOUSE - DAY"
+    assert row["content_json"] == [{"type": "action", "text": "hi"}]
+
+
+@pytest.mark.asyncio
+async def test_project_scene_rows_stmt_entity_level_negative_control_proves_sensitivity():
+    """Negative control: selecting the ScriptScenes ENTITY alongside
+    ScriptProjects.episode_id (rather than the individually-labeled columns
+    ``_project_scene_rows_stmt`` uses) produces an entity-keyed mapping for
+    the scene fields — proving the column-level select choice is
+    load-bearing, not incidental."""
+    engine = _create_async_engine("sqlite+aiosqlite://")
+    engine = engine.execution_options(schema_translate_map={"public": None})
+    await _seed_project_scene_pipeline(engine)
+
+    sessionmaker = _async_sessionmaker(
+        engine, class_=_AsyncSession, expire_on_commit=False
+    )
+    try:
+        bad_stmt = (
+            _sa_select(ScriptProjects.episode_id.label("episode_id"), ScriptScenes)
+            .select_from(ScriptScenes)
+            .join(ScriptProjects, ScriptProjects.id == ScriptScenes.script_id)
+            .where(ScriptProjects.project_id == 99, ScriptProjects.status != "deleted")
+        )
+        async with sessionmaker() as session:
+            bad_rows = (await session.execute(bad_stmt)).mappings().all()
+    finally:
+        await engine.dispose()
+
+    assert len(bad_rows) == 1
+    bad_row = bad_rows[0]
+    assert "ScriptScenes" in bad_row.keys()  # entity-keyed, not column-keyed
+    assert bad_row.get("location_text") is None  # dict(r) consumption would break
+    with pytest.raises(KeyError):
+        bad_row["location_text"]

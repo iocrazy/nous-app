@@ -18,7 +18,7 @@ from typing import Any, Optional
 from dbos import DBOS
 from sqlalchemy import select
 
-from app.db.scope import is_enforced, system_request_scope
+from app.db.scope import Scope, is_enforced, request_scope, system_request_scope
 
 
 def _summary_inputs_select_stmt(parsed_media_id: int, user_id: str):
@@ -26,10 +26,15 @@ def _summary_inputs_select_stmt(parsed_media_id: int, user_id: str):
     B4 row-shape lesson) so ``row["transcript"]``/``row.get("title")`` below
     read real column values. Already filters ``r.creator_id = :uid`` — this
     predicate is the query's OWN tenant filter (pre-dating the ORM choke
-    point), kept as-is; the ``system_request_scope`` wrap at the call site
-    only prevents a REDUNDANT fail-closed raise from the choke point (this
-    step has no ambient per-request scope to open a real user session with),
-    it does not change which rows are visible. Factored out so a real-
+    point), kept as-is. Phase C final-review Minor 4: since ``user_id`` is a
+    required, single, determinate arg AND is exactly the identity this
+    predicate already filters on, the call site opens a real per-user
+    ``request_scope(Scope(user_id=user_id))`` rather than
+    ``system_request_scope`` — the choke point's injected filter then matches
+    this query's own explicit filter exactly (defense in depth) instead of
+    granting unrestricted SYSTEM visibility a query that already knows its
+    one user doesn't need. Mirrors
+    ``tags_repository._get_tag_counts_fallback``. Factored out so a real-
     aiosqlite row-shape test can import and exercise the exact production
     statement."""
     from app.models import ParsedMedia, Resources, ResourceTranscripts
@@ -58,19 +63,14 @@ async def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, A
     # Resources carries UserScoped(creator_id); SCOPE_ENFORCE_RESOURCES
     # defaults false in code but production sets it true via
     # secrets/backend.env (CLAUDE.md 部署陷阱). This step has no ambient
-    # per-request scope of its own (it's a DBOS step), so the wrap is
+    # per-request scope of its own (it's a DBOS step), so a scope wrap is
     # LOAD-BEARING once the flag is on — without it the JOIN through
-    # Resources fail-closed raises UnscopedQueryError. Gated on is_enforced
-    # to stay byte-for-byte legacy where the flag is off.
-    scope_cm = (
-        system_request_scope(
-            reason="ai-summary workflow: resolve transcript+resource for "
-            "summary inputs"
-        )
-        if is_enforced("resources")
-        else nullcontext()
-    )
-    async with scope_cm:
+    # Resources fail-closed raises UnscopedQueryError. A real per-user
+    # request_scope (see _summary_inputs_select_stmt's docstring) rather
+    # than system_request_scope — harmless no-op while the flag is off
+    # (request_scope only sets the ambient ContextVar, no DB session, so no
+    # is_enforced gate is needed here).
+    async with request_scope(Scope(user_id=user_id)):
         async with read_scope() as session:
             row = (
                 (

@@ -1,21 +1,38 @@
 """C1 regression pin (Phase C task 1, 2026-08-05): proves the
-``is_enforced("resources")``-gated ``system_request_scope`` wrap added at
-each of the ~14 Resources-touching call sites across the 7 AI/media
-workflow files is LOAD-BEARING in production, not decorative — same
-contract as ``test_scope_enforcement_regression_i1.py`` (Phase A), extended
-to cover Phase C's workflow sites and its two write-shaped call classes
-(bulk Core UPDATE, not just SELECT).
+``is_enforced("resources")``-gated scope wrap added at each of the ~14
+Resources-touching call sites across the 7 AI/media workflow files is
+LOAD-BEARING in production, not decorative — same contract as
+``test_scope_enforcement_regression_i1.py`` (Phase A), extended to cover
+Phase C's workflow sites and its two write-shaped call classes (bulk Core
+UPDATE, not just SELECT).
 
 Context: ``SCOPE_ENFORCE_RESOURCES`` DEFAULTS to false in code, but
 production sets it TRUE via ``secrets/backend.env`` (CLAUDE.md 部署陷阱).
 These DBOS workflow steps have NO ambient per-request scope of their own
-(they are background steps, not HTTP handlers), so every
-``system_request_scope`` wrap added in this migration batch is what stands
-between the statement and a fail-closed 500 once the flag is on.
+(they are background steps, not HTTP handlers), so every scope wrap added
+in this migration batch is what stands between the statement and a
+fail-closed 500 once the flag is on.
 
-Two call-site shapes, two assertion helpers:
+deferred-minors batch (2026-08, scope-judgment-pass Minor 1): site 5
+(``ai_summary.py::load_summary_inputs``) was flipped from
+``system_request_scope`` to a real per-user ``request_scope(Scope(user_id=
+...))`` — its query already filters ``Resources.creator_id == user_id``
+explicitly and the function has a single determinate ``user_id`` arg, so a
+real user Scope is defense-in-depth-correct (mirrors C3's
+``tags_repository._get_tag_counts_fallback``) rather than opening
+unrestricted SYSTEM visibility. Every other site's Resources query either
+has no per-owner filter (cross-tenant sweep/backfill by design) or is a
+preference-only ``ORDER BY`` (analyze_l1's creator-match-first lookup,
+which FALLS BACK to another user's resource — injecting a real filter
+there would break that fallback) or is itself the read that resolves
+``creator_id``/``user_id`` in the first place (volcengine ASR's creator
+lookup) — all of those correctly stay ``system_request_scope``. See the
+per-site docstrings in the workflow files for the individual judgment call.
 
-  SELECT sites (``_assert_select_load_bearing``) — mirrors I1:
+Three call-site shapes, three assertion helpers:
+
+  SELECT sites wrapped in ``system_request_scope``
+  (``_assert_select_load_bearing``) — mirrors I1:
     (a) POSITIVE — wrapped in ``system_request_scope`` (SYSTEM scope: no
         injection, no raise), the statement clears the choke point and
         reaches real execution, failing only with ``OperationalError`` (no
@@ -23,6 +40,20 @@ Two call-site shapes, two assertion helpers:
     (b) COUNTERFACTUAL — with NO scope open at all (simulating "the wrap
         was deleted"), the exact same statement is intercepted and
         fail-closed raises ``UnscopedQueryError`` BEFORE reaching the DB.
+
+  SELECT site wrapped in a real per-user ``request_scope(Scope(user_id=...))``
+  (``_assert_select_load_bearing_via_user_scope``) — mirrors C3's
+  ``_get_tag_counts_fallback`` variant; only site 5 (``ai_summary``) uses
+  this shape:
+    (a) POSITIVE — wrapped in ``request_scope(Scope(user_id=_UID))`` (a REAL
+        user Scope, not SYSTEM) using the SAME identity the query already
+        filters on — the choke point's injected predicate matches the
+        query's own explicit filter, clears the choke point, and reaches
+        real execution (``OperationalError``, never ``UnscopedQueryError``).
+    (b) COUNTERFACTUAL — with NO scope open at all, fail-closed raises
+        ``UnscopedQueryError`` BEFORE reaching the DB (same as the
+        system-scope sites — the point being pinned is "some correctly-typed
+        scope wrap is load-bearing here", regardless of which kind).
 
   Bulk Core UPDATE sites (``_assert_write_load_bearing``) — the write-path
   guard (``_forbid_scoped_bulk_dml``) is STRICTER than the SELECT path: a
@@ -110,6 +141,29 @@ async def _assert_select_load_bearing(sqlite_sessionmaker, stmt) -> None:
     # point, reaches real execution, fails ONLY on the throwaway DB having
     # no schema (never UnscopedQueryError).
     async with system_request_scope(reason="c1-regression-pin"):
+        async with sqlite_sessionmaker() as session:
+            with pytest.raises(OperationalError):
+                await session.execute(stmt)
+
+
+async def _assert_select_load_bearing_via_user_scope(sqlite_sessionmaker, stmt) -> None:
+    """(a)+(b) pair for the one SELECT site (ai_summary's
+    ``load_summary_inputs``) whose correct wrap is a REAL per-user
+    ``request_scope(Scope(user_id=_UID))`` rather than
+    ``system_request_scope`` — the query already filters on that same
+    identity (mirrors C3's ``_get_tag_counts_fallback`` helper of the same
+    name)."""
+    # (b) COUNTERFACTUAL — no ambient scope at all: fail-closed BEFORE any
+    # DB round-trip.
+    async with sqlite_sessionmaker() as session:
+        with pytest.raises(UnscopedQueryError):
+            await session.execute(stmt)
+
+    # (a) POSITIVE — a REAL user Scope (not SYSTEM) carrying the SAME
+    # identity the statement already filters on: clears the choke point
+    # (the injected predicate matches the explicit one) and reaches real
+    # execution, failing only on the throwaway DB having no schema.
+    async with request_scope(Scope(user_id=_UID)):
         async with sqlite_sessionmaker() as session:
             with pytest.raises(OperationalError):
                 await session.execute(stmt)
@@ -208,8 +262,12 @@ async def test_ai_summary_load_inputs_query_is_load_bearing(
     enforce_resources_on, sqlite_sessionmaker
 ):
     """app/workflows/ai_summary.py::load_summary_inputs — parsed_media JOIN
-    resources JOIN resource_transcripts, WHERE r.creator_id = :uid."""
-    await _assert_select_load_bearing(
+    resources JOIN resource_transcripts, WHERE r.creator_id = :uid.
+
+    deferred-minors batch: this call site now opens a real per-user
+    request_scope(Scope(user_id=user_id)) — not system_request_scope — so
+    it is pinned via the user-scope helper (see that helper's docstring)."""
+    await _assert_select_load_bearing_via_user_scope(
         sqlite_sessionmaker, _summary_inputs_select_stmt(1, _UID)
     )
 

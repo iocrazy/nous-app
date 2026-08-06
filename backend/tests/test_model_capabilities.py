@@ -1,10 +1,16 @@
 # backend/tests/test_model_capabilities.py
+import decimal
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import insert as _sa_insert
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+from sqlalchemy.ext.asyncio import async_sessionmaker as _async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine
 
+from app.models import AiModelPrices
 from app.services.ai import model_capabilities as m
 
 
@@ -180,3 +186,73 @@ async def test_refresh_reloads_cache(monkeypatch):
     await m.refresh_capabilities()
     assert await m.model_supports_vision("gpt-4o", "openai") is False
     assert fetch.await_count == 2
+
+
+# ── Real-aiosqlite row-shape regression (B5 review leftover — deferred
+# minors batch, Minor 4) ─────────────────────────────────────────────────
+#
+# test_fetch_capabilities_uses_distinct_on_model_provider above only ever
+# checks the COMPILED SQL text against a hand-rolled dict "row" — never a
+# genuine materialized Result — so the B4 row-shape bug class (an
+# entity-level select producing one key per row instead of one per column)
+# has no coverage here. This statement already selects three individually-
+# named columns (no select(Entity)/select(*Entity.__table__.c) ambiguity is
+# even possible), so — mirroring test_orm_b5_task2_row_shape_e2e.py's
+# treatment of its own no-ambiguity sites — this gets a POSITIVE real-engine
+# round trip proving the DISTINCT + column-shape mechanics actually
+# materialize as expected, not a negative control.
+#
+# DISTINCT ON (model, provider) is Postgres-only syntax; SQLAlchemy silently
+# degrades ``.distinct(col1, col2)`` to a plain ``DISTINCT`` over the
+# selected columns on other dialects (verified: compiles clean against the
+# sqlite dialect, no CompileError) — irrelevant to what this test checks
+# (row SHAPE, not "latest per pair" semantics, which the compile-level test
+# above already pins against the postgresql dialect).
+
+_AI_MODEL_PRICES_DDL = """
+CREATE TABLE ai_model_prices (
+    id TEXT PRIMARY KEY, model TEXT NOT NULL, provider TEXT NOT NULL,
+    prompt_cents_per_1k NUMERIC, completion_cents_per_1k NUMERIC,
+    effective_at TIMESTAMP, created_at TIMESTAMP, supports_vision INTEGER,
+    cached_input_cents_per_1k NUMERIC
+)
+"""
+
+
+@pytest.mark.asyncio
+async def test_capabilities_select_stmt_yields_column_keyed_row_against_real_sqlite():
+    """The REAL production statement (``_capabilities_select_stmt``, imported
+    — not reconstructed here) round-tripped through a genuine aiosqlite
+    ``Result`` gives a column-keyed RowMapping matching ``_fetch_capabilities``'s
+    ``dict(r)`` consumption and ``_ensure_loaded``'s ``row.get("model")``/
+    ``row.get("provider")``/``row.get("supports_vision")`` reads."""
+    engine = _create_async_engine("sqlite+aiosqlite://")
+    engine = engine.execution_options(schema_translate_map={"public": None})
+    async with engine.begin() as conn:
+        await conn.exec_driver_sql(_AI_MODEL_PRICES_DDL)
+        await conn.execute(
+            _sa_insert(AiModelPrices.__table__).values(
+                model="gpt-4o",
+                provider="openai",
+                prompt_cents_per_1k=decimal.Decimal("0.5"),
+                completion_cents_per_1k=decimal.Decimal("1.5"),
+                supports_vision=True,
+            )
+        )
+
+    sessionmaker = _async_sessionmaker(
+        engine, class_=_AsyncSession, expire_on_commit=False
+    )
+    try:
+        async with sessionmaker() as session:
+            rows = (
+                (await session.execute(m._capabilities_select_stmt())).mappings().all()
+            )
+    finally:
+        await engine.dispose()
+
+    assert len(rows) == 1
+    row = dict(rows[0])  # exact consumption shape used by _fetch_capabilities
+    assert row["model"] == "gpt-4o"
+    assert row["provider"] == "openai"
+    assert bool(row["supports_vision"]) is True

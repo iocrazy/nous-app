@@ -41,16 +41,22 @@ _FALLBACK_PREFIXES = (
 )
 
 
-async def _fetch_capabilities() -> list[dict]:
-    """Pull the capability map from ai_model_prices. One row per (model,
-    provider) pair — we collapse duplicate effective_at rows by picking
-    the latest. Returns a list of {model, provider, supports_vision} dicts."""
+def _capabilities_select_stmt():
+    """The ai_model_prices capability-map statement itself, column-level (not
+    entity-level — the B4 row-shape lesson) so ``_ensure_loaded``'s
+    ``row.get("model")``/``row.get("provider")``/``row.get("supports_vision")``
+    reads below get real column values. DISTINCT ON (model, provider) picks
+    the latest ``effective_at`` row per pair — Postgres-only syntax; other
+    dialects (e.g. the sqlite row-shape test) silently degrade to a plain
+    DISTINCT over the selected columns, which is fine for a row-SHAPE check
+    (not a semantics check of "latest per pair"). Factored out so a real-
+    aiosqlite row-shape test can import and exercise the exact production
+    statement."""
     from sqlalchemy import select
 
-    from app.db.session import read_scope  # deferred — matches codebase convention
     from app.models import AiModelPrices
 
-    stmt = (
+    return (
         select(
             AiModelPrices.model,
             AiModelPrices.provider,
@@ -63,8 +69,16 @@ async def _fetch_capabilities() -> list[dict]:
             AiModelPrices.effective_at.desc(),
         )
     )
+
+
+async def _fetch_capabilities() -> list[dict]:
+    """Pull the capability map from ai_model_prices. One row per (model,
+    provider) pair — we collapse duplicate effective_at rows by picking
+    the latest. Returns a list of {model, provider, supports_vision} dicts."""
+    from app.db.session import read_scope  # deferred — matches codebase convention
+
     async with read_scope() as session:
-        rows = (await session.execute(stmt)).mappings().all()
+        rows = (await session.execute(_capabilities_select_stmt())).mappings().all()
     return [dict(r) for r in rows]
 
 
