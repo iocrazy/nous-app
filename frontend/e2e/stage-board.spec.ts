@@ -177,6 +177,15 @@ const FORM_STAGE_BOARD_DATA = {
   node: { ...STAGE_BOARD_DATA.node, form_schema: FORM_SCHEMA, form_data: {} },
 };
 
+// B2 #1712: one episode so ProjectWorkspace resolves a non-null
+// `currentEpisodeId` — that's what makes the workflow read + advance chain ride
+// `?episode_id=` on the query (and forces the `/workflow` glob below to end in
+// `*` so it still matches once the query is present).
+const EPISODE_ID = 'ep-1';
+const EPISODES_PROGRESS = [
+  { episode_id: EPISODE_ID, title: 'Episode 1', sort_order: 0, script_count: 1, scene_count: 0, shots_total: 0, shots_done: 0, renders_count: 0, status: 'in_progress' },
+];
+
 function json(body: unknown) {
   return (route: Route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
@@ -190,9 +199,14 @@ async function setupStageBoardStubs(page: Page): Promise<void> {
 
   // Project list (workspace resolves selectedProject by matching the URL id).
   await page.route('**/api/v1/projects?*', json({ success: true, data: [PROJECT] }));
+  // Episodes progress (B2 #1712) — ≥1 episode so `currentEpisodeId` is non-null
+  // and the workflow read/advance carry `?episode_id=`.
+  await page.route('**/api/v1/projects/*/episodes/progress', json({ success: true, data: EPISODES_PROGRESS }));
   // Per-project workflow instance (response_model → no envelope) + advance
-  // preview for the Complete Stage click.
-  await page.route('**/api/v1/projects/*/workflow', json(WORKFLOW));
+  // preview for the Complete Stage click. Trailing `*` so the glob still matches
+  // once the read carries `?episode_id=` (the `/workflow/nodes/*/board` route
+  // below is registered AFTER, so last-registered-wins keeps board URLs off it).
+  await page.route('**/api/v1/projects/*/workflow*', json(WORKFLOW));
   await page.route('**/api/v1/projects/*/advance-preview*', json(ADVANCE_PREVIEW));
   // Stage Board aggregate (F1) — `data`-wrapped envelope (fetchStageBoard
   // reads `response.data`, not the bare model). Distinct path from the bare
@@ -290,7 +304,7 @@ for (const theme of ['dark', 'light'] as const) {
     // node-2 payload — registered after setupStageBoardStubs's routes, so
     // (same last-registered-wins convention as the rest of this file) these
     // win for this test only.
-    await page.route('**/api/v1/projects/*/workflow', json(RUN_PREPARED_WORKFLOW));
+    await page.route('**/api/v1/projects/*/workflow*', json(RUN_PREPARED_WORKFLOW));
     await page.route(
       '**/api/v1/projects/*/workflow/nodes/*/board',
       json({ success: true, data: RUN_PREPARED_STAGE_BOARD_DATA }),

@@ -153,6 +153,14 @@ const ADVANCE_PREVIEW = {
   warnings: [],
 };
 
+// B2 #1712: one episode so ProjectWorkspace resolves a non-null
+// `currentEpisodeId` — that's what makes the workflow read + advance chain ride
+// `?episode_id=` on the query (and forces the workflow glob below to end in `*`).
+const EPISODE_ID = 'ep-1';
+const EPISODES_PROGRESS = [
+  { episode_id: EPISODE_ID, title: 'Episode 1', sort_order: 0, script_count: 1, scene_count: 0, shots_total: 0, shots_done: 0, renders_count: 0, status: 'in_progress' },
+];
+
 function json(body: unknown) {
   return (route: Route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
@@ -171,11 +179,17 @@ async function setupWorkflowStubs(page: Page): Promise<void> {
 
   // Project list (workspace resolves selectedProject by matching the URL id).
   await page.route('**/api/v1/projects?*', json({ success: true, data: [PROJECT] }));
+  // Episodes progress (B2 #1712) — ≥1 episode so `currentEpisodeId` is non-null.
+  await page.route('**/api/v1/projects/*/episodes/progress', json({ success: true, data: EPISODES_PROGRESS }));
   // Per-project workflow instance + advance preview (response_model → no envelope).
-  await page.route('**/api/v1/projects/*/workflow', json(WORKFLOW));
+  // Trailing `*` so the glob still matches once the read carries `?episode_id=`
+  // (B2 #1712) — without it the URL falls through to the harness catch-all and
+  // the workflow silently renders empty.
+  await page.route('**/api/v1/projects/*/workflow*', json(WORKFLOW));
   await page.route('**/api/v1/projects/*/advance-preview*', json(ADVANCE_PREVIEW));
-  // Node collection (W3-1): POST add / DELETE remove. Distinct paths from the
-  // bare `/workflow` route above; registered last per the last-wins convention.
+  // Node collection (W3-1): POST add / DELETE remove. Registered AFTER the
+  // `/workflow*` glob above so the last-registered-wins convention keeps these
+  // more-specific node routes in front of it (the `*` now overlaps them).
   await page.route('**/api/v1/projects/*/workflow/nodes', json({ success: true, data: node('node-new', 'Voiceover', 4, 'pending') }));
   await page.route('**/api/v1/projects/*/workflow/nodes/*', json({ success: true, data: { deleted: true } }));
 }
@@ -305,12 +319,30 @@ for (const theme of ['dark', 'light'] as const) {
   test(`${theme}: advance confirm dialog renders the server preview`, async ({ page }) => {
     await setupWorkflowStubs(page);
     await forceTheme(page, theme);
+
+    // B2 #1712 positive assertion — capture the workflow-read + advance-preview
+    // request URLs off the wire and prove `episode_id` actually rode the query
+    // (guards against a silent regression to the pre-`*` glob / null episode).
+    const workflowReads: string[] = [];
+    const advancePreviews: string[] = [];
+    page.on('request', (req) => {
+      const u = req.url();
+      if (/\/api\/v1\/projects\/[^/]+\/workflow(\?|$)/.test(u)) workflowReads.push(u);
+      if (/\/api\/v1\/projects\/[^/]+\/advance-preview/.test(u)) advancePreviews.push(u);
+    });
+
     await openWorkspaceOverview(page);
     await page.getByTestId('workflow-complete-stage').click();
     await expect(page.getByTestId('workflow-advance-dialog')).toBeVisible();
     // The dialog renders the server ruling: closing Storyboard, creating Editing.
     await expect(page.getByTestId('workflow-advance-dialog')).toContainText('Storyboard');
     await expect(page.getByTestId('workflow-advance-dialog')).toContainText('Editing');
+
+    // Both the read (on load) and the advance preview (on Complete click) must
+    // carry the resolved episode id — not a null/omitted param.
+    expect(workflowReads.some((u) => u.includes(`episode_id=${EPISODE_ID}`))).toBe(true);
+    expect(advancePreviews.some((u) => u.includes(`episode_id=${EPISODE_ID}`))).toBe(true);
+
     await page.screenshot({ path: `${SHOTS}/03-advance-dialog-${theme}.png`, fullPage: true });
   });
 

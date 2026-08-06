@@ -163,6 +163,15 @@ const TEMPLATE_DETAIL = {
   ],
 };
 
+// B2 #1712: one episode so ProjectWorkspace resolves a non-null
+// `currentEpisodeId` — makes the workflow read + advance + start-early rides
+// `?episode_id=` (and forces the `/workflow` and `/start-early` globs to end in
+// `*` so they still match once the query is present).
+const EPISODE_ID = 'ep-1';
+const EPISODES_PROGRESS = [
+  { episode_id: EPISODE_ID, title: 'Episode 1', sort_order: 0, script_count: 1, scene_count: 0, shots_total: 0, shots_done: 0, renders_count: 0, status: 'in_progress' },
+];
+
 function json(body: unknown) {
   return (route: Route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
@@ -176,8 +185,11 @@ async function setupAutopilotStubs(page: Page): Promise<void> {
 
   // Project list (workspace resolves selectedProject by matching the URL id).
   await page.route('**/api/v1/projects?*', json({ success: true, data: [PROJECT] }));
-  // Per-project workflow instance (response_model → no envelope).
-  await page.route('**/api/v1/projects/*/workflow', json(WORKFLOW));
+  // Episodes progress (B2 #1712) — ≥1 episode so `currentEpisodeId` is non-null.
+  await page.route('**/api/v1/projects/*/episodes/progress', json({ success: true, data: EPISODES_PROGRESS }));
+  // Per-project workflow instance (response_model → no envelope). Trailing `*`
+  // so the glob still matches once the read carries `?episode_id=`.
+  await page.route('**/api/v1/projects/*/workflow*', json(WORKFLOW));
 }
 
 async function setupTemplateStubs(page: Page): Promise<void> {
@@ -301,7 +313,7 @@ test('Start early — deps-satisfied future node shows the button; click POSTs s
   await forceTheme(page, 'dark');
 
   const calls: string[] = [];
-  await page.route('**/api/v1/projects/*/workflow/nodes/*/start-early', async (route) => {
+  await page.route('**/api/v1/projects/*/workflow/nodes/*/start-early*', async (route) => {
     calls.push(route.request().url());
     await route.fulfill({
       status: 200,
@@ -319,6 +331,9 @@ test('Start early — deps-satisfied future node shows the button; click POSTs s
 
   await expect.poll(() => calls.length).toBe(1);
   expect(calls[0]).toContain('/workflow/nodes/node-3/start-early');
+  // B2 #1712: the resolved episode rides the query (guards against a silent
+  // regression to the pre-`*` glob / a null currentEpisodeId).
+  expect(calls[0]).toContain(`episode_id=${EPISODE_ID}`);
 });
 
 test('Start early — server DEPS_PENDING 422 surfaces the shared waiting-on toast (task O4 §2)', async ({ page }) => {
@@ -331,7 +346,7 @@ test('Start early — server DEPS_PENDING 422 surfaces the shared waiting-on toa
   // it still blocked — the structured 422 `detail` (task O3's apiClient.ts
   // fix unwraps this into ApiError.code/.details) maps to the same
   // `deps.waitingOn` i18n copy the Stage Board's own "Waiting on" row uses.
-  await page.route('**/api/v1/projects/*/workflow/nodes/*/start-early', (route) =>
+  await page.route('**/api/v1/projects/*/workflow/nodes/*/start-early*', (route) =>
     route.fulfill({
       status: 422,
       contentType: 'application/json',
@@ -412,7 +427,7 @@ for (const theme of ['dark', 'light'] as const) {
     // Override the generic workflow/board routes with the brief-bearing
     // node-2 — registered after setupAutopilotStubs's routes (last-registered-
     // wins convention this file family already uses).
-    await page.route('**/api/v1/projects/*/workflow', json(WORKFLOW_WITH_BRIEF));
+    await page.route('**/api/v1/projects/*/workflow*', json(WORKFLOW_WITH_BRIEF));
     await page.route(
       '**/api/v1/projects/*/workflow/nodes/*/board',
       json({ success: true, data: STAGE_BOARD_DATA_WITH_BRIEF }),
