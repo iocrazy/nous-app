@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import socket
 import time
 from typing import Any
 from urllib.parse import urlsplit, unquote
@@ -135,9 +136,33 @@ def xvfb_socket_path(display: str) -> str | None:
 
 
 def xvfb_ready(display: str | None = None) -> bool:
+    """Is an X server actually listening on `display`?
+
+    Connects to the socket rather than stat-ing it. The file outlives the
+    process: when Xvfb dies, its socket and `/tmp/.X<n>-lock` stay behind, so an
+    existence check reports a healthy display forever while every headed launch
+    fails with "you launched a headed browser without having a XServer running".
+
+    That happened in production on 2026-08-06 — `/healthz` answered
+    `xvfb: true` beside `browser_ready: false`, and the real cause only surfaced
+    in a Playwright traceback. A probe that cannot fail is not a probe; the note
+    below says exactly that about `browser_ready`, and this function used to be
+    the exception proving it.
+    """
     settings = get_settings()
     path = xvfb_socket_path(display or settings.display)
-    return bool(path) and os.path.exists(path)
+    if not path or not os.path.exists(path):
+        return False
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(1.0)
+        sock.connect(path)
+        return True
+    except OSError:
+        # ECONNREFUSED on a leftover socket: the file is there, nobody is home.
+        return False
+    finally:
+        sock.close()
 
 
 # --- real browser probe -----------------------------------------------------

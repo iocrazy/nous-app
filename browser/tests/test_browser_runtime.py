@@ -1,5 +1,7 @@
 import pytest
 
+from app import browser_runtime
+
 from app.browser_runtime import (
     HEADLESS,
     ProxyConfigError,
@@ -125,3 +127,55 @@ def test_null_environment_fields_do_not_leak_none_into_context_kwargs():
 )
 def test_xvfb_socket_path(display, expected):
     assert xvfb_socket_path(display) == expected
+
+
+# --- xvfb_ready: the probe that was not a probe -----------------------------
+#
+# Shipped 2026-08-06 as `os.path.exists(socket)`. Xvfb died in production, left
+# its socket and lock file behind, and /healthz kept answering `xvfb: true`
+# while every headed launch failed. The user was shown "the platform refused
+# the sign-in" and went looking at proxies.
+
+
+def test_xvfb_ready_is_false_when_no_socket_exists(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        browser_runtime, "xvfb_socket_path", lambda _d: str(tmp_path / "X99")
+    )
+    assert browser_runtime.xvfb_ready(":99") is False
+
+
+def test_xvfb_ready_is_false_for_a_socket_nobody_is_listening_on(
+    tmp_path, monkeypatch
+):
+    """The regression itself: the file outlives the process.
+
+    A bound-then-closed socket leaves exactly what a crashed Xvfb leaves — a
+    path that stats fine and refuses connections. An existence check calls this
+    healthy; that is how a dead display reported ready for hours.
+    """
+    import socket as _socket
+
+    path = tmp_path / "X99"
+    srv = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+    srv.bind(str(path))
+    srv.close()  # file stays, listener does not
+
+    monkeypatch.setattr(browser_runtime, "xvfb_socket_path", lambda _d: str(path))
+    assert path.exists(), "fixture must leave the socket file behind"
+    assert browser_runtime.xvfb_ready(":99") is False
+
+
+def test_xvfb_ready_is_true_when_something_is_actually_listening(
+    tmp_path, monkeypatch
+):
+    import socket as _socket
+
+    path = tmp_path / "X99"
+    srv = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+    srv.bind(str(path))
+    srv.listen(1)
+    try:
+        monkeypatch.setattr(browser_runtime, "xvfb_socket_path", lambda _d: str(path))
+        assert browser_runtime.xvfb_ready(":99") is True
+    finally:
+        srv.close()

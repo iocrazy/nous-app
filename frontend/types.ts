@@ -2393,6 +2393,13 @@ export interface SessionLoginState {
   expires_at?: string | null;
   /** Server-authored detail (English); shown verbatim under the status line. */
   message?: string | null;
+  /**
+   * Typed failure context (spec §7.8). `error_kind` marks a failure as **ours**
+   * — the browser container, the token, the decrypt — as opposed to a verdict
+   * about the account. The distinction decides what the user is told to do, so
+   * a `failed` without it means the platform really did say no.
+   */
+  detail?: { error_kind?: string; reason?: string } & Record<string, unknown>;
 }
 
 export interface PublishTaskAccount {

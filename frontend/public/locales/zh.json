@@ -264,7 +264,8 @@
       "failedLabel": "登录失败",
       "failedHint": "平台拒绝了本次登录。可以重试，并确认该账号是否被限制。",
       "proxyFailedLabel": "代理不可达",
-      "proxyFailedHint": "该账号的出口代理连不上 —— 账号本身没问题。修好代理后重试。"
+      "proxyFailedHint": "该账号的出口代理连不上 —— 账号本身没问题。修好代理后重试。",
+      "failedInfraHint": "本次失败发生在我们这边，还没到平台 —— 账号没问题。稍后重试；持续出现请检查浏览器服务。"
     },
     "nav": {
       "publish": "发布",
