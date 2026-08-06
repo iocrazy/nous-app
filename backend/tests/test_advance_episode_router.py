@@ -114,10 +114,17 @@ class _FakeEpisodeRepo:
     def __init__(self, cursors: Dict[str, Optional[str]]):
         self.cursors = {str(k): v for k, v in cursors.items()}
         self.writes: List[tuple] = []
+        # Which project each episode belongs to — the ownership guard
+        # (``_require_project_episode``) compares this against the path project.
+        # Defaults every known episode to _PROJECT unless overridden.
+        self.project_of = {str(k): _PROJECT for k in self.cursors}
 
     async def get_by_id(self, episode_id):
+        if str(episode_id) not in self.cursors:
+            return None
         return {
             "id": str(episode_id),
+            "project_id": self.project_of.get(str(episode_id), _PROJECT),
             "current_node_id": self.cursors.get(str(episode_id)),
         }
 
@@ -371,3 +378,141 @@ async def test_start_early_legacy_deps_see_all_project_nodes(monkeypatch):
     assert exc.value.detail["code"] == "DEPS_PENDING"
     # It's the sibling node 21 that gates it in the legacy project-wide map.
     assert exc.value.detail["waiting_on"] == ["Node 21"]
+
+
+# ── review Important: mismatched episode_id must not bypass the dep gate ──────
+
+
+@pytest.mark.asyncio
+async def test_start_early_mismatched_episode_id_422_no_bypass(monkeypatch):
+    """The dependency-gate bypass this fix closes: node 12 (ep1) depends on the
+    still-pending node 11 (ep1). Passing a MISMATCHED episode_id (ep2) used to
+    make ``list_nodes_by_episode(ep2)`` return a set without 11, so the unmet
+    dep read as satisfied-by-absence and the node started anyway. Now a query
+    episode_id that != the node's own episode is rejected 422 BEFORE any start —
+    the node is never dispatched."""
+    from fastapi import HTTPException
+
+    nodes = _two_episode_nodes()
+    nodes[1]["depends_on"] = ["11"]  # node 12 (ep1) depends on 11 (ep1, pending)
+    nodes_repo = _FakeNodesRepo(nodes)
+    episode_repo = _FakeEpisodeRepo({_EP1: "11", _EP2: "21"})
+    _install(monkeypatch, nodes_repo=nodes_repo, episode_repo=episode_repo)
+
+    async def _noop(*a, **kw):
+        return None
+
+    node_start = importlib.import_module("app.services.workflow.node_start")
+
+    async def _boom_start(*a, **kw):
+        raise AssertionError("a dependency-blocked node must never be started")
+
+    monkeypatch.setattr(node_start, "start_node_now", _boom_start)
+    monkeypatch.setattr(node_start, "_open_mirror_issue", _noop)
+
+    with pytest.raises(HTTPException) as exc:
+        await _router().start_workflow_node_early(
+            _PROJECT, "12", _Auth(), episode_id=_EP2  # wrong episode
+        )
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "EPISODE_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_start_early_correct_episode_gates_unmet_same_episode_dep(monkeypatch):
+    """With the CORRECT episode_id, the node's own-episode dependency IS seen:
+    node 12 (ep1) depends on pending node 11 (ep1) → DEPS_PENDING, not started."""
+    from fastapi import HTTPException
+
+    nodes = _two_episode_nodes()
+    nodes[1]["depends_on"] = ["11"]
+    nodes_repo = _FakeNodesRepo(nodes)
+    episode_repo = _FakeEpisodeRepo({_EP1: "11", _EP2: "21"})
+    _install(monkeypatch, nodes_repo=nodes_repo, episode_repo=episode_repo)
+
+    async def _noop(*a, **kw):
+        return None
+
+    node_start = importlib.import_module("app.services.workflow.node_start")
+
+    async def _boom_start(*a, **kw):
+        raise AssertionError("a dependency-blocked node must never be started")
+
+    monkeypatch.setattr(node_start, "start_node_now", _boom_start)
+    monkeypatch.setattr(node_start, "_open_mirror_issue", _noop)
+
+    with pytest.raises(HTTPException) as exc:
+        await _router().start_workflow_node_early(
+            _PROJECT, "12", _Auth(), episode_id=_EP1
+        )
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "DEPS_PENDING"
+    assert exc.value.detail["waiting_on"] == ["Node 11"]
+
+
+# ── review Minor: episode_id ownership — a foreign project's episode 404s ─────
+
+
+@pytest.mark.asyncio
+async def test_workflow_foreign_episode_404_no_cursor_echo(monkeypatch):
+    """GET /workflow?episode_id=<other project's ep> must 404 — never confirm
+    the foreign episode's existence nor echo its current_node_id."""
+    from fastapi import HTTPException
+
+    nodes_repo = _FakeNodesRepo(_two_episode_nodes())
+    episode_repo = _FakeEpisodeRepo({_EP1: "11"})
+    # _EP1 actually belongs to a DIFFERENT project.
+    episode_repo.project_of[_EP1] = "999"
+    _install(monkeypatch, nodes_repo=nodes_repo, episode_repo=episode_repo)
+
+    with pytest.raises(HTTPException) as exc:
+        await _router().get_project_workflow(_PROJECT, _Auth(), episode_id=_EP1)
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_advance_preview_foreign_episode_404(monkeypatch):
+    from fastapi import HTTPException
+
+    nodes_repo = _FakeNodesRepo(_two_episode_nodes())
+    episode_repo = _FakeEpisodeRepo({_EP1: "11"})
+    episode_repo.project_of[_EP1] = "999"
+    _install(monkeypatch, nodes_repo=nodes_repo, episode_repo=episode_repo)
+
+    # The predicate service must never run for a foreign episode.
+    def _boom(*a, **kw):
+        raise AssertionError("compute_advance_preview must not run for a foreign ep")
+
+    monkeypatch.setattr(advance_service, "compute_advance_preview", _boom)
+
+    with pytest.raises(HTTPException) as exc:
+        await _router().get_advance_preview(
+            _PROJECT, _Auth(), direction="forward", episode_id=_EP1
+        )
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_advance_foreign_episode_404(monkeypatch):
+    from fastapi import HTTPException
+
+    nodes_repo = _FakeNodesRepo(_two_episode_nodes())
+    episode_repo = _FakeEpisodeRepo({_EP1: "11"})
+    episode_repo.project_of[_EP1] = "999"
+    _install(monkeypatch, nodes_repo=nodes_repo, episode_repo=episode_repo)
+
+    def _boom(*a, **kw):
+        raise AssertionError("execute_advance must not run for a foreign ep")
+
+    monkeypatch.setattr(advance_service, "execute_advance", _boom)
+
+    with pytest.raises(HTTPException) as exc:
+        await _router().post_advance(
+            _PROJECT, _Auth(), direction="forward", episode_id=_EP1
+        )
+
+    assert exc.value.status_code == 404
