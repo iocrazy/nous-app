@@ -384,7 +384,7 @@ async def test_list_groups_title_prefers_conversation_then_issue_then_ask(
             agent_id,
             user_id,
             trigger="visual_analysis_l1",
-            output_summary="```json\n{\"prompt_en\": \"...\"}",
+            output_summary='```json\n{"prompt_en": "..."}',
             started_at=base - timedelta(minutes=3),
         )
     finally:
