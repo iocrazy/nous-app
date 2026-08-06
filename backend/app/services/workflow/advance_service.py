@@ -249,15 +249,28 @@ def _unmet_dependency_names(
     target_group: List[Dict[str, Any]],
     node_by_id: Dict[str, Dict[str, Any]],
     exempt_ids: Optional[set] = None,
+    external_by_id: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> List[str]:
     """Names of unmet-dependency nodes for ``target_group`` (mig 391, M3 PR-J).
 
     A dependency is satisfied when the depended-on node's ``status`` is
     ``done`` OR it is ``skipped`` (skipped counts as satisfied per spec §3),
     OR its id is a member of ``exempt_ids`` (see below). A ``depends_on`` id
-    absent from ``node_by_id`` (the depended-on node was deleted — FK CASCADE
-    already dropped the edge row, but defend anyway) is treated as already
-    resolved, never as unmet.
+    absent from BOTH ``node_by_id`` AND ``external_by_id`` (the depended-on
+    node was deleted — FK CASCADE already dropped the edge row, but defend
+    anyway) is treated as already resolved, never as unmet.
+
+    ``external_by_id`` (T2 cross-episode supplement): a stripped
+    ``{id: {status, skipped, name, ...}}`` map of dependency TARGETS that fall
+    OUTSIDE this episode's ``node_by_id`` — i.e. cross-episode edges pointing
+    at an earlier episode's node. It is resolved by the call site with a
+    precise id-only point lookup (``get_node_statuses_by_ids``) and consulted
+    ONLY here, for the done/skipped judgment — it never enters ``node_by_id`` /
+    groups / cursor math (T2 三重护栏②). When empty (every project with no
+    cross-episode edge), lookup order collapses to ``node_by_id`` alone and
+    behaviour is byte-for-byte identical to the mig-391 original (三重护栏③).
+    Local (``node_by_id``) is consulted first so a same-id in both never lets
+    the stripped external row shadow the full local one.
 
     ``exempt_ids`` (M3 final review, two exemptions folded into one set by
     the call site so this predicate only has to check membership):
@@ -291,18 +304,24 @@ def _unmet_dependency_names(
     never dict/set iteration order.
     """
     exempt = exempt_ids or set()
+    external = external_by_id or {}
     unmet_by_id: Dict[str, Dict[str, Any]] = {}
     for node in target_group:
         for dep_id in node.get("depends_on") or []:
             dep_id_str = str(dep_id)
             if dep_id_str in exempt:
                 continue
+            # Local (this episode) first, then the cross-episode supplement.
             dep_node = node_by_id.get(dep_id_str)
+            if dep_node is None:
+                dep_node = external.get(dep_id_str)
             if dep_node is None:
                 continue
             if dep_node.get("status") == "done" or dep_node.get("skipped"):
                 continue
-            unmet_by_id[str(dep_node["id"])] = dep_node
+            # Key by the dep id (external rows carry no ``id`` field), so a
+            # cross-episode target dedupes/orders cleanly alongside local ones.
+            unmet_by_id[dep_id_str] = dep_node
 
     ordered = sorted(unmet_by_id.values(), key=lambda n: n.get("sort_order", 0))
     names: List[str] = []
@@ -545,7 +564,38 @@ async def _preview_forward(
     # config). ``waiting_on`` therefore only ever lists genuinely-earlier,
     # unrelated, unfinished nodes.
     exempt_ids = {str(n["id"]) for n in next_group} | {str(n["id"]) for n in active}
-    waiting_on = _unmet_dependency_names(next_group, node_by_id, exempt_ids)
+
+    # Cross-episode dependency supplement (T2). A next_group node's depends_on
+    # may name a target that lives OUTSIDE this episode's node_by_id — a
+    # cross-episode edge whose target node belongs to an earlier episode. Those
+    # ids (typically 0-2, only ever non-empty when a real cross-episode edge
+    # exists) are collected and resolved with a PRECISE id-only point lookup —
+    # never an episode/project batch pull (三重护栏①), and the stripped result
+    # is passed to the predicate for the done/skipped judgment ONLY, never into
+    # groups / node_by_id / cursor math (三重护栏②). A project with no
+    # cross-episode edge yields an empty set → no lookup → byte-for-byte
+    # identical to the mig-391 behaviour (三重护栏③).
+    external_ids = list(
+        dict.fromkeys(
+            str(dep_id)
+            for n in next_group
+            for dep_id in (n.get("depends_on") or [])
+            if str(dep_id) not in node_by_id and str(dep_id) not in exempt_ids
+        )
+    )
+    external_by_id: Dict[str, Dict[str, Any]] = {}
+    if external_ids:
+        from app.repositories.project_stage_nodes_repository import (
+            get_project_stage_nodes_repository,
+        )
+
+        external_by_id = await get_project_stage_nodes_repository().get_node_statuses_by_ids(  # noqa: E501
+            str(project_id), external_ids
+        )
+
+    waiting_on = _unmet_dependency_names(
+        next_group, node_by_id, exempt_ids, external_by_id
+    )
     if waiting_on:
         return AdvancePreview(
             direction="forward",
