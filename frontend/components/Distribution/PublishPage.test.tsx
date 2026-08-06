@@ -16,11 +16,20 @@ const { addToast } = vi.hoisted(() => ({ addToast: vi.fn() }));
 
 vi.mock('../../services/distributionService', () => ({
   listAccounts: vi.fn().mockResolvedValue([
+    // Two bindings of the same platform, because the row copy differs by
+    // auth_type: a QR-bound account publishes unattended, an OAuth one needs
+    // the user's phone.
     { id: '10', scope_type: 'user', scope_id: 'u1', platform: 'douyin',
       platform_user_id: 'op1', username: 'HEYGO', avatar_url: null,
+      auth_type: 'session',
+      token_expires_at: null, status: 'active', created_at: '2026-07-08T00:00:00Z' },
+    { id: '12', scope_type: 'user', scope_id: 'u1', platform: 'douyin',
+      platform_user_id: 'op3', username: 'OAuth One', avatar_url: null,
+      auth_type: 'oauth',
       token_expires_at: null, status: 'active', created_at: '2026-07-08T00:00:00Z' },
     { id: '11', scope_type: 'user', scope_id: 'u1', platform: 'douyin',
       platform_user_id: 'op2', username: 'Expired One', avatar_url: null,
+      auth_type: 'oauth',
       token_expires_at: null, status: 'expired', created_at: '2026-07-08T00:00:00Z' },
   ]),
   // Returns images when the caller asks for mediaType 'image', videos otherwise
@@ -138,10 +147,44 @@ describe('PublishPage', () => {
     expect(arg.topics).toEqual(['goldenhour', 'cityscape']);
   });
 
-  it('locks the Official API channel behind Douyin review', async () => {
+  it('states per account whether publishing needs the user afterwards', async () => {
+    // Replaces an older test that asserted the channel picker existed. The
+    // picker is gone: a channel only works for accounts bound the matching way,
+    // so offering the choice mostly offered a way to pick a broken combination.
+    // What the user actually needs to know is per row — whether pressing
+    // Publish finishes the job, or leaves them a link to confirm on a phone.
+    // That difference is the entire reason someone binds by QR code.
     render(<MemoryRouter><PublishPage /></MemoryRouter>);
     await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: /Official API/i })).toBeDisabled();
+
+    expect(screen.queryByRole('button', { name: /Official API/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /H5 share/i })).toBeNull();
+
+    expect(screen.getByText(/Publishes unattended/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Needs confirming on your phone/i).length).toBeGreaterThan(0);
+  });
+
+  it('asks for the session route and lets the backend downgrade per account', async () => {
+    // The page always requests 'session'. That is not a claim that every
+    // account can do it — `decide_channel` re-decides per account and sends an
+    // OAuth-bound one down the H5 handoff. Requesting the weaker 'h5' instead
+    // would be the lossy direction: it would strand session accounts on a route
+    // that needs a human.
+    render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /Add from Library/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /clip-a\.mp4/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Done$/i }));
+
+    fireEvent.click(screen.getByText('HEYGO'));
+    fireEvent.change(screen.getByPlaceholderText(/Add a title/i), {
+      target: { value: 'Route check' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Publish now/i }));
+
+    await waitFor(() => expect(createPublishTask).toHaveBeenCalled());
+    expect(createPublishTask.mock.calls[0][0]).toMatchObject({ channel: 'session' });
   });
 
   it('promotes a generated video on pick and publishes its resource id', async () => {

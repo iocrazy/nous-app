@@ -402,7 +402,10 @@
       "coverNotSetWarning": "Cover Studio coming in D4 — Douyin picks the cover during publish.",
       "lookingGood": "Title, topics and accounts look good.",
       "saveDraft": "Save draft",
-      "handoffMsg": "Douyin personal accounts finish inside the Douyin app — we hand off automatically and track the result here."
+      "handoffMsg": "Douyin personal accounts finish inside the Douyin app — we hand off automatically and track the result here.",
+      "routeHint": "Each account publishes the way it was connected — shown on its row.",
+      "routeUnattended": "Publishes unattended",
+      "routeNeedsPhone": "Needs confirming on your phone"
     },
     "records": {
       "title": "Records",

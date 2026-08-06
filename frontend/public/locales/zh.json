@@ -402,7 +402,10 @@
       "coverNotSetWarning": "封面工作室将随 D4 上线 — 发布时由抖音自动选择封面。",
       "lookingGood": "标题、话题和账号均已就绪。",
       "saveDraft": "保存草稿",
-      "handoffMsg": "抖音个人账号需要在抖音 App 内完成发布 — 我们会自动跳转并在此追踪结果。"
+      "handoffMsg": "抖音个人账号需要在抖音 App 内完成发布 — 我们会自动跳转并在此追踪结果。",
+      "routeHint": "每个账号按它的绑定方式发布 —— 见各行标注。",
+      "routeUnattended": "自动发布，无需值守",
+      "routeNeedsPhone": "需在手机上确认"
     },
     "records": {
       "title": "记录",
