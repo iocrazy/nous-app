@@ -1,35 +1,28 @@
-"""Pins the (pre-existing, dead) video/audio branch of
-``resource_fetch_tool._fetch_dispatch`` after Phase A raw-SQL-to-ORM
-migration (docs/decisions/2026-08-04-raw-sql-to-orm-full-migration.md).
+"""Pins the repaired video/audio branch of
+``resource_fetch_tool._fetch_dispatch``.
 
-The second query in this branch joins ``public.videos`` — a table renamed
-away by migration 066 (``066_rename_videos_to_parsed_media.sql``); confirmed
-absent against the live schema (``information_schema.tables`` has no
-``videos`` row; ``resource_summaries`` / ``resource_transcripts`` hold that
-content today, keyed by resource_id). This query has therefore always
-raised in production. Rather than silently fixing the join target (a real
-behavior change, out of scope for a refactor-only ORM pass), it is routed
-through the new ``app/db/scoped_sql.py`` migration guardrail with
-``system=True`` — preserving the exact byte-for-byte failure while at least
-declaring and auditing the access instead of leaving it on an ungoverned
-``db_engine`` call.
+History: the pre-2026-08 implementation joined ``public.videos`` — a table
+renamed away by migration 066 — so this branch always raised in production
+(every video/audio fetch degraded to "fetch failed" for months). Phase A's
+ORM pass preserved that failure byte-for-byte per refactor-only discipline
+and this file used to pin the dead query's governance. The branch has since
+been repaired to read the real data sources — ``resource_summaries`` /
+``resource_transcripts``, keyed by resource_id — so these tests now pin the
+repaired contract:
 
-These tests pin:
-  * the call goes through ``scoped_sql.scoped_fetch_all`` with
-    ``system=True`` and a non-empty ``reason`` (governed, not bare
-    ``db_engine``);
-  * a DB error from that call (the real-world outcome — the table doesn't
-    exist) propagates up through ``_fetch_dispatch`` and is converted to a
-    typed ``{"error": "fetch failed: <ExceptionClassName>"}`` by
+  * a DB error during the content lookup is converted to a typed
+    ``{"error": "fetch failed: <ExceptionClassName>"}`` by
     ``resource_fetch``'s broad except — never a silent/opaque failure;
-  * an (unrealistic today, but contractually possible) empty result set
-    degrades to the "not yet processed" error rather than raising.
+  * a missing row degrades to the "not yet processed" message rather than
+    raising;
+  * the phantom ``public.videos`` table is never queried again (guarded
+    here and in test_resource_fetch_video_transcripts.py, which also covers
+    the happy path end-to-end on a real engine).
 """
 
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -44,7 +37,7 @@ class _FakeMappingsResult:
         return self._rows[0] if self._rows else None
 
 
-class _FakeResult:
+class _AccessResult:
     def __init__(self, rows):
         self._rows = rows
 
@@ -52,10 +45,19 @@ class _FakeResult:
         return _FakeMappingsResult(self._rows)
 
 
-def _patch_access_check_hit(monkeypatch, *, mime: str):
-    """Stand in for the first (access-check) query succeeding with a single
-    row of the given mime type — isolates the video/audio branch under test
-    from the resources+resource_items+team_members query."""
+class _ContentResult:
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+
+def _patch_sessions(monkeypatch, *, mime: str, content_outcome):
+    """First ``read_scope`` session serves the access-check row; subsequent
+    sessions serve the content lookup. ``content_outcome`` is either a value
+    (returned via ``scalar_one_or_none``) or an Exception instance (raised
+    from ``execute``)."""
     import app.db.scope as scope_module
     import app.db.session as session_module
 
@@ -67,9 +69,22 @@ def _patch_access_check_hit(monkeypatch, *, mime: str):
         "brief": None,
     }
 
+    class _AccessSession:
+        async def execute(self, _stmt):
+            return _AccessResult([row])
+
+    class _ContentSession:
+        async def execute(self, _stmt):
+            if isinstance(content_outcome, Exception):
+                raise content_outcome
+            return _ContentResult(content_outcome)
+
+    calls = {"n": 0}
+
     @asynccontextmanager
     async def _read_scope():
-        yield _StubSession(row)
+        calls["n"] += 1
+        yield _AccessSession() if calls["n"] == 1 else _ContentSession()
 
     @asynccontextmanager
     async def _system_request_scope(reason: str):
@@ -79,57 +94,16 @@ def _patch_access_check_hit(monkeypatch, *, mime: str):
     monkeypatch.setattr(scope_module, "system_request_scope", _system_request_scope)
 
 
-class _StubSession:
-    def __init__(self, row):
-        self._row = row
-
-    async def execute(self, _stmt):
-        return _FakeResult([self._row])
-
-
-async def test_video_audio_query_declares_system_scope_with_reason(monkeypatch):
-    """The dead public.videos query must go through scoped_sql(system=True,
-    reason=...) — not a bare db_engine call — even though it always fails."""
-    from app.services.ai.tools import resource_fetch_tool as m
-
-    _patch_access_check_hit(monkeypatch, mime="video/mp4")
-
-    captured: dict = {}
-
-    async def _fake_scoped_fetch_all(
-        sql, params=None, *, scope=None, system=False, reason=""
-    ):
-        captured["sql"] = sql
-        captured["params"] = params
-        captured["system"] = system
-        captured["reason"] = reason
-        return [{"summary": "a summary", "transcript": None}]
-
-    monkeypatch.setattr("app.db.scoped_sql.scoped_fetch_all", _fake_scoped_fetch_all)
-
-    result = await m._fetch_dispatch(
-        resource_id="1", mode="summary", args=None, user_id="u"
-    )
-
-    assert captured["system"] is True
-    assert captured["reason"], "reason must be non-empty for the audit trail"
-    assert "public.videos" in captured["sql"]
-    assert result == {
-        "content": "a summary",
-        "meta": {"name": "clip", "mode": "summary"},
-    }
-
-
 async def test_video_audio_query_db_error_becomes_typed_error(monkeypatch):
-    """The realistic outcome today: public.videos doesn't exist, so the
-    query raises — resource_fetch's broad except must convert that into a
-    typed {"error": ...}, never propagate raw or silently swallow."""
+    """A DB error during the content lookup must be converted into a typed
+    {"error": ...} by resource_fetch's broad except — never propagate raw
+    or silently swallow."""
     from app.services.ai.tools import resource_fetch_tool as m
 
-    _patch_access_check_hit(monkeypatch, mime="video/mp4")
-    monkeypatch.setattr(
-        "app.db.scoped_sql.scoped_fetch_all",
-        AsyncMock(side_effect=RuntimeError('relation "videos" does not exist')),
+    _patch_sessions(
+        monkeypatch,
+        mime="video/mp4",
+        content_outcome=RuntimeError("connection lost"),
     )
 
     result = await m.resource_fetch(
@@ -143,18 +117,37 @@ async def test_video_audio_query_db_error_becomes_typed_error(monkeypatch):
     assert result == {"error": "fetch failed: RuntimeError"}
 
 
-async def test_video_audio_query_empty_result_degrades_to_not_available(monkeypatch):
-    """Contractual (not realistic) case: an empty result set (rather than a
-    raised error) must degrade to the 'not yet processed' message, not
-    raise an IndexError — mirrors legacy ``(media_rows or [{}])[0]``."""
+async def test_video_audio_missing_row_degrades_to_not_available(monkeypatch):
+    """No summary row yet → the 'not yet processed' message, not a raise."""
     from app.services.ai.tools import resource_fetch_tool as m
 
-    _patch_access_check_hit(monkeypatch, mime="video/mp4")
-    monkeypatch.setattr(
-        "app.db.scoped_sql.scoped_fetch_all", AsyncMock(return_value=[])
-    )
+    _patch_sessions(monkeypatch, mime="video/mp4", content_outcome=None)
 
     result = await m._fetch_dispatch(
         resource_id="1", mode="summary", args=None, user_id="u"
     )
     assert result == {"error": "summary not available; resource not yet processed"}
+
+
+async def test_video_audio_happy_path_returns_content(monkeypatch):
+    """A present summary row is returned as content with mode metadata."""
+    from app.services.ai.tools import resource_fetch_tool as m
+
+    _patch_sessions(monkeypatch, mime="video/mp4", content_outcome="a summary")
+
+    result = await m._fetch_dispatch(
+        resource_id="1", mode="summary", args=None, user_id="u"
+    )
+    assert result == {
+        "content": "a summary",
+        "meta": {"name": "clip", "mode": "summary"},
+    }
+
+
+def test_phantom_videos_table_never_queried_again():
+    import inspect
+
+    from app.services.ai.tools import resource_fetch_tool as m
+
+    src = inspect.getsource(m)
+    assert "FROM public.videos" not in src
