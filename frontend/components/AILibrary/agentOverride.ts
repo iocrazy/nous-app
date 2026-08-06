@@ -28,3 +28,22 @@ export function overrideFieldCount(agent: AILibraryAgent): number {
 export function hasPersonalOverride(agent: AILibraryAgent): boolean {
   return Boolean(agent.is_system_preset) && overrideFieldCount(agent) > 0;
 }
+
+/** Which of the Persona tab's two mutually exclusive banners to render. */
+export type PersonaHintKind = 'none' | 'preset_hint' | 'override_active';
+
+/**
+ * The question this feature exists to answer — "I edited a system template;
+ * where did my change go, and can I undo it?" — is asked at the moment of
+ * editing, not after. So a pristine preset gets a preventive, neutral line
+ * (edits will be yours alone), and a customized one gets the warn-toned line
+ * plus the reset affordance in the header menu.
+ *
+ * Exclusive by construction: showing both would state the same fact twice,
+ * once in the future tense directly above the copy saying it already
+ * happened. A user-owned agent gets neither — its edits ARE the row.
+ */
+export function personaHintKind(agent: AILibraryAgent): PersonaHintKind {
+  if (!agent.is_system_preset) return 'none';
+  return overrideFieldCount(agent) > 0 ? 'override_active' : 'preset_hint';
+}

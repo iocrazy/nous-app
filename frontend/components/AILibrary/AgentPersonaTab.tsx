@@ -23,7 +23,7 @@ import type { AILibraryAgent, AILibrarySkill } from '../../types';
 import { MarkdownEditor } from './MarkdownEditor';
 import { AgentIconPicker } from './AgentIconPicker';
 import { renderModelSelect, type ProviderModelGroup } from './agentEditorModel';
-import { hasPersonalOverride, overrideFieldCount } from './agentOverride';
+import { overrideFieldCount, personaHintKind } from './agentOverride';
 
 type PersonaDoc = 'identity_md' | 'soul_md' | 'agent_md';
 
@@ -80,10 +80,24 @@ export const AgentPersonaTab: React.FC<AgentPersonaTabProps> = ({
       )}
 
       {/* Personal override (mig 341). Editing a system preset writes to the
-          caller's own layer, not the template — without this line the edit
-          looks like it changed the official agent for everyone. Reset lives in
-          the header's "..." menu, one step away from an accidental click. */}
-      {hasPersonalOverride(agent) && (
+          caller's own layer, not the template — the two lines below answer
+          "where did my change go, can I undo it?" at the two moments it gets
+          asked: before the first edit (neutral, preventive) and after one
+          exists (warn, with the count). Reset itself lives in the header's
+          "..." menu, one step away from an accidental click. */}
+      {personaHintKind(agent) === 'preset_hint' && (
+        <div
+          data-testid="agent-preset-hint-banner"
+          className="rounded-lg border border-info-line bg-info-soft px-3 py-2 text-xs text-info"
+        >
+          {t(
+            'aiLibrary.agents.presetOverrideHint',
+            'System agent — edits are saved as your personal customization (visible only to you) and can be reset anytime.',
+          )}
+        </div>
+      )}
+
+      {personaHintKind(agent) === 'override_active' && (
         <div
           data-testid="agent-override-banner"
           data-override-count={overrideFieldCount(agent)}

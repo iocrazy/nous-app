@@ -9,7 +9,11 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { AILibraryAgent } from '../../types';
-import { hasPersonalOverride, overrideFieldCount } from './agentOverride';
+import {
+  hasPersonalOverride,
+  overrideFieldCount,
+  personaHintKind,
+} from './agentOverride';
 
 const agent = (over: Partial<AILibraryAgent>): AILibraryAgent =>
   ({ id: 'a1', slug: 'script-ai', name: 'Script AI', ...over }) as AILibraryAgent;
@@ -51,6 +55,50 @@ describe('hasPersonalOverride', () => {
         agent({ is_system_preset: false, override_fields: ['soul_md'] }),
       ),
     ).toBe(false);
+  });
+});
+
+describe('personaHintKind', () => {
+  it('warns about the override once one exists', () => {
+    expect(
+      personaHintKind(
+        agent({
+          is_system_preset: true,
+          override_scope: 'user',
+          override_fields: ['soul_md'],
+        }),
+      ),
+    ).toBe('override_active');
+  });
+
+  it('explains where edits will go BEFORE the preset is customized', () => {
+    // The question this feature answers ("I edited a system template — where
+    // did my change go, can I undo it?") occurs at the moment of editing, not
+    // after. A pristine preset therefore gets the preventive hint rather than
+    // nothing at all.
+    expect(
+      personaHintKind(agent({ is_system_preset: true, override_fields: [] })),
+    ).toBe('preset_hint');
+    expect(personaHintKind(agent({ is_system_preset: true }))).toBe('preset_hint');
+  });
+
+  it('says nothing on a user-owned agent — edits land on the row itself', () => {
+    expect(personaHintKind(agent({ is_system_preset: false }))).toBe('none');
+    expect(
+      personaHintKind(agent({ is_system_preset: false, override_fields: ['soul_md'] })),
+    ).toBe('none');
+  });
+
+  it('is exclusive: an overridden preset never shows both lines', () => {
+    // The two banners answer the same question at different times. Stacking
+    // them would say "your edits are private and resettable" twice, once in
+    // the future tense, directly above the copy that already says it happened.
+    const kinds = [
+      personaHintKind(agent({ is_system_preset: true, override_fields: ['model'] })),
+      personaHintKind(agent({ is_system_preset: true, override_fields: [] })),
+      personaHintKind(agent({ is_system_preset: false })),
+    ];
+    expect(new Set(kinds).size).toBe(3);
   });
 });
 

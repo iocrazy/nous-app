@@ -139,11 +139,13 @@ describe('AgentPersonaTab — 技能绑定开关行', () => {
 });
 
 /**
- * The banner is the only place the user learns their preset edits went into a
- * personal layer rather than into the template. It carries the field count so
- * "I changed one word" and "I rewrote all three documents" don't read alike.
+ * The banner is the only place the user learns that editing a system template
+ * writes to a personal layer instead of to the template. Two lines, one per
+ * moment: the preventive one before there is anything to reset, the warn-toned
+ * one (with the field count, so "changed one word" and "rewrote all three
+ * documents" don't read alike) once there is.
  */
-describe('AgentPersonaTab — personal override banner', () => {
+describe('AgentPersonaTab — persona hint banner', () => {
   const preset = (over: Partial<AILibraryAgent>): AILibraryAgent =>
     ({ ...agent, is_system_preset: true, ...over }) as AILibraryAgent;
 
@@ -152,15 +154,19 @@ describe('AgentPersonaTab — personal override banner', () => {
       agent: preset({ override_scope: 'user', override_fields: ['soul_md', 'model'] }),
     }).getByTestId('agent-override-banner');
     expect(el.getAttribute('data-override-count')).toBe('2');
+    // Exclusive — the preventive line has nothing left to prevent.
+    expect(screen.queryByTestId('agent-preset-hint-banner')).toBeNull();
   });
 
-  it('stays hidden on a preset the caller never customized', () => {
+  it('explains where edits will land on a preset that has none yet', () => {
     renderTab({ agent: preset({ override_fields: [] }) });
+    expect(screen.getByTestId('agent-preset-hint-banner')).toBeTruthy();
     expect(screen.queryByTestId('agent-override-banner')).toBeNull();
   });
 
-  it('stays hidden on a user-owned agent — its edits are the row itself', () => {
+  it('says nothing on a user-owned agent — its edits are the row itself', () => {
     renderTab({ agent: { ...agent, override_fields: ['soul_md'] } as AILibraryAgent });
     expect(screen.queryByTestId('agent-override-banner')).toBeNull();
+    expect(screen.queryByTestId('agent-preset-hint-banner')).toBeNull();
   });
 });
