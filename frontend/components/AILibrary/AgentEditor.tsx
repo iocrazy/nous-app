@@ -1,13 +1,15 @@
 // frontend/components/AILibrary/AgentEditor.tsx
-// Agent detail shell — three tabs (B2, spec 2026-08-02 §B2).
+// Agent detail shell — five tabs (B2, spec 2026-08-02 §B2).
 //
-//   Workbench  what it's doing      → AgentWorkbenchTab
-//   Persona    who it is            → AgentPersonaTab
-//   Profile    its paperwork        → AgentProfileTab
+//   Workbench    what it's doing     → AgentWorkbenchTab
+//   Persona      who it is           → AgentPersonaTab
+//   Permissions  who may talk to it  → PermissionsSection
+//   Cost         what it has spent   → AgentCostTab
+//   Profile      its paperwork       → AgentProfileTab
 //
 // Eight sub-tabs used to sit here; LEGACY_TAB_MAP keeps old ``?tab=`` links
 // working. This file keeps what the tabs share: loading the agent, the draft
-// and its single Save, the paused/override banners, and tab routing.
+// and its Save, the provider-preflight banner, and tab routing.
 //
 // Draft state is local; `save()` PATCHes via aiLibraryService and replaces
 // the hydrated agent immutably on success.
@@ -15,7 +17,7 @@
 // WARNING: Every hook stays ABOVE the loading/error early-returns. A useState below
 // them changes the hook count between the loading and loaded renders and
 // blows up with React #310 on every agent open — that regression shipped
-// once already (see resetOverride's note).
+// once already, via a `useState` declared next to a handler down in the body.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -31,7 +33,6 @@ import { aiLibraryService } from '../../services/aiLibraryService';
 import { getNousModels, getAIGovernance } from '../../services/aiService';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../Toast';
-import { AlertTriangle, Play } from 'lucide-react';
 import { NewAgentModal } from './NewAgentModal';
 import { AgentActionBar } from './AgentActionBar';
 import { AgentWorkbenchTab } from './AgentWorkbenchTab';
@@ -196,11 +197,9 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [permSaving, setPermSaving] = useState(false);
-  const [resuming, setResuming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forkModalOpen, setForkModalOpen] = useState(false);
   const [allAgents, setAllAgents] = useState<AILibraryAgent[]>([]);
-  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -387,56 +386,6 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
         t('aiLibrary.agents.saveError', { error: friendlyError(err) }),
         'error',
       );
-    }
-  };
-
-  // 复位: drop the caller's override layer so the preset falls back to the
-  // admin/system defaults (DELETE /agents/{slug}/override). NOTE: its
-  // `resetting` state is declared with the other hooks at the top — a
-  // useState down here sat AFTER the loading/error early-returns and blew
-  // up every agent open with React #310 (hooks count changed between the
-  // loading render and the loaded render).
-  const resetOverride = async (): Promise<void> => {
-    setResetting(true);
-    try {
-      const updated = await aiLibraryService.deleteAgentOverride(slug);
-      setAgent(updated);
-      setDraft(buildDraft(updated));
-      addToast(
-        t('aiLibrary.agents.overrideResetToast', 'Restored system defaults'),
-        'success',
-      );
-    } catch (err) {
-      console.error('[AgentEditor] deleteAgentOverride failed:', err);
-      addToast(
-        t('aiLibrary.agents.saveError', { error: friendlyError(err) }),
-        'error',
-      );
-    } finally {
-      setResetting(false);
-    }
-  };
-
-  const handleResume = async (): Promise<void> => {
-    if (catalogLocked) return;
-    setResuming(true);
-    setError(null);
-    try {
-      const updated = await aiLibraryService.resumeAgent(slug);
-      setAgent(updated);
-      setDraft(buildDraft(updated));
-      addToast(
-        t('aiLibrary.agents.budget.resumedToast', 'Agent resumed'),
-        'success',
-      );
-    } catch (err) {
-      console.error('[AgentEditor] resumeAgent failed:', err);
-      addToast(
-        t('aiLibrary.agents.resumeError', { error: friendlyError(err) }),
-        'error',
-      );
-    } finally {
-      setResuming(false);
     }
   };
 
@@ -798,71 +747,4 @@ function buildDraft(a: AILibraryAgent): Partial<AILibraryAgent> {
 }
 
 
-/**
- * Top-of-Overview banner shown when the agent has a `paused_reason` set.
- *
- * - `'budget'` (amber): the sweeper found spend over the cap. Resume clears
- *   the flag, but if the budget isn't raised first, the sweeper will
- *   re-pause within ~60 s — the copy says so.
- * - `'manual'` (zinc): an admin / owner hit Pause. Resume re-enables.
- *
- * The Resume button is also disabled for preset agents (readOnly) since
- * Phase 1 policy blocks writes on system presets.
- */
-const PausedBanner: React.FC<{
-  reason: 'budget' | 'manual';
-  disabled: boolean;
-  resuming: boolean;
-  onResume: () => void;
-}> = ({ reason, disabled, resuming, onResume }) => {
-  const { t } = useTranslation();
-  const isBudget = reason === 'budget';
-  const wrap = isBudget
-    ? 'border-amber-500/40 bg-amber-500/10 text-warn-soft'
-    : 'border-ink-700 bg-ink-800 text-ink-200';
-  const icon = isBudget ? 'text-amber-400' : 'text-ink-400';
-  const title = isBudget
-    ? t('aiLibrary.agents.budget.pausedTitleBudget', 'Paused — monthly budget exceeded')
-    : t('aiLibrary.agents.budget.pausedTitleManual', 'Paused manually');
-  const body = isBudget
-    ? t(
-        'aiLibrary.agents.budget.pausedBodyBudget',
-        'The sweeper detected this agent ran over its token or cost budget this month. Raise the budget below before resuming — otherwise the sweeper will re-pause within a minute.',
-      )
-    : t(
-        'aiLibrary.agents.budget.pausedBodyManual',
-        'An owner or admin paused this agent. Click Resume to re-enable.',
-      );
-  return (
-    <div className={`flex items-start gap-3 rounded-lg border px-3 py-3 text-xs ${wrap}`}>
-      <AlertTriangle size={16} className={`flex-shrink-0 mt-0.5 ${icon}`} />
-      <div className="flex-1 min-w-0">
-        <div className="font-medium">{title}</div>
-        <p className="mt-0.5 opacity-90">{body}</p>
-      </div>
-      <button
-        type="button"
-        onClick={onResume}
-        disabled={disabled}
-        className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40 whitespace-nowrap"
-      >
-        <Play size={12} />
-        {resuming
-          ? t('aiLibrary.agents.budget.resuming', 'Resuming...')
-          : t('aiLibrary.agents.budget.resume', 'Resume')}
-      </button>
-    </div>
-  );
-};
-
-/**
- * Budget input row. Two numeric fields: monthly token budget and monthly
- * cost budget (in cents). Empty / 0 means unlimited (the backend normalizes
- * 0 → NULL before persisting, so the sweeper's `is not None` cap check
- * treats both the same way).
- *
- * Uses string-valued inputs internally so the user can cleanly delete all
- * digits without React emitting spurious 0s or NaN — we parse on change and
- * send `null` back up when the field is empty.
- */
 export default AgentEditor;

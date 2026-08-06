@@ -161,14 +161,14 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
   // the editor squeezed into a third of the width and gave "+ New Skill" two
   // homes. The tab strip above is how you get back out.
   return (
-    <div className="flex h-full min-h-0 w-full flex-col">
+    <div className="flex w-full flex-col">
       <div className="px-1 pt-6">
         {/* placement="detail": the Skills tab is how you get back to the
             gallery from here, so it must stay clickable. */}
         <AILibraryTabs active="skills" skillCount={skills.length} placement="detail" />
       </div>
 
-      <div className="min-h-0 min-w-0 flex-1">
+      <div className="min-w-0 flex-1">
         <SkillEditor
           // ``key={selectedSlug}`` forces a full remount when the slug
           // changes so a pending in-flight fetch from the previous slug

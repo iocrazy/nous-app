@@ -349,7 +349,11 @@ export const SkillEditor: React.FC<SkillEditorProps> = ({
   const fileCount = 1 + skill.files.length;
 
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-y-auto">
+    // No scroll container: AILibraryLayout owns the page scroll. This was
+    // `h-full … overflow-y-auto` under SkillsPage's `h-full … overflow-hidden`,
+    // the same double-scroller that put the agent detail page's scrollbar
+    // inside the gutter and made it come and go per tab.
+    <div className="flex min-w-0 flex-col pb-8">
       {/* ── Header ────────────────────────────────────────────────── */}
       <div className="px-5 pt-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
