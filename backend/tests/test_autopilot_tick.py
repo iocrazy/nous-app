@@ -759,7 +759,11 @@ async def test_tick_fixpoint_loop_stops_when_cascade_advances_nothing(monkeypatc
     await autopilot._autopilot_tick_impl(_PROJECT)
 
     assert len(cascade_calls) == 1
-    assert nodes_repo.list_nodes_calls == 1
+    # Two list_nodes reads: one by the legacy-vs-episode discriminator (computing
+    # bound_episode_ids — here empty → legacy), one by the legacy fixpoint's
+    # single auto-start pass. The point is convergence (cascade called once), not
+    # the read count.
+    assert nodes_repo.list_nodes_calls == 2
 
 
 async def test_tick_fixpoint_loop_is_bounded_and_flags_a_runaway(monkeypatch):
@@ -1127,9 +1131,18 @@ async def test_episode_cascade_threads_matching_episode_id(monkeypatch):
     """The cascade advance for each episode is scoped to THAT episode
     (execute_advance episode_id), so the run it dispatches is branded with the
     same episode it moves — never ep1's advance firing an ep2-scoped run."""
-    # No nodes per episode -> auto-start no-op, cascade still invoked once each.
+    # Each episode owns a bound but non-candidate node (status=done, auto_start
+    # off): enough to make the project episode-aware (bound_episode_ids = {EP1,
+    # EP2}) so the tick loops per episode, while contributing no auto-start
+    # candidate — the cascade-threading assertion stays isolated.
     projects_repo = _FakeProjectsRepo()
-    nodes_repo = _FakeNodesRepo([], projects_repo=projects_repo)
+    nodes_repo = _FakeNodesRepo(
+        [
+            _node("1", episode_id=_EP1, auto_start=False, status="done"),
+            _node("2", episode_id=_EP2, auto_start=False, status="done"),
+        ],
+        projects_repo=projects_repo,
+    )
     episodes_repo = _FakeEpisodesRepo(
         [_episode(_EP1, sort_order=1), _episode(_EP2, sort_order=2)]
     )
@@ -1227,3 +1240,52 @@ async def test_tick_stays_one_per_project_no_per_episode_subticks(monkeypatch):
 
     # No sub-tick fan-out — the single tick handled both episodes in-process.
     assert enqueue_calls == []
+
+
+async def test_seeded_ep1_row_but_all_nodes_null_uses_legacy_scope(monkeypatch):
+    """现网基线 (Critical regression): every project auto-seeds an Ep1 episode
+    ROW at creation (projects_service.py), but pre-B3 the workflow NODES all
+    have episode_id=NULL (instantiate_from_template never binds them). Keying
+    legacy-vs-episode on "episodes table has rows" therefore ALWAYS took the
+    episode path -> list_nodes_by_episode(Ep1) excludes NULL nodes -> empty ->
+    every real project's autopilot silently stalled (no auto-start, no cascade).
+
+    The judgement must key on "has episode-BOUND nodes", not "has episode rows":
+    an Ep1 row with all-NULL nodes -> LEGACY project-level path, exactly as
+    master behaved (auto-start + cascade proceed, NOT BLOCK_NO_NEXT)."""
+    candidate = _node("1", sort_order=1, owner_agent_id=_AGENT, episode_id=None)
+    projects_repo = _FakeProjectsRepo()
+    nodes_repo = _FakeNodesRepo([candidate], projects_repo=projects_repo)
+    # The seeded Ep1 row EXISTS — but no node is bound to it.
+    episodes_repo = _FakeEpisodesRepo([_episode(_EP1, sort_order=1)])
+    _install_repos(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        agent_runs_repo=_FakeAgentRunsRepo(count=0),
+        episodes_repo=episodes_repo,
+    )
+    monkeypatch.setattr(autopilot, "_daily_auto_runs_limit", _const_limit(20))
+
+    seen_episode_ids: List[Optional[str]] = []
+
+    async def _spy_cascade(project_id, project, *, episode_id=None):
+        seen_episode_ids.append(episode_id)
+        return False
+
+    monkeypatch.setattr(autopilot, "_cascade_pass", _spy_cascade)
+
+    spy = _StartNodeSpy()
+    monkeypatch.setattr(autopilot, "start_node_now", spy)
+
+    await autopilot._autopilot_tick_impl(_PROJECT)
+
+    # Legacy project-level path — the NULL node is NEVER read through the
+    # episode-scoped list (which would exclude it and stall the project).
+    assert nodes_repo.list_nodes_by_episode_calls == []
+    # Cascade is project-scoped (episode_id=None), like master.
+    assert seen_episode_ids == [None]
+    # The all-NULL project still auto-starts — no silent stall.
+    assert len(spy.calls) == 1
+    assert spy.calls[0]["node_id"] == "1"
+    assert spy.calls[0]["dispatch"] is True

@@ -524,21 +524,55 @@ async def _cascade_pass(
         _cascade_active.reset(token)
 
 
-async def _list_active_episodes(project_id: str) -> List[Dict[str, Any]]:
-    """The project's episodes, ordered by ``sort_order`` (P0 §3.3), or ``[]``
-    for a legacy project with no episode rows. Best-effort: any read failure
-    degrades to ``[]`` so the tick falls back to the legacy project-level path
-    rather than failing outright — a legacy project genuinely has no episodes,
-    and a transient episodes-table hiccup must never stall autopilot."""
+async def _bound_episodes_in_sort_order(
+    project_id: str, bound_episode_ids: set[str]
+) -> List[Dict[str, Any]]:
+    """The project's episode rows that ACTUALLY own workflow nodes
+    (``id in bound_episode_ids``), ordered by ``sort_order`` (P0 §3.3).
+
+    Critical (2026-08-06 regression): the legacy-vs-episode decision keys on
+    whether the project has episode-BOUND NODES — NOT on whether episode ROWS
+    exist. Every project auto-seeds an Ep1 row at creation
+    (``projects_service.py``), yet pre-B3 every ``project_stage_nodes.episode_id``
+    is NULL (``instantiate_from_template`` never binds them). Keying on the row's
+    existence sent EVERY real project down the episode path, where
+    ``list_nodes_by_episode`` (correctly) excludes NULL nodes → empty node list →
+    the whole project's autopilot silently stalled. So this filters the episode
+    rows down to only those a bound node points at; an empty result means the
+    caller must use the legacy project-level path.
+
+    Best-effort: any read failure degrades to ``[]`` (→ legacy path) rather than
+    stalling autopilot on a transient episodes-table hiccup."""
+    if not bound_episode_ids:
+        return []
     try:
         from app.repositories.episode_repository import get_episode_repository
 
-        return await get_episode_repository().list_by_project(str(project_id))
+        episodes = await get_episode_repository().list_by_project(str(project_id))
     except Exception as exc:  # noqa: BLE001 — degrade to legacy path, never raise
         logger.warning(
             f"[autopilot] episode list failed for project {project_id}: {exc!r}"
         )
         return []
+    # list_by_project already orders by sort_order asc — keep only the episodes
+    # that own at least one bound node.
+    return [e for e in episodes if str(e["id"]) in bound_episode_ids]
+
+
+async def _run_legacy_fixpoint(project_id: str, project: Dict[str, Any]) -> None:
+    """The original project-level (auto-start → cascade) fixpoint — byte-for-
+    byte the pre-episode behavior (``episode_id=None``, quota read fresh each
+    pass, no per-episode caps). Used for legacy projects AND for any project
+    whose nodes are all still episode-unbound (the pre-B3 现网 baseline)."""
+    for _ in range(_MAX_TICK_PASSES):
+        await _auto_start_pass(project_id, project)
+        if not await _cascade_pass(project_id, project):
+            return
+    logger.warning(
+        f"[autopilot] tick for project {project_id} hit the "
+        f"{_MAX_TICK_PASSES}-pass ceiling without reaching a fixpoint — "
+        "possible cyclic/pathological workflow template"
+    )
 
 
 async def _run_episode_fixpoint(
@@ -595,18 +629,26 @@ async def _autopilot_tick_impl(project_id: str) -> None:
     ``used``) and could blow the project total past ``daily_auto_runs``.
     Instead the ONE tick loops over the project's episodes internally.
 
-    Two shapes:
-      * Legacy (no episode rows): the original project-level fixpoint,
-        byte-for-byte unchanged (``episode_id=None``, quota read fresh).
-      * Episode-aware: one shared ``_DispatchBudget`` (the project daily hard
-        cap — the outer total gate every episode shares) plus a per-episode
-        ``_EpisodeBudget`` sub-cap. Episodes run in ``(episode.sort_order,
+    Legacy vs episode is decided by whether the project has episode-BOUND
+    NODES (``project_stage_nodes.episode_id`` non-null) — NOT by whether episode
+    rows exist (every project auto-seeds an Ep1 row while pre-B3 nodes are all
+    NULL; see ``_bound_episodes_in_sort_order``). Two shapes:
+      * Legacy / pre-B3 baseline (no bound nodes): the original project-level
+        fixpoint, byte-for-byte unchanged (``episode_id=None``, quota read
+        fresh).
+      * Episode-aware (some nodes bound): one shared ``_DispatchBudget`` (the
+        project daily hard cap — the outer total gate every episode shares)
+        plus a per-episode ``_EpisodeBudget`` sub-cap. Only episodes that
+        actually own bound nodes are iterated, in ``(episode.sort_order,
         node.sort_order)`` order — the outer loop takes them in ``sort_order``,
         each inner auto-start pass orders that episode's own nodes by
         ``sort_order``. A single spinning episode stops at its per-episode cap
         and yields to its siblings, so one looping episode can't drain the
         whole project quota and starve the others.
     """
+    from app.repositories.project_stage_nodes_repository import (
+        get_project_stage_nodes_repository,
+    )
     from app.repositories.projects_repository import get_projects_repository
 
     project = await get_projects_repository().get_project_by_id(int(str(project_id)))
@@ -615,18 +657,17 @@ async def _autopilot_tick_impl(project_id: str) -> None:
     if not project.get("autopilot_enabled", True):
         return
 
-    episodes = await _list_active_episodes(project_id)
+    # One cheap project-wide read (reused, not doubled) to learn which episodes
+    # own nodes. All-NULL (现网 pre-B3) → no bound episodes → legacy path.
+    nodes = await get_project_stage_nodes_repository().list_nodes(str(project_id))
+    bound_episode_ids = {
+        str(n["episode_id"]) for n in nodes if n.get("episode_id") is not None
+    }
+    episodes = await _bound_episodes_in_sort_order(project_id, bound_episode_ids)
     if not episodes:
-        # Legacy project-level path — byte-for-byte the original fixpoint.
-        for _ in range(_MAX_TICK_PASSES):
-            await _auto_start_pass(project_id, project)
-            if not await _cascade_pass(project_id, project):
-                return
-        logger.warning(
-            f"[autopilot] tick for project {project_id} hit the "
-            f"{_MAX_TICK_PASSES}-pass ceiling without reaching a fixpoint — "
-            "possible cyclic/pathological workflow template"
-        )
+        # No episode-bound nodes (legacy project, or the pre-B3 all-NULL
+        # baseline) — project-level fixpoint, exactly as master.
+        await _run_legacy_fixpoint(project_id, project)
         return
 
     from app.repositories.agent_runs_repository import get_agent_runs_repository
