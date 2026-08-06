@@ -39,6 +39,12 @@ vi.mock('../../stores/globalChatStore', () => ({
   useGlobalChatStore: (sel: (s: unknown) => unknown) => sel({ requestChat }),
 }));
 
+const navigateSpy = vi.fn();
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>();
+  return { ...actual, useNavigate: () => navigateSpy };
+});
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (_k: string, d?: string | Record<string, unknown>, o?: Record<string, unknown>) => {
@@ -208,5 +214,31 @@ describe('AgentGalleryPage', () => {
     listAgents.mockRejectedValue(new Error('nope'));
     renderGallery();
     await waitFor(() => expect(screen.getByText('Retry')).toBeTruthy());
+  });
+
+  // 2026-08-05 用户回归报告："无法点击 agent 进入详情页"。此前只有卡片里
+  // 名称文字是可点按钮，卡片空白处无反应——与设计稿"点卡片进入"不符。
+  describe('card click navigates to detail', () => {
+    it('clicking the card body opens the agent editor', async () => {
+      renderGallery();
+      await waitFor(() => expect(screen.getAllByTestId('agent-card')).toHaveLength(3));
+      const card = screen
+        .getByText('translate')
+        .closest('[data-testid="agent-card"]')! as HTMLElement;
+      fireEvent.click(card);
+      expect(navigateSpy).toHaveBeenCalledWith('/ai-library/agents/translate');
+    });
+
+    it('inner action buttons do NOT double-fire card navigation', async () => {
+      renderGallery();
+      await waitFor(() => expect(screen.getAllByTestId('agent-card')).toHaveLength(3));
+      const primary = screen
+        .getByText('translate')
+        .closest('[data-testid="agent-card"]')!
+        .querySelector('[data-testid="primary-action"]')! as HTMLElement;
+      fireEvent.click(primary); // idle → chat
+      expect(requestChat).toHaveBeenCalledWith('translate');
+      expect(navigateSpy).not.toHaveBeenCalled();
+    });
   });
 });
