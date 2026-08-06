@@ -192,6 +192,11 @@ class PublishTasks(Base):
         server_default=text("'broadcast'::character varying"),
     )
     scheduled_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(True))
+    # mig 407 — 抖音发布页的两个平台原生字段。self_declaration 存的是页面上的
+    # 中文原文（六个之一，库里有 CHECK），NULL = 不碰那个控件；与 ai_content 的
+    # 关系见 services/distribution/publish_options.py::resolve_self_declaration。
+    self_declaration: Mapped[str | None] = mapped_column(Text)
+    collection_name: Mapped[str | None] = mapped_column(Text)
     dbos_workflow_id: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")

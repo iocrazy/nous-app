@@ -98,18 +98,52 @@ def test_bad_intents_are_refused_with_a_stable_reason_code(bad, expected_reason)
     assert problem.message
 
 
-def test_scheduling_is_refused_rather_than_published_immediately():
-    """Guards the one failure the user cannot undo.
+def test_scheduling_without_platform_rules_is_refused_not_published_immediately():
+    """Guards the one failure the user cannot undo, and pins the *default*.
 
     Publishing a post scheduled for tomorrow *now* is not a partial success -
-    the audience has already seen it by the time anyone notices. S3 has no
-    scheduling, so the only safe answer is a refusal.
+    the audience has already seen it by the time anyone notices. Whether a
+    scheduled time is legal is a platform question (Douyin: 2h..14d), so it is
+    answered by `PlatformIntentRules`. What this test fixes is what happens when
+    a platform supplies none: refusal. The tempting alternative reading - "no
+    rules, so nothing to check" - publishes immediately, which is precisely the
+    unrecoverable outcome.
     """
     problem = validate_intent(
         intent(scheduled_at=datetime(2030, 1, 1, tzinfo=timezone.utc))
     )
     assert problem is not None
     assert problem.reason == "scheduling_not_supported"
+
+
+def test_a_platform_that_cannot_schedule_refuses_even_with_rules_registered():
+    """Registering rules is not the same as supporting scheduling. A platform
+    whose rules exist for its other options must still refuse a scheduled post
+    rather than have `supports_scheduling` default in its favour."""
+    from app.publish import PlatformIntentRules
+
+    rules = PlatformIntentRules(supports_scheduling=False, check=lambda _i, _n: None)
+    problem = validate_intent(
+        intent(scheduled_at=datetime(2030, 1, 1, tzinfo=timezone.utc)), rules
+    )
+    assert problem is not None
+    assert problem.reason == "scheduling_not_supported"
+
+
+def test_platform_rules_can_refuse_an_intent_the_neutral_gate_accepts():
+    """The extension point itself: everything channel-neutral is fine, and the
+    platform still gets the last word. Without this seam a platform's window or
+    vocabulary would have to live in `validate_intent`, which is how the neutral
+    layer starts accumulating one platform's knowledge."""
+    from app.publish import IntentProblem, PlatformIntentRules
+
+    rules = PlatformIntentRules(
+        supports_scheduling=True,
+        check=lambda _intent, _now: IntentProblem("platform_says_no", "not on my watch"),
+    )
+    problem = validate_intent(intent(), rules)
+    assert problem is not None
+    assert problem.reason == "platform_says_no"
 
 
 def test_a_file_url_is_refused_before_anything_could_read_it():

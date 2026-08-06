@@ -359,6 +359,16 @@ export const RecordsPage: React.FC = () => {
                               {t('distribution.records.view', 'View post')}
                             </a>
                           )}
+                          {/* A published row can still carry a note: the browser
+                              degrades a missing collection instead of throwing
+                              away a finished upload, and that degradation has to
+                              be visible or it is a silent no-op. Rendered as a
+                              caveat, never as a failure — the post did go out. */}
+                          {a.status === 'success' && a.error_message && (
+                            <span className="note" title={a.error_message}>
+                              {humanizeTaskError(a.error_message).message}
+                            </span>
+                          )}
                           {a.status === 'failed' && (
                             <>
                               <span className="err" title={a.error_message || undefined}>

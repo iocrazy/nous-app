@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Iterable, Mapping, Optional
 
 from loguru import logger
@@ -66,6 +66,13 @@ from app.services.distribution.browser_client import (
     SessionOpResult,
     SessionStatus,
     is_infra_failure,
+)
+from app.services.distribution.publish_options import (
+    DOUYIN_SELF_DECLARATIONS,
+    MAX_COLLECTION_NAME_LEN,
+    SCHEDULE_MAX_AHEAD,
+    SCHEDULE_MIN_LEAD,
+    validate_scheduled_at,
 )
 
 AUTH_TYPE_SESSION = "session"
@@ -133,7 +140,20 @@ class PublishIntent:
 
     ``platform_options`` 是逃生舱：平台独有且无法通用化的字段（图文笔记
     类型、封面选择策略、合集 id 等）放这里，键名由各平台 uploader 自定，
-    backend 只透传不解释。
+    backend 只透传不解释。目前抖音用两个键（跨服务契约，browser 侧按同名取值）：
+
+    - ``self_declaration``：「自主声明」下拉的**原文**（六个之一，见
+      ``publish_options.SELF_DECLARATIONS``）。缺省/None = 不碰那个控件。
+    - ``collection``：「合集」名称，按名匹配账号已有的合集；缺省 = 不选。
+
+    "只透传不解释"指的是**语义**：backend 不知道这两个键会被点在页面的哪里。
+    但**取值合法性**仍然要在起浏览器前拦（§7.7），因为一次浏览器 + 一次上传
+    的代价是分钟级 —— 这个校验按 ``PlatformSessionProfile`` 的数据表驱动，
+    不写成 if platform == 'douyin' 的分支。
+
+    ``scheduled_at`` 是通道级字段（不进 platform_options）：定时发布不是抖音
+    独有的概念，各平台都有，差别只在窗口大小 —— 那个差别正是 profile 里的
+    ``schedule_min_lead`` / ``schedule_max_ahead`` 两个数。
     """
 
     content_type: str  # "video" | "images"
@@ -207,6 +227,14 @@ class PlatformSessionProfile:
     max_title_len: Optional[int] = None
     max_topics: Optional[int] = None
     max_images: Optional[int] = None
+    # 定时窗口。两个都是 None = 该平台还没接定时 → 带 scheduled_at 的意图直接
+    # 拒（而不是静默立即发出去：早发十二小时不比不发轻）。
+    schedule_min_lead: Optional[timedelta] = None
+    schedule_max_ahead: Optional[timedelta] = None
+    # 该平台「自主声明」的合法取值（原文）。空 = 平台没有这个概念 →
+    # 带 self_declaration 的意图会被拒，而不是被浏览器侧静默丢掉。
+    self_declarations: frozenset[str] = frozenset()
+    supports_collection: bool = False
 
 
 SESSION_PLATFORM_PROFILES: dict[str, PlatformSessionProfile] = {
@@ -216,6 +244,12 @@ SESSION_PLATFORM_PROFILES: dict[str, PlatformSessionProfile] = {
         video_extensions=frozenset({".mp4", ".mov", ".webm"}),
         image_extensions=frozenset({".jpg", ".jpeg", ".png"}),
         # 上限待 S3 对着 creator.douyin.com 实测后填入（见 docstring）。
+        # 下面三项相反 —— 是 2026-08-06 在真实发布页上探过的，属于"确定的事"：
+        # 定时只接受 2 小时后 ~ 14 天内；自主声明是六选一的固定下拉；有合集。
+        schedule_min_lead=SCHEDULE_MIN_LEAD,
+        schedule_max_ahead=SCHEDULE_MAX_AHEAD,
+        self_declarations=DOUYIN_SELF_DECLARATIONS,
+        supports_collection=True,
     ),
     # 第二个平台建议是小红书（档位 2），正因为它与抖音最不同 —— 见 spec §6.1。
 }
@@ -441,11 +475,17 @@ class SessionAdapter:
 
     # ── fail-fast 参数校验 (§7.7) ───────────────────────────
 
-    def validate_publish_intent(self, intent: PublishIntent) -> list[str]:
+    def validate_publish_intent(
+        self, intent: PublishIntent, *, now: Optional[datetime] = None
+    ) -> list[str]:
         """起浏览器**之前**跑的纯校验，返回问题清单（空 = 通过）。
 
         纯函数、无 IO —— 发布 step 应在调 ``publish()`` 前先跑它，把参数
         错误挡在几分钟的浏览器+上传开销之外。
+
+        ``now`` 只为测试注入。定时窗口在这里**又算一次**（请求 schema 已经算
+        过）不是冗余：两次之间隔着排队与调度，提交时刚过 2 小时线的批次，真
+        到执行时可能已经滑进线内 —— 那时再被平台拒，用户已经等了一次上传。
         """
         problems: list[str] = []
         p = self._profile
@@ -470,6 +510,56 @@ class SessionAdapter:
         problems.extend(self._extension_problems(intent.media))
         if intent.visibility not in ("public", "private", "friends"):
             problems.append(f"unknown visibility {intent.visibility!r}")
+        problems.extend(self._schedule_problems(intent, now=now))
+        problems.extend(self._platform_option_problems(intent))
+        return problems
+
+    def _schedule_problems(
+        self, intent: PublishIntent, *, now: Optional[datetime]
+    ) -> list[str]:
+        """定时时间的窗口校验。平台没有定时能力时，带了时间直接拒。"""
+        if intent.scheduled_at is None:
+            return []
+        p = self._profile
+        if p.schedule_min_lead is None and p.schedule_max_ahead is None:
+            return [f"scheduled publishing is not supported on {p.platform}"]
+        problem = validate_scheduled_at(
+            intent.scheduled_at,
+            now=now,
+            min_lead=p.schedule_min_lead or timedelta(0),
+            max_ahead=p.schedule_max_ahead or timedelta.max,
+        )
+        return [problem] if problem else []
+
+    def _platform_option_problems(self, intent: PublishIntent) -> list[str]:
+        """``platform_options`` 里我们**认识**的键的取值校验。
+
+        只校验认识的键：``platform_options`` 是逃生舱，未知键照旧原样透传
+        （否则每加一个平台专属字段都要先改 backend，逃生舱就不成其为逃生舱）。
+        但认识的键必须拦 —— 一个拼错的自主声明送到浏览器侧，最好的结果是发布
+        失败，最坏的结果是选项没选中而作品照发（合规字段静默丢失）。
+        """
+        problems: list[str] = []
+        p = self._profile
+        opts = intent.platform_options or {}
+
+        declaration = opts.get("self_declaration")
+        if declaration is not None:
+            if not p.self_declarations:
+                problems.append(f"self declaration is not supported on {p.platform}")
+            elif declaration not in p.self_declarations:
+                problems.append(f"unknown self declaration {declaration!r}")
+
+        collection = opts.get("collection")
+        if collection is not None:
+            if not p.supports_collection:
+                problems.append(f"collections are not supported on {p.platform}")
+            elif not isinstance(collection, str) or not collection.strip():
+                problems.append("collection name is empty")
+            elif len(collection) > MAX_COLLECTION_NAME_LEN:
+                problems.append(
+                    f"collection name exceeds {MAX_COLLECTION_NAME_LEN} characters"
+                )
         return problems
 
     def _extension_problems(self, media: Iterable[PublishMedia]) -> list[str]:

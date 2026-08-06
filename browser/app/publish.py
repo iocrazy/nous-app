@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Mapping
 
 from .assets import (
@@ -49,8 +50,9 @@ from .schemas import (
 
 logger = logging.getLogger("nous_browser.publish")
 
-# S3 scope. Image posts (图文) and scheduling are separate increments, and the
-# design doc puts both outside this spec.
+# S3 scope. Image posts (图文) remain a separate increment. Scheduling is no
+# longer refused outright - it is delegated to the platform's own rules, because
+# "how far ahead may a post be scheduled" has no channel-neutral answer.
 SUPPORTED_CONTENT_TYPES = ("video",)
 VIDEO_ROLE = "video"
 COVER_ROLE = "cover"
@@ -68,6 +70,30 @@ class IntentProblem:
 
     reason: str
     message: str
+
+
+@dataclass(frozen=True)
+class PlatformIntentRules:
+    """The part of the spec 7.7 gate that only one platform can answer.
+
+    Douyin's scheduling window (2h..14d) and its six legal self-declaration
+    strings are not channel semantics - a second platform will have different
+    numbers and different strings, and hard-coding Douyin's into
+    `validate_intent` is how the neutral layer starts accumulating platform
+    knowledge (§6.1a forbids exactly that for `SessionStatus`; the same argument
+    applies here).
+
+    `supports_scheduling` is a separate flag rather than something `check` can
+    express, because the safe default has to be *refusal*: a platform that
+    registers no rules at all must not silently publish a scheduled post right
+    now. Absent rules ⇒ scheduling refused.
+
+    `check` takes `now` so the window arithmetic is testable without freezing
+    the clock.
+    """
+
+    supports_scheduling: bool
+    check: Callable[[PublishIntent, datetime], "IntentProblem | None"]
 
 
 @dataclass(frozen=True)
@@ -130,11 +156,21 @@ class Deadline:
 Publisher = Callable[[PublishJob, Deadline], Awaitable[PublishOutcome]]
 
 
-def validate_intent(intent: PublishIntent) -> IntentProblem | None:
+def validate_intent(
+    intent: PublishIntent,
+    rules: PlatformIntentRules | None = None,
+    now: datetime | None = None,
+) -> IntentProblem | None:
     """First reason this intent cannot be published, or None. Pure.
 
     Total by construction: it runs before any browser or network exists, so
     everything it can catch is caught for free.
+
+    `rules` are the platform's own additions to the gate. **Omitting them is
+    not neutral** - a platform that registered none cannot schedule, because the
+    alternative reading ("no rules, so anything goes") publishes a post booked
+    for tomorrow morning right now, which the audience has already seen by the
+    time anyone notices.
     """
     if intent.content_type not in SUPPORTED_CONTENT_TYPES:
         return IntentProblem(
@@ -143,13 +179,11 @@ def validate_intent(intent: PublishIntent) -> IntentProblem | None:
             f"expected one of {', '.join(SUPPORTED_CONTENT_TYPES)}",
         )
 
-    if intent.scheduled_at is not None:
-        # Refused rather than published immediately. Publishing a scheduled post
-        # now is not a partial success - it is the wrong post at the wrong time,
-        # already visible to the audience by the time anyone notices.
+    if intent.scheduled_at is not None and (rules is None or not rules.supports_scheduling):
         return IntentProblem(
             "scheduling_not_supported",
-            "scheduled publishing is not implemented; send scheduled_at=null",
+            "scheduled publishing is not supported for this platform; "
+            "send scheduled_at=null",
         )
 
     videos = [item for item in intent.media if item.kind == VIDEO_ROLE]
@@ -174,6 +208,12 @@ def validate_intent(intent: PublishIntent) -> IntentProblem | None:
         problem = _check_asset(intent.cover, IMAGE_EXTENSIONS, "cover")
         if problem is not None:
             return problem
+
+    if rules is not None:
+        # Last, so a platform rule never pre-empts a neutral one: "there is no
+        # video in this request" is a more useful answer than "your scheduled
+        # time is 40 minutes too soon" when both are true.
+        return rules.check(intent, now or datetime.now(timezone.utc))
 
     return None
 
@@ -222,7 +262,20 @@ async def run_publish(
     environment: EnvironmentConfig | None,
     intent: PublishIntent,
 ) -> PublishResponse:
-    problem = validate_intent(intent)
+    # Imported here, not at module scope: `platforms/__init__` imports every
+    # platform module, and `douyin_publish` imports this one for `PublishJob` /
+    # `Deadline`. At module scope that cycle resolves only when `app.platforms`
+    # happens to be imported first, so `import app.publish` on a cold
+    # interpreter (a test, a script, a future module) fails on an import order
+    # nobody chose.
+    from .platforms import get_intent_rules, get_validator
+
+    # Both halves of the gate before anything is launched or downloaded
+    # (spec 7.7). The platform half is where a scheduling window and a
+    # self-declaration vocabulary live, and both are cheap to check and
+    # expensive to discover late: a scheduled time the platform will reject is
+    # otherwise found *after* the video has finished transferring.
+    problem = validate_intent(intent, get_intent_rules(platform))
     if problem is not None:
         return _response(
             PublishOutcome(
@@ -232,14 +285,6 @@ async def run_publish(
             ),
             platform,
         )
-
-    # Imported here, not at module scope: `platforms/__init__` imports every
-    # platform module, and `douyin_publish` imports this one for `PublishJob` /
-    # `Deadline`. At module scope that cycle resolves only when `app.platforms`
-    # happens to be imported first, so `import app.publish` on a cold
-    # interpreter (a test, a script, a future module) fails on an import order
-    # nobody chose.
-    from .platforms import get_validator
 
     validator = get_validator(platform)
     if validator is None:

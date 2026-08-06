@@ -1042,3 +1042,191 @@ async def test_run_accounts_degrades_session_row_on_an_oauth_account(monkeypatch
         rows, accounts_repo, creds={}, task=_session_task(), repo=_FakeRepo()
     )
     assert statuses == ["pending_share"]
+
+
+# ── 发布表单新字段：定时 / 自主声明 / 合集（mig 407） ─────────────
+
+
+def _form_task(**over):
+    base = {
+        "title": "Launch",
+        "description": None,
+        "resource_ids": ["30"],
+        "content_type": "video",
+    }
+    base.update(over)
+    return base
+
+
+@pytest.mark.asyncio
+async def test_intent_carries_scheduled_at_to_the_browser():
+    """``scheduled_at`` 以前被刻意丢掉（列还没有写入口）。现在浏览器要用它去
+    设置平台自己的定时发布 —— 丢掉等于把一条"六小时后发"的任务立刻发出去。"""
+    from datetime import datetime, timedelta, timezone
+
+    from app.workflows.publish_distribution import _build_publish_intent
+
+    when = datetime.now(timezone.utc) + timedelta(hours=6)
+    intent = await _build_publish_intent(
+        _session_account(), _form_task(scheduled_at=when), _FakeRepo()
+    )
+    assert intent.scheduled_at == when
+    assert intent.to_payload()["scheduled_at"] == when.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_ai_content_alone_becomes_a_real_declaration_on_the_page():
+    """产品决策的落点：ai_content 这个存了两版却从没生效的布尔位，现在会变成
+    platform_options 里一次真实的声明选择。"""
+    from app.workflows.publish_distribution import _build_publish_intent
+
+    intent = await _build_publish_intent(
+        _session_account(), _form_task(ai_content=True), _FakeRepo()
+    )
+    assert intent.platform_options["self_declaration"] == "内容由AI生成"
+
+
+@pytest.mark.asyncio
+async def test_explicit_declaration_wins_over_ai_content():
+    from app.workflows.publish_distribution import _build_publish_intent
+
+    intent = await _build_publish_intent(
+        _session_account(),
+        _form_task(ai_content=True, self_declaration="内容为转载信息"),
+        _FakeRepo(),
+    )
+    assert intent.platform_options["self_declaration"] == "内容为转载信息"
+
+
+@pytest.mark.asyncio
+async def test_no_declaration_and_no_collection_send_no_keys_at_all():
+    """None 与"键不存在"在浏览器侧语义不同（不碰控件 vs 显式设置）。"""
+    from app.workflows.publish_distribution import _build_publish_intent
+
+    intent = await _build_publish_intent(_session_account(), _form_task(), _FakeRepo())
+    assert intent.platform_options == {}
+    assert intent.scheduled_at is None
+
+
+@pytest.mark.asyncio
+async def test_collection_name_rides_in_platform_options():
+    from app.workflows.publish_distribution import _build_publish_intent
+
+    intent = await _build_publish_intent(
+        _session_account(), _form_task(collection_name="  Summer Trip "), _FakeRepo()
+    )
+    assert intent.platform_options["collection"] == "Summer Trip"
+
+
+@pytest.mark.parametrize(
+    "task,expected",
+    [
+        ({}, []),
+        ({"scheduled_at": "2026-09-01T00:00:00Z"}, ["scheduled publishing"]),
+        ({"self_declaration": "内容由AI生成"}, ["self declaration"]),
+        ({"collection_name": "Trip"}, ["collection"]),
+        ({"collection_name": "   "}, []),
+        (
+            {"scheduled_at": "2026-09-01T00:00:00Z", "collection_name": "Trip"},
+            ["scheduled publishing", "collection"],
+        ),
+        # ai_content 不在清单里：它对 official/h5 一直只是"存着"，没有回归。
+        ({"ai_content": True}, []),
+    ],
+)
+def test_unsupported_options_lists_what_oauth_channels_cannot_honour(task, expected):
+    from app.workflows.publish_distribution import unsupported_options
+
+    assert unsupported_options(task, "h5") == expected
+    assert unsupported_options(task, "official") == expected
+    # 会话通道全都接得住。
+    assert unsupported_options(task, "session") == []
+
+
+@pytest.mark.asyncio
+async def test_h5_row_fails_loudly_instead_of_silently_dropping_the_schedule():
+    """一条本该六小时后发、却立刻发出去的作品不是更小的失败 —— 让这一行失败，
+    并把原因写进 error_message（UI 唯一的抓手）。"""
+    from app.workflows.publish_distribution import _publish_one_account
+
+    repo = _FakeRepo()
+    account = {"id": "1", "channel": "h5", "access_token": None, "resource_id": "30"}
+    status = await _publish_one_account(
+        account, _FakeAdapter(), _form_task(scheduled_at="2026-09-01T00:00:00Z"), repo
+    )
+    assert status == "failed"
+    assert "scheduled publishing" in repo.updates[-1][1]["error_message"]
+    assert "QR code" in repo.updates[-1][1]["error_message"]
+
+
+# ── 合集降级的回显（跨服务约定 2026-08-06） ───────────────────────
+
+
+@pytest.mark.parametrize(
+    "detail,expected_fragment",
+    [
+        ({}, None),
+        ({"collection": "not_requested"}, None),
+        ({"collection": "applied", "collection_requested": "Trip"}, None),
+        ({"collection": "not_found", "collection_requested": "Trip"}, "'Trip'"),
+        ({"collection": "control_missing"}, "collection_control_missing"),
+        ({"collection": "error"}, "collection_error"),
+    ],
+)
+def test_collection_note_only_speaks_up_when_the_collection_was_dropped(
+    detail, expected_fragment
+):
+    from app.workflows.publish_distribution import collection_note
+
+    note = collection_note(detail)
+    if expected_fragment is None:
+        assert note is None
+    else:
+        assert expected_fragment in note
+
+
+@pytest.mark.asyncio
+async def test_published_row_carries_the_collection_caveat():
+    """作品发出去了但合集没挂上：行仍是 success（视频真的在平台上），但原因
+    必须写进 error_message —— 那是 UI 唯一的自由文本，不写就是 silent no-op。"""
+    from app.workflows.publish_distribution import _publish_one_account_session
+
+    repo, accounts_repo = _FakeRepo(), _FakeAccountsRepo()
+    adapter = _FakeSessionAdapter(
+        outcome=_outcome(
+            "published",
+            platform_item_id="item-1",
+            detail={"collection": "not_found", "collection_requested": "Summer Trip"},
+        )
+    )
+
+    status = await _publish_one_account_session(
+        _session_account(),
+        _session_task(),
+        repo,
+        accounts_repo,
+        adapter=adapter,
+        lock=_always_free_lock(),
+    )
+
+    assert status == "success"
+    assert "collection_not_found" in repo.updates[-1][1]["error_message"]
+    assert "Summer Trip" in repo.updates[-1][1]["error_message"]
+
+
+@pytest.mark.asyncio
+async def test_a_clean_publish_leaves_no_caveat_behind():
+    """重投同一行时，上一次的提示必须被清掉，而不是永远挂在那儿。"""
+    from app.workflows.publish_distribution import _publish_one_account_session
+
+    repo, accounts_repo = _FakeRepo(), _FakeAccountsRepo()
+    status = await _publish_one_account_session(
+        _session_account(),
+        _session_task(),
+        repo,
+        accounts_repo,
+        adapter=_FakeSessionAdapter(),
+        lock=_always_free_lock(),
+    )
+    assert status == "success"
+    assert repo.updates[-1][1]["error_message"] is None

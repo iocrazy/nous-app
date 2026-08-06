@@ -2424,6 +2424,24 @@ export interface PublishTaskAccount {
   published_at: string | null;
 }
 
+/**
+ * Douyin 自主声明 — the six options the platform offers, in the platform's own
+ * wording. These strings are the WIRE values (and what the DB stores): the
+ * browser service picks the option by matching this text on the creator page,
+ * so a translated value would select nothing and the post would go out with no
+ * declaration at all. English labels live in the Publish form, display only.
+ *
+ * Mirrors backend `services/distribution/publish_options.py::SELF_DECLARATIONS`,
+ * which rejects anything outside this set.
+ */
+export type SelfDeclaration =
+  | '内容由AI生成'
+  | '内容为个人观点或见解'
+  | '内容为转载信息'
+  | '内容含营销推广信息'
+  | '虚构演绎，仅供娱乐'
+  | '无需添加自主声明';
+
 export interface PublishTask {
   id: string;
   content_type: 'video' | 'images' | 'article';
@@ -2434,6 +2452,12 @@ export interface PublishTask {
   distribution_mode: 'broadcast' | 'one_to_one';
   status: 'pending' | 'publishing' | 'pending_share' | 'success' | 'partial' | 'failed';
   created_at: string;
+  /** Platform-side scheduled publish time (ISO). null = published immediately. */
+  scheduled_at: string | null;
+  /** null = the declaration control was left untouched. Distinct from
+   *  '无需添加自主声明', which is the user explicitly declaring nothing. */
+  self_declaration: SelfDeclaration | null;
+  collection_name: string | null;
   accounts: PublishTaskAccount[];
 }
 
@@ -2460,6 +2484,23 @@ export interface PublishRequest {
   account_ids: string[];
   /** Per-account overrides keyed by account_id — e.g. a custom title for one account. */
   account_configs?: Record<string, { title?: string; description?: string; topics?: string[] }>;
+  /**
+   * Platform-side scheduled publish time (ISO 8601 **with offset** — a naive
+   * string is rejected rather than guessed at, because getting the zone wrong
+   * sends the post hours early and there is no taking it back).
+   * Window: 2 hours .. 14 days from now. Omit = publish immediately.
+   */
+  scheduled_at?: string;
+  /**
+   * Douyin 自主声明. Omit = leave the control untouched — NOT the same as
+   * '无需添加自主声明' (an explicit "nothing to declare" the platform records).
+   * Omitting it while `ai_content` is true still produces '内容由AI生成' at
+   * publish time; see the backend's `resolve_self_declaration`.
+   */
+  self_declaration?: SelfDeclaration;
+  /** Douyin 合集 name. Matched against the account's EXISTING collections; never
+   *  creates one. Omit = no collection. */
+  collection_name?: string;
 }
 
 export interface LibraryVideo {

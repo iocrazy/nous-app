@@ -34,6 +34,17 @@ interface ErrorPattern {
 // Order matters: earlier, more specific rows win.
 const PATTERNS: ReadonlyArray<ErrorPattern> = [
   {
+    // Session-channel publish that LANDED but could not file the post into the
+    // requested 合集 (collection). The browser service degrades here instead of
+    // discarding a finished upload for an archival field (see
+    // publish_distribution.collection_note) — so this row is a caveat on a
+    // success, not a failure. First in the table so the generic "not found"
+    // rule below can never claim it.
+    test: /\[collection_(not_found|control_missing|error)\]/i,
+    message: 'Published, but the collection was not applied.',
+    hint: 'Check the collection name, or file the post from the app.',
+  },
+  {
     // ffmpeg audio extraction produced no stream — the source video has no
     // audio track (e.g. a B站 DASH clip merged without sound). The
     // extract→transcribe chain (manual Transcribe on a no-audio video) fails

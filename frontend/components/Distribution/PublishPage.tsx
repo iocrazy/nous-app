@@ -16,7 +16,7 @@ import {
   addResourceTag, createTag, removeResourceTag,
 } from '../../services/unifiedTagService';
 import { TO_PUBLISH_TAG_NAME, findToPublishTagId } from '../../services/toPublishService';
-import { SocialAccount, LibraryVideo } from '../../types';
+import { SocialAccount, LibraryVideo, SelfDeclaration } from '../../types';
 import { useToast } from '../Toast';
 import { useWorkspaceScope } from '../../hooks/useWorkspaceScope';
 import { PageHeader } from '../layout/PageHeader';
@@ -56,6 +56,70 @@ const MAX_TOPIC_LEN = 50;
 // Cap concurrent image uploads so a large multi-select can't open dozens of
 // parallel requests at once — pick order is preserved regardless of timing.
 const UPLOAD_CONCURRENCY = 3;
+
+/**
+ * Douyin's 自主声明 (self declaration) — a compliance control on the creator
+ * page, six fixed options.
+ *
+ * `value` is the platform's OWN wording, verbatim. It is what travels on the
+ * wire and what gets stored, because the browser service selects the option by
+ * matching that text in the DOM: a translated value would silently select
+ * nothing and the post would go out undeclared. The English `label` is display
+ * only (CLAUDE.md UI language rule) and never leaves the browser.
+ *
+ * Kept in sync with backend `services/distribution/publish_options.py`
+ * (SELF_DECLARATIONS) — the backend rejects anything outside the six.
+ */
+const SELF_DECLARATIONS: Array<{ value: SelfDeclaration; key: string; label: string }> = [
+  { value: '内容由AI生成', key: 'declAi', label: 'AI-generated content' },
+  { value: '内容为个人观点或见解', key: 'declOpinion', label: 'Personal opinion or insight' },
+  { value: '内容为转载信息', key: 'declRepost', label: 'Reposted information' },
+  { value: '内容含营销推广信息', key: 'declMarketing', label: 'Contains marketing or promotion' },
+  { value: '虚构演绎，仅供娱乐', key: 'declFiction', label: 'Fictional dramatization, entertainment only' },
+  { value: '无需添加自主声明', key: 'declNone', label: 'No declaration needed' },
+];
+const DECLARATION_AI: SelfDeclaration = '内容由AI生成';
+
+/**
+ * Douyin accepts a scheduled time between 2 hours and 14 days out — and the
+ * time is typed into the creator page only AFTER the upload finishes, which
+ * takes minutes. So the lead time offered here is the platform's 2 hours plus
+ * a 10-minute upload margin: a request in the 2h00–2h10 band would pass every
+ * check we make and then be refused by Douyin after a few hundred MB went up.
+ * The same effective bound is enforced in the request schema, before the
+ * browser opens, and in the browser service (SCHEDULE_LEAD_SLACK) — all three
+ * must agree or the user gets accepted-then-rejected.
+ *
+ * No margin on the upper bound: time passing only moves the target closer.
+ */
+const SCHEDULE_MIN_LEAD_MS = (2 * 60 + 10) * 60 * 1000;
+const SCHEDULE_MAX_AHEAD_MS = 14 * 24 * 60 * 60 * 1000;
+
+export type ScheduleProblem = 'empty' | 'tooSoon' | 'tooFar' | null;
+
+/** `<input type="datetime-local">` value (local wall clock, no offset) → the
+ *  window verdict. Exported so the boundaries are unit-testable without a DOM. */
+export const scheduleProblem = (
+  localValue: string,
+  now: number = Date.now(),
+): ScheduleProblem => {
+  if (!localValue) return 'empty';
+  const at = new Date(localValue).getTime();
+  if (Number.isNaN(at)) return 'empty';
+  const delta = at - now;
+  if (delta < SCHEDULE_MIN_LEAD_MS) return 'tooSoon';
+  if (delta > SCHEDULE_MAX_AHEAD_MS) return 'tooFar';
+  return null;
+};
+
+/** Date → the `YYYY-MM-DDTHH:mm` shape a datetime-local input wants, in LOCAL
+ *  time (toISOString would shift by the offset and hand the user a min/max in
+ *  the wrong timezone). */
+const toLocalInputValue = (d: Date): string => {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+    + `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
 
 // Deterministic gradient pick per account id — keeps avatars visually
 // distinct without needing per-user color config.
@@ -126,6 +190,19 @@ export const PublishPage: React.FC = () => {
   const [topicInputOpen, setTopicInputOpen] = useState(false);
   const [visibility, setVisibility] = useState<Visibility>('public');
   const [aiContent, setAiContent] = useState(false);
+  // '' = leave the platform's declaration control alone. Deliberately NOT the
+  // same as '无需添加自主声明', which is a declaration the user chose and the
+  // platform records.
+  const [selfDeclaration, setSelfDeclaration] = useState<SelfDeclaration | ''>('');
+  // Whether the current declaration was filled in BY the AI toggle rather than
+  // by the user. Turning the toggle back off should undo what the toggle did —
+  // and nothing else.
+  const [declarationAuto, setDeclarationAuto] = useState(false);
+  const [scheduleMode, setScheduleMode] = useState<'now' | 'schedule'>('now');
+  // datetime-local value (local wall clock, no offset) — converted to an
+  // absolute ISO instant only at submit time.
+  const [scheduledAt, setScheduledAt] = useState('');
+  const [collectionName, setCollectionName] = useState('');
   const [allowDownload, setAllowDownload] = useState(true);
   const [mode, setMode] = useState<Mode>('broadcast');
   // Not user-selectable: the backend routes per account (see the Channel type).
@@ -448,9 +525,61 @@ export const PublishPage: React.FC = () => {
     }
   };
 
+  // ── AI toggle ⇄ self declaration ──
+  // Product decision (mirrored on the backend in `resolve_self_declaration`):
+  // auto-map, allow override. `ai_content` existed for two releases and never
+  // reached the platform — flipping it now fills in the matching declaration,
+  // and the user can still change it afterwards.
+  const onToggleAiContent = () => {
+    setAiContent((was) => {
+      const next = !was;
+      if (next && selfDeclaration === '') {
+        setSelfDeclaration(DECLARATION_AI);
+        setDeclarationAuto(true);
+      } else if (!next && declarationAuto) {
+        setSelfDeclaration('');
+        setDeclarationAuto(false);
+      }
+      return next;
+    });
+  };
+
+  const onSelfDeclarationChange = (value: string) => {
+    setSelfDeclaration(value as SelfDeclaration | '');
+    setDeclarationAuto(false);
+  };
+
+  // Flagged as AI but declaring something else (including "nothing to
+  // declare"). Not blocked — the declaration is the user's call — but they
+  // should see that the two controls now disagree.
+  const declarationConflict =
+    aiContent && selfDeclaration !== '' && selfDeclaration !== DECLARATION_AI;
+
+  const scheduleIssue = scheduleMode === 'schedule' ? scheduleProblem(scheduledAt) : null;
+  const scheduleBounds = useMemo(() => ({
+    min: toLocalInputValue(new Date(Date.now() + SCHEDULE_MIN_LEAD_MS)),
+    max: toLocalInputValue(new Date(Date.now() + SCHEDULE_MAX_AHEAD_MS)),
+  }), []);
+
+  // Scheduling / declaration / collection are creator-page controls: only an
+  // account bound by QR code publishes through that page. On any other account
+  // the backend fails the row rather than dropping the field, so warn before
+  // the user finds out from a failed record.
+  const usesCreatorPageOnlyFields =
+    scheduleMode === 'schedule' || selfDeclaration !== '' || collectionName.trim().length > 0;
+  const nonSessionSelected = useMemo(
+    () => selectedAccounts.filter(
+      (id) => accounts.find((a) => a.id === id)?.auth_type !== 'session',
+    ).length,
+    [selectedAccounts, accounts],
+  );
+
   const canPublish = useMemo(
-    () => selectedVideos.length > 0 && selectedAccounts.length > 0 && title.trim().length > 0,
-    [selectedVideos, selectedAccounts, title],
+    () => selectedVideos.length > 0
+      && selectedAccounts.length > 0
+      && title.trim().length > 0
+      && scheduleIssue === null,
+    [selectedVideos, selectedAccounts, title, scheduleIssue],
   );
 
   const postsBroadcast = selectedVideos.length * selectedAccounts.length;
@@ -504,6 +633,15 @@ export const PublishPage: React.FC = () => {
         // one_to_one selection can't leak into the payload.
         distribution_mode: isImages ? 'broadcast' : mode,
         channel,
+        // Sent as an absolute instant. The input holds local wall clock; the
+        // backend refuses a value without an offset rather than guessing.
+        scheduled_at: scheduleMode === 'schedule' && scheduledAt
+          ? new Date(scheduledAt).toISOString()
+          : undefined,
+        // Omitted (not null) when unset — "leave the control alone" and
+        // "declare nothing" are different instructions on the platform.
+        self_declaration: selfDeclaration || undefined,
+        collection_name: collectionName.trim() || undefined,
         account_ids: selectedAccounts,
         account_configs: Object.keys(accountConfigsPayload).length ? accountConfigsPayload : undefined,
       });
@@ -774,7 +912,7 @@ export const PublishPage: React.FC = () => {
             <div className="frow">
               <div className="lbl">
                 <b>{t('distribution.publish.aiContent', 'AI-generated content')}</b>
-                <span>{t('distribution.publish.aiContentDesc', 'Saved with the task — Douyin requires setting the AI label in-app.')}</span>
+                <span>{t('distribution.publish.aiContentDesc', 'Preselects the matching self declaration below.')}</span>
               </div>
               <button
                 type="button"
@@ -782,8 +920,42 @@ export const PublishPage: React.FC = () => {
                 aria-checked={aiContent}
                 aria-label={t('distribution.publish.aiContent', 'AI-generated content')}
                 className={`toggle ${aiContent ? 'on' : ''}`}
-                onClick={() => setAiContent((v) => !v)}
+                onClick={onToggleAiContent}
               />
+            </div>
+            <div className="frow" style={{ display: 'block' }}>
+              <div className="lbl" style={{ marginBottom: 7 }}>
+                <b>{t('distribution.publish.selfDeclaration', 'Self declaration')}</b>
+                <span>
+                  {t(
+                    'distribution.publish.selfDeclarationDesc',
+                    'Douyin content declaration. Leave unset to keep the platform default.',
+                  )}
+                </span>
+              </div>
+              <select
+                className="input"
+                value={selfDeclaration}
+                aria-label={t('distribution.publish.selfDeclaration', 'Self declaration')}
+                onChange={(e) => onSelfDeclarationChange(e.target.value)}
+              >
+                <option value="">
+                  {t('distribution.publish.declUnset', 'Not set')}
+                </option>
+                {SELF_DECLARATIONS.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    {t(`distribution.publish.${d.key}`, d.label)}
+                  </option>
+                ))}
+              </select>
+              {declarationConflict && (
+                <p className="field-warn">
+                  {t(
+                    'distribution.publish.declConflict',
+                    'This is marked as AI-generated but declares something else — the declaration you picked is what gets sent.',
+                  )}
+                </p>
+              )}
             </div>
             <div className="frow">
               <div className="lbl">
@@ -799,24 +971,88 @@ export const PublishPage: React.FC = () => {
                 onClick={() => setAllowDownload((v) => !v)}
               />
             </div>
-            <div className="frow">
-              <div className="lbl"><b>{t('distribution.publish.publishTime', 'Publish time')}</b></div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div className="seg">
-                  <button type="button" className="on">{t('distribution.publish.scheduleNow', 'Now')}</button>
-                  <button type="button" disabled title={t('distribution.comingInD3', 'Coming in D3')}>{t('distribution.publish.schedule', 'Schedule')}</button>
-                </div>
-                <span className="sched-input"><Calendar />{t('distribution.publish.notScheduled', 'Not scheduled')}</span>
+            <div className="frow" style={{ display: 'block' }}>
+              <div className="lbl" style={{ marginBottom: 7 }}>
+                <b>{t('distribution.publish.publishTime', 'Publish time')}</b>
+                <span>
+                  {t(
+                    'distribution.publish.scheduleWindow',
+                    'Douyin accepts a time between 2 hours and 14 days from now — we ask for 2h10m so the upload has room.',
+                  )}
+                </span>
               </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <div className="seg">
+                  <button
+                    type="button"
+                    className={scheduleMode === 'now' ? 'on' : ''}
+                    onClick={() => setScheduleMode('now')}
+                  >
+                    {t('distribution.publish.scheduleNow', 'Now')}
+                  </button>
+                  <button
+                    type="button"
+                    className={scheduleMode === 'schedule' ? 'on' : ''}
+                    onClick={() => setScheduleMode('schedule')}
+                  >
+                    {t('distribution.publish.schedule', 'Schedule')}
+                  </button>
+                </div>
+                {scheduleMode === 'schedule' ? (
+                  <input
+                    type="datetime-local"
+                    className="input"
+                    style={{ width: 'auto', flex: '1 1 200px' }}
+                    value={scheduledAt}
+                    min={scheduleBounds.min}
+                    max={scheduleBounds.max}
+                    aria-label={t('distribution.publish.scheduleAt', 'Scheduled time')}
+                    aria-invalid={scheduleIssue !== null}
+                    onChange={(e) => setScheduledAt(e.target.value)}
+                  />
+                ) : (
+                  <span className="sched-input"><Calendar />{t('distribution.publish.notScheduled', 'Not scheduled')}</span>
+                )}
+              </div>
+              {/* The window is re-checked in the request schema and again before
+                  a browser opens; saying it here is what keeps the user from
+                  finding out after a full upload. */}
+              {scheduleIssue === 'tooSoon' && (
+                <p className="field-err">
+                  {t('distribution.publish.scheduleTooSoon', 'Pick a time at least 2 hours 10 minutes from now — the platform minimum is 2 hours and the upload needs room.')}
+                </p>
+              )}
+              {scheduleIssue === 'tooFar' && (
+                <p className="field-err">
+                  {t('distribution.publish.scheduleTooFar', 'Pick a time within 14 days from now.')}
+                </p>
+              )}
+              {scheduleIssue === 'empty' && (
+                <p className="field-err">
+                  {t('distribution.publish.scheduleEmpty', 'Choose when this should publish.')}
+                </p>
+              )}
             </div>
           </div>
 
           <div className="fcard">
             <h4>{t('distribution.publish.moreOptions', 'More options')}</h4>
+            {/* Collections are matched BY NAME against the ones the account
+                already has — we can't enumerate them from here, so this is a
+                free-text field and a name that doesn't exist fails the row
+                (loudly) rather than publishing outside the collection. */}
             <div className="opt-row">
               <Folder />
               <span className="ol">{t('distribution.publish.collection', 'Collection')}</span>
-              <span className="oa">{t('distribution.publish.change', 'Change')}</span>
+              <input
+                className="input"
+                style={{ width: 200 }}
+                value={collectionName}
+                maxLength={100}
+                aria-label={t('distribution.publish.collection', 'Collection')}
+                placeholder={t('distribution.publish.collectionPlaceholder', 'Existing collection name')}
+                onChange={(e) => setCollectionName(e.target.value)}
+              />
             </div>
             <div className="opt-row">
               <MapPin />
@@ -1015,6 +1251,20 @@ export const PublishPage: React.FC = () => {
               <AlertTriangle />
               {t('distribution.publish.coverNotSetWarning', 'Cover Studio coming in D4 — Douyin picks the cover during publish.')}
             </div>
+            {/* Scheduling / declarations / collections only exist on the creator
+                page, which only a QR-bound account reaches. Those rows fail
+                rather than publish with the field dropped — so say it here,
+                while the selection can still be changed. */}
+            {usesCreatorPageOnlyFields && nonSessionSelected > 0 && (
+              <div className="check warn">
+                <AlertTriangle />
+                {t(
+                  'distribution.publish.creatorPageOnlyWarning',
+                  'Scheduling, self declaration and collections need accounts connected by QR code — {{n}} selected account(s) will fail.',
+                  { n: nonSessionSelected },
+                )}
+              </div>
+            )}
             {canPublish && (
               <div className="check ok">
                 <Check strokeWidth={2.5} />
