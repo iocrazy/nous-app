@@ -39,6 +39,11 @@ interface WorkflowSectionProps {
   /** The project's team (personal project → '' — AttachWorkflowModal's
    * fetchTemplates resolves that server-side to the owner's personal team). */
   teamId: string;
+  /** Current episode id (B2 #1712) — passed to startEarlyNode so a start-early
+   * scopes to this episode's frozen node; null/undefined → project-level. Note
+   * addProjectNode/deleteProjectNode stay project-level (episode ownership of
+   * new nodes is B3's scope, deliberately not threaded here). */
+  episodeId?: string | null;
   workflow: ProjectWorkflow;
   canWrite: boolean;
   onReload: () => void;
@@ -62,6 +67,7 @@ const REMOVE_BLOCK_KEY: Record<string, string> = {
 export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
   projectId,
   teamId,
+  episodeId,
   workflow,
   canWrite,
   onReload,
@@ -172,7 +178,7 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
   const handleStartEarly = async (nodeId: string) => {
     setStartingEarlyId(nodeId);
     try {
-      await startEarlyNode(projectId, nodeId);
+      await startEarlyNode(projectId, nodeId, episodeId ?? undefined);
       onReload();
     } catch (err) {
       if (err instanceof ApiError && err.status === 422) {
@@ -185,6 +191,8 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
           );
         } else if (err.code === 'NODE_CANCELLED') {
           addToast(t('projects.workflow.startEarly.cancelled'), 'error');
+        } else if (err.code === 'EPISODE_MISMATCH') {
+          addToast(t('projects.workflow.startEarly.episodeMismatch'), 'error');
         } else {
           addToast(t('projects.workflow.startEarly.blocked'), 'error');
         }

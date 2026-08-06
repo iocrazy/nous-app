@@ -135,63 +135,10 @@ export function ProjectWorkspace({
     );
   }, [activeModule, stageNodeId, setSearchParams]);
 
-  // ── Workflow instance (strip + node card + advance gate) ───────────────
-  const { workflow, reload: reloadWorkflow } = useProjectWorkflow(project.id);
-  // A node the sidebar / top-bar asked to focus on the Overview.
-  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
-  // The advance/back confirm gate — one instance, shared by the node card's
-  // Complete/Back buttons and the top-bar stepper. Holds the server preview so
-  // the dialog only ever renders what the same predicate ruled (#1400).
-  const [advance, setAdvance] = useState<{
-    direction: 'forward' | 'back';
-    preview: AdvancePreview | null;
-    confirming: boolean;
-  } | null>(null);
-
-  const requestAdvance = useCallback(
-    (direction: 'forward' | 'back') => {
-      setAdvance({ direction, preview: null, confirming: false });
-      fetchAdvancePreview(project.id, direction)
-        .then((preview) =>
-          setAdvance((cur) => (cur && cur.direction === direction ? { ...cur, preview } : cur)),
-        )
-        .catch((err) => {
-          console.error('[ProjectWorkspace] advance preview failed:', err);
-          setAdvance(null);
-          addToast(t('common.error'), 'error');
-        });
-    },
-    [project.id, addToast, t],
-  );
-
-  const confirmAdvance = useCallback(() => {
-    setAdvance((cur) => (cur ? { ...cur, confirming: true } : cur));
-    const direction = advance?.direction ?? 'forward';
-    executeAdvance(project.id, direction)
-      .then(() => {
-        setAdvance(null);
-        void reloadWorkflow();
-      })
-      .catch((err) => {
-        console.error('[ProjectWorkspace] advance failed:', err);
-        addToast(t('common.error'), 'error');
-        setAdvance((cur) => (cur ? { ...cur, confirming: false } : cur));
-      });
-  }, [advance?.direction, project.id, reloadWorkflow, addToast, t]);
-
-  const handleJumpToNode = useCallback((nodeId: string) => {
-    setActiveModule('overview');
-    setFocusNodeId(nodeId);
-  }, []);
-
-  // Sidebar Stages block (M2 PR-F F2) — opens the dedicated Stage Board module
-  // instead of scrolling to the node's Overview card (handleJumpToNode above).
-  const handleOpenStage = useCallback((nodeId: string) => {
-    setStageNodeId(nodeId);
-    setActiveModule('stage');
-  }, []);
-
   // ── Episodes (sidebar current-episode block + switcher) ────────────────
+  // Declared BEFORE the workflow instance / advance callbacks below: they all
+  // consume `currentEpisodeId` (B2 #1712 — the workflow read + advance chain are
+  // scoped to the current episode), so its state must exist first.
   const [episodes, setEpisodes] = useState<EpisodeProgress[]>([]);
   const [currentEpisodeId, setCurrentEpisodeId] = useState<string | null>(null);
 
@@ -221,6 +168,62 @@ export function ProjectWorkspace({
   }, [project.id]);
 
   const currentEpisode = episodes.find((e) => e.episode_id === currentEpisodeId) ?? null;
+
+  // ── Workflow instance (strip + node card + advance gate) ───────────────
+  const { workflow, reload: reloadWorkflow } = useProjectWorkflow(project.id, currentEpisodeId);
+  // A node the sidebar / top-bar asked to focus on the Overview.
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  // The advance/back confirm gate — one instance, shared by the node card's
+  // Complete/Back buttons and the top-bar stepper. Holds the server preview so
+  // the dialog only ever renders what the same predicate ruled (#1400).
+  const [advance, setAdvance] = useState<{
+    direction: 'forward' | 'back';
+    preview: AdvancePreview | null;
+    confirming: boolean;
+  } | null>(null);
+
+  const requestAdvance = useCallback(
+    (direction: 'forward' | 'back') => {
+      setAdvance({ direction, preview: null, confirming: false });
+      fetchAdvancePreview(project.id, direction, currentEpisodeId ?? undefined)
+        .then((preview) =>
+          setAdvance((cur) => (cur && cur.direction === direction ? { ...cur, preview } : cur)),
+        )
+        .catch((err) => {
+          console.error('[ProjectWorkspace] advance preview failed:', err);
+          setAdvance(null);
+          addToast(t('common.error'), 'error');
+        });
+    },
+    [project.id, currentEpisodeId, addToast, t],
+  );
+
+  const confirmAdvance = useCallback(() => {
+    setAdvance((cur) => (cur ? { ...cur, confirming: true } : cur));
+    const direction = advance?.direction ?? 'forward';
+    executeAdvance(project.id, direction, currentEpisodeId ?? undefined)
+      .then(() => {
+        setAdvance(null);
+        void reloadWorkflow();
+      })
+      .catch((err) => {
+        console.error('[ProjectWorkspace] advance failed:', err);
+        addToast(t('common.error'), 'error');
+        setAdvance((cur) => (cur ? { ...cur, confirming: false } : cur));
+      });
+  }, [advance?.direction, project.id, currentEpisodeId, reloadWorkflow, addToast, t]);
+
+  const handleJumpToNode = useCallback((nodeId: string) => {
+    setActiveModule('overview');
+    setFocusNodeId(nodeId);
+  }, []);
+
+  // Sidebar Stages block (M2 PR-F F2) — opens the dedicated Stage Board module
+  // instead of scrolling to the node's Overview card (handleJumpToNode above).
+  const handleOpenStage = useCallback((nodeId: string) => {
+    setStageNodeId(nodeId);
+    setActiveModule('stage');
+  }, []);
 
   const handleEpisodeChange = useCallback(
     (episodeId: string) => {
@@ -512,6 +515,7 @@ export function ProjectWorkspace({
                 project={project}
                 episodes={episodes}
                 currentEpisode={currentEpisode}
+                episodeId={currentEpisodeId}
                 epNumber={epNumber}
                 onOpenScript={() => void openCurrentEpisodeScript()}
                 workflow={workflow}
@@ -560,13 +564,19 @@ export function ProjectWorkspace({
               <WorkspaceCanvas projectId={project.id} teamId={teamId} />
             )}
             {activeModule === 'tasks' && (
-              <WorkspaceTasks projectId={project.id} projectName={project.name} teamId={teamId} />
+              <WorkspaceTasks
+                projectId={project.id}
+                projectName={project.name}
+                teamId={teamId}
+                currentEpisodeId={currentEpisodeId}
+              />
             )}
             {activeModule === 'stage' && stageNodeId && (
               <WorkspaceStageBoard
                 projectId={project.id}
                 projectName={project.name}
                 nodeId={stageNodeId}
+                episodeId={currentEpisodeId}
                 workflow={workflow}
                 canWrite={canWrite}
                 onRequestAdvance={requestAdvance}

@@ -18,6 +18,9 @@ interface WorkspaceOverviewProps {
   /** 1-based index of the current episode (for the CONTINUE · EP read-out). */
   epNumber: number | null;
   episodes: EpisodeProgress[];
+  /** Current episode id (B2 #1712) — threaded to WorkflowSection so its
+   * start-early call scopes to this episode; null → project-level. */
+  episodeId?: string | null;
   onOpenScript: () => void;
   /** The project's workflow instance (null while loading / no workflow). */
   workflow?: ProjectWorkflow | null;
@@ -36,6 +39,7 @@ export function WorkspaceOverview({
   currentEpisode,
   epNumber,
   episodes,
+  episodeId = null,
   onOpenScript,
   workflow = null,
   canWrite = true,
@@ -58,6 +62,7 @@ export function WorkspaceOverview({
         <WorkflowSection
           projectId={project.id}
           teamId={project.team_id ?? ''}
+          episodeId={episodeId}
           workflow={workflow}
           canWrite={canWrite}
           onReload={onReloadWorkflow ?? (() => undefined)}
