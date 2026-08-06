@@ -255,3 +255,47 @@ def test_a_semi_switch_reports_its_state_through_its_class_list(classes, expecte
     setting off, which for "allow others to save" is a change the user never
     asked for."""
     assert switch_is_on(classes) is expected
+
+
+# --- profile selectors: read off the live console 2026-08-06 ----------------
+
+
+def test_profile_selectors_match_the_shipped_console_markup():
+    """The class names below are copied from the real creator console.
+
+    A bound account came back named `41cf16775ee3e9fdf5e021f9c1ddfc12` because
+    every selector missed: the console names its nodes `<role>-<hash>`, and the
+    roles are `name` / `unique_id` — not `nickname`, and with an UNDERSCORE
+    where the old selector guessed a hyphen. This test pins the shape so the
+    next redesign fails here rather than in production.
+    """
+    from app.platforms.douyin import PROFILE_ATTR_SELECTORS, PROFILE_TEXT_SELECTORS
+
+    username = PROFILE_TEXT_SELECTORS["username"]
+    assert any("name-" in s for s in username)
+    assert username[0].startswith('[class^="header-"]'), (
+        "the scoped selector must be tried first: a bare name- prefix also "
+        "matches nodes outside the profile header"
+    )
+
+    ids = PROFILE_TEXT_SELECTORS["platform_user_id"]
+    assert any("unique_id" in s for s in ids), "underscore, not hyphen"
+
+    avatar_selectors, attr = PROFILE_ATTR_SELECTORS["avatar_url"]
+    assert attr == "src"
+    assert any("aweme-avatar" in s for s in avatar_selectors), (
+        "the CDN path is the one hook that survives a header rename — it is "
+        "what actually matched when this was verified against a live account"
+    )
+
+
+def test_profile_selectors_keep_their_historical_fallbacks():
+    """Old selectors stay as later candidates.
+
+    A console redesign should degrade to the next hook, not to a hard outage —
+    and the previous generation's markup is a free candidate to keep.
+    """
+    from app.platforms.douyin import PROFILE_TEXT_SELECTORS
+
+    assert any("nickname" in s for s in PROFILE_TEXT_SELECTORS["username"])
+    assert any("unique-id" in s for s in PROFILE_TEXT_SELECTORS["platform_user_id"])
