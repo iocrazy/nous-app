@@ -101,16 +101,30 @@ describe('AgentWorkbenchTab — 等你回复卡', () => {
     renderTab();
 
     await waitFor(() => expect(listNeedsInput).toHaveBeenCalled());
-    expect(screen.queryByTestId('waiting-replies')).toBeNull();
+    // The panel is permanent now; what must be absent is the foreign question.
+    expect(screen.getByTestId('waiting-replies-empty')).toBeTruthy();
     expect(screen.queryByText(/Not yours/)).toBeNull();
   });
 
-  it('renders no card at all when nothing is waiting', async () => {
+  it('keeps the panel with an empty state when nothing is waiting', async () => {
+    // The card used to vanish entirely, so the right column silently changed
+    // shape between agents and "is anything waiting on me?" had no stable
+    // place to look — you had to remember whether a card was ever there.
+    // Routines and This Week are always-present panels; this one is now too.
     listNeedsInput.mockResolvedValue({ items: [] });
     renderTab();
 
-    await waitFor(() => expect(listNeedsInput).toHaveBeenCalled());
-    expect(screen.queryByTestId('waiting-replies')).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('waiting-replies')).toBeTruthy());
+    expect(screen.getByTestId('waiting-replies-empty')).toBeTruthy();
+    expect(screen.queryByTestId('waitcard')).toBeNull();
+  });
+
+  it('drops the empty state as soon as something is waiting', async () => {
+    listNeedsInput.mockResolvedValue({ items: [item()] });
+    renderTab();
+
+    await waitFor(() => expect(screen.getByTestId('waitcard')).toBeTruthy());
+    expect(screen.queryByTestId('waiting-replies-empty')).toBeNull();
   });
 
   it('falls back to the issue title when the agent gave no reason', async () => {
@@ -121,13 +135,14 @@ describe('AgentWorkbenchTab — 等你回复卡', () => {
     expect(screen.getByText(/Second act/)).toBeTruthy();
   });
 
-  it('degrades to no card when the feed fails, instead of blanking the page', async () => {
+  it('degrades to the empty state when the feed fails, instead of blanking the page', async () => {
     listNeedsInput.mockRejectedValue(new Error('boom'));
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     renderTab();
 
     await waitFor(() => expect(spy).toHaveBeenCalled());
-    expect(screen.queryByTestId('waiting-replies')).toBeNull();
+    expect(screen.getByTestId('waiting-replies-empty')).toBeTruthy();
+    expect(screen.queryByTestId('waitcard')).toBeNull();
     spy.mockRestore();
   });
 
@@ -137,6 +152,16 @@ describe('AgentWorkbenchTab — 等你回复卡', () => {
 
     await waitFor(() => expect(listNeedsInput).toHaveBeenCalled());
     expect(screen.queryByTestId('waitcard-answer-link')).toBeNull();
+  });
+
+  it('hides the "View in Issues" link while nothing is waiting', async () => {
+    // The panel is permanent; the escape hatch out of it is not. A link to a
+    // filtered list that is empty by construction is a dead end.
+    listNeedsInput.mockResolvedValue({ items: [] });
+    renderTab();
+
+    await waitFor(() => expect(screen.getByTestId('waiting-replies')).toBeTruthy());
+    expect(screen.queryByText('View in Issues')).toBeNull();
   });
 });
 
@@ -166,6 +191,39 @@ describe('AgentWorkbenchTab — 最近对话左栏', () => {
     getAgentStats.mockResolvedValue({});
     listAgentRunGroups.mockClear();
     listAgentRunGroups.mockResolvedValue({ items: [] });
+  });
+
+  it('names the row from the server title, not the run output', async () => {
+    // The whole list read "Untitled conversation" because the only source was
+    // the run's output tail — empty on 44 of 99 prod runs, JSON on 20 more.
+    listAgentRunGroups.mockResolvedValue({
+      items: [
+        group({
+          title: 'Write the opening scene of the pilot',
+          latest_output_summary: '{"shots": [{"title": "wide"}]}',
+        }),
+      ],
+    });
+    renderTab();
+
+    await waitFor(() => expect(screen.getByTestId('conversation-row')).toBeTruthy());
+    const row = screen.getByTestId('conversation-row');
+    expect(row.textContent).toContain('Write the opening scene of the pilot');
+    expect(row.textContent).not.toContain('Untitled conversation');
+  });
+
+  it('falls back to the neutral label when the server named nothing', async () => {
+    // A captioning run has no conversation and no issue — title is NULL by
+    // design, and its output is a payload. That is the fallback's real job.
+    listAgentRunGroups.mockResolvedValue({
+      items: [group({ title: null, latest_output_summary: '```json\n{"prompt_en": "x"}' })],
+    });
+    renderTab();
+
+    await waitFor(() => expect(screen.getByTestId('conversation-row')).toBeTruthy());
+    const row = screen.getByTestId('conversation-row');
+    expect(row.textContent).toContain('Untitled conversation');
+    expect(row.textContent).not.toContain('```');
   });
 
   it('never renders a raw JSON summary as the row title', async () => {

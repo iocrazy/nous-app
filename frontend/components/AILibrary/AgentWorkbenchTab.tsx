@@ -131,6 +131,8 @@ export const AgentWorkbenchTab: React.FC<AgentWorkbenchTabProps> = ({
     };
   }, [agent.id]);
 
+  const hasWaiting = waiting.length > 0;
+
   if (showRuns) {
     return (
       <div>
@@ -202,22 +204,46 @@ export const AgentWorkbenchTab: React.FC<AgentWorkbenchTabProps> = ({
 
       {/* ── right: what needs you, what runs itself, how much it cost ── */}
       <div className="flex min-w-0 flex-col gap-4">
-        {waiting.length > 0 && (
-          <section
-            className="rounded-lg border border-warn-line bg-warn-soft px-3 py-2.5"
-            data-testid="waiting-replies"
+        {/* Always mounted, even with nothing waiting (spec §02 right column).
+            It used to unmount, so the column silently changed shape between
+            agents and "is anything blocked on me?" had no fixed place to look
+            — you could only tell by remembering whether a card had been there.
+            Its two neighbours (Routines, This Week) are permanent; so is this. */}
+        <section
+          className={`rounded-lg border px-3 py-2.5 ${
+            hasWaiting ? 'border-warn-line bg-warn-soft' : 'border-ink-800 bg-ink-900/20'
+          }`}
+          data-testid="waiting-replies"
+        >
+          <div
+            className={`flex items-center gap-2 text-[12px] font-semibold ${
+              hasWaiting ? 'text-warn' : 'text-ink-400'
+            }`}
           >
-            <div className="flex items-center gap-2 text-[12px] font-semibold text-warn">
-              <MessageCircleQuestion size={14} className="shrink-0" />
-              <span className="min-w-0 flex-1">
-                {t('aiLibrary.agents.waitingReplies', '{{count}} issue(s) waiting for your reply', {
-                  count: waiting.length,
-                })}
-              </span>
+            <MessageCircleQuestion size={14} className="shrink-0" />
+            <span className="min-w-0 flex-1">
+              {hasWaiting
+                ? t(
+                    'aiLibrary.agents.waitingReplies',
+                    '{{count}} issue(s) waiting for your reply',
+                    { count: waiting.length },
+                  )
+                : t('aiLibrary.agents.waitingRepliesTitle', 'Waiting on you')}
+            </span>
+            {/* The panel is permanent; the way out of it is not. A link into a
+                filter that is empty by construction is a dead end. */}
+            {hasWaiting && (
               <a href={`${urlPrefix}/todolist`} className="shrink-0 font-normal underline">
                 {t('aiLibrary.agents.viewInIssues', 'View in Issues')}
               </a>
-            </div>
+            )}
+          </div>
+          {!hasWaiting && (
+            <p className="mt-1.5 text-[12px] text-ink-600" data-testid="waiting-replies-empty">
+              {t('aiLibrary.agents.waitingRepliesEmpty', 'Nothing waiting for your reply')}
+            </p>
+          )}
+          {hasWaiting && (
             <ul className="mt-2 space-y-2">
               {waiting.map((issue) => (
                 <li
@@ -245,8 +271,8 @@ export const AgentWorkbenchTab: React.FC<AgentWorkbenchTabProps> = ({
                 </li>
               ))}
             </ul>
-          </section>
-        )}
+          )}
+        </section>
 
         <Panel
           title={t('aiLibrary.agents.workbench.routines', 'Routines')}
