@@ -2433,7 +2433,16 @@ export interface PublishRequest {
   ai_content?: boolean;
   allow_download?: boolean;
   distribution_mode?: 'broadcast' | 'one_to_one';
-  channel?: 'official' | 'h5';
+  /**
+   * Requested route. The backend re-decides it PER ACCOUNT (`decide_channel`),
+   * so this is a preference, not an instruction: asking for `'session'` still
+   * sends an OAuth-bound account down the H5 handoff.
+   *
+   * `'session'` was missing here while the response type already had it — the
+   * same shape of gap that made the backend's `Channel` Literal silently reject
+   * the only value reaching the session publish path.
+   */
+  channel?: 'official' | 'h5' | 'session';
   account_ids: string[];
   /** Per-account overrides keyed by account_id — e.g. a custom title for one account. */
   account_configs?: Record<string, { title?: string; description?: string; topics?: string[] }>;

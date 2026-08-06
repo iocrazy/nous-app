@@ -24,7 +24,17 @@ import './distribution-v4.css';
 
 type Visibility = 'public' | 'friends' | 'private';
 type Mode = 'broadcast' | 'one_to_one';
-type Channel = 'official' | 'h5';
+/**
+ * Publish routes, in the order the backend prefers them.
+ *
+ * The page always submits `'session'` and lets the backend pick per account —
+ * `decide_channel` reads each account's `auth_type` and falls through:
+ *   session account  -> browser automation (unattended)
+ *   oauth account    -> H5 handoff (user confirms on their phone)
+ * Asking the user to choose a channel would only let them pick one that cannot
+ * work for the account they selected.
+ */
+type Channel = 'official' | 'h5' | 'session';
 type Orientation = 'vertical' | 'horizontal';
 type ContentKind = 'video' | 'images';
 
@@ -118,7 +128,8 @@ export const PublishPage: React.FC = () => {
   const [aiContent, setAiContent] = useState(false);
   const [allowDownload, setAllowDownload] = useState(true);
   const [mode, setMode] = useState<Mode>('broadcast');
-  const [channel, setChannel] = useState<Channel>('h5');
+  // Not user-selectable: the backend routes per account (see the Channel type).
+  const [channel] = useState<Channel>('session');
   const [orientation, setOrientation] = useState<Orientation>('vertical');
   const [customizeOpen, setCustomizeOpen] = useState<Record<string, boolean>>({});
   const [accountConfigs, setAccountConfigs] = useState<Record<string, { title: string }>>({});
@@ -895,19 +906,17 @@ export const PublishPage: React.FC = () => {
                 {t('distribution.publish.selectedOfTotal', '{{selected}} of {{total}} selected', { selected: selectedAccounts.length, total: accounts.length })}
               </span>
             </h4>
-            <div className="seg" style={{ marginBottom: 10 }}>
-              <button type="button" className={channel === 'h5' ? 'on' : ''} onClick={() => setChannel('h5')}>{t('distribution.publish.channelH5', 'H5 share')}</button>
-              {/* Official API stays locked until the Douyin app clears review —
-                  the backend code path is intact and re-enables by dropping
-                  `disabled`. Channel is pinned to H5 meanwhile. */}
-              <button
-                type="button"
-                disabled
-                title={t('distribution.publish.officialLocked', 'Requires Douyin app review — H5 share only for now')}
-              >
-                {t('distribution.publish.channel_official', 'Official API')}
-              </button>
-            </div>
+            {/* The channel picker used to live here. It was removed rather than
+                extended with a third button: a channel only works for accounts
+                bound the matching way, so offering the choice mostly offered a
+                way to pick a broken combination. Each row now states how that
+                account will publish. */}
+            <p className="hint" style={{ marginBottom: 10 }}>
+              {t(
+                'distribution.publish.routeHint',
+                'Each account publishes the way it was connected — shown on its row.',
+              )}
+            </p>
 
             {accounts.map((a) => {
               const expired = a.status === 'expired';
@@ -945,6 +954,14 @@ export const PublishPage: React.FC = () => {
                         {expired
                           ? t('distribution.publish.expiredReauthorize', 'Expired — reauthorize')
                           : (a.scope_type === 'team' ? t('distribution.teamScope', 'Team') : t('distribution.personalScope', 'Personal'))}
+                        {' · '}
+                        {/* How this row will actually publish. Worth stating: the
+                            two routes differ in whether the user has to do
+                            anything after pressing Publish, and that is the whole
+                            reason someone binds by QR code. */}
+                        {a.auth_type === 'session'
+                          ? t('distribution.publish.routeUnattended', 'Publishes unattended')
+                          : t('distribution.publish.routeNeedsPhone', 'Needs confirming on your phone')}
                       </small>
                     </span>
                     {!expired && (
