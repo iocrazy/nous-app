@@ -121,6 +121,20 @@ _MAX_VISION_IMAGES = 4
 _MAX_VISION_IMAGE_BYTES = 8 * 1024 * 1024
 
 
+def _vision_image_lookup_stmt(generated_media_id: int):
+    """The generated_media lookup for one candidate vision image,
+    column-level (not entity-level — the B4 row-shape lesson) so
+    ``_inject_image_blocks``'s ``row.get(...)`` reads below get real column
+    values. Factored out so a real-aiosqlite row-shape test can import and
+    exercise the exact production statement."""
+    return select(
+        GeneratedMedia.file_path,
+        GeneratedMedia.mime,
+        GeneratedMedia.file_size_bytes,
+        GeneratedMedia.conversation_id,
+    ).where(GeneratedMedia.id == generated_media_id)
+
+
 async def _inject_image_blocks(
     history: list[dict[str, Any]],
     recent: list[dict[str, Any]],
@@ -152,14 +166,7 @@ async def _inject_image_blocks(
             continue
         try:
             async with read_scope() as session:
-                result = await session.execute(
-                    select(
-                        GeneratedMedia.file_path,
-                        GeneratedMedia.mime,
-                        GeneratedMedia.file_size_bytes,
-                        GeneratedMedia.conversation_id,
-                    ).where(GeneratedMedia.id == int(gm_id))
-                )
+                result = await session.execute(_vision_image_lookup_stmt(int(gm_id)))
                 row = result.mappings().first()
         except (ValueError, TypeError):
             continue

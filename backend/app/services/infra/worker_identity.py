@@ -130,6 +130,17 @@ async def upsert_registry(db_engine: Any) -> bool:
         return False
 
 
+def _stale_executor_ids_stmt(cutoff: datetime):
+    """The stale-heartbeat statement itself, column-level (not entity-level —
+    the B4 row-shape lesson) so ``stale_executor_ids``'s ``r["executor_id"]``
+    read below gets a real column value. ``cutoff`` is passed in (not computed
+    here) so a real-aiosqlite row-shape test can import and exercise the exact
+    production statement against a deterministic cutoff."""
+    return select(t_worker_registry.c.executor_id).where(
+        t_worker_registry.c.heartbeat_at < cutoff
+    )
+
+
 async def stale_executor_ids(db_engine: Any, threshold_seconds: float) -> list[str]:
     """executor_ids whose heartbeat is older than `threshold_seconds` — i.e. a
     worker process presumed gone. P1 only LOGS these (observe); no action. The
@@ -147,11 +158,12 @@ async def stale_executor_ids(db_engine: Any, threshold_seconds: float) -> list[s
         cutoff = datetime.now(timezone.utc) - timedelta(
             seconds=float(threshold_seconds)
         )
-        stmt = select(t_worker_registry.c.executor_id).where(
-            t_worker_registry.c.heartbeat_at < cutoff
-        )
         async with read_scope() as session:
-            rows = (await session.execute(stmt)).mappings().all()
+            rows = (
+                (await session.execute(_stale_executor_ids_stmt(cutoff)))
+                .mappings()
+                .all()
+            )
         return [r["executor_id"] for r in rows]
     except Exception as exc:  # noqa: BLE001
         logger.opt(exception=True).debug(

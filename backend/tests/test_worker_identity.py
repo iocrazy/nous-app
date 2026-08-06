@@ -16,9 +16,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
+from sqlalchemy import insert as _sa_insert
+from sqlalchemy import select as _sa_select
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
+from sqlalchemy.ext.asyncio import async_sessionmaker as _async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine
 
 import app.services.infra.worker_identity as wi
+from app.models import t_worker_registry
 
 
 def test_boot_generation_is_stable_uuid():
@@ -165,3 +171,96 @@ async def test_stale_executor_ids_returns_names(monkeypatch):
 async def test_stale_executor_ids_swallows_errors_returns_empty(monkeypatch):
     _patch_scope(monkeypatch, "read_scope", raise_exc=RuntimeError("db down"))
     assert await wi.stale_executor_ids(None, 360) == []
+
+
+# ── Real-aiosqlite row-shape regression (B5 review leftover — deferred
+# minors batch, Minor 4) ─────────────────────────────────────────────────
+#
+# test_stale_executor_ids_returns_names above only ever fakes the Result
+# (_FakeResult), so the B4 row-shape bug class has no coverage for
+# _stale_executor_ids_stmt's own fetch->consume chain (``.mappings().all()``
+# -> ``r["executor_id"]`` in stale_executor_ids). Mirrors
+# tests/test_orm_b5_task1_row_shape_e2e.py's positive/negative-control pair
+# with a genuine aiosqlite engine.
+
+_WORKER_REGISTRY_DDL = """
+CREATE TABLE worker_registry (
+    executor_id TEXT NOT NULL, boot_generation TEXT NOT NULL,
+    app_version TEXT, pid INTEGER, started_at TIMESTAMP,
+    heartbeat_at TIMESTAMP, updated_at TIMESTAMP
+)
+"""
+
+
+async def _seeded_worker_registry_engine(*, heartbeat_at):
+    engine = _create_async_engine("sqlite+aiosqlite://")
+    engine = engine.execution_options(schema_translate_map={"public": None})
+    async with engine.begin() as conn:
+        await conn.exec_driver_sql(_WORKER_REGISTRY_DDL)
+        await conn.execute(
+            _sa_insert(t_worker_registry).values(
+                executor_id="worker-dead",
+                boot_generation=uuid.uuid4(),
+                pid=12345,
+                heartbeat_at=heartbeat_at,
+            )
+        )
+    return engine
+
+
+@pytest.mark.asyncio
+async def test_stale_executor_ids_stmt_yields_column_keyed_row_against_real_sqlite():
+    """The REAL production statement (``wi._stale_executor_ids_stmt``,
+    imported — not reconstructed here) round-tripped through a genuine
+    aiosqlite ``Result`` gives a column-keyed RowMapping matching
+    ``stale_executor_ids``'s ``r["executor_id"]`` read."""
+    stale_heartbeat = datetime.now(timezone.utc) - timedelta(hours=1)
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+    engine = await _seeded_worker_registry_engine(heartbeat_at=stale_heartbeat)
+
+    sessionmaker = _async_sessionmaker(
+        engine, class_=_AsyncSession, expire_on_commit=False
+    )
+    try:
+        async with sessionmaker() as session:
+            rows = (
+                (await session.execute(wi._stale_executor_ids_stmt(cutoff)))
+                .mappings()
+                .all()
+            )
+    finally:
+        await engine.dispose()
+
+    assert len(rows) == 1
+    assert rows[0]["executor_id"] == "worker-dead"  # matches stale_executor_ids' read
+
+
+@pytest.mark.asyncio
+async def test_stale_executor_ids_stmt_entity_level_negative_control_proves_sensitivity():
+    """Negative control: selecting the bare ``t_worker_registry`` Table
+    (whole-row, still column-keyed since it's a Core ``Table`` not a mapped
+    entity) vs. hypothetically mis-labeling the column would both still be
+    column-keyed for a Core Table select — so instead this proves sensitivity
+    the OTHER way a single-column select can silently break: selecting a
+    DIFFERENT column name than ``executor_id`` produces a row that raises
+    exactly the ``KeyError`` ``stale_executor_ids``'s ``r["executor_id"]``
+    would hit if the statement's selected column were ever wrong."""
+    stale_heartbeat = datetime.now(timezone.utc) - timedelta(hours=1)
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+    engine = await _seeded_worker_registry_engine(heartbeat_at=stale_heartbeat)
+
+    sessionmaker = _async_sessionmaker(
+        engine, class_=_AsyncSession, expire_on_commit=False
+    )
+    try:
+        bad_stmt = _sa_select(t_worker_registry.c.pid).where(
+            t_worker_registry.c.heartbeat_at < cutoff
+        )
+        async with sessionmaker() as session:
+            bad_rows = (await session.execute(bad_stmt)).mappings().all()
+    finally:
+        await engine.dispose()
+
+    assert len(bad_rows) == 1
+    with pytest.raises(KeyError):
+        bad_rows[0]["executor_id"]  # proves the test above is column-name-sensitive
