@@ -64,7 +64,13 @@ async def _fetch_dispatch(
 
     from app.db.scope import is_enforced, system_request_scope
     from app.db.session import read_scope
-    from app.models import ResourceItems, Resources, TeamMembers
+    from app.models import (
+        ResourceItems,
+        Resources,
+        ResourceSummaries,
+        ResourceTranscripts,
+        TeamMembers,
+    )
 
     # Original SQL (kept for reference — same JOIN/WHERE/LIMIT shape):
     #   SELECT r.id::text, r.mime_type AS mime, r.filename AS name,
@@ -172,52 +178,39 @@ async def _fetch_dispatch(
             "meta": {"name": row["name"], "kind": "image"},
         }
 
-    # Video / audio — read from `videos` table joined on parsed_media
+    # Video / audio — AI-generated text lives on resource_summaries /
+    # resource_transcripts, keyed by resource_id (UNIQUE, at most one row
+    # each). The pre-2026-08 implementation joined `public.videos`, a table
+    # renamed away by migration 066 — every video/audio fetch raised and
+    # degraded to "fetch failed" for months. Access is already validated by
+    # the resources+resource_items team-membership check above; these two
+    # tables carry no scope mixin, so no wrapper is needed here. The int()
+    # bind is required: resource_id arrives as str and asyncpg's int8 codec
+    # rejects str for BIGINT columns.
     if mime.startswith("video/") or mime.startswith("audio/"):
         m = mode or ("summary" if mime.startswith("video/") else "transcript")
-        # NOT ported to the ORM: `public.videos` does not exist — it was
-        # renamed to `public.parsed_media` by migration 066
-        # (066_rename_videos_to_parsed_media.sql), and AI-generated text
-        # content now lives on `resource_summaries` / `resource_transcripts`
-        # (keyed by resource_id), not a `videos` table. This query has been
-        # dead since that rename (confirmed against the live schema — no
-        # `public.videos` relation) and always raised, degrading every
-        # video/audio ResourceFetch call to "fetch failed". Preserved
-        # byte-for-byte here (still targets the phantom table, still fails
-        # the same way) per this branch's refactor-only discipline — see
-        # docs/decisions/2026-08-04-raw-sql-to-orm-full-migration.md; fixing
-        # the join target is a real behavior change, tracked separately, not
-        # bundled into this ORM-only pass. Routed through the scoped_sql
-        # guardrail (system=True) rather than left on ungoverned db_engine —
-        # at minimum this dead call site is now declared and audited.
-        from app.db.scoped_sql import scoped_fetch_all
-
-        media_rows = await scoped_fetch_all(
-            """
-            SELECT v.summary, v.transcript
-              FROM public.videos v
-              JOIN public.parsed_media pm ON pm.id = v.parsed_media_id
-              JOIN public.resources r ON r.media_id = pm.id
-             WHERE r.id::text = :rid
-             LIMIT 1
-            """,
-            {"rid": resource_id},
-            system=True,
-            reason=(
-                "resource_fetch video/audio content lookup — known dead "
-                "query against a table renamed away in migration 066; "
-                "access already validated by the resources+resource_items "
-                "team-membership check above"
-            ),
-        )
-        v = (media_rows or [{}])[0]
+        rid = int(resource_id)
         if m == "summary":
-            text = v.get("summary")
+            async with read_scope() as session:
+                text = (
+                    await session.execute(
+                        select(ResourceSummaries.summary_text).where(
+                            ResourceSummaries.resource_id == rid
+                        )
+                    )
+                ).scalar_one_or_none()
             if not text:
                 return {"error": "summary not available; resource not yet processed"}
             return {"content": text, "meta": {"name": row["name"], "mode": "summary"}}
         if m == "transcript":
-            text = v.get("transcript")
+            async with read_scope() as session:
+                text = (
+                    await session.execute(
+                        select(ResourceTranscripts.full_text).where(
+                            ResourceTranscripts.resource_id == rid
+                        )
+                    )
+                ).scalar_one_or_none()
             if not text:
                 return {"error": "transcript not available; resource not yet processed"}
             return {
