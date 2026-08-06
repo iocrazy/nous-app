@@ -39,6 +39,7 @@ from app.workflows.canvas_generation import (  # noqa: F401
 from app.workflows.caption_asset import caption_asset_workflow  # noqa: F401
 from app.workflows.caption_slide import caption_slide_workflow  # noqa: F401
 from app.workflows.classify_asset import classify_asset_workflow  # noqa: F401
+from app.workflows.cover_frames import cover_frames_workflow  # noqa: F401
 from app.workflows.download import (  # noqa: F401
     download_user_queue,
     download_workflow,

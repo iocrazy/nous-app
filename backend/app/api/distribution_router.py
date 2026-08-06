@@ -35,6 +35,12 @@ from app.schemas.distribution import (
     SessionOpResponse,
     SessionSmsRequest,
 )
+from app.schemas.distribution_cover import (
+    CoverExtractRequest,
+    CoverExtractResponse,
+    CoverSelectRequest,
+    CoverSelectResponse,
+)
 from app.schemas.distribution_publish import (
     PublishTaskCreate,
     PublishTaskListResponse,
@@ -760,3 +766,123 @@ async def get_share_schema(task_id: int, user: CurrentUserDep):
         allow_download=bool(allow_download),
     )
     return ShareSchemaResponse(schema_url=schema_url or "", share_id=h5["share_id"])
+
+
+# ── Cover frames (从视频抽帧做封面) ────────────────────────────────
+#
+# 发布模块的封面此前一直是"即将推出"：库表列（mig 356）和浏览器侧的 _set_cover
+# 都有，缺的只是封面从哪来。两个端点补上这一段，异步/同步的分界见
+# app/workflows/cover_frames.py 的模块 docstring。
+
+
+@router.post(
+    "/covers/extract",
+    response_model=CoverExtractResponse,
+    dependencies=[Depends(require_distribution)],
+)
+async def extract_cover_frames(body: CoverExtractRequest, user: CurrentUserDep):
+    """从一个视频 resource 均匀抽候选封面帧（异步）。
+
+    先做一次 fail-fast 校验再派工：源不存在 / 不是视频 / 没有 scope 归属这几种
+    情况能在毫秒内判定，让它们变成一个立刻返回的 4xx，好过建一条 task_tracking
+    行、起一个 workflow、几秒后再让用户去任务中心看一条红色失败。真正耗时的
+    下载与 ffmpeg 才留给 workflow。
+    """
+    from app.repositories.resources_repository import ResourcesRepository
+    from app.services.distribution.cover_frames import (
+        CoverFrameError,
+        load_source_video,
+    )
+    from app.workflows.cover_frames import TASK_TYPE as COVER_FRAMES_TASK_TYPE
+    from app.workflows.cover_frames import cover_frames_workflow
+
+    try:
+        # IDOR：ResourcesRepository 的读走租户 scope 选择点，别人的 resource
+        # 在这里本来就查不到 —— 与 canvas derive 系服务同一个seam。
+        source = await load_source_video(ResourcesRepository(), body.resource_id)
+    except CoverFrameError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+
+    wf_id = str(_uuid.uuid4())
+    await get_task_manager().create(
+        user_id=user["id"],
+        task_type=COVER_FRAMES_TASK_TYPE,  # ≤20 chars (VARCHAR(20))
+        title=f"Cover frames: {source.filename}"[:200],
+        subtitle="Sampling frames",
+        resource_id=str(body.resource_id),
+        dbos_workflow_id=wf_id,
+        metadata={
+            "cover_frames": {
+                "source_resource_id": str(body.resource_id),
+                "candidates": [],
+            }
+        },
+    )
+    await start_workflow_routed(
+        COVER_FRAMES_TASK_TYPE,
+        dbos_workflow_callable=cover_frames_workflow,
+        dbos_workflow_kwargs={
+            "source_resource_id": str(body.resource_id),
+            "user_id": user["id"],
+            "num_frames": body.num_frames,
+        },
+        workflow_id=wf_id,
+    )
+    return CoverExtractResponse(task_id=wf_id)
+
+
+@router.post(
+    "/covers/select",
+    response_model=CoverSelectResponse,
+    dependencies=[Depends(require_distribution)],
+)
+async def select_cover_frame(body: CoverSelectRequest, user: CurrentUserDep):
+    """把选中的候选帧居中裁成竖版 3:4 + 横版 4:3（同步）。
+
+    同步是有意的：这一步只是裁一张已经存在的图片，与 canvas 的 crop-derive
+    同一条管线、同一个量级，让前端为它多绕一次 Realtime 是净损失。
+
+    ``publish_task_id`` 可选，因为常见顺序是**封面在前**：撰写表单里先挑封面，
+    再把两个 id 塞进 POST /distribution/tasks 的 body。已经建好的任务要换封面
+    才需要传它。
+    """
+    from app.services.distribution.cover_frames import (
+        CoverFrameError,
+        derive_cover_pair,
+    )
+
+    # 先鉴权再干活：写回的目标必须是调用者自己的任务（_authorize_task 用 404
+    # 而非 403，不泄露存在性）。放在裁切之前，免得权限不足时还白裁两张图、
+    # 白建两个 resources 行。
+    #
+    # id 是 str 传进来的（snowflake 放不进 JS 的 2^53），所以解析失败是**用户
+    # 可达**的一条路径而不是内部不变量。畸形 id 与"任务不存在"要给同一个 404 ——
+    # 裸 int() 会让它变成 500，等于把一次坏输入伪装成服务故障。同一条教训在
+    # _load_login_task 的 docstring 里已经写过一次。
+    task_id: int | None = None
+    if body.publish_task_id is not None:
+        try:
+            task_id = int(body.publish_task_id)
+        except (TypeError, ValueError) as e:
+            raise HTTPException(status_code=404, detail="Task not found") from e
+        await _authorize_task(task_id, user)
+
+    try:
+        pair = await derive_cover_pair(
+            frame_resource_id=body.frame_resource_id, user_id=user["id"]
+        )
+    except CoverFrameError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+
+    if task_id is not None:
+        await publish_repo.set_task_covers(
+            task_id,
+            vertical_resource_id=int(pair.vertical_resource_id),
+            horizontal_resource_id=int(pair.horizontal_resource_id),
+        )
+
+    return CoverSelectResponse(
+        cover_vertical_resource_id=pair.vertical_resource_id,
+        cover_horizontal_resource_id=pair.horizontal_resource_id,
+        publish_task_id=body.publish_task_id,
+    )

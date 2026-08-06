@@ -182,6 +182,46 @@ class PublishTasksRepository(AsyncpgRepository):
                 .values(dbos_workflow_id=wf_id, updated_at=func.now())
             )
 
+    async def set_task_covers(
+        self,
+        task_id: int,
+        *,
+        vertical_resource_id: Optional[int],
+        horizontal_resource_id: Optional[int],
+    ) -> Optional[dict]:
+        """写回封面（``/distribution/covers/select`` 带了 publish_task_id 时）。
+
+        两列一起写而不是各写各的：一次选帧同时产出竖版与横版，让它们分两次
+        落库会开出"竖版是新帧、横版还是上一次的"这种中间态。两个 None 是合法
+        输入 —— 那是"取消封面"。
+        """
+        async with write_scope() as session:
+            row = (
+                (
+                    await session.execute(
+                        sa_update(PublishTasks)
+                        .where(PublishTasks.id == self._bigint(task_id))
+                        .values(
+                            cover_vertical_resource_id=(
+                                self._bigint(vertical_resource_id)
+                                if vertical_resource_id
+                                else None
+                            ),
+                            cover_horizontal_resource_id=(
+                                self._bigint(horizontal_resource_id)
+                                if horizontal_resource_id
+                                else None
+                            ),
+                            updated_at=func.now(),
+                        )
+                        .returning(*_TASK_COLS)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return _public_task_row(dict(row)) if row else None
+
     async def get_task(self, task_id: int) -> Optional[dict]:
         async with read_scope() as session:
             row = (
