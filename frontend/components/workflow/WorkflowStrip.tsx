@@ -20,7 +20,10 @@ import { isNodeInActiveGroup, isNodeOverdue, NODE_STATUS_CONFIG, unmetDeps } fro
 interface WorkflowStripProps {
   nodes: ProjectStageNode[];
   currentNodeId: string | null;
-  onSelectNode?: (nodeId: string) => void;
+  /** Node-click navigation (B5 T-B5.3) — the strip is now the sole node
+   * entry point (the sidebar's Stages list was removed in T-B5.6). Receives
+   * the full node so the handler can route by `surface` (see nodeSurface.ts). */
+  onSelectNode?: (node: ProjectStageNode) => void;
   /** Editing affordances (W3-1): trailing add capsule + per-node remove. */
   canEdit?: boolean;
   onAddNode?: () => void;
@@ -72,7 +75,7 @@ export const WorkflowStrip: React.FC<WorkflowStripProps> = ({
             locked={
               isNodeInActiveGroup(n, currentNode) && unmetDeps(nodes, n).length > 0
             }
-            onClick={onSelectNode ? () => onSelectNode(n.id) : undefined}
+            onClick={onSelectNode ? () => onSelectNode(n) : undefined}
             canEdit={canEdit}
             onRemove={onRemoveNode ? () => onRemoveNode(n) : undefined}
           />

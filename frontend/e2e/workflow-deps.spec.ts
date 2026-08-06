@@ -369,7 +369,7 @@ for (const theme of ['dark', 'light'] as const) {
     await forceTheme(page, theme);
     await openWorkspaceOverview(page);
 
-    await page.getByTestId('ws-stage-node-2').click();
+    await page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]').click();
     await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
 
     // Local derivation (nodeStatus.ts::unmetDeps) — the board's own "Waiting

@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { ArrowRight, Clock } from 'lucide-react';
 import { formatRelativeTime } from '../../utils/relativeTime';
 import { WorkflowSection } from '../workflow/WorkflowSection';
-import type { EpisodeProgress, Project, ProjectWorkflow } from '../../types';
+import type { EpisodeProgress, Project, ProjectStageNode, ProjectWorkflow } from '../../types';
 
 interface WorkspaceOverviewProps {
   project: Project;
@@ -31,6 +31,9 @@ interface WorkspaceOverviewProps {
   /** Navigate to a node's dedicated Stage Board (H3 Run now chip) — threaded
    * through to WorkflowSection → CurrentNodeCard. */
   onOpenStage?: (nodeId: string) => void;
+  /** Strip node click (B5 T-B5.3) — routes by the node's surface. Threaded to
+   * WorkflowSection → WorkflowStrip. */
+  onSelectNode?: (node: ProjectStageNode) => void;
   focusNodeId?: string | null;
 }
 
@@ -47,6 +50,7 @@ export function WorkspaceOverview({
   onRequestAdvance,
   onOpenTodolist,
   onOpenStage,
+  onSelectNode,
   focusNodeId = null,
 }: WorkspaceOverviewProps) {
   const { t } = useTranslation();
@@ -69,6 +73,7 @@ export function WorkspaceOverview({
           onRequestAdvance={onRequestAdvance ?? (() => undefined)}
           onOpenTodolist={onOpenTodolist ?? (() => undefined)}
           onOpenStage={onOpenStage}
+          onSelectNode={onSelectNode}
           focusNodeId={focusNodeId}
         />
       )}

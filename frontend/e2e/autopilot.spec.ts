@@ -257,7 +257,7 @@ async function openWorkspaceOverview(page: Page): Promise<void> {
 async function openWorkspace(page: Page): Promise<void> {
   await page.goto(`/team/${TEAM_ID}/projects/${PARENT_PROJECT_ID}`);
   await expect(page.getByTestId('workspace-sidebar')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('ws-stage-node-2')).toBeVisible();
+  await expect(page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]')).toBeVisible();
 }
 
 async function openTemplateEditor(page: Page): Promise<void> {
@@ -434,7 +434,7 @@ for (const theme of ['dark', 'light'] as const) {
     );
 
     await openWorkspace(page);
-    await page.getByTestId('ws-stage-node-2').click();
+    await page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]').click();
     await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
 
     // The in_review node's saved brief pins to the top of the board...

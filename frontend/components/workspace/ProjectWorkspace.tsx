@@ -34,6 +34,7 @@ import { ProjectSettingsPanel } from '../ProjectSettingsPanel';
 import type { RailView } from '../../editor/components/RailModules';
 import type { SceneDoc } from '../../editor/types';
 import { WorkspaceSidebar, type WorkView } from './WorkspaceSidebar';
+import { resolveSurface } from './nodeSurface';
 import { WorkspaceTopBar } from './WorkspaceTopBar';
 import { WorkspaceOverview } from './WorkspaceOverview';
 import { AdvanceConfirmDialog } from '../workflow/AdvanceConfirmDialog';
@@ -41,7 +42,7 @@ import { useProjectWorkflow } from '../../hooks/useProjectWorkflow';
 import { executeAdvance, fetchAdvancePreview } from '../../services/workflowService';
 import { episodeStorageKey, type WorkspaceModule } from './workspaceModules';
 import type { FilesChip } from './WorkspaceFiles';
-import type { AdvancePreview, EpisodeProgress, Project } from '../../types';
+import type { AdvancePreview, EpisodeProgress, Project, ProjectStageNode } from '../../types';
 
 // Code-split the heavier / non-default modules out of the ProjectsPage chunk
 // (PR-19). Overview is the landing module so it stays eager, as do the
@@ -433,6 +434,31 @@ export function ProjectWorkspace({
     setActiveModule('files');
   }, []);
 
+  // Workflow-strip node click (B5 T-B5.3) — the strip is now the sole node
+  // entry point (the sidebar's Stages list was removed in T-B5.6). Route by the
+  // node's creative `surface` (nodeSurface.ts::resolveSurface): script /
+  // storyboard open the current episode's studio on that view; renders opens the
+  // Renders file filter; a deliverable-only node (surface === null) falls back
+  // to its dedicated Stage Board.
+  const handleSelectNode = useCallback(
+    (node: ProjectStageNode) => {
+      switch (resolveSurface(node)) {
+        case 'script':
+          handleOpenWorkView('script');
+          break;
+        case 'storyboard':
+          handleOpenWorkView('storyboard');
+          break;
+        case 'renders':
+          handleOpenRenders();
+          break;
+        default:
+          handleOpenStage(node.id);
+      }
+    },
+    [handleOpenWorkView, handleOpenRenders, handleOpenStage],
+  );
+
   const studioMode = activeModule === 'script' && resolvedScriptId != null;
 
   // `?module=stage` without a `node` param has nothing to render (stageNodeId
@@ -477,10 +503,6 @@ export function ProjectWorkspace({
         activeWorkView={activeModule === 'script' ? studioView : null}
         onOpenWorkView={handleOpenWorkView}
         onOpenRenders={handleOpenRenders}
-        workflowNodes={workflow?.nodes ?? []}
-        currentNodeId={workflow?.current_node_id ?? null}
-        onOpenStage={handleOpenStage}
-        activeStageNodeId={activeModule === 'stage' ? stageNodeId : null}
       />
       <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
         <Suspense
@@ -524,6 +546,7 @@ export function ProjectWorkspace({
                 onRequestAdvance={requestAdvance}
                 onOpenTodolist={() => setActiveModule('tasks')}
                 onOpenStage={handleOpenStage}
+                onSelectNode={handleSelectNode}
                 focusNodeId={focusNodeId}
               />
             )}

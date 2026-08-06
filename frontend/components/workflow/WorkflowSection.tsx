@@ -53,6 +53,10 @@ interface WorkflowSectionProps {
    * straight through to CurrentNodeCard, which falls back to onOpenTodolist
    * when this isn't provided. */
   onOpenStage?: (nodeId: string) => void;
+  /** Strip node click (B5 T-B5.3) — routes by the node's `surface` to the
+   * matching creative surface (script / storyboard / renders) or its Stage
+   * Board (deliverable-only). Threaded through to WorkflowStrip. */
+  onSelectNode?: (node: ProjectStageNode) => void;
   /** A node the user asked to focus (from the sidebar / strip) — scroll to it. */
   focusNodeId: string | null;
 }
@@ -74,6 +78,7 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
   onRequestAdvance,
   onOpenTodolist,
   onOpenStage,
+  onSelectNode,
   focusNodeId,
 }) => {
   const { t } = useTranslation();
@@ -267,7 +272,7 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
       <WorkflowStrip
         nodes={workflow.nodes}
         currentNodeId={workflow.current_node_id}
-        onSelectNode={() => undefined}
+        onSelectNode={onSelectNode}
         canEdit={canWrite}
         onAddNode={() => setPickerOpen(true)}
         onRemoveNode={(node) => setRemoving(node)}
