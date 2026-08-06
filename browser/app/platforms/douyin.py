@@ -165,13 +165,34 @@ SMS_SUBMIT_SELECTORS: tuple[str, ...] = (
     'div[class*="submit"][role="button"]',
 )
 
+# Read off the live console on 2026-08-06, after a bound account came back
+# named `41cf16775ee3e9fdf5e021f9c1ddfc12` — every selector below missed and the
+# code fell back to the cookie id.
+#
+# The console builds class names as `<role>-<hash>` (CSS Modules): `name-_lSSDc`,
+# `unique_id-EuH8eA`. The hash changes between deploys, the role prefix does not,
+# so these match on the prefix. Two consequences worth stating:
+#
+#   * `[class*="nickname"]` never had a chance — the role is `name`, not
+#     `nickname`, and the id one is `unique_id` with an UNDERSCORE where the old
+#     selector guessed a hyphen.
+#   * `name-` and `img-` are generic enough to appear elsewhere on the page
+#     (`img-pos9sN` is a post thumbnail), so both are scoped under the profile
+#     header — `name-_lSSDc < left-zEzdJX < header-_F2uzl` is the observed chain.
+#
+# Historical selectors stay as fallbacks rather than being deleted: a redesign
+# should degrade to the next candidate, not to a hard outage.
 PROFILE_TEXT_SELECTORS: Mapping[str, tuple[str, ...]] = {
     "username": (
+        '[class^="header-"] [class^="name-"]',
+        '[class^="name-"]',
         'div[class*="nickname"]',
         'span[class*="nickname"]',
         'div[class*="user-name"]',
     ),
     "platform_user_id": (
+        '[class^="unique_id-"]',
+        '[class*="unique_id"]',
         'div[class*="unique-id"]',
         'span[class*="unique-id"]',
         'div[class*="douyin-id"]',
@@ -181,6 +202,13 @@ PROFILE_TEXT_SELECTORS: Mapping[str, tuple[str, ...]] = {
 PROFILE_ATTR_SELECTORS: Mapping[str, tuple[tuple[str, ...], str]] = {
     "avatar_url": (
         (
+            # Scoped to the header for the reason above: bare `img[class^="img-"]`
+            # also matches post thumbnails, and picking the newest video's cover
+            # as someone's avatar is worse than having no avatar at all.
+            '[class^="header-"] img[class^="img-"]',
+            # The avatar CDN path is stable across layouts, so this survives a
+            # header rename that the scoped selector would not.
+            'img[src*="aweme-avatar"]',
             'img[class*="avatar"]',
             'div[class*="avatar"] img',
         ),
