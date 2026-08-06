@@ -1821,6 +1821,13 @@ export interface AgentRunListItem {
 export interface AgentRunGroupItem {
   group_key: string;
   conversation_id?: string | null;
+  /**
+   * Display name projected by the backend: conversation title → issue title →
+   * first user message (60-char cap). Null for pipeline runs that name no
+   * conversation — `conversationTitle()` supplies the translated fallback.
+   * Mirrors RunGroupItem.title in backend/app/schemas/agent_runs.py.
+   */
+  title?: string | null;
   run_count: number;
   prompt_tokens: number;
   completion_tokens: number;
