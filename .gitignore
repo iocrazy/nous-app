@@ -318,3 +318,4 @@ deploy/gpu-server/supabase/.env
 deploy/gpu-server/supabase/**/*.key
 deploy/gpu-server/supabase/**/*.crt
 deploy/gpu-server/supabase/**/*.pem
+.b2-*.md
