@@ -1855,6 +1855,7 @@
       "owner": "Owner",
       "members": "Members",
       "schedule": "Schedule",
+      "details": "Details",
       "setSchedule": "Set schedule",
       "suggestAgentRun": "Suggested: run {{agentName}}",
       "runNow": "Run now",

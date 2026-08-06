@@ -8,7 +8,7 @@
  */
 
 import React, { useState } from 'react';
-import { ArrowLeft, ArrowRight, Bot, ClipboardList, ExternalLink, FileCheck2, Rocket } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bot, ChevronDown, ClipboardList, ExternalLink, FileCheck2, Rocket } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { updateProjectNode } from '../../services/workflowService';
 import type { ProjectNodePatch, ProjectStageNode } from '../../types';
@@ -78,6 +78,11 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
 }) => {
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
+  // B5 T-B5.8: management fields (owner / members / schedule) are collapsed by
+  // default so the card leads with "what's happening now + what to deliver".
+  // Auto-open when the node is overdue so the schedule stays discoverable
+  // without a click when it actually needs attention.
+  const [detailsOpen, setDetailsOpen] = useState(() => isNodeOverdue(node));
   const meta = NODE_STATUS_CONFIG[node.status];
   const overdue = isNodeOverdue(node);
 
@@ -187,56 +192,6 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
         </div>
       )}
 
-      <Row label={t('projects.workflow.owner')}>
-        <OwnerPicker
-          mode="owner"
-          people={people}
-          agents={agents}
-          ownerUserId={node.owner_user_id}
-          ownerAgentId={node.owner_agent_id}
-          disabled={!canWrite || saving}
-          placeholder={t('projects.workflow.unassigned')}
-          onOwnerChange={(ref) =>
-            void patch({
-              owner_user_id: ref?.user_id ?? null,
-              owner_agent_id: ref?.agent_id ?? null,
-            })
-          }
-        />
-      </Row>
-
-      <Row label={t('projects.workflow.members')}>
-        <OwnerPicker
-          mode="members"
-          people={people}
-          agents={agents}
-          members={node.members}
-          disabled={!canWrite || saving}
-          onMembersChange={(members) => void patch({ members })}
-        />
-      </Row>
-
-      <Row label={t('projects.workflow.schedule')}>
-        <div className={overdue ? 'text-rose-400' : undefined} data-testid="workflow-card-schedule">
-          <NodeSchedulePicker
-            start={node.planned_start}
-            due={node.planned_due}
-            disabled={!canWrite || saving}
-            onChange={(start, dueDate) =>
-              void patch({ planned_start: start, planned_due: dueDate })
-            }
-          />
-          {overdue && (
-            <span
-              data-testid="workflow-card-overdue"
-              className="mt-1 inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-rose-300"
-            >
-              {t('projects.workflow.overdue')}
-            </span>
-          )}
-        </div>
-      </Row>
-
       {(node.deliverable_label || node.deliverable_required) && (
         <Row label={t('projects.workflow.deliverable')}>
           <div className="flex items-center gap-2 pt-1 text-[13px] text-ink-300">
@@ -291,6 +246,93 @@ export const CurrentNodeCard: React.FC<CurrentNodeCardProps> = ({
           testId="workflow-node-brief"
         />
       </Row>
+
+      {/* B5 T-B5.8: management fields (owner / members / schedule) folded into a
+          collapsible "Details" block, collapsed by default so the card leads
+          with the current action + completion condition and keeps the
+          management surface one click away at the bottom. Every editor
+          (OwnerPicker, NodeSchedulePicker) is untouched — just relocated. The
+          overdue chip peeks on the toggle even while collapsed so an at-risk
+          schedule stays visible without opening (and the node auto-expands when
+          overdue on mount). */}
+      <div className="mt-1 border-t border-line pt-1">
+        <button
+          type="button"
+          onClick={() => setDetailsOpen((open) => !open)}
+          data-testid="workflow-card-details-toggle"
+          aria-expanded={detailsOpen}
+          className="flex w-full items-center gap-2 py-1 text-[11px] uppercase tracking-wider text-ink-600 transition hover:text-ink-300"
+        >
+          <ChevronDown
+            size={13}
+            className={`shrink-0 transition-transform ${detailsOpen ? '' : '-rotate-90'}`}
+            aria-hidden
+          />
+          {t('projects.workflow.details')}
+          {overdue && !detailsOpen && (
+            <span
+              data-testid="workflow-card-overdue"
+              className="ml-1 inline-flex items-center gap-1 rounded-full bg-danger-soft px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal text-danger"
+            >
+              {t('projects.workflow.overdue')}
+            </span>
+          )}
+        </button>
+
+        {detailsOpen && (
+          <div data-testid="workflow-card-details" className="pt-1">
+            <Row label={t('projects.workflow.owner')}>
+              <OwnerPicker
+                mode="owner"
+                people={people}
+                agents={agents}
+                ownerUserId={node.owner_user_id}
+                ownerAgentId={node.owner_agent_id}
+                disabled={!canWrite || saving}
+                placeholder={t('projects.workflow.unassigned')}
+                onOwnerChange={(ref) =>
+                  void patch({
+                    owner_user_id: ref?.user_id ?? null,
+                    owner_agent_id: ref?.agent_id ?? null,
+                  })
+                }
+              />
+            </Row>
+
+            <Row label={t('projects.workflow.members')}>
+              <OwnerPicker
+                mode="members"
+                people={people}
+                agents={agents}
+                members={node.members}
+                disabled={!canWrite || saving}
+                onMembersChange={(members) => void patch({ members })}
+              />
+            </Row>
+
+            <Row label={t('projects.workflow.schedule')}>
+              <div className={overdue ? 'text-danger' : undefined} data-testid="workflow-card-schedule">
+                <NodeSchedulePicker
+                  start={node.planned_start}
+                  due={node.planned_due}
+                  disabled={!canWrite || saving}
+                  onChange={(start, dueDate) =>
+                    void patch({ planned_start: start, planned_due: dueDate })
+                  }
+                />
+                {overdue && (
+                  <span
+                    data-testid="workflow-card-overdue-expanded"
+                    className="mt-1 inline-flex items-center gap-1 rounded-full bg-danger-soft px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-danger"
+                  >
+                    {t('projects.workflow.overdue')}
+                  </span>
+                )}
+              </div>
+            </Row>
+          </div>
+        )}
+      </div>
 
       <div className="mt-3 flex items-center gap-2 border-t border-line pt-3">
         <button

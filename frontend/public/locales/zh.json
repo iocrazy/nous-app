@@ -1855,6 +1855,7 @@
       "owner": "负责人",
       "members": "成员",
       "schedule": "排期",
+      "details": "详细信息",
       "setSchedule": "设置排期",
       "suggestAgentRun": "建议运行 {{agentName}}",
       "runNow": "立即运行",
