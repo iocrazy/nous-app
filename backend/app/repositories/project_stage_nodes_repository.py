@@ -464,15 +464,20 @@ class ProjectStageNodesRepository:
 
             return await self._list_nodes_in_session(session, pid)
 
-    async def _list_nodes_in_session(self, session, pid: int) -> List[Dict[str, Any]]:
+    async def _list_nodes_in_session(
+        self, session, pid: int, episode_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        stmt = select(ProjectStageNodes).where(ProjectStageNodes.project_id == pid)
+        # Episode收口 (mig 402, B2 T0): when an episode is named, return ONLY
+        # that episode's nodes. Every episode instantiated from the same
+        # template carries identical parallel_group / sort_order values, so an
+        # unfiltered project-level listing collapses Ep1 and Ep3's same-named
+        # nodes into one group downstream ("advance one episode = advance all").
+        # episode_id=None keeps the legacy project-wide behaviour untouched.
+        if episode_id is not None:
+            stmt = stmt.where(ProjectStageNodes.episode_id == episode_id)
         nodes = (
-            (
-                await session.execute(
-                    select(ProjectStageNodes)
-                    .where(ProjectStageNodes.project_id == pid)
-                    .order_by(ProjectStageNodes.sort_order)
-                )
-            )
+            (await session.execute(stmt.order_by(ProjectStageNodes.sort_order)))
             .scalars()
             .all()
         )
@@ -520,6 +525,24 @@ class ProjectStageNodesRepository:
         """All of a project's nodes (+ members), ordered by sort_order."""
         async with read_scope() as session:
             return await self._list_nodes_in_session(session, int(str(project_id)))
+
+    async def list_nodes_by_episode(
+        self, project_id: str, episode_id: str
+    ) -> List[Dict[str, Any]]:
+        """One episode's nodes (+ members), ordered by sort_order.
+
+        The episode-scoped counterpart of ``list_nodes`` (mig 402, B2 T0). Same
+        return shape — a list of ``_node_row`` dicts — but the row set is
+        confined to ``episode_id``. This is the data entry point B2 T1
+        (advance_service下沉) reads from so an episode's group-building and
+        active-index math see only that episode's nodes, never a sibling
+        episode's template-cloned twins. Rows with ``episode_id IS NULL``
+        (legacy project-level nodes) are intentionally excluded.
+        """
+        async with read_scope() as session:
+            return await self._list_nodes_in_session(
+                session, int(str(project_id)), episode_id=int(str(episode_id))
+            )
 
     async def get_node(
         self, node_id: str, project_id: Optional[str] = None
@@ -884,14 +907,27 @@ class ProjectStageNodesRepository:
             await session.flush()
             return dict(merged)
 
-    async def get_active_group(self, project_id: str) -> List[Dict[str, Any]]:
+    async def get_active_group(
+        self, project_id: str, episode_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """The node(s) forming the project's active group.
 
         The cursor ``projects.current_node_id`` names one node; the active group
         is every non-skipped node sharing its ``parallel_group`` (or just that
         node when it has none). Empty when no cursor is set.
+
+        ``episode_id`` (mig 402, B2 T0) confines the group to a single episode.
+        This is the badge/board read path — and, via ``node_mutations``, the
+        "can't delete an active node" guard. Without an episode filter the
+        parallel_group fan-out matches sibling episodes' template-cloned twins
+        (same ``parallel_group`` value across every episode), so Ep1's active
+        node would falsely guard the identically-grouped node in Ep3. When
+        ``episode_id`` is None the legacy project-wide behaviour is unchanged;
+        when given, both the cursor-node lookup and the parallel_group fan-out
+        are pinned to that episode.
         """
         pid = int(str(project_id))
+        eid = int(str(episode_id)) if episode_id is not None else None
         async with read_scope() as session:
             cursor = (
                 await session.execute(
@@ -900,34 +936,31 @@ class ProjectStageNodesRepository:
             ).first()
             if cursor is None or cursor[0] is None:
                 return []
-            current = (
-                (
-                    await session.execute(
-                        select(ProjectStageNodes)
-                        .where(ProjectStageNodes.id == cursor[0])
-                        .where(ProjectStageNodes.project_id == pid)
-                        .limit(1)
-                    )
-                )
-                .scalars()
-                .first()
+            current_stmt = (
+                select(ProjectStageNodes)
+                .where(ProjectStageNodes.id == cursor[0])
+                .where(ProjectStageNodes.project_id == pid)
             )
+            if eid is not None:
+                current_stmt = current_stmt.where(ProjectStageNodes.episode_id == eid)
+            current = (await session.execute(current_stmt.limit(1))).scalars().first()
             if current is None:
                 return []
             if current.parallel_group is None:
                 group = [current]
             else:
+                group_stmt = (
+                    select(ProjectStageNodes)
+                    .where(ProjectStageNodes.project_id == pid)
+                    .where(ProjectStageNodes.parallel_group == current.parallel_group)
+                    .where(ProjectStageNodes.skipped.is_(False))
+                )
+                if eid is not None:
+                    group_stmt = group_stmt.where(ProjectStageNodes.episode_id == eid)
                 group = (
                     (
                         await session.execute(
-                            select(ProjectStageNodes)
-                            .where(ProjectStageNodes.project_id == pid)
-                            .where(
-                                ProjectStageNodes.parallel_group
-                                == current.parallel_group
-                            )
-                            .where(ProjectStageNodes.skipped.is_(False))
-                            .order_by(ProjectStageNodes.sort_order)
+                            group_stmt.order_by(ProjectStageNodes.sort_order)
                         )
                     )
                     .scalars()
