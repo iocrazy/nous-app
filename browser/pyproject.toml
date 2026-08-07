@@ -2,8 +2,19 @@
 name = "nous-browser"
 version = "0.1.0"
 description = "Nous browser automation sidecar - platform session validation and DOM publishing"
-# 与 .python-version（3.13）对齐 —— 见 backend/pyproject.toml 同处的说明
-requires-python = ">=3.13"
+# ⚠️ 刻意与 backend（>=3.13）和仓库根 .python-version 不同，这不是漂移。
+# 本服务的基础镜像是 mcr.microsoft.com/playwright/python:v1.52.0-noble，
+# 而 noble 自带的是 **Python 3.12.3** —— 版本由上游 playwright 镜像决定，
+# 不归我们选；那个 tag 又必须跟 dependencies 里的 playwright pin 一起动。
+#
+# 2026-08-06 曾把这里"统一"成 >=3.13，后果：镜像里找不到 3.13，uv 转而
+# 下载一个 managed python 装进 **root 的 home**，venv 的解释器指过去；而
+# Dockerfile 只 `chown -R pwuser:pwuser /app`、最后 `USER pwuser` —— 非
+# root 用户碰不到那个解释器，容器起不来：
+#   ./entrypoint.sh: /app/.venv/bin/uvicorn:
+#     /app/.venv/bin/python: bad interpreter: Permission denied
+# 生产 smoke 拦下并自动回滚了。要改这一行，先确认基础镜像的 python 版本。
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.12",
     "uvicorn[standard]>=0.34.3",
@@ -15,11 +26,15 @@ dependencies = [
     "playwright==1.52.0",
 ]
 
-# PEP 735 标准写法，与 backend/ 一致。原为 [project.optional-dependencies]，
-# 那是"给下游安装者的可选功能"语义，不是开发依赖 —— 副作用是 `uv sync` 默认
-# 不装，要记住敲 `--extra dev`，而 backend 那边是 `--dev`，同一个仓库两套命令。
-# dependency-groups 的 dev 组 `uv sync` 默认就装。
-[dependency-groups]
+# ⚠️ 刻意保持 optional-dependencies，别"统一"成 [dependency-groups]。
+# Dockerfile 那层是裸 `uv sync --frozen --no-install-project`，靠的正是
+# optional extras **不被默认安装**这一点，让生产镜像不含 pytest/httpx
+# （那份注释就写在 Dockerfile 第 37-38 行）。dependency-groups 的 dev 组
+# `uv sync` 默认就装，改过去等于把测试依赖塞进生产镜像。
+#
+# 代价是装 dev 依赖的命令与 backend 不一致（这里 --extra dev，那边 --dev）。
+# 接受这个不一致：它换来的是生产镜像干净，比命令统一重要。
+[project.optional-dependencies]
 dev = [
     "pytest>=8.4.1",
     "pytest-asyncio>=0.21.0",
