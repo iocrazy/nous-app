@@ -75,10 +75,21 @@ async def create_episode(
         data = body.model_dump(exclude_none=True)
         data["project_id"] = project_id
         episode = await get_episode_repository().create(data)
-        return {"success": True, "data": episode}
     except Exception as exc:
         logger.error(f"[Episodes] create for project {project_id} failed: {exc}")
         raise HTTPException(status_code=500, detail="Failed to create episode")
+
+    # B3 trigger 3 (spec §5): a new episode in a workflow-bound project gets its
+    # own node chain + arrival hooks, reusing the project's stored template +
+    # method. No-op when the project has no binding. Best-effort — the episode
+    # is already created and returned regardless; a workflow hiccup must never
+    # turn a successful episode-create into a 500.
+    from app.services.workflow.instantiation import maybe_instantiate_episode_workflow
+
+    await maybe_instantiate_episode_workflow(
+        str(project_id), str(episode["id"]), user_id=auth.user_id
+    )
+    return {"success": True, "data": episode}
 
 
 @router.patch("/episodes/{episode_id}")

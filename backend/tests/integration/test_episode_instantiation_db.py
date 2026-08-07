@@ -247,6 +247,133 @@ async def test_fan_out_is_idempotent_and_expect_fresh_raises(
         )
 
 
+async def test_instantiate_project_workflow_fans_out_and_sets_per_episode_cursors(
+    patched_engine, cleanup_test_rows, integration_db_url
+):
+    """The service entry (attach/create path) writes the project binding, fans
+    the template out to EVERY episode, and sets each episode's own cursor to
+    its first active node — not the legacy single project-level cursor."""
+    from app.services.workflow.instantiation import instantiate_project_workflow
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        owner_id, team_id = await _owner_and_team(conn)
+        tid, _tpl = await _seed_template(conn, team_id)
+        project_id, ep_ids = await _seed_project_with_episodes(conn, owner_id, 2)
+    finally:
+        await conn.close()
+
+    await instantiate_project_workflow(
+        str(project_id), str(tid), method="ai", user_id=str(owner_id)
+    )
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        # (1) binding written
+        row = await conn.fetchrow(
+            "SELECT workflow_template_id, workflow_method FROM projects WHERE id=$1",
+            project_id,
+        )
+        assert row["workflow_template_id"] == tid
+        assert row["workflow_method"] == "ai"
+        # (2) every episode got its chain, none left project-level
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM project_stage_nodes "
+                "WHERE project_id=$1 AND episode_id IS NULL",
+                project_id,
+            )
+            == 0
+        )
+        # (3) each episode's own cursor points at a node of THAT episode
+        for eid in ep_ids:
+            cnt = await conn.fetchval(
+                "SELECT count(*) FROM project_stage_nodes "
+                "WHERE project_id=$1 AND episode_id=$2",
+                project_id,
+                eid,
+            )
+            assert cnt == 2
+            cur = await conn.fetchval(
+                "SELECT current_node_id FROM episodes WHERE id=$1", eid
+            )
+            assert cur is not None
+            assert (
+                await conn.fetchval(
+                    "SELECT episode_id FROM project_stage_nodes WHERE id=$1", cur
+                )
+                == eid
+            )
+    finally:
+        await conn.close()
+
+
+async def test_single_episode_workflow_service_sets_new_episode_cursor(
+    patched_engine, cleanup_test_rows, integration_db_url
+):
+    """The new-episode trigger service: a bound project gets its newly added
+    episode instantiated + that episode's own cursor set. A project with NO
+    binding is a clean no-op."""
+    from app.services.workflow.instantiation import (
+        instantiate_single_episode_workflow,
+    )
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        owner_id, team_id = await _owner_and_team(conn)
+        tid, _tpl = await _seed_template(conn, team_id)
+        project_id, _ = await _seed_project_with_episodes(conn, owner_id, 0)
+        # unbound project first: adding an episode must be a no-op
+        unbound_ep = await conn.fetchval(
+            "INSERT INTO episodes (project_id, title, sort_order) "
+            "VALUES ($1, 'Ep0', 1) RETURNING id",
+            project_id,
+        )
+    finally:
+        await conn.close()
+
+    nodes = await instantiate_single_episode_workflow(
+        str(project_id), str(unbound_ep), user_id=str(owner_id)
+    )
+    assert nodes == []  # no binding → no-op
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        await conn.execute(
+            "UPDATE projects SET workflow_template_id=$1, workflow_method='ai' "
+            "WHERE id=$2",
+            tid,
+            project_id,
+        )
+        bound_ep = await conn.fetchval(
+            "INSERT INTO episodes (project_id, title, sort_order) "
+            "VALUES ($1, 'Ep1', 2) RETURNING id",
+            project_id,
+        )
+    finally:
+        await conn.close()
+
+    nodes = await instantiate_single_episode_workflow(
+        str(project_id), str(bound_ep), user_id=str(owner_id)
+    )
+    assert len(nodes) == 2
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        cur = await conn.fetchval(
+            "SELECT current_node_id FROM episodes WHERE id=$1", bound_ep
+        )
+        assert cur is not None
+        assert (
+            await conn.fetchval(
+                "SELECT episode_id FROM project_stage_nodes WHERE id=$1", cur
+            )
+            == bound_ep
+        )
+    finally:
+        await conn.close()
+
+
 async def test_single_episode_chain_reads_project_binding(
     patched_engine, cleanup_test_rows, integration_db_url
 ):
