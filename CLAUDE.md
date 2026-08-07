@@ -527,6 +527,18 @@ Schema (schemas/)      — Pydantic 请求/响应模型
 
 **为什么后端与 migration 必须 self-hosted**：gpupc 无公网 IP（CGNAT），GitHub 云端 runner 既不能 SSH 进来也收不到 webhook，只能反过来让 gpupc 主动连出去拉任务。附带好处：省掉 ACR 跨境推拉、build 用本机 48 核、不消耗 Actions 分钟数。
 
+**`ci.yml` 也在 self-hosted 上（2026-08-06 起）**，理由不同：账户付款失败让托管 runner 的 job 全部 2 秒内被拦，CI 完全失去守卫能力。计费恢复后可以切回 `ubuntu-latest`（三处 `runs-on`）。
+
+⚠️ **public repo + self-hosted runner 必须带 fork 守卫**。本仓库是 public，而 runner 就是生产部署机（以 `heygo` 身份跑，workdir 在 `datahub` 盘），fork 里的任意代码在上面执行等于把机器交出去 —— 这是 GitHub 官方对该组合的明确警告。`ci.yml` 三个 job 都有：
+
+```yaml
+if: github.event.pull_request.head.repo.full_name == github.repository
+```
+
+fork PR 因此**没有 CI**（显示 skipped 而非 failed）。这是刻意的取舍：宁可 fork PR 无守卫，也不开这个口子。往 self-hosted 上加任何 `pull_request` 触发的 workflow，都要同步加这一行。
+
+runner 的 workspace 与生产数据同盘（`/media/heygo/program`），`actions/checkout` 默认 `clean: true` 会 `git clean -ffdx`，所以 `node_modules` / `target/` 不累积；代价是每次重装依赖。
+
 ### 前端链的关键设计（改之前先读）
 
 - **构建期配置的唯一来源是 `frontend/.env.production`**，不在本文档里重复写域名与 flag 值。`deploy-pages.yml` 的构建 env 必须与该文件一致；CI 里 GHA 环境变量优先级高于 `.env` 文件（Vite 不覆盖已存在的环境变量），所以线上以 workflow 为准，而该文件保证**本地构建**产出同样的包。
@@ -563,6 +575,26 @@ Schema (schemas/)      — Pydantic 请求/响应模型
    - **`Reclaim disk`**（`if: success()`）：清 48h 以上的 dangling 镜像 + 缓存上限 60GB。只在成功后跑，失败时保留现场；全部 `|| true`，回收失败不该把一次成功的部署判成失败。
 
    保留 48h 而不是全清，是为了「`:rollback` 本身也坏了」时还能手动退到更早一版。`:local` / `:rollback` 带 tag，天然不在 dangling 之列，不会被误清（已验证）。
+
+4. **工具链版本只能有一个来源，CI 不许自己抄一份**（2026-08-06 补）。`.python-version`（3.13）/ `.nvmrc`（22）是唯一真相，所有 `setup-python` / `setup-node` 一律写 `python-version-file` / `node-version-file`，**不写版本号字面量**。
+
+   在此之前 `ci.yml` 和 `schema-drift.yml` 写死 `"3.12"`、`ci.yml` 写死 node `20`，而生产是 3.13（Dockerfile pin 的 digest）和 22（`deploy-pages.yml` 出货构建）。**后果不是报错，是静默失去保证** —— lint、依赖解析、前端 build 全在生产从不使用的版本上跑绿，与「探针必须可证伪」是同一族的问题。没被拦住是因为 `requires-python = ">=3.12"` 是**下限不是锁**，而 node 侧此前既无 `.nvmrc` 也无 `package.json` engines，压根没有可对齐的来源。
+
+   ⚠️ 版本文件的路径相对 **workspace 根**（写 `.python-version`），`defaults.run.working-directory` 只作用于 `run` 步骤，不影响 action 输入。
+
+### 红 CI 的诊断顺序（先读日志，再谈假设）
+
+同一批红 CI 曾被连着误诊两次（先判"计费假红"、再判"要迁 self-hosted"），真相是第三种。**第一步永远是 `gh run view --job <id> --log-failed` 看首个 error**，再套下面的表：
+
+| 首个 error | 含义 | 处置 |
+|---|---|---|
+| `runner_name` 为空 + `steps=0` + 2 秒 fail | 账户计费失败（托管 runner 被拦） | 走 self-hosted（不计费）。⚠️ 别指望"切 public"，见下 |
+| `Failed to resolve action download info: Service Unavailable` | **GitHub Actions 侧 outage**，job 死在准备阶段 | 只能等 + 重跑。**迁 self-hosted 无效** —— runner 一样要向 GitHub API 取 action 元数据 |
+| 有真实步骤日志与耗时 | 代码/配置真的挂了 | 正常修 |
+
+中间那档最容易误判成前一档：两者都是"一行业务代码没跑"，但一个是计费、一个是 GitHub 故障，处置**完全相反**（一个换 runner 有用，一个换了也没用）。区别在**有没有真实耗时** —— 计费拦截 2 秒就死，outage 会重试到几分钟甚至十几分钟。
+
+⚠️ **「切 public 就能解」已被推翻**（2026-08-06）：repo 当时**已经是 public**，托管 runner 仍被全部拦下。那条旧经验（2026-07-26）适用的是**免费额度用尽**触发的强制回退；付款方式本身失败时公私有无关。所以判断顺序是先 `gh repo view --json visibility` 确认可见性，**如果已经是 public 还被拦，就不是额度问题，只能换 runner 或修账单**。
 
 ### 已退役的 NAS 老线（⚠️ 扳手当前是坏的）
 

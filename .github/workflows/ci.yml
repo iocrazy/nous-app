@@ -14,7 +14,22 @@ concurrency:
 jobs:
   frontend:
     name: Frontend Build
-    runs-on: ubuntu-latest
+    # fork PR 一律跳过。本仓库是 public，而下面的 runner 是生产部署机 ——
+    # 让 fork 里的代码在上面执行等于把机器交给任何人（GitHub 官方对
+    # public repo + self-hosted runner 的警告就是这条）。宁可 fork PR
+    # 没有 CI，也不开这个口子。
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    # self-hosted，不是 ubuntu-latest。2026-08-06：账户付款失败让所有托管
+    # runner 的 job 在 2 秒内 fail（runner_name 为空、steps=0，annotation 写着
+    # "recent account payments have failed"），CI 完全失去守卫能力。
+    #
+    # ⚠️「切 public 就能解」这条旧经验这次不成立 —— repo 已经是 public 仍被拦，
+    # 说明是付款方式本身失败，不是免费额度用尽。self-hosted 不计费，同期
+    # deploy-gpu 三次全 success 可证它不受影响。
+    #
+    # 代价：只有一个 runner，三个 job 由并行变串行，且与 deploy-gpu 争用。
+    # 计费恢复后切回：三处 runs-on 改成 ubuntu-latest 即可，if 守卫留着无害。
+    runs-on: [self-hosted, gpu]
     defaults:
       run:
         working-directory: frontend
@@ -59,7 +74,9 @@ jobs:
 
   backend:
     name: Backend Lint & Deps
-    runs-on: ubuntu-latest
+    # 同 frontend job：fork 守卫 + self-hosted 的理由见那里的注释
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, gpu]
     defaults:
       run:
         working-directory: backend
@@ -143,7 +160,9 @@ jobs:
 
   rust:
     name: Rust Check
-    runs-on: ubuntu-latest
+    # 同 frontend job：fork 守卫 + self-hosted 的理由见那里的注释
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, gpu]
     defaults:
       run:
         working-directory: nous-core
