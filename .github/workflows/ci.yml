@@ -163,6 +163,19 @@ jobs:
     # 同 frontend job：fork 守卫 + self-hosted 的理由见那里的注释
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, gpu]
+    # ⚠️ 把 rust 工具链关进 runner 的 tool cache，别碰 runner 用户的 home。
+    #
+    # 迁到 self-hosted 后第一次跑 rust job，就把开发者的 ~/.cargo/bin/rustup
+    # 二进制弄没了 —— 那目录下 cargo / cargo-clippy 都是指向 rustup 的符号
+    # 链接，rustup 一丢，本机 `cargo` 直接 command not found（~/.rustup/
+    # toolchains 里的实体反而完好）。托管 runner 上这类破坏无所谓，机器用完
+    # 就销毁；self-hosted 的 home 是活人在用的。
+    #
+    # runner.tool_cache 在托管 runner 上是 /opt/hostedtoolcache，所以将来切
+    # 回 ubuntu-latest 这两行也不会坏。
+    env:
+      CARGO_HOME: ${{ runner.tool_cache }}/rust/cargo
+      RUSTUP_HOME: ${{ runner.tool_cache }}/rust/rustup
     defaults:
       run:
         working-directory: nous-core

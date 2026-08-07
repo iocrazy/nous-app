@@ -542,6 +542,20 @@ fork PR 因此**没有 CI**（显示 skipped 而非 failed）。这是刻意的�
 
 runner 的 workspace 与生产数据同盘（`/media/heygo/program`），`actions/checkout` 默认 `clean: true` 会 `git clean -ffdx`，所以 `node_modules` / `target/` 不累积；代价是每次重装依赖。
 
+⚠️ **CI job 会写 runner 用户的 home，必须逐个隔离**。runner 以 `heygo` 跑，任何往 `~` 写东西的 action 都在动**活人正在用的开发环境** —— 托管 runner 上这类破坏无所谓（机器用完即销毁），self-hosted 上是真的破坏。
+
+已经栽过一次：迁过来第一次跑 rust job，`~/.cargo/bin/rustup` 二进制就没了。那目录下 `cargo` / `cargo-clippy` 全是指向 `rustup` 的符号链接，rustup 一丢，本机 `cargo` 直接 `command not found`（而 `~/.rustup/toolchains/` 里的实体完好，纯粹是 shim 断了）。修复：`curl https://rsproxy.cn/rustup/dist/x86_64-unknown-linux-gnu/rustup-init` 拿到二进制直接放回 `~/.cargo/bin/rustup`（`rustup-init` 和 `rustup` 是同一个程序，靠 argv[0] 区分），**不要跑它的安装流程** —— 那会改 shell 配置文件。
+
+预防：往 self-hosted 加任何装工具链的 step，先确认它写哪里，把它导到 `runner.tool_cache`：
+
+```yaml
+env:
+  CARGO_HOME: ${{ runner.tool_cache }}/rust/cargo
+  RUSTUP_HOME: ${{ runner.tool_cache }}/rust/rustup
+```
+
+`runner.tool_cache` 在托管 runner 上是 `/opt/hostedtoolcache`，所以这样写切回 `ubuntu-latest` 也不会坏。`setup-node` / `setup-python` / `setup-uv` 自带隔离（装进 `_work/_tool/`），**`dtolnay/rust-toolchain` 不自带** —— 它认 `RUSTUP_HOME`/`CARGO_HOME`，不设就用 home。
+
 ### 前端链的关键设计（改之前先读）
 
 - **构建期配置的唯一来源是 `frontend/.env.production`**，不在本文档里重复写域名与 flag 值。`deploy-pages.yml` 的构建 env 必须与该文件一致；CI 里 GHA 环境变量优先级高于 `.env` 文件（Vite 不覆盖已存在的环境变量），所以线上以 workflow 为准，而该文件保证**本地构建**产出同样的包。
