@@ -345,6 +345,9 @@ python3 -c "import os; os.setxattr('<目录>/.probe','user.t',b'1')"
 - **gpupc 上 PG 容器内部监听 55434，不是 5432**：自托管 Supabase 的 `POSTGRES_PORT=55434` 会同时喂给容器内的 `PGPORT`（为与同机 `sb-dev` 共存），所以 **PG 进程本身只监听 55434**。走宿主机端口时无所谓（`ports: "127.0.0.1:55436:55434"` 映射层会转换），但**走 docker 内网容器名直连会绕过映射层**，必须写 `nous-db:55434` —— 写 5432 拿 `Connection refused`。`DBOS_DATABASE_URL` 尤其要注意：DBOS 依赖 LISTEN/NOTIFY，不能走 pooler，只能直连，所以它是唯一必须硬编码这个非标准端口的地方。血泪教训见 [`deploy/gpu-server/README.md`](deploy/gpu-server/README.md) 的「DBOS 直连端口」节。
 - **触发路径必须类型化失败回显**：`attachment_failures` 字段后端早就在返回（`ai_library_chat_service.py`），前端却整整没读过——因为没有强制约定"新触发路径要连带写失败分支"。用户动作→agent 触发的每条路径必须返回类型化结果(成功/失败/原因),silent no-op 不可接受——与'DBOS 失败必须 raise'同族。新增触发路径时先写失败分支的用户可见回显。
 - **裸 SQL 全量 ORM 化（2026-08-04 立约）**：新代码禁止新增 `text()` 裸 SQL（结构性例外：`dbos.*` schema 的两个文档化访问点、PG 系统目录诊断/schema 探针）。存量迁移期间（Phase B/C 未迁文件）如需改动裸 SQL，必须换用 `app/db/scoped_sql.py` 的 `scoped_sql()`（唯一新入口），显式声明 `scope=Scope(...)` 或 `system=True, reason="..."`——两者都不传会 raise。决策与分期见 [`docs/decisions/2026-08-04-raw-sql-to-orm-full-migration.md`](docs/decisions/2026-08-04-raw-sql-to-orm-full-migration.md)。
+- **测试进程必须与本机网络环境隔离（2026-08-06 立约）**：`backend/tests/conftest.py` 与 `browser/tests/conftest.py` 各有一个 session 级 autouse fixture，把继承来的 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` 全部摘掉。
+  起因：本机 shell 带 `ALL_PROXY=socks5://127.0.0.1:7891`（mihomo），httpx 从环境读到 socks 代理就在**构造时**抛 `ImportError: Using SOCKS proxy, but the 'socksio' package is not installed`——**87 个失败、跨 19 个文件，没有一个是真缺陷**。CI 上没有代理变量，同一套测试全绿。**一套结果取决于谁的机器在跑的测试，不构成门禁。**
+  ⚠️ 这跟「代理问题一律在 mihomo 层解决、不要 unset 绕过」不冲突：那条针对的是**真的要连服务**的场景，依然有效。单元测试**碰到网络本身就是 bug**，摘代理是环境隔离不是绕过。故意验证代理行为的测试不受影响——它们自己 `monkeypatch.setenv`，在 fixture 之后生效且逐测试还原。
 
 ### Schema 迁移 / 代码漂移检查口径
 
