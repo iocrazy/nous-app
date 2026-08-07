@@ -42,6 +42,10 @@ interface WorkspaceStageBoardProps {
   projectId: string;
   projectName: string;
   nodeId: string;
+  /** Current episode id (B2 #1712) — passed to startEarlyNode so a start-early
+   * scopes to this episode; null/undefined → project-level. The board fetch
+   * itself stays project-level (episode scoping of /board is B3's scope). */
+  episodeId?: string | null;
   /** The project's shared workflow instance — used only to decide whether
    * THIS node is in the active group (current node ± parallel-group
    * siblings); the node's own detail data comes from the board fetch. */
@@ -73,6 +77,7 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
   projectId,
   projectName,
   nodeId,
+  episodeId,
   workflow,
   canWrite,
   onRequestAdvance,
@@ -261,7 +266,7 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
   const handleStartEarly = async () => {
     setStartingEarly(true);
     try {
-      await startEarlyNode(projectId, node.id);
+      await startEarlyNode(projectId, node.id, episodeId ?? undefined);
       setRefreshTick((v) => v + 1);
     } catch (err) {
       if (err instanceof ApiError && err.status === 422) {
@@ -274,6 +279,8 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
           );
         } else if (err.code === 'NODE_CANCELLED') {
           toast?.addToast(t('projects.workflow.startEarly.cancelled'), 'error');
+        } else if (err.code === 'EPISODE_MISMATCH') {
+          toast?.addToast(t('projects.workflow.startEarly.episodeMismatch'), 'error');
         } else {
           toast?.addToast(t('projects.workflow.startEarly.blocked'), 'error');
         }

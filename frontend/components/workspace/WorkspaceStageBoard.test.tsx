@@ -631,7 +631,8 @@ describe('WorkspaceStageBoard — Start early (M4 Autopilot task O2/O3)', () => 
     );
 
     fireEvent.click(await screen.findByTestId('stage-board-start-early'));
-    await waitFor(() => expect(mockWorkflowService.startEarlyNode).toHaveBeenCalledWith('10', '2'));
+    // 3rd arg is episode_id (T5 #1714): undefined here = legacy project-level path (no episode context).
+    await waitFor(() => expect(mockWorkflowService.startEarlyNode).toHaveBeenCalledWith('10', '2', undefined));
     // Success re-triggers the board fetch (refreshTick), same mechanism the
     // Run now dispatch already uses.
     await waitFor(() => expect(mockWorkflowService.fetchStageBoard).toHaveBeenCalledTimes(2));

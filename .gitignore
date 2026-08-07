@@ -321,3 +321,6 @@ deploy/gpu-server/supabase/**/*.pem
 .b2-*.md
 
 .xep-*.md
+
+# B2 T5 子任务本地报告（不入仓库）
+.b2-*.md

@@ -27,9 +27,12 @@ interface WorkspaceTasksProps {
   projectId: string;
   projectName: string;
   teamId?: string;
+  /** Current episode id (B2 #1712) — scopes the context-bar flow ring's read
+   * to this episode's frozen node chain; null/undefined → project-level. */
+  currentEpisodeId?: string | null;
 }
 
-export function WorkspaceTasks({ projectId, projectName, teamId }: WorkspaceTasksProps) {
+export function WorkspaceTasks({ projectId, projectName, teamId, currentEpisodeId }: WorkspaceTasksProps) {
   const { addToast } = useToast();
   const { currentUserId } = useAuth();
 
@@ -53,11 +56,11 @@ export function WorkspaceTasks({ projectId, projectName, teamId }: WorkspaceTask
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const flow = await loadProjectFlow(projectId);
+      const flow = await loadProjectFlow(projectId, currentEpisodeId ?? undefined);
       if (!cancelled) setProjectStage(flow);
     })();
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, currentEpisodeId]);
 
   const refresh = useCallback(async (agentMap: Record<string, AgentRef>) => {
     setLoading(true);

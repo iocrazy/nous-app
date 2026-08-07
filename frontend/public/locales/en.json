@@ -1975,6 +1975,7 @@
         "button": "Start early",
         "cancelled": "This stage's task was cancelled — restore it in the Todolist before starting it early.",
         "blocked": "This stage can't be started yet.",
+        "episodeMismatch": "This Stage Belongs to a Different Episode — Switch to Its Episode to Start It.",
         "failed": "Failed to start this stage early"
       }
     }

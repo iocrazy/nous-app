@@ -141,6 +141,14 @@ const DEPS_PENDING_PREVIEW = {
   waiting_on: ['Storyboard'],
 };
 
+// B2 #1712: one episode so ProjectWorkspace resolves a non-null
+// `currentEpisodeId` — that's what makes the workflow read + advance chain ride
+// `?episode_id=` on the query (and forces the workflow glob below to end in `*`).
+const EPISODE_ID = 'ep-1';
+const EPISODES_PROGRESS = [
+  { episode_id: EPISODE_ID, title: 'Episode 1', sort_order: 0, script_count: 1, scene_count: 0, shots_total: 0, shots_done: 0, renders_count: 0, status: 'in_progress' },
+];
+
 function json(body: unknown) {
   return (route: Route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
@@ -179,8 +187,15 @@ async function setupWorkspaceStubs(page: Page): Promise<void> {
   await setupStubbedSession(page);
   await page.route('**/api/v1/ai-library/agents', json([]));
   await page.route('**/api/v1/projects?*', json({ success: true, data: [PROJECT] }));
-  await page.route('**/api/v1/projects/*/workflow', json(WORKFLOW_LOCKED));
+  // Episodes progress (B2 #1712) — ≥1 episode so `currentEpisodeId` is non-null.
+  await page.route('**/api/v1/projects/*/episodes/progress', json({ success: true, data: EPISODES_PROGRESS }));
+  // Trailing `*` so the read still matches once it carries `?episode_id=`
+  // (B2 #1712) — otherwise it falls through to the catch-all and the strip
+  // renders empty.
+  await page.route('**/api/v1/projects/*/workflow*', json(WORKFLOW_LOCKED));
   await page.route('**/api/v1/projects/*/advance-preview*', json(DEPS_PENDING_PREVIEW));
+  // Registered AFTER the `/workflow*` glob above so this more-specific board
+  // route stays in front of it (last-registered-wins; the `*` now overlaps it).
   await page.route(
     '**/api/v1/projects/*/workflow/nodes/*/board',
     json({ success: true, data: STAGE_BOARD_DATA_LOCKED }),
@@ -323,7 +338,18 @@ for (const theme of ['dark', 'light'] as const) {
     await setupWorkspaceStubs(page);
     await useEnglishLocale(page);
     await forceTheme(page, theme);
+
+    // B2 #1712 positive assertion — the workflow read must carry the resolved
+    // episode id on the query (proves the `?episode_id=` path, not a null omit).
+    const workflowReads: string[] = [];
+    page.on('request', (req) => {
+      const u = req.url();
+      if (/\/api\/v1\/projects\/[^/]+\/workflow(\?|$)/.test(u)) workflowReads.push(u);
+    });
+
     await openWorkspaceOverview(page);
+
+    expect(workflowReads.some((u) => u.includes(`episode_id=${EPISODE_ID}`))).toBe(true);
 
     const storyboard = page.getByTestId('workflow-strip-node').filter({ hasText: 'Storyboard' });
     await expect(storyboard).toHaveAttribute('data-locked', 'true');

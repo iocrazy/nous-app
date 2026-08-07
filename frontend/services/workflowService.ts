@@ -204,14 +204,19 @@ export const fetchStageLibrary = async (): Promise<StageLibraryItem[]> => {
 // Per-project workflow instance
 // ============================================
 
-/** The project's instance nodes + cursor + running-agent count. */
+/** The project's instance nodes + cursor + running-agent count.
+ * `episodeId` (B2 #1712) narrows the read to one episode's frozen row set;
+ * omitted → the legacy project-level view (URL byte-identical, episode_id
+ * never appears — apiClient's buildUrl skips undefined query values). */
 export const fetchProjectWorkflow = async (
   projectId: string,
+  episodeId?: string,
 ): Promise<ProjectWorkflow> => {
   // NOTE: declares a FastAPI response_model → returns the model directly (no
   // `{data}` envelope). Do not add a `.data` unwrap here.
   const workflow = await apiClient.get<ProjectWorkflow>(
     `/api/v1/projects/${projectId}/workflow`,
+    { query: { episode_id: episodeId || undefined } },
   );
   return { ...workflow, nodes: (workflow.nodes ?? []).map(normalizeInstanceNode) };
 };
@@ -294,9 +299,12 @@ export const updateProjectNode = async (
 export const startEarlyNode = async (
   projectId: string,
   nodeId: string,
+  episodeId?: string,
 ): Promise<ProjectStageNode> => {
   const response = await apiClient.post<Envelope<ProjectStageNode>>(
     `/api/v1/projects/${projectId}/workflow/nodes/${nodeId}/start-early`,
+    undefined,
+    { query: { episode_id: episodeId || undefined } },
   );
   if (!response.data) throw new Error('Empty response from startEarlyNode');
   return normalizeInstanceNode(response.data);
@@ -306,11 +314,12 @@ export const startEarlyNode = async (
 export const fetchAdvancePreview = async (
   projectId: string,
   direction: 'forward' | 'back' = 'forward',
+  episodeId?: string,
 ): Promise<AdvancePreview> => {
   // response_model endpoint → returned directly, no envelope.
   return apiClient.get<AdvancePreview>(
     `/api/v1/projects/${projectId}/advance-preview`,
-    { query: { direction } },
+    { query: { direction, episode_id: episodeId || undefined } },
   );
 };
 
@@ -322,11 +331,12 @@ export const fetchAdvancePreview = async (
 export const executeAdvance = async (
   projectId: string,
   direction: 'forward' | 'back' = 'forward',
+  episodeId?: string,
 ): Promise<AdvancePreview> => {
   const response = await apiClient.post<Envelope<AdvancePreview>>(
     `/api/v1/projects/${projectId}/advance`,
     undefined,
-    { query: { direction } },
+    { query: { direction, episode_id: episodeId || undefined } },
   );
   if (!response.data) throw new Error('Empty response from executeAdvance');
   return response.data;

@@ -161,9 +161,10 @@ export function deriveWorkflowFlow(
  */
 export async function loadProjectFlow(
   projectId: string,
+  episodeId?: string,
 ): Promise<ProjectFlow | null> {
   try {
-    const workflow = await fetchProjectWorkflow(projectId).catch(() => null);
+    const workflow = await fetchProjectWorkflow(projectId, episodeId).catch(() => null);
     return deriveWorkflowFlow(workflow);
   } catch {
     return null;
