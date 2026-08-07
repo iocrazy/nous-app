@@ -141,3 +141,24 @@ extend-exclude = '''
 profile = "black"
 multi_line_output = 3
 line_length = 88
+
+# PyPI 走国内镜像。**这是 lock 里被钉死的 URL，不是运行时可覆盖的开关** ——
+# uv 在 `--frozen`（CI/Docker 的用法）下严格按 uv.lock 记录的 URL 下载，
+# UV_DEFAULT_INDEX 之类的环境变量完全不生效（实测 173 次请求全打
+# files.pythonhosted.org）。所以想换源只能改这里再重新 `uv lock`。
+#
+# 2026-08-07 实测（gpupc 直连，同一个 wheel）：
+#   files.pythonhosted.org  38～165 KB/s，波动剧烈
+#   mirrors.aliyun.com      10.7 MB/s
+# 差两个数量级。当天 CI 与部署各挂一次，重跑三轮分别卡在 virtualenv /
+# dbos / posthog —— 每次卡在不同的包，因为成功的进了缓存、失败的没有。
+# 走 mihomo 代理更慢（60s 无响应），runner 环境本就没有代理变量。
+#
+# 代价：`schema-drift.yml` 跑在 ubuntu-latest（境外），它也会拉阿里云，
+# 比走官方源慢。接受这个代价，因为 self-hosted 承担的是每个 PR 的 CI +
+# 每次合并的部署，频率高一个量级，而 schema-drift 只在 migration 变动时跑。
+# 要回官方源：删掉这一段再 `uv lock` 即可，无残留。
+[[tool.uv.index]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true

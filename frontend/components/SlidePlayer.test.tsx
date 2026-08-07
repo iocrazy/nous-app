@@ -33,8 +33,13 @@ describe('SlidePlayer — onSlideChange', () => {
   it('reports the first slide as soon as the listing lands', async () => {
     const onSlideChange = vi.fn();
     render(<SlidePlayer mediaId="m1" downloadStatus="completed" onSlideChange={onSlideChange} />);
-    await waitFor(() => expect(screen.getByAltText('Slide 1')).toBeInTheDocument());
-    expect(onSlideChange).toHaveBeenCalledWith('a.jpg', 0, 2);
+    // 等的必须是**回调本身**，不能等 DOM 再同步断言回调 —— 图片挂载和
+    // onSlideChange 派发不保证同序，CI 上就真的先渲染出 Slide 1、断言时
+    // 回调仍是 0 次调用（2026-08-07 一次红 CI，本地复现不出来：它取决于
+    // 微任务排队顺序，机器越忙越容易翻车）。
+    // 紧邻的下一个用例本来就是这么写的，所以它从没 flaky 过。
+    await waitFor(() => expect(onSlideChange).toHaveBeenCalledWith('a.jpg', 0, 2));
+    expect(screen.getByAltText('Slide 1')).toBeInTheDocument();
   });
 
   it('reports the new slide when the user advances', async () => {

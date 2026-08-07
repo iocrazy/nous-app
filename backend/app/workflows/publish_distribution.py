@@ -611,7 +611,27 @@ async def run_publish_accounts_step(task_id: int) -> dict[str, Any]:
     if not rows:
         raise RuntimeError(f"publish task {task_id} has no accounts")
 
-    creds = await get_douyin_credentials()
+    # Lazily fetched, NOT eagerly. These are the OAuth app credentials
+    # (client_id/secret) and only the official/h5 channels use them — the
+    # session channel publishes through browser cookies and never touches them.
+    #
+    # Fetching eagerly meant a deployment with no `system_settings
+    # ['distribution.douyin']` row could not publish AT ALL, even a batch that
+    # was 100% session accounts. That is not a hypothetical: an operator whose
+    # Douyin open-platform capabilities are still under review has no
+    # credentials to configure, and the session channel exists precisely so
+    # they can publish anyway. The first real end-to-end publish run of this
+    # module died here — `publish task ... errored: system_settings
+    # ['distribution.douyin'] missing` — with a single session account.
+    #
+    # Cached after the first await so a mixed batch pays for it once.
+    creds_box: dict[str, Any] = {}
+
+    async def creds_lazy():
+        if "v" not in creds_box:
+            creds_box["v"] = await get_douyin_credentials()
+        return creds_box["v"]
+
     # Heartbeat (§7.2): the session channel turns this step from "a few HTTP
     # calls" into "one headed browser + one full video upload PER ACCOUNT",
     # i.e. tens of minutes for a batch. Without a heartbeat the health
@@ -619,11 +639,11 @@ async def run_publish_accounts_step(task_id: int) -> dict[str, Any]:
     # legitimate long batches and staying silent long after a worker dies.
     # Tolerates an empty workflow_id (unit tests, no DBOS runtime).
     async with async_heartbeat_loop(workflow_id=DBOS.workflow_id or ""):
-        statuses = await _run_accounts(rows, accounts_repo, creds, task, repo)
+        statuses = await _run_accounts(rows, accounts_repo, creds_lazy, task, repo)
     return {"statuses": statuses}
 
 
-async def _run_accounts(rows, accounts_repo, creds, task: dict, repo) -> list[str]:
+async def _run_accounts(rows, accounts_repo, creds_lazy, task: dict, repo) -> list[str]:
     """Dispatch each account row, publishing only the ones still 'pending'.
 
     Idempotency guard: a workflow re-dispatch (retry) must NOT re-publish rows
@@ -684,7 +704,10 @@ async def _run_accounts(rows, accounts_repo, creds, task: dict, repo) -> list[st
         # Everything else (including a 'session' row that degraded — see
         # decide_channel) goes down the OAuth/H5 path, which re-runs
         # decide_channel on the same dict and therefore agrees with us.
-        adapter = get_adapter(row.get("platform", "douyin"), creds)
+        # Only here — after decide_channel picked a non-session route — do we
+        # actually need the OAuth app credentials. A session-only batch never
+        # reaches this line and therefore needs no configuration at all.
+        adapter = get_adapter(row.get("platform", "douyin"), await creds_lazy())
         statuses.append(await _publish_one_account(merged, adapter, task, repo))
     return statuses
 

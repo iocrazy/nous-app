@@ -12,6 +12,15 @@ from app.workflows.publish_distribution import (
 )
 
 
+async def _no_creds():
+    """OAuth 凭证的惰性 getter。
+
+    session-only 批次绝不该 await 它 —— 见
+    test_session_only_batch_never_fetches_oauth_credentials。
+    """
+    return {}
+
+
 def test_decide_channel_h5_default():
     assert decide_channel("h5", {"access_token": None}) == "h5"
 
@@ -518,7 +527,9 @@ async def test_run_accounts_only_republishes_pending_rows(monkeypatch):
     repo = _FakeRepo()
     task = {"title": "Hi", "description": None, "resource_ids": ["30"]}
 
-    statuses = await _run_accounts(rows, accounts_repo, creds={}, task=task, repo=repo)
+    statuses = await _run_accounts(
+        rows, accounts_repo, creds_lazy=_no_creds, task=task, repo=repo
+    )
 
     assert statuses == ["success", "pending_share", "cancelled"]
     # only the pending row (account_id 20) triggered a token lookup
@@ -973,7 +984,11 @@ async def test_run_accounts_routes_session_rows_to_the_session_path(monkeypatch)
         }
     ]
     statuses = await _run_accounts(
-        rows, accounts_repo, creds={}, task=_session_task(), repo=_FakeRepo()
+        rows,
+        accounts_repo,
+        creds_lazy=_no_creds,
+        task=_session_task(),
+        repo=_FakeRepo(),
     )
 
     assert statuses == ["success"]
@@ -1005,7 +1020,11 @@ async def test_run_accounts_idempotency_guard_covers_session_rows(monkeypatch):
         }
     ]
     statuses = await _run_accounts(
-        rows, accounts_repo, creds={}, task=_session_task(), repo=_FakeRepo()
+        rows,
+        accounts_repo,
+        creds_lazy=_no_creds,
+        task=_session_task(),
+        repo=_FakeRepo(),
     )
     assert statuses == ["success"]
     assert accounts_repo.session_reads == []
@@ -1039,7 +1058,11 @@ async def test_run_accounts_degrades_session_row_on_an_oauth_account(monkeypatch
         }
     ]
     statuses = await _run_accounts(
-        rows, accounts_repo, creds={}, task=_session_task(), repo=_FakeRepo()
+        rows,
+        accounts_repo,
+        creds_lazy=_no_creds,
+        task=_session_task(),
+        repo=_FakeRepo(),
     )
     assert statuses == ["pending_share"]
 
@@ -1230,3 +1253,56 @@ async def test_a_clean_publish_leaves_no_caveat_behind():
     )
     assert status == "success"
     assert repo.updates[-1][1]["error_message"] is None
+
+
+@pytest.mark.asyncio
+async def test_session_only_batch_never_fetches_oauth_credentials(monkeypatch):
+    """全 session 批次绝不能去取 OAuth 应用凭证。
+
+    回归自这个模块的**第一次真实端到端发布**（2026-08-07）：批次里只有一个
+    session 账号，workflow 却在开跑前无条件 ``await get_douyin_credentials()``
+    而直接炸掉：
+
+        publish task ... errored: system_settings['distribution.douyin'] missing
+
+    ``distribution.douyin`` 装的是开放平台的 client_id/secret，只有
+    official / h5 两条通道用得上；session 通道靠账号自己的 storage_state 驱动
+    浏览器，跟它毫无关系。急取的后果是：**没配这一行的部署一条都发不出去**，
+    哪怕批次 100% 是 session 账号 —— 而开放平台能力还在审核中的运营者根本
+    没有凭证可配，session 通道存在的意义恰恰是让他们照样能发。
+
+    断言方式刻意选了"被调用就炸"而不是计数：只要有人把惰性改回急取，
+    这个用例立刻失败。
+    """
+
+    async def _exploding_creds():
+        raise AssertionError(
+            "session-only batch must not fetch OAuth credentials "
+            "(they are only needed by the official/h5 channels)"
+        )
+
+    async def _fake_session_publish(account, task, repo, accounts_repo, **kw):
+        return "success"
+
+    monkeypatch.setattr(
+        "app.workflows.publish_distribution._publish_one_account_session",
+        _fake_session_publish,
+    )
+    rows = [
+        {
+            "id": "1",
+            "account_id": "900",
+            "status": "pending",
+            "platform": "douyin",
+            "channel": "session",
+            "resource_id": "30",
+        }
+    ]
+    statuses = await _run_accounts(
+        rows,
+        _FakeAccountsRepo(),
+        creds_lazy=_exploding_creds,
+        task=_session_task(),
+        repo=_FakeRepo(),
+    )
+    assert statuses == ["success"]
