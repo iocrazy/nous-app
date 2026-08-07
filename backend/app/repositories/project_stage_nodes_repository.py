@@ -227,6 +227,15 @@ class ProjectStageNodesRepository:
     ) -> List[Dict[str, Any]]:
         """Copy a template's nodes into ``project_stage_nodes`` (idempotent).
 
+        ⚠️ Builds a LEGACY project-level chain — every node it creates has
+        ``episode_id`` NULL. Since B3, production instantiation is per-episode
+        (``instantiate_project_workflow`` → ``instantiate_episode_chains``);
+        this method has NO remaining production caller and is kept only as the
+        shared building block ``_clone_template_chain(episode_id=None)`` and for
+        tests. Do NOT wire it into a new flow: a NULL node on a project that is
+        otherwise per-episode is the silent-stall state the all-or-nothing
+        constraint forbids.
+
         A project that already owns any node is left untouched (returns its
         existing nodes) UNLESS ``expect_fresh`` is set, in which case that
         case raises ``WorkflowAlreadyInstantiated`` instead (the M1.x
@@ -553,6 +562,34 @@ class ProjectStageNodesRepository:
             if existing is not None and expect_fresh:
                 raise WorkflowAlreadyInstantiated()
 
+            # Defense-in-depth for the all-or-nothing constraint: fanning
+            # per-episode chains onto a project that still holds LEGACY
+            # (episode_id NULL) nodes would leave it half-bound — some nodes
+            # episode-scoped, some NULL — the exact state B2's autopilot
+            # legacy-detection silently mis-handles. No wiring reaches this today
+            # (attach 409s via expect_fresh; create runs on fresh projects;
+            # legacy conversion goes through reinstantiate_legacy_as_episodes,
+            # which DELETEs the NULL nodes first), but the contract is
+            # all-or-nothing, so enforce it here rather than trust callers.
+            legacy_null = (
+                (
+                    await session.execute(
+                        select(ProjectStageNodes.id).where(
+                            ProjectStageNodes.project_id == pid,
+                            ProjectStageNodes.episode_id.is_(None),
+                        )
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if legacy_null is not None:
+                raise ValueError(
+                    "cannot fan per-episode chains onto a project that still "
+                    "holds legacy project-level (episode_id NULL) nodes — use "
+                    "reinstantiate_legacy_as_episodes to convert atomically"
+                )
+
             bits = await self._load_template_bits(session, template_id)
             if bits is None:
                 return {}
@@ -677,6 +714,14 @@ class ProjectStageNodesRepository:
                     )
                 return result
 
+            # Load the template BEFORE touching the legacy chain: an empty
+            # template must short-circuit here, never after the DELETE — deleting
+            # then recreating nothing would be silent data loss (the whole point
+            # of this method is a SAFE atomic conversion).
+            bits = await self._load_template_bits(session, template_id)
+            if bits is None:
+                return {}
+
             # Drop the legacy project-level chain (members/deps cascade).
             await session.execute(
                 delete(ProjectStageNodes).where(
@@ -684,10 +729,6 @@ class ProjectStageNodesRepository:
                     ProjectStageNodes.episode_id.is_(None),
                 )
             )
-
-            bits = await self._load_template_bits(session, template_id)
-            if bits is None:
-                return {}
 
             for eid_raw in episode_ids:
                 eid = int(str(eid_raw))
@@ -838,6 +879,29 @@ class ProjectStageNodesRepository:
                 await session.execute(
                     select(ProjectStageNodes.id)
                     .where(ProjectStageNodes.project_id == pid)
+                    .limit(1)
+                )
+            ).first()
+        return row is not None
+
+    async def has_episode_scoped_nodes(self, project_id: str) -> bool:
+        """Whether the project has any per-episode (episode_id non-null) node.
+
+        The signal B3 uses to tell a per-episode project from a legacy
+        project-level one — the same predicate B2's autopilot legacy-detection
+        keys off. Callers that would insert a project-level (episode_id NULL)
+        node use it to refuse, since a NULL node on a per-episode project is the
+        silent-stall state the all-or-nothing constraint forbids.
+        """
+        pid = int(str(project_id))
+        async with read_scope() as session:
+            row = (
+                await session.execute(
+                    select(ProjectStageNodes.id)
+                    .where(
+                        ProjectStageNodes.project_id == pid,
+                        ProjectStageNodes.episode_id.is_not(None),
+                    )
                     .limit(1)
                 )
             ).first()

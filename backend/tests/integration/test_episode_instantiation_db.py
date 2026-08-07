@@ -453,6 +453,121 @@ async def test_reinstantiate_project_service_ignites_legacy_project(
         await conn.close()
 
 
+async def test_reinstantiate_empty_template_never_drops_legacy_chain(
+    patched_engine, cleanup_test_rows, integration_db_url
+):
+    """Review I1: a template with zero nodes must NOT delete the legacy chain.
+    The bits-empty short-circuit has to happen BEFORE the DELETE, or the
+    conversion becomes silent data loss (legacy gone, nothing recreated)."""
+    from app.repositories.project_stage_nodes_repository import (
+        get_project_stage_nodes_repository,
+    )
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        owner_id, team_id = await _owner_and_team(conn)
+        tid, _tpl = await _seed_template(conn, team_id)
+        project_id, ep_ids = await _seed_project_with_episodes(conn, owner_id, 2)
+        # empty template (no nodes) — the data-loss trigger
+        empty_tid = await conn.fetchval(
+            "INSERT INTO workflow_templates (team_id, name) VALUES ($1, $2) "
+            "RETURNING id",
+            team_id,
+            f"{_PREFIX}Empty {uuid.uuid4().hex[:8]}",
+        )
+    finally:
+        await conn.close()
+
+    repo = get_project_stage_nodes_repository()
+    await repo.instantiate_from_template(str(project_id), str(tid), method="ai")
+
+    # Reinstantiate against the EMPTY template — must not touch the legacy chain.
+    await repo.reinstantiate_legacy_as_episodes(
+        str(project_id), str(empty_tid), [str(e) for e in ep_ids], method="ai"
+    )
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM project_stage_nodes "
+                "WHERE project_id=$1 AND episode_id IS NULL",
+                project_id,
+            )
+            == 2  # legacy chain preserved — no data loss
+        )
+    finally:
+        await conn.close()
+
+
+async def test_instantiate_episode_chains_refuses_legacy_populated_project(
+    patched_engine, cleanup_test_rows, integration_db_url
+):
+    """Review I2: fanning per-episode chains onto a project that still holds
+    legacy (episode_id NULL) nodes would create the forbidden half-bound state.
+    Defense-in-depth: refuse it."""
+    from app.repositories.project_stage_nodes_repository import (
+        get_project_stage_nodes_repository,
+    )
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        owner_id, team_id = await _owner_and_team(conn)
+        tid, _tpl = await _seed_template(conn, team_id)
+        project_id, ep_ids = await _seed_project_with_episodes(conn, owner_id, 1)
+    finally:
+        await conn.close()
+
+    repo = get_project_stage_nodes_repository()
+    await repo.instantiate_from_template(str(project_id), str(tid), method="ai")
+
+    with pytest.raises(ValueError):
+        await repo.instantiate_episode_chains(
+            str(project_id), str(tid), [str(ep_ids[0])], method="ai"
+        )
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        # nothing added on top of the legacy chain
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM project_stage_nodes "
+                "WHERE project_id=$1 AND episode_id IS NOT NULL",
+                project_id,
+            )
+            == 0
+        )
+    finally:
+        await conn.close()
+
+
+async def test_add_node_refuses_per_episode_project(
+    patched_engine, cleanup_test_rows, integration_db_url
+):
+    """Review I3: adding a project-level (episode_id NULL) node to a per-episode
+    project manufactures the silent-stall state B2's autopilot detection falls
+    into. add_project_node must fail loudly instead."""
+    from app.repositories.project_stage_nodes_repository import (
+        get_project_stage_nodes_repository,
+    )
+    from app.services.workflow.node_mutations import add_project_node
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        owner_id, team_id = await _owner_and_team(conn)
+        tid, _tpl = await _seed_template(conn, team_id)
+        project_id, ep_ids = await _seed_project_with_episodes(conn, owner_id, 1)
+    finally:
+        await conn.close()
+
+    repo = get_project_stage_nodes_repository()
+    # Make it per-episode.
+    await repo.instantiate_episode_chains(
+        str(project_id), str(tid), [str(ep_ids[0])], method="ai"
+    )
+
+    with pytest.raises(ValueError):
+        await add_project_node(str(project_id), name="New stage", sort_order=99)
+
+
 async def test_reinstantiate_legacy_as_episodes_is_atomic_and_idempotent(
     patched_engine, cleanup_test_rows, integration_db_url
 ):

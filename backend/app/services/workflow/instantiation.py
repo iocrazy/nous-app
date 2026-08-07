@@ -1,10 +1,12 @@
-"""Instantiate a project's workflow at creation time (M1 PR-B).
+"""Instantiate a project's workflow (M1 PR-B; B3 per-episode fan-out).
 
-Copies a team template's nodes onto the project (``project_stage_nodes``), sets
-the ``projects.current_node_id`` cursor to the first non-skipped group, and
-fires the arrival hook so that group's mirror issues appear in the Todolist.
+Copies a team template's nodes onto the project (``project_stage_nodes``) — one
+node chain PER episode (B3) — sets each episode's ``episodes.current_node_id``
+cursor to its first non-skipped group, and fires that group's arrival hooks so
+its mirror issues appear in the Todolist.
 
-All best-effort: a workflow hiccup must never fail project creation (same
+All best-effort: a workflow hiccup must never fail project (or episode)
+creation, and one episode's arrival failure must never block the others (same
 discipline as the born-on-first-stage / default-episode enrichment blocks in
 ``ProjectsService.create_project``).
 """
@@ -106,12 +108,21 @@ async def instantiate_project_workflow(
     all_nodes: List[Dict[str, Any]] = []
     for episode_id, nodes in chains.items():
         all_nodes.extend(nodes)
-        await _fire_episode_arrival(
-            project_id=str(project_id),
-            episode_id=str(episode_id),
-            nodes=nodes,
-            user_id=str(user_id),
-        )
+        # Per-episode isolation: one episode's cursor/hook failure must never
+        # block the others (the nodes are already committed atomically above;
+        # arrival is best-effort enrichment).
+        try:
+            await _fire_episode_arrival(
+                project_id=str(project_id),
+                episode_id=str(episode_id),
+                nodes=nodes,
+                user_id=str(user_id),
+            )
+        except Exception as exc:  # noqa: BLE001 — per-episode best-effort
+            logger.warning(
+                f"[workflow] arrival failed for project {project_id} episode "
+                f"{episode_id}: {exc!r}"
+            )
 
     # M4 Autopilot (task O2, spec §2 trigger 2): a just-arrived group may
     # contain auto_start nodes. One project-level tick is enough — the tick
@@ -321,8 +332,9 @@ async def _close_legacy_mirror_issues(
             try:
                 origin_id = build_stage_origin_id(project_id, nid)
                 for issue in await issues_repo.list_by_origin(ORIGIN_KIND, origin_id):
-                    if issue.get("id") is not None and issue.get("status") not in (
-                        terminal
+                    if (
+                        issue.get("id") is not None
+                        and issue.get("status") not in terminal
                     ):
                         await issues_repo.transition_status(
                             int(issue["id"]), "cancelled"
@@ -413,12 +425,20 @@ async def reinstantiate_project_per_episode(
     node_count = 0
     for episode_id, nodes in chains.items():
         node_count += len(nodes)
-        await _fire_episode_arrival(
-            project_id=str(project_id),
-            episode_id=str(episode_id),
-            nodes=nodes,
-            user_id=str(user_id),
-        )
+        # Per-episode isolation (see instantiate_project_workflow): one
+        # episode's arrival failure must not block the rest of the ignition.
+        try:
+            await _fire_episode_arrival(
+                project_id=str(project_id),
+                episode_id=str(episode_id),
+                nodes=nodes,
+                user_id=str(user_id),
+            )
+        except Exception as exc:  # noqa: BLE001 — per-episode best-effort
+            logger.warning(
+                f"[workflow] arrival failed during reinstantiation for project "
+                f"{project_id} episode {episode_id}: {exc!r}"
+            )
 
     try:
         from app.workflows.autopilot import enqueue_autopilot_tick
