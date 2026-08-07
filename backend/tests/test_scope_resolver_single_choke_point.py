@@ -208,6 +208,18 @@ REPO_LAYER_ALLOWED_PATHS: dict[str, str] = {
         "writes set_current_node_id — episode_id comes from the server-bound "
         "dispatch scope / a project-gated REST arg, never a model-supplied id."
     ),
+    "services/workflow/instantiation.py": (
+        "pre-A2 workflow instantiation service, reached only from the "
+        "authenticated, project-access-gated REST layer (attach / create-"
+        "project / create-episode / reinstantiate-per-episode). B3 fans a "
+        "template out per episode: reads get_episode_repository().list_by_"
+        "project to enumerate the project's OWN episodes and set_current_node_"
+        "id to seat each episode's cursor. The identity is the project the "
+        "caller already owns — every episode id is the project's own or a "
+        "project-gated REST arg, never a model-supplied id — a system write "
+        "like autopilot.py's tick, not the agent-tool id-resolution this guard "
+        "protects."
+    ),
     "services/workflow/node_folders.py": (
         "pre-A2 deliverable-folder helper called from advance_service. B2 T2 "
         "reads get_episode_repository().get_by_id to prefix a node's folder "
