@@ -1,6 +1,5 @@
 import pytest
 
-
 from app.workflows.publish_distribution import (
     _account_publish_opts,
     _publish_one_account,
