@@ -35,7 +35,7 @@ import datetime
 import uuid
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import delete, func, select, text, update
 
 from app.db.session import read_scope, write_scope
 from app.models import (
@@ -612,6 +612,179 @@ class ProjectStageNodesRepository:
             method=method,
         )
         return res.get(str(episode_id), [])
+
+    async def reinstantiate_legacy_as_episodes(
+        self,
+        project_id: str,
+        template_id: str,
+        episode_ids: List[str],
+        *,
+        method: Optional[str] = None,
+        overrides: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Backfill (B3 §6): atomically convert a project's LEGACY project-level
+        chain (``episode_id`` NULL) into per-episode chains.
+
+        The legacy-node DELETE and the per-episode fan-out run in ONE
+        transaction under the same per-project advisory lock, so the mixed
+        NULL/non-NULL state B2's autopilot audit forbids never exists on disk —
+        a mid-fan-out failure rolls the DELETE back too, leaving the legacy
+        chain intact. Deleting a node cascades to its members/deps (FK ON DELETE
+        CASCADE) and NULLs any episode cursor pointing at it (there are none for
+        a legacy project). Idempotent: a project already holding ANY
+        episode-scoped node is left untouched and its current per-episode chains
+        are returned.
+
+        Mirror-issue cleanup for the deleted legacy nodes is the caller's job
+        (issues reference nodes by string origin_id, not FK, so they do not
+        cascade) — see ``reinstantiate_project_per_episode``.
+        """
+        pid = int(str(project_id))
+        overrides_by_src: Dict[str, Dict[str, Any]] = {}
+        for ov in overrides or []:
+            key = ov.get("source_template_node_id")
+            if key is not None:
+                overrides_by_src[str(key)] = ov
+
+        result: Dict[str, List[Dict[str, Any]]] = {}
+        async with write_scope() as session:
+            await session.execute(
+                text(
+                    "SELECT pg_advisory_xact_lock("
+                    "hashtextextended('project_stage_nodes_instantiate:' || :pid, 0))"
+                ),
+                {"pid": str(pid)},
+            )
+
+            # Idempotency: already per-episode? (any node with a non-null
+            # episode_id). Leave it untouched and return its current chains.
+            per_episode = (
+                (
+                    await session.execute(
+                        select(ProjectStageNodes.id).where(
+                            ProjectStageNodes.project_id == pid,
+                            ProjectStageNodes.episode_id.is_not(None),
+                        )
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if per_episode is not None:
+                for eid_raw in episode_ids:
+                    result[str(eid_raw)] = await self._list_nodes_in_session(
+                        session, pid, episode_id=int(str(eid_raw))
+                    )
+                return result
+
+            # Drop the legacy project-level chain (members/deps cascade).
+            await session.execute(
+                delete(ProjectStageNodes).where(
+                    ProjectStageNodes.project_id == pid,
+                    ProjectStageNodes.episode_id.is_(None),
+                )
+            )
+
+            bits = await self._load_template_bits(session, template_id)
+            if bits is None:
+                return {}
+
+            for eid_raw in episode_ids:
+                eid = int(str(eid_raw))
+                await self._clone_template_chain(
+                    session,
+                    pid,
+                    bits,
+                    method=method,
+                    overrides_by_src=overrides_by_src,
+                    episode_id=eid,
+                )
+                result[str(eid_raw)] = await self._list_nodes_in_session(
+                    session, pid, episode_id=eid
+                )
+            return result
+
+    async def infer_legacy_binding(
+        self, project_id: str
+    ) -> tuple[Optional[int], Optional[str]]:
+        """Infer ``(template_id, method)`` for a legacy project-level chain
+        (B3 backfill §6).
+
+        ``template_id`` is read from any legacy node's
+        ``source_template_node_id`` → its template. ``method`` is recovered from
+        the Shooting/Canvas skip state the original instantiation baked in:
+        Shooting skipped → ``'ai'``; Shooting + Canvas sharing a
+        ``parallel_group`` → ``'hybrid'``; otherwise → ``'live'``. Returns
+        ``(None, None)`` when the project has no legacy (episode_id NULL) nodes —
+        i.e. it is already per-episode, or never had a workflow.
+
+        Fragile by design (see spec §10): a mis-inferred method only affects the
+        Shooting/Canvas skip presentation of the reinstantiated chains, never
+        their structure — and the backfill caller may override it explicitly.
+        """
+        pid = int(str(project_id))
+        async with read_scope() as session:
+            legacy = (
+                (
+                    await session.execute(
+                        select(ProjectStageNodes).where(
+                            ProjectStageNodes.project_id == pid,
+                            ProjectStageNodes.episode_id.is_(None),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if not legacy:
+                return None, None
+
+            template_id: Optional[int] = None
+            src_ids = [
+                n.source_template_node_id
+                for n in legacy
+                if n.source_template_node_id is not None
+            ]
+            if src_ids:
+                template_id = (
+                    await session.execute(
+                        select(WorkflowTemplateNodes.template_id)
+                        .where(WorkflowTemplateNodes.id == src_ids[0])
+                        .limit(1)
+                    )
+                ).scalars().first()
+
+            slug_map = await self._load_slug_map(session)
+            shooting = None
+            canvas = None
+            for n in legacy:
+                slug = (
+                    slug_map.get(n.legacy_stage_id)
+                    if n.legacy_stage_id is not None
+                    else None
+                )
+                if slug == _SLUG_SHOOTING:
+                    shooting = n
+                elif slug == _SLUG_CANVAS:
+                    canvas = n
+
+            method: Optional[str] = None
+            if shooting is not None:
+                if shooting.skipped:
+                    method = "ai"
+                elif (
+                    canvas is not None
+                    and shooting.parallel_group is not None
+                    and shooting.parallel_group == canvas.parallel_group
+                ):
+                    method = "hybrid"
+                else:
+                    method = "live"
+
+            return (
+                int(template_id) if template_id is not None else None,
+                method,
+            )
 
     async def _list_nodes_in_session(
         self, session, pid: int, episode_id: Optional[int] = None

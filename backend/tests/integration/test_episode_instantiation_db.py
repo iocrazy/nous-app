@@ -374,6 +374,186 @@ async def test_single_episode_workflow_service_sets_new_episode_cursor(
         await conn.close()
 
 
+async def test_reinstantiate_project_service_ignites_legacy_project(
+    patched_engine, cleanup_test_rows, integration_db_url
+):
+    """The backfill SERVICE ignites a sleeping legacy project end-to-end: infers
+    the template from its existing nodes, converts to per-episode chains, writes
+    the project binding, and sets each episode's cursor."""
+    from app.repositories.project_stage_nodes_repository import (
+        get_project_stage_nodes_repository,
+    )
+    from app.services.workflow.instantiation import (
+        reinstantiate_project_per_episode,
+    )
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        owner_id, team_id = await _owner_and_team(conn)
+        tid, _tpl = await _seed_template(conn, team_id)
+        project_id, ep_ids = await _seed_project_with_episodes(conn, owner_id, 2)
+    finally:
+        await conn.close()
+
+    # Sleeping legacy state: one project-level chain, no binding, no cursors.
+    repo = get_project_stage_nodes_repository()
+    await repo.instantiate_from_template(str(project_id), str(tid), method="ai")
+
+    result = await reinstantiate_project_per_episode(
+        str(project_id), user_id=str(owner_id)
+    )
+    assert result["converted"] is True
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        # legacy gone, per-episode chains in, binding written
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM project_stage_nodes "
+                "WHERE project_id=$1 AND episode_id IS NULL",
+                project_id,
+            )
+            == 0
+        )
+        assert (
+            await conn.fetchval(
+                "SELECT workflow_template_id FROM projects WHERE id=$1", project_id
+            )
+            == tid
+        )
+        for eid in ep_ids:
+            cur = await conn.fetchval(
+                "SELECT current_node_id FROM episodes WHERE id=$1", eid
+            )
+            assert cur is not None
+            assert (
+                await conn.fetchval(
+                    "SELECT episode_id FROM project_stage_nodes WHERE id=$1", cur
+                )
+                == eid
+            )
+    finally:
+        await conn.close()
+
+    # Idempotent: already per-episode → reports not converted, no doubling.
+    result2 = await reinstantiate_project_per_episode(
+        str(project_id), user_id=str(owner_id)
+    )
+    assert result2["converted"] is False
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM project_stage_nodes WHERE project_id=$1",
+                project_id,
+            )
+            == 4
+        )
+    finally:
+        await conn.close()
+
+
+async def test_reinstantiate_legacy_as_episodes_is_atomic_and_idempotent(
+    patched_engine, cleanup_test_rows, integration_db_url
+):
+    """The backfill repo method converts a legacy project-level chain
+    (episode_id NULL) into per-episode chains in ONE transaction: the legacy
+    delete + the fan-out either both land or both roll back (never the mixed
+    NULL/non-NULL state B2 forbids). Idempotent once already per-episode."""
+    from app.repositories.project_stage_nodes_repository import (
+        get_project_stage_nodes_repository,
+    )
+
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        owner_id, team_id = await _owner_and_team(conn)
+        tid, _tpl = await _seed_template(conn, team_id)
+        project_id, ep_ids = await _seed_project_with_episodes(conn, owner_id, 2)
+    finally:
+        await conn.close()
+
+    repo = get_project_stage_nodes_repository()
+
+    # Start in the legacy state: one project-level chain, episode_id all NULL.
+    await repo.instantiate_from_template(str(project_id), str(tid), method="ai")
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM project_stage_nodes "
+                "WHERE project_id=$1 AND episode_id IS NULL",
+                project_id,
+            )
+            == 2
+        )
+    finally:
+        await conn.close()
+
+    # Atomicity: a bad episode mid-fan-out must roll BACK the legacy delete too.
+    from sqlalchemy.exc import IntegrityError
+
+    with pytest.raises(IntegrityError):
+        await repo.reinstantiate_legacy_as_episodes(
+            str(project_id),
+            str(tid),
+            [str(ep_ids[0]), "999999999999999999"],
+            method="ai",
+        )
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        # legacy chain untouched — rollback preserved it
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM project_stage_nodes "
+                "WHERE project_id=$1 AND episode_id IS NULL",
+                project_id,
+            )
+            == 2
+        )
+    finally:
+        await conn.close()
+
+    # Happy path: legacy gone, per-episode chains in.
+    await repo.reinstantiate_legacy_as_episodes(
+        str(project_id), str(tid), [str(e) for e in ep_ids], method="ai"
+    )
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM project_stage_nodes "
+                "WHERE project_id=$1 AND episode_id IS NULL",
+                project_id,
+            )
+            == 0
+        )
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM project_stage_nodes WHERE project_id=$1",
+                project_id,
+            )
+            == 4
+        )
+    finally:
+        await conn.close()
+
+    # Idempotent: already per-episode → no-op, no doubling.
+    await repo.reinstantiate_legacy_as_episodes(
+        str(project_id), str(tid), [str(e) for e in ep_ids], method="ai"
+    )
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM project_stage_nodes WHERE project_id=$1",
+                project_id,
+            )
+            == 4
+        )
+    finally:
+        await conn.close()
+
+
 async def test_single_episode_chain_reads_project_binding(
     patched_engine, cleanup_test_rows, integration_db_url
 ):

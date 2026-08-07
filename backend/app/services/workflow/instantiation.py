@@ -294,3 +294,146 @@ async def maybe_instantiate_episode_workflow(
             f"[workflow] episode instantiation failed for project "
             f"{project_id} episode {episode_id}: {exc!r}"
         )
+
+
+async def _close_legacy_mirror_issues(
+    project_id: str, node_ids: List[Any]
+) -> None:
+    """Cancel the mirror issues of now-deleted legacy nodes (B3 backfill).
+
+    Mirror issues reference their node by string ``origin_id`` (not an FK), so
+    dropping the legacy nodes leaves their Todolist issues orphaned. Transition
+    each non-terminal one to ``cancelled``. Entirely best-effort — a cleanup
+    hiccup must never undo a successful conversion.
+    """
+    if not node_ids:
+        return
+    try:
+        from app.repositories.issue_repository import get_issue_repository
+        from app.services.library.project_stage_issues import (
+            ORIGIN_KIND,
+            build_stage_origin_id,
+        )
+
+        issues_repo = get_issue_repository()
+        terminal = {"done", "cancelled"}
+        for nid in node_ids:
+            try:
+                origin_id = build_stage_origin_id(project_id, nid)
+                for issue in await issues_repo.list_by_origin(ORIGIN_KIND, origin_id):
+                    if issue.get("id") is not None and issue.get("status") not in (
+                        terminal
+                    ):
+                        await issues_repo.transition_status(
+                            int(issue["id"]), "cancelled"
+                        )
+            except Exception as exc:  # noqa: BLE001 — per-node best-effort
+                logger.warning(
+                    f"[workflow] legacy mirror-issue close failed for project "
+                    f"{project_id} node {nid}: {exc!r}"
+                )
+    except Exception as exc:  # noqa: BLE001 — cleanup is enrichment only
+        logger.warning(
+            f"[workflow] legacy mirror-issue cleanup failed for project "
+            f"{project_id}: {exc!r}"
+        )
+
+
+async def reinstantiate_project_per_episode(
+    project_id: str,
+    *,
+    user_id: str,
+    method: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Ignite a sleeping LEGACY project (B3 backfill §6): atomically convert its
+    project-level node chain into per-episode chains, store the binding, set
+    each episode's cursor, fire arrival hooks, and cancel the old mirror issues.
+
+    Idempotent: a project already per-episode (no legacy nodes) returns
+    ``{"converted": False, ...}`` and touches nothing. The atomic delete +
+    fan-out lives in ``reinstantiate_legacy_as_episodes`` (one transaction, no
+    mixed NULL/non-NULL state); everything else here is best-effort enrichment
+    layered on top, exactly like ``instantiate_project_workflow``.
+
+    ``method`` overrides the value inferred from the legacy chain's skip state
+    (spec §6/§10) — pass it when igniting a project whose original method the
+    inference might not recover (e.g. hybrid).
+    """
+    from app.repositories.episode_repository import get_episode_repository
+    from app.repositories.project_stage_nodes_repository import (
+        get_project_stage_nodes_repository,
+    )
+    from app.repositories.projects_repository import get_projects_repository
+
+    repo = get_project_stage_nodes_repository()
+
+    template_id, inferred_method = await repo.infer_legacy_binding(str(project_id))
+    if template_id is None:
+        return {"converted": False, "reason": "no_legacy_chain"}
+
+    method = method or inferred_method
+
+    episodes = await get_episode_repository().list_by_project(str(project_id))
+    episode_ids = [str(e["id"]) for e in episodes]
+    if not episode_ids:
+        return {"converted": False, "reason": "no_episodes"}
+
+    # Capture the legacy node ids BEFORE the conversion deletes them, so their
+    # orphaned mirror issues can be cancelled once the conversion succeeds.
+    all_nodes = await repo.list_nodes(str(project_id))
+    legacy_node_ids = [n["id"] for n in all_nodes if n.get("episode_id") is None]
+
+    chains = await repo.reinstantiate_legacy_as_episodes(
+        str(project_id),
+        str(template_id),
+        episode_ids,
+        method=method,
+    )
+
+    # Store the binding + clear the now-stale project-level cursor. Best-effort
+    # (same discipline as instantiate_project_workflow).
+    try:
+        await get_projects_repository().update_project(
+            str(project_id),
+            {
+                "workflow_template_id": int(template_id),
+                "workflow_method": method,
+                "current_node_id": None,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 — binding is enrichment
+        logger.error(
+            f"[workflow] binding write failed during reinstantiation for "
+            f"project {project_id}: {exc!r}"
+        )
+
+    # Now that conversion committed, cancel the deleted legacy nodes' issues.
+    await _close_legacy_mirror_issues(str(project_id), legacy_node_ids)
+
+    node_count = 0
+    for episode_id, nodes in chains.items():
+        node_count += len(nodes)
+        await _fire_episode_arrival(
+            project_id=str(project_id),
+            episode_id=str(episode_id),
+            nodes=nodes,
+            user_id=str(user_id),
+        )
+
+    try:
+        from app.workflows.autopilot import enqueue_autopilot_tick
+
+        await enqueue_autopilot_tick(str(project_id))
+    except Exception as exc:  # noqa: BLE001 — enrichment only
+        logger.warning(
+            f"[workflow] autopilot tick enqueue failed for project "
+            f"{project_id}: {exc!r}"
+        )
+
+    return {
+        "converted": True,
+        "episodes": len(chains),
+        "nodes": node_count,
+        "template_id": str(template_id),
+        "method": method,
+    }
