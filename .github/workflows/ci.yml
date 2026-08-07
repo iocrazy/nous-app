@@ -170,6 +170,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # nous-core 是 pyo3 扩展，编译时要链接一个具体的 CPython。不指定的话
+      # pyo3 的 build script 去 PATH 里找 —— 于是编译用的解释器由 runner 的
+      # 系统 python 决定，跟 .python-version 无关。
+      #
+      # 这在 ubuntu-latest 上一直没暴露（系统 python 恰好是 3.12，在 pyo3
+      # 0.22 支持范围内）；迁到 self-hosted 立刻炸：
+      #   error: the configured Python interpreter version (3.14) is newer
+      #          than PyO3's maximum supported version (3.13)
+      # gpupc 的系统 python 是 3.14。同一份代码换台机器就编不过，正是
+      # "版本声明必须单一来源" 要消灭的那类问题。
+      - uses: actions/setup-python@v5
+        id: setup-python
+        with:
+          python-version-file: .python-version
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -179,7 +194,13 @@ jobs:
           workspaces: nous-core
 
       - name: Check compilation
+        env:
+          # 显式钉死，不靠 PATH 顺序 —— setup-python 装的解释器未必排在
+          # 系统 python 前面，而 pyo3 只认它找到的第一个。
+          PYO3_PYTHON: ${{ steps.setup-python.outputs.python-path }}
         run: cargo check
 
       - name: Clippy lint
+        env:
+          PYO3_PYTHON: ${{ steps.setup-python.outputs.python-path }}
         run: cargo clippy -- -D warnings
