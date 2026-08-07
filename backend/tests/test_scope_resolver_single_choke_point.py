@@ -186,6 +186,26 @@ REPO_LAYER_ALLOWED_PATHS: dict[str, str] = {
         "owns — no user-supplied scope to resolve — so this is a system read, "
         "not the agent-tool id-resolution this guard protects."
     ),
+    "api/projects_router.py": (
+        "authenticated REST layer — the /workflow + /advance + start-early "
+        "endpoints. B2 T3 reads get_episode_repository().get_by_id to verify a "
+        "client-supplied episode_id belongs to the path project (_require_"
+        "project_episode → 404) before scoping the workflow to it; the caller "
+        "is already project-access-gated, id is validated, not model-supplied."
+    ),
+    "services/workflow/advance_service.py": (
+        "pre-A2 workflow advance engine, reached from the authenticated REST "
+        "/advance + autopilot. B2 T1 sank the cursor to episode level: reads "
+        "get_episode_repository().get_by_id(episode_id).current_node_id and "
+        "writes set_current_node_id — episode_id comes from the server-bound "
+        "dispatch scope / a project-gated REST arg, never a model-supplied id."
+    ),
+    "services/workflow/node_folders.py": (
+        "pre-A2 deliverable-folder helper called from advance_service. B2 T2 "
+        "reads get_episode_repository().get_by_id to prefix a node's folder "
+        "name per episode (breaks the cross-episode shared-folder P0 trap); "
+        "episode_id is the node's own frozen surface scope, not model-supplied."
+    ),
     "workflows/script_import.py": (
         "pre-A2 DBOS workflow (fountain/prose script import), triggered "
         "from the authenticated REST layer; constructs "
