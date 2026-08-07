@@ -28,8 +28,16 @@ worth reading before trusting one:
   declaration options in the 对作品内容添加声明 dialog.
 - *Reference project's 2026-06 field notes*: the upload/editor/cover selectors
   and the schedule field's placeholder, reproduced faithfully.
-- *Inference from Semi Design's markup*: the "allow others to save" switch. The
-  reference implements it nowhere and it has not been observed here.
+- *Verified against the live editor, 2026-08-07*: 「保存权限」. It had been an
+  **inference** from Semi's markup — an "allow others to save" switch that the
+  reference project implements nowhere and that nobody had ever observed. The
+  first real publish run reached the editor and proved the inference wrong: the
+  control is a 允许 / 不允许 radio pair, and none of the three guessed captions
+  ("允许他人保存视频" / "允许他人保存" / "允许下载") exist on the page at all.
+  Selection state lives in `data-checked` on the enclosing `<label>`.
+  **Lesson worth keeping**: an inferred selector is not a weak fact, it is a
+  *placeholder for a fact*. This one sat here reading like documentation, with
+  passing unit tests built on the same guess, until a real run touched it.
 
 **Which is why text is the primary handle and class is the fallback**, not the
 other way round. The console names its nodes `<role>-<hash>` and the hash
@@ -163,7 +171,25 @@ VISIBILITY_LABELS: dict[str, tuple[str, ...]] = {
     "private": ("仅自己可见", "私密"),
 }
 
-DOWNLOAD_TOGGLE_TEXTS = ("允许他人保存视频", "允许他人保存", "允许下载")
+# 「保存权限」是一组 radio（允许 / 不允许），**不是开关**。
+#
+# 旧实现找的是 Semi 开关 + 文案 ("允许他人保存视频", "允许他人保存",
+# "允许下载")，三个在 2026-08-07 的真实发布页上**一个都不存在** —— 本模块
+# 第一次真跑到浏览器就死在这里（reason=download_control_missing）。真实结构
+# 与「谁可以看」完全同构：
+#
+#   <label class="radio-…" data-checked="true">
+#     <input type="checkbox" class="radio-native-…" value="0">
+#     <span>公开 </span>
+#   </label>
+#
+# ⚠️ `exact=True` 不可省：**「允许」是「不允许」的子串**，非精确匹配会把
+# 「不允许」也算进来，于是想关下载反而可能点开它 —— 正是这个字段最不能
+# 出的错。`_click_radio_labelled` 已经是 exact 的，所以直接复用它。
+DOWNLOAD_LABELS: dict[bool, tuple[str, ...]] = {
+    True: ("允许",),
+    False: ("不允许",),
+}
 
 # What the platform does when we touch nothing. `_apply_options` leans on this:
 # a request that matches the default is satisfied by doing nothing, so a missing
@@ -382,6 +408,9 @@ def download_needs_control(allow_download: bool) -> bool:
     return bool(allow_download) != DEFAULT_ALLOW_DOWNLOAD
 
 
+# ⚠️ 当前**没有使用者**：「保存权限」在 2026-08-07 已从 Semi 开关改成
+# 一组 radio（见 DOWNLOAD_LABELS）。保留是因为页面上别处仍可能出现开关，
+# 而这段判定逻辑本身没错。要是过一阵仍然没人用，就该删掉。
 def switch_is_on(class_attribute: str | None) -> bool:
     """Read a Semi switch's state off its class list. Pure."""
     return SEMI_SWITCH_CHECKED_CLASS in (class_attribute or "")
@@ -920,26 +949,59 @@ async def _select_visibility(page: Any, visibility: str, click_ms: int) -> bool:
     return False
 
 
+async def _radio_is_checked(page: Any, label: str) -> bool | None:
+    """Is the radio captioned `label` currently selected?
+
+    Reads `data-checked` off the enclosing `<label>`. Returns None when the
+    answer cannot be determined — callers must NOT read that as "no", or a page
+    whose markup shifted again would silently look like a successful click.
+    """
+    try:
+        return await page.evaluate(
+            """(want) => {
+                const el = [...document.querySelectorAll('*')].find(
+                    e => e.children.length === 0 && (e.innerText || '').trim() === want
+                );
+                if (!el) return null;
+                const box = el.closest('label');
+                if (!box) return null;
+                return box.getAttribute('data-checked') === 'true';
+            }""",
+            label,
+        )
+    except Exception:
+        return None
+
+
 async def _set_download_toggle(page: Any, allow_download: bool, click_ms: int) -> bool:
-    for text in DOWNLOAD_TOGGLE_TEXTS:
-        try:
-            label = page.get_by_text(text, exact=False).first
-            if not await label.count():
-                continue
-            # Walk up a few levels to the row that owns the switch. Semi does
-            # not associate the two with anything queryable, so proximity in the
-            # tree is the only handle available.
-            switch = label.locator(SWITCH_NEAR_LABEL_XPATH).first
-            if not await switch.count():
-                continue
-            if switch_is_on(await switch.get_attribute("class")) == allow_download:
-                return True
-            native = switch.locator(SEMI_SWITCH_INPUT_SELECTOR).first
-            target = native if await native.count() else switch
-            if await click_element(target, click_ms):
-                return True
-        except Exception:
+    """Pick 允许 / 不允许 under 「保存权限」.
+
+    Same radio group shape as visibility, so it goes through the same helper
+    (`_click_radio_labelled`, which matches captions with `exact=True`).
+
+    The click is **verified**, not assumed: clicking a radio is idempotent, so a
+    click that lands on nothing looks exactly like one that worked. Since the
+    caller turns a False return into a refused publish, guessing here would
+    either publish with the wrong download permission or refuse a good publish.
+    `data-checked` is the platform's own answer to "is it selected now".
+    """
+    want = bool(allow_download)
+    for label in DOWNLOAD_LABELS[want]:
+        if not await _click_radio_labelled(page, label, click_ms):
             continue
+        checked = await _radio_is_checked(page, label)
+        if checked is True:
+            return True
+        if checked is None:
+            # Markup we no longer recognise. The click may well have worked, but
+            # unverifiable is not the same as verified — fail and let the caller
+            # refuse rather than publish on a guess.
+            logger.warning(
+                "[douyin.publish] clicked 保存权限 '%s' but could not read "
+                "data-checked; treating as unverified",
+                label,
+            )
+            return False
     return False
 
 
