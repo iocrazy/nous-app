@@ -178,6 +178,14 @@ REPO_LAYER_ALLOWED_PATHS: dict[str, str] = {
         "ScriptSceneRepository() directly to persist_scenes — found by the "
         "A2 review widening the repo-class-construction pattern"
     ),
+    "workflows/autopilot.py": (
+        "scheduled/system DBOS workflow (not an agent-tool scope path). B2 T4 "
+        "made the per-project tick loop over the project's episodes: it reads "
+        "``get_episode_repository().list_by_project(project_id)`` to enumerate "
+        "them, then advances each. The identity is the project the tick already "
+        "owns — no user-supplied scope to resolve — so this is a system read, "
+        "not the agent-tool id-resolution this guard protects."
+    ),
     "workflows/script_import.py": (
         "pre-A2 DBOS workflow (fountain/prose script import), triggered "
         "from the authenticated REST layer; constructs "
