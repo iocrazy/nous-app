@@ -1,4 +1,6 @@
-import { SocialAccount, PublishRequest, PublishTask, LibraryVideo } from '../types';
+import {
+  SocialAccount, PublishRequest, PublishTask, LibraryVideo, CoverSelectResult,
+} from '../types';
 import { getAuthHeaders } from './parserService';
 import { getApiUrl } from '../utils/apiConfig';
 
@@ -122,6 +124,45 @@ export const cancelPublishTask = (id: string): Promise<PublishTask> =>
 
 export const retryPublishTask = (id: string): Promise<PublishTask> =>
   request<PublishTask>(`/tasks/${id}/retry`, { method: 'POST' });
+
+/**
+ * Sample candidate cover frames from a video (asynchronous).
+ *
+ * Returns only a `task_id` — the frames need the source downloaded out of
+ * object storage and N ffmpeg seeks, which is seconds to minutes, so it runs
+ * as a DBOS workflow. The candidate list arrives over Supabase Realtime in
+ * `task_tracking.metadata.cover_frames` (`CoverFramesMeta`), the same channel
+ * the QR login uses. There is nothing to poll here.
+ *
+ * The fail-fast validation (source missing / not a video / not yours) happens
+ * before the workflow starts, so those come back as a 4xx from THIS call
+ * rather than as a red task minutes later.
+ */
+export const extractCoverFrames = (body: {
+  resource_id: string;
+  num_frames?: number;
+}): Promise<{ task_id: string }> =>
+  request<{ task_id: string }>('/covers/extract', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+/**
+ * Turn one picked candidate frame into the vertical 3:4 + horizontal 4:3 pair
+ * (synchronous — it only centre-crops an image that already exists).
+ *
+ * `publish_task_id` is for editing a task that already exists; the compose
+ * form picks a cover BEFORE the task is created and passes the two returned
+ * ids into the create body instead.
+ */
+export const selectCoverFrame = (body: {
+  frame_resource_id: string;
+  publish_task_id?: string;
+}): Promise<CoverSelectResult> =>
+  request<CoverSelectResult>('/covers/select', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 
 export const getShareSchema = (
   id: string,
