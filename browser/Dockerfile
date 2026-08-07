@@ -1,12 +1,45 @@
+# UBUNTU_MIRROR is the Ubuntu counterpart of the root Dockerfile's APT_MIRROR.
+# The base image below is Ubuntu (noble), not Debian, so it points at
+# archive.ubuntu.com and the Debian mirror arg does not apply to it.
+#
+# 2026-08-07 measured from this machine:
+#   archive.ubuntu.com    ~26 KB/s
+#   mirrors.aliyun.com   ~952 KB/s   (36x)
+# At 26 KB/s `apt-get update` does not merely crawl, it *corrupts*: the index
+# download times out half-read and apt reports `Hash Sum mismatch`, which reads
+# like a compromised mirror rather than a slow one. That is what failed the
+# deploy — and because this stage is `target browser`, the whole deploy-gpu run
+# goes red and blocks everyone else's merges too.
+#
+# Overridable so a build outside China is not forced through a Chinese mirror:
+#   docker build --build-arg UBUNTU_MIRROR=archive.ubuntu.com .
+ARG UBUNTU_MIRROR=mirrors.aliyun.com
+
 # Playwright's own image already carries Chromium plus every shared library it
 # needs. The tag and the `playwright` pin in pyproject.toml must move together -
 # a mismatch fails at runtime with "Executable doesn't exist".
 FROM mcr.microsoft.com/playwright/python:v1.52.0-noble
 
+# ARGs declared before the first FROM are global; a stage that wants one has to
+# re-declare it (Docker semantics, not a typo).
+ARG UBUNTU_MIRROR
+
 # Xvfb, because this service runs Chromium HEADED (design doc 2.4). Headless
 # leaves detectable traces and Douyin bounces the upload page to login, which
 # reads as an expired session. Server-side != headless.
-RUN apt-get update \
+#
+# Ubuntu 24.04 uses the deb822 format, so the file to rewrite is
+# `/etc/apt/sources.list.d/ubuntu.sources` — NOT the classic
+# `/etc/apt/sources.list`, which does not exist here. Both URIs need it: the
+# archive one AND security.ubuntu.com (they are separate stanzas, and leaving
+# security on the slow host reintroduces the same timeout).
+RUN if [ -n "$UBUNTU_MIRROR" ]; then \
+        sed -i \
+            -e "s|http://archive.ubuntu.com/ubuntu/|http://${UBUNTU_MIRROR}/ubuntu/|g" \
+            -e "s|http://security.ubuntu.com/ubuntu/|http://${UBUNTU_MIRROR}/ubuntu/|g" \
+            /etc/apt/sources.list.d/ubuntu.sources; \
+    fi \
+    && apt-get update \
     && apt-get install -y --no-install-recommends xvfb \
     && rm -rf /var/lib/apt/lists/*
 
