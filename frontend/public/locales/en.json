@@ -1410,7 +1410,18 @@
       "storyboard": "Storyboard",
       "canvas": "Canvas",
       "shotlist": "Shot List",
-      "renders": "Renders"
+      "renders": "Renders",
+      "label": "Views"
+    },
+    "episodeSurface": {
+      "shotlistComingSoon": "Shot list — coming soon",
+      "shotlistHint": "A per-scene shot table for this storyboard is planned.",
+      "openCanvas": "Open Canvas",
+      "openScript": "Open Script Editor",
+      "openBeats": "Open Beats View",
+      "openStoryboard": "Open Storyboard",
+      "openRenders": "Open Renders",
+      "editorEntryHint": "This view opens in the episode editor."
     },
     "title": "All Projects",
     "recentEmpty": "No recent items",

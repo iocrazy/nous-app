@@ -16,7 +16,7 @@
  * stages happens elsewhere.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Loading } from '../common/Loading';
@@ -34,7 +34,8 @@ import { ProjectSettingsPanel } from '../ProjectSettingsPanel';
 import type { RailView } from '../../editor/components/RailModules';
 import type { SceneDoc } from '../../editor/types';
 import { WorkspaceSidebar, type WorkView } from './WorkspaceSidebar';
-import { resolveSurface } from './nodeSurface';
+import { resolveSurface, viewsForNode } from './nodeSurface';
+import { EpisodeViewTabs } from './EpisodeViewTabs';
 import { WorkspaceTopBar } from './WorkspaceTopBar';
 import { WorkspaceOverview } from './WorkspaceOverview';
 import { AdvanceConfirmDialog } from '../workflow/AdvanceConfirmDialog';
@@ -470,6 +471,34 @@ export function ProjectWorkspace({
   // still behaves as expected).
   const showOverview = activeModule === 'overview' || (activeModule === 'stage' && !stageNodeId);
 
+  // ── Episode surface view set (B5 T-B5.4) ──────────────────────────────
+  // The current workflow node's creative `surface` (nodeSurface.ts) drives a
+  // top segmented control (EpisodeViewTabs). Deliverable-only nodes yield an
+  // empty view set → no control (they still reach their Stage Board via the
+  // node click). The panel is rendered on the workspace landing (Overview),
+  // above the overview content, so it is strictly additive and easy to retune
+  // once the design mock lands — see the render block + report for assumptions.
+  const currentNode = useMemo(
+    () => workflow?.nodes.find((n) => n.id === workflow.current_node_id) ?? null,
+    [workflow],
+  );
+  const surfaceViews = useMemo(() => viewsForNode(currentNode), [currentNode]);
+  const [episodeView, setEpisodeView] = useState<string | null>(null);
+  // Keep the active view key valid for the current node's set: default to the
+  // first view; reset when the set no longer contains the active key (e.g. the
+  // writer advanced to a node with a different surface).
+  useEffect(() => {
+    if (surfaceViews.length === 0) {
+      if (episodeView !== null) setEpisodeView(null);
+      return;
+    }
+    if (!surfaceViews.some((v) => v.key === episodeView)) {
+      setEpisodeView(surfaceViews[0].key);
+    }
+  }, [surfaceViews, episodeView]);
+  const activeEpisodeView = episodeView ?? surfaceViews[0]?.key ?? null;
+  const showSurfacePanel = showOverview && surfaceViews.length > 0;
+
   // Film slate read-out (studio only): 1-based episode + active-scene numbers.
   const epIdx = episodes.findIndex((e) => e.episode_id === currentEpisode?.episode_id);
   const epNumber = epIdx >= 0 ? epIdx + 1 : null;
@@ -532,6 +561,77 @@ export function ProjectWorkspace({
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto px-6 pb-8">
+            {showSurfacePanel && activeEpisodeView && (
+              // B5 T-B5.4: surface view set for the current node. Rendered as a
+              // strip above the Overview content — additive, not a replacement.
+              // Content wiring is intentionally shallow (see per-view notes):
+              // canvas reuses the real WorkspaceCanvas inline; editor-backed
+              // views (script/beats/storyboard) and renders route to their
+              // existing surface via an entry button; shotlist is a disabled
+              // placeholder (the table does not exist yet).
+              <div data-testid="episode-surface-panel" className="pt-4 pb-2">
+                <EpisodeViewTabs
+                  views={surfaceViews}
+                  active={activeEpisodeView}
+                  onChange={setEpisodeView}
+                />
+                <div className="mt-4">
+                  {activeEpisodeView === 'canvas' ? (
+                    // Reuse the SAME canvas module component (not a fork); its
+                    // sidebar module registration is untouched.
+                    <div className="min-h-[24rem]">
+                      <WorkspaceCanvas projectId={project.id} teamId={teamId} />
+                    </div>
+                  ) : activeEpisodeView === 'shotlist' ? (
+                    <div
+                      data-testid="episode-view-shotlist"
+                      className="rounded-lg border border-dashed border-line bg-island-2/40 px-6 py-10 text-center"
+                    >
+                      <p className="text-sm font-medium text-content-2">
+                        {t('projects.episodeSurface.shotlistComingSoon')}
+                      </p>
+                      <p className="mt-1 text-xs text-content-3">
+                        {t('projects.episodeSurface.shotlistHint')}
+                      </p>
+                    </div>
+                  ) : (
+                    // Editor-backed / renders views: entry button into the
+                    // existing surface. Deep inline embedding of the studio
+                    // editor / storyboard is deferred (needs the editor's
+                    // lifted scenes + scriptId) — see report.
+                    <div
+                      data-testid="episode-view-entry"
+                      className="rounded-lg border border-line bg-island-2/40 px-6 py-10 text-center"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (activeEpisodeView === 'renders') handleOpenRenders();
+                          else if (activeEpisodeView === 'storyboard')
+                            handleOpenWorkView('storyboard');
+                          else if (activeEpisodeView === 'beats') handleOpenWorkView('beats');
+                          else handleOpenWorkView('script');
+                        }}
+                        className="rounded-md bg-[var(--accent-soft)] px-4 py-2 text-sm font-medium text-[var(--accent-text)] hover:opacity-90"
+                      >
+                        {activeEpisodeView === 'renders'
+                          ? t('projects.episodeSurface.openRenders')
+                          : activeEpisodeView === 'storyboard'
+                            ? t('projects.episodeSurface.openStoryboard')
+                            : activeEpisodeView === 'beats'
+                              ? t('projects.episodeSurface.openBeats')
+                              : t('projects.episodeSurface.openScript')}
+                      </button>
+                      {activeEpisodeView !== 'renders' && (
+                        <p className="mt-2 text-xs text-content-3">
+                          {t('projects.episodeSurface.editorEntryHint')}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             {showOverview && (
               <WorkspaceOverview
                 project={project}

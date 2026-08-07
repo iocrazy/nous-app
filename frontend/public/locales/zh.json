@@ -1410,7 +1410,18 @@
       "storyboard": "分镜",
       "canvas": "画布",
       "shotlist": "分镜列表",
-      "renders": "成片"
+      "renders": "成片",
+      "label": "视图"
+    },
+    "episodeSurface": {
+      "shotlistComingSoon": "分镜列表 — 敬请期待",
+      "shotlistHint": "该分镜的逐场景镜头表尚在规划中。",
+      "openCanvas": "打开画布",
+      "openScript": "打开剧本编辑器",
+      "openBeats": "打开节拍视图",
+      "openStoryboard": "打开分镜",
+      "openRenders": "打开成片",
+      "editorEntryHint": "该视图在剧集编辑器中打开。"
     },
     "title": "全部项目",
     "recentEmpty": "暂无最近编辑",
