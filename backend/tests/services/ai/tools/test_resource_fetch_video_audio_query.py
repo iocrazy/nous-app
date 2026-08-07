@@ -49,14 +49,14 @@ class _ContentResult:
     def __init__(self, value):
         self._value = value
 
-    def scalar_one_or_none(self):
+    def scalar(self):
         return self._value
 
 
 def _patch_sessions(monkeypatch, *, mime: str, content_outcome):
     """First ``read_scope`` session serves the access-check row; subsequent
     sessions serve the content lookup. ``content_outcome`` is either a value
-    (returned via ``scalar_one_or_none``) or an Exception instance (raised
+    (returned via ``scalar``) or an Exception instance (raised
     from ``execute``)."""
     import app.db.scope as scope_module
     import app.db.session as session_module

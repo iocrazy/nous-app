@@ -11,6 +11,7 @@ exception.
 
 from __future__ import annotations
 
+import datetime as _datetime
 import uuid
 from contextlib import asynccontextmanager
 from unittest.mock import patch
@@ -21,6 +22,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from app.models import ResourceSummaries, ResourceTranscripts
 
 RID = 331438000000001
+
+
+def _dt(year: int, month: int, day: int) -> _datetime.datetime:
+    return _datetime.datetime(year, month, day, tzinfo=_datetime.timezone.utc)
+
 
 # Hand-written SQLite DDL: the real models carry PG-only DDL (JSONB columns,
 # gen_random_uuid() server defaults, schema "public") that the SQLite
@@ -52,10 +58,30 @@ CREATE TABLE resource_summaries (
 
 @pytest.fixture()
 async def sqlite_session_factory():
+    async for factory in _make_factory(_CREATE_SQL):
+        yield factory
+
+
+@pytest.fixture()
+async def multirow_session_factory():
+    """Same two tables with ``UNIQUE(resource_id)`` dropped.
+
+    Today both tables carry that constraint, so more than one row per
+    resource is unreachable — which is exactly why the "newest wins"
+    ordering cannot be exercised against the real schema. This fixture
+    simulates a future relaxation of the constraint so the ordering is
+    pinned by a test that actually fails if it regresses, rather than
+    living only in a comment.
+    """
+    async for factory in _make_factory(_CREATE_SQL.replace(" UNIQUE", "")):
+        yield factory
+
+
+async def _make_factory(ddl_sql: str):
     engine = create_async_engine("sqlite+aiosqlite://")
     engine = engine.execution_options(schema_translate_map={"public": None})
     async with engine.begin() as conn:
-        for ddl in _CREATE_SQL.strip().split(";"):
+        for ddl in ddl_sql.strip().split(";"):
             if ddl.strip():
                 await conn.exec_driver_sql(ddl)
     yield lambda: AsyncSession(engine, expire_on_commit=False)
@@ -159,6 +185,78 @@ async def test_missing_rows_yield_typed_not_available_errors(
     assert "summary not available" in out["error"]
     out = await _call_video_branch(factory, mime="audio/mpeg", mode="transcript")
     assert "transcript not available" in out["error"]
+
+
+@pytest.mark.asyncio
+async def test_transcript_multiple_rows_returns_the_newest(
+    multirow_session_factory,
+):
+    """Defence in depth: if UNIQUE(resource_id) is ever relaxed, the branch
+    must return the most recent row — not raise MultipleResultsFound (which
+    would degrade the whole fetch to a generic "fetch failed")."""
+    factory = multirow_session_factory
+    async with factory() as s:
+        for text, when in (
+            ("stale transcript", _dt(2026, 1, 1)),
+            ("newest transcript", _dt(2026, 6, 1)),
+            ("middle transcript", _dt(2026, 3, 1)),
+        ):
+            await s.execute(
+                ResourceTranscripts.__table__.insert().values(
+                    id=uuid.uuid4(),
+                    resource_id=RID,
+                    full_text=text,
+                    created_at=when,
+                )
+            )
+        await s.commit()
+    out = await _call_video_branch(factory, mime="audio/mpeg")
+    assert out.get("content") == "newest transcript"
+
+
+@pytest.mark.asyncio
+async def test_summary_multiple_rows_returns_the_newest(multirow_session_factory):
+    factory = multirow_session_factory
+    async with factory() as s:
+        for text, when in (
+            ("newest gist", _dt(2026, 6, 1)),
+            ("stale gist", _dt(2026, 1, 1)),
+        ):
+            await s.execute(
+                ResourceSummaries.__table__.insert().values(
+                    id=uuid.uuid4(),
+                    resource_id=RID,
+                    summary_text=text,
+                    created_at=when,
+                )
+            )
+        await s.commit()
+    out = await _call_video_branch(factory, mime="video/mp4", mode="summary")
+    assert out.get("content") == "newest gist"
+
+
+@pytest.mark.asyncio
+async def test_null_created_at_does_not_outrank_a_timestamped_row(
+    multirow_session_factory,
+):
+    """``ORDER BY created_at DESC`` puts NULLs FIRST on Postgres, which would
+    let a row with no timestamp beat a real one. Both tables default
+    created_at to now(), so a NULL only arrives via a direct backfill — pin
+    NULLS LAST so "newest" still means the newest known timestamp."""
+    factory = multirow_session_factory
+    async with factory() as s:
+        for text, when in (("no timestamp", None), ("dated", _dt(2026, 1, 1))):
+            await s.execute(
+                ResourceTranscripts.__table__.insert().values(
+                    id=uuid.uuid4(),
+                    resource_id=RID,
+                    full_text=text,
+                    created_at=when,
+                )
+            )
+        await s.commit()
+    out = await _call_video_branch(factory, mime="audio/mpeg")
+    assert out.get("content") == "dated"
 
 
 def test_dead_videos_table_reference_is_gone():
