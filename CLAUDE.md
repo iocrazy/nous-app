@@ -542,6 +542,30 @@ fork PR 因此**没有 CI**（显示 skipped 而非 failed）。这是刻意的�
 
 runner 的 workspace 与生产数据同盘（`/media/heygo/program`），`actions/checkout` 默认 `clean: true` 会 `git clean -ffdx`，所以 `node_modules` / `target/` 不累积；代价是每次重装依赖。
 
+⚠️ **CI job 会写 runner 用户的 home，必须逐个隔离**。runner 以 `heygo` 跑，任何往 `~` 写东西的 action 都在动**活人正在用的开发环境** —— 托管 runner 上这类破坏无所谓（机器用完即销毁），self-hosted 上是真的破坏。
+
+已经栽过一次：迁过来第一次跑 rust job，`~/.cargo/bin/rustup` 二进制就没了。那目录下 `cargo` / `cargo-clippy` 全是指向 `rustup` 的符号链接，rustup 一丢，本机 `cargo` 直接 `command not found`（而 `~/.rustup/toolchains/` 里的实体完好，纯粹是 shim 断了）。修复：`curl https://rsproxy.cn/rustup/dist/x86_64-unknown-linux-gnu/rustup-init` 拿到二进制直接放回 `~/.cargo/bin/rustup`（`rustup-init` 和 `rustup` 是同一个程序，靠 argv[0] 区分），**不要跑它的安装流程** —— 那会改 shell 配置文件。
+
+预防：往 self-hosted 加任何装工具链的 step，先确认它写哪里，把它导到 runner 的 tool cache。⚠️ 用 step 写 `$GITHUB_ENV`，**不要**写成 job 级 `env:` 配 `${{ runner.tool_cache }}` —— `runner` context 在 job 级 env 里不可用（那里只认 `github`/`inputs`/`matrix`/`needs`/`secrets`/`strategy`/`vars`），actionlint 会直接拒绝：
+
+```yaml
+- name: Keep the rust toolchain out of the runner user's home
+  run: |
+    echo "CARGO_HOME=$RUNNER_TOOL_CACHE/rust/cargo" >> "$GITHUB_ENV"
+    echo "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rust/rustup" >> "$GITHUB_ENV"
+```
+
+`$RUNNER_TOOL_CACHE` 是 runner 自动导出的环境变量（托管 runner 上是 `/opt/hostedtoolcache`），所以这样写切回 `ubuntu-latest` 也不会坏。`setup-node` / `setup-python` / `setup-uv` 自带隔离（装进 `_work/_tool/`），**`dtolnay/rust-toolchain` 不自带** —— 它认 `RUSTUP_HOME`/`CARGO_HOME`，不设就用 home。
+
+**改 workflow 前先在本地跑 actionlint，别拿 CI 当语法检查器**（一轮 CI 十几分钟，actionlint 一秒）：
+
+```bash
+curl -sSL -o /tmp/al.tgz https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz
+tar xzf /tmp/al.tgz -C /tmp actionlint && /tmp/actionlint   # 无输出 + exit 0 即干净
+```
+
+CI 里那步用的是 `docker://rhysd/actionlint:latest`，本机 docker pull 常被网络打断，二进制更稳。
+
 ### 前端链的关键设计（改之前先读）
 
 - **构建期配置的唯一来源是 `frontend/.env.production`**，不在本文档里重复写域名与 flag 值。`deploy-pages.yml` 的构建 env 必须与该文件一致；CI 里 GHA 环境变量优先级高于 `.env` 文件（Vite 不覆盖已存在的环境变量），所以线上以 workflow 为准，而该文件保证**本地构建**产出同样的包。
