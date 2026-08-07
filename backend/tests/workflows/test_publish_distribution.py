@@ -1306,3 +1306,57 @@ async def test_session_only_batch_never_fetches_oauth_credentials(monkeypatch):
         repo=_FakeRepo(),
     )
     assert statuses == ["success"]
+
+
+@pytest.mark.asyncio
+async def test_publish_step_runs_inside_a_user_scope(monkeypatch):
+    """发布必须在 ambient user scope 里跑。
+
+    回归自**第二次真实端到端发布**（2026-08-07）：`resources` 是 scoped
+    model，解析视频 URL 就是对它的一次 SELECT，而这个 step 没开 scope，
+    于是 fail-closed 守卫直接拦下：
+
+        SELECT references scoped table(s) ['Resources(resources)']
+        but no scope is set
+
+    结果是**每一次发布都在碰到浏览器之前就死掉**。这个包里其他 workflow
+    （download / thumbnail / upload_postprocess …）早就都开了 request_scope，
+    唯独 publish 漏了。
+
+    必须是 USER scope 而不是 system：`resource_ids` 直接来自客户端，
+    `create_task` 从不校验它们属于调用者。是租户过滤让别人的 resource
+    解析成"没有可服务的 URL"，而不是被开开心心发到攻击者的账号上。
+    """
+    from app.db.scope import Scope
+    from app.db.scope import _scope as scope_var
+
+    seen: dict = {}
+
+    async def _capture(rows, accounts_repo, creds_lazy, task, repo):
+        seen["scope"] = scope_var.get()
+        return ["success"]
+
+    monkeypatch.setattr("app.workflows.publish_distribution._run_accounts", _capture)
+
+    class _Repo:
+        async def get_task(self, _tid):
+            return {"id": "1", "title": "t", "content_type": "video"}
+
+        async def get_task_accounts(self, _tid):
+            return [{"id": "1", "account_id": "900", "status": "pending"}]
+
+    monkeypatch.setattr(
+        "app.repositories.publish_tasks_repository.PublishTasksRepository", _Repo
+    )
+
+    from app.workflows.publish_distribution import run_publish_accounts_step
+
+    uid = "8e1584e3-9c29-4a5b-90fe-125b74259f7f"
+    # 直接调被 @DBOS.step 包装的函数体：单测里没有 DBOS runtime。
+    fn = getattr(run_publish_accounts_step, "__wrapped__", run_publish_accounts_step)
+    await fn(1, uid)
+
+    got = seen.get("scope")
+    assert got is not None, "发布跑在了没有 ambient scope 的上下文里"
+    assert isinstance(got, Scope), f"期望 USER scope，实际拿到 {got!r}"
+    assert got.user_id == uid
