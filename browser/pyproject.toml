@@ -55,3 +55,12 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+# PyPI 走国内镜像 —— 理由与代价见 backend/pyproject.toml 同处的长注释。
+# 这边尤其重要：playwright 的 wheel 有 40MB 量级，2026-08-07 的部署就是
+# 卡在它身上（tls handshake eof / 下载超时），而 browser 层一挂，整条
+# deploy-gpu 就红，连带挡住当天所有人的部署。
+[[tool.uv.index]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
