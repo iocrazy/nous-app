@@ -11,7 +11,7 @@ interface UseNavigationParams {
 
 export function useNavigation({ isAuthenticated, selectedTeamId, personalTeamId }: UseNavigationParams) {
   const [view, setView] = useState<ViewState>('parser');
-  const [settingsTab, setSettingsTab] = useState<'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'docs'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'api' | 'logs' | 'monitor' | 'tasks' | 'tags' | 'ai' | 'docs' | 'workflow'>('general');
 
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [reviewFile, setReviewFile] = useState<ProjectFile | null>(null);

@@ -241,18 +241,19 @@ async function useEnglishLocale(page: Page): Promise<void> {
 async function openWorkspace(page: Page): Promise<void> {
   await page.goto(`/team/${TEAM_ID}/projects/${PARENT_PROJECT_ID}`);
   await expect(page.getByTestId('workspace-sidebar')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('ws-stage-node-2')).toBeVisible();
+  await expect(page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]')).toBeVisible();
 }
 
 for (const theme of ['dark', 'light'] as const) {
-  test(`${theme}: Stages sidebar click opens the Stage Board module`, async ({ page }) => {
+  test(`${theme}: Workflow strip node click opens the Stage Board module`, async ({ page }) => {
     await setupStageBoardStubs(page);
     await useEnglishLocale(page);
     await forceTheme(page, theme);
     await openWorkspace(page);
 
-    // Sidebar Stages click → stage module opens with the node id in the URL.
-    await page.getByTestId('ws-stage-node-2').click();
+    // Workflow-strip node click → stage module opens with the node id in the URL
+    // (node-2 has no creative surface → deliverable-only → its Stage Board).
+    await page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]').click();
     await expect(page).toHaveURL(/[?&]module=stage(&|$)/);
     await expect(page).toHaveURL(/[?&]node=node-2(&|$)/);
 
@@ -279,7 +280,7 @@ for (const theme of ['dark', 'light'] as const) {
     await forceTheme(page, theme);
     await openWorkspace(page);
 
-    await page.getByTestId('ws-stage-node-2').click();
+    await page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]').click();
     await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
 
     // node-2 is the current node → the active-group action bar renders.
@@ -321,7 +322,7 @@ for (const theme of ['dark', 'light'] as const) {
     });
 
     await openWorkspace(page);
-    await page.getByTestId('ws-stage-node-2').click();
+    await page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]').click();
     await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
 
     // The stage hook already prepared a run → solid "Run now" button, not
@@ -376,7 +377,7 @@ for (const theme of ['dark', 'light'] as const) {
     });
 
     await openWorkspace(page);
-    await page.getByTestId('ws-stage-node-2').click();
+    await page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]').click();
     await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
 
     const form = page.getByTestId('stage-node-form');
@@ -414,7 +415,7 @@ for (const theme of ['dark', 'light'] as const) {
     );
 
     await openWorkspace(page);
-    await page.getByTestId('ws-stage-node-2').click();
+    await page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]').click();
     await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
 
     const completeButton = page.getByTestId('stage-board-complete');

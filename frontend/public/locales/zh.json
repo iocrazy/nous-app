@@ -1404,6 +1404,25 @@
     }
   },
   "projects": {
+    "episodeViews": {
+      "script": "剧本",
+      "beats": "节拍",
+      "storyboard": "分镜",
+      "canvas": "画布",
+      "shotlist": "分镜列表",
+      "renders": "成片",
+      "label": "视图"
+    },
+    "episodeSurface": {
+      "shotlistComingSoon": "分镜列表 — 敬请期待",
+      "shotlistHint": "该分镜的逐场景镜头表尚在规划中。",
+      "openCanvas": "打开画布",
+      "openScript": "打开剧本编辑器",
+      "openBeats": "打开节拍视图",
+      "openStoryboard": "打开分镜",
+      "openRenders": "打开成片",
+      "editorEntryHint": "该视图在剧集编辑器中打开。"
+    },
     "title": "全部项目",
     "recentEmpty": "暂无最近编辑",
     "view": {
@@ -1791,7 +1810,9 @@
         "openEpisode": "打开剧集",
         "scriptScenes": "{{count}} 场",
         "shotsProgress": "镜头 {{done}}/{{total}}",
-        "rendersCount": "成片 {{count}}"
+        "rendersCount": "成片 {{count}}",
+        "awaiting": "{{count}} 集等你处理",
+        "awaitingHint": "仍处于待规划阶段的剧集——等你介入（近似值；精确的“等你回答”计数待每集信号补齐）。"
       },
       "episodes": {
         "title": "剧集",
@@ -1847,6 +1868,7 @@
       "owner": "负责人",
       "members": "成员",
       "schedule": "排期",
+      "details": "详细信息",
       "setSchedule": "设置排期",
       "suggestAgentRun": "建议运行 {{agentName}}",
       "runNow": "立即运行",

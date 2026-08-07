@@ -21,10 +21,12 @@ vi.mock('../../utils/relativeTime', () => ({
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => {
+    t: (key: string, opts?: unknown) => {
       if (key.startsWith('projects.workspace.modules.')) return key.split('.').pop()!;
       if (key.startsWith('projects.workspace.episodeStatus.')) return key.split('.').pop()!;
       if (key === 'projects.card.activityFile') return 'Added files';
+      if (key === 'projects.workspace.overview.awaiting')
+        return `${(opts as { count?: number } | undefined)?.count ?? 0} awaiting you`;
       return key;
     },
   }),
@@ -121,6 +123,64 @@ describe('WorkspaceOverview', () => {
     expect(screen.getByTestId('ws-summary-storyboard')).toHaveTextContent('9/16');
     expect(screen.getByTestId('ws-summary-files')).toHaveTextContent('128');
     expect(screen.getByTestId('ws-summary-canvas')).toHaveTextContent('—');
+  });
+
+  it('renders one rollup row per episode and deep-links on click', () => {
+    const onSelectEpisode = vi.fn();
+    render(
+      <WorkspaceOverview
+        project={PROJECT}
+        episodes={EPISODES}
+        currentEpisode={EPISODES[0]}
+        epNumber={1}
+        onOpenScript={noop}
+        onSelectEpisode={onSelectEpisode}
+      />,
+    );
+
+    const rollup = screen.getByTestId('ws-rollup');
+    expect(rollup).toBeTruthy();
+    // One row per episode, current episode flagged.
+    const row1 = screen.getByTestId('ws-rollup-row-1');
+    expect(row1).toHaveAttribute('data-current', 'true');
+    expect(row1).toHaveTextContent('4 SC · SHOTS 9/12 · CUTS 1');
+    // boarding → 3 of 5 stage segments lit.
+    expect(screen.getByTestId('ws-rollup-stages-1')).toHaveAttribute('data-fill', '3');
+    // drafting → 2 lit.
+    expect(screen.getByTestId('ws-rollup-stages-2')).toHaveAttribute('data-fill', '2');
+
+    fireEvent.click(screen.getByTestId('ws-rollup-row-2'));
+    expect(onSelectEpisode).toHaveBeenCalledWith('2');
+  });
+
+  it('shows the awaiting hint only for episodes parked at the planned stage', () => {
+    const withPlanned: EpisodeProgress[] = [
+      { ...EPISODES[0], status: 'planned' },
+      { ...EPISODES[1], episode_id: '3', status: 'planned' },
+      EPISODES[1],
+    ];
+    const { rerender } = render(
+      <WorkspaceOverview
+        project={PROJECT}
+        episodes={withPlanned}
+        currentEpisode={withPlanned[0]}
+        epNumber={1}
+        onOpenScript={noop}
+      />,
+    );
+    expect(screen.getByTestId('ws-rollup-awaiting')).toHaveTextContent('2 awaiting you');
+
+    // No planned episodes → hint hidden.
+    rerender(
+      <WorkspaceOverview
+        project={PROJECT}
+        episodes={EPISODES}
+        currentEpisode={EPISODES[0]}
+        epNumber={1}
+        onOpenScript={noop}
+      />,
+    );
+    expect(screen.queryByTestId('ws-rollup-awaiting')).toBeNull();
   });
 
   it('renders the recent-activity line from project.latest_activity', () => {

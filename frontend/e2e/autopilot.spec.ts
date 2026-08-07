@@ -257,12 +257,13 @@ async function openWorkspaceOverview(page: Page): Promise<void> {
 async function openWorkspace(page: Page): Promise<void> {
   await page.goto(`/team/${TEAM_ID}/projects/${PARENT_PROJECT_ID}`);
   await expect(page.getByTestId('workspace-sidebar')).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('ws-stage-node-2')).toBeVisible();
+  await expect(page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]')).toBeVisible();
 }
 
 async function openTemplateEditor(page: Page): Promise<void> {
-  await page.goto(`/team/${TEAM_ID}/projects`);
-  await page.getByTestId('workflow-templates-entry').click();
+  // B5: Workflow Templates config moved from the projects sidebar to
+  // Settings → Workflow Templates (deep-linkable via ?tab=workflow).
+  await page.goto(`/team/${TEAM_ID}/settings?tab=workflow`);
   await expect(page.getByTestId('workflow-template-editor')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId('workflow-node-capsule').first()).toBeVisible();
 }
@@ -434,7 +435,7 @@ for (const theme of ['dark', 'light'] as const) {
     );
 
     await openWorkspace(page);
-    await page.getByTestId('ws-stage-node-2').click();
+    await page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]').click();
     await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
 
     // The in_review node's saved brief pins to the top of the board...

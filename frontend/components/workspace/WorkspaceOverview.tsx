@@ -7,10 +7,11 @@
  */
 
 import { useTranslation } from 'react-i18next';
-import { ArrowRight, Clock } from 'lucide-react';
+import { ArrowRight, Clock, MessageCircleQuestion } from 'lucide-react';
 import { formatRelativeTime } from '../../utils/relativeTime';
 import { WorkflowSection } from '../workflow/WorkflowSection';
-import type { EpisodeProgress, Project, ProjectWorkflow } from '../../types';
+import { EpisodeSummaryRow } from './EpisodeSummaryRow';
+import type { EpisodeProgress, Project, ProjectStageNode, ProjectWorkflow } from '../../types';
 
 interface WorkspaceOverviewProps {
   project: Project;
@@ -31,7 +32,13 @@ interface WorkspaceOverviewProps {
   /** Navigate to a node's dedicated Stage Board (H3 Run now chip) — threaded
    * through to WorkflowSection → CurrentNodeCard. */
   onOpenStage?: (nodeId: string) => void;
+  /** Strip node click (B5 T-B5.3) — routes by the node's surface. Threaded to
+   * WorkflowSection → WorkflowStrip. */
+  onSelectNode?: (node: ProjectStageNode) => void;
   focusNodeId?: string | null;
+  /** Click a rollup row → switch the workspace's current episode (B5 T-B5.5).
+   * Reuses ProjectWorkspace's `handleEpisodeChange`. */
+  onSelectEpisode?: (episodeId: string) => void;
 }
 
 export function WorkspaceOverview({
@@ -47,7 +54,9 @@ export function WorkspaceOverview({
   onRequestAdvance,
   onOpenTodolist,
   onOpenStage,
+  onSelectNode,
   focusNodeId = null,
+  onSelectEpisode,
 }: WorkspaceOverviewProps) {
   const { t } = useTranslation();
 
@@ -55,6 +64,14 @@ export function WorkspaceOverview({
   const totalShotsTotal = episodes.reduce((sum, e) => sum + e.shots_total, 0);
   const firstEpisodeStatus = episodes[0]?.status ?? null;
   const activity = project.latest_activity ?? null;
+
+  // ⚠️ Data-gap approximation (see .b5-rollup-report.md): the spec wants an
+  // "N episodes awaiting your answer" hint, but there is no per-episode
+  // needs_input source in this component (the workflow prop is scoped to the
+  // current episode only). We proxy it with episodes still parked at the
+  // `planned` stage — i.e. not yet started, so clearly waiting on the writer.
+  // A precise count needs a per-episode needs_input endpoint / field.
+  const awaitingCount = episodes.filter((e) => e.status === 'planned').length;
 
   return (
     <div data-testid="ws-overview" className="flex flex-col gap-3 py-3">
@@ -69,6 +86,7 @@ export function WorkspaceOverview({
           onRequestAdvance={onRequestAdvance ?? (() => undefined)}
           onOpenTodolist={onOpenTodolist ?? (() => undefined)}
           onOpenStage={onOpenStage}
+          onSelectNode={onSelectNode}
           focusNodeId={focusNodeId}
         />
       )}
@@ -107,6 +125,38 @@ export function WorkspaceOverview({
             {t('projects.workspace.overview.openEpisode')}
             <ArrowRight size={15} />
           </button>
+        </div>
+      )}
+
+      {episodes.length > 0 && (
+        <div data-testid="ws-rollup" className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between px-1">
+            <div className="text-[11.5px] font-semibold text-ink-200">
+              {t('projects.workspace.modules.episodes')}
+              <span className="text-ink-400 font-normal"> · {episodes.length}</span>
+            </div>
+            {awaitingCount > 0 && (
+              <div
+                data-testid="ws-rollup-awaiting"
+                className="flex items-center gap-1 text-[11px] text-[var(--warn)]"
+                title={t('projects.workspace.overview.awaitingHint')}
+              >
+                <MessageCircleQuestion size={12} className="flex-shrink-0" />
+                <span>{t('projects.workspace.overview.awaiting', { count: awaitingCount })}</span>
+              </div>
+            )}
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {episodes.map((ep, i) => (
+              <EpisodeSummaryRow
+                key={ep.episode_id}
+                episode={ep}
+                epNumber={i + 1}
+                isCurrent={ep.episode_id === currentEpisode?.episode_id}
+                onSelect={onSelectEpisode}
+              />
+            ))}
+          </div>
         </div>
       )}
 

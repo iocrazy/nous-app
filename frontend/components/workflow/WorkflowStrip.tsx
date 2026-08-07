@@ -4,7 +4,10 @@
  * emerald tick, the current node gets an accent outline with an amber pulse,
  * skipped nodes render dashed + struck through, and a parallel group stacks its
  * members in a dashed vertical box. Overdue nodes (planned_due past, not
- * done/skipped) turn rose with an "Overdue" micro-tag (W3-2).
+ * done/skipped) turn rose with an "Overdue" micro-tag (W3-2). Delivery-only
+ * nodes (no creative surface — `surface===null`, B5 T-B5.6) also render dashed,
+ * reading as a "deliverable slot" rather than an authorable surface; the
+ * resolved surface is stamped on `data-surface` (`'deliverable'` when null).
  *
  * When editing is allowed (W3-1) a trailing "+ Add stage" ghost capsule opens
  * the library picker, and each still-pending node shows a hover remove affordance
@@ -16,11 +19,15 @@ import { Check, Lock, Plus, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { ProjectStageNode } from '../../types';
 import { isNodeInActiveGroup, isNodeOverdue, NODE_STATUS_CONFIG, unmetDeps } from './nodeStatus';
+import { isDeliverableOnly, resolveSurface } from '../workspace/nodeSurface';
 
 interface WorkflowStripProps {
   nodes: ProjectStageNode[];
   currentNodeId: string | null;
-  onSelectNode?: (nodeId: string) => void;
+  /** Node-click navigation (B5 T-B5.3) — the strip is now the sole node
+   * entry point (the sidebar's Stages list was removed in T-B5.6). Receives
+   * the full node so the handler can route by `surface` (see nodeSurface.ts). */
+  onSelectNode?: (node: ProjectStageNode) => void;
   /** Editing affordances (W3-1): trailing add capsule + per-node remove. */
   canEdit?: boolean;
   onAddNode?: () => void;
@@ -72,7 +79,7 @@ export const WorkflowStrip: React.FC<WorkflowStripProps> = ({
             locked={
               isNodeInActiveGroup(n, currentNode) && unmetDeps(nodes, n).length > 0
             }
-            onClick={onSelectNode ? () => onSelectNode(n.id) : undefined}
+            onClick={onSelectNode ? () => onSelectNode(n) : undefined}
             canEdit={canEdit}
             onRemove={onRemoveNode ? () => onRemoveNode(n) : undefined}
           />
@@ -125,6 +132,11 @@ const NodeCapsule: React.FC<{
   const isDone = node.status === 'done';
   const isSkipped = node.status === 'skipped' || node.skipped;
   const overdue = isNodeOverdue(node);
+  // B5 (T-B5.6): nodes with no creative surface are delivery-only slots (upload /
+  // version / review, not a place you author). They render a dashed border to
+  // read as "a deliverable slot, not a creative surface". `data-surface` (below)
+  // stamps the resolved surface — or 'deliverable' for null — for styling/tests.
+  const deliverable = isDeliverableOnly(node);
   // A remove affordance only makes sense for a still-pending, non-current node
   // (anything further along is server-fenced anyway — skip ≠ delete).
   const removable = canEdit && !!onRemove && node.status === 'pending' && !current;
@@ -139,6 +151,8 @@ const NodeCapsule: React.FC<{
         data-current={current ? 'true' : undefined}
         data-overdue={overdue ? 'true' : undefined}
         data-locked={locked ? 'true' : undefined}
+        data-surface={resolveSurface(node) ?? 'deliverable'}
+        data-deliverable={deliverable ? 'true' : undefined}
         title={locked ? t('projects.workflow.deps.lockedTitle') : undefined}
         className={`relative inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12.5px] transition ${
           current
@@ -146,7 +160,13 @@ const NodeCapsule: React.FC<{
             : overdue
               ? 'border-rose-500/50 bg-rose-500/10 text-rose-400'
               : 'border-line text-ink-300 hover:border-line-strong'
-        } ${isSkipped ? 'border-dashed line-through opacity-50' : ''} ${removable ? 'pr-6' : ''}`}
+        } ${
+          isSkipped
+            ? 'border-dashed line-through opacity-50'
+            : deliverable
+              ? 'border-dashed'
+              : ''
+        } ${removable ? 'pr-6' : ''}`}
       >
         {current && (
           <span

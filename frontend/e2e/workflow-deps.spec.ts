@@ -223,8 +223,9 @@ async function useEnglishLocale(page: Page): Promise<void> {
 }
 
 async function openTemplateEditor(page: Page): Promise<void> {
-  await page.goto(`/team/${TEAM_ID}/projects`);
-  await page.getByTestId('workflow-templates-entry').click();
+  // B5: Workflow Templates config moved from the projects sidebar to
+  // Settings → Workflow Templates (deep-linkable via ?tab=workflow).
+  await page.goto(`/team/${TEAM_ID}/settings?tab=workflow`);
   await expect(page.getByTestId('workflow-template-editor')).toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId('workflow-node-capsule').first()).toBeVisible();
 }
@@ -369,7 +370,7 @@ for (const theme of ['dark', 'light'] as const) {
     await forceTheme(page, theme);
     await openWorkspaceOverview(page);
 
-    await page.getByTestId('ws-stage-node-2').click();
+    await page.locator('[data-testid="workflow-strip-node"][data-node-id="node-2"]').click();
     await expect(page.getByTestId('workspace-stage-board')).toBeVisible({ timeout: 15_000 });
 
     // Local derivation (nodeStatus.ts::unmetDeps) — the board's own "Waiting

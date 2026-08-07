@@ -1404,6 +1404,25 @@
     }
   },
   "projects": {
+    "episodeViews": {
+      "script": "Script",
+      "beats": "Beats",
+      "storyboard": "Storyboard",
+      "canvas": "Canvas",
+      "shotlist": "Shot List",
+      "renders": "Renders",
+      "label": "Views"
+    },
+    "episodeSurface": {
+      "shotlistComingSoon": "Shot list — coming soon",
+      "shotlistHint": "A per-scene shot table for this storyboard is planned.",
+      "openCanvas": "Open Canvas",
+      "openScript": "Open Script Editor",
+      "openBeats": "Open Beats View",
+      "openStoryboard": "Open Storyboard",
+      "openRenders": "Open Renders",
+      "editorEntryHint": "This view opens in the episode editor."
+    },
     "title": "All Projects",
     "recentEmpty": "No recent items",
     "view": {
@@ -1791,7 +1810,9 @@
         "openEpisode": "Open Episode",
         "scriptScenes": "{{count}} scenes",
         "shotsProgress": "Shots {{done}}/{{total}}",
-        "rendersCount": "Renders {{count}}"
+        "rendersCount": "Renders {{count}}",
+        "awaiting": "{{count}} awaiting you",
+        "awaitingHint": "Episodes still at the Planned stage — awaiting your input (approximate; a precise \"needs answer\" count is pending a per-episode signal)."
       },
       "episodes": {
         "title": "Episodes",
@@ -1847,6 +1868,7 @@
       "owner": "Owner",
       "members": "Members",
       "schedule": "Schedule",
+      "details": "Details",
       "setSchedule": "Set schedule",
       "suggestAgentRun": "Suggested: run {{agentName}}",
       "runNow": "Run now",
