@@ -179,14 +179,23 @@ async def _fetch_dispatch(
         }
 
     # Video / audio — AI-generated text lives on resource_summaries /
-    # resource_transcripts, keyed by resource_id (UNIQUE, at most one row
-    # each). The pre-2026-08 implementation joined `public.videos`, a table
-    # renamed away by migration 066 — every video/audio fetch raised and
+    # resource_transcripts, keyed by resource_id (UNIQUE today, so at most
+    # one row each). The pre-2026-08 implementation joined `public.videos`, a
+    # table renamed away by migration 066 — every video/audio fetch raised and
     # degraded to "fetch failed" for months. Access is already validated by
     # the resources+resource_items team-membership check above; these two
     # tables carry no scope mixin, so no wrapper is needed here. The int()
     # bind is required: resource_id arrives as str and asyncpg's int8 codec
     # rejects str for BIGINT columns.
+    #
+    # "newest row wins" is stated explicitly rather than leaning on the UNIQUE
+    # constraint: `scalar_one_or_none()` would raise MultipleResultsFound the
+    # day that constraint is relaxed, and the broad except upstream would turn
+    # that into an opaque "fetch failed" — the exact silent-degradation shape
+    # this branch just spent months in. NULLS LAST because Postgres sorts
+    # NULLs FIRST under DESC, which would let an untimestamped backfill row
+    # outrank a real one (created_at defaults to now(), so NULL only arrives
+    # that way).
     if mime.startswith("video/") or mime.startswith("audio/"):
         m = mode or ("summary" if mime.startswith("video/") else "transcript")
         rid = int(resource_id)
@@ -194,11 +203,12 @@ async def _fetch_dispatch(
             async with read_scope() as session:
                 text = (
                     await session.execute(
-                        select(ResourceSummaries.summary_text).where(
-                            ResourceSummaries.resource_id == rid
-                        )
+                        select(ResourceSummaries.summary_text)
+                        .where(ResourceSummaries.resource_id == rid)
+                        .order_by(ResourceSummaries.created_at.desc().nullslast())
+                        .limit(1)
                     )
-                ).scalar_one_or_none()
+                ).scalar()
             if not text:
                 return {"error": "summary not available; resource not yet processed"}
             return {"content": text, "meta": {"name": row["name"], "mode": "summary"}}
@@ -206,11 +216,12 @@ async def _fetch_dispatch(
             async with read_scope() as session:
                 text = (
                     await session.execute(
-                        select(ResourceTranscripts.full_text).where(
-                            ResourceTranscripts.resource_id == rid
-                        )
+                        select(ResourceTranscripts.full_text)
+                        .where(ResourceTranscripts.resource_id == rid)
+                        .order_by(ResourceTranscripts.created_at.desc().nullslast())
+                        .limit(1)
                     )
-                ).scalar_one_or_none()
+                ).scalar()
             if not text:
                 return {"error": "transcript not available; resource not yet processed"}
             return {
