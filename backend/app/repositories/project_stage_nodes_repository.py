@@ -40,6 +40,7 @@ from sqlalchemy import func, select, text, update
 from app.db.session import read_scope, write_scope
 from app.models import (
     AgentRuns,
+    Episodes,
     ProjectFiles,
     Projects,
     ProjectStageNodeDeps,
@@ -50,7 +51,11 @@ from app.models import (
     WorkflowTemplateNodeMembers,
     WorkflowTemplateNodes,
 )
-from app.schemas.workflow import DepsBackwardOnly, WorkflowAlreadyInstantiated
+from app.schemas.workflow import (
+    CrossEpisodeDepInvalid,
+    DepsBackwardOnly,
+    WorkflowAlreadyInstantiated,
+)
 
 # Node-bank slugs whose skip state the method shortcut overrides (spec §2/§3):
 # Canvas is always on (常驻不可关); Shooting is on for live/hybrid, off for ai.
@@ -737,6 +742,143 @@ class ProjectStageNodesRepository:
                     )
 
         return await self.get_node(node_id, project_id)
+
+    async def add_cross_episode_dep(
+        self, node_id: str, depends_on_node_id: str
+    ) -> Dict[str, Any]:
+        """Insert ONE cross-episode dependency edge (T1).
+
+        A node in a later episode depends on a node in an EARLIER episode of
+        the same project. Reuses ``project_stage_node_deps`` verbatim (no new
+        table / column — cross-episode-ness is derived from the two endpoints
+        living in different episodes). Validates, then idempotently inserts.
+
+        Rules (all → ``CrossEpisodeDepInvalid``):
+          (a) both node ids exist and belong to the SAME project;
+          (b) both nodes are episode-scoped (``episode_id`` non-null) and sit
+              in DIFFERENT episodes — a same-episode edge belongs on
+              ``update_node``'s backward-only (intra-episode ``sort_order``)
+              path, not here;
+          (c) the depended-on node's EPISODE ``sort_order`` is strictly
+              smaller than the dependent node's episode ``sort_order`` (can
+              only depend on an earlier episode — this is the cross-episode
+              analogue of the intra-episode backward-only rule, and it is what
+              prevents cycles: a later→earlier edge can never close a loop);
+          (d) no self-reference.
+
+        Idempotent: a duplicate edge (composite PK already present) is a
+        no-op, never an error. Returns ``{node_id, depends_on_node_id}`` (ids
+        stringified). Both FKs are ON DELETE CASCADE, so deleting either
+        endpoint drops the edge automatically — no dangling row survives.
+        """
+        nid = int(str(node_id))
+        dep_id = int(str(depends_on_node_id))
+        if nid == dep_id:
+            raise CrossEpisodeDepInvalid()
+
+        async with write_scope() as session:
+            rows = (
+                await session.execute(
+                    select(
+                        ProjectStageNodes.id,
+                        ProjectStageNodes.project_id,
+                        ProjectStageNodes.episode_id,
+                    ).where(ProjectStageNodes.id.in_([nid, dep_id]))
+                )
+            ).all()
+            by_id = {r[0]: r for r in rows}
+            node_row = by_id.get(nid)
+            dep_row = by_id.get(dep_id)
+            # (a) both exist, same project
+            if node_row is None or dep_row is None:
+                raise CrossEpisodeDepInvalid()
+            if node_row[1] != dep_row[1]:
+                raise CrossEpisodeDepInvalid()
+            # (b) both episode-scoped, different episodes
+            node_eid, dep_eid = node_row[2], dep_row[2]
+            if node_eid is None or dep_eid is None or node_eid == dep_eid:
+                raise CrossEpisodeDepInvalid()
+            # (c) depended-on episode strictly earlier (episode sort_order)
+            eps = (
+                await session.execute(
+                    select(Episodes.id, Episodes.sort_order).where(
+                        Episodes.id.in_([node_eid, dep_eid])
+                    )
+                )
+            ).all()
+            so_by_eid = {r[0]: r[1] for r in eps}
+            node_so = so_by_eid.get(node_eid)
+            dep_so = so_by_eid.get(dep_eid)
+            if node_so is None or dep_so is None or dep_so >= node_so:
+                raise CrossEpisodeDepInvalid()
+            # (d) idempotent insert
+            existing = (
+                (
+                    await session.execute(
+                        select(ProjectStageNodeDeps).where(
+                            ProjectStageNodeDeps.node_id == nid,
+                            ProjectStageNodeDeps.depends_on_node_id == dep_id,
+                        )
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if existing is None:
+                session.add(
+                    ProjectStageNodeDeps(node_id=nid, depends_on_node_id=dep_id)
+                )
+        return {"node_id": str(nid), "depends_on_node_id": str(dep_id)}
+
+    async def get_node_statuses_by_ids(
+        self, project_id: str, node_ids: List[str]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Precise ``WHERE id IN (...)`` point-lookup of dependency-gate fields
+        for a set of node ids within one project (T2 cross-episode supplement).
+
+        Returns ``{str(id): {status, skipped, name, episode_id}}`` — ONLY these
+        scalar fields, deliberately NEVER whole node rows. This is the read
+        entry point ``advance_service._unmet_dependency_names`` uses to resolve
+        a cross-episode dependency TARGET whose node lives outside the current
+        episode's node set. Returning a stripped dict (no ``sort_order`` /
+        ``parallel_group``) is the structural guarantee behind the T2 三重护栏:
+        the caller physically cannot feed these into ``_build_groups`` /
+        ``node_by_id`` / cursor math (B2 陷阱①), because the fields those need
+        are simply not here.
+
+        Never batches by episode/project fan-out — it takes an explicit id list
+        and pins it to ``project_id`` (defense-in-depth: an id from another
+        project is silently dropped). Ids not found (deleted target) are absent
+        from the result — the predicate treats such a miss as "resolved",
+        identical to the intra-episode deleted-target behaviour.
+        """
+        if not node_ids:
+            return {}
+        pid = int(str(project_id))
+        ids = [int(str(n)) for n in node_ids]
+        async with read_scope() as session:
+            rows = (
+                await session.execute(
+                    select(
+                        ProjectStageNodes.id,
+                        ProjectStageNodes.status,
+                        ProjectStageNodes.skipped,
+                        ProjectStageNodes.name,
+                        ProjectStageNodes.episode_id,
+                    )
+                    .where(ProjectStageNodes.project_id == pid)
+                    .where(ProjectStageNodes.id.in_(ids))
+                )
+            ).all()
+        return {
+            str(r[0]): {
+                "status": r[1],
+                "skipped": r[2],
+                "name": r[3],
+                "episode_id": (str(r[4]) if r[4] is not None else None),
+            }
+            for r in rows
+        }
 
     async def add_node(
         self,

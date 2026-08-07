@@ -84,6 +84,14 @@ ORM_ALLOWED_PATHS: dict[str, str] = {
         "pre-A2 repository; project-scoped media listing behind the "
         "authenticated project REST layer"
     ),
+    "repositories/project_stage_nodes_repository.py": (
+        "pre-A2 workflow repository backing the human-request-authenticated "
+        "/projects/{id}/workflow + /advance REST endpoints. Reads "
+        "Episodes.sort_order (id-only, project-scoped) in add_cross_episode_dep "
+        "to enforce the strictly-earlier-episode rule for a cross-episode "
+        "dependency edge — NOT the agent-tool scope path this guard protects; "
+        "callers are gated by project access before reaching here"
+    ),
     "repositories/script_repository.py": (
         "pre-A2 repository backing /script_projects REST endpoints "
         "(app/core/scope_guards.py verify_script_access gates callers)"

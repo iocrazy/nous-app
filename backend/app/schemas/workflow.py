@@ -417,6 +417,26 @@ class DepsBackwardOnly(Exception):
         self.reason = reason
 
 
+# Cross-episode dependency validation (T1). A node in a later episode may
+# depend on a node in an EARLIER episode of the SAME project — the ordering is
+# judged on EPISODE ``sort_order`` (not the intra-episode node ``sort_order``
+# that ``DepsBackwardOnly`` enforces). A same-episode target, a later-episode
+# target, a cross-project target, a non-episode-scoped node, or a self-
+# reference is rejected. Router (B5) maps this to 422, same envelope as
+# DepsBackwardOnly.
+XEP_DEP_INVALID = "XEP_DEP_INVALID"
+
+
+class CrossEpisodeDepInvalid(Exception):
+    """Raised by ``add_cross_episode_dep`` (repo layer) when the requested
+    cross-episode edge is not a strictly-earlier-episode dependency within one
+    project (see ``XEP_DEP_INVALID``). Router → 422."""
+
+    def __init__(self, reason: str = XEP_DEP_INVALID) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 # ── advance preview / execute (PR-B) ────────────────────────────────────────
 
 # Blocked-reason codes the advance predicate can return (spec §7). The frontend
