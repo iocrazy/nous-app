@@ -235,6 +235,8 @@ class FakePage:
         self.waits: list[tuple[str, str, Any]] = []
         self.navigations: list[str] = []
         self.removed_overlays = 0
+        # caption -> data-checked。缺键 = 读不出来（None），不是 False。
+        self.data_checked: dict[str, bool] = {}
         self.keyboard = FakeKeyboard()
 
     @property
@@ -262,7 +264,14 @@ class FakePage:
     async def goto(self, url: str, **_kwargs: Any) -> None:
         self.navigations.append(url)
 
-    async def evaluate(self, _script: str, _arg: Any = None) -> int:
+    async def evaluate(self, _script: str, _arg: Any = None) -> Any:
+        # `_radio_is_checked` asks the page whether the radio captioned `_arg`
+        # carries data-checked="true". Answer from `data_checked`, where a
+        # missing key means "could not determine" (None) — NOT False. The
+        # production code treats those two very differently: False retries the
+        # next caption, None refuses the publish outright.
+        if "data-checked" in (_script or ""):
+            return self.data_checked.get(_arg)
         self.removed_overlays += 1
         return 0
 

@@ -311,35 +311,34 @@ async def test_a_download_permission_change_is_refused_without_its_toggle():
     assert excinfo.value.detail["requested_allow_download"] is False
 
 
-async def test_a_toggle_already_in_the_requested_state_is_left_alone():
-    """Clicking a switch that is already correct turns the setting *off*. For
-    "allow others to save this video" that is a change the user never asked
-    for, and one no error message would ever report."""
-    label = f"text={dp.DOWNLOAD_TOGGLE_TEXTS[0]}"
-    page = FakePage(
-        url=EDITOR_URL,
-        visible={label},
-        counts={dp.SWITCH_NEAR_LABEL_XPATH: 1, dp.SEMI_SWITCH_INPUT_SELECTOR: 1},
-        attributes={dp.SWITCH_NEAR_LABEL_XPATH: {"class": "semi-switch"}},
-    )
+async def test_download_permission_is_picked_by_its_caption():
+    """「保存权限」是一组 radio（允许 / 不允许），不是开关。
+
+    旧实现按 Semi 开关 + 文案 "允许他人保存视频" 去找，而 2026-08-07 的真实
+    发布页上那三个候选文案**一个都不存在** —— 本模块第一次真跑到浏览器就
+    死在这里（reason=download_control_missing）。这组用例改测真实结构。
+    """
+    page = FakePage(url=EDITOR_URL, visible={"text=不允许"})
+    page.data_checked = {"不允许": True}
     notes = await dp._apply_options(page, job(allow_download=False), Deadline(5))
 
     assert notes["allow_download"] == "applied"
-    assert page.clicks == []
+    assert "text=不允许" in page.clicks
 
 
-async def test_a_toggle_in_the_wrong_state_is_clicked():
-    label = f"text={dp.DOWNLOAD_TOGGLE_TEXTS[0]}"
-    page = FakePage(
-        url=EDITOR_URL,
-        visible={label},
-        counts={dp.SWITCH_NEAR_LABEL_XPATH: 1, dp.SEMI_SWITCH_INPUT_SELECTOR: 1},
-        attributes={
-            dp.SWITCH_NEAR_LABEL_XPATH: {"class": "semi-switch semi-switch-checked"}
-        },
-    )
-    await dp._apply_options(page, job(allow_download=False), Deadline(5))
-    assert dp.SEMI_SWITCH_INPUT_SELECTOR in page.clicks
+async def test_an_unverifiable_click_is_not_reported_as_applied():
+    """点了但读不到 data-checked，**不算成功**。
+
+    点 radio 是幂等的，所以"点了个空"和"点对了"在页面上长得一模一样。
+    调用方会把 False 变成拒绝发布 —— 这里猜一下的代价是：要么带着错误的
+    下载权限发出去，要么把一次本来好的发布拒掉。unverifiable ≠ verified。
+    """
+    page = FakePage(url=EDITOR_URL, visible={"text=不允许"})
+    page.data_checked = {}          # 读不到
+
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._apply_options(page, job(allow_download=False), Deadline(5))
+    assert excinfo.value.detail["reason"] == "download_control_missing"
 
 
 # --- confirming the publish -------------------------------------------------
