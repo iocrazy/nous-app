@@ -54,6 +54,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from app.db.session import caller_scope
 from app.schemas.script_selection import MAX_SELECTION_ELEMENTS, SelectionRejected
 from app.services.ai.scope import scoped_script_gateway as gateway
 from app.services.ai.scope.agent_run_scope import AgentRunScope, scope_for_run
@@ -243,7 +244,14 @@ class ScreenwritingTools:
             else gateway.MAX_LIST_SCENES
         )
 
-        scenes = await gateway.list_scenes_in_scope(scope, episode=episode, limit=limit)
+        # RLS 第三层 (PR-2b): the actual scene read runs as the calling user,
+        # not postgres, so mig-408 tenant policies are enforced at the DB. The
+        # scope resolution + episode authorization above ran on postgres on
+        # purpose (see caller_scope docstring §3).
+        async with caller_scope(scope.user_id):
+            scenes = await gateway.list_scenes_in_scope(
+                scope, episode=episode, limit=limit
+            )
         return {
             "ok": True,
             "count": len(scenes),
@@ -259,10 +267,16 @@ class ScreenwritingTools:
         if isinstance(scene, Denied):
             return _denied(scene)
 
+        # RLS 第三层 (PR-2b): scene-number derivation, element read and shot
+        # list all touch tenant tables — run them as the calling user.
+        async with caller_scope(scope.user_id):
+            scene_no = await gateway.scene_no_for(scope, scene)
+            elements = await gateway.read_scene_elements(scope, scene)
+            shots = await gateway.list_shots_for_scene(scope, scene)
         return {
             "ok": True,
             "scene_id": str(scene.id),
-            "scene_no_in_episode": await gateway.scene_no_for(scope, scene),
+            "scene_no_in_episode": scene_no,
             "heading_int_ext": scene.heading_int_ext,
             "location_text": scene.location_text,
             "time_of_day": scene.time_of_day,
@@ -271,8 +285,8 @@ class ScreenwritingTools:
             # channel's VersionConflict semantics rather than inventing a
             # second mechanism (spec §5.2).
             "content_version": scene.content_version,
-            "elements": await gateway.read_scene_elements(scope, scene),
-            "shots": await gateway.list_shots_for_scene(scope, scene),
+            "elements": elements,
+            "shots": shots,
         }
 
     async def create_shot(self, args: dict, run_context: dict) -> dict:
@@ -285,7 +299,11 @@ class ScreenwritingTools:
             return _denied(scene)
 
         try:
-            shot = await gateway.create_shot(scope, scene, args)
+            # RLS 第三层 (PR-2b): the INSERT (and its scene-number read) run as
+            # the calling user; WITH CHECK on script_shots refuses a write that
+            # would land outside the caller's tenant.
+            async with caller_scope(scope.user_id):
+                shot = await gateway.create_shot(scope, scene, args)
         except Exception as exc:  # noqa: BLE001 — never raise into the loop
             logger.exception("[screenwriting] CreateShot failed scene=%s", scene.id)
             return {
@@ -364,7 +382,12 @@ class ScreenwritingTools:
         # back-to-back calls could otherwise both win: without this, both
         # would see status='empty' above and both would proceed to dispatch).
         try:
-            await gateway.set_shot_status(scope, shot, "generating")
+            # RLS 第三层 (PR-2b): the status claim is a tenant write on
+            # script_shots — run it as the calling user. The DBOS dispatch that
+            # follows stays on postgres (task_tracking / dbos.* are infra tables
+            # authenticated has no grant on).
+            async with caller_scope(scope.user_id):
+                await gateway.set_shot_status(scope, shot, "generating")
         except Exception as exc:  # noqa: BLE001 — never raise into the loop
             logger.exception(
                 "[screenwriting] GenerateShotImage status claim failed shot=%s",
@@ -412,7 +435,8 @@ class ScreenwritingTools:
             # /generate endpoint does on the same failure mode. Without this
             # the shot would be stuck 'generating' forever with no live task.
             try:
-                await gateway.set_shot_status(scope, shot, "empty")
+                async with caller_scope(scope.user_id):
+                    await gateway.set_shot_status(scope, shot, "empty")
             except Exception:  # noqa: BLE001
                 logger.exception(
                     "[screenwriting] GenerateShotImage status rollback failed "
@@ -453,7 +477,10 @@ class ScreenwritingTools:
             return _denied(shot)
 
         try:
-            updated = await gateway.update_shot(scope, shot, args)
+            # RLS 第三层 (PR-2b): the UPDATE (and its scene-number read) run as
+            # the calling user.
+            async with caller_scope(scope.user_id):
+                updated = await gateway.update_shot(scope, shot, args)
         except Exception as exc:  # noqa: BLE001
             logger.exception("[screenwriting] UpdateShot failed shot=%s", shot.id)
             return {
@@ -583,12 +610,17 @@ class ScreenwritingTools:
         scene = selection.scene
 
         stale = base_version is not None and base_version != scene.content_version
+        # RLS 第三层 (PR-2b): scene-number derivation touches tenant tables.
+        # _prepare_edit above (resolve_selection, which also writes best-effort
+        # audit rows) ran on postgres on purpose — see caller_scope docstring §3.
+        async with caller_scope(scope.user_id):
+            scene_no = await gateway.scene_no_for(scope, scene)
         return {
             "ok": True,
             "applied": False,
             "proposal": {
                 "scene_id": str(scene.id),
-                "scene_no_in_episode": await gateway.scene_no_for(scope, scene),
+                "scene_no_in_episode": scene_no,
                 "element_ids": list(selection.element_ids),
                 "edits": [
                     {"element_id": eid, "text": text} for eid, text in edits.items()
@@ -642,20 +674,26 @@ class ScreenwritingTools:
                 "error_code": "missing_precondition",
             }
 
-        outcome = await gateway.apply_element_edit(
-            scope,
-            scene,
-            edits,
-            quoted_base_version=base_version,
-            actor=_edit_actor(scope),
-        )
-        if isinstance(outcome, gateway.EditRefused):
-            return outcome.as_dict()
+        # RLS 第三层 (PR-2b): the ops-channel write (script_scenes UPDATE +
+        # script_ops INSERT) and the scene-number read run as the calling user;
+        # WITH CHECK refuses any write outside the caller's tenant. _prepare_edit
+        # above (resolve_selection + its audit writes) ran on postgres on purpose.
+        async with caller_scope(scope.user_id):
+            outcome = await gateway.apply_element_edit(
+                scope,
+                scene,
+                edits,
+                quoted_base_version=base_version,
+                actor=_edit_actor(scope),
+            )
+            if isinstance(outcome, gateway.EditRefused):
+                return outcome.as_dict()
+            scene_no = await gateway.scene_no_for(scope, scene)
 
         return {
             "ok": True,
             "applied": True,
-            "scene_no_in_episode": await gateway.scene_no_for(scope, scene),
+            "scene_no_in_episode": scene_no,
             **outcome.as_dict(),
             "note": (
                 "Applied. The writer had edited elsewhere in the scene "

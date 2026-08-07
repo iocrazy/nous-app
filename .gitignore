@@ -324,3 +324,5 @@ deploy/gpu-server/supabase/**/*.pem
 
 # B2 T5 子任务本地报告（不入仓库）
 .b2-*.md
+# RLS PR-2b working report (not committed)
+.rls2b-*.md
