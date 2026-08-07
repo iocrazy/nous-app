@@ -17,6 +17,7 @@ import {
 } from '../../services/unifiedTagService';
 import { TO_PUBLISH_TAG_NAME, findToPublishTagId } from '../../services/toPublishService';
 import { SocialAccount, LibraryVideo, SelfDeclaration } from '../../types';
+import { CoverPicker, CoverPair } from './CoverPicker';
 import { useToast } from '../Toast';
 import { useWorkspaceScope } from '../../hooks/useWorkspaceScope';
 import { PageHeader } from '../layout/PageHeader';
@@ -189,6 +190,9 @@ export const PublishPage: React.FC = () => {
   const [topicInput, setTopicInput] = useState('');
   const [topicInputOpen, setTopicInputOpen] = useState(false);
   const [visibility, setVisibility] = useState<Visibility>('public');
+  // The 3:4 / 4:3 pair derived from a video frame. Null = let the platform
+  // pick its own frame at publish time.
+  const [covers, setCovers] = useState<CoverPair | null>(null);
   const [aiContent, setAiContent] = useState(false);
   // '' = leave the platform's declaration control alone. Deliberately NOT the
   // same as '无需添加自主声明', which is a declaration the user chose and the
@@ -288,6 +292,9 @@ export const PublishPage: React.FC = () => {
     if (kind === contentType) return;
     setContentType(kind);
     setSelectedVideos([]);
+    // Covers are frames OF the cleared selection — keeping them would publish
+    // a cover from content that is no longer in the post.
+    setCovers(null);
     setPickerTab('library');
     if (kind === 'images') setMode('broadcast');
   };
@@ -642,6 +649,11 @@ export const PublishPage: React.FC = () => {
         // "declare nothing" are different instructions on the platform.
         self_declaration: selfDeclaration || undefined,
         collection_name: collectionName.trim() || undefined,
+        // Cover-first order: the pair was already derived by
+        // POST /covers/select, so it rides along at create time rather than
+        // needing a second call against the new task.
+        cover_vertical_resource_id: covers?.vertical,
+        cover_horizontal_resource_id: covers?.horizontal,
         account_ids: selectedAccounts,
         account_configs: Object.keys(accountConfigsPayload).length ? accountConfigsPayload : undefined,
       });
@@ -786,20 +798,27 @@ export const PublishPage: React.FC = () => {
           </div>
 
           <div className="fcard">
-            <h4>{t('distribution.publish.cover', 'Cover')} <span className="aux">{t('distribution.publish.notSetYet', 'Not set yet')}</span></h4>
+            <h4>
+              {t('distribution.publish.cover', 'Cover')}
+              <span className="aux">
+                {covers
+                  ? t('distribution.publish.coverSet', 'Vertical + horizontal ready')
+                  : t('distribution.publish.notSetYet', 'Not set yet')}
+              </span>
+            </h4>
             <div className="cover-wrap">
-              <div className="cover-slots">
-                <div className="cover-slot v is-soon" aria-disabled="true">
-                  <span className="soon-tag">{t('distribution.publish.soon', 'Soon')}</span>
-                  <Sparkles />
-                  {t('distribution.publish.vertical34', 'Vertical 3:4')}
-                </div>
-                <div className="cover-slot h is-soon" aria-disabled="true">
-                  <span className="soon-tag">{t('distribution.publish.soon', 'Soon')}</span>
-                  <Sparkles />
-                  {t('distribution.publish.horizontal43', 'Horizontal 4:3')}
-                </div>
-              </div>
+              {/* Covers come from a frame of the video being published, so the
+                  picker needs the same selection the content card holds.
+                  Images mode has no video to sample — pass nothing and it
+                  explains that rather than offering a dead button. */}
+              <CoverPicker
+                sources={isImages ? [] : selectedVideoObjs}
+                emptyHint={isImages
+                  ? t('distribution.publish.coverImagesMode', 'Image posts use the first image as their cover — there is no video to sample.')
+                  : undefined}
+                value={covers}
+                onChange={setCovers}
+              />
               <div className="cover-ai">
                 <div className="head">
                   <b><Sparkles size={14} />{t('distribution.publish.aiCoversCanvas', 'AI covers · Canvas')}</b>
@@ -807,11 +826,13 @@ export const PublishPage: React.FC = () => {
                     {t('distribution.publish.openCoverStudio', 'Open Cover Studio')}
                   </a>
                 </div>
-                <div className="cover-cands">
-                  <div className="cand" style={{ background: 'linear-gradient(170deg,#46346e,#23375f 55%,#132c47)' }} />
-                  <div className="cand" style={{ background: 'linear-gradient(170deg,#6e3446,#4c2b5e 60%,#1e1e3a)' }} />
-                  <div className="cand" style={{ background: 'linear-gradient(200deg,#0f3a4d,#46346e 70%,#1e1e3a)' }} />
-                </div>
+                {/* The three gradient tiles that used to sit here were mock
+                    candidates — placeholder art, not images anyone could pick.
+                    They were harmless while the whole cover area was a stub;
+                    now they sit directly beside a frame picker that DOES work,
+                    and two rows of thumbnails where only one is clickable reads
+                    as a bug rather than as "not built yet". The line below says
+                    the same thing without pretending to have output. */}
                 <div className="foot">{t('distribution.publish.coverGenDesc', 'Generates candidates from a video frame + your title.')}</div>
                 <div className="d4-note">{t('distribution.publish.comingInD4', 'Coming in D4')}</div>
               </div>
@@ -1247,10 +1268,22 @@ export const PublishPage: React.FC = () => {
             )}
             <div className="line total"><span>{t('distribution.publish.postsToCreate', 'Posts to create')}</span><b>{totalPosts}</b></div>
 
-            <div className="check warn">
-              <AlertTriangle />
-              {t('distribution.publish.coverNotSetWarning', 'Cover Studio coming in D4 — Douyin picks the cover during publish.')}
-            </div>
+            {/* A missing cover is not an error — the platform picks its own
+                frame. It IS worth saying, because the frame it picks is
+                usually the first one. */}
+            {covers ? (
+              <div className="check ok">
+                <Check strokeWidth={2.5} />
+                {t('distribution.publish.coverSetOk', 'Cover set — vertical and horizontal crops attached.')}
+              </div>
+            ) : (
+              <div className="check warn">
+                <AlertTriangle />
+                {isImages
+                  ? t('distribution.publish.coverImagesNote', 'The first image is used as the cover for image posts.')
+                  : t('distribution.publish.coverNotSetWarning', 'No cover set — the platform picks a frame during publish.')}
+              </div>
+            )}
             {/* Scheduling / declarations / collections only exist on the creator
                 page, which only a QR-bound account reaches. Those rows fail
                 rather than publish with the field dropped — so say it here,

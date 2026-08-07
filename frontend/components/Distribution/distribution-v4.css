@@ -253,6 +253,30 @@
    disabled affordances used elsewhere on this page). */
 .dist-v4 .cover-slot.is-soon { opacity: .5; }
 .dist-v4 .cover-slot .soon-tag { position: absolute; right: 6px; top: 6px; font-size: 9px; font-weight: 600; padding: 2px 6px; border-radius: 5px; background: rgba(0, 0, 0, .45); color: #fff; letter-spacing: .03em; }
+/* Frame-sampled covers. The two slots above render the derived crops; this
+   panel is the sampling flow (button → progress → candidate strip → errors). */
+.dist-v4 .cover-slot.filled { cursor: default; }
+.dist-v4 .cover-slot.filled img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.dist-v4 .cover-frames { flex: 1; min-width: 240px; border: 1px solid var(--line); background: var(--card-2); border-radius: 13px; padding: 13px 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 9px; }
+.dist-v4 .cover-frames .head { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; }
+.dist-v4 .cover-frames .head b { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--content-2); }
+.dist-v4 .cover-frames-hint { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 11px; color: var(--content-4); line-height: 1.5; }
+.dist-v4 .cover-frames-err { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; width: 100%; }
+.dist-v4 .cover-frames-err .field-err { margin: 0; flex: 1 1 200px; display: flex; align-items: flex-start; gap: 6px; }
+.dist-v4 .cover-frames-err .field-err svg { flex-shrink: 0; margin-top: 2px; }
+.dist-v4 .cover-source { display: flex; align-items: center; gap: 8px; width: 100%; }
+.dist-v4 .cover-source label { font-size: 11px; color: var(--content-4); white-space: nowrap; }
+.dist-v4 .cover-source .input { flex: 1; min-width: 0; }
+.dist-v4 .cover-cand-strip { display: flex; gap: 9px; flex-wrap: wrap; }
+.dist-v4 .cover-cand { position: relative; width: 62px; height: 82px; padding: 0; border-radius: 9px; border: 1.5px solid var(--line-strong); background: none; overflow: hidden; cursor: pointer; transition: border-color .12s; }
+.dist-v4 .cover-cand:hover:not(:disabled) { border-color: var(--content-4); }
+.dist-v4 .cover-cand.sel { border-color: var(--accent); }
+.dist-v4 .cover-cand:disabled { cursor: not-allowed; }
+.dist-v4 .cover-cand img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.dist-v4 .cover-cand .stamp { position: absolute; left: 4px; bottom: 4px; font-size: 9.5px; font-weight: 600; padding: 1px 5px; border-radius: 5px; background: rgba(0, 0, 0, .55); color: #fff; }
+.dist-v4 .spin { animation: dist-v4-spin 1s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .dist-v4 .spin { animation: none; } }
+
 .dist-v4 .cover-ai { flex: 1; min-width: 220px; border: 1px solid rgba(167, 139, 250, .28); background: linear-gradient(180deg, rgba(167, 139, 250, .07), rgba(167, 139, 250, .02)); border-radius: 13px; padding: 13px 14px; }
 .dist-v4 .cover-ai .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .dist-v4 .cover-ai .head b { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--violet); }

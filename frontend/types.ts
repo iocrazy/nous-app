@@ -2501,6 +2501,57 @@ export interface PublishRequest {
   /** Douyin 合集 name. Matched against the account's EXISTING collections; never
    *  creates one. Omit = no collection. */
   collection_name?: string;
+  /**
+   * The two covers produced by `POST /distribution/covers/select`. Sent at
+   * create time because the usual order is cover-first: the compose form
+   * derives them before a publish task exists. Omit = the platform picks its
+   * own frame during publish.
+   */
+  cover_vertical_resource_id?: string;
+  cover_horizontal_resource_id?: string;
+}
+
+/**
+ * One candidate cover frame sampled from a video.
+ *
+ * Mirrors the backend `CoverCandidateOut`. It is NOT an HTTP response shape:
+ * the list travels through `task_tracking.metadata.cover_frames` over Supabase
+ * Realtime (extraction is a DBOS workflow — download + ffmpeg). Each frame is
+ * already a real image resource, so the id goes straight into a media URL.
+ */
+export interface CoverCandidate {
+  resource_id: string;
+  /** Where in the source video this frame came from. Null when the extractor
+   *  could not probe the duration and fell back to fps sampling — the frame is
+   *  still usable, so this is nullable rather than a made-up number. */
+  timestamp_seconds: number | null;
+  width: number;
+  height: number;
+  filename: string;
+}
+
+/**
+ * The `metadata.cover_frames` blob the extraction workflow writes.
+ *
+ * Three observable shapes, and the UI has to tell them apart:
+ *  - seeded by the endpoint at create time → `candidates: []`, no `error`
+ *  - success → `candidates` non-empty
+ *  - failure → `error` + `error_status` (the workflow's typed failure, e.g.
+ *    504 timeout vs 422 unreadable source), `candidates` still empty
+ */
+export interface CoverFramesMeta {
+  source_resource_id: string;
+  duration_seconds?: number | null;
+  candidates: CoverCandidate[];
+  error?: string;
+  error_status?: number;
+}
+
+/** `POST /distribution/covers/select` — one picked frame → 3:4 + 4:3 covers. */
+export interface CoverSelectResult {
+  cover_vertical_resource_id: string;
+  cover_horizontal_resource_id: string;
+  publish_task_id?: string | null;
 }
 
 export interface LibraryVideo {
