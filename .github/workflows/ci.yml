@@ -171,17 +171,24 @@ jobs:
     # toolchains 里的实体反而完好）。托管 runner 上这类破坏无所谓，机器用完
     # 就销毁；self-hosted 的 home 是活人在用的。
     #
-    # runner.tool_cache 在托管 runner 上是 /opt/hostedtoolcache，所以将来切
-    # 回 ubuntu-latest 这两行也不会坏。
-    env:
-      CARGO_HOME: ${{ runner.tool_cache }}/rust/cargo
-      RUSTUP_HOME: ${{ runner.tool_cache }}/rust/rustup
+    # 具体做法见下面第一个 step —— 注意不能写成 job 级 `env:` 配
+    # ${{ runner.tool_cache }}：runner context 在 job 级 env 里不可用
+    # （那里只认 github/inputs/matrix/needs/secrets/strategy/vars），
+    # actionlint 会直接拒绝。
     defaults:
       run:
         working-directory: nous-core
 
     steps:
       - uses: actions/checkout@v4
+
+      # $RUNNER_TOOL_CACHE 是 runner 自动导出的环境变量（托管 runner 上是
+      # /opt/hostedtoolcache），在 shell 里取得到，所以这样写切回
+      # ubuntu-latest 也不会坏。写进 $GITHUB_ENV 后对后续所有 step 生效。
+      - name: Keep the rust toolchain out of the runner user's home
+        run: |
+          echo "CARGO_HOME=$RUNNER_TOOL_CACHE/rust/cargo" >> "$GITHUB_ENV"
+          echo "RUSTUP_HOME=$RUNNER_TOOL_CACHE/rust/rustup" >> "$GITHUB_ENV"
 
       # nous-core 是 pyo3 扩展，编译时要链接一个具体的 CPython。不指定的话
       # pyo3 的 build script 去 PATH 里找 —— 于是编译用的解释器由 runner 的
