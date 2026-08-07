@@ -44,6 +44,7 @@ def _node(
     review_required: bool = False,
     parallel_group: Optional[int] = None,
     name: Optional[str] = None,
+    episode_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     return {
         "id": node_id,
@@ -62,7 +63,24 @@ def _node(
         "deliverable_required": False,
         "folder_id": None,
         "planned_due": None,
+        "episode_id": episode_id,
     }
+
+
+class _FakeEpisodesRepo:
+    """Minimal episodes repo fake. ``list_by_project`` returns the episode
+    dicts in the given order (real repo orders by sort_order asc), so tests
+    supply them already sorted. Empty list == legacy project (no episodes)."""
+
+    def __init__(self, episodes: Optional[List[Dict[str, Any]]] = None):
+        self._episodes = episodes or []
+
+    async def list_by_project(self, project_id):
+        return [dict(e) for e in self._episodes]
+
+
+def _episode(episode_id: str, *, sort_order: int) -> Dict[str, Any]:
+    return {"id": episode_id, "sort_order": sort_order, "title": f"Ep {episode_id}"}
 
 
 class _FakeProjectsRepo:
@@ -104,6 +122,7 @@ class _FakeNodesRepo:
         # SECOND compute_advance_preview would re-read a stale cursor.
         self._projects_repo = projects_repo
         self.list_nodes_calls = 0
+        self.list_nodes_by_episode_calls: List[str] = []
         self.metadata_patches: List[Any] = []
         self.current_node_id_calls: List[Any] = []
         self.set_node_status_calls: List[Any] = []
@@ -111,6 +130,12 @@ class _FakeNodesRepo:
     async def list_nodes(self, project_id):
         self.list_nodes_calls += 1
         return list(self._nodes)
+
+    async def list_nodes_by_episode(self, project_id, episode_id):
+        # Mirrors the real repo: only rows whose episode_id matches (NULL /
+        # other-episode rows excluded — the陷阱① single-episode confinement).
+        self.list_nodes_by_episode_calls.append(str(episode_id))
+        return [n for n in self._nodes if str(n.get("episode_id")) == str(episode_id)]
 
     async def set_node_status(self, node_id, status):
         self.set_node_status_calls.append((str(node_id), status))
@@ -196,11 +221,19 @@ def _install_repos(
     agent_runs_repo: Optional[_FakeAgentRunsRepo] = None,
     notify_spy: Optional[_NotifySpy] = None,
     role: Optional[str] = "manager",
+    episodes_repo: Optional[_FakeEpisodesRepo] = None,
 ):
     monkeypatch.setattr(
         "app.repositories.project_stage_nodes_repository."
         "get_project_stage_nodes_repository",
         lambda: nodes_repo,
+    )
+    # Default: no episodes → every existing test deterministically takes the
+    # legacy project-level path (no real DB read). Episode tests pass an
+    # explicit repo.
+    monkeypatch.setattr(
+        "app.repositories.episode_repository.get_episode_repository",
+        lambda: episodes_repo or _FakeEpisodesRepo([]),
     )
     monkeypatch.setattr(
         "app.repositories.projects_repository.get_projects_repository",
@@ -726,7 +759,11 @@ async def test_tick_fixpoint_loop_stops_when_cascade_advances_nothing(monkeypatc
     await autopilot._autopilot_tick_impl(_PROJECT)
 
     assert len(cascade_calls) == 1
-    assert nodes_repo.list_nodes_calls == 1
+    # Two list_nodes reads: one by the legacy-vs-episode discriminator (computing
+    # bound_episode_ids — here empty → legacy), one by the legacy fixpoint's
+    # single auto-start pass. The point is convergence (cascade called once), not
+    # the read count.
+    assert nodes_repo.list_nodes_calls == 2
 
 
 async def test_tick_fixpoint_loop_is_bounded_and_flags_a_runaway(monkeypatch):
@@ -867,3 +904,388 @@ async def test_tick_cascade_ceiling_exhaustion_logs_warning(monkeypatch):
 
     assert len(nodes_repo.current_node_id_calls) == autopilot._MAX_CASCADE_STEPS
     assert any("ceiling" in w for w in spy_logger.warnings)
+
+
+# ── B2 T4: per-episode dispatch metering (P0 §3.3) ──────────────────────────
+#
+# All of these fake ``_cascade_pass`` to a no-op that returns False so the
+# metering of the AUTO-START pass is isolated (cascade advance / cursor moves
+# are covered by test_advance_predicate.py's episode tests). Each episode's
+# fixpoint then runs exactly one auto-start pass and stops.
+
+
+_EP1 = "8001"
+_EP2 = "8002"
+
+
+async def _fake_cascade_noop(project_id, project, *, episode_id=None):
+    return False
+
+
+async def test_episode_metering_per_episode_cap_prevents_starvation(monkeypatch):
+    """2-episode project. Ep1 has FAR more eligible agent nodes than the whole
+    project quota — without a per-episode cap it would eat the entire project
+    budget and starve Ep2 to zero. The per-episode cap bounds Ep1 to its slice
+    so Ep2 still gets its fair share, while the project daily hard cap is never
+    exceeded.
+
+    quota_limit=8, 2 episodes -> per_episode_cap = max(3, ceil(8/2)) = 4.
+      Ep1 (10 eligible agent nodes): 4 dispatch (cap), 6 -> per-episode prepare.
+      Ep2 (4 eligible agent nodes): 4 dispatch (brings project total to 8=cap).
+    """
+    ep1_nodes = [
+        _node(
+            str(1100 + i),
+            sort_order=i,
+            owner_agent_id=_AGENT,
+            episode_id=_EP1,
+            name=f"E1N{i}",
+        )
+        for i in range(1, 11)
+    ]
+    ep2_nodes = [
+        _node(
+            str(2100 + i),
+            sort_order=i,
+            owner_agent_id=_AGENT,
+            episode_id=_EP2,
+            name=f"E2N{i}",
+        )
+        for i in range(1, 5)
+    ]
+    projects_repo = _FakeProjectsRepo()
+    nodes_repo = _FakeNodesRepo(ep1_nodes + ep2_nodes, projects_repo=projects_repo)
+    episodes_repo = _FakeEpisodesRepo(
+        [_episode(_EP1, sort_order=1), _episode(_EP2, sort_order=2)]
+    )
+    _install_repos(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        agent_runs_repo=_FakeAgentRunsRepo(count=0),
+        episodes_repo=episodes_repo,
+    )
+    monkeypatch.setattr(autopilot, "_daily_auto_runs_limit", _const_limit(8))
+    monkeypatch.setattr(autopilot, "_cascade_pass", _fake_cascade_noop)
+
+    spy = _StartNodeSpy()
+    monkeypatch.setattr(autopilot, "start_node_now", spy)
+
+    await autopilot._autopilot_tick_impl(_PROJECT)
+
+    ep1_ids = {str(1100 + i) for i in range(1, 11)}
+    ep2_ids = {str(2100 + i) for i in range(1, 5)}
+    dispatched = [c for c in spy.calls if c["dispatch"]]
+    ep1_dispatched = [c for c in dispatched if c["node_id"] in ep1_ids]
+    ep2_dispatched = [c for c in dispatched if c["node_id"] in ep2_ids]
+
+    # (b) single episode's dispatch count never exceeds per_episode_cap (4).
+    assert len(ep1_dispatched) == 4
+    assert len(ep2_dispatched) == 4
+    # (a) Ep2 is NOT starved to zero even though Ep1 wanted the whole quota.
+    assert len(ep2_dispatched) > 0
+    # (c) project daily hard cap (8) is respected — total not blown past it.
+    assert len(dispatched) == 8
+
+    # Ep1's over-cap nodes are paused with the PER-EPISODE copy...
+    ep1_prepared = [
+        c for c in spy.calls if not c["dispatch"] and c["node_id"] in ep1_ids
+    ]
+    assert len(ep1_prepared) == 6
+    assert all("per-episode" in c["prepare_title"] for c in ep1_prepared)
+
+
+async def test_episode_metering_project_cap_labels_daily_limit(monkeypatch):
+    """When an episode is still under its own per-episode cap but the SHARED
+    project daily total is already drained by earlier episodes, its paused
+    nodes get the DAILY-limit copy — distinct from the per-episode copy. Proves
+    the two pause states are told apart.
+
+    quota_limit=5, 2 episodes -> per_episode_cap = max(3, ceil(5/2)) = 3.
+      Ep1 (3 agent nodes): 3 dispatch -> project total now 3.
+      Ep2 (5 agent nodes): 2 dispatch (project total hits 5 = cap), remaining 3
+        are still UNDER Ep2's own cap (3) yet blocked by the drained project
+        total -> daily-limit copy (NOT per-episode).
+    """
+    ep1_nodes = [
+        _node(str(1100 + i), sort_order=i, owner_agent_id=_AGENT, episode_id=_EP1)
+        for i in range(1, 4)
+    ]
+    ep2_nodes = [
+        _node(str(2100 + i), sort_order=i, owner_agent_id=_AGENT, episode_id=_EP2)
+        for i in range(1, 6)
+    ]
+    projects_repo = _FakeProjectsRepo()
+    nodes_repo = _FakeNodesRepo(ep1_nodes + ep2_nodes, projects_repo=projects_repo)
+    episodes_repo = _FakeEpisodesRepo(
+        [_episode(_EP1, sort_order=1), _episode(_EP2, sort_order=2)]
+    )
+    _install_repos(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        agent_runs_repo=_FakeAgentRunsRepo(count=0),
+        episodes_repo=episodes_repo,
+    )
+    monkeypatch.setattr(autopilot, "_daily_auto_runs_limit", _const_limit(5))
+    monkeypatch.setattr(autopilot, "_cascade_pass", _fake_cascade_noop)
+
+    spy = _StartNodeSpy()
+    monkeypatch.setattr(autopilot, "start_node_now", spy)
+
+    await autopilot._autopilot_tick_impl(_PROJECT)
+
+    dispatched = [c for c in spy.calls if c["dispatch"]]
+    assert len(dispatched) == 5  # project hard cap
+
+    ep2_ids = {str(2100 + i) for i in range(1, 6)}
+    ep2_prepared = [
+        c for c in spy.calls if not c["dispatch"] and c["node_id"] in ep2_ids
+    ]
+    ep2_dispatched = [c for c in dispatched if c["node_id"] in ep2_ids]
+    # Ep2 got 2 dispatches (project ran out before its own cap of 3), the
+    # remaining 3 paused under the DAILY-limit banner (NOT per-episode) —
+    # proving the project total, not Ep2's own cap, is what stopped it.
+    assert len(ep2_dispatched) == 2
+    assert len(ep2_prepared) == 3
+    assert all("daily limit reached" in c["prepare_title"] for c in ep2_prepared)
+    assert all("per-episode" not in c["prepare_title"] for c in ep2_prepared)
+
+
+async def test_episode_metering_starts_with_prior_project_usage(monkeypatch):
+    """The shared project budget is seeded from today's already-dispatched
+    count — so a project that has already burned most of its daily quota gives
+    its episodes only the remainder, regardless of per-episode caps.
+
+    used=5, quota_limit=8 -> only 3 dispatches left. per_episode_cap for 2
+    episodes = 4, but the project total gate stops everything at 8."""
+    ep1_nodes = [
+        _node(str(1100 + i), sort_order=i, owner_agent_id=_AGENT, episode_id=_EP1)
+        for i in range(1, 6)
+    ]
+    ep2_nodes = [
+        _node(str(2100 + i), sort_order=i, owner_agent_id=_AGENT, episode_id=_EP2)
+        for i in range(1, 6)
+    ]
+    projects_repo = _FakeProjectsRepo()
+    nodes_repo = _FakeNodesRepo(ep1_nodes + ep2_nodes, projects_repo=projects_repo)
+    episodes_repo = _FakeEpisodesRepo(
+        [_episode(_EP1, sort_order=1), _episode(_EP2, sort_order=2)]
+    )
+    _install_repos(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        agent_runs_repo=_FakeAgentRunsRepo(count=5),
+        episodes_repo=episodes_repo,
+    )
+    monkeypatch.setattr(autopilot, "_daily_auto_runs_limit", _const_limit(8))
+    monkeypatch.setattr(autopilot, "_cascade_pass", _fake_cascade_noop)
+
+    spy = _StartNodeSpy()
+    monkeypatch.setattr(autopilot, "start_node_now", spy)
+
+    await autopilot._autopilot_tick_impl(_PROJECT)
+
+    dispatched = [c for c in spy.calls if c["dispatch"]]
+    # Only 3 of the daily 8 remained (5 already used) — project cap holds
+    # across episodes.
+    assert len(dispatched) == 3
+
+
+async def test_episode_metering_candidates_ordered_by_episode_then_node(monkeypatch):
+    """Dispatch order is (episode.sort_order, node.sort_order): the outer loop
+    takes episodes in sort_order, each auto-start pass orders that episode's own
+    nodes by sort_order. Nodes are supplied scrambled to prove the sort."""
+    # EpA sort_order 1, EpB sort_order 2. Nodes scrambled within each.
+    nodes = [
+        _node("22", sort_order=2, owner_agent_id=_AGENT, episode_id=_EP2),
+        _node("11", sort_order=1, owner_agent_id=_AGENT, episode_id=_EP1),
+        _node("21", sort_order=1, owner_agent_id=_AGENT, episode_id=_EP2),
+        _node("12", sort_order=2, owner_agent_id=_AGENT, episode_id=_EP1),
+    ]
+    projects_repo = _FakeProjectsRepo()
+    nodes_repo = _FakeNodesRepo(nodes, projects_repo=projects_repo)
+    episodes_repo = _FakeEpisodesRepo(
+        [_episode(_EP1, sort_order=1), _episode(_EP2, sort_order=2)]
+    )
+    _install_repos(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        agent_runs_repo=_FakeAgentRunsRepo(count=0),
+        episodes_repo=episodes_repo,
+    )
+    monkeypatch.setattr(autopilot, "_daily_auto_runs_limit", _const_limit(20))
+    monkeypatch.setattr(autopilot, "_cascade_pass", _fake_cascade_noop)
+
+    spy = _StartNodeSpy()
+    monkeypatch.setattr(autopilot, "start_node_now", spy)
+
+    await autopilot._autopilot_tick_impl(_PROJECT)
+
+    assert [c["node_id"] for c in spy.calls] == ["11", "12", "21", "22"]
+
+
+async def test_episode_cascade_threads_matching_episode_id(monkeypatch):
+    """The cascade advance for each episode is scoped to THAT episode
+    (execute_advance episode_id), so the run it dispatches is branded with the
+    same episode it moves — never ep1's advance firing an ep2-scoped run."""
+    # Each episode owns a bound but non-candidate node (status=done, auto_start
+    # off): enough to make the project episode-aware (bound_episode_ids = {EP1,
+    # EP2}) so the tick loops per episode, while contributing no auto-start
+    # candidate — the cascade-threading assertion stays isolated.
+    projects_repo = _FakeProjectsRepo()
+    nodes_repo = _FakeNodesRepo(
+        [
+            _node("1", episode_id=_EP1, auto_start=False, status="done"),
+            _node("2", episode_id=_EP2, auto_start=False, status="done"),
+        ],
+        projects_repo=projects_repo,
+    )
+    episodes_repo = _FakeEpisodesRepo(
+        [_episode(_EP1, sort_order=1), _episode(_EP2, sort_order=2)]
+    )
+    _install_repos(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        agent_runs_repo=_FakeAgentRunsRepo(count=0),
+        episodes_repo=episodes_repo,
+    )
+    monkeypatch.setattr(autopilot, "_daily_auto_runs_limit", _const_limit(20))
+
+    seen_episode_ids: List[Optional[str]] = []
+
+    async def _spy_cascade(project_id, project, *, episode_id=None):
+        seen_episode_ids.append(episode_id)
+        return False
+
+    monkeypatch.setattr(autopilot, "_cascade_pass", _spy_cascade)
+
+    await autopilot._autopilot_tick_impl(_PROJECT)
+
+    assert seen_episode_ids == [_EP1, _EP2]
+
+
+async def test_legacy_no_episodes_uses_project_scope(monkeypatch):
+    """A project with NO episode rows falls back to the legacy project-level
+    path: list_nodes (not list_nodes_by_episode), cascade with episode_id=None,
+    behavior unchanged."""
+    candidate = _node("1", sort_order=1, owner_agent_id=_AGENT)
+    projects_repo = _FakeProjectsRepo()
+    nodes_repo = _FakeNodesRepo([candidate], projects_repo=projects_repo)
+    _install_repos(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        agent_runs_repo=_FakeAgentRunsRepo(count=0),
+        # episodes_repo defaults to empty -> legacy path
+    )
+    monkeypatch.setattr(autopilot, "_daily_auto_runs_limit", _const_limit(20))
+
+    seen_episode_ids: List[Optional[str]] = []
+
+    async def _spy_cascade(project_id, project, *, episode_id=None):
+        seen_episode_ids.append(episode_id)
+        return False
+
+    monkeypatch.setattr(autopilot, "_cascade_pass", _spy_cascade)
+
+    spy = _StartNodeSpy()
+    monkeypatch.setattr(autopilot, "start_node_now", spy)
+
+    await autopilot._autopilot_tick_impl(_PROJECT)
+
+    # Legacy read path only — never the episode-scoped list.
+    assert nodes_repo.list_nodes_by_episode_calls == []
+    assert nodes_repo.list_nodes_calls >= 1
+    # Legacy cascade is project-scoped (episode_id=None).
+    assert seen_episode_ids == [None]
+    # Node still dispatched under legacy metering.
+    assert len(spy.calls) == 1
+    assert spy.calls[0]["dispatch"] is True
+
+
+async def test_tick_stays_one_per_project_no_per_episode_subticks(monkeypatch):
+    """铁律: the tick is one-per-project — looping episodes internally must
+    NEVER enqueue a fresh tick per episode (that would shard the in-process
+    dispatch counters and let the project hard cap be blown past 2x)."""
+    ep1_nodes = [_node("11", sort_order=1, owner_agent_id=_AGENT, episode_id=_EP1)]
+    ep2_nodes = [_node("21", sort_order=1, owner_agent_id=_AGENT, episode_id=_EP2)]
+    projects_repo = _FakeProjectsRepo()
+    nodes_repo = _FakeNodesRepo(ep1_nodes + ep2_nodes, projects_repo=projects_repo)
+    episodes_repo = _FakeEpisodesRepo(
+        [_episode(_EP1, sort_order=1), _episode(_EP2, sort_order=2)]
+    )
+    _install_repos(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        agent_runs_repo=_FakeAgentRunsRepo(count=0),
+        episodes_repo=episodes_repo,
+    )
+    monkeypatch.setattr(autopilot, "_daily_auto_runs_limit", _const_limit(20))
+    monkeypatch.setattr(autopilot, "_cascade_pass", _fake_cascade_noop)
+    monkeypatch.setattr(autopilot, "start_node_now", _StartNodeSpy())
+
+    enqueue_calls: List[str] = []
+
+    async def _spy_enqueue(project_id):
+        enqueue_calls.append(project_id)
+
+    monkeypatch.setattr(autopilot, "enqueue_autopilot_tick", _spy_enqueue)
+
+    await autopilot._autopilot_tick_impl(_PROJECT)
+
+    # No sub-tick fan-out — the single tick handled both episodes in-process.
+    assert enqueue_calls == []
+
+
+async def test_seeded_ep1_row_but_all_nodes_null_uses_legacy_scope(monkeypatch):
+    """现网基线 (Critical regression): every project auto-seeds an Ep1 episode
+    ROW at creation (projects_service.py), but pre-B3 the workflow NODES all
+    have episode_id=NULL (instantiate_from_template never binds them). Keying
+    legacy-vs-episode on "episodes table has rows" therefore ALWAYS took the
+    episode path -> list_nodes_by_episode(Ep1) excludes NULL nodes -> empty ->
+    every real project's autopilot silently stalled (no auto-start, no cascade).
+
+    The judgement must key on "has episode-BOUND nodes", not "has episode rows":
+    an Ep1 row with all-NULL nodes -> LEGACY project-level path, exactly as
+    master behaved (auto-start + cascade proceed, NOT BLOCK_NO_NEXT)."""
+    candidate = _node("1", sort_order=1, owner_agent_id=_AGENT, episode_id=None)
+    projects_repo = _FakeProjectsRepo()
+    nodes_repo = _FakeNodesRepo([candidate], projects_repo=projects_repo)
+    # The seeded Ep1 row EXISTS — but no node is bound to it.
+    episodes_repo = _FakeEpisodesRepo([_episode(_EP1, sort_order=1)])
+    _install_repos(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        agent_runs_repo=_FakeAgentRunsRepo(count=0),
+        episodes_repo=episodes_repo,
+    )
+    monkeypatch.setattr(autopilot, "_daily_auto_runs_limit", _const_limit(20))
+
+    seen_episode_ids: List[Optional[str]] = []
+
+    async def _spy_cascade(project_id, project, *, episode_id=None):
+        seen_episode_ids.append(episode_id)
+        return False
+
+    monkeypatch.setattr(autopilot, "_cascade_pass", _spy_cascade)
+
+    spy = _StartNodeSpy()
+    monkeypatch.setattr(autopilot, "start_node_now", spy)
+
+    await autopilot._autopilot_tick_impl(_PROJECT)
+
+    # Legacy project-level path — the NULL node is NEVER read through the
+    # episode-scoped list (which would exclude it and stall the project).
+    assert nodes_repo.list_nodes_by_episode_calls == []
+    # Cascade is project-scoped (episode_id=None), like master.
+    assert seen_episode_ids == [None]
+    # The all-NULL project still auto-starts — no silent stall.
+    assert len(spy.calls) == 1
+    assert spy.calls[0]["node_id"] == "1"
+    assert spy.calls[0]["dispatch"] is True

@@ -361,17 +361,47 @@ async def generate_missing_frames(
 # ============================================
 
 
+async def _require_project_episode(project_id: str, episode_id: str) -> dict:
+    """Fetch a client-supplied ``episode_id`` and assert it belongs to the path
+    ``project_id`` (B2 T3 review, defense-in-depth over the A-line trust-boundary
+    lesson).
+
+    The four workflow-cursor endpoints take ``episode_id`` as a QUERY param — it
+    is caller-controlled and must never be trusted to belong to the path
+    project. Without this check ``episode_repository.get_by_id`` happily returns
+    a FOREIGN project's episode, whose ``current_node_id`` would then leak back
+    in the workflow response (existence + cursor disclosure). 404 (never echo)
+    on missing or cross-project. Returns the validated episode dict so callers
+    reuse its cursor without a second read."""
+    from app.repositories.episode_repository import get_episode_repository
+
+    episode = await get_episode_repository().get_by_id(episode_id)
+    if episode is None or str(episode.get("project_id")) != str(project_id):
+        raise HTTPException(status_code=404, detail="Episode not found")
+    return episode
+
+
 @router.get("/{project_id}/workflow", response_model=ProjectWorkflowOut)
 async def get_project_workflow(
     project_id: str,
     auth: AuthDep,
+    episode_id: Optional[str] = Query(
+        None, description="Scope the workflow view to a single episode (B2)."
+    ),
     _project_guard: None = Depends(verify_project_read_access),
 ) -> ProjectWorkflowOut:
     """The project's workflow: instance nodes (+ per-node status/members), the
     active-group cursor, and the count of currently-running agent runs.
 
     Empty ``nodes`` (``has_workflow=false``) for a No-workflow project — the
-    Overview renders no workflow region in that case."""
+    Overview renders no workflow region in that case.
+
+    ``episode_id`` (B2 T3): when given, the node set and the cursor are read
+    per-episode (``list_nodes_by_episode`` + ``episodes.current_node_id``) so
+    the view reflects only that episode, never a sibling's template-cloned
+    twins. When None the legacy project-level read is byte-for-byte unchanged.
+    Role/permission resolution and ``agents_active`` stay project-level (the
+    response STRUCTURE is untouched here — the per-episode re-shape is B5)."""
     from app.repositories.project_stage_nodes_repository import (
         get_project_stage_nodes_repository,
     )
@@ -379,9 +409,16 @@ async def get_project_workflow(
 
     repo = get_project_stage_nodes_repository()
     projects_repo = get_projects_repository()
-    nodes = await repo.list_nodes(project_id)
-    project = await projects_repo.get_project_by_id(int(project_id))
-    current_node_id = (project or {}).get("current_node_id")
+    if episode_id is None:
+        nodes = await repo.list_nodes(project_id)
+        project = await projects_repo.get_project_by_id(int(project_id))
+        current_node_id = (project or {}).get("current_node_id")
+    else:
+        # Ownership check first — a foreign episode_id 404s here and never
+        # reaches list_nodes_by_episode / cursor echo.
+        episode = await _require_project_episode(project_id, episode_id)
+        nodes = await repo.list_nodes_by_episode(project_id, episode_id)
+        current_node_id = episode.get("current_node_id")
     agents_active = await repo.count_running_agent_runs(project_id)
 
     # Filed-file count per node's deliverable folder — one file scan, tallied by
@@ -769,6 +806,10 @@ async def start_workflow_node_early(
     project_id: str,
     node_id: str,
     auth: AuthDep,
+    episode_id: Optional[str] = Query(
+        None,
+        description="Scope the dependency check to a single episode (B2).",
+    ),
     _project_guard: None = Depends(verify_project_write_access),
 ):
     """Manual "Start early" (M4 Autopilot, task O2 brief): begin work on a
@@ -835,7 +876,38 @@ async def start_workflow_node_early(
             },
         )
 
-    nodes = await nodes_repo.list_nodes(project_id)
+    # B2 T3 (+ review Important fix): the dependency map must be scoped so it
+    # sees this node's OWN episode's dependencies — never a sibling episode's.
+    #
+    # The security hole this closes: ``episode_id`` is a client-supplied query
+    # param. A write-role user passing an episode_id that does NOT match the
+    # node's real episode would make ``list_nodes_by_episode`` return a node set
+    # that OMITS this node's true same-episode dependencies; ``_unmet_dependency_names``
+    # then treats every absent dep as "satisfied-by-absence" → DEPS_PENDING is
+    # bypassed and an unmet node starts anyway. So we never trust the query
+    # episode to scope the map: when given, it must (a) belong to this project
+    # and (b) equal the node's own ``episode_id`` — otherwise 404/422. The map
+    # is then always drawn from the node's TRUE episode (``list_nodes_by_episode``),
+    # falling back to the legacy project-wide ``list_nodes`` only for a legacy
+    # node with no episode / when no episode_id is supplied (project-wide is the
+    # strict superset — it can never bypass, only over-block).
+    node_episode_id = node.get("episode_id")
+    if episode_id is not None:
+        await _require_project_episode(project_id, episode_id)
+        if str(episode_id) != str(node_episode_id):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "EPISODE_MISMATCH",
+                    "message": (
+                        "episode_id does not match this node's episode — "
+                        "dependency checks must run against the node's own episode"
+                    ),
+                },
+            )
+        nodes = await nodes_repo.list_nodes_by_episode(project_id, node_episode_id)
+    else:
+        nodes = await nodes_repo.list_nodes(project_id)
     node_by_id = {str(n["id"]): n for n in nodes}
     waiting_on = _unmet_dependency_names([node], node_by_id, exempt_ids=set())
     if waiting_on:
@@ -858,12 +930,24 @@ async def get_advance_preview(
     project_id: str,
     auth: AuthDep,
     direction: str = Query("forward", pattern="^(forward|back)$"),
+    episode_id: Optional[str] = Query(
+        None, description="Scope the advance cursor to a single episode (B2)."
+    ),
     _project_guard: None = Depends(verify_project_read_access),
 ) -> AdvancePreview:
-    """Pure-read ruling on a forward/back move (same predicate as /advance)."""
+    """Pure-read ruling on a forward/back move (same predicate as /advance).
+
+    ``episode_id`` (B2 T3): given → the ruling is computed against that
+    episode's node set + its own ``episodes.current_node_id`` cursor (validated
+    to belong to this project first); None → the legacy project-level read is
+    byte-for-byte unchanged."""
     from app.services.workflow.advance_service import compute_advance_preview
 
-    return await compute_advance_preview(project_id, auth.user_id, direction)
+    if episode_id is not None:
+        await _require_project_episode(project_id, episode_id)
+    return await compute_advance_preview(
+        project_id, auth.user_id, direction, episode_id
+    )
 
 
 @router.post("/{project_id}/advance")
@@ -871,14 +955,24 @@ async def post_advance(
     project_id: str,
     auth: AuthDep,
     direction: str = Query("forward", pattern="^(forward|back)$"),
+    episode_id: Optional[str] = Query(
+        None, description="Scope the advance cursor to a single episode (B2)."
+    ),
     _project_guard: None = Depends(verify_project_write_access),
 ):
     """Advance/retreat the workflow cursor. Recomputes the predicate server-side
     (never trusts the client) and 409s with the blocked reason if it no longer
-    clears."""
+    clears.
+
+    ``episode_id`` (B2 T3): given → moves that episode's own
+    ``episodes.current_node_id`` cursor and leaves the project column / sibling
+    episodes untouched; None → the legacy project-level cursor move is
+    byte-for-byte unchanged."""
     from app.services.workflow.advance_service import execute_advance
 
-    preview = await execute_advance(project_id, auth.user_id, direction)
+    if episode_id is not None:
+        await _require_project_episode(project_id, episode_id)
+    preview = await execute_advance(project_id, auth.user_id, direction, episode_id)
     if not preview.will_advance:
         raise HTTPException(
             status_code=409, detail=preview.blocked_reason or "Advance blocked"
