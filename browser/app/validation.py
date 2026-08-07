@@ -15,6 +15,7 @@ callables, not specs.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -29,6 +30,8 @@ from .config import get_settings
 from .dom import visible_marker_texts
 from .redaction import scrub
 from .schemas import EnvironmentConfig, SessionResult, SessionStatus
+
+logger = logging.getLogger(__name__)
 
 
 class ProbeKind(str, Enum):
@@ -115,6 +118,47 @@ def storage_state_is_empty(storage_state: dict[str, Any]) -> bool:
     return not storage_state.get("cookies") and not storage_state.get("origins")
 
 
+async def _read_profile_best_effort(
+    platform: str, page: Any, context: Any
+) -> dict[str, Any] | None:
+    """Scrape the account identity off an already-authenticated page.
+
+    Returns None whenever anything at all goes wrong, and callers must treat
+    that as "no profile this time", never as a bad session. **A failed scrape
+    must not change a validation verdict** — the selectors are CSS-Modules
+    hashes that move on every console deploy, and letting a stale selector
+    condemn a live session would be the worst possible trade.
+
+    Imports are deferred: `login` and the platform registry pull in the
+    platform modules, which import this one.
+    """
+    try:
+        from .login import read_profile_from_page
+        from .platforms import get_login_flow
+
+        spec = get_login_flow(platform)
+        if spec is None:
+            return None
+
+        try:
+            cookies = list(await context.cookies())
+        except Exception:
+            cookies = []
+
+        profile = await read_profile_from_page(page, spec, cookies)
+        fields = {
+            "platform_user_id": profile.platform_user_id or None,
+            "username": profile.username or None,
+            "avatar_url": profile.avatar_url or None,
+        }
+        # All-empty is indistinguishable from "selectors all missed"; sending
+        # `{}` would let a caller overwrite a good stored name with nothing.
+        return fields if any(v for v in fields.values()) else None
+    except Exception:  # noqa: BLE001 - best effort by contract
+        logger.debug("profile scrape failed for platform=%s", platform, exc_info=True)
+        return None
+
+
 async def _probe_once(
     spec: DomValidationSpec,
     storage_state: dict[str, Any],
@@ -158,12 +202,29 @@ async def _probe_once(
                 final_url = page.url
                 visible = await visible_marker_texts(page, spec.login_text_markers)
                 judgement = spec.judge(final_url, visible)
+                # final_url is platform navigation state, not credential
+                # material, and it is what makes a misjudgement debuggable.
+                detail: dict[str, Any] = {
+                    "final_url": scrub(final_url),
+                    "login_markers": visible,
+                }
+                if judgement.valid:
+                    # Read the account identity while we already hold a live
+                    # authenticated page. Before this, profile was scraped ONLY
+                    # during the login flow, so an account bound before a
+                    # selector fix kept showing its fallback cookie id forever —
+                    # nothing in the system could ever refresh it. Callers get
+                    # `detail["profile"]` and can write it back.
+                    #
+                    # Strictly after `judge`: this navigates away from the page
+                    # the verdict was read from.
+                    profile = await _read_profile_best_effort(spec.platform, page, context)
+                    if profile is not None:
+                        detail["profile"] = profile
                 return ProbeOutcome(
                     kind=ProbeKind.VALID if judgement.valid else ProbeKind.INVALID,
                     reason=judgement.reason,
-                    # final_url is platform navigation state, not credential
-                    # material, and it is what makes a misjudgement debuggable.
-                    detail={"final_url": scrub(final_url), "login_markers": visible},
+                    detail=detail,
                 )
             finally:
                 await browser.close()

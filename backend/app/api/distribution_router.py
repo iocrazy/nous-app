@@ -257,12 +257,91 @@ async def oauth_callback(platform: str, code: str = "", state: str = ""):
     return RedirectResponse(f"{front}/distribution/accounts?connected=1")
 
 
+async def _refresh_session_account(account_id: int, acct: dict) -> dict:
+    """Re-validate a browser-session account and write back what it tells us.
+
+    Two things come out of one browser run, and they are written back through
+    different doors on purpose:
+
+    * the verdict → ``status`` / ``session_checked_at`` (session_state itself is
+      untouched: validate does not renew cookies, publish does)
+    * ``detail["profile"]`` → username / avatar
+
+    The profile write-back is why this endpoint matters beyond a liveness check.
+    Profile used to be scraped only during login, so an account bound before a
+    selector fix displayed its fallback cookie id forever — no path in the
+    system could refresh it. Now any successful validation repairs it.
+
+    Infra failures (browser container down, proxy dead) must leave ``status``
+    and ``session_checked_at`` alone — see spec §7.8: marking accounts
+    ``needs_relogin`` because a container was restarting would send users off
+    re-scanning QR codes to fix an outage on our side.
+    """
+    from app.services.distribution.browser_client import is_infra_failure
+    from app.services.distribution.registry import get_session_adapter
+
+    adapter = get_session_adapter(acct.get("platform", "douyin"))
+    result = await adapter.validate_session(acct)
+    detail = result.get("detail") or {}
+
+    if is_infra_failure(result):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "session_check_unavailable",
+                "message": result.get("message") or "session service unavailable",
+                "error_kind": detail.get("error_kind"),
+                "hint": "The account was left untouched. Retry once the service recovers.",
+            },
+        )
+
+    if not result.get("success"):
+        await accounts_repo.mark_needs_relogin(account_id)
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "session_invalid",
+                "message": result.get("message") or "session is no longer valid",
+                "reason": detail.get("reason"),
+                "hint": "Bind the account again to restore publishing.",
+            },
+        )
+
+    profile = detail.get("profile") or {}
+    await accounts_repo.update_profile(
+        account_id,
+        username=profile.get("username"),
+        avatar_url=profile.get("avatar_url"),
+    )
+    # session_state=None: the session is alive but validate produced no new
+    # cookies, so this bumps session_checked_at without blanking the row.
+    await accounts_repo.update_session_state(account_id, None, status="active")
+    return await accounts_repo.get_public(account_id) or {}
+
+
 @router.post(
     "/accounts/{account_id}/refresh",
     dependencies=[Depends(require_distribution)],
 )
 async def refresh_account(account_id: int, user: CurrentUserDep):
+    """Refresh an account. Branches on auth_type — the two channels share nothing.
+
+    Session accounts have no ``refresh_token`` by construction, so before this
+    branch existed they hit the OAuth path's guard and got
+    ``404 "Account not found or no refresh token"`` — a bound, working account
+    told it does not exist. That is exactly the untyped dead end the repo's
+    "触发路径必须类型化失败回显" rule is about.
+    """
+    from app.services.distribution.session_adapter import AUTH_TYPE_SESSION
+
     await _authorize_account(account_id, user)
+
+    acct = await accounts_repo.get_with_session(account_id)
+    if not acct:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if acct.get("auth_type") == AUTH_TYPE_SESSION:
+        return await _refresh_session_account(account_id, acct)
+
     row = await accounts_repo.get_with_tokens(account_id)
     if not row or not row.get("refresh_token"):
         raise HTTPException(

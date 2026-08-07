@@ -201,31 +201,9 @@ class LoginDriver:
 
     async def read_profile(self) -> LoginProfile:
         """Best effort. A missing display name must never fail a good login."""
-        spec = self._spec
-        if spec.profile_url:
-            try:
-                await self._page.goto(
-                    spec.profile_url,
-                    wait_until="domcontentloaded",
-                    timeout=get_settings().nav_timeout_ms,
-                )
-                await self._page.wait_for_timeout(get_settings().settle_ms)
-            except Exception:
-                # Stay on whatever page we are on and read what we can.
-                pass
-
-        fields: dict[str, str] = {}
-        for name, selectors in spec.profile_text_selectors.items():
-            value = await first_text(self._page, selectors)
-            if value:
-                fields[name] = value
-        for name, (selectors, attribute) in spec.profile_attr_selectors.items():
-            value = await first_visible_attribute(self._page, selectors, attribute)
-            if value:
-                fields[name] = value
-
-        cookies = await self._safe_cookies()
-        return spec.parse_profile(fields, cookies)
+        return await read_profile_from_page(
+            self._page, self._spec, await self._safe_cookies()
+        )
 
     async def _safe_cookies(self) -> list[dict[str, Any]]:
         try:
@@ -260,6 +238,46 @@ class LoginDriver:
                 await closer()
             except Exception:
                 continue
+
+
+async def read_profile_from_page(
+    page: Any, spec: LoginFlowSpec, cookies: Sequence[Mapping[str, Any]]
+) -> LoginProfile:
+    """Navigate to the profile page and scrape the account identity. Best effort.
+
+    Module-level rather than a `LoginDriver` method because the session
+    *validation* path needs the same scrape and has no driver: it holds its own
+    page from a storage_state-seeded context. Duplicating the logic there is how
+    the two copies drift, and this scrape is already fragile enough — the
+    selectors are CSS-Modules hashes that move on every console deploy.
+
+    Every step swallows its failure by design: a console redesign that breaks a
+    display-name selector must degrade to a nameless account, never fail a login
+    the user already completed or condemn a session that is actually alive.
+    """
+    if spec.profile_url:
+        try:
+            await page.goto(
+                spec.profile_url,
+                wait_until="domcontentloaded",
+                timeout=get_settings().nav_timeout_ms,
+            )
+            await page.wait_for_timeout(get_settings().settle_ms)
+        except Exception:
+            # Stay on whatever page we are on and read what we can.
+            pass
+
+    fields: dict[str, str] = {}
+    for name, selectors in spec.profile_text_selectors.items():
+        value = await first_text(page, selectors)
+        if value:
+            fields[name] = value
+    for name, (selectors, attribute) in spec.profile_attr_selectors.items():
+        value = await first_visible_attribute(page, selectors, attribute)
+        if value:
+            fields[name] = value
+
+    return spec.parse_profile(fields, cookies)
 
 
 async def _any_selector_visible(page: Any, selectors: Sequence[str]) -> bool:

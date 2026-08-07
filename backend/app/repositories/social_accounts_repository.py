@@ -364,6 +364,47 @@ class SocialAccountsRepository:
                 .values(**values)
             )
 
+    async def update_profile(
+        self,
+        account_id: int,
+        *,
+        username: Optional[str] = None,
+        avatar_url: Optional[str] = None,
+    ) -> None:
+        """Write back the display identity scraped off a live session.
+
+        Exists because profile used to be scraped ONLY during the login flow: an
+        account bound before a selector fix kept rendering its fallback cookie id
+        as the display name forever, with no path in the system able to refresh
+        it. ``/session/validate`` now returns a profile whenever it holds an
+        authenticated page, and this is where that lands.
+
+        ``None`` means "the scrape did not produce this field" and leaves the
+        stored value alone — a console redesign that breaks one selector must
+        not blank a name that is currently correct.
+
+        **``platform_user_id`` is deliberately not updatable here.** It is part
+        of the natural key (scope + platform + platform_user_id) that
+        ``upsert_session_account`` dedupes on, so rewriting it would either
+        collide with an existing row or orphan this one from the identity a
+        re-bind would resolve to. Correcting a wrong id is a re-bind, not a
+        profile refresh.
+        """
+        values: dict[str, Any] = {}
+        if username:
+            values["username"] = username
+        if avatar_url:
+            values["avatar_url"] = avatar_url
+        if not values:
+            return
+        values["updated_at"] = func.now()
+        async with write_scope() as session:
+            await session.execute(
+                sa_update(SocialAccounts)
+                .where(SocialAccounts.id == _bigint(account_id))
+                .values(**values)
+            )
+
     async def list_session_accounts_for_check(
         self,
         limit: int = SESSION_CHECK_BATCH,
