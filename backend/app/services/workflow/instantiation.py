@@ -307,9 +307,7 @@ async def maybe_instantiate_episode_workflow(
         )
 
 
-async def _close_legacy_mirror_issues(
-    project_id: str, node_ids: List[Any]
-) -> None:
+async def _close_legacy_mirror_issues(project_id: str, node_ids: List[Any]) -> None:
     """Cancel the mirror issues of now-deleted legacy nodes (B3 backfill).
 
     Mirror issues reference their node by string ``origin_id`` (not an FK), so

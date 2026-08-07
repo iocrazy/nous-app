@@ -44,9 +44,7 @@ async def patched_engine(integration_db_url):
 
     db_engine._engine = None
     db_session.dispose_sessionmaker()
-    with patch.object(
-        db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url
-    ):
+    with patch.object(db_engine.settings, "SUPAVISOR_DATABASE_URL", integration_db_url):
         yield
     await db_engine.dispose_engine()
     db_engine._engine = None

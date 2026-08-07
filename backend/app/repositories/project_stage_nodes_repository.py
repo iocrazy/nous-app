@@ -310,9 +310,7 @@ class ProjectStageNodesRepository:
 
             return await self._list_nodes_in_session(session, pid)
 
-    async def _load_template_bits(
-        self, session, template_id: str
-    ) -> Optional[tuple]:
+    async def _load_template_bits(self, session, template_id: str) -> Optional[tuple]:
         """Load a template's nodes + members + dep edges + slug map, once.
 
         Returns ``None`` when the template has no nodes (caller short-circuits
@@ -788,12 +786,16 @@ class ProjectStageNodesRepository:
             ]
             if src_ids:
                 template_id = (
-                    await session.execute(
-                        select(WorkflowTemplateNodes.template_id)
-                        .where(WorkflowTemplateNodes.id == src_ids[0])
-                        .limit(1)
+                    (
+                        await session.execute(
+                            select(WorkflowTemplateNodes.template_id)
+                            .where(WorkflowTemplateNodes.id == src_ids[0])
+                            .limit(1)
+                        )
                     )
-                ).scalars().first()
+                    .scalars()
+                    .first()
+                )
 
             slug_map = await self._load_slug_map(session)
             shooting = None
