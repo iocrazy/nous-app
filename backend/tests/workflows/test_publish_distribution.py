@@ -1,15 +1,6 @@
 import pytest
 
 
-async def _no_creds():
-    """OAuth 凭证的惰性 getter。
-
-    session-only 批次绝不该 await 它 —— 见
-    test_session_only_batch_never_fetches_oauth_credentials。
-    """
-    return {}
-
-
 from app.workflows.publish_distribution import (
     _account_publish_opts,
     _publish_one_account,
@@ -20,6 +11,15 @@ from app.workflows.publish_distribution import (
     decide_channel,
     visibility_to_private_status,
 )
+
+
+async def _no_creds():
+    """OAuth 凭证的惰性 getter。
+
+    session-only 批次绝不该 await 它 —— 见
+    test_session_only_batch_never_fetches_oauth_credentials。
+    """
+    return {}
 
 
 def test_decide_channel_h5_default():
