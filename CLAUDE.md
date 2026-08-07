@@ -613,6 +613,22 @@ CI 里那步用的是 `docker://rhysd/actionlint:latest`，本机 docker pull �
 
    ⚠️ 版本文件的路径相对 **workspace 根**（写 `.python-version`），`defaults.run.working-directory` 只作用于 `run` 步骤，不影响 action 输入。
 
+### 环境版本一览（怀疑"是不是被人偷偷改了"时先看这张表）
+
+| 位置 | 版本 | 谁决定 |
+|------|------|--------|
+| `.python-version` | **3.13** | 我们（唯一真相，CI 三处都读它） |
+| `backend/pyproject.toml` | **>=3.13** | 我们 |
+| `nous-core/pyproject.toml` | **>=3.13** | 我们（pyo3 无 abi3，wheel 钉死 cp313） |
+| `Dockerfile`（pin 的 digest） | **3.13**-slim | 我们 |
+| `browser/pyproject.toml` | **3.12** | ⚠️ **上游** —— 见下 |
+| `.nvmrc` | **22** | 我们（CI 与 `deploy-pages` 都读它） |
+| `frontend/` `admin/` Dockerfile | node **22** | 我们 |
+
+⚠️ **`browser/` 是 3.12，这是刻意的，不是漂移**：它的基础镜像是 `mcr.microsoft.com/playwright/python:v1.52.0-noble`，noble 自带 **Python 3.12.3**，版本由上游 playwright 镜像决定，而那个 tag 又必须跟 `dependencies` 里的 `playwright` pin 一起动。2026-08-07 曾把它"统一"成 `>=3.13`，结果 uv 找不到 3.13 就下载一个装进 **root 家目录**，而 Dockerfile 只 `chown /app` 后切 `USER pwuser` —— 容器起不来（`bad interpreter: Permission denied`），生产 smoke 拦下自动回滚。要真统一，是换基础镜像（自建 python:3.13 + 自装 chromium），不是改这一行。
+
+⚠️ **gpupc 的系统 python 是 3.14**（`/usr/bin/python3`），跟本项目无关 —— uv 管的项目一律看 `.python-version`。但它会从 PATH 漏进构建：pyo3 的 build script 就是这么抓到 3.14 并报 "newer than PyO3's maximum supported version (3.13)" 的，所以 `ci.yml` 的 rust job 显式钉 `PYO3_PYTHON`。**诊断时别拿 `python3 -V` 当项目环境**。
+
 ### 红 CI 的诊断顺序（先读日志，再谈假设）
 
 同一批红 CI 曾被连着误诊两次（先判"计费假红"、再判"要迁 self-hosted"），真相是第三种。**第一步永远是 `gh run view --job <id> --log-failed` 看首个 error**，再套下面的表：
