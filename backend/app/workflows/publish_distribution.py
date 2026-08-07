@@ -594,9 +594,14 @@ async def mark_publish_processing_step(
 
 
 @DBOS.step()
-async def run_publish_accounts_step(task_id: int) -> dict[str, Any]:
+async def run_publish_accounts_step(task_id: int, user_id: str) -> dict[str, Any]:
     """Load the batch + its accounts (with decrypted tokens) and publish each.
-    Returns the per-account final statuses for the workflow to aggregate."""
+    Returns the per-account final statuses for the workflow to aggregate.
+
+    ``user_id`` exists only to establish the ambient scope (see below); the
+    batch's own rows are found by ``task_id``.
+    """
+    from app.db.scope import Scope, request_scope
     from app.repositories.publish_tasks_repository import PublishTasksRepository
     from app.repositories.social_accounts_repository import SocialAccountsRepository
     from app.services.distribution.credentials import get_douyin_credentials
@@ -638,8 +643,24 @@ async def run_publish_accounts_step(task_id: int) -> dict[str, Any]:
     # classifier has only wall-clock to go on and must choose between killing
     # legitimate long batches and staying silent long after a worker dies.
     # Tolerates an empty workflow_id (unit tests, no DBOS runtime).
-    async with async_heartbeat_loop(workflow_id=DBOS.workflow_id or ""):
-        statuses = await _run_accounts(rows, accounts_repo, creds_lazy, task, repo)
+    #
+    # request_scope establishes the ambient tenant scope this step's repo calls
+    # need — `resources` is a scoped model, and resolving the video URL is a
+    # SELECT against it. Without this the fail-closed guard raises
+    #   "SELECT references scoped table(s) ['Resources(resources)'] but no
+    #    scope is set"
+    # and EVERY publish dies before it can reach a browser. Found by the second
+    # real end-to-end run; every other workflow in this package already opens
+    # one (download / thumbnail / upload_postprocess / …) — publish was the
+    # only one missing it.
+    #
+    # USER scope, not system: `resource_ids` comes straight from the client and
+    # `create_task` never verifies they belong to the caller. The tenant filter
+    # is what makes another user's resource resolve to "no servable URL" instead
+    # of being happily published to the attacker's account.
+    async with request_scope(Scope(user_id=user_id)):
+        async with async_heartbeat_loop(workflow_id=DBOS.workflow_id or ""):
+            statuses = await _run_accounts(rows, accounts_repo, creds_lazy, task, repo)
     return {"statuses": statuses}
 
 
@@ -763,7 +784,7 @@ async def publish_distribution_workflow(task_id: int, user_id: str) -> dict[str,
     await mark_publish_processing_step(DBOS.workflow_id, user_id)
 
     try:
-        result = await run_publish_accounts_step(task_id)
+        result = await run_publish_accounts_step(task_id, user_id)
     except Exception as e:
         await manager.fail(DBOS.workflow_id, f"publish batch errored: {e}")
         await emit_publish_notification_step(
