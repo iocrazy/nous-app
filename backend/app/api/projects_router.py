@@ -65,6 +65,7 @@ from app.schemas.workflow import (
     NodeDeleteBlocked,
     NodePatch,
     ProjectWorkflowOut,
+    ReinstantiatePerEpisodeRequest,
     WorkflowAlreadyInstantiated,
 )
 from app.services.library.projects_service import ProjectsService
@@ -543,6 +544,35 @@ async def attach_project_workflow(
     except WorkflowAlreadyInstantiated:
         raise HTTPException(status_code=409, detail="Project already has a workflow")
     return {"success": True, "data": nodes}
+
+
+@router.post("/{project_id}/workflow/reinstantiate-per-episode")
+async def reinstantiate_workflow_per_episode(
+    project_id: str,
+    auth: AuthDep,
+    payload: Optional[ReinstantiatePerEpisodeRequest] = None,
+    _project_guard: None = Depends(verify_project_write_access),
+):
+    """B3 backfill (§6): ignite a legacy project-level workflow into per-episode
+    chains — atomically drop the legacy nodes, fan the template out per episode,
+    set each episode's cursor, and cancel the old mirror issues.
+
+    A one-shot owner/manager action (``verify_project_write_access``), run once
+    against the sleeping production project after deploy. Idempotent: a project
+    already per-episode returns ``{"converted": false}`` and touches nothing, so
+    a re-run is harmless. ``method`` optionally overrides the value inferred from
+    the legacy chain's skip state.
+    """
+    from app.services.workflow.instantiation import (
+        reinstantiate_project_per_episode,
+    )
+
+    result = await reinstantiate_project_per_episode(
+        str(project_id),
+        user_id=auth.user_id,
+        method=payload.method if payload else None,
+    )
+    return {"success": True, "data": result}
 
 
 @router.get("/{project_id}/workflow/nodes/{node_id}/board")

@@ -35,7 +35,7 @@ import datetime
 import uuid
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import delete, func, select, text, update
 
 from app.db.session import read_scope, write_scope
 from app.models import (
@@ -227,6 +227,15 @@ class ProjectStageNodesRepository:
     ) -> List[Dict[str, Any]]:
         """Copy a template's nodes into ``project_stage_nodes`` (idempotent).
 
+        ⚠️ Builds a LEGACY project-level chain — every node it creates has
+        ``episode_id`` NULL. Since B3, production instantiation is per-episode
+        (``instantiate_project_workflow`` → ``instantiate_episode_chains``);
+        this method has NO remaining production caller and is kept only as the
+        shared building block ``_clone_template_chain(episode_id=None)`` and for
+        tests. Do NOT wire it into a new flow: a NULL node on a project that is
+        otherwise per-episode is the silent-stall state the all-or-nothing
+        constraint forbids.
+
         A project that already owns any node is left untouched (returns its
         existing nodes) UNLESS ``expect_fresh`` is set, in which case that
         case raises ``WorkflowAlreadyInstantiated`` instead (the M1.x
@@ -286,188 +295,539 @@ class ProjectStageNodesRepository:
                     raise WorkflowAlreadyInstantiated()
                 return await self._list_nodes_in_session(session, pid)
 
-            tpl_nodes = (
-                (
-                    await session.execute(
-                        select(WorkflowTemplateNodes)
-                        .where(
-                            WorkflowTemplateNodes.template_id == int(str(template_id))
-                        )
-                        .order_by(WorkflowTemplateNodes.sort_order)
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            if not tpl_nodes:
+            bits = await self._load_template_bits(session, template_id)
+            if bits is None:
                 return []
 
-            tpl_ids = [n.id for n in tpl_nodes]
-            tpl_members = (
-                (
-                    await session.execute(
-                        select(WorkflowTemplateNodeMembers).where(
-                            WorkflowTemplateNodeMembers.node_id.in_(tpl_ids)
-                        )
-                    )
-                )
-                .scalars()
-                .all()
+            await self._clone_template_chain(
+                session,
+                pid,
+                bits,
+                method=method,
+                overrides_by_src=overrides_by_src,
+                episode_id=None,
             )
-            members_by_tpl: Dict[int, List[WorkflowTemplateNodeMembers]] = {}
-            for m in tpl_members:
-                members_by_tpl.setdefault(m.node_id, []).append(m)
-
-            # Dependency edges (mig 391, M3 PR-J): loaded once here, resolved
-            # to instance ids AFTER the instance nodes below are created (the
-            # tpl-id -> instance-id map only exists once every node has been
-            # flushed).
-            tpl_deps = (
-                (
-                    await session.execute(
-                        select(WorkflowTemplateNodeDeps).where(
-                            WorkflowTemplateNodeDeps.node_id.in_(tpl_ids)
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-
-            slug_map = await self._load_slug_map(session)
-
-            # Build instance rows (skip/parallel resolved) before inserting so we
-            # can compute the hybrid parallel group over the full set.
-            planned: List[Dict[str, Any]] = []
-            for tn in tpl_nodes:
-                slug = (
-                    slug_map.get(tn.source_stage_id)
-                    if tn.source_stage_id is not None
-                    else None
-                )
-                ov = overrides_by_src.get(str(tn.id), {})
-                skipped = _resolve_skip(slug, tn.skip_default, method)
-                if "skipped" in ov:
-                    skipped = bool(ov["skipped"])
-                planned.append(
-                    {
-                        "tpl_node": tn,
-                        "slug": slug,
-                        "override": ov,
-                        "parallel_group": tn.parallel_group,
-                        "skipped": skipped,
-                    }
-                )
-
-            if method == "hybrid":
-                groups = [
-                    p["parallel_group"]
-                    for p in planned
-                    if p["parallel_group"] is not None
-                ]
-                fresh_group = (max(groups) if groups else 0) + 1
-                for p in planned:
-                    if p["slug"] in (_SLUG_SHOOTING, _SLUG_CANVAS):
-                        p["parallel_group"] = fresh_group
-
-            # Dependency edges (mig 391, M3 PR-J): template node id -> the
-            # instance node id created for it below, so the copied edges below
-            # can be re-pointed at the new rows (same idiom as
-            # ``source_template_node_id`` on the node itself).
-            tpl_to_instance: Dict[int, int] = {}
-            for p in planned:
-                tn = p["tpl_node"]
-                ov = p["override"]
-                owner_user = ov.get("owner_user_id", tn.default_owner_user_id)
-                owner_agent = ov.get("owner_agent_id", tn.default_owner_agent_id)
-                # An override that sets a user owner clears any agent owner (XOR).
-                if "owner_user_id" in ov and ov.get("owner_user_id") is not None:
-                    owner_agent = None
-                elif "owner_agent_id" in ov and ov.get("owner_agent_id") is not None:
-                    owner_user = None
-
-                node = ProjectStageNodes(
-                    project_id=pid,
-                    source_template_node_id=tn.id,
-                    legacy_stage_id=tn.source_stage_id,
-                    name=tn.name,
-                    sort_order=tn.sort_order,
-                    parallel_group=p["parallel_group"],
-                    status="skipped" if p["skipped"] else "pending",
-                    owner_user_id=_as_uuid(owner_user),
-                    owner_agent_id=_as_uuid(owner_agent),
-                    planned_start=_require_date(
-                        ov.get("planned_start"), "planned_start"
-                    ),
-                    planned_due=_require_date(ov.get("planned_due"), "planned_due"),
-                    review_required=tn.review_required,
-                    deliverable_required=tn.deliverable_required,
-                    deliverable_label=tn.deliverable_label,
-                    skipped=p["skipped"],
-                    # Flow Rules / Events (mig 386) — template-layer config,
-                    # copied verbatim at instantiation; instances don't open
-                    # these for in-place tweaks (spec §5).
-                    completion_policy=tn.completion_policy,
-                    events=tn.events,
-                    # Form-based deliverables (mig 390, M3 PR-I): form_schema
-                    # copied verbatim, same instantiate-then-freeze idiom as
-                    # completion_policy/events above. form_data is left unset
-                    # here (DB server_default '{}'::jsonb) — an instance
-                    # starts with no entered values.
-                    form_schema=tn.form_schema,
-                    # Surface (mig 402, B1): copied verbatim, same idiom as
-                    # completion_policy/events/form_schema above. Unlike those
-                    # three, ``tn.surface`` may legitimately be None
-                    # (deliverable-type node) — assigned as-is, never coerced
-                    # through an ``(x or {})``/``(x or default)`` fallback,
-                    # since that would silently turn a real deliverable-type
-                    # node into something else.
-                    surface=tn.surface,
-                    # episode_id intentionally NOT set here — B1 is the data
-                    # layer only. Every node instantiate_from_template creates
-                    # today stays a legacy project-level node (episode_id
-                    # NULL); B3 is what starts building per-episode chains.
-                )
-                session.add(node)
-                await session.flush()
-                tpl_to_instance[tn.id] = node.id
-
-                # Members: template defaults, unless the override supplies a list.
-                if "members" in ov:
-                    member_pairs = [
-                        (m.get("user_id"), m.get("agent_id")) for m in ov["members"]
-                    ]
-                else:
-                    member_pairs = [
-                        (m.user_id, m.agent_id) for m in members_by_tpl.get(tn.id, [])
-                    ]
-                for user_id, agent_id in member_pairs:
-                    session.add(
-                        ProjectStageNodeMembers(
-                            node_id=node.id,
-                            user_id=_as_uuid(user_id),
-                            agent_id=_as_uuid(agent_id),
-                        )
-                    )
-
-            # Copy dependency edges last, now that every template node id has
-            # a resolved instance id. A dep whose endpoint fell outside this
-            # template's own node set (should never happen — edges are
-            # created FK-scoped to one template) is skipped defensively
-            # rather than raising: instantiation must never fail because of a
-            # data shape a repo-level guard already prevents.
-            for d in tpl_deps:
-                inst_node_id = tpl_to_instance.get(d.node_id)
-                inst_dep_id = tpl_to_instance.get(d.depends_on_node_id)
-                if inst_node_id is not None and inst_dep_id is not None:
-                    session.add(
-                        ProjectStageNodeDeps(
-                            node_id=inst_node_id,
-                            depends_on_node_id=inst_dep_id,
-                        )
-                    )
 
             return await self._list_nodes_in_session(session, pid)
+
+    async def _load_template_bits(self, session, template_id: str) -> Optional[tuple]:
+        """Load a template's nodes + members + dep edges + slug map, once.
+
+        Returns ``None`` when the template has no nodes (caller short-circuits
+        to "No-workflow"); otherwise a 4-tuple
+        ``(tpl_nodes, members_by_tpl, tpl_deps, slug_map)`` that
+        ``_clone_template_chain`` consumes. Extracted from
+        ``instantiate_from_template`` so the per-episode fan-out
+        (``instantiate_episode_chains``) reads the template ONCE and clones it
+        N times instead of re-reading it per episode.
+        """
+        tpl_nodes = (
+            (
+                await session.execute(
+                    select(WorkflowTemplateNodes)
+                    .where(WorkflowTemplateNodes.template_id == int(str(template_id)))
+                    .order_by(WorkflowTemplateNodes.sort_order)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not tpl_nodes:
+            return None
+
+        tpl_ids = [n.id for n in tpl_nodes]
+        tpl_members = (
+            (
+                await session.execute(
+                    select(WorkflowTemplateNodeMembers).where(
+                        WorkflowTemplateNodeMembers.node_id.in_(tpl_ids)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        members_by_tpl: Dict[int, List[WorkflowTemplateNodeMembers]] = {}
+        for m in tpl_members:
+            members_by_tpl.setdefault(m.node_id, []).append(m)
+
+        # Dependency edges (mig 391, M3 PR-J): loaded once, resolved to instance
+        # ids by _clone_template_chain AFTER its nodes are flushed.
+        tpl_deps = (
+            (
+                await session.execute(
+                    select(WorkflowTemplateNodeDeps).where(
+                        WorkflowTemplateNodeDeps.node_id.in_(tpl_ids)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        slug_map = await self._load_slug_map(session)
+        return tpl_nodes, members_by_tpl, tpl_deps, slug_map
+
+    async def _clone_template_chain(
+        self,
+        session,
+        pid: int,
+        template_bits: tuple,
+        *,
+        method: Optional[str],
+        overrides_by_src: Dict[str, Dict[str, Any]],
+        episode_id: Optional[int],
+    ) -> None:
+        """Clone ONE full chain from a loaded template onto ``pid``.
+
+        ``episode_id`` stamps every created node (B3): ``None`` reproduces the
+        legacy project-level chain byte-for-byte (what
+        ``instantiate_from_template`` always did); a real id builds that
+        episode's chain. Every copy-freeze rule
+        (surface/events/completion_policy/form_schema, spec §5) lives here, so
+        the project-level and per-episode entries share one implementation.
+        Does NOT commit or list — the caller owns the transaction and reads back
+        whatever it needs.
+        """
+        tpl_nodes, members_by_tpl, tpl_deps, slug_map = template_bits
+
+        # Build instance rows (skip/parallel resolved) before inserting so we
+        # can compute the hybrid parallel group over the full set.
+        planned: List[Dict[str, Any]] = []
+        for tn in tpl_nodes:
+            slug = (
+                slug_map.get(tn.source_stage_id)
+                if tn.source_stage_id is not None
+                else None
+            )
+            ov = overrides_by_src.get(str(tn.id), {})
+            skipped = _resolve_skip(slug, tn.skip_default, method)
+            if "skipped" in ov:
+                skipped = bool(ov["skipped"])
+            planned.append(
+                {
+                    "tpl_node": tn,
+                    "slug": slug,
+                    "override": ov,
+                    "parallel_group": tn.parallel_group,
+                    "skipped": skipped,
+                }
+            )
+
+        if method == "hybrid":
+            groups = [
+                p["parallel_group"] for p in planned if p["parallel_group"] is not None
+            ]
+            fresh_group = (max(groups) if groups else 0) + 1
+            for p in planned:
+                if p["slug"] in (_SLUG_SHOOTING, _SLUG_CANVAS):
+                    p["parallel_group"] = fresh_group
+
+        # template node id -> the instance node id created for it below, so the
+        # copied dep edges can be re-pointed at the new rows.
+        tpl_to_instance: Dict[int, int] = {}
+        for p in planned:
+            tn = p["tpl_node"]
+            ov = p["override"]
+            owner_user = ov.get("owner_user_id", tn.default_owner_user_id)
+            owner_agent = ov.get("owner_agent_id", tn.default_owner_agent_id)
+            # An override that sets a user owner clears any agent owner (XOR).
+            if "owner_user_id" in ov and ov.get("owner_user_id") is not None:
+                owner_agent = None
+            elif "owner_agent_id" in ov and ov.get("owner_agent_id") is not None:
+                owner_user = None
+
+            node = ProjectStageNodes(
+                project_id=pid,
+                # B3: stamp the owning episode (None = legacy project-level).
+                episode_id=episode_id,
+                source_template_node_id=tn.id,
+                legacy_stage_id=tn.source_stage_id,
+                name=tn.name,
+                sort_order=tn.sort_order,
+                parallel_group=p["parallel_group"],
+                status="skipped" if p["skipped"] else "pending",
+                owner_user_id=_as_uuid(owner_user),
+                owner_agent_id=_as_uuid(owner_agent),
+                planned_start=_require_date(ov.get("planned_start"), "planned_start"),
+                planned_due=_require_date(ov.get("planned_due"), "planned_due"),
+                review_required=tn.review_required,
+                deliverable_required=tn.deliverable_required,
+                deliverable_label=tn.deliverable_label,
+                skipped=p["skipped"],
+                # Template-layer config copied verbatim + frozen at instantiation
+                # (spec §5): completion_policy / events / form_schema / surface.
+                # form_data is left unset (DB server_default '{}'::jsonb).
+                # surface may legitimately be None (deliverable-type node) —
+                # assigned as-is, never coerced through an ``(x or ...)``
+                # fallback that would silently retype a real deliverable node.
+                completion_policy=tn.completion_policy,
+                events=tn.events,
+                form_schema=tn.form_schema,
+                surface=tn.surface,
+            )
+            session.add(node)
+            await session.flush()
+            tpl_to_instance[tn.id] = node.id
+
+            # Members: template defaults, unless the override supplies a list.
+            if "members" in ov:
+                member_pairs = [
+                    (m.get("user_id"), m.get("agent_id")) for m in ov["members"]
+                ]
+            else:
+                member_pairs = [
+                    (m.user_id, m.agent_id) for m in members_by_tpl.get(tn.id, [])
+                ]
+            for user_id, agent_id in member_pairs:
+                session.add(
+                    ProjectStageNodeMembers(
+                        node_id=node.id,
+                        user_id=_as_uuid(user_id),
+                        agent_id=_as_uuid(agent_id),
+                    )
+                )
+
+        # Copy dependency edges last, now that every template node id has a
+        # resolved instance id. A dep whose endpoint fell outside this
+        # template's own node set (should never happen) is skipped defensively.
+        for d in tpl_deps:
+            inst_node_id = tpl_to_instance.get(d.node_id)
+            inst_dep_id = tpl_to_instance.get(d.depends_on_node_id)
+            if inst_node_id is not None and inst_dep_id is not None:
+                session.add(
+                    ProjectStageNodeDeps(
+                        node_id=inst_node_id,
+                        depends_on_node_id=inst_dep_id,
+                    )
+                )
+
+    async def instantiate_episode_chains(
+        self,
+        project_id: str,
+        template_id: str,
+        episode_ids: List[str],
+        *,
+        method: Optional[str] = None,
+        overrides: Optional[List[Dict[str, Any]]] = None,
+        expect_fresh: bool = False,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Fan a template out into ONE node chain per episode, atomically (B3).
+
+        Returns ``{episode_id: [node dicts]}``. Every chain is built inside a
+        SINGLE transaction under the same per-project advisory lock
+        ``instantiate_from_template`` uses, so a mid-fan-out failure (e.g. a bad
+        episode_id violating the FK) rolls back EVERY chain — the all-or-nothing
+        constraint from B2's autopilot audit (a project must never be left
+        half-bound, some nodes episode-scoped and some NULL, or the
+        legacy/per-episode detection flips and the NULL nodes silently drop out
+        of the per-episode path).
+
+        Idempotency has two layers: ``expect_fresh`` raises
+        ``WorkflowAlreadyInstantiated`` when the project already owns ANY node
+        (the attach 409 path); and, regardless, an episode that already has
+        nodes is skipped rather than doubled (so a retried fan-out — and the
+        single-episode entry below — is safe).
+        """
+        pid = int(str(project_id))
+        overrides_by_src: Dict[str, Dict[str, Any]] = {}
+        for ov in overrides or []:
+            key = ov.get("source_template_node_id")
+            if key is not None:
+                overrides_by_src[str(key)] = ov
+
+        result: Dict[str, List[Dict[str, Any]]] = {}
+        async with write_scope() as session:
+            await session.execute(
+                text(
+                    "SELECT pg_advisory_xact_lock("
+                    "hashtextextended('project_stage_nodes_instantiate:' || :pid, 0))"
+                ),
+                {"pid": str(pid)},
+            )
+
+            existing = (
+                (
+                    await session.execute(
+                        select(ProjectStageNodes.id).where(
+                            ProjectStageNodes.project_id == pid
+                        )
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if existing is not None and expect_fresh:
+                raise WorkflowAlreadyInstantiated()
+
+            # Defense-in-depth for the all-or-nothing constraint: fanning
+            # per-episode chains onto a project that still holds LEGACY
+            # (episode_id NULL) nodes would leave it half-bound — some nodes
+            # episode-scoped, some NULL — the exact state B2's autopilot
+            # legacy-detection silently mis-handles. No wiring reaches this today
+            # (attach 409s via expect_fresh; create runs on fresh projects;
+            # legacy conversion goes through reinstantiate_legacy_as_episodes,
+            # which DELETEs the NULL nodes first), but the contract is
+            # all-or-nothing, so enforce it here rather than trust callers.
+            legacy_null = (
+                (
+                    await session.execute(
+                        select(ProjectStageNodes.id).where(
+                            ProjectStageNodes.project_id == pid,
+                            ProjectStageNodes.episode_id.is_(None),
+                        )
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if legacy_null is not None:
+                raise ValueError(
+                    "cannot fan per-episode chains onto a project that still "
+                    "holds legacy project-level (episode_id NULL) nodes — use "
+                    "reinstantiate_legacy_as_episodes to convert atomically"
+                )
+
+            bits = await self._load_template_bits(session, template_id)
+            if bits is None:
+                return {}
+
+            for eid_raw in episode_ids:
+                eid = int(str(eid_raw))
+                already = (
+                    (
+                        await session.execute(
+                            select(ProjectStageNodes.id).where(
+                                ProjectStageNodes.project_id == pid,
+                                ProjectStageNodes.episode_id == eid,
+                            )
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
+                if already is None:
+                    await self._clone_template_chain(
+                        session,
+                        pid,
+                        bits,
+                        method=method,
+                        overrides_by_src=overrides_by_src,
+                        episode_id=eid,
+                    )
+                result[str(eid_raw)] = await self._list_nodes_in_session(
+                    session, pid, episode_id=eid
+                )
+            return result
+
+    async def instantiate_single_episode_chain(
+        self, project_id: str, episode_id: str
+    ) -> List[Dict[str, Any]]:
+        """Instantiate one episode's chain from the project's STORED binding
+        (``projects.workflow_template_id`` + ``workflow_method``, mig 409).
+
+        The new-episode trigger (B3 §5): an episode added after the project
+        already has a workflow reuses the same template + method the project was
+        attached with. Returns ``[]`` (no-op) when the project has no binding.
+        Idempotent via ``instantiate_episode_chains``'s per-episode skip.
+        """
+        from app.repositories.projects_repository import get_projects_repository
+
+        project = await get_projects_repository().get_project_by_id(
+            int(str(project_id))
+        )
+        template_id = (project or {}).get("workflow_template_id")
+        if not template_id:
+            return []
+        method = (project or {}).get("workflow_method")
+        res = await self.instantiate_episode_chains(
+            str(project_id),
+            str(template_id),
+            [str(episode_id)],
+            method=method,
+        )
+        return res.get(str(episode_id), [])
+
+    async def reinstantiate_legacy_as_episodes(
+        self,
+        project_id: str,
+        template_id: str,
+        episode_ids: List[str],
+        *,
+        method: Optional[str] = None,
+        overrides: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Backfill (B3 §6): atomically convert a project's LEGACY project-level
+        chain (``episode_id`` NULL) into per-episode chains.
+
+        The legacy-node DELETE and the per-episode fan-out run in ONE
+        transaction under the same per-project advisory lock, so the mixed
+        NULL/non-NULL state B2's autopilot audit forbids never exists on disk —
+        a mid-fan-out failure rolls the DELETE back too, leaving the legacy
+        chain intact. Deleting a node cascades to its members/deps (FK ON DELETE
+        CASCADE) and NULLs any episode cursor pointing at it (there are none for
+        a legacy project). Idempotent: a project already holding ANY
+        episode-scoped node is left untouched and its current per-episode chains
+        are returned.
+
+        Mirror-issue cleanup for the deleted legacy nodes is the caller's job
+        (issues reference nodes by string origin_id, not FK, so they do not
+        cascade) — see ``reinstantiate_project_per_episode``.
+        """
+        pid = int(str(project_id))
+        overrides_by_src: Dict[str, Dict[str, Any]] = {}
+        for ov in overrides or []:
+            key = ov.get("source_template_node_id")
+            if key is not None:
+                overrides_by_src[str(key)] = ov
+
+        result: Dict[str, List[Dict[str, Any]]] = {}
+        async with write_scope() as session:
+            await session.execute(
+                text(
+                    "SELECT pg_advisory_xact_lock("
+                    "hashtextextended('project_stage_nodes_instantiate:' || :pid, 0))"
+                ),
+                {"pid": str(pid)},
+            )
+
+            # Idempotency: already per-episode? (any node with a non-null
+            # episode_id). Leave it untouched and return its current chains.
+            per_episode = (
+                (
+                    await session.execute(
+                        select(ProjectStageNodes.id).where(
+                            ProjectStageNodes.project_id == pid,
+                            ProjectStageNodes.episode_id.is_not(None),
+                        )
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if per_episode is not None:
+                for eid_raw in episode_ids:
+                    result[str(eid_raw)] = await self._list_nodes_in_session(
+                        session, pid, episode_id=int(str(eid_raw))
+                    )
+                return result
+
+            # Load the template BEFORE touching the legacy chain: an empty
+            # template must short-circuit here, never after the DELETE — deleting
+            # then recreating nothing would be silent data loss (the whole point
+            # of this method is a SAFE atomic conversion).
+            bits = await self._load_template_bits(session, template_id)
+            if bits is None:
+                return {}
+
+            # Drop the legacy project-level chain (members/deps cascade).
+            await session.execute(
+                delete(ProjectStageNodes).where(
+                    ProjectStageNodes.project_id == pid,
+                    ProjectStageNodes.episode_id.is_(None),
+                )
+            )
+
+            for eid_raw in episode_ids:
+                eid = int(str(eid_raw))
+                await self._clone_template_chain(
+                    session,
+                    pid,
+                    bits,
+                    method=method,
+                    overrides_by_src=overrides_by_src,
+                    episode_id=eid,
+                )
+                result[str(eid_raw)] = await self._list_nodes_in_session(
+                    session, pid, episode_id=eid
+                )
+            return result
+
+    async def infer_legacy_binding(
+        self, project_id: str
+    ) -> tuple[Optional[int], Optional[str]]:
+        """Infer ``(template_id, method)`` for a legacy project-level chain
+        (B3 backfill §6).
+
+        ``template_id`` is read from any legacy node's
+        ``source_template_node_id`` → its template. ``method`` is recovered from
+        the Shooting/Canvas skip state the original instantiation baked in:
+        Shooting skipped → ``'ai'``; Shooting + Canvas sharing a
+        ``parallel_group`` → ``'hybrid'``; otherwise → ``'live'``. Returns
+        ``(None, None)`` when the project has no legacy (episode_id NULL) nodes —
+        i.e. it is already per-episode, or never had a workflow.
+
+        Fragile by design (see spec §10): a mis-inferred method only affects the
+        Shooting/Canvas skip presentation of the reinstantiated chains, never
+        their structure — and the backfill caller may override it explicitly.
+        """
+        pid = int(str(project_id))
+        async with read_scope() as session:
+            legacy = (
+                (
+                    await session.execute(
+                        select(ProjectStageNodes).where(
+                            ProjectStageNodes.project_id == pid,
+                            ProjectStageNodes.episode_id.is_(None),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if not legacy:
+                return None, None
+
+            template_id: Optional[int] = None
+            src_ids = [
+                n.source_template_node_id
+                for n in legacy
+                if n.source_template_node_id is not None
+            ]
+            if src_ids:
+                template_id = (
+                    (
+                        await session.execute(
+                            select(WorkflowTemplateNodes.template_id)
+                            .where(WorkflowTemplateNodes.id == src_ids[0])
+                            .limit(1)
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
+
+            slug_map = await self._load_slug_map(session)
+            shooting = None
+            canvas = None
+            for n in legacy:
+                slug = (
+                    slug_map.get(n.legacy_stage_id)
+                    if n.legacy_stage_id is not None
+                    else None
+                )
+                if slug == _SLUG_SHOOTING:
+                    shooting = n
+                elif slug == _SLUG_CANVAS:
+                    canvas = n
+
+            method: Optional[str] = None
+            if shooting is not None:
+                if shooting.skipped:
+                    method = "ai"
+                elif (
+                    canvas is not None
+                    and shooting.parallel_group is not None
+                    and shooting.parallel_group == canvas.parallel_group
+                ):
+                    method = "hybrid"
+                else:
+                    method = "live"
+
+            return (
+                int(template_id) if template_id is not None else None,
+                method,
+            )
 
     async def _list_nodes_in_session(
         self, session, pid: int, episode_id: Optional[int] = None
@@ -521,6 +881,29 @@ class ProjectStageNodesRepository:
                 await session.execute(
                     select(ProjectStageNodes.id)
                     .where(ProjectStageNodes.project_id == pid)
+                    .limit(1)
+                )
+            ).first()
+        return row is not None
+
+    async def has_episode_scoped_nodes(self, project_id: str) -> bool:
+        """Whether the project has any per-episode (episode_id non-null) node.
+
+        The signal B3 uses to tell a per-episode project from a legacy
+        project-level one — the same predicate B2's autopilot legacy-detection
+        keys off. Callers that would insert a project-level (episode_id NULL)
+        node use it to refuse, since a NULL node on a per-episode project is the
+        silent-stall state the all-or-nothing constraint forbids.
+        """
+        pid = int(str(project_id))
+        async with read_scope() as session:
+            row = (
+                await session.execute(
+                    select(ProjectStageNodes.id)
+                    .where(
+                        ProjectStageNodes.project_id == pid,
+                        ProjectStageNodes.episode_id.is_not(None),
+                    )
                     .limit(1)
                 )
             ).first()

@@ -34,14 +34,23 @@ class _FakeNodesRepo:
         *,
         node: Optional[Dict[str, Any]],
         active: Optional[List[Dict[str, Any]]] = None,
+        episode_scoped: bool = False,
     ):
         self._node = node
         self._active = active or []
+        self._episode_scoped = episode_scoped
         self.add_calls: List[Dict[str, Any]] = []
         self.deleted: List[tuple] = []
 
     async def get_node(self, node_id, project_id=None):
         return self._node
+
+    async def has_episode_scoped_nodes(self, project_id):
+        # B3: add_project_node refuses to add a project-level node to a
+        # per-episode project. Default False keeps these legacy add tests on the
+        # project-level path; the refusal itself is covered by the integration
+        # test test_add_node_refuses_per_episode_project.
+        return self._episode_scoped
 
     async def get_active_group(self, project_id):
         return list(self._active)

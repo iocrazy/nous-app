@@ -193,6 +193,15 @@ class AttachWorkflowRequest(BaseModel):
     method: Optional[Literal["live", "ai", "hybrid"]] = None
 
 
+class ReinstantiatePerEpisodeRequest(BaseModel):
+    """POST /projects/{id}/workflow/reinstantiate-per-episode body (B3 backfill
+    §6 — ignite a legacy project-level chain into per-episode chains). ``method``
+    optionally overrides the value inferred from the legacy chain's skip state
+    (pass it when the original method — e.g. hybrid — may not be recoverable)."""
+
+    method: Optional[Literal["live", "ai", "hybrid"]] = None
+
+
 class TemplateUpdate(BaseModel):
     """PATCH /workflows/{id}. Every field optional. When ``nodes`` is present it
     is a FULL replacement of the template's node list (delete + insert)."""

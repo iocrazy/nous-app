@@ -49,6 +49,19 @@ async def add_project_node(
     )
 
     repo = get_project_stage_nodes_repository()
+
+    # B3: add_node stamps no episode_id (→ NULL). On a per-episode project that
+    # NULL node would silently drop out of every episode's advance/autopilot
+    # (B2 selects the per-episode path once ANY node is episode-scoped, and
+    # list_nodes_by_episode excludes NULL nodes) — the silent-stall state the
+    # all-or-nothing constraint forbids. Refuse loudly instead. Per-episode
+    # stage editing is B4's job; the router maps this ValueError to 422.
+    if await repo.has_episode_scoped_nodes(str(project_id)):
+        raise ValueError(
+            "cannot add a project-level stage to a per-episode workflow "
+            "project — per-episode stage editing lands in B4"
+        )
+
     return await repo.add_node(
         str(project_id),
         source_stage_id=source_stage_id,

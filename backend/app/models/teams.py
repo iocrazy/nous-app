@@ -282,6 +282,11 @@ class Projects(Base):
             " 'restricted'::character varying::text])",
             name="projects_visibility_check",
         ),
+        CheckConstraint(
+            "workflow_method IS NULL OR workflow_method = ANY"
+            " (ARRAY['live'::text, 'ai'::text, 'hybrid'::text])",
+            name="projects_workflow_method_check",
+        ),
         ForeignKeyConstraint(
             ["team_id"],
             ["public.teams.id"],
@@ -293,11 +298,22 @@ class Projects(Base):
             ["public.project_workflows.id"],
             name="projects_workflow_id_fkey",
         ),
+        ForeignKeyConstraint(
+            ["workflow_template_id"],
+            ["public.workflow_templates.id"],
+            ondelete="SET NULL",
+            name="projects_workflow_template_id_fkey",
+        ),
         # current_canvas_id has no FK in the DB — deliberately unconstrained.
         PrimaryKeyConstraint("id", name="projects_pkey"),
         Index("idx_projects_owner", "owner_id"),
         Index("idx_projects_team", "team_id"),
         Index("idx_projects_workflow_id", "workflow_id"),
+        Index(
+            "idx_projects_workflow_template",
+            "workflow_template_id",
+            postgresql_where=text("workflow_template_id IS NOT NULL"),
+        ),
         {"schema": "public"},
     )
 
@@ -355,6 +371,26 @@ class Projects(Base):
     # Autopilot never crosses a review gate regardless of this flag.
     autopilot_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
+    )
+    # B3 workflow binding (mig 409): the template + method this project was
+    # instantiated from, so a newly added episode's chain reuses them. NULL for
+    # a project with no workflow. workflow_template_id has an FK (declared in
+    # __table_args__ above) — unlike current_node_id/topic_id soft pointers,
+    # this one references a durable config row we want the DB to keep honest.
+    workflow_template_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        comment=(
+            "B3 workflow binding (mig 409): workflow_templates.id this project "
+            "was instantiated from. NULL = no workflow. ON DELETE SET NULL."
+        ),
+    )
+    workflow_method: Mapped[Optional[str]] = mapped_column(
+        Text,
+        comment=(
+            "B3 workflow binding (mig 409): instantiation method "
+            "(live/ai/hybrid) frozen so every episode chain is built the same "
+            "way. NULL = no workflow."
+        ),
     )
 
 
