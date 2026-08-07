@@ -1810,7 +1810,9 @@
         "openEpisode": "Open Episode",
         "scriptScenes": "{{count}} scenes",
         "shotsProgress": "Shots {{done}}/{{total}}",
-        "rendersCount": "Renders {{count}}"
+        "rendersCount": "Renders {{count}}",
+        "awaiting": "{{count}} awaiting you",
+        "awaitingHint": "Episodes still at the Planned stage — awaiting your input (approximate; a precise \"needs answer\" count is pending a per-episode signal)."
       },
       "episodes": {
         "title": "Episodes",

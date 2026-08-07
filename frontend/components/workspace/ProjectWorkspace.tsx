@@ -648,6 +648,7 @@ export function ProjectWorkspace({
                 onOpenStage={handleOpenStage}
                 onSelectNode={handleSelectNode}
                 focusNodeId={focusNodeId}
+                onSelectEpisode={handleEpisodeChange}
               />
             )}
             {activeModule === 'episodes' && (
