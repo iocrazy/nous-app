@@ -14,7 +14,22 @@ concurrency:
 jobs:
   frontend:
     name: Frontend Build
-    runs-on: ubuntu-latest
+    # fork PR 一律跳过。本仓库是 public，而下面的 runner 是生产部署机 ——
+    # 让 fork 里的代码在上面执行等于把机器交给任何人（GitHub 官方对
+    # public repo + self-hosted runner 的警告就是这条）。宁可 fork PR
+    # 没有 CI，也不开这个口子。
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    # self-hosted，不是 ubuntu-latest。2026-08-06：账户付款失败让所有托管
+    # runner 的 job 在 2 秒内 fail（runner_name 为空、steps=0，annotation 写着
+    # "recent account payments have failed"），CI 完全失去守卫能力。
+    #
+    # ⚠️「切 public 就能解」这条旧经验这次不成立 —— repo 已经是 public 仍被拦，
+    # 说明是付款方式本身失败，不是免费额度用尽。self-hosted 不计费，同期
+    # deploy-gpu 三次全 success 可证它不受影响。
+    #
+    # 代价：只有一个 runner，三个 job 由并行变串行，且与 deploy-gpu 争用。
+    # 计费恢复后切回：三处 runs-on 改成 ubuntu-latest 即可，if 守卫留着无害。
+    runs-on: [self-hosted, gpu]
     defaults:
       run:
         working-directory: frontend
@@ -24,7 +39,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # 读 .nvmrc，不写死。曾是 CI 验 node 20 而 deploy-pages 用 22 构建
+          # 出货产物 —— 门禁跑的和线上跑的不是同一个 major，验过的等于没验。
+          # 仓库此前既无 .nvmrc 也无 package.json engines，无处对齐。
+          node-version-file: .nvmrc
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -56,7 +74,9 @@ jobs:
 
   backend:
     name: Backend Lint & Deps
-    runs-on: ubuntu-latest
+    # 同 frontend job：fork 守卫 + self-hosted 的理由见那里的注释
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, gpu]
     defaults:
       run:
         working-directory: backend
@@ -76,7 +96,12 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          # 读 .python-version，不写死版本号。写死过 "3.12"，而 .python-version
+          # 是 3.13、Dockerfile 也 pin 在 python:3.13-slim —— CI 于是在一个生产
+          # 从不使用的解释器上做 lint 和依赖解析，绿了却什么也没保证。
+          # requires-python = ">=3.12" 是下限不是锁，拦不住这种漂移。
+          # 路径相对 workspace 根：defaults.working-directory 只作用于 run 步骤。
+          python-version-file: .python-version
 
       - name: Install dependencies
         run: uv sync --frozen
@@ -135,13 +160,30 @@ jobs:
 
   rust:
     name: Rust Check
-    runs-on: ubuntu-latest
+    # 同 frontend job：fork 守卫 + self-hosted 的理由见那里的注释
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, gpu]
     defaults:
       run:
         working-directory: nous-core
 
     steps:
       - uses: actions/checkout@v4
+
+      # nous-core 是 pyo3 扩展，编译时要链接一个具体的 CPython。不指定的话
+      # pyo3 的 build script 去 PATH 里找 —— 于是编译用的解释器由 runner 的
+      # 系统 python 决定，跟 .python-version 无关。
+      #
+      # 这在 ubuntu-latest 上一直没暴露（系统 python 恰好是 3.12，在 pyo3
+      # 0.22 支持范围内）；迁到 self-hosted 立刻炸：
+      #   error: the configured Python interpreter version (3.14) is newer
+      #          than PyO3's maximum supported version (3.13)
+      # gpupc 的系统 python 是 3.14。同一份代码换台机器就编不过，正是
+      # "版本声明必须单一来源" 要消灭的那类问题。
+      - uses: actions/setup-python@v5
+        id: setup-python
+        with:
+          python-version-file: .python-version
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -152,7 +194,13 @@ jobs:
           workspaces: nous-core
 
       - name: Check compilation
+        env:
+          # 显式钉死，不靠 PATH 顺序 —— setup-python 装的解释器未必排在
+          # 系统 python 前面，而 pyo3 只认它找到的第一个。
+          PYO3_PYTHON: ${{ steps.setup-python.outputs.python-path }}
         run: cargo check
 
       - name: Clippy lint
+        env:
+          PYO3_PYTHON: ${{ steps.setup-python.outputs.python-path }}
         run: cargo clippy -- -D warnings

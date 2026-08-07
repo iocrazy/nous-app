@@ -1,5 +1,8 @@
 # Build stage
-FROM node:20-alpine AS builder
+# node 版本跟 .nvmrc / deploy-pages.yml 保持一致（22）。前端出货走
+# Cloudflare Pages（GHA 构建 + wrangler 直传），这个 Dockerfile 不在
+# 出货路径上，但版本分叉了迟早误导人。
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 

@@ -1,5 +1,8 @@
 # Build stage
-FROM node:20-alpine AS builder
+# node 版本跟 .nvmrc 保持一致（22）。⚠️ 这个 Dockerfile 在出货路径上：
+# nous-admin 是 compose 本机 build，且 admin 没有自动部署也不在 CI 覆盖内
+# （见 CLAUDE.md「已知缺口」），所以改完只能靠手动 build 验证。
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 

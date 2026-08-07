@@ -2,7 +2,8 @@
 name = "nous-browser"
 version = "0.1.0"
 description = "Nous browser automation sidecar - platform session validation and DOM publishing"
-requires-python = ">=3.12"
+# 与 .python-version（3.13）对齐 —— 见 backend/pyproject.toml 同处的说明
+requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.115.12",
     "uvicorn[standard]>=0.34.3",
@@ -14,7 +15,11 @@ dependencies = [
     "playwright==1.52.0",
 ]
 
-[project.optional-dependencies]
+# PEP 735 标准写法，与 backend/ 一致。原为 [project.optional-dependencies]，
+# 那是"给下游安装者的可选功能"语义，不是开发依赖 —— 副作用是 `uv sync` 默认
+# 不装，要记住敲 `--extra dev`，而 backend 那边是 `--dev`，同一个仓库两套命令。
+# dependency-groups 的 dev 组 `uv sync` 默认就装。
+[dependency-groups]
 dev = [
     "pytest>=8.4.1",
     "pytest-asyncio>=0.21.0",

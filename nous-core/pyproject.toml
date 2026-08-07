@@ -6,7 +6,11 @@ build-backend = "maturin"
 name = "nous-core"
 version = "0.1.0"
 description = "High-performance media processing module for Nous"
-requires-python = ">=3.10"
+# pyo3 只启用了 extension-module，没有 abi3 —— maturin 因此产出钉死单个
+# CPython 版本的 wheel（Dockerfile 注释："builds cp313 wheels"），跨版本
+# 装不上。">=3.10" 是假声明：宣称支持 3.10+，实际二进制只能在 3.13 跑。
+# 若将来真要跨版本，是给 pyo3 加 abi3-py310 feature，而不是放宽这一行。
+requires-python = ">=3.13"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
