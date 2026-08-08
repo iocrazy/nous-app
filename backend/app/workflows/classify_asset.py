@@ -171,7 +171,12 @@ async def classify_asset_workflow(
         )
         return {"status": "ok", "resource_id": resource_id, "tags_added": attached}
     except Exception as e:  # noqa: BLE001
-        return await record_workflow_failure(
+        # Route-C rule 4: record for task_tracking/UI, then RE-RAISE so
+        # DBOS records ERROR — returning the dict made DBOS mark this
+        # workflow SUCCESS while task_tracking said failed (same violation
+        # fixed for ai_summary/ai_transcription/analyze_l1, observed live
+        # 2026-08-08, wf 5a872175/1e63f80b).
+        await record_workflow_failure(
             workflow_id=wf_id,
             error=e,
             context={
@@ -180,3 +185,4 @@ async def classify_asset_workflow(
                 "user_id": user_id,
             },
         )
+        raise
