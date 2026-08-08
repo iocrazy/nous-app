@@ -123,6 +123,13 @@ ORM_ALLOWED_PATHS: dict[str, str] = {
         "enforces it by signature introspection — a future function taking a "
         "bare scene_id fails the build."
     ),
+    "services/workflow/surface_completion.py": (
+        "B4 回流 hook 服务（产物写入回流点触发自动完成）。在 _scope_for_* 私有函数中"
+        "通过 ORM JOIN 解析 script_id/scene_id/shot_id 的项目与集数归属（为了入队 tick）。"
+        "这些函数的 id 参数来自系统发起的回流点（ScriptProjects.id / ScriptScenes.id / "
+        "ScriptShots.id），不是 agent-tool 用户供给的，与 scope_resolver 的单回流点约束"
+        "同精神——回流 hook 层只负责解析归属，不做 scope 判定（判定已在上游产物写入时完成）。"
+    ),
 }
 
 # Files allowed to reach the scene/shot/episode/script-project repository
@@ -225,6 +232,12 @@ REPO_LAYER_ALLOWED_PATHS: dict[str, str] = {
         "reads get_episode_repository().get_by_id to prefix a node's folder "
         "name per episode (breaks the cross-episode shared-folder P0 trap); "
         "episode_id is the node's own frozen surface scope, not model-supplied."
+    ),
+    "services/workflow/surface_completion.py": (
+        "B4 回流 hook 服务（产物写入回流点触发自动完成）。读判据/节点/镜像走 "
+        "repo 公开接口（surface_criteria_for_episode / list_nodes_by_episode / "
+        "list_by_origin / transition_status / set_node_status）。所有 id 来自 "
+        "系统层（节点.id / issue.id），不涉及 scope 解析，无 agent-tool 用户供给 id 的路径。"
     ),
     "workflows/script_import.py": (
         "pre-A2 DBOS workflow (fountain/prose script import), triggered "
