@@ -1568,19 +1568,6 @@ class ProjectStageNodesRepository:
 
             return groups
 
-    async def set_current_node_id(
-        self, project_id: str, node_id: Optional[str]
-    ) -> None:
-        """Move the ``projects.current_node_id`` cursor."""
-        async with write_scope() as session:
-            await session.execute(
-                update(Projects)
-                .where(Projects.id == int(str(project_id)))
-                .values(
-                    current_node_id=(int(str(node_id)) if node_id is not None else None)
-                )
-            )
-
     async def count_running_agent_runs(self, project_id: str) -> int:
         """Number of ``agent_runs`` for the project with ``status='running'``
         (the header "N agents active" chip, spec §7)."""
