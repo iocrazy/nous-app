@@ -5,11 +5,16 @@ Collapses the pre-existing two-valued team-member gate (any member → allowed)
 into a graded role so the workflow write surface (template CRUD, advance, node
 tweaks = manager/editor; viewer/external = read-only) has one predicate.
 
-Resolution order (spec §7):
+Resolution order (spec §7 + 2026-08-08 owner rule):
   1. explicit ``project_members`` role wins — manager / editor / viewer / external
-  2. otherwise fall back to the project's (or the given) team:
+     (this can DEMOTE the owner: an explicit row is an admin action)
+  2. ``projects.owner_id`` == user → ``manager``. Without this, a personal
+     project (``team_id`` NULL, no member rows) resolved to None for
+     EVERYONE — the owner got 403 on their own workflow advance (2026-08-08
+     production finding during B4 ignition)
+  3. otherwise fall back to the project's (or the given) team:
      team ``owner``/``admin`` → ``manager``; ``member`` → ``editor``
-  3. no membership anywhere → ``None`` (caller raises 403, after its own 404)
+  4. no membership anywhere → ``None`` (caller raises 403, after its own 404)
 
 DB reads are isolated behind three seams (``_get_project_member_role``,
 ``_get_project_team_id``, ``_get_team_role``) so the unit tests can exercise
@@ -75,6 +80,26 @@ async def _get_project_team_id(project_id: str) -> Optional[str]:
     return str(row[0])
 
 
+async def _get_project_owner_id(project_id: str) -> Optional[str]:
+    """The project's ``owner_id`` (str), or None."""
+    from sqlalchemy import select
+
+    from app.db.session import read_scope
+    from app.models import Projects
+
+    async with read_scope() as session:
+        row = (
+            await session.execute(
+                select(Projects.owner_id)
+                .where(Projects.id == int(str(project_id)))
+                .limit(1)
+            )
+        ).first()
+    if row is None or row[0] is None:
+        return None
+    return str(row[0])
+
+
 async def _get_team_role(team_id: str, user_id: str) -> Optional[str]:
     """Raw ``team_members.role`` for (team, user), or None."""
     from sqlalchemy import select
@@ -110,6 +135,9 @@ async def resolve_effective_role(
         explicit = await _get_project_member_role(project_id, user_id)
         if explicit is not None:
             return explicit
+        owner_id = await _get_project_owner_id(project_id)
+        if owner_id is not None and owner_id == str(user_id):
+            return MANAGER
         if team_id is None:
             team_id = await _get_project_team_id(project_id)
 
