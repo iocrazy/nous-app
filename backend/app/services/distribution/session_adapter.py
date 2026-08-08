@@ -86,6 +86,9 @@ REASON_AUTH_TYPE_MISMATCH = "auth_type_mismatch"
 # 让账号进 needs_relogin：会话好得很，是这一次的入参不合法。调用方按
 # status=failed 处理（见 publish() 的说明）。
 REASON_INVALID_INTENT = "invalid_publish_intent"
+# 该平台只做到"绑定账号 + 会话保活",发布未实现。与上面几个的区别:会话是
+# 好的、账号是活的 —— 所以**绝不能**让它把账号标成 needs_relogin。
+REASON_PUBLISHING_NOT_IMPLEMENTED = "publishing_not_implemented"
 
 
 class SessionStateError(RuntimeError):
@@ -235,6 +238,14 @@ class PlatformSessionProfile:
     # 带 self_declaration 的意图会被拒，而不是被浏览器侧静默丢掉。
     self_declarations: frozenset[str] = frozenset()
     supports_collection: bool = False
+    # 能不能**发布**。默认 False —— 绑定账号和发布是两件事,新平台通常先有
+    # 前者:浏览器侧的会话校验 + 扫码登录是通用机制,而发布流程是一整套只能
+    # 对着真实页面写的 DOM 操作。
+    #
+    # 默认 False 是刻意的:漏填只会让发布被类型化拒绝(可见、可查),填成
+    # True 却没实现,才会让请求一路走到浏览器上瞎试。**缺失要往安全的方向
+    # 塌陷。**
+    supports_publishing: bool = False
 
 
 SESSION_PLATFORM_PROFILES: dict[str, PlatformSessionProfile] = {
@@ -250,13 +261,58 @@ SESSION_PLATFORM_PROFILES: dict[str, PlatformSessionProfile] = {
         schedule_max_ahead=SCHEDULE_MAX_AHEAD,
         self_declarations=DOUYIN_SELF_DECLARATIONS,
         supports_collection=True,
+        supports_publishing=True,
     ),
-    # 第二个平台建议是小红书（档位 2），正因为它与抖音最不同 —— 见 spec §6.1。
+    # 小红书 / B 站：**只做到账号绑定 + 会话保活**，发布未实现。
+    #
+    # 浏览器侧同样只注册了 validator 和 login flow，没有 publisher（见
+    # browser/app/platforms/__init__.py 末尾的说明）。两侧一致地把"能绑账号"
+    # 和"能发布"分开，所以发布请求在两个层面都会被类型化拒绝，不可能走到
+    # 浏览器上照着未写完的流程瞎试。
+    #
+    # 下面这些 content_types / 扩展名是**占位**，等真正实现发布时要对着平台
+    # 实测填准；在 supports_publishing=False 的前提下它们不会被用到。
+    "xiaohongshu": PlatformSessionProfile(
+        platform="xiaohongshu",
+        content_types=frozenset({"video", "images"}),
+        video_extensions=frozenset({".mp4", ".mov"}),
+        image_extensions=frozenset({".jpg", ".jpeg", ".png", ".webp"}),
+        supports_publishing=False,
+    ),
+    "bilibili": PlatformSessionProfile(
+        platform="bilibili",
+        content_types=frozenset({"video"}),
+        video_extensions=frozenset({".mp4", ".mov", ".flv"}),
+        image_extensions=frozenset({".jpg", ".jpeg", ".png"}),
+        supports_publishing=False,
+    ),
 }
 
 
 def supported_session_platforms() -> frozenset[str]:
+    """能通过会话通道**绑定账号**的平台。
+
+    注意这是"能绑账号",不是"能发布" —— 见 ``publishable_session_platforms``。
+    绑定端点用这个,因为扫码登录 + 会话校验是平台无关的通用机制,新平台先
+    有它是常态。
+    """
     return frozenset(SESSION_PLATFORM_PROFILES)
+
+
+def publishable_session_platforms() -> frozenset[str]:
+    """能通过会话通道**发布**的平台 —— 是上面那个集合的子集。
+
+    分成两个函数而不是一个,是因为把"能绑账号"当成"能发布"会让一个只做了
+    账号绑定的平台把发布请求一路放到浏览器上,照着根本没写的流程瞎点。
+    浏览器侧有对称的保护(只注册 validator/login,不注册 publisher),这里
+    是同一件事在 backend 侧的表达 —— 两层都拦,因为这条路径错一次的代价是
+    往用户的真实账号上发出错东西。
+    """
+    return frozenset(
+        name
+        for name, profile in SESSION_PLATFORM_PROFILES.items()
+        if profile.supports_publishing
+    )
 
 
 # ── 环境组装 ──────────────────────────────────────────────
@@ -611,6 +667,33 @@ class SessionAdapter:
         绕过 step 的调用方也不可能把非法参数送进浏览器。纯函数、无 IO，重复
         一次的代价是零。
         """
+        # 第 0 道门:这个平台到底实现了发布吗。
+        #
+        # 排在最前是因为它最便宜(一次字典查找),而且拦的是最危险的一类:
+        # 小红书 / B 站已经能绑账号了 —— 会话是真的、账号是活的、auth_type
+        # 也对 —— 后面三道门全都会放行。少了这道,一个 platform='xiaohongshu'
+        # 的发布请求会带着有效会话一路走到浏览器,照着**根本没写的流程**
+        # 在用户的真实账号上瞎点。
+        #
+        # 浏览器侧有对称保护(只注册 validator/login,不注册 publisher),
+        # 两层都拦是刻意的:这条路径错一次的代价是往真实账号发出错东西。
+        if not self._profile.supports_publishing:
+            logger.warning(
+                f"[session.publish] account={account.get('id')} "
+                f"platform={self.platform_name} has no publisher implemented"
+            )
+            return PublishOutcome(
+                result=SessionOpResult(
+                    success=False,
+                    status=SessionStatus.FAILED.value,
+                    message=(
+                        f"publishing is not implemented for '{self.platform_name}'; "
+                        "the account can be bound and kept alive, but not published to"
+                    ),
+                    detail={"reason": REASON_PUBLISHING_NOT_IMPLEMENTED},
+                )
+            )
+
         auth_type = account.get("auth_type")
         if auth_type is not None and auth_type != AUTH_TYPE_SESSION:
             logger.warning(
@@ -683,4 +766,5 @@ __all__ = [
     "parse_session_state",
     "is_infra_failure",
     "supported_session_platforms",
+    "publishable_session_platforms",
 ]

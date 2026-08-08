@@ -8,6 +8,7 @@ import React from 'react';
 
 export const PLATFORM_LABEL: Record<string, string> = {
   douyin: 'Douyin', kuaishou: 'Kuaishou', xiaohongshu: 'Xiaohongshu',
+  bilibili: 'Bilibili',
 };
 
 export const PLATFORM_BADGE: Record<string, { bg: string; icon: React.ReactNode }> = {
@@ -26,6 +27,14 @@ export const PLATFORM_BADGE: Record<string, { bg: string; icon: React.ReactNode 
   xiaohongshu: {
     bg: '#FE2C55',
     icon: <svg viewBox="0 0 24 24" fill="#fff"><circle cx="12" cy="12" r="5" /></svg>,
+  },
+  bilibili: {
+    bg: '#00A1D6',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="#fff">
+        <path d="M7.2 3.6 9 5.4h6l1.8-1.8 1.2 1.2-.9.9h1.2A2.7 2.7 0 0 1 21 8.4v9a2.7 2.7 0 0 1-2.7 2.7H5.7A2.7 2.7 0 0 1 3 17.4v-9a2.7 2.7 0 0 1 2.7-2.7h1.2l-.9-.9ZM5.7 8.1a.3.3 0 0 0-.3.3v9c0 .17.13.3.3.3h12.6a.3.3 0 0 0 .3-.3v-9a.3.3 0 0 0-.3-.3Zm2.4 2.4v2.4H9.9v-2.4Zm6 0v2.4h1.8v-2.4Z" />
+      </svg>
+    ),
   },
 };
 

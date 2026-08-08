@@ -172,7 +172,8 @@ def test_returned_statuses_stay_inside_the_shared_enum(client, monkeypatch):
     """
     from app.platforms import supported_platforms
 
-    assert supported_platforms() == ["douyin"]
+    # 同注册表用例:断言"包含",否则每接一个平台都会红一次。
+    assert "douyin" in supported_platforms()
     allowed = {s.value for s in SessionStatus}
     assert allowed == {
         "session_valid",

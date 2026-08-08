@@ -112,3 +112,16 @@ def get_intent_rules(platform: str) -> "PlatformIntentRules | None":
 # Importing the module performs its registration.
 from . import douyin as _douyin  # noqa: E402,F401
 from . import douyin_publish as _douyin_publish  # noqa: E402,F401
+
+# Xiaohongshu / Bilibili register a validator + a login flow, but deliberately
+# NO publisher and NO intent rules: binding an account and keeping its session
+# alive is implemented, publishing is not.
+#
+# That split is load-bearing rather than an oversight. `get_validator` /
+# `get_login_flow` find them, so accounts bind and stay healthy; `get_publisher`
+# does not, so a publish request for these platforms is refused by the same
+# typed path that refuses any unknown platform — it can never reach a browser
+# and improvise on an unwritten flow. Registering an empty publisher "to be
+# filled in later" is what would turn a missing feature into a silent one.
+from . import xiaohongshu as _xiaohongshu  # noqa: E402,F401
+from . import bilibili as _bilibili  # noqa: E402,F401

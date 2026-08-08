@@ -490,7 +490,8 @@
       "contentImages": "图集",
       "contentArticle": "图文",
       "accountsCount": "{{n}} 个账号"
-    }
+    },
+    "platNoPublish": "暂不支持发布"
   },
   "parser": {
     "title": "媒体解析",
