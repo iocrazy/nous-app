@@ -189,6 +189,10 @@ async def run_summarize_agent(
         "summary": result.summary,
         "key_points": result.key_points,
         "topics": result.topics,
+        # Telemetry for resource_summaries.llm_model/llm_provider — both
+        # columns were NULL since the table was created (2026-08-07 diag).
+        "llm_model": (provider_config or {}).get("model", "") or "",
+        "llm_provider": provider_key or "",
     }
 
 
@@ -200,6 +204,8 @@ async def persist_summary(
     summary: str,
     key_points: list[str],
     topics: list[str],
+    llm_model: str = "",
+    llm_provider: str = "",
 ) -> dict[str, Any]:
     """Persist summary to resource_summaries + parsed_media.ai_rewrite_text +
     resources.summary_status, atomically (one transaction).
@@ -230,6 +236,8 @@ async def persist_summary(
             # them; no json.dumps()+CAST(... AS jsonb) round-trip needed.
             key_points=key_points or [],
             topics=topics or [],
+            llm_model=llm_model or None,
+            llm_provider=llm_provider or None,
         )
         insert_stmt = insert_stmt.on_conflict_do_update(
             index_elements=[ResourceSummaries.resource_id],
@@ -238,6 +246,8 @@ async def persist_summary(
                 "key_points": insert_stmt.excluded.key_points,
                 "topics": insert_stmt.excluded.topics,
                 "summary_type": insert_stmt.excluded.summary_type,
+                "llm_model": insert_stmt.excluded.llm_model,
+                "llm_provider": insert_stmt.excluded.llm_provider,
             },
         )
         await session.execute(insert_stmt)
@@ -318,6 +328,10 @@ async def ai_summary_workflow(parsed_media_id: int, user_id: str) -> dict[str, A
             summary=agent_out["summary"],
             key_points=agent_out["key_points"],
             topics=agent_out["topics"],
+            # .get() fallback: a DBOS step result replayed from an older
+            # cached run may predate these keys — must not KeyError.
+            llm_model=agent_out.get("llm_model", ""),
+            llm_provider=agent_out.get("llm_provider", ""),
         )
         await manager.update_progress(wf_id, 100, subtitle="Summary saved")
         return result
