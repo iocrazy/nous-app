@@ -94,6 +94,14 @@ async def _complete_node(project_id: str, node: Dict[str, Any]) -> None:
             f"{len(open_issues)} mirror issue(s) (project {project_id})"
         )
         return
+    # 镜像存在但全部终态(done/cancelled) → no-op。cancelled 镜像说明有人显式取消过该
+    # 阶段,自动完成不越过人的决定(与 node_start 的 _NEVER_RESURRECT 同精神)
+    if issues:
+        logger.debug(
+            f"[surface-completion] node {node_id} has terminal issue(s), "
+            f"skipping auto-complete (project {project_id})"
+        )
+        return
     # 镜像未创建(节点在未到达的组):走唯一写入口,tick 自己入队
     from app.repositories.project_stage_nodes_repository import (
         get_project_stage_nodes_repository,
@@ -118,12 +126,18 @@ async def _enqueue_tick(project_id: str) -> None:
 
 async def sync_project_surface_completion(project_id: str) -> Dict[str, int]:
     """全项目一次性重算(部署点火/修复用,Task 7 的端点调它)。"""
-    from app.repositories.episode_repository import get_episode_repository
+    try:
+        from app.repositories.episode_repository import get_episode_repository
 
-    episodes = await get_episode_repository().list_by_project(project_id)
-    for ep in episodes:
-        await sync_surface_completion(project_id, str(ep["id"]))
-    return {"episodes": len(episodes)}
+        episodes = await get_episode_repository().list_by_project(project_id)
+        for ep in episodes:
+            await sync_surface_completion(project_id, str(ep["id"]))
+        return {"episodes": len(episodes)}
+    except Exception as exc:  # noqa: BLE001 — 回流 hook 绝不影响主写
+        logger.warning(
+            f"[surface-completion] project sync failed for project {project_id}: {exc!r}"
+        )
+        return {"episodes": 0}
 
 
 # ---- 写路径 seams:各回流点只知道自己手里的 id,这里解析归属 ----
