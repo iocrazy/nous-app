@@ -206,13 +206,13 @@ def judge_xiaohongshu_login(snapshot: LoginPageSnapshot) -> LoginJudgement:
 
     if snapshot.scanned_texts:
         return LoginJudgement(
-            SessionStatus.WAITING_CONFIRM,
+            SessionStatus.SCANNED,
             "scanned; waiting for confirmation on the phone",
         )
 
     if snapshot.sms_input_visible:
         return LoginJudgement(
-            SessionStatus.WAITING_SMS,
+            SessionStatus.SMS_REQUIRED,
             "the platform is asking for an SMS code",
         )
 
@@ -228,13 +228,13 @@ def judge_xiaohongshu_login(snapshot: LoginPageSnapshot) -> LoginJudgement:
     # 报 WAITING_SCAN 会让 UI 去等一张永远不出现的二维码。
     if snapshot.login_texts:
         return LoginJudgement(
-            SessionStatus.WAITING_SMS,
+            SessionStatus.SMS_REQUIRED,
             "SMS login page: enter the phone number and submit the code",
         )
 
     if host in CREATOR_HOSTS:
         return LoginJudgement(
-            SessionStatus.WAITING_SMS,
+            SessionStatus.SMS_REQUIRED,
             f"no recognisable login state on the page yet (path={parts.path or '/'})",
         )
 
