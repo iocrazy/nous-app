@@ -1,11 +1,14 @@
 /**
- * Unit tests for the workflowService `episodeId` threading (B2 T5-1).
+ * Unit tests for the workflowService `episodeId` threading (B2 T5-1, tightened
+ * B6 PR-2 task 10).
  *
- * Pins the backward-compat命门: the 4 episode-aware endpoints must produce a
- * BYTE-IDENTICAL URL (no `episode_id` key) when `episodeId` is omitted, and
- * must append `episode_id=<value>` when it is given. apiClient's buildUrl
- * skips `undefined` query values, so `episode_id: episodeId || undefined`
- * is what makes the omitted case invisible.
+ * The 4 episode-aware endpoints (fetchProjectWorkflow / fetchAdvancePreview /
+ * executeAdvance / startEarlyNode) now REQUIRE `episodeId` — the backend
+ * dropped the legacy project-level (no episode_id) path and 422s a bare
+ * request. Every call therefore always appends `episode_id=<value>` to the
+ * URL; there is no longer an "omitted" case to pin (callers gate on a
+ * resolved episode id before calling — see useProjectWorkflow / issueFlow /
+ * WorkflowSection / WorkspaceStageBoard).
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -36,29 +39,11 @@ beforeEach(() => {
 });
 
 describe('workflowService episode_id threading', () => {
-  it('fetchProjectWorkflow omits episode_id when episodeId is undefined', async () => {
-    const spy = stubFetch({ nodes: [] });
-    await fetchProjectWorkflow('p-1');
-    const url = spy.mock.calls[0][0] as string;
-    expect(url).toBe('https://api.test/api/v1/projects/p-1/workflow');
-    expect(url).not.toContain('episode_id');
-  });
-
-  it('fetchProjectWorkflow appends episode_id when given', async () => {
+  it('fetchProjectWorkflow appends episode_id', async () => {
     const spy = stubFetch({ nodes: [] });
     await fetchProjectWorkflow('p-1', 'ep-9');
     const url = spy.mock.calls[0][0] as string;
-    expect(url).toContain('episode_id=ep-9');
-  });
-
-  it('fetchAdvancePreview keeps only direction when episodeId omitted', async () => {
-    const spy = stubFetch({});
-    await fetchAdvancePreview('p-1', 'forward');
-    const url = spy.mock.calls[0][0] as string;
-    expect(url).toBe(
-      'https://api.test/api/v1/projects/p-1/advance-preview?direction=forward',
-    );
-    expect(url).not.toContain('episode_id');
+    expect(url).toBe('https://api.test/api/v1/projects/p-1/workflow?episode_id=ep-9');
   });
 
   it('fetchAdvancePreview appends episode_id alongside direction', async () => {
@@ -69,16 +54,6 @@ describe('workflowService episode_id threading', () => {
     expect(url).toContain('episode_id=ep-9');
   });
 
-  it('executeAdvance keeps only direction when episodeId omitted', async () => {
-    const spy = stubFetch({ data: {} });
-    await executeAdvance('p-1', 'forward');
-    const url = spy.mock.calls[0][0] as string;
-    expect(url).toBe(
-      'https://api.test/api/v1/projects/p-1/advance?direction=forward',
-    );
-    expect(url).not.toContain('episode_id');
-  });
-
   it('executeAdvance appends episode_id alongside direction', async () => {
     const spy = stubFetch({ data: {} });
     await executeAdvance('p-1', 'forward', 'ep-9');
@@ -87,20 +62,12 @@ describe('workflowService episode_id threading', () => {
     expect(url).toContain('episode_id=ep-9');
   });
 
-  it('startEarlyNode omits episode_id when episodeId undefined', async () => {
-    const spy = stubFetch({ data: {} });
-    await startEarlyNode('p-1', 'n-1');
-    const url = spy.mock.calls[0][0] as string;
-    expect(url).toBe(
-      'https://api.test/api/v1/projects/p-1/workflow/nodes/n-1/start-early',
-    );
-    expect(url).not.toContain('episode_id');
-  });
-
-  it('startEarlyNode appends episode_id when given', async () => {
+  it('startEarlyNode appends episode_id', async () => {
     const spy = stubFetch({ data: {} });
     await startEarlyNode('p-1', 'n-1', 'ep-9');
     const url = spy.mock.calls[0][0] as string;
-    expect(url).toContain('episode_id=ep-9');
+    expect(url).toBe(
+      'https://api.test/api/v1/projects/p-1/workflow/nodes/n-1/start-early?episode_id=ep-9',
+    );
   });
 });

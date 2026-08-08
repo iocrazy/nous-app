@@ -186,8 +186,14 @@ export function ProjectWorkspace({
 
   const requestAdvance = useCallback(
     (direction: 'forward' | 'back') => {
+      // Gate on currentEpisodeId (B6 PR-2 task 10): fetchAdvancePreview now
+      // REQUIRES episode_id (server 422s otherwise). In practice the advance
+      // affordances only render once `workflow` is loaded, which itself
+      // requires a resolved episodeId (see useProjectWorkflow) — this is a
+      // defensive no-op for the brief window before that resolves.
+      if (!currentEpisodeId) return;
       setAdvance({ direction, preview: null, confirming: false });
-      fetchAdvancePreview(project.id, direction, currentEpisodeId ?? undefined)
+      fetchAdvancePreview(project.id, direction, currentEpisodeId)
         .then((preview) =>
           setAdvance((cur) => (cur && cur.direction === direction ? { ...cur, preview } : cur)),
         )
@@ -201,9 +207,12 @@ export function ProjectWorkspace({
   );
 
   const confirmAdvance = useCallback(() => {
+    // Same episodeId gate as requestAdvance above — executeAdvance also
+    // requires episode_id.
+    if (!currentEpisodeId) return;
     setAdvance((cur) => (cur ? { ...cur, confirming: true } : cur));
     const direction = advance?.direction ?? 'forward';
-    executeAdvance(project.id, direction, currentEpisodeId ?? undefined)
+    executeAdvance(project.id, direction, currentEpisodeId)
       .then(() => {
         setAdvance(null);
         void reloadWorkflow();

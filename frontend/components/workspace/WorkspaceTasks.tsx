@@ -53,10 +53,20 @@ export function WorkspaceTasks({ projectId, projectName, teamId, currentEpisodeI
   // Resolve the flow read-out for the context bar's progress ring from the ONE
   // switch point: workflow node chain when the project has one, else the legacy
   // SOP catalog. Best effort — any failure simply hides the ring.
+  //
+  // Gate on currentEpisodeId (B6 PR-2 task 10): loadProjectFlow's underlying
+  // fetchProjectWorkflow now REQUIRES episode_id (server 422s a bare read),
+  // and this effect fires on first mount before the workspace shell's own
+  // episodes fetch resolves currentEpisodeId — skip the loader call entirely
+  // while it's still null rather than let it no-op internally.
   useEffect(() => {
+    if (!currentEpisodeId) {
+      setProjectStage(null);
+      return;
+    }
     let cancelled = false;
     (async () => {
-      const flow = await loadProjectFlow(projectId, currentEpisodeId ?? undefined);
+      const flow = await loadProjectFlow(projectId, currentEpisodeId);
       if (!cancelled) setProjectStage(flow);
     })();
     return () => { cancelled = true; };

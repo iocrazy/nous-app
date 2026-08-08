@@ -210,18 +210,20 @@ export const fetchStageLibrary = async (): Promise<StageLibraryItem[]> => {
 // ============================================
 
 /** The project's instance nodes + cursor + running-agent count.
- * `episodeId` (B2 #1712) narrows the read to one episode's frozen row set;
- * omitted → the legacy project-level view (URL byte-identical, episode_id
- * never appears — apiClient's buildUrl skips undefined query values). */
+ * `episodeId` (B2 #1712) narrows the read to one episode's frozen row set.
+ * REQUIRED (B6 PR-2 task 10) — the server 422s on a bare project-level read
+ * now that the legacy no-episode path is retired; callers must gate on a
+ * resolved episode id before calling this (see useProjectWorkflow's null
+ * check). */
 export const fetchProjectWorkflow = async (
   projectId: string,
-  episodeId?: string,
+  episodeId: string,
 ): Promise<ProjectWorkflow> => {
   // NOTE: declares a FastAPI response_model → returns the model directly (no
   // `{data}` envelope). Do not add a `.data` unwrap here.
   const workflow = await apiClient.get<ProjectWorkflow>(
     `/api/v1/projects/${projectId}/workflow`,
-    { query: { episode_id: episodeId || undefined } },
+    { query: { episode_id: episodeId } },
   );
   return { ...workflow, nodes: (workflow.nodes ?? []).map(normalizeInstanceNode) };
 };
@@ -300,31 +302,35 @@ export const updateProjectNode = async (
  * `code` — `NODE_NOT_PENDING` / `NODE_CANCELLED` / the shared `DEPS_PENDING`
  * (carrying `waiting_on` in `details`, same shape as `AdvancePreview`) — when
  * it no longer clears; callers should catch that and surface mapped copy.
+ *
+ * `episodeId` REQUIRED (B6 PR-2 task 10) — same rationale as
+ * `fetchProjectWorkflow`; callers must gate on a resolved episode id first.
  */
 export const startEarlyNode = async (
   projectId: string,
   nodeId: string,
-  episodeId?: string,
+  episodeId: string,
 ): Promise<ProjectStageNode> => {
   const response = await apiClient.post<Envelope<ProjectStageNode>>(
     `/api/v1/projects/${projectId}/workflow/nodes/${nodeId}/start-early`,
     undefined,
-    { query: { episode_id: episodeId || undefined } },
+    { query: { episode_id: episodeId } },
   );
   if (!response.data) throw new Error('Empty response from startEarlyNode');
   return normalizeInstanceNode(response.data);
 };
 
-/** Pure-read advance ruling (same predicate as executeAdvance). */
+/** Pure-read advance ruling (same predicate as executeAdvance). `episodeId`
+ * REQUIRED (B6 PR-2 task 10) — same rationale as `fetchProjectWorkflow`. */
 export const fetchAdvancePreview = async (
   projectId: string,
-  direction: 'forward' | 'back' = 'forward',
-  episodeId?: string,
+  direction: 'forward' | 'back',
+  episodeId: string,
 ): Promise<AdvancePreview> => {
   // response_model endpoint → returned directly, no envelope.
   return apiClient.get<AdvancePreview>(
     `/api/v1/projects/${projectId}/advance-preview`,
-    { query: { direction, episode_id: episodeId || undefined } },
+    { query: { direction, episode_id: episodeId } },
   );
 };
 
@@ -332,16 +338,19 @@ export const fetchAdvancePreview = async (
  * Advance / retreat the workflow cursor. The server recomputes the predicate
  * and 409s (ApiError, status 409) with the blocked reason if it no longer
  * clears — callers should catch that and re-open the preview.
+ *
+ * `episodeId` REQUIRED (B6 PR-2 task 10) — same rationale as
+ * `fetchProjectWorkflow`.
  */
 export const executeAdvance = async (
   projectId: string,
-  direction: 'forward' | 'back' = 'forward',
-  episodeId?: string,
+  direction: 'forward' | 'back',
+  episodeId: string,
 ): Promise<AdvancePreview> => {
   const response = await apiClient.post<Envelope<AdvancePreview>>(
     `/api/v1/projects/${projectId}/advance`,
     undefined,
-    { query: { direction, episode_id: episodeId || undefined } },
+    { query: { direction, episode_id: episodeId } },
   );
   if (!response.data) throw new Error('Empty response from executeAdvance');
   return response.data;

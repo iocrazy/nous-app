@@ -84,9 +84,10 @@ describe('loadProjectFlow', () => {
       nodes: [node('n1', 'Script', 10), node('n2', 'Canvas', 20)],
     });
 
-    const flow = await loadProjectFlow('7');
+    const flow = await loadProjectFlow('7', 'ep-1');
 
     expect(flow).toEqual({ name: 'Script', index: 1, total: 2 });
+    expect(mockWorkflow).toHaveBeenCalledWith('7', 'ep-1');
   });
 
   it('resolves to null (ring hidden) for a No-workflow project', async () => {
@@ -97,12 +98,20 @@ describe('loadProjectFlow', () => {
       nodes: [],
     });
 
-    expect(await loadProjectFlow('7')).toBeNull();
+    expect(await loadProjectFlow('7', 'ep-1')).toBeNull();
   });
 
   it('resolves to null (ring hidden) when the workflow fetch rejects', async () => {
     mockWorkflow.mockRejectedValue(new Error('down'));
 
+    expect(await loadProjectFlow('7', 'ep-1')).toBeNull();
+  });
+
+  // B6 PR-2 task 10: fetchProjectWorkflow now requires episode_id (the server
+  // 422s a bare project-level read) — a caller mid episode-resolution must
+  // skip the fetch entirely, not just swallow the resulting error.
+  it('resolves to null WITHOUT fetching when episodeId is undefined', async () => {
     expect(await loadProjectFlow('7')).toBeNull();
+    expect(mockWorkflow).not.toHaveBeenCalled();
   });
 });
