@@ -210,13 +210,13 @@ def judge_bilibili_login(snapshot: LoginPageSnapshot) -> LoginJudgement:
 
     if snapshot.scanned_texts:
         return LoginJudgement(
-            SessionStatus.WAITING_CONFIRM,
+            SessionStatus.SCANNED,
             "scanned; waiting for confirmation on the phone",
         )
 
     if snapshot.sms_input_visible:
         return LoginJudgement(
-            SessionStatus.WAITING_SMS,
+            SessionStatus.SMS_REQUIRED,
             "the platform is asking for an SMS code",
         )
 
