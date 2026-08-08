@@ -55,6 +55,25 @@ def _summary_inputs_select_stmt(parsed_media_id: int, user_id: str):
     )
 
 
+def _summary_inputs_exists_any_owner_stmt(parsed_media_id: int):
+    """Same join chain as ``_summary_inputs_select_stmt`` but WITHOUT the
+    ``creator_id`` filter — used only in ``load_summary_inputs``'s error path
+    to tell "transcript missing" apart from "resource owned by someone
+    else". No column-level/entity-level row-shape concern here (the caller
+    only checks truthiness of ``.first()``), so ``select(Resources.id)`` is
+    fine as-is."""
+    from app.models import ParsedMedia, Resources, ResourceTranscripts
+
+    return (
+        select(Resources.id)
+        .join(ParsedMedia, Resources.media_id == ParsedMedia.id)
+        .join(ResourceTranscripts, ResourceTranscripts.resource_id == Resources.id)
+        .where(ParsedMedia.id == parsed_media_id)
+        .where(ResourceTranscripts.full_text.is_not(None))
+        .limit(1)
+    )
+
+
 @DBOS.step()
 async def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, Any]:
     """Load transcript + user's preferred provider config + media title."""
@@ -82,6 +101,34 @@ async def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, A
                 .first()
             )
     if not row:
+        # Two failure modes shared one message and misled the 2026-08-07
+        # diagnosis: "no transcript" also fired when the transcript existed
+        # but belonged to a DIFFERENT resource owner (this query's own
+        # Resources.creator_id == user_id filter hid the row). Probe once
+        # without that filter to tell the two apart. SYSTEM scope: this
+        # cross-tenant existence check IS the whole point of the probe — it
+        # leaks nothing beyond a boolean (row exists / doesn't).
+        probe_cm = (
+            system_request_scope(
+                reason="ai-summary error diagnostics: distinguish missing "
+                "transcript from foreign-owned resource"
+            )
+            if is_enforced("resources")
+            else nullcontext()
+        )
+        async with probe_cm:
+            async with read_scope() as session:
+                foreign = (
+                    await session.execute(
+                        _summary_inputs_exists_any_owner_stmt(parsed_media_id)
+                    )
+                ).first()
+        if foreign:
+            raise RuntimeError(
+                f"resource for parsed_media={parsed_media_id} exists but is "
+                f"not owned by user={user_id} — dispatch identity mismatch, "
+                f"not a missing transcript"
+            )
         raise RuntimeError(
             f"no transcript for parsed_media={parsed_media_id} user={user_id}"
         )
