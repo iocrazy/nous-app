@@ -61,6 +61,24 @@ LAUNCH_ARGS = (
     # restoring this flag brings back random "Target closed" renderer crashes.
     # Drops the `navigator.webdriver` flag that Blink otherwise sets.
     "--disable-blink-features=AutomationControlled",
+    # WebRTC leaks the real egress IP straight past an HTTP proxy: the ICE
+    # gathering step opens its own UDP sockets, which never traverse the proxy
+    # Playwright was configured with. Measured in this container on 2026-08-08 —
+    # a page could read the public address 38.175.x.x while every HTTP request
+    # went through the account's configured proxy.
+    #
+    # That is worse than configuring no proxy at all. A per-account environment
+    # sets a city-matched proxy, locale and timezone; a real egress IP from a
+    # different province turns a consistent identity into a **contradictory**
+    # one, which is exactly the signal a risk engine looks for.
+    #
+    # `disable_non_proxied_udp` keeps WebRTC working over the proxy when one is
+    # set and stops it from opening direct sockets when one is not. Both flag
+    # spellings are passed on purpose: Chromium renamed it, and the older build
+    # silently ignores the name it does not know rather than failing — so
+    # passing only the new one would leave older bases leaking with no signal.
+    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+    "--webrtc-ip-handling-policy=disable_non_proxied_udp",
 )
 
 _ALLOWED_PROXY_SCHEMES = ("http", "https", "socks5")
