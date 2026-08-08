@@ -315,12 +315,15 @@ async def test_chain_transcript_summary_propagates_scope_through_run_async():
 
 
 @pytest.mark.asyncio
-async def test_chain_summary_for_tags_propagates_scope_through_run_async():
-    """e2e for the #3 wiring: the async caller (ai_transcription_workflow) sets
-    request_scope around chain_summary_for_tags. Same approach as #2 —
+async def test_chain_summary_for_tags_propagates_caller_scope_when_unenforced():
+    """e2e for the #3 wiring with SCOPE_ENFORCE_RESOURCES OFF (code default):
+    the async caller (ai_transcription_workflow) sets request_scope around
+    chain_summary_for_tags, and — since enforcement is off — the resource
+    read runs the ``nullcontext()`` branch of the F1 gate, so the ambient
+    CALLER scope reaches it unchanged (harmless: the choke point is inert
+    for `resources` while the flag is off). Same drive approach as #2 —
     ai_transcription_workflow is a heavy DBOS workflow, so we drive the sync
-    helper under the same request_scope wrap inside a running loop and assert
-    the scope reaches its `resources` read through run_async branch 2."""
+    helper under the same request_scope wrap inside a running loop."""
     from app.repositories.media_repository import MediaRepository
     from app.repositories.resources_repository import ResourcesRepository
     from app.tasks.download_helpers import chain_summary_for_tags
@@ -344,6 +347,57 @@ async def test_chain_summary_for_tags_propagates_scope_through_run_async():
             await chain_summary_for_tags(12345, _USER)
 
     assert getattr(recorded.get("scope"), "user_id", None) == _USER
+    assert current_scope() is None
+
+
+@pytest.mark.asyncio
+async def test_chain_summary_for_tags_reads_under_system_scope_when_enforced(
+    monkeypatch,
+):
+    """F1 (2026-08-08 终审 Critical): with SCOPE_ENFORCE_RESOURCES ON
+    (production's actual setting), the AMBIENT scope at this read point is
+    the transcription CALLER's — set by ``async with
+    request_scope(Scope(user_id=user_id))`` in
+    ``ai_transcription_workflow`` (app/workflows/ai_transcription.py:556),
+    where ``user_id`` is whoever triggered transcription, not necessarily
+    the resource creator. Left unguarded, the choke point would inject
+    ``creator_id == caller`` on this SELECT — exactly re-instating the
+    creator-scoped filter that Task 4's fix (B-3) removed, so a
+    teammate-triggered transcription would silently fail to find the
+    resource again.
+
+    The fix wraps this specific read in ``system_request_scope`` (mirroring
+    ``ai_transcription.py:67``'s ``load_transcribe_inputs`` precedent)
+    whenever ``is_enforced("resources")`` — so the read must observe SYSTEM,
+    not the caller's Scope, regardless of what's ambient outside it."""
+    import app.db.scope as scope_module
+    from app.db.scope import SYSTEM
+    from app.repositories.media_repository import MediaRepository
+    from app.repositories.resources_repository import ResourcesRepository
+    from app.tasks.download_helpers import chain_summary_for_tags
+
+    monkeypatch.setattr(scope_module.settings, "SCOPE_ENFORCE_RESOURCES", True)
+
+    recorded: dict[str, object] = {}
+
+    async def _rec_get_by_id(self, media_id):
+        return {"id": media_id, "platform_id": "p-1", "title": "t"}
+
+    async def _rec_by_media(self, media_id):
+        recorded["scope"] = current_scope()
+        return None  # short-circuit — scope observation is all we need here
+
+    assert current_scope() is None
+    with (
+        patch.object(MediaRepository, "get_by_id", _rec_get_by_id),
+        patch.object(ResourcesRepository, "get_resource_by_media_id", _rec_by_media),
+    ):
+        # Ambient CALLER scope, exactly as ai_transcription_workflow sets it —
+        # the point being pinned is that the read does NOT inherit this.
+        async with request_scope(Scope(user_id=_USER)):
+            await chain_summary_for_tags(12345, _USER)
+
+    assert recorded.get("scope") is SYSTEM
     assert current_scope() is None
 
 

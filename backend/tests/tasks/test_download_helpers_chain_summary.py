@@ -94,6 +94,72 @@ async def test_chain_dispatches_as_resource_creator():
 
 
 @pytest.mark.asyncio
+async def test_chain_dispatches_as_resource_creator_when_enforced(monkeypatch):
+    """F1 (2026-08-08 终审 Critical): with SCOPE_ENFORCE_RESOURCES ON
+    (production's actual setting), the resource lookup must run under
+    SYSTEM scope, not the ambient CALLER scope that
+    ``ai_transcription_workflow`` opens around this call
+    (``async with request_scope(Scope(user_id=user_id))`` at
+    ai_transcription.py:556). Left unwrapped, the choke point would inject
+    ``creator_id == caller`` on the SELECT and reinstate the exact
+    creator-scoped filter Task 4 removed — a teammate-triggered
+    transcription would silently fail to find the resource and never
+    dispatch summary at all.
+
+    Behavioral pin: caller ("caller-1") != resource creator ("owner-1"),
+    enforcement ON, and the resource is still found and dispatched with
+    owner identity — proving the fix's system-scope wrap is what makes
+    this possible (not merely that the choke point is inert in tests)."""
+    import app.db.scope as scope_module
+    from app.db.scope import SYSTEM, Scope, current_scope, request_scope
+
+    monkeypatch.setattr(scope_module.settings, "SCOPE_ENFORCE_RESOURCES", True)
+
+    observed_scope: dict[str, object] = {}
+
+    async def _fake_get_by_id(self, media_id):
+        return {"id": media_id, "platform_id": "p-1", "title": "Clip"}
+
+    async def _fake_get_resource(self, media_id):
+        # Records the scope THIS particular read observes — the choke
+        # point itself isn't exercised (the repo method is replaced), but
+        # this proves chain_summary_for_tags' own wrap is what's active at
+        # the call site, independent of whatever's ambient outside it.
+        observed_scope["scope"] = current_scope()
+        return {"id": "res-1", "creator_id": "owner-1"}
+
+    async def _fake_tag_names(_resource_id):
+        return {"Summary"}
+
+    fake_mgr = AsyncMock()
+    swr = AsyncMock()
+
+    with (
+        patch.object(MediaRepository, "get_by_id", _fake_get_by_id),
+        patch.object(
+            ResourcesRepository, "get_resource_by_media_id", _fake_get_resource
+        ),
+        patch.object(dh, "read_resource_tag_names", _fake_tag_names),
+        patch("app.db.session.read_scope", _fake_read_scope),
+        patch(
+            "app.services.infra.unified_task_manager.get_task_manager",
+            lambda: fake_mgr,
+        ),
+        patch("app.services.infra.dbos_orchestrator.start_workflow_routed", swr),
+    ):
+        # Ambient CALLER scope, exactly as ai_transcription_workflow sets it
+        # around this call in production.
+        async with request_scope(Scope(user_id="caller-1")):
+            await dh.chain_summary_for_tags(12345, "caller-1")
+
+    assert observed_scope.get("scope") is SYSTEM
+    swr.assert_awaited_once()
+    assert swr.await_args.kwargs["dbos_workflow_kwargs"]["user_id"] == "owner-1"
+    fake_mgr.create.assert_awaited_once()
+    assert fake_mgr.create.await_args.kwargs["user_id"] == "caller-1"
+
+
+@pytest.mark.asyncio
 async def test_chain_skips_when_resource_missing():
     """No resource for the parsed_media → the chain must not dispatch
     anything. (The "not fully silent" half of the fix is an info-level
