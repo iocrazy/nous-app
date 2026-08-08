@@ -178,7 +178,7 @@ async def test_add_cross_episode_dep_self_reference_rejected(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_add_cross_episode_dep_non_episode_node_rejected(monkeypatch):
-    """A legacy project-level node (episode_id NULL) can't carry a
+    """Defensive guard: a project-level node (episode_id NULL) can't carry a
     cross-episode edge — rejected before any episode sort_order lookup."""
     session = _XepFakeSession(node_rows=[(200, 50, 8002), (100, 50, None)])
     repo = _install_repo(monkeypatch, session)

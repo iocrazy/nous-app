@@ -25,6 +25,8 @@ import app.services.workflow.advance_service as advance_service
 from app.schemas.workflow import BLOCK_DEPS_PENDING
 from app.services.workflow.advance_service import _unmet_dependency_names
 
+_EP1 = "8001"
+
 
 def _node_row(
     node_id: str,
@@ -35,6 +37,7 @@ def _node_row(
     skipped: bool = False,
     depends_on: Optional[List[str]] = None,
     name: Optional[str] = None,
+    episode_id: str = _EP1,
 ) -> Dict[str, Any]:
     return {
         "id": node_id,
@@ -52,6 +55,7 @@ def _node_row(
         "form_schema": [],
         "form_data": {},
         "depends_on": depends_on or [],
+        "episode_id": episode_id,
     }
 
 
@@ -177,16 +181,27 @@ def test_same_group_dependency_without_exempt_ids_is_still_unmet():
 class _FakeNodesRepo:
     def __init__(self, nodes: List[Dict[str, Any]]):
         self._nodes = nodes
-        self.current_node_id_calls: List[Any] = []
 
-    async def list_nodes(self, project_id):
-        return list(self._nodes)
-
-    async def set_current_node_id(self, project_id, node_id):
-        self.current_node_id_calls.append((project_id, node_id))
+    async def list_nodes_by_episode(self, project_id, episode_id):
+        return [n for n in self._nodes if str(n.get("episode_id")) == str(episode_id)]
 
     async def list_folder_files(self, folder_id):
         return []
+
+
+class _FakeEpisodesRepo:
+    def __init__(self, cursors: Dict[str, Optional[str]]):
+        self._cursors: Dict[str, Optional[str]] = {
+            str(k): v for k, v in cursors.items()
+        }
+        self.set_current_node_id_calls: List[Any] = []
+
+    async def get_by_id(self, episode_id):
+        return {"current_node_id": self._cursors.get(str(episode_id))}
+
+    async def set_current_node_id(self, episode_id, node_id):
+        self.set_current_node_id_calls.append((str(episode_id), node_id))
+        self._cursors[str(episode_id)] = node_id
 
 
 class _FakeProjectsRepo:
@@ -221,11 +236,16 @@ def _install(
     projects_repo: _FakeProjectsRepo,
     issue_repo: _FakeIssueRepo,
     role: Optional[str] = "manager",
+    episodes_repo: Optional[_FakeEpisodesRepo] = None,
 ):
     monkeypatch.setattr(
         "app.repositories.project_stage_nodes_repository."
         "get_project_stage_nodes_repository",
         lambda: nodes_repo,
+    )
+    monkeypatch.setattr(
+        "app.repositories.episode_repository.get_episode_repository",
+        lambda: episodes_repo or _FakeEpisodesRepo({}),
     )
     monkeypatch.setattr(
         "app.repositories.projects_repository.get_projects_repository",
@@ -259,15 +279,19 @@ async def test_preview_blocks_forward_on_unmet_target_group_dependency(monkeypat
     n3 = _node_row("3", sort_order=3, status="pending")
     nodes_repo = _FakeNodesRepo([n1, n2, n3])
     projects_repo = _FakeProjectsRepo("1")
+    episodes_repo = _FakeEpisodesRepo({_EP1: "1"})
     issue_repo = _FakeIssueRepo()
     _install(
         monkeypatch,
         nodes_repo=nodes_repo,
         projects_repo=projects_repo,
         issue_repo=issue_repo,
+        episodes_repo=episodes_repo,
     )
 
-    preview = await advance_service.compute_advance_preview("100", "user-1", "forward")
+    preview = await advance_service.compute_advance_preview(
+        "100", "user-1", "forward", episode_id=_EP1
+    )
 
     assert preview.will_advance is False
     assert preview.blocked_reason == BLOCK_DEPS_PENDING
@@ -281,15 +305,19 @@ async def test_preview_allows_forward_once_dependency_done(monkeypatch):
     n3 = _node_row("3", sort_order=3, status="done")
     nodes_repo = _FakeNodesRepo([n1, n2, n3])
     projects_repo = _FakeProjectsRepo("1")
+    episodes_repo = _FakeEpisodesRepo({_EP1: "1"})
     issue_repo = _FakeIssueRepo()
     _install(
         monkeypatch,
         nodes_repo=nodes_repo,
         projects_repo=projects_repo,
         issue_repo=issue_repo,
+        episodes_repo=episodes_repo,
     )
 
-    preview = await advance_service.compute_advance_preview("100", "user-1", "forward")
+    preview = await advance_service.compute_advance_preview(
+        "100", "user-1", "forward", episode_id=_EP1
+    )
 
     assert preview.will_advance is True
     assert preview.waiting_on == []
@@ -305,15 +333,19 @@ async def test_preview_allows_forward_when_dependency_skipped(monkeypatch):
     n3 = _node_row("3", sort_order=3, status="pending", skipped=True)
     nodes_repo = _FakeNodesRepo([n1, n2, n3])
     projects_repo = _FakeProjectsRepo("1")
+    episodes_repo = _FakeEpisodesRepo({_EP1: "1"})
     issue_repo = _FakeIssueRepo()
     _install(
         monkeypatch,
         nodes_repo=nodes_repo,
         projects_repo=projects_repo,
         issue_repo=issue_repo,
+        episodes_repo=episodes_repo,
     )
 
-    preview = await advance_service.compute_advance_preview("100", "user-1", "forward")
+    preview = await advance_service.compute_advance_preview(
+        "100", "user-1", "forward", episode_id=_EP1
+    )
 
     assert preview.will_advance is True
     assert preview.waiting_on == []
@@ -326,19 +358,23 @@ async def test_execute_advance_blocked_by_deps_pending_does_not_mutate(monkeypat
     n3 = _node_row("3", sort_order=3, status="pending")
     nodes_repo = _FakeNodesRepo([n1, n2, n3])
     projects_repo = _FakeProjectsRepo("1")
+    episodes_repo = _FakeEpisodesRepo({_EP1: "1"})
     issue_repo = _FakeIssueRepo()
     _install(
         monkeypatch,
         nodes_repo=nodes_repo,
         projects_repo=projects_repo,
         issue_repo=issue_repo,
+        episodes_repo=episodes_repo,
     )
 
-    result = await advance_service.execute_advance("100", "user-1", "forward")
+    result = await advance_service.execute_advance(
+        "100", "user-1", "forward", episode_id=_EP1
+    )
 
     assert result.will_advance is False
     assert result.blocked_reason == BLOCK_DEPS_PENDING
-    assert nodes_repo.current_node_id_calls == []
+    assert episodes_repo.set_current_node_id_calls == []
 
 
 @pytest.mark.asyncio
@@ -350,15 +386,17 @@ async def test_back_direction_is_never_gated_by_dependencies(monkeypatch):
     n2 = _node_row("2", sort_order=2, depends_on=["1"])
     nodes_repo = _FakeNodesRepo([n1, n2])
     projects_repo = _FakeProjectsRepo("2")
+    episodes_repo = _FakeEpisodesRepo({_EP1: "2"})
     issue_repo = _FakeIssueRepo()
     _install(
         monkeypatch,
         nodes_repo=nodes_repo,
         projects_repo=projects_repo,
         issue_repo=issue_repo,
+        episodes_repo=episodes_repo,
     )
 
-    preview = await advance_service.compute_advance_preview("100", "user-1", "back")
+    preview = await advance_service.compute_advance_preview("100", "user-1", "back", episode_id=_EP1)
 
     assert preview.will_advance is True
     assert preview.creating[0].node_id == "1"
@@ -378,15 +416,19 @@ async def test_preview_advances_when_next_group_dep_is_same_group_sibling(monkey
     )  # C depends on B, same parallel_group as B
     nodes_repo = _FakeNodesRepo([n1, n2, n3])
     projects_repo = _FakeProjectsRepo("1")
+    episodes_repo = _FakeEpisodesRepo({_EP1: "1"})
     issue_repo = _FakeIssueRepo()
     _install(
         monkeypatch,
         nodes_repo=nodes_repo,
         projects_repo=projects_repo,
         issue_repo=issue_repo,
+        episodes_repo=episodes_repo,
     )
 
-    preview = await advance_service.compute_advance_preview("100", "user-1", "forward")
+    preview = await advance_service.compute_advance_preview(
+        "100", "user-1", "forward", episode_id=_EP1
+    )
 
     assert preview.will_advance is True
     assert preview.waiting_on == []
@@ -405,15 +447,19 @@ async def test_preview_advances_when_next_group_depends_on_closing_current_group
     n2 = _node_row("2", sort_order=2, depends_on=["1"], status="pending")  # next
     nodes_repo = _FakeNodesRepo([n1, n2])
     projects_repo = _FakeProjectsRepo("1")
+    episodes_repo = _FakeEpisodesRepo({_EP1: "1"})
     issue_repo = _FakeIssueRepo()
     _install(
         monkeypatch,
         nodes_repo=nodes_repo,
         projects_repo=projects_repo,
         issue_repo=issue_repo,
+        episodes_repo=episodes_repo,
     )
 
-    preview = await advance_service.compute_advance_preview("100", "user-1", "forward")
+    preview = await advance_service.compute_advance_preview(
+        "100", "user-1", "forward", episode_id=_EP1
+    )
 
     assert preview.will_advance is True
     assert preview.waiting_on == []
@@ -431,15 +477,19 @@ async def test_preview_still_blocks_on_earlier_unrelated_unfinished_dependency(
     n2 = _node_row("2", sort_order=3, depends_on=["0"], status="pending")  # next
     nodes_repo = _FakeNodesRepo([n0, n1, n2])
     projects_repo = _FakeProjectsRepo("1")
+    episodes_repo = _FakeEpisodesRepo({_EP1: "1"})
     issue_repo = _FakeIssueRepo()
     _install(
         monkeypatch,
         nodes_repo=nodes_repo,
         projects_repo=projects_repo,
         issue_repo=issue_repo,
+        episodes_repo=episodes_repo,
     )
 
-    preview = await advance_service.compute_advance_preview("100", "user-1", "forward")
+    preview = await advance_service.compute_advance_preview(
+        "100", "user-1", "forward", episode_id=_EP1
+    )
 
     assert preview.will_advance is False
     assert preview.blocked_reason == BLOCK_DEPS_PENDING
@@ -454,15 +504,19 @@ async def test_no_deps_zero_regression_forward_still_advances(monkeypatch):
     n2 = _node_row("2", sort_order=2)
     nodes_repo = _FakeNodesRepo([n1, n2])
     projects_repo = _FakeProjectsRepo("1")
+    episodes_repo = _FakeEpisodesRepo({_EP1: "1"})
     issue_repo = _FakeIssueRepo()
     _install(
         monkeypatch,
         nodes_repo=nodes_repo,
         projects_repo=projects_repo,
         issue_repo=issue_repo,
+        episodes_repo=episodes_repo,
     )
 
-    preview = await advance_service.compute_advance_preview("100", "user-1", "forward")
+    preview = await advance_service.compute_advance_preview(
+        "100", "user-1", "forward", episode_id=_EP1
+    )
 
     assert preview.will_advance is True
     assert preview.waiting_on == []
