@@ -146,10 +146,12 @@ async def _deliverable_present(
     Stage Board endpoint's ``files`` section, F1) so "is something filed?" and
     "what's filed?" can never disagree.
 
-    Fallback (a node whose folder creation lost the race, or a legacy row): a
-    file counts when it lives in a project folder whose name matches the node
-    name; absent such a folder, ANY non-trashed project file counts. Server-
-    side, never trusts the client.
+    Fallback (B4, mig 410): a node whose folder creation lost the race, or a
+    legacy row. A file counts when it lives in a project folder whose name
+    matches the node name. Absent such a folder, return False (fail-closed).
+    This prevents the per-episode gate from being circumvented by mismatched
+    stage folders (which carry episode-prefix names and never match legacy
+    node names).
 
     ``episode_id`` (B2 T1 double-path shim, reserved): the primary path keys off
     the node's own ``folder_id`` so it is already episode-correct once the
@@ -178,7 +180,6 @@ async def _deliverable_present(
 
     repo = get_projects_repository()
     try:
-        files = await repo.get_project_files(str(project_id))
         folders = await repo.get_folders(str(project_id))
     except Exception as exc:  # noqa: BLE001 — treat an unreadable store as empty
         logger.warning(
@@ -206,7 +207,11 @@ async def _deliverable_present(
             )
             return False
         return bool(matched_files)
-    return len(files) > 0
+    # B4 fail-closed:无显式 folder_id 且无同名文件夹 → 视为未交付。
+    # 旧行为(任意非回收站文件即算)对按集节点是后门:episode 前缀文件夹
+    # (node_folders._episode_scoped_folder_name)不会同名命中,于是全落到
+    # 这个兜底,任何一集的任何文件都能替所有集过 Gate2。
+    return False
 
 
 def _form_incomplete(node: Dict[str, Any]) -> List[str]:

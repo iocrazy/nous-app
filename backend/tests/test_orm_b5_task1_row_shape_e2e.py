@@ -41,13 +41,14 @@ resolves.
 
 from __future__ import annotations
 
+import json
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import insert, select
+from sqlalchemy import event, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.models import (
@@ -333,6 +334,22 @@ CREATE TABLE episodes (
     current_node_id INTEGER
 )
 """
+
+
+def _register_jsonb_array_length(dbapi_conn, _record):
+    """B4 Task 6 added ``func.jsonb_array_length(...)`` to ``_progress_stmt``
+    (via ``_scene_content_count_col()``) — a real Postgres jsonb function
+    SQLite has no equivalent for. This aiosqlite backend otherwise round-
+    trips the REAL production statement faithfully (the whole point of this
+    file), so the fix is a same-name SQLite UDF shim, not a change to
+    ``_progress_stmt`` itself: ``sqlite3.Connection.create_function``
+    registers ``jsonb_array_length(text) -> int`` against the raw DBAPI
+    connection on every new connection this engine opens."""
+    dbapi_conn.create_function(
+        "jsonb_array_length", 1, lambda v: len(json.loads(v)) if v else 0
+    )
+
+
 _SCRIPT_PROJECTS_DDL = """
 CREATE TABLE script_projects (
     id INTEGER PRIMARY KEY, project_id INTEGER, team_id INTEGER,
@@ -373,6 +390,7 @@ async def _real_session_with_one_episode_pipeline():
     double-counting)."""
     engine = create_async_engine("sqlite+aiosqlite://")
     engine = engine.execution_options(schema_translate_map={"public": None})
+    event.listen(engine.sync_engine, "connect", _register_jsonb_array_length)
     async with engine.begin() as conn:
         for ddl in (
             _EPISODES_DDL,
@@ -401,7 +419,14 @@ async def _real_session_with_one_episode_pipeline():
             insert(ScriptScenes.__table__).values(
                 id=100,
                 script_id=10,
-                content_json="[]",
+                # content_json is JSONB (Mapped[dict]) on the real model — a
+                # Python list, not a pre-serialized "[]" string. Passing the
+                # string double-encodes through the JSON bind processor
+                # (json.dumps("[]") -> the 4-char literal '"[]"'), which
+                # silently made jsonb_array_length(...) see a 2-character
+                # JSON *string* ("[]") instead of an empty JSON *array* —
+                # len() > 0, so scene_content_count came out 1 instead of 0.
+                content_json=[],
                 content="",
                 content_version=0,
                 sort_order=0,
@@ -442,6 +467,13 @@ async def test_progress_stmt_yields_column_keyed_row_and_counts_render_once():
     assert row["episode_id"] == 1
     assert row["title"] == "Ep 1"
     assert row["sort_order"] == 0
+    # B4 Task 6 additions: current_node_id was never set on this episode
+    # (NULL column, no per-episode workflow cursor seeded) -> None; the
+    # seeded scene has empty content ("" / "[]") -> excluded from
+    # scene_content_count by _scene_content_count_col()'s FILTER, same as
+    # it's excluded from the script surface criterion.
+    assert row["current_node_id"] is None
+    assert row["scene_content_count"] == 0
     assert row["script_count"] == 1
     assert row["scene_count"] == 1
     assert row["shots_total"] == 1

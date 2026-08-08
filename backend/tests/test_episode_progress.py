@@ -105,6 +105,55 @@ def test_progress_row_coerces_none_counts_to_zero():
     assert out["status"] == "planned"
 
 
+def test_progress_row_carries_workflow_and_surface_state():
+    row = {
+        "episode_id": 42,
+        "title": "Ep 1",
+        "sort_order": 0,
+        "current_node_id": 987654321098765,  # > 2^53, JS precision trap
+        "script_count": 1,
+        "scene_count": 2,
+        "scene_content_count": 1,
+        "shots_total": 3,
+        "shots_done": 1,
+        "renders_count": 0,
+    }
+    out = _progress_row(
+        row,
+        workflow_rollup={"nodes_total": 3, "nodes_done": 1, "needs_input_count": 1},
+    )
+    assert out["workflow"]["nodes_total"] == 3
+    assert out["workflow"]["nodes_done"] == 1
+    assert out["workflow"]["current_node_id"] == "987654321098765"
+    assert isinstance(out["workflow"]["current_node_id"], str)
+    assert out["workflow"]["needs_input_count"] == 1
+    assert out["surface_state"] == {"script": True, "storyboard": False}
+
+
+def test_progress_row_defaults_workflow_and_surface_state_when_absent():
+    """No workflow_rollup passed (e.g. an episode with zero eligible nodes,
+    absent from both rollup dicts) and no current_node_id key -> zeros/None,
+    never a KeyError."""
+    row = {
+        "episode_id": 1,
+        "title": "Ep 2",
+        "sort_order": 1,
+        "script_count": 0,
+        "scene_count": 0,
+        "shots_total": 0,
+        "shots_done": 0,
+        "renders_count": 0,
+    }
+    out = _progress_row(row)
+    assert out["workflow"] == {
+        "nodes_total": 0,
+        "nodes_done": 0,
+        "current_node_id": None,
+        "needs_input_count": 0,
+    }
+    assert out["surface_state"] == {"script": False, "storyboard": False}
+
+
 # --------------------------------------------------------------------------- #
 # EpisodeRepository.progress_by_project — monkeypatched fetch_all
 # --------------------------------------------------------------------------- #
@@ -146,15 +195,25 @@ class _FakeResult:
         return self._rows
 
 
-def _fake_read_scope(rows=None, raise_exc=None):
-    captured: dict = {}
+def _fake_read_scope(results_sequence=None, raise_exc=None):
+    """``progress_by_project`` now issues 3 sequential execute() calls in one
+    session (progress rows, nodes rollup, needs_input rollup) — the fake
+    returns ``results_sequence[i]`` for the i-th call (empty list past the
+    end) and records every compiled statement, not just the last one."""
+    captured: dict = {"stmts": []}
 
     class _FakeSession:
+        def __init__(self):
+            self._idx = 0
+
         async def execute(self, stmt):
-            captured["stmt"] = stmt
+            captured["stmts"].append(stmt)
             if raise_exc is not None:
                 raise raise_exc
-            return _FakeResult(rows or [])
+            seq = results_sequence or []
+            rows = seq[self._idx] if self._idx < len(seq) else []
+            self._idx += 1
+            return _FakeResult(rows)
 
     @asynccontextmanager
     async def _scope():
@@ -172,8 +231,10 @@ async def test_progress_by_project_maps_rows_and_passes_project_id(monkeypatch):
             "episode_id": 111,
             "title": "Ep 1",
             "sort_order": 0,
+            "current_node_id": None,
             "script_count": 1,
             "scene_count": 2,
+            "scene_content_count": 2,
             "shots_total": 4,
             "shots_done": 4,
             "renders_count": 1,
@@ -182,8 +243,10 @@ async def test_progress_by_project_maps_rows_and_passes_project_id(monkeypatch):
             "episode_id": 222,
             "title": "Ep 2",
             "sort_order": 1,
+            "current_node_id": 555,
             "script_count": 0,
             "scene_count": 0,
+            "scene_content_count": 0,
             "shots_total": 0,
             "shots_done": 0,
             "renders_count": 0,
@@ -198,25 +261,50 @@ async def test_progress_by_project_maps_rows_and_passes_project_id(monkeypatch):
             "episode_id": 333,
             "title": "Ep 3",
             "sort_order": 2,
+            "current_node_id": None,
             "script_count": 1,
             "scene_count": 1,
+            "scene_content_count": 1,
             "shots_total": 1,
             "shots_done": 1,
             "renders_count": 1,
         },
     ]
-    fake_scope, captured = _fake_read_scope(rows)
+    nodes_rollup_rows = [
+        {"episode_id": 111, "nodes_total": 3, "nodes_done": 2},
+    ]
+    needs_input_rollup_rows = [
+        {"episode_id": 222, "needs_input_count": 1},
+    ]
+    fake_scope, captured = _fake_read_scope(
+        [rows, nodes_rollup_rows, needs_input_rollup_rows]
+    )
     monkeypatch.setattr(mod, "read_scope", fake_scope)
 
     items = await EpisodeRepository().progress_by_project("999")
 
-    _sql, binds = _compile(captured["stmt"])
+    assert len(captured["stmts"]) == 3
+    _sql, binds = _compile(captured["stmts"][0])
     assert binds["project_id_1"] == 999
     assert len(items) == 3
     assert items[0]["episode_id"] == "111"
     assert items[0]["status"] == "rendered"
+    assert items[0]["workflow"] == {
+        "nodes_total": 3,
+        "nodes_done": 2,
+        "current_node_id": None,
+        "needs_input_count": 0,
+    }
+    assert items[0]["surface_state"] == {"script": True, "storyboard": True}
     assert items[1]["episode_id"] == "222"
     assert items[1]["status"] == "planned"
+    assert items[1]["workflow"] == {
+        "nodes_total": 0,
+        "nodes_done": 0,
+        "current_node_id": "555",
+        "needs_input_count": 1,
+    }
+    assert items[1]["surface_state"] == {"script": False, "storyboard": False}
     assert items[2]["episode_id"] == "333"
     assert items[2]["renders_count"] == 1
     assert items[2]["status"] == "rendered"

@@ -315,6 +315,14 @@ class ScriptSceneRepository:
                 f"Created scene in script {data.get('script_id')} "
                 f"chapter {data.get('chapter_id')}"
             )
+            # B4 回流点:场次内容出现可能让 script 判据变真(spec §5)。
+            # fire_* 永不 raise,不影响主写。
+            if out.get("id") is not None:
+                from app.services.workflow.surface_completion import (
+                    fire_surface_sync_for_scene,
+                )
+
+                await fire_surface_sync_for_scene(str(out["id"]))
             return out
         except Exception as e:
             logger.error(f"Failed to create scene: {e}")
@@ -391,6 +399,13 @@ class ScriptSceneRepository:
                 f"Created scene with content in script {data.get('script_id')} "
                 f"chapter {data.get('chapter_id')} ({len(elements)} elements)"
             )
+            # B4 回流点:场次内容出现可能让 script 判据变真(spec §5)。
+            # fire_* 永不 raise,不影响主写。
+            from app.services.workflow.surface_completion import (
+                fire_surface_sync_for_scene,
+            )
+
+            await fire_surface_sync_for_scene(str(out["id"]))
             return out
         except Exception as e:
             logger.error(f"Failed to create scene with content: {e}")
@@ -438,6 +453,7 @@ class ScriptSceneRepository:
         """
         sid = _bigint(scene_id)
         try:
+            script_id: Optional[int] = None
             async with write_scope() as session:
                 scene = (
                     await session.execute(
@@ -446,6 +462,7 @@ class ScriptSceneRepository:
                 ).first()
                 if scene is None:
                     return {"deleted": False, "omitted": False, "scene": None}
+                script_id = scene.script_id
 
                 locked_at = await session.scalar(
                     select(ScriptProjects.numbering_locked_at).where(
@@ -464,13 +481,23 @@ class ScriptSceneRepository:
                     row = result.scalars().first()
                     out = _row(row) if row else None
                     logger.info(f"Omitted scene {scene_id} (numbering locked)")
-                    return {"deleted": False, "omitted": True, "scene": out}
+                    outcome = {"deleted": False, "omitted": True, "scene": out}
+                else:
+                    await session.execute(
+                        sa_delete(ScriptScenes).where(ScriptScenes.id == sid)
+                    )
+                    logger.info(f"Deleted scene {scene_id}")
+                    outcome = {"deleted": True, "omitted": False, "scene": None}
+            # B4 回流点:删场(硬删级联删镜头,或锁定后 omit)都可能让
+            # storyboard/script 判据重算(spec §5 ② 回归)。场行已消失/已改
+            # 状态,不能再靠 scene_id 反查,改用取号存好的 script_id。
+            # fire_* 永不 raise,不影响主写。
+            from app.services.workflow.surface_completion import (
+                fire_surface_sync_for_script,
+            )
 
-                await session.execute(
-                    sa_delete(ScriptScenes).where(ScriptScenes.id == sid)
-                )
-            logger.info(f"Deleted scene {scene_id}")
-            return {"deleted": True, "omitted": False, "scene": None}
+            await fire_surface_sync_for_script(str(script_id))
+            return outcome
         except Exception as e:
             logger.error(f"Failed to delete scene {scene_id}: {e}")
             raise
@@ -552,6 +579,13 @@ class ScriptSceneRepository:
                     actor=actor,
                 )
             )
+        # B4 回流点:场次内容出现可能让 script 判据变真(spec §5)。
+        # fire_* 永不 raise,不影响主写。
+        from app.services.workflow.surface_completion import (
+            fire_surface_sync_for_scene,
+        )
+
+        await fire_surface_sync_for_scene(str(sid))
         return {"content_version": new_version, "elements": new_elements}
 
     # ------------------------------------------------------------------ #
@@ -921,6 +955,13 @@ class ScriptSceneRepository:
         logger.info(
             f"Assigned scene_number {new_number} to scene {scene_id} (post-lock insert)"
         )
+        # B4 回流点:场次内容出现可能让 script 判据变真(spec §5)。
+        # fire_* 永不 raise,不影响主写。
+        from app.services.workflow.surface_completion import (
+            fire_surface_sync_for_scene,
+        )
+
+        await fire_surface_sync_for_scene(str(scene_id))
         return out
 
 

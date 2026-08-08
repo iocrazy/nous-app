@@ -17,13 +17,22 @@ import uuid as _uuid
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from sqlalchemy import and_
+from sqlalchemy import Text, and_, cast
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import func, insert, or_, select, update
 
 from app.db.session import read_scope, write_scope
-from app.models import Episodes, ScriptProjects, ScriptScenes, ScriptShots
+from app.models import (
+    Episodes,
+    Issues,
+    ProjectStageNodes,
+    ScriptProjects,
+    ScriptScenes,
+    ScriptShots,
+)
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
+from app.repositories.issue_repository import needs_input_predicate
+from app.services.library.project_stage_issues import ORIGIN_KIND
 
 _EPISODES_N2A: Dict[str, str] = _name_to_attr(Episodes)
 _EPISODES_ATTRS = {p.key for p in Episodes.__mapper__.column_attrs}
@@ -79,14 +88,36 @@ def _episode_write_values(data: Dict[str, Any]) -> Dict[str, Any]:
 # ------------------------------------------------------------------ #
 
 
+def _scene_content_count_col():
+    """FILTER predicate for "a real scene": non-OMITTED and content-non-empty
+    (content text or content_json array either non-empty) — B4 spec §5
+    script-criterion count. Extracted to a single module-level definition so
+    ``_progress_stmt`` and ``surface_criteria_for_episode`` can never drift
+    apart (they used to each hand-write this FILTER; Task 6 folds
+    ``_progress_stmt`` onto this one, Task 2's original owner)."""
+    return (
+        func.count(func.distinct(ScriptScenes.id))
+        .filter(
+            ScriptScenes.omitted_at.is_(None),
+            or_(
+                ScriptScenes.content != "",
+                func.jsonb_array_length(ScriptScenes.content_json) > 0,
+            ),
+        )
+        .label("scene_content_count")
+    )
+
+
 def _progress_stmt(project_id: Optional[int]):
     return (
         select(
             Episodes.id.label("episode_id"),
             Episodes.title.label("title"),
             Episodes.sort_order.label("sort_order"),
+            Episodes.current_node_id.label("current_node_id"),
             func.count(func.distinct(ScriptProjects.id)).label("script_count"),
             func.count(func.distinct(ScriptScenes.id)).label("scene_count"),
+            _scene_content_count_col(),
             func.count(func.distinct(ScriptShots.id)).label("shots_total"),
             func.count(func.distinct(ScriptShots.id))
             .filter(ScriptShots.status == "done")
@@ -108,8 +139,69 @@ def _progress_stmt(project_id: Optional[int]):
         .outerjoin(ScriptScenes, ScriptScenes.script_id == ScriptProjects.id)
         .outerjoin(ScriptShots, ScriptShots.scene_id == ScriptScenes.id)
         .where(Episodes.project_id == project_id)
-        .group_by(Episodes.id, Episodes.title, Episodes.sort_order)
+        .group_by(
+            Episodes.id, Episodes.title, Episodes.sort_order, Episodes.current_node_id
+        )
         .order_by(Episodes.sort_order.asc())
+    )
+
+
+def _workflow_nodes_rollup_stmt(project_id: int):
+    """Per-episode node counts for one project — one GROUP BY query for the
+    whole project (not per-episode) to avoid N+1. Excludes skipped nodes via
+    BOTH skip signals ``project_stage_nodes`` carries: the boolean
+    ``skipped`` column and the legacy ``status='skipped'`` string."""
+    return (
+        select(
+            ProjectStageNodes.episode_id.label("episode_id"),
+            func.count(ProjectStageNodes.id).label("nodes_total"),
+            func.count(ProjectStageNodes.id)
+            .filter(ProjectStageNodes.status == "done")
+            .label("nodes_done"),
+        )
+        .where(
+            ProjectStageNodes.project_id == project_id,
+            ProjectStageNodes.episode_id.isnot(None),
+            ProjectStageNodes.skipped.is_(False),
+            ProjectStageNodes.status != "skipped",
+        )
+        .group_by(ProjectStageNodes.episode_id)
+    )
+
+
+def _needs_input_rollup_stmt(project_id: int):
+    """Per-episode count of needs_input mirror issues for one project — one
+    GROUP BY query, joined via the project_stage origin_id shape
+    (``project_stage:{project_id}:{node_id}``, ``build_stage_origin_id``'s
+    format) built in SQL with concat/cast since it must match per-row
+    against a batch of nodes, not a single known id (the Python-side
+    ``build_stage_origin_id`` helper used everywhere else in the codebase
+    only fits a one-id-at-a-time call site)."""
+    return (
+        select(
+            ProjectStageNodes.episode_id.label("episode_id"),
+            func.count(Issues.id).label("needs_input_count"),
+        )
+        .select_from(ProjectStageNodes)
+        .join(
+            Issues,
+            and_(
+                Issues.origin_kind == ORIGIN_KIND,
+                Issues.origin_id
+                == func.concat(
+                    ORIGIN_KIND + ":",
+                    cast(ProjectStageNodes.project_id, Text),
+                    ":",
+                    cast(ProjectStageNodes.id, Text),
+                ),
+            ),
+        )
+        .where(
+            ProjectStageNodes.project_id == project_id,
+            ProjectStageNodes.episode_id.isnot(None),
+            needs_input_predicate(),
+        )
+        .group_by(ProjectStageNodes.episode_id)
     )
 
 
@@ -138,13 +230,49 @@ def _derive_episode_status(
     return status
 
 
-def _progress_row(row: Dict[str, Any]) -> Dict[str, Any]:
-    """One raw SQL row -> JSON-safe progress dict with derived status."""
+def script_criterion_met(script_count: int, scene_content_count: int) -> bool:
+    """B4 spec §5 script 档完成判据:该集有剧本且有场次内容。
+
+    与 ``_derive_episode_status`` 的展示阶梯刻意分离 —— 阶梯只判
+    ``script_count == 0``(scene_count 是死参数),且把 OMITTED 场次计入;
+    完成判据要求至少一个非 OMITTED、内容非空的场次。
+    """
+    return script_count > 0 and scene_content_count > 0
+
+
+def storyboard_criterion_met(shots_total: int, shots_done: int) -> bool:
+    """B4 spec §5 storyboard 档:镜头全部出卡(boarded 档口径,可复用)。"""
+    return shots_total > 0 and shots_done == shots_total
+
+
+def _progress_row(
+    row: Dict[str, Any], workflow_rollup: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """One raw SQL row -> JSON-safe progress dict with derived status.
+
+    ``workflow_rollup`` is this episode's slice of the two batched rollup
+    queries ``progress_by_project`` runs alongside ``_progress_stmt``
+    (``nodes_total`` / ``nodes_done`` / ``needs_input_count``) — kept OUT of
+    ``_progress_stmt`` itself because joining ``project_stage_nodes``/
+    ``issues`` into that query's GROUP BY would fan out and corrupt the
+    shots_total/shots_done/renders_count aggregates. Defaults to zeros when
+    the episode has no eligible nodes / no needs_input mirror issues (absent
+    from both rollup dicts, not an error).
+
+    ``surface_state`` is derived here (not fetched) from this same row's
+    script_count/scene_content_count/shots_total/shots_done via Task 2's
+    pure predicates — it can legitimately disagree with a node's persisted
+    ``status`` (e.g. the produced content was deleted after the node
+    auto-completed); that divergence is exactly what this field surfaces.
+    """
     script_count = int(row["script_count"] or 0)
     scene_count = int(row["scene_count"] or 0)
+    scene_content_count = int(row.get("scene_content_count") or 0)
     shots_total = int(row["shots_total"] or 0)
     shots_done = int(row["shots_done"] or 0)
     renders_count = int(row["renders_count"] or 0)
+    rollup = workflow_rollup or {}
+    current_node_id = row.get("current_node_id")
     return {
         "episode_id": str(row["episode_id"]),
         "title": row["title"],
@@ -157,6 +285,18 @@ def _progress_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "status": _derive_episode_status(
             script_count, scene_count, shots_total, shots_done, renders_count
         ),
+        "workflow": {
+            "nodes_total": int(rollup.get("nodes_total") or 0),
+            "nodes_done": int(rollup.get("nodes_done") or 0),
+            "current_node_id": (
+                str(current_node_id) if current_node_id is not None else None
+            ),
+            "needs_input_count": int(rollup.get("needs_input_count") or 0),
+        },
+        "surface_state": {
+            "script": script_criterion_met(script_count, scene_content_count),
+            "storyboard": storyboard_criterion_met(shots_total, shots_done),
+        },
     }
 
 
@@ -167,13 +307,73 @@ class EpisodeRepository:
         pass
 
     async def progress_by_project(self, project_id: str) -> List[Dict[str, Any]]:
-        """Per-episode progress (script/scene/shot counts + derived status)
-        for the workspace shell episodes panel (spec G12). LEFT JOINs so an
-        empty episode (no scripts yet) still appears with all-zero counts."""
+        """Per-episode progress (script/scene/shot counts + derived status,
+        plus B4 Task 6's workflow node/needs_input rollups and derived
+        surface_state) for the workspace shell episodes panel (spec G12).
+        LEFT JOINs in ``_progress_stmt`` so an empty episode (no scripts
+        yet) still appears with all-zero counts. The two workflow rollups
+        are separate GROUP BY queries (not joined into ``_progress_stmt``,
+        which would fan out its shot aggregates) — one query each for the
+        whole project, avoiding N+1 across episodes."""
+        pid = _bigint(project_id)
         async with read_scope() as session:
-            result = await session.execute(_progress_stmt(_bigint(project_id)))
+            result = await session.execute(_progress_stmt(pid))
             rows = result.mappings().all()
-        return [_progress_row(r) for r in rows]
+            nodes_result = await session.execute(_workflow_nodes_rollup_stmt(pid))
+            nodes_by_episode = {
+                r["episode_id"]: dict(r) for r in nodes_result.mappings().all()
+            }
+            needs_input_result = await session.execute(_needs_input_rollup_stmt(pid))
+            needs_input_by_episode = {
+                r["episode_id"]: r["needs_input_count"]
+                for r in needs_input_result.mappings().all()
+            }
+        return [
+            _progress_row(
+                r,
+                workflow_rollup={
+                    **nodes_by_episode.get(r["episode_id"], {}),
+                    "needs_input_count": needs_input_by_episode.get(r["episode_id"], 0),
+                },
+            )
+            for r in rows
+        ]
+
+    async def surface_criteria_for_episode(self, episode_id: str) -> Dict[str, bool]:
+        """One episode's surface-completion criteria (B4 spec §5).
+
+        scene_content_count = 非 OMITTED 且内容非空(content 文本或 content_json
+        数组任一非空)的场次数 —— 这是与 _progress_stmt.scene_count 的两点口径差。
+        刻意不吞异常(对齐 progress_by_project 的口径,让写路径 hook 的外层
+        try/except 记 warning)。
+        """
+        stmt = (
+            select(
+                func.count(func.distinct(ScriptProjects.id)).label("script_count"),
+                _scene_content_count_col(),
+                func.count(func.distinct(ScriptShots.id)).label("shots_total"),
+                func.count(func.distinct(ScriptShots.id))
+                .filter(ScriptShots.status == "done")
+                .label("shots_done"),
+            )
+            .select_from(ScriptProjects)
+            .outerjoin(ScriptScenes, ScriptScenes.script_id == ScriptProjects.id)
+            .outerjoin(ScriptShots, ScriptShots.scene_id == ScriptScenes.id)
+            .where(
+                ScriptProjects.episode_id == int(episode_id),
+                ScriptProjects.status != "deleted",
+            )
+        )
+        async with read_scope() as session:
+            row = (await session.execute(stmt)).one()
+        return {
+            "script": script_criterion_met(
+                int(row.script_count or 0), int(row.scene_content_count or 0)
+            ),
+            "storyboard": storyboard_criterion_met(
+                int(row.shots_total or 0), int(row.shots_done or 0)
+            ),
+        }
 
     async def list_by_project(self, project_id: str) -> List[Dict[str, Any]]:
         """All episodes for a project, ordered by sort_order, each annotated

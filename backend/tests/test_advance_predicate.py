@@ -318,6 +318,33 @@ async def test_deliverable_missing_blocks_forward(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_deliverable_present_allows_forward(monkeypatch):
+    """Fallback with same-named folder: a file in folder matching node name."""
+    n1 = _node("1", sort_order=1, deliverable_required=True)
+    n2 = _node("2", sort_order=2)
+    files = [{"id": "f1", "folder_id": "55"}]
+    nodes_repo = _FakeNodesRepo([n1, n2], files=files)
+    projects_repo = _FakeProjectsRepo(
+        "1", folders=[{"id": "55", "name": "Node 1"}], files=files
+    )
+    issue_repo = _FakeIssueRepo()
+    _install(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        issue_repo=issue_repo,
+    )
+
+    preview = await advance_service.compute_advance_preview(_PROJECT, _USER, "forward")
+
+    assert preview.will_advance is True
+    assert preview.creating[0].node_id == "2"
+
+
+@pytest.mark.asyncio
+async def test_deliverable_fallback_fail_closed(monkeypatch):
+    """B4:无 folder_id、无同名文件夹 → 即便项目里有别的文件,也判未交付。
+    (B2 计划文档点名的 fail-closed;按集节点的 stage 文件夹带 episode 前缀,
+    同名匹配本就不命中,任意文件兜底等于给按集门禁开了后门。)"""
     n1 = _node("1", sort_order=1, deliverable_required=True)
     n2 = _node("2", sort_order=2)
     nodes_repo = _FakeNodesRepo([n1, n2])
@@ -334,8 +361,8 @@ async def test_deliverable_present_allows_forward(monkeypatch):
 
     preview = await advance_service.compute_advance_preview(_PROJECT, _USER, "forward")
 
-    assert preview.will_advance is True
-    assert preview.creating[0].node_id == "2"
+    assert preview.will_advance is False
+    assert preview.blocked_reason == BLOCK_DELIVERABLE_MISSING
 
 
 # ── DELIVERABLE via explicit folder_id (M2-W1) ──────────────────────────────
