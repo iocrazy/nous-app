@@ -88,8 +88,12 @@ def wire(monkeypatch):
     def install(drive_result: PublishOutcome | Exception, **context_kwargs):
         context = FakeContext(**context_kwargs)
         browser = FakeBrowser(context)
+        # 打在 patchright 上 —— 生产代码 import 的是它。此前这里写死
+        # "playwright.async_api",换 driver 后桩没打中,测试真的去启浏览器,
+        # 报 "Executable doesn't exist at …chromium-1208"。测试替身跟着
+        # 生产代码的 import 走,不要各写各的。
         monkeypatch.setattr(
-            "playwright.async_api.async_playwright", lambda: FakePlaywright(browser)
+            "patchright.async_api.async_playwright", lambda: FakePlaywright(browser)
         )
 
         async def fake_drive(_page, _job, _deadline):
@@ -222,7 +226,7 @@ async def test_the_browser_is_closed_even_when_the_context_cannot_be_created(
     idle runs out of memory hours later."""
     browser = FakeBrowser(FakeContext(), fail_context=True)
     monkeypatch.setattr(
-        "playwright.async_api.async_playwright", lambda: FakePlaywright(browser)
+        "patchright.async_api.async_playwright", lambda: FakePlaywright(browser)
     )
 
     outcome = await douyin_publish.publish(job(), Deadline(60))

@@ -1461,7 +1461,9 @@ async def _safe_storage_state(context: Any) -> dict[str, Any] | None:
 
 async def publish(job: PublishJob, deadline: Deadline) -> PublishOutcome:
     """Publish one video. Total: every failure comes back as a typed status."""
-    from playwright.async_api import async_playwright
+    # patchright，不是 playwright：drop-in fork，补 CDP 层泄露。
+    # 四个 import 点必须一致 —— test_patchright_everywhere 会失败。
+    from patchright.async_api import async_playwright
 
     try:
         launch_kwargs = build_launch_kwargs(job.environment)
