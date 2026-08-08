@@ -201,7 +201,9 @@ _probe_cache: tuple[float, bool] | None = None
 
 
 async def _launch_and_close() -> bool:
-    from playwright.async_api import async_playwright
+    # patchright，不是 playwright：drop-in fork，补 CDP 层泄露。
+    # 四个 import 点必须一致 —— test_patchright_everywhere 会失败。
+    from patchright.async_api import async_playwright
 
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(

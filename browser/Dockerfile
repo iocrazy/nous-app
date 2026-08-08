@@ -72,6 +72,21 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-install-project
 
+# patchright 自带**另一份** Chromium，跟基础镜像里的不是同一个。实测（构建
+# 期探测，2026-08-08）：装完 patchright 后 executable_path 指向
+# /ms-playwright/chromium-1208/，而 v1.52.0-noble 镜像里只有 chromium-1169，
+# 该路径 EXISTS=False。
+#
+# ⚠️ 漏掉这一步，**构建照样通过**，直到运行时第一次启浏览器才炸
+# "Executable doesn't exist" —— 而那时已经是线上发布任务在跑。
+#
+# 装到 PLAYWRIGHT_BROWSERS_PATH（镜像已设为 /ms-playwright）下，patchright
+# 认这个变量（同一次探测确认）。只装 chromium：patchright 明确不支持
+# Firefox / WebKit，装了也是白占体积。
+RUN patchright install chromium \
+    && test -x "$(python3 -c 'from patchright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')" \
+    || (echo "patchright chromium missing after install" && exit 1)
+
 COPY app ./app
 COPY entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh

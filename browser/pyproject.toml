@@ -19,11 +19,21 @@ dependencies = [
     "fastapi>=0.115.12",
     "uvicorn[standard]>=0.34.3",
     "pydantic>=2.11.3",
-    # Pinned exactly. The Dockerfile base image ships a matching browser build
-    # (mcr.microsoft.com/playwright/python:v1.52.0-noble); bumping one without
-    # the other yields "Executable doesn't exist" at runtime. Single source of
-    # truth for the pair is browser/README.md#upgrading-playwright.
+    # patchright 是 playwright 的 undetected fork，**drop-in replacement**：
+    # 只改 import，API 完全一致。换它的理由是 CDP 协议层的泄露（Runtime.enable
+    # 之类页面 JS 能侧信道探到的痕迹），那是 stealth.min.js 补不到的一层 ——
+    # 参考项目 sau 正是 patchright + stealth 双保险，我们此前只有后者。
+    #
+    # ⚠️ 它自带一份**独立的 Chromium**（1208），跟基础镜像自带的（1169）不是
+    # 同一个。实测：装完 patchright 后 executable_path 指向
+    # /ms-playwright/chromium-1208/，而该目录在基础镜像里不存在（EXISTS=False），
+    # 必须由 Dockerfile 的 `patchright install chromium` 补上。忘了那一步，
+    # 构建照样通过，运行时才炸 "Executable doesn't exist"。
+    #
+    # playwright 仍然保留：`playwright.async_api` 的类型/异常仍被引用，且基础
+    # 镜像的版本对应关系（v1.52.0-noble ↔ playwright 1.52.0）没有改变。
     "playwright==1.52.0",
+    "patchright==1.58.2",
 ]
 
 # ⚠️ 刻意保持 optional-dependencies，别"统一"成 [dependency-groups]。

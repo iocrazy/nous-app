@@ -166,7 +166,9 @@ async def _probe_once(
     env: EnvironmentConfig | None,
 ) -> ProbeOutcome:
     """One full launch -> navigate -> settle -> judge cycle."""
-    from playwright.async_api import async_playwright
+    # patchright，不是 playwright：drop-in fork，补 CDP 层泄露。
+    # 四个 import 点必须一致 —— test_patchright_everywhere 会失败。
+    from patchright.async_api import async_playwright
 
     settings = get_settings()
     proxy_configured = bool(env is not None and env.proxy_url)

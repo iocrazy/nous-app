@@ -299,7 +299,9 @@ async def open_login_driver(
     from a clean profile by definition, and seeding it with a dead session is
     how you land on a logged-in-looking shell with no QR code on it.
     """
-    from playwright.async_api import async_playwright
+    # patchright，不是 playwright：drop-in fork，补 CDP 层泄露。
+    # 四个 import 点必须一致 —— test_patchright_everywhere 会失败。
+    from patchright.async_api import async_playwright
 
     settings = get_settings()
     playwright = await async_playwright().start()
