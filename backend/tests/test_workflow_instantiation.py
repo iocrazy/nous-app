@@ -511,7 +511,9 @@ async def test_instantiate_default_expect_fresh_false_stays_idempotent(monkeypat
 # Shooting's own ``skipped`` flag.
 
 
-def _legacy_shooting_node(*, skipped: bool, legacy_stage_id: int = 700) -> ProjectStageNodes:
+def _legacy_shooting_node(
+    *, skipped: bool, legacy_stage_id: int = 700, parallel_group: Any = None
+) -> ProjectStageNodes:
     return ProjectStageNodes(
         id=1,
         project_id=50,
@@ -519,7 +521,7 @@ def _legacy_shooting_node(*, skipped: bool, legacy_stage_id: int = 700) -> Proje
         legacy_stage_id=legacy_stage_id,
         name="Shooting",
         sort_order=1,
-        parallel_group=None,
+        parallel_group=parallel_group,
         status="pending",
         owner_user_id=None,
         owner_agent_id=None,
@@ -529,6 +531,42 @@ def _legacy_shooting_node(*, skipped: bool, legacy_stage_id: int = 700) -> Proje
         deliverable_required=False,
         deliverable_label=None,
         skipped=skipped,
+        completion_policy="owner",
+        events={
+            "notify_on_arrival": True,
+            "notify_on_complete": False,
+            "suggest_agent_run": False,
+        },
+        form_schema=[],
+        form_data={},
+    )
+
+
+def _legacy_canvas_node(
+    *, legacy_stage_id: int = 701, parallel_group: Any = None
+) -> ProjectStageNodes:
+    """A stale legacy Canvas row — B6 retired Canvas from the node bank (mig
+    412), but old projects instantiated before that migration can still have
+    one sitting in ``project_stage_nodes``. Used only by the discriminating
+    pin below: the pre-B6 code would read this node's ``parallel_group`` to
+    detect hybrid; B6 must ignore it entirely."""
+    return ProjectStageNodes(
+        id=2,
+        project_id=50,
+        source_template_node_id=None,
+        legacy_stage_id=legacy_stage_id,
+        name="Canvas",
+        sort_order=2,
+        parallel_group=parallel_group,
+        status="pending",
+        owner_user_id=None,
+        owner_agent_id=None,
+        planned_start=None,
+        planned_due=None,
+        review_required=False,
+        deliverable_required=False,
+        deliverable_label=None,
+        skipped=False,
         completion_policy="owner",
         events={
             "notify_on_arrival": True,
@@ -585,5 +623,30 @@ async def test_infer_method_shooting_only(monkeypatch):
         slug_rows=[(700, "shooting")],
     )
     monkeypatch.setattr(mod, "read_scope", _write_scope_with(session_live))
+    _, method = await repo.infer_legacy_binding("50")
+    assert method == "live"
+
+
+@pytest.mark.asyncio
+async def test_infer_method_ignores_canvas_shooting_shared_parallel_group(
+    monkeypatch,
+):
+    """Discriminating pin against the deleted hybrid branch reviving on a
+    bad merge/rebase: Shooting (not skipped) and a stale legacy Canvas row
+    SHARE a ``parallel_group`` — the exact shape the pre-B6 code read as
+    ``'hybrid'``. B6 must infer ``'live'`` regardless, because the Canvas
+    lookup and the parallel-group comparison no longer exist at all."""
+    import app.repositories.project_stage_nodes_repository as mod
+
+    repo = ProjectStageNodesRepository()
+
+    session = _InferBindingFakeSession(
+        legacy_nodes=[
+            _legacy_shooting_node(skipped=False, parallel_group=9),
+            _legacy_canvas_node(parallel_group=9),
+        ],
+        slug_rows=[(700, "shooting"), (701, "canvas")],
+    )
+    monkeypatch.setattr(mod, "read_scope", _write_scope_with(session))
     _, method = await repo.infer_legacy_binding("50")
     assert method == "live"
