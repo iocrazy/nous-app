@@ -108,9 +108,12 @@ async def ensure_stage_issue(
     project_name = (project or {}).get("name") or "Project"
     stage_name = new_stage.get("name") or "Stage"
 
+    # done 节点(surface 自动完成可先于组到达把节点推到 done, B4)的镜像直接
+    # 以 done 落地——按 todo 建会留下「节点 done 但 Todolist 挂 open todo」的
+    # 错位,末组/被闸挡时 cascade 不会自愈它。done→done 投影无害。
     payload: dict[str, Any] = {
         "title": f"{project_name} — {stage_name}",
-        "status": "todo",
+        "status": "done" if new_stage.get("status") == "done" else "todo",
         "origin_kind": ORIGIN_KIND,
         "origin_id": origin_id,
         "project_id": int(project_id),

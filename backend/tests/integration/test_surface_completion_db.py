@@ -553,7 +553,7 @@ async def test_project_wide_sync_completes_satisfied_episodes(
     integration_db_url, patched_engine, cleanup_test_rows
 ):
     """B4 点火端点回归: 两集场景 — Ep1 判据满足但节点 pending(有镜像 issue)、Ep2 空。
-    调用 sync_project_surface_completion -> 返回 {"episodes": 2}。
+    调用 sync_project_surface_completion -> 返回 {"episodes": 2, "failed": 0}。
     Ep1 Script 节点+镜像 issue 变 done，Ep2 保持 in_progress(无产物不推进)。"""
     conn = await asyncpg.connect(integration_db_url)
     try:
@@ -634,7 +634,10 @@ async def test_project_wide_sync_completes_satisfied_episodes(
     result = await sync_project_surface_completion(str(project_id))
 
     # Assertions
-    assert result == {"episodes": 2}, f"Expected {{'episodes': 2}}, got {result}"
+    assert result == {
+        "episodes": 2,
+        "failed": 0,
+    }, f"Expected {{'episodes': 2, 'failed': 0}}, got {result}"
 
     # Verify Ep1 Script node and its mirror issue are now done
     conn = await asyncpg.connect(integration_db_url)
