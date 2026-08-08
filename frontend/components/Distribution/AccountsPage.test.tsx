@@ -237,8 +237,28 @@ describe('AccountsPage', () => {
     mount();
     await waitFor(() => expect(screen.getByText(/Connect a platform/i)).toBeInTheDocument());
     // The old blanket "Ready" badge overstated a half-working OAuth channel.
-    expect(screen.getByText(/QR sign-in ready/i)).toBeInTheDocument();
-    expect(screen.getByText(/Official: hand-off only/i)).toBeInTheDocument();
+    //
+    // 查询限定在抖音那张卡内:小红书 / B 站接进来之后,"QR sign-in ready"
+    // 在页面上出现三次,全局 getByText 会直接抛 "Found multiple elements"。
+    // 这个用例要验的是**抖音卡片上两种方式各自的状态**,不是全页唯一性。
+    const douyinCard = screen.getByText('Douyin').closest('button') as HTMLElement;
+    expect(douyinCard).toBeTruthy();
+    expect(within(douyinCard).getByText(/QR sign-in ready/i)).toBeInTheDocument();
+    expect(within(douyinCard).getByText(/Official: hand-off only/i)).toBeInTheDocument();
     expect(screen.queryByText(/^Ready$/)).toBeNull();
+  });
+
+  it('小红书 / B 站:能扫码绑定,但明确标注发布未实现', async () => {
+    // 只标 "QR sign-in ready" 会让人以为绑完就能发,而实际提交会被后端
+    // 类型化拒绝(publishing_not_implemented)。UI 必须把这两件事分开说。
+    mount();
+    await waitFor(() => expect(screen.getByText(/Connect a platform/i)).toBeInTheDocument());
+
+    for (const name of ['Xiaohongshu', 'Bilibili']) {
+      const card = screen.getByText(name).closest('button') as HTMLElement;
+      expect(card).toBeTruthy();
+      expect(within(card).getByText(/QR sign-in ready/i)).toBeInTheDocument();
+      expect(within(card).getByText(/Publishing not available yet/i)).toBeInTheDocument();
+    }
   });
 });

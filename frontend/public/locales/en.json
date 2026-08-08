@@ -490,7 +490,8 @@
       "contentImages": "Images",
       "contentArticle": "Article",
       "accountsCount": "{{n}} accounts"
-    }
+    },
+    "platNoPublish": "Publishing not available yet"
   },
   "parser": {
     "title": "Media Parser",

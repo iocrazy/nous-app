@@ -304,13 +304,40 @@ export const AccountsPage: React.FC = () => {
               </small>
             </div>
           </button>
+          {/* 小红书 / B 站:能绑账号、能保活会话,但**发布未实现**。
+              这两件事必须分开说 —— 只标 "QR sign-in ready" 会让人以为绑完
+              就能发,而实际提交会被后端类型化拒绝。宁可这里写得啰嗦。 */}
+          <button type="button" className="plat ready" onClick={() => onConnect('xiaohongshu')}>
+            <span className="pbadge lg" style={{ background: PLATFORM_BADGE.xiaohongshu.bg }}>{PLATFORM_BADGE.xiaohongshu.icon}</span>
+            <div>
+              Xiaohongshu
+              <small className="plat-methods">
+                <span className="pm ok">
+                  <QrCode size={10} /> {t('distribution.platQrReady', 'QR sign-in ready')}
+                </span>
+                <span className="pm warn">
+                  {t('distribution.platNoPublish', 'Publishing not available yet')}
+                </span>
+              </small>
+            </div>
+          </button>
+          <button type="button" className="plat ready" onClick={() => onConnect('bilibili')}>
+            <span className="pbadge lg" style={{ background: PLATFORM_BADGE.bilibili.bg }}>{PLATFORM_BADGE.bilibili.icon}</span>
+            <div>
+              Bilibili
+              <small className="plat-methods">
+                <span className="pm ok">
+                  <QrCode size={10} /> {t('distribution.platQrReady', 'QR sign-in ready')}
+                </span>
+                <span className="pm warn">
+                  {t('distribution.platNoPublish', 'Publishing not available yet')}
+                </span>
+              </small>
+            </div>
+          </button>
           <div className="plat soon">
             <span className="pbadge lg" style={{ background: PLATFORM_BADGE.kuaishou.bg }}>{PLATFORM_BADGE.kuaishou.icon}</span>
             <div>Kuaishou<small>{t('distribution.platPlanned', 'Planned')}</small></div>
-          </div>
-          <div className="plat soon">
-            <span className="pbadge lg" style={{ background: PLATFORM_BADGE.xiaohongshu.bg }}>{PLATFORM_BADGE.xiaohongshu.icon}</span>
-            <div>Xiaohongshu<small>{t('distribution.platPlanned', 'Planned')}</small></div>
           </div>
         </div>
       </div>

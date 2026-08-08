@@ -14,7 +14,9 @@ pytestmark = pytest.mark.unit
 
 
 def test_douyin_is_registered():
-    assert supported_platforms() == ["douyin"]
+    # 断言"包含"而不是"等于":每接一个平台这里就会红一次,而它想守的其实是
+    # "抖音注册上了",不是"只有抖音"。
+    assert "douyin" in supported_platforms()
     assert get_validator("douyin") is validate_session
 
 
@@ -23,7 +25,10 @@ def test_lookup_is_case_and_whitespace_insensitive():
 
 
 def test_unknown_platform_returns_none():
-    assert get_validator("xiaohongshu") is None
+    # 用一个**不会被实现**的名字。原先这里写的是 "xiaohongshu",接入小红书
+    # 那天它就变成了真平台,用例随之红掉 —— 拿"尚未实现的真实平台"当反例,
+    # 保质期只到它被实现为止。
+    assert get_validator("definitely-not-a-platform") is None
 
 
 def test_double_registration_is_refused():
@@ -38,31 +43,43 @@ def test_double_registration_is_refused():
         register("douyin", other)
 
 
-def test_only_one_douyin_session_validator_exists_in_the_tree():
-    """Spec 7.1 is a structural rule, so assert it structurally rather than
-    trusting review to catch a second copy."""
+def test_each_platform_defines_its_session_validator_exactly_once():
+    """Spec 7.1 是结构规则,所以结构性地断言,而不是指望 review 抓出第二份。
+
+    原先写成 `== ["douyin.py"]`,把规则("每个平台只有一份")表达成了现状
+    ("只有抖音")。接第二个平台那天它必然红,而红的原因跟规则本身无关。
+    现在按**每个文件一份**来断言:多出来的那份重复实现照样会被抓到。
+    """
     from pathlib import Path
 
     app_dir = Path(__file__).resolve().parents[1] / "app"
-    definitions = [
-        path
+    per_file = {
+        path.name: path.read_text(encoding="utf-8").count("async def validate_session")
         for path in app_dir.rglob("*.py")
-        if "async def validate_session" in path.read_text(encoding="utf-8")
-    ]
-    assert [p.name for p in definitions] == ["douyin.py"]
+    }
+    offenders = {name: n for name, n in per_file.items() if n > 1}
+    assert not offenders, f"同一个文件里定义了多份 validate_session: {offenders}"
+
+    # 而且每个已注册的平台都必须真有一份
+    assert per_file.get("douyin.py") == 1
+    for name in supported_platforms():
+        assert any(
+            n == 1 for f, n in per_file.items() if f.startswith(name.split("_")[0])
+        ), f"{name} 已注册但找不到它的 validate_session"
 
 
 # --- login flows -----------------------------------------------------------
 
 
 def test_douyin_login_flow_is_registered():
-    assert login_platforms() == ["douyin"]
+    assert "douyin" in login_platforms()
     assert get_login_flow("douyin") is LOGIN_SPEC
     assert get_login_flow("  DouYin ") is LOGIN_SPEC
 
 
 def test_unknown_platform_has_no_login_flow():
-    assert get_login_flow("xiaohongshu") is None
+    # 同上:反例要用永远不会存在的名字。
+    assert get_login_flow("definitely-not-a-platform") is None
 
 
 def test_double_login_registration_is_refused():
