@@ -224,7 +224,14 @@ async def test_the_cover_goes_to_the_second_upload_input_not_the_first():
             dp.COVER_MODAL_SELECTOR,
             f"text={dp.COVER_CONFIRM_BUTTON_TEXT}",
         },
-        counts={dp.COVER_HIDDEN_INPUT_SELECTOR: 4},
+        # 弹窗在「完成」被点过之后消失 —— 真实行为。此前 fake 让它一直在,
+        # 于是"确认后没关掉"这条路径从来没被任何用例覆盖过。
+        counts={
+            dp.COVER_HIDDEN_INPUT_SELECTOR: 4,
+            dp.COVER_MODAL_SELECTOR: lambda pg: (
+                0 if f"text={dp.COVER_CONFIRM_BUTTON_TEXT}" in pg.clicks else 1
+            ),
+        },
     )
     result = await dp._set_cover(
         page, job(assets={"cover": cover_asset()}), Deadline(10)
@@ -448,3 +455,31 @@ def test_proxy_credentials_never_reach_an_outcome_message():
 def test_a_crash_outcome_is_never_reported_as_a_success():
     outcome: PublishOutcome = dp._outcome_from_exception(RuntimeError("boom"))
     assert outcome.success is False
+
+
+async def test_a_cover_dialog_that_will_not_close_fails_as_cover_not_as_the_next_step():
+    """残留的封面弹窗必须在**封面这一步**失败,不能让后面的步骤替它背锅。
+
+    2026-08-08 实测:封面弹窗确认后没关掉,盖住了后续控件,整次发布死在两步
+    之后的 `self_declaration_dialog_missing` —— 指向一个完全正常的步骤。排查
+    时间大半耗在错误的嫌疑人身上。
+
+    旧实现只 logger.warning 就放行,理由是"真被挡住的话发布按钮会大声失败"。
+    它确实会失败,但**以错误步骤的名义**,而这正是类型化失败要消灭的东西。
+    """
+    page = FakePage(
+        url=EDITOR_URL,
+        visible={f"text={dp.COVER_ENTRY_TEXT}", dp.COVER_MODAL_SELECTOR},
+        # 弹窗始终在:确认后不 detach,清理后依然 count() > 0
+        counts={
+            dp.COVER_MODAL_SELECTOR: 1,
+            dp.COVER_HIDDEN_INPUT_SELECTOR: 4,
+            f"text={dp.COVER_CONFIRM_BUTTON_TEXT}": 1,
+        },
+    )
+
+    with pytest.raises(dp.StepFailure) as excinfo:
+        await dp._set_cover(page, job(assets={"cover": cover_asset()}), Deadline(30))
+
+    assert excinfo.value.detail["reason"] == "cover_dialog_stuck"
+    assert excinfo.value.detail["stage"] == "cover"
