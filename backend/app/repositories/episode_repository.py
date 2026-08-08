@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 from sqlalchemy import and_
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import func, insert, or_, select, update
 
 from app.db.session import read_scope, write_scope
 from app.models import Episodes, ScriptProjects, ScriptScenes, ScriptShots
@@ -138,6 +138,21 @@ def _derive_episode_status(
     return status
 
 
+def script_criterion_met(script_count: int, scene_content_count: int) -> bool:
+    """B4 spec §5 script 档完成判据:该集有剧本且有场次内容。
+
+    与 ``_derive_episode_status`` 的展示阶梯刻意分离 —— 阶梯只判
+    ``script_count == 0``(scene_count 是死参数),且把 OMITTED 场次计入;
+    完成判据要求至少一个非 OMITTED、内容非空的场次。
+    """
+    return script_count > 0 and scene_content_count > 0
+
+
+def storyboard_criterion_met(shots_total: int, shots_done: int) -> bool:
+    """B4 spec §5 storyboard 档:镜头全部出卡(boarded 档口径,可复用)。"""
+    return shots_total > 0 and shots_done == shots_total
+
+
 def _progress_row(row: Dict[str, Any]) -> Dict[str, Any]:
     """One raw SQL row -> JSON-safe progress dict with derived status."""
     script_count = int(row["script_count"] or 0)
@@ -174,6 +189,50 @@ class EpisodeRepository:
             result = await session.execute(_progress_stmt(_bigint(project_id)))
             rows = result.mappings().all()
         return [_progress_row(r) for r in rows]
+
+    async def surface_criteria_for_episode(self, episode_id: str) -> Dict[str, bool]:
+        """One episode's surface-completion criteria (B4 spec §5).
+
+        scene_content_count = 非 OMITTED 且内容非空(content 文本或 content_json
+        数组任一非空)的场次数 —— 这是与 _progress_stmt.scene_count 的两点口径差。
+        刻意不吞异常(对齐 progress_by_project 的口径,让写路径 hook 的外层
+        try/except 记 warning)。
+        """
+        stmt = (
+            select(
+                func.count(func.distinct(ScriptProjects.id)).label("script_count"),
+                func.count(func.distinct(ScriptScenes.id))
+                .filter(
+                    ScriptScenes.omitted_at.is_(None),
+                    or_(
+                        ScriptScenes.content != "",
+                        func.jsonb_array_length(ScriptScenes.content_json) > 0,
+                    ),
+                )
+                .label("scene_content_count"),
+                func.count(func.distinct(ScriptShots.id)).label("shots_total"),
+                func.count(func.distinct(ScriptShots.id))
+                .filter(ScriptShots.status == "done")
+                .label("shots_done"),
+            )
+            .select_from(ScriptProjects)
+            .outerjoin(ScriptScenes, ScriptScenes.script_id == ScriptProjects.id)
+            .outerjoin(ScriptShots, ScriptShots.scene_id == ScriptScenes.id)
+            .where(
+                ScriptProjects.episode_id == int(episode_id),
+                ScriptProjects.status != "deleted",
+            )
+        )
+        async with read_scope() as session:
+            row = (await session.execute(stmt)).one()
+        return {
+            "script": script_criterion_met(
+                int(row.script_count or 0), int(row.scene_content_count or 0)
+            ),
+            "storyboard": storyboard_criterion_met(
+                int(row.shots_total or 0), int(row.shots_done or 0)
+            ),
+        }
 
     async def list_by_project(self, project_id: str) -> List[Dict[str, Any]]:
         """All episodes for a project, ordered by sort_order, each annotated
