@@ -60,6 +60,7 @@ issues_router = importlib.import_module("app.api.issues_router")
 _NOW = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
 _OWNER = "00000000-0000-0000-0000-000000000001"
 _OTHER = "00000000-0000-0000-0000-000000000002"
+_EPISODE = "9001"  # Task 8: get_project_workflow's episode_id is now required
 
 
 # ── guard: completion_policy honored ────────────────────────────────────────
@@ -552,10 +553,11 @@ async def test_get_project_workflow_response_carries_completion_policy_and_event
             "suggest_agent_run": True,
         },
         "members": [],
+        "episode_id": _EPISODE,
     }
 
     class _NodesRepo:
-        async def list_nodes(self, project_id):
+        async def list_nodes_by_episode(self, project_id, episode_id):
             return [node_row]
 
         async def count_running_agent_runs(self, project_id):
@@ -568,6 +570,10 @@ async def test_get_project_workflow_response_carries_completion_policy_and_event
         async def get_project_files(self, project_id):
             return []
 
+    class _EpisodeRepo:
+        async def get_by_id(self, episode_id):
+            return {"id": _EPISODE, "project_id": "100", "current_node_id": None}
+
     monkeypatch.setattr(
         "app.repositories.project_stage_nodes_repository."
         "get_project_stage_nodes_repository",
@@ -576,6 +582,10 @@ async def test_get_project_workflow_response_carries_completion_policy_and_event
     monkeypatch.setattr(
         "app.repositories.projects_repository.get_projects_repository",
         lambda: _ProjectsRepo(),
+    )
+    monkeypatch.setattr(
+        "app.repositories.episode_repository.get_episode_repository",
+        lambda: _EpisodeRepo(),
     )
 
     # NOTE: must use importlib, not ``import app.api.projects_router as m`` —
@@ -587,7 +597,9 @@ async def test_get_project_workflow_response_carries_completion_policy_and_event
     # reason).
     projects_router_mod = importlib.import_module("app.api.projects_router")
 
-    result = await projects_router_mod.get_project_workflow("100", _Auth(_OTHER), None)
+    result = await projects_router_mod.get_project_workflow(
+        "100", _Auth(_OTHER), _EPISODE
+    )
 
     assert result.has_workflow is True
     node_out = result.nodes[0]
@@ -652,10 +664,11 @@ async def test_get_project_workflow_response_carries_metadata_run_prepared_at(
         "events": {"suggest_agent_run": True, "prepare_agent_run": True},
         "metadata": {"run_prepared_at": "2026-07-27T00:00:00+00:00"},
         "members": [],
+        "episode_id": _EPISODE,
     }
 
     class _NodesRepo:
-        async def list_nodes(self, project_id):
+        async def list_nodes_by_episode(self, project_id, episode_id):
             return [node_row]
 
         async def count_running_agent_runs(self, project_id):
@@ -668,6 +681,10 @@ async def test_get_project_workflow_response_carries_metadata_run_prepared_at(
         async def get_project_files(self, project_id):
             return []
 
+    class _EpisodeRepo:
+        async def get_by_id(self, episode_id):
+            return {"id": _EPISODE, "project_id": "100", "current_node_id": None}
+
     monkeypatch.setattr(
         "app.repositories.project_stage_nodes_repository."
         "get_project_stage_nodes_repository",
@@ -677,9 +694,15 @@ async def test_get_project_workflow_response_carries_metadata_run_prepared_at(
         "app.repositories.projects_repository.get_projects_repository",
         lambda: _ProjectsRepo(),
     )
+    monkeypatch.setattr(
+        "app.repositories.episode_repository.get_episode_repository",
+        lambda: _EpisodeRepo(),
+    )
 
     projects_router_mod = importlib.import_module("app.api.projects_router")
-    result = await projects_router_mod.get_project_workflow("100", _Auth(_OTHER), None)
+    result = await projects_router_mod.get_project_workflow(
+        "100", _Auth(_OTHER), _EPISODE
+    )
 
     node_out = result.nodes[0]
     assert node_out.metadata == {"run_prepared_at": "2026-07-27T00:00:00+00:00"}
