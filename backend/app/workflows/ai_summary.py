@@ -236,8 +236,12 @@ async def persist_summary(
             # them; no json.dumps()+CAST(... AS jsonb) round-trip needed.
             key_points=key_points or [],
             topics=topics or [],
-            llm_model=llm_model or None,
-            llm_provider=llm_provider or None,
+            # Columns are varchar(50) — an over-length model/provider string
+            # (some provider IDs run well past 50 chars) raises
+            # StringDataRightTruncation at the DB, which combined with the
+            # route-C rule 4 re-raise discards an already-paid-for summary.
+            llm_model=(llm_model or "")[:50] or None,
+            llm_provider=(llm_provider or "")[:50] or None,
         )
         insert_stmt = insert_stmt.on_conflict_do_update(
             index_elements=[ResourceSummaries.resource_id],

@@ -1,10 +1,11 @@
 """Shared workflow-level exception handler.
 
-Why this exists: when a `@DBOS.step` exhausts its retry budget DBOS
-raises ``DBOSMaxStepRetriesExceeded`` to the workflow body. If the
-workflow body doesn't catch it, the exception propagates to DBOS's
-internal worker thread — which can damage the host process (DBOS runs
-in-process with FastAPI/uvicorn, unlike Celery's separated worker).
+Why this exists: every workflow already catches its own exceptions (it
+must, to re-raise per Route-C rule 4 — see item 2 below) — what they'd
+otherwise duplicate is the bookkeeping that has to happen on the way out: mark
+``task_tracking`` failed, unwrap ``DBOSMaxStepRetriesExceeded`` down to
+the real underlying error, and log with context. This helper centralizes
+that so each workflow's ``except`` block is one call, not five.
 
 This helper gives every workflow a one-line tail-catch that:
   1. Marks the corresponding ``task_tracking`` row as failed

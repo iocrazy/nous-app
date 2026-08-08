@@ -430,17 +430,49 @@ async def retry_task(task_id: str, auth: AuthDep, _scope: ScopedRequestDep):
             )
 
         elif task_type == "ai_summary" and resource_id:
+            from contextlib import nullcontext
+
+            from app.db.scope import is_enforced, system_request_scope
+            from app.repositories.resources_repository import ResourcesRepository
             from app.services.infra.dbos_orchestrator import start_workflow_routed
             from app.workflows.ai_summary import ai_summary_workflow
 
             media_id = task.get("media_id")
+
+            # F2 (2026-08-08 终审 Important): retry can be triggered by any
+            # teammate on a shared resource — task_tracking.user_id here is
+            # the retrying CALLER (retry_task's own row lookup already
+            # requires caller == row owner), not necessarily the resource
+            # CREATOR. The workflow's creator_id filter and points ledger
+            # key off the owner (same fix as Task 2's ai_router.py
+            # trigger_summary_by_resource, commit 3c45716).
+            #
+            # This endpoint declares ScopedRequestDep, so the ambient scope
+            # for the whole request is the CALLER's — resolving creator_id
+            # under that scope would hit the exact F1 mechanism (the choke
+            # point injects creator_id == caller, silently hiding a
+            # resource owned by someone else). Wrapped in system_request_scope
+            # whenever enforced, mirroring F1's
+            # download_helpers.chain_summary_for_tags fix.
+            scope_cm = (
+                system_request_scope(
+                    reason="task retry: resolve ai_summary resource owner "
+                    "regardless of retry caller"
+                )
+                if is_enforced("resources")
+                else nullcontext()
+            )
+            async with scope_cm:
+                resource = await ResourcesRepository().get_resource_by_id(resource_id)
+            owner_id = (resource or {}).get("creator_id") or user_id
+
             try:
                 await start_workflow_routed(
                     "ai_summary",
                     dbos_workflow_callable=ai_summary_workflow,
                     dbos_workflow_kwargs={
                         "parsed_media_id": int(media_id),
-                        "user_id": user_id,
+                        "user_id": owner_id,
                     },
                     workflow_id=new_wf_id,
                 )
