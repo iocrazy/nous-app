@@ -23,6 +23,7 @@ from typing import Any, Callable, Sequence
 
 from .browser_runtime import (
     ProxyConfigError,
+    apply_stealth,
     build_context_kwargs,
     build_launch_kwargs,
 )
@@ -186,6 +187,7 @@ async def _probe_once(
             browser = await playwright.chromium.launch(**launch_kwargs)
             try:
                 context = await browser.new_context(**context_kwargs)
+                await apply_stealth(context)
                 page = await context.new_page()
                 await page.goto(
                     spec.target_url,
