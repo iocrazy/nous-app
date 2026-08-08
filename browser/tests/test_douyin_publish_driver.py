@@ -31,9 +31,15 @@ class FakeContext:
         self._explode_on_state = explode_on_state
         self.closed = False
         self.state_calls = 0
+        # 记录注入过的脚本 —— 反检测是否真的加到了发布这条路径上,
+        # 由此可断言,而不是只看代码里写没写。
+        self.init_scripts: list[str] = []
 
     async def new_page(self) -> Any:
         return object()
+
+    async def add_init_script(self, script: str) -> None:
+        self.init_scripts.append(script)
 
     async def storage_state(self) -> dict[str, Any]:
         self.state_calls += 1
@@ -224,3 +230,22 @@ async def test_the_browser_is_closed_even_when_the_context_cannot_be_created(
     assert outcome.status is SessionStatus.PROXY_FAILED
     assert outcome.updated_storage_state is None
     assert browser.closed is True
+
+
+async def test_the_publish_path_actually_injects_the_evasions(wire):
+    """发布这条路径在运行时真的注入了反检测脚本。
+
+    源码守卫(test_stealth_injection)只能证明"代码里写了 apply_stealth",
+    证明不了它在这条路径上真的被执行到 —— 一个提前 return、一个异常分支,
+    都能让那行代码永远不运行。这里跑一遍真实驱动,断言 context 上确实落了
+    脚本。
+    """
+    from app.browser_runtime import STEALTH_SCRIPT
+
+    context, _browser = wire(published())
+
+    outcome = await _publish()
+
+    assert outcome.status is SessionStatus.PUBLISHED
+    assert context.init_scripts, "发布路径没有注入任何 init script"
+    assert STEALTH_SCRIPT in context.init_scripts
