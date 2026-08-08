@@ -11,8 +11,12 @@ This helper gives every workflow a one-line tail-catch that:
      (status='failed', error_msg, completed_at) so the frontend's
      Realtime channel pushes the failure to the user instead of leaving
      a forever-pending card.
-  2. Returns a uniform failure dict so callers (chain_followups,
-     trigger_*) get a recognisable shape instead of an exception.
+  2. Returns a uniform failure dict for logging/test-assertion
+     convenience only — callers MUST re-raise after awaiting this, not
+     return the dict as the workflow's result. Returning it makes DBOS
+     record the workflow as SUCCESS while task_tracking says failed,
+     splitting the two sources of truth Route-C rule 4 exists to keep
+     aligned (observed live 2026-08-08, wf 5a872175/1e63f80b).
   3. Logs the error with full context for post-mortem.
 
 Use:
@@ -21,11 +25,12 @@ Use:
         try:
             ... # original body
         except Exception as e:  # noqa: BLE001
-            return await record_workflow_failure(
+            await record_workflow_failure(
                 workflow_id=DBOS.workflow_id,
                 error=e,
                 context={"k": "v", ...},
             )
+            raise
 
 Why this is async (PR #237 audit)
 ---------------------------------

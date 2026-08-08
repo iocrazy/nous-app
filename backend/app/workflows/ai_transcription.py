@@ -566,7 +566,11 @@ async def ai_transcription_workflow(
         # tab stops spinning. Business column (route-C rule 3), written by
         # business code — not a trigger-owned task_tracking column.
         await mark_transcript_failed(parsed_media_id)
-        return await record_workflow_failure(
+        # Route-C rule 4: record for task_tracking/UI, then RE-RAISE so
+        # DBOS records ERROR — returning the dict made DBOS mark this
+        # workflow SUCCESS while task_tracking said failed (observed live
+        # 2026-08-08, wf 5a872175/1e63f80b).
+        await record_workflow_failure(
             workflow_id=DBOS.workflow_id,
             error=e,
             context={
@@ -575,3 +579,4 @@ async def ai_transcription_workflow(
                 "user_id": user_id,
             },
         )
+        raise
