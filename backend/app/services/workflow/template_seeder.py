@@ -12,10 +12,12 @@ per-node switch — so the two templates differ only by ``skip_default``:
     Short-form (default) — skips Voiceover, Color Grading, VFX
     Long-form            — skips VFX
 
-Canvas (AI generation) is always on; Shooting is on in both. ``review_required``
-comes straight from the node bank; ``deliverable_required`` mirrors it as the
-seed default (the ✓ acceptance nodes gate on a filed deliverable), overridable
-per template in the editor.
+Shooting is on in both (B6: the method switch is the only thing that ever
+turns it off, at instantiation time — Canvas is retired as a standalone
+node-bank slug, mig 412). ``review_required`` comes straight from the node
+bank; ``deliverable_required`` mirrors it as the seed default (the ✓
+acceptance nodes gate on a filed deliverable), overridable per template in
+the editor.
 """
 
 from __future__ import annotations

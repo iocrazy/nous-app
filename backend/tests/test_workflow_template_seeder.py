@@ -13,7 +13,7 @@ import pytest
 
 from app.services.workflow.template_seeder import ensure_seed_templates
 
-# ── node bank fixture (the 11 seeded nodes, phase-not-null) ──────────────────
+# ── node bank fixture (the 10 seeded nodes, phase-not-null) ──────────────────
 _STAGE_LIBRARY: List[Dict[str, Any]] = [
     {
         "id": 1,
@@ -38,14 +38,6 @@ _STAGE_LIBRARY: List[Dict[str, Any]] = [
         "sort_order": 30,
         "review_required": False,
         "deliverable_label": "VO track",
-    },
-    {
-        "id": 4,
-        "slug": "canvas",
-        "name": "Canvas (AI Generation)",
-        "sort_order": 40,
-        "review_required": True,
-        "deliverable_label": "Generated clips",
     },
     {
         "id": 5,
@@ -182,12 +174,12 @@ async def test_short_form_is_default_long_form_is_not():
 
 
 @pytest.mark.asyncio
-async def test_both_templates_carry_all_11_nodes_with_null_duration():
+async def test_both_templates_carry_all_10_nodes_with_null_duration():
     repo = _FakeRepo()
     result = await ensure_seed_templates("42", repo=repo)
 
     for tpl in result:
-        assert len(tpl["nodes"]) == 11
+        assert len(tpl["nodes"]) == 10
         assert all(n["duration_days"] is None for n in tpl["nodes"])
         assert all(n["parallel_group"] is None for n in tpl["nodes"])
 
@@ -214,7 +206,6 @@ async def test_deliverable_required_mirrors_review_required():
 
     # ✓ acceptance nodes gate on a deliverable; the others do not.
     assert nodes["Script"]["deliverable_required"] is True
-    assert nodes["Canvas (AI Generation)"]["deliverable_required"] is True
     assert nodes["Voiceover"]["deliverable_required"] is False
     assert nodes["Shooting"]["deliverable_required"] is False
 
