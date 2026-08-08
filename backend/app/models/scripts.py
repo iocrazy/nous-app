@@ -387,10 +387,10 @@ class ScriptChapters(Base):
 class Episodes(Base):
     """(mig 338) ``current_node_id`` (mig 402, B1) is the per-episode
     workflow cursor -- the design doc's recommended home, replacing the
-    project-level ``projects.current_node_id`` (mig 380) for whatever B2
-    rewires to read it. UNTOUCHED by B1: ``advance_service`` still reads only
-    the project-level column until then; this is purely the new column plus
-    ``EpisodeRepository.set_current_node_id`` as its accessor."""
+    project-level ``projects.current_node_id`` (mig 380). The episode-level
+    column has ``EpisodeRepository.set_current_node_id`` as its write accessor;
+    the project-level column's write entry point was deleted in Task 7 (B6)
+    and is now read-only (preserved for historical data and union guards)."""
 
     __tablename__ = "episodes"
     __table_args__ = (

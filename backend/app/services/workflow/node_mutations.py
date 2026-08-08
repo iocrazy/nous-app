@@ -94,8 +94,14 @@ async def delete_project_node(project_id: str, node_id: str) -> bool:
     if node.get("status") != "pending":
         raise NodeDeleteBlocked(DELETE_BLOCK_NOT_PENDING)
 
-    # Guard 2: a node the workspace is standing on cannot be removed.
-    active = await repo.get_active_group(str(project_id))
+    # Guard 2: a node the workspace is standing on cannot be removed. Pinned to
+    # the node's OWN episode_id (None for a legacy project-level node) — a
+    # per-episode project never writes projects.current_node_id (mig 402,
+    # B2/B3), so a bare project-wide call here would read a cursor that stays
+    # NULL forever and silently never block anything (the B6 T5 现网 bug).
+    active = await repo.get_active_group(
+        str(project_id), episode_id=node.get("episode_id")
+    )
     if any(str(n["id"]) == str(node_id) for n in active):
         raise NodeDeleteBlocked(DELETE_BLOCK_ACTIVE)
 

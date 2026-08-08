@@ -20,6 +20,7 @@ _AGENT = "00000000-0000-0000-0000-0000000000aa"
 _MEMBER_USER = "00000000-0000-0000-0000-000000000cc"
 _PROJECT = "100"
 _NODE = "1"
+_EPISODE = "9001"  # Task 8: episode_id is now a required query param
 
 
 class _Auth:
@@ -37,6 +38,7 @@ def _node(
     owner_user_id: Optional[str] = None,
     members: Optional[List[Dict[str, Any]]] = None,
     sort_order: int = 2,
+    episode_id: Optional[str] = _EPISODE,
 ) -> Dict[str, Any]:
     return {
         "id": node_id,
@@ -53,6 +55,7 @@ def _node(
         "metadata": {},
         "depends_on": depends_on or [],
         "folder_id": None,
+        "episode_id": episode_id,
     }
 
 
@@ -67,6 +70,13 @@ class _FakeNodesRepo:
     async def list_nodes(self, project_id):
         return [dict(n) for n in self._nodes.values()]
 
+    async def list_nodes_by_episode(self, project_id, episode_id):
+        return [
+            dict(n)
+            for n in self._nodes.values()
+            if str(n.get("episode_id")) == str(episode_id)
+        ]
+
     async def set_node_metadata(self, node_id, patch):
         n = self._nodes.get(str(node_id))
         if n is None:
@@ -75,6 +85,19 @@ class _FakeNodesRepo:
         merged.update(patch)
         n["metadata"] = merged
         return dict(merged)
+
+
+class _FakeEpisodeRepo:
+    """Serves ``_require_project_episode`` — a single episode that owns
+    every node ``_node()`` builds by default (see ``_EPISODE``)."""
+
+    def __init__(self, project_id: str = _PROJECT):
+        self._project_id = project_id
+
+    async def get_by_id(self, episode_id):
+        if str(episode_id) != _EPISODE:
+            return None
+        return {"id": _EPISODE, "project_id": self._project_id, "current_node_id": None}
 
 
 class _FakeIssueRepo:
@@ -144,6 +167,10 @@ def _install(
         "app.repositories.projects_repository.get_projects_repository",
         lambda: _FakeProjectsRepo(),
     )
+    monkeypatch.setattr(
+        "app.repositories.episode_repository.get_episode_repository",
+        lambda: _FakeEpisodeRepo(),
+    )
 
     async def _role(user_id, *, project_id=None, team_id=None):
         return role
@@ -174,9 +201,9 @@ def _router():
     return importlib.import_module("app.api.projects_router")
 
 
-async def _call(project_id, node_id, user_id):
+async def _call(project_id, node_id, user_id, episode_id=_EPISODE):
     return await _router().start_workflow_node_early(
-        project_id, node_id, _Auth(user_id), None
+        project_id, node_id, _Auth(user_id), episode_id
     )
 
 
@@ -391,3 +418,46 @@ async def test_start_node_now_never_resurrects_done_mirror(monkeypatch):
 
     assert issue_repo.transitions == []
     assert notify_spy.calls == []
+
+
+# ── Task 8: episode_id is now a required Query param on all four endpoints ──
+
+
+@pytest.fixture
+def _episode_required_client():
+    """Real ASGI request path (unlike every test above, which calls the
+    router function directly and so bypasses FastAPI's own dependency-
+    injection validation entirely) — the only way to prove a bare
+    ``Query(...)`` actually 422s an omitted ``episode_id`` before any
+    handler code runs. Mirrors ``test_project_sop_stages.py``'s ``client``
+    fixture."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.core.deps import AuthContext, get_auth
+    from app.core.scope_guards import (
+        verify_project_read_access,
+        verify_project_write_access,
+    )
+
+    app = FastAPI()
+    app.include_router(_router().router, prefix="/api/v1")
+    app.dependency_overrides[get_auth] = lambda: AuthContext(
+        user_id=_USER, auth_type="jwt"
+    )
+    app.dependency_overrides[verify_project_write_access] = lambda: None
+    app.dependency_overrides[verify_project_read_access] = lambda: None
+    return TestClient(app)
+
+
+def test_missing_episode_id_422_on_all_four_endpoints(_episode_required_client):
+    c = _episode_required_client
+    assert c.get(f"/api/v1/projects/{_PROJECT}/workflow").status_code == 422
+    assert (
+        c.post(
+            f"/api/v1/projects/{_PROJECT}/workflow/nodes/{_NODE}/start-early"
+        ).status_code
+        == 422
+    )
+    assert c.get(f"/api/v1/projects/{_PROJECT}/advance-preview").status_code == 422
+    assert c.post(f"/api/v1/projects/{_PROJECT}/advance").status_code == 422

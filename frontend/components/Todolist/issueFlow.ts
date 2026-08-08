@@ -158,11 +158,18 @@ export function deriveWorkflowFlow(
  * read the node chain; a No-workflow project resolves to null (the legacy SOP
  * catalog fallback was retired in G3 — the ring simply hides). Best-effort —
  * any failure also resolves to null.
+ *
+ * `episodeId` gate (B6 PR-2 task 10): `fetchProjectWorkflow` now REQUIRES
+ * `episode_id` (the server 422s a bare project-level read) — a caller mid
+ * episode-resolution (episodeId still null/undefined) must not fetch at all,
+ * not just swallow the resulting error. Resolves to null the same as any
+ * other best-effort miss.
  */
 export async function loadProjectFlow(
   projectId: string,
   episodeId?: string,
 ): Promise<ProjectFlow | null> {
+  if (!episodeId) return null;
   try {
     const workflow = await fetchProjectWorkflow(projectId, episodeId).catch(() => null);
     return deriveWorkflowFlow(workflow);

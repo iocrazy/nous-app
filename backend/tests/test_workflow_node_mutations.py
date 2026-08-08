@@ -34,13 +34,25 @@ class _FakeNodesRepo:
         *,
         node: Optional[Dict[str, Any]],
         active: Optional[List[Dict[str, Any]]] = None,
+        active_by_episode: Optional[Dict[Optional[str], List[Dict[str, Any]]]] = None,
         episode_scoped: bool = False,
     ):
         self._node = node
-        self._active = active or []
+        # Keyed by episode_id (None = the project-wide/legacy call). ``active``
+        # is sugar for the common "no episode dimension" case and lands under
+        # the None key; ``active_by_episode`` lets a test give DIFFERENT
+        # answers per episode_id — the shape node_mutations' Guard 2 actually
+        # depends on since B6 T5 (it must query the node's OWN episode, not
+        # always the project-wide default).
+        self._active_by_episode: Dict[Optional[str], List[Dict[str, Any]]] = dict(
+            active_by_episode or {}
+        )
+        if active is not None:
+            self._active_by_episode.setdefault(None, list(active))
         self._episode_scoped = episode_scoped
         self.add_calls: List[Dict[str, Any]] = []
         self.deleted: List[tuple] = []
+        self.active_calls: List[tuple] = []
 
     async def get_node(self, node_id, project_id=None):
         return self._node
@@ -52,8 +64,9 @@ class _FakeNodesRepo:
         # test test_add_node_refuses_per_episode_project.
         return self._episode_scoped
 
-    async def get_active_group(self, project_id):
-        return list(self._active)
+    async def get_active_group(self, project_id, episode_id=None):
+        self.active_calls.append((project_id, episode_id))
+        return list(self._active_by_episode.get(episode_id, []))
 
     async def add_node(self, project_id, **kwargs):
         self.add_calls.append({"project_id": project_id, **kwargs})
@@ -162,6 +175,31 @@ async def test_delete_blocked_when_in_active_group(monkeypatch):
         await nm.delete_project_node(_PROJECT, _NODE)
     assert exc.value.reason == DELETE_BLOCK_ACTIVE
     assert repo.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_delete_blocked_when_active_in_own_episode(monkeypatch):
+    """B6 T5 现网 bug: a per-episode project never writes
+    ``projects.current_node_id`` (mig 402, B2/B3), so a bare project-wide
+    ``get_active_group`` call (no episode_id) always sees an empty group there
+    and Guard 2 silently never blocks. Guard 2 must consult the DELETED
+    node's OWN episode — not a project-wide default that stays empty forever
+    on a per-episode project."""
+    node = _pending_node(episode_id="777")
+    repo = _FakeNodesRepo(
+        node=node,
+        # Active within episode 777 — nothing registered under the
+        # project-wide (None) key, mirroring a real per-episode project where
+        # that legacy column is never written.
+        active_by_episode={"777": [{"id": _NODE}]},
+    )
+    _install(monkeypatch, repo, _FakeIssueRepo())
+    with pytest.raises(NodeDeleteBlocked) as exc:
+        await nm.delete_project_node(_PROJECT, _NODE)
+    assert exc.value.reason == DELETE_BLOCK_ACTIVE
+    assert repo.deleted == []
+    # The active-group lookup was scoped to the node's own episode.
+    assert repo.active_calls[-1] == (_PROJECT, "777")
 
 
 @pytest.mark.asyncio

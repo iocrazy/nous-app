@@ -181,9 +181,14 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
   // same error codes the server's tick uses: DEPS_PENDING (waiting_on),
   // NODE_CANCELLED, or a generic NODE_NOT_PENDING/other block.
   const handleStartEarly = async (nodeId: string) => {
+    // Gate on episodeId (B6 PR-2 task 10): startEarlyNode now REQUIRES
+    // episode_id (server 422s otherwise). This card only renders once
+    // `workflow` is loaded (itself gated on a resolved episodeId), so this is
+    // a defensive no-op rather than a reachable path in practice.
+    if (!episodeId) return;
     setStartingEarlyId(nodeId);
     try {
-      await startEarlyNode(projectId, nodeId, episodeId ?? undefined);
+      await startEarlyNode(projectId, nodeId, episodeId);
       onReload();
     } catch (err) {
       if (err instanceof ApiError && err.status === 422) {

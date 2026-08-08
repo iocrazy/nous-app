@@ -162,8 +162,8 @@ async def test_create_without_project_id_skips_subquery(
 
 # ── set_current_node_id: per-episode workflow cursor (mig 402, B1) ──────────
 #
-# Sibling of ProjectStageNodesRepository.set_current_node_id, but writes
-# episodes.current_node_id instead of the legacy projects.current_node_id —
+# Writes episodes.current_node_id (the recommended home, replacing the legacy
+# projects.current_node_id whose write entry point was deleted in Task 7, B6).
 # B1 only lands this accessor, B2 is what wires advance_service to call it.
 
 
@@ -185,8 +185,8 @@ async def test_set_current_node_id_none_clears_cursor(
     repo: EpisodeRepository, fake_session: _FakeSession
 ) -> None:
     """node_id=None binds an explicit SQL NULL (clearing the cursor), not a
-    no-op — same "assign None explicitly" contract as
-    ProjectStageNodesRepository.set_current_node_id."""
+    no-op — same "assign None explicitly" contract that the deleted
+    project-level write entry had."""
     await repo.set_current_node_id("777", None)
 
     sql, binds = fake_session.calls[-1]

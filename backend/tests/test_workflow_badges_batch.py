@@ -56,9 +56,14 @@ async def test_badges_shape_and_position(monkeypatch):
     # 100: cursor on node 900; nodes 900(Script),901(Storyboard),902(skipped);
     #      2 running agents. 200: no cursor, one node, no agents.
     #      300: no nodes → absent from the badge map.
+    # No project here is per-episode (episode cursor query returns nothing),
+    # so every badge is sourced from the legacy projects.current_node_id
+    # column — see test_badges_prefers_earliest_cursored_episode below for
+    # the per-episode source.
     session = _FakeSession(
         [
-            [(100, 900), (200, None), (300, None)],  # cursors
+            [(100, 900), (200, None), (300, None)],  # legacy cursors
+            [],  # episode cursors (B6 T5) — none of these projects are per-episode
             [
                 (100, 900, "Script", 0, False),
                 (100, 901, "Storyboard", 1, False),
@@ -87,8 +92,45 @@ async def test_badges_shape_and_position(monkeypatch):
         "workflow_position": None,
         "agents_active": 0,  # no running agents
     }
-    # No N+1: exactly three queries regardless of the three projects.
-    assert session.execute_count == 3
+    # No N+1: exactly four queries regardless of the three projects.
+    assert session.execute_count == 4
+
+
+@pytest.mark.asyncio
+async def test_badges_prefers_earliest_cursored_episode_over_legacy_column(
+    monkeypatch,
+):
+    """B6 T5 现网 bug: a per-episode project never writes
+    ``projects.current_node_id`` (mig 402, B2/B3 write ``episodes.
+    current_node_id`` instead), so that column alone renders a permanently
+    empty badge. The badge cursor must fall back to the earliest
+    (smallest sort_order) episode that actually HAS a cursor — a
+    DISTINCT ON query the repo issues once for the whole batch (still no
+    N+1), not per-project."""
+    session = _FakeSession(
+        [
+            [(400, None)],  # legacy cursor: none — project 400 is per-episode
+            # episode cursors: DISTINCT ON already resolved, per project, to
+            # the smallest-sort_order episode that has a cursor set.
+            [(400, 950)],
+            [
+                (400, 940, "Script", 0, False),
+                (400, 950, "Storyboard", 1, False),
+            ],  # nodes
+            [],  # running agent counts
+        ]
+    )
+    _install(monkeypatch, session)
+
+    out = await ProjectStageNodesRepository().workflow_badges_for_projects([400])
+
+    assert out["400"] == {
+        "current_node_name": "Storyboard",
+        "workflow_total": 2,
+        "workflow_position": 2,
+        "agents_active": 0,
+    }
+    assert session.execute_count == 4
 
 
 @pytest.mark.asyncio
@@ -97,6 +139,7 @@ async def test_badges_query_count_is_constant_across_project_counts(monkeypatch)
     session = _FakeSession(
         [
             [(p, None) for p in many],
+            [],
             [(p, p * 10, "Script", 0, False) for p in many],
             [],
         ]
@@ -104,7 +147,7 @@ async def test_badges_query_count_is_constant_across_project_counts(monkeypatch)
     _install(monkeypatch, session)
     out = await ProjectStageNodesRepository().workflow_badges_for_projects(many)
     assert len(out) == 50
-    assert session.execute_count == 3  # still three — no N+1
+    assert session.execute_count == 4  # still constant — no N+1
 
 
 @pytest.mark.asyncio

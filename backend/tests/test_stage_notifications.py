@@ -24,6 +24,7 @@ from app.services.workflow.stage_notifications import notify_stage_event
 
 _PROJECT = "100"
 _USER = "00000000-0000-0000-0000-000000000001"
+_EP1 = "8001"
 
 
 def _node(
@@ -35,6 +36,7 @@ def _node(
     owner_agent_id: Optional[str] = None,
     members: Optional[List[Dict[str, Any]]] = None,
     events: Optional[Dict[str, Any]] = None,
+    episode_id: str = _EP1,
 ) -> Dict[str, Any]:
     return {
         "id": node_id,
@@ -50,6 +52,7 @@ def _node(
         "folder_id": None,
         "members": members or [],
         "events": events or {},
+        "episode_id": episode_id,
     }
 
 
@@ -222,11 +225,26 @@ class _FakeNodesRepo:
     def __init__(self, nodes: List[Dict[str, Any]]):
         self._nodes = nodes
 
-    async def list_nodes(self, project_id):
-        return list(self._nodes)
+    async def list_nodes_by_episode(self, project_id, episode_id):
+        return [n for n in self._nodes if str(n.get("episode_id")) == str(episode_id)]
 
-    async def set_current_node_id(self, project_id, node_id):
-        pass
+    async def list_folder_files(self, folder_id):
+        return []
+
+
+class _FakeEpisodesRepo:
+    def __init__(self, cursors: Dict[str, Optional[str]]):
+        self._cursors: Dict[str, Optional[str]] = {
+            str(k): v for k, v in cursors.items()
+        }
+        self.set_current_node_id_calls: List[Any] = []
+
+    async def get_by_id(self, episode_id):
+        return {"current_node_id": self._cursors.get(str(episode_id))}
+
+    async def set_current_node_id(self, episode_id, node_id):
+        self.set_current_node_id_calls.append((str(episode_id), node_id))
+        self._cursors[str(episode_id)] = node_id
 
 
 class _FakeProjectsRepo:
@@ -258,11 +276,17 @@ class _FakeIssueRepo:
         return []
 
 
-def _install_advance_fakes(monkeypatch, *, nodes_repo, projects_repo, issue_repo):
+def _install_advance_fakes(
+    monkeypatch, *, nodes_repo, projects_repo, issue_repo, episodes_repo=None
+):
     monkeypatch.setattr(
         "app.repositories.project_stage_nodes_repository."
         "get_project_stage_nodes_repository",
         lambda: nodes_repo,
+    )
+    monkeypatch.setattr(
+        "app.repositories.episode_repository.get_episode_repository",
+        lambda: episodes_repo or _FakeEpisodesRepo({}),
     )
     monkeypatch.setattr(
         "app.repositories.projects_repository.get_projects_repository",
@@ -295,12 +319,14 @@ async def test_notify_failure_does_not_affect_advance_return_value(monkeypatch):
     n2 = _node("2", sort_order=2, owner_user_id="u9")
     nodes_repo = _FakeNodesRepo([n1, n2])
     projects_repo = _FakeProjectsRepo("1")
+    episodes_repo = _FakeEpisodesRepo({_EP1: "1"})
     issue_repo = _FakeIssueRepo()
     _install_advance_fakes(
         monkeypatch,
         nodes_repo=nodes_repo,
         projects_repo=projects_repo,
         issue_repo=issue_repo,
+        episodes_repo=episodes_repo,
     )
 
     # The lower-level notify() blows up on every call — proves the best-effort
@@ -310,7 +336,9 @@ async def test_notify_failure_does_not_affect_advance_return_value(monkeypatch):
     spy = _NotifySpy(raise_exc=RuntimeError("inbox down"))
     monkeypatch.setattr(stage_notifications, "notify", spy)
 
-    result = await advance_service.execute_advance(_PROJECT, _USER, "forward")
+    result = await advance_service.execute_advance(
+        _PROJECT, _USER, "forward", episode_id=_EP1
+    )
 
     assert result.will_advance is True
     assert result.creating[0].node_id == "2"

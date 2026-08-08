@@ -28,6 +28,8 @@ import app.services.workflow.advance_service as advance_service
 from app.schemas.workflow import BLOCK_FORM_INCOMPLETE
 from app.services.workflow.advance_service import _form_incomplete
 
+_EP1 = "8001"
+
 
 def _field(
     key: str, ftype: str, *, required: bool = True, label: Optional[str] = None
@@ -48,6 +50,7 @@ def _node_row(
     skipped: bool = False,
     form_schema: Optional[List[Dict[str, Any]]] = None,
     form_data: Optional[Dict[str, Any]] = None,
+    episode_id: str = _EP1,
 ) -> Dict[str, Any]:
     return {
         "id": node_id,
@@ -63,6 +66,7 @@ def _node_row(
         "folder_id": None,
         "form_schema": form_schema or [],
         "form_data": form_data or {},
+        "episode_id": episode_id,
     }
 
 
@@ -186,16 +190,27 @@ def test_multiple_fields_lists_only_missing_required_labels():
 class _FakeNodesRepo:
     def __init__(self, nodes: List[Dict[str, Any]]):
         self._nodes = nodes
-        self.current_node_id_calls: List[Any] = []
 
-    async def list_nodes(self, project_id):
-        return list(self._nodes)
-
-    async def set_current_node_id(self, project_id, node_id):
-        self.current_node_id_calls.append((project_id, node_id))
+    async def list_nodes_by_episode(self, project_id, episode_id):
+        return [n for n in self._nodes if str(n.get("episode_id")) == str(episode_id)]
 
     async def list_folder_files(self, folder_id):
         return []
+
+
+class _FakeEpisodesRepo:
+    def __init__(self, cursors: Dict[str, Optional[str]]):
+        self._cursors: Dict[str, Optional[str]] = {
+            str(k): v for k, v in cursors.items()
+        }
+        self.set_current_node_id_calls: List[Any] = []
+
+    async def get_by_id(self, episode_id):
+        return {"current_node_id": self._cursors.get(str(episode_id))}
+
+    async def set_current_node_id(self, episode_id, node_id):
+        self.set_current_node_id_calls.append((str(episode_id), node_id))
+        self._cursors[str(episode_id)] = node_id
 
 
 class _FakeProjectsRepo:
@@ -230,11 +245,16 @@ def _install(
     projects_repo: _FakeProjectsRepo,
     issue_repo: _FakeIssueRepo,
     role: Optional[str] = "manager",
+    episodes_repo: Optional[_FakeEpisodesRepo] = None,
 ):
     monkeypatch.setattr(
         "app.repositories.project_stage_nodes_repository."
         "get_project_stage_nodes_repository",
         lambda: nodes_repo,
+    )
+    monkeypatch.setattr(
+        "app.repositories.episode_repository.get_episode_repository",
+        lambda: episodes_repo or _FakeEpisodesRepo({}),
     )
     monkeypatch.setattr(
         "app.repositories.projects_repository.get_projects_repository",
@@ -266,15 +286,19 @@ async def test_preview_blocks_forward_on_missing_required_field(monkeypatch):
     n2 = _node_row("2", sort_order=2)
     nodes_repo = _FakeNodesRepo([n1, n2])
     projects_repo = _FakeProjectsRepo("1")
+    episodes_repo = _FakeEpisodesRepo({_EP1: "1"})
     issue_repo = _FakeIssueRepo()
     _install(
         monkeypatch,
         nodes_repo=nodes_repo,
         projects_repo=projects_repo,
         issue_repo=issue_repo,
+        episodes_repo=episodes_repo,
     )
 
-    preview = await advance_service.compute_advance_preview("100", "user-1", "forward")
+    preview = await advance_service.compute_advance_preview(
+        "100", "user-1", "forward", episode_id=_EP1
+    )
 
     assert preview.will_advance is False
     assert preview.blocked_reason == BLOCK_FORM_INCOMPLETE
@@ -292,15 +316,19 @@ async def test_preview_allows_forward_once_required_field_filled(monkeypatch):
     n2 = _node_row("2", sort_order=2)
     nodes_repo = _FakeNodesRepo([n1, n2])
     projects_repo = _FakeProjectsRepo("1")
+    episodes_repo = _FakeEpisodesRepo({_EP1: "1"})
     issue_repo = _FakeIssueRepo()
     _install(
         monkeypatch,
         nodes_repo=nodes_repo,
         projects_repo=projects_repo,
         issue_repo=issue_repo,
+        episodes_repo=episodes_repo,
     )
 
-    preview = await advance_service.compute_advance_preview("100", "user-1", "forward")
+    preview = await advance_service.compute_advance_preview(
+        "100", "user-1", "forward", episode_id=_EP1
+    )
 
     assert preview.will_advance is True
     assert preview.missing_fields == []
@@ -314,19 +342,23 @@ async def test_execute_advance_blocked_by_form_incomplete_does_not_mutate(monkey
     n2 = _node_row("2", sort_order=2)
     nodes_repo = _FakeNodesRepo([n1, n2])
     projects_repo = _FakeProjectsRepo("1")
+    episodes_repo = _FakeEpisodesRepo({_EP1: "1"})
     issue_repo = _FakeIssueRepo()
     _install(
         monkeypatch,
         nodes_repo=nodes_repo,
         projects_repo=projects_repo,
         issue_repo=issue_repo,
+        episodes_repo=episodes_repo,
     )
 
-    result = await advance_service.execute_advance("100", "user-1", "forward")
+    result = await advance_service.execute_advance(
+        "100", "user-1", "forward", episode_id=_EP1
+    )
 
     assert result.will_advance is False
     assert result.blocked_reason == BLOCK_FORM_INCOMPLETE
-    assert nodes_repo.current_node_id_calls == []
+    assert episodes_repo.set_current_node_id_calls == []
 
 
 @pytest.mark.asyncio
@@ -345,15 +377,19 @@ async def test_skipped_node_with_incomplete_form_is_exempt(monkeypatch):
     n3 = _node_row("3", sort_order=3)
     nodes_repo = _FakeNodesRepo([n1, skipped, n3])
     projects_repo = _FakeProjectsRepo("1")
+    episodes_repo = _FakeEpisodesRepo({_EP1: "1"})
     issue_repo = _FakeIssueRepo()
     _install(
         monkeypatch,
         nodes_repo=nodes_repo,
         projects_repo=projects_repo,
         issue_repo=issue_repo,
+        episodes_repo=episodes_repo,
     )
 
-    preview = await advance_service.compute_advance_preview("100", "user-1", "forward")
+    preview = await advance_service.compute_advance_preview(
+        "100", "user-1", "forward", episode_id=_EP1
+    )
 
     assert preview.will_advance is True
     assert preview.missing_fields == []

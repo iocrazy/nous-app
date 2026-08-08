@@ -189,6 +189,66 @@ def _node_row(
     }
 
 
+async def _active_group_for_cursor(
+    session: Any,
+    pid: int,
+    eid: Optional[int],
+    cursor_node_id: int,
+) -> List[Dict[str, Any]]:
+    """The non-skipped ``parallel_group`` siblings of ``cursor_node_id`` (or
+    just that node when it has none), optionally confined to one episode.
+    Shared by every ``get_active_group`` cursor source (project-level legacy
+    column, a single episode, or the per-episode union) so the group-building
+    rule lives in exactly one place."""
+    current_stmt = (
+        select(ProjectStageNodes)
+        .where(ProjectStageNodes.id == cursor_node_id)
+        .where(ProjectStageNodes.project_id == pid)
+    )
+    if eid is not None:
+        current_stmt = current_stmt.where(ProjectStageNodes.episode_id == eid)
+    current = (await session.execute(current_stmt.limit(1))).scalars().first()
+    if current is None:
+        return []
+    if current.parallel_group is None:
+        group = [current]
+    else:
+        group_stmt = (
+            select(ProjectStageNodes)
+            .where(ProjectStageNodes.project_id == pid)
+            .where(ProjectStageNodes.parallel_group == current.parallel_group)
+            .where(ProjectStageNodes.skipped.is_(False))
+        )
+        if eid is not None:
+            group_stmt = group_stmt.where(ProjectStageNodes.episode_id == eid)
+        group = (
+            (await session.execute(group_stmt.order_by(ProjectStageNodes.sort_order)))
+            .scalars()
+            .all()
+        )
+    group_ids = [n.id for n in group]
+    members_by_node: Dict[int, List[Dict[str, Any]]] = {nid: [] for nid in group_ids}
+    if group_ids:
+        mrows = (
+            (
+                await session.execute(
+                    select(ProjectStageNodeMembers).where(
+                        ProjectStageNodeMembers.node_id.in_(group_ids)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for m in mrows:
+            members_by_node.setdefault(m.node_id, []).append(_member_row(m))
+    deps_by_node = await _deps_by_node(session, group_ids)
+    return [
+        _node_row(n, members_by_node.get(n.id, []), deps_by_node.get(n.id, []))
+        for n in group
+    ]
+
+
 def _resolve_skip(
     slug: Optional[str], skip_default: bool, method: Optional[str]
 ) -> bool:
@@ -1417,98 +1477,78 @@ class ProjectStageNodesRepository:
     async def get_active_group(
         self, project_id: str, episode_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """The node(s) forming the project's active group.
+        """The node(s) forming the project's (or one episode's) active group.
 
-        The cursor ``projects.current_node_id`` names one node; the active group
-        is every non-skipped node sharing its ``parallel_group`` (or just that
-        node when it has none). Empty when no cursor is set.
+        The active group is every non-skipped node sharing the cursor node's
+        ``parallel_group`` (or just that node when it has none). Empty when no
+        cursor is set. This is the "can't delete an active node" guard's data
+        source (``node_mutations``).
 
-        ``episode_id`` (mig 402, B2 T0) confines the group to a single episode.
-        This is the badge/board read path — and, via ``node_mutations``, the
-        "can't delete an active node" guard. Without an episode filter the
-        parallel_group fan-out matches sibling episodes' template-cloned twins
-        (same ``parallel_group`` value across every episode), so Ep1's active
-        node would falsely guard the identically-grouped node in Ep3. When
-        ``episode_id`` is None the legacy project-wide behaviour is unchanged;
-        when given, both the cursor-node lookup and the parallel_group fan-out
-        are pinned to that episode.
+        ``episode_id`` (mig 402, B2 T0) selects the cursor SOURCE, not merely a
+        post-hoc filter: given, the cursor is read from that episode's own
+        ``episodes.current_node_id`` (and both the cursor-node lookup and the
+        parallel_group fan-out are pinned to that episode) — per-episode
+        projects never write ``projects.current_node_id`` (mig 402, B2/B3), so
+        reading the project-level column here would silently see no cursor at
+        all. Without an episode filter, the group is the UNION of the legacy
+        project-level cursor's group (still the only cursor a legacy,
+        not-yet-per-episode project ever writes — every node's ``episode_id``
+        is NULL there, so the fan-out is deliberately unscoped) and every
+        episode's own active group — a node counts as "active" if it is the
+        one the workspace is standing on in ANY episode, since a bare
+        ``project_id`` call (no single episode to pin down) can't otherwise
+        tell which episode the caller means.
         """
         pid = int(str(project_id))
-        eid = int(str(episode_id)) if episode_id is not None else None
         async with read_scope() as session:
-            cursor = (
+            if episode_id is not None:
+                eid = int(str(episode_id))
+                cursor = (
+                    await session.execute(
+                        select(Episodes.current_node_id)
+                        .where(Episodes.id == eid)
+                        .where(Episodes.project_id == pid)
+                        .limit(1)
+                    )
+                ).first()
+                if cursor is None or cursor[0] is None:
+                    return []
+                return await _active_group_for_cursor(session, pid, eid, cursor[0])
+
+            groups: List[Dict[str, Any]] = []
+            seen_ids: set = set()
+
+            legacy_cursor = (
                 await session.execute(
                     select(Projects.current_node_id).where(Projects.id == pid).limit(1)
                 )
             ).first()
-            if cursor is None or cursor[0] is None:
-                return []
-            current_stmt = (
-                select(ProjectStageNodes)
-                .where(ProjectStageNodes.id == cursor[0])
-                .where(ProjectStageNodes.project_id == pid)
-            )
-            if eid is not None:
-                current_stmt = current_stmt.where(ProjectStageNodes.episode_id == eid)
-            current = (await session.execute(current_stmt.limit(1))).scalars().first()
-            if current is None:
-                return []
-            if current.parallel_group is None:
-                group = [current]
-            else:
-                group_stmt = (
-                    select(ProjectStageNodes)
-                    .where(ProjectStageNodes.project_id == pid)
-                    .where(ProjectStageNodes.parallel_group == current.parallel_group)
-                    .where(ProjectStageNodes.skipped.is_(False))
-                )
-                if eid is not None:
-                    group_stmt = group_stmt.where(ProjectStageNodes.episode_id == eid)
-                group = (
-                    (
-                        await session.execute(
-                            group_stmt.order_by(ProjectStageNodes.sort_order)
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
-            group_ids = [n.id for n in group]
-            members_by_node: Dict[int, List[Dict[str, Any]]] = {
-                nid: [] for nid in group_ids
-            }
-            if group_ids:
-                mrows = (
-                    (
-                        await session.execute(
-                            select(ProjectStageNodeMembers).where(
-                                ProjectStageNodeMembers.node_id.in_(group_ids)
-                            )
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
-                for m in mrows:
-                    members_by_node.setdefault(m.node_id, []).append(_member_row(m))
-            deps_by_node = await _deps_by_node(session, group_ids)
-            return [
-                _node_row(n, members_by_node.get(n.id, []), deps_by_node.get(n.id, []))
-                for n in group
-            ]
+            if legacy_cursor is not None and legacy_cursor[0] is not None:
+                for row in await _active_group_for_cursor(
+                    session, pid, None, legacy_cursor[0]
+                ):
+                    if row["id"] not in seen_ids:
+                        seen_ids.add(row["id"])
+                        groups.append(row)
 
-    async def set_current_node_id(
-        self, project_id: str, node_id: Optional[str]
-    ) -> None:
-        """Move the ``projects.current_node_id`` cursor."""
-        async with write_scope() as session:
-            await session.execute(
-                update(Projects)
-                .where(Projects.id == int(str(project_id)))
-                .values(
-                    current_node_id=(int(str(node_id)) if node_id is not None else None)
+            episode_cursors = (
+                await session.execute(
+                    select(Episodes.id, Episodes.current_node_id)
+                    .where(Episodes.project_id == pid)
+                    .order_by(Episodes.sort_order)
                 )
-            )
+            ).all()
+            for eid, cursor_node_id in episode_cursors:
+                if cursor_node_id is None:
+                    continue
+                for row in await _active_group_for_cursor(
+                    session, pid, eid, cursor_node_id
+                ):
+                    if row["id"] not in seen_ids:
+                        seen_ids.add(row["id"])
+                        groups.append(row)
+
+            return groups
 
     async def count_running_agent_runs(self, project_id: str) -> int:
         """Number of ``agent_runs`` for the project with ``status='running'``
@@ -1550,21 +1590,29 @@ class ProjectStageNodesRepository:
     async def workflow_badges_for_projects(
         self, project_ids: List[Any]
     ) -> Dict[str, Dict[str, Any]]:
-        """Per-project workflow badge data for the list page in THREE queries
-        (W3-3, no N+1 regardless of the number of projects).
+        """Per-project workflow badge data for the list page in FOUR queries
+        (W3-3 + B6 T5, no N+1 regardless of the number of projects).
 
         Returns ``{str(project_id): {current_node_name, workflow_total,
         workflow_position, agents_active}}``. Only projects that own workflow
         nodes are present (a No-workflow project renders no badge);
         ``current_node_name`` / ``workflow_position`` are null when the cursor
         is unset. Never raises — enrichment must not sink the list.
+
+        The cursor per project is the earliest (smallest ``sort_order``)
+        episode that has one set, read via a single batched ``DISTINCT ON``
+        query — per-episode projects never write ``projects.current_node_id``
+        (mig 402, B2/B3), so that column alone would show every such project's
+        badge as permanently empty. A legacy (not-yet-per-episode) project
+        still only ever writes the project-level column, so it stays the
+        fallback when no episode has a cursor.
         """
         if not project_ids:
             return {}
         pids = [int(p) for p in project_ids]
         try:
             async with read_scope() as session:
-                cursors = {
+                legacy_cursors = {
                     r[0]: r[1]
                     for r in (
                         await session.execute(
@@ -1573,6 +1621,22 @@ class ProjectStageNodesRepository:
                             )
                         )
                     ).all()
+                }
+                episode_cursors = {
+                    r[0]: r[1]
+                    for r in (
+                        await session.execute(
+                            select(Episodes.project_id, Episodes.current_node_id)
+                            .distinct(Episodes.project_id)
+                            .where(Episodes.project_id.in_(pids))
+                            .where(Episodes.current_node_id.isnot(None))
+                            .order_by(Episodes.project_id, Episodes.sort_order.asc())
+                        )
+                    ).all()
+                }
+                cursors = {
+                    pid: episode_cursors.get(pid, legacy_cursors.get(pid))
+                    for pid in pids
                 }
                 node_rows = (
                     await session.execute(

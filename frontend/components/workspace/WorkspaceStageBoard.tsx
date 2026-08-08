@@ -264,9 +264,13 @@ export const WorkspaceStageBoard: React.FC<WorkspaceStageBoardProps> = ({
    * `refreshTick`, same mechanism the Run now dispatch already uses) so the
    * header/status/action-bar reflect the freshly-started node immediately. */
   const handleStartEarly = async () => {
+    // Gate on episodeId (B6 PR-2 task 10): startEarlyNode now REQUIRES
+    // episode_id (server 422s otherwise). Defensive no-op — the board is
+    // normally only reachable once an episode is selected.
+    if (!episodeId) return;
     setStartingEarly(true);
     try {
-      await startEarlyNode(projectId, node.id, episodeId ?? undefined);
+      await startEarlyNode(projectId, node.id, episodeId);
       setRefreshTick((v) => v + 1);
     } catch (err) {
       if (err instanceof ApiError && err.status === 422) {

@@ -125,6 +125,7 @@ function renderBoard(
   opts: {
     workflow?: ProjectWorkflow | null;
     canWrite?: boolean;
+    episodeId?: string | null;
     onRequestAdvance?: (direction: 'forward' | 'back') => void;
     onOpenTodolist?: () => void;
   } = {},
@@ -139,6 +140,7 @@ function renderBoard(
           projectId="10"
           projectName="Spring Campaign"
           nodeId={data.node.id}
+          episodeId={opts.episodeId}
           workflow={opts.workflow === undefined ? workflow() : opts.workflow}
           canWrite={opts.canWrite ?? true}
           onRequestAdvance={onRequestAdvance}
@@ -627,15 +629,35 @@ describe('WorkspaceStageBoard — Start early (M4 Autopilot task O2/O3)', () => 
     mockWorkflowService.startEarlyNode.mockResolvedValue(node({ id: '2', status: 'in_progress' }));
     renderBoard(
       board({ node: node({ id: '2', status: 'pending' }) }),
-      { workflow: workflow({ current_node_id: '1', nodes: [node({ id: '1' }), node({ id: '2', status: 'pending' })] }) },
+      {
+        workflow: workflow({ current_node_id: '1', nodes: [node({ id: '1' }), node({ id: '2', status: 'pending' })] }),
+        episodeId: 'ep-1',
+      },
     );
 
     fireEvent.click(await screen.findByTestId('stage-board-start-early'));
-    // 3rd arg is episode_id (T5 #1714): undefined here = legacy project-level path (no episode context).
-    await waitFor(() => expect(mockWorkflowService.startEarlyNode).toHaveBeenCalledWith('10', '2', undefined));
+    // 3rd arg is episode_id (T5 #1714, required since B6 PR-2 task 10).
+    await waitFor(() => expect(mockWorkflowService.startEarlyNode).toHaveBeenCalledWith('10', '2', 'ep-1'));
     // Success re-triggers the board fetch (refreshTick), same mechanism the
     // Run now dispatch already uses.
     await waitFor(() => expect(mockWorkflowService.fetchStageBoard).toHaveBeenCalledTimes(2));
+  });
+
+  // B6 PR-2 task 10: startEarlyNode now REQUIRES episode_id (server 422s
+  // otherwise) — a click with no episodeId resolved must no-op, not call the
+  // service with `undefined`.
+  it('clicking Start early with no episodeId resolved does not call startEarlyNode', async () => {
+    renderBoard(
+      board({ node: node({ id: '2', status: 'pending' }) }),
+      {
+        workflow: workflow({ current_node_id: '1', nodes: [node({ id: '1' }), node({ id: '2', status: 'pending' })] }),
+        episodeId: null,
+      },
+    );
+
+    fireEvent.click(await screen.findByTestId('stage-board-start-early'));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockWorkflowService.startEarlyNode).not.toHaveBeenCalled();
   });
 
   it('maps a DEPS_PENDING 422 to the shared "Waiting on" toast copy', async () => {
@@ -644,7 +666,10 @@ describe('WorkspaceStageBoard — Start early (M4 Autopilot task O2/O3)', () => 
     );
     renderBoard(
       board({ node: node({ id: '2', status: 'pending' }) }),
-      { workflow: workflow({ current_node_id: '1', nodes: [node({ id: '1' }), node({ id: '2', status: 'pending' })] }) },
+      {
+        workflow: workflow({ current_node_id: '1', nodes: [node({ id: '1' }), node({ id: '2', status: 'pending' })] }),
+        episodeId: 'ep-1',
+      },
     );
 
     fireEvent.click(await screen.findByTestId('stage-board-start-early'));
@@ -657,7 +682,10 @@ describe('WorkspaceStageBoard — Start early (M4 Autopilot task O2/O3)', () => 
     );
     renderBoard(
       board({ node: node({ id: '2', status: 'pending' }) }),
-      { workflow: workflow({ current_node_id: '1', nodes: [node({ id: '1' }), node({ id: '2', status: 'pending' })] }) },
+      {
+        workflow: workflow({ current_node_id: '1', nodes: [node({ id: '1' }), node({ id: '2', status: 'pending' })] }),
+        episodeId: 'ep-1',
+      },
     );
 
     fireEvent.click(await screen.findByTestId('stage-board-start-early'));

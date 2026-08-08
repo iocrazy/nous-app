@@ -36,6 +36,7 @@ from typing import Any, List, Optional
 import pytest
 
 from app.models import (
+    Episodes,
     Projects,
     ProjectStageNodeMembers,
     ProjectStageNodes,
@@ -81,6 +82,20 @@ def _node(node_id: int, episode_id: int, **overrides: Any) -> ProjectStageNodes:
     )
     base.update(overrides)
     return ProjectStageNodes(**base)
+
+
+def _episode(
+    episode_id: int,
+    project_id: int,
+    current_node_id: Optional[int],
+    sort_order: int = 0,
+) -> Episodes:
+    return Episodes(
+        id=episode_id,
+        project_id=project_id,
+        current_node_id=current_node_id,
+        sort_order=sort_order,
+    )
 
 
 # ── a FakeSession that really evaluates each query's WHERE clause ────────────
@@ -129,17 +144,25 @@ class _FilteringSession:
         nodes: List[ProjectStageNodes],
         members: Optional[List[ProjectStageNodeMembers]] = None,
         current_node_id: Optional[int] = None,
+        episodes: Optional[List[Episodes]] = None,
     ):
         self._nodes = nodes
         self._members = members or []
+        # Legacy project-level cursor (``projects.current_node_id``) — the
+        # ONLY cursor a not-yet-per-episode project ever writes.
         self._current_node_id = current_node_id
+        self._episodes = episodes or []
 
     async def execute(self, stmt: Any) -> _Result:
         entity = stmt.column_descriptions[0]["entity"]
         crit = stmt._where_criteria
         if entity is Projects:
-            # get_active_group cursor read: returns a 1-tuple row, indexed [0].
+            # legacy get_active_group cursor read: returns a 1-tuple row.
             return _Result([(self._current_node_id,)])
+        if entity is Episodes:
+            matched = [e for e in self._episodes if _matches(e, crit)]
+            col_names = [cd["name"] for cd in stmt.column_descriptions]
+            return _Result([tuple(getattr(e, n) for n in col_names) for e in matched])
         if entity is ProjectStageNodes:
             return _Result([n for n in self._nodes if _matches(n, crit)])
         if entity is ProjectStageNodeMembers:
@@ -200,11 +223,16 @@ async def test_list_nodes_still_returns_whole_project(monkeypatch):
 async def test_get_active_group_excludes_other_episode_same_parallel_group(
     monkeypatch,
 ):
-    # Cursor sits on Ep1's node. Ep2 has a node with the SAME parallel_group
-    # ("draft"). The active group for Ep1 must contain only Ep1's node.
+    # Cursor sits on Ep1's node -- read from EP1's OWN episodes.current_node_id
+    # (mig 402, B2/B3 write the cursor there, never on projects.current_node_id,
+    # for a per-episode project; B6 T5 fixes get_active_group's cursor SOURCE to
+    # match). Ep2 has a node with the SAME parallel_group ("draft"). The active
+    # group for Ep1 must contain only Ep1's node.
     ep1_node = _node(1, EP1)
     ep2_node = _node(2, EP2)
-    session = _FilteringSession([ep1_node, ep2_node], current_node_id=1)
+    ep1 = _episode(EP1, PID, current_node_id=1)
+    ep2 = _episode(EP2, PID, current_node_id=None)
+    session = _FilteringSession([ep1_node, ep2_node], episodes=[ep1, ep2])
     _install(monkeypatch, session)
 
     repo = ProjectStageNodesRepository()
@@ -216,13 +244,58 @@ async def test_get_active_group_excludes_other_episode_same_parallel_group(
 
 
 @pytest.mark.asyncio
-async def test_get_active_group_without_episode_sees_both_twins(monkeypatch):
-    # Proves the fixture genuinely exercises filtering: the SAME data, queried
-    # WITHOUT an episode filter (legacy call), collapses both episodes' twins
-    # into one active group -- i.e. the exact P0 bug T0 fixes, still reachable
-    # through the back-compat signature.
+async def test_get_active_group_without_episode_unions_all_episode_cursors(
+    monkeypatch,
+):
+    # No episode_id given (the node_mutations Guard 2 shape for a LEGACY node,
+    # or any other project-wide caller): every episode's own cursor group
+    # contributes, unioned by node id. Ep1 stands on node 1 (parallel_group
+    # "draft"); Ep2 stands on node 3 (a DIFFERENT parallel_group) -- both must
+    # come back, proving the union isn't just "the first episode with a
+    # cursor".
     ep1_node = _node(1, EP1)
     ep2_node = _node(2, EP2)
+    ep2_other_node = _node(3, EP2, parallel_group="review")
+    ep1 = _episode(EP1, PID, current_node_id=1)
+    ep2 = _episode(EP2, PID, current_node_id=3)
+    session = _FilteringSession(
+        [ep1_node, ep2_node, ep2_other_node], episodes=[ep1, ep2]
+    )
+    _install(monkeypatch, session)
+
+    repo = ProjectStageNodesRepository()
+    group = await repo.get_active_group(str(PID))
+
+    assert {n["id"] for n in group} == {"1", "3"}
+    assert "2" not in {n["id"] for n in group}  # Ep2's OWN cursor is node 3, not 2
+
+
+@pytest.mark.asyncio
+async def test_get_active_group_without_episode_falls_back_to_legacy_project_cursor(
+    monkeypatch,
+):
+    # A legacy (not-yet-per-episode) project's nodes are episode_id=None and
+    # its cursor lives on projects.current_node_id -- untouched by B6 T5, and
+    # the ONLY source when no episode has a cursor of its own.
+    node1 = _node(1, episode_id=None, parallel_group=None)
+    session = _FilteringSession([node1], current_node_id=1)
+    _install(monkeypatch, session)
+
+    repo = ProjectStageNodesRepository()
+    group = await repo.get_active_group(str(PID))
+
+    assert {n["id"] for n in group} == {"1"}
+
+
+@pytest.mark.asyncio
+async def test_get_active_group_legacy_cursor_fanout_stays_unscoped(monkeypatch):
+    # The legacy project-level cursor's parallel_group fan-out is
+    # DELIBERATELY unscoped by episode (pre-dates episode_id entirely -- a
+    # legacy project's nodes all carry episode_id=None, so there is no
+    # episode dimension to scope by). Two legacy nodes sharing a
+    # parallel_group both come back for a single legacy cursor.
+    ep1_node = _node(1, episode_id=EP1)
+    ep2_node = _node(2, episode_id=EP2)
     session = _FilteringSession([ep1_node, ep2_node], current_node_id=1)
     _install(monkeypatch, session)
 
