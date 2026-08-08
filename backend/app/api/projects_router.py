@@ -8,7 +8,7 @@ file management, and video linking.
 Requires authentication (JWT or API Key).
 """
 
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import (
     APIRouter,
@@ -580,7 +580,7 @@ async def sync_surface_completion_for_project(
     project_id: str,
     auth: AuthDep,
     _guard: None = Depends(verify_project_write_access),
-) -> dict[str, any]:
+) -> Dict[str, Any]:
     """B4 点火/修复:重算全项目每集的 surface 完成态(幂等,只正向)。
     部署后既有产物不会自己触发回流 hook,owner 调一次此端点补齐。"""
     from app.services.workflow.surface_completion import (
