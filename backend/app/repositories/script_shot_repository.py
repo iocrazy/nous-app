@@ -364,6 +364,14 @@ class ScriptShotRepository:
                 row = result.scalars().first()
                 out = _row(row) if row else None
             logger.info(f"Updated shot {shot_id} status → {status}")
+            # B4 回流点:镜头置 done 可能让本集 storyboard 判据变真(spec §5)。
+            # fire_* 永不 raise,不影响主写。
+            if status == "done":
+                from app.services.workflow.surface_completion import (
+                    fire_surface_sync_for_shot,
+                )
+
+                await fire_surface_sync_for_shot(str(shot_id))
             return out
         except Exception as e:
             logger.error(f"Failed to update shot status {shot_id}: {e}")
@@ -396,12 +404,27 @@ class ScriptShotRepository:
 
     async def delete(self, shot_id: str) -> bool:
         """Delete a shot."""
+        sid = _bigint(shot_id)
         try:
             async with write_scope() as session:
+                scene_id = await session.scalar(
+                    select(ScriptShots.scene_id).where(ScriptShots.id == sid)
+                )
                 await session.execute(
-                    sa_delete(ScriptShots).where(ScriptShots.id == _bigint(shot_id))
+                    sa_delete(ScriptShots).where(ScriptShots.id == sid)
                 )
             logger.info(f"Deleted shot {shot_id}")
+            # B4 回流点:删掉未完成镜头可能让 storyboard 判据变真(spec §5)。
+            # 行已消失,不能靠 shot_id 反查,改用取号存好的 scene_id。
+            # fire_* 永不 raise,不影响主写。
+            if scene_id is not None:
+                from app.services.workflow.surface_completion import (
+                    fire_surface_sync_for_scene,
+                )
+
+                await fire_surface_sync_for_scene(
+                    str(scene_id), surfaces=("storyboard",)
+                )
             return True
         except Exception as e:
             logger.error(f"Failed to delete shot {shot_id}: {e}")

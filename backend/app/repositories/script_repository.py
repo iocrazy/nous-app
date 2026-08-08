@@ -175,6 +175,13 @@ class ScriptProjectRepository(BaseRepository):
                     raise RuntimeError("Insert into script_projects returned no data")
                 out = _to_dict(row, _PROJECT_N2A)
             logger.info("Created script_projects record")
+            # B4 回流点:新剧本落集可能让该集 script 判据变真(spec §5)。
+            # fire_* 永不 raise,不影响主写。
+            from app.services.workflow.surface_completion import (
+                fire_surface_sync_for_script,
+            )
+
+            await fire_surface_sync_for_script(str(out["id"]))
             return out
         except Exception as e:
             logger.error(f"Failed to create script_projects: {e}")
@@ -191,7 +198,16 @@ class ScriptProjectRepository(BaseRepository):
                     .returning(ScriptProjects)
                 )
                 row = result.scalars().first()
-                return _to_dict(row, _PROJECT_N2A) if row else {}
+                out = _to_dict(row, _PROJECT_N2A) if row else {}
+            # B4 回流点:重挂 episode_id 后按新集重算,可能让目标集判据变真。
+            # fire_* 永不 raise,不影响主写。
+            if out.get("id") is not None:
+                from app.services.workflow.surface_completion import (
+                    fire_surface_sync_for_script,
+                )
+
+                await fire_surface_sync_for_script(str(out["id"]))
+            return out
         except Exception as e:
             logger.error(f"Failed to update script_projects {record_id}: {e}")
             raise
@@ -252,15 +268,28 @@ class ScriptProjectRepository(BaseRepository):
                         f"Reused existing script for episode {episode_id} "
                         "(get-or-create)"
                     )
-                    return out
-                result = await session.execute(
-                    insert(ScriptProjects).values(**values).returning(ScriptProjects)
-                )
-                row = result.scalars().first()
-                if row is None:
-                    raise RuntimeError("Insert into script_projects returned no data")
-                out = _to_dict(row, _PROJECT_N2A)
-            logger.info(f"Created script for episode {episode_id} (get-or-create)")
+                else:
+                    result = await session.execute(
+                        insert(ScriptProjects)
+                        .values(**values)
+                        .returning(ScriptProjects)
+                    )
+                    row = result.scalars().first()
+                    if row is None:
+                        raise RuntimeError(
+                            "Insert into script_projects returned no data"
+                        )
+                    out = _to_dict(row, _PROJECT_N2A)
+                    logger.info(
+                        f"Created script for episode {episode_id} (get-or-create)"
+                    )
+            # B4 回流点:新剧本落集可能让该集 script 判据变真(spec §5)。
+            # fire_* 永不 raise,不影响主写。
+            from app.services.workflow.surface_completion import (
+                fire_surface_sync_for_script,
+            )
+
+            await fire_surface_sync_for_script(str(out["id"]))
             return out
         except Exception as e:
             logger.error(
@@ -278,6 +307,13 @@ class ScriptProjectRepository(BaseRepository):
                     .values(status="deleted")
                 )
             logger.info(f"Soft-deleted script_projects {record_id}")
+            # B4 回流点:多剧本剧集删掉未完成的那本可能让 storyboard 判据变真。
+            # script 行还在(软删),归属能解析。fire_* 永不 raise,不影响主写。
+            from app.services.workflow.surface_completion import (
+                fire_surface_sync_for_script,
+            )
+
+            await fire_surface_sync_for_script(str(record_id))
         except Exception as e:
             logger.error(f"Failed to soft-delete script_projects {record_id}: {e}")
             raise

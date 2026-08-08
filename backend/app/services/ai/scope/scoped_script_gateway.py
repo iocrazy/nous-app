@@ -928,6 +928,13 @@ async def set_shot_status(
         await session.execute(
             update(ScriptShots).where(ScriptShots.id == shot.id).values(status=status)
         )
+    # B4 回流点:镜头置 done 可能让本集 storyboard 判据变真(spec §5)。agent
+    # 车道绕过 repo,必须显式接(「触发路径必须类型化回显」同族教训)。
+    # fire_* 永不 raise,不影响主写。
+    if status == "done":
+        from app.services.workflow.surface_completion import fire_surface_sync_for_shot
+
+        await fire_surface_sync_for_shot(str(shot.id))
 
 
 async def episode_id_for_script(script_id: Any) -> Optional[int]:
