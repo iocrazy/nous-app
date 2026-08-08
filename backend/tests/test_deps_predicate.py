@@ -396,7 +396,9 @@ async def test_back_direction_is_never_gated_by_dependencies(monkeypatch):
         episodes_repo=episodes_repo,
     )
 
-    preview = await advance_service.compute_advance_preview("100", "user-1", "back", episode_id=_EP1)
+    preview = await advance_service.compute_advance_preview(
+        "100", "user-1", "back", episode_id=_EP1
+    )
 
     assert preview.will_advance is True
     assert preview.creating[0].node_id == "1"
