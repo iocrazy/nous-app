@@ -38,10 +38,20 @@ async def _get_media_or_404(platform_id: str) -> dict:
     return media
 
 
-async def _resolve_resource_to_platform_id(resource_id: str) -> tuple[dict, str, dict]:
-    """Resolve resource_id -> (resource dict, platform_id, media dict), or raise 404."""
+async def _resolve_resource_to_platform_id(
+    resource_id: str, user_id: str
+) -> tuple[dict, str, dict]:
+    """Resolve resource_id -> (resource dict, platform_id, media dict), or raise 404.
+
+    Visibility is OWNER-OR-TEAM-MEMBER (``get_resource_by_id_for_caller``),
+    not creator-only: under ``SCOPE_ENFORCE_RESOURCES=true`` (production), a
+    bare creator-scoped read here used to 404 a team member triggering AI
+    processing on a resource shared to their team — undoing PR #1743's
+    "teammate triggers, owner pays" identity fix at the resolve step itself.
+    404 either way (not found vs not visible) — no existence leak.
+    """
     repo = ResourcesRepository()
-    resource = await repo.get_resource_by_id(resource_id)
+    resource = await repo.get_resource_by_id_for_caller(resource_id, user_id)
     if not resource or not resource.get("media_id"):
         raise HTTPException(
             status_code=404,
@@ -92,7 +102,9 @@ async def trigger_transcription_by_resource(
     resource_id: str, auth: AuthDep, _scope: ScopedRequestDep
 ):
     """Trigger AI transcription by resource_id."""
-    resource, platform_id, media = await _resolve_resource_to_platform_id(resource_id)
+    resource, platform_id, media = await _resolve_resource_to_platform_id(
+        resource_id, auth.user_id
+    )
 
     # === Dedup: reject if already processing ===
     from sqlalchemy import select
@@ -324,7 +336,9 @@ async def trigger_summary_by_resource(
     resource_id: str, auth: AuthDep, _scope: ScopedRequestDep
 ):
     """Trigger AI summary by resource_id."""
-    resource, platform_id, media = await _resolve_resource_to_platform_id(resource_id)
+    resource, platform_id, media = await _resolve_resource_to_platform_id(
+        resource_id, auth.user_id
+    )
 
     # === Dedup: reject if already processing ===
     from sqlalchemy import select
@@ -486,7 +500,9 @@ async def trigger_visual_analysis_by_resource(
     task_tracking → dispatch DBOS workflow with the same workflow_id so
     the Task Center sees the run and Realtime pushes lifecycle changes
     back to the frontend (otherwise a click would be invisible)."""
-    resource, platform_id, media = await _resolve_resource_to_platform_id(resource_id)
+    resource, platform_id, media = await _resolve_resource_to_platform_id(
+        resource_id, auth.user_id
+    )
 
     # Dedup: skip if a run is already in flight for this resource.
     from sqlalchemy import select
@@ -1024,7 +1040,9 @@ async def get_analysis_by_resource(
     read by the resource's own id. (The write path keys it the same way; reading
     by ``media.id`` here was why the vision card always showed "not analyzed".)
     """
-    resource, _platform_id, media = await _resolve_resource_to_platform_id(resource_id)
+    resource, _platform_id, media = await _resolve_resource_to_platform_id(
+        resource_id, auth.user_id
+    )
     if resource.get("creator_id") != auth.user_id:
         raise HTTPException(status_code=403, detail="Access denied")
 

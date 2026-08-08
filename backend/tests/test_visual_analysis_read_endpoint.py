@@ -23,7 +23,7 @@ def _auth(user_id: str = "u1"):
 
 
 def _patch_resolve(monkeypatch, *, creator_id: str = "u1", media_id: int = 555):
-    async def _fake_resolve(resource_id: str):
+    async def _fake_resolve(resource_id: str, _user_id: str):
         resource = {"id": resource_id, "creator_id": creator_id, "media_id": media_id}
         media = {"id": media_id, "platform_id": "pf-1"}
         return resource, "pf-1", media

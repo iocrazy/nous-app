@@ -90,7 +90,7 @@ def _patch_common(monkeypatch, dispatched: list, created: list):
 def _patch_resource_resolver(monkeypatch, media: dict):
     resource = {"id": "res-1", "media_id": "111", "creator_id": "user-1"}
 
-    async def _resolve(_rid):
+    async def _resolve(_rid, _uid):
         return resource, media["platform_id"], media
 
     monkeypatch.setattr(ai_router, "_resolve_resource_to_platform_id", _resolve)
