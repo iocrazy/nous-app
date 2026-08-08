@@ -37,8 +37,10 @@ class _FakeMaxRetries(Exception):
 async def _run_failing_caption(step_error: Exception):
     """Run the workflow with provider resolution raising ``step_error``.
 
-    Returns ``(result, manager)`` so callers can assert on both the
-    uniform failure dict and what was written to task_tracking.
+    Returns ``(raised, manager)`` — the exception that propagated out of
+    the workflow (Route-C rule 4: the tail-catch records, then re-raises,
+    it never returns a failed dict) and the manager mock so callers can
+    assert on what was written to task_tracking/metadata.
     """
     from app.workflows import caption_asset as m
 
@@ -65,10 +67,11 @@ async def _run_failing_caption(step_error: Exception):
         ),
         patch.object(m.DBOS, "workflow_id", "wf-caption-1", create=True),
     ):
-        result = await inspect.unwrap(m.caption_asset_workflow)(
-            resource_id=_RID, user_id=_USER
-        )
-    return result, manager
+        with pytest.raises(Exception) as exc_info:
+            await inspect.unwrap(m.caption_asset_workflow)(
+                resource_id=_RID, user_id=_USER
+            )
+    return exc_info.value, manager
 
 
 async def test_provider_401_behind_dbos_retry_wrapper_writes_error_code():
@@ -80,9 +83,9 @@ async def test_provider_401_behind_dbos_retry_wrapper_writes_error_code():
             )
         ]
     )
-    result, manager = await _run_failing_caption(exc)
+    raised, manager = await _run_failing_caption(exc)
 
-    assert result["status"] == "failed"
+    assert raised is exc
     manager.patch_metadata.assert_awaited_once_with(
         "wf-caption-1", {"error_code": PROVIDER_AUTH}
     )
@@ -95,9 +98,9 @@ async def test_provider_401_behind_dbos_retry_wrapper_writes_error_code():
 async def test_unclassifiable_failure_writes_no_code():
     """Unknown shapes leave metadata alone so the UI falls back to the raw
     error rather than a generic catch-all that hides information."""
-    result, manager = await _run_failing_caption(RuntimeError("something novel"))
+    raised, manager = await _run_failing_caption(RuntimeError("something novel"))
 
-    assert result["status"] == "failed"
+    assert isinstance(raised, RuntimeError)
     manager.patch_metadata.assert_not_awaited()
 
 
@@ -132,9 +135,9 @@ async def test_metadata_write_failure_does_not_change_the_failure_path():
         ),
         patch.object(m.DBOS, "workflow_id", "wf-caption-2", create=True),
     ):
-        result = await inspect.unwrap(m.caption_asset_workflow)(
-            resource_id=_RID, user_id=_USER
-        )
+        with pytest.raises(Exception) as exc_info:
+            await inspect.unwrap(m.caption_asset_workflow)(
+                resource_id=_RID, user_id=_USER
+            )
 
-    assert result["status"] == "failed"
-    assert "401" in result["error"]
+    assert "401" in str(exc_info.value)

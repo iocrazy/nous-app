@@ -267,6 +267,102 @@ async def test_summary_inputs_stmt_entity_level_negative_control():
         bad_row["transcript"]
 
 
+# ── ai_summary — Bug B-2: load_summary_inputs error-message split ───────
+#
+# 'no transcript' and 'owned by someone else' used to share ONE message
+# (both hit the same `if not row: raise RuntimeError("no transcript...")`),
+# which sent the 2026-08-07 live diagnosis down the wrong path: the
+# transcript existed, but load_summary_inputs's own tenant filter
+# (Resources.creator_id == user_id) hid the row from a caller who wasn't
+# the resource's owner. These two tests exercise load_summary_inputs()
+# itself (not just the raw SELECT) end-to-end against a real aiosqlite
+# session, monkeypatching get_sessionmaker() the way
+# tests/db/test_maybe_unit_of_work.py does — load_summary_inputs opens its
+# own session(s) via read_scope(), so there's no other way to point it at
+# the throwaway engine.
+#
+# Real uuid.UUID objects (not str) throughout — see this file's earlier
+# note: SQLite's Uuid bind_processor calls value.hex, which only a real
+# UUID instance has; production binds a plain str against asyncpg/Postgres
+# just fine (bind_processor is None there).
+
+_CALLER_UID = uuid.UUID("44444444-4444-4444-4444-444444444444")
+_OTHER_UID = uuid.UUID("55555555-5555-5555-5555-555555555555")
+
+
+@asynccontextmanager
+async def _real_sessionmaker_with_summary_row(*, creator_id, with_transcript: bool):
+    """Same schema/DDL as _real_session_with_one_summary_row, but yields the
+    SESSIONMAKER itself rather than one session — load_summary_inputs() opens
+    its own session(s) internally, so the caller needs to monkeypatch
+    get_sessionmaker() to return this."""
+    engine = create_async_engine("sqlite+aiosqlite://")
+    engine = engine.execution_options(schema_translate_map={"public": None})
+    async with engine.begin() as conn:
+        await conn.exec_driver_sql(_PARSED_MEDIA_DDL)
+        await conn.exec_driver_sql(_RESOURCES_DDL)
+        await conn.exec_driver_sql(_RESOURCE_TRANSCRIPTS_DDL)
+        await conn.execute(
+            insert(ParsedMedia.__table__).values(
+                id=3, platform_id="pf-3", title="Task 3 Target"
+            )
+        )
+        await conn.execute(
+            insert(Resources.__table__).values(
+                id=300, media_id=3, creator_id=creator_id, file_path="x"
+            )
+        )
+        if with_transcript:
+            await conn.execute(
+                insert(ResourceTranscripts.__table__).values(
+                    id=uuid.uuid4(),
+                    resource_id=300,
+                    full_text="hello world transcript",
+                )
+            )
+    sessionmaker = async_sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
+    try:
+        yield sessionmaker
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_load_summary_inputs_distinguishes_foreign_owner_from_missing_transcript(
+    monkeypatch,
+):
+    """'no transcript' and 'owned by someone else' used to share one message,
+    sending the 2026-08-07 diagnosis down the wrong path (transcript
+    existed; the tenant filter hid it)."""
+    import app.db.session as session_mod
+    from app.workflows.ai_summary import load_summary_inputs
+
+    async with _real_sessionmaker_with_summary_row(
+        creator_id=_OTHER_UID, with_transcript=True
+    ) as sessionmaker:
+        monkeypatch.setattr(session_mod, "get_sessionmaker", lambda: sessionmaker)
+        with pytest.raises(RuntimeError, match="not owned by"):
+            await load_summary_inputs(3, _CALLER_UID)
+
+
+@pytest.mark.asyncio
+async def test_load_summary_inputs_when_transcript_truly_missing(monkeypatch):
+    """Same caller owns the resource, but no transcript row exists — must
+    still raise the original 'no transcript' message, not the new
+    foreign-owner one."""
+    import app.db.session as session_mod
+    from app.workflows.ai_summary import load_summary_inputs
+
+    async with _real_sessionmaker_with_summary_row(
+        creator_id=_CALLER_UID, with_transcript=False
+    ) as sessionmaker:
+        monkeypatch.setattr(session_mod, "get_sessionmaker", lambda: sessionmaker)
+        with pytest.raises(RuntimeError, match="no transcript"):
+            await load_summary_inputs(3, _CALLER_UID)
+
+
 # ── thumbnail — single-table resources SELECT (simplest baseline) ───────
 
 

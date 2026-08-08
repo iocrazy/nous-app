@@ -173,3 +173,55 @@ async def test_persist_summary_atomic_writes_with_int_rid():
     assert insert_params["key_points"] == ["a"]
     assert insert_params["topics"] == ["b"]
     assert out["summary_len"] == 1
+
+
+async def test_persist_summary_writes_llm_telemetry():
+    """llm_model / llm_provider have been NULL since resource_summaries was
+    created — run_summarize_agent already knows both (provider_key +
+    provider_config["model"]), persist_summary just never accepted them."""
+    import app.workflows.ai_summary as m
+
+    session = _CapturingWriteSession()
+    with patch.object(db_session, "write_scope", _fake_write_scope(session)):
+        await m.persist_summary(
+            42,
+            resource_id="999",
+            summary="S",
+            key_points=["a"],
+            topics=["b"],
+            llm_model="doubao-seed-2-0-pro-260215",
+            llm_provider="doubao",
+        )
+
+    insert_params = session.statements[0].compile(dialect=postgresql.dialect()).params
+    assert insert_params["llm_model"] == "doubao-seed-2-0-pro-260215"
+    assert insert_params["llm_provider"] == "doubao"
+
+
+async def test_persist_summary_truncates_llm_telemetry_over_50_chars():
+    """resource_summaries.llm_model/llm_provider are varchar(50). A model
+    name/provider string longer than that raises StringDataRightTruncation
+    at the DB — which, combined with the route-C rule 4 re-raise, discards
+    an already-paid-for summary. Truncate defensively before the write."""
+    import app.workflows.ai_summary as m
+
+    long_model = "m" * 80
+    long_provider = "p" * 80
+
+    session = _CapturingWriteSession()
+    with patch.object(db_session, "write_scope", _fake_write_scope(session)):
+        await m.persist_summary(
+            42,
+            resource_id="999",
+            summary="S",
+            key_points=["a"],
+            topics=["b"],
+            llm_model=long_model,
+            llm_provider=long_provider,
+        )
+
+    insert_params = session.statements[0].compile(dialect=postgresql.dialect()).params
+    assert insert_params["llm_model"] == long_model[:50]
+    assert insert_params["llm_provider"] == long_provider[:50]
+    assert len(insert_params["llm_model"]) == 50
+    assert len(insert_params["llm_provider"]) == 50

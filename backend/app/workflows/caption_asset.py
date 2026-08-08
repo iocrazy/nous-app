@@ -243,7 +243,12 @@ async def caption_asset_workflow(
         # metadata only — error_msg/phase stay trigger-owned — and never
         # raises, so the failure path below is unchanged.
         await record_ai_error_code(wf_id, e)
-        return await record_workflow_failure(
+        # Route-C rule 4: record for task_tracking/UI, then RE-RAISE so
+        # DBOS records ERROR — returning the dict made DBOS mark this
+        # workflow SUCCESS while task_tracking said failed (same violation
+        # fixed for ai_summary/ai_transcription/analyze_l1, observed live
+        # 2026-08-08, wf 5a872175/1e63f80b).
+        await record_workflow_failure(
             workflow_id=wf_id,
             error=e,
             context={
@@ -252,3 +257,4 @@ async def caption_asset_workflow(
                 "user_id": user_id,
             },
         )
+        raise

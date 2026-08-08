@@ -55,6 +55,25 @@ def _summary_inputs_select_stmt(parsed_media_id: int, user_id: str):
     )
 
 
+def _summary_inputs_exists_any_owner_stmt(parsed_media_id: int):
+    """Same join chain as ``_summary_inputs_select_stmt`` but WITHOUT the
+    ``creator_id`` filter — used only in ``load_summary_inputs``'s error path
+    to tell "transcript missing" apart from "resource owned by someone
+    else". No column-level/entity-level row-shape concern here (the caller
+    only checks truthiness of ``.first()``), so ``select(Resources.id)`` is
+    fine as-is."""
+    from app.models import ParsedMedia, Resources, ResourceTranscripts
+
+    return (
+        select(Resources.id)
+        .join(ParsedMedia, Resources.media_id == ParsedMedia.id)
+        .join(ResourceTranscripts, ResourceTranscripts.resource_id == Resources.id)
+        .where(ParsedMedia.id == parsed_media_id)
+        .where(ResourceTranscripts.full_text.is_not(None))
+        .limit(1)
+    )
+
+
 @DBOS.step()
 async def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, Any]:
     """Load transcript + user's preferred provider config + media title."""
@@ -82,6 +101,34 @@ async def load_summary_inputs(parsed_media_id: int, user_id: str) -> dict[str, A
                 .first()
             )
     if not row:
+        # Two failure modes shared one message and misled the 2026-08-07
+        # diagnosis: "no transcript" also fired when the transcript existed
+        # but belonged to a DIFFERENT resource owner (this query's own
+        # Resources.creator_id == user_id filter hid the row). Probe once
+        # without that filter to tell the two apart. SYSTEM scope: this
+        # cross-tenant existence check IS the whole point of the probe — it
+        # leaks nothing beyond a boolean (row exists / doesn't).
+        probe_cm = (
+            system_request_scope(
+                reason="ai-summary error diagnostics: distinguish missing "
+                "transcript from foreign-owned resource"
+            )
+            if is_enforced("resources")
+            else nullcontext()
+        )
+        async with probe_cm:
+            async with read_scope() as session:
+                foreign = (
+                    await session.execute(
+                        _summary_inputs_exists_any_owner_stmt(parsed_media_id)
+                    )
+                ).first()
+        if foreign:
+            raise RuntimeError(
+                f"resource for parsed_media={parsed_media_id} exists but is "
+                f"not owned by user={user_id} — dispatch identity mismatch, "
+                f"not a missing transcript"
+            )
         raise RuntimeError(
             f"no transcript for parsed_media={parsed_media_id} user={user_id}"
         )
@@ -142,6 +189,10 @@ async def run_summarize_agent(
         "summary": result.summary,
         "key_points": result.key_points,
         "topics": result.topics,
+        # Telemetry for resource_summaries.llm_model/llm_provider — both
+        # columns were NULL since the table was created (2026-08-07 diag).
+        "llm_model": (provider_config or {}).get("model", "") or "",
+        "llm_provider": provider_key or "",
     }
 
 
@@ -153,6 +204,8 @@ async def persist_summary(
     summary: str,
     key_points: list[str],
     topics: list[str],
+    llm_model: str = "",
+    llm_provider: str = "",
 ) -> dict[str, Any]:
     """Persist summary to resource_summaries + parsed_media.ai_rewrite_text +
     resources.summary_status, atomically (one transaction).
@@ -183,6 +236,12 @@ async def persist_summary(
             # them; no json.dumps()+CAST(... AS jsonb) round-trip needed.
             key_points=key_points or [],
             topics=topics or [],
+            # Columns are varchar(50) — an over-length model/provider string
+            # (some provider IDs run well past 50 chars) raises
+            # StringDataRightTruncation at the DB, which combined with the
+            # route-C rule 4 re-raise discards an already-paid-for summary.
+            llm_model=(llm_model or "")[:50] or None,
+            llm_provider=(llm_provider or "")[:50] or None,
         )
         insert_stmt = insert_stmt.on_conflict_do_update(
             index_elements=[ResourceSummaries.resource_id],
@@ -191,6 +250,8 @@ async def persist_summary(
                 "key_points": insert_stmt.excluded.key_points,
                 "topics": insert_stmt.excluded.topics,
                 "summary_type": insert_stmt.excluded.summary_type,
+                "llm_model": insert_stmt.excluded.llm_model,
+                "llm_provider": insert_stmt.excluded.llm_provider,
             },
         )
         await session.execute(insert_stmt)
@@ -271,11 +332,19 @@ async def ai_summary_workflow(parsed_media_id: int, user_id: str) -> dict[str, A
             summary=agent_out["summary"],
             key_points=agent_out["key_points"],
             topics=agent_out["topics"],
+            # .get() fallback: a DBOS step result replayed from an older
+            # cached run may predate these keys — must not KeyError.
+            llm_model=agent_out.get("llm_model", ""),
+            llm_provider=agent_out.get("llm_provider", ""),
         )
         await manager.update_progress(wf_id, 100, subtitle="Summary saved")
         return result
     except Exception as e:  # noqa: BLE001
-        return await record_workflow_failure(
+        # Route-C rule 4: record for task_tracking/UI, then RE-RAISE so
+        # DBOS records ERROR — returning the dict made DBOS mark this
+        # workflow SUCCESS while task_tracking said failed (observed live
+        # 2026-08-08, wf 5a872175/1e63f80b).
+        await record_workflow_failure(
             workflow_id=DBOS.workflow_id,
             error=e,
             context={
@@ -284,3 +353,4 @@ async def ai_summary_workflow(parsed_media_id: int, user_id: str) -> dict[str, A
                 "user_id": user_id,
             },
         )
+        raise

@@ -321,7 +321,11 @@ async def analyze_l1_workflow(
         await manager.update_progress(wf_id, 100, subtitle="Analysis complete")
         return result
     except Exception as e:  # noqa: BLE001
-        return await record_workflow_failure(
+        # Route-C rule 4: record for task_tracking/UI, then RE-RAISE so
+        # DBOS records ERROR — returning the dict made DBOS mark this
+        # workflow SUCCESS while task_tracking said failed (observed live
+        # 2026-08-08, wf 5a872175/1e63f80b).
+        await record_workflow_failure(
             workflow_id=DBOS.workflow_id,
             error=e,
             context={
@@ -330,3 +334,4 @@ async def analyze_l1_workflow(
                 "user_id": user_id,
             },
         )
+        raise

@@ -257,7 +257,9 @@ class TestCaptionAssetWorkflowLegacyResult:
     async def test_empty_result_raises_and_workflow_records_failure(self, tmp_path):
         # call_caption itself raises when the service returns None (per the
         # step's own contract); simulate that failure path here to confirm
-        # the workflow's tail-catch still fires with the richer body.
+        # the workflow's tail-catch still records AND re-raises (Route-C
+        # rule 4 — returning the failure dict made DBOS mark this workflow
+        # SUCCESS while task_tracking said failed).
         from app.workflows import caption_asset as m
 
         local = tmp_path / "materialized.png"
@@ -296,10 +298,10 @@ class TestCaptionAssetWorkflowLegacyResult:
                 record_failure,
             ),
         ):
-            result = await inspect.unwrap(m.caption_asset_workflow)(
-                resource_id=_RID, user_id=_USER
-            )
+            with pytest.raises(RuntimeError, match="provider unreachable"):
+                await inspect.unwrap(m.caption_asset_workflow)(
+                    resource_id=_RID, user_id=_USER
+                )
 
-        assert result == {"status": "failed"}
         record_failure.assert_awaited_once()
         repo.update_resource.assert_not_awaited()

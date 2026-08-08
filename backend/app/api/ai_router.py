@@ -404,7 +404,12 @@ async def trigger_summary_by_resource(
                 dbos_workflow_callable=ai_summary_workflow,
                 dbos_workflow_kwargs={
                     "parsed_media_id": int(media["id"]),
-                    "user_id": auth.user_id,
+                    # Run as the resource OWNER, matching the points charge
+                    # above and load_summary_inputs' creator_id filter — a
+                    # team member triggering summary on a shared resource
+                    # used to charge the owner then fail "no transcript"
+                    # (identity mismatch, 2026-08-07 diagnosis).
+                    "user_id": resource_owner,
                 },
                 workflow_id=wf_id,
             )
