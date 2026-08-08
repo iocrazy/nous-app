@@ -222,7 +222,14 @@ def judge_xiaohongshu_login(snapshot: LoginPageSnapshot) -> LoginJudgement:
     # Landed inside the console = logged in. Checked before the login-copy test
     # because the console briefly renders shared chrome that can match.
     if host in CREATOR_HOSTS and CONSOLE_PATH_FRAGMENT in parts.path:
-        return LoginJudgement(SessionStatus.SESSION_VALID, "reached the creator console")
+        # ⚠️ SUCCESS,不是 SESSION_VALID。登录轮询(login_sessions.py)只认
+        # SUCCESS —— 返回别的值时它会当作"还没完成"继续等,于是即便页面
+        # 已经登录成功,弹窗也永远停在上一个状态。抖音那份用的就是 SUCCESS,
+        # 我照抄时又按直觉换了名字(同一天第二次栽在枚举上)。
+        #
+        # SESSION_VALID 是**会话校验**那条链路的词汇(validate_session 用),
+        # 跟登录完成不是一回事 —— 名字相近但归属不同的两套状态。
+        return LoginJudgement(SessionStatus.SUCCESS, "reached the creator console")
 
     # 这个平台没有扫码,登录页 == 等待用户输入手机号并提交验证码。
     # 报 WAITING_SCAN 会让 UI 去等一张永远不出现的二维码。
