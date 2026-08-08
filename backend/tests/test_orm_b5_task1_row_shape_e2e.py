@@ -348,6 +348,8 @@ def _register_jsonb_array_length(dbapi_conn, _record):
     dbapi_conn.create_function(
         "jsonb_array_length", 1, lambda v: len(json.loads(v)) if v else 0
     )
+
+
 _SCRIPT_PROJECTS_DDL = """
 CREATE TABLE script_projects (
     id INTEGER PRIMARY KEY, project_id INTEGER, team_id INTEGER,

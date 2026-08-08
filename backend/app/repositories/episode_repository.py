@@ -17,8 +17,9 @@ import uuid as _uuid
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from sqlalchemy import Text, and_, cast, func, insert, or_, select, update
+from sqlalchemy import Text, and_, cast
 from sqlalchemy import delete as sa_delete
+from sqlalchemy import func, insert, or_, select, update
 
 from app.db.session import read_scope, write_scope
 from app.models import (
@@ -332,9 +333,7 @@ class EpisodeRepository:
                 r,
                 workflow_rollup={
                     **nodes_by_episode.get(r["episode_id"], {}),
-                    "needs_input_count": needs_input_by_episode.get(
-                        r["episode_id"], 0
-                    ),
+                    "needs_input_count": needs_input_by_episode.get(r["episode_id"], 0),
                 },
             )
             for r in rows

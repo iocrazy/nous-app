@@ -21,7 +21,10 @@ from typing import Any, Dict, Iterable, Optional, Tuple
 from loguru import logger
 from sqlalchemy import select
 
-_AUTO_SURFACES: Tuple[str, ...] = ("script", "storyboard")  # renders 本期不映射(2026-08-07 拍板)
+_AUTO_SURFACES: Tuple[str, ...] = (
+    "script",
+    "storyboard",
+)  # renders 本期不映射(2026-08-07 拍板)
 _AUTO_COMPLETABLE = frozenset({"pending", "in_progress"})
 _TERMINAL_ISSUE = frozenset({"done", "cancelled"})
 
@@ -141,6 +144,7 @@ async def sync_project_surface_completion(project_id: str) -> Dict[str, int]:
 
 
 # ---- 写路径 seams:各回流点只知道自己手里的 id,这里解析归属 ----
+
 
 async def _scope_for_script(script_id: str) -> Optional[Tuple[str, str]]:
     from app.db.session import read_scope

@@ -61,9 +61,7 @@ async def cleanup_test_rows(integration_db_url):
         )
         await conn.execute("DELETE FROM projects WHERE name LIKE $1", _PREFIX + "%")
         await conn.execute("DELETE FROM teams WHERE name LIKE $1", _PREFIX + "%")
-        await conn.execute(
-            "DELETE FROM auth.users WHERE email LIKE $1", _PREFIX + "%"
-        )
+        await conn.execute("DELETE FROM auth.users WHERE email LIKE $1", _PREFIX + "%")
     finally:
         await conn.close()
 
@@ -157,9 +155,7 @@ async def test_script_criterion_excludes_omitted_and_empty_scenes(
     conn = await asyncpg.connect(integration_db_url)
     try:
         owner_id, team_id = await _seed_owner_and_team(conn)
-        episode_id, script_id = await _seed_episode_and_script(
-            conn, owner_id, team_id
-        )
+        episode_id, script_id = await _seed_episode_and_script(conn, owner_id, team_id)
         await _seed_scene(conn, script_id, content="x", omitted=True)  # scene A
         await _seed_scene(conn, script_id, content="", content_json="[]")  # scene B
     finally:
@@ -189,9 +185,7 @@ async def test_storyboard_criterion_all_done(
     conn = await asyncpg.connect(integration_db_url)
     try:
         owner_id, team_id = await _seed_owner_and_team(conn)
-        episode_id, script_id = await _seed_episode_and_script(
-            conn, owner_id, team_id
-        )
+        episode_id, script_id = await _seed_episode_and_script(conn, owner_id, team_id)
         scene_id = await _seed_scene(conn, script_id, content="INT. 客厅 - 日")
         shot1_id = await _seed_shot(conn, scene_id, 1, status="empty")
         await _seed_shot(conn, scene_id, 2, status="done")

@@ -58,17 +58,13 @@ async def cleanup_test_rows(integration_db_url):
     yield
     conn = await asyncpg.connect(integration_db_url)
     try:
-        await conn.execute(
-            "DELETE FROM issues WHERE identifier LIKE $1", _PREFIX + "%"
-        )
+        await conn.execute("DELETE FROM issues WHERE identifier LIKE $1", _PREFIX + "%")
         await conn.execute(
             "DELETE FROM script_projects WHERE name LIKE $1", _PREFIX + "%"
         )
         await conn.execute("DELETE FROM projects WHERE name LIKE $1", _PREFIX + "%")
         await conn.execute("DELETE FROM teams WHERE name LIKE $1", _PREFIX + "%")
-        await conn.execute(
-            "DELETE FROM auth.users WHERE email LIKE $1", _PREFIX + "%"
-        )
+        await conn.execute("DELETE FROM auth.users WHERE email LIKE $1", _PREFIX + "%")
     finally:
         await conn.close()
 
@@ -147,7 +143,9 @@ async def _seed_stage_nodes(
     return script_node_id, storyboard_node_id
 
 
-async def _seed_mirror_issue(conn, project_id, node_id, owner_id, *, status="in_progress"):
+async def _seed_mirror_issue(
+    conn, project_id, node_id, owner_id, *, status="in_progress"
+):
     """A mirror issue for a stage node — origin_kind='project_stage',
     origin_id='project_stage:{project_id}:{node_id}' — the shape
     ``_fire_stage_node_sync`` recognises."""
@@ -401,7 +399,13 @@ async def test_omitted_scene_does_not_satisfy_script(
 
     await scene_repo.apply_element_ops(
         scene["id"],
-        [{"op": "insert", "element_id": "el_1", "payload": {"type": "action", "text": "Hello."}}],
+        [
+            {
+                "op": "insert",
+                "element_id": "el_1",
+                "payload": {"type": "action", "text": "Hello."},
+            }
+        ],
         expected_version=0,
         actor=str(seed["owner_id"]),
     )

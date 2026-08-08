@@ -64,17 +64,13 @@ async def cleanup_test_rows(integration_db_url):
     yield
     conn = await asyncpg.connect(integration_db_url)
     try:
-        await conn.execute(
-            "DELETE FROM issues WHERE identifier LIKE $1", _PREFIX + "%"
-        )
+        await conn.execute("DELETE FROM issues WHERE identifier LIKE $1", _PREFIX + "%")
         await conn.execute(
             "DELETE FROM script_projects WHERE name LIKE $1", _PREFIX + "%"
         )
         await conn.execute("DELETE FROM projects WHERE name LIKE $1", _PREFIX + "%")
         await conn.execute("DELETE FROM teams WHERE name LIKE $1", _PREFIX + "%")
-        await conn.execute(
-            "DELETE FROM auth.users WHERE email LIKE $1", _PREFIX + "%"
-        )
+        await conn.execute("DELETE FROM auth.users WHERE email LIKE $1", _PREFIX + "%")
     finally:
         await conn.close()
 
