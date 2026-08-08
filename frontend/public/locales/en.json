@@ -474,6 +474,7 @@
       "retryFailed": "Retry failed",
       "shareFailed": "Could not open Douyin",
       "view": "View",
+      "openManager": "Open in platform",
       "loadFailed": "Failed to load records",
       "status_pending": "Pending",
       "status_pending_share": "Awaiting share",

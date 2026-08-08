@@ -35,6 +35,19 @@ const PLATFORM_LABEL: Record<string, string> = {
   douyin: 'Douyin', kuaishou: 'Kuaishou', xiaohongshu: 'Xiaohongshu',
 };
 
+// Where to send someone whose post has no direct link. The session channel
+// cannot produce one: Douyin's post-publish redirect lands on the content
+// manager with no item id in the URL, the post cards carry neither an href nor
+// an id attribute, and no listing XHR returns one (all three verified against
+// the live console, 2026-08-08). Guessing "the newest card" would mislabel the
+// row for any account with a scheduled or concurrent post.
+//
+// Keyed by the raw platform key, NOT the display label — `platformFor` returns
+// the label ('Douyin'), which would never match here.
+const PLATFORM_MANAGER_URL: Record<string, string> = {
+  douyin: 'https://creator.douyin.com/creator-micro/content/manage',
+};
+
 const REC_COVERS = [
   'radial-gradient(60px 40px at 70% 20%, rgba(255,196,120,.55), transparent 70%), linear-gradient(170deg,#46346e,#23375f 55%,#132c47)',
   'radial-gradient(50px 35px at 30% 25%, rgba(120,220,255,.4), transparent 70%), linear-gradient(170deg,#6e3446,#4c2b5e 60%,#1e1e3a)',
@@ -138,6 +151,15 @@ export const RecordsPage: React.FC = () => {
     (accountId: string): string | null => {
       const acc = accounts.find((a) => a.id === accountId);
       return acc ? (PLATFORM_LABEL[acc.platform] ?? acc.platform) : null;
+    },
+    [accounts],
+  );
+
+  // 按原始 platform key 取,不是 platformFor 的显示名。
+  const managerUrlFor = useCallback(
+    (accountId: string): string | null => {
+      const acc = accounts.find((a) => a.id === accountId);
+      return acc ? (PLATFORM_MANAGER_URL[acc.platform] ?? null) : null;
     },
     [accounts],
   );
@@ -357,6 +379,24 @@ export const RecordsPage: React.FC = () => {
                           {a.status === 'success' && a.published_url && (
                             <a href={a.published_url} target="_blank" rel="noreferrer">
                               {t('distribution.records.view', 'View post')}
+                            </a>
+                          )}
+                          {/* No direct link: the session channel cannot produce
+                              one. Douyin's post-publish redirect lands on the
+                              content manager and carries no item id, the post
+                              cards expose neither an href nor an id attribute,
+                              and no listing XHR returns one either (all three
+                              verified against the live console, 2026-08-08).
+                              Guessing "the newest card" would mislabel the row
+                              for any account with a scheduled or concurrent
+                              post — worse than no link at all.
+
+                              So we send the user to the manager page instead,
+                              and the copy says exactly that. Calling this
+                              "View post" would be a lie about where it goes. */}
+                          {a.status === 'success' && !a.published_url && managerUrlFor(a.account_id) && (
+                            <a href={managerUrlFor(a.account_id)!} target="_blank" rel="noreferrer">
+                              {t('distribution.records.openManager', 'Open in platform')}
                             </a>
                           )}
                           {/* A published row can still carry a note: the browser
