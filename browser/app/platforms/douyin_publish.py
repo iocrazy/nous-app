@@ -67,6 +67,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..browser_runtime import (
     ProxyConfigError,
+    apply_stealth,
     build_context_kwargs,
     build_launch_kwargs,
 )
@@ -1483,6 +1484,7 @@ async def publish(job: PublishJob, deadline: Deadline) -> PublishOutcome:
         state: dict[str, Any] | None = None
         try:
             context = await browser.new_context(**context_kwargs)
+            await apply_stealth(context)
             try:
                 page = await context.new_page()
                 outcome = await _drive(page, job, deadline)

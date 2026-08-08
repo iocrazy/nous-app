@@ -12,11 +12,35 @@ import asyncio
 import os
 import socket
 import time
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, unquote
 
 from .config import get_settings
 from .schemas import EnvironmentConfig
+
+# --- stealth ----------------------------------------------------------------
+#
+# Read at import, NOT lazily on first use. A missing file must break container
+# startup, not silently produce contexts with no evasions: "we thought we had
+# protection and did not" is the failure mode this whole file's health probe
+# exists to prevent. See app/assets/README.md for provenance and limits.
+_STEALTH_PATH = Path(__file__).resolve().parent / "assets" / "stealth.min.js"
+STEALTH_SCRIPT = _STEALTH_PATH.read_text(encoding="utf-8")
+
+
+async def apply_stealth(context: Any) -> None:
+    """Inject the evasions into `context`. Call after EVERY `new_context()`.
+
+    Every context this service opens loads a logged-in platform page, so there
+    is no context that may skip this — a single missed call is one code path
+    quietly browsing without the evasions the other paths have.
+
+    `test_stealth_is_applied_everywhere` reads this module's siblings and fails
+    if a `new_context()` appears without this call nearby, because "remember to
+    call it" is not a mechanism.
+    """
+    await context.add_init_script(STEALTH_SCRIPT)
 
 # Headed only. headless (even headless=new) leaves detectable traces and Douyin
 # bounces the upload page to login, which reads as "cookie expired" - the exact

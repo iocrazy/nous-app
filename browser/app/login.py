@@ -18,7 +18,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Sequence
 
-from .browser_runtime import build_launch_kwargs
+from .browser_runtime import apply_stealth, build_launch_kwargs
 from .config import get_settings
 from .dom import (
     first_text,
@@ -308,6 +308,7 @@ async def open_login_driver(
     try:
         browser = await playwright.chromium.launch(**build_launch_kwargs(environment))
         context = await browser.new_context(**_login_context_kwargs(environment))
+        await apply_stealth(context)
         page = await context.new_page()
         await page.goto(
             spec.login_url,
