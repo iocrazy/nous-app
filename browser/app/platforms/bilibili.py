@@ -108,8 +108,11 @@ register(PLATFORM, validate_session)
 
 # --- QR login ---------------------------------------------------------------
 
-# [URL] Creator studio home — where the identity is read after login.
+# [URL] 登录后的落点(gourl 目标)。
 PROFILE_URL = "https://member.bilibili.com/platform/home"
+# [URL] 读身份的地方 —— **不是**创作中心,见 PROFILE_TEXT_SELECTORS 的说明。
+# space.bilibili.com 不带 uid 时会自动重定向到当前登录用户的空间。
+IDENTITY_URL = "https://space.bilibili.com/"
 
 # [URL] Passport login page, **with an explicit post-login destination**.
 #
@@ -180,24 +183,40 @@ SMS_SUBMIT_SELECTORS = (
     '.btn-login',
 )
 
-# [GUESS] UNVERIFIED. Identity on the studio home page.
+# [VERIFIED 2026-08-08] 用真实会话在两个页面上数过命中数。
+#
+# ⚠️ **昵称不在创作中心**。member.bilibili.com/platform/home 上:
+#     [class*="nickname"]  -> 0
+# 头像旁边那块文字是「成为UP主的第2560天」;hover 头像弹出的 popover 里
+# 只有导航项(个人中心 / 投稿管理 / B币钱包 / 订单中心 / 直播中心 / 退出登录),
+# 没有昵称。所以 profile_url 指向**个人空间**而不是创作中心:
+#
+#   space.bilibili.com/<uid>  →  .nickname 命中 1 个,读到 "imheygo"
+#
+# 这也是它与抖音的一处结构差异:抖音的创作者中心首页同时有昵称和头像,
+# B 站把身份信息留在了主站空间页。
+#
+# 头像:member 首页 `.avatar img` 命中 1 个(精确)。原先写的
+# `img[src*="hdslb.com"]` 命中 **3+**,因为 hdslb.com 是 B 站所有静态资源的
+# CDN,页面上一堆 AI 工具图标都在那个域下 —— 用它当"头像"会抓到图标。
+# `bfs/face` 才是头像专属路径段。
 PROFILE_TEXT_SELECTORS: Mapping[str, tuple[str, ...]] = {
     "username": (
+        ".nickname",
         '[class*="nickname"]',
-        '[class*="user-name"]',
-        '[class*="userName"]',
+        "#h-name",
     ),
-    "platform_user_id": (
-        '[class*="uid"]',
-        '[class*="mid"]',
-    ),
+    # 留空:空间页 URL 里就带 uid,而 DedeUserID cookie 是更可靠的来源
+    # (见 USER_ID_COOKIES)。与其配几个猜的选择器,不如让 cookie 兜底接手 ——
+    # 它已经在实战里救过一次:三个 profile 选择器全落空时,账号至少还有 id。
+    "platform_user_id": (),
 }
 PROFILE_ATTR_SELECTORS: Mapping[str, tuple[tuple[str, ...], str]] = {
     "avatar_url": (
         (
-            'img[src*="hdslb.com"]',   # bilibili's CDN — the most stable handle
+            'img[src*="bfs/face"]',   # 头像专属路径段,不是泛泛的 hdslb.com
+            ".avatar img",
             '[class*="avatar"] img',
-            'img[class*="avatar"]',
         ),
         "src",
     ),
@@ -310,7 +329,7 @@ def parse_bilibili_profile(
 LOGIN_SPEC = LoginFlowSpec(
     platform=PLATFORM,
     login_url=LOGIN_URL,
-    profile_url=PROFILE_URL,
+    profile_url=IDENTITY_URL,
     qrcode_selectors=QRCODE_SELECTORS,
     login_markers=LOGIN_MARKERS,
     scanned_markers=SCANNED_MARKERS,

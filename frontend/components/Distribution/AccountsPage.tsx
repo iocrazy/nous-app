@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { getSupabaseClient } from '../../supabaseClient';
 import { KeyRound, Plus, QrCode, RefreshCw, Trash2, X } from 'lucide-react';
 import { useToast } from '../Toast';
 import {
@@ -59,6 +60,39 @@ export const AccountsPage: React.FC = () => {
   }, [addToast, t]);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  // ── Realtime:账号行变化直接推过来 ──────────────────────────────
+  //
+  // 用户两次反馈同一件事:扫码绑定成功了,卡片却不出现,手动刷新才看到
+  // (2026-08-06 抖音、2026-08-08 B站)。
+  //
+  // 后端是清白的 —— workflow 先入库、成功后才把状态写成 success,所以前端
+  // 看到 success 时账号行已经在库里。缺的是**这个列表没有任何实时信号**:
+  // 它只在挂载时拉一次,之后完全静止,刷新全靠 onBound/onClose 那一次
+  // reload。而那两条走的是**同一个 HTTP 请求** —— 网络抖一下(用户截图里
+  // 就有一批 503),两条一起失败,列表就永远停在旧数据。
+  //
+  // 这条订阅是一条**独立的**信号通道,不是把重试做得更狠。migration 412
+  // 把 social_accounts 加进了 supabase_realtime publication。
+  //
+  // 收到事件只触发重新拉列表,不直接用 payload 里的行:REPLICA IDENTITY 是
+  // default(仅主键),payload 不完整;而且这张表存着加密凭证,拿它当数据源
+  // 会诱使以后有人去读那些字段。
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return undefined;
+
+    const channel = supabase
+      .channel('distribution-accounts')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'social_accounts' },
+        () => { void reload(); },
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [reload]);
 
   /**
    * Every "connect" affordance opens the method picker rather than jumping
