@@ -141,10 +141,35 @@ docker exec nous-db psql -U postgres -p 55434 -d postgres -tAc \
 
 - 至今只发过「仅自己可见」。公开会触发审核/限流路径,行为可能不同
 
-### 不用做的
+### 图集 / note:不是"待验证",是"明确不支持"
 
-**图集 / note**:浏览器侧**根本没实现**,`SUPPORTED_CONTENT_TYPES = ("video",)`
-会类型化拒绝。这不是缺口 —— 它不会发出错的东西。要做是新功能,不是修 bug。
+别把它当成 A 组的一员去验 —— **它压根走不到浏览器**。
+
+`browser/app/publish.py` 的 `validate_intent` 第一条就拦:
+
+```python
+SUPPORTED_CONTENT_TYPES = ("video",)
+
+if intent.content_type not in SUPPORTED_CONTENT_TYPES:
+    return IntentProblem(
+        "unsupported_content_type",
+        f"content_type '{intent.content_type}' is not supported; ...")
+```
+
+提交图集会立刻拿到 `unsupported_content_type`,**一步浏览器操作都不执行**。
+不是崩溃、不是静默失败、更不会发出个残缺作品。
+
+对比一下就清楚为什么 A3/A4/A5 要验而它不用:
+
+| | 图集 | A3 合集 / A4 多账号 / A5 公开 |
+|---|---|---|
+| 代码会执行吗 | ❌ 进浏览器前就被拒 | ✅ 会真的跑 |
+| 风险 | 无(拒绝得很干净) | 可能有 bug、选择器可能过时 |
+| 需要验吗 | 不需要 | **必须** |
+
+⚠️ 措辞注意:这里的现状是**「功能不存在,但拒绝方式是对的」**,不是
+「功能没问题」。真要支持图集,是**新功能**(后端 workflow 有
+`_resolve_image_urls` 分支,但浏览器侧的图集发布流程完全没写),不是修 bug。
 
 ---
 
