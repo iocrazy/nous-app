@@ -27,6 +27,14 @@ vi.mock('../../services/distributionService', () => ({
         { id: '3', account_id: '12', username: 'Bad One', avatar_url: null, channel: 'official',
           status: 'failed', error_message: 'upload rejected', published_url: null,
           platform_item_id: null, published_at: null }] },
+    { id: '703', content_type: 'video', title: 'Session No Link', description: null, topics: [],
+      visibility: 'private', distribution_mode: 'broadcast', status: 'success',
+      created_at: '2026-07-08T00:00:00Z',
+      // 会话通道的常态:发布成功,但拿不到作品直链(抖音发布后重定向不带
+      // item id,作品卡无 href/id,列表接口也不返回)。
+      accounts: [{ id: '5', account_id: '14', username: 'Sessioned', avatar_url: null,
+        channel: 'session', status: 'success', error_message: null, published_url: null,
+        platform_item_id: null, published_at: '2026-07-08T03:00:00Z' }] },
     { id: '702', content_type: 'video', title: 'Done One', description: null, topics: [],
       visibility: 'public', distribution_mode: 'broadcast', status: 'success',
       created_at: '2026-07-08T00:00:00Z',
@@ -47,6 +55,8 @@ vi.mock('../../services/distributionService', () => ({
       username: 'Bad One', avatar_url: null, token_expires_at: null, status: 'active', created_at: '2026-07-08T00:00:00Z' },
     { id: '13', scope_type: 'user', scope_id: 'u1', platform: 'douyin', platform_user_id: 'op4',
       username: 'Winner', avatar_url: null, token_expires_at: null, status: 'active', created_at: '2026-07-08T00:00:00Z' },
+    { id: '14', scope_type: 'user', scope_id: 'u1', platform: 'douyin', platform_user_id: 'op5',
+      username: 'Sessioned', avatar_url: null, token_expires_at: null, status: 'active', created_at: '2026-07-08T00:00:00Z' },
   ]),
 }));
 
@@ -83,5 +93,36 @@ describe('RecordsPage', () => {
     expect(screen.getByText('Awaiting')).toBeInTheDocument();   // pending_share
     expect(screen.getByText('Mixed')).toBeInTheDocument();      // partial
     expect(screen.queryByText('Done One')).not.toBeInTheDocument(); // success excluded
+  });
+
+  it('会话通道没有直链时,给出平台管理页入口而不是假装有作品链接', async () => {
+    // 这是会话通道的**常态**而非异常:抖音发布后重定向不带 item id,作品卡
+    // 上没有 href 也没有 id 属性,列表接口同样不返回(2026-08-08 对着真实
+    // 控制台逐条验证)。猜"最新那张卡"会在有定时/并发发布的账号上张冠李戴,
+    // 比不给链接更糟。
+    render(<MemoryRouter><RecordsPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('Session No Link')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText('Session No Link'));
+
+    const link = await screen.findByText('Open in platform');
+    expect(link.closest('a')).toHaveAttribute(
+      'href',
+      'https://creator.douyin.com/creator-micro/content/manage',
+    );
+  });
+
+  it('兜底入口的文案不能写成 View post —— 那会谎报跳转目标', async () => {
+    render(<MemoryRouter><RecordsPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('Session No Link')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Session No Link'));
+
+    const link = await screen.findByText('Open in platform');
+    // 指向管理页的入口,文案必须说"去平台",不能借用作品直链那句 View post。
+    expect(link.closest('a')).toHaveAttribute(
+      'href',
+      'https://creator.douyin.com/creator-micro/content/manage',
+    );
+    expect(link.textContent).not.toMatch(/View post/i);
   });
 });
