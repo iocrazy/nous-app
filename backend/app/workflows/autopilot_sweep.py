@@ -32,10 +32,19 @@ _BATCH_SIZE = 200
 
 def _eligible_projects_stmt(limit: int):
     """Column-level select of every project with a currently-eligible
-    auto_start node. ``select(Projects.id)`` — a single explicit column, so
-    ``.mappings()``/scalar rows stay column-keyed (matching
-    ``list_eligible_autopilot_projects_step``'s ``str(r["id"])`` read), never
-    the entity-keyed shape ``select(Projects)`` would give.
+    auto_start node OR a cascade-pending episode. ``select(Projects.id)`` — a
+    single explicit column, so ``.mappings()``/scalar rows stay column-keyed
+    (matching ``list_eligible_autopilot_projects_step``'s ``str(r["id"])``
+    read), never the entity-keyed shape ``select(Projects)`` would give.
+
+    Cascade-pending branch (B4 ignition finding, 2026-08-08): surface
+    auto-completion can push a node to ``done`` while its tick enqueue is
+    lost (fired inside a DBOS step, an ad-hoc process, a worker restart).
+    The old auto_start-only predicate never re-selected such a project, so
+    "the 5-minute backstop" silently did not apply to pure-cascade stalls.
+    An episode whose cursor (``episodes.current_node_id``) still points at a
+    ``done`` node IS the cascade debt signal — the tick's cascade pass will
+    advance it (or notify the block reason).
 
     Plain string equality on ``events->>'auto_start'``, NOT
     ``(...)::boolean`` (review adjacent-minor fix): a ``::boolean`` cast
@@ -47,20 +56,30 @@ def _eligible_projects_stmt(limit: int):
     serializes as the JSON literal ``true``/``false``, so string equality
     never loses a real match — it degrades a bad row to "not eligible"
     instead of a global 500."""
-    from sqlalchemy import select
+    from sqlalchemy import and_, or_, select
 
-    from app.models import Projects, ProjectStageNodes
+    from app.models import Episodes, Projects, ProjectStageNodes
 
     return (
         select(Projects.id)
         .distinct()
         .select_from(Projects)
         .join(ProjectStageNodes, ProjectStageNodes.project_id == Projects.id)
+        .outerjoin(Episodes, Episodes.current_node_id == ProjectStageNodes.id)
         .where(
             Projects.autopilot_enabled.is_(True),
-            ProjectStageNodes.status == "pending",
-            ProjectStageNodes.skipped.is_(False),
-            ProjectStageNodes.events["auto_start"].astext == "true",
+            or_(
+                and_(
+                    ProjectStageNodes.status == "pending",
+                    ProjectStageNodes.skipped.is_(False),
+                    ProjectStageNodes.events["auto_start"].astext == "true",
+                ),
+                # cascade 欠账:某集游标仍指着已 done 的节点
+                and_(
+                    ProjectStageNodes.status == "done",
+                    Episodes.id.isnot(None),
+                ),
+            ),
         )
         .limit(limit)
     )

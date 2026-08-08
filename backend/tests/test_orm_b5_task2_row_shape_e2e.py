@@ -66,7 +66,7 @@ from sqlalchemy import insert, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.models import AiAgents, Folders, Projects, ProjectStageNodes, Teams
+from app.models import AiAgents, Episodes, Folders, Projects, ProjectStageNodes, Teams
 from app.workflows.agent_runs_sweeper import _agents_budget_scan_stmt
 from app.workflows.autopilot_sweep import _eligible_projects_stmt
 from app.workflows.backfill_normalize_personal_project_team_ids import (
@@ -498,6 +498,13 @@ CREATE TABLE project_stage_nodes (
 )
 """
 
+_EPISODES_DDL = """
+CREATE TABLE episodes (
+    id INTEGER PRIMARY KEY, project_id INTEGER, title TEXT, sort_order INTEGER,
+    created_at TIMESTAMP, updated_at TIMESTAMP, current_node_id INTEGER
+)
+"""
+
 
 @pytest.mark.asyncio
 async def test_eligible_projects_stmt_yields_column_keyed_row_against_real_sqlite():
@@ -531,6 +538,7 @@ async def test_eligible_projects_stmt_yields_column_keyed_row_against_real_sqlit
     async with engine.begin() as conn:
         await conn.exec_driver_sql(_PROJECTS_DDL)
         await conn.exec_driver_sql(_PROJECT_STAGE_NODES_DDL)
+        await conn.exec_driver_sql(_EPISODES_DDL)
         now = datetime.now(timezone.utc)
         await conn.execute(
             insert(Projects.__table__).values(
@@ -602,6 +610,64 @@ async def test_eligible_projects_stmt_yields_column_keyed_row_against_real_sqlit
             )
         )
 
+        # ── cascade 欠账分支(B4 fast-follow)────────────────────────────
+        # 项目 3:autopilot on,唯一节点已 done 且某集游标指着它 → 入选
+        # (没有任何 auto_start 节点,旧判定会漏掉它)。
+        await conn.execute(
+            insert(Projects.__table__).values(
+                id=3,
+                name="Cascade pending",
+                owner_id=_UID,
+                project_type="personal",
+                is_starred=False,
+                created_at=now,
+                updated_at=now,
+                visibility="inherited",
+                autopilot_enabled=True,
+            )
+        )
+        await conn.execute(
+            insert(ProjectStageNodes.__table__).values(
+                id=14,
+                project_id=3,
+                name="done-cursor-node",
+                episode_id=20,
+                **_node(status="done", events={"auto_start": "false"}),
+            )
+        )
+        await conn.execute(
+            insert(Episodes.__table__).values(
+                id=20,
+                project_id=3,
+                title="Ep 1",
+                sort_order=0,
+                created_at=now,
+                updated_at=now,
+                current_node_id=14,
+            )
+        )
+        # 负控制:项目 2(autopilot off)同样有游标指着 done 节点 → 仍被排除。
+        await conn.execute(
+            insert(ProjectStageNodes.__table__).values(
+                id=15,
+                project_id=2,
+                name="off-done-cursor-node",
+                episode_id=21,
+                **_node(status="done", events={"auto_start": "false"}),
+            )
+        )
+        await conn.execute(
+            insert(Episodes.__table__).values(
+                id=21,
+                project_id=2,
+                title="Ep 1",
+                sort_order=0,
+                created_at=now,
+                updated_at=now,
+                current_node_id=15,
+            )
+        )
+
     sessionmaker = async_sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )
@@ -613,7 +679,7 @@ async def test_eligible_projects_stmt_yields_column_keyed_row_against_real_sqlit
     finally:
         await engine.dispose()
 
-    assert [r["id"] for r in rows] == [1]
+    assert sorted(r["id"] for r in rows) == [1, 3]
 
 
 # ── scheduled_quotas.py — table-valued stored-function selects ────────────

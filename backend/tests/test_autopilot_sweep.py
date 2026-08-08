@@ -45,6 +45,23 @@ def test_eligible_projects_stmt_is_column_level_not_entity_level():
     assert list(stmt.selected_columns.keys()) == ["id"]
 
 
+def test_eligible_projects_stmt_covers_cascade_pending_episodes():
+    """B4 点火实测(2026-08-08):surface 自动完成把节点推到 done 后,若当下的
+    tick enqueue 丢失(DBOS step 内触发、临时进程、worker 重启),旧判定只认
+    auto_start 节点——纯 cascade 停摆的项目永远不会被 sweep 补,「5 分钟兜底」
+    对它们不成立。新增 OR 支:某集游标(episodes.current_node_id)仍指着一个
+    已 done 的节点 = cascade 欠账,一并入选。"""
+    sql = str(
+        autopilot_sweep._eligible_projects_stmt(200).compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert "episodes" in sql
+    assert "current_node_id" in sql
+    assert "'done'" in sql
+    assert " OR " in sql
+
+
 def test_query_step_never_enqueues_from_inside_a_dbos_step():
     """Regression (live E2E probe, 2026-07-31): the step used to call
     ``enqueue_autopilot_tick`` itself, and ``DBOS.start_workflow`` from inside

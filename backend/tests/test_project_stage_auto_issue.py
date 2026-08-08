@@ -119,6 +119,34 @@ async def test_new_stage_creates_unassigned_todo_issue(patch):
 
 
 @pytest.mark.asyncio
+async def test_done_node_mirrors_as_done_issue(patch):
+    """B4 fast-follow(终审 Minor#1): surface 自动完成可把未到达组的节点先推
+    到 done;该组到达时镜像若仍按 todo 建,会留下「节点 done 但 Todolist 挂着
+    open todo」的错位(末组/被闸挡时不会被 cascade 自愈)。done 节点的镜像
+    直接以 done 落地——done→done 投影无害,状态两侧一致。"""
+    issues = _FakeIssueRepo()
+    patch(issues=issues, project={"name": "My Film", "team_id": 42})
+
+    await ensure_stage_issue(
+        issues, 100, {"id": "20", "name": "Script", "status": "done"}, _USER
+    )
+
+    assert issues.created[0]["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_non_done_node_still_mirrors_as_todo(patch):
+    issues = _FakeIssueRepo()
+    patch(issues=issues, project={"name": "My Film", "team_id": 42})
+
+    await ensure_stage_issue(
+        issues, 100, {"id": "20", "name": "Script", "status": "in_progress"}, _USER
+    )
+
+    assert issues.created[0]["status"] == "todo"
+
+
+@pytest.mark.asyncio
 async def test_personal_project_omits_team_id(patch):
     # No owner_id on the project → the personal-team resolve short-circuits
     # before touching the repo, so the issue stays team-less.

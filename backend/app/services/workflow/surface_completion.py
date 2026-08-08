@@ -46,7 +46,10 @@ def should_auto_complete(node: Dict[str, Any], criterion_met: bool) -> bool:
 
 async def sync_surface_completion(
     project_id: str, episode_id: str, surfaces: Iterable[str] = _AUTO_SURFACES
-) -> None:
+) -> bool:
+    """One episode's sync. Returns True on success, False when a failure was
+    swallowed (契约仍是永不 raise) — 让项目级重算能数出失败集数,而不是把
+    故障伪装成「无事可做」。写路径的 fire seams 忽略返回值。"""
     try:
         from app.repositories.episode_repository import get_episode_repository
         from app.repositories.project_stage_nodes_repository import (
@@ -55,7 +58,7 @@ async def sync_surface_completion(
 
         wanted = set(surfaces) & set(_AUTO_SURFACES)
         if not wanted:
-            return
+            return True
         criteria = await get_episode_repository().surface_criteria_for_episode(
             episode_id
         )
@@ -69,11 +72,13 @@ async def sync_surface_completion(
             if not should_auto_complete(node, bool(criteria.get(surf))):
                 continue
             await _complete_node(project_id, node)
+        return True
     except Exception as exc:  # noqa: BLE001 — 回流 hook 绝不影响主写
         logger.warning(
             f"[surface-completion] sync failed for project {project_id} "
             f"episode {episode_id}: {exc!r}"
         )
+        return False
 
 
 async def _complete_node(project_id: str, node: Dict[str, Any]) -> None:
@@ -128,19 +133,27 @@ async def _enqueue_tick(project_id: str) -> None:
 
 
 async def sync_project_surface_completion(project_id: str) -> Dict[str, int]:
-    """全项目一次性重算(部署点火/修复用,Task 7 的端点调它)。"""
+    """全项目一次性重算(部署点火/修复用,Task 7 的端点调它)。
+
+    ``failed`` 计数被吞掉的失败集数——没有它,故障时的返回与「空项目/无事
+    可做」不可区分,而歧义恰好出现在最需要诊断的点火时刻(2026-08-08 终审
+    Minor 转正)。契约仍是永不 raise。
+    """
     try:
         from app.repositories.episode_repository import get_episode_repository
 
         episodes = await get_episode_repository().list_by_project(project_id)
+        failed = 0
         for ep in episodes:
-            await sync_surface_completion(project_id, str(ep["id"]))
-        return {"episodes": len(episodes)}
+            ok = await sync_surface_completion(project_id, str(ep["id"]))
+            if not ok:
+                failed += 1
+        return {"episodes": len(episodes), "failed": failed}
     except Exception as exc:  # noqa: BLE001 — 回流 hook 绝不影响主写
         logger.warning(
             f"[surface-completion] project sync failed for project {project_id}: {exc!r}"
         )
-        return {"episodes": 0}
+        return {"episodes": 0, "failed": 1}
 
 
 # ---- 写路径 seams:各回流点只知道自己手里的 id,这里解析归属 ----

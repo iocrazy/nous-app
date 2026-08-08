@@ -130,6 +130,13 @@ ORM_ALLOWED_PATHS: dict[str, str] = {
         "ScriptShots.id），不是 agent-tool 用户供给的，与 scope_resolver 的单回流点约束"
         "同精神——回流 hook 层只负责解析归属，不做 scope 判定（判定已在上游产物写入时完成）。"
     ),
+    "workflows/autopilot_sweep.py": (
+        "5 分钟兜底 sweep 的 eligible-project 扫描（B4 fast-follow, 2026-08-08）:"
+        "outerjoin Episodes 只为识别「某集游标仍指着已 done 节点 = cascade 欠账」的"
+        "项目 id 集合。纯基础设施只读扫描,无任何用户/agent 供给的 id,不触碰场景/"
+        "镜头数据,不做 scope 判定——判定与推进都在被入队的 autopilot_tick 里走"
+        "既有闸门。"
+    ),
 }
 
 # Files allowed to reach the scene/shot/episode/script-project repository
