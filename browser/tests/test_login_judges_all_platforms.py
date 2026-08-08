@@ -101,3 +101,40 @@ def test_cookie_fallback_identity_works(platform: str):
     assert profile.platform_user_id == "fallback-id", (
         f"{platform}: 所有选择器失效时,cookie 兜底没生效"
     )
+
+
+# --- 登录"成功"必须用轮询认的那个状态 ---------------------------------------
+#
+# 同一天栽了两次:先是 WAITING_CONFIRM(枚举根本不存在,扫码时 AttributeError),
+# 再是 SESSION_VALID(枚举存在、import 正常、judge 也跑得通 —— 但
+# login_sessions.py 的轮询**只认 SUCCESS**,于是页面明明登录好了,弹窗永远停在
+# "已扫码,请在手机上确认")。
+#
+# 第二个尤其阴险:所有测试都绿,judge 返回的也是合法枚举,只有把它跟**消费方**
+# 对照才看得出错。所以这里断言的不是"返回值合法",而是"返回值正是轮询要的那个"。
+
+_LOGGED_IN_URL = {
+    "douyin": "https://creator.douyin.com/creator-micro/home",
+    "xiaohongshu": "https://creator.xiaohongshu.com/new/home",
+    "bilibili": "https://member.bilibili.com/platform/home",
+}
+
+
+@pytest.mark.parametrize("platform", sorted(login_platforms()))
+def test_a_logged_in_page_reports_the_status_the_poller_waits_for(platform: str):
+    """已登录页面必须判成 SUCCESS —— 轮询只认这一个值。"""
+    from app.login_sessions import SessionStatus as PollerStatus
+
+    url = _LOGGED_IN_URL.get(platform)
+    assert url, (
+        f"{platform} 没有登录后 URL 样本 —— 新平台请在 _LOGGED_IN_URL 里补一条,"
+        "否则它的成功判定不会被任何用例覆盖"
+    )
+
+    spec = get_login_flow(platform)
+    judgement = spec.judge(_snapshot(url=url))
+
+    assert judgement.status is PollerStatus.SUCCESS, (
+        f"{platform} 在已登录页面上返回 {judgement.status.name},"
+        "而 login_sessions 的轮询只认 SUCCESS —— 登录会永远完不成"
+    )

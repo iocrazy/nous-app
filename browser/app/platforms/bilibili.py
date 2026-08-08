@@ -30,7 +30,7 @@ reason this warning is repeated in every platform module.
 from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from ..login import LoginFlowSpec, LoginJudgement, LoginPageSnapshot, LoginProfile
 from ..schemas import EnvironmentConfig, SessionResult, SessionStatus
@@ -108,10 +108,26 @@ register(PLATFORM, validate_session)
 
 # --- QR login ---------------------------------------------------------------
 
-# [URL] Passport login page (renders the QR code).
-LOGIN_URL = "https://passport.bilibili.com/login"
 # [URL] Creator studio home — where the identity is read after login.
 PROFILE_URL = "https://member.bilibili.com/platform/home"
+
+# [URL] Passport login page, **with an explicit post-login destination**.
+#
+# ⚠️ 没有 `gourl` 的话,确认之后页面**原地不动**留在 /login。2026-08-08 实测:
+# 用户手机点了确认,后端却一直收到
+#   waiting_scan / "no recognisable login state on the page yet (path=/login)"
+# 因为本模块的成功判据是"到达 member.bilibili.com",而没人告诉 B 站要跳过去。
+#
+# 判据本身是对的、也验证过:未登录访问 member.bilibili.com 会被弹回
+# passport /login,所以"落在 member 主机上"确实等价于"已登录"。缺的只是让
+# 平台知道往哪跳。
+#
+# 实测带上 gourl 后二维码照常渲染(alt="Scan me!" 仍匹配 1 个),所以这个
+# 参数不影响扫码流程本身。
+LOGIN_URL = (
+    "https://passport.bilibili.com/login"
+    f"?gourl={quote(PROFILE_URL, safe='')}"
+)
 
 # ⚠️ Login STARTS on passport.* and SUCCEEDS on member.* — the host changes.
 # `judge_bilibili_login` must therefore accept both, and must not read "no
@@ -227,7 +243,14 @@ def judge_bilibili_login(snapshot: LoginPageSnapshot) -> LoginJudgement:
     # different host from where login started, which is why it is checked before
     # anything else host-related.
     if host in MEMBER_HOSTS:
-        return LoginJudgement(SessionStatus.SESSION_VALID, "reached the creator studio")
+        # ⚠️ SUCCESS,不是 SESSION_VALID。登录轮询(login_sessions.py)只认
+        # SUCCESS —— 返回别的值时它会当作"还没完成"继续等,于是即便页面
+        # 已经登录成功,弹窗也永远停在上一个状态。抖音那份用的就是 SUCCESS,
+        # 我照抄时又按直觉换了名字(同一天第二次栽在枚举上)。
+        #
+        # SESSION_VALID 是**会话校验**那条链路的词汇(validate_session 用),
+        # 跟登录完成不是一回事 —— 名字相近但归属不同的两套状态。
+        return LoginJudgement(SessionStatus.SUCCESS, "reached the creator studio")
 
     if snapshot.login_texts or snapshot.qrcode_visible:
         return LoginJudgement(
