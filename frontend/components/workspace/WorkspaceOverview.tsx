@@ -65,13 +65,14 @@ export function WorkspaceOverview({
   const firstEpisodeStatus = episodes[0]?.status ?? null;
   const activity = project.latest_activity ?? null;
 
-  // ⚠️ Data-gap approximation (see .b5-rollup-report.md): the spec wants an
-  // "N episodes awaiting your answer" hint, but there is no per-episode
-  // needs_input source in this component (the workflow prop is scoped to the
-  // current episode only). We proxy it with episodes still parked at the
-  // `planned` stage — i.e. not yet started, so clearly waiting on the writer.
-  // A precise count needs a per-episode needs_input endpoint / field.
-  const awaitingCount = episodes.filter((e) => e.status === 'planned').length;
+  // "N episodes awaiting your answer" (B4 真数据, 2026-08-08): episodes/progress
+  // 现在带每集 workflow.needs_input_count(agent 提问停等回答的镜像 issue 数)。
+  // 任一集带 workflow 信号即用真数据;全部缺省(旧后端/e2e 桩)时回退 pre-B4 的
+  // planned 近似,与 EpisodeSummaryRow 的进度条降级同策略。
+  const hasWorkflowSignal = episodes.some((e) => e.workflow != null);
+  const awaitingCount = hasWorkflowSignal
+    ? episodes.filter((e) => (e.workflow?.needs_input_count ?? 0) > 0).length
+    : episodes.filter((e) => e.status === 'planned').length;
 
   return (
     <div data-testid="ws-overview" className="flex flex-col gap-3 py-3">

@@ -65,6 +65,42 @@ describe('EpisodeSummaryRow', () => {
     expect(screen.getByTestId('ws-rollup-stages-7')).toHaveAttribute('data-fill', '3');
   });
 
+  // ── node-segmented bar (B4 真数据: EpisodeProgress.workflow) ──────────
+
+  const WF = { nodes_total: 8, nodes_done: 3, current_node_id: '336', needs_input_count: 0 };
+
+  it('segments by real workflow nodes when the rollup field is present', () => {
+    render(
+      <EpisodeSummaryRow
+        episode={{ ...EP, workflow: WF }}
+        epNumber={7}
+        isCurrent={false}
+        onSelect={() => {}}
+      />,
+    );
+    const bar = screen.getByTestId('ws-rollup-stages-7');
+    expect(bar).toHaveAttribute('data-fill', '3');
+    expect(bar).toHaveAttribute('data-total', '8');
+    expect(bar.childElementCount).toBe(8);
+  });
+
+  it('falls back to the status ladder when the rollup is absent or has no nodes', () => {
+    render(<EpisodeSummaryRow episode={EP} epNumber={7} isCurrent={false} onSelect={() => {}} />);
+    const legacy = screen.getByTestId('ws-rollup-stages-7');
+    expect(legacy).toHaveAttribute('data-fill', '3'); // boarding
+    expect(legacy).toHaveAttribute('data-total', '5');
+    cleanup();
+    render(
+      <EpisodeSummaryRow
+        episode={{ ...EP, workflow: { ...WF, nodes_total: 0, nodes_done: 0 } }}
+        epNumber={7}
+        isCurrent={false}
+        onSelect={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('ws-rollup-stages-7')).toHaveAttribute('data-total', '5');
+  });
+
   it('deep-links to the episode on click', () => {
     const onSelect = vi.fn();
     render(<EpisodeSummaryRow episode={EP} epNumber={7} isCurrent={false} onSelect={onSelect} />);

@@ -4,13 +4,12 @@
  * a segmented pipeline-stage indicator, and deep-links into the episode when
  * clicked.
  *
- * ⚠️ Data-gap note (see .b5-rollup-report.md): the spec asks for a "progress bar
- * segmented by node". WorkspaceOverview only receives `EpisodeProgress` (per-
- * episode counts + a single derived `status`) — it has no per-episode node list.
- * So this row approximates the segmented bar with the 5 pipeline stages derived
- * server-side (planned → drafting → boarding → boarded → rendered). A true
- * node-segmented bar needs a per-episode node fetch or an extra field on
- * EpisodeProgress; that is out of scope here.
+ * Node-segmented bar (B4, 2026-08-08): `EpisodeProgress.workflow` now carries
+ * real per-episode node counts (`nodes_total`/`nodes_done`), so the bar
+ * segments by actual workflow nodes when present. The pre-B4 5-stage
+ * status-ladder approximation is kept as the fallback for a missing/empty
+ * rollup (old backend responses, e2e stubs) — same degrade-don't-throw
+ * philosophy as `stageFill`'s unknown-status handling.
  */
 
 import { useTranslation } from 'react-i18next';
@@ -39,7 +38,10 @@ interface EpisodeSummaryRowProps {
 
 export function EpisodeSummaryRow({ episode, epNumber, isCurrent, onSelect }: EpisodeSummaryRowProps) {
   const { t } = useTranslation();
-  const fill = stageFill(episode.status);
+  const wf = episode.workflow;
+  const nodeDriven = wf != null && wf.nodes_total > 0;
+  const total = nodeDriven ? wf.nodes_total : EPISODE_STAGES.length;
+  const fill = nodeDriven ? Math.min(wf.nodes_done, wf.nodes_total) : stageFill(episode.status);
   const statusLabel = t(`projects.workspace.episodeStatus.${episode.status}`, episode.status);
   const clickable = Boolean(onSelect);
 
@@ -69,17 +71,18 @@ export function EpisodeSummaryRow({ episode, epNumber, isCurrent, onSelect }: Ep
       </div>
 
       <div className="shrink-0 flex flex-col items-end gap-1 w-[104px]">
-        {/* Segmented stage indicator (status-derived approximation). */}
+        {/* Segmented bar: real workflow nodes when present, status ladder otherwise. */}
         <div
           className="flex items-center gap-0.5 w-full"
           data-testid={`ws-rollup-stages-${episode.episode_id}`}
           data-fill={fill}
+          data-total={total}
           role="img"
           aria-label={statusLabel}
         >
-          {EPISODE_STAGES.map((stage, i) => (
+          {Array.from({ length: total }, (_, i) => (
             <span
-              key={stage}
+              key={i}
               className="h-1.5 flex-1 rounded-full"
               style={{ background: i < fill ? 'var(--accent-text)' : 'var(--line-strong)' }}
             />
