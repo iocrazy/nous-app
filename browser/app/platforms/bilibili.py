@@ -121,12 +121,25 @@ PROFILE_URL = "https://member.bilibili.com/platform/home"
 PASSPORT_HOSTS = ("passport.bilibili.com", "www.bilibili.com")
 CONSOLE_PATH_FRAGMENT = "/platform"
 
-# [GUESS] UNVERIFIED. QR image candidates, priority order.
+# [VERIFIED 2026-08-08] 对着真实 passport.bilibili.com/login 逐个数过命中数:
+#
+#   img[class*="qrcode"]      → 0   ← 我原本写的,**匹配不到**
+#   div[class*="qrcode"] img  → 1
+#   img[src^="data:image"]    → 1
+#   .login-scan-box img       → 0   ← 也是猜的,不存在
+#   div[class*="scan"] img    → 1
+#
+# 二维码那张 img 的 class 是**空字符串**,所以任何 class 匹配都够不到它。
+# 真实祖先链:DIV.login-scan__qrcode → DIV.login-scan sns_bind_left_wp main__
+#
+# 顺序按"最稳 → 最泛":`alt="Scan me!"` 是这张图唯一自带的语义标识,比
+# 结构位置更抗改版;data: 前缀次之(二维码总是内联生成的);class 匹配放
+# 最后当兜底。
 QRCODE_SELECTORS = (
+    'img[alt="Scan me!"]',
     'div[class*="qrcode"] img',
-    'img[class*="qrcode"]',
-    'div[class*="login-scan"] img',
-    ".login-scan-box img",
+    'img[src^="data:image"]',
+    'div[class*="scan"] img',
 )
 
 # [COPY] UNVERIFIED — the login sub-states.
