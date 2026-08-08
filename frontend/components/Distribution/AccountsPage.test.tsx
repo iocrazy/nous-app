@@ -63,9 +63,16 @@ vi.mock('../../services/distributionService', async (importOriginal) => ({
 }));
 
 // The session modal streams over Realtime; the page tests only need it to mount.
+// 捕获 postgres_changes 的回调,好在用例里真的触发一次事件 —— 只断言
+// "订阅建立了" 证明不了收到事件会做正确的事。
+const realtimeHandlers = vi.hoisted(() => ({ current: [] as Array<() => void> }));
+
 vi.mock('../../supabaseClient', () => {
   const channelObj = {
-    on: () => channelObj,
+    on: (_evt: string, _cfg: unknown, cb: () => void) => {
+      realtimeHandlers.current.push(cb);
+      return channelObj;
+    },
     subscribe: () => channelObj,
   };
   return {
@@ -260,5 +267,27 @@ describe('AccountsPage', () => {
       expect(within(card).getByText(/QR sign-in ready/i)).toBeInTheDocument();
       expect(within(card).getByText(/Publishing not available yet/i)).toBeInTheDocument();
     }
+  });
+});
+
+describe('AccountsPage — 账号列表的实时刷新', () => {
+  it('订阅 social_accounts 的变化,收到事件时重新拉列表', async () => {
+    // 用户两次反馈:扫码绑定成功但卡片不出现,手动刷新才看到。
+    // 后端顺序是对的(先入库再报 success),缺的是这个列表没有独立的实时
+    // 信号 —— 刷新全靠 onBound/onClose 那**同一个** HTTP 请求,它一失败
+    // (截图里就有一批 503)列表就永远是旧的。
+    realtimeHandlers.current = [];
+    mount();
+    await waitFor(() => expect(listAccounts).toHaveBeenCalled());
+
+    expect(realtimeHandlers.current.length).toBeGreaterThan(0);
+
+    const before = (listAccounts as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
+    act(() => { realtimeHandlers.current.forEach((cb) => cb()); });
+
+    await waitFor(() => {
+      const after = (listAccounts as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
+      expect(after).toBeGreaterThan(before);
+    });
   });
 });
