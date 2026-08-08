@@ -126,42 +126,44 @@ LOGIN_URL = "https://creator.xiaohongshu.com/login"
 PROFILE_URL = "https://creator.xiaohongshu.com/new/home"
 CONSOLE_PATH_FRAGMENT = "/new/"
 
-# [GUESS] UNVERIFIED. QR image candidates, priority order. Prefixed/attribute
-# matches only — never a full hashed class name, which changes per release.
-QRCODE_SELECTORS = (
-    'img[class*="qrcode"]',
-    'div[class*="qrcode"] img',
-    'div[class*="qr-code"] img',
-    "canvas + img",
-)
+# ⚠️ 小红书创作平台**没有扫码登录**,只有短信/密码。
+#
+# 2026-08-08 实测 https://creator.xiaohongshu.com/login:
+#   - 大图(>80px)      : 0 个
+#   - canvas            : 0 个
+#   - 含"扫码/二维码/QR"的可点元素: 0 个
+#   - 页面文案          : 短信登录 / 发送验证码 / 收不到验证码? / 忘记密码?
+#
+# 我最初照抖音的模式假设它默认扫码,那是**把一个平台的形态套到另一个平台**
+# —— 用户第一次点绑定就拿到 "login page rendered no QR code"。
+#
+# 所以这里走**短信通道**:登录 flow 的 `sms_input_selectors` /
+# `submit_sms_code()` / 后端 `/login/{task_id}/sms` 端点本来就都在,只是此前
+# 只当抖音的降级路径用。二维码选择器留空 —— 留空是事实陈述,填几个猜的
+# 反而会让 `qrcode_visible` 永远为 False 却看起来"配了"。
+QRCODE_SELECTORS: tuple[str, ...] = ()
 
-# [COPY] UNVERIFIED — the three login sub-states.
-LOGIN_MARKERS = ("扫码登录", "手机号登录", "登录")
-SCANNED_MARKERS = ("扫码成功", "请在手机上确认", "已扫描")
-EXPIRED_MARKERS = ("二维码已失效", "已过期", "点击刷新")
+# [VERIFIED 2026-08-08] 精确匹配数各为 1。
+# ⚠️「登 录」中间**有一个空格**,`登录` 的精确匹配是 0 —— 又一个"猜的字符串
+# 一定会错"的例子。
+LOGIN_MARKERS = ("短信登录", "发送验证码", "登 录")
+# 短信通道没有"已扫描"这个状态。留空而不是编几个词。
+SCANNED_MARKERS: tuple[str, ...] = ()
+EXPIRED_MARKERS: tuple[str, ...] = ()
+REFRESH_SELECTORS: tuple[str, ...] = ()
 
-# [GUESS] UNVERIFIED. Clicking one of these re-issues an expired code.
-REFRESH_SELECTORS = (
-    'div[class*="qrcode"]',
-    'div[class*="refresh"]',
-)
-
-# [GUESS] UNVERIFIED. SMS fallback (some accounts get pushed to it).
+# [VERIFIED 2026-08-08] placeholder 实测值。页面上有 5 个 input
+# (请选择选项 / 手机号 / 验证码 / 邮箱 / 密码),验证码那个是我们要的。
 SMS_INPUT_SELECTORS = (
+    'input[placeholder="验证码"]',
     'input[placeholder*="验证码"]',
-    'input[type="tel"]',
 )
 SMS_SUBMIT_SELECTORS = (
-    'button:has-text("登录")',
-    'button[type="submit"]',
+    'button:has-text("登 录")',
+    ".beer-login-bt",
 )
 
-# [GUESS] UNVERIFIED. Profile fields on the creator home page.
-#
-# Deliberately attribute/prefix matches with several fallbacks, because this is
-# exactly the shape that went wrong on Douyin — three selectors, all inferred,
-# all wrong, and the account rendered its raw cookie id as a display name for
-# weeks. Calibrate against a live session before trusting these.
+# [GUESS] UNVERIFIED — 待绑定成功后用活会话校准。
 PROFILE_TEXT_SELECTORS: Mapping[str, tuple[str, ...]] = {
     "username": (
         '[class*="nickname"]',
@@ -185,13 +187,7 @@ PROFILE_ATTR_SELECTORS: Mapping[str, tuple[tuple[str, ...], str]] = {
     ),
 }
 
-# Cookie names that carry the numeric user id, used as the fallback identity
-# when every profile selector misses. Douyin's equivalent is what kept bound
-# accounts identifiable at all while its selectors were wrong.
 USER_ID_COOKIES = ("customer-sso-sid", "customerClientId", "userId")
-
-# [COPY] Prefixes the platform puts in front of the public id, stripped so the
-# stored id is the bare handle.
 _ID_PREFIXES = ("小红书号：", "小红书号:", "小红书号", "ID：", "ID:")
 
 
@@ -228,14 +224,17 @@ def judge_xiaohongshu_login(snapshot: LoginPageSnapshot) -> LoginJudgement:
     if host in CREATOR_HOSTS and CONSOLE_PATH_FRAGMENT in parts.path:
         return LoginJudgement(SessionStatus.SESSION_VALID, "reached the creator console")
 
-    if snapshot.login_texts or snapshot.qrcode_visible:
+    # 这个平台没有扫码,登录页 == 等待用户输入手机号并提交验证码。
+    # 报 WAITING_SCAN 会让 UI 去等一张永远不出现的二维码。
+    if snapshot.login_texts:
         return LoginJudgement(
-            SessionStatus.WAITING_SCAN, "waiting for the code to be scanned"
+            SessionStatus.WAITING_SMS,
+            "SMS login page: enter the phone number and submit the code",
         )
 
     if host in CREATOR_HOSTS:
         return LoginJudgement(
-            SessionStatus.WAITING_SCAN,
+            SessionStatus.WAITING_SMS,
             f"no recognisable login state on the page yet (path={parts.path or '/'})",
         )
 
