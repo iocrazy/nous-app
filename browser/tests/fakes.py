@@ -249,7 +249,11 @@ class FakePage:
 
     def count_of(self, selector: str) -> int:
         if selector in self.counts:
-            return self.counts[selector]
+            value = self.counts[selector]
+            # 与 `url` / `visible` 同样的约定:值或"接收 page 的函数"。此前
+            # 只有那两个支持,counts 不支持,于是"某次点击之后这个节点就消失了"
+            # 这类状态变化无法表达 —— 而弹窗关闭正是这种。
+            return value(self) if callable(value) else value
         return 1 if selector in self.visible_now() else 0
 
     def locator(self, selector: str) -> FakeLocator:

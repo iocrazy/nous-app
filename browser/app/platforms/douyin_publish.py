@@ -903,13 +903,45 @@ async def _set_cover(page: Any, job: PublishJob, deadline: Deadline) -> dict[str
 
     try:
         await modal.wait_for(state="detached", timeout=deadline.slice_ms(20_000))
+        return {"cover": "applied", "cover_input_index": COVER_INPUT_INDEX}
     except Exception:
-        # A dialog that lingers is worth recording but not worth discarding a
-        # finished upload over; the publish click below will fail loudly if the
-        # dialog is genuinely still blocking the page.
         logger.warning("cover dialog did not detach after confirmation")
 
-    return {"cover": "applied", "cover_input_index": COVER_INPUT_INDEX}
+    # A lingering dialog is NOT a cosmetic leftover: it covers the controls the
+    # following steps click, so their clicks land on the overlay and *those*
+    # steps report the failure. Observed 2026-08-08 — the cover dialog stayed
+    # open and the run died two steps later with
+    # `self_declaration_dialog_missing`, pointing at a step that was working
+    # fine. Most of that investigation was spent on the wrong suspect.
+    #
+    # The old code just logged and moved on, reasoning that "the publish click
+    # will fail loudly if the dialog is genuinely blocking". It does fail — but
+    # under the wrong step's name, which is the one thing a typed failure exists
+    # to prevent (CLAUDE.md 触发路径必须类型化失败回显).
+    #
+    # So: try to clear it, then verify. Still there → fail HERE, as `cover`.
+    await remove_nodes(page, OVERLAY_SELECTORS)
+    try:
+        await page.keyboard.press("Escape")
+    except Exception:
+        pass
+    await page.wait_for_timeout(deadline.slice_ms(settings.publish_settle_ms))
+
+    if await modal.count():
+        raise StepFailure(
+            SessionStatus.FAILED,
+            "the cover dialog stayed open and would block every later step",
+            reason="cover_dialog_stuck",
+            stage="cover",
+        )
+
+    return {
+        "cover": "applied",
+        "cover_input_index": COVER_INPUT_INDEX,
+        # Recorded, not silent: it worked, but only after a nudge. A run that
+        # needs this every time is a selector about to break.
+        "cover_dialog_needed_dismissal": True,
+    }
 
 
 async def _click_radio_labelled(root: Any, label: str, click_ms: int) -> bool:
