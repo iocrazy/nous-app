@@ -543,3 +543,164 @@ async def test_unbound_script_is_noop(
     )
     assert script["id"] is not None
     assert script.get("episode_id") is None
+
+
+async def test_project_wide_sync_completes_satisfied_episodes(
+    integration_db_url, patched_engine, cleanup_test_rows
+):
+    """B4 点火端点回归: seed 两集，Ep1 判据满足但节点 pending（模拟部署前就有产物），
+    Ep2 空。调用 sync_project_surface_completion -> 返回 {"episodes": 2}。
+    Ep1 Script 节点变 done，Ep2 不变（仍 pending）。"""
+    # Setup: create project + owner + team
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        owner_id, team_id = await _seed_owner_and_team(conn)
+        project_id = await conn.fetchval(
+            "INSERT INTO projects (name, owner_id) VALUES ($1, $2) RETURNING id",
+            f"{_PREFIX}project_{uuid.uuid4().hex[:8]}",
+            owner_id,
+        )
+    finally:
+        await conn.close()
+
+    # Seed Ep1 with Script node (pending, has mirror issue)
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        ep1_id = await conn.fetchval(
+            "INSERT INTO episodes (project_id, title, sort_order) "
+            "VALUES ($1, $2, 1) RETURNING id",
+            project_id,
+            "Episode 1",
+        )
+        ep1_script_node_id = await conn.fetchval(
+            """
+            INSERT INTO project_stage_nodes
+                (project_id, episode_id, name, sort_order, parallel_group,
+                 status, surface, review_required)
+            VALUES ($1, $2, 'Script', 1, 1, 'pending', 'script', FALSE)
+            RETURNING id
+            """,
+            project_id,
+            ep1_id,
+        )
+        await conn.execute(
+            "UPDATE episodes SET current_node_id=$1 WHERE id=$2",
+            ep1_script_node_id,
+            ep1_id,
+        )
+        # Create mirror issue for Ep1 Script node
+        await conn.fetchval(
+            """
+            INSERT INTO issues
+                (issue_number, identifier, title, status, priority,
+                 origin_kind, origin_id, project_id, created_by_user_id)
+            VALUES (
+                (SELECT COALESCE(MAX(issue_number), 0) + 1 FROM issues),
+                $1, $2, 'in_progress', 'medium', 'project_stage', $3, $4, $5
+            )
+            RETURNING id
+            """,
+            f"{_PREFIX}{uuid.uuid4().hex[:8]}",
+            f"{_PREFIX} ep1 mirror",
+            f"project_stage:{project_id}:{ep1_script_node_id}",
+            project_id,
+            owner_id,
+        )
+    finally:
+        await conn.close()
+
+    # Seed Ep2 with Script node (empty/pending, no content, no mirror issue)
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        ep2_id = await conn.fetchval(
+            "INSERT INTO episodes (project_id, title, sort_order) "
+            "VALUES ($1, $2, 2) RETURNING id",
+            project_id,
+            "Episode 2",
+        )
+        ep2_script_node_id = await conn.fetchval(
+            """
+            INSERT INTO project_stage_nodes
+                (project_id, episode_id, name, sort_order, parallel_group,
+                 status, surface, review_required)
+            VALUES ($1, $2, 'Script', 1, 1, 'pending', 'script', FALSE)
+            RETURNING id
+            """,
+            project_id,
+            ep2_id,
+        )
+        await conn.execute(
+            "UPDATE episodes SET current_node_id=$1 WHERE id=$2",
+            ep2_script_node_id,
+            ep2_id,
+        )
+    finally:
+        await conn.close()
+
+    # Create Ep1 script with content (satisfies script criterion)
+    from app.repositories.script_repository import get_script_project_repository
+    from app.repositories.script_scene_repository import get_script_scene_repository
+
+    script_repo = get_script_project_repository()
+    script_ep1 = await script_repo.get_or_create_for_episode(
+        {
+            "project_id": project_id,
+            "team_id": team_id,
+            "name": f"{_PREFIX}script_ep1",
+            "status": "active",
+            "created_by": str(owner_id),
+        },
+        ep1_id,
+    )
+
+    scene_repo = get_script_scene_repository()
+    await scene_repo.create_with_content(
+        {"script_id": script_ep1["id"]},
+        [{"id": "el_1", "type": "action", "text": "INT. 客厅 - 日"}],
+        actor=str(owner_id),
+    )
+
+    # Manually revert Ep1 Script node to pending (to simulate "criteria met but node stuck in pending")
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        await conn.execute(
+            "UPDATE project_stage_nodes SET status='pending' WHERE id=$1",
+            ep1_script_node_id,
+        )
+        # Also revert the mirror issue back to in_progress
+        await conn.execute(
+            "UPDATE issues SET status='in_progress' WHERE origin_id=$1",
+            f"project_stage:{project_id}:{ep1_script_node_id}",
+        )
+    finally:
+        await conn.close()
+
+    # Call the service function directly (not via endpoint)
+    from app.services.workflow.surface_completion import (
+        sync_project_surface_completion,
+    )
+
+    result = await sync_project_surface_completion(str(project_id))
+
+    # Assertions
+    assert result == {"episodes": 2}, f"Expected {{'episodes': 2}}, got {result}"
+
+    # Verify Ep1 Script node is now done
+    conn = await asyncpg.connect(integration_db_url)
+    try:
+        ep1_node_status = await conn.fetchval(
+            "SELECT status FROM project_stage_nodes WHERE id=$1",
+            ep1_script_node_id,
+        )
+        assert ep1_node_status == "done", f"Expected Ep1 Script node to be 'done', got '{ep1_node_status}'"
+
+        # Verify Ep2 Script node is still pending (not touched)
+        ep2_node_status = await conn.fetchval(
+            "SELECT status FROM project_stage_nodes WHERE id=$1",
+            ep2_script_node_id,
+        )
+        assert (
+            ep2_node_status == "pending"
+        ), f"Expected Ep2 Script node to stay 'pending', got '{ep2_node_status}'"
+    finally:
+        await conn.close()

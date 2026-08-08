@@ -575,6 +575,28 @@ async def reinstantiate_workflow_per_episode(
     return {"success": True, "data": result}
 
 
+@router.post("/{project_id}/workflow/surface-completion/sync")
+async def sync_surface_completion_for_project(
+    project_id: str,
+    auth: AuthDep,
+    _guard: None = Depends(verify_project_write_access),
+) -> dict[str, any]:
+    """B4 点火/修复:重算全项目每集的 surface 完成态(幂等,只正向)。
+    部署后既有产物不会自己触发回流 hook,owner 调一次此端点补齐。"""
+    from app.services.workflow.surface_completion import (
+        sync_project_surface_completion,
+    )
+
+    try:
+        data = await sync_project_surface_completion(project_id)
+        return {"success": True, "data": data}
+    except Exception as exc:
+        logger.error(
+            f"[Workflow] surface-completion sync for {project_id} failed: {exc}"
+        )
+        raise HTTPException(status_code=500, detail="Surface completion sync failed")
+
+
 @router.get("/{project_id}/workflow/nodes/{node_id}/board")
 async def get_stage_board(
     project_id: str,
