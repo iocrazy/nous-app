@@ -344,6 +344,80 @@ class ResourcesRepository(AsyncpgRepository):
             logger.error(f"Failed to get resource {resource_id}: {e}")
             return None
 
+    async def get_resource_by_id_for_caller(
+        self, resource_id: str, user_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Like ``get_resource_by_id``, but visibility-checked: OWNER
+        (``creator_id == user_id``) OR any teammate whose ``resource_items.
+        scope_id`` membership covers this resource — mirrors the
+        team-membership check in ``resource_fetch_tool.py::_fetch_dispatch``
+        and ``search_resources``. None on BOTH "doesn't exist" and "exists
+        but not visible to this caller" (no existence leak — callers should
+        404 either way).
+
+        ``ai_router.py::_resolve_resource_to_platform_id`` used to call the
+        plain ``get_resource_by_id`` above, which runs on a bare
+        ``read_scope()``. Under ``SCOPE_ENFORCE_RESOURCES=true`` (production's
+        real value — see CLAUDE.md's 部署陷阱), that read sits inside the
+        caller's ambient USER scope (opened by ``ScopedRequestDep``), so the
+        choke point injects ``creator_id == caller`` — a team member
+        triggering AI processing on a resource shared to their team but owned
+        by someone else got 404'd before PR #1743's "run as owner" identity
+        fix ever got a chance to apply.
+
+        The ``creator_id`` half of the predicate is EXPLICIT (not merely
+        "the join happens to also match the owner's own resource_items row")
+        so an owner is never denied by a resource with a missing/orphaned
+        resource_items row — the normal create path always writes one, but
+        nothing here should depend on that invariant holding for every
+        historical row.
+
+        The wrap is gated by ``is_enforced("resources")`` the same as every
+        other team-membership-visibility read in this file: with the flag
+        off, ``nullcontext()`` keeps this byte-for-byte with an ungated read
+        (the choke point itself is inert for ``resources`` while off). The
+        owner-or-teammate PREDICATE, however, is unconditional — it does not
+        loosen just because the flag happens to be off.
+        """
+        from sqlalchemy import String, cast
+
+        scope_cm = (
+            system_request_scope(
+                reason="get-resource-by-id-for-caller: owner-or-team-member "
+                "visibility check, not a blind cross-tenant read"
+            )
+            if is_enforced("resources")
+            else nullcontext()
+        )
+        try:
+            membership_exists = (
+                select(ResourceItems.id)
+                .where(ResourceItems.resource_id == Resources.id)
+                .where(
+                    cast(ResourceItems.scope_id, String).in_(
+                        select(cast(TeamMembers.team_id, String)).where(
+                            TeamMembers.user_id == user_id
+                        )
+                    )
+                )
+                .exists()
+            )
+            async with scope_cm:
+                async with read_scope() as session:
+                    result = await session.execute(
+                        select(Resources)
+                        .where(Resources.id == self._bigint(resource_id))
+                        .where(or_(Resources.creator_id == user_id, membership_exists))
+                        .limit(1)
+                    )
+                    row = result.scalars().first()
+                    return _resources_row_to_dict(row) if row else None
+        except Exception as e:
+            logger.error(
+                f"Failed to get resource {resource_id} for caller {user_id}: {e}"
+            )
+            return None
+
     async def get_resource_by_media_id(self, media_id: str) -> Optional[Dict[str, Any]]:
         try:
             async with read_scope() as session:

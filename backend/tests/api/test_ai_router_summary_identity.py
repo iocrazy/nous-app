@@ -51,7 +51,7 @@ async def _fake_read_scope():
 def _patch_resource_resolver(monkeypatch, media: dict, owner_id: str):
     resource = {"id": "res-1", "media_id": media["id"], "creator_id": owner_id}
 
-    async def _resolve(_rid):
+    async def _resolve(_rid, _uid):
         return resource, media["platform_id"], media
 
     monkeypatch.setattr(ai_router, "_resolve_resource_to_platform_id", _resolve)
