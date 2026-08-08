@@ -1814,7 +1814,7 @@
         "shotsProgress": "镜头 {{done}}/{{total}}",
         "rendersCount": "成片 {{count}}",
         "awaiting": "{{count}} 集等你处理",
-        "awaitingHint": "仍处于待规划阶段的剧集——等你介入（近似值；精确的“等你回答”计数待每集信号补齐）。"
+        "awaitingHint": "有 agent 提问等你回答的剧集。"
       },
       "episodes": {
         "title": "剧集",

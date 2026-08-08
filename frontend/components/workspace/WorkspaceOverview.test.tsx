@@ -183,6 +183,47 @@ describe('WorkspaceOverview', () => {
     expect(screen.queryByTestId('ws-rollup-awaiting')).toBeNull();
   });
 
+  it('counts real needs_input episodes when the workflow rollup is present', () => {
+    // B4 真数据:两集各有 agent 提问(needs_input_count>0)但都不在 planned —
+    // 旧的 planned 近似会显示 0(隐藏),真数据应显示 2。
+    const wf = (needs: number) => ({
+      nodes_total: 8,
+      nodes_done: 1,
+      current_node_id: null,
+      needs_input_count: needs,
+    });
+    const withQuestions: EpisodeProgress[] = [
+      { ...EPISODES[0], workflow: wf(2) },
+      { ...EPISODES[1], workflow: wf(1) },
+    ];
+    const { rerender } = render(
+      <WorkspaceOverview
+        project={PROJECT}
+        episodes={withQuestions}
+        currentEpisode={withQuestions[0]}
+        epNumber={1}
+        onOpenScript={noop}
+      />,
+    );
+    expect(screen.getByTestId('ws-rollup-awaiting')).toHaveTextContent('2 awaiting you');
+
+    // 反向:有 workflow 信号时,停在 planned 但没有提问的集不再被误计。
+    const plannedNoQuestions: EpisodeProgress[] = [
+      { ...EPISODES[0], status: 'planned', workflow: wf(0) },
+      { ...EPISODES[1], workflow: wf(0) },
+    ];
+    rerender(
+      <WorkspaceOverview
+        project={PROJECT}
+        episodes={plannedNoQuestions}
+        currentEpisode={plannedNoQuestions[0]}
+        epNumber={1}
+        onOpenScript={noop}
+      />,
+    );
+    expect(screen.queryByTestId('ws-rollup-awaiting')).toBeNull();
+  });
+
   it('renders the recent-activity line from project.latest_activity', () => {
     render(
       <WorkspaceOverview

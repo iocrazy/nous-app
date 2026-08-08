@@ -1814,7 +1814,7 @@
         "shotsProgress": "Shots {{done}}/{{total}}",
         "rendersCount": "Renders {{count}}",
         "awaiting": "{{count}} awaiting you",
-        "awaitingHint": "Episodes still at the Planned stage — awaiting your input (approximate; a precise \"needs answer\" count is pending a per-episode signal)."
+        "awaitingHint": "Episodes where an agent question is waiting for your answer."
       },
       "episodes": {
         "title": "Episodes",

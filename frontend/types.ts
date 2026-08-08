@@ -1399,6 +1399,27 @@ export interface EpisodeProgress {
   shots_done: number;
   renders_count: number;
   status: string;
+  /** B4 真数据(2026-08-08):每集工作流节点计数与 agent 提问数。optional —
+   * fetchEpisodesProgress 原样透传,旧后端/测试桩缺省时消费方回退旧近似
+   * (进度条回落 status 五段阶梯、"等你回答"回落 planned 计数)。 */
+  workflow?: EpisodeWorkflowRollup;
+  /** B4 判据当前值(派生,可与节点 status 合法不一致=产物被删的信号)。 */
+  surface_state?: EpisodeSurfaceState;
+}
+
+/** 每集工作流汇总(episode_repository.progress_by_project 的 workflow 键)。 */
+export interface EpisodeWorkflowRollup {
+  nodes_total: number;
+  nodes_done: number;
+  /** BIGINT 走字符串防精度丢失;无游标时为 null。 */
+  current_node_id: string | null;
+  needs_input_count: number;
+}
+
+/** surface 完成判据的当前派生值(script/storyboard 两档, spec §5)。 */
+export interface EpisodeSurfaceState {
+  script: boolean;
+  storyboard: boolean;
 }
 
 /**
