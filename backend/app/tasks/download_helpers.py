@@ -359,14 +359,25 @@ async def chain_summary_for_tags(parsed_media_id: int, user_id: str):
             return
         platform_id = media.get("platform_id")
 
+        # Creator-agnostic lookup — transcription may have been triggered
+        # by a teammate on a shared resource, so the caller's user_id is
+        # not a safe filter here (that's exactly what silently dropped the
+        # chain pre-fix: a teammate-triggered transcript found "no
+        # resource" under the old creator-scoped lookup).
         res_repo = ResourcesRepository()
-        resource = await res_repo.get_resource_by_media_id_and_creator(
-            str(parsed_media_id), user_id
-        )
+        resource = await res_repo.get_resource_by_media_id(str(parsed_media_id))
 
         if not resource:
+            logger.info(
+                f"[AI] summary chain: no resource for parsed_media "
+                f"{parsed_media_id}; skipping summary"
+            )
             return
         resource_id = str(resource["id"])
+        # Dispatch as the resource creator — the workflow's creator_id
+        # filter and the points ledger both use this identity. The chain's
+        # inbound user_id (the transcription caller) may be a teammate.
+        owner_id = str(resource.get("creator_id") or user_id)
 
         tag_names = await read_resource_tag_names(resource_id)
         if "Summary" not in tag_names:
@@ -420,7 +431,7 @@ async def chain_summary_for_tags(parsed_media_id: int, user_id: str):
             dbos_workflow_callable=ai_summary_workflow,
             dbos_workflow_kwargs={
                 "parsed_media_id": int(parsed_media_id),
-                "user_id": user_id,
+                "user_id": owner_id,
             },
             workflow_id=sm_wf_id,
         )

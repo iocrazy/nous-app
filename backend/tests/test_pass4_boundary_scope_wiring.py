@@ -330,16 +330,14 @@ async def test_chain_summary_for_tags_propagates_scope_through_run_async():
     async def _rec_get_by_id(self, media_id):
         return {"id": media_id, "platform_id": "p-1", "title": "t"}
 
-    async def _rec_by_media(self, media_id, user_id):
+    async def _rec_by_media(self, media_id):
         recorded["scope"] = current_scope()
-        return None  # short-circuit
+        return None  # short-circuit (bug B-3 fix: creator-agnostic lookup)
 
     assert current_scope() is None
     with (
         patch.object(MediaRepository, "get_by_id", _rec_get_by_id),
-        patch.object(
-            ResourcesRepository, "get_resource_by_media_id_and_creator", _rec_by_media
-        ),
+        patch.object(ResourcesRepository, "get_resource_by_media_id", _rec_by_media),
     ):
         async with request_scope(Scope(user_id=_USER)):
             # §2.4b: helper is async-native — awaited on this loop.
