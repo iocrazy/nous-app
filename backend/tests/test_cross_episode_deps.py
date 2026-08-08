@@ -259,17 +259,10 @@ class _FakeNodesRepo:
 
     def __init__(self, nodes: List[Dict[str, Any]]):
         self._nodes = nodes
-        self.current_node_id_calls: List[Any] = []
         self.status_lookup_calls: List[Any] = []
-
-    async def list_nodes(self, project_id):
-        return list(self._nodes)
 
     async def list_nodes_by_episode(self, project_id, episode_id):
         return [n for n in self._nodes if str(n.get("episode_id")) == str(episode_id)]
-
-    async def set_current_node_id(self, project_id, node_id):
-        self.current_node_id_calls.append((project_id, node_id))
 
     async def list_folder_files(self, folder_id):
         return []
@@ -457,7 +450,6 @@ async def test_ep2_execute_blocked_does_not_move_cursor(monkeypatch):
     assert result.will_advance is False
     assert result.blocked_reason == BLOCK_DEPS_PENDING
     assert episodes_repo.set_current_node_id_calls == []
-    assert nodes_repo.current_node_id_calls == []
 
 
 @pytest.mark.asyncio

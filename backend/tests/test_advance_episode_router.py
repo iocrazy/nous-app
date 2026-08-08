@@ -7,13 +7,14 @@ entrypoints in ``projects_router``:
   * ``POST /{project_id}/workflow/nodes/{node_id}/start-early``
         (``start_workflow_node_early``)
 
-``episode_id`` is optional everywhere and defaults to None. None reproduces
-the legacy project-level behaviour byte-for-byte (regression); a given
 ``episode_id`` reads/writes that one episode only, never a sibling's
 template-cloned twins (B2 陷阱①). These go through the REAL router functions
 + the REAL ``advance_service`` predicate end to end, faking only at the
 repository-getter seam (mirrors ``test_start_early.py`` /
-``test_workflow_flow_rules.py``'s pattern).
+``test_workflow_flow_rules.py``'s pattern). The router's own ``episode_id``
+query param is still ``Optional`` at this layer (Task 8 makes it required) —
+that transitional surface is not this file's concern; every test here passes
+a real episode_id.
 """
 
 from __future__ import annotations
@@ -67,16 +68,11 @@ def _node(
 
 
 class _FakeNodesRepo:
-    """Serves both the legacy (``list_nodes``) and per-episode
-    (``list_nodes_by_episode``) read paths from one node table keyed by the
-    node's ``episode_id`` field."""
+    """Serves the per-episode (``list_nodes_by_episode``) read path from one
+    node table keyed by the node's ``episode_id`` field."""
 
     def __init__(self, nodes: List[Dict[str, Any]]):
         self._nodes = [dict(n) for n in nodes]
-        self.project_cursor_writes: List[tuple] = []
-
-    async def list_nodes(self, project_id):
-        return [dict(n) for n in self._nodes]
 
     async def list_nodes_by_episode(self, project_id, episode_id):
         return [
@@ -88,9 +84,6 @@ class _FakeNodesRepo:
             if str(n["id"]) == str(node_id):
                 return dict(n)
         return None
-
-    async def set_current_node_id(self, project_id, node_id):
-        self.project_cursor_writes.append((str(project_id), str(node_id)))
 
     async def count_running_agent_runs(self, project_id):
         return 0
@@ -219,61 +212,10 @@ async def test_execute_advance_moves_only_target_episode_cursor(monkeypatch):
     )
 
     assert result["success"] is True
-    # ep1 cursor moved 11 -> 12; ep2 cursor untouched; project column never
-    # written (episode path writes episodes.current_node_id only).
+    # ep1 cursor moved 11 -> 12; ep2 cursor untouched.
     assert episode_repo.cursors[_EP1] == "12"
     assert episode_repo.cursors[_EP2] == "21"
     assert episode_repo.writes == [(_EP1, "12")]
-    assert nodes_repo.project_cursor_writes == []
-
-
-# ── (b) no episode_id → legacy project-level path unchanged ──────────────────
-
-
-@pytest.mark.asyncio
-async def test_advance_preview_legacy_project_path_when_no_episode(monkeypatch):
-    # A clean single project-level workflow (episode_id=None nodes), cursor on
-    # the project column.
-    nodes_repo = _FakeNodesRepo([_node("1", sort_order=1), _node("2", sort_order=2)])
-    projects_repo = _FakeProjectsRepo(current_node_id="1")
-
-    def _boom_episode():
-        raise AssertionError("legacy path must not touch the episode repo")
-
-    _install(monkeypatch, nodes_repo=nodes_repo, projects_repo=projects_repo)
-    monkeypatch.setattr(
-        "app.repositories.episode_repository.get_episode_repository", _boom_episode
-    )
-
-    preview = await _router().get_advance_preview(
-        _PROJECT, _Auth(), direction="forward", episode_id=None
-    )
-
-    assert preview.will_advance is True
-    assert [c.node_id for c in preview.closing] == ["1"]
-    assert [c.node_id for c in preview.creating] == ["2"]
-
-
-@pytest.mark.asyncio
-async def test_execute_advance_legacy_writes_project_cursor(monkeypatch):
-    nodes_repo = _FakeNodesRepo([_node("1", sort_order=1), _node("2", sort_order=2)])
-    projects_repo = _FakeProjectsRepo(current_node_id="1")
-    episode_repo = _FakeEpisodeRepo({})
-    _install(
-        monkeypatch,
-        nodes_repo=nodes_repo,
-        projects_repo=projects_repo,
-        episode_repo=episode_repo,
-    )
-
-    result = await _router().post_advance(
-        _PROJECT, _Auth(), direction="forward", episode_id=None
-    )
-
-    assert result["success"] is True
-    # Legacy path writes the PROJECT cursor and never the episode cursor.
-    assert nodes_repo.project_cursor_writes == [(_PROJECT, "2")]
-    assert episode_repo.writes == []
 
 
 # ── (c) GET /workflow scoped to one episode ──────────────────────────────────
@@ -291,28 +233,6 @@ async def test_get_workflow_scoped_to_episode(monkeypatch):
     # Only ep1's nodes (11, 12) — never ep2's (21, 22).
     assert sorted(n.id for n in result.nodes) == ["11", "12"]
     # Cursor comes from the EPISODE, not the project column.
-    assert result.current_node_id == "11"
-
-
-@pytest.mark.asyncio
-async def test_get_workflow_legacy_project_path_when_no_episode(monkeypatch):
-    nodes_repo = _FakeNodesRepo(_two_episode_nodes())
-    projects_repo = _FakeProjectsRepo(current_node_id="11")
-
-    def _boom_episode():
-        raise AssertionError("legacy workflow read must not touch the episode repo")
-
-    _install(monkeypatch, nodes_repo=nodes_repo, projects_repo=projects_repo)
-    monkeypatch.setattr(
-        "app.repositories.episode_repository.get_episode_repository", _boom_episode
-    )
-
-    result = await _router().get_project_workflow(_PROJECT, _Auth(), episode_id=None)
-
-    assert result.has_workflow is True
-    # Legacy path returns ALL project nodes (every episode's) and the project
-    # cursor — byte-for-byte the pre-B2 behaviour.
-    assert sorted(n.id for n in result.nodes) == ["11", "12", "21", "22"]
     assert result.current_node_id == "11"
 
 
@@ -350,34 +270,6 @@ async def test_start_early_deps_scoped_to_episode(monkeypatch):
     )
 
     assert result["success"] is True
-
-
-@pytest.mark.asyncio
-async def test_start_early_legacy_deps_see_all_project_nodes(monkeypatch):
-    """Without episode_id the dependency map is project-wide (legacy): a dep on
-    a still-pending project node DOES gate the start-early (422 DEPS_PENDING)."""
-    from fastapi import HTTPException
-
-    nodes = _two_episode_nodes()
-    nodes[1]["depends_on"] = ["21"]  # node 12 depends on 21 (still pending)
-    nodes_repo = _FakeNodesRepo(nodes)
-    _install(monkeypatch, nodes_repo=nodes_repo)
-
-    async def _noop(*a, **kw):
-        return None
-
-    node_start = importlib.import_module("app.services.workflow.node_start")
-    monkeypatch.setattr(node_start, "_open_mirror_issue", _noop)
-
-    with pytest.raises(HTTPException) as exc:
-        await _router().start_workflow_node_early(
-            _PROJECT, "12", _Auth(), episode_id=None
-        )
-
-    assert exc.value.status_code == 422
-    assert exc.value.detail["code"] == "DEPS_PENDING"
-    # It's the sibling node 21 that gates it in the legacy project-wide map.
-    assert exc.value.detail["waiting_on"] == ["Node 21"]
 
 
 # ── review Important: mismatched episode_id must not bypass the dep gate ──────
