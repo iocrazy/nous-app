@@ -28,6 +28,11 @@ pytestmark = pytest.mark.asyncio
 _PROJECT = "100"
 _OWNER = "00000000-0000-0000-0000-0000000000aa"
 _AGENT = "00000000-0000-0000-0000-0000000000bb"
+# Every project is episode-scoped since B6 deleted the legacy project-level
+# dual path (Task 9) — _EP1 is the implicit single episode most tests run
+# against; _EP2 is used by the multi-episode (B2 T4 metering) tests below.
+_EP1 = "8001"
+_EP2 = "8002"
 
 
 def _node(
@@ -44,7 +49,7 @@ def _node(
     review_required: bool = False,
     parallel_group: Optional[int] = None,
     name: Optional[str] = None,
-    episode_id: Optional[str] = None,
+    episode_id: Optional[str] = _EP1,
 ) -> Dict[str, Any]:
     return {
         "id": node_id,
@@ -68,15 +73,37 @@ def _node(
 
 
 class _FakeEpisodesRepo:
-    """Minimal episodes repo fake. ``list_by_project`` returns the episode
-    dicts in the given order (real repo orders by sort_order asc), so tests
-    supply them already sorted. Empty list == legacy project (no episodes)."""
+    """Episodes repo fake combining two roles: ``list_by_project`` backs the
+    tick's own bound-episode discriminator (``_bound_episodes_in_sort_order``
+    — real repo orders by sort_order asc, so tests supply episodes already
+    sorted); ``get_by_id``/``set_current_node_id`` back ``execute_advance``'s
+    per-episode cursor read/write (mirrors ``test_advance_predicate.py``'s own
+    fake — B6 made the cursor exclusively episode-scoped, project-level
+    ``current_node_id`` is no longer read by the cascade path).
+    ``set_current_node_id_calls`` lets a test assert exactly which episode's
+    cursor moved and to what node."""
 
-    def __init__(self, episodes: Optional[List[Dict[str, Any]]] = None):
+    def __init__(
+        self,
+        episodes: Optional[List[Dict[str, Any]]] = None,
+        *,
+        cursors: Optional[Dict[str, Optional[str]]] = None,
+    ):
         self._episodes = episodes or []
+        self._cursors: Dict[str, Optional[str]] = {
+            str(k): v for k, v in (cursors or {}).items()
+        }
+        self.set_current_node_id_calls: List[Any] = []
 
     async def list_by_project(self, project_id):
         return [dict(e) for e in self._episodes]
+
+    async def get_by_id(self, episode_id):
+        return {"current_node_id": self._cursors.get(str(episode_id))}
+
+    async def set_current_node_id(self, episode_id, node_id):
+        self.set_current_node_id_calls.append((str(episode_id), node_id))
+        self._cursors[str(episode_id)] = node_id
 
 
 def _episode(episode_id: str, *, sort_order: int) -> Dict[str, Any]:
@@ -108,23 +135,11 @@ class _FakeProjectsRepo:
 
 
 class _FakeNodesRepo:
-    def __init__(
-        self,
-        nodes: List[Dict[str, Any]],
-        *,
-        projects_repo: Optional["_FakeProjectsRepo"] = None,
-    ):
+    def __init__(self, nodes: List[Dict[str, Any]]):
         self._nodes = nodes
-        # Wired to the SAME projects fake (when given) so
-        # set_current_node_id actually moves the cursor the next
-        # get_project_by_id() read sees — real behavior (both write/read the
-        # `projects.current_node_id` column); without this a cascade's
-        # SECOND compute_advance_preview would re-read a stale cursor.
-        self._projects_repo = projects_repo
         self.list_nodes_calls = 0
         self.list_nodes_by_episode_calls: List[str] = []
         self.metadata_patches: List[Any] = []
-        self.current_node_id_calls: List[Any] = []
         self.set_node_status_calls: List[Any] = []
 
     async def list_nodes(self, project_id):
@@ -160,11 +175,6 @@ class _FakeNodesRepo:
                 n["metadata"] = merged
                 return dict(merged)
         return None
-
-    async def set_current_node_id(self, project_id, node_id):
-        self.current_node_id_calls.append((project_id, node_id))
-        if self._projects_repo is not None:
-            self._projects_repo._row["current_node_id"] = node_id
 
     async def list_folder_files(self, folder_id):
         return []
@@ -228,12 +238,13 @@ def _install_repos(
         "get_project_stage_nodes_repository",
         lambda: nodes_repo,
     )
-    # Default: no episodes → every existing test deterministically takes the
-    # legacy project-level path (no real DB read). Episode tests pass an
-    # explicit repo.
+    # Default: a single implicit episode (_EP1, matching _node()'s own default
+    # episode_id) so ordinary single-episode tests need not construct one
+    # explicitly. Multi-episode / no-bound-episode / cursor-seeded tests pass
+    # an explicit repo.
     monkeypatch.setattr(
         "app.repositories.episode_repository.get_episode_repository",
-        lambda: episodes_repo or _FakeEpisodesRepo([]),
+        lambda: episodes_repo or _FakeEpisodesRepo([_episode(_EP1, sort_order=1)]),
     )
     monkeypatch.setattr(
         "app.repositories.projects_repository.get_projects_repository",
@@ -328,7 +339,7 @@ async def test_tick_auto_starts_node_with_satisfied_deps_no_agent_owner(monkeypa
     spy = _StartNodeSpy()
     monkeypatch.setattr(autopilot, "start_node_now", spy)
 
-    async def _fake_cascade(project_id, project):
+    async def _fake_cascade(project_id, project, *, episode_id=None):
         return None
 
     monkeypatch.setattr(autopilot, "_cascade_pass", _fake_cascade)
@@ -352,7 +363,7 @@ async def test_tick_skips_node_with_unmet_deps(monkeypatch):
 
     spy = _StartNodeSpy()
     monkeypatch.setattr(autopilot, "start_node_now", spy)
-    monkeypatch.setattr(autopilot, "_cascade_pass", lambda *a: _noop_coro())
+    monkeypatch.setattr(autopilot, "_cascade_pass", lambda *a, **kw: _noop_coro())
 
     await autopilot._autopilot_tick_impl(_PROJECT)
 
@@ -373,7 +384,7 @@ async def test_tick_ignores_skipped_and_non_pending_and_non_auto_start(monkeypat
 
     spy = _StartNodeSpy()
     monkeypatch.setattr(autopilot, "start_node_now", spy)
-    monkeypatch.setattr(autopilot, "_cascade_pass", lambda *a: _noop_coro())
+    monkeypatch.setattr(autopilot, "_cascade_pass", lambda *a, **kw: _noop_coro())
 
     await autopilot._autopilot_tick_impl(_PROJECT)
 
@@ -398,7 +409,7 @@ async def test_tick_dispatches_agent_owner_under_quota(monkeypatch):
 
     spy = _StartNodeSpy()
     monkeypatch.setattr(autopilot, "start_node_now", spy)
-    monkeypatch.setattr(autopilot, "_cascade_pass", lambda *a: _noop_coro())
+    monkeypatch.setattr(autopilot, "_cascade_pass", lambda *a, **kw: _noop_coro())
 
     await autopilot._autopilot_tick_impl(_PROJECT)
 
@@ -423,7 +434,7 @@ async def test_tick_quota_exceeded_routes_to_prepare_not_dispatch(monkeypatch):
 
     spy = _StartNodeSpy()
     monkeypatch.setattr(autopilot, "start_node_now", spy)
-    monkeypatch.setattr(autopilot, "_cascade_pass", lambda *a: _noop_coro())
+    monkeypatch.setattr(autopilot, "_cascade_pass", lambda *a, **kw: _noop_coro())
 
     await autopilot._autopilot_tick_impl(_PROJECT)
 
@@ -452,7 +463,7 @@ async def test_tick_quota_boundary_within_same_tick_20_then_21st(monkeypatch):
 
     spy = _StartNodeSpy()
     monkeypatch.setattr(autopilot, "start_node_now", spy)
-    monkeypatch.setattr(autopilot, "_cascade_pass", lambda *a: _noop_coro())
+    monkeypatch.setattr(autopilot, "_cascade_pass", lambda *a, **kw: _noop_coro())
 
     await autopilot._autopilot_tick_impl(_PROJECT)
 
@@ -481,7 +492,7 @@ async def test_tick_idempotent_second_call_skips_already_started_node(monkeypatc
 
     spy = _StartNodeSpy()
     monkeypatch.setattr(autopilot, "start_node_now", spy)
-    monkeypatch.setattr(autopilot, "_cascade_pass", lambda *a: _noop_coro())
+    monkeypatch.setattr(autopilot, "_cascade_pass", lambda *a, **kw: _noop_coro())
 
     await autopilot._autopilot_tick_impl(_PROJECT)
     assert len(spy.calls) == 1
@@ -509,7 +520,10 @@ async def test_tick_cascade_never_turns_in_review_to_done_and_notifies_once(
         owner_user_id=_OWNER,
     )
     nodes_repo = _FakeNodesRepo([blocked_node])
-    projects_repo = _FakeProjectsRepo(current_node_id="1")
+    projects_repo = _FakeProjectsRepo()
+    episodes_repo = _FakeEpisodesRepo(
+        [_episode(_EP1, sort_order=1)], cursors={_EP1: "1"}
+    )
     issue_repo = _FakeIssueRepo(
         by_node={"1": [{"id": 501, "status": "in_review", "identifier": "MH-501"}]}
     )
@@ -520,6 +534,7 @@ async def test_tick_cascade_never_turns_in_review_to_done_and_notifies_once(
         projects_repo=projects_repo,
         issue_repo=issue_repo,
         notify_spy=notify_spy,
+        episodes_repo=episodes_repo,
     )
 
     await autopilot._autopilot_tick_impl(_PROJECT)
@@ -545,8 +560,11 @@ async def test_tick_cascade_never_turns_in_review_to_done_and_notifies_once(
 async def test_tick_cascade_advances_through_multiple_groups(monkeypatch):
     n1 = _node("1", sort_order=1, auto_start=False, status="done")
     n2 = _node("2", sort_order=2, auto_start=False, status="pending")
-    projects_repo = _FakeProjectsRepo(current_node_id="1")
-    nodes_repo = _FakeNodesRepo([n1, n2], projects_repo=projects_repo)
+    projects_repo = _FakeProjectsRepo()
+    nodes_repo = _FakeNodesRepo([n1, n2])
+    episodes_repo = _FakeEpisodesRepo(
+        [_episode(_EP1, sort_order=1)], cursors={_EP1: "1"}
+    )
     issue_repo = _FakeIssueRepo(by_node={"1": [{"id": 501, "status": "done"}]})
     notify_spy = _NotifySpy()
     _install_repos(
@@ -555,15 +573,16 @@ async def test_tick_cascade_advances_through_multiple_groups(monkeypatch):
         projects_repo=projects_repo,
         issue_repo=issue_repo,
         notify_spy=notify_spy,
+        episodes_repo=episodes_repo,
     )
 
     await autopilot._autopilot_tick_impl(_PROJECT)
 
-    # Cascade advanced the cursor onto group 2 (the only remaining group) —
-    # BLOCK_NO_NEXT stops it there silently (no notification: NO_NEXT isn't a
-    # human-actionable gate).
-    assert nodes_repo.current_node_id_calls
-    assert nodes_repo.current_node_id_calls[-1] == (_PROJECT, "2")
+    # Cascade advanced the episode's own cursor onto group 2 (the only
+    # remaining group) — BLOCK_NO_NEXT stops it there silently (no
+    # notification: NO_NEXT isn't a human-actionable gate).
+    assert episodes_repo.set_current_node_id_calls
+    assert episodes_repo.set_current_node_id_calls[-1] == (_EP1, "2")
     assert notify_spy.calls == []
 
 
@@ -618,8 +637,11 @@ async def test_tick_cascade_reentrancy_guard_skips_nested_enqueue_real_hook(
     hook (review fix I2) — stay silent for the cascade's own internal moves."""
     n1 = _node("1", sort_order=1, auto_start=False, status="in_progress")
     n2 = _node("2", sort_order=2, auto_start=False, status="pending")
-    projects_repo = _FakeProjectsRepo(current_node_id="1")
-    nodes_repo = _FakeNodesRepo([n1, n2], projects_repo=projects_repo)
+    projects_repo = _FakeProjectsRepo()
+    nodes_repo = _FakeNodesRepo([n1, n2])
+    episodes_repo = _FakeEpisodesRepo(
+        [_episode(_EP1, sort_order=1)], cursors={_EP1: "1"}
+    )
     issue_repo = _RealishIssueRepo(
         {
             501: {
@@ -642,6 +664,7 @@ async def test_tick_cascade_reentrancy_guard_skips_nested_enqueue_real_hook(
         projects_repo=projects_repo,
         issue_repo=issue_repo,
         notify_spy=_NotifySpy(),
+        episodes_repo=episodes_repo,
     )
 
     enqueue_calls: List[str] = []
@@ -692,8 +715,11 @@ async def test_tick_auto_starts_node_the_cascade_just_opened_same_tick(
         owner_agent_id=_AGENT,
         depends_on=["1"],
     )
-    projects_repo = _FakeProjectsRepo(current_node_id="1")
-    nodes_repo = _FakeNodesRepo([n1, n2], projects_repo=projects_repo)
+    projects_repo = _FakeProjectsRepo()
+    nodes_repo = _FakeNodesRepo([n1, n2])
+    episodes_repo = _FakeEpisodesRepo(
+        [_episode(_EP1, sort_order=1)], cursors={_EP1: "1"}
+    )
     issue_repo = _RealishIssueRepo(
         {
             501: {
@@ -716,6 +742,7 @@ async def test_tick_auto_starts_node_the_cascade_just_opened_same_tick(
         projects_repo=projects_repo,
         issue_repo=issue_repo,
         notify_spy=_NotifySpy(),
+        episodes_repo=episodes_repo,
     )
 
     spy = _StartNodeSpy()
@@ -728,9 +755,10 @@ async def test_tick_auto_starts_node_the_cascade_just_opened_same_tick(
 
     await autopilot._autopilot_tick_impl(_PROJECT)
 
-    # The cascade really did close node 1 and move the cursor onto node 2...
+    # The cascade really did close node 1 and move the episode's cursor onto
+    # node 2...
     assert issue_repo._issues[501]["status"] == "done"
-    assert nodes_repo.current_node_id_calls[-1] == (_PROJECT, "2")
+    assert episodes_repo.set_current_node_id_calls[-1] == (_EP1, "2")
     # ...and the SAME tick then auto-started the node it just unblocked.
     assert len(spy.calls) == 1
     assert spy.calls[0]["node_id"] == "2"
@@ -750,7 +778,7 @@ async def test_tick_fixpoint_loop_stops_when_cascade_advances_nothing(monkeypatc
 
     cascade_calls: List[int] = []
 
-    async def _no_advance(project_id, project):
+    async def _no_advance(project_id, project, *, episode_id=None):
         cascade_calls.append(1)
         return False
 
@@ -759,11 +787,12 @@ async def test_tick_fixpoint_loop_stops_when_cascade_advances_nothing(monkeypatc
     await autopilot._autopilot_tick_impl(_PROJECT)
 
     assert len(cascade_calls) == 1
-    # Two list_nodes reads: one by the legacy-vs-episode discriminator (computing
-    # bound_episode_ids — here empty → legacy), one by the legacy fixpoint's
-    # single auto-start pass. The point is convergence (cascade called once), not
-    # the read count.
-    assert nodes_repo.list_nodes_calls == 2
+    # One list_nodes read (the bound-episode discriminator computing
+    # bound_episode_ids); the episode fixpoint's own auto-start pass reads via
+    # list_nodes_by_episode instead. The point is convergence (cascade called
+    # once), not the read count.
+    assert nodes_repo.list_nodes_calls == 1
+    assert nodes_repo.list_nodes_by_episode_calls == [_EP1]
 
 
 async def test_tick_fixpoint_loop_is_bounded_and_flags_a_runaway(monkeypatch):
@@ -777,7 +806,7 @@ async def test_tick_fixpoint_loop_is_bounded_and_flags_a_runaway(monkeypatch):
 
     cascade_calls: List[int] = []
 
-    async def _always_advance(project_id, project):
+    async def _always_advance(project_id, project, *, episode_id=None):
         cascade_calls.append(1)
         return True
 
@@ -799,7 +828,10 @@ async def test_tick_deps_pending_cascade_notifies_once(monkeypatch):
     n2 = _node("2", sort_order=2, auto_start=False, status="pending", depends_on=["3"])
     n3 = _node("3", sort_order=3, auto_start=False, status="pending")
     nodes_repo = _FakeNodesRepo([n1, n2, n3])
-    projects_repo = _FakeProjectsRepo(current_node_id="1")
+    projects_repo = _FakeProjectsRepo()
+    episodes_repo = _FakeEpisodesRepo(
+        [_episode(_EP1, sort_order=1)], cursors={_EP1: "1"}
+    )
     issue_repo = _FakeIssueRepo(by_node={"1": [{"id": 501, "status": "done"}]})
     notify_spy = _NotifySpy()
     _install_repos(
@@ -808,6 +840,7 @@ async def test_tick_deps_pending_cascade_notifies_once(monkeypatch):
         projects_repo=projects_repo,
         issue_repo=issue_repo,
         notify_spy=notify_spy,
+        episodes_repo=episodes_repo,
     )
 
     await autopilot._autopilot_tick_impl(_PROJECT)
@@ -842,8 +875,11 @@ class _LoggerSpy:
 async def test_tick_cascade_no_role_actor_logs_warning_no_notify(monkeypatch):
     n1 = _node("1", sort_order=1, auto_start=False, status="done")
     n2 = _node("2", sort_order=2, auto_start=False, status="pending")
-    projects_repo = _FakeProjectsRepo(current_node_id="1")
-    nodes_repo = _FakeNodesRepo([n1, n2], projects_repo=projects_repo)
+    projects_repo = _FakeProjectsRepo()
+    nodes_repo = _FakeNodesRepo([n1, n2])
+    episodes_repo = _FakeEpisodesRepo(
+        [_episode(_EP1, sort_order=1)], cursors={_EP1: "1"}
+    )
     issue_repo = _FakeIssueRepo(by_node={"1": [{"id": 501, "status": "done"}]})
     notify_spy = _NotifySpy()
     _install_repos(
@@ -852,6 +888,7 @@ async def test_tick_cascade_no_role_actor_logs_warning_no_notify(monkeypatch):
         projects_repo=projects_repo,
         issue_repo=issue_repo,
         notify_spy=notify_spy,
+        episodes_repo=episodes_repo,
         # The role gap itself is a known, unfixed pre-existing issue (see
         # task-O2-report.md Concerns) — simulate it directly rather than
         # depending on resolve_effective_role's real personal-project edge
@@ -886,8 +923,11 @@ async def test_tick_cascade_ceiling_exhaustion_logs_warning(monkeypatch):
         _node(str(i), sort_order=i, auto_start=False, status="done")
         for i in range(node_count)
     ]
-    projects_repo = _FakeProjectsRepo(current_node_id="0")
-    nodes_repo = _FakeNodesRepo(nodes, projects_repo=projects_repo)
+    projects_repo = _FakeProjectsRepo()
+    nodes_repo = _FakeNodesRepo(nodes)
+    episodes_repo = _FakeEpisodesRepo(
+        [_episode(_EP1, sort_order=1)], cursors={_EP1: "0"}
+    )
     issue_repo = _FakeIssueRepo()
     _install_repos(
         monkeypatch,
@@ -895,6 +935,7 @@ async def test_tick_cascade_ceiling_exhaustion_logs_warning(monkeypatch):
         projects_repo=projects_repo,
         issue_repo=issue_repo,
         notify_spy=_NotifySpy(),
+        episodes_repo=episodes_repo,
     )
 
     spy_logger = _LoggerSpy()
@@ -902,7 +943,7 @@ async def test_tick_cascade_ceiling_exhaustion_logs_warning(monkeypatch):
 
     await autopilot._autopilot_tick_impl(_PROJECT)
 
-    assert len(nodes_repo.current_node_id_calls) == autopilot._MAX_CASCADE_STEPS
+    assert len(episodes_repo.set_current_node_id_calls) == autopilot._MAX_CASCADE_STEPS
     assert any("ceiling" in w for w in spy_logger.warnings)
 
 
@@ -912,10 +953,6 @@ async def test_tick_cascade_ceiling_exhaustion_logs_warning(monkeypatch):
 # metering of the AUTO-START pass is isolated (cascade advance / cursor moves
 # are covered by test_advance_predicate.py's episode tests). Each episode's
 # fixpoint then runs exactly one auto-start pass and stops.
-
-
-_EP1 = "8001"
-_EP2 = "8002"
 
 
 async def _fake_cascade_noop(project_id, project, *, episode_id=None):
@@ -954,7 +991,7 @@ async def test_episode_metering_per_episode_cap_prevents_starvation(monkeypatch)
         for i in range(1, 5)
     ]
     projects_repo = _FakeProjectsRepo()
-    nodes_repo = _FakeNodesRepo(ep1_nodes + ep2_nodes, projects_repo=projects_repo)
+    nodes_repo = _FakeNodesRepo(ep1_nodes + ep2_nodes)
     episodes_repo = _FakeEpisodesRepo(
         [_episode(_EP1, sort_order=1), _episode(_EP2, sort_order=2)]
     )
@@ -1016,7 +1053,7 @@ async def test_episode_metering_project_cap_labels_daily_limit(monkeypatch):
         for i in range(1, 6)
     ]
     projects_repo = _FakeProjectsRepo()
-    nodes_repo = _FakeNodesRepo(ep1_nodes + ep2_nodes, projects_repo=projects_repo)
+    nodes_repo = _FakeNodesRepo(ep1_nodes + ep2_nodes)
     episodes_repo = _FakeEpisodesRepo(
         [_episode(_EP1, sort_order=1), _episode(_EP2, sort_order=2)]
     )
@@ -1068,7 +1105,7 @@ async def test_episode_metering_starts_with_prior_project_usage(monkeypatch):
         for i in range(1, 6)
     ]
     projects_repo = _FakeProjectsRepo()
-    nodes_repo = _FakeNodesRepo(ep1_nodes + ep2_nodes, projects_repo=projects_repo)
+    nodes_repo = _FakeNodesRepo(ep1_nodes + ep2_nodes)
     episodes_repo = _FakeEpisodesRepo(
         [_episode(_EP1, sort_order=1), _episode(_EP2, sort_order=2)]
     )
@@ -1105,7 +1142,7 @@ async def test_episode_metering_candidates_ordered_by_episode_then_node(monkeypa
         _node("12", sort_order=2, owner_agent_id=_AGENT, episode_id=_EP1),
     ]
     projects_repo = _FakeProjectsRepo()
-    nodes_repo = _FakeNodesRepo(nodes, projects_repo=projects_repo)
+    nodes_repo = _FakeNodesRepo(nodes)
     episodes_repo = _FakeEpisodesRepo(
         [_episode(_EP1, sort_order=1), _episode(_EP2, sort_order=2)]
     )
@@ -1140,8 +1177,7 @@ async def test_episode_cascade_threads_matching_episode_id(monkeypatch):
         [
             _node("1", episode_id=_EP1, auto_start=False, status="done"),
             _node("2", episode_id=_EP2, auto_start=False, status="done"),
-        ],
-        projects_repo=projects_repo,
+        ]
     )
     episodes_repo = _FakeEpisodesRepo(
         [_episode(_EP1, sort_order=1), _episode(_EP2, sort_order=2)]
@@ -1168,26 +1204,32 @@ async def test_episode_cascade_threads_matching_episode_id(monkeypatch):
     assert seen_episode_ids == [_EP1, _EP2]
 
 
-async def test_legacy_no_episodes_uses_project_scope(monkeypatch):
-    """A project with NO episode rows falls back to the legacy project-level
-    path: list_nodes (not list_nodes_by_episode), cascade with episode_id=None,
-    behavior unchanged."""
-    candidate = _node("1", sort_order=1, owner_agent_id=_AGENT)
+async def test_no_bound_episodes_tick_is_noop(monkeypatch):
+    """A project with genuinely no episode-bound nodes (bound_episode_ids
+    empty — 现网基线: every project auto-seeds an Ep1 ROW at creation, but a
+    pre-B3 project's nodes can all still be episode_id=NULL) is a plain no-op
+    tick: nothing to auto-start, no cursor to advance. Replaces the deleted
+    legacy fixpoint for this case — behavior-equivalent (the old fixpoint
+    found zero auto-start candidates and BLOCK_NO_NEXT'd on its very first
+    cascade call anyway), just an explicit no-op instead of running a
+    do-nothing fixpoint loop (Task 9, case 1)."""
+    candidate = _node("1", sort_order=1, owner_agent_id=_AGENT, episode_id=None)
     projects_repo = _FakeProjectsRepo()
-    nodes_repo = _FakeNodesRepo([candidate], projects_repo=projects_repo)
+    nodes_repo = _FakeNodesRepo([candidate])
+    # The seeded Ep1 row EXISTS (default _install_repos episodes_repo) — but
+    # no node is bound to it, so it must never even be read.
     _install_repos(
         monkeypatch,
         nodes_repo=nodes_repo,
         projects_repo=projects_repo,
         agent_runs_repo=_FakeAgentRunsRepo(count=0),
-        # episodes_repo defaults to empty -> legacy path
     )
     monkeypatch.setattr(autopilot, "_daily_auto_runs_limit", _const_limit(20))
 
-    seen_episode_ids: List[Optional[str]] = []
+    cascade_calls: List[Optional[str]] = []
 
     async def _spy_cascade(project_id, project, *, episode_id=None):
-        seen_episode_ids.append(episode_id)
+        cascade_calls.append(episode_id)
         return False
 
     monkeypatch.setattr(autopilot, "_cascade_pass", _spy_cascade)
@@ -1197,14 +1239,63 @@ async def test_legacy_no_episodes_uses_project_scope(monkeypatch):
 
     await autopilot._autopilot_tick_impl(_PROJECT)
 
-    # Legacy read path only — never the episode-scoped list.
+    # Only the bound-episode discriminator's list_nodes fired — no
+    # episode-scoped read (the seeded Ep1 row is never even consulted since
+    # bound_episode_ids is empty), no auto-start dispatch, no cascade call.
+    assert nodes_repo.list_nodes_calls == 1
     assert nodes_repo.list_nodes_by_episode_calls == []
-    assert nodes_repo.list_nodes_calls >= 1
-    # Legacy cascade is project-scoped (episode_id=None).
-    assert seen_episode_ids == [None]
-    # Node still dispatched under legacy metering.
-    assert len(spy.calls) == 1
-    assert spy.calls[0]["dispatch"] is True
+    assert cascade_calls == []
+    assert spy.calls == []
+
+
+async def test_episode_read_failure_warns_not_silent(monkeypatch):
+    """bound_episode_ids is non-empty (a node really IS bound to an episode)
+    but the episode read itself fails — ``_bound_episodes_in_sort_order``
+    degrades to ``[]`` (its own warning), and ``_autopilot_tick_impl``'s own
+    branch must ALSO warn and skip rather than silently collapsing this into
+    the same no-op as a genuinely-unbound project (盘点 §3e case 3: a
+    degraded read must stay visible, never a silent fallback)."""
+    candidate = _node("1", sort_order=1, owner_agent_id=_AGENT, episode_id=_EP1)
+    projects_repo = _FakeProjectsRepo()
+    nodes_repo = _FakeNodesRepo([candidate])
+
+    class _BrokenEpisodesRepo:
+        async def list_by_project(self, project_id):
+            raise RuntimeError("episodes table unreachable")
+
+    _install_repos(
+        monkeypatch,
+        nodes_repo=nodes_repo,
+        projects_repo=projects_repo,
+        agent_runs_repo=_FakeAgentRunsRepo(count=0),
+        episodes_repo=_BrokenEpisodesRepo(),
+    )
+    monkeypatch.setattr(autopilot, "_daily_auto_runs_limit", _const_limit(20))
+
+    cascade_calls: List[Optional[str]] = []
+
+    async def _spy_cascade(project_id, project, *, episode_id=None):
+        cascade_calls.append(episode_id)
+        return False
+
+    monkeypatch.setattr(autopilot, "_cascade_pass", _spy_cascade)
+
+    spy = _StartNodeSpy()
+    monkeypatch.setattr(autopilot, "start_node_now", spy)
+
+    spy_logger = _LoggerSpy()
+    monkeypatch.setattr(autopilot, "logger", spy_logger)
+
+    await autopilot._autopilot_tick_impl(_PROJECT)
+
+    # Nothing dispatched or advanced this tick...
+    assert spy.calls == []
+    assert cascade_calls == []
+    # ...but the degraded read is VISIBLE in the logs, not a silent no-op —
+    # both the leaf helper's own warning and the tick's own can-never-be-sure
+    # warning fired.
+    assert any("episode list failed" in w for w in spy_logger.warnings)
+    assert any("bound episode id" in w for w in spy_logger.warnings)
 
 
 async def test_tick_stays_one_per_project_no_per_episode_subticks(monkeypatch):
@@ -1214,7 +1305,7 @@ async def test_tick_stays_one_per_project_no_per_episode_subticks(monkeypatch):
     ep1_nodes = [_node("11", sort_order=1, owner_agent_id=_AGENT, episode_id=_EP1)]
     ep2_nodes = [_node("21", sort_order=1, owner_agent_id=_AGENT, episode_id=_EP2)]
     projects_repo = _FakeProjectsRepo()
-    nodes_repo = _FakeNodesRepo(ep1_nodes + ep2_nodes, projects_repo=projects_repo)
+    nodes_repo = _FakeNodesRepo(ep1_nodes + ep2_nodes)
     episodes_repo = _FakeEpisodesRepo(
         [_episode(_EP1, sort_order=1), _episode(_EP2, sort_order=2)]
     )
@@ -1240,52 +1331,3 @@ async def test_tick_stays_one_per_project_no_per_episode_subticks(monkeypatch):
 
     # No sub-tick fan-out — the single tick handled both episodes in-process.
     assert enqueue_calls == []
-
-
-async def test_seeded_ep1_row_but_all_nodes_null_uses_legacy_scope(monkeypatch):
-    """现网基线 (Critical regression): every project auto-seeds an Ep1 episode
-    ROW at creation (projects_service.py), but pre-B3 the workflow NODES all
-    have episode_id=NULL (instantiate_from_template never binds them). Keying
-    legacy-vs-episode on "episodes table has rows" therefore ALWAYS took the
-    episode path -> list_nodes_by_episode(Ep1) excludes NULL nodes -> empty ->
-    every real project's autopilot silently stalled (no auto-start, no cascade).
-
-    The judgement must key on "has episode-BOUND nodes", not "has episode rows":
-    an Ep1 row with all-NULL nodes -> LEGACY project-level path, exactly as
-    master behaved (auto-start + cascade proceed, NOT BLOCK_NO_NEXT)."""
-    candidate = _node("1", sort_order=1, owner_agent_id=_AGENT, episode_id=None)
-    projects_repo = _FakeProjectsRepo()
-    nodes_repo = _FakeNodesRepo([candidate], projects_repo=projects_repo)
-    # The seeded Ep1 row EXISTS — but no node is bound to it.
-    episodes_repo = _FakeEpisodesRepo([_episode(_EP1, sort_order=1)])
-    _install_repos(
-        monkeypatch,
-        nodes_repo=nodes_repo,
-        projects_repo=projects_repo,
-        agent_runs_repo=_FakeAgentRunsRepo(count=0),
-        episodes_repo=episodes_repo,
-    )
-    monkeypatch.setattr(autopilot, "_daily_auto_runs_limit", _const_limit(20))
-
-    seen_episode_ids: List[Optional[str]] = []
-
-    async def _spy_cascade(project_id, project, *, episode_id=None):
-        seen_episode_ids.append(episode_id)
-        return False
-
-    monkeypatch.setattr(autopilot, "_cascade_pass", _spy_cascade)
-
-    spy = _StartNodeSpy()
-    monkeypatch.setattr(autopilot, "start_node_now", spy)
-
-    await autopilot._autopilot_tick_impl(_PROJECT)
-
-    # Legacy project-level path — the NULL node is NEVER read through the
-    # episode-scoped list (which would exclude it and stall the project).
-    assert nodes_repo.list_nodes_by_episode_calls == []
-    # Cascade is project-scoped (episode_id=None), like master.
-    assert seen_episode_ids == [None]
-    # The all-NULL project still auto-starts — no silent stall.
-    assert len(spy.calls) == 1
-    assert spy.calls[0]["node_id"] == "1"
-    assert spy.calls[0]["dispatch"] is True

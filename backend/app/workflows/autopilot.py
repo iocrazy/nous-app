@@ -238,52 +238,33 @@ async def _auto_start_pass(
     project_id: str,
     project: Dict[str, Any],
     *,
-    episode_id: Optional[str] = None,
-    budget: Optional["_DispatchBudget"] = None,
+    episode_id: str,
+    budget: "_DispatchBudget",
     ep_budget: Optional["_EpisodeBudget"] = None,
 ) -> None:
     """Spec §2 step 2. Re-fetches the live node list fresh (idempotency: a
     node another tick already started is no longer ``status == 'pending'``,
     so it silently drops out of the candidate list on the next call).
 
-    Two scoping modes (B2 T4):
-      * Legacy / project-level — ``episode_id is None`` and ``budget is None``:
-        exact pre-episode behavior. Lists ALL project nodes and reads the daily
-        quota fresh each call (kept identical so a project with no episodes
-        rows behaves byte-for-byte as before).
-      * Episode-scoped — ``episode_id`` + a shared ``budget`` (project daily
-        hard cap) + a per-episode ``ep_budget`` (this episode's sub-cap): lists
-        only that episode's nodes and meters dispatches against BOTH caps. The
-        episode's own cap being the tighter, more specific bound is checked
-        first so its pause copy names the per-episode limit; only when the
-        episode is still under its own cap but the shared project total is
-        drained does the daily-limit copy apply.
+    Episode-scoped (B2 T4; the only mode since B6 deleted the legacy
+    project-level dual path — see module docstring): lists only ``episode_id``'s
+    own nodes and meters dispatches against a shared ``budget`` (the project
+    daily hard cap, read once per tick and threaded across every episode) plus
+    an optional per-episode ``ep_budget`` sub-cap. The episode's own cap being
+    the tighter, more specific bound is checked first so its pause copy names
+    the per-episode limit; only when the episode is still under its own cap but
+    the shared project total is drained does the daily-limit copy apply.
     """
     from app.repositories.project_stage_nodes_repository import (
         get_project_stage_nodes_repository,
     )
 
     nodes_repo = get_project_stage_nodes_repository()
-    if episode_id is None:
-        nodes = await nodes_repo.list_nodes(str(project_id))
-    else:
-        nodes = await nodes_repo.list_nodes_by_episode(str(project_id), str(episode_id))
+    nodes = await nodes_repo.list_nodes_by_episode(str(project_id), str(episode_id))
     node_by_id = {str(n["id"]): n for n in nodes}
     candidates = _eligible_auto_start_candidates(nodes)
     if not candidates:
         return
-
-    # Legacy path reads the quota fresh each call; episode path uses the shared
-    # in-process budget threaded by the tick (see _DispatchBudget's docstring).
-    quota_limit = 0
-    used = 0
-    if budget is None:
-        from app.repositories.agent_runs_repository import get_agent_runs_repository
-
-        quota_limit = await _daily_auto_runs_limit()
-        used = await get_agent_runs_repository().count_auto_dispatches_today(
-            str(project_id)
-        )
 
     for node in candidates:
         # A start-ahead node's deps must ACTUALLY be done/skipped — no
@@ -298,20 +279,7 @@ async def _auto_start_pass(
         prepare_title: Optional[str] = None
         if node.get("owner_agent_id"):
             node_name = node.get("name") or "Stage"
-            if budget is None:
-                # Legacy project-level metering — unchanged.
-                if used < quota_limit:
-                    dispatch = True
-                    used += 1  # in-process running count — the agent_runs row
-                    # this dispatch produces is written asynchronously by the
-                    # DBOS workflow it kicks off, so a same-tick re-query of the
-                    # DB would race it; counting in-process keeps the 20→21
-                    # boundary correct within one tick regardless of that lag.
-                else:
-                    prepare_title = (
-                        f'Autopilot paused: daily limit reached — "{node_name}"'
-                    )
-            elif ep_budget is not None and ep_budget.cap_reached:
+            if ep_budget is not None and ep_budget.cap_reached:
                 # This episode has spent its per-episode slice — pause it here
                 # (per-episode cap) and let the tick move on to its siblings.
                 prepare_title = (
@@ -432,7 +400,7 @@ async def _cascade_pass(
     project_id: str,
     project: Dict[str, Any],
     *,
-    episode_id: Optional[str] = None,
+    episode_id: str,
 ) -> bool:
     """Spec §2 step 3. Loops ``execute_advance`` — the SAME predicate
     ``compute_advance_preview``/``execute_advance`` share (#1400) — until
@@ -442,8 +410,9 @@ async def _cascade_pass(
     ``episode_id`` (B2 T4) confines the advance to a single episode's node
     chain: each ``execute_advance`` call is scoped to that episode (its own
     cursor + single-episode node list), so the run this advance dispatches is
-    branded with the SAME episode it is actually moving. ``episode_id is None``
-    keeps the legacy project-level cursor path unchanged.
+    branded with the SAME episode it is actually moving. Required — B6 deleted
+    ``execute_advance``'s legacy project-level cursor path, so it raises on
+    ``None``.
 
     The acting user for this system-driven advance is the project owner
     (there is no human actor for an automated cascade) — same "acts on the
@@ -530,26 +499,31 @@ async def _bound_episodes_in_sort_order(
     """The project's episode rows that ACTUALLY own workflow nodes
     (``id in bound_episode_ids``), ordered by ``sort_order`` (P0 §3.3).
 
-    Critical (2026-08-06 regression): the legacy-vs-episode decision keys on
-    whether the project has episode-BOUND NODES — NOT on whether episode ROWS
-    exist. Every project auto-seeds an Ep1 row at creation
-    (``projects_service.py``), yet pre-B3 every ``project_stage_nodes.episode_id``
-    is NULL (``instantiate_from_template`` never binds them). Keying on the row's
-    existence sent EVERY real project down the episode path, where
-    ``list_nodes_by_episode`` (correctly) excludes NULL nodes → empty node list →
-    the whole project's autopilot silently stalled. So this filters the episode
-    rows down to only those a bound node points at; an empty result means the
-    caller must use the legacy project-level path.
+    Critical (2026-08-06 regression, since hardened by B6's legacy-path
+    removal): a project's episode rows always pre-date its nodes actually
+    being bound to one (every project auto-seeds an Ep1 row at creation —
+    ``projects_service.py`` — while ``instantiate_from_template`` binds nodes
+    to it separately). Keying on the row's existence alone would send an
+    unbound project down ``list_nodes_by_episode``, which (correctly) excludes
+    unbound nodes → empty node list → the tick would silently do nothing while
+    LOOKING like it checked. So this filters the episode rows down to only
+    those a bound node points at; an empty result tells the caller there is
+    nothing this tick can act on (see ``_autopilot_tick_impl``'s own handling
+    of the two ways that happens: genuinely no bound nodes vs. a read failure).
 
-    Best-effort: any read failure degrades to ``[]`` (→ legacy path) rather than
-    stalling autopilot on a transient episodes-table hiccup."""
+    Best-effort: any read failure degrades to ``[]`` rather than raising —
+    ``_autopilot_tick_impl`` distinguishes that from "genuinely no bound nodes"
+    by checking whether ``bound_episode_ids`` was non-empty, and logs a
+    warning instead of silently skipping (盘点 §3e case 3)."""
     if not bound_episode_ids:
         return []
     try:
         from app.repositories.episode_repository import get_episode_repository
 
         episodes = await get_episode_repository().list_by_project(str(project_id))
-    except Exception as exc:  # noqa: BLE001 — degrade to legacy path, never raise
+    except Exception as exc:  # noqa: BLE001 — degrade to [], never raise; the
+        # caller's bound_episode_ids check turns this into a visible warning
+        # rather than a silent no-op.
         logger.warning(
             f"[autopilot] episode list failed for project {project_id}: {exc!r}"
         )
@@ -557,22 +531,6 @@ async def _bound_episodes_in_sort_order(
     # list_by_project already orders by sort_order asc — keep only the episodes
     # that own at least one bound node.
     return [e for e in episodes if str(e["id"]) in bound_episode_ids]
-
-
-async def _run_legacy_fixpoint(project_id: str, project: Dict[str, Any]) -> None:
-    """The original project-level (auto-start → cascade) fixpoint — byte-for-
-    byte the pre-episode behavior (``episode_id=None``, quota read fresh each
-    pass, no per-episode caps). Used for legacy projects AND for any project
-    whose nodes are all still episode-unbound (the pre-B3 现网 baseline)."""
-    for _ in range(_MAX_TICK_PASSES):
-        await _auto_start_pass(project_id, project)
-        if not await _cascade_pass(project_id, project):
-            return
-    logger.warning(
-        f"[autopilot] tick for project {project_id} hit the "
-        f"{_MAX_TICK_PASSES}-pass ceiling without reaching a fixpoint — "
-        "possible cyclic/pathological workflow template"
-    )
 
 
 async def _run_episode_fixpoint(
@@ -629,22 +587,24 @@ async def _autopilot_tick_impl(project_id: str) -> None:
     ``used``) and could blow the project total past ``daily_auto_runs``.
     Instead the ONE tick loops over the project's episodes internally.
 
-    Legacy vs episode is decided by whether the project has episode-BOUND
-    NODES (``project_stage_nodes.episode_id`` non-null) — NOT by whether episode
-    rows exist (every project auto-seeds an Ep1 row while pre-B3 nodes are all
-    NULL; see ``_bound_episodes_in_sort_order``). Two shapes:
-      * Legacy / pre-B3 baseline (no bound nodes): the original project-level
-        fixpoint, byte-for-byte unchanged (``episode_id=None``, quota read
-        fresh).
-      * Episode-aware (some nodes bound): one shared ``_DispatchBudget`` (the
-        project daily hard cap — the outer total gate every episode shares)
-        plus a per-episode ``_EpisodeBudget`` sub-cap. Only episodes that
-        actually own bound nodes are iterated, in ``(episode.sort_order,
-        node.sort_order)`` order — the outer loop takes them in ``sort_order``,
-        each inner auto-start pass orders that episode's own nodes by
-        ``sort_order``. A single spinning episode stops at its per-episode cap
-        and yields to its siblings, so one looping episode can't drain the
-        whole project quota and starve the others.
+    Every project is episode-scoped (B6 deleted the legacy project-level dual
+    path — see module docstring): one shared ``_DispatchBudget`` (the project
+    daily hard cap — the outer total gate every episode shares) plus a
+    per-episode ``_EpisodeBudget`` sub-cap. Only episodes that actually own
+    bound nodes are iterated (``project_stage_nodes.episode_id`` non-null —
+    NOT merely "the episode row exists"; see ``_bound_episodes_in_sort_order``),
+    in ``(episode.sort_order, node.sort_order)`` order — the outer loop takes
+    them in ``sort_order``, each inner auto-start pass orders that episode's
+    own nodes by ``sort_order``. A single spinning episode stops at its
+    per-episode cap and yields to its siblings, so one looping episode can't
+    drain the whole project quota and starve the others.
+
+    A project with NO episode-bound nodes at all is a genuine no-op (there is
+    nothing to auto-start and no cursor to advance) — debug-logged, not an
+    error. A project WITH bound nodes whose episode read comes back empty
+    anyway is different: that's ``_bound_episodes_in_sort_order`` degrading a
+    read failure to ``[]``, and silently treating it as "nothing to do" would
+    hide the failure — so this warns instead of no-op'ing (盘点 §3e case 3).
     """
     from app.repositories.project_stage_nodes_repository import (
         get_project_stage_nodes_repository,
@@ -658,16 +618,29 @@ async def _autopilot_tick_impl(project_id: str) -> None:
         return
 
     # One cheap project-wide read (reused, not doubled) to learn which episodes
-    # own nodes. All-NULL (现网 pre-B3) → no bound episodes → legacy path.
+    # own nodes.
     nodes = await get_project_stage_nodes_repository().list_nodes(str(project_id))
     bound_episode_ids = {
         str(n["episode_id"]) for n in nodes if n.get("episode_id") is not None
     }
     episodes = await _bound_episodes_in_sort_order(project_id, bound_episode_ids)
     if not episodes:
-        # No episode-bound nodes (legacy project, or the pre-B3 all-NULL
-        # baseline) — project-level fixpoint, exactly as master.
-        await _run_legacy_fixpoint(project_id, project)
+        if bound_episode_ids:
+            # Nodes ARE bound to episodes, but the episode read came back
+            # empty — a degraded read (_bound_episodes_in_sort_order's own
+            # except branch), not a real "nothing bound" state. Surface it
+            # rather than silently skipping the tick.
+            logger.warning(
+                f"[autopilot] tick for project {project_id}: "
+                f"{len(bound_episode_ids)} bound episode id(s) but the episode "
+                "read returned none — skipping this tick rather than "
+                "silently no-op'ing"
+            )
+        else:
+            logger.debug(
+                f"[autopilot] tick for project {project_id}: no episode-bound "
+                "nodes — nothing to auto-start or advance, no-op"
+            )
         return
 
     from app.repositories.agent_runs_repository import get_agent_runs_repository
@@ -680,11 +653,17 @@ async def _autopilot_tick_impl(project_id: str) -> None:
     per_episode_cap = max(_MIN_PER_EPISODE_CAP, ceil(quota_limit / len(episodes)))
 
     for episode in episodes:  # list_by_project orders by sort_order asc
-        if budget.project_exhausted:
-            # Project daily cap already drained by earlier episodes — remaining
-            # episodes have no dispatch budget left this tick; stop rather than
-            # re-prepare every node under a daily-limit banner.
-            break
+        # No pre-check on ``budget.project_exhausted`` here — even an
+        # already-drained project still gets each episode's auto-start pass
+        # run exactly once (``_run_episode_fixpoint`` itself returns right
+        # after that first pass once the budget reads exhausted, so this
+        # never spins). Skipping episodes outright here would mean a node
+        # that just became newly eligible (deps freshly met) while the daily
+        # cap was ALREADY drained — including drained before this tick even
+        # started — never gets its "paused: daily limit reached" prepare_title
+        # set at all, silently sitting unprepared instead of visibly paused
+        # (legacy's project-level fixpoint had no such gap: it evaluated
+        # every candidate on every tick regardless of quota state).
         ep_budget = _EpisodeBudget(per_episode_cap)
         await _run_episode_fixpoint(
             project_id,
