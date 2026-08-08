@@ -260,3 +260,54 @@ if intent.content_type not in SUPPORTED_CONTENT_TYPES:
 `#1735` stealth / `#1733` 保存权限 radio / `#1732` Ubuntu apt 镜像 /
 `#1730` workflow 缺 scope / `#1729` 全 session 批次不该要 OAuth 凭证 /
 `#1728` session 校验抓 profile
+
+---
+
+## 十、平台登录方式各不相同 —— 别照抄抖音
+
+2026-08-08 对着真实页面逐个查过。**把一个平台的登录形态套到另一个平台**是
+这一轮最贵的错误:用户第一次点绑定小红书就拿到
+`login page rendered no QR code`。
+
+| 平台 | 网页端登录方式 | 状态 |
+|------|----------------|------|
+| 抖音 | 扫码 | ✅ 已验证 |
+| **小红书** | **只有短信/密码,没有扫码** | ✅ 走短信通道 |
+| B 站 | 扫码 | ✅ 选择器已实测校准 |
+
+实测数据(小红书 `creator.xiaohongshu.com/login`):大图 0 个、canvas 0 个、
+含"扫码/二维码/QR"的可点元素 0 个。
+
+### 小红书为什么不做 API 扫码(2026-08-08 用户决定)
+
+参考项目 sau 确实有(`xhs_login_qrcode.py`),走 **API 而非网页**:
+`XhsClient.get_qrcode()` + `check_qrcode()` 轮询。调研后**决定不采用**:
+
+1. **`xhs` 库已停止维护** —— PyPI 最后一版 `0.2.13` 发布于 **2024-04-29**,
+   两年多没动。对一个依赖逆向签名的库,这基本等于死亡。
+2. **签名根本不在库里** —— sau 的 `sign_local()` 是**起一个 Playwright
+   浏览器**执行 `window._webmsxyw` 现算的,库只封装 HTTP 调用。
+
+⚠️ 曾考虑"把 xhs 库做成 admin 端可独立升级"来对冲失效风险,**被第 1 条
+否掉**:升级机制做得再好,上游没有新版本可升。
+
+**真要做小红书扫码**,正确路线是第 2 条指出的:复用已有的 nous-browser
+容器执行签名脚本、自己调二维码 API —— 也就是 spec §1.3 早就描述过的
+「档位 2:浏览器只当签名机 + 上传走裸 HTTP」。
+
+### 通用教训
+
+- `登录` 的精确匹配数是 **0**,`登 录`(中间一个空格)才是 1
+- B 站二维码那张 img 的 `class` 是**空字符串**,任何 class 匹配都够不到,
+  要用 `alt="Scan me!"`
+
+**没有对着真实页面数过匹配数的选择器,一个都不要相信。**
+
+### 排查纪律(这次又交了学费)
+
+前端 CI 红时,**先看失败的是哪个 step,再看日志**。这次 `Frontend Build`
+失败,我盯着日志里一堆 TS 报错查了很久 —— 那些是 lint 阶段的 warning 输出,
+`TypeScript check` 和 `Build` 两步其实都是 success,真正失败的是
+`Vitest unit tests`(EditorShell 那个已知 flaky,重跑即绿)。
+
+    gh api repos/<owner>/<repo>/actions/jobs/<job_id> --jq '.steps[] | "\(.conclusion)\t\(.name)"'
