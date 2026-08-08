@@ -37,7 +37,6 @@ from app.models import (
     WorkflowTemplateNodes,
 )
 from app.repositories.project_stage_nodes_repository import (
-    _SLUG_CANVAS,
     _SLUG_SHOOTING,
     ProjectStageNodesRepository,
     _as_uuid,
@@ -46,13 +45,17 @@ from app.repositories.project_stage_nodes_repository import (
     _s,
 )
 
-# ── method matrix: _resolve_skip (spec §2 — Canvas 常驻不可关, Shooting 按 method) ──
+# ── method matrix: _resolve_skip (spec §2/B6 — Shooting-only; Canvas retired) ──
 
 
-def test_canvas_never_skipped_regardless_of_method_or_default():
+def test_canvas_slug_gets_no_special_treatment():
+    """B6: Canvas is retired from the node bank (mig 412) — the literal slug
+    "canvas" is no longer special-cased by ``_resolve_skip`` and, if it ever
+    showed up again (e.g. a stale legacy row), it would just follow
+    ``skip_default`` like any other unknown node."""
     for method in (None, "live", "ai", "hybrid"):
-        for skip_default in (True, False):
-            assert _resolve_skip(_SLUG_CANVAS, skip_default, method) is False
+        assert _resolve_skip("canvas", True, method) is True
+        assert _resolve_skip("canvas", False, method) is False
 
 
 @pytest.mark.parametrize("method", ["live", "hybrid"])
@@ -74,7 +77,7 @@ def test_shooting_falls_back_to_template_default_with_no_method():
 
 @pytest.mark.parametrize("method", [None, "live", "ai", "hybrid"])
 def test_other_nodes_always_keep_template_default(method):
-    for slug in ("script", "storyboard", "voiceover", "editing", None):
+    for slug in ("script", "storyboard", "voiceover", "editing", "canvas", None):
         assert _resolve_skip(slug, True, method) is True
         assert _resolve_skip(slug, False, method) is False
 
@@ -499,3 +502,88 @@ async def test_instantiate_default_expect_fresh_false_stays_idempotent(monkeypat
 
     assert len(result) == 1
     assert result[0]["id"] == "42"
+
+
+# ── infer_legacy_binding: method reverse-inference (B6 — Shooting-only) ─────
+# No prior test coverage existed for this method (confirmed by inventory
+# before this task); these are the first pins. B6 drops the Canvas lookup and
+# the hybrid parallel-group check entirely — the rule collapses to reading
+# Shooting's own ``skipped`` flag.
+
+
+def _legacy_shooting_node(*, skipped: bool, legacy_stage_id: int = 700) -> ProjectStageNodes:
+    return ProjectStageNodes(
+        id=1,
+        project_id=50,
+        source_template_node_id=None,
+        legacy_stage_id=legacy_stage_id,
+        name="Shooting",
+        sort_order=1,
+        parallel_group=None,
+        status="pending",
+        owner_user_id=None,
+        owner_agent_id=None,
+        planned_start=None,
+        planned_due=None,
+        review_required=False,
+        deliverable_required=False,
+        deliverable_label=None,
+        skipped=skipped,
+        completion_policy="owner",
+        events={
+            "notify_on_arrival": True,
+            "notify_on_complete": False,
+            "suggest_agent_run": False,
+        },
+        form_schema=[],
+        form_data={},
+    )
+
+
+class _InferBindingFakeSession:
+    """Two-call fake for ``infer_legacy_binding``: the legacy-nodes select,
+    then the node-bank slug map select. The fixture node below has no
+    ``source_template_node_id``, so ``src_ids`` stays empty and the
+    template_id lookup branch never fires — call order collapses to exactly
+    these two, same FakeSession call-order-based idiom as
+    ``_InstantiateFakeSession`` above."""
+
+    def __init__(self, legacy_nodes: List[Any], slug_rows: List[Any]):
+        self._legacy_nodes = legacy_nodes
+        self._slug_rows = slug_rows
+        self._calls = 0
+
+    async def execute(self, stmt: Any, params: Any = None) -> _Result:
+        self._calls += 1
+        if self._calls == 1:
+            return _Result(self._legacy_nodes)
+        if self._calls == 2:
+            return _Result(self._slug_rows)
+        raise AssertionError(f"unexpected extra session.execute call #{self._calls}")
+
+
+@pytest.mark.asyncio
+async def test_infer_method_shooting_only(monkeypatch):
+    """B6: the reverse-inference reads Shooting's skip state alone — no
+    Canvas node lookup, no hybrid parallel-group check. A legacy chain that
+    has ONLY a Shooting node (Canvas no longer exists in the node bank, mig
+    412) must not blow up looking for one."""
+    import app.repositories.project_stage_nodes_repository as mod
+
+    repo = ProjectStageNodesRepository()
+
+    session_ai = _InferBindingFakeSession(
+        legacy_nodes=[_legacy_shooting_node(skipped=True)],
+        slug_rows=[(700, "shooting")],
+    )
+    monkeypatch.setattr(mod, "read_scope", _write_scope_with(session_ai))
+    _, method = await repo.infer_legacy_binding("50")
+    assert method == "ai"
+
+    session_live = _InferBindingFakeSession(
+        legacy_nodes=[_legacy_shooting_node(skipped=False)],
+        slug_rows=[(700, "shooting")],
+    )
+    monkeypatch.setattr(mod, "read_scope", _write_scope_with(session_live))
+    _, method = await repo.infer_legacy_binding("50")
+    assert method == "live"

@@ -27,7 +27,8 @@ class ProjectCreate(BaseModel):
     announcement: Optional[str] = Field(None, max_length=100)
     # Workflow (M1 PR-B): choose a team template to instantiate the project's
     # nodes. None = No workflow (Overview renders no workflow region). method is
-    # the Live/AI/Hybrid preset that flips Shooting/Canvas node switches.
+    # the Live/AI/Hybrid preset that flips the Shooting node switch (B6:
+    # Shooting-only — Canvas retired as a standalone node-bank slug).
     workflow_template_id: Optional[str] = None
     workflow_method: Optional[Literal["live", "ai", "hybrid"]] = None
     # Ideation (M1.5): the topics.id this project is created from. Persisted to

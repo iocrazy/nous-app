@@ -57,9 +57,9 @@ from app.schemas.workflow import (
     WorkflowAlreadyInstantiated,
 )
 
-# Node-bank slugs whose skip state the method shortcut overrides (spec §2/§3):
-# Canvas is always on (常驻不可关); Shooting is on for live/hybrid, off for ai.
-_SLUG_CANVAS = "canvas"
+# Node-bank slug whose skip state the method shortcut overrides (spec §2/§3,
+# B6): Shooting is on for live/hybrid, off for ai. Canvas retired as a
+# standalone node bank slug (mig 412) — method is Shooting-only now.
 _SLUG_SHOOTING = "shooting"
 
 _VALID_STATUSES = frozenset({"pending", "in_progress", "in_review", "done", "skipped"})
@@ -194,11 +194,9 @@ def _resolve_skip(
 ) -> bool:
     """Method shortcut over a template node's ``skip_default`` (team-lead B1).
 
-    Canvas is never skipped (常驻不可关); Shooting is forced on for live/hybrid
-    and off for ai; every other node keeps its template default.
+    Shooting is forced on for live/hybrid and off for ai; every other node
+    keeps its template default.
     """
-    if slug == _SLUG_CANVAS:
-        return False
     if slug == _SLUG_SHOOTING:
         if method in ("live", "hybrid"):
             return False
@@ -241,10 +239,10 @@ class ProjectStageNodesRepository:
         case raises ``WorkflowAlreadyInstantiated`` instead (the M1.x
         attach-workflow path opts into this so it can 409 rather than
         silently succeed a second time). ``method`` (live/ai/hybrid) flips
-        the Shooting/Canvas skip state and, for hybrid, drops Shooting+Canvas
-        into one parallel group. ``overrides`` (keyed by
-        ``source_template_node_id``) let the create dialog tweak the
-        instance without touching the template.
+        the Shooting skip state (B6: Shooting-only — hybrid no longer regroups
+        anything, it is purely a user-visible label sharing live's chain
+        shape). ``overrides`` (keyed by ``source_template_node_id``) let the
+        create dialog tweak the instance without touching the template.
 
         Concurrency: a per-project ``pg_advisory_xact_lock`` is taken FIRST,
         inside this same transaction, before the idempotency check below —
@@ -391,8 +389,9 @@ class ProjectStageNodesRepository:
         """
         tpl_nodes, members_by_tpl, tpl_deps, slug_map = template_bits
 
-        # Build instance rows (skip/parallel resolved) before inserting so we
-        # can compute the hybrid parallel group over the full set.
+        # Build instance rows (skip resolved per node; parallel_group is just
+        # copied from the template — B6 dropped the hybrid regroup, so there
+        # is no longer a need to build the full set before inserting).
         planned: List[Dict[str, Any]] = []
         for tn in tpl_nodes:
             slug = (
@@ -413,15 +412,6 @@ class ProjectStageNodesRepository:
                     "skipped": skipped,
                 }
             )
-
-        if method == "hybrid":
-            groups = [
-                p["parallel_group"] for p in planned if p["parallel_group"] is not None
-            ]
-            fresh_group = (max(groups) if groups else 0) + 1
-            for p in planned:
-                if p["slug"] in (_SLUG_SHOOTING, _SLUG_CANVAS):
-                    p["parallel_group"] = fresh_group
 
         # template node id -> the instance node id created for it below, so the
         # copied dep edges can be re-pointed at the new rows.
@@ -747,19 +737,22 @@ class ProjectStageNodesRepository:
         self, project_id: str
     ) -> tuple[Optional[int], Optional[str]]:
         """Infer ``(template_id, method)`` for a legacy project-level chain
-        (B3 backfill §6).
+        (B3 backfill §6; B6 — Shooting-only).
 
         ``template_id`` is read from any legacy node's
         ``source_template_node_id`` → its template. ``method`` is recovered from
-        the Shooting/Canvas skip state the original instantiation baked in:
-        Shooting skipped → ``'ai'``; Shooting + Canvas sharing a
-        ``parallel_group`` → ``'hybrid'``; otherwise → ``'live'``. Returns
-        ``(None, None)`` when the project has no legacy (episode_id NULL) nodes —
-        i.e. it is already per-episode, or never had a workflow.
+        Shooting's own skip state alone: Shooting skipped → ``'ai'``; Shooting
+        present and not skipped → ``'live'``. ``'hybrid'`` can NOT be recovered
+        this way — it shares live's chain shape (B6 dropped the hybrid regroup),
+        so the two are structurally indistinguishable after the fact; a caller
+        that needs hybrid preserved must pass ``method`` explicitly when
+        firing/reinstantiating (existing behavior, unchanged by this note).
+        Returns ``(None, None)`` when the project has no legacy (episode_id
+        NULL) nodes — i.e. it is already per-episode, or never had a workflow.
 
         Fragile by design (see spec §10): a mis-inferred method only affects the
-        Shooting/Canvas skip presentation of the reinstantiated chains, never
-        their structure — and the backfill caller may override it explicitly.
+        Shooting skip presentation of the reinstantiated chains, never their
+        structure — and the backfill caller may override it explicitly.
         """
         pid = int(str(project_id))
         async with read_scope() as session:
@@ -799,7 +792,6 @@ class ProjectStageNodesRepository:
 
             slug_map = await self._load_slug_map(session)
             shooting = None
-            canvas = None
             for n in legacy:
                 slug = (
                     slug_map.get(n.legacy_stage_id)
@@ -808,21 +800,11 @@ class ProjectStageNodesRepository:
                 )
                 if slug == _SLUG_SHOOTING:
                     shooting = n
-                elif slug == _SLUG_CANVAS:
-                    canvas = n
+                    break
 
             method: Optional[str] = None
             if shooting is not None:
-                if shooting.skipped:
-                    method = "ai"
-                elif (
-                    canvas is not None
-                    and shooting.parallel_group is not None
-                    and shooting.parallel_group == canvas.parallel_group
-                ):
-                    method = "hybrid"
-                else:
-                    method = "live"
+                method = "ai" if shooting.skipped else "live"
 
             return (
                 int(template_id) if template_id is not None else None,
