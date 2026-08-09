@@ -15,7 +15,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { ProjectWorkspace } from './ProjectWorkspace';
-import type { EpisodeProgress, Project } from '../../types';
+import type { EpisodeProgress, Project, ProjectStageNode, ProjectWorkflow } from '../../types';
 
 const navigate = vi.fn();
 // Mutable so a single test can seed the initial URL (e.g. `?module=stage`
@@ -103,6 +103,11 @@ const mockProjectsService = vi.hoisted(() => ({
   // WorkspaceTopBar's Autopilot chip (M4 Autopilot task O3) — unused by these
   // tests (no click on the chip), just needs to exist so the import resolves.
   updateProject: vi.fn(),
+  // WorkflowSection's mount effect (only reached once a test seeds a
+  // non-empty `workflow` via mockWorkflowService.fetchProjectWorkflow —
+  // the surface-panel tests below) — the section swallows a rejection
+  // itself, but resolving cleanly keeps those tests quiet/deterministic.
+  fetchProjectMembers: vi.fn(),
 }));
 vi.mock('../../services/projectsService', () => mockProjectsService);
 
@@ -113,12 +118,76 @@ const mockScriptService = vi.hoisted(() => ({
 }));
 vi.mock('../../services/scriptService', () => mockScriptService);
 
+// Task 3 (主工作面接线): the storyboard surface panel renders WorkflowSection
+// (workflow-strip node click routing) and, once a node's surface is
+// 'storyboard', EpisodeSceneBoard/EpisodeShotListTable — both self-fetch via
+// sceneService. Mocked here so those tests stay network-free; most existing
+// tests below never populate a workflow, so `fetchProjectWorkflow` defaults
+// to resolving `null` (identical to the previously-unmocked, always-pending
+// real fetch: `workflow` state simply never becomes truthy).
+const mockWorkflowService = vi.hoisted(() => ({
+  fetchProjectWorkflow: vi.fn(),
+  fetchAdvancePreview: vi.fn(),
+  executeAdvance: vi.fn(),
+  addProjectNode: vi.fn(),
+  deleteProjectNode: vi.fn(),
+  fetchStageLibrary: vi.fn().mockResolvedValue([]),
+  startEarlyNode: vi.fn(),
+  updateProjectNode: vi.fn(),
+}));
+vi.mock('../../services/workflowService', () => mockWorkflowService);
+
+const mockAiLibraryService = vi.hoisted(() => ({
+  aiLibraryService: { listAgents: vi.fn().mockResolvedValue([]) },
+}));
+vi.mock('../../services/aiLibraryService', () => mockAiLibraryService);
+
+const mockSceneService = vi.hoisted(() => ({
+  listScenes: vi.fn(),
+  listShots: vi.fn(),
+  autoStoryboard: vi.fn(),
+}));
+vi.mock('../../editor/sceneService', () => mockSceneService);
+
 // WorkspaceCanvas (real Canvas module) fetches the project's canvases on
 // mount — stub the service so the shell test stays network-free.
 vi.mock('../../features/canvas-core/services/canvasService', () => ({
   listCanvases: vi.fn().mockResolvedValue([]),
   createCanvas: vi.fn(),
 }));
+
+/** Minimal-but-complete ProjectStageNode builder (mirrors WorkflowStrip.test.tsx's factory). */
+function stageNode(over: Partial<ProjectStageNode>): ProjectStageNode {
+  return {
+    id: '1',
+    project_id: 'p1',
+    source_template_node_id: null,
+    legacy_stage_id: null,
+    name: 'Storyboard',
+    sort_order: 0,
+    parallel_group: null,
+    status: 'in_progress',
+    owner_user_id: null,
+    owner_agent_id: null,
+    planned_start: null,
+    planned_due: null,
+    review_required: false,
+    deliverable_required: false,
+    deliverable_label: null,
+    skipped: false,
+    surface: 'storyboard',
+    members: [],
+    completion_policy: 'owner',
+    events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false },
+    ...over,
+  };
+}
+
+/** A one-node workflow instance whose current node is the storyboard-surface node above. */
+function storyboardWorkflow(nodeOver: Partial<ProjectStageNode> = {}): ProjectWorkflow {
+  const node = stageNode(nodeOver);
+  return { has_workflow: true, current_node_id: node.id, agents_active: 0, nodes: [node] };
+}
 
 const PROJECT: Project = {
   id: 'p1',
@@ -176,6 +245,13 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ id: 'created-1', name: 'Episode 1' });
   mockScriptService.updateScriptProject.mockReset().mockResolvedValue({ id: 'created-1' });
+  mockProjectsService.fetchProjectMembers.mockReset().mockResolvedValue([]);
+  mockWorkflowService.fetchProjectWorkflow.mockReset().mockResolvedValue(null);
+  mockWorkflowService.fetchAdvancePreview.mockReset();
+  mockWorkflowService.executeAdvance.mockReset();
+  mockSceneService.listScenes.mockReset().mockResolvedValue([]);
+  mockSceneService.listShots.mockReset().mockResolvedValue([]);
+  mockSceneService.autoStoryboard.mockReset();
   mockSearchParams.current = new URLSearchParams();
   localStorage.clear();
 });
@@ -290,21 +366,161 @@ describe('ProjectWorkspace', () => {
     expect(screen.queryByTestId('ws-overview')).toBeNull();
   });
 
-  it('mounts EditorShell preset to the storyboard view when 分镜 is clicked', async () => {
+  // Storyboard is now the episode node's primary face (三视图主工作面, PR-A) —
+  // a bare click (sidebar 分镜 row, or a workflow-strip node — see the next
+  // test) lands on Overview with the storyboard surface panel expanded
+  // instead of diving straight into the embedded editor.
+  it('lands on the Overview storyboard surface panel — not the embedded editor — when 分镜 is clicked', async () => {
     mockScriptService.fetchScriptProjects.mockResolvedValue({
       data: [
         { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
       ],
       total: 1,
     });
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    mockSceneService.listScenes.mockResolvedValue([
+      {
+        id: '200',
+        script_id: 's1',
+        chapter_id: null,
+        scene_number: null,
+        heading_int_ext: 'INT',
+        location_text: 'Kitchen',
+        time_of_day: 'DAY',
+        content_version: 1,
+        sort_order: 0,
+        elements: [],
+      },
+    ]);
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
     await expandEpisodesTree();
     fireEvent.click(await screen.findByTestId('ws-ep-storyboard'));
+
+    expect(await screen.findByTestId('ep-scene-card-200')).toBeInTheDocument();
+    expect(screen.getByTestId('episode-view-tabs')).toBeInTheDocument();
+    expect(mockSceneService.listScenes).toHaveBeenCalledWith('s1');
+    expect(screen.queryByTestId('mock-editor-shell')).toBeNull();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('routes a storyboard-surface workflow-strip node click (handleSelectNode) to the same surface panel', async () => {
+    mockScriptService.fetchScriptProjects.mockResolvedValue({
+      data: [
+        { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
+      ],
+      total: 1,
+    });
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    mockSceneService.listScenes.mockResolvedValue([
+      {
+        id: '200',
+        script_id: 's1',
+        chapter_id: null,
+        scene_number: null,
+        heading_int_ext: 'INT',
+        location_text: 'Kitchen',
+        time_of_day: 'DAY',
+        content_version: 1,
+        sort_order: 0,
+        elements: [],
+      },
+    ]);
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    fireEvent.click(await screen.findByTestId('workflow-strip-node'));
+
+    expect(await screen.findByTestId('ep-scene-card-200')).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-editor-shell')).toBeNull();
+  });
+
+  it('a scene card\'s Open button deep-links into the embedded editor at the storyboard rail view', async () => {
+    mockScriptService.fetchScriptProjects.mockResolvedValue({
+      data: [
+        { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
+      ],
+      total: 1,
+    });
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    mockSceneService.listScenes.mockResolvedValue([
+      {
+        id: '200',
+        script_id: 's1',
+        chapter_id: null,
+        scene_number: null,
+        heading_int_ext: 'INT',
+        location_text: 'Kitchen',
+        time_of_day: 'DAY',
+        content_version: 1,
+        sort_order: 0,
+        elements: [],
+      },
+    ]);
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    await screen.findByTestId('ep-scene-card-200');
+    fireEvent.click(screen.getByTestId('ep-scene-open-200'));
+
     const shell = await screen.findByTestId('mock-editor-shell');
     expect(shell).toHaveAttribute('data-script-id', 's1');
     expect(shell).toHaveAttribute('data-initial-rail-view', 'storyboard');
-    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('switches to the Shot List tab and exports CSV via the tabs\' actions-slot button', async () => {
+    mockScriptService.fetchScriptProjects.mockResolvedValue({
+      data: [
+        { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
+      ],
+      total: 1,
+    });
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    mockSceneService.listScenes.mockResolvedValue([
+      {
+        id: '200',
+        script_id: 's1',
+        chapter_id: null,
+        scene_number: '1',
+        heading_int_ext: 'INT',
+        location_text: 'Kitchen',
+        time_of_day: 'DAY',
+        content_version: 1,
+        sort_order: 0,
+        elements: [],
+      },
+    ]);
+    mockSceneService.listShots.mockResolvedValue([
+      {
+        id: '900',
+        scene_id: '200',
+        shot_number: 1,
+        shot_type: 'WIDE',
+        camera_angle: 'EYE',
+        camera_movement: 'STATIC',
+        focal_length: '35mm',
+        lighting: null,
+        description: 'Establishing shot.',
+        image_url: null,
+        thumbnail_url: null,
+        video_url: null,
+        status: 'empty',
+        sort_order: 0,
+      },
+    ]);
+    const createSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    await screen.findByTestId('ep-scene-card-200');
+    const tabs = screen.getByTestId('episode-view-tabs');
+    fireEvent.click(tabs.querySelector('[data-view="shotlist"]')!);
+
+    expect(await screen.findByTestId('ep-shotlist-row-900')).toBeInTheDocument();
+    // The table's own built-in Export button is suppressed (hideExport) — the
+    // one visible trigger lives in the tabs' actions slot, driven via ref.
+    expect(screen.getAllByTestId('ep-shotlist-export')).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('ep-shotlist-export'));
+    expect(createSpy).toHaveBeenCalledTimes(1);
   });
 
   it('re-resolves the mounted script for the newly selected episode via the ⇄ card', async () => {

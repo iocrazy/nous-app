@@ -130,6 +130,74 @@ const SCRIPTS = [
   },
 ];
 
+// A single-node workflow whose CURRENT node is storyboard-surfaced — drives
+// the Overview's storyboard surface panel (三视图主工作面, PR-A). Only used by
+// the test below that exercises it; the other tests in this file never stub
+// `/workflow` and keep getting the generic `{success:true,data:[]}` catch-all
+// from setupStubbedSession (has_workflow undefined → WorkflowSection's empty
+// "Set up workflow" CTA — unrelated pre-existing behavior, unaffected here).
+const WORKFLOW_NODE = {
+  id: 'wn1',
+  project_id: '1',
+  source_template_node_id: null,
+  legacy_stage_id: null,
+  name: 'Storyboard',
+  sort_order: 0,
+  parallel_group: null,
+  status: 'in_progress',
+  owner_user_id: null,
+  owner_agent_id: null,
+  planned_start: null,
+  planned_due: null,
+  review_required: false,
+  deliverable_required: false,
+  deliverable_label: null,
+  skipped: false,
+  surface: 'storyboard',
+  members: [],
+  completion_policy: 'owner',
+  events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false },
+};
+const WORKFLOW = { has_workflow: true, current_node_id: 'wn1', agents_active: 0, nodes: [WORKFLOW_NODE] };
+
+// One scene (Ep 1's script s1) with one shot — feeds EpisodeSceneBoard /
+// EpisodeShotListTable, both of which self-fetch via /scripts/{id}/scenes and
+// /scenes/{id}/shots (editor/sceneService.ts).
+const SCENES = [
+  {
+    id: '300',
+    script_id: 's1',
+    chapter_id: null,
+    scene_number: '1',
+    heading_int_ext: 'INT',
+    location_text: 'Kitchen',
+    time_of_day: 'DAY',
+    content_version: 1,
+    sort_order: 0,
+    content_json: [{ id: 'el1', type: 'action', text: 'She enters.' }],
+  },
+];
+const SHOTS_BY_SCENE: Record<string, unknown[]> = {
+  '300': [
+    {
+      id: '400',
+      scene_id: '300',
+      shot_number: 1,
+      shot_type: 'WIDE',
+      camera_angle: 'EYE',
+      camera_movement: 'STATIC',
+      focal_length: '35mm',
+      lighting: null,
+      description: 'Establishing shot of the kitchen.',
+      image_url: null,
+      thumbnail_url: null,
+      video_url: null,
+      status: 'empty',
+      sort_order: 0,
+    },
+  ],
+};
+
 /**
  * Installs the single `**\/api/v1/projects*` handler that dispatches on
  * pathname to the fixtures above. A RegExp on the pathname (rather than a
@@ -199,6 +267,43 @@ async function routeScriptsApi(page: Page): Promise<void> {
     }
     return route.fallback();
   });
+}
+
+/**
+ * Stubs `/api/v1/projects/{id}/workflow` — a separate route from
+ * `routeWorkspaceApi`'s catch-all (registered AFTER it in the tests that need
+ * it, so Playwright's most-recently-registered-wins ordering lets this one
+ * answer `/workflow` specifically while `routeWorkspaceApi`'s broader
+ * `/api/v1/projects*` regex keeps handling everything else unchanged).
+ * `fetchProjectWorkflow` (workflowService.ts) does NOT use the `{data}`
+ * envelope — the response body IS the ProjectWorkflow object directly.
+ */
+async function routeWorkflowApi(page: Page): Promise<void> {
+  await page.route(/\/api\/v1\/projects\/[^/]+\/workflow(\?|$)/, (route: Route) =>
+    route.fulfill({ json: WORKFLOW }),
+  );
+}
+
+/**
+ * Stubs the v2 editor's scene/shot endpoints (editor/sceneService.ts) that
+ * EpisodeSceneBoard / EpisodeShotListTable self-fetch (三视图主工作面, PR-A
+ * Task 3) — separate from `routeScriptsApi`'s `/api/v1/scripts/projects*`
+ * surface (script list/detail), a disjoint path shape under the same
+ * `/api/v1/scripts` prefix.
+ */
+async function routeSceneShotsApi(page: Page): Promise<void> {
+  await page.route(/\/api\/v1\/scripts\/[^/]+\/scenes(\?|$)/, (route: Route) =>
+    route.fulfill({ json: { success: true, data: SCENES } }),
+  );
+  await page.route(/\/api\/v1\/scenes\/[^/]+\/shots(\?|$)/, (route: Route) => {
+    const { pathname } = new URL(route.request().url());
+    const match = pathname.match(/^\/api\/v1\/scenes\/([^/]+)\/shots$/);
+    const sceneId = match?.[1] ?? '';
+    return route.fulfill({ json: { success: true, data: SHOTS_BY_SCENE[sceneId] ?? [] } });
+  });
+  await page.route(/\/api\/v1\/scenes\/[^/]+\/auto-storyboard$/, (route: Route) =>
+    route.fulfill({ json: { success: true, task_id: 'e2e-auto-task' } }),
+  );
 }
 
 test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
@@ -289,7 +394,7 @@ test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
     await page.screenshot({ path: 'e2e-artifacts/projects-workspace-light.png', fullPage: true });
   });
 
-  test('mounts the editor inline for Script/Storyboard and shows the disabled Publish child (PR-11)', async ({
+  test('mounts the editor inline for Script and shows the disabled Publish child (PR-11)', async ({
     page,
   }) => {
     await routeWorkspaceApi(page);
@@ -313,16 +418,40 @@ test.describe('Projects workspace shell — PR-10b Wave 2 modules', () => {
     await expect(page.getByTestId('workspace-sidebar')).toBeVisible();
     await expect(page.getByTestId('ws-overview')).toHaveCount(0);
 
-    // Storyboard child — the same embedded shell switches its centre pane to the
-    // storyboard view. The editor's own RailModules nav is suppressed in embedded
-    // mode (`{!embedded && <RailModules/>}` — the workspace sidebar is the single
-    // navigation), so assert the storyboard view itself took hold rather than a
-    // rail button's aria-current.
-    await page.getByTestId('ws-ep-storyboard').click();
-    await expect(page.locator('[data-editor-shell]')).toBeVisible();
-    await expect(page.getByTestId('storyboard-view')).toBeVisible();
-
     // Publish placeholder (G12) — visible, disabled, no module content.
+    await expect(page.getByTestId('ws-ep-publish')).toBeVisible();
+    await expect(page.getByTestId('ws-ep-publish')).toBeDisabled();
+  });
+
+  test('storyboard child lands on the Overview surface panel (scene board + shot list), not the embedded editor (PR-A)', async ({
+    page,
+  }) => {
+    await routeWorkspaceApi(page);
+    await routeScriptsApi(page);
+    await routeWorkflowApi(page);
+    await routeSceneShotsApi(page);
+    await page.goto(`${PROJECTS_URL}/1`);
+
+    await expect(page.getByTestId('workspace-topbar')).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId('ws-module-episodes').click();
+    await expect(page.getByTestId('ws-ep-card')).toHaveText(/Ep 1 — Pilot/);
+
+    // Storyboard child — 三视图主工作面 (PR-A): the sidebar's 分镜 row now lands
+    // back on Overview with the storyboard surface panel expanded (the scene
+    // board IS the view), not the embedded editor.
+    await page.getByTestId('ws-ep-storyboard').click();
+    await expect(page.getByTestId('ws-overview')).toBeVisible();
+    await expect(page.getByTestId('episode-view-tabs')).toBeVisible();
+    await expect(page.getByTestId('ep-scene-card-300')).toBeVisible();
+    await expect(page.locator('[data-editor-shell]')).toHaveCount(0);
+
+    // Shot List tab — the flat per-shot table for the same script.
+    await page.locator('[data-view="shotlist"]').click();
+    await expect(page.getByTestId('ep-shotlist-table')).toBeVisible();
+    await expect(page.getByTestId('ep-shotlist-row-400')).toBeVisible();
+
+    // Publish placeholder (G12) — still visible/disabled regardless of which
+    // surface view is active (it's the sidebar tree, not the content pane).
     await expect(page.getByTestId('ws-ep-publish')).toBeVisible();
     await expect(page.getByTestId('ws-ep-publish')).toBeDisabled();
   });

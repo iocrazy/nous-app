@@ -5,6 +5,7 @@
  * shells out to buildShotListCsv + a Blob/object-URL anchor download
  * (zipExport.ts:102 pattern).
  */
+import { createRef } from 'react';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Shot } from '../../editor/sceneService';
@@ -20,7 +21,7 @@ const svc = vi.hoisted(() => ({
 }));
 vi.mock('../../editor/sceneService', () => svc);
 
-import { EpisodeShotListTable } from './EpisodeShotListTable';
+import { EpisodeShotListTable, type EpisodeShotListTableHandle } from './EpisodeShotListTable';
 
 const scene = (over: Partial<SceneDoc> = {}): SceneDoc => ({
   id: '200',
@@ -136,5 +137,37 @@ describe('EpisodeShotListTable', () => {
     expect(blobArg.type).toMatch(/text\/csv/);
     expect(clickSpy).toHaveBeenCalledTimes(1);
     expect(revokeSpy).toHaveBeenCalledWith('blob:mock');
+  });
+
+  // Task 3 (主工作面接线): the Export trigger moves to EpisodeViewTabs' actions
+  // slot when the table is embedded in ProjectWorkspace — `hideExport`
+  // suppresses the built-in button, and the parent drives export through the
+  // forwarded ref instead (no second scenes/shots fetch at the parent).
+  it('hideExport suppresses the built-in Export button', async () => {
+    svc.listScenes.mockResolvedValue([scene({ id: '200' })]);
+    svc.listShots.mockResolvedValue([shot({ id: '900' })]);
+    render(<EpisodeShotListTable scriptId="1" hideExport />);
+
+    await waitFor(() => expect(screen.getByTestId('ep-shotlist-row-900')).toBeInTheDocument());
+    expect(screen.queryByTestId('ep-shotlist-export')).toBeNull();
+  });
+
+  it('exposes exportCsv on the forwarded ref, producing the same CSV blob as the built-in button', async () => {
+    svc.listScenes.mockResolvedValue([scene({ id: '200', scene_number: '1' })]);
+    svc.listShots.mockResolvedValue([shot({ id: '900' })]);
+    const createSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const ref = createRef<EpisodeShotListTableHandle>();
+
+    render(<EpisodeShotListTable ref={ref} scriptId="42" hideExport />);
+    await waitFor(() => expect(screen.getByTestId('ep-shotlist-row-900')).toBeInTheDocument());
+
+    expect(screen.queryByTestId('ep-shotlist-export')).toBeNull();
+    ref.current?.exportCsv();
+
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    const blobArg = createSpy.mock.calls[0][0] as Blob;
+    expect(blobArg.type).toMatch(/text\/csv/);
   });
 });
