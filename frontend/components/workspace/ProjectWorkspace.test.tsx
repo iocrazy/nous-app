@@ -523,6 +523,53 @@ describe('ProjectWorkspace', () => {
     expect(createSpy).toHaveBeenCalledTimes(1);
   });
 
+  // Review fix (Task 3 round 1, Critical): the surface panel shows by DEFAULT
+  // on Overview landing whenever the current node is storyboard-surfaced —
+  // no click required. Its scriptId resolution MUST be read-only; this test
+  // is the anti-regression pin — zero create calls from a passive render.
+  it('never provisions a script just from landing on the storyboard surface panel — renders the "no script" empty state instead', async () => {
+    mockScriptService.fetchScriptProjects.mockResolvedValue({ data: [], total: 0 });
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    expect(await screen.findByTestId('episode-surface-no-script')).toBeInTheDocument();
+    expect(screen.getByTestId('episode-surface-start-storyboard')).toBeInTheDocument();
+    expect(screen.queryByTestId('ep-scene-card-200')).toBeNull();
+    expect(mockScriptService.createScriptProject).not.toHaveBeenCalled();
+  });
+
+  it('clicking "Start Storyboard" provisions a script and the panel refreshes to the scene board', async () => {
+    mockScriptService.fetchScriptProjects.mockResolvedValue({ data: [], total: 0 });
+    mockScriptService.createScriptProject.mockResolvedValue({ id: 'created-sb', name: 'Ep 1 — Pilot' });
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    mockSceneService.listScenes.mockResolvedValue([
+      {
+        id: '200',
+        script_id: 'created-sb',
+        chapter_id: null,
+        scene_number: null,
+        heading_int_ext: 'INT',
+        location_text: 'Kitchen',
+        time_of_day: 'DAY',
+        content_version: 1,
+        sort_order: 0,
+        elements: [],
+      },
+    ]);
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    fireEvent.click(await screen.findByTestId('episode-surface-start-storyboard'));
+
+    expect(await screen.findByTestId('ep-scene-card-200')).toBeInTheDocument();
+    expect(mockScriptService.createScriptProject).toHaveBeenCalledTimes(1);
+    expect(mockScriptService.createScriptProject).toHaveBeenCalledWith({
+      project_id: 'p1',
+      name: 'Ep 1 — Pilot',
+      episode_id: '1',
+    });
+    expect(mockSceneService.listScenes).toHaveBeenCalledWith('created-sb');
+  });
+
   it('re-resolves the mounted script for the newly selected episode via the ⇄ card', async () => {
     mockScriptService.fetchScriptProjects.mockResolvedValue({
       data: [

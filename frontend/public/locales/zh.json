@@ -1416,6 +1416,8 @@
       "label": "视图"
     },
     "episodeSurface": {
+      "noScriptHint": "该剧集还没有剧本。",
+      "startStoryboard": "开始分镜",
       "openCanvas": "打开画布",
       "openScript": "打开剧本编辑器",
       "openBeats": "打开节拍视图",

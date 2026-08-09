@@ -286,34 +286,51 @@ export function ProjectWorkspace({
   // cross-tab / lost-race case as defense in depth.
   const provisionInFlightRef = useRef<Map<string, Promise<string | null>>>(new Map());
 
+  // Read-only half of the resolve chain: looks for the episode's most
+  // recently updated script WITHOUT creating one. Shared by
+  // `resolveOrProvisionScript` below (which falls through to create) and the
+  // storyboard surface panel's probe effect (which must NOT create — see the
+  // Task 3 review fix: a passive Overview landing on a storyboard-surface
+  // node must never silently provision an empty script just because the
+  // panel rendered).
+  const findExistingScript = useCallback(
+    async (episode: EpisodeProgress): Promise<string | null> => {
+      const result = await fetchScriptProjects(project.id);
+      const candidates = (result.data ?? []).filter(
+        (s) => String(s.episode_id ?? '') === String(episode.episode_id),
+      );
+      if (candidates.length === 0) return null;
+      candidates.sort(
+        (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+      );
+      return candidates[0].id;
+    },
+    [project.id],
+  );
+
   const resolveOrProvisionScript = useCallback(
     (episode: EpisodeProgress): Promise<string | null> => {
       const key = String(episode.episode_id);
       const inflight = provisionInFlightRef.current.get(key);
       if (inflight) return inflight;
       const run = (async (): Promise<string | null> => {
-        const result = await fetchScriptProjects(project.id);
-        const candidates = (result.data ?? []).filter(
-          (s) => String(s.episode_id ?? '') === String(episode.episode_id),
-        );
-        if (candidates.length === 0) {
-          // Pre-epic projects have episodes with no script (mig353 backfilled
-          // Episode 1 but only attached scripts that already existed) — the
-          // old silent fall-back to the Episodes pane read as "点了没反应"
-          // (prod feedback 2026-07-11). Atomic create+bind: the backend
-          // returns the episode's existing active script if one already
-          // exists, so a lost race still can't duplicate.
-          const created = await createScriptProject({
-            project_id: project.id,
-            name: episode.title,
-            episode_id: episode.episode_id,
-          });
-          return created.id;
-        }
-        candidates.sort(
-          (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-        );
-        return candidates[0].id;
+        const existing = await findExistingScript(episode);
+        if (existing) return existing;
+        // Pre-epic projects have episodes with no script (mig353 backfilled
+        // Episode 1 but only attached scripts that already existed) — the
+        // old silent fall-back to the Episodes pane read as "点了没反应"
+        // (prod feedback 2026-07-11). Atomic create+bind: the backend
+        // returns the episode's existing active script if one already
+        // exists, so a lost race still can't duplicate. Only reached from an
+        // explicit user action (Script/Beats work views, the scene card's
+        // Open deep-link, or the storyboard panel's "Start Storyboard" CTA)
+        // — never from a passive render, see findExistingScript above.
+        const created = await createScriptProject({
+          project_id: project.id,
+          name: episode.title,
+          episode_id: episode.episode_id,
+        });
+        return created.id;
       })();
       provisionInFlightRef.current.set(key, run);
       // Housekeeping branch: clear the in-flight entry once settled. The
@@ -331,7 +348,7 @@ export function ProjectWorkspace({
         .catch(() => {});
       return run;
     },
-    [project.id],
+    [project.id, findExistingScript],
   );
 
   // Resolve a given episode's most recently updated script and mount
@@ -524,36 +541,96 @@ export function ProjectWorkspace({
   const activeEpisodeView = episodeView ?? surfaceViews[0]?.key ?? null;
   const showSurfacePanel = showOverview && surfaceViews.length > 0;
 
-  // Script id for the storyboard/shot-list surface views (Task 3, 主工作面接线).
-  // Same resolve-or-provision chain `openEpisodeScript` uses for the embedded
-  // editor (`resolveOrProvisionScript` above) — but WITHOUT switching into the
-  // editor: EpisodeSceneBoard / EpisodeShotListTable self-fetch scenes/shots
-  // once they have it. Gated on the current node's view set actually
-  // including 'storyboard' (SURFACE_VIEWS always pairs it with canvas +
-  // shotlist, nodeSurface.ts) so a writer who never opens a storyboard-surface
-  // node doesn't silently provision a script for every episode they land on.
-  const [surfaceScriptId, setSurfaceScriptId] = useState<string | null>(null);
+  // Script id for the storyboard/shot-list surface views (Task 3, 主工作面接线;
+  // review fix, Task 3 round 1): the panel is reached by a passive Overview
+  // landing just as often as by an explicit click (a project whose current
+  // node sits on storyboard shows this panel by DEFAULT), so this probe MUST
+  // be read-only — `findExistingScript`, never `resolveOrProvisionScript`.
+  // Silently creating an empty script on mere render was the bug: opening a
+  // project that has no script yet used to provision one before the writer
+  // touched anything. `'missing'` renders an explicit "Start Storyboard" CTA
+  // (handleStartStoryboard below) — provisioning only happens from THAT
+  // click, same as every other write in this file (script/beats views, the
+  // scene card's Open deep-link).
+  type SurfaceScriptState =
+    | { status: 'loading' }
+    | { status: 'ready'; scriptId: string }
+    | { status: 'missing' }
+    | { status: 'provisioning' };
+  const [surfaceScript, setSurfaceScript] = useState<SurfaceScriptState>({ status: 'loading' });
   const needsSurfaceScriptId =
     showSurfacePanel && surfaceViews.some((v) => v.key === 'storyboard');
   useEffect(() => {
     if (!needsSurfaceScriptId || !currentEpisode) {
-      setSurfaceScriptId(null);
+      setSurfaceScript({ status: 'loading' });
       return;
     }
     let cancelled = false;
-    resolveOrProvisionScript(currentEpisode)
+    setSurfaceScript({ status: 'loading' });
+    findExistingScript(currentEpisode)
       .then((id) => {
-        if (!cancelled) setSurfaceScriptId(id);
+        if (cancelled) return;
+        setSurfaceScript(id ? { status: 'ready', scriptId: id } : { status: 'missing' });
       })
       .catch((err) => {
-        console.error('[ProjectWorkspace] failed to resolve surface script id:', err);
-        if (!cancelled) setSurfaceScriptId(null);
+        console.error('[ProjectWorkspace] failed to probe surface script:', err);
+        if (!cancelled) setSurfaceScript({ status: 'missing' });
       });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-resolve only on an episode-id change or the panel/view-set flipping; `currentEpisode`'s object identity changes on every episodes refetch (mirrors the analogous effect above at ~L390)
-  }, [needsSurfaceScriptId, currentEpisodeId, resolveOrProvisionScript]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-probe only on an episode-id change or the panel/view-set flipping; `currentEpisode`'s object identity changes on every episodes refetch (mirrors the analogous effect above at ~L390)
+  }, [needsSurfaceScriptId, currentEpisodeId, findExistingScript]);
+
+  // The ONLY write trigger for the surface panel's script — fired exclusively
+  // by the "Start Storyboard" CTA (an explicit click), never by the probe
+  // effect above.
+  const handleStartStoryboard = useCallback(() => {
+    if (!currentEpisode || surfaceScript.status === 'provisioning') return;
+    setSurfaceScript({ status: 'provisioning' });
+    resolveOrProvisionScript(currentEpisode)
+      .then((id) => {
+        setSurfaceScript(id ? { status: 'ready', scriptId: id } : { status: 'missing' });
+      })
+      .catch((err) => {
+        console.error('[ProjectWorkspace] failed to start storyboard:', err);
+        addToast(t('common.error'), 'error');
+        setSurfaceScript({ status: 'missing' });
+      });
+  }, [currentEpisode, surfaceScript.status, resolveOrProvisionScript, addToast, t]);
+
+  // Shared gate for the storyboard/shot-list panes while `surfaceScript` isn't
+  // 'ready': a spinner during the read-only probe (or a CTA-triggered
+  // provision), or the "no script yet" empty state with the explicit
+  // "Start Storyboard" CTA — the ONLY thing that calls handleStartStoryboard.
+  function renderSurfaceScriptGate() {
+    if (surfaceScript.status === 'missing') {
+      return (
+        <div
+          data-testid="episode-surface-no-script"
+          className="rounded-lg border border-dashed border-line bg-island-2/40 px-6 py-10 text-center"
+        >
+          <p className="text-sm font-medium text-content-2">
+            {t('projects.episodeSurface.noScriptHint')}
+          </p>
+          <button
+            type="button"
+            data-testid="episode-surface-start-storyboard"
+            onClick={handleStartStoryboard}
+            className="mt-3 rounded-md bg-[var(--accent-soft)] px-4 py-2 text-sm font-medium text-[var(--accent-text)] hover:opacity-90"
+          >
+            {t('projects.episodeSurface.startStoryboard')}
+          </button>
+        </div>
+      );
+    }
+    // 'loading' (initial probe) or 'provisioning' (CTA click in flight).
+    return (
+      <div className="flex justify-center py-10">
+        <Loading center />
+      </div>
+    );
+  }
 
   // Imperative handle into the mounted EpisodeShotListTable (hideExport) so
   // the Export trigger can live in EpisodeViewTabs' `actions` slot instead of
@@ -640,7 +717,7 @@ export function ProjectWorkspace({
                       <button
                         type="button"
                         data-testid="ep-shotlist-export"
-                        disabled={!surfaceScriptId}
+                        disabled={surfaceScript.status !== 'ready'}
                         onClick={() => shotListTableRef.current?.exportCsv()}
                         className="rounded-md border border-line px-3 py-1.5 text-[13px] font-medium text-content hover:bg-island-2 disabled:opacity-50"
                       >
@@ -659,33 +736,32 @@ export function ProjectWorkspace({
                   ) : activeEpisodeView === 'storyboard' ? (
                     // Storyboard's primary face: a stream of scene cards, each
                     // with an Open deep-link into the real editor and an Auto
-                    // Storyboard dispatch — see EpisodeSceneBoard.
+                    // Storyboard dispatch — see EpisodeSceneBoard. 'missing' /
+                    // 'loading' render the shared read-only-probe gate below —
+                    // provisioning a script never happens just from viewing
+                    // this panel (see the state comment above).
                     <div data-testid="episode-view-storyboard" className="min-h-[24rem]">
-                      {surfaceScriptId ? (
+                      {surfaceScript.status === 'ready' ? (
                         <EpisodeSceneBoard
-                          scriptId={surfaceScriptId}
+                          scriptId={surfaceScript.scriptId}
                           onOpenScene={(sceneId) => handleOpenWorkView('storyboard', { sceneId })}
                         />
                       ) : (
-                        <div className="flex justify-center py-10">
-                          <Loading center />
-                        </div>
+                        renderSurfaceScriptGate()
                       )}
                     </div>
                   ) : activeEpisodeView === 'shotlist' ? (
                     // Flat per-shot table (Export lives in the tabs' actions
                     // slot above, driven through shotListTableRef).
                     <div data-testid="episode-view-shotlist" className="min-h-[24rem]">
-                      {surfaceScriptId ? (
+                      {surfaceScript.status === 'ready' ? (
                         <EpisodeShotListTable
                           ref={shotListTableRef}
-                          scriptId={surfaceScriptId}
+                          scriptId={surfaceScript.scriptId}
                           hideExport
                         />
                       ) : (
-                        <div className="flex justify-center py-10">
-                          <Loading center />
-                        </div>
+                        renderSurfaceScriptGate()
                       )}
                     </div>
                   ) : (

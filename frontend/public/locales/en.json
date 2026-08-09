@@ -1416,6 +1416,8 @@
       "label": "Views"
     },
     "episodeSurface": {
+      "noScriptHint": "This episode doesn't have a script yet.",
+      "startStoryboard": "Start Storyboard",
       "openCanvas": "Open Canvas",
       "openScript": "Open Script Editor",
       "openBeats": "Open Beats View",
