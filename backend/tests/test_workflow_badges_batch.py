@@ -65,11 +65,11 @@ async def test_badges_shape_and_position(monkeypatch):
             [(100, 900), (200, None), (300, None)],  # legacy cursors
             [],  # episode cursors (B6 T5) — none of these projects are per-episode
             [
-                (100, 900, "Script", 0, False),
-                (100, 901, "Storyboard", 1, False),
-                (100, 902, "Voiceover", 2, True),  # skipped → not counted
-                (200, 910, "Editing", 0, False),
-            ],  # nodes
+                (100, 900, "Script", 0, False, None),
+                (100, 901, "Storyboard", 1, False, None),
+                (100, 902, "Voiceover", 2, True, None),  # skipped → not counted
+                (200, 910, "Editing", 0, False, None),
+            ],  # nodes (legacy → episode_id None)
             [(100, 2)],  # running agent counts
         ]
     )
@@ -114,9 +114,9 @@ async def test_badges_prefers_earliest_cursored_episode_over_legacy_column(
             # the smallest-sort_order episode that has a cursor set.
             [(400, 950)],
             [
-                (400, 940, "Script", 0, False),
-                (400, 950, "Storyboard", 1, False),
-            ],  # nodes
+                (400, 940, "Script", 0, False, 51),
+                (400, 950, "Storyboard", 1, False, 51),
+            ],  # nodes (single episode 51)
             [],  # running agent counts
         ]
     )
@@ -134,13 +134,47 @@ async def test_badges_prefers_earliest_cursored_episode_over_legacy_column(
 
 
 @pytest.mark.asyncio
+async def test_badges_scope_total_and_position_to_the_cursor_episode(monkeypatch):
+    """B6 尾巴(2026-08-09): 按集项目的 total/position 曾是全项目口径 —
+    3 集 × 3 节点的项目会显示「X of 9」。改为按游标节点所属集计:
+    total = 该集非 skip 节点数,position = 游标在该集内的序。
+    legacy 项目(episode_id 全 None)口径逐字不变(None 集合就是全项目)。"""
+    session = _FakeSession(
+        [
+            [(500, None)],  # legacy cursor: none
+            [(500, 961)],  # episode cursor → ep51 的第 2 个节点
+            [
+                (500, 960, "Script", 0, False, 51),
+                (500, 961, "Storyboard", 1, False, 51),
+                (500, 962, "Editing", 2, False, 51),
+                (500, 970, "Script", 0, False, 52),
+                (500, 971, "Storyboard", 1, False, 52),
+                (500, 972, "Editing", 2, False, 52),
+                (500, 973, "Extra", 3, True, 52),  # skipped,不影响任何口径
+            ],  # nodes: 2 集 × 3 节点
+            [],  # running agent counts
+        ]
+    )
+    _install(monkeypatch, session)
+
+    out = await ProjectStageNodesRepository().workflow_badges_for_projects([500])
+
+    assert out["500"] == {
+        "current_node_name": "Storyboard",
+        "workflow_total": 3,  # 只数游标所在集,不是 6
+        "workflow_position": 2,  # 集内序,不是全项目序
+        "agents_active": 0,
+    }
+
+
+@pytest.mark.asyncio
 async def test_badges_query_count_is_constant_across_project_counts(monkeypatch):
     many = list(range(1, 51))  # 50 projects
     session = _FakeSession(
         [
             [(p, None) for p in many],
             [],
-            [(p, p * 10, "Script", 0, False) for p in many],
+            [(p, p * 10, "Script", 0, False, None) for p in many],
             [],
         ]
     )
