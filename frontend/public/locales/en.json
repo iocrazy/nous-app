@@ -1425,6 +1425,15 @@
       "openRenders": "Open Renders",
       "editorEntryHint": "This view opens in the episode editor."
     },
+    "sceneBoard": {
+      "open": "Open",
+      "autoStoryboard": "Auto Storyboard",
+      "autoStoryboardBusy": "Running…",
+      "confirmAuto": "Confirm?",
+      "noShots": "Run Auto Storyboard to hand this scene to the agent",
+      "emptyScene": "Scene has no content yet — the agent will ask first",
+      "noScenes": "No scenes yet"
+    },
     "title": "All Projects",
     "recentEmpty": "No recent items",
     "view": {

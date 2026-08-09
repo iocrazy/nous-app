@@ -28,6 +28,12 @@ export interface SceneDoc {
   id: string;
   script_id: string;
   chapter_id: string | null;
+  /** Slate scene number (e.g. "12", "12A"); null/absent when unassigned.
+   *  Already passed through by sceneService's `...rest` spread — this type
+   *  just catches up (triview Task 1). Optional (like position_x/y below) so
+   *  the many existing SceneDoc test literals that predate this field don't
+   *  need touching. */
+  scene_number?: string | null;
   heading_int_ext: string | null;
   location_text: string | null;
   time_of_day: string | null;
