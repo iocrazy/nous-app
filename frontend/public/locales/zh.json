@@ -1432,7 +1432,12 @@
       "confirmAuto": "确认？",
       "noShots": "运行自动分镜，把这场戏交给 agent 处理",
       "emptyScene": "该场景还没有内容 — agent 会先询问",
-      "noScenes": "暂无场景"
+      "noScenes": "暂无场景",
+      "sceneLabel": "场次",
+      "ieLabel": "内外",
+      "locationLabel": "地点",
+      "dayNightLabel": "日夜",
+      "shotBadge": "镜头 {{scene}}-{{shot}}"
     },
     "title": "全部项目",
     "recentEmpty": "暂无最近编辑",

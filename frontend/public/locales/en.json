@@ -1432,7 +1432,12 @@
       "confirmAuto": "Confirm?",
       "noShots": "Run Auto Storyboard to hand this scene to the agent",
       "emptyScene": "Scene has no content yet — the agent will ask first",
-      "noScenes": "No scenes yet"
+      "noScenes": "No scenes yet",
+      "sceneLabel": "Scene",
+      "ieLabel": "I-E",
+      "locationLabel": "Location",
+      "dayNightLabel": "D-N",
+      "shotBadge": "SHOT {{scene}}-{{shot}}"
     },
     "title": "All Projects",
     "recentEmpty": "No recent items",

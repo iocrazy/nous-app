@@ -126,25 +126,31 @@ export function EpisodeSceneBoard({ scriptId, onOpenScene }: EpisodeSceneBoardPr
             <div className="p-4">
               <div className="grid grid-cols-2 gap-x-4 gap-y-2 mb-3">
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider text-content-3">Scene</div>
+                  <div className="text-[10px] uppercase tracking-wider text-content-3">
+                    {t('projects.sceneBoard.sceneLabel')}
+                  </div>
                   <div className="text-sm font-medium text-content">{num}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider text-content-3">I-E</div>
+                  <div className="text-[10px] uppercase tracking-wider text-content-3">
+                    {t('projects.sceneBoard.ieLabel')}
+                  </div>
                   <div className="text-sm font-medium text-content">
                     {sceneDoc.heading_int_ext ?? '—'}
                   </div>
                 </div>
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-content-3">
-                    Location
+                    {t('projects.sceneBoard.locationLabel')}
                   </div>
                   <div className="text-sm font-medium text-content">
                     {sceneDoc.location_text ?? '—'}
                   </div>
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider text-content-3">D-N</div>
+                  <div className="text-[10px] uppercase tracking-wider text-content-3">
+                    {t('projects.sceneBoard.dayNightLabel')}
+                  </div>
                   <div className="text-sm font-medium text-content">
                     {sceneDoc.time_of_day ?? '—'}
                   </div>
@@ -203,7 +209,10 @@ export function EpisodeSceneBoard({ scriptId, onOpenScene }: EpisodeSceneBoardPr
                         <div className="h-8 w-12 rounded bg-island-2 shrink-0" />
                       )}
                       <span className="font-mono text-[10px] font-bold text-content-2 shrink-0">
-                        SHOT {num}-{shot.shot_number ?? shotIdx + 1}
+                        {t('projects.sceneBoard.shotBadge', {
+                          scene: num,
+                          shot: shot.shot_number ?? shotIdx + 1,
+                        })}
                       </span>
                       <span className="text-[12px] text-content-3 truncate">
                         {shot.description ?? ''}
