@@ -1439,6 +1439,16 @@
       "dayNightLabel": "日夜",
       "shotBadge": "镜头 {{scene}}-{{shot}}"
     },
+    "shotList": {
+      "export": "导出 CSV",
+      "frame": "画面",
+      "shot": "镜头",
+      "type": "类型",
+      "angle": "角度",
+      "move": "运动",
+      "lens": "焦段",
+      "description": "描述"
+    },
     "title": "全部项目",
     "recentEmpty": "暂无最近编辑",
     "view": {

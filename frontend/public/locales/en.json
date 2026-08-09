@@ -1439,6 +1439,16 @@
       "dayNightLabel": "D-N",
       "shotBadge": "SHOT {{scene}}-{{shot}}"
     },
+    "shotList": {
+      "export": "Export CSV",
+      "frame": "Frame",
+      "shot": "Shot",
+      "type": "Type",
+      "angle": "Angle",
+      "move": "Move",
+      "lens": "Lens",
+      "description": "Description"
+    },
     "title": "All Projects",
     "recentEmpty": "No recent items",
     "view": {
