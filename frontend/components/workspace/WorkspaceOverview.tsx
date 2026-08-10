@@ -1,74 +1,96 @@
 /**
- * WorkspaceOverview — the workspace shell's landing module (spec frame:
- * "Overview(落地页)", decision G6). A film-styled Continue card (slate stripe +
- * mono read-out, deep-links into the current episode's studio) + summary tiles
- * per module + a recent-activity line reusing the same copy as ProjectCard's
- * activity row.
+ * WorkspaceOverview — the workspace shell's landing module, rewritten as an
+ * episode accordion (IA redesign Task 4, spec `2026-08-10-workspace-ia-redesign`).
+ *
+ * Replaces the old film-styled Continue card + summary-tile grid + full-project
+ * workflow strip layout: one row per episode (`EpisodeSummaryRow`), the row
+ * addressed by the URL (`expandedEpisodeId`, Task 1's `ep=`) expands to show
+ * that episode's workflow strip and the Task 5 node-card slot
+ * (`renderNodeCard`, a placeholder until that task lands). The recent-activity
+ * line stays at the bottom (unchanged copy/logic).
+ *
+ * `workflow` scoping (binding note, read before touching the strip wiring
+ * below): `ProjectWorkspace`'s `useProjectWorkflow` fetches instance nodes for
+ * exactly ONE episode — whichever is `currentEpisodeId` (the server REQUIRES
+ * `episode_id`, B6 PR-2 task 10 — see `workflowService.fetchProjectWorkflow`).
+ * `ProjectStageNode` itself carries no `episode_id` field to filter a
+ * project-wide node list by (confirmed against `types.ts`), so there is no
+ * way — nor need — to slice `workflow.nodes` per row. `onExpandEpisode`
+ * always routes a non-null id through `ProjectWorkspace.handleEpisodeChange`,
+ * which sets `currentEpisodeId` AND writes URL `ep` in the SAME call (Task 1
+ * contract), so `expandedEpisodeId` and the episode `workflow` was fetched
+ * for are always the same episode whenever a row is open. The accordion body
+ * below therefore renders `workflow.nodes` as-is for whichever row is open —
+ * filtering by a nonexistent field would just silently break the strip.
+ *
+ * No-workflow / attach-CTA flow (ambiguity #1): kept reachable via the
+ * existing `WorkflowSection` (unchanged import) — it owns the "Set up
+ * workflow" empty state, so a No-workflow project doesn't lose that entry
+ * point just because the attached-workflow case moved to the accordion. Only
+ * rendered once `workflow` has resolved AND turned out to have
+ * `has_workflow === false`; a still-loading `workflow === null` renders
+ * nothing extra (matches the pre-rewrite behavior — `WorkflowSection` cannot
+ * render with a null `workflow` prop, it's a required, non-nullable field).
  */
 
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowRight, Clock, MessageCircleQuestion } from 'lucide-react';
+import { Clock, MessageCircleQuestion } from 'lucide-react';
 import { formatRelativeTime } from '../../utils/relativeTime';
 import { WorkflowSection } from '../workflow/WorkflowSection';
+import { WorkflowStrip } from '../workflow/WorkflowStrip';
 import { EpisodeSummaryRow } from './EpisodeSummaryRow';
-import type { EpisodeProgress, Project, ProjectStageNode, ProjectWorkflow } from '../../types';
+import type { EpisodeProgress, Project, ProjectWorkflow } from '../../types';
 
-interface WorkspaceOverviewProps {
+export interface WorkspaceOverviewProps {
   project: Project;
-  currentEpisode: EpisodeProgress | null;
-  /** 1-based index of the current episode (for the CONTINUE · EP read-out). */
-  epNumber: number | null;
   episodes: EpisodeProgress[];
-  /** Current episode id (B2 #1712) — threaded to WorkflowSection so its
-   * start-early call scopes to this episode; null → project-level. */
-  episodeId?: string | null;
-  onOpenScript: () => void;
-  /** The project's workflow instance (null while loading / no workflow). */
+  /** The current episode's workflow instance (null while loading / before an
+   * episode has resolved). Internally filtered to the expanded row — see the
+   * file-doc "workflow scoping" note above for why no per-node filter exists. */
   workflow?: ProjectWorkflow | null;
+  /** URL `ep=` (Task 1) — which episode's row is expanded. null = all collapsed. */
+  expandedEpisodeId: string | null;
+  /** URL `node=` — the node selected within the expanded episode's strip. */
+  selectedNodeId: string | null;
+  /** Row toggle: a non-null id opens that episode's row (switching the
+   * workspace's current episode via `ProjectWorkspace.handleEpisodeChange`,
+   * which also writes URL `ep=`); `null` collapses the currently-open row
+   * without changing which episode is current (URL `ep=` stays put). */
+  onExpandEpisode: (episodeId: string | null) => void;
+  /** Strip node click — writes URL `node=`; does not itself navigate/route
+   * (Task 5's node card owns what "selected" actually does). */
+  onSelectNode: (nodeId: string) => void;
+  /** Task 5's `EpisodeNodeCard` — a placeholder slot until that task lands. */
+  renderNodeCard: (episodeId: string, nodeId: string | null) => ReactNode;
+  /** Gates the no-workflow empty-state CTA (`WorkflowSection`'s own check) —
+   * mirrors the pre-rewrite default. */
   canWrite?: boolean;
   onReloadWorkflow?: () => void;
-  onRequestAdvance?: (direction: 'forward' | 'back') => void;
-  onOpenTodolist?: () => void;
-  /** Navigate to a node's dedicated Stage Board (H3 Run now chip) — threaded
-   * through to WorkflowSection → CurrentNodeCard. */
-  onOpenStage?: (nodeId: string) => void;
-  /** Strip node click (B5 T-B5.3) — routes by the node's surface. Threaded to
-   * WorkflowSection → WorkflowStrip. */
-  onSelectNode?: (node: ProjectStageNode) => void;
-  focusNodeId?: string | null;
-  /** Click a rollup row → switch the workspace's current episode (B5 T-B5.5).
-   * Reuses ProjectWorkspace's `handleEpisodeChange`. */
-  onSelectEpisode?: (episodeId: string) => void;
 }
 
 export function WorkspaceOverview({
   project,
-  currentEpisode,
-  epNumber,
   episodes,
-  episodeId = null,
-  onOpenScript,
   workflow = null,
+  expandedEpisodeId,
+  selectedNodeId,
+  onExpandEpisode,
+  onSelectNode,
+  renderNodeCard,
   canWrite = true,
   onReloadWorkflow,
-  onRequestAdvance,
-  onOpenTodolist,
-  onOpenStage,
-  onSelectNode,
-  focusNodeId = null,
-  onSelectEpisode,
 }: WorkspaceOverviewProps) {
   const { t } = useTranslation();
 
-  const totalShotsDone = episodes.reduce((sum, e) => sum + e.shots_done, 0);
-  const totalShotsTotal = episodes.reduce((sum, e) => sum + e.shots_total, 0);
-  const firstEpisodeStatus = episodes[0]?.status ?? null;
   const activity = project.latest_activity ?? null;
 
   // "N episodes awaiting your answer" (B4 真数据, 2026-08-08): episodes/progress
-  // 现在带每集 workflow.needs_input_count(agent 提问停等回答的镜像 issue 数)。
-  // 任一集带 workflow 信号即用真数据;全部缺省(旧后端/e2e 桩)时回退 pre-B4 的
-  // planned 近似,与 EpisodeSummaryRow 的进度条降级同策略。
+  // now bring each episode's workflow.needs_input_count (agent-question
+  // mirror-issue count). Any episode carrying a workflow signal switches on
+  // real data; all missing (old backend / e2e stubs) falls back to the
+  // pre-B4 planned-count approximation — same degrade strategy as
+  // EpisodeSummaryRow's progress bar.
   const hasWorkflowSignal = episodes.some((e) => e.workflow != null);
   const awaitingCount = hasWorkflowSignal
     ? episodes.filter((e) => (e.workflow?.needs_input_count ?? 0) > 0).length
@@ -76,61 +98,22 @@ export function WorkspaceOverview({
 
   return (
     <div data-testid="ws-overview" className="flex flex-col gap-3 py-3">
-      {workflow && (
+      {workflow && !workflow.has_workflow && (
         <WorkflowSection
           projectId={project.id}
           teamId={project.team_id ?? ''}
-          episodeId={episodeId}
+          episodeId={expandedEpisodeId}
           workflow={workflow}
           canWrite={canWrite}
           onReload={onReloadWorkflow ?? (() => undefined)}
-          onRequestAdvance={onRequestAdvance ?? (() => undefined)}
-          onOpenTodolist={onOpenTodolist ?? (() => undefined)}
-          onOpenStage={onOpenStage}
-          onSelectNode={onSelectNode}
-          focusNodeId={focusNodeId}
+          onRequestAdvance={() => undefined}
+          onOpenTodolist={() => undefined}
+          focusNodeId={null}
         />
-      )}
-      {currentEpisode && (
-        <div
-          data-testid="ws-continue-card"
-          className="rounded-xl border border-[var(--accent-border)] bg-island p-4 flex items-center justify-between gap-4"
-        >
-          <div className="flex items-center gap-3 min-w-0">
-            <span
-              aria-hidden
-              className="w-9 h-5 rounded-[4px] shrink-0"
-              style={{
-                background: 'repeating-linear-gradient(-45deg,#f4f1fb 0 5px,#16121f 5px 10px)',
-                border: '1px solid var(--line-strong)',
-              }}
-            />
-            <div className="min-w-0">
-              <div className="font-mono text-[9px] font-bold tracking-[0.14em] text-[var(--accent-text)]">
-                CONTINUE{epNumber ? ` · EP${epNumber}` : ''}
-              </div>
-              <div className="text-sm font-medium text-ink-100 mt-0.5 truncate">
-                {currentEpisode.title}
-              </div>
-              <div className="font-mono text-[11px] text-ink-400 mt-1">
-                {currentEpisode.scene_count} SC · SHOTS {currentEpisode.shots_done}/
-                {currentEpisode.shots_total} · CUTS {currentEpisode.renders_count}
-              </div>
-            </div>
-          </div>
-          <button
-            data-testid="ws-open-episode-btn"
-            onClick={onOpenScript}
-            className="flex items-center gap-1.5 shrink-0 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white font-semibold text-sm px-4 py-2 transition-colors"
-          >
-            {t('projects.workspace.overview.openEpisode')}
-            <ArrowRight size={15} />
-          </button>
-        </div>
       )}
 
       {episodes.length > 0 && (
-        <div data-testid="ws-rollup" className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between px-1">
             <div className="text-[11.5px] font-semibold text-ink-200">
               {t('projects.workspace.modules.episodes')}
@@ -148,42 +131,34 @@ export function WorkspaceOverview({
             )}
           </div>
           <div className="flex flex-col gap-1.5">
-            {episodes.map((ep, i) => (
-              <EpisodeSummaryRow
-                key={ep.episode_id}
-                episode={ep}
-                epNumber={i + 1}
-                isCurrent={ep.episode_id === currentEpisode?.episode_id}
-                onSelect={onSelectEpisode}
-              />
-            ))}
+            {episodes.map((ep, i) => {
+              const isOpen = ep.episode_id === expandedEpisodeId;
+              return (
+                <EpisodeSummaryRow
+                  key={ep.episode_id}
+                  episode={ep}
+                  epNumber={i + 1}
+                  isOpen={isOpen}
+                  onToggle={onExpandEpisode}
+                >
+                  {isOpen && (
+                    <>
+                      {workflow && (
+                        <WorkflowStrip
+                          nodes={workflow.nodes}
+                          currentNodeId={workflow.current_node_id}
+                          onSelectNode={(node) => onSelectNode(String(node.id))}
+                        />
+                      )}
+                      {renderNodeCard(ep.episode_id, selectedNodeId ?? workflow?.current_node_id ?? null)}
+                    </>
+                  )}
+                </EpisodeSummaryRow>
+              );
+            })}
           </div>
         </div>
       )}
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" data-testid="ws-overview-summary">
-        <SummaryTile
-          testId="ws-summary-episodes"
-          labelKey="projects.workspace.modules.episodes"
-          value={String(episodes.length)}
-          sub={
-            firstEpisodeStatus
-              ? t(`projects.workspace.episodeStatus.${firstEpisodeStatus}`, firstEpisodeStatus)
-              : undefined
-          }
-        />
-        <SummaryTile
-          testId="ws-summary-storyboard"
-          labelKey="projects.workspace.modules.storyboard"
-          value={`${totalShotsDone}/${totalShotsTotal}`}
-        />
-        <SummaryTile
-          testId="ws-summary-files"
-          labelKey="projects.workspace.modules.files"
-          value={String(project.file_count ?? 0)}
-        />
-        <SummaryTile testId="ws-summary-canvas" labelKey="projects.workspace.modules.canvas" value="—" />
-      </div>
 
       {activity && (
         <div
@@ -202,29 +177,6 @@ export function WorkspaceOverview({
           </span>
         </div>
       )}
-    </div>
-  );
-}
-
-function SummaryTile({
-  testId,
-  labelKey,
-  value,
-  sub,
-}: {
-  testId: string;
-  labelKey: string;
-  value: string;
-  sub?: string;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div data-testid={testId} className="rounded-xl border border-line bg-island p-2.5">
-      <div className="text-[11.5px] font-semibold text-ink-200">{t(labelKey)}</div>
-      <div className="font-mono text-[12px] font-bold text-[var(--accent-text)] mt-0.5">
-        {value}
-        {sub ? <span className="text-[10px] font-normal text-ink-400"> · {sub}</span> : ''}
-      </div>
     </div>
   );
 }

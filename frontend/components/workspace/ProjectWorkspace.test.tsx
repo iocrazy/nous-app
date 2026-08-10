@@ -649,44 +649,37 @@ describe('ProjectWorkspace', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('routes a storyboard-surface workflow-strip node click (handleSelectNode) to the same Storyboard module', async () => {
-    mockScriptService.fetchScriptProjects.mockResolvedValue({
-      data: [
-        { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
-      ],
-      total: 1,
-    });
+  // IA redesign Task 4: the workflow strip moved from the always-mounted,
+  // whole-project WorkflowSection into the Overview accordion's expanded-row
+  // body, and node clicks no longer route anywhere by themselves — a click
+  // now only writes URL `node=` (`WorkspaceOverview`'s `onSelectNode`); what
+  // "selected" means is Task 5's `EpisodeNodeCard` job (via the
+  // `renderNodeCard` slot, still a placeholder here). This replaces the old
+  // "clicking the current node's storyboard-surface capsule routes to the
+  // Storyboard module" pin — that auto-navigation is retired.
+  it('clicking a workflow-strip node writes URL node= and does not auto-navigate anywhere', async () => {
     mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
-    mockSceneService.listScenes.mockResolvedValue([
-      {
-        id: '200',
-        script_id: 's1',
-        chapter_id: null,
-        scene_number: null,
-        heading_int_ext: 'INT',
-        location_text: 'Kitchen',
-        time_of_day: 'DAY',
-        content_version: 1,
-        sort_order: 0,
-        elements: [],
-      },
-    ]);
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
+    setSearchParamsSpy.mockClear();
     fireEvent.click(await screen.findByTestId('workflow-strip-node'));
 
-    expect(await screen.findByTestId('scene-column-200')).toBeInTheDocument();
+    await waitFor(() => expect(setSearchParamsSpy).toHaveBeenCalled());
+    const lastCall = setSearchParamsSpy.mock.calls[setSearchParamsSpy.mock.calls.length - 1];
+    const updater = lastCall[0] as (prev: URLSearchParams) => URLSearchParams;
+    const result = updater(new URLSearchParams('ep=1'));
+    expect(result.get('node')).toBe('1');
+    expect(screen.queryByTestId('scene-column-200')).toBeNull();
     expect(screen.queryByTestId('mock-editor-shell')).toBeNull();
   });
 
-  // Task 7 (小尾巴 A, 2026-08-09 拍板): the strip used to route ANY node click
-  // by its creative surface, so clicking a non-current storyboard/script node
-  // flashed open the CURRENT episode's surface panel — content unrelated to
-  // the node the writer actually clicked. Decoupled: only the CURRENT node's
-  // capsule routes to the surface panel; every other node's click lands on
-  // that node's own Stage Board (handleOpenStage), same path deliverable-only
-  // nodes already take.
-  it('routes a non-current workflow-strip node click to that node\'s own Stage Board, not the current episode\'s surface panel', async () => {
+  // Task 7 (小尾巴 A, 2026-08-09 拍板) used to decouple "current node → surface
+  // panel" from "non-current node → its own Stage Board" — both of those
+  // navigation paths are now retired by Task 4 (see the test above): EVERY
+  // node click, current or not, is just a URL `node=` write. Kept as its own
+  // test to pin that a non-current node's click still doesn't fall back to
+  // the old Stage Board route either.
+  it('clicking a non-current workflow-strip node also only writes URL node=, never opens a Stage Board or surface panel', async () => {
     const currentNode = stageNode({ id: '1', name: 'Storyboard', status: 'in_progress', surface: 'storyboard' });
     const otherNode = stageNode({ id: '2', name: 'Script Pass 2', status: 'pending', surface: 'script' });
     mockWorkflowService.fetchProjectWorkflow.mockResolvedValue({
@@ -695,19 +688,21 @@ describe('ProjectWorkspace', () => {
       agents_active: 0,
       nodes: [currentNode, otherNode],
     });
-    mockWorkflowService.fetchStageBoard.mockResolvedValue({ node: otherNode, issue: null, files: [] });
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
     const nodeButtons = await screen.findAllByTestId('workflow-strip-node');
     const otherButton = nodeButtons.find((el) => el.getAttribute('data-node-id') === '2');
     expect(otherButton).toBeTruthy();
+    setSearchParamsSpy.mockClear();
     fireEvent.click(otherButton!);
 
-    expect(await screen.findByTestId('workspace-stage-board')).toBeInTheDocument();
-    expect(mockWorkflowService.fetchStageBoard).toHaveBeenCalledWith('p1', '2');
-    // Never flashed the CURRENT episode's storyboard/script surface — nor
-    // provisioned/mounted a script — for a click that was about a different
-    // (non-current) node entirely.
+    await waitFor(() => expect(setSearchParamsSpy).toHaveBeenCalled());
+    const lastCall = setSearchParamsSpy.mock.calls[setSearchParamsSpy.mock.calls.length - 1];
+    const updater = lastCall[0] as (prev: URLSearchParams) => URLSearchParams;
+    const result = updater(new URLSearchParams('ep=1'));
+    expect(result.get('node')).toBe('2');
+    expect(mockWorkflowService.fetchStageBoard).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('workspace-stage-board')).toBeNull();
     expect(screen.queryByTestId('episode-view-tabs')).toBeNull();
     expect(screen.queryByTestId('mock-editor-shell')).toBeNull();
     expect(mockScriptService.createScriptProject).not.toHaveBeenCalled();

@@ -198,6 +198,14 @@ export function ProjectWorkspace({
   // scoped to the current episode), so its state must exist first.
   const [episodes, setEpisodes] = useState<EpisodeProgress[]>([]);
   const [currentEpisodeId, setCurrentEpisodeId] = useState<string | null>(null);
+  // Overview accordion (IA redesign Task 4): whether the writer collapsed the
+  // open row WITHOUT switching episodes (EpisodeSummaryRow's chevron click on
+  // an already-open row). Deliberately NOT part of the URL — Task 1's `ep=`
+  // stays the "which episode" truth; this is purely the accordion's own
+  // open/closed UI state, reset back to expanded on every real episode switch
+  // (see `handleEpisodeChange` below) so collapsing one episode's row never
+  // silently hides the NEXT one you switch to.
+  const [overviewCollapsed, setOverviewCollapsed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -239,8 +247,6 @@ export function ProjectWorkspace({
 
   // ── Workflow instance (strip + node card + advance gate) ───────────────
   const { workflow, reload: reloadWorkflow } = useProjectWorkflow(project.id, currentEpisodeId);
-  // A node the sidebar / top-bar asked to focus on the Overview.
-  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   // The advance/back confirm gate — one instance, shared by the node card's
   // Complete/Back buttons and the top-bar stepper. Holds the server preview so
   // the dialog only ever renders what the same predicate ruled (#1400).
@@ -290,10 +296,38 @@ export function ProjectWorkspace({
       });
   }, [advance?.direction, project.id, currentEpisodeId, reloadWorkflow, addToast, t]);
 
-  const handleJumpToNode = useCallback((nodeId: string) => {
-    setActiveModule('overview');
-    setFocusNodeId(nodeId);
-  }, []);
+  // Overview accordion node selection (IA redesign Task 4) — writes URL
+  // `node=` only; it does NOT itself navigate/route anywhere. Task 5's
+  // `EpisodeNodeCard` (consumed via `WorkspaceOverview`'s `renderNodeCard`
+  // slot) owns what "a node is selected" actually does.
+  const handleSelectNodeId = useCallback(
+    (nodeId: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('node', nodeId);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  // Top-bar node stepper (H3) — jump back to Overview with that node selected
+  // (URL `node=`, same as clicking it in the accordion strip) instead of the
+  // old free-standing `focusNodeId`/scroll-into-view mechanism, which had no
+  // surviving consumer once the accordion replaced the always-mounted
+  // project-wide WorkflowSection strip (Task 4). `overviewCollapsed` reset
+  // ensures a jump while the accordion is collapsed actually shows the row.
+  const handleJumpToNode = useCallback(
+    (nodeId: string) => {
+      setActiveModule('overview');
+      setOverviewCollapsed(false);
+      handleSelectNodeId(nodeId);
+    },
+    [handleSelectNodeId],
+  );
 
   // Sidebar Stages block (M2 PR-F F2) — opens the dedicated Stage Board module
   // instead of scrolling to the node's Overview card (handleJumpToNode above).
@@ -305,6 +339,10 @@ export function ProjectWorkspace({
   const handleEpisodeChange = useCallback(
     (episodeId: string) => {
       setCurrentEpisodeId(episodeId);
+      // A real episode switch always re-expands the accordion (Task 4) — see
+      // `overviewCollapsed`'s doc comment: collapsing one episode's row must
+      // never carry over and silently hide the row you just switched to.
+      setOverviewCollapsed(false);
       // localStorage stays as the cross-session/no-URL-yet default; the URL
       // `ep` (Task 1) is now the first source of truth on load, so keep both
       // in sync on every explicit switch.
@@ -332,6 +370,23 @@ export function ProjectWorkspace({
       );
     },
     [project.id, setSearchParams],
+  );
+
+  // Overview accordion row toggle (IA redesign Task 4, ambiguity #3): a
+  // non-null id opens/switches to that episode's row by routing through
+  // `handleEpisodeChange` (writes URL `ep=` AND resets the collapsed flag);
+  // `null` means "collapse the currently-open row" — the writer clicked the
+  // chevron on an already-open row, which must NOT change which episode is
+  // current (URL `ep=` stays exactly as-is).
+  const handleExpandEpisode = useCallback(
+    (episodeId: string | null) => {
+      if (episodeId != null) {
+        handleEpisodeChange(episodeId);
+      } else {
+        setOverviewCollapsed(true);
+      }
+    },
+    [handleEpisodeChange],
   );
 
   // Re-fetch the progress feed after a create/rename/reorder/delete in the
@@ -482,11 +537,6 @@ export function ProjectWorkspace({
       }
     },
     [resolveOrProvisionScript, addToast, t],
-  );
-
-  const openCurrentEpisodeScript = useCallback(
-    () => openEpisodeScript(currentEpisode),
-    [openEpisodeScript, currentEpisode],
   );
 
   // Storyboard is now the episode node's PRIMARY face (三视图主工作面, 2026-08-09
@@ -715,6 +765,17 @@ export function ProjectWorkspace({
       ? studioScenes.findIndex((s) => s.id === studioActiveSceneId) + 1
       : 0) || null;
 
+  // Overview accordion addressing (IA redesign Task 4, ambiguity #3): URL
+  // `ep=` is the first source of truth (falls back to `currentEpisodeId`
+  // exactly like the episode-resolution effect above), UNLESS the writer
+  // explicitly collapsed the open row — that's local UI state, not a URL
+  // concern, so it wins over both. `node=` has no such override; Task 5's
+  // node card decides what an absent selection defaults to.
+  const expandedEpisodeId = overviewCollapsed
+    ? null
+    : (readWorkspaceParams(searchParams).ep ?? currentEpisodeId);
+  const selectedNodeId = readWorkspaceParams(searchParams).node;
+
   return (
     <div data-testid="project-workspace" className="flex flex-col h-full min-h-0">
       {/* Full-width project bar on top, spanning over the sidebar. */}
@@ -790,19 +851,16 @@ export function ProjectWorkspace({
               <WorkspaceOverview
                 project={project}
                 episodes={episodes}
-                currentEpisode={currentEpisode}
-                episodeId={currentEpisodeId}
-                epNumber={epNumber}
-                onOpenScript={() => void openCurrentEpisodeScript()}
                 workflow={workflow}
+                expandedEpisodeId={expandedEpisodeId}
+                selectedNodeId={selectedNodeId}
+                onExpandEpisode={handleExpandEpisode}
+                onSelectNode={handleSelectNodeId}
+                // Task 5 fills this in with the real EpisodeNodeCard; Task 4
+                // only wires the accordion + strip + slot plumbing.
+                renderNodeCard={() => null}
                 canWrite={canWrite}
                 onReloadWorkflow={() => void reloadWorkflow()}
-                onRequestAdvance={requestAdvance}
-                onOpenTodolist={() => setActiveModule('tasks')}
-                onOpenStage={handleOpenStage}
-                onSelectNode={handleSelectNode}
-                focusNodeId={focusNodeId}
-                onSelectEpisode={handleEpisodeChange}
               />
             )}
             {activeModule === 'episodes' && (
