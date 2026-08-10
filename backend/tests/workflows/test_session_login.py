@@ -294,7 +294,9 @@ async def test_platform_rejection_carries_no_error_kind():
     如果这里也带上 error_kind，"基建失败"这个标记就失去了鉴别力 ——
     前端会把每一次真实的平台拒绝都说成"我们这边的问题"。
     """
-    outcome = await _run(_FakeClient([_snap("failed", message="account blocked")]), _Harness())
+    outcome = await _run(
+        _FakeClient([_snap("failed", message="account blocked")]), _Harness()
+    )
 
     assert outcome.outcome == "failed"
     assert outcome.detail.get("error_kind") is None
@@ -367,9 +369,7 @@ async def test_metadata_writer_publishes_the_error_kind():
     manager.update_progress = AsyncMock()
     writer = m.LoginMetadataWriter(manager, "wf-1", "douyin")
 
-    await writer.publish(
-        _snap("failed", error_kind=SessionErrorKind.UNREACHABLE.value)
-    )
+    await writer.publish(_snap("failed", error_kind=SessionErrorKind.UNREACHABLE.value))
 
     login = manager.patch_metadata.await_args.args[1]["login"]
     assert login["detail"] == {"error_kind": "unreachable"}
