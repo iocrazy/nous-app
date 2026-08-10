@@ -39,6 +39,7 @@ import { resolveSurface } from './nodeSurface';
 import { WorkspaceTopBar } from './WorkspaceTopBar';
 import { WorkspaceOverview } from './WorkspaceOverview';
 import { EpisodeNodeCard, type NodeConfigPatch } from './EpisodeNodeCard';
+import { WorkspaceNodeSettings } from './WorkspaceNodeSettings';
 import { AdvanceConfirmDialog } from '../workflow/AdvanceConfirmDialog';
 import { useProjectWorkflow } from '../../hooks/useProjectWorkflow';
 import { executeAdvance, fetchAdvancePreview, updateProjectNode } from '../../services/workflowService';
@@ -400,6 +401,49 @@ export function ProjectWorkspace({
     },
     [setSearchParams],
   );
+
+  // Settings module's Node Config tab (Task 10) — mirrors its own episode/node
+  // selection into the URL `ep=`/`node=` so a refresh (or a shared link) lands
+  // back on the same episode+node. Deliberately NOT routed through
+  // `handleEpisodeChange`/`handleSelectNodeId` above: `WorkspaceNodeSettings`
+  // browses episodes independently of the main workspace's own
+  // `currentEpisodeId` (see that file's doc comment) — switching episodes
+  // inside Settings must never reset the main workspace's view/scene/shot
+  // params or localStorage.
+  const handleNodeSettingsEpisodeChange = useCallback(
+    (episodeId: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('ep', episodeId);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+  const handleNodeSettingsNodeChange = useCallback(
+    (nodeId: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('node', nodeId);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+  // Bubbles a fresh `owner_id` after a successful episode-owner PATCH so the
+  // rest of the shell (Task 9's `canEditNodeConfig`, the Overview accordion)
+  // sees the new owner without a full episodes refetch.
+  const handleEpisodeOwnerChanged = useCallback((episodeId: string, ownerId: string | null) => {
+    setEpisodes((rows) =>
+      rows.map((r) => (r.episode_id === episodeId ? { ...r, owner_id: ownerId } : r)),
+    );
+  }, []);
 
   // Top-bar node stepper (H3) — jump back to Overview with that node selected
   // (URL `node=`, same as clicking it in the accordion strip) instead of the
@@ -893,6 +937,23 @@ export function ProjectWorkspace({
     : (readWorkspaceParams(searchParams).ep ?? currentEpisodeId);
   const selectedNodeId = readWorkspaceParams(searchParams).node;
 
+  // Settings module tabs (Task 10, spec §7): `?tab=nodes` deep-links straight
+  // into Node Config (Task 5's card Settings button — `handleOpenNodeSettings`
+  // above — always sets it); anything else (including absent) is the existing
+  // Project tab, unchanged default.
+  const settingsTab = searchParams.get('tab') === 'nodes' ? 'nodes' : 'project';
+  const setSettingsTab = (tab: 'project' | 'nodes') => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('module', 'settings');
+        next.set('tab', tab);
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
   return (
     <div data-testid="project-workspace" className="flex flex-col h-full min-h-0">
       {/* Full-width project bar on top, spanning over the sidebar. */}
@@ -1029,16 +1090,63 @@ export function ProjectWorkspace({
             )}
             {activeModule === 'trash' && <ProjectTrashView projectId={project.id} />}
             {activeModule === 'settings' && (
-              <ProjectSettingsPanel
-                project={project}
-                isOpen
-                onClose={() => setActiveModule('overview')}
-                onUpdated={(updated) => {
-                  onProjectUpdated?.(updated);
-                  setActiveModule('overview');
-                }}
-                onDeleted={onBack}
-              />
+              <div className="space-y-4">
+                <div className="flex gap-1 border-b border-line" data-testid="settings-tabs">
+                  <button
+                    type="button"
+                    data-testid="settings-tab-project"
+                    onClick={() => setSettingsTab('project')}
+                    aria-current={settingsTab === 'project' ? 'true' : undefined}
+                    className={`px-3 py-2 text-[13px] font-medium transition ${
+                      settingsTab === 'project'
+                        ? 'border-b-2 border-[var(--accent-border)] text-ink-100'
+                        : 'text-ink-500 hover:text-ink-200'
+                    }`}
+                  >
+                    {t('projects.settings.tabs.project', 'Project')}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="settings-tab-nodes"
+                    onClick={() => setSettingsTab('nodes')}
+                    aria-current={settingsTab === 'nodes' ? 'true' : undefined}
+                    className={`px-3 py-2 text-[13px] font-medium transition ${
+                      settingsTab === 'nodes'
+                        ? 'border-b-2 border-[var(--accent-border)] text-ink-100'
+                        : 'text-ink-500 hover:text-ink-200'
+                    }`}
+                  >
+                    {t('projects.settings.tabs.nodes', 'Node Config')}
+                  </button>
+                </div>
+
+                {settingsTab === 'project' ? (
+                  <ProjectSettingsPanel
+                    project={project}
+                    isOpen
+                    onClose={() => setActiveModule('overview')}
+                    onUpdated={(updated) => {
+                      onProjectUpdated?.(updated);
+                      setActiveModule('overview');
+                    }}
+                    onDeleted={onBack}
+                  />
+                ) : (
+                  <WorkspaceNodeSettings
+                    projectId={project.id}
+                    episodes={episodes}
+                    initialEpisodeId={readWorkspaceParams(searchParams).ep}
+                    initialNodeId={readWorkspaceParams(searchParams).node}
+                    canEditFor={canEditNodeConfig}
+                    canAssignEpisodeOwner={currentUserId === project.owner_id}
+                    people={nodeCardPeople}
+                    agents={nodeCardAgents}
+                    onEpisodeChange={handleNodeSettingsEpisodeChange}
+                    onNodeChange={handleNodeSettingsNodeChange}
+                    onEpisodeOwnerChanged={handleEpisodeOwnerChanged}
+                  />
+                )}
+              </div>
             )}
             {activeModule === 'canvas' && (
               <WorkspaceCanvas projectId={project.id} teamId={teamId} />

@@ -101,7 +101,7 @@ export const OwnerCandidateList: FC<OwnerCandidateListProps> = ({
             >
               <Avatar kind="user" name={p.name} />
               <span className="flex-1 truncate text-left">{p.name}</span>
-              {sel && <Check size={14} className="text-emerald-500" />}
+              {sel && <Check size={14} className="text-ok" />}
             </button>
           );
         })}
@@ -124,7 +124,7 @@ export const OwnerCandidateList: FC<OwnerCandidateListProps> = ({
             >
               <Avatar kind="agent" name={a.name} color={a.color} />
               <span className="flex-1 truncate text-left">{a.name}</span>
-              {sel && <Check size={14} className="text-emerald-500" />}
+              {sel && <Check size={14} className="text-ok" />}
             </button>
           );
         })}

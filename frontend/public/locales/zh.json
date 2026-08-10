@@ -1653,7 +1653,11 @@
       "noGroup": "暂无分组",
       "save": "保存更改",
       "dangerZone": "危险操作",
-      "deleteProject": "删除项目"
+      "deleteProject": "删除项目",
+      "tabs": {
+        "project": "项目",
+        "nodes": "节点配置"
+      }
     },
     "deleteConfirm": {
       "title": "确认删除项目",
@@ -1904,7 +1908,12 @@
         "loadMore": "加载更多",
         "loadingMore": "加载中…"
       },
-      "canvasEmpty": "还没有画布——创建一个开始为这个项目构思。"
+      "canvasEmpty": "还没有画布——创建一个开始为这个项目构思。",
+      "nodeSettings": {
+        "selectEpisode": "选择剧集",
+        "episodeOwner": "剧集负责人",
+        "episodeOwnerForbidden": "只有项目负责人可以指派剧集负责人"
+      }
     },
     "workflow": {
       "templatesEntry": "工作流模板",

@@ -16,7 +16,7 @@ import { createInstance, type i18n as I18n } from 'i18next';
 import enJson from '../../public/locales/en.json';
 import { WorkspaceTopBar } from './WorkspaceTopBar';
 import { ToastProvider } from '../Toast';
-import type { Project } from '../../types';
+import type { Project, ProjectStageNode, ProjectWorkflow } from '../../types';
 
 function makeI18n(): I18n {
   const instance = createInstance();
@@ -143,5 +143,99 @@ describe('WorkspaceTopBar — Autopilot chip', () => {
       </I18nextProvider>,
     );
     expect(screen.getByTestId('workspace-autopilot-chip')).toHaveAttribute('data-autopilot', 'off');
+  });
+});
+
+/**
+ * Editor flow pill (IA redesign Task 10, spec §6) — studio (slate) mode's
+ * `● <node name> · <status>` + Complete Stage capsule, top-right of the
+ * top bar. Cursor node = `workflow.current_node_id` resolved against
+ * `workflow.nodes`; a stale/foreign cursor id (not in `nodes`) is treated the
+ * same as "no workflow" — no pill, not a crash.
+ */
+describe('WorkspaceTopBar — editor flow pill', () => {
+  const NODE: ProjectStageNode = {
+    id: 'n1',
+    project_id: 'p1',
+    source_template_node_id: null,
+    legacy_stage_id: null,
+    name: 'Storyboard',
+    sort_order: 0,
+    parallel_group: null,
+    status: 'in_progress',
+    owner_user_id: null,
+    owner_agent_id: null,
+    planned_start: null,
+    planned_due: null,
+    review_required: false,
+    deliverable_required: false,
+    deliverable_label: null,
+    skipped: false,
+    members: [],
+    completion_policy: 'owner',
+    events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false },
+  } as ProjectStageNode;
+
+  const WORKFLOW: ProjectWorkflow = {
+    has_workflow: true,
+    current_node_id: 'n1',
+    agents_active: 0,
+    nodes: [NODE],
+  };
+
+  function renderWithFlow(overrides: {
+    slate?: { ep: number; scene?: number | null } | null;
+    workflow?: ProjectWorkflow | null;
+    canWrite?: boolean;
+    onRequestAdvance?: (direction: 'forward' | 'back') => void;
+  } = {}) {
+    const onRequestAdvance = overrides.onRequestAdvance ?? vi.fn();
+    const utils = render(
+      <I18nextProvider i18n={makeI18n()}>
+        <WorkspaceTopBar
+          projectName="Spring Campaign"
+          onBack={vi.fn()}
+          canWrite={overrides.canWrite ?? true}
+          slate={'slate' in overrides ? overrides.slate! : { ep: 1, scene: 2 }}
+          workflow={'workflow' in overrides ? overrides.workflow! : WORKFLOW}
+          onRequestAdvance={onRequestAdvance}
+        />
+      </I18nextProvider>,
+    );
+    return { ...utils, onRequestAdvance };
+  }
+
+  it('shows the flow pill with the cursor node name + status, and a Complete Stage action', () => {
+    renderWithFlow();
+    const pill = screen.getByTestId('workspace-flow-pill');
+    expect(pill.textContent).toContain('Storyboard');
+    expect(screen.getByTestId('workspace-flow-pill-complete')).toBeTruthy();
+  });
+
+  it('clicking Complete Stage fires onRequestAdvance("forward")', () => {
+    const { onRequestAdvance } = renderWithFlow();
+    fireEvent.click(screen.getByTestId('workspace-flow-pill-complete'));
+    expect(onRequestAdvance).toHaveBeenCalledWith('forward');
+  });
+
+  it('no pill when there is no workflow', () => {
+    renderWithFlow({ workflow: null });
+    expect(screen.queryByTestId('workspace-flow-pill')).toBeNull();
+  });
+
+  it('no pill when the workflow cursor node id is not in this episode\'s node list', () => {
+    renderWithFlow({ workflow: { ...WORKFLOW, current_node_id: 'not-in-this-episode' } });
+    expect(screen.queryByTestId('workspace-flow-pill')).toBeNull();
+  });
+
+  it('no pill outside studio (slate) mode, even with a live workflow cursor', () => {
+    renderWithFlow({ slate: null });
+    expect(screen.queryByTestId('workspace-flow-pill')).toBeNull();
+  });
+
+  it('shows the status pill without the Complete Stage button when canWrite is false', () => {
+    renderWithFlow({ canWrite: false });
+    expect(screen.getByTestId('workspace-flow-pill')).toBeTruthy();
+    expect(screen.queryByTestId('workspace-flow-pill-complete')).toBeNull();
   });
 });

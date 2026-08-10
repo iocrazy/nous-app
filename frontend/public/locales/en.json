@@ -1653,7 +1653,11 @@
       "noGroup": "No group",
       "save": "Save Changes",
       "dangerZone": "Danger Zone",
-      "deleteProject": "Delete Project"
+      "deleteProject": "Delete Project",
+      "tabs": {
+        "project": "Project",
+        "nodes": "Node Config"
+      }
     },
     "deleteConfirm": {
       "title": "Delete Project",
@@ -1904,7 +1908,12 @@
         "loadMore": "Load more",
         "loadingMore": "Loading…"
       },
-      "canvasEmpty": "No canvases yet — create one to start sketching this project."
+      "canvasEmpty": "No canvases yet — create one to start sketching this project.",
+      "nodeSettings": {
+        "selectEpisode": "Select episode",
+        "episodeOwner": "Episode Owner",
+        "episodeOwnerForbidden": "Only the project owner can assign the episode owner"
+      }
     },
     "workflow": {
       "templatesEntry": "Workflow Templates",
