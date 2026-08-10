@@ -266,7 +266,9 @@
       "proxyFailedLabel": "代理不可达",
       "proxyFailedHint": "该账号的出口代理连不上 —— 账号本身没问题。修好代理后重试。",
       "infraLabel": "服务暂时不可用",
-      "failedInfraHint": "本次失败发生在我们这边，还没到平台 —— 账号没问题。稍后重试；持续出现请检查浏览器服务。"
+      "failedInfraHint": "本次失败发生在我们这边，还没到平台 —— 账号没问题。稍后重试；持续出现请检查浏览器服务。",
+      "identityUnresolvedLabel": "已登录，但读不到账号身份",
+      "identityUnresolvedHint": "登录本身成功了 —— 但我们没能读出这是哪个账号，因此没有绑定任何账号，账号本身也未受影响。请重新绑定一次；若反复出现请联系支持。"
     },
     "nav": {
       "publish": "发布",
