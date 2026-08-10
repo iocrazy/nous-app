@@ -216,6 +216,9 @@ def test_unmirrored_stmt_uses_text_extract_not_jsonb_arrow() -> None:
     assert "LEFT OUTER JOIN public.publish_tasks" in sql
     assert "CAST(public.task_tracking.user_id AS TEXT)" in sql
     assert "ORDER BY public.task_tracking.created_at DESC" in sql
+    # P1-2: the go-live instant must be selected, or the schedule gate silently
+    # sees None for every row and closes scheduled batches early.
+    assert "public.publish_tasks.scheduled_at" in sql
 
 
 def test_mirrored_open_stmt_terminal_phase_and_open_status_filters() -> None:
@@ -226,6 +229,10 @@ def test_mirrored_open_stmt_terminal_phase_and_open_status_filters() -> None:
     assert (
         "JOIN public.issues ON public.issues.id = public.task_tracking.issue_id" in sql
     )
+    # The schedule gate's input, and the join must stay OUTER — a batch whose
+    # publish_tasks row was deleted must still be able to close.
+    assert "public.publish_tasks.scheduled_at" in sql
+    assert "LEFT OUTER JOIN public.publish_tasks" in sql
 
 
 # ─── backfill_issue_scope: null-scope repair COALESCE ──────────────────────
