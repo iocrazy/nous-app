@@ -266,7 +266,9 @@
       "proxyFailedLabel": "Proxy unreachable",
       "proxyFailedHint": "The egress proxy for this account could not be reached — the account itself is fine. Fix the proxy, then retry.",
       "infraLabel": "Service temporarily unavailable",
-      "failedInfraHint": "This failed on our side before reaching the platform — the account is fine. Retry in a moment; if it persists the browser service needs looking at."
+      "failedInfraHint": "This failed on our side before reaching the platform — the account is fine. Retry in a moment; if it persists the browser service needs looking at.",
+      "identityUnresolvedLabel": "Signed in, but the account is unidentified",
+      "identityUnresolvedHint": "The sign-in itself succeeded — we could not read which account it was, so nothing was linked and the account is untouched. Try binding again; if it keeps happening, contact support."
     },
     "nav": {
       "publish": "Publish",

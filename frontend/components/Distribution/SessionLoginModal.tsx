@@ -57,6 +57,20 @@ const RETRYABLE: ReadonlySet<ViewStatus> = new Set<ViewStatus>([
   'start_failed', 'qrcode_expired', 'timeout', 'failed', 'proxy_failed', 'session_ended',
 ]);
 
+/**
+ * `detail.reason` for "the sign-in worked, but the identity cookie was never
+ * in the jar" (browser-side `IdentityUnresolved`, surfaced as a typed 409 and
+ * carried through `login_metadata`'s `detail` whitelist).
+ *
+ * It arrives as a plain `status: 'failed'` with **no** `error_kind` — byte for
+ * byte the shape of a genuine platform refusal — so without this branch it
+ * reads as "the platform refused the sign-in ... check whether the account is
+ * restricted" and sends the user hunting for a ban that never happened. The
+ * account is fine, the platform said yes, and nothing was linked: the remedy
+ * is to bind again.
+ */
+const IDENTITY_UNRESOLVED = 'identity_unresolved';
+
 /** Semantic tone per state — drives the dot/border color, never a hue name. */
 const TONE: Record<ViewStatus, 'info' | 'ok' | 'warn' | 'danger'> = {
   starting: 'info',
@@ -374,22 +388,49 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
   // `proxy_failed` is excluded on purpose: it is already its own status with
   // its own correct copy, and it points at a *different* fix (the account's
   // egress proxy, not our browser service).
-  const infraKind = (status === 'failed' || status === 'timeout')
-    ? login?.detail?.error_kind
+  //
+  // A third reading hides in the same shape: `detail.reason` ===
+  // `identity_unresolved` means the *opposite* of a refusal — the platform let
+  // us in and we could not tell which account it was. Blaming either party is
+  // wrong there, so it gets its own copy rather than sharing the platform one.
+  //
+  // The three readings are mutually exclusive by construction: `infraKind`
+  // wins when both markers are somehow present, because "we never reached a
+  // conclusion" subsumes any `reason` riding along with it.
+  const failureDetail = (status === 'failed' || status === 'timeout')
+    ? login?.detail
     : undefined;
-  const label = infraKind
-    ? t('distribution.session.infraLabel', 'Service temporarily unavailable')
-    : STATUS_LABEL[status];
-  const hint = infraKind
-    ? t(
+  const infraKind = failureDetail?.error_kind;
+  // Gated on `failed` alone: this is a terminal conclusion from the state
+  // fetch, never a timeout, and never `proxy_failed` (which keeps its own copy
+  // pointing at the account's egress proxy).
+  const identityUnresolved = !infraKind
+    && status === 'failed'
+    && failureDetail?.reason === IDENTITY_UNRESOLVED;
+
+  let label = STATUS_LABEL[status];
+  let hint = STATUS_HINT[status];
+  if (infraKind) {
+    label = t('distribution.session.infraLabel', 'Service temporarily unavailable');
+    hint = t(
       'distribution.session.failedInfraHint',
       'This failed on our side before reaching the platform — the account is fine. Retry in a moment; if it persists the browser service needs looking at.',
-    )
-    : STATUS_HINT[status];
+    );
+  } else if (identityUnresolved) {
+    label = t(
+      'distribution.session.identityUnresolvedLabel',
+      'Signed in, but the account is unidentified',
+    );
+    hint = t(
+      'distribution.session.identityUnresolvedHint',
+      'The sign-in itself succeeded — we could not read which account it was, so nothing was linked and the account is untouched. Try binding again; if it keeps happening, contact support.',
+    );
+  }
 
   // Transient-and-ours reads as `warn`, not `danger`: nothing is broken about
-  // the user's account and the remedy is simply to wait a moment.
-  const tone = infraKind ? 'warn' : TONE[status];
+  // the user's account and the remedy is simply to retry (bind again, or wait
+  // a moment) — true of the identity case for exactly the same reason.
+  const tone = infraKind || identityUnresolved ? 'warn' : TONE[status];
   const busy = status === 'starting' || status === 'connecting';
   const showQr = Boolean(login?.qrcode_data_url) && (status === 'waiting_scan' || status === 'scanned');
   const canRetry = RETRYABLE.has(status);

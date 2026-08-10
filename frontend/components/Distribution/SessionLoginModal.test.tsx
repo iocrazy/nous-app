@@ -376,6 +376,64 @@ describe('SessionLoginModal', () => {
     expect(screen.queryByText(/Nobody scanned the code in time/i)).toBeNull();
   });
 
+  // D2. A third reading of the same `status: 'failed'` shape: the platform let
+  // us in and we could not tell *who* signed in (browser `IdentityUnresolved`
+  // → typed 409 → `detail.reason`). It carries no `error_kind`, so it is
+  // byte-for-byte a platform refusal to any check that only looks at that key.
+  it('says the sign-in worked when only the identity could not be read', async () => {
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({
+      status: 'failed',
+      message: "cannot identify the douyin account: cookie 'uid_tt' was not present after login",
+      detail: { reason: 'identity_unresolved' },
+    });
+
+    expect(screen.getByText('Signed in, but the account is unidentified')).toBeInTheDocument();
+    expect(screen.getByText(/could not read which account it was/i)).toBeInTheDocument();
+    // Neither of the other two tiers may leak through: one would send the user
+    // hunting for a ban that never happened, the other would blame our
+    // browser service for something it answered correctly.
+    expect(screen.queryByText(/The platform refused the sign-in/i)).toBeNull();
+    expect(screen.queryByText(/check whether the account is restricted/i)).toBeNull();
+    expect(screen.queryByText(/Service temporarily unavailable/i)).toBeNull();
+    // Binding again is the remedy, so the retry has to be on screen.
+    expect(screen.getByRole('button', { name: /Get a new code/i })).toBeInTheDocument();
+  });
+
+  it('lands each failure payload on exactly one of the three tiers', async () => {
+    // The whole point of the trio: three payloads that differ only inside
+    // `detail` must produce three different sentences, and never two at once.
+    const LABELS = {
+      platform: /^Sign-in failed$/,
+      infra: /^Service temporarily unavailable$/,
+      identity: /^Signed in, but the account is unidentified$/,
+    } as const;
+    const cases: Array<[keyof typeof LABELS, Partial<SessionLoginState>]> = [
+      ['platform', { status: 'failed', message: 'account is restricted' }],
+      ['infra', { status: 'failed', detail: { error_kind: 'unreachable' } }],
+      ['identity', { status: 'failed', detail: { reason: 'identity_unresolved' } }],
+      // Both markers at once: "we never reached a conclusion" subsumes any
+      // reason riding along with it, so infra wins rather than both showing.
+      ['infra', {
+        status: 'failed',
+        detail: { error_kind: 'unreachable', reason: 'identity_unresolved' },
+      }],
+    ];
+    for (const [tier, payload] of cases) {
+      updateHandler = null;
+      const view = mount();
+      await waitFor(() => expect(updateHandler).toBeTruthy());
+      await pushLogin(payload);
+
+      for (const [name, label] of Object.entries(LABELS)) {
+        if (name === tier) expect(screen.getByText(label)).toBeInTheDocument();
+        else expect(screen.queryByText(label)).toBeNull();
+      }
+      view.unmount();
+    }
+  });
+
   it('keeps a dead proxy pointing at the proxy, not at our browser service', async () => {
     // `proxy_failed` is deliberately outside the infra branch: it is the
     // account's egress proxy, a different thing to go fix.
@@ -385,6 +443,17 @@ describe('SessionLoginModal', () => {
 
     expect(screen.getByText('Proxy unreachable')).toBeInTheDocument();
     expect(screen.queryByText(/Service temporarily unavailable/i)).toBeNull();
+  });
+
+  it('leaves proxy_failed alone even when a reason rides along', async () => {
+    // Same exclusion as above, for the identity tier: `proxy_failed` already
+    // names the thing to go fix, and it is not our browser service either.
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({ status: 'proxy_failed', detail: { reason: 'identity_unresolved' } });
+
+    expect(screen.getByText('Proxy unreachable')).toBeInTheDocument();
+    expect(screen.queryByText(/Signed in, but the account is unidentified/i)).toBeNull();
   });
 
   it('reports success to the caller', async () => {
