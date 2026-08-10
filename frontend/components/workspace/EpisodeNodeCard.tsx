@@ -279,24 +279,33 @@ export const EpisodeNodeCard: FC<EpisodeNodeCardProps> = ({
         )}
       </Fact>
 
-      {(hasSchedule || canEditConfig) && (
-        <Fact label={t('projects.workflow.schedule')}>
-          {canEditConfig ? (
-            <EditableFactTrigger
-              testId="node-card-schedule"
-              empty={!hasSchedule}
-              emptyLabel={t('projects.nodeCard.setSchedule', '+ Set Schedule')}
-              onClick={(e) => setScheduleAnchor(e.currentTarget)}
-            >
-              {node.planned_start ?? '—'} → {node.planned_due ?? '—'}
-            </EditableFactTrigger>
-          ) : (
-            <span data-testid="node-card-schedule" className="text-[13px] text-ink-300">
-              {node.planned_start ?? '—'} → {node.planned_due ?? '—'}
-            </span>
-          )}
-        </Fact>
-      )}
+      {/* 评审修复轮 (Minor #10): spec §3's readonly rule ("无权者:纯文本
+          （空值显示灰色「未指派/未设置」）") applies to schedule same as
+          owner — the owner Fact above always renders (see `ownerLabel`'s
+          "Unassigned" fallback), but this row used to OMIT itself entirely
+          for a readonly + empty schedule instead of showing a dim "Not set"
+          — inconsistent with the owner row right above it. Always render
+          the row now; only the readonly+empty branch is new. */}
+      <Fact label={t('projects.workflow.schedule')}>
+        {canEditConfig ? (
+          <EditableFactTrigger
+            testId="node-card-schedule"
+            empty={!hasSchedule}
+            emptyLabel={t('projects.nodeCard.setSchedule', '+ Set Schedule')}
+            onClick={(e) => setScheduleAnchor(e.currentTarget)}
+          >
+            {node.planned_start ?? '—'} → {node.planned_due ?? '—'}
+          </EditableFactTrigger>
+        ) : hasSchedule ? (
+          <span data-testid="node-card-schedule" className="text-[13px] text-ink-300">
+            {node.planned_start ?? '—'} → {node.planned_due ?? '—'}
+          </span>
+        ) : (
+          <span data-testid="node-card-schedule" className="text-[13px] text-ink-600">
+            {t('projects.workflow.notSet', 'Not set')}
+          </span>
+        )}
+      </Fact>
       <DateRangePopover
         anchorEl={scheduleAnchor}
         start={node.planned_start}

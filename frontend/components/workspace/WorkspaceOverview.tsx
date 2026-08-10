@@ -99,6 +99,13 @@ export interface WorkspaceOverviewProps {
   /** Gates the no-workflow empty-state CTA (`WorkflowSection`'s own check) —
    * mirrors the pre-rewrite default. */
   canWrite?: boolean;
+  /** 评审修复轮 (Important #4): node add/remove is an ARRANGEMENT action,
+   * gated to the project owner (see `ProjectWorkspace.isProjectOwner`'s doc
+   * comment) — narrower than `canWrite`. Threaded straight through to both
+   * `WorkflowSection` mounts below as `canArrange`. Defaults `true` so a
+   * caller that doesn't pass it (only this file's own test harness today)
+   * keeps the pre-existing, unrestricted behavior. */
+  canArrangeWorkflow?: boolean;
   onReloadWorkflow?: () => void;
 }
 
@@ -113,6 +120,7 @@ export function WorkspaceOverview({
   onSelectNode,
   renderNodeCard,
   canWrite = true,
+  canArrangeWorkflow = true,
   onReloadWorkflow,
 }: WorkspaceOverviewProps) {
   const { t } = useTranslation();
@@ -212,6 +220,11 @@ export function WorkspaceOverview({
                             episodeId={ep.episode_id}
                             workflow={workflow}
                             canWrite={canWrite}
+                            // 评审修复轮 (Important #4): gates the strip's
+                            // Add-stage/remove-node affordances specifically
+                            // — see `WorkflowSection`'s own `canArrange` doc
+                            // comment.
+                            canArrange={canArrangeWorkflow}
                             onReload={onReloadWorkflow ?? (() => undefined)}
                             onRequestAdvance={() => undefined}
                             onOpenTodolist={() => undefined}

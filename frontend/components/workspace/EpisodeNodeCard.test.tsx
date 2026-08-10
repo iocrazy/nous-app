@@ -162,9 +162,15 @@ describe('EpisodeNodeCard', () => {
     expect(deliverable.textContent).toContain('2');
   });
 
-  it('omits the schedule row when neither planned_start nor planned_due is set', () => {
-    renderCard({ node: { ...node, planned_start: null, planned_due: null } });
-    expect(screen.queryByTestId('node-card-schedule')).toBeNull();
+  // 评审修复轮 (Minor #10): spec §3 says a readonly viewer sees dim "Not
+  // set" text for an empty schedule (same as the owner row's "Unassigned"),
+  // not an omitted row — the row used to disappear entirely here, which was
+  // the bug.
+  it('shows a dim "Not set" schedule row (not omitted) when readonly and neither planned_start nor planned_due is set', () => {
+    renderCard({ node: { ...node, planned_start: null, planned_due: null }, canEditConfig: false });
+    const schedule = screen.getByTestId('node-card-schedule');
+    expect(schedule.tagName).toBe('SPAN');
+    expect(schedule.textContent).toMatch(/Not set/);
   });
 
   it('shows the schedule row once a planned date is set', () => {
@@ -229,9 +235,12 @@ describe('EpisodeNodeCard', () => {
   it('readonly viewer sees plain <span> facts even when owner/schedule are empty', () => {
     renderCard({ canEditConfig: false });
     expect(screen.getByTestId('node-card-owner').tagName).toBe('SPAN');
-    // Read-only + empty schedule omits the row entirely (unchanged Task 5
-    // behavior) — there is nothing editable to show a pill for.
-    expect(screen.queryByTestId('node-card-schedule')).toBeNull();
+    // Read-only + empty schedule renders a dim "Not set" <span> (Minor #10
+    // fix) — consistent with the owner row's "Unassigned" fallback, not an
+    // omitted row.
+    const schedule = screen.getByTestId('node-card-schedule');
+    expect(schedule.tagName).toBe('SPAN');
+    expect(schedule.textContent).toMatch(/Not set/);
   });
 
   it('editable schedule button opens DateRangePopover and a completed range patches via onPatchNode', () => {

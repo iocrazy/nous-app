@@ -383,6 +383,65 @@ describe('ProjectWorkspace', () => {
     expect(result.has('shot')).toBe(false);
   });
 
+  // 评审修复轮 (Important #3): `node=` is the OTHER per-episode deep link (the
+  // Overview accordion's selected node id, Task 4/5) — left uncleared, a real
+  // episode switch carried the OLD episode's node id into the NEW episode's
+  // row. `renderNodeCard` computes `selectedNodeId ?? workflow.current_node_id`,
+  // so a stale (but non-empty) `node=` always won over the new episode's own
+  // cursor node — the accordion row expanded correctly but the node-card slot
+  // rendered NOTHING (`workflow.nodes.find` misses an id belonging to a
+  // different episode's node set).
+  it('clears the stale accordion node= selection from the URL in the same call that writes the new ep (Important #3)', async () => {
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    const epCard = await expandEpisodesTree();
+    fireEvent.click(epCard);
+    fireEvent.click(await screen.findByTestId('ws-ep-option-2'));
+
+    await waitFor(() => expect(setSearchParamsSpy).toHaveBeenCalled());
+    const lastCall = setSearchParamsSpy.mock.calls[setSearchParamsSpy.mock.calls.length - 1];
+    const updater = lastCall[0] as (prev: URLSearchParams) => URLSearchParams;
+    const result = updater(new URLSearchParams('ep=1&node=n1'));
+    expect(result.get('ep')).toBe('2');
+    expect(result.has('node')).toBe(false);
+  });
+
+  // 评审修复轮 (Important #2): the Overview accordion must always expand
+  // whichever episode `workflow`/`renderNodeCard` are ACTUALLY scoped to
+  // (`currentEpisodeId`), never a raw URL `ep=` that has diverged from it.
+  // Task 10's Settings module mirrors ITS OWN episode browsing into the SAME
+  // `ep=` key without moving `currentEpisodeId` (by design — Settings
+  // browses independently of the main workspace) — before this fix, leaving
+  // Settings back to Overview with a browsed-but-not-switched-to episode
+  // left the accordion trusting that stale `ep=`, expanding the WRONG row
+  // while `workflow` stayed scoped to the real `currentEpisodeId`.
+  it('the accordion expands currentEpisodeId, not a URL ep= that has drifted away from it (Important #2)', async () => {
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    // No `ep` param seeded → falls back to the lowest sort_order episode (Ep 1).
+    await waitFor(() =>
+      expect(screen.getByTestId('ep-accordion-row-1')).toHaveAttribute('data-open', 'true'),
+    );
+    expect(screen.getByTestId('ep-accordion-row-2')).not.toHaveAttribute('data-open', 'true');
+
+    // Simulate the Settings-mirror desync: URL `ep=` now points at episode 2
+    // (as if `handleNodeSettingsEpisodeChange` had written it while the
+    // writer browsed Settings) while `currentEpisodeId` — real React state,
+    // untouched by that mirror — is still episode 1.
+    mockSearchParams.current = new URLSearchParams('ep=2');
+    // Force a fresh render that re-reads searchParams, without touching
+    // currentEpisodeId itself (a genuine, unrelated activeModule change).
+    fireEvent.click(await screen.findByTestId('ws-module-episodes'));
+    fireEvent.click(await screen.findByTestId('ws-module-overview'));
+
+    // Still episode 1's row — NOT the stale URL ep=2 — because `workflow`
+    // (fetched for currentEpisodeId) has nothing for episode 2.
+    await waitFor(() =>
+      expect(screen.getByTestId('ep-accordion-row-1')).toHaveAttribute('data-open', 'true'),
+    );
+    expect(screen.getByTestId('ep-accordion-row-2')).not.toHaveAttribute('data-open', 'true');
+  });
+
   // Review fix round 1 (Important #2): `?shot=` is a one-shot deep-link
   // trigger, consumed by ProjectWorkspace's own URL-shot effect (moved out of
   // EpisodeStoryboardPage in Task 3 修复轮2 — see `handleOpenShotInEditor`'s

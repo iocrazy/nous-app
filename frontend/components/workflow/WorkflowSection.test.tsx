@@ -13,6 +13,7 @@ import { createInstance, type i18n as I18n } from 'i18next';
 import enJson from '../../public/locales/en.json';
 import { WorkflowSection } from './WorkflowSection';
 import { ToastProvider } from '../Toast';
+import { ApiError } from '../../services/apiClient';
 import type { ProjectWorkflow } from '../../types';
 
 function makeI18n(): I18n {
@@ -56,7 +57,43 @@ const EMPTY_WORKFLOW: ProjectWorkflow = {
   nodes: [],
 };
 
-function renderSection(overrides: { canWrite?: boolean; onReload?: () => void } = {}) {
+const NODE_WORKFLOW: ProjectWorkflow = {
+  has_workflow: true,
+  current_node_id: 'n1',
+  agents_active: 0,
+  nodes: [
+    {
+      id: 'n1',
+      project_id: '500',
+      source_template_node_id: null,
+      legacy_stage_id: null,
+      name: 'Script',
+      sort_order: 0,
+      parallel_group: null,
+      status: 'pending',
+      owner_user_id: null,
+      owner_agent_id: null,
+      planned_start: null,
+      planned_due: null,
+      review_required: false,
+      deliverable_required: false,
+      deliverable_label: null,
+      skipped: false,
+      members: [],
+      completion_policy: 'owner',
+      events: { notify_on_arrival: true, notify_on_complete: false, suggest_agent_run: false },
+    } as ProjectWorkflow['nodes'][number],
+  ],
+};
+
+function renderSection(
+  overrides: {
+    canWrite?: boolean;
+    canArrange?: boolean;
+    workflow?: ProjectWorkflow;
+    onReload?: () => void;
+  } = {},
+) {
   const onReload = overrides.onReload ?? vi.fn();
   render(
     <I18nextProvider i18n={makeI18n()}>
@@ -64,8 +101,9 @@ function renderSection(overrides: { canWrite?: boolean; onReload?: () => void } 
         <WorkflowSection
           projectId="500"
           teamId="42"
-          workflow={EMPTY_WORKFLOW}
+          workflow={overrides.workflow ?? EMPTY_WORKFLOW}
           canWrite={overrides.canWrite ?? true}
+          canArrange={overrides.canArrange}
           onReload={onReload}
           onRequestAdvance={() => undefined}
           onOpenTodolist={() => undefined}
@@ -125,5 +163,37 @@ describe('WorkflowSection empty state', () => {
     await waitFor(() => expect(onReload).toHaveBeenCalled());
     // The modal closes itself on success.
     expect(screen.queryByTestId('attach-workflow-modal')).toBeNull();
+  });
+});
+
+// ── 评审修复轮 (Important #4): node arrangement is project-owner-only ────────
+describe('WorkflowSection node arrangement gate', () => {
+  it('canArrange=false hides the Add-stage capsule even when canWrite is true', () => {
+    renderSection({ canWrite: true, canArrange: false, workflow: NODE_WORKFLOW });
+    expect(screen.queryByTestId('workflow-add-stage')).toBeNull();
+  });
+
+  it('canArrange defaults to canWrite (true) — Add-stage shows for a writer', () => {
+    renderSection({ canWrite: true, workflow: NODE_WORKFLOW });
+    expect(screen.getByTestId('workflow-add-stage')).toBeInTheDocument();
+  });
+
+  it('a 403 arrangement_forbidden on add-node surfaces the typed toast, not the generic addFailed one', async () => {
+    mockWorkflowService.addProjectNode.mockRejectedValue(
+      new ApiError('Forbidden', 403, { code: 'arrangement_forbidden' }),
+    );
+    mockWorkflowService.fetchStageLibrary.mockResolvedValue([]);
+    renderSection({ canWrite: true, canArrange: true, workflow: NODE_WORKFLOW });
+
+    fireEvent.click(screen.getByTestId('workflow-add-stage'));
+    await waitFor(() => expect(screen.getByTestId('workflow-blank-stage-input')).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId('workflow-blank-stage-input'), {
+      target: { value: 'Voiceover' },
+    });
+    fireEvent.click(screen.getByTestId('workflow-add-blank-stage'));
+
+    await waitFor(() =>
+      expect(screen.getByText(enJson.projects.workflow.arrangementForbidden)).toBeInTheDocument(),
+    );
   });
 });

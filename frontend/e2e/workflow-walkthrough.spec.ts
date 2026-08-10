@@ -80,6 +80,14 @@ const PROJECT = {
   id: PARENT_PROJECT_ID,
   name: 'Workflow E2E Project',
   description: null,
+  // 评审修复轮 (Important #4, workspace IA redesign): node arrangement
+  // (add/remove stage) is now gated to the project owner on the frontend
+  // (`ProjectWorkspace.isProjectOwner`, `currentUserId === project.owner_id`)
+  // in addition to `canWrite` — without this, `workflow-add-stage`/
+  // `workflow-remove-node` below would be hidden and the two W3-1 tests
+  // would fail to find them. The stubbed session logs in as `USER_ID`
+  // (see `helpers/stubs.ts`), so this project must be owned by that same id.
+  owner_id: USER_ID,
   team_id: TEAM_ID,
   project_type: 'internal',
   project_group: null,

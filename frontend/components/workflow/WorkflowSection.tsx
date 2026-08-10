@@ -56,6 +56,16 @@ interface WorkflowSectionProps {
   episodeId?: string | null;
   workflow: ProjectWorkflow;
   canWrite: boolean;
+  /** 评审修复轮 (Important #4, workspace IA redesign): node add/remove is an
+   * ARRANGEMENT action — the backend gates it to the project manager only
+   * (`node_authz.require_arrangement_role`, 403 `arrangement_forbidden`,
+   * NO episode-owner carve-out — spec §5), stricter than `canWrite`'s
+   * WRITE_ROLES gate. Defaults to `canWrite` so every caller that predates
+   * this prop (there's exactly one production mount today —
+   * `WorkspaceOverview` — plus this file's own test harness) keeps its
+   * prior, unrestricted-by-arrangement behavior; `WorkspaceOverview` passes
+   * a real (narrower) value computed from `project.owner_id`. */
+  canArrange?: boolean;
   onReload: () => void;
   onRequestAdvance: (direction: 'forward' | 'back') => void;
   onOpenTodolist: () => void;
@@ -94,6 +104,7 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
   episodeId,
   workflow,
   canWrite,
+  canArrange = canWrite,
   onReload,
   onRequestAdvance,
   onOpenTodolist,
@@ -169,8 +180,16 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
       setPickerOpen(false);
       onReload();
     } catch (err) {
-      console.error('[WorkflowSection] add node failed', err);
-      addToast(t('projects.workflow.addFailed'), 'error');
+      // 评审修复轮 (Important #4): typed 403 for the ARRANGEMENT gate — see
+      // `canArrange`'s doc comment. The frontend hide/disable above already
+      // covers a project-owner-signal miss; this toast covers the narrower
+      // backend-manager-but-not-owner edge that same comment documents.
+      if (err instanceof ApiError && err.status === 403 && err.code === 'arrangement_forbidden') {
+        addToast(t('projects.workflow.arrangementForbidden'), 'error');
+      } else {
+        console.error('[WorkflowSection] add node failed', err);
+        addToast(t('projects.workflow.addFailed'), 'error');
+      }
     } finally {
       setBusy(false);
     }
@@ -187,6 +206,9 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
       if (err instanceof ApiError && err.status === 409) {
         const key = REMOVE_BLOCK_KEY[err.message] ?? 'projects.workflow.removeBlocked.generic';
         addToast(t(key), 'error');
+      } else if (err instanceof ApiError && err.status === 403 && err.code === 'arrangement_forbidden') {
+        // 评审修复轮 (Important #4) — see doAdd's matching branch above.
+        addToast(t('projects.workflow.arrangementForbidden'), 'error');
       } else {
         console.error('[WorkflowSection] remove node failed', err);
         addToast(t('projects.workflow.removeFailed'), 'error');
@@ -299,7 +321,10 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
         nodes={workflow.nodes}
         currentNodeId={workflow.current_node_id}
         onSelectNode={onSelectNode}
-        canEdit={canWrite}
+        // 评审修复轮 (Important #4): add/remove-stage is gated on BOTH
+        // canWrite (base write access) AND canArrange (project-owner-only
+        // arrangement signal) — see `canArrange`'s doc comment.
+        canEdit={canWrite && canArrange}
         onAddNode={() => setPickerOpen(true)}
         onRemoveNode={(node) => setRemoving(node)}
       />

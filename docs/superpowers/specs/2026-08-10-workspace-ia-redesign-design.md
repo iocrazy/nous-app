@@ -136,6 +136,14 @@ URL**——组件间传 ID 不传索引,刷新可恢复,链接可分享,设置/�
 &tab=nodes                     设置页节点配置区(设置深链:module=settings&tab=nodes&ep=&node=)
 ```
 
+> ⚠️ **`scene=` 明确延后(2026-08-10 评审 Important #5 拍板)**:`scene=` 参数本期仅保留
+> 占位声明——实现范围内**没有**任何代码读取它来定位/滚动分镜页的场次列,场次深链目前
+> 走的是 state 通道(`studioFocusSceneId` + `handleOpenWorkView`/`openEpisodeScript`,
+> 参见 `ProjectWorkspace.tsx`),不是 URL 恢复。`readWorkspaceParams` 对 `scene=` 的**解析**
+> 是真实的(`ProjectWorkspace.urlparams.test.tsx` 覆盖),但"刷新/分享链接能恢复到该场次"
+> 这一效果尚未实现,是另立项——不要假设它已经工作。`shot=` 不受影响,已是真实的一次性深链
+> 入口(见 `handleOpenShotInEditor` 及其 URL 效果)。
+
 - 总览手风琴:展开集 = `ep`,选中节点 = `node` → 「在设置中修改」深链、待办回跳、
   分享链接全部可拼。
 - 所有 ID 在 URL/props 中一律**字符串**(Snowflake BIGINT 超 2^53,禁 `Number()`;

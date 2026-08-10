@@ -1435,12 +1435,7 @@
     },
     "episodeSurface": {
       "noScriptHint": "该剧集还没有剧本。",
-      "startStoryboard": "开始分镜",
-      "openCanvas": "打开画布",
-      "openScript": "打开剧本编辑器",
-      "openBeats": "打开节拍视图",
-      "openRenders": "打开成片",
-      "editorEntryHint": "该视图在剧集编辑器中打开。"
+      "startStoryboard": "开始分镜"
     },
     "storyboardPage": {
       "title": "分镜",
@@ -1936,6 +1931,8 @@
       "agentsActive_one": "{{count}} 个智能体运行中",
       "agentsActive_other": "{{count}} 个智能体运行中",
       "unassigned": "未指派",
+      "notSet": "未设置",
+      "arrangementForbidden": "仅项目负责人可调整剧集与阶段结构",
       "genericAgent": "智能体",
       "genericMember": "成员",
       "days_one": "{{count}} 天",

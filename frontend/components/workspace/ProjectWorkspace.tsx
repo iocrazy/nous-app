@@ -297,6 +297,21 @@ export function ProjectWorkspace({
     [currentUserId, project.owner_id, episodes],
   );
 
+  // 评审修复轮 (Important #4): ARRANGEMENT (episode create/reorder/delete;
+  // workflow node add/remove) is backend-gated to the project MANAGER only
+  // (`node_authz.require_arrangement_role` — no episode-owner carve-out,
+  // spec §5), stricter than the WRITE_ROLES gate `canWrite` reflects. The
+  // only owner signal already in scope on the frontend is `project.owner_id`
+  // (the same one `canEditNodeConfig` above and `canAssignEpisodeOwner`
+  // below use) — narrower than the backend's "manager" role (a team-admin
+  // resolved to manager with no `owner_id` match still passes the backend
+  // gate but sees these controls hidden here, per the review ledger). That
+  // asymmetry is intentionally fail-safe: hiding a legitimate manager's
+  // controls is a lesser harm than exposing them to a non-manager who'd
+  // just eat a 403 — and the typed `arrangement_forbidden` toast (wired in
+  // `WorkspaceEpisodes`/`WorkflowSection`) still catches the gap either way.
+  const isProjectOwner = currentUserId === project.owner_id;
+
   // Task 9: in-place PATCH for a node's owner/schedule facts. Optimistic
   // (patches `workflow.nodes` locally before the request settles), reverts
   // on failure, and is the SOLE toaster for this action (EpisodeNodeCard
@@ -513,6 +528,16 @@ export function ProjectWorkspace({
           next.delete('view');
           next.delete('scene');
           next.delete('shot');
+          // 评审修复轮 (Important #3): `node=` is the OTHER per-episode deep
+          // link — the Overview accordion's selected node id (Task 4/5).
+          // Left uncleared, a real episode switch carried the OLD episode's
+          // node id into the NEW episode's row: `renderNodeCard` computes
+          // `selectedNodeId ?? workflow.current_node_id`, so a stale (but
+          // non-empty) `node=` always won over the new episode's own cursor
+          // node — the accordion expanded correctly but the node-card slot
+          // rendered nothing (`workflow.nodes.find` misses an id that
+          // belongs to a different episode's node set).
+          next.delete('node');
           return next;
         },
         { replace: true },
@@ -952,15 +977,30 @@ export function ProjectWorkspace({
       ? studioScenes.findIndex((s) => s.id === studioActiveSceneId) + 1
       : 0) || null;
 
-  // Overview accordion addressing (IA redesign Task 4, ambiguity #3): URL
-  // `ep=` is the first source of truth (falls back to `currentEpisodeId`
-  // exactly like the episode-resolution effect above), UNLESS the writer
-  // explicitly collapsed the open row — that's local UI state, not a URL
-  // concern, so it wins over both. `node=` has no such override; Task 5's
-  // node card decides what an absent selection defaults to.
-  const expandedEpisodeId = overviewCollapsed
-    ? null
-    : (readWorkspaceParams(searchParams).ep ?? currentEpisodeId);
+  // Overview accordion addressing (IA redesign Task 4, ambiguity #3; revised
+  // 评审修复轮 Important #2): the accordion must show whichever episode
+  // `workflow` (this file's ONE `useProjectWorkflow` instance, scoped to
+  // `currentEpisodeId`) actually holds data for — reading a raw URL `ep=`
+  // here independently of `currentEpisodeId` broke that invariant once Task
+  // 10 gave Settings its OWN reason to write `ep=` without moving
+  // `currentEpisodeId` (`handleNodeSettingsEpisodeChange` above — Settings
+  // browses episodes independently of the main workspace by design, see
+  // that handler's doc comment). Leaving Settings back to Overview with a
+  // browsed-but-not-switched-to episode left URL `ep=` pointing at episode
+  // X while `workflow`/`renderNodeCard` stayed scoped to episode Y
+  // (`currentEpisodeId`) — the accordion expanded X's row and rendered Y's
+  // strip/node card underneath it, a silent wrong-episode display (not a
+  // loading gap `workflowLoading` could catch, since Y's fetch had already
+  // resolved). `currentEpisodeId` is ALREADY the URL-`ep`-derived value for
+  // every path meant to move the main workspace (the episode-resolution
+  // effect on mount, and `handleEpisodeChange` on every real switch) — it's
+  // the single source of truth now; a raw second read of `searchParams`
+  // here was redundant on the happy path and actively wrong on this one.
+  // `overviewCollapsed` still wins over it: the writer explicitly collapsed
+  // the row — that's local UI state, not a URL concern. `node=` has no such
+  // override; Task 5's node card decides what an absent selection defaults
+  // to.
+  const expandedEpisodeId = overviewCollapsed ? null : currentEpisodeId;
   const selectedNodeId = readWorkspaceParams(searchParams).node;
 
   // Settings module tabs (Task 10, spec §7): `?tab=nodes` deep-links straight
@@ -1091,6 +1131,9 @@ export function ProjectWorkspace({
                   );
                 }}
                 canWrite={canWrite}
+                // 评审修复轮 (Important #4): workflow node add/remove is an
+                // ARRANGEMENT action — see `isProjectOwner`'s doc comment.
+                canArrangeWorkflow={isProjectOwner}
                 onReloadWorkflow={() => void reloadWorkflow()}
               />
             )}
@@ -1100,6 +1143,9 @@ export function ProjectWorkspace({
                 episodes={episodes}
                 onEpisodesChanged={() => void refetchEpisodes()}
                 onOpenEpisode={handleOpenEpisode}
+                // 评审修复轮 (Important #4): episode create/reorder/delete is
+                // an ARRANGEMENT action — see `isProjectOwner`'s doc comment.
+                canArrange={isProjectOwner}
               />
             )}
             {(activeModule === 'characters' || activeModule === 'locations' || activeModule === 'props') && (
@@ -1164,7 +1210,7 @@ export function ProjectWorkspace({
                     initialEpisodeId={readWorkspaceParams(searchParams).ep}
                     initialNodeId={readWorkspaceParams(searchParams).node}
                     canEditFor={canEditNodeConfig}
-                    canAssignEpisodeOwner={currentUserId === project.owner_id}
+                    canAssignEpisodeOwner={isProjectOwner}
                     people={nodeCardPeople}
                     agents={nodeCardAgents}
                     onEpisodeChange={handleNodeSettingsEpisodeChange}

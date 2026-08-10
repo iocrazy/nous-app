@@ -1435,12 +1435,7 @@
     },
     "episodeSurface": {
       "noScriptHint": "This episode doesn't have a script yet.",
-      "startStoryboard": "Start Storyboard",
-      "openCanvas": "Open Canvas",
-      "openScript": "Open Script Editor",
-      "openBeats": "Open Beats View",
-      "openRenders": "Open Renders",
-      "editorEntryHint": "This view opens in the episode editor."
+      "startStoryboard": "Start Storyboard"
     },
     "storyboardPage": {
       "title": "Storyboard",
@@ -1936,6 +1931,8 @@
       "agentsActive_one": "{{count}} agent active",
       "agentsActive_other": "{{count}} agents active",
       "unassigned": "Unassigned",
+      "notSet": "Not set",
+      "arrangementForbidden": "Only the project owner can restructure episodes and stages",
       "genericAgent": "Agent",
       "genericMember": "Member",
       "days_one": "{{count}} day",
