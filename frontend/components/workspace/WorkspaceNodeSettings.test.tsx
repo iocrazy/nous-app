@@ -371,4 +371,77 @@ describe('WorkspaceNodeSettings', () => {
     fireEvent.click(screen.getByText('Ep 2 — Cutdown'));
     expect(onEpisodeChange).toHaveBeenCalledWith('ep2');
   });
+
+  // ── Task 10 修复轮1 (Important #2): onNodePatched carries the episode id ──
+  // so a host holding its OWN separate `useProjectWorkflow` instance for the
+  // same episode (e.g. `ProjectWorkspace`'s Overview/top-bar one) knows to
+  // reload it too — this panel's own `reload()` only refreshes ITS instance.
+  it('a successful node PATCH fires onNodePatched with the patched node\'s episode id', async () => {
+    mockWorkflowService.updateProjectNode.mockResolvedValue(NODE_A);
+    const onNodePatched = vi.fn();
+    renderPanel({ initialEpisodeId: 'ep1', canEditFor: () => true, onNodePatched });
+    await screen.findByTestId('node-settings-form');
+
+    const field = screen.getByTestId('node-settings-brief') as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: 'Focus on act 2' } });
+    fireEvent.blur(field);
+
+    await waitFor(() => expect(onNodePatched).toHaveBeenCalledWith('ep1'));
+  });
+
+  it('a FAILED node PATCH does not fire onNodePatched', async () => {
+    mockWorkflowService.updateProjectNode.mockRejectedValue(
+      new ApiError('Forbidden', 403, { details: { code: 'node_config_forbidden' } }),
+    );
+    const onNodePatched = vi.fn();
+    renderPanel({ initialEpisodeId: 'ep1', canEditFor: () => true, onNodePatched });
+    await screen.findByTestId('node-settings-form');
+
+    const field = screen.getByTestId('node-settings-brief') as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: 'Focus on act 2' } });
+    fireEvent.blur(field);
+
+    await waitFor(() => expect(mockWorkflowService.updateProjectNode).toHaveBeenCalled());
+    expect(onNodePatched).not.toHaveBeenCalled();
+  });
+
+  // ── Task 10 修复轮1: cold deep-link mount (episodes arrive AFTER mount) ──
+  it('resolves the initial episode once `episodes` arrives, even if it was still empty at mount (cold deep-link)', async () => {
+    const utils = render(
+      <I18nextProvider i18n={makeI18n()}>
+        <WorkspaceNodeSettings
+          projectId="p1"
+          episodes={[]}
+          initialEpisodeId="ep1"
+          initialNodeId={null}
+          canEditFor={() => true}
+          canAssignEpisodeOwner={false}
+          people={PEOPLE}
+        />
+      </I18nextProvider>,
+    );
+    // Nothing to show yet — `episodes` is empty, `selectedEpisodeId` can't
+    // resolve, `useProjectWorkflow` skips its fetch on a null episode id.
+    expect(screen.queryByTestId('node-settings-form')).toBeNull();
+    expect(mockWorkflowService.fetchProjectWorkflow).not.toHaveBeenCalled();
+
+    // The host's episodes fetch resolves — a prop update, same component
+    // instance (mirrors ProjectWorkspace's real `episodes` state flow).
+    utils.rerender(
+      <I18nextProvider i18n={makeI18n()}>
+        <WorkspaceNodeSettings
+          projectId="p1"
+          episodes={EPISODES}
+          initialEpisodeId="ep1"
+          initialNodeId={null}
+          canEditFor={() => true}
+          canAssignEpisodeOwner={false}
+          people={PEOPLE}
+        />
+      </I18nextProvider>,
+    );
+
+    await waitFor(() => expect(mockWorkflowService.fetchProjectWorkflow).toHaveBeenCalledWith('p1', 'ep1'));
+    await screen.findByTestId('node-settings-form');
+  });
 });

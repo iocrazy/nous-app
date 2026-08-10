@@ -117,6 +117,9 @@ const mockProjectsService = vi.hoisted(() => ({
   // the surface-panel tests below) — the section swallows a rejection
   // itself, but resolving cleanly keeps those tests quiet/deterministic.
   fetchProjectMembers: vi.fn(),
+  // WorkspaceNodeSettings' episode-owner PATCH (Task 10) — unused by most
+  // tests below, just needs to exist so the import resolves.
+  updateEpisode: vi.fn(),
 }));
 vi.mock('../../services/projectsService', () => mockProjectsService);
 
@@ -1218,5 +1221,114 @@ describe('ProjectWorkspace — Task 9 node config inline edit', () => {
     // pre-both-edits snapshot merge.
     expect(screen.getByTestId('node-card-schedule').textContent).toContain('2026-08-10');
     expect(screen.getByTestId('node-card-owner').textContent).toMatch(/assign/i);
+  });
+});
+
+// ── Task 10 修复轮1 ───────────────────────────────────────────────────────
+describe('ProjectWorkspace — Task 10 修复轮1 (Node Config settings)', () => {
+  // Critical #1: `handleOpenNodeSettings` previously only wrote the URL —
+  // `activeModule` is a plain `useState` seeded ONCE from the URL on mount
+  // (never resynced from `searchParams` afterward), so the address bar
+  // changed but the screen didn't. This exercises the REAL click path (the
+  // node card's Settings button), not `WorkspaceNodeSettings` fed props
+  // directly — the fix must make the click itself switch the module.
+  it('clicking a node card\'s Settings button switches the module to Settings\' Node Config tab, node preselected', async () => {
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    const { rerender } = render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    const callsBefore = setSearchParamsSpy.mock.calls.length;
+    fireEvent.click(await screen.findByTestId('node-card-settings'));
+
+    // The screen must actually switch — not just the URL.
+    expect(await screen.findByTestId('settings-tabs')).toBeTruthy();
+    expect(screen.queryByTestId('ws-overview')).toBeNull();
+
+    // This suite's router mock doesn't auto-apply `setSearchParams` writes
+    // onto `mockSearchParams.current` (see the file-header comment on
+    // `setSearchParamsSpy`) — replay EVERY updater fired by this click, IN
+    // ORDER, the same way a real router would apply them sequentially, then
+    // re-render, to verify `WorkspaceNodeSettings`' own deep-link
+    // preselection end to end (real click → real URL writes → real
+    // re-render). `handleOpenNodeSettings` itself fires one `setSearchParams`
+    // call, but `setActiveModule('settings')` ALSO triggers the module-sync
+    // `useEffect` (`[activeModule, stageNodeId, setSearchParams]`), which
+    // fires a SECOND, later call — picking only the LAST call (as if it were
+    // the only one) would silently drop `handleOpenNodeSettings`'s own
+    // `tab=nodes`/`ep=`/`node=` writes.
+    const newCalls = setSearchParamsSpy.mock.calls.slice(callsBefore);
+    for (const call of newCalls) {
+      mockSearchParams.current = (call[0] as (prev: URLSearchParams) => URLSearchParams)(
+        mockSearchParams.current,
+      );
+    }
+    rerender(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    expect(screen.getByTestId('settings-tab-nodes')).toHaveAttribute('aria-current', 'true');
+    await waitFor(() => {
+      expect(screen.getByTestId('node-settings-form')).toHaveTextContent('Storyboard');
+    });
+  });
+
+  // Important #2: two independent `useProjectWorkflow` instances (this
+  // file's own Overview/top-bar one, and `WorkspaceNodeSettings`' own) can
+  // both be watching the SAME episode. A node PATCH made through Settings
+  // must reload the main instance too, or the Overview/top-bar go stale
+  // until some unrelated refetch happens to fire.
+  it('a node PATCH in Settings reloads the main workspace instance when the patched episode IS the current one', async () => {
+    // ep=1 is both this fixture's default current episode (lowest
+    // sort_order) and the URL-seeded Settings episode — same-episode case.
+    mockSearchParams.current = new URLSearchParams('module=settings&tab=nodes&ep=1&node=1');
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    mockWorkflowService.updateProjectNode.mockResolvedValue(stageNode({ brief: 'Focus on act 2' }));
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    await screen.findByTestId('node-settings-form');
+    // Two instances, both resolved to ep=1: this file's own (Overview/top
+    // bar) + WorkspaceNodeSettings' own.
+    await waitFor(() => expect(mockWorkflowService.fetchProjectWorkflow).toHaveBeenCalledTimes(2));
+
+    const brief = screen.getByTestId('node-settings-brief');
+    fireEvent.change(brief, { target: { value: 'Focus on act 2' } });
+    fireEvent.blur(brief);
+
+    await waitFor(() => expect(mockWorkflowService.updateProjectNode).toHaveBeenCalled());
+    // +1 for WorkspaceNodeSettings' own `reload()`, +1 for the main
+    // instance's `reloadWorkflow()` fired via `onNodePatched` — same
+    // episode, so the gate in `handleNodePatchedInSettings` lets it through.
+    await waitFor(() => expect(mockWorkflowService.fetchProjectWorkflow).toHaveBeenCalledTimes(4));
+  });
+
+  it('a node PATCH in Settings does NOT reload the main workspace instance when the patched episode differs from the current one', async () => {
+    mockSearchParams.current = new URLSearchParams('module=settings&tab=nodes&ep=1&node=1');
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    mockWorkflowService.updateProjectNode.mockResolvedValue(stageNode({ brief: 'Focus on act 2' }));
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    await screen.findByTestId('node-settings-form');
+    await waitFor(() => expect(mockWorkflowService.fetchProjectWorkflow).toHaveBeenCalledTimes(2));
+
+    // Switch episodes INSIDE Settings only — this diverges
+    // `WorkspaceNodeSettings`' own `selectedEpisodeId` from the main
+    // workspace's `currentEpisodeId` (which stays '1'; it's only re-derived
+    // from the URL once, on the initial episodes fetch — see
+    // `ProjectWorkspace`'s own file-doc on `currentEpisodeId`).
+    fireEvent.click(screen.getByTestId('node-settings-episode-switch'));
+    fireEvent.click(screen.getByText('Ep 2 — Cutdown'));
+    // The episode switch itself fires one more fetch (WorkspaceNodeSettings'
+    // instance, now on ep=2).
+    await waitFor(() => expect(mockWorkflowService.fetchProjectWorkflow).toHaveBeenCalledTimes(3));
+
+    const brief = await screen.findByTestId('node-settings-brief');
+    fireEvent.change(brief, { target: { value: 'Focus on act 2' } });
+    fireEvent.blur(brief);
+
+    await waitFor(() => expect(mockWorkflowService.updateProjectNode).toHaveBeenCalled());
+    // Only +1 (WorkspaceNodeSettings' own reload, for ep=2) — the main
+    // instance (still watching ep=1) must NOT reload for a different
+    // episode's PATCH.
+    await waitFor(() => expect(mockWorkflowService.fetchProjectWorkflow).toHaveBeenCalledTimes(4));
+    // Give any wrongly-fired extra reload a chance to show up before asserting it didn't.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mockWorkflowService.fetchProjectWorkflow).toHaveBeenCalledTimes(4);
   });
 });

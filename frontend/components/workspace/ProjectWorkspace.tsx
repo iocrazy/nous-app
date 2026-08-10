@@ -445,6 +445,24 @@ export function ProjectWorkspace({
     );
   }, []);
 
+  // Task 10 修复轮1 (Important #2): `WorkspaceNodeSettings` holds its OWN
+  // `useProjectWorkflow` instance (see that file's doc comment — deliberately
+  // independent of `currentEpisodeId` so browsing episodes in Settings never
+  // disturbs the main workspace). A node PATCH there only reloads THAT
+  // instance, leaving this file's own `workflow` (Overview accordion +
+  // top-bar flow pill) stale until some unrelated refetch happens to fire —
+  // exactly the same staleness class Task 9's `onEpisodeOwnerChanged` above
+  // was added to close for the episode-owner field. Only reload when the
+  // patched episode is the one THIS instance is actually watching — a patch
+  // in a different episode's Settings tab has nothing for this instance to
+  // refresh.
+  const handleNodePatchedInSettings = useCallback(
+    (episodeId: string) => {
+      if (episodeId === currentEpisodeId) void reloadWorkflow();
+    },
+    [currentEpisodeId, reloadWorkflow],
+  );
+
   // Top-bar node stepper (H3) — jump back to Overview with that node selected
   // (URL `node=`, same as clicking it in the accordion strip) instead of the
   // old free-standing `focusNodeId`/scroll-into-view mechanism, which had no
@@ -810,11 +828,19 @@ export function ProjectWorkspace({
   // EpisodeNodeCard's Settings deep-link (Task 5, ambiguity #4) — a plain new
   // navigation into the Settings module's Node Config tab, so `replace: false`
   // (unlike the module-sync effect above, which intentionally collapses
-  // module switches into the current history entry). Settings itself doesn't
-  // read `tab`/`node` yet (Task 10's scope) — this only guarantees the URL is
-  // correct ahead of that.
+  // module switches into the current history entry).
+  //
+  // Task 10 修复轮1 (Critical): `activeModule` is a plain `useState`, seeded
+  // ONCE from the URL on mount (see `initialModule` above) — it is NOT kept
+  // in sync with `searchParams` afterward (that effect only runs the other
+  // direction, state → URL). Writing `module=settings` into the URL here
+  // without also calling `setActiveModule('settings')` left the address bar
+  // correct but the screen showing whatever module was already on screen —
+  // the button looked like a no-op. Mirrors `handleModuleChange`'s own
+  // pattern (side effects THEN `setActiveModule`).
   const handleOpenNodeSettings = useCallback(
     (episodeId: string, nodeId: string) => {
+      setActiveModule('settings');
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
@@ -1144,6 +1170,7 @@ export function ProjectWorkspace({
                     onEpisodeChange={handleNodeSettingsEpisodeChange}
                     onNodeChange={handleNodeSettingsNodeChange}
                     onEpisodeOwnerChanged={handleEpisodeOwnerChanged}
+                    onNodePatched={handleNodePatchedInSettings}
                   />
                 )}
               </div>

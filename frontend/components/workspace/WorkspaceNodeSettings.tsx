@@ -82,6 +82,16 @@ export interface WorkspaceNodeSettingsProps {
    * host can refresh its own `episodes` list (e.g. `canEditFor` elsewhere
    * derives from `EpisodeProgress.owner_id`). */
   onEpisodeOwnerChanged?: (episodeId: string, ownerId: string | null) => void;
+  /** Fired after a successful node PATCH (owner/members/schedule/brief),
+   * carrying the episode it belongs to. Task 10 修复轮1 (Important #2):
+   * this panel owns its OWN `useProjectWorkflow` instance (see the file-doc
+   * — deliberately independent of the host's `currentEpisodeId`), so a PATCH
+   * here reloads only that instance; a host also holding a separate instance
+   * for the SAME episode (`ProjectWorkspace`'s Overview/top-bar one) would
+   * otherwise go stale until its own next incidental refetch. The host
+   * decides whether the patched episode is "the one it's watching" — this
+   * callback carries `episodeId` for exactly that comparison. */
+  onNodePatched?: (episodeId: string) => void;
 }
 
 const Row: FC<{ label: string; children: ReactNode }> = ({ label, children }) => (
@@ -103,6 +113,7 @@ export function WorkspaceNodeSettings({
   onEpisodeChange,
   onNodeChange,
   onEpisodeOwnerChanged,
+  onNodePatched,
 }: WorkspaceNodeSettingsProps) {
   const { t } = useTranslation();
   const toast = useOptionalToast();
@@ -121,6 +132,29 @@ export function WorkspaceNodeSettings({
   const [episodeOwnerSaving, setEpisodeOwnerSaving] = useState(false);
 
   const { workflow, reload, patchNodeLocally } = useProjectWorkflow(projectId, selectedEpisodeId);
+
+  // Task 10 修复轮1: a COLD deep-link (`?module=settings&tab=nodes&ep=&node=`
+  // opened fresh, not clicked into from an already-loaded Overview) can mount
+  // this component before the host's `episodes` list has fetched — the
+  // `useState` initializer above only runs ONCE, at mount, so it falls
+  // through to `sortedEpisodes[0] ?? null` against an EMPTY array and
+  // permanently strands `selectedEpisodeId` at `null` (nothing re-derives it
+  // once `episodes` actually arrives as a prop update). Since
+  // `useProjectWorkflow` skips its fetch entirely while `episodeId` is
+  // `null`, the panel would sit blank forever. Resolve it once, the same way
+  // the initializer would have, the moment `episodes` stops being empty —
+  // only while still unresolved, so this never fights a real user pick.
+  useEffect(() => {
+    if (selectedEpisodeId) return;
+    if (episodes.length === 0) return;
+    const sorted = [...episodes].sort((a, b) => a.sort_order - b.sort_order);
+    const initial =
+      initialEpisodeId && episodes.some((e) => e.episode_id === initialEpisodeId)
+        ? initialEpisodeId
+        : (sorted[0]?.episode_id ?? null);
+    setSelectedEpisodeId(initial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately narrow: only resolves the initial cold-mount case (selectedEpisodeId still null), not every `episodes` refresh
+  }, [episodes]);
 
   // Re-pick a valid node whenever the workflow (episode) changes — the
   // previously-selected id may belong to a different episode's node list.
@@ -148,12 +182,14 @@ export function WorkspaceNodeSettings({
   };
 
   const patchNode = async (patch: ProjectNodePatch) => {
-    if (!selectedNode) return;
+    if (!selectedNode || !selectedEpisodeId) return;
+    const episodeId = selectedEpisodeId; // capture — see onNodePatched below
     setNodeSaving(true);
     patchNodeLocally(selectedNode.id, patch);
     try {
       await updateProjectNode(projectId, selectedNode.id, patch);
       await reload();
+      onNodePatched?.(episodeId);
     } catch (err) {
       console.error('[WorkspaceNodeSettings] node patch failed', err);
       await reload();
