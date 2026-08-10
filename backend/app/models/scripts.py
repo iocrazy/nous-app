@@ -513,6 +513,12 @@ class ScriptShots(Base):
     __tablename__ = "script_shots"
     __table_args__ = (
         ForeignKeyConstraint(
+            ["created_by_agent_run_id"],
+            ["public.agent_runs.id"],
+            ondelete="SET NULL",
+            name="script_shots_created_by_agent_run_id_fkey",
+        ),
+        ForeignKeyConstraint(
             ["scene_id"],
             ["public.script_scenes.id"],
             ondelete="CASCADE",
