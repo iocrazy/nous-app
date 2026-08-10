@@ -16,6 +16,7 @@ from ..schemas import EnvironmentConfig, SessionResult
 if TYPE_CHECKING:  # pragma: no cover - import cycle: login imports schemas only
     from ..login import LoginFlowSpec
     from ..publish import PlatformIntentRules, Publisher
+    from ..verify import VerifySpec
 
 SessionValidator = Callable[
     [dict[str, Any], "EnvironmentConfig | None"], Awaitable[SessionResult]
@@ -25,6 +26,7 @@ _VALIDATORS: dict[str, SessionValidator] = {}
 _LOGIN_FLOWS: dict[str, "LoginFlowSpec"] = {}
 _PUBLISHERS: dict[str, "Publisher"] = {}
 _INTENT_RULES: dict[str, "PlatformIntentRules"] = {}
+_VERIFY_SPECS: dict[str, "VerifySpec"] = {}
 
 
 def register(platform: str, validator: SessionValidator) -> None:
@@ -109,9 +111,39 @@ def get_intent_rules(platform: str) -> "PlatformIntentRules | None":
     return _INTENT_RULES.get((platform or "").strip().lower())
 
 
+# A fifth registry: publish READ-BACK (P1-3). Separate from the publisher for
+# the same reason intent rules are — the two are reachable independently. A
+# read-back runs on a schedule, hours after the publish that created the post,
+# in a different process tick; tying it to the publisher entry would suggest
+# they are one operation.
+#
+# Absence is meaningful, and it is what keeps the honest answer available: a
+# platform with no read-back gets a typed `not_supported`, which the backend
+# records as "verification is not available here" rather than pretending the
+# post was confirmed. Xiaohongshu and Bilibili cannot publish at all, so they
+# will never need one; a future platform that can publish but cannot be read
+# back must say so out loud rather than inherit Douyin's answer.
+
+
+def register_verify_spec(platform: str, spec: "VerifySpec") -> None:
+    key = platform.strip().lower()
+    if key in _VERIFY_SPECS:
+        raise ValueError(f"verify spec for '{key}' is already registered")
+    _VERIFY_SPECS[key] = spec
+
+
+def get_verify_spec(platform: str) -> "VerifySpec | None":
+    return _VERIFY_SPECS.get((platform or "").strip().lower())
+
+
+def verify_platforms() -> list[str]:
+    return sorted(_VERIFY_SPECS)
+
+
 # Importing the module performs its registration.
 from . import douyin as _douyin  # noqa: E402,F401
 from . import douyin_publish as _douyin_publish  # noqa: E402,F401
+from . import douyin_verify as _douyin_verify  # noqa: E402,F401
 
 # Xiaohongshu / Bilibili register a validator + a login flow, but deliberately
 # NO publisher and NO intent rules: binding an account and keeping its session

@@ -106,6 +106,7 @@ class _FakeIssueRepo:
         self._existing = existing or {}
         self.created = []
         self.transitions = []
+        self.descriptions: dict[int, str] = {}
 
     async def list_by_origin(self, origin_kind, origin_id, *, include_hidden=False):
         return list(self._existing.get(origin_id, []))
@@ -117,6 +118,16 @@ class _FakeIssueRepo:
     async def transition_status(self, issue_id, new_status, *, dbos_workflow_id=None):
         self.transitions.append((issue_id, new_status))
         return {"id": issue_id, "status": new_status}
+
+    # P1-3: the mirror annotates an issue before blocking it, so the reason the
+    # read-back gave survives into what the user reads.
+    async def get_by_id(self, issue_id):
+        return {"id": issue_id, "description": self.descriptions.get(issue_id, "")}
+
+    async def update(self, issue_id, patch):
+        if "description" in patch:
+            self.descriptions[issue_id] = patch["description"]
+        return {"id": issue_id, **patch}
 
 
 def _compile(stmt: Any) -> tuple[str, dict[str, Any]]:
@@ -390,3 +401,219 @@ async def test_terminal_sync_closes_and_blocks(harness):
     counts = await wf._sync_terminal_batches()
     assert counts["synced"] == 2
     assert issues.transitions == [(1, "done"), (2, "blocked")]
+
+
+# ── P1-3: the read-back gate ────────────────────────────────────────────
+#
+# P1-2 released the issue on a CLOCK. Reaching go-live says nothing about
+# whether the platform reviewed it, refused it, dropped the schedule, or the
+# user deleted the post — so "done" was still an assumption, just a
+# better-timed one. These pin the replacement.
+
+
+class TestReadbackVerdictAggregation:
+    """One batch, N accounts -> one word. Precedence is the design."""
+
+    def test_no_session_rows_means_nothing_to_verify(self):
+        assert wf.readback_verdict(None) == wf.READBACK_NOT_REQUIRED
+        assert wf.readback_verdict([]) == wf.READBACK_NOT_REQUIRED
+
+    def test_all_verified_lets_the_issue_close(self):
+        assert wf.readback_verdict(["verified", "verified"]) == "verified"
+
+    def test_one_not_live_account_outranks_three_good_ones(self):
+        """A partial failure a human must see. Averaging it away is exactly how
+        it becomes invisible."""
+        states = ["verified", "verified", "not_live", "verified"]
+        assert wf.readback_verdict(states) == "not_live"
+
+    def test_not_live_outranks_abandoned_and_pending(self):
+        assert wf.readback_verdict(["abandoned", "not_live", "pending"]) == "not_live"
+
+    def test_abandoned_outranks_pending(self):
+        assert wf.readback_verdict(["pending", "abandoned"]) == "abandoned"
+
+    def test_a_never_attempted_row_reads_as_pending(self):
+        """NULL is 'we have not looked yet', not 'nothing to look at'."""
+        assert wf.readback_verdict([None, "verified"]) == "pending"
+
+    def test_not_supported_does_not_hold_the_user_hostage(self):
+        """A platform without a read-back is OUR coverage gap. Blocking the
+        user's work item over it would punish them for something they cannot
+        act on — so it falls back to P1-2's time-based release."""
+        assert wf.readback_verdict(["not_supported"]) == "verified"
+
+
+class TestReadbackGate:
+    def test_verified_closes_the_issue(self):
+        assert (
+            wf.terminal_sync_action(
+                "completed",
+                "in_progress",
+                scheduled_at=_real_past(),
+                readback="verified",
+            )
+            == "done"
+        )
+
+    def test_not_live_blocks_instead_of_closing(self):
+        assert (
+            wf.terminal_sync_action(
+                "completed",
+                "in_progress",
+                scheduled_at=_real_past(),
+                readback="not_live",
+            )
+            == "blocked"
+        )
+
+    def test_abandoned_blocks_too(self):
+        """ "We could not confirm it went live" must never render as done."""
+        assert (
+            wf.terminal_sync_action(
+                "completed",
+                "in_progress",
+                scheduled_at=_real_past(),
+                readback="abandoned",
+            )
+            == "blocked"
+        )
+
+    def test_pending_holds_the_issue_open(self):
+        assert (
+            wf.terminal_sync_action(
+                "completed",
+                "in_progress",
+                scheduled_at=_real_past(),
+                readback="pending",
+            )
+            is None
+        )
+
+    def test_the_clock_is_checked_before_the_readback(self):
+        """Ordering guard: a batch that has not reached go-live must never be
+        blocked for 'not being live yet'."""
+        assert (
+            wf.terminal_sync_action(
+                "completed",
+                "in_progress",
+                scheduled_at=_real_future(),
+                readback="not_live",
+            )
+            is None
+        )
+
+    def test_default_keeps_the_pre_p1_3_behaviour(self):
+        """An OAuth/h5 batch has no session rows and therefore no verdict; it
+        must close exactly as it did before."""
+        assert wf.terminal_sync_action("completed", "in_progress") == "done"
+
+
+def _readback_row(**overrides):
+    row = {
+        "dbos_workflow_id": "wf-1",
+        "phase": "completed",
+        "issue_id": 5,
+        "issue_status": "in_progress",
+        "scheduled_at": _real_past(),
+        "readback_states": ["verified"],
+        "readback_details": [None],
+    }
+    row.update(overrides)
+    return row
+
+
+@pytest.mark.asyncio
+async def test_scheduled_batch_closes_only_after_a_verified_readback(harness):
+    """The happy path of the new gate: go-live passed AND the platform
+    confirmed the post. Only then does the work item close."""
+    issues, _ = harness(mirrored_open=[_readback_row()])
+    counts = await wf._sync_terminal_batches()
+
+    assert issues.transitions == [(5, "done")]
+    assert counts["synced"] == 1
+
+
+@pytest.mark.asyncio
+async def test_gone_from_the_platform_blocks_the_issue_with_a_reason(harness):
+    """The user's acceptance case: schedule a publish, then delete the post on
+    the platform. Go-live passes, the read-back finds nothing, and the work
+    item lands in the incident lane carrying WHY."""
+    issues, _ = harness(
+        mirrored_open=[
+            _readback_row(
+                readback_states=["not_live"],
+                readback_details=["[not_found] read 5 work(s), none matches"],
+            )
+        ]
+    )
+    counts = await wf._sync_terminal_batches()
+
+    assert issues.transitions == [(5, "blocked")]
+    assert counts["blocked_by_readback"] == 1
+    note = issues.descriptions[5]
+    assert "NOT live" in note
+    assert "[not_found]" in note
+
+
+@pytest.mark.asyncio
+async def test_an_unconfirmable_batch_blocks_rather_than_hanging(harness):
+    """Giving up must stay visible. A row that quietly stayed 'in progress'
+    forever is the shape CLAUDE.md's typed-failure rule forbids."""
+    issues, _ = harness(
+        mirrored_open=[
+            _readback_row(
+                readback_states=["abandoned"],
+                readback_details=["[verification_abandoned] gave up after 5 attempts"],
+            )
+        ]
+    )
+    counts = await wf._sync_terminal_batches()
+
+    assert issues.transitions == [(5, "blocked")]
+    assert counts["blocked_by_readback"] == 1
+    assert "could not be confirmed" in issues.descriptions[5]
+
+
+@pytest.mark.asyncio
+async def test_a_batch_awaiting_its_readback_is_counted_separately(harness):
+    """'waiting for the platform's clock' and 'waiting for the read-back' are
+    different situations with different fixes, so they get different counters
+    instead of both hiding in the generic skip bucket."""
+    issues, _ = harness(mirrored_open=[_readback_row(readback_states=[None])])
+    counts = await wf._sync_terminal_batches()
+
+    assert issues.transitions == []
+    assert counts["awaiting_readback"] == 1
+    assert counts["awaiting_schedule"] == 0
+    assert counts["skipped"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_failed_batch_blocks_without_waiting_for_any_readback(harness):
+    """An incident needs a human now. The read-back gate only ever guards the
+    path to done."""
+    issues, _ = harness(
+        mirrored_open=[_readback_row(phase="failed", readback_states=[None])]
+    )
+    counts = await wf._sync_terminal_batches()
+
+    assert issues.transitions == [(5, "blocked")]
+    # Not attributed to the read-back — the batch failed on its own.
+    assert counts["blocked_by_readback"] == 0
+
+
+class TestReadbackNote:
+    def test_typed_reasons_are_carried_through_verbatim(self):
+        note = wf.build_readback_note("not_live", ["[rejected] unauthorised music"])
+        assert "[rejected] unauthorised music" in note
+
+    def test_repeated_reasons_are_collapsed(self):
+        """A broadcast batch hits N accounts with the same outcome; printing it
+        four times adds nothing."""
+        note = wf.build_readback_note("not_live", ["[rejected] x"] * 4)
+        assert note.count("[rejected] x") == 1
+
+    def test_a_verdict_with_no_detail_still_says_something_actionable(self):
+        assert wf.build_readback_note("abandoned", []) is not None
+        assert wf.build_readback_note("abandoned", [None, ""]) is not None

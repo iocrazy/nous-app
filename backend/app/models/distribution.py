@@ -27,6 +27,7 @@ from sqlalchemy import (
     Double,
     ForeignKeyConstraint,
     Index,
+    Integer,
     PrimaryKeyConstraint,
     String,
     Text,
@@ -263,6 +264,18 @@ class PublishTaskAccounts(Base):
     published_url: Mapped[str | None] = mapped_column(Text)
     platform_item_id: Mapped[str | None] = mapped_column(Text)
     published_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(True))
+    # Read-back verification (mig 418, P1-3). These are what let a scheduled
+    # batch close on a CHECK instead of on a clock: nothing writes
+    # published_url on the session channel at publish time (the platform's
+    # post-publish redirect carries no id), so confirmation has to come from a
+    # later visit to the creator centre. Vocabulary and transitions live in
+    # ``app/workflows/publish_readback.py``.
+    verify_state: Mapped[str | None] = mapped_column(Text)
+    verify_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    verify_detail: Mapped[str | None] = mapped_column(Text)
+    verify_checked_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(True))
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )

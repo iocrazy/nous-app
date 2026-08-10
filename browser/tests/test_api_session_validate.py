@@ -187,4 +187,12 @@ def test_returned_statuses_stay_inside_the_shared_enum(client, monkeypatch):
         "sms_required",
         "success",
         "published",
+        # P1-3 read-back. Added to BOTH sides in the same change — the backend's
+        # `browser_client.SessionStatus` carries it too. A member that exists
+        # only here would arrive there unrecognised and be flattened to
+        # `failed`, which for this particular member is the worst possible
+        # flattening: "the platform refused this post" would become "our
+        # browser fell over", and the batch would be retried forever instead of
+        # shown to a human.
+        "not_published",
     }

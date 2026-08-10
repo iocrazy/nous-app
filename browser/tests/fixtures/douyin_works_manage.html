@@ -1,0 +1,101 @@
+<!--
+  Fixture: Douyin creator centre 作品管理 (/creator-micro/content/manage).
+
+  ⚠️ What this fixture is and is not.
+
+  It is a faithful model of the *structure the reader assumes*: CSS-Modules
+  class names of the form `<role>-<hash>` (the convention observed on the live
+  console and documented in `platforms/douyin.py`), one card per work, a watch
+  link on cards that have an item id, and the status word rendered as text
+  inside the card.
+
+  It is NOT a capture of the live page. Nobody has read the manage page with a
+  bound account yet. So these tests prove the parsing and the judgement are
+  correct GIVEN this shape; they do not prove the live page has this shape.
+  That second half needs a real account and is on the post-merge checklist.
+
+  The reason that split is acceptable: `judge_readback` is built so that being
+  wrong about the shape yields `list_unreadable` (inconclusive → retry → ask a
+  human), never a false "live" and never a false "deleted". The tests below
+  pin exactly that property.
+
+  Five cards, covering every branch:
+    1. live, public                → LIVE
+    2. under review, no item id    → NOT_LIVE / under_review
+    3. rejected                    → NOT_LIVE / rejected
+    4. still scheduled             → NOT_LIVE / still_scheduled
+    5. live but private (仅自己可见) → LIVE  (a private post IS published)
+-->
+<div class="content-list-wrap">
+  <div class="content-card-a1b2c3">
+    <a href="https://www.douyin.com/video/7412345678901234567">
+      <img class="cover-x1y2" src="https://p3.douyinpic.com/cover1.jpeg" />
+    </a>
+    <div class="info-d4e5f6">
+      <div class="title-g7h8i9">Autumn Harvest Field Notes</div>
+      <div class="status-j1k2l3">已发布</div>
+      <div class="stats-m4n5o6">播放 12.4万 · 点赞 3201</div>
+    </div>
+  </div>
+
+  <div class="content-card-a1b2c3">
+    <div class="cover-x1y2 placeholder"></div>
+    <div class="info-d4e5f6">
+      <div class="title-g7h8i9">Winter Kitchen Experiment</div>
+      <div class="status-j1k2l3">审核中</div>
+      <div class="stats-m4n5o6">提交于 2026-08-10 09:00</div>
+    </div>
+  </div>
+
+  <div class="content-card-a1b2c3">
+    <a href="https://www.douyin.com/video/7412345678909999999">
+      <img class="cover-x1y2" src="https://p3.douyinpic.com/cover3.jpeg" />
+    </a>
+    <div class="info-d4e5f6">
+      <div class="title-g7h8i9">Studio Tour Walkthrough</div>
+      <div class="status-j1k2l3">未通过</div>
+      <div class="stats-m4n5o6">内容涉及未授权音乐</div>
+    </div>
+  </div>
+
+  <div class="content-card-a1b2c3">
+    <div class="cover-x1y2 placeholder"></div>
+    <div class="info-d4e5f6">
+      <div class="title-g7h8i9">Spring Planting Timelapse</div>
+      <div class="status-j1k2l3">定时中</div>
+      <div class="stats-m4n5o6">将于 2026-08-11 20:00 发布</div>
+    </div>
+  </div>
+
+  <div class="content-card-a1b2c3">
+    <a href="https://www.douyin.com/video/7412345678905555555">
+      <img class="cover-x1y2" src="https://p3.douyinpic.com/cover5.jpeg" />
+    </a>
+    <div class="info-d4e5f6">
+      <div class="title-g7h8i9">Private Draft Reference Cut</div>
+      <div class="status-j1k2l3">仅自己可见</div>
+      <div class="stats-m4n5o6">播放 0</div>
+    </div>
+  </div>
+
+  <!--
+    6. Live, but with NO link and NO id attribute anywhere on the card.
+
+    This is the shape the live console is actually believed to have: checked
+    against a real account on 2026-08-08 and recorded in
+    frontend/components/Distribution/RecordsPage.tsx — the post cards expose
+    neither an href nor an id, and no listing XHR returns one either.
+
+    It is in the fixture because the read-back MUST still verify such a card.
+    The verdict comes from the status text; the id (and therefore
+    published_url) is opportunistic and simply stays null.
+  -->
+  <div class="content-card-a1b2c3">
+    <div class="cover-x1y2"><img src="https://p3.douyinpic.com/cover6.jpeg" /></div>
+    <div class="info-d4e5f6">
+      <div class="title-g7h8i9">Linkless Live Card From The Real Console</div>
+      <div class="status-j1k2l3">已发布</div>
+      <div class="stats-m4n5o6">播放 812</div>
+    </div>
+  </div>
+</div>

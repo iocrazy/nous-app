@@ -101,6 +101,14 @@ class SessionStatus(str, Enum):
     SMS_REQUIRED = "sms_required"
     SUCCESS = "success"
     PUBLISHED = "published"
+    # P1-3 回读：**"我们看过了，它没上线"**。它是一个结论，不是一次失败 ——
+    # 这跟 ``failed``（"我们没问出来"）是两件事，而把两者合并正是这条链最容易
+    # 犯的错：合并之后，一次容器宕机会把一整批好好的作品判成没发出去，而平台
+    # 真的拒稿时又跟"浏览器挂了"长得一模一样。
+    #
+    # 措辞保持通道级中性（§6.1 a）："没上线"对审核中 / 被拒 / 用户删稿都成立，
+    # **具体是哪一种**走 ``detail["reason"]``。
+    NOT_PUBLISHED = "not_published"
     TIMEOUT = "timeout"
     PROXY_FAILED = "proxy_failed"
     FAILED = "failed"
@@ -156,6 +164,22 @@ _VALIDATE_STATUSES = frozenset(
 _PUBLISH_STATUSES = frozenset(
     {
         SessionStatus.PUBLISHED.value,
+        SessionStatus.SESSION_INVALID.value,
+        SessionStatus.TIMEOUT.value,
+        SessionStatus.PROXY_FAILED.value,
+        SessionStatus.FAILED.value,
+    }
+)
+
+# /session/verify-publish 回读允许返回的 status 值（契约已定死）。
+#
+# 只有 ``published`` / ``not_published`` 是**结论**；其余四个都表示"这一轮没
+# 问出来"，调用方必须重试而不是下判断。这个划分写在 ``VerifyResult.conclusive``
+# 里，别在调用点各写一遍。
+_VERIFY_STATUSES = frozenset(
+    {
+        SessionStatus.PUBLISHED.value,
+        SessionStatus.NOT_PUBLISHED.value,
         SessionStatus.SESSION_INVALID.value,
         SessionStatus.TIMEOUT.value,
         SessionStatus.PROXY_FAILED.value,
@@ -401,6 +425,56 @@ class PublishResult:
     def __repr__(self) -> str:  # pragma: no cover - 防呆
         return (
             f"PublishResult(status={self.status!r}, "
+            f"platform_item_id={self.platform_item_id!r}, "
+            f"published_url={'set' if self.published_url else 'none'}, "
+            f"updated_storage_state="
+            f"{'set' if self.updated_storage_state else 'none'})"
+        )
+
+
+@dataclass(frozen=True)
+class VerifyResult:
+    """``POST /session/verify-publish`` 的传输层结果 (P1-3)。
+
+    与 ``PublishResult`` 同形，因为调用方"作品上线了、这是它的 URL 和 id"的
+    落库路径不该因为消息来自回读而不是来自发布就再实现一遍。
+
+    ``conclusive`` 是本类存在的理由。回读只有两种**结论**（上线 / 没上线），
+    其余一律是"这一轮没问出来"。把这个判断放在类型上而不是每个调用点各写一
+    次 ``status in (...)``，是因为写错的那一次代价极不对称：把"没问出来"当成
+    "没上线"，就会因为一次容器宕机把一批好好的作品挂成待办事故。
+    """
+
+    result: SessionOpResult
+    platform_item_id: Optional[str] = None
+    published_url: Optional[str] = None
+    updated_storage_state: Optional[dict[str, Any]] = None
+
+    @property
+    def status(self) -> str:
+        return self.result.status
+
+    @property
+    def is_live(self) -> bool:
+        """平台上真的能看到这条作品。"""
+        return self.status == SessionStatus.PUBLISHED.value
+
+    @property
+    def is_not_live(self) -> bool:
+        """我们看过了 —— 它没上线（审核中 / 被拒 / 找不到）。"""
+        return self.status == SessionStatus.NOT_PUBLISHED.value
+
+    @property
+    def conclusive(self) -> bool:
+        return self.is_live or self.is_not_live
+
+    @property
+    def reason(self) -> Optional[str]:
+        return self.result.detail.get("reason")
+
+    def __repr__(self) -> str:  # pragma: no cover - 防呆
+        return (
+            f"VerifyResult(status={self.status!r}, reason={self.reason!r}, "
             f"platform_item_id={self.platform_item_id!r}, "
             f"published_url={'set' if self.published_url else 'none'}, "
             f"updated_storage_state="
@@ -815,6 +889,96 @@ class BrowserClient:
             updated_storage_state=updated_state,
         )
 
+    # ── /session/verify-publish (P1-3 回读) ─────────────────
+
+    async def verify_publish(
+        self,
+        platform: str,
+        storage_state: Mapping[str, Any],
+        title: str,
+        environment: Optional[SessionEnvironment] = None,
+    ) -> VerifyResult:
+        """``POST /session/verify-publish`` —— 去创作者中心确认作品真的上线了。
+
+        为什么需要它：``douyin_publish`` 明确返回 ``published_url=None``，因为
+        平台发布后的跳转不带作品 id，而"取列表里第一条"对任何有定时稿或并发
+        发布的账号都会张冠李戴。所以发布这一步只能证明"编辑器收下了"。对定时
+        发布来说，那离真相还有几个小时 —— 期间平台可以审核、拒稿、取消定时，
+        用户也可以删稿。
+
+        读超时用 ``validate`` 那一档而不是 ``publish`` 那一档：回读只有一次
+        导航、没有上传，几百秒的预算是留给传视频的。
+
+        永不抛传输异常；参数非法才 raise ``ValueError``。
+        """
+        if not isinstance(storage_state, Mapping) or not storage_state:
+            raise ValueError("storage_state must be a non-empty JSON object")
+        if not title or not title.strip():
+            # 标题是回读**唯一**的抓手（我们从来没拿到过作品 id）。空标题不是
+            # "查全部"，而是根本无法定位 —— 让它在这里炸，好过让浏览器白跑一趟
+            # 然后返回一个看似权威的 not_found，把用户的待办挂成事故。
+            raise ValueError("title must be a non-empty string")
+        env = environment or SessionEnvironment()
+        payload = {
+            "platform": platform,
+            "storage_state": dict(storage_state),
+            "environment": env.to_payload(),
+            "probe": {"title": title},
+        }
+        try:
+            data = await self._call(
+                "POST",
+                "/session/verify-publish",
+                read_timeout=self._validate_timeout,
+                payload=payload,
+            )
+        except _TransportFailure as failure:
+            logger.warning(
+                f"[browser.verify] platform={platform} "
+                f"{failure.kind.value}: {failure.message}"
+            )
+            # 传输失败 == 没问出来。``conclusive`` 因此为 False，调用方会重试
+            # 而不是给作品下判断。
+            return VerifyResult(result=self._transport_result(failure))
+
+        raw_status = data.get("status")
+        if raw_status not in _VERIFY_STATUSES:
+            logger.warning(
+                f"[browser.verify] platform={platform} illegal status={raw_status!r}"
+            )
+            return VerifyResult(
+                result=_failure(
+                    SessionStatus.FAILED,
+                    SessionErrorKind.BAD_RESPONSE,
+                    f"browser service returned unknown status {raw_status!r}",
+                )
+            )
+
+        detail = data.get("detail")
+        detail = dict(detail) if isinstance(detail, Mapping) else {}
+        updated = data.get("updated_storage_state")
+        updated_state = (
+            dict(updated) if isinstance(updated, Mapping) and updated else None
+        )
+        item_id = data.get("platform_item_id")
+        published_url = data.get("published_url")
+        logger.info(
+            f"[browser.verify] platform={platform} status={raw_status} "
+            f"reason={detail.get('reason')!r}"
+        )
+        return VerifyResult(
+            result=SessionOpResult(
+                # success 由 status 推导（与其余方法同款单一真相源）。
+                success=raw_status == SessionStatus.PUBLISHED.value,
+                status=raw_status,
+                message=str(data.get("message") or ""),
+                detail=detail,
+            ),
+            platform_item_id=str(item_id) if item_id else None,
+            published_url=str(published_url) if published_url else None,
+            updated_storage_state=updated_state,
+        )
+
     # ── /session/login/* (S2 扫码登录) ──────────────────────
 
     async def start_login(
@@ -1128,5 +1292,6 @@ __all__ = [
     "SessionErrorKind",
     "SessionOpResult",
     "SessionStatus",
+    "VerifyResult",
     "is_infra_failure",
 ]

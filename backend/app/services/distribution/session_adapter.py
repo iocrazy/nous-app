@@ -65,6 +65,7 @@ from app.services.distribution.browser_client import (
     SessionErrorKind,
     SessionOpResult,
     SessionStatus,
+    VerifyResult,
     is_infra_failure,
 )
 from app.services.distribution.publish_options import (
@@ -759,6 +760,72 @@ class SessionAdapter:
             published_url=published.published_url,
             updated_storage_state=published.updated_storage_state,
         )
+
+    # ── 发布回读 (P1-3) ─────────────────────────────────────
+
+    async def verify_publish(
+        self,
+        account: Mapping[str, Any],
+        title: str,
+        *,
+        environment: Optional[SessionEnvironment] = None,
+    ) -> VerifyResult:
+        """回创作者中心确认 ``title`` 这条作品是不是真的上线了。
+
+        与 ``publish`` 走同样的三道门（能力 → auth_type → 会话可解密），顺序
+        和理由都一样。唯一不同的是**门没过时返回什么**：
+
+          * 平台没实现回读 → ``not_published`` + ``reason=not_supported``。
+            这是关于**我们的覆盖范围**的真话，调用方据此记"这里无法核实"，
+            而不是把待办永远挂在那儿等一个永远不会来的答案。
+          * auth_type 不对 / 会话解不开 → 一律走 ``failed``（非结论），调用方
+            重试。这类失败说的是账号或我们的密钥，**不是**作品的状态；让它
+            走 ``not_published`` 会因为一次密钥错配把作品挂成事故。
+
+        这个不对称是刻意的：``not_published`` 会让待办变 blocked（找人来看），
+        所以只有"我们真的看过平台"才配返回它。
+        """
+        if not self._profile.supports_publishing:
+            # 不能发布的平台自然也没有回读 —— 而且这条路径压根不该出现，因为
+            # 没有它发出去的作品。返回 not_supported 而不是静默成功。
+            return VerifyResult(
+                result=SessionOpResult(
+                    success=False,
+                    status=SessionStatus.NOT_PUBLISHED.value,
+                    message=(
+                        f"publish read-back is not available for "
+                        f"'{self.platform_name}'"
+                    ),
+                    detail={"reason": "not_supported"},
+                )
+            )
+
+        auth_type = account.get("auth_type")
+        if auth_type is not None and auth_type != AUTH_TYPE_SESSION:
+            return VerifyResult(
+                result=SessionOpResult(
+                    success=False,
+                    status=SessionStatus.FAILED.value,
+                    message=f"account auth_type is {auth_type!r}, not 'session'",
+                    detail={"reason": REASON_AUTH_TYPE_MISMATCH},
+                )
+            )
+
+        try:
+            storage_state = parse_session_state(account)
+        except SessionStateError as exc:
+            return VerifyResult(result=self._session_state_failure(account, exc))
+
+        env = environment or build_environment(account.get("environment"))
+        verified = await self._client.verify_publish(
+            self.platform_name, storage_state, title, env
+        )
+        logger.info(
+            f"[session.verify] platform={self.platform_name} "
+            f"account={account.get('id')} status={verified.status} "
+            f"reason={verified.reason!r}"
+        )
+        return verified
 
 
 __all__ = [
