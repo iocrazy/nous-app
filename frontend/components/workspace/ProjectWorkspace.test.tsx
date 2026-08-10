@@ -374,6 +374,29 @@ describe('ProjectWorkspace', () => {
     expect(result.has('shot')).toBe(false);
   });
 
+  // Review fix round 1 (Important #2): `?shot=` is a one-shot deep-link
+  // trigger consumed by EpisodeStoryboardPage's focus effect. Before this
+  // fix, `handleStoryboardViewChange` only wrote `view` — a manually-picked
+  // tab left the stale `shot` in the URL, so a later remount (refresh, or
+  // navigating out of and back into the Storyboard module) re-read it and
+  // forcibly bounced the writer back to Canvas, discarding their choice.
+  it('clears the sticky ?shot= deep-link trigger from the URL on a manual view-tab switch', async () => {
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    await openStoryboardModule();
+    const tabs = await screen.findByTestId('episode-view-tabs');
+    setSearchParamsSpy.mockClear();
+    fireEvent.click(tabs.querySelector('[data-view="canvas"]')!);
+
+    await waitFor(() => expect(setSearchParamsSpy).toHaveBeenCalled());
+    const lastCall = setSearchParamsSpy.mock.calls[setSearchParamsSpy.mock.calls.length - 1];
+    const updater = lastCall[0] as (prev: URLSearchParams) => URLSearchParams;
+    // Simulate a URL that still carries a consumed deep-link's `shot`.
+    const result = updater(new URLSearchParams('module=storyboard&shot=900'));
+    expect(result.get('view')).toBe('canvas');
+    expect(result.has('shot')).toBe(false);
+  });
+
   it('URL `ep` wins over localStorage on load (Task 1, IA redesign)', async () => {
     // localStorage says Ep 1, but the URL says Ep 2 — a deep link (e.g.
     // shared, or back/forward navigated) must win over what this browser

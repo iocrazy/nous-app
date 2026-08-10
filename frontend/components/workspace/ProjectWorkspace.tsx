@@ -603,12 +603,22 @@ export function ProjectWorkspace({
   // to persist a writer-driven tab switch to the URL (deep-linkable, survives
   // back/forward). `replace: true` mirrors the module-sync effect above: a
   // tab switch isn't a new history entry.
+  //
+  // Review fix round 1 (sticky `?shot=`): `shot` is a ONE-SHOT deep-link
+  // trigger consumed by EpisodeStoryboardPage's focus effect (jump to Canvas
+  // + requestShotFocus) — every view change, whether the writer clicking a
+  // tab or that same effect's own initial auto-switch to Canvas, clears it
+  // here. Without this, `shot` lingered in the URL after the writer manually
+  // switched away from Canvas; a later remount (refresh, or navigating out
+  // and back into the Storyboard module) re-read the stale `shot` and forced
+  // the view back to Canvas, silently discarding the writer's own choice.
   const handleStoryboardViewChange = useCallback(
     (view: string) => {
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
           next.set('view', view);
+          next.delete('shot');
           return next;
         },
         { replace: true },

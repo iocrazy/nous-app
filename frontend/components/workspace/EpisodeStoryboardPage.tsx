@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loading } from '../common/Loading';
+import { useToast } from '../Toast';
 import { requestShotFocus } from '../agentActivity/shotFocusBus';
 import { EpisodeViewTabs } from './EpisodeViewTabs';
 import { EpisodeSceneBoard } from './EpisodeSceneBoard';
@@ -71,11 +72,21 @@ export function EpisodeStoryboardPage({
   onOpenScene,
 }: EpisodeStoryboardPageProps) {
   const { t } = useTranslation();
+  const { addToast } = useToast();
 
   const [view, setViewState] = useState<string>(
     initialView && STORYBOARD_VIEWS.some((v) => v.key === initialView) ? initialView : DEFAULT_VIEW,
   );
-  const setView = useCallback(
+
+  // Manual tab click (EpisodeViewTabs' onChange) — the ONLY path that writes
+  // to the URL. Review fix round 1 (sticky `?shot=`): ProjectWorkspace's
+  // `onViewChange` deletes `shot` from the URL in the same setSearchParams
+  // call — `shot` is a one-shot deep-link trigger, invalidated the moment the
+  // writer manually picks a view. Deliberately NOT used by the focus effect
+  // below (see its own comment) — routing that programmatic auto-switch
+  // through here too would race the URL write against the pending focus
+  // timer.
+  const handleTabChange = useCallback(
     (next: string) => {
       setViewState(next);
       onViewChange(next);
@@ -83,15 +94,22 @@ export function EpisodeStoryboardPage({
     [onViewChange],
   );
 
-  // `?shot=` deep-link: land straight on Canvas and ask whoever is listening
-  // on the bus to reveal the shot once it has mounted (300ms — the canvas
-  // module's own load/mount effect needs to settle first).
+  // `?shot=` deep-link: land straight on Canvas (LOCAL state only — never
+  // via `onViewChange`/the URL) and ask whoever is listening on the bus to
+  // reveal the shot once it has mounted (300ms — the canvas module's own
+  // load/mount effect needs to settle first). If this instead called
+  // `onViewChange` (which clears `shot`), the resulting URL write would
+  // re-render the parent with `focusShotId` now null, and THIS effect's own
+  // cleanup (dependency `[focusShotId]` changing) would cancel the still-
+  // pending timer before `requestShotFocus` ever fires — the deep link would
+  // silently do nothing. Leaving `shot` in the URL here is also what makes
+  // the link re-shareable/reload-safe; it only gets cleared by an explicit
+  // later tab click (handleTabChange above).
   useEffect(() => {
     if (!focusShotId) return;
-    setView('canvas');
+    setViewState('canvas');
     const timer = window.setTimeout(() => requestShotFocus(focusShotId), 300);
     return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire only on a focusShotId change, not on every setView identity change
   }, [focusShotId]);
 
   // Read-only probe (ported from ProjectWorkspace's surface panel, Task 3
@@ -132,9 +150,13 @@ export function EpisodeStoryboardPage({
       })
       .catch((err) => {
         console.error('[EpisodeStoryboardPage] failed to start storyboard:', err);
+        // Typed failure echo (CLAUDE.md「触发路径必须类型化失败回显」) — was
+        // silently swallowed by console.error alone when this block was
+        // ported from ProjectWorkspace, which had this toast.
+        addToast(t('common.error'), 'error');
         setScript({ status: 'missing' });
       });
-  }, [episode, script.status, provisionScript]);
+  }, [episode, script.status, provisionScript, addToast, t]);
 
   function renderScriptGate() {
     if (script.status === 'missing') {
@@ -177,7 +199,7 @@ export function EpisodeStoryboardPage({
           {t('projects.storyboardPage.title', 'Storyboard')}
         </span>
         <span className="font-mono text-[11px] text-ink-500">{episode?.shots_total ?? 0}</span>
-        <EpisodeViewTabs views={STORYBOARD_VIEWS} active={view} onChange={setView} />
+        <EpisodeViewTabs views={STORYBOARD_VIEWS} active={view} onChange={handleTabChange} />
         {view === 'shotlist' && (
           <button
             type="button"
