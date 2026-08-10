@@ -1426,7 +1426,8 @@
       "editorEntryHint": "This view opens in the episode editor."
     },
     "storyboardPage": {
-      "title": "Storyboard"
+      "title": "Storyboard",
+      "shotHint": "Open on canvas"
     },
     "sceneBoard": {
       "open": "Open",

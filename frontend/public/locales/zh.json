@@ -1426,7 +1426,8 @@
       "editorEntryHint": "该视图在剧集编辑器中打开。"
     },
     "storyboardPage": {
-      "title": "分镜"
+      "title": "分镜",
+      "shotHint": "在画布中打开"
     },
     "sceneBoard": {
       "open": "打开",

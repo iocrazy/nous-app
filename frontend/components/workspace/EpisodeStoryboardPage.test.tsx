@@ -13,7 +13,14 @@ import { cleanup } from '@testing-library/react';
 import * as bus from '../agentActivity/shotFocusBus';
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (k: string, dflt?: string) => dflt ?? k }),
+  // Second arg is either an i18next default-value string OR an interpolation
+  // options object (e.g. EpisodeSceneBoard's `shotBadge` call) — only treat
+  // it as a rendered default when it's actually a string, else fall back to
+  // the raw key (mirrors EpisodeSceneBoard.test.tsx's own `t: (k) => k` mock).
+  useTranslation: () => ({
+    t: (k: string, dflt?: string | Record<string, unknown>) =>
+      typeof dflt === 'string' ? dflt : k,
+  }),
 }));
 
 const mockSceneService = vi.hoisted(() => ({
@@ -57,7 +64,7 @@ const ep = { episode_id: '324362669885098', title: 'EP1', scene_count: 7,
   shots_done: 0, shots_total: 6, renders_count: 0, status: 'in_progress' } as any;
 const base = {
   projectId: 'p1', teamId: 't1', episode: ep, initialView: null, focusShotId: null,
-  onViewChange: vi.fn(), onOpenScene: vi.fn(),
+  onViewChange: vi.fn(), onOpenScene: vi.fn(), onShotDeepLink: vi.fn(),
   findExistingScript: vi.fn().mockResolvedValue('sc1'),
   provisionScript: vi.fn().mockResolvedValue('sc1'),
 };
@@ -67,6 +74,7 @@ beforeEach(() => {
   mockSceneService.listShots.mockReset().mockResolvedValue([]);
   base.onViewChange.mockClear();
   base.onOpenScene.mockClear();
+  base.onShotDeepLink.mockClear();
   base.findExistingScript.mockReset().mockResolvedValue('sc1');
   base.provisionScript.mockReset().mockResolvedValue('sc1');
   addToast.mockClear();
@@ -125,5 +133,42 @@ describe('EpisodeStoryboardPage', () => {
     fireEvent.click(tabs.querySelector('[data-view="shotlist"]')!);
 
     expect(base.onViewChange).toHaveBeenCalledWith('shotlist');
+  });
+
+  // Task 3: a scene board shot-card click must go through `onShotDeepLink`
+  // (the container's dedicated URL write), NOT `onViewChange` — reusing
+  // `onViewChange` would delete the very `shot` param this click just set
+  // (see the prop's doc comment / the ambiguity-resolution note in the task
+  // brief). It also flips local view state to canvas immediately and arms
+  // the same 300ms-delayed `requestShotFocus` the `?shot=` deep-link effect
+  // uses, so the canvas module has time to mount before the bus fires.
+  it('a shot-card click calls onShotDeepLink (not onViewChange) and focuses the shot', async () => {
+    const spy = vi.spyOn(bus, 'requestShotFocus');
+    mockSceneService.listScenes.mockResolvedValue([
+      { id: '200', script_id: 'sc1', chapter_id: null, scene_number: '1',
+        heading_int_ext: 'INT', location_text: 'Kitchen', time_of_day: 'DAY',
+        content_version: 1, sort_order: 0, elements: [] },
+    ]);
+    mockSceneService.listShots.mockResolvedValue([
+      { id: '9007199254740997', scene_id: '200', shot_number: 1, shot_type: 'WIDE',
+        camera_angle: 'EYE', camera_movement: 'STATIC', focal_length: '35mm',
+        lighting: null, description: '', image_url: null, thumbnail_url: null,
+        video_url: null, status: 'empty', sort_order: 1000 },
+    ]);
+
+    render(<EpisodeStoryboardPage {...base} />);
+    const shotCard = await screen.findByTestId('shot-card-9007199254740997');
+
+    // Fake timers only from here — RTL's `findByTestId` above polls via real
+    // setTimeout internally and would hang forever if faked first.
+    vi.useFakeTimers();
+    fireEvent.click(shotCard);
+
+    expect(base.onShotDeepLink).toHaveBeenCalledWith('9007199254740997');
+    expect(base.onViewChange).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(300);
+    expect(spy).toHaveBeenCalledWith('9007199254740997');
+    vi.useRealTimers();
   });
 });

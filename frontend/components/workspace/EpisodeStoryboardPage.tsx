@@ -41,6 +41,14 @@ export interface EpisodeStoryboardPageProps {
   provisionScript: (ep: EpisodeProgress) => Promise<string | null>;
   /** Scene card's Open deep-link → the real editor at the scene level. */
   onOpenScene: (sceneId: string) => void;
+  /**
+   * Shot card click (Task 3) → persist `view=canvas` AND `shot=id` in ONE
+   * URL write. Deliberately NOT `onViewChange`: that path clears `shot` (see
+   * `handleTabChange`'s comment) because a manual tab pick invalidates any
+   * pending deep-link — but THIS is the write that arms the deep-link in the
+   * first place, so it must go through a separate container callback.
+   */
+  onShotDeepLink: (shotId: string) => void;
 }
 
 const STORYBOARD_VIEWS = SURFACE_VIEWS.storyboard;
@@ -70,6 +78,7 @@ export function EpisodeStoryboardPage({
   findExistingScript,
   provisionScript,
   onOpenScene,
+  onShotDeepLink,
 }: EpisodeStoryboardPageProps) {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -111,6 +120,22 @@ export function EpisodeStoryboardPage({
     const timer = window.setTimeout(() => requestShotFocus(focusShotId), 300);
     return () => window.clearTimeout(timer);
   }, [focusShotId]);
+
+  // Scene board's shot-card click (Task 3): jump to Canvas immediately (LOCAL
+  // state, same path the deep-link effect above uses) and schedule the same
+  // 300ms-delayed `requestShotFocus` (the canvas module's own mount/load
+  // effect needs to settle before a focus request means anything). Persist
+  // `view=canvas`+`shot=id` to the URL via `onShotDeepLink` — NOT
+  // `onViewChange`, which would delete the very `shot` param this click just
+  // asked for (see `handleTabChange`'s comment above).
+  const handleOpenShot = useCallback(
+    (shotId: string) => {
+      setViewState('canvas');
+      window.setTimeout(() => requestShotFocus(shotId), 300);
+      onShotDeepLink(shotId);
+    },
+    [onShotDeepLink],
+  );
 
   // Read-only probe (ported from ProjectWorkspace's surface panel, Task 3
   // review fix): re-probes on every episode-id change so switching episodes
@@ -222,7 +247,11 @@ export function EpisodeStoryboardPage({
         ) : view === 'storyboard' ? (
           <div data-testid="episode-view-storyboard" className="min-h-[24rem]">
             {script.status === 'ready' ? (
-              <EpisodeSceneBoard scriptId={script.scriptId} onOpenScene={onOpenScene} />
+              <EpisodeSceneBoard
+                scriptId={script.scriptId}
+                onOpenScene={onOpenScene}
+                onOpenShot={handleOpenShot}
+              />
             ) : (
               renderScriptGate()
             )}

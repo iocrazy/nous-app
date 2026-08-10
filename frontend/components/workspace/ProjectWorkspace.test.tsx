@@ -397,6 +397,66 @@ describe('ProjectWorkspace', () => {
     expect(result.has('shot')).toBe(false);
   });
 
+  // Task 3 (镜头卡进画布): a scene board shot-card click must land `view=canvas`
+  // AND `shot=<id>` in the URL via ONE setSearchParams write, through the
+  // dedicated `handleStoryboardShotDeepLink` — NOT `handleStoryboardViewChange`,
+  // whose `shot`-clearing behavior (pinned by the test above) would delete the
+  // very param this click just asked to set.
+  it('a shot-card click writes view=canvas and shot=<id> together, without deleting shot', async () => {
+    mockScriptService.fetchScriptProjects.mockResolvedValue({
+      data: [
+        { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
+      ],
+      total: 1,
+    });
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    mockSceneService.listScenes.mockResolvedValue([
+      {
+        id: '200',
+        script_id: 's1',
+        chapter_id: null,
+        scene_number: null,
+        heading_int_ext: 'INT',
+        location_text: 'Kitchen',
+        time_of_day: 'DAY',
+        content_version: 1,
+        sort_order: 0,
+        elements: [],
+      },
+    ]);
+    mockSceneService.listShots.mockResolvedValue([
+      {
+        id: '9007199254740997',
+        scene_id: '200',
+        shot_number: 1,
+        shot_type: 'WIDE',
+        camera_angle: 'EYE',
+        camera_movement: 'STATIC',
+        focal_length: '35mm',
+        lighting: null,
+        description: '',
+        image_url: null,
+        thumbnail_url: null,
+        video_url: null,
+        status: 'empty',
+        sort_order: 0,
+      },
+    ]);
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    await openStoryboardModule();
+    const shotCard = await screen.findByTestId('shot-card-9007199254740997');
+    setSearchParamsSpy.mockClear();
+    fireEvent.click(shotCard);
+
+    await waitFor(() => expect(setSearchParamsSpy).toHaveBeenCalled());
+    const lastCall = setSearchParamsSpy.mock.calls[setSearchParamsSpy.mock.calls.length - 1];
+    const updater = lastCall[0] as (prev: URLSearchParams) => URLSearchParams;
+    const result = updater(new URLSearchParams('module=storyboard'));
+    expect(result.get('view')).toBe('canvas');
+    expect(result.get('shot')).toBe('9007199254740997');
+  });
+
   it('URL `ep` wins over localStorage on load (Task 1, IA redesign)', async () => {
     // localStorage says Ep 1, but the URL says Ep 2 — a deep link (e.g.
     // shared, or back/forward navigated) must win over what this browser
@@ -493,7 +553,7 @@ describe('ProjectWorkspace', () => {
     await expandEpisodesTree();
     fireEvent.click(await screen.findByTestId('ws-ep-storyboard'));
 
-    expect(await screen.findByTestId('ep-scene-card-200')).toBeInTheDocument();
+    expect(await screen.findByTestId('scene-column-200')).toBeInTheDocument();
     expect(screen.getByTestId('episode-view-tabs')).toBeInTheDocument();
     expect(mockSceneService.listScenes).toHaveBeenCalledWith('s1');
     expect(screen.queryByTestId('mock-editor-shell')).toBeNull();
@@ -526,7 +586,7 @@ describe('ProjectWorkspace', () => {
 
     fireEvent.click(await screen.findByTestId('workflow-strip-node'));
 
-    expect(await screen.findByTestId('ep-scene-card-200')).toBeInTheDocument();
+    expect(await screen.findByTestId('scene-column-200')).toBeInTheDocument();
     expect(screen.queryByTestId('mock-editor-shell')).toBeNull();
   });
 
@@ -589,7 +649,7 @@ describe('ProjectWorkspace', () => {
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
     await openStoryboardModule();
-    await screen.findByTestId('ep-scene-card-200');
+    await screen.findByTestId('scene-column-200');
     fireEvent.click(screen.getByTestId('ep-scene-open-200'));
 
     const shell = await screen.findByTestId('mock-editor-shell');
@@ -635,7 +695,7 @@ describe('ProjectWorkspace', () => {
 
     // Step 1: scene-card Open deep-links into EditorShell with the target scene.
     await openStoryboardModule();
-    await screen.findByTestId('ep-scene-card-200');
+    await screen.findByTestId('scene-column-200');
     fireEvent.click(screen.getByTestId('ep-scene-open-200'));
     const firstShell = await screen.findByTestId('mock-editor-shell');
     expect(firstShell).toHaveAttribute('data-initial-focus-scene-id', '200');
@@ -700,7 +760,7 @@ describe('ProjectWorkspace', () => {
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
     await openStoryboardModule();
-    await screen.findByTestId('ep-scene-card-200');
+    await screen.findByTestId('scene-column-200');
     const tabs = screen.getByTestId('episode-view-tabs');
     fireEvent.click(tabs.querySelector('[data-view="shotlist"]')!);
 
@@ -724,7 +784,7 @@ describe('ProjectWorkspace', () => {
 
     expect(await screen.findByTestId('episode-surface-no-script')).toBeInTheDocument();
     expect(screen.getByTestId('episode-surface-start-storyboard')).toBeInTheDocument();
-    expect(screen.queryByTestId('ep-scene-card-200')).toBeNull();
+    expect(screen.queryByTestId('scene-column-200')).toBeNull();
     expect(mockScriptService.createScriptProject).not.toHaveBeenCalled();
   });
 
@@ -750,7 +810,7 @@ describe('ProjectWorkspace', () => {
     await openStoryboardModule();
     fireEvent.click(await screen.findByTestId('episode-surface-start-storyboard'));
 
-    expect(await screen.findByTestId('ep-scene-card-200')).toBeInTheDocument();
+    expect(await screen.findByTestId('scene-column-200')).toBeInTheDocument();
     expect(mockScriptService.createScriptProject).toHaveBeenCalledTimes(1);
     expect(mockScriptService.createScriptProject).toHaveBeenCalledWith({
       project_id: 'p1',

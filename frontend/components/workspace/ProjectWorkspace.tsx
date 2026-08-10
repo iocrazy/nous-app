@@ -627,6 +627,27 @@ export function ProjectWorkspace({
     [setSearchParams],
   );
 
+  // Task 3 (镜头卡进画布): a scene-board shot card asks to land on Canvas
+  // AND focus a specific shot in ONE URL write. Deliberately NOT routed
+  // through `handleStoryboardViewChange` above — that call's `next.delete
+  // ('shot')` exists precisely to invalidate a stale ONE-SHOT deep-link on a
+  // manual tab pick, so reusing it here would delete the very `shot` param
+  // this click just asked to set.
+  const handleStoryboardShotDeepLink = useCallback(
+    (shotId: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('view', 'canvas');
+          next.set('shot', shotId);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
   // Film slate read-out (studio only): 1-based episode + active-scene numbers.
   const epIdx = episodes.findIndex((e) => e.episode_id === currentEpisode?.episode_id);
   const epNumber = epIdx >= 0 ? epIdx + 1 : null;
@@ -703,6 +724,7 @@ export function ProjectWorkspace({
             findExistingScript={findExistingScript}
             provisionScript={resolveOrProvisionScript}
             onOpenScene={(sceneId) => handleOpenWorkView('storyboard', { sceneId })}
+            onShotDeepLink={handleStoryboardShotDeepLink}
           />
         ) : (
           <div className="flex-1 overflow-y-auto px-6 pb-8">
