@@ -137,6 +137,14 @@ ORM_ALLOWED_PATHS: dict[str, str] = {
         "镜头数据,不做 scope 判定——判定与推进都在被入队的 autopilot_tick 里走"
         "既有闸门。"
     ),
+    "services/ai/undo/run_undo_service.py": (
+        "Run 撤销执行器（mig 413 立项）。不是 agent-tool 路径：入口是"
+        "人触发的 /runs/{run_id}/undo REST 端点，router 已按 agent_runs."
+        "user_id 校验归属 + undone_at CAS 幂等后才调用。它操作的每个 id 都"
+        "来自服务端自己的账本（script_shot_ops / script_ops），从不接受"
+        "模型或用户供给的 scene/shot id；写入全部带 CAS WHERE（与并发编辑"
+        "互斥），scene 正文只走 apply_element_ops 这一条 ops 通道。"
+    ),
 }
 
 # Files allowed to reach the scene/shot/episode/script-project repository
@@ -253,6 +261,15 @@ REPO_LAYER_ALLOWED_PATHS: dict[str, str] = {
         "from the authenticated REST layer; constructs "
         "ScriptSceneRepository() directly for the same persist_scenes path "
         "as script_scene_convert.py above"
+    ),
+    "services/ai/undo/run_undo_service.py": (
+        "Run 撤销执行器（mig 413 立项）。不是 agent-tool 路径：入口是"
+        "人触发的 /runs/{run_id}/undo REST 端点，router 已按 agent_runs."
+        "user_id 校验归属 + undone_at CAS 幂等后才调用。它操作的每个 id 都"
+        "来自服务端自己的账本（script_shot_ops / script_ops），从不接受"
+        "模型或用户供给的 scene/shot id；写入全部带 CAS WHERE（与并发编辑"
+        "互斥），scene 正文只调 get_script_scene_repository() 的"
+        "list_ops_by_scene + apply_element_ops 两个方法。"
     ),
 }
 
