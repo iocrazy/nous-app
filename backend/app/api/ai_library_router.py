@@ -2814,6 +2814,9 @@ async def send_chat_message(
         content=payload.content,
         plan_mode=payload.plan_mode,
         attachments=payload.attachments or None,  # G2
+        script_context=(
+            payload.script_context.model_dump() if payload.script_context else None
+        ),  # §5.3
     )
     return {
         "message": result["assistant_message"],
@@ -2860,6 +2863,11 @@ async def send_chat_message_stream(
                 content=payload.content,
                 plan_mode=payload.plan_mode,
                 attachments=payload.attachments or None,  # G2
+                script_context=(
+                    payload.script_context.model_dump()
+                    if payload.script_context
+                    else None
+                ),  # §5.3
             ):
                 # evt: dict with type + payload
                 event_name = evt.get("type", "delta")

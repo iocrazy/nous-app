@@ -89,6 +89,21 @@ export type ChatAttachmentInput =
       alt_text?: string;
     };
 
+/**
+ * §5.3: structured selection handle sent alongside a chat turn (shared by
+ * /chat and /chat-stream). No quoted text — the selection text is already
+ * folded into `content`; this only carries ids so the backend can render a
+ * `<user_selection>` instruction block letting the agent target the exact
+ * scene/elements instead of re-locating them by content.
+ */
+export interface ChatScriptContextInput {
+  scene_id?: string | null;
+  element_ids?: string[];
+  element_type?: string | null;
+  scene_label?: string | null;
+  cross_scene?: boolean;
+}
+
 /** Why an agent is unhealthy, plus the one line telling the user what to do. */
 export interface AgentFault {
   kind: 'budget' | 'manual' | 'dead_runs';
@@ -893,6 +908,7 @@ export const aiLibraryService = {
     options: {
       plan_mode?: 'auto' | 'prompt_user' | 'dry_run';
       attachments?: ChatAttachmentInput[];
+      script_context?: ChatScriptContextInput;
     } = {},
   ): Promise<ChatResponse> {
     const body: Record<string, unknown> = { content };
@@ -900,6 +916,7 @@ export const aiLibraryService = {
     if (options.attachments && options.attachments.length > 0) {
       body.attachments = options.attachments;
     }
+    if (options.script_context) body.script_context = options.script_context;
     const resp = await fetch(
       `${base()}/sessions/${encodeURIComponent(sessionId)}/chat`,
       {
@@ -938,12 +955,14 @@ export const aiLibraryService = {
     options: {
       plan_mode?: 'auto' | 'prompt_user' | 'dry_run';
       attachments?: ChatAttachmentInput[];
+      script_context?: ChatScriptContextInput;
       signal?: AbortSignal;
     } = {},
   ): AsyncGenerator<{ type: string; data: any }> {
     const body: Record<string, unknown> = { content };
     if (options.plan_mode) body.plan_mode = options.plan_mode;
     if (options.attachments?.length) body.attachments = options.attachments;
+    if (options.script_context) body.script_context = options.script_context;
     const resp = await fetch(
       `${base()}/sessions/${encodeURIComponent(sessionId)}/chat-stream`,
       {

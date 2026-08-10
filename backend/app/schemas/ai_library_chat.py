@@ -154,11 +154,29 @@ class AttachmentRequest(BaseModel):
     )
 
 
+class ScriptContextRequest(BaseModel):
+    """§5.3：随消息携带的剧本选区 handle。文本折叠仍在 content 里（展示/
+    持久化不变）；这里只携带 id，让 agent 能用 ReadScene/ProposeEdit 精确
+    定位，而不是拿文本再搜一遍。id 全部字符串（BIGINT snowflake 精度）。"""
+
+    scene_id: Optional[str] = None
+    element_ids: list[str] = Field(default_factory=list)
+    element_type: Optional[str] = None
+    scene_label: Optional[str] = None
+    cross_scene: bool = False
+
+
 class ChatRequest(BaseModel):
     """POST /sessions/:id/chat body. Only the user's new message; history
     comes from the server-side ai_messages rows."""
 
     content: str = Field(..., min_length=1)
+
+    # §5.3: structured selection handle (scene_id / element_ids) alongside
+    # the folded-text content — lets the agent target the exact scene/
+    # element instead of re-locating it by text search. None when the
+    # user didn't have a context capsule active.
+    script_context: Optional["ScriptContextRequest"] = None
     # Phase M (M4): opt-in PlanMode. When set to 'prompt_user' the chat
     # service runs the model in plan-only mode for this turn — emits
     # a structured plan and waits for the user to reply approve/reject.
