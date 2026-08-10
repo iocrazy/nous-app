@@ -18,6 +18,7 @@ import type {
   AgentChatPermissions,
   AgentDashboard,
   AgentRunDetail,
+  AgentRunUndoReport,
   AgentUsage,
   AgentRunEvent,
   AgentRunGroupListResponse,
@@ -471,6 +472,18 @@ export const aiLibraryService = {
       const text = await resp.text().catch(() => '');
       throw new Error(`${resp.status}: ${text}`);
     }
+  },
+
+  /**
+   * Undo everything a finished run wrote (one-shot; server skips anything a
+   * later edit touched and reports it). 409 while the run is still running.
+   */
+  async undoRun(runId: string): Promise<AgentRunUndoReport> {
+    const resp = await fetch(
+      `${base()}/runs/${encodeURIComponent(runId)}/undo`,
+      { method: 'POST', headers: await getAuthHeaders() },
+    );
+    return handle<AgentRunUndoReport>(resp);
   },
 
   // ─── AI Usage aggregates ───────────────────────────────────────────────────

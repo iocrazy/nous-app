@@ -39,6 +39,9 @@ export interface MessageBubbleProps {
    * Renders an inline Approve/Reject card above the prose body.
    */
   awaitingApproval?: AwaitingApproval;
+  /** The agent_runs id that backed this turn (metadata_json.run_id). Threaded
+   *  to TurnWriteSummary so its Undo button knows what to undo. */
+  runId?: string | null;
 }
 
 /** Image strip + file chips shown above the message text. resource_ref
@@ -96,6 +99,7 @@ export function MessageBubble({
   attachments,
   toolCalls,
   awaitingApproval,
+  runId,
 }: MessageBubbleProps): React.ReactElement {
   const { t } = useTranslation();
   const [copied, setCopied] = React.useState(false);
@@ -156,7 +160,7 @@ export function MessageBubble({
         {screenwritingActivities.length > 0 && (
           <div className="space-y-1.5 px-3 pt-2">
             <ToolActivityChips activities={screenwritingActivities} />
-            <TurnWriteSummary summary={writeSummary} />
+            <TurnWriteSummary summary={writeSummary} runId={runId} />
           </div>
         )}
 

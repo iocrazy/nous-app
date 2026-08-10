@@ -3,10 +3,29 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TurnWriteSummary } from './TurnWriteSummary';
 import type { ShotCardSummary, TurnWriteSummary as WriteSummary } from './toolActivity';
+import type { AgentRunUndoReport } from '../../types';
 
 const requestShotFocus = vi.fn();
 vi.mock('./shotFocusBus', () => ({
   requestShotFocus: (...args: unknown[]) => requestShotFocus(...args),
+}));
+
+// useRunUndo is mocked wholesale — its own state machine (loading/cache/undo
+// call) is exercised by useRunUndo's design, not by this component's tests.
+// The mock still honours the (runId, enabled) contract so the "hidden when
+// not interactive / no runId" case below tests the real wiring, not a stub.
+const undoMock = vi.fn();
+let hookReturn: {
+  state: 'loading' | 'ready' | 'busy' | 'undone' | 'hidden';
+  report: AgentRunUndoReport | null;
+  undo: () => void;
+} = { state: 'ready', report: null, undo: undoMock };
+const useRunUndo = vi.fn((runId: unknown, enabled: unknown) => {
+  if (!enabled || !runId) return { state: 'hidden', report: null, undo: undoMock };
+  return hookReturn;
+});
+vi.mock('./useRunUndo', () => ({
+  useRunUndo: (runId: unknown, enabled: unknown) => useRunUndo(runId, enabled),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -32,6 +51,8 @@ function shot(
 
 beforeEach(() => {
   requestShotFocus.mockReset();
+  undoMock.mockReset();
+  hookReturn = { state: 'ready', report: null, undo: undoMock };
 });
 
 describe('TurnWriteSummary', () => {
@@ -101,5 +122,59 @@ describe('TurnWriteSummary', () => {
     const summary: WriteSummary = { shots: [shot('9', '2-1', 'x', null)], otherWriteCount: 0 };
     const { getByTestId } = render(<TurnWriteSummary summary={summary} interactive={false} />);
     expect(getByTestId('turn-write-shot').tagName).toBe('DIV');
+  });
+});
+
+describe('TurnWriteSummary undo', () => {
+  const summary: WriteSummary = { shots: [shot('1', '1-1', 'x', null)], otherWriteCount: 0 };
+
+  it('renders the Undo button with an icon when interactive with a runId and state is ready', () => {
+    const { getByTestId } = render(<TurnWriteSummary summary={summary} runId="123" />);
+    const button = getByTestId('turn-undo-button');
+    expect(button.textContent).toContain('Undo');
+    expect(button.querySelector('svg')).not.toBeNull();
+  });
+
+  it('renders a disabled "Undone" indicator when state is undone with no report', () => {
+    hookReturn = { state: 'undone', report: null, undo: undoMock };
+    const { getByTestId } = render(<TurnWriteSummary summary={summary} runId="123" />);
+    const el = getByTestId('turn-undo-button');
+    expect(el.textContent).toContain('Undone');
+    expect(el).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('calls undo() once when the button is clicked', () => {
+    const { getByTestId } = render(<TurnWriteSummary summary={summary} runId="123" />);
+    fireEvent.click(getByTestId('turn-undo-button'));
+    expect(undoMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the undo report with counts and skip reasons', () => {
+    hookReturn = {
+      state: 'undone',
+      report: {
+        status: 'done',
+        shots_deleted: 2,
+        shots_reverted: 0,
+        scene_elements_reverted: 3,
+        skipped: [{ kind: 'shot', id: '9', reason: 'rendered' }],
+      },
+      undo: undoMock,
+    };
+    const { getByTestId } = render(<TurnWriteSummary summary={summary} runId="123" />);
+    const report = getByTestId('turn-undo-report');
+    expect(report.textContent).toContain('agentActivity.undoSummary');
+    expect(report.textContent).toContain('agentActivity.undoKind.shot');
+    expect(report.textContent).toContain('9');
+    expect(report.textContent).toContain('agentActivity.undoReason.rendered');
+  });
+
+  it('does not render the undo button when interactive is false or runId is missing', () => {
+    const { queryByTestId, rerender } = render(
+      <TurnWriteSummary summary={summary} runId="123" interactive={false} />,
+    );
+    expect(queryByTestId('turn-undo-button')).toBeNull();
+    rerender(<TurnWriteSummary summary={summary} />);
+    expect(queryByTestId('turn-undo-button')).toBeNull();
   });
 });

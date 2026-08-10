@@ -101,6 +101,15 @@ function extractToolCalls(msg: AIChatMessage): ChatToolCall[] {
   );
 }
 
+/** Persisted assistant message metadata_json.run_id (BIGINT snowflake, kept
+ *  as a string end-to-end — see the file-wide 2^53 precision caveat). */
+function extractRunId(msg: AIChatMessage): string | null {
+  const meta = msg.metadata_json;
+  if (!meta || typeof meta !== 'object') return null;
+  const raw = (meta as Record<string, unknown>).run_id;
+  return typeof raw === 'string' && raw ? raw : null;
+}
+
 /**
  * Extract the Plan Mode paused-for-approval state (Phase 4.5). Backend
  * folds it into ``metadata_json.awaiting_approval`` when a hook returned
@@ -1025,6 +1034,7 @@ export function AIChatPanel({
                     ? extractAwaitingApproval(msg)
                     : undefined
                 }
+                runId={msg.role === 'assistant' ? extractRunId(msg) : undefined}
                 onApply={
                   msg.role === 'assistant' && onApplyContent
                     ? () => onApplyContent(msg.content)

@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { hasShotFocusListener, onShotFocus, requestShotFocus } from './shotFocusBus';
+import {
+  hasShotFocusListener,
+  onShotFocus,
+  onStoryboardRefresh,
+  requestShotFocus,
+  requestStoryboardRefresh,
+} from './shotFocusBus';
 
 describe('shotFocusBus', () => {
   it('reports no listener and no-ops safely when nothing is subscribed', () => {
@@ -54,5 +60,27 @@ describe('shotFocusBus', () => {
     unsubBad();
     unsubGood();
     consoleError.mockRestore();
+  });
+});
+
+describe('storyboard refresh channel', () => {
+  it('does not throw when requested with no subscribers', () => {
+    expect(() => requestStoryboardRefresh()).not.toThrow();
+  });
+
+  it('notifies a subscribed listener', () => {
+    const listener = vi.fn();
+    const unsubscribe = onStoryboardRefresh(listener);
+    requestStoryboardRefresh();
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it('stops notifying after unsubscribe', () => {
+    const listener = vi.fn();
+    const unsubscribe = onStoryboardRefresh(listener);
+    unsubscribe();
+    requestStoryboardRefresh();
+    expect(listener).not.toHaveBeenCalled();
   });
 });

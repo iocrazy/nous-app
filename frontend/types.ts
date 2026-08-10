@@ -1932,6 +1932,21 @@ export interface AgentRunDetail extends AgentRunListItem {
   created_at: string;
   /** Resolved from task_id by the backend (null when not workflow-linked). */
   task?: AgentRunTaskRef | null;
+  /** Set once this run's writes have been undone (one-shot; see AgentRunUndoReport). */
+  undone_at?: string | null;
+}
+
+/** Response of POST /runs/{run_id}/undo — what got reverted, and what didn't. */
+export interface AgentRunUndoReport {
+  status: 'done' | 'already_undone';
+  shots_deleted: number;
+  shots_reverted: number;
+  scene_elements_reverted: number;
+  skipped: {
+    kind: 'shot' | 'scene' | 'scene_element';
+    id: string;
+    reason: 'edited_after_run' | 'rendered' | 'version_conflict';
+  }[];
 }
 
 export interface AgentRunListResponse {
