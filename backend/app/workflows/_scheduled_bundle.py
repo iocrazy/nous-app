@@ -52,6 +52,9 @@ from app.workflows.scheduled_recovery import (  # noqa: F401
     recover_stale_orchestrator_locks_workflow,
     retry_failed_downloads_workflow,
 )
+from app.workflows.session_health_check import (  # noqa: F401
+    session_health_check_workflow,
+)
 from app.workflows.stranded_issue_monitor import (  # noqa: F401
     stranded_issue_monitor_workflow,
 )
