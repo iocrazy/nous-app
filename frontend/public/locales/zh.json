@@ -1416,14 +1416,37 @@
       "label": "视图"
     },
     "episodeSurface": {
-      "shotlistComingSoon": "分镜列表 — 敬请期待",
-      "shotlistHint": "该分镜的逐场景镜头表尚在规划中。",
+      "noScriptHint": "该剧集还没有剧本。",
+      "startStoryboard": "开始分镜",
       "openCanvas": "打开画布",
       "openScript": "打开剧本编辑器",
       "openBeats": "打开节拍视图",
-      "openStoryboard": "打开分镜",
       "openRenders": "打开成片",
       "editorEntryHint": "该视图在剧集编辑器中打开。"
+    },
+    "sceneBoard": {
+      "open": "打开",
+      "autoStoryboard": "自动分镜",
+      "autoStoryboardBusy": "正在运行…",
+      "confirmAuto": "确认？",
+      "noShots": "运行自动分镜，把这场戏交给 agent 处理",
+      "emptyScene": "该场景还没有内容 — agent 会先询问",
+      "noScenes": "暂无场景",
+      "sceneLabel": "场次",
+      "ieLabel": "内外",
+      "locationLabel": "地点",
+      "dayNightLabel": "日夜",
+      "shotBadge": "镜头 {{scene}}-{{shot}}"
+    },
+    "shotList": {
+      "export": "导出 CSV",
+      "frame": "画面",
+      "shot": "镜头",
+      "type": "类型",
+      "angle": "角度",
+      "move": "运动",
+      "lens": "焦段",
+      "description": "描述"
     },
     "title": "全部项目",
     "recentEmpty": "暂无最近编辑",
