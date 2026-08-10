@@ -107,6 +107,23 @@ export const cancelSessionLogin = (
 export const refreshAccount = (id: string): Promise<SocialAccount> =>
   request<SocialAccount>(`/accounts/${id}/refresh`, { method: 'POST' });
 
+/**
+ * What unbinding this account would touch. Backing data for the unbind
+ * confirmation, which must quote a measured number rather than an adjective —
+ * the Remove button used to have no dialog at all while the backend cascaded
+ * publish records off the account row.
+ *
+ * `publish_records` is now history the unbind KEEPS (soft delete, mig 416), and
+ * `0` is a real answer that must be shown as 0, not hidden.
+ */
+export const getAccountUsage = (id: string): Promise<{ publish_records: number }> =>
+  request<{ publish_records: number }>(`/accounts/${id}/usage`);
+
+/**
+ * Unbind an account. Soft since mig 416: the row and its publish history stay,
+ * the stored credentials are destroyed, and re-scanning the QR code wakes the
+ * same row. The HTTP shape (DELETE → 204) is unchanged.
+ */
 export const deleteAccount = (id: string): Promise<void> =>
   request<void>(`/accounts/${id}`, { method: 'DELETE' });
 

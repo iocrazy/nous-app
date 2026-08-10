@@ -248,6 +248,29 @@ class PublishTasksRepository(AsyncpgRepository):
             rows = [dict(m) for m in result.mappings().all()]
         return [_public_task_row(r) for r in rows]
 
+    async def count_account_publish_records(self, account_id: int) -> int:
+        """How many publish records reference this account (mig 416 / P0-2).
+
+        Exists so the unbind confirmation can state a MEASURED number instead
+        of an adjective. Before soft delete this was the blast radius of the
+        Remove button (``publish_task_accounts.account_id`` is
+        ``ON DELETE CASCADE``); it is now the count of history the unbind
+        deliberately keeps. Either way the user is told the real figure — the
+        one thing the old dialog could not do, because there was no dialog and
+        no endpoint behind it.
+
+        Lives here, not on ``SocialAccountsRepository``: this counts rows of
+        ``publish_task_accounts``, and that table's reads belong to the repo
+        that owns it.
+        """
+        async with read_scope() as session:
+            n = await session.scalar(
+                select(func.count())
+                .select_from(PublishTaskAccounts)
+                .where(PublishTaskAccounts.account_id == self._bigint(account_id))
+            )
+        return int(n or 0)
+
     async def get_task_accounts(self, task_id: int) -> list[dict]:
         async with read_scope() as session:
             result = await session.execute(

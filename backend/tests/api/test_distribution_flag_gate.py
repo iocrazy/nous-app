@@ -145,12 +145,15 @@ def test_delete_account_idor_blocked_for_non_owner(monkeypatch):
 
     delete_calls = []
 
-    async def fake_delete(account_id):
+    # mig 416：删除改软删，方法名随之从 delete 变成 soft_delete。
+    # monkeypatch.setattr 在属性不存在时会抛 AttributeError，所以这个改名不会
+    # 悄悄让守卫失效 —— 它直接把这条测试打红了。
+    async def fake_soft_delete(account_id):
         delete_calls.append(account_id)
 
     monkeypatch.setattr(dr.accounts_repo, "get_public", fake_get_public)
     monkeypatch.setattr(dr, "_user_team_ids", fake_user_team_ids)
-    monkeypatch.setattr(dr.accounts_repo, "delete", fake_delete)
+    monkeypatch.setattr(dr.accounts_repo, "soft_delete", fake_soft_delete)
 
     resp = client.delete("/api/v1/distribution/accounts/123")
     assert resp.status_code == 404

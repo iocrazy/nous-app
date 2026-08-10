@@ -2,6 +2,9 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { MemoryRouter } from 'react-router-dom';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { ToastProvider } from '../Toast';
+// 解绑走 useConfirm(P0-2:那个按钮以前直接进库,而后端硬 DELETE 会级联抹掉
+// 发布记录)。少了这个 Provider,AccountsPage 一挂载就抛。
+import { ConfirmProvider } from '../ConfirmDialog';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_k: string, d?: string) => d ?? _k }),
@@ -92,9 +95,11 @@ import AccountsPage from './AccountsPage';
 
 const mount = () => render(
   <ToastProvider>
-    <MemoryRouter>
-      <AccountsPage />
-    </MemoryRouter>
+    <ConfirmProvider>
+      <MemoryRouter>
+        <AccountsPage />
+      </MemoryRouter>
+    </ConfirmProvider>
   </ToastProvider>,
 );
 

@@ -492,7 +492,12 @@
       "contentArticle": "图文",
       "accountsCount": "{{n}} 个账号"
     },
-    "platNoPublish": "暂不支持发布"
+    "platNoPublish": "暂不支持发布",
+    "unbind": "解绑",
+    "unbindTitle": "解绑 {{name}}？",
+    "unbindMessage": "解绑后需重新扫码登录才能用该账号发布。它的 {{n}} 条发布记录会保留。",
+    "unbindConfirm": "解绑",
+    "unbindCheckFailed": "没能查到该账号被哪些记录引用，已取消解绑。请重试。"
   },
   "parser": {
     "title": "媒体解析",
