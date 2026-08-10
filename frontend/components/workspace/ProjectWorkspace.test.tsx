@@ -22,12 +22,17 @@ const navigate = vi.fn();
 // with no `node`) without needing a real router — read once per render via
 // the initializer in ProjectWorkspace, so tests set it BEFORE calling render().
 const mockSearchParams = vi.hoisted(() => ({ current: new URLSearchParams() }));
+// A single stable identity (mirrors react-router's real setSearchParams,
+// which doesn't change across renders) — needed so the Task 2 carry-over
+// test below can inspect the raw updater `handleEpisodeChange` passes it,
+// without depending on the mock actually re-deriving `mockSearchParams`.
+const setSearchParamsSpy = vi.hoisted(() => vi.fn());
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
     useNavigate: () => navigate,
-    useSearchParams: () => [mockSearchParams.current, vi.fn()],
+    useSearchParams: () => [mockSearchParams.current, setSearchParamsSpy],
   };
 });
 
@@ -261,6 +266,7 @@ beforeEach(() => {
   mockSceneService.listShots.mockReset().mockResolvedValue([]);
   mockSceneService.autoStoryboard.mockReset();
   mockSearchParams.current = new URLSearchParams();
+  setSearchParamsSpy.mockClear();
   localStorage.clear();
 });
 
@@ -272,6 +278,17 @@ const noop = () => {};
 async function expandEpisodesTree() {
   fireEvent.click(await screen.findByTestId('ws-module-episodes'));
   return screen.findByTestId('ws-ep-card');
+}
+
+/**
+ * Navigate to the standalone Storyboard module (IA redesign Task 2) via the
+ * sidebar's 分镜 row — the same entry point the old "surface panel" used to
+ * show automatically on a passive Overview landing. Storyboard no longer
+ * renders without this explicit click.
+ */
+async function openStoryboardModule() {
+  await expandEpisodesTree();
+  fireEvent.click(await screen.findByTestId('ws-ep-storyboard'));
 }
 
 describe('ProjectWorkspace', () => {
@@ -328,6 +345,33 @@ describe('ProjectWorkspace', () => {
     );
     expect(screen.getByTestId('ws-ep-storyboard')).toHaveTextContent('0/4');
     expect(localStorage.getItem('mediahub.project.p1.ep')).toBe('2');
+  });
+
+  // Task 2 review carry-over: `view`/`scene`/`shot` are scoped to whichever
+  // episode was current when they were set (e.g. a `?shot=` deep-link into
+  // that episode's canvas/storyboard). An episode switch must drop them in
+  // the SAME setSearchParams call that writes the new `ep` — otherwise a
+  // stale shot/scene id from the episode just left behind would survive into
+  // the newly-selected episode's Storyboard page.
+  it('clears stale view/scene/shot params from the URL in the same call that writes the new ep (Task 2 carry-over)', async () => {
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    const epCard = await expandEpisodesTree();
+    fireEvent.click(epCard);
+    fireEvent.click(await screen.findByTestId('ws-ep-option-2'));
+
+    await waitFor(() => expect(setSearchParamsSpy).toHaveBeenCalled());
+    // handleEpisodeChange's own call is the last one in this interaction —
+    // apply its updater to a URL carrying a stale view/scene/shot from the
+    // episode being left behind, and confirm all three are gone alongside
+    // the new `ep`.
+    const lastCall = setSearchParamsSpy.mock.calls[setSearchParamsSpy.mock.calls.length - 1];
+    const updater = lastCall[0] as (prev: URLSearchParams) => URLSearchParams;
+    const result = updater(new URLSearchParams('ep=1&view=canvas&scene=55&shot=900'));
+    expect(result.get('ep')).toBe('2');
+    expect(result.has('view')).toBe(false);
+    expect(result.has('scene')).toBe(false);
+    expect(result.has('shot')).toBe(false);
   });
 
   it('URL `ep` wins over localStorage on load (Task 1, IA redesign)', async () => {
@@ -395,11 +439,11 @@ describe('ProjectWorkspace', () => {
     expect(screen.queryByTestId('ws-overview')).toBeNull();
   });
 
-  // Storyboard is now the episode node's primary face (三视图主工作面, PR-A) —
-  // a bare click (sidebar 分镜 row, or a workflow-strip node — see the next
-  // test) lands on Overview with the storyboard surface panel expanded
+  // Storyboard is now its own standalone module (IA redesign Task 2, building
+  // on PR-A's 三视图主工作面) — a bare click (sidebar 分镜 row, or a
+  // workflow-strip node — see the next test) routes to EpisodeStoryboardPage
   // instead of diving straight into the embedded editor.
-  it('lands on the Overview storyboard surface panel — not the embedded editor — when 分镜 is clicked', async () => {
+  it('lands on the Storyboard module — not the embedded editor — when 分镜 is clicked', async () => {
     mockScriptService.fetchScriptProjects.mockResolvedValue({
       data: [
         { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
@@ -433,7 +477,7 @@ describe('ProjectWorkspace', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('routes a storyboard-surface workflow-strip node click (handleSelectNode) to the same surface panel', async () => {
+  it('routes a storyboard-surface workflow-strip node click (handleSelectNode) to the same Storyboard module', async () => {
     mockScriptService.fetchScriptProjects.mockResolvedValue({
       data: [
         { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
@@ -521,6 +565,7 @@ describe('ProjectWorkspace', () => {
     ]);
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
+    await openStoryboardModule();
     await screen.findByTestId('ep-scene-card-200');
     fireEvent.click(screen.getByTestId('ep-scene-open-200'));
 
@@ -566,6 +611,7 @@ describe('ProjectWorkspace', () => {
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
     // Step 1: scene-card Open deep-links into EditorShell with the target scene.
+    await openStoryboardModule();
     await screen.findByTestId('ep-scene-card-200');
     fireEvent.click(screen.getByTestId('ep-scene-open-200'));
     const firstShell = await screen.findByTestId('mock-editor-shell');
@@ -630,6 +676,7 @@ describe('ProjectWorkspace', () => {
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
+    await openStoryboardModule();
     await screen.findByTestId('ep-scene-card-200');
     const tabs = screen.getByTestId('episode-view-tabs');
     fireEvent.click(tabs.querySelector('[data-view="shotlist"]')!);
@@ -642,14 +689,15 @@ describe('ProjectWorkspace', () => {
     expect(createSpy).toHaveBeenCalledTimes(1);
   });
 
-  // Review fix (Task 3 round 1, Critical): the surface panel shows by DEFAULT
-  // on Overview landing whenever the current node is storyboard-surfaced —
-  // no click required. Its scriptId resolution MUST be read-only; this test
-  // is the anti-regression pin — zero create calls from a passive render.
-  it('never provisions a script just from landing on the storyboard surface panel — renders the "no script" empty state instead', async () => {
+  // Review fix (Task 3 round 1, Critical), re-mounted on EpisodeStoryboardPage
+  // by Task 2 (IA redesign): opening the Storyboard module must not itself
+  // provision anything — its scriptId resolution MUST be read-only. This test
+  // is the anti-regression pin — zero create calls just from opening the page.
+  it('never provisions a script just from opening the Storyboard module — renders the "no script" empty state instead', async () => {
     mockScriptService.fetchScriptProjects.mockResolvedValue({ data: [], total: 0 });
-    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    await openStoryboardModule();
 
     expect(await screen.findByTestId('episode-surface-no-script')).toBeInTheDocument();
     expect(screen.getByTestId('episode-surface-start-storyboard')).toBeInTheDocument();
@@ -657,10 +705,9 @@ describe('ProjectWorkspace', () => {
     expect(mockScriptService.createScriptProject).not.toHaveBeenCalled();
   });
 
-  it('clicking "Start Storyboard" provisions a script and the panel refreshes to the scene board', async () => {
+  it('clicking "Start Storyboard" provisions a script and the page refreshes to the scene board', async () => {
     mockScriptService.fetchScriptProjects.mockResolvedValue({ data: [], total: 0 });
     mockScriptService.createScriptProject.mockResolvedValue({ id: 'created-sb', name: 'Ep 1 — Pilot' });
-    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
     mockSceneService.listScenes.mockResolvedValue([
       {
         id: '200',
@@ -677,6 +724,7 @@ describe('ProjectWorkspace', () => {
     ]);
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
+    await openStoryboardModule();
     fireEvent.click(await screen.findByTestId('episode-surface-start-storyboard'));
 
     expect(await screen.findByTestId('ep-scene-card-200')).toBeInTheDocument();

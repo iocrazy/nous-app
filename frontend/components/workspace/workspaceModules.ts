@@ -24,7 +24,12 @@ export type WorkspaceModule =
   // Stage Board (M2 PR-F F2) — NOT in TOP_MODULES/ASSET_MODULES/MANAGE_MODULES:
   // it never appears in the fixed sidebar menu, only reachable from clicking a
   // node in the dynamic Stages block (WorkspaceSidebar ~:332).
-  | 'stage';
+  | 'stage'
+  // Storyboard's standalone page (IA redesign Task 2) — also not in the
+  // fixed menu group arrays: reached from the 剧集 tree's 分镜 row
+  // (WorkspaceSidebar's onOpenWorkView) or a storyboard-surface
+  // workflow-strip node (handleSelectNode), same pattern as 'stage' above.
+  | 'storyboard';
 
 export interface WorkspaceModuleDef {
   key: WorkspaceModule;

@@ -1425,6 +1425,9 @@
       "openRenders": "Open Renders",
       "editorEntryHint": "This view opens in the episode editor."
     },
+    "storyboardPage": {
+      "title": "Storyboard"
+    },
     "sceneBoard": {
       "open": "Open",
       "autoStoryboard": "Auto Storyboard",

@@ -1425,6 +1425,9 @@
       "openRenders": "打开成片",
       "editorEntryHint": "该视图在剧集编辑器中打开。"
     },
+    "storyboardPage": {
+      "title": "分镜"
+    },
     "sceneBoard": {
       "open": "打开",
       "autoStoryboard": "自动分镜",

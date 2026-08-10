@@ -16,7 +16,7 @@
  * stages happens elsewhere.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Loading } from '../common/Loading';
@@ -34,10 +34,7 @@ import { ProjectSettingsPanel } from '../ProjectSettingsPanel';
 import type { RailView } from '../../editor/components/RailModules';
 import type { SceneDoc } from '../../editor/types';
 import { WorkspaceSidebar, type WorkView } from './WorkspaceSidebar';
-import { resolveSurface, viewsForNode } from './nodeSurface';
-import { EpisodeViewTabs } from './EpisodeViewTabs';
-import { EpisodeSceneBoard } from './EpisodeSceneBoard';
-import { EpisodeShotListTable, type EpisodeShotListTableHandle } from './EpisodeShotListTable';
+import { resolveSurface } from './nodeSurface';
 import { WorkspaceTopBar } from './WorkspaceTopBar';
 import { WorkspaceOverview } from './WorkspaceOverview';
 import { AdvanceConfirmDialog } from '../workflow/AdvanceConfirmDialog';
@@ -76,6 +73,9 @@ const WorkspaceStageBoard = lazy(() =>
 );
 const ProjectTrashView = lazy(() =>
   import('../ProjectTrashView').then((m) => ({ default: m.ProjectTrashView })),
+);
+const EpisodeStoryboardPage = lazy(() =>
+  import('./EpisodeStoryboardPage').then((m) => ({ default: m.EpisodeStoryboardPage })),
 );
 
 /** Minimal scene shape lifted from the embedded editor for the SCENES sidebar. */
@@ -131,7 +131,7 @@ export function ProjectWorkspace({
     const q = searchParams.get('module');
     const valid: WorkspaceModule[] = [
       'overview', 'canvas', 'episodes', 'tasks', 'script', 'characters',
-      'locations', 'props', 'files', 'trash', 'settings', 'stage',
+      'locations', 'props', 'files', 'trash', 'settings', 'stage', 'storyboard',
     ];
     return valid.includes(q as WorkspaceModule) ? (q as WorkspaceModule) : 'overview';
   })();
@@ -285,6 +285,15 @@ export function ProjectWorkspace({
         (prev) => {
           const next = new URLSearchParams(prev);
           next.set('ep', episodeId);
+          // Task 2 review carry-over: `view`/`scene`/`shot` are scoped to
+          // WHICHEVER episode was current when they were set (e.g. a
+          // `?shot=` deep-link into that episode's canvas) — an episode
+          // switch must drop them in this SAME setSearchParams call, or a
+          // shot/scene id from the episode just left behind would survive
+          // into the newly-selected one's storyboard page.
+          next.delete('view');
+          next.delete('scene');
+          next.delete('shot');
           return next;
         },
         { replace: true },
@@ -449,21 +458,20 @@ export function ProjectWorkspace({
   );
 
   // Storyboard is now the episode node's PRIMARY face (三视图主工作面, 2026-08-09
-  // 拍板): a bare open ('storyboard', no sceneId) — from the sidebar's 分镜
-  // row, a workflow-strip node (handleSelectNode below), or anywhere else that
-  // used to jump straight into the embedded editor — now lands on Overview
-  // with the storyboard surface panel expanded (EpisodeSceneBoard IS the view,
-  // not an entry button into one). Only a scene card's "Open" deep-link
-  // (opts.sceneId set) still wants the real editor — studioFocusSceneId
-  // carries the target down to EditorShell's initialFocusSceneId, which
-  // scrolls the matching storyboard column / script scene into view once it
-  // has rendered (Task 8).
+  // 拍板) AND its own standalone module (IA redesign Task 2): a bare open
+  // ('storyboard', no sceneId) — from the sidebar's 分镜 row, a workflow-strip
+  // node (handleSelectNode below), or anywhere else that used to jump
+  // straight into the embedded editor — now routes to the dedicated
+  // EpisodeStoryboardPage module (EpisodeSceneBoard IS the view, not an entry
+  // button into one). Only a scene card's "Open" deep-link (opts.sceneId set)
+  // still wants the real editor — studioFocusSceneId carries the target down
+  // to EditorShell's initialFocusSceneId, which scrolls the matching
+  // storyboard column / script scene into view once it has rendered (Task 8).
   const handleOpenWorkView = useCallback(
     (view: WorkView, opts?: { sceneId?: string }) => {
       if (view === 'storyboard' && !opts?.sceneId) {
         setStudioFocusSceneId(null); // clear any stale target from a prior deep link
-        setActiveModule('overview');
-        setEpisodeView('storyboard');
+        setActiveModule('storyboard');
         return;
       }
       setStudioView(view);
@@ -590,129 +598,24 @@ export function ProjectWorkspace({
   // still behaves as expected).
   const showOverview = activeModule === 'overview' || (activeModule === 'stage' && !stageNodeId);
 
-  // ── Episode surface view set (B5 T-B5.4) ──────────────────────────────
-  // The current workflow node's creative `surface` (nodeSurface.ts) drives a
-  // top segmented control (EpisodeViewTabs). Deliverable-only nodes yield an
-  // empty view set → no control (they still reach their Stage Board via the
-  // node click). The panel is rendered on the workspace landing (Overview),
-  // above the overview content, so it is strictly additive and easy to retune
-  // once the design mock lands — see the render block + report for assumptions.
-  const currentNode = useMemo(
-    () => workflow?.nodes.find((n) => n.id === workflow.current_node_id) ?? null,
-    [workflow],
-  );
-  const surfaceViews = useMemo(() => viewsForNode(currentNode), [currentNode]);
-  const [episodeView, setEpisodeView] = useState<string | null>(null);
-  // Keep the active view key valid for the current node's set: default to the
-  // first view; reset when the set no longer contains the active key (e.g. the
-  // writer advanced to a node with a different surface).
-  useEffect(() => {
-    if (surfaceViews.length === 0) {
-      if (episodeView !== null) setEpisodeView(null);
-      return;
-    }
-    if (!surfaceViews.some((v) => v.key === episodeView)) {
-      setEpisodeView(surfaceViews[0].key);
-    }
-  }, [surfaceViews, episodeView]);
-  const activeEpisodeView = episodeView ?? surfaceViews[0]?.key ?? null;
-  const showSurfacePanel = showOverview && surfaceViews.length > 0;
-
-  // Script id for the storyboard/shot-list surface views (Task 3, 主工作面接线;
-  // review fix, Task 3 round 1): the panel is reached by a passive Overview
-  // landing just as often as by an explicit click (a project whose current
-  // node sits on storyboard shows this panel by DEFAULT), so this probe MUST
-  // be read-only — `findExistingScript`, never `resolveOrProvisionScript`.
-  // Silently creating an empty script on mere render was the bug: opening a
-  // project that has no script yet used to provision one before the writer
-  // touched anything. `'missing'` renders an explicit "Start Storyboard" CTA
-  // (handleStartStoryboard below) — provisioning only happens from THAT
-  // click, same as every other write in this file (script/beats views, the
-  // scene card's Open deep-link).
-  type SurfaceScriptState =
-    | { status: 'loading' }
-    | { status: 'ready'; scriptId: string }
-    | { status: 'missing' }
-    | { status: 'provisioning' };
-  const [surfaceScript, setSurfaceScript] = useState<SurfaceScriptState>({ status: 'loading' });
-  const needsSurfaceScriptId =
-    showSurfacePanel && surfaceViews.some((v) => v.key === 'storyboard');
-  useEffect(() => {
-    if (!needsSurfaceScriptId || !currentEpisode) {
-      setSurfaceScript({ status: 'loading' });
-      return;
-    }
-    let cancelled = false;
-    setSurfaceScript({ status: 'loading' });
-    findExistingScript(currentEpisode)
-      .then((id) => {
-        if (cancelled) return;
-        setSurfaceScript(id ? { status: 'ready', scriptId: id } : { status: 'missing' });
-      })
-      .catch((err) => {
-        console.error('[ProjectWorkspace] failed to probe surface script:', err);
-        if (!cancelled) setSurfaceScript({ status: 'missing' });
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-probe only on an episode-id change or the panel/view-set flipping; `currentEpisode`'s object identity changes on every episodes refetch (mirrors the analogous effect above at ~L390)
-  }, [needsSurfaceScriptId, currentEpisodeId, findExistingScript]);
-
-  // The ONLY write trigger for the surface panel's script — fired exclusively
-  // by the "Start Storyboard" CTA (an explicit click), never by the probe
-  // effect above.
-  const handleStartStoryboard = useCallback(() => {
-    if (!currentEpisode || surfaceScript.status === 'provisioning') return;
-    setSurfaceScript({ status: 'provisioning' });
-    resolveOrProvisionScript(currentEpisode)
-      .then((id) => {
-        setSurfaceScript(id ? { status: 'ready', scriptId: id } : { status: 'missing' });
-      })
-      .catch((err) => {
-        console.error('[ProjectWorkspace] failed to start storyboard:', err);
-        addToast(t('common.error'), 'error');
-        setSurfaceScript({ status: 'missing' });
-      });
-  }, [currentEpisode, surfaceScript.status, resolveOrProvisionScript, addToast, t]);
-
-  // Shared gate for the storyboard/shot-list panes while `surfaceScript` isn't
-  // 'ready': a spinner during the read-only probe (or a CTA-triggered
-  // provision), or the "no script yet" empty state with the explicit
-  // "Start Storyboard" CTA — the ONLY thing that calls handleStartStoryboard.
-  function renderSurfaceScriptGate() {
-    if (surfaceScript.status === 'missing') {
-      return (
-        <div
-          data-testid="episode-surface-no-script"
-          className="rounded-lg border border-dashed border-line bg-island-2/40 px-6 py-10 text-center"
-        >
-          <p className="text-sm font-medium text-content-2">
-            {t('projects.episodeSurface.noScriptHint')}
-          </p>
-          <button
-            type="button"
-            data-testid="episode-surface-start-storyboard"
-            onClick={handleStartStoryboard}
-            className="mt-3 rounded-md bg-[var(--accent-soft)] px-4 py-2 text-sm font-medium text-[var(--accent-text)] hover:opacity-90"
-          >
-            {t('projects.episodeSurface.startStoryboard')}
-          </button>
-        </div>
+  // EpisodeStoryboardPage (IA redesign Task 2) owns the `?view=` param on its
+  // own — it holds the active-view state internally and calls back here only
+  // to persist a writer-driven tab switch to the URL (deep-linkable, survives
+  // back/forward). `replace: true` mirrors the module-sync effect above: a
+  // tab switch isn't a new history entry.
+  const handleStoryboardViewChange = useCallback(
+    (view: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('view', view);
+          return next;
+        },
+        { replace: true },
       );
-    }
-    // 'loading' (initial probe) or 'provisioning' (CTA click in flight).
-    return (
-      <div className="flex justify-center py-10">
-        <Loading center />
-      </div>
-    );
-  }
-
-  // Imperative handle into the mounted EpisodeShotListTable (hideExport) so
-  // the Export trigger can live in EpisodeViewTabs' `actions` slot instead of
-  // inside the table's own content pane, without a second scenes/shots fetch.
-  const shotListTableRef = useRef<EpisodeShotListTableHandle>(null);
+    },
+    [setSearchParams],
+  );
 
   // Film slate read-out (studio only): 1-based episode + active-scene numbers.
   const epIdx = episodes.findIndex((e) => e.episode_id === currentEpisode?.episode_id);
@@ -775,107 +678,24 @@ export function ProjectWorkspace({
               onActiveSceneChange={handleActiveSceneChange}
             />
           </div>
+        ) : activeModule === 'storyboard' ? (
+          // Storyboard's standalone module (IA redesign Task 2) — replaces
+          // the old Overview "surface panel". Full-bleed like the EditorShell
+          // branch above: the page owns its own header + scroll region, so
+          // no px-6 pb-8 wrapper (that would double the padding/scrollbar).
+          <EpisodeStoryboardPage
+            projectId={project.id}
+            teamId={teamId ?? ''}
+            episode={currentEpisode}
+            initialView={readWorkspaceParams(searchParams).view}
+            focusShotId={readWorkspaceParams(searchParams).shot}
+            onViewChange={handleStoryboardViewChange}
+            findExistingScript={findExistingScript}
+            provisionScript={resolveOrProvisionScript}
+            onOpenScene={(sceneId) => handleOpenWorkView('storyboard', { sceneId })}
+          />
         ) : (
           <div className="flex-1 overflow-y-auto px-6 pb-8">
-            {showSurfacePanel && activeEpisodeView && (
-              // B5 T-B5.4, promoted by PR-A (三视图主工作面, 2026-08-09 拍板):
-              // surface view set for the current node, rendered above the
-              // Overview content. Storyboard is now a MAIN face — the scene
-              // board / shot table render directly, not behind an entry
-              // button — while script/beats/renders (unchanged, out of PR-A's
-              // scope) still route to the embedded editor / renders filter
-              // via an entry button; canvas reuses the real module inline.
-              <div data-testid="episode-surface-panel" className="pt-4 pb-2">
-                <EpisodeViewTabs
-                  views={surfaceViews}
-                  active={activeEpisodeView}
-                  onChange={setEpisodeView}
-                  actions={
-                    activeEpisodeView === 'shotlist' ? (
-                      <button
-                        type="button"
-                        data-testid="ep-shotlist-export"
-                        disabled={surfaceScript.status !== 'ready'}
-                        onClick={() => shotListTableRef.current?.exportCsv()}
-                        className="rounded-md border border-line px-3 py-1.5 text-[13px] font-medium text-content hover:bg-island-2 disabled:opacity-50"
-                      >
-                        {t('projects.shotList.export')}
-                      </button>
-                    ) : undefined
-                  }
-                />
-                <div className="mt-4">
-                  {activeEpisodeView === 'canvas' ? (
-                    // Reuse the SAME canvas module component (not a fork); its
-                    // sidebar module registration is untouched.
-                    <div className="min-h-[24rem]">
-                      <WorkspaceCanvas projectId={project.id} teamId={teamId} />
-                    </div>
-                  ) : activeEpisodeView === 'storyboard' ? (
-                    // Storyboard's primary face: a stream of scene cards, each
-                    // with an Open deep-link into the real editor and an Auto
-                    // Storyboard dispatch — see EpisodeSceneBoard. 'missing' /
-                    // 'loading' render the shared read-only-probe gate below —
-                    // provisioning a script never happens just from viewing
-                    // this panel (see the state comment above).
-                    <div data-testid="episode-view-storyboard" className="min-h-[24rem]">
-                      {surfaceScript.status === 'ready' ? (
-                        <EpisodeSceneBoard
-                          scriptId={surfaceScript.scriptId}
-                          onOpenScene={(sceneId) => handleOpenWorkView('storyboard', { sceneId })}
-                        />
-                      ) : (
-                        renderSurfaceScriptGate()
-                      )}
-                    </div>
-                  ) : activeEpisodeView === 'shotlist' ? (
-                    // Flat per-shot table (Export lives in the tabs' actions
-                    // slot above, driven through shotListTableRef).
-                    <div data-testid="episode-view-shotlist" className="min-h-[24rem]">
-                      {surfaceScript.status === 'ready' ? (
-                        <EpisodeShotListTable
-                          ref={shotListTableRef}
-                          scriptId={surfaceScript.scriptId}
-                          hideExport
-                        />
-                      ) : (
-                        renderSurfaceScriptGate()
-                      )}
-                    </div>
-                  ) : (
-                    // Editor-backed / renders views: entry button into the
-                    // existing surface. Deep inline embedding of Script/Beats
-                    // is unchanged — only Storyboard was promoted to a main
-                    // face by PR-A.
-                    <div
-                      data-testid="episode-view-entry"
-                      className="rounded-lg border border-line bg-island-2/40 px-6 py-10 text-center"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (activeEpisodeView === 'renders') handleOpenRenders();
-                          else if (activeEpisodeView === 'beats') handleOpenWorkView('beats');
-                          else handleOpenWorkView('script');
-                        }}
-                        className="rounded-md bg-[var(--accent-soft)] px-4 py-2 text-sm font-medium text-[var(--accent-text)] hover:opacity-90"
-                      >
-                        {activeEpisodeView === 'renders'
-                          ? t('projects.episodeSurface.openRenders')
-                          : activeEpisodeView === 'beats'
-                            ? t('projects.episodeSurface.openBeats')
-                            : t('projects.episodeSurface.openScript')}
-                      </button>
-                      {activeEpisodeView !== 'renders' && (
-                        <p className="mt-2 text-xs text-content-3">
-                          {t('projects.episodeSurface.editorEntryHint')}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
             {showOverview && (
               <WorkspaceOverview
                 project={project}
