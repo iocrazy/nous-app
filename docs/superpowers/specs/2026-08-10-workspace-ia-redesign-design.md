@@ -98,7 +98,49 @@ v4.2)定稿。分镜页本身的布局规范以原设计稿 artifact `24b61005-0
 - 总览信息卡的权限提示灰字深链到这里(带集+节点定位)。
 - 权限同 §5;无权者看到只读表单。
 
-## 8. 接线点(已核实的代码位置)
+## 8. 统一寻址(ID 全覆盖)
+
+原则:**四层里每一个可点击/可跳转/可聚焦的东西,都必须以后端稳定 ID 寻址,并反映进
+URL**——组件间传 ID 不传索引,刷新可恢复,链接可分享,设置/待办/Agent 面板的深链都拼
+同一套参数。
+
+### 8.1 实体 ID 底账(全部已存在,已核实)
+
+| 层 | 实体 | ID 来源 | 现状 |
+|----|------|---------|------|
+| 项目 | project | `projects.id` | 路由级已有 |
+| 剧集 | episode | `episodes.id` | ⚠️ 只存 localStorage,不进 URL |
+| 流程节点 | node | `project_stage_nodes.id` | 仅 stage 模块带 `?node=` |
+| 剧本 | script | `script_projects.id` | 内部解析,不进 URL(每集唯一,由 ep 推导,无需进) |
+| 章节(编辑器画布) | chapter | script canvas chapter id(`sync_canvas` 按 id 增删改) | 编辑器内部 |
+| 节拍 | beat | `script_beats.id`(含 `scene_ids` 关联) | 编辑器内部 |
+| 场次 | scene | `script_scenes.id` | 深链已 id 化(#1767) |
+| 剧本内容块(元素) | element | `content_json` 的 `element_id`(script_ops 账本键,undo/归属都靠它) | 编辑器/账本已 id 化 |
+| 镜头 | shot | `script_shots.id` | shotFocusBus 已 id 化 |
+| 分镜画布节点 | = shot | 画布节点本体就是 shot,无独立实体 | 已 id 化 |
+| 成片/归档文件 | resource | `resources.id` | 已有 |
+| 待办 | issue | `issues.id` | 已有 |
+
+### 8.2 URL scheme(本重构统一收口)
+
+```
+?module=<overview|storyboard|script|...>   现有,保留
+&ep=<episodes.id>        当前集(取代 localStorage 作为第一真相;localStorage 降级为无参时的默认值)
+&node=<stage_nodes.id>   总览手风琴选中的节点 / stage 板的节点(现有语义合并)
+&view=<board|canvas|shotlist>  分镜页三视图
+&scene=<script_scenes.id>      分镜页定位场次列 / 编辑器深链场次
+&shot=<script_shots.id>        画布聚焦镜头(进页后触发 shotFocusBus)
+&tab=nodes                     设置页节点配置区(设置深链:module=settings&tab=nodes&ep=&node=)
+```
+
+- 总览手风琴:展开集 = `ep`,选中节点 = `node` → 「在设置中修改」深链、待办回跳、
+  分享链接全部可拼。
+- 所有 ID 在 URL/props 中一律**字符串**(Snowflake BIGINT 超 2^53,禁 `Number()`;
+  fetch 层已有 bigIntSafeFetch,前端新代码不得引入数字转换)。
+- 新组件契约:手风琴行、节点卡、场次列、镜头卡的 props/事件载荷全部携带实体 ID,
+  禁用数组下标定位(场次重排/镜头增删后索引即失效)。
+
+## 9. 接线点(已核实的代码位置)
 
 | 变更 | 位置 |
 |------|------|
@@ -109,9 +151,10 @@ v4.2)定稿。分镜页本身的布局规范以原设计稿 artifact `24b61005-0
 | 日历组件 | 新公共组件(Portal + 区间选择),总览卡与设置页共用 |
 | 编辑器胶囊 | `WorkspaceTopBar.tsx`(studio 模式已有 slate/workflow props 通道) |
 | 设置节点配置 | 设置面板新增区块;`episodes.owner_id` migration + PATCH + 权限检查 |
+| URL 寻址 | `ProjectWorkspace.tsx` searchParams 块(~L110-140)扩展 ep/node/view/scene/shot 参数 |
 | e2e 跟改 | 现有 workflow/stage-board e2e 依赖 Overview 上的 strip 与阶段卡,需按集内展开跟改 |
 
-## 9. 测试
+## 10. 测试
 
 - 前端组件测:手风琴单开互斥;节点卡三态(有权编辑/无权只读/空值 + 号);日历翻转与跨月;
   分镜页路由(侧栏/节点两个入口直达、无剧本空态);编辑器胶囊显隐。
@@ -119,7 +162,7 @@ v4.2)定稿。分镜页本身的布局规范以原设计稿 artifact `24b61005-0
   剧集编排端点)各 403/200;类型化错误码。
 - e2e:总览展开→点节点→进工作面全链;设置节点配置改负责人后总览卡即时反映。
 
-## 10. 范围外(YAGNI)
+## 11. 范围外(YAGNI)
 
 - 画布/分镜列表视图改动;Agent 面板(已收官)
 - 排期日历的「具体时间/提醒」(参考截图里有,本期只做日期区间)
