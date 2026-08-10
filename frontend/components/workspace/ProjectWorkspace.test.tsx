@@ -134,6 +134,11 @@ const mockWorkflowService = vi.hoisted(() => ({
   fetchStageLibrary: vi.fn().mockResolvedValue([]),
   startEarlyNode: vi.fn(),
   updateProjectNode: vi.fn(),
+  // Task 7 (strip 解耦): a non-current node click now lands on its own Stage
+  // Board (WorkspaceStageBoard, unmocked in this suite) instead of the
+  // current episode's surface panel — that real component calls
+  // fetchStageBoard on mount.
+  fetchStageBoard: vi.fn(),
 }));
 vi.mock('../../services/workflowService', () => mockWorkflowService);
 
@@ -249,6 +254,7 @@ beforeEach(() => {
   mockWorkflowService.fetchProjectWorkflow.mockReset().mockResolvedValue(null);
   mockWorkflowService.fetchAdvancePreview.mockReset();
   mockWorkflowService.executeAdvance.mockReset();
+  mockWorkflowService.fetchStageBoard.mockReset();
   mockSceneService.listScenes.mockReset().mockResolvedValue([]);
   mockSceneService.listShots.mockReset().mockResolvedValue([]);
   mockSceneService.autoStoryboard.mockReset();
@@ -432,6 +438,40 @@ describe('ProjectWorkspace', () => {
 
     expect(await screen.findByTestId('ep-scene-card-200')).toBeInTheDocument();
     expect(screen.queryByTestId('mock-editor-shell')).toBeNull();
+  });
+
+  // Task 7 (小尾巴 A, 2026-08-09 拍板): the strip used to route ANY node click
+  // by its creative surface, so clicking a non-current storyboard/script node
+  // flashed open the CURRENT episode's surface panel — content unrelated to
+  // the node the writer actually clicked. Decoupled: only the CURRENT node's
+  // capsule routes to the surface panel; every other node's click lands on
+  // that node's own Stage Board (handleOpenStage), same path deliverable-only
+  // nodes already take.
+  it('routes a non-current workflow-strip node click to that node\'s own Stage Board, not the current episode\'s surface panel', async () => {
+    const currentNode = stageNode({ id: '1', name: 'Storyboard', status: 'in_progress', surface: 'storyboard' });
+    const otherNode = stageNode({ id: '2', name: 'Script Pass 2', status: 'pending', surface: 'script' });
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue({
+      has_workflow: true,
+      current_node_id: currentNode.id,
+      agents_active: 0,
+      nodes: [currentNode, otherNode],
+    });
+    mockWorkflowService.fetchStageBoard.mockResolvedValue({ node: otherNode, issue: null, files: [] });
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    const nodeButtons = await screen.findAllByTestId('workflow-strip-node');
+    const otherButton = nodeButtons.find((el) => el.getAttribute('data-node-id') === '2');
+    expect(otherButton).toBeTruthy();
+    fireEvent.click(otherButton!);
+
+    expect(await screen.findByTestId('workspace-stage-board')).toBeInTheDocument();
+    expect(mockWorkflowService.fetchStageBoard).toHaveBeenCalledWith('p1', '2');
+    // Never flashed the CURRENT episode's storyboard/script surface — nor
+    // provisioned/mounted a script — for a click that was about a different
+    // (non-current) node entirely.
+    expect(screen.queryByTestId('episode-view-tabs')).toBeNull();
+    expect(screen.queryByTestId('mock-editor-shell')).toBeNull();
+    expect(mockScriptService.createScriptProject).not.toHaveBeenCalled();
   });
 
   it('a scene card\'s Open button deep-links into the embedded editor at the storyboard rail view', async () => {

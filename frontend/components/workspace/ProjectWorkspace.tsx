@@ -478,13 +478,21 @@ export function ProjectWorkspace({
   }, []);
 
   // Workflow-strip node click (B5 T-B5.3) — the strip is now the sole node
-  // entry point (the sidebar's Stages list was removed in T-B5.6). Route by the
-  // node's creative `surface` (nodeSurface.ts::resolveSurface): script /
-  // storyboard open the current episode's studio on that view; renders opens the
-  // Renders file filter; a deliverable-only node (surface === null) falls back
-  // to its dedicated Stage Board.
+  // entry point (the sidebar's Stages list was removed in T-B5.6). Only the
+  // CURRENT node routes by creative `surface` (nodeSurface.ts::resolveSurface):
+  // script / storyboard open the current episode's studio on that view; renders
+  // opens the Renders file filter. Every other node — including a
+  // deliverable-only one (surface === null) — falls back to its own dedicated
+  // Stage Board (Task 7, see guard below: a non-current node's click must not
+  // flash open the CURRENT episode's surface panel with unrelated content).
   const handleSelectNode = useCallback(
     (node: ProjectStageNode) => {
+      // 拍板（undo 立项附带, Task 7 小尾巴 A, 2026-08-09）：非当前节点点击不再闪当前集的
+      // 作业面——surface 路由只对 current 节点成立，其余一律看节点自己的 Stage Board。
+      if (node.id !== workflow?.current_node_id) {
+        handleOpenStage(node.id);
+        return;
+      }
       switch (resolveSurface(node)) {
         case 'script':
           handleOpenWorkView('script');
@@ -499,7 +507,7 @@ export function ProjectWorkspace({
           handleOpenStage(node.id);
       }
     },
-    [handleOpenWorkView, handleOpenRenders, handleOpenStage],
+    [handleOpenWorkView, handleOpenRenders, handleOpenStage, workflow?.current_node_id],
   );
 
   const studioMode = activeModule === 'script' && resolvedScriptId != null;
