@@ -12,6 +12,7 @@ from datetime import timedelta
 import pytest
 
 from app.config import get_settings
+from app.login import IdentityUnresolved
 from app.login_sessions import (
     LoginCapacityError,
     LoginError,
@@ -406,6 +407,35 @@ async def test_a_failed_profile_scrape_still_yields_the_session_state(spec):
 
     assert state["cookies"]
     assert profile.username == ""
+
+
+async def test_an_unresolved_identity_fails_the_login_instead_of_degrading(spec):
+    """The one profile failure that must NOT degrade.
+
+    A nameless account is a cosmetic loss. An account with no identity key is a
+    *different* account: the backend upserts on
+    `(scope, platform, platform_user_id)`, so binding without one either fails
+    downstream with a generic message or, worse, keys on whatever substitute is
+    at hand and forks the row. `identity_unresolved` says which, so the user is
+    told to rescan rather than left owning two half-accounts.
+    """
+    spec_ok = make_spec(judge=always(SessionStatus.SUCCESS, "logged in"))
+    driver = FakeDriver(spec_ok)
+
+    async def unresolved():
+        raise IdentityUnresolved("testplatform", "test_uid")
+
+    driver.read_profile = unresolved
+    registry = LoginSessionRegistry(open_driver=driver_factory(driver))
+    session = await registry.start(spec_ok, None)
+
+    with pytest.raises(LoginError) as exc:
+        await session.collect_state()
+
+    assert exc.value.status is SessionStatus.FAILED
+    assert exc.value.detail["reason"] == "identity_unresolved"
+    assert exc.value.detail["identity_cookie"] == "test_uid"
+    assert exc.value.detail["terminal"] is True
 
 
 async def test_state_after_release_is_a_typed_error_not_a_crash(spec):

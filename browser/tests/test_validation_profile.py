@@ -59,6 +59,7 @@ async def test_returns_fields_when_scrape_succeeds(monkeypatch):
         "platform_user_id": "MS4wLjAB",
         "username": "Test Creator",
         "avatar_url": "https://x/a.jpg",
+        "platform_handle": None,
     }
 
 
@@ -75,7 +76,12 @@ async def test_unreadable_cookies_still_scrapes(monkeypatch):
     got = await validation._read_profile_best_effort(
         "douyin", object(), _FakeContext(boom=True)
     )
-    assert got == {"platform_user_id": None, "username": "Named", "avatar_url": None}
+    assert got == {
+        "platform_user_id": None,
+        "username": "Named",
+        "avatar_url": None,
+        "platform_handle": None,
+    }
 
 
 async def test_all_fields_empty_returns_none(monkeypatch):

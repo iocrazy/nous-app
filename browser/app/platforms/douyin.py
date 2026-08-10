@@ -190,7 +190,9 @@ PROFILE_TEXT_SELECTORS: Mapping[str, tuple[str, ...]] = {
         'span[class*="nickname"]',
         'div[class*="user-name"]',
     ),
-    "platform_user_id": (
+    # 抖音号. DISPLAY ONLY — it is not, and must never again be, the identity
+    # key. See `IDENTITY_COOKIE` below.
+    "platform_handle": (
         '[class^="unique_id-"]',
         '[class*="unique_id"]',
         'div[class*="unique-id"]',
@@ -216,11 +218,24 @@ PROFILE_ATTR_SELECTORS: Mapping[str, tuple[tuple[str, ...], str]] = {
     ),
 }
 
-# Cookie holding a stable per-user id. Not a display value, but it is the only
-# identifier guaranteed to exist regardless of how the console lays out its
-# header, so it backs up the scraped 抖音号 rather than replacing it.
-USER_ID_COOKIES = ("uid_tt", "uid_tt_ss")
+# THE identity source. One cookie, no fallback (2026-08-09).
+#
+# It used to be the *second* choice, behind the scraped 抖音号 — and that cost
+# us a duplicated account. `MioPoo` bound on 08-06 while the `unique_id-` hash
+# selector missed, so it keyed on this cookie (`41cf16…`); it bound again on
+# 08-09 after the selector was fixed, keyed on `miopoo`, and the backend's
+# unique key `(scope, platform, platform_user_id)` saw two different accounts.
+# Ten publish records stayed with the first row while the UI showed the second.
+#
+# `uid_tt_ss` is gone from here on purpose. It is the same id under the secure
+# cookie, so "try uid_tt, else uid_tt_ss" reads as harmless — but a second
+# source is a second answer, and there is no way to be sure they agree on a
+# page we did not write. Verified present alongside `uid_tt` in the live jar
+# (2026-08-09 dry-run: 46 cookies, both present, `uid_tt` equal to the id
+# already stored for the bound account).
+IDENTITY_COOKIE = "uid_tt"
 
+# Labels the console prints in front of the 抖音号. Display-side only now.
 _ID_PREFIXES = ("抖音号：", "抖音号:", "抖音号", "ID：", "ID:")
 
 
@@ -307,30 +322,26 @@ def judge_douyin_login(snapshot: LoginPageSnapshot) -> LoginJudgement:
     )
 
 
-def parse_douyin_profile(
-    fields: Mapping[str, str], cookies: Sequence[Mapping[str, Any]]
-) -> LoginProfile:
-    """Turn scraped strings into an account identity. Pure.
+def parse_douyin_profile(fields: Mapping[str, str]) -> LoginProfile:
+    """Turn scraped strings into the DISPLAY half of a profile. Pure.
 
-    Everything is best-effort by design: a console redesign that breaks a
+    Everything here is best-effort by design: a console redesign that breaks a
     display-name selector must degrade to a nameless account, never fail a login
     the user already completed.
+
+    It has no say in `platform_user_id` — no cookies are passed in, and the
+    caller stamps the identity over whatever this returns. That is deliberate:
+    "best-effort" and "identity" are the combination that duplicated an account
+    (see `IDENTITY_COOKIE`), and the cleanest way not to repeat it is to make
+    the mistake unrepresentable rather than to remember not to make it.
     """
     username = (fields.get("username") or "").strip()
 
-    raw_id = (fields.get("platform_user_id") or "").strip()
+    handle = (fields.get("platform_handle") or "").strip()
     for prefix in _ID_PREFIXES:
-        if raw_id.startswith(prefix):
-            raw_id = raw_id[len(prefix) :].strip()
+        if handle.startswith(prefix):
+            handle = handle[len(prefix) :].strip()
             break
-
-    if not raw_id:
-        by_name = {c.get("name"): c.get("value") for c in cookies if c.get("name")}
-        for name in USER_ID_COOKIES:
-            value = (by_name.get(name) or "").strip()
-            if value:
-                raw_id = value
-                break
 
     avatar = (fields.get("avatar_url") or "").strip()
     if not avatar.startswith(("http://", "https://", "data:image")):
@@ -339,14 +350,15 @@ def parse_douyin_profile(
         avatar = ""
 
     return LoginProfile(
-        platform_user_id=raw_id,
         username=username,
         avatar_url=avatar or None,
+        platform_handle=handle,
     )
 
 
 LOGIN_SPEC = LoginFlowSpec(
     platform=PLATFORM,
+    identity_cookie=IDENTITY_COOKIE,
     login_url=LOGIN_URL,
     profile_url=PROFILE_URL,
     qrcode_selectors=QRCODE_SELECTORS,

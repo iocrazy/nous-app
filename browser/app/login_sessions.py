@@ -38,7 +38,13 @@ from enum import Enum
 from typing import Any, Awaitable, Callable
 
 from .config import get_settings
-from .login import LoginDriver, LoginFlowSpec, LoginProfile, open_login_driver
+from .login import (
+    IdentityUnresolved,
+    LoginDriver,
+    LoginFlowSpec,
+    LoginProfile,
+    open_login_driver,
+)
 from .redaction import scrub
 from .schemas import EnvironmentConfig, SessionStatus
 from .validation import ProbeKind, classify_playwright_error
@@ -266,6 +272,26 @@ class LoginSession:
             state = await driver.storage_state()
             try:
                 profile = await driver.read_profile()
+            except IdentityUnresolved as exc:
+                # NOT degradable. Every other profile failure costs a display
+                # field; this one would cost the account's continuity — the
+                # backend keys `social_accounts` on this value, so binding with
+                # a blank or substituted id forks the account into a second row
+                # and leaves its publish history on the first. Fail the login
+                # and say why, so the user rescans instead of quietly owning
+                # two half-accounts (repo rule: 触发路径必须类型化失败回显).
+                logger.warning(
+                    "identity unresolved for platform=%s (cookie=%s)",
+                    self.platform,
+                    exc.cookie,
+                )
+                raise LoginError(
+                    SessionStatus.FAILED,
+                    exc.args[0],
+                    reason=IdentityUnresolved.reason,
+                    identity_cookie=exc.cookie,
+                    terminal=True,
+                ) from exc
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "profile scrape failed for platform=%s: %s",

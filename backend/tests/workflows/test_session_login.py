@@ -583,6 +583,79 @@ async def test_finalize_step_never_returns_the_plaintext_session():
     assert written["scope_type"] == "user"
 
 
+async def test_finalize_step_writes_the_handle_without_touching_the_identity():
+    """抖音号进 platform_handle,身份键仍是 cookie id(mig 414 / P0-1)。
+
+    这两个字段一旦又合流,重新绑定就会因为用户改了抖音号而建出第二行账号 ——
+    2026-08-09 的原样复发。
+    """
+    from app.services.distribution.browser_client import LoginState
+
+    state = LoginState(
+        result=SessionOpResult(True, "success", "ok", {}),
+        storage_state={"cookies": []},
+        platform_user_id="41cf16775ee3e9fdf5e021f9c1ddfc12",
+        username="MioPoo",
+        platform_handle="miopoo",
+    )
+    repo = MagicMock()
+    repo.upsert_session_account = AsyncMock(
+        return_value={"id": "900", "username": "MioPoo"}
+    )
+    client = MagicMock()
+    client.get_login_state = AsyncMock(return_value=state)
+
+    with (
+        patch(
+            "app.services.distribution.browser_client.BrowserClient",
+            return_value=client,
+        ),
+        patch(
+            "app.repositories.social_accounts_repository.SocialAccountsRepository",
+            return_value=repo,
+        ),
+    ):
+        await inspect.unwrap(m.finalize_login_step)(SID, "douyin", "user", _USER, _USER)
+
+    written = repo.upsert_session_account.await_args.kwargs
+    assert written["platform_user_id"] == "41cf16775ee3e9fdf5e021f9c1ddfc12"
+    assert written["platform_handle"] == "miopoo"
+
+
+async def test_finalize_step_falls_back_to_the_handle_for_a_missing_nickname():
+    """username 是 NOT NULL。没昵称时 `miopoo` 比 32 位 hex 可读得多 —— 但这只是
+    显示兜底,platform_user_id 一步也不许跟着动。"""
+    from app.services.distribution.browser_client import LoginState
+
+    state = LoginState(
+        result=SessionOpResult(True, "success", "ok", {}),
+        storage_state={"cookies": []},
+        platform_user_id="41cf16775ee3e9fdf5e021f9c1ddfc12",
+        username=None,
+        platform_handle="miopoo",
+    )
+    repo = MagicMock()
+    repo.upsert_session_account = AsyncMock(return_value={"id": "900"})
+    client = MagicMock()
+    client.get_login_state = AsyncMock(return_value=state)
+
+    with (
+        patch(
+            "app.services.distribution.browser_client.BrowserClient",
+            return_value=client,
+        ),
+        patch(
+            "app.repositories.social_accounts_repository.SocialAccountsRepository",
+            return_value=repo,
+        ),
+    ):
+        await inspect.unwrap(m.finalize_login_step)(SID, "douyin", "user", _USER, _USER)
+
+    written = repo.upsert_session_account.await_args.kwargs
+    assert written["username"] == "miopoo"
+    assert written["platform_user_id"] == "41cf16775ee3e9fdf5e021f9c1ddfc12"
+
+
 async def test_finalize_step_raises_when_the_browser_has_no_state():
     """扫了码却没有会话物料时建一个空账号行，用户会以为绑好了。"""
     from app.services.distribution.browser_client import LoginState

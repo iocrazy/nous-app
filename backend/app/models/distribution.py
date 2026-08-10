@@ -77,6 +77,12 @@ class SocialAccounts(Base):
     scope_id: Mapped[str] = mapped_column(Text, nullable=False)
     platform: Mapped[str] = mapped_column(String(50), nullable=False)
     platform_user_id: Mapped[str] = mapped_column(Text, nullable=False)
+    # mig 414 — the platform's human-facing account name (抖音号 / 小红书号).
+    # DISPLAY ONLY, and the distinction is load-bearing: it used to be fed into
+    # platform_user_id whenever its DOM selector happened to hit, which bound one
+    # Douyin account into two rows on 2026-08-09. Users rename it at will, so it
+    # can never take part in the unique key.
+    platform_handle: Mapped[str | None] = mapped_column(Text)
     username: Mapped[str] = mapped_column(Text, nullable=False)
     avatar_url: Mapped[str | None] = mapped_column(Text)
     access_token: Mapped[str | None] = mapped_column(Text)

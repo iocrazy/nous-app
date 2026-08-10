@@ -300,6 +300,20 @@ class SocialAccountsRepository:
         already-bound account refreshes its storage_state in place rather than
         creating a second row. ``status`` goes back to 'active' because a
         successful scan is exactly the cure for 'needs_relogin'.
+
+        **The key only works if ``platform_user_id`` means the same thing every
+        time.** It did not: nous-browser used to resolve Douyin's id from the
+        page first and the ``uid_tt`` cookie second, so the same account bound
+        as ``miopoo`` on one day and ``41cf16…`` on another, and this upsert
+        dutifully created a second row (2026-08-09). The fix lives at the
+        source — one declared cookie per platform, and a typed
+        ``identity_unresolved`` failure when it is missing — because nothing
+        here can tell two namespaces apart after the fact.
+
+        ``platform_handle`` (mig 414) is the display half that was split out of
+        it. It is written and refreshed like ``username``, and it is **not** in
+        ``index_elements``: renaming a 抖音号 must move the label, not fork the
+        account.
         """
         f = _encrypt_secret_cols(f, _SESSION_COLS)
         checked_at = f.get("session_checked_at")
@@ -308,6 +322,7 @@ class SocialAccountsRepository:
             scope_id=f["scope_id"],
             platform=f["platform"],
             platform_user_id=f["platform_user_id"],
+            platform_handle=f.get("platform_handle"),
             username=f["username"],
             avatar_url=f.get("avatar_url"),
             auth_type="session",
@@ -320,6 +335,14 @@ class SocialAccountsRepository:
             set_={
                 "username": stmt.excluded.username,
                 "avatar_url": stmt.excluded.avatar_url,
+                # COALESCE, unlike the fields above: a re-bind whose handle
+                # selector missed passes NULL, and blanking a label that is
+                # currently correct would be a pure loss. Same rule
+                # ``update_profile`` states for the display fields — "the scrape
+                # did not produce this" is not "the value is empty".
+                "platform_handle": func.coalesce(
+                    stmt.excluded.platform_handle, SocialAccounts.platform_handle
+                ),
                 "auth_type": "session",
                 "session_state": stmt.excluded.session_state,
                 "session_checked_at": stmt.excluded.session_checked_at,
@@ -370,6 +393,7 @@ class SocialAccountsRepository:
         *,
         username: Optional[str] = None,
         avatar_url: Optional[str] = None,
+        platform_handle: Optional[str] = None,
     ) -> None:
         """Write back the display identity scraped off a live session.
 
@@ -389,12 +413,19 @@ class SocialAccountsRepository:
         collide with an existing row or orphan this one from the identity a
         re-bind would resolve to. Correcting a wrong id is a re-bind, not a
         profile refresh.
+
+        ``platform_handle`` (mig 414) IS updatable, and that asymmetry is the
+        whole point of splitting the two apart: a 抖音号 is display material the
+        user may rename at any time, so it has to be refreshable in place —
+        which is exactly why it can never be part of the key.
         """
         values: dict[str, Any] = {}
         if username:
             values["username"] = username
         if avatar_url:
             values["avatar_url"] = avatar_url
+        if platform_handle:
+            values["platform_handle"] = platform_handle
         if not values:
             return
         values["updated_at"] = func.now()

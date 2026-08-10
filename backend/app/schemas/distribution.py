@@ -22,6 +22,10 @@ class SocialAccountOut(BaseModel):
     scope_id: str
     platform: str
     platform_user_id: str
+    # mig 414 — 平台侧公开账号名（抖音号 / 小红书号）。展示用，可改名，因此
+    # **不参与**账号唯一键。⚠️ 响应模型是白名单：漏掉这一行的话 repo 明明返回
+    # 了它、前端却永远收不到，且不报错（与 auth_type 那次同款静默）。
+    platform_handle: Optional[str] = None
     username: str
     avatar_url: Optional[str] = None
     token_expires_at: Optional[datetime] = None
