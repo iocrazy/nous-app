@@ -19,6 +19,18 @@ This module answers the question the timer was guessing at, from the other end:
 it goes looking for a SPECIFIC post — identified by the caption we typed
 ourselves — and reports what the platform now says about it.
 
+What it delivers, and what it does not
+======================================
+The deliverable is the **verdict** (live / under review / refused / gone). It
+is read from the card's status text and needs no post id.
+
+It does NOT reliably deliver a `published_url`. The manage page was checked
+against a live account on 2026-08-08 and its cards carry no href, no id
+attribute, and no listing XHR that returns one (the finding is recorded in
+`frontend/.../RecordsPage.tsx`, which is why the UI says "Open in platform"
+rather than "View post"). The id extraction here is opportunistic — see the
+note on `_ITEM_ID_PATTERN`. A live card with no id still verifies.
+
 Shape, matching the rest of this tree
 =====================================
 This module contributes **selectors, marker texts and pure judgement
@@ -75,6 +87,31 @@ VIDEO_URL_TEMPLATE = "https://www.douyin.com/video/{item_id}"
 # `/video/0` or a tracking parameter cannot masquerade as one.
 _ITEM_ID_PATTERN = re.compile(r"/video/(\d{6,32})")
 
+# ⚠️ EXPECT THIS TO FIND NOTHING on today's console, and do not treat that as a
+# failure.
+#
+# `frontend/components/Distribution/RecordsPage.tsx` records a live-console
+# check from 2026-08-08: the manage page's post cards expose **neither an href
+# nor an id attribute, and no listing XHR returns one either** — all three
+# verified against a real account. That is exactly why the frontend renders
+# "Open in platform" instead of "View post", and why `douyin_publish._drive`
+# returns `published_url=None` in the first place.
+#
+# So the id extraction below is OPPORTUNISTIC, not the deliverable:
+#
+#   * What this read-back actually delivers is the VERDICT — is the post live,
+#     under review, refused, or gone. That comes from the card's status text and
+#     needs no id at all.
+#   * `published_url` / `platform_item_id` get filled only if the console ever
+#     starts exposing an id (a redesign, or a layout we have not seen). A live
+#     card with no id still verifies — see `judge_readback`, which returns LIVE
+#     with `item_id=None`, and `verification_update_stmt`, which only writes the
+#     URL when it is non-empty.
+#
+# Keeping the extraction costs one regex per card and means a console that does
+# expose an id gets picked up for free. Deleting it would mean noticing the
+# change by hand. Believing it will fire today would be the mistake.
+
 # Candidate roots for one work card, most specific first, class-name-free
 # structural fallback last. A list rather than a single selector for the reason
 # spelled out in `dom.first_visible_attribute`: this console has already moved
@@ -84,9 +121,6 @@ CARD_SELECTORS: tuple[str, ...] = (
     '[class*="work-card"]',
     '[class*="video-card"]',
     '[class^="card-"]',
-    # Structural fallback. Also matches nested wrappers, which is why
-    # `read_work_cards` de-duplicates on the extracted item id.
-    'div:has(> a[href*="/video/"])',
 )
 
 # The platform's own "you have nothing here" state. Reaching it is a REAL

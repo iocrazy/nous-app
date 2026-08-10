@@ -67,7 +67,23 @@ class TestAgainstFixtureHtml:
 
     async def test_reads_every_card_once(self):
         cards = await read_work_cards(FakePage(FIXTURE))
-        assert len(cards) == 5, [c.text[:40] for c in cards]
+        assert len(cards) == 6, [c.text[:40] for c in cards]
+
+    async def test_a_live_card_with_no_link_still_verifies(self):
+        """**The shape the live console is believed to actually have.**
+
+        Checked against a real account on 2026-08-08 (recorded in
+        RecordsPage.tsx): the manage page's cards carry no href, no id
+        attribute, and no listing XHR returns one. The verdict must therefore
+        come from the status text alone — `published_url` is opportunistic and
+        stays null, which is a documented limit, not a failure.
+        """
+        judgement = await verify_publish(
+            FakePage(FIXTURE), "Linkless Live Card From The Real Console"
+        )
+        assert judgement.verdict is ReadbackVerdict.LIVE
+        assert judgement.item_id is None
+        assert judgement.published_url is None
 
     async def test_item_id_comes_off_the_watch_link(self):
         cards = await read_work_cards(FakePage(FIXTURE))
@@ -87,7 +103,7 @@ class TestAgainstFixtureHtml:
         assert judgement.published_url == (
             "https://www.douyin.com/video/7412345678901234567"
         )
-        assert judgement.detail["cards_seen"] == 5
+        assert judgement.detail["cards_seen"] == 6
 
     async def test_private_post_counts_as_live(self):
         """仅自己可见 is a visibility the batch can legitimately request. If
@@ -116,7 +132,7 @@ class TestAgainstFixtureHtml:
         judgement = await verify_publish(FakePage(FIXTURE), "A Post That Was Deleted")
         assert judgement.verdict is ReadbackVerdict.NOT_LIVE
         assert judgement.reason == "not_found"
-        assert judgement.detail["cards_seen"] == 5
+        assert judgement.detail["cards_seen"] == 6
 
     async def test_empty_account_reads_as_not_found(self):
         page = FakePage(EMPTY_PAGE)

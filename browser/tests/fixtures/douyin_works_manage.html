@@ -77,4 +77,25 @@
       <div class="stats-m4n5o6">播放 0</div>
     </div>
   </div>
+
+  <!--
+    6. Live, but with NO link and NO id attribute anywhere on the card.
+
+    This is the shape the live console is actually believed to have: checked
+    against a real account on 2026-08-08 and recorded in
+    frontend/components/Distribution/RecordsPage.tsx — the post cards expose
+    neither an href nor an id, and no listing XHR returns one either.
+
+    It is in the fixture because the read-back MUST still verify such a card.
+    The verdict comes from the status text; the id (and therefore
+    published_url) is opportunistic and simply stays null.
+  -->
+  <div class="content-card-a1b2c3">
+    <div class="cover-x1y2"><img src="https://p3.douyinpic.com/cover6.jpeg" /></div>
+    <div class="info-d4e5f6">
+      <div class="title-g7h8i9">Linkless Live Card From The Real Console</div>
+      <div class="status-j1k2l3">已发布</div>
+      <div class="stats-m4n5o6">播放 812</div>
+    </div>
+  </div>
 </div>
