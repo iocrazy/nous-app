@@ -2056,6 +2056,13 @@
         "episodeMismatch": "This Stage Belongs to a Different Episode — Switch to Its Episode to Start It.",
         "failed": "Failed to start this stage early"
       }
+    },
+    "nodeCard": {
+      "openScript": "Open Script",
+      "openStoryboard": "Open Storyboard",
+      "openRenders": "Open Renders",
+      "openStageBoard": "Open Stage Board",
+      "settings": "Node settings"
     }
   },
   "storyboard": {

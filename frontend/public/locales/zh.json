@@ -2056,6 +2056,13 @@
         "episodeMismatch": "此阶段属于其他剧集 — 请切换到对应剧集后再开工。",
         "failed": "提前开工失败"
       }
+    },
+    "nodeCard": {
+      "openScript": "打开剧本",
+      "openStoryboard": "打开分镜",
+      "openRenders": "打开渲染成片",
+      "openStageBoard": "打开阶段面板",
+      "settings": "节点设置"
     }
   },
   "storyboard": {

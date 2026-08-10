@@ -38,6 +38,7 @@ import { WorkspaceSidebar, type WorkView } from './WorkspaceSidebar';
 import { resolveSurface } from './nodeSurface';
 import { WorkspaceTopBar } from './WorkspaceTopBar';
 import { WorkspaceOverview } from './WorkspaceOverview';
+import { EpisodeNodeCard } from './EpisodeNodeCard';
 import { AdvanceConfirmDialog } from '../workflow/AdvanceConfirmDialog';
 import { useProjectWorkflow } from '../../hooks/useProjectWorkflow';
 import { executeAdvance, fetchAdvancePreview } from '../../services/workflowService';
@@ -652,15 +653,12 @@ export function ProjectWorkspace({
   // Stage Board (Task 7, see guard below: a non-current node's click must not
   // flash open the CURRENT episode's surface panel with unrelated content).
   //
-  // ⚠️ Task 4 (IA redesign accordion rewrite) unwired this from
-  // `WorkspaceOverview` — its new `onSelectNode` prop only writes URL
-  // `node=` (see `handleSelectNodeId` above), it doesn't take a full
-  // `ProjectStageNode` to route by surface. This function (and
-  // `handleOpenStage` / the `resolveSurface` import it uses) is INTENTIONALLY
-  // KEPT, currently uncalled: Task 5's `EpisodeNodeCard` (the `renderNodeCard`
-  // slot) is expected to reuse this exact routing logic for its own actions
-  // (e.g. an "Open" affordance on the node card). DO NOT DELETE as dead code
-  // without checking Task 5's plan first.
+  // Task 4 (IA redesign accordion rewrite) unwired this from `WorkspaceOverview`
+  // directly — clicking a strip node now only writes URL `node=` (see
+  // `handleSelectNodeId` above) and selects that node's `EpisodeNodeCard`.
+  // Task 5 wires THIS function back in as that card's `onEnterSurface` prop
+  // (see `renderNodeCard` below) — the card's entry button is the surviving
+  // consumer of this exact routing logic.
   const handleSelectNode = useCallback(
     (node: ProjectStageNode) => {
       // 拍板（undo 立项附带, Task 7 小尾巴 A, 2026-08-09）：非当前节点点击不再闪当前集的
@@ -684,6 +682,29 @@ export function ProjectWorkspace({
       }
     },
     [handleOpenWorkView, handleOpenRenders, handleOpenStage, workflow?.current_node_id],
+  );
+
+  // EpisodeNodeCard's Settings deep-link (Task 5, ambiguity #4) — a plain new
+  // navigation into the Settings module's Node Config tab, so `replace: false`
+  // (unlike the module-sync effect above, which intentionally collapses
+  // module switches into the current history entry). Settings itself doesn't
+  // read `tab`/`node` yet (Task 10's scope) — this only guarantees the URL is
+  // correct ahead of that.
+  const handleOpenNodeSettings = useCallback(
+    (episodeId: string, nodeId: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('module', 'settings');
+          next.set('tab', 'nodes');
+          next.set('ep', episodeId);
+          next.set('node', nodeId);
+          return next;
+        },
+        { replace: false },
+      );
+    },
+    [setSearchParams],
   );
 
   const studioMode = activeModule === 'script' && resolvedScriptId != null;
@@ -874,9 +895,29 @@ export function ProjectWorkspace({
                 selectedNodeId={selectedNodeId}
                 onExpandEpisode={handleExpandEpisode}
                 onSelectNode={handleSelectNodeId}
-                // Task 5 fills this in with the real EpisodeNodeCard; Task 4
-                // only wires the accordion + strip + slot plumbing.
-                renderNodeCard={() => null}
+                // Task 5: the real EpisodeNodeCard. `nodeId` is
+                // `selectedNodeId ?? workflow.current_node_id ?? null`
+                // (WorkspaceOverview's own default) — a node not found in the
+                // (possibly stale/mid-fetch) `workflow.nodes` list renders
+                // nothing rather than guessing (ambiguity #1).
+                renderNodeCard={(episodeId, nodeId) => {
+                  const node = workflow?.nodes.find((n) => String(n.id) === String(nodeId)) ?? null;
+                  if (!node) return null;
+                  return (
+                    <EpisodeNodeCard
+                      key={node.id}
+                      node={node}
+                      // Task 9 wires the real per-node config-write permission;
+                      // hardwired false here renders every fact read-only.
+                      canEditConfig={false}
+                      isCursorNode={String(node.id) === String(workflow?.current_node_id ?? '')}
+                      onEnterSurface={handleSelectNode}
+                      onRequestAdvance={requestAdvance}
+                      onOpenTodolist={() => setActiveModule('tasks')}
+                      onOpenSettings={(_ignoredEpisodeId, nid) => handleOpenNodeSettings(episodeId, nid)}
+                    />
+                  );
+                }}
                 canWrite={canWrite}
                 onReloadWorkflow={() => void reloadWorkflow()}
               />
