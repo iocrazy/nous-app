@@ -12,6 +12,10 @@ vi.mock('react-i18next', () => ({
 
 const connectAccount = vi.fn();
 const startSessionLogin = vi.fn();
+// The QR entry points are gated on the browser service being reachable (D1).
+// Mocked healthy here so these cases keep testing what they are about; the
+// gate itself has its own file (AccountsPage.browserGate.test.tsx).
+const getBrowserHealth = vi.fn();
 // Hoisted so a test can count refetches — the close-path reload is only
 // observable as "listAccounts ran again".
 const listAccounts = vi.fn();
@@ -60,6 +64,7 @@ vi.mock('../../services/distributionService', async (importOriginal) => ({
     },
   ]),
   connectAccount: (...a: unknown[]) => connectAccount(...a),
+  getBrowserHealth: (...a: unknown[]) => getBrowserHealth(...a),
   refreshAccount: vi.fn(), deleteAccount: vi.fn(),
   startSessionLogin: (...a: unknown[]) => startSessionLogin(...a),
   submitSmsCode: vi.fn(), cancelSessionLogin: vi.fn().mockResolvedValue(undefined),
@@ -109,6 +114,7 @@ describe('AccountsPage', () => {
     listAccounts.mockResolvedValue(ACCOUNTS);
     connectAccount.mockResolvedValue({ auth_url: 'https://open.douyin.com/oauth' });
     startSessionLogin.mockResolvedValue({ task_id: 'task-1' });
+    getBrowserHealth.mockResolvedValue({ ok: true, error_kind: null, message: 'ok' });
   });
 
   it('renders accounts with status and scope badges', async () => {

@@ -430,6 +430,17 @@
 .dist-v4 .method-card > span:not(.mc-ic) { font-size: 11.5px; line-height: 1.5; color: var(--content-4); }
 .dist-v4 .method-card em { font-style: normal; font-size: 11px; font-weight: 550; margin-top: 2px; }
 .dist-v4 .mc-ic { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 9px; background: var(--island); border: 1px solid var(--line); }
+/* QR sign-in is unavailable while nous-browser is down (D1). The card stays
+   readable — it explains itself in place of its usual note. */
+.dist-v4 .method-card:disabled { cursor: not-allowed; opacity: .6; }
+.dist-v4 .method-card:disabled:hover { border-color: var(--line); }
+
+/* browser-service outage notice (D1) */
+.dist-v4 .svc-notice { display: flex; align-items: flex-start; gap: 11px; padding: 12px 14px; margin-bottom: 14px; border-radius: 13px; border: 1px solid var(--warn-line); background: var(--warn-soft); }
+.dist-v4 .svc-notice .svc-ic { color: var(--warn); flex-shrink: 0; margin-top: 1px; }
+.dist-v4 .svc-notice .svc-body { flex: 1; min-width: 0; }
+.dist-v4 .svc-notice b { display: block; font-size: 12.5px; font-weight: 600; color: var(--content); letter-spacing: -.005em; }
+.dist-v4 .svc-notice p { margin: 3px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--content-3); }
 
 /* QR login modal */
 .dist-v4 .picker.sess { width: min(520px, 100%); }

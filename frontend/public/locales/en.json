@@ -498,7 +498,12 @@
     "unbindTitle": "Unbind {{name}}?",
     "unbindMessage": "You will need to sign in again to publish from this account. Its {{n}} publish records are kept.",
     "unbindConfirm": "Unbind",
-    "unbindCheckFailed": "Could not check what this account is used by — not unbinding. Try again."
+    "unbindCheckFailed": "Could not check what this account is used by — not unbinding. Try again.",
+    "browserDownTitle": "Connection service is temporarily unavailable",
+    "browserDownDesc": "QR sign-in runs in a browser service that is not responding — usually a restart during a deploy. Official Authorization is unaffected.",
+    "browserUnavailable": "Connection service is temporarily unavailable — QR sign-in cannot start right now.",
+    "browserRecheck": "Check again",
+    "browserChecking": "Checking..."
   },
   "parser": {
     "title": "Media Parser",

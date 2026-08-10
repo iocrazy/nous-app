@@ -498,7 +498,12 @@
     "unbindTitle": "解绑 {{name}}？",
     "unbindMessage": "解绑后需重新扫码登录才能用该账号发布。它的 {{n}} 条发布记录会保留。",
     "unbindConfirm": "解绑",
-    "unbindCheckFailed": "没能查到该账号被哪些记录引用，已取消解绑。请重试。"
+    "unbindCheckFailed": "没能查到该账号被哪些记录引用，已取消解绑。请重试。",
+    "browserDownTitle": "扫码服务暂时不可用",
+    "browserDownDesc": "扫码登录跑在一个浏览器服务里，它现在没有响应 —— 通常是发布期间的一次重启。官方授权不受影响。",
+    "browserUnavailable": "扫码服务暂时不可用，现在无法开始扫码登录。",
+    "browserRecheck": "重新检查",
+    "browserChecking": "检查中…"
   },
   "parser": {
     "title": "媒体解析",

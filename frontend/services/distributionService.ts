@@ -104,6 +104,32 @@ export const cancelSessionLogin = (
     method: 'DELETE',
   });
 
+/**
+ * Typed verdict on the browser service every QR binding runs inside (backend
+ * `BrowserHealthResponse`). `ok: false` arrives as a **200**, not an error
+ * status, on purpose: the caller has to tell "the browser service is down"
+ * apart from "this request failed", and only the first one is evidence about
+ * the browser. `error_kind` is `unreachable` / `timeout` / `not_configured` /
+ * `server_error` / … — kept as a plain string so a kind added server-side
+ * cannot break parsing.
+ */
+export interface BrowserHealth {
+  ok: boolean;
+  error_kind?: string | null;
+  message?: string;
+}
+
+/**
+ * Probe the QR-login channel before offering it. Read-only, and deliberately
+ * NOT polled — the binding entry point asks once on mount, once before it
+ * actually starts a login, and once more whenever the user hits Check again.
+ *
+ * A rejected promise here means our own API call failed, which says nothing
+ * about the browser container; callers must not turn that into "unavailable".
+ */
+export const getBrowserHealth = (): Promise<BrowserHealth> =>
+  request<BrowserHealth>('/browser/health');
+
 export const refreshAccount = (id: string): Promise<SocialAccount> =>
   request<SocialAccount>(`/accounts/${id}/refresh`, { method: 'POST' });
 
