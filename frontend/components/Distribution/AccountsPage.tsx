@@ -4,11 +4,13 @@ import { getSupabaseClient } from '../../supabaseClient';
 import { KeyRound, Plus, QrCode, RefreshCw, Trash2, X } from 'lucide-react';
 import { useToast } from '../Toast';
 import {
-  connectAccount, deleteAccount, listAccounts, listPublishTasks, refreshAccount,
+  connectAccount, deleteAccount, getAccountUsage, listAccounts, listPublishTasks,
+  refreshAccount,
 } from '../../services/distributionService';
 import { SocialAccount, PublishTask } from '../../types';
 import { PLATFORM_BADGE, PLATFORM_LABEL, gradientFor } from './platform';
 import { PageHeader } from '../layout/PageHeader';
+import { useConfirm } from '../ConfirmDialog';
 import SessionLoginModal from './SessionLoginModal';
 import './distribution-v4.css';
 
@@ -35,6 +37,7 @@ type SessionLoginTarget = {
 export const AccountsPage: React.FC = () => {
   const { t } = useTranslation();
   const { addToast } = useToast();
+  const confirm = useConfirm();
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [tasks, setTasks] = useState<PublishTask[]>([]);
   const [loading, setLoading] = useState(true);
@@ -140,9 +143,57 @@ export const AccountsPage: React.FC = () => {
     }
   };
 
-  const onDelete = async (id: string) => {
+  /**
+   * Unbind, but only after showing what it costs — measured, not guessed.
+   *
+   * This button used to go straight to the API. The backend hard-deleted the
+   * row, and `publish_task_accounts.account_id` is `ON DELETE CASCADE`, so one
+   * click could take an account's whole publish history with it and say
+   * nothing. Measured on prod the day this was found: of the two cards on
+   * screen, one carried 10 publish records and the other 0 — the user happened
+   * to click the 0 one.
+   *
+   * Two things changed. The backend keeps the records (soft delete), so the
+   * copy is "unbind", not "delete". And the count comes from the server on
+   * every open — never from `postsByAccount`, which is derived from the last
+   * 100 tasks the stats call happened to return and would understate the real
+   * figure exactly when it matters most.
+   *
+   * A failed count ABORTS instead of falling back to a confirm without a
+   * number: the whole point is that the user is told the impact, and "we could
+   * not check" is not that. Unbinding is never urgent, and the typed toast
+   * says what to do (CLAUDE.md「触发路径必须类型化失败回显」 — a silent no-op
+   * here would be the same class of bug).
+   */
+  const onDelete = async (a: SocialAccount) => {
+    let records: number;
     try {
-      await deleteAccount(id);
+      ({ publish_records: records } = await getAccountUsage(a.id));
+    } catch (err) {
+      console.error('distribution: account usage lookup failed', err);
+      addToast(
+        t('distribution.unbindCheckFailed',
+          'Could not check what this account is used by — not unbinding. Try again.'),
+        'error',
+      );
+      return;
+    }
+
+    const ok = await confirm({
+      variant: 'warning',
+      title: t('distribution.unbindTitle', 'Unbind {{name}}?', { name: a.username }),
+      message: t(
+        'distribution.unbindMessage',
+        'You will need to sign in again to publish from this account. Its {{n}} publish records are kept.',
+        { n: records },
+      ),
+      confirmLabel: t('distribution.unbindConfirm', 'Unbind'),
+      cancelLabel: t('common.cancel', 'Cancel'),
+    });
+    if (!ok) return;
+
+    try {
+      await deleteAccount(a.id);
       void reload();
     } catch (err) {
       console.error('distribution: delete failed', err);
@@ -301,8 +352,8 @@ export const AccountsPage: React.FC = () => {
                       <RefreshCw size={13} /> {t('distribution.reauthorize', 'Reauthorize')}
                     </button>
                   ) : (
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => onDelete(a.id)}>
-                      <Trash2 size={13} /> {t('common.remove', 'Remove')}
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => void onDelete(a)}>
+                      <Trash2 size={13} /> {t('distribution.unbind', 'Unbind')}
                     </button>
                   )}
                 </div>

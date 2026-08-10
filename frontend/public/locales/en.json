@@ -492,7 +492,12 @@
       "contentArticle": "Article",
       "accountsCount": "{{n}} accounts"
     },
-    "platNoPublish": "Publishing not available yet"
+    "platNoPublish": "Publishing not available yet",
+    "unbind": "Unbind",
+    "unbindTitle": "Unbind {{name}}?",
+    "unbindMessage": "You will need to sign in again to publish from this account. Its {{n}} publish records are kept.",
+    "unbindConfirm": "Unbind",
+    "unbindCheckFailed": "Could not check what this account is used by — not unbinding. Try again."
   },
   "parser": {
     "title": "Media Parser",

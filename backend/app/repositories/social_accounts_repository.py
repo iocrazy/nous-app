@@ -27,9 +27,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from sqlalchemy import and_
-from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -59,6 +57,24 @@ SESSION_CHECK_BATCH = 20
 SESSION_STATE_DECRYPT_FAILED = "session_state_decrypt_failed"
 
 _SA_COLS = tuple(SocialAccounts.__table__.columns)
+
+
+def _live():
+    """The "not unbound" predicate (mig 416) — every business read path adds it.
+
+    It is a function returning a fresh clause rather than a module-level
+    constant so nothing can accidentally mutate a shared expression, and so
+    grepping ``_live()`` finds every read that opted in. A read WITHOUT it is a
+    read that resurrects unbound accounts into the UI, which is the whole point
+    of the column.
+
+    Deliberately NOT applied to ``publish_tasks_repository.get_task_accounts``'s
+    JOIN: the records page must keep showing which account a past post went out
+    from, and hiding the row there would turn "unbind an account" back into
+    "erase its history" — the exact thing mig 416 exists to prevent.
+    """
+    return SocialAccounts.deleted_at.is_(None)
+
 
 # mig 402 — the account's pinned browser environment, LEFT JOINed onto the two
 # session read paths. Column names are the raw table's (spec §3.2): the adapter
@@ -163,6 +179,7 @@ class SocialAccountsRepository:
             result = await session.execute(
                 select(*_SA_COLS)
                 .where(
+                    _live(),
                     or_(
                         and_(
                             SocialAccounts.scope_type == "user",
@@ -172,7 +189,7 @@ class SocialAccountsRepository:
                             SocialAccounts.scope_type == "team",
                             SocialAccounts.scope_id.in_([str(t) for t in team_ids]),
                         ),
-                    )
+                    ),
                 )
                 .order_by(SocialAccounts.created_at.desc())
             )
@@ -180,6 +197,8 @@ class SocialAccountsRepository:
         return [_public_row(r) for r in rows]
 
     async def upsert_account(self, **f: Any) -> dict:
+        """OAuth bind / re-bind. Wakes an unbound row — see
+        ``upsert_session_account`` for why that is not optional."""
         f = _encrypt_token_cols(f)
         stmt = pg_insert(SocialAccounts).values(
             scope_type=f["scope_type"],
@@ -202,6 +221,12 @@ class SocialAccountsRepository:
                 "refresh_token": stmt.excluded.refresh_token,
                 "token_expires_at": stmt.excluded.token_expires_at,
                 "status": "active",
+                # mig 416 wake-up. Without it, re-authorizing an account the
+                # user had unbound would UPDATE the soft-deleted row (the
+                # unique key still matches) and leave deleted_at set — a
+                # successful OAuth round-trip that produces no visible account
+                # and no error anywhere.
+                "deleted_at": None,
                 "updated_at": func.now(),
             },
         ).returning(*_SA_COLS)
@@ -210,12 +235,18 @@ class SocialAccountsRepository:
         return _public_row(dict(row))
 
     async def get_public(self, account_id: int) -> Optional[dict]:
+        """The row every router-level ``_authorize_account`` check reads.
+
+        Filtering unbound rows here is what makes soft delete behave like
+        delete for the whole API surface: refresh / re-login / usage / delete
+        of an unbound account all 404 from that one seam, instead of each
+        endpoint having to remember."""
         async with read_scope() as session:
             row = (
                 (
                     await session.execute(
                         select(*_SA_COLS).where(
-                            SocialAccounts.id == _bigint(account_id)
+                            SocialAccounts.id == _bigint(account_id), _live()
                         )
                     )
                 )
@@ -233,7 +264,7 @@ class SocialAccountsRepository:
                 (
                     await session.execute(
                         select(*_SA_COLS).where(
-                            SocialAccounts.id == _bigint(account_id)
+                            SocialAccounts.id == _bigint(account_id), _live()
                         )
                     )
                 )
@@ -273,7 +304,7 @@ class SocialAccountsRepository:
                 (
                     await session.execute(
                         _env_join(select(*_SA_COLS, *_AE_SELECT)).where(
-                            SocialAccounts.id == _bigint(account_id)
+                            SocialAccounts.id == _bigint(account_id), _live()
                         )
                     )
                 )
@@ -314,6 +345,16 @@ class SocialAccountsRepository:
         it. It is written and refreshed like ``username``, and it is **not** in
         ``index_elements``: renaming a 抖音号 must move the label, not fork the
         account.
+
+        **A re-bind also WAKES an unbound row** (``deleted_at`` → NULL, mig
+        415). Soft delete leaves the row in place, so it keeps occupying the
+        unique key — meaning a user who unbinds an account and then rescans its
+        QR code lands on ``ON CONFLICT`` no matter what. Without the reset the
+        scan would succeed, refresh a session nobody can see, and return an
+        account the list endpoint filters right back out: bound, working,
+        invisible, no error. Re-binding is exactly the inverse of unbinding, so
+        it restores the row rather than forking a new one — and reuniting the
+        account with its own publish history is the point of keeping the row.
         """
         f = _encrypt_secret_cols(f, _SESSION_COLS)
         checked_at = f.get("session_checked_at")
@@ -347,6 +388,7 @@ class SocialAccountsRepository:
                 "session_state": stmt.excluded.session_state,
                 "session_checked_at": stmt.excluded.session_checked_at,
                 "status": "active",
+                "deleted_at": None,  # mig 416 wake-up — see the docstring.
                 "updated_at": func.now(),
             },
         ).returning(*_SA_COLS)
@@ -459,6 +501,10 @@ class SocialAccountsRepository:
         conds = [
             SocialAccounts.auth_type == "session",
             SocialAccounts.status == "active",
+            # An unbound account must not be swept: opening a browser context
+            # against a session the user asked us to let go is both wasted
+            # capacity and a live login the user believes is gone.
+            _live(),
         ]
         if platform:
             conds.append(SocialAccounts.platform == platform)
@@ -499,11 +545,47 @@ class SocialAccountsRepository:
                 .values(status="needs_relogin", updated_at=func.now())
             )
 
-    async def delete(self, account_id: int) -> None:
+    async def soft_delete(self, account_id: int) -> None:
+        """Unbind an account (mig 416) — stamp ``deleted_at``, do NOT DELETE.
+
+        ``publish_task_accounts.account_id`` and
+        ``account_environments.account_id`` are both ``ON DELETE CASCADE``, so
+        the DELETE this replaces took the account's entire publish history with
+        it. Measured on prod the day before this change: one of the two visible
+        cards would have taken 10 publish records with it, the other 0 — and
+        the user happened to click the 0 one. Publish history is the audit
+        record of what went out where; it does not belong to the binding.
+
+        The stored credentials ARE destroyed, because "unbound" has to mean
+        unbound: leaving a decryptable ``session_state`` on a row the user
+        asked us to let go is a live platform login they believe is gone. That
+        also makes the UI's promise ("you will need to scan again") literally
+        true rather than a description of what the code happens to do.
+        ``status`` follows to ``needs_relogin`` so the row is not left claiming
+        to be active with no way to act.
+
+        The name is ``soft_delete``, not ``delete``: the old name would keep
+        reading as a hard delete at every call site, and this is precisely the
+        distinction the migration exists to make visible. ``sa_delete`` is no
+        longer imported here at all — a hard delete has no caller left.
+        """
         async with write_scope() as session:
             await session.execute(
-                sa_delete(SocialAccounts).where(
-                    SocialAccounts.id == _bigint(account_id)
+                sa_update(SocialAccounts)
+                .where(
+                    SocialAccounts.id == _bigint(account_id),
+                    # Idempotent: unbinding twice must not move the timestamp,
+                    # so "when did this account leave" stays answerable.
+                    _live(),
+                )
+                .values(
+                    deleted_at=func.now(),
+                    session_state=None,
+                    access_token=None,
+                    refresh_token=None,
+                    token_expires_at=None,
+                    status="needs_relogin",
+                    updated_at=func.now(),
                 )
             )
 

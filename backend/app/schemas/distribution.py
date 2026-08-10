@@ -44,6 +44,23 @@ class AccountListResponse(BaseModel):
     accounts: list[SocialAccountOut]
 
 
+class AccountUsageResponse(BaseModel):
+    """What unbinding this account would touch (P0-2 / mig 416).
+
+    Exists purely so the confirmation dialog can quote a real number. The old
+    Remove button had no dialog at all while ``publish_task_accounts`` cascaded
+    off the row, so a click could take 10 publish records with it silently.
+    Soft delete keeps them, and this endpoint is what lets the UI say so
+    truthfully — including "0", which must be shown as 0 rather than dropped.
+
+    Not folded into ``SocialAccountOut``: the list endpoint would then run a
+    COUNT per account on every page load, to answer a question only the delete
+    path asks.
+    """
+
+    publish_records: int
+
+
 # ── 会话通道扫码登录（S2, spec §4.1） ──────────────────────────────
 
 

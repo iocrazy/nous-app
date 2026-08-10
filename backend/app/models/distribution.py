@@ -99,6 +99,11 @@ class SocialAccounts(Base):
     session_state: Mapped[str | None] = mapped_column(Text)
     session_checked_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(True))
     created_by: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    # mig 416 — unbind timestamp. NULL means "in use"; every business read path
+    # filters on it. The row is kept because publish_task_accounts CASCADEs off
+    # this table, so a hard DELETE would take the account's publish history with
+    # it — and that history is the audit record, not a detail of the binding.
+    deleted_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(True))
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(True), nullable=False, server_default=text("now()")
     )

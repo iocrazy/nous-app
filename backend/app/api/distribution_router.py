@@ -27,6 +27,7 @@ from app.repositories.publish_tasks_repository import (
 from app.repositories.social_accounts_repository import SocialAccountsRepository
 from app.schemas.distribution import (
     AccountListResponse,
+    AccountUsageResponse,
     ConnectAccountRequest,
     ConnectAccountResponse,
     SessionLoginCancelResponse,
@@ -374,14 +375,39 @@ async def refresh_account(account_id: int, user: CurrentUserDep):
     )
 
 
+@router.get(
+    "/accounts/{account_id}/usage",
+    response_model=AccountUsageResponse,
+    dependencies=[Depends(require_distribution)],
+)
+async def get_account_usage(account_id: int, user: CurrentUserDep):
+    """What unbinding this account touches — read by the confirm dialog.
+
+    Same ``_authorize_account`` seam as every other per-account endpoint, so a
+    foreign id 404s instead of leaking how much a stranger has published.
+    """
+    await _authorize_account(account_id, user)
+    return {
+        "publish_records": await publish_repo.count_account_publish_records(account_id)
+    }
+
+
 @router.delete(
     "/accounts/{account_id}",
     status_code=204,
     dependencies=[Depends(require_distribution)],
 )
 async def delete_account(account_id: int, user: CurrentUserDep):
+    """Unbind. SOFT since mig 416 — the row stays, its credentials do not.
+
+    It used to be a hard DELETE, and ``publish_task_accounts.account_id``
+    cascades off this row, so one un-confirmed click could erase an account's
+    entire publish history. The route, verb and 204 are unchanged; what changed
+    is that the history survives it and the UI now asks first, quoting the
+    number that ``GET /accounts/{id}/usage`` returns.
+    """
     await _authorize_account(account_id, user)
-    await accounts_repo.delete(account_id)
+    await accounts_repo.soft_delete(account_id)
 
 
 # ── Session channel — QR login (S2, spec §4.1) ────────────────────────
