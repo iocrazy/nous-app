@@ -740,7 +740,16 @@ async def patch_workflow_node(
     - Everything else (skipped/form_data/depends_on — instance STRUCTURE,
       not owner-configurable content) keeps the pre-existing behavior
       UNCHANGED: an effective role of manager/editor (the workflow
-      single-source, on top of the write guard)."""
+      single-source, on top of the write guard).
+    - MIXED body (touches CONFIG fields AND a structure field in the same
+      request, e.g. ``{"brief": "x", "skipped": true}``): 评审 Critical #1 —
+      passing ``can_edit_node_config`` alone must NOT be enough to also
+      apply the structure fields. Pre-branch, every PATCH required
+      WRITE_ROLES; the config gate is intentionally narrower (an episode
+      owner needs no project_members row at all), so an episode owner with
+      no WRITE_ROLES membership could otherwise smuggle a structural change
+      through by piggybacking it on a config field they ARE allowed to
+      touch. Both gates must pass for a mixed body — see below."""
     from app.core.workflow_roles import WRITE_ROLES, resolve_effective_role
     from app.repositories.project_stage_nodes_repository import (
         get_project_stage_nodes_repository,
@@ -768,6 +777,15 @@ async def patch_workflow_node(
             raise HTTPException(
                 status_code=403, detail={"code": "node_config_forbidden"}
             )
+        # Mixed body: also ALSO require WRITE_ROLES for the structure fields
+        # riding along (see docstring "MIXED body" above). An episode owner
+        # with no WRITE_ROLES membership may PATCH config fields alone; the
+        # moment the same body touches skipped/form_data/depends_on it needs
+        # the base role gate too, on top of (not instead of) the config gate.
+        if fields - CONFIG_FIELDS:
+            role = await resolve_effective_role(auth.user_id, project_id=project_id)
+            if role not in WRITE_ROLES:
+                raise HTTPException(status_code=403, detail="Insufficient role")
     else:
         role = await resolve_effective_role(auth.user_id, project_id=project_id)
         if role not in WRITE_ROLES:

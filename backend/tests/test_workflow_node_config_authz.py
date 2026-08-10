@@ -266,6 +266,124 @@ async def test_patch_node_config_missing_node_404(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# Router: PATCH .../workflow/nodes/{node_id} — MIXED body (评审 Critical #1)
+# a body touching BOTH a config field and a structure field must pass BOTH
+# gates — the config gate (can_edit_node_config) alone must not smuggle the
+# structure field through for a non-WRITE_ROLES episode owner.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_patch_node_mixed_body_episode_owner_non_member_403(monkeypatch):
+    """An episode owner with NO project role at all (no WRITE_ROLES
+    membership — Task 6's whole point is they don't need one) may PATCH
+    config fields alone, but a MIXED body carrying `skipped` too must still
+    be rejected — the pre-branch invariant ('every PATCH needs WRITE_ROLES')
+    survives for the structure half."""
+    node = {"id": NODE_ID, "project_id": PROJECT_ID, "episode_id": EPISODE_ID}
+    captured = _fake_nodes_repo(monkeypatch, node=node)
+    monkeypatch.setattr(roles_mod, "resolve_effective_role", _role(None))
+
+    class _FakeEpisodeRepo:
+        async def get_by_id(self, episode_id):
+            return {"id": episode_id, "owner_id": USER_ID}
+
+    monkeypatch.setattr(
+        "app.repositories.episode_repository.get_episode_repository",
+        lambda: _FakeEpisodeRepo(),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await projects_router.patch_workflow_node(
+            PROJECT_ID,
+            NODE_ID,
+            NodePatch(brief="x", skipped=True),
+            _AUTH,
+            None,
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Insufficient role"
+    assert "update_node_called_with" not in captured
+
+
+@pytest.mark.asyncio
+async def test_patch_node_config_only_body_episode_owner_non_member_still_200(
+    monkeypatch,
+):
+    """Pin: a config-ONLY body from the same non-member episode owner must
+    still succeed — the mixed-body fix must not regress the Task 6
+    carve-out itself."""
+    node = {"id": NODE_ID, "project_id": PROJECT_ID, "episode_id": EPISODE_ID}
+    captured = _fake_nodes_repo(monkeypatch, node=node)
+    monkeypatch.setattr(roles_mod, "resolve_effective_role", _role(None))
+
+    class _FakeEpisodeRepo:
+        async def get_by_id(self, episode_id):
+            return {"id": episode_id, "owner_id": USER_ID}
+
+    monkeypatch.setattr(
+        "app.repositories.episode_repository.get_episode_repository",
+        lambda: _FakeEpisodeRepo(),
+    )
+
+    res = await projects_router.patch_workflow_node(
+        PROJECT_ID,
+        NODE_ID,
+        NodePatch(brief="x"),
+        _AUTH,
+        None,
+    )
+    assert res["success"] is True
+    assert "update_node_called_with" in captured
+
+
+@pytest.mark.asyncio
+async def test_patch_node_mixed_body_write_roles_member_still_200(monkeypatch):
+    """Pin: a mixed body from a plain WRITE_ROLES member (editor, no episode
+    ownership) must still succeed when the node has no episode owner
+    matching them — wait, editor lacks can_edit_node_config too, so use a
+    manager: a WRITE_ROLES manager passes BOTH gates for a mixed body."""
+    node = {"id": NODE_ID, "project_id": PROJECT_ID, "episode_id": EPISODE_ID}
+    captured = _fake_nodes_repo(monkeypatch, node=node)
+    monkeypatch.setattr(roles_mod, "resolve_effective_role", _role("manager"))
+
+    res = await projects_router.patch_workflow_node(
+        PROJECT_ID,
+        NODE_ID,
+        NodePatch(brief="x", skipped=True),
+        _AUTH,
+        None,
+    )
+    assert res["success"] is True
+    assert captured["update_node_called_with"][2]["skipped"] is True
+    assert captured["update_node_called_with"][2]["brief"] == "x"
+
+
+@pytest.mark.asyncio
+async def test_patch_node_structure_only_body_episode_owner_non_member_still_403(
+    monkeypatch,
+):
+    """Pin: a structure-ONLY body (no config field at all) from a
+    non-WRITE_ROLES user takes the pre-existing `else` branch — unchanged by
+    this fix, still 403 'Insufficient role'. (Already covered by
+    `test_patch_node_skipped_only_viewer_still_403_insufficient_role` above
+    for a viewer; this one pins the same for a user with NO role at all,
+    matching the mixed-body tests' fixture shape.)"""
+    monkeypatch.setattr(roles_mod, "resolve_effective_role", _role(None))
+
+    with pytest.raises(HTTPException) as exc:
+        await projects_router.patch_workflow_node(
+            PROJECT_ID,
+            NODE_ID,
+            NodePatch(skipped=True),
+            _AUTH,
+            None,
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Insufficient role"
+
+
+# --------------------------------------------------------------------------- #
 # Router: PATCH .../workflow/nodes/{node_id} — non-config fields UNCHANGED
 # --------------------------------------------------------------------------- #
 
