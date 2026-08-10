@@ -239,7 +239,9 @@ async def test_rebinding_the_same_identity_three_times_keeps_one_row(
             )
         )
 
-    assert {r["id"] for r in rows} == {rows[0]["id"]}, "同一身份键绑三次却拿到了不同的行"
+    assert {r["id"] for r in rows} == {
+        rows[0]["id"]
+    }, "同一身份键绑三次却拿到了不同的行"
 
     stamps = [r["updated_at"] for r in rows]
     assert stamps[0] < stamps[1] < stamps[2], f"updated_at 没有递增: {stamps}"

@@ -422,9 +422,7 @@ async def finalize_login_step(
         # `MioPoo` > `miopoo` > `41cf16775ee3e9fdf5e021f9c1ddfc12`。
         # ⚠️ 这只影响**显示**。三者谁被选中都不改 platform_user_id，账号唯一键
         # 永远是那个 cookie（mig 414 / P0-1）。
-        username=state.username
-        or state.platform_handle
-        or str(state.platform_user_id),
+        username=state.username or state.platform_handle or str(state.platform_user_id),
         avatar_url=state.avatar_url,
         platform_handle=state.platform_handle,
         session_state=json.dumps(state.storage_state, ensure_ascii=False),

@@ -332,9 +332,9 @@ async def test_upsert_session_account_keys_on_the_identity_not_the_handle(monkey
     sql = _sql(session.statements[0])
     conflict = sql.split("ON CONFLICT", 1)[1].split("DO UPDATE", 1)[0]
     assert "platform_user_id" in conflict
-    assert "platform_handle" not in conflict, (
-        "把可改的展示名放进唯一键 —— 用户改一次抖音号就会多一个账号"
-    )
+    assert (
+        "platform_handle" not in conflict
+    ), "把可改的展示名放进唯一键 —— 用户改一次抖音号就会多一个账号"
     # 但它确实被写进去了(否则卡片上永远没有抖音号)。
     assert _params(session.statements[0])["platform_handle"] == "miopoo"
 
@@ -359,9 +359,7 @@ async def test_upsert_session_account_does_not_blank_a_known_handle(monkeypatch)
     )
 
     update = _sql(session.statements[0]).split("DO UPDATE", 1)[1]
-    assert "coalesce" in update.lower(), (
-        "落空的抓取会把已经正确的抖音号抹成 NULL"
-    )
+    assert "coalesce" in update.lower(), "落空的抓取会把已经正确的抖音号抹成 NULL"
 
 
 @pytest.mark.asyncio
