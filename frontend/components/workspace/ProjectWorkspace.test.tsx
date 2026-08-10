@@ -51,6 +51,7 @@ vi.mock('../../editor/components/EditorShell', () => ({
     scriptId: string;
     projectId?: string;
     initialRailView?: string;
+    initialFocusSceneId?: string;
     currentUserId?: string | null;
     currentUserName?: string;
     embedded?: boolean;
@@ -73,6 +74,7 @@ vi.mock('../../editor/components/EditorShell', () => ({
         data-script-id={props.scriptId}
         data-project-id={props.projectId ?? ''}
         data-initial-rail-view={props.initialRailView ?? ''}
+        data-initial-focus-scene-id={props.initialFocusSceneId ?? ''}
         data-embedded={props.embedded ? 'true' : 'false'}
       />
     );
@@ -134,6 +136,11 @@ const mockWorkflowService = vi.hoisted(() => ({
   fetchStageLibrary: vi.fn().mockResolvedValue([]),
   startEarlyNode: vi.fn(),
   updateProjectNode: vi.fn(),
+  // Task 7 (strip 解耦): a non-current node click now lands on its own Stage
+  // Board (WorkspaceStageBoard, unmocked in this suite) instead of the
+  // current episode's surface panel — that real component calls
+  // fetchStageBoard on mount.
+  fetchStageBoard: vi.fn(),
 }));
 vi.mock('../../services/workflowService', () => mockWorkflowService);
 
@@ -249,6 +256,7 @@ beforeEach(() => {
   mockWorkflowService.fetchProjectWorkflow.mockReset().mockResolvedValue(null);
   mockWorkflowService.fetchAdvancePreview.mockReset();
   mockWorkflowService.executeAdvance.mockReset();
+  mockWorkflowService.fetchStageBoard.mockReset();
   mockSceneService.listScenes.mockReset().mockResolvedValue([]);
   mockSceneService.listShots.mockReset().mockResolvedValue([]);
   mockSceneService.autoStoryboard.mockReset();
@@ -434,6 +442,40 @@ describe('ProjectWorkspace', () => {
     expect(screen.queryByTestId('mock-editor-shell')).toBeNull();
   });
 
+  // Task 7 (小尾巴 A, 2026-08-09 拍板): the strip used to route ANY node click
+  // by its creative surface, so clicking a non-current storyboard/script node
+  // flashed open the CURRENT episode's surface panel — content unrelated to
+  // the node the writer actually clicked. Decoupled: only the CURRENT node's
+  // capsule routes to the surface panel; every other node's click lands on
+  // that node's own Stage Board (handleOpenStage), same path deliverable-only
+  // nodes already take.
+  it('routes a non-current workflow-strip node click to that node\'s own Stage Board, not the current episode\'s surface panel', async () => {
+    const currentNode = stageNode({ id: '1', name: 'Storyboard', status: 'in_progress', surface: 'storyboard' });
+    const otherNode = stageNode({ id: '2', name: 'Script Pass 2', status: 'pending', surface: 'script' });
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue({
+      has_workflow: true,
+      current_node_id: currentNode.id,
+      agents_active: 0,
+      nodes: [currentNode, otherNode],
+    });
+    mockWorkflowService.fetchStageBoard.mockResolvedValue({ node: otherNode, issue: null, files: [] });
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    const nodeButtons = await screen.findAllByTestId('workflow-strip-node');
+    const otherButton = nodeButtons.find((el) => el.getAttribute('data-node-id') === '2');
+    expect(otherButton).toBeTruthy();
+    fireEvent.click(otherButton!);
+
+    expect(await screen.findByTestId('workspace-stage-board')).toBeInTheDocument();
+    expect(mockWorkflowService.fetchStageBoard).toHaveBeenCalledWith('p1', '2');
+    // Never flashed the CURRENT episode's storyboard/script surface — nor
+    // provisioned/mounted a script — for a click that was about a different
+    // (non-current) node entirely.
+    expect(screen.queryByTestId('episode-view-tabs')).toBeNull();
+    expect(screen.queryByTestId('mock-editor-shell')).toBeNull();
+    expect(mockScriptService.createScriptProject).not.toHaveBeenCalled();
+  });
+
   it('a scene card\'s Open button deep-links into the embedded editor at the storyboard rail view', async () => {
     mockScriptService.fetchScriptProjects.mockResolvedValue({
       data: [
@@ -464,6 +506,62 @@ describe('ProjectWorkspace', () => {
     const shell = await screen.findByTestId('mock-editor-shell');
     expect(shell).toHaveAttribute('data-script-id', 's1');
     expect(shell).toHaveAttribute('data-initial-rail-view', 'storyboard');
+    expect(shell).toHaveAttribute('data-initial-focus-scene-id', '200');
+  });
+
+  // Fix round 1 regression (2026-08-09 review): a scene-card deep link used to
+  // leave studioFocusSceneId set in ProjectWorkspace state even after
+  // EditorShell unmounted (leaving the 'script' module drops it — studioMode
+  // gates the mount). The NEXT unrelated mount — "Continue Writing" or an
+  // episode row's Open button (handleOpenEpisode), neither of which passes a
+  // sceneId — then re-mounted EditorShell with the STALE initialFocusSceneId
+  // still attached, silently re-scrolling to a scene the writer never asked
+  // for this time. Fixed by threading focusSceneId through openEpisodeScript
+  // (the sole call site that flips activeModule to 'script') so every
+  // mount-causing entry point declares its intent explicitly — undeclared
+  // defaults to clearing it.
+  it('a stale scene-card deep link does not survive into an unrelated later mount (handleOpenEpisode)', async () => {
+    mockScriptService.fetchScriptProjects.mockResolvedValue({
+      data: [
+        { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
+      ],
+      total: 1,
+    });
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    mockSceneService.listScenes.mockResolvedValue([
+      {
+        id: '200',
+        script_id: 's1',
+        chapter_id: null,
+        scene_number: null,
+        heading_int_ext: 'INT',
+        location_text: 'Kitchen',
+        time_of_day: 'DAY',
+        content_version: 1,
+        sort_order: 0,
+        elements: [],
+      },
+    ]);
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    // Step 1: scene-card Open deep-links into EditorShell with the target scene.
+    await screen.findByTestId('ep-scene-card-200');
+    fireEvent.click(screen.getByTestId('ep-scene-open-200'));
+    const firstShell = await screen.findByTestId('mock-editor-shell');
+    expect(firstShell).toHaveAttribute('data-initial-focus-scene-id', '200');
+
+    // Step 2: navigate away — EditorShell unmounts (studioMode gates on
+    // activeModule === 'script'), but studioFocusSceneId is bare React state
+    // that outlives the unmount unless something explicitly clears it.
+    fireEvent.click(await screen.findByTestId('ws-module-episodes'));
+    expect(await screen.findByTestId('ws-episodes')).toBeTruthy();
+    expect(screen.queryByTestId('mock-editor-shell')).toBeNull();
+
+    // Step 3: an UNRELATED remount via the episode row's Open button
+    // (handleOpenEpisode) — no sceneId involved at all.
+    fireEvent.click(await screen.findByTestId('ws-episode-open-1'));
+    const secondShell = await screen.findByTestId('mock-editor-shell');
+    expect(secondShell).toHaveAttribute('data-initial-focus-scene-id', '');
   });
 
   it('switches to the Shot List tab and exports CSV via the tabs\' actions-slot button', async () => {

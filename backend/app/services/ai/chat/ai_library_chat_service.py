@@ -191,6 +191,7 @@ class AILibraryChatService:
         content: str,
         plan_mode: Optional[str] = None,
         attachments: Optional[list] = None,
+        script_context: Optional[dict] = None,
     ):
         """P2: real streaming variant of chat.
 
@@ -227,6 +228,7 @@ class AILibraryChatService:
                 plan_mode=plan_mode,
                 chunk_callback=_on_chunk,
                 attachments=attachments,
+                script_context=script_context,
             ),
             name=f"chat-stream-{session_id}",
         )
@@ -298,6 +300,7 @@ class AILibraryChatService:
         plan_mode: Optional[str] = None,
         chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None,
         attachments: Optional[list] = None,
+        script_context: Optional[dict] = None,
     ) -> Dict[str, Any]:
         """Send ``content`` as a user turn, get an assistant response.
 
@@ -309,6 +312,10 @@ class AILibraryChatService:
         prompt composer prepends the PLAN_PROMPT instructing the LLM to
         emit a structured plan instead of executing. The chat response
         is the plan markdown; user replies approve/reject in next turn.
+
+        ``script_context`` (§5.3): optional selection handle
+        ({scene_id, element_ids, ...}) rendered into a <user_selection>
+        instruction block — see ``format_script_context_block``.
         """
         session = await self.get_session(session_id, user_id=user_id)
         if not session.get("agent_slug"):
@@ -324,6 +331,7 @@ class AILibraryChatService:
             plan_mode=plan_mode,
             chunk_callback=chunk_callback,
             attachments=attachments,
+            script_context=script_context,
         )
 
     async def run_session_turn(
@@ -337,6 +345,7 @@ class AILibraryChatService:
         chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None,
         attachments: Optional[list] = None,
         attribution: Optional[str] = None,
+        script_context: Optional[dict] = None,
     ) -> Dict[str, Any]:
         """Per-user concurrency gate around the turn. Both chat (.chat) and
         issue (run_issue_reply_step) funnel through here, so one gate caps a
@@ -357,6 +366,7 @@ class AILibraryChatService:
                 chunk_callback=chunk_callback,
                 attachments=attachments,
                 attribution=attribution,
+                script_context=script_context,
             )
 
     async def _run_session_turn_inner(
@@ -370,6 +380,7 @@ class AILibraryChatService:
         chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None,
         attachments: Optional[list] = None,
         attribution: Optional[str] = None,
+        script_context: Optional[dict] = None,
     ) -> Dict[str, Any]:
         """Execute a single turn against a session.
 
@@ -507,6 +518,14 @@ class AILibraryChatService:
                 user_id=str(user_id),
                 request_instructions=request_instructions,
             )
+
+        # §5.3: structured selection handle → <user_selection> block. Only
+        # a handle (scene_id / element_ids) — no quoted_text, the selection
+        # text is already folded into `content` by the frontend, so
+        # duplicating it here would just double the token spend.
+        selection_block = format_script_context_block(script_context)
+        if selection_block:
+            request_instructions = selection_block + "\n\n" + request_instructions
 
         # P1-6: link-injection wire-up. Pull URLs out of the latest user
         # message, fetch via boundary-safe link_understanding, prepend
@@ -1364,6 +1383,42 @@ class AILibraryChatService:
             logger.exception("[chat] compact_messages crashed; sending full history")
 
         return messages
+
+
+def format_script_context_block(script_context: Optional[dict]) -> str:
+    """script_context handle → <user_selection> 指令块（空/无效返回 ""）。
+    只带 id 与标签，不带文本——文本已折叠在用户消息里，重复注入是双份 token。"""
+    sc = script_context or {}
+    scene_id = sc.get("scene_id")
+    element_ids = [e for e in (sc.get("element_ids") or []) if e]
+    if not scene_id and not element_ids:
+        return ""
+    lines = ["<user_selection>"]
+    if sc.get("scene_label"):
+        lines.append(f"scene: {sc['scene_label']}")
+    if scene_id:
+        lines.append(f"scene_id: {scene_id}")
+    if element_ids:
+        lines.append(f"element_ids: {', '.join(element_ids)}")
+    if sc.get("element_type"):
+        lines.append(f"element_type: {sc['element_type']}")
+    if sc.get("cross_scene"):
+        lines.append("spans multiple scenes")
+    if element_ids:
+        lines.append(
+            "The user's message refers to this selection. Use these ids "
+            "directly (ReadScene the scene, then target the selected "
+            "elements with ProposeEdit/ApplyEdit) instead of re-locating "
+            "the text by content."
+        )
+    else:
+        lines.append(
+            "The user's message refers to this scene. Use this scene_id "
+            "directly (ReadScene the scene) instead of re-locating it by "
+            "content."
+        )
+    lines.append("</user_selection>")
+    return "\n".join(lines)
 
 
 async def _surface_next_session_commitments(

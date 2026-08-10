@@ -86,6 +86,9 @@ class RunDetail(RunListItem):
     # Resolved from task_id by the get_run endpoint (None when the run
     # wasn't part of a tracked workflow).
     task: Optional[RunTaskRef] = None
+    # mig 413: set by claim_undo() on POST /runs/{run_id}/undo. None until
+    # the run has been undone once (undo is one-shot, no redo).
+    undone_at: Optional[datetime] = None
 
 
 class RunListResponse(BaseModel):
@@ -166,3 +169,21 @@ class UsageAggregate(BaseModel):
     total_tokens: int
     total_cost_cents: float
     per_agent: list[UsagePerAgent]
+
+
+class UndoSkippedItem(BaseModel):
+    """撤销报告里一条被跳过的项（spec §4.4：silent no-op 不可接受）。"""
+
+    kind: str  # 'shot' | 'scene' | 'scene_element'
+    id: str
+    reason: str  # 'edited_after_run' | 'rendered' | 'version_conflict'
+
+
+class UndoReport(BaseModel):
+    """POST /runs/{run_id}/undo 的类型化报告。"""
+
+    status: str  # 'done' | 'already_undone'
+    shots_deleted: int = 0
+    shots_reverted: int = 0
+    scene_elements_reverted: int = 0
+    skipped: list[UndoSkippedItem] = Field(default_factory=list)

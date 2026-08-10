@@ -274,6 +274,11 @@ export function ProjectWorkspace({
   // active scene number.
   const [resolvedScriptId, setResolvedScriptId] = useState<string | null>(null);
   const [studioView, setStudioView] = useState<RailView>('script');
+  // Scene-card deep link (Task 8): set alongside studioView by
+  // handleOpenWorkView when a scene card's Open passes a sceneId, cleared on
+  // the bare-storyboard early return so a stale target doesn't leak into a
+  // later plain script/beats open.
+  const [studioFocusSceneId, setStudioFocusSceneId] = useState<string | null>(null);
   const [studioScenes, setStudioScenes] = useState<SceneLift[]>([]);
   const [studioActiveSceneId, setStudioActiveSceneId] = useState<string | null>(null);
 
@@ -355,13 +360,28 @@ export function ProjectWorkspace({
   // EditorShell inline (no route jump); no script → provision an empty one the
   // same way project-create does, then mount it. `railView` presets the work
   // view (and the sidebar highlight). ───
+  // `focusSceneId` (Task 8 fix round 1): this is the ONLY call site that flips
+  // activeModule to 'script' (the studioMode condition EditorShell mounts on),
+  // so it's the single choke point for studioFocusSceneId too — every caller
+  // must declare its scene-focus intent explicitly, default null CLEARS it.
+  // Without this, a scene-card deep link's target survived in bare React state
+  // past the EditorShell unmount (leaving 'script' drops the mount but not the
+  // state) and got silently re-consumed by the next, unrelated remount —
+  // "Continue Writing" or an episode row's Open button (neither of which ever
+  // meant to focus a scene) — scrolling to a scene the writer never asked for
+  // this time.
   const openEpisodeScript = useCallback(
-    async (episode: EpisodeProgress | null, railView: RailView = 'script') => {
+    async (
+      episode: EpisodeProgress | null,
+      railView: RailView = 'script',
+      focusSceneId: string | null = null,
+    ) => {
       if (!episode) {
         setActiveModule('episodes');
         return;
       }
       setStudioView(railView);
+      setStudioFocusSceneId(focusSceneId);
       try {
         const scriptId = await resolveOrProvisionScript(episode);
         if (!scriptId) {
@@ -391,18 +411,24 @@ export function ProjectWorkspace({
   // used to jump straight into the embedded editor — now lands on Overview
   // with the storyboard surface panel expanded (EpisodeSceneBoard IS the view,
   // not an entry button into one). Only a scene card's "Open" deep-link
-  // (opts.sceneId set) still wants the real editor — handleOpenWorkView has no
-  // scene-focus argument yet, so this just opens the script at the storyboard
-  // rail view; scrolling to the specific scene is deferred (see report).
+  // (opts.sceneId set) still wants the real editor — studioFocusSceneId
+  // carries the target down to EditorShell's initialFocusSceneId, which
+  // scrolls the matching storyboard column / script scene into view once it
+  // has rendered (Task 8).
   const handleOpenWorkView = useCallback(
     (view: WorkView, opts?: { sceneId?: string }) => {
       if (view === 'storyboard' && !opts?.sceneId) {
+        setStudioFocusSceneId(null); // clear any stale target from a prior deep link
         setActiveModule('overview');
         setEpisodeView('storyboard');
         return;
       }
       setStudioView(view);
-      void openEpisodeScript(currentEpisode, view);
+      void openEpisodeScript(
+        currentEpisode,
+        view,
+        view === 'storyboard' && opts?.sceneId ? opts.sceneId : null,
+      );
     },
     [openEpisodeScript, currentEpisode],
   );
@@ -478,13 +504,21 @@ export function ProjectWorkspace({
   }, []);
 
   // Workflow-strip node click (B5 T-B5.3) — the strip is now the sole node
-  // entry point (the sidebar's Stages list was removed in T-B5.6). Route by the
-  // node's creative `surface` (nodeSurface.ts::resolveSurface): script /
-  // storyboard open the current episode's studio on that view; renders opens the
-  // Renders file filter; a deliverable-only node (surface === null) falls back
-  // to its dedicated Stage Board.
+  // entry point (the sidebar's Stages list was removed in T-B5.6). Only the
+  // CURRENT node routes by creative `surface` (nodeSurface.ts::resolveSurface):
+  // script / storyboard open the current episode's studio on that view; renders
+  // opens the Renders file filter. Every other node — including a
+  // deliverable-only one (surface === null) — falls back to its own dedicated
+  // Stage Board (Task 7, see guard below: a non-current node's click must not
+  // flash open the CURRENT episode's surface panel with unrelated content).
   const handleSelectNode = useCallback(
     (node: ProjectStageNode) => {
+      // 拍板（undo 立项附带, Task 7 小尾巴 A, 2026-08-09）：非当前节点点击不再闪当前集的
+      // 作业面——surface 路由只对 current 节点成立，其余一律看节点自己的 Stage Board。
+      if (node.id !== workflow?.current_node_id) {
+        handleOpenStage(node.id);
+        return;
+      }
       switch (resolveSurface(node)) {
         case 'script':
           handleOpenWorkView('script');
@@ -499,7 +533,7 @@ export function ProjectWorkspace({
           handleOpenStage(node.id);
       }
     },
-    [handleOpenWorkView, handleOpenRenders, handleOpenStage],
+    [handleOpenWorkView, handleOpenRenders, handleOpenStage, workflow?.current_node_id],
   );
 
   const studioMode = activeModule === 'script' && resolvedScriptId != null;
@@ -692,6 +726,7 @@ export function ProjectWorkspace({
               currentUserName={userProfile.name}
               projectId={project.id}
               initialRailView={studioView}
+              initialFocusSceneId={studioFocusSceneId ?? undefined}
               embedded
               onScenesChange={handleScenesChange}
               onActiveSceneChange={handleActiveSceneChange}

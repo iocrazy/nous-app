@@ -20,6 +20,7 @@ import { Plus, Search, X } from 'lucide-react';
 import type { Editor } from '@tiptap/core';
 
 import { aiLibraryService } from '../services/aiLibraryService';
+import type { ChatScriptContextInput } from '../services/aiLibraryService';
 import type {
   AILibraryAgent,
   AIChatMessage,
@@ -101,6 +102,15 @@ function extractToolCalls(msg: AIChatMessage): ChatToolCall[] {
   );
 }
 
+/** Persisted assistant message metadata_json.run_id (BIGINT snowflake, kept
+ *  as a string end-to-end — see the file-wide 2^53 precision caveat). */
+function extractRunId(msg: AIChatMessage): string | null {
+  const meta = msg.metadata_json;
+  if (!meta || typeof meta !== 'object') return null;
+  const raw = (meta as Record<string, unknown>).run_id;
+  return typeof raw === 'string' && raw ? raw : null;
+}
+
 /**
  * Extract the Plan Mode paused-for-approval state (Phase 4.5). Backend
  * folds it into ``metadata_json.awaiting_approval`` when a hook returned
@@ -153,6 +163,30 @@ function rememberLastSession(agentSlug: string, sessionId: string): void {
   } catch {
     /* storage full/blocked — memory is a nicety, never fatal */
   }
+}
+
+/**
+ * §5.3: turn a context capsule into the structured selection handle sent
+ * alongside the chat turn. Ids only — no quoted_text, the selection text is
+ * already folded into the outgoing message content by handleSend, so
+ * repeating it here would just double the token spend for no benefit.
+ *
+ * Returns null when there's no capsule, or the capsule carries no id
+ * (scene_id/element_id) to hand the agent — a bare text-only capsule isn't
+ * worth a block.
+ */
+export function buildScriptContext(
+  capsule: ContextCapsuleValue | null,
+): ChatScriptContextInput | null {
+  if (!capsule) return null;
+  if (!capsule.sceneId && !capsule.elementId) return null;
+  return {
+    scene_id: capsule.sceneId ?? null,
+    element_ids: capsule.elementId ? [capsule.elementId] : [],
+    element_type: capsule.elementType ?? null,
+    scene_label: capsule.sceneLabel ?? null,
+    cross_scene: Boolean(capsule.crossScene),
+  };
 }
 
 export function AIChatPanel({
@@ -630,6 +664,10 @@ export function AIChatPanel({
         if (allAttachments.length > 0) {
           opts.attachments = allAttachments;
         }
+        // §5.3: the same capsule snapshot read above for the text fold also
+        // carries the structured handle — one read, two uses.
+        const scriptContext = buildScriptContext(capsule);
+        if (scriptContext) opts.script_context = scriptContext;
         // SSE streaming instead of the buffered /chat call: a long AI reply
         // no longer sits behind one giant request that proxies love to kill
         // — deltas render as they arrive and keep the connection alive.
@@ -1025,6 +1063,7 @@ export function AIChatPanel({
                     ? extractAwaitingApproval(msg)
                     : undefined
                 }
+                runId={msg.role === 'assistant' ? extractRunId(msg) : undefined}
                 onApply={
                   msg.role === 'assistant' && onApplyContent
                     ? () => onApplyContent(msg.content)

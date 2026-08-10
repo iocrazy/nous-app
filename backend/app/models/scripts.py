@@ -513,6 +513,12 @@ class ScriptShots(Base):
     __tablename__ = "script_shots"
     __table_args__ = (
         ForeignKeyConstraint(
+            ["created_by_agent_run_id"],
+            ["public.agent_runs.id"],
+            ondelete="SET NULL",
+            name="script_shots_created_by_agent_run_id_fkey",
+        ),
+        ForeignKeyConstraint(
             ["scene_id"],
             ["public.script_scenes.id"],
             ondelete="CASCADE",
@@ -552,6 +558,10 @@ class ScriptShots(Base):
         DateTime(True),
         nullable=False,
         server_default=text("now()"),
+    )
+    created_by_agent_run_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger,
+        comment="mig 413: agent CreateShot 归属；人写 / Auto-Storyboard 为 NULL",
     )
 
 
@@ -699,6 +709,40 @@ class ScriptOps(Base):
         DateTime(True),
         nullable=False,
         server_default=text("now()"),
+    )
+
+
+class ScriptShotOps(Base):
+    __tablename__ = "script_shot_ops"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["run_id"],
+            ["public.agent_runs.id"],
+            ondelete="CASCADE",
+            name="script_shot_ops_run_id_fkey",
+        ),
+        ForeignKeyConstraint(
+            ["shot_id"],
+            ["public.script_shots.id"],
+            ondelete="CASCADE",
+            name="script_shot_ops_shot_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="script_shot_ops_pkey"),
+        Index("idx_script_shot_ops_run", "run_id"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    run_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    shot_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    scene_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    before_json: Mapped[Optional[dict]] = mapped_column(JSONB)
+    after_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
     )
 
 

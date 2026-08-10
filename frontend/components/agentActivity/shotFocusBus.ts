@@ -42,3 +42,33 @@ export function requestShotFocus(shotId: string): void {
 export function hasShotFocusListener(): boolean {
   return listeners.size > 0;
 }
+
+/**
+ * Second channel on the same bus: "something off-canvas (an Undo) changed
+ * shot/scene data, reload." StoryboardView subscribes and re-fetches every
+ * scene's shots; useRunUndo publishes after a successful undo. Same
+ * fire-and-forget shape as shot focus above — no subscriber (storyboard not
+ * mounted) just means the next mount picks up fresh data on its own load.
+ */
+export type StoryboardRefreshListener = () => void;
+
+const refreshListeners = new Set<StoryboardRefreshListener>();
+
+/** Subscribe; returns the unsubscribe function (useEffect-shaped). */
+export function onStoryboardRefresh(listener: StoryboardRefreshListener): () => void {
+  refreshListeners.add(listener);
+  return () => {
+    refreshListeners.delete(listener);
+  };
+}
+
+/** Ask whoever is listening to reload storyboard data. No-op when nothing listens. */
+export function requestStoryboardRefresh(): void {
+  for (const listener of [...refreshListeners]) {
+    try {
+      listener();
+    } catch (err) {
+      console.error('[shotFocusBus] storyboard refresh listener failed:', err);
+    }
+  }
+}

@@ -35,6 +35,7 @@ import {
 import { usePoll } from '../usePoll';
 import { ShotCard } from './ShotCard';
 import type { SceneDoc } from '../types';
+import { onStoryboardRefresh } from '../../components/agentActivity/shotFocusBus';
 
 /** How long an armed Auto Storyboard "Confirm?" stays live before auto-disarming. */
 const CONFIRM_WINDOW_MS = 3000;
@@ -101,10 +102,11 @@ export function StoryboardView({ scenes, scriptId }: StoryboardViewProps) {
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const draggingRef = useRef<{ shotId: string; sceneId: string } | null>(null);
 
-  // Load every scene's shots in parallel on mount / when the scene set changes.
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all(
+  // Load every scene's shots in parallel. Extracted so it can also be
+  // triggered by an off-canvas write (an Undo) via onStoryboardRefresh below,
+  // not just the mount / scene-set-changed effect.
+  const loadAll = useCallback(async (): Promise<ShotsByScene> => {
+    const pairs = await Promise.all(
       scenes.map(async (scene) => {
         const shots = await listShots(scene.id).catch((err) => {
           console.error('[StoryboardView] failed to load shots', err);
@@ -112,14 +114,30 @@ export function StoryboardView({ scenes, scriptId }: StoryboardViewProps) {
         });
         return [String(scene.id), shots] as const;
       }),
-    ).then((pairs) => {
-      if (cancelled) return;
-      setShotsByScene(Object.fromEntries(pairs));
+    );
+    return Object.fromEntries(pairs);
+  }, [scenes]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadAll().then((next) => {
+      if (!cancelled) setShotsByScene(next);
     });
     return () => {
       cancelled = true;
     };
-  }, [scenes]);
+  }, [loadAll]);
+
+  // An Undo (or any other off-canvas write) can change shot/scene data out
+  // from under this view — reload everything when asked. Same reasoning as
+  // shotFocusBus's shot-focus channel: fire-and-forget, unsubscribe on unmount.
+  useEffect(
+    () =>
+      onStoryboardRefresh(() => {
+        void loadAll().then(setShotsByScene);
+      }),
+    [loadAll],
+  );
 
   useEffect(
     () => () => {

@@ -4052,6 +4052,19 @@
     "alsoEdits_other": "+ {{count}} 处剧本修改",
     "revealShot": "在分镜中显示这个镜头",
     "shotNoDescription": "暂无描述",
+    "undo": "撤销",
+    "undone": "已撤销",
+    "undoSummary": "已删除 {{deleted}} 张卡片，复原 {{reverted}} 张卡片，恢复 {{elements}} 段文字",
+    "undoKind": {
+      "shot": "镜头卡",
+      "scene": "场景",
+      "scene_element": "段落"
+    },
+    "undoReason": {
+      "edited_after_run": "此后已被修改 — 未改动",
+      "rendered": "已生成渲染 — 未改动",
+      "version_conflict": "该场景当时正被编辑 — 未改动"
+    },
     "chooseAgent": "选择一个 Agent",
     "chooseAgentHint": "挑选你想合作的对象",
     "noDescription": "暂无描述",

@@ -326,6 +326,10 @@ class AgentRuns(Base):
     # never updated; NULL = project-wide (no episode restriction).
     episode_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     ended_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
+    undone_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(True),
+        comment="mig 413: run 级一次性撤销标记；NULL = 未撤销",
+    )
     model: Mapped[Optional[str]] = mapped_column(Text)
     provider: Mapped[Optional[str]] = mapped_column(Text)
     total_tokens: Mapped[Optional[int]] = mapped_column(

@@ -113,6 +113,7 @@ export function EditorShell({
   currentUserName,
   projectId: workspaceProjectId,
   initialRailView,
+  initialFocusSceneId,
   embedded = false,
   onScenesChange,
   onActiveSceneChange,
@@ -143,6 +144,12 @@ export function EditorShell({
    * Omitted preserves the existing per-script localStorage preference.
    */
   initialRailView?: RailView;
+  /**
+   * 深链：mount 后滚动定位到该 scene（场次卡 Open → scene 级）。storyboard
+   * 列与 script sheet 的 SceneBlock 都带 data-scene-id，两个 rail view 通用。
+   * 与 pendingFocusShotId 同范式：先等目标渲染出来再滚，一次性消费。
+   */
+  initialFocusSceneId?: string;
   /**
    * Studio mode: the shell is mounted inside the project workspace (合一终稿,
    * 2026-07-11). The workspace tree is the single side navigation, so embedded
@@ -233,6 +240,9 @@ export function EditorShell({
   const [diffCommit, setDiffCommit] = useState<ScriptCommit | null>(null);
   const [pendingOpenSceneId, setPendingOpenSceneId] = useState<string | null>(null);
   const [pendingFocusShotId, setPendingFocusShotId] = useState<string | null>(null);
+  const [pendingFocusSceneId, setPendingFocusSceneId] = useState<string | null>(
+    initialFocusSceneId ?? null,
+  );
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [typeCommand, setTypeCommand] = useState<TypeCommand | null>(null);
@@ -541,6 +551,24 @@ export function EditorShell({
     }
     setPendingFocusShotId(null);
   }, [pendingFocusShotId, railView, scenes]);
+
+  // Scene-card deep link (Task 8): the workspace's EpisodeSceneBoard "Open"
+  // passes a sceneId through initialRailView + initialFocusSceneId. Same
+  // wait-for-render-then-scroll shape as pendingOpenSceneId/pendingFocusShotId
+  // above, but the selector is shared by BOTH rail views (storyboard columns
+  // and script-sheet SceneBlocks both stamp data-scene-id), so this effect
+  // isn't gated on a specific railView — whichever one initialRailView opened
+  // on will already have the matching element once scenes have loaded.
+  useEffect(() => {
+    if (!pendingFocusSceneId) return;
+    const block = shellRef.current?.querySelector<HTMLElement>(
+      `[data-scene-id="${pendingFocusSceneId}"]`,
+    );
+    if (!block) return; // scenes 还没渲染完——等下一次 deps 变化再试
+    block.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setActiveScene(pendingFocusSceneId);
+    setPendingFocusSceneId(null);
+  }, [pendingFocusSceneId, railView, scenes, setActiveScene]);
 
   // Focusing an element line raises the editing-state flag, which the shell
   // exposes as data-editing="true" — a pure CSS hook that lights up the element

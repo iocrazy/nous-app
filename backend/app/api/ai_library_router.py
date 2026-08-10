@@ -56,6 +56,7 @@ from app.schemas.agent_runs import (
     RunGroupListResponse,
     RunListItem,
     RunListResponse,
+    UndoReport,
     UsageAggregate,
 )
 from app.schemas.ai_library import (
@@ -2355,6 +2356,43 @@ async def cancel_run(run_id: str, auth: AuthDep) -> Dict[str, Any]:
     return {"status": "cancel_requested", "run_id": str(run_id)}
 
 
+@router.post(
+    "/runs/{run_id}/undo",
+    response_model=UndoReport,
+    summary="Undo everything this run wrote (one-shot, skip + typed report)",
+)
+async def undo_run(run_id: str, auth: AuthDep) -> Dict[str, Any]:
+    """整 run 一键撤销（mig 413 立项）。逐项 CAS：被后续修改碰过的写入
+    跳过并报告，永不销毁别人的工作。一次性，无 redo；重复调用返回
+    already_undone。运行中的 run 不可撤（先 cancel）。"""
+    runs_repo = get_agent_runs_repository()
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    claim = await runs_repo.claim_undo(run_id, user_id=user_uuid)
+    if claim == "not_found":
+        raise HTTPException(status_code=404, detail="run not found or not owned by you")
+    if claim == "running":
+        raise HTTPException(
+            status_code=409, detail="run is still running — cancel it first"
+        )
+    if claim == "already_undone":
+        return {
+            "status": "already_undone",
+            "shots_deleted": 0,
+            "shots_reverted": 0,
+            "scene_elements_reverted": 0,
+            "skipped": [],
+        }
+    # Module-attribute access (not `from ... import execute_undo`) is
+    # deliberate — tests patch `app.services.ai.undo.run_undo_service.
+    # execute_undo`, which only takes effect if this call resolves it
+    # through the module at call time rather than binding a local name
+    # at import time.
+    from app.services.ai.undo import run_undo_service
+
+    report = await run_undo_service.execute_undo(int(run_id))
+    return {"status": "done", **report}
+
+
 @router.get(
     "/usage",
     response_model=UsageAggregate,
@@ -2776,6 +2814,9 @@ async def send_chat_message(
         content=payload.content,
         plan_mode=payload.plan_mode,
         attachments=payload.attachments or None,  # G2
+        script_context=(
+            payload.script_context.model_dump() if payload.script_context else None
+        ),  # §5.3
     )
     return {
         "message": result["assistant_message"],
@@ -2822,6 +2863,11 @@ async def send_chat_message_stream(
                 content=payload.content,
                 plan_mode=payload.plan_mode,
                 attachments=payload.attachments or None,  # G2
+                script_context=(
+                    payload.script_context.model_dump()
+                    if payload.script_context
+                    else None
+                ),  # §5.3
             ):
                 # evt: dict with type + payload
                 event_name = evt.get("type", "delta")
