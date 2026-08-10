@@ -594,10 +594,12 @@ async def test_create_shot_assigns_the_next_scene_internal_integer():
                     camera_angle=None,
                     camera_movement=None,
                     focal_length="85mm",
+                    lighting=None,
                     description="Her hands.",
                     status="empty",
                 )
             ),
+            _FakeResult(),  # ledger INSERT
         ]
     )
     with (
@@ -637,10 +639,12 @@ async def test_create_shot_ignores_a_model_supplied_shot_number_and_status():
                     camera_angle=None,
                     camera_movement=None,
                     focal_length=None,
+                    lighting=None,
                     description="x",
                     status="empty",
                 )
             ),
+            _FakeResult(),  # ledger INSERT
         ]
     )
     with (
@@ -677,16 +681,28 @@ async def test_update_shot_rejects_status_and_url_writes():
         [
             _FakeResult(
                 first_row=SimpleNamespace(
+                    shot_type="MS",
+                    camera_angle=None,
+                    camera_movement=None,
+                    focal_length=None,
+                    lighting=None,
+                    description=None,
+                )
+            ),  # SELECT ... FOR UPDATE 旧值
+            _FakeResult(
+                first_row=SimpleNamespace(
                     id=_SHOT_ID,
                     shot_number=4,
                     shot_type="MS",
                     camera_angle="LOW",
                     camera_movement=None,
                     focal_length=None,
+                    lighting=None,
                     description=None,
                     status="empty",
                 )
-            )
+            ),
+            _FakeResult(),  # ledger INSERT
         ]
     )
     with (

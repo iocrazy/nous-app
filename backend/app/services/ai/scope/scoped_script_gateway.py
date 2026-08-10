@@ -67,7 +67,7 @@ from typing import Any, Optional
 from sqlalchemy import func, insert, select, update
 
 from app.db.session import read_scope, write_scope
-from app.models import ScriptProjects, ScriptScenes, ScriptShots
+from app.models import ScriptProjects, ScriptScenes, ScriptShotOps, ScriptShots
 from app.repositories.script_scene_repository import (
     VersionConflict,
     get_script_scene_repository,
@@ -107,6 +107,18 @@ _WRITABLE_SHOT_FIELDS = (
     "lighting",
     "description",
 )
+
+
+def _ledger_run_id(scope: AgentRunScope) -> Optional[int]:
+    """账本/归属用的 BIGINT run id；测试路径的 sentinel run_id="0"（见
+    agent_run_scope._SENTINEL_RUN_ID）没有对应 agent_runs 行，写了会 FK
+    违约——返回 None 表示这次写入不记账、不归属。"""
+    try:
+        rid = int(str(scope.run_id))
+    except (TypeError, ValueError):
+        return None
+    return rid if rid > 0 else None
+
 
 # Hard ceiling on one ListScenes response, independent of what the model asks
 # for. An episode of television is tens of scenes; a whole project is
@@ -825,6 +837,9 @@ async def create_shot(
         values["scene_id"] = scene.id
         values["shot_number"] = base_num + 1
         values["sort_order"] = base_sort + _SORT_ORDER_STEP
+        rid = _ledger_run_id(scope)
+        if rid is not None:
+            values["created_by_agent_run_id"] = rid
         row = (
             await session.execute(
                 insert(ScriptShots)
@@ -836,13 +851,26 @@ async def create_shot(
                     ScriptShots.camera_angle,
                     ScriptShots.camera_movement,
                     ScriptShots.focal_length,
+                    ScriptShots.lighting,
                     ScriptShots.description,
                     ScriptShots.status,
                 )
             )
         ).first()
-    if row is None:  # pragma: no cover — RETURNING on a successful insert
-        raise RuntimeError("insert into script_shots returned no row")
+        if row is None:  # pragma: no cover — RETURNING on a successful insert
+            raise RuntimeError("insert into script_shots returned no row")
+        if rid is not None:
+            # 同事务——写入失败不留账，记账失败连卡一起回滚。
+            await session.execute(
+                insert(ScriptShotOps).values(
+                    run_id=rid,
+                    shot_id=row.id,
+                    scene_id=scene.id,
+                    action="create",
+                    before_json=None,
+                    after_json={f: getattr(row, f) for f in _WRITABLE_SHOT_FIELDS},
+                )
+            )
     scene_no = await scene_no_for(scope, scene)
     logger.info(
         "[scoped_script_gateway] CreateShot run=%s scene=%s shot=%s",
@@ -866,7 +894,18 @@ async def update_shot(
     values = _writable(fields)
     if not values:
         return None
+    rid = _ledger_run_id(scope)
     async with write_scope() as session:
+        # Locked read of the pre-update values, over the full writable set
+        # (not just `values`) — cheap and lets before_json below select
+        # only the touched columns without a second query.
+        old = (
+            await session.execute(
+                select(*[getattr(ScriptShots, f) for f in _WRITABLE_SHOT_FIELDS])
+                .where(ScriptShots.id == shot.id)
+                .with_for_update()
+            )
+        ).first()
         row = (
             await session.execute(
                 update(ScriptShots)
@@ -879,11 +918,23 @@ async def update_shot(
                     ScriptShots.camera_angle,
                     ScriptShots.camera_movement,
                     ScriptShots.focal_length,
+                    ScriptShots.lighting,
                     ScriptShots.description,
                     ScriptShots.status,
                 )
             )
         ).first()
+        if rid is not None and old is not None and row is not None:
+            await session.execute(
+                insert(ScriptShotOps).values(
+                    run_id=rid,
+                    shot_id=shot.id,
+                    scene_id=shot.scene_id,
+                    action="update",
+                    before_json={f: getattr(old, f) for f in values},
+                    after_json={f: getattr(row, f) for f in values},
+                )
+            )
     if row is None:  # pragma: no cover — resolver already proved it exists
         return None
     logger.info(
