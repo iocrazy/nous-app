@@ -259,6 +259,33 @@ describe('EditorShell', () => {
     await waitFor(() => expect(scrollSpy).toHaveBeenCalled());
   });
 
+  it('scene-card deep link: initialFocusSceneId scrolls the matching storyboard column into view and marks it active', async () => {
+    svc.listScenes.mockResolvedValue(twoScenes);
+    let scrolledEl: HTMLElement | null = null;
+    const scrollSpy = vi.fn(function (this: HTMLElement) {
+      scrolledEl = this;
+    });
+    HTMLElement.prototype.scrollIntoView = scrollSpy;
+    render(
+      <EditorShell scriptId="1" initialRailView="storyboard" initialFocusSceneId="222" />,
+    );
+
+    await screen.findByTestId('storyboard-view');
+    await waitFor(() => expect(scrollSpy).toHaveBeenCalled());
+    expect(scrolledEl).not.toBeNull();
+    expect((scrolledEl as unknown as HTMLElement).getAttribute('data-scene-id')).toBe('222');
+  });
+
+  it('without initialFocusSceneId, mounting on the storyboard rail view does not scroll', async () => {
+    svc.listScenes.mockResolvedValue(twoScenes);
+    const scrollSpy = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollSpy;
+    render(<EditorShell scriptId="1" initialRailView="storyboard" />);
+
+    await screen.findByTestId('storyboard-view');
+    expect(scrollSpy).not.toHaveBeenCalled();
+  });
+
   it('toolbar "Scene" inserts the new scene AFTER the active scene, not at the tail', async () => {
     svc.listScenes.mockResolvedValue(twoScenes);
     svc.createScene.mockReset().mockResolvedValue(scene({ id: '999', sort_order: 2 }));

@@ -274,6 +274,11 @@ export function ProjectWorkspace({
   // active scene number.
   const [resolvedScriptId, setResolvedScriptId] = useState<string | null>(null);
   const [studioView, setStudioView] = useState<RailView>('script');
+  // Scene-card deep link (Task 8): set alongside studioView by
+  // handleOpenWorkView when a scene card's Open passes a sceneId, cleared on
+  // the bare-storyboard early return so a stale target doesn't leak into a
+  // later plain script/beats open.
+  const [studioFocusSceneId, setStudioFocusSceneId] = useState<string | null>(null);
   const [studioScenes, setStudioScenes] = useState<SceneLift[]>([]);
   const [studioActiveSceneId, setStudioActiveSceneId] = useState<string | null>(null);
 
@@ -391,16 +396,19 @@ export function ProjectWorkspace({
   // used to jump straight into the embedded editor — now lands on Overview
   // with the storyboard surface panel expanded (EpisodeSceneBoard IS the view,
   // not an entry button into one). Only a scene card's "Open" deep-link
-  // (opts.sceneId set) still wants the real editor — handleOpenWorkView has no
-  // scene-focus argument yet, so this just opens the script at the storyboard
-  // rail view; scrolling to the specific scene is deferred (see report).
+  // (opts.sceneId set) still wants the real editor — studioFocusSceneId
+  // carries the target down to EditorShell's initialFocusSceneId, which
+  // scrolls the matching storyboard column / script scene into view once it
+  // has rendered (Task 8).
   const handleOpenWorkView = useCallback(
     (view: WorkView, opts?: { sceneId?: string }) => {
       if (view === 'storyboard' && !opts?.sceneId) {
+        setStudioFocusSceneId(null); // clear any stale target from a prior deep link
         setActiveModule('overview');
         setEpisodeView('storyboard');
         return;
       }
+      setStudioFocusSceneId(view === 'storyboard' && opts?.sceneId ? opts.sceneId : null);
       setStudioView(view);
       void openEpisodeScript(currentEpisode, view);
     },
@@ -700,6 +708,7 @@ export function ProjectWorkspace({
               currentUserName={userProfile.name}
               projectId={project.id}
               initialRailView={studioView}
+              initialFocusSceneId={studioFocusSceneId ?? undefined}
               embedded
               onScenesChange={handleScenesChange}
               onActiveSceneChange={handleActiveSceneChange}
