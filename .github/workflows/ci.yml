@@ -90,6 +90,17 @@ jobs:
           # everything (or fails to find origin/<base>).
           fetch-depth: 0
 
+      # migration 取号查重。放在 backend job 而不是新开 workflow：这个 job
+      # 已经有 fork 守卫 + self-hosted + checkout，而只有一个 runner，多一个
+      # job 就是多一次串行 checkout。放在 setup-uv 之前，几百毫秒就出结果，
+      # 不用等装依赖。
+      #
+      # ⚠️ 脚本内部会自己 `git fetch origin <base>` 拿 CI 运行这一刻的 master，
+      # 不看 merge-base —— 理由写在脚本头部，那正是 2026-08-09 连撞两次的窗口。
+      - name: Migration number collision check
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/check-migration-numbers.sh pr "${{ github.base_ref }}"
+
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
