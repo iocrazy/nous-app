@@ -177,6 +177,23 @@
       "minutesAgo": "{{count}}m ago",
       "hoursAgo": "{{count}}h ago",
       "daysAgo": "{{count}}d ago"
+    },
+    "dateRangePopover": {
+      "title": "Select date range",
+      "monthYear": "{{monthName}} {{year}}",
+      "prevMonth": "Previous Month",
+      "nextMonth": "Next Month",
+      "start": "Start",
+      "end": "End",
+      "empty": "–",
+      "clear": "Clear",
+      "weekdaySun": "Su",
+      "weekdayMon": "Mo",
+      "weekdayTue": "Tu",
+      "weekdayWed": "We",
+      "weekdayThu": "Th",
+      "weekdayFri": "Fr",
+      "weekdaySat": "Sa"
     }
   },
   "distribution": {

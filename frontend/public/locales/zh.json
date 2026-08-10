@@ -177,6 +177,23 @@
       "minutesAgo": "{{count}} 分钟前",
       "hoursAgo": "{{count}} 小时前",
       "daysAgo": "{{count}} 天前"
+    },
+    "dateRangePopover": {
+      "title": "选择日期区间",
+      "monthYear": "{{year}}年 {{monthNum}}月",
+      "prevMonth": "上个月",
+      "nextMonth": "下个月",
+      "start": "开始",
+      "end": "结束",
+      "empty": "–",
+      "clear": "清除",
+      "weekdaySun": "日",
+      "weekdayMon": "一",
+      "weekdayTue": "二",
+      "weekdayWed": "三",
+      "weekdayThu": "四",
+      "weekdayFri": "五",
+      "weekdaySat": "六"
     }
   },
   "distribution": {
