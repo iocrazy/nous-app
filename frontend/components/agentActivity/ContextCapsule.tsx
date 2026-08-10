@@ -54,7 +54,7 @@ export function ContextCapsule({
     <div
       data-testid="context-capsule"
       data-scene-id={value.sceneId ?? ''}
-      className="mx-3 mb-1.5 rounded-lg border border-info-line bg-info-soft"
+      className="mx-3 mb-1.5 rounded-lg border border-ok-line bg-ok-soft"
     >
       <div className="flex items-center gap-1.5 px-2 py-1.5">
         <button
@@ -62,7 +62,7 @@ export function ContextCapsule({
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
           data-testid="context-capsule-toggle"
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[11px] text-info"
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[11px] text-ok"
         >
           {expanded ? (
             <ChevronDown size={11} className="shrink-0" />
@@ -88,7 +88,7 @@ export function ContextCapsule({
       {expanded && (
         <p
           data-testid="context-capsule-text"
-          className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words border-t border-info-line px-3 py-1.5 text-[11px] leading-relaxed text-ink-300"
+          className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words border-t border-ok-line px-3 py-1.5 text-[11px] leading-relaxed text-ink-300"
         >
           {value.text}
         </p>
