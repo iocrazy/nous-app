@@ -280,6 +280,22 @@ describe('WorkspaceOverview', () => {
     expect(screen.queryByTestId('workflow-empty-state')).toBeNull();
   });
 
+  // Task 4 修复轮2: `has_workflow` is PER-EPISODE (backend `projects_router`
+  // computes it per `episode_id`), so it's a SECOND consumer of the same
+  // stale-data window as the accordion body (修复轮1) — switching from a
+  // no-workflow episode to a workflow-attached one can hold the OLD episode's
+  // `has_workflow: false` in `workflow` while the new fetch is in flight,
+  // which would flash the attach CTA under the newly-expanded (attached)
+  // episode for one render.
+  it('does not render the attach entry while workflowLoading is true, even with a stale has_workflow=false', () => {
+    renderOverview({
+      expandedEpisodeId: 'ep2',
+      workflowLoading: true,
+      workflow: { has_workflow: false, current_node_id: null, agents_active: 0, nodes: [] },
+    });
+    expect(screen.queryByTestId('workflow-empty-state')).toBeNull();
+  });
+
   it('shows the awaiting hint only for episodes parked at the planned stage', () => {
     const withPlanned: EpisodeProgress[] = [
       { ...EPISODES[0], status: 'planned' },

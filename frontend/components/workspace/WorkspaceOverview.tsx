@@ -45,6 +45,15 @@
  * `has_workflow === false`; a still-loading `workflow === null` renders
  * nothing extra (matches the pre-rewrite behavior — `WorkflowSection` cannot
  * render with a null `workflow` prop, it's a required, non-nullable field).
+ *
+ * `has_workflow` is itself PER-EPISODE (backend `projects_router`:
+ * `has_workflow=bool(nodes)`, queried per `episode_id`) — a SECOND consumer
+ * of the same stale-data window described above (Task 4 修复轮2): switching
+ * from a no-workflow episode to a workflow-attached one still holds the OLD
+ * episode's `has_workflow: false` in `workflow` until the new fetch resolves,
+ * which would flash the attach CTA under the NEW (attached) episode for one
+ * render. Gated on `!workflowLoading` for exactly the same reason the
+ * accordion body is — see "Stale-episode flash" above.
  */
 
 import type { ReactNode } from 'react';
@@ -68,10 +77,11 @@ export interface WorkspaceOverviewProps {
   workflow?: ProjectWorkflow | null;
   /** True while `useProjectWorkflow`'s fetch for the CURRENT episode is in
    * flight — including the stale-data window right after switching episodes
-   * (see the file-doc "Stale-episode flash" note). While true, the expanded
-   * row renders a loading placeholder instead of `workflow`-derived content,
-   * so the strip/card slot never shows a previous episode's data under the
-   * newly-expanded row. */
+   * (see the file-doc "Stale-episode flash" note). While true: the expanded
+   * row renders a loading placeholder instead of `workflow`-derived content
+   * (strip/card slot never shows a previous episode's data), AND the
+   * no-workflow attach CTA is suppressed (its own `has_workflow` gate is
+   * ALSO per-episode and subject to the same staleness — 修复轮2). */
   workflowLoading?: boolean;
   /** URL `ep=` (Task 1) — which episode's row is expanded. null = all collapsed. */
   expandedEpisodeId: string | null;
@@ -123,7 +133,7 @@ export function WorkspaceOverview({
 
   return (
     <div data-testid="ws-overview" className="flex flex-col gap-3 py-3">
-      {workflow && !workflow.has_workflow && (
+      {workflow && !workflow.has_workflow && !workflowLoading && (
         <WorkflowSection
           projectId={project.id}
           teamId={project.team_id ?? ''}
