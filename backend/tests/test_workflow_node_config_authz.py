@@ -369,6 +369,132 @@ async def test_delete_node_plain_member_forbidden_arrangement(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# Router: PATCH /episodes/{episode_id} reorder (sort_order) — 修复轮1
+# (Task 7 code review Critical): the workspace Episodes panel's Move up/down
+# drives this exact endpoint via a pair of sort_order swaps, so it's a real
+# ARRANGEMENT surface — tightened to manager-only, same as owner_id.
+# --------------------------------------------------------------------------- #
+
+
+def _fake_episode_repo_for_update(monkeypatch, *, episode, update_return=None):
+    captured: Dict[str, Any] = {}
+
+    class _FakeEpisodeRepo:
+        async def get_by_id(self, episode_id):
+            captured["get_by_id_called_with"] = episode_id
+            return episode
+
+        async def update(self, episode_id, data):
+            captured["update_called_with"] = (episode_id, data)
+            if update_return is not None:
+                return update_return
+            return {"id": episode_id, **data}
+
+    monkeypatch.setattr(
+        episodes_router, "get_episode_repository", lambda: _FakeEpisodeRepo()
+    )
+    return captured
+
+
+@pytest.mark.asyncio
+async def test_update_episode_title_only_no_role_check_unchanged(monkeypatch):
+    """Pin: title-only PATCH must not consult resolve_effective_role at all
+    (neither the owner_id nor the new sort_order gate) — pre-existing
+    verify_episode_write_access behavior, untouched by 修复轮1."""
+    from app.schemas.script import EpisodeUpdate
+
+    episode = {"id": EPISODE_ID, "project_id": PROJECT_ID}
+    captured = _fake_episode_repo_for_update(monkeypatch, episode=episode)
+
+    def _fail_if_called(*a, **k):
+        raise AssertionError("resolve_effective_role must not be called")
+
+    monkeypatch.setattr(roles_mod, "resolve_effective_role", _fail_if_called)
+
+    res = await episodes_router.update_episode(
+        EPISODE_ID, _AUTH, EpisodeUpdate(title="Renamed"), None
+    )
+    assert res["success"] is True
+    assert "get_by_id_called_with" not in captured
+    _, update_data = captured["update_called_with"]
+    assert update_data == {"title": "Renamed"}
+
+
+@pytest.mark.asyncio
+async def test_update_episode_sort_order_manager_ok(monkeypatch):
+    from app.schemas.script import EpisodeUpdate
+
+    episode = {"id": EPISODE_ID, "project_id": PROJECT_ID}
+    captured = _fake_episode_repo_for_update(monkeypatch, episode=episode)
+    monkeypatch.setattr(roles_mod, "resolve_effective_role", _role("manager"))
+
+    res = await episodes_router.update_episode(
+        EPISODE_ID, _AUTH, EpisodeUpdate(sort_order=2), None
+    )
+    assert res["success"] is True
+    _, update_data = captured["update_called_with"]
+    assert update_data["sort_order"] == 2
+
+
+@pytest.mark.asyncio
+async def test_update_episode_sort_order_plain_member_403_arrangement_forbidden(
+    monkeypatch,
+):
+    from app.schemas.script import EpisodeUpdate
+
+    episode = {"id": EPISODE_ID, "project_id": PROJECT_ID}
+    captured = _fake_episode_repo_for_update(monkeypatch, episode=episode)
+    monkeypatch.setattr(roles_mod, "resolve_effective_role", _role("editor"))
+
+    with pytest.raises(HTTPException) as exc:
+        await episodes_router.update_episode(
+            EPISODE_ID, _AUTH, EpisodeUpdate(sort_order=2), None
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.detail == {"code": "arrangement_forbidden"}
+    assert "update_called_with" not in captured
+
+
+@pytest.mark.asyncio
+async def test_update_episode_owner_id_and_sort_order_together_resolves_role_once(
+    monkeypatch,
+):
+    """When a single request touches BOTH manager-gated fields,
+    resolve_effective_role must run exactly once, not once per field."""
+    from app.schemas.script import EpisodeUpdate
+
+    episode = {"id": EPISODE_ID, "project_id": PROJECT_ID}
+
+    class _FakeEpisodeRepo:
+        async def get_by_id(self, episode_id):
+            return episode
+
+        async def update(self, episode_id, data):
+            return {"id": episode_id, **data}
+
+    monkeypatch.setattr(
+        episodes_router, "get_episode_repository", lambda: _FakeEpisodeRepo()
+    )
+
+    call_count = {"n": 0}
+
+    async def _counting_role(user_id, *, project_id=None, team_id=None):
+        call_count["n"] += 1
+        return "manager"
+
+    monkeypatch.setattr(roles_mod, "resolve_effective_role", _counting_role)
+
+    res = await episodes_router.update_episode(
+        EPISODE_ID,
+        _AUTH,
+        EpisodeUpdate(sort_order=2, owner_id=OTHER_UUID),
+        None,
+    )
+    assert res["success"] is True
+    assert call_count["n"] == 1
+
+
+# --------------------------------------------------------------------------- #
 # Router: episode create/delete — tightened to manager-only
 # --------------------------------------------------------------------------- #
 

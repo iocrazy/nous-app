@@ -110,34 +110,61 @@ async def update_episode(
 ) -> Dict[str, Any]:
     """Update an episode (title / sort_order / owner_id).
 
-    ``owner_id`` is gated tighter than the base write-access guard above:
-    only the project manager (``resolve_effective_role`` == 'manager', #1742
-    resolves the project owner to manager too) may assign/clear the "集负责人"
-    (Task 6, workspace IA redesign spec §5 方案 A). Title/sort_order keep the
-    existing ``verify_episode_write_access`` behavior unchanged — the field
-    is only consulted when the client actually sends it (``model_fields_set``
-    sentinel: absent = untouched, present-as-null = clear).
+    Two fields are gated tighter than the base write-access guard above —
+    both manager-only, both consulted via the same ``model_fields_set``
+    sentinel (absent = untouched, present-as-null = clear where nullable):
+
+    - ``owner_id`` — assign/clear "集负责人" (Task 6, spec §5 方案 A):
+      only the project manager (``resolve_effective_role`` == 'manager',
+      #1742 resolves the project owner to manager too). 403
+      ``episode_owner_forbidden`` otherwise.
+    - ``sort_order`` — episode reorder is ARRANGEMENT, not content (Task 7
+      修复轮1, spec §5): the workspace Episodes panel's Move up/down drives
+      THIS SAME PATCH endpoint with a pair of ``sort_order`` swaps, so the
+      base ``verify_episode_write_access`` guard alone (any team member with
+      write access) let any member reorder episodes — the same gap Task 7
+      closed for node add/delete and episode create/delete. Same 403 shape
+      as ``node_authz.require_arrangement_role`` (``arrangement_forbidden``),
+      but the role check is inlined here rather than calling that helper
+      directly: when a single request touches BOTH ``owner_id`` and
+      ``sort_order`` (unusual but not rejected), ``resolve_effective_role``
+      must only run once, not once per field.
+
+    ``title`` (and any other field) keeps the existing
+    ``verify_episode_write_access`` behavior unchanged.
     """
     from app.core.workflow_roles import MANAGER, resolve_effective_role
 
+    fields = body.model_fields_set
+    needs_manager_check = bool({"owner_id", "sort_order"} & fields)
+
     try:
         data = body.model_dump(exclude_none=True, exclude={"owner_id"})
-        if "owner_id" in body.model_fields_set:
-            episode_for_owner_check = await get_episode_repository().get_by_id(
-                episode_id
-            )
-            if episode_for_owner_check is None:
+
+        role = None
+        if needs_manager_check:
+            episode_for_check = await get_episode_repository().get_by_id(episode_id)
+            if episode_for_check is None:
                 raise HTTPException(status_code=404, detail="Episode not found")
             role = await resolve_effective_role(
                 auth.user_id,
-                project_id=str(episode_for_owner_check["project_id"]),
+                project_id=str(episode_for_check["project_id"]),
             )
+
+        if "owner_id" in fields:
             if role != MANAGER:
                 raise HTTPException(
                     status_code=403,
                     detail={"code": "episode_owner_forbidden"},
                 )
             data["owner_id"] = str(body.owner_id) if body.owner_id is not None else None
+
+        if "sort_order" in fields:
+            if role != MANAGER:
+                raise HTTPException(
+                    status_code=403,
+                    detail={"code": "arrangement_forbidden"},
+                )
 
         episode = await get_episode_repository().update(episode_id, data)
         if episode is None:
