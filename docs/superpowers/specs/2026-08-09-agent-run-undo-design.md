@@ -32,9 +32,11 @@ shot 写入无归属、无账本、无 run 级逆操作。本 spec 补齐这三�
 
 ```sql
 ALTER TABLE public.script_shots
-  ADD COLUMN created_by_agent_run_id UUID NULL
+  ADD COLUMN created_by_agent_run_id BIGINT NULL
   REFERENCES public.agent_runs(id) ON DELETE SET NULL;
 ```
+
+> `agent_runs.id` 是 BIGINT snowflake（mig 232 后），不是 UUID。
 
 - 只在 agent `create_shot` 时写；人写 / Auto-Storyboard 的卡保持 NULL。
 - 本期仅供撤销与后续 UI 使用；storyboard 卡上的归属 badge **不在本期**。
@@ -44,7 +46,7 @@ ALTER TABLE public.script_shots
 | 列 | 类型 | 说明 |
 |----|------|------|
 | `id` | BIGINT snowflake PK | `generate_snowflake_id()` |
-| `run_id` | UUID NOT NULL | FK → `agent_runs(id) ON DELETE CASCADE` |
+| `run_id` | BIGINT NOT NULL | FK → `agent_runs(id) ON DELETE CASCADE` |
 | `shot_id` | BIGINT NOT NULL | FK → `script_shots(id) ON DELETE CASCADE` |
 | `scene_id` | BIGINT NOT NULL | 冗余，供 scene 级查询 |
 | `action` | TEXT NOT NULL | CHECK (`'create'` / `'update'`) |
