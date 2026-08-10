@@ -99,7 +99,24 @@ describe('DateRangePopover', () => {
     expect(screen.getByRole('button', { name: '2026-07-15' })).toBeTruthy();
   });
 
-  it('two clicks select a cross-month range in order (first = start, second = end)', () => {
+  it('commit-on-complete: first click buffers a draft start (no onChange yet, but visually selected)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0)); // July 2026, so start=null opens on July.
+    const onChange = vi.fn();
+    render(
+      <DateRangePopover anchorEl={anchor} start={null} end={null} onChange={onChange} onClose={vi.fn()} />,
+    );
+    const day15 = screen.getByRole('button', { name: '2026-07-15' });
+    fireEvent.click(day15);
+    // A half-open range must never reach a caller that treats onChange as
+    // "apply this" (Task 9 inline PATCH / Task 10 settings form).
+    expect(onChange).not.toHaveBeenCalled();
+    // But the draft endpoint is still visually selected (agent solid).
+    expect(day15.className).toContain('bg-agent');
+    expect(day15.className).toContain('text-white');
+  });
+
+  it('two clicks select a cross-month range in order, committing only on the second (completing) click', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0)); // July 2026, so start=null opens on July.
     const onChange = vi.fn();
@@ -107,13 +124,14 @@ describe('DateRangePopover', () => {
       <DateRangePopover anchorEl={anchor} start={null} end={null} onChange={onChange} onClose={vi.fn()} />,
     );
     fireEvent.click(screen.getByRole('button', { name: '2026-07-15' }));
-    expect(onChange).toHaveBeenLastCalledWith('2026-07-15', null);
+    expect(onChange).not.toHaveBeenCalled();
     fireEvent.click(screen.getByLabelText('Next Month'));
     fireEvent.click(screen.getByRole('button', { name: '2026-08-03' }));
+    expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenLastCalledWith('2026-07-15', '2026-08-03');
   });
 
-  it('swaps start/end when the second click lands earlier than the first', () => {
+  it('swaps start/end when the second click lands earlier than the draft start, committing once', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 6, 1, 12, 0, 0)); // July 2026
     const onChange = vi.fn();
@@ -127,12 +145,13 @@ describe('DateRangePopover', () => {
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: '2026-07-20' }));
-    expect(onChange).toHaveBeenLastCalledWith('2026-07-20', null);
+    expect(onChange).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '2026-07-10' }));
+    expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenLastCalledWith('2026-07-10', '2026-07-20');
   });
 
-  it('a click after a complete range starts a fresh selection', () => {
+  it('a click after a complete range starts a fresh draft (no onChange until it completes again)', () => {
     const onChange = vi.fn();
     render(
       <DateRangePopover
@@ -143,8 +162,53 @@ describe('DateRangePopover', () => {
         onClose={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: '2026-07-20' }));
-    expect(onChange).toHaveBeenLastCalledWith('2026-07-20', null);
+    const day20 = screen.getByRole('button', { name: '2026-07-20' });
+    fireEvent.click(day20);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(day20.className).toContain('bg-agent');
+    expect(screen.getByTestId('date-range-start-cell')).toHaveTextContent('2026-07-20');
+    expect(screen.getByTestId('date-range-end-cell')).not.toHaveTextContent('2026-07-10');
+  });
+
+  it('closing on a half-selected draft (Escape or outside click) discards it without calling onChange', async () => {
+    const onChangeEsc = vi.fn();
+    const onCloseEsc = vi.fn();
+    const { unmount } = render(
+      <DateRangePopover
+        anchorEl={anchor}
+        start={null}
+        end={null}
+        onChange={onChangeEsc}
+        onClose={onCloseEsc}
+      />,
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: /^\d{4}-\d{2}-\d{2}$/ })[10]);
+    expect(onChangeEsc).not.toHaveBeenCalled();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onCloseEsc).toHaveBeenCalledTimes(1);
+    expect(onChangeEsc).not.toHaveBeenCalled();
+    unmount();
+
+    const onChangeOutside = vi.fn();
+    const onCloseOutside = vi.fn();
+    render(
+      <DateRangePopover
+        anchorEl={anchor}
+        start={null}
+        end={null}
+        onChange={onChangeOutside}
+        onClose={onCloseOutside}
+      />,
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: /^\d{4}-\d{2}-\d{2}$/ })[10]);
+    expect(onChangeOutside).not.toHaveBeenCalled();
+    await new Promise((r) => setTimeout(r, 0));
+    const outside = document.createElement('div');
+    document.body.appendChild(outside);
+    fireEvent.mouseDown(outside);
+    expect(onCloseOutside).toHaveBeenCalledTimes(1);
+    expect(onChangeOutside).not.toHaveBeenCalled();
+    outside.remove();
   });
 
   it('‹ › navigate months without mutating the pending selection', () => {

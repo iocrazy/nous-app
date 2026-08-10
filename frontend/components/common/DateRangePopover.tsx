@@ -11,8 +11,13 @@
  * every month navigation since jsdom/real browsers only know true height
  * after layout.
  *
- * Selection: first click sets `start`, second sets `end` (earlier date wins
- * `start` — clicking an earlier day than the pending start swaps them).
+ * Selection: commit-on-complete. The first click only buffers a draft
+ * `start` internally (visually selected, but no `onChange` yet — a caller
+ * that treats `onChange` as "apply this" must never see a half-open range).
+ * The second click completes the range and is the one that calls
+ * `onChange(start, end)` (earlier date wins `start` — clicking an earlier
+ * day than the draft start swaps them). Escape / outside-click / scroll
+ * close without calling `onChange`, discarding any mid-flight draft.
  * Ranges may span months; the visible month only changes via ‹ › nav, not
  * as a side effect of clicking a day in the (already visible) grid.
  *
@@ -184,11 +189,17 @@ export function DateRangePopover({
     setView({ year: Math.floor(total / 12), month: ((total % 12) + 12) % 12 });
   };
 
+  // Commit-on-complete: the first click only buffers a draft `start` — it
+  // does NOT call `onChange`, since a half-open range has no meaning to a
+  // caller that treats onChange as "apply this" (e.g. an inline PATCH on a
+  // node card). Only the second click, which completes the range (swapping
+  // if it lands earlier than the draft start), commits via `onChange`. This
+  // mirrors the draft-buffer + commit-on-Done semantics of the
+  // NodeSchedulePicker this component replaces.
   const handleDayClick = (iso: string) => {
     if (!pendingStart || pendingEnd) {
       setPendingStart(iso);
       setPendingEnd(null);
-      onChange(iso, null);
       return;
     }
     const s = iso < pendingStart ? iso : pendingStart;
