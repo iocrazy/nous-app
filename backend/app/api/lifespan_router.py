@@ -55,9 +55,7 @@ def _dbos_readiness() -> str:
 
     from app.services.infra import dbos_orchestrator
 
-    return (
-        "enabled" if dbos_orchestrator.is_launched() else "configured_but_disabled"
-    )
+    return "enabled" if dbos_orchestrator.is_launched() else "configured_but_disabled"
 
 
 @router.get("/healthz", summary="Liveness probe (always 200 if process is alive)")

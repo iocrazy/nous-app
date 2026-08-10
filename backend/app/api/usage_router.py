@@ -83,8 +83,7 @@ async def usage_summary(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                "group_by must be one of "
-                f"{sorted(usage_repository.VALID_GROUP_BY)}"
+                "group_by must be one of " f"{sorted(usage_repository.VALID_GROUP_BY)}"
             ),
         )
 
@@ -151,9 +150,7 @@ async def issue_usage(issue_id: int, auth: AuthDep):
 
     row = await issue_repository.get_by_id(issue_id)
     if not row:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
 
     user_id = str(auth.user_id)
     visible = (
@@ -167,9 +164,7 @@ async def issue_usage(issue_id: int, auth: AuthDep):
         ):
             visible = True
     if not visible:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
 
     totals = await usage_repository.issue_totals(issue_id)
     return IssueUsageResponse(

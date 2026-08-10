@@ -581,7 +581,9 @@ async def test_pdf_sb_path_materializes_to_local_temp():
 
     fake_result = PdfRenderResult(
         attachments=[
-            Attachment(kind=AttachmentKind.PDF_PAGE, data_url="data:image/jpeg;base64,p1")
+            Attachment(
+                kind=AttachmentKind.PDF_PAGE, data_url="data:image/jpeg;base64,p1"
+            )
         ],
         page_count=1,
         rendered_pages=[1],

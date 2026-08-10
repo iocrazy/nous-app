@@ -25,9 +25,9 @@ def _on_user_concurrency(evt) -> None:
     if value is None:
         return
     try:
+        from app.workflows.download import set_download_concurrency
         from app.workflows.parse import set_parse_concurrency
         from app.workflows.soda_download import set_soda_concurrency
-        from app.workflows.download import set_download_concurrency
 
         set_parse_concurrency(int(value))
         set_soda_concurrency(int(value))

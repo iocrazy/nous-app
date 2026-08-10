@@ -105,7 +105,9 @@ async def _as_authenticated(conn: asyncpg.Connection, sub: str, sql: str, *args)
     tx = conn.transaction()
     await tx.start()
     try:
-        await conn.execute("SELECT set_config('request.jwt.claims', $1, true)", _claims(sub))
+        await conn.execute(
+            "SELECT set_config('request.jwt.claims', $1, true)", _claims(sub)
+        )
         await conn.execute("SET LOCAL ROLE authenticated")
         return await conn.fetchval(sql, *args)
     finally:
@@ -148,7 +150,10 @@ async def _audit_one(conn: asyncpg.Connection, t: Target) -> tuple[str, str]:
         f"WHERE {t.owner_col} IS NOT NULL LIMIT 1"
     )
     if real_owner is None:
-        return "ISOLATED", f"no-data user sees 0/{total}; no non-null owner to cross-check"
+        return (
+            "ISOLATED",
+            f"no-data user sees 0/{total}; no non-null owner to cross-check",
+        )
 
     foreign = await _as_authenticated(
         conn,
@@ -176,11 +181,18 @@ async def main() -> int:
             "SELECT rolsuper OR pg_has_role(current_user, 'authenticated', 'MEMBER') "
             "FROM pg_roles WHERE rolname = current_user"
         )
-        print(f"connected as {whoami!r} (can impersonate authenticated: {can_setrole})\n")
+        print(
+            f"connected as {whoami!r} (can impersonate authenticated: {can_setrole})\n"
+        )
         for t in _TARGETS:
             verdict, detail = await _audit_one(conn, t)
-            mark = {"ISOLATED": "PASS ", "LEAK": "LEAK ", "EMPTY": "skip ",
-                    "NO_GRANT": "PASS ", "ERROR": "err  "}.get(verdict, "?    ")
+            mark = {
+                "ISOLATED": "PASS ",
+                "LEAK": "LEAK ",
+                "EMPTY": "skip ",
+                "NO_GRANT": "PASS ",
+                "ERROR": "err  ",
+            }.get(verdict, "?    ")
             if verdict == "LEAK":
                 leaks += 1
             print(f"  {mark} [{t.scope:6}] {t.table:24} {verdict:9} {detail}")
