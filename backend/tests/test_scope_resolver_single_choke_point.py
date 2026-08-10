@@ -138,7 +138,7 @@ ORM_ALLOWED_PATHS: dict[str, str] = {
         "既有闸门。"
     ),
     "services/ai/undo/run_undo_service.py": (
-        "Run 撤销执行器（mig 413 立项）。不是 agent-tool 路径：入口是"
+        "Run 撤销执行器（mig 415 立项）。不是 agent-tool 路径：入口是"
         "人触发的 /runs/{run_id}/undo REST 端点，router 已按 agent_runs."
         "user_id 校验归属 + undone_at CAS 幂等后才调用。它操作的每个 id 都"
         "来自服务端自己的账本（script_shot_ops / script_ops），从不接受"
@@ -263,7 +263,7 @@ REPO_LAYER_ALLOWED_PATHS: dict[str, str] = {
         "as script_scene_convert.py above"
     ),
     "services/ai/undo/run_undo_service.py": (
-        "Run 撤销执行器（mig 413 立项）。不是 agent-tool 路径：入口是"
+        "Run 撤销执行器（mig 415 立项）。不是 agent-tool 路径：入口是"
         "人触发的 /runs/{run_id}/undo REST 端点，router 已按 agent_runs."
         "user_id 校验归属 + undone_at CAS 幂等后才调用。它操作的每个 id 都"
         "来自服务端自己的账本（script_shot_ops / script_ops），从不接受"

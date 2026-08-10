@@ -561,7 +561,7 @@ class ScriptShots(Base):
     )
     created_by_agent_run_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
-        comment="mig 413: agent CreateShot 归属；人写 / Auto-Storyboard 为 NULL",
+        comment="mig 415: agent CreateShot 归属；人写 / Auto-Storyboard 为 NULL",
     )
 
 

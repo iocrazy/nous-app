@@ -2362,7 +2362,7 @@ async def cancel_run(run_id: str, auth: AuthDep) -> Dict[str, Any]:
     summary="Undo everything this run wrote (one-shot, skip + typed report)",
 )
 async def undo_run(run_id: str, auth: AuthDep) -> Dict[str, Any]:
-    """整 run 一键撤销（mig 413 立项）。逐项 CAS：被后续修改碰过的写入
+    """整 run 一键撤销（mig 415 立项）。逐项 CAS：被后续修改碰过的写入
     跳过并报告，永不销毁别人的工作。一次性，无 redo；重复调用返回
     already_undone。运行中的 run 不可撤（先 cancel）。"""
     runs_repo = get_agent_runs_repository()
