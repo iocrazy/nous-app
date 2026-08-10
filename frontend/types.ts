@@ -1393,6 +1393,10 @@ export interface EpisodeProgress {
   episode_id: string;
   title: string;
   sort_order: number;
+  /** 集负责人 (Task 6, mig — Episodes.owner_id). null = unassigned. Drives
+   * Task 9's `canEditConfig` (project owner OR this episode's owner may
+   * edit that episode's node config in place). */
+  owner_id?: string | null;
   script_count: number;
   scene_count: number;
   shots_total: number;

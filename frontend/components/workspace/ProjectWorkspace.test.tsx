@@ -16,6 +16,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import * as shotFocusBus from '../agentActivity/shotFocusBus';
 
 import { ProjectWorkspace } from './ProjectWorkspace';
+import { ApiError } from '../../services/apiClient';
 import type { EpisodeProgress, Project, ProjectStageNode, ProjectWorkflow } from '../../types';
 
 const navigate = vi.fn();
@@ -263,6 +264,10 @@ beforeEach(() => {
   mockWorkflowService.fetchAdvancePreview.mockReset();
   mockWorkflowService.executeAdvance.mockReset();
   mockWorkflowService.fetchStageBoard.mockReset();
+  // Task 9: node config PATCH, consumed by EpisodeNodeCard's editable owner
+  // field via ProjectWorkspace's onPatchNode.
+  mockWorkflowService.updateProjectNode.mockReset();
+  mockAiLibraryService.aiLibraryService.listAgents.mockReset().mockResolvedValue([]);
   mockSceneService.listScenes.mockReset().mockResolvedValue([]);
   mockSceneService.listShots.mockReset().mockResolvedValue([]);
   mockSceneService.autoStoryboard.mockReset();
@@ -1039,5 +1044,122 @@ describe('ProjectWorkspace', () => {
     expect(await screen.findByTestId('ws-overview')).toBeInTheDocument();
     expect(screen.queryByTestId('workspace-stage-board')).toBeNull();
     expect(screen.queryByTestId('stage-board-loading')).toBeNull();
+  });
+});
+
+// ── Task 9 (角色门控行内编辑): canEditConfig computation + onPatchNode wiring ──
+// EpisodeNodeCard itself holds no optimistic/toast state (see its file-doc
+// comment) — the real optimistic-update / 403-revert / generic-error-revert /
+// toast / reload-on-success behavior all lives in `handlePatchNode` here, so
+// that's what these tests exercise end to end (real EpisodeNodeCard, real
+// `ApiError`, mocked `updateProjectNode`/`fetchProjectWorkflow`).
+describe('ProjectWorkspace — Task 9 node config inline edit', () => {
+  it('project owner sees the owner fact as an editable BUTTON (canEditConfig=true via project.owner_id)', async () => {
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    const ownerFact = await screen.findByTestId('node-card-owner');
+    expect(ownerFact.tagName).toBe('BUTTON');
+  });
+
+  it('a non-owner viewer (neither project owner nor this episode\'s owner) sees the owner fact as a read-only <span>', async () => {
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    // PROJECT.owner_id is 'u1' (== the mocked currentUserId) — override so
+    // neither the project nor the (ownerless, per EPISODES fixture) episode
+    // grants edit access.
+    render(
+      <ProjectWorkspace project={{ ...PROJECT, owner_id: 'someone-else' }} teamId="t1" onBack={noop} />,
+    );
+
+    const ownerFact = await screen.findByTestId('node-card-owner');
+    expect(ownerFact.tagName).toBe('SPAN');
+  });
+
+  it('the current episode\'s own owner (not the project owner) also gets canEditConfig=true', async () => {
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    mockProjectsService.fetchEpisodesProgress.mockResolvedValue(
+      EPISODES.map((e) => (e.episode_id === '1' ? { ...e, owner_id: 'u1' } : e)),
+    );
+    render(
+      <ProjectWorkspace project={{ ...PROJECT, owner_id: 'someone-else' }} teamId="t1" onBack={noop} />,
+    );
+
+    const ownerFact = await screen.findByTestId('node-card-owner');
+    expect(ownerFact.tagName).toBe('BUTTON');
+  });
+
+  it('selecting an owner PATCHes via updateProjectNode and reloads the workflow on success', async () => {
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    mockProjectsService.fetchProjectMembers.mockResolvedValue([
+      { project_id: 'p1', user_id: 'alice-uuid', role: 'editor', invited_by: null, email: 'alice@example.com', joined_at: '' },
+    ]);
+    mockWorkflowService.updateProjectNode.mockResolvedValue(stageNode({ owner_user_id: 'alice-uuid' }));
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    fireEvent.click(await screen.findByTestId('node-card-owner'));
+    fireEvent.click(await screen.findByText('alice@example.com'));
+
+    await waitFor(() =>
+      expect(mockWorkflowService.updateProjectNode).toHaveBeenCalledWith('p1', '1', {
+        owner_user_id: 'alice-uuid',
+        owner_agent_id: null,
+      }),
+    );
+    // Success reloads (existing `reloadWorkflow`) so the strip/card end up
+    // reflecting server truth, not just the optimistic local patch.
+    await waitFor(() => expect(mockWorkflowService.fetchProjectWorkflow).toHaveBeenCalledTimes(2));
+    expect(addToast).not.toHaveBeenCalled();
+  });
+
+  it('a 403 node_config_forbidden PATCH reverts the optimistic value and shows the typed forbidden toast', async () => {
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    mockProjectsService.fetchProjectMembers.mockResolvedValue([
+      { project_id: 'p1', user_id: 'alice-uuid', role: 'editor', invited_by: null, email: 'alice@example.com', joined_at: '' },
+    ]);
+    mockWorkflowService.updateProjectNode.mockRejectedValue(
+      new ApiError('Forbidden', 403, { details: { code: 'node_config_forbidden' } }),
+    );
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    // Empty before — the storyboardWorkflow() node has no owner.
+    expect((await screen.findByTestId('node-card-owner')).textContent).toMatch(/assign/i);
+
+    fireEvent.click(screen.getByTestId('node-card-owner'));
+    fireEvent.click(await screen.findByText('alice@example.com'));
+
+    // Optimistic: immediately flips to the filled (non-pill) state.
+    await waitFor(() => expect(screen.getByTestId('node-card-owner').tagName).toBe('BUTTON'));
+
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith(
+        'projects.nodeCard.forbidden',
+        'error',
+      ),
+    );
+    // Reverted back to the empty pill — the 403 must not leave the
+    // optimistic (wrong) value on screen.
+    await waitFor(() =>
+      expect(screen.getByTestId('node-card-owner').textContent).toMatch(/assign/i),
+    );
+    // A 403 revert is NOT a "reload and trust the server" path — no second
+    // fetch was needed since the local revert already matches server state.
+    expect(mockWorkflowService.fetchProjectWorkflow).toHaveBeenCalledTimes(1);
+  });
+
+  it('a non-403 PATCH failure reverts the optimistic value and shows the generic error toast', async () => {
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
+    mockProjectsService.fetchProjectMembers.mockResolvedValue([
+      { project_id: 'p1', user_id: 'alice-uuid', role: 'editor', invited_by: null, email: 'alice@example.com', joined_at: '' },
+    ]);
+    mockWorkflowService.updateProjectNode.mockRejectedValue(new Error('network blip'));
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    fireEvent.click(await screen.findByTestId('node-card-owner'));
+    fireEvent.click(await screen.findByText('alice@example.com'));
+
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith('common.error', 'error'));
+    await waitFor(() =>
+      expect(screen.getByTestId('node-card-owner').textContent).toMatch(/assign/i),
+    );
   });
 });

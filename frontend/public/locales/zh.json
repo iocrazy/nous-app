@@ -2079,7 +2079,14 @@
       "openStoryboard": "打开分镜",
       "openRenders": "打开渲染成片",
       "openStageBoard": "打开阶段面板",
-      "settings": "节点设置"
+      "settings": "节点设置",
+      "assignOwner": "+ 指定负责人",
+      "setSchedule": "+ 设置排期",
+      "unassign": "取消指定",
+      "people": "成员",
+      "agents": "Agent",
+      "noCandidates": "暂无可选项",
+      "forbidden": "仅项目负责人或本集负责人可编辑"
     }
   },
   "storyboard": {

@@ -20,7 +20,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Loading } from '../common/Loading';
-import { fetchEpisodesProgress } from '../../services/projectsService';
+import { fetchEpisodesProgress, fetchProjectMembers } from '../../services/projectsService';
 import {
   createScriptProject,
   fetchScriptProjects,
@@ -38,10 +38,13 @@ import { WorkspaceSidebar, type WorkView } from './WorkspaceSidebar';
 import { resolveSurface } from './nodeSurface';
 import { WorkspaceTopBar } from './WorkspaceTopBar';
 import { WorkspaceOverview } from './WorkspaceOverview';
-import { EpisodeNodeCard } from './EpisodeNodeCard';
+import { EpisodeNodeCard, type NodeConfigPatch } from './EpisodeNodeCard';
 import { AdvanceConfirmDialog } from '../workflow/AdvanceConfirmDialog';
 import { useProjectWorkflow } from '../../hooks/useProjectWorkflow';
-import { executeAdvance, fetchAdvancePreview } from '../../services/workflowService';
+import { executeAdvance, fetchAdvancePreview, updateProjectNode } from '../../services/workflowService';
+import { aiLibraryService } from '../../services/aiLibraryService';
+import { ApiError } from '../../services/apiClient';
+import type { AgentOption, PersonOption } from '../workflow/OwnerPicker';
 import { episodeStorageKey, type WorkspaceModule } from './workspaceModules';
 import type { FilesChip } from './WorkspaceFiles';
 import type { AdvancePreview, EpisodeProgress, Project, ProjectStageNode } from '../../types';
@@ -251,9 +254,76 @@ export function ProjectWorkspace({
   // the accordion's strip/card-slot render — see that prop's doc comment for
   // why `workflow` alone isn't a safe signal of "this is the expanded
   // episode's data" during an episode-switch fetch.
-  const { workflow, loading: workflowLoading, reload: reloadWorkflow } = useProjectWorkflow(
-    project.id,
-    currentEpisodeId,
+  const {
+    workflow,
+    loading: workflowLoading,
+    reload: reloadWorkflow,
+    patchNodeLocally,
+  } = useProjectWorkflow(project.id, currentEpisodeId);
+
+  // Owner/agent candidates for `EpisodeNodeCard`'s Task 9 editable owner
+  // field — one project-scoped fetch (mirrors `WorkflowSection`'s own
+  // people/agents effect), independent of which episode/node is selected.
+  const [nodeCardPeople, setNodeCardPeople] = useState<PersonOption[]>([]);
+  const [nodeCardAgents, setNodeCardAgents] = useState<AgentOption[]>([]);
+  useEffect(() => {
+    let alive = true;
+    Promise.all([
+      fetchProjectMembers(project.id).catch(() => []),
+      aiLibraryService.listAgents().catch(() => []),
+    ]).then(([mem, ag]) => {
+      if (!alive) return;
+      setNodeCardPeople(mem.map((m) => ({ id: m.user_id, name: m.email || 'Member' })));
+      setNodeCardAgents(ag.map((a) => ({ id: a.id, name: a.name, slug: a.slug })));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [project.id]);
+
+  // Task 9 (角色门控行内编辑): the project owner OR the SELECTED episode's own
+  // owner (episodes/progress `owner_id`, Task 6) may edit that episode's
+  // node config in place. Real signal this file already has in scope —
+  // `project.owner_id` (the Project type's only owner field) and each
+  // episode row's `owner_id` — no new field invented.
+  const canEditNodeConfig = useCallback(
+    (episodeId: string): boolean => {
+      if (!currentUserId) return false;
+      if (currentUserId === project.owner_id) return true;
+      const episode = episodes.find((e) => e.episode_id === episodeId);
+      return currentUserId === episode?.owner_id;
+    },
+    [currentUserId, project.owner_id, episodes],
+  );
+
+  // Task 9: in-place PATCH for a node's owner/schedule facts. Optimistic
+  // (patches `workflow.nodes` locally before the request settles), reverts
+  // on failure, and is the SOLE toaster for this action (EpisodeNodeCard
+  // itself holds no local state and never toasts — see that file's doc
+  // comment) so there's exactly one toast per failed patch, not two.
+  const handlePatchNode = useCallback(
+    async (nodeId: string, patch: NodeConfigPatch): Promise<void> => {
+      const prevNode = workflow?.nodes.find((n) => n.id === nodeId) ?? null;
+      patchNodeLocally(nodeId, patch);
+      try {
+        await updateProjectNode(project.id, nodeId, patch);
+        await reloadWorkflow();
+      } catch (err) {
+        if (prevNode) patchNodeLocally(nodeId, prevNode);
+        const forbidden =
+          err instanceof ApiError &&
+          err.status === 403 &&
+          (err.details as { code?: string } | undefined)?.code === 'node_config_forbidden';
+        console.error('[ProjectWorkspace] node config patch failed:', err);
+        addToast(
+          forbidden
+            ? t('projects.nodeCard.forbidden', 'Only the project or episode owner can edit this')
+            : t('common.error'),
+          'error',
+        );
+      }
+    },
+    [project.id, workflow, patchNodeLocally, reloadWorkflow, addToast, t],
   );
   // The advance/back confirm gate — one instance, shared by the node card's
   // Complete/Back buttons and the top-bar stepper. Holds the server preview so
@@ -907,9 +977,8 @@ export function ProjectWorkspace({
                     <EpisodeNodeCard
                       key={node.id}
                       node={node}
-                      // Task 9 wires the real per-node config-write permission;
-                      // hardwired false here renders every fact read-only.
-                      canEditConfig={false}
+                      // Task 9: project owner OR this episode's own owner.
+                      canEditConfig={canEditNodeConfig(episodeId)}
                       // 评审修复轮1 (Important #1): gates Back/Complete-stage —
                       // a read-only member must never see those buttons at all,
                       // not just have the server reject the click.
@@ -919,6 +988,9 @@ export function ProjectWorkspace({
                       onRequestAdvance={requestAdvance}
                       onOpenTodolist={() => setActiveModule('tasks')}
                       onOpenSettings={(_ignoredEpisodeId, nid) => handleOpenNodeSettings(episodeId, nid)}
+                      people={nodeCardPeople}
+                      agents={nodeCardAgents}
+                      onPatchNode={handlePatchNode}
                     />
                   );
                 }}

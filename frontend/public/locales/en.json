@@ -2079,7 +2079,14 @@
       "openStoryboard": "Open Storyboard",
       "openRenders": "Open Renders",
       "openStageBoard": "Open Stage Board",
-      "settings": "Node settings"
+      "settings": "Node settings",
+      "assignOwner": "+ Assign Owner",
+      "setSchedule": "+ Set Schedule",
+      "unassign": "Unassign",
+      "people": "People",
+      "agents": "Agents",
+      "noCandidates": "No candidates",
+      "forbidden": "Only the project or episode owner can edit this"
     }
   },
   "storyboard": {

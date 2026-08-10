@@ -12,16 +12,26 @@
  * Skip the fetch entirely while that's true (stay in the loading state, keep
  * `workflow` null) rather than firing a request the server will reject; the
  * effect re-runs and fetches for real once episodes resolve a real id.
+ *
+ * `patchNodeLocally` (Task 9, IA redesign) — a synchronous, in-memory patch
+ * of one node inside `workflow.nodes`, with NO network call. Exists so a
+ * caller (ProjectWorkspace's `onPatchNode`) can apply an optimistic update
+ * before the PATCH request resolves, and revert it (by calling this again
+ * with the pre-patch field values) if the request fails — both without
+ * waiting on a full `reload()` round-trip. No-ops if `workflow` is null or
+ * the node id isn't found (defensive; the caller always has a real node in
+ * scope since it comes from `workflow.nodes` in the first place).
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { fetchProjectWorkflow } from '../services/workflowService';
-import type { ProjectWorkflow } from '../types';
+import type { ProjectStageNode, ProjectWorkflow } from '../types';
 
 interface UseProjectWorkflow {
   workflow: ProjectWorkflow | null;
   loading: boolean;
   reload: () => Promise<void>;
+  patchNodeLocally: (nodeId: string, patch: Partial<ProjectStageNode>) => void;
 }
 
 export function useProjectWorkflow(
@@ -70,5 +80,15 @@ export function useProjectWorkflow(
     };
   }, [projectId, episodeId]);
 
-  return { workflow, loading, reload };
+  const patchNodeLocally = useCallback((nodeId: string, patch: Partial<ProjectStageNode>) => {
+    setWorkflow((wf) => {
+      if (!wf) return wf;
+      return {
+        ...wf,
+        nodes: wf.nodes.map((n) => (n.id === nodeId ? { ...n, ...patch } : n)),
+      };
+    });
+  }, []);
+
+  return { workflow, loading, reload, patchNodeLocally };
 }

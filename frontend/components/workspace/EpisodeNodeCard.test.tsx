@@ -1,10 +1,21 @@
 /**
  * EpisodeNodeCard (IA redesign Task 5) — the Overview accordion's single-node
  * info card. Pins: header entry button label follows `resolveSurface`,
- * read-only facts render `<span>`s (canEditConfig has no editable branch
- * yet — Task 9), Complete-stage/Back only show on the cursor node, and the
- * entry button reports the full node object (so the caller can route by
- * surface via the existing `handleSelectNode`).
+ * read-only facts render `<span>`s, Complete-stage/Back only show on the
+ * cursor node, and the entry button reports the full node object (so the
+ * caller can route by surface via the existing `handleSelectNode`).
+ *
+ * Task 9 (角色门控行内编辑) adds the editable owner/schedule branch: when
+ * `canEditConfig` is true, the owner fact renders as a real trigger button
+ * that opens a candidate menu (people from `people`/agents from `agents`),
+ * and the schedule fact renders as a trigger that opens `DateRangePopover`.
+ * Both call `onPatchNode(nodeId, patch)` and fire-and-forget it — this
+ * component holds NO optimistic/local override state and never
+ * shows a toast itself. The optimistic-update / 403-revert / toast
+ * responsibility lives one level up in `ProjectWorkspace`'s real
+ * `onPatchNode` implementation (see ProjectWorkspace.test.tsx for that
+ * coverage) — `onPatchNode`'s contract here is "never rejects" so this
+ * component can safely `void` the call.
  */
 import type { ComponentProps } from 'react';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
@@ -15,6 +26,7 @@ import { createInstance, type i18n as I18n } from 'i18next';
 import enJson from '../../public/locales/en.json';
 import { EpisodeNodeCard } from './EpisodeNodeCard';
 import type { ProjectStageNode } from '../../types';
+import type { PersonOption } from '../workflow/OwnerPicker';
 
 function makeI18n(): I18n {
   const instance = createInstance();
@@ -59,6 +71,11 @@ function cbs() {
     onOpenSettings: vi.fn(),
   };
 }
+
+const PEOPLE: PersonOption[] = [
+  { id: 'alice-uuid', name: 'Alice' },
+  { id: 'bob-uuid', name: 'Bob' },
+];
 
 function renderCard(overrides: Partial<ComponentProps<typeof EpisodeNodeCard>> = {}) {
   const base = {
@@ -184,5 +201,67 @@ describe('EpisodeNodeCard', () => {
     fireEvent.click(screen.getByTestId('node-card-complete'));
     expect(onRequestAdvance).toHaveBeenNthCalledWith(1, 'back');
     expect(onRequestAdvance).toHaveBeenNthCalledWith(2, 'forward');
+  });
+
+  // ── Task 9: role-gated inline edit (owner / schedule) ───────────────────
+
+  it('editable owner renders as a button; clicking it opens a picker and selecting a person patches via onPatchNode', async () => {
+    const onPatchNode = vi.fn().mockResolvedValue(undefined);
+    renderCard({ canEditConfig: true, people: PEOPLE, onPatchNode });
+
+    const ownerBtn = screen.getByTestId('node-card-owner');
+    expect(ownerBtn.tagName).toBe('BUTTON');
+    fireEvent.click(ownerBtn);
+    fireEvent.click(await screen.findByText('Alice'));
+
+    expect(onPatchNode).toHaveBeenCalledWith('n2', {
+      owner_user_id: 'alice-uuid',
+      owner_agent_id: null,
+    });
+  });
+
+  it('empty editable fields render as "+ Assign"/"+ Set Schedule" pills', () => {
+    renderCard({ canEditConfig: true, people: PEOPLE });
+    expect(screen.getByTestId('node-card-owner').textContent).toMatch(/Assign/);
+    expect(screen.getByTestId('node-card-schedule').textContent).toMatch(/Set Schedule/);
+  });
+
+  it('readonly viewer sees plain <span> facts even when owner/schedule are empty', () => {
+    renderCard({ canEditConfig: false });
+    expect(screen.getByTestId('node-card-owner').tagName).toBe('SPAN');
+    // Read-only + empty schedule omits the row entirely (unchanged Task 5
+    // behavior) — there is nothing editable to show a pill for.
+    expect(screen.queryByTestId('node-card-schedule')).toBeNull();
+  });
+
+  it('editable schedule button opens DateRangePopover and a completed range patches via onPatchNode', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 1, 12, 0, 0)); // August 2026
+    const onPatchNode = vi.fn().mockResolvedValue(undefined);
+    renderCard({ canEditConfig: true, onPatchNode });
+
+    fireEvent.click(screen.getByTestId('node-card-schedule'));
+    fireEvent.click(screen.getByRole('button', { name: '2026-08-01' }));
+    expect(onPatchNode).not.toHaveBeenCalled(); // first click only buffers a draft
+    fireEvent.click(screen.getByRole('button', { name: '2026-08-05' }));
+
+    expect(onPatchNode).toHaveBeenCalledWith('n2', {
+      planned_start: '2026-08-01',
+      planned_due: '2026-08-05',
+    });
+    vi.useRealTimers();
+  });
+
+  it('onPatchNode never rejecting is safe to fire-and-forget (no unhandled rejection) even when the caller-supplied promise rejects', async () => {
+    // This component holds no local optimistic/revert state and shows no
+    // toast itself — see the file-doc comment. A rejecting onPatchNode must
+    // not throw synchronously or crash the click handler; the real
+    // revert+toast contract is exercised in ProjectWorkspace.test.tsx
+    // against the actual onPatchNode implementation.
+    const onPatchNode = vi.fn().mockRejectedValue({ code: 'node_config_forbidden' });
+    renderCard({ canEditConfig: true, people: PEOPLE, onPatchNode });
+    fireEvent.click(screen.getByTestId('node-card-owner'));
+    fireEvent.click(await screen.findByText('Alice'));
+    expect(onPatchNode).toHaveBeenCalledTimes(1);
   });
 });
