@@ -6,7 +6,7 @@
 
 **Architecture:** 新表 `script_shot_ops` 在 `scoped_script_gateway` 的写事务内记账（不侵入 `script_ops` watermark 语义）；撤销端点按账本逐项 CAS（delete/update 带完整 WHERE 条件，与并发编辑天然互斥），scene 正文走既有 `apply_element_ops` 以 `actor='undo:<run_id>'` 作为新 forward op；前端按钮挂 `TurnWriteSummary` 头部行，报告就地渲染。
 
-**Tech Stack:** FastAPI + SQLAlchemy async ORM（禁裸 SQL）、PostgreSQL（migration 413）、React 19 + vitest、i18next。
+**Tech Stack:** FastAPI + SQLAlchemy async ORM（禁裸 SQL）、PostgreSQL（migration 417）、React 19 + vitest、i18next。
 
 **Spec:** `docs/superpowers/specs/2026-08-09-agent-run-undo-design.md`（已拍板）。
 
@@ -27,7 +27,7 @@
 ### Task 1: Migration 413 + ORM 模型（归属列 / 账本表 / undone_at）
 
 **Files:**
-- Create: `supabase/migrations/413_agent_run_undo.sql`
+- Create: `supabase/migrations/417_agent_run_undo.sql`
 - Modify: `backend/app/models/scripts.py`（`ScriptShots` 加列 + 新 `ScriptShotOps` 类）
 - Modify: `backend/app/models/agents.py`（`AgentRuns` 加 `undone_at`）
 - Modify: `backend/app/models/__init__.py`（导出 `ScriptShotOps`）
@@ -48,7 +48,7 @@ ls supabase/migrations/ | sort | tail -5
 - [ ] **Step 2: 写 migration SQL**
 
 ```sql
--- 413_agent_run_undo.sql
+-- 417_agent_run_undo.sql
 --
 -- Agent Run 撤销立项（spec: docs/superpowers/specs/2026-08-09-agent-run-undo-design.md）
 -- 三件套：
@@ -101,7 +101,7 @@ ALTER TABLE public.agent_runs
 ```python
     created_by_agent_run_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
-        comment="mig 413: agent CreateShot 归属；人写 / Auto-Storyboard 为 NULL",
+        comment="mig 417: agent CreateShot 归属；人写 / Auto-Storyboard 为 NULL",
     )
 ```
 
@@ -147,7 +147,7 @@ class ScriptShotOps(Base):
 ```python
     undone_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime(True),
-        comment="mig 413: run 级一次性撤销标记；NULL = 未撤销",
+        comment="mig 417: run 级一次性撤销标记；NULL = 未撤销",
     )
 ```
 
@@ -165,8 +165,8 @@ Expected: 打印 `script_shot_ops True True`；守卫测试全绿（models/scrip
 - [ ] **Step 5: Commit**
 
 ```bash
-git add supabase/migrations/413_agent_run_undo.sql backend/app/models/
-git commit -m "feat(db): agent run 撤销三件套 — shot 归属列 + script_shot_ops 账本 + undone_at (mig 413)"
+git add supabase/migrations/417_agent_run_undo.sql backend/app/models/
+git commit -m "feat(db): agent run 撤销三件套 — shot 归属列 + script_shot_ops 账本 + undone_at (mig 417)"
 ```
 
 ---
@@ -192,7 +192,7 @@ git commit -m "feat(db): agent run 撤销三件套 — shot 归属列 + script_s
 新建 `backend/tests/test_script_shot_ops_ledger.py`，复用 `test_screenwriting_tools.py` 的 `_CaptureSession` / `_FakeResult` / `_ScopeCtx` 基建（直接 import 或复制到本文件，以该文件现状为准；若是私有类就复制，别跨文件 import 私有名）：
 
 ```python
-"""scoped_script_gateway 记账（mig 413）：create/update 同事务写 script_shot_ops。"""
+"""scoped_script_gateway 记账（mig 417）：create/update 同事务写 script_shot_ops。"""
 
 import pytest
 from types import SimpleNamespace
@@ -594,7 +594,7 @@ result = await session.execute(delete(ScriptShots).where(*conds))
 
 ```python
     "services/ai/undo/run_undo_service.py": (
-        "Run 撤销执行器（mig 413 立项）。不是 agent-tool 路径：入口是"
+        "Run 撤销执行器（mig 417 立项）。不是 agent-tool 路径：入口是"
         "人触发的 /runs/{run_id}/undo REST 端点，router 已按 agent_runs."
         "user_id 校验归属 + undone_at CAS 幂等后才调用。它操作的每个 id 都"
         "来自服务端自己的账本（script_shot_ops / script_ops），从不接受"
@@ -752,7 +752,7 @@ Expected: FAIL（`ImportError: cannot import name 'undo_run'`——记得在文�
 
 ```python
     async def claim_undo(self, run_id: str, *, user_id: UUID) -> str:
-        """Run 级撤销的一次性认领（mig 413）。单条 CAS：undone_at 从 NULL
+        """Run 级撤销的一次性认领（mig 417）。单条 CAS：undone_at 从 NULL
         置 now() 即认领成功；先 claim 后执行是刻意的——两个并发 undo 把
         scene inverse 应用两次比「崩溃后无法重试」更糟（宁可少撤不可重撤）。
         返回 'claimed' | 'already_undone' | 'running' | 'not_found'。"""
@@ -813,7 +813,7 @@ class UndoReport(BaseModel):
     summary="Undo everything this run wrote (one-shot, skip + typed report)",
 )
 async def undo_run(run_id: str, auth: AuthDep) -> Dict[str, Any]:
-    """整 run 一键撤销（mig 413 立项）。逐项 CAS：被后续修改碰过的写入
+    """整 run 一键撤销（mig 417 立项）。逐项 CAS：被后续修改碰过的写入
     跳过并报告，永不销毁别人的工作。一次性，无 redo；重复调用返回
     already_undone。运行中的 run 不可撤（先 cancel）。"""
     runs_repo = get_agent_runs_repository()

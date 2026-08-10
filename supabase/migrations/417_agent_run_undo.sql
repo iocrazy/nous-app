@@ -1,4 +1,11 @@
--- 413_agent_run_undo.sql
+-- 417_agent_run_undo.sql
+--
+-- ⚠️ 本文件原名 413_agent_run_undo.sql（PR #1767），与 #1762 刚改名过去的
+-- 413_social_accounts_realtime.sql 撞号 —— 两个 PR 开发期互相看不见对方分支，
+-- "取号前 fetch"防不住这个窗口。改名为 417（415/416 已被 P0-2/P0-3 预定）。
+-- 相对顺序不变：原来 413_agent < 413_social（a<s），现在 413_social < 417_agent，
+-- 两者无依赖关系（一个碰 publication，一个建剧本域表），换序无影响。
+-- 治本手段是 CI 取号查重，单独立项。
 --
 -- Agent Run 撤销立项（spec: docs/superpowers/specs/2026-08-09-agent-run-undo-design.md）
 -- 三件套：
@@ -14,6 +21,11 @@
 -- RLS：script_shot_ops 不启用。它是后端内部账本（不经 PostgREST 暴露，
 -- 只有服务端超管连接读写）；剧本域租户策略（mig 408 起的第三层）后续分期
 -- 覆盖时再一并处理，现在启用反而会挡住 CI ephemeral 库的非平台角色。
+
+-- 幂等性：下面四条已逐条核过，全部带 IF NOT EXISTS，重复执行是 no-op。
+-- 改名有被 run-migration.yml 误判成"新增文件"从而在生产重跑的风险（原版已经
+-- 跑过了），所以这一点是必须的，不是锦上添花。ADD COLUMN IF NOT EXISTS 在列
+-- 已存在时整条跳过（连 REFERENCES 也不会重加），不会撞重复 FK 约束名。
 
 ALTER TABLE public.script_shots
   ADD COLUMN IF NOT EXISTS created_by_agent_run_id BIGINT NULL

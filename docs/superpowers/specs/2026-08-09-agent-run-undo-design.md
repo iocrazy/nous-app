@@ -23,7 +23,7 @@ shot 写入无归属、无账本、无 run 级逆操作。本 spec 补齐这三�
 - **无 run 级逆操作端点**：run 端点族在 `ai_library_router` 的 `/runs/{run_id}/*`
   （live / events / children / cancel），undo 挂同族。
 
-## 2. 数据模型（migration 413）
+## 2. 数据模型（migration 417）
 
 > 取号注意：当前最新已有一对 412 撞号（`412_retire_canvas_stage_node` /
 > `412_social_accounts_realtime`），本迁移取 413；落地前再 fetch 复核。

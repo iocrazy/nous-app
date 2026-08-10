@@ -1,4 +1,4 @@
-"""scoped_script_gateway 记账（mig 413）：create/update 同事务写 script_shot_ops。"""
+"""scoped_script_gateway 记账（mig 417）：create/update 同事务写 script_shot_ops。"""
 
 from __future__ import annotations
 

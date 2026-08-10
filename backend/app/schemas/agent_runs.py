@@ -86,7 +86,7 @@ class RunDetail(RunListItem):
     # Resolved from task_id by the get_run endpoint (None when the run
     # wasn't part of a tracked workflow).
     task: Optional[RunTaskRef] = None
-    # mig 413: set by claim_undo() on POST /runs/{run_id}/undo. None until
+    # mig 417: set by claim_undo() on POST /runs/{run_id}/undo. None until
     # the run has been undone once (undo is one-shot, no redo).
     undone_at: Optional[datetime] = None
 

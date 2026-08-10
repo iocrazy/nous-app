@@ -579,7 +579,7 @@ class AgentRunsRepository(AsyncpgRepository):
             return False
 
     async def claim_undo(self, run_id: str, *, user_id: UUID) -> str:
-        """Run 级撤销的一次性认领（mig 413）。单条 CAS：undone_at 从 NULL
+        """Run 级撤销的一次性认领（mig 417）。单条 CAS：undone_at 从 NULL
         置 now() 即认领成功；先 claim 后执行是刻意的——两个并发 undo 把
         scene inverse 应用两次比「崩溃后无法重试」更糟（宁可少撤不可重撤）。
         返回 'claimed' | 'already_undone' | 'running' | 'not_found'。"""
