@@ -434,6 +434,56 @@ async def test_publish_rejects_bad_intent_before_calling_the_browser():
     assert is_infra_failure(outcome.result.to_dict()) is False
 
 
+async def test_publish_refuses_images_on_douyin_before_calling_the_browser():
+    """图集在**第一次字典查找**就被拒,而不是走到浏览器任务里才失败。
+
+    抖音的图集发布一行都没实现(``browser/app/publish.py`` 的
+    ``SUPPORTED_CONTENT_TYPES = ("video",)``)。在 profile 改回单 "video" 之前,
+    这条路径的三道门全部放行,请求一路排队、起浏览器、才拿到
+    ``unsupported_content_type`` —— 用户已经填完表单等了几分钟。
+
+    断言 ``client.calls == []`` 就是"拒绝发生在最前面"这句话的可证伪形式:
+    浏览器一次都没被调用。
+    """
+    client = FakePublishClient(_published())
+    outcome = await _adapter(client).publish(
+        _account(),
+        _video_intent(
+            content_type="images",
+            media=(
+                PublishMedia(kind="image", url="https://s3/a.jpg", filename="a.jpg"),
+                PublishMedia(kind="image", url="https://s3/b.jpg", filename="b.jpg"),
+            ),
+        ),
+    )
+
+    assert client.calls == []  # 浏览器一次都没被调用
+    assert outcome.result.success is False
+    assert outcome.result.detail["reason"] == "invalid_publish_intent"
+    # 报的是内容形态,不是"素材有问题" —— 用户要据此换发布方式,而不是换素材。
+    assert any("content_type" in p for p in outcome.result.detail["problems"])
+    # 参数不合法是业务失败,不能被当成基建抖动去重试。
+    assert is_infra_failure(outcome.result.to_dict()) is False
+
+
+def test_images_intent_is_the_only_thing_wrong_with_it():
+    """正向对照:上面那条被拒**只**因为 content_type。
+
+    否则一条"素材扩展名也不合法"的 intent 也能让上面的断言变绿,而它证明的
+    就不再是图集被拒了。
+    """
+    problems = _adapter().validate_publish_intent(
+        _video_intent(
+            content_type="images",
+            media=(
+                PublishMedia(kind="image", url="https://s3/a.jpg", filename="a.jpg"),
+            ),
+        )
+    )
+    assert len(problems) == 1
+    assert "content_type" in problems[0] and "images" in problems[0]
+
+
 async def test_publish_without_session_state_is_session_invalid_not_infra():
     client = FakePublishClient(_published())
     outcome = await _adapter(client).publish(

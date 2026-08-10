@@ -325,6 +325,7 @@
       "contentType": "Content type",
       "contentTypeVideo": "Video",
       "contentTypeImages": "Images",
+      "imagesUnsupported": "Image posts are not supported yet — the connected platforms can only publish video.",
       "imageOrder": "Image {{n}}",
       "imagePreviewAria": "First image preview — gallery post",
       "noImages": "No uploaded images yet — downloads aren't publishable",

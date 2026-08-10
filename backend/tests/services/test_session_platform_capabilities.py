@@ -96,6 +96,21 @@ def _intent():
     )
 
 
+def test_douyin_declares_only_the_content_type_its_publisher_implements():
+    """profile 是**能力声明**,不是愿望清单。
+
+    浏览器侧的唯一真相是 ``browser/app/publish.py`` 的
+    ``SUPPORTED_CONTENT_TYPES = ("video",)`` —— ``douyin_publish.py`` 只上传
+    单个视频文件,图集的多文件 + 排序 + 封面语义一行都没写。
+
+    这里曾经是 ``{"video", "images"}``,三层声明打架(前端能选 / 后端放行 /
+    浏览器拒),用户填完整个表单才在最后一步拿到 ``unsupported_content_type``。
+    图集是要做的(P2-1 步骤 2),但**在浏览器侧写出来之前**,这一行必须只写
+    已经存在的能力。加回 "images" 时要和 browser 侧同一个 PR 落地。
+    """
+    assert SESSION_PLATFORM_PROFILES["douyin"].content_types == frozenset({"video"})
+
+
 def test_every_profile_declares_the_capability_explicitly():
     """新增平台时必须想一下这个字段,而不是让它悄悄继承默认值。
 
