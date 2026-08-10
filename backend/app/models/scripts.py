@@ -437,6 +437,10 @@ class Episodes(Base):
     # silently read as "nothing found -> group 0"), rather than repeating it
     # on this new column.
     current_node_id: Mapped[int | None] = mapped_column(BigInteger)
+    # Episode owner (mig 419, workspace IA redesign spec §5 方案 A) -- assigned
+    # by the project manager; NULL = unassigned. Task 7 gates node
+    # owner/schedule edits on this alongside the project-level manager role.
+    owner_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)
 
 
 class ScriptScenes(Base):

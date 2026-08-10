@@ -99,11 +99,38 @@ async def update_episode(
     body: EpisodeUpdate,
     _guard: None = Depends(verify_episode_write_access),
 ) -> Dict[str, Any]:
-    """Update an episode (title / sort_order)."""
+    """Update an episode (title / sort_order / owner_id).
+
+    ``owner_id`` is gated tighter than the base write-access guard above:
+    only the project manager (``resolve_effective_role`` == 'manager', #1742
+    resolves the project owner to manager too) may assign/clear the "集负责人"
+    (Task 6, workspace IA redesign spec §5 方案 A). Title/sort_order keep the
+    existing ``verify_episode_write_access`` behavior unchanged — the field
+    is only consulted when the client actually sends it (``model_fields_set``
+    sentinel: absent = untouched, present-as-null = clear).
+    """
+    from app.core.workflow_roles import MANAGER, resolve_effective_role
+
     try:
-        episode = await get_episode_repository().update(
-            episode_id, body.model_dump(exclude_none=True)
-        )
+        data = body.model_dump(exclude_none=True, exclude={"owner_id"})
+        if "owner_id" in body.model_fields_set:
+            episode_for_owner_check = await get_episode_repository().get_by_id(
+                episode_id
+            )
+            if episode_for_owner_check is None:
+                raise HTTPException(status_code=404, detail="Episode not found")
+            role = await resolve_effective_role(
+                auth.user_id,
+                project_id=str(episode_for_owner_check["project_id"]),
+            )
+            if role != MANAGER:
+                raise HTTPException(
+                    status_code=403,
+                    detail={"code": "episode_owner_forbidden"},
+                )
+            data["owner_id"] = str(body.owner_id) if body.owner_id is not None else None
+
+        episode = await get_episode_repository().update(episode_id, data)
         if episode is None:
             raise HTTPException(status_code=404, detail="Episode not found")
         return {"success": True, "data": episode}
