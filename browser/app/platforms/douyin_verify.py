@@ -46,6 +46,10 @@ publish flow's selectors were read off a real account (see the dated notes in
 `douyin.py` and `douyin_publish.py`); these were not, because confirming them
 needs a bound account that already has works on it.
 
+(Not a contradiction with the section above: what the 2026-08-08 check
+established is that the cards carry **no post id**. It did not record which
+class names wrap a card, which is what these selectors need.)
+
 So the design makes being wrong about them SAFE rather than plausible-looking,
 and that property is the load-bearing part:
 
