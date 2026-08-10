@@ -354,7 +354,20 @@ async def publish_issue_mirror_workflow(
     """One sweep: mirror unmirrored batches, then sync terminal outcomes."""
     created = await _mirror_new_batches()
     synced = await _sync_terminal_batches()
-    result = {**created, **synced}
-    if result.get("created") or result.get("synced") or result.get("awaiting_schedule"):
+    # Both halves report a "skipped" count; a plain {**a, **b} let the second
+    # silently eat the first, so a run of mirror failures was invisible in the
+    # log line meant to show them. Namespace them instead.
+    result = {
+        "created": created["created"],
+        "mirror_skipped": created["skipped"],
+        "synced": synced["synced"],
+        "sync_skipped": synced["skipped"],
+        "awaiting_schedule": synced["awaiting_schedule"],
+    }
+    # A scheduled batch sitting on the gate is NORMAL operation for hours —
+    # logging it every 2 minutes would be pure noise, so the counter rides the
+    # workflow's return value (durable in DBOS) and only real state changes
+    # get a log line.
+    if result["created"] or result["synced"] or result["mirror_skipped"]:
         logger.info(f"[publish-mirror] sweep: {result}")
     return result
