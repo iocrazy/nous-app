@@ -27,6 +27,7 @@ import {
 } from '../../services/scriptService';
 import { useToast } from '../Toast';
 import { useAuth } from '../../contexts/AuthContext';
+import { hasShotFocusListener, requestShotFocus } from '../agentActivity/shotFocusBus';
 // Kept eager: ProjectsListView statically imports it too, so it lives in the
 // ProjectsPage chunk regardless — a dynamic import here buys nothing and just
 // trips Rollup's "dynamically + statically imported" warning.
@@ -99,6 +100,37 @@ export function readWorkspaceParams(sp: URLSearchParams) {
     return v && v.length > 0 ? v : null;
   };
   return { ep: get('ep'), node: get('node'), view: get('view'), scene: get('scene'), shot: get('shot') };
+}
+
+// Shot-focus request timing (Task 3 修复轮2, 2026-08-10 用户拍板): `shotFocusBus`'s
+// ONLY subscriber is EditorShell (editor/components/EditorShell.tsx ~L534,
+// `useEffect(() => onShotFocus(...), [selectRailView])`), which registers on
+// mount. Getting from "shot card clicked" to "EditorShell mounted and
+// subscribed" crosses TWO unbounded async hops — resolving/provisioning the
+// episode's script (network) and loading EditorShell's own lazy chunk
+// (`lazy(() => import('../../editor/components/EditorShell'))` above) — so a
+// single fixed delay (the 300ms this codebase used for the OLD page-local
+// canvas jump, when the target was already mounted) can't be trusted here.
+// `hasShotFocusListener()` (already exported by the bus for exactly this
+// "is anyone listening" question) turns the guess into a check: try once
+// after a generous first delay, and if nobody's listening yet, retry once
+// more after a longer one before giving up silently — matching the bus's own
+// fire-and-forget philosophy ("a chip that does nothing beats yanking the
+// writer somewhere unexpected", per shotFocusBus.ts's file doc comment) over
+// an unbounded poll loop.
+const SHOT_FOCUS_FIRST_DELAY_MS = 400;
+const SHOT_FOCUS_RETRY_DELAY_MS = 900;
+
+function requestShotFocusWhenEditorReady(shotId: string): void {
+  window.setTimeout(() => {
+    if (hasShotFocusListener()) {
+      requestShotFocus(shotId);
+      return;
+    }
+    window.setTimeout(() => {
+      if (hasShotFocusListener()) requestShotFocus(shotId);
+    }, SHOT_FOCUS_RETRY_DELAY_MS);
+  }, SHOT_FOCUS_FIRST_DELAY_MS);
 }
 
 interface ProjectWorkspaceProps {
@@ -605,13 +637,14 @@ export function ProjectWorkspace({
   // tab switch isn't a new history entry.
   //
   // Review fix round 1 (sticky `?shot=`): `shot` is a ONE-SHOT deep-link
-  // trigger consumed by EpisodeStoryboardPage's focus effect (jump to Canvas
-  // + requestShotFocus) — every view change, whether the writer clicking a
-  // tab or that same effect's own initial auto-switch to Canvas, clears it
-  // here. Without this, `shot` lingered in the URL after the writer manually
-  // switched away from Canvas; a later remount (refresh, or navigating out
-  // and back into the Storyboard module) re-read the stale `shot` and forced
-  // the view back to Canvas, silently discarding the writer's own choice.
+  // trigger, now consumed by THIS file's own URL-shot effect below (moved out
+  // of EpisodeStoryboardPage in 修复轮2 — see that effect's comment) — every
+  // view change, whether the writer clicking a tab or that effect's own
+  // consumption, clears it here. Without this, `shot` lingered in the URL
+  // after the writer manually switched tabs; a later remount (refresh, or
+  // navigating out and back into the Storyboard module) re-read the stale
+  // `shot` and re-fired the editor deep-link, silently overriding whatever
+  // the writer was doing.
   const handleStoryboardViewChange = useCallback(
     (view: string) => {
       setSearchParams(
@@ -627,26 +660,52 @@ export function ProjectWorkspace({
     [setSearchParams],
   );
 
-  // Task 3 (镜头卡进画布): a scene-board shot card asks to land on Canvas
-  // AND focus a specific shot in ONE URL write. Deliberately NOT routed
-  // through `handleStoryboardViewChange` above — that call's `next.delete
-  // ('shot')` exists precisely to invalidate a stale ONE-SHOT deep-link on a
-  // manual tab pick, so reusing it here would delete the very `shot` param
-  // this click just asked to set.
-  const handleStoryboardShotDeepLink = useCallback(
-    (shotId: string) => {
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          next.set('view', 'canvas');
-          next.set('shot', shotId);
-          return next;
-        },
-        { replace: true },
-      );
+  // Shot deep-link into the editor (Task 3 修复轮2, 2026-08-10 用户拍板): the
+  // ONLY two entry points — a scene board's shot-card click (via
+  // EpisodeStoryboardPage's `onOpenShotInEditor` prop, sceneId always known —
+  // the shot's own column has it) and the URL `?shot=` one-shot trigger below
+  // (sceneId unknown, `null` — an agent-panel/share link only carries the
+  // shot id) — both funnel through here, so there is exactly ONE behavior to
+  // reason about. Routes through `openEpisodeScript` directly (NOT
+  // `handleOpenWorkView('storyboard', {sceneId})`; that helper's own
+  // `!opts?.sceneId` guard would redirect a null-sceneId call back to the
+  // standalone Storyboard MODULE page instead of the embedded editor — see
+  // its comment above). `openEpisodeScript` already handles `sceneId=null`
+  // gracefully (just skips the scroll-to-scene half), so the editor's
+  // storyboard rail opens on the current episode's script either way.
+  const handleOpenShotInEditor = useCallback(
+    (shotId: string, sceneId: string | null) => {
+      void openEpisodeScript(currentEpisode, 'storyboard', sceneId);
+      requestShotFocusWhenEditorReady(shotId);
     },
-    [setSearchParams],
+    [openEpisodeScript, currentEpisode],
   );
+
+  // URL `?shot=` one-shot deep-link (kept as an entry point per 修复轮2's
+  // 拍板: an agent panel or a shared link may carry `shot=<id>` into the
+  // Storyboard module page without a `scene`). Fires once `currentEpisode`
+  // has resolved (so `openEpisodeScript` above has a real episode to work
+  // with, not a premature `null` that would bounce to the Episodes module),
+  // then immediately clears `shot` from the URL in the SAME effect — true
+  // one-shot, mirroring the `shot`-clearing contract `handleStoryboardViewChange`
+  // already enforces on a manual tab switch. Not gated on `activeModule` —
+  // the deep-link's destination is the EDITOR, a different module entirely,
+  // so it's meant to fire regardless of which module the URL happened to
+  // land on first.
+  useEffect(() => {
+    const shotId = readWorkspaceParams(searchParams).shot;
+    if (!shotId || !currentEpisode) return;
+    handleOpenShotInEditor(shotId, null);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('shot');
+        return next;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately narrow: re-checks whenever `searchParams` changes (for a fresh `shot` value) or `currentEpisode` first resolves; `handleOpenShotInEditor`'s identity riding on `currentEpisode` would otherwise re-fire this on every episodes refetch even with no `shot` in the URL, but the `!shotId` guard above already makes that a no-op
+  }, [searchParams, currentEpisode, setSearchParams]);
 
   // Film slate read-out (studio only): 1-based episode + active-scene numbers.
   const epIdx = episodes.findIndex((e) => e.episode_id === currentEpisode?.episode_id);
@@ -719,12 +778,11 @@ export function ProjectWorkspace({
             teamId={teamId ?? ''}
             episode={currentEpisode}
             initialView={readWorkspaceParams(searchParams).view}
-            focusShotId={readWorkspaceParams(searchParams).shot}
             onViewChange={handleStoryboardViewChange}
             findExistingScript={findExistingScript}
             provisionScript={resolveOrProvisionScript}
             onOpenScene={(sceneId) => handleOpenWorkView('storyboard', { sceneId })}
-            onShotDeepLink={handleStoryboardShotDeepLink}
+            onOpenShotInEditor={handleOpenShotInEditor}
           />
         ) : (
           <div className="flex-1 overflow-y-auto px-6 pb-8">

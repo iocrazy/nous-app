@@ -199,7 +199,12 @@ describe('EpisodeSceneBoard', () => {
     expect(screen.getByTestId('scene-columns').className).toMatch(/overflow-x-auto/);
   });
 
-  it('clicking a shot card reports the shot id', async () => {
+  // Task 3 修复轮2 (2026-08-10 用户拍板): the shot's own sceneId rides along
+  // (the column it's rendered in already has it) — the editor deep-link
+  // orchestration in ProjectWorkspace needs it to route via
+  // `openEpisodeScript(episode, 'storyboard', sceneId)`. Both ids stay
+  // strings, no `Number()` round-trip.
+  it('clicking a shot card reports the shot id AND its scene id', async () => {
     svc.listScenes.mockResolvedValue([scene({ id: '9007199254740995' })]);
     svc.listShots.mockResolvedValue([shot({ id: '9007199254740997', scene_id: '9007199254740995' })]);
     const onOpenShot = vi.fn();
@@ -207,6 +212,6 @@ describe('EpisodeSceneBoard', () => {
       <EpisodeSceneBoard scriptId="sc1" onOpenScene={vi.fn()} onOpenShot={onOpenShot} />,
     );
     (await screen.findByTestId('shot-card-9007199254740997')).click();
-    expect(onOpenShot).toHaveBeenCalledWith('9007199254740997');
+    expect(onOpenShot).toHaveBeenCalledWith('9007199254740997', '9007199254740995');
   });
 });

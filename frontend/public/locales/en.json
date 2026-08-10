@@ -1427,7 +1427,7 @@
     },
     "storyboardPage": {
       "title": "Storyboard",
-      "shotHint": "Open on canvas"
+      "shotHint": "Open in editor"
     },
     "sceneBoard": {
       "open": "Open",

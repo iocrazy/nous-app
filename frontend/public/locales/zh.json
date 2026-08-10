@@ -1427,7 +1427,7 @@
     },
     "storyboardPage": {
       "title": "分镜",
-      "shotHint": "在画布中打开"
+      "shotHint": "在编辑器中打开"
     },
     "sceneBoard": {
       "open": "打开",

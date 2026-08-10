@@ -20,7 +20,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loading } from '../common/Loading';
 import { useToast } from '../Toast';
-import { requestShotFocus } from '../agentActivity/shotFocusBus';
 import { EpisodeViewTabs } from './EpisodeViewTabs';
 import { EpisodeSceneBoard } from './EpisodeSceneBoard';
 import { EpisodeShotListTable, type EpisodeShotListTableHandle } from './EpisodeShotListTable';
@@ -34,21 +33,22 @@ export interface EpisodeStoryboardPageProps {
   episode: EpisodeProgress | null;
   /** 'storyboard' | 'canvas' | 'shotlist', from URL ?view=; defaults to 'storyboard'. */
   initialView: string | null;
-  /** URL ?shot=: on entry, switch to canvas and requestShotFocus. */
-  focusShotId: string | null;
   onViewChange: (view: string) => void;
   findExistingScript: (ep: EpisodeProgress) => Promise<string | null>;
   provisionScript: (ep: EpisodeProgress) => Promise<string | null>;
   /** Scene card's Open deep-link → the real editor at the scene level. */
   onOpenScene: (sceneId: string) => void;
   /**
-   * Shot card click (Task 3) → persist `view=canvas` AND `shot=id` in ONE
-   * URL write. Deliberately NOT `onViewChange`: that path clears `shot` (see
-   * `handleTabChange`'s comment) because a manual tab pick invalidates any
-   * pending deep-link — but THIS is the write that arms the deep-link in the
-   * first place, so it must go through a separate container callback.
+   * Shot card click (Task 3 修复轮2, 2026-08-10 用户拍板) → deep-link into the
+   * REAL script editor's storyboard rail, focused on this shot — NOT this
+   * page's own Canvas tab. `shotFocusBus`'s only subscriber is EditorShell
+   * (~editor/components/EditorShell.tsx:534); this page's `view==='canvas'`
+   * tab is the materials canvas (no shot nodes at all — a focus request there
+   * would spin the bus emptily). The container (ProjectWorkspace) owns the
+   * editor-mount + bus-retry orchestration since only it can flip
+   * `activeModule` to the embedded editor; this page just forwards the click.
    */
-  onShotDeepLink: (shotId: string) => void;
+  onOpenShotInEditor: (shotId: string, sceneId: string) => void;
 }
 
 const STORYBOARD_VIEWS = SURFACE_VIEWS.storyboard;
@@ -73,12 +73,11 @@ export function EpisodeStoryboardPage({
   teamId,
   episode,
   initialView,
-  focusShotId,
   onViewChange,
   findExistingScript,
   provisionScript,
   onOpenScene,
-  onShotDeepLink,
+  onOpenShotInEditor,
 }: EpisodeStoryboardPageProps) {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -101,40 +100,6 @@ export function EpisodeStoryboardPage({
       onViewChange(next);
     },
     [onViewChange],
-  );
-
-  // `?shot=` deep-link: land straight on Canvas (LOCAL state only — never
-  // via `onViewChange`/the URL) and ask whoever is listening on the bus to
-  // reveal the shot once it has mounted (300ms — the canvas module's own
-  // load/mount effect needs to settle first). If this instead called
-  // `onViewChange` (which clears `shot`), the resulting URL write would
-  // re-render the parent with `focusShotId` now null, and THIS effect's own
-  // cleanup (dependency `[focusShotId]` changing) would cancel the still-
-  // pending timer before `requestShotFocus` ever fires — the deep link would
-  // silently do nothing. Leaving `shot` in the URL here is also what makes
-  // the link re-shareable/reload-safe; it only gets cleared by an explicit
-  // later tab click (handleTabChange above).
-  useEffect(() => {
-    if (!focusShotId) return;
-    setViewState('canvas');
-    const timer = window.setTimeout(() => requestShotFocus(focusShotId), 300);
-    return () => window.clearTimeout(timer);
-  }, [focusShotId]);
-
-  // Scene board's shot-card click (Task 3): jump to Canvas immediately (LOCAL
-  // state, same path the deep-link effect above uses) and schedule the same
-  // 300ms-delayed `requestShotFocus` (the canvas module's own mount/load
-  // effect needs to settle before a focus request means anything). Persist
-  // `view=canvas`+`shot=id` to the URL via `onShotDeepLink` — NOT
-  // `onViewChange`, which would delete the very `shot` param this click just
-  // asked for (see `handleTabChange`'s comment above).
-  const handleOpenShot = useCallback(
-    (shotId: string) => {
-      setViewState('canvas');
-      window.setTimeout(() => requestShotFocus(shotId), 300);
-      onShotDeepLink(shotId);
-    },
-    [onShotDeepLink],
   );
 
   // Read-only probe (ported from ProjectWorkspace's surface panel, Task 3
@@ -250,7 +215,7 @@ export function EpisodeStoryboardPage({
               <EpisodeSceneBoard
                 scriptId={script.scriptId}
                 onOpenScene={onOpenScene}
-                onOpenShot={handleOpenShot}
+                onOpenShot={onOpenShotInEditor}
               />
             ) : (
               renderScriptGate()

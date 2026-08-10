@@ -25,8 +25,14 @@ export interface EpisodeSceneBoardProps {
   scriptId: string;
   /** Deep-link into the scene (opens the script editor there). */
   onOpenScene: (sceneId: string) => void;
-  /** Shot card click → jump to Canvas and focus this shot (Task 3). */
-  onOpenShot: (shotId: string) => void;
+  /**
+   * Shot card click → deep-link into the script editor's storyboard rail,
+   * focused on this shot (Task 3 修复轮2, 2026-08-10 用户拍板: the editor is
+   * the only shotFocusBus subscriber — NOT this page's own Canvas tab). The
+   * shot's own sceneId rides along since the column it's rendered in already
+   * has it at hand — same shape as `onOpenScene` above.
+   */
+  onOpenShot: (shotId: string, sceneId: string) => void;
 }
 
 /** Slate scene-number read-out: the real value, or a 1-based fallback. */
@@ -197,7 +203,7 @@ export function EpisodeSceneBoard({ scriptId, onOpenScene, onOpenShot }: Episode
                       key={shotItem.id}
                       type="button"
                       data-testid={`shot-card-${shotItem.id}`}
-                      onClick={() => onOpenShot(String(shotItem.id))}
+                      onClick={() => onOpenShot(String(shotItem.id), key)}
                       className="rounded-md border border-dashed border-line bg-island-2 px-2 py-2.5 text-center hover:border-agent-line hover:bg-agent-soft"
                     >
                       <span className="block font-mono text-[11.5px] font-bold text-ink-300">
@@ -207,7 +213,7 @@ export function EpisodeSceneBoard({ scriptId, onOpenScene, onOpenShot }: Episode
                         })}
                       </span>
                       <span className="text-[10.5px] text-ink-500">
-                        {t('projects.storyboardPage.shotHint', 'Open on canvas')}
+                        {t('projects.storyboardPage.shotHint', 'Open in editor')}
                       </span>
                     </button>
                   ))
