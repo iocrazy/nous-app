@@ -16,6 +16,8 @@
  * A button that sometimes destroys the wrong card is worse than no button, so
  * the summary ships read-only until the shot writes are given attribution and
  * a run-scoped inverse (see the A7 report for the four-item backend list).
+ *
+ * (2026-08-09 拍板:撤销延后独立立项——shot 归属列+run 级逆操作,见 memory)
  */
 
 import React, { useCallback } from 'react';
