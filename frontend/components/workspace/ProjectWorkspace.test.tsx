@@ -1141,9 +1141,11 @@ describe('ProjectWorkspace — Task 9 node config inline edit', () => {
     await waitFor(() =>
       expect(screen.getByTestId('node-card-owner').textContent).toMatch(/assign/i),
     );
-    // A 403 revert is NOT a "reload and trust the server" path — no second
-    // fetch was needed since the local revert already matches server state.
-    expect(mockWorkflowService.fetchProjectWorkflow).toHaveBeenCalledTimes(1);
+    // 修复轮1 (Important #1): the revert path RE-FETCHES server truth
+    // (`reloadWorkflow()`) rather than re-merging a captured pre-edit
+    // snapshot — see `handlePatchNode`'s file-doc comment. That's the
+    // second `fetchProjectWorkflow` call (first was the initial mount).
+    expect(mockWorkflowService.fetchProjectWorkflow).toHaveBeenCalledTimes(2);
   });
 
   it('a non-403 PATCH failure reverts the optimistic value and shows the generic error toast', async () => {
@@ -1161,5 +1163,60 @@ describe('ProjectWorkspace — Task 9 node config inline edit', () => {
     await waitFor(() =>
       expect(screen.getByTestId('node-card-owner').textContent).toMatch(/assign/i),
     );
+  });
+
+  // 评审修复轮1 (Important #1): pins the concurrency fix directly — a
+  // schedule PATCH succeeds and reloads (server now has the new schedule),
+  // then a fast-follow owner PATCH on the SAME node fails. Before the fix,
+  // the failure handler re-merged a `prevNode` snapshot captured BEFORE
+  // either edit, which would silently wipe the already-confirmed schedule
+  // back to empty too — with no toast hinting why. The fix (revert via
+  // `reloadWorkflow()` instead of a snapshot merge) means the schedule
+  // survives because it re-fetches real server state, which still has it.
+  it('a later failing PATCH does not roll back an earlier already-succeeded field on the same node', async () => {
+    const baseNode = stageNode({
+      id: '1',
+      owner_user_id: null,
+      planned_start: '2026-08-01',
+      planned_due: null,
+    });
+    const afterSchedule = { ...baseNode, planned_due: '2026-08-10' };
+    mockWorkflowService.fetchProjectWorkflow
+      .mockResolvedValueOnce({ has_workflow: true, current_node_id: '1', agents_active: 0, nodes: [baseNode] }) // initial mount
+      .mockResolvedValueOnce({ has_workflow: true, current_node_id: '1', agents_active: 0, nodes: [afterSchedule] }) // reload after schedule PATCH succeeds
+      .mockResolvedValueOnce({ has_workflow: true, current_node_id: '1', agents_active: 0, nodes: [afterSchedule] }); // revert-reload after owner PATCH fails — schedule is untouched server-side
+    mockProjectsService.fetchProjectMembers.mockResolvedValue([
+      { project_id: 'p1', user_id: 'alice-uuid', role: 'editor', invited_by: null, email: 'alice@example.com', joined_at: '' },
+    ]);
+    mockWorkflowService.updateProjectNode
+      .mockResolvedValueOnce(afterSchedule) // schedule PATCH succeeds
+      .mockRejectedValueOnce(new ApiError('Forbidden', 403, { details: { code: 'node_config_forbidden' } })); // owner PATCH fails
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    // 1) Schedule PATCH: planned_start is already set (from baseNode), so a
+    // SINGLE day click completes the range (DateRangePopover's
+    // commit-on-complete: pendingStart pre-seeded from the prop, pendingEnd
+    // null → this click completes rather than starting a fresh draft).
+    fireEvent.click(await screen.findByTestId('node-card-schedule'));
+    fireEvent.click(await screen.findByRole('button', { name: '2026-08-10' }));
+    await waitFor(() =>
+      expect(mockWorkflowService.updateProjectNode).toHaveBeenNthCalledWith(1, 'p1', '1', {
+        planned_start: '2026-08-01',
+        planned_due: '2026-08-10',
+      }),
+    );
+    await waitFor(() => expect(mockWorkflowService.fetchProjectWorkflow).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('node-card-schedule').textContent).toContain('2026-08-10');
+
+    // 2) Owner PATCH, on the SAME node, fails.
+    fireEvent.click(screen.getByTestId('node-card-owner'));
+    fireEvent.click(await screen.findByText('alice@example.com'));
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith('projects.nodeCard.forbidden', 'error'));
+    await waitFor(() => expect(mockWorkflowService.fetchProjectWorkflow).toHaveBeenCalledTimes(3));
+
+    // The already-confirmed schedule survives — not stomped by a stale
+    // pre-both-edits snapshot merge.
+    expect(screen.getByTestId('node-card-schedule').textContent).toContain('2026-08-10');
+    expect(screen.getByTestId('node-card-owner').textContent).toMatch(/assign/i);
   });
 });

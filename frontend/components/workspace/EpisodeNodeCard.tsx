@@ -47,7 +47,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Bot,
-  Check,
   ChevronDown,
   ExternalLink,
   FileCheck2,
@@ -55,11 +54,11 @@ import {
   Settings,
   User,
 } from 'lucide-react';
-import type { ProjectNodePatch, ProjectStageNode } from '../../types';
+import type { ProjectNodePatch, ProjectStageNode, WorkflowMemberRef } from '../../types';
 import { resolveSurface } from './nodeSurface';
 import { NODE_STATUS_CONFIG, NODE_STATUS_LABEL } from '../workflow/nodeStatus';
 import { DateRangePopover } from '../common/DateRangePopover';
-import type { AgentOption, PersonOption } from '../workflow/OwnerPicker';
+import { OwnerCandidateList, type AgentOption, type PersonOption } from '../workflow/OwnerCandidateList';
 
 /** The subset of `ProjectNodePatch` this card's editable facts ever send —
  * owner/schedule only (members/skipped/form_data/brief stay on the fuller
@@ -200,6 +199,15 @@ export const EpisodeNodeCard: FC<EpisodeNodeCardProps> = ({
     void onPatchNode(node.id, patch);
   };
 
+  // `OwnerCandidateList`'s selection contract (shared with `OwnerPicker`,
+  // 评审修复轮1) speaks `WorkflowMemberRef` ({user_id} xor {agent_id}), not
+  // this card's own `NodeConfigPatch` shape — translate at the boundary.
+  const isOwnerSelected = (ref: WorkflowMemberRef): boolean =>
+    (!!ref.user_id && ref.user_id === node.owner_user_id) ||
+    (!!ref.agent_id && ref.agent_id === node.owner_agent_id);
+  const selectOwner = (ref: WorkflowMemberRef) =>
+    patchOwner({ owner_user_id: ref.user_id ?? null, owner_agent_id: ref.agent_id ?? null });
+
   // ── Task 9: schedule popover (DateRangePopover, anchored on the trigger). ─
   const [scheduleAnchor, setScheduleAnchor] = useState<HTMLElement | null>(null);
 
@@ -251,49 +259,15 @@ export const EpisodeNodeCard: FC<EpisodeNodeCardProps> = ({
                     {t('projects.nodeCard.unassign', 'Unassign')}
                   </button>
                 )}
-                {people.length > 0 && (
-                  <>
-                    <div className="px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-600">
-                      {t('projects.nodeCard.people', 'People')}
-                    </div>
-                    {people.map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => patchOwner({ owner_user_id: p.id, owner_agent_id: null })}
-                        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-[13px] text-ink-200 hover:bg-ink-800"
-                      >
-                        <User size={12} />
-                        <span className="min-w-0 flex-1 truncate text-left">{p.name}</span>
-                        {node.owner_user_id === p.id && <Check size={13} className="shrink-0 text-ok" />}
-                      </button>
-                    ))}
-                  </>
-                )}
-                {agents.length > 0 && (
-                  <>
-                    <div className="px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-ink-600">
-                      {t('projects.nodeCard.agents', 'Agents')}
-                    </div>
-                    {agents.map((a) => (
-                      <button
-                        key={a.id}
-                        type="button"
-                        onClick={() => patchOwner({ owner_user_id: null, owner_agent_id: a.id })}
-                        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-[13px] text-ink-200 hover:bg-ink-800"
-                      >
-                        <Bot size={12} />
-                        <span className="min-w-0 flex-1 truncate text-left">{a.name}</span>
-                        {node.owner_agent_id === a.id && <Check size={13} className="shrink-0 text-ok" />}
-                      </button>
-                    ))}
-                  </>
-                )}
-                {people.length === 0 && agents.length === 0 && (
-                  <div className="px-2.5 py-2 text-[13px] text-ink-500">
-                    {t('projects.nodeCard.noCandidates', 'No candidates')}
-                  </div>
-                )}
+                <OwnerCandidateList
+                  people={people}
+                  agents={agents}
+                  isSelected={isOwnerSelected}
+                  onSelect={selectOwner}
+                  peopleLabel={t('projects.nodeCard.people', 'People')}
+                  agentsLabel={t('projects.nodeCard.agents', 'Agents')}
+                  emptyLabel={t('projects.nodeCard.noCandidates', 'No candidates')}
+                />
               </div>
             )}
           </div>

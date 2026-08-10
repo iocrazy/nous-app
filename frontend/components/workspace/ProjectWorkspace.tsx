@@ -301,15 +301,24 @@ export function ProjectWorkspace({
   // on failure, and is the SOLE toaster for this action (EpisodeNodeCard
   // itself holds no local state and never toasts — see that file's doc
   // comment) so there's exactly one toast per failed patch, not two.
+  //
+  // 评审修复轮1 (Important #1): failure reverts by RE-FETCHING server truth
+  // (`reloadWorkflow()`), not by re-merging a captured pre-edit node
+  // snapshot. The snapshot approach broke under a fast concurrent edit:
+  // schedule PATCH succeeds + reloads (server now has the new schedule),
+  // then a fast-follow owner PATCH on the SAME node fails — merging the
+  // stale (pre-BOTH-edits) snapshot back in would silently stomp the
+  // already-confirmed schedule too, with no toast explaining why. Re-fetch
+  // is simple and always correct; the cost is one extra request on the
+  // (already the unhappy, infrequent) failure path — accepted trade-off.
   const handlePatchNode = useCallback(
     async (nodeId: string, patch: NodeConfigPatch): Promise<void> => {
-      const prevNode = workflow?.nodes.find((n) => n.id === nodeId) ?? null;
       patchNodeLocally(nodeId, patch);
       try {
         await updateProjectNode(project.id, nodeId, patch);
         await reloadWorkflow();
       } catch (err) {
-        if (prevNode) patchNodeLocally(nodeId, prevNode);
+        await reloadWorkflow();
         const forbidden =
           err instanceof ApiError &&
           err.status === 403 &&
@@ -323,7 +332,7 @@ export function ProjectWorkspace({
         );
       }
     },
-    [project.id, workflow, patchNodeLocally, reloadWorkflow, addToast, t],
+    [project.id, patchNodeLocally, reloadWorkflow, addToast, t],
   );
   // The advance/back confirm gate — one instance, shared by the node card's
   // Complete/Back buttons and the top-bar stepper. Holds the server preview so
