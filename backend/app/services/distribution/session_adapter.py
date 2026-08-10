@@ -251,8 +251,24 @@ class PlatformSessionProfile:
 SESSION_PLATFORM_PROFILES: dict[str, PlatformSessionProfile] = {
     "douyin": PlatformSessionProfile(
         platform="douyin",
-        content_types=frozenset({"video", "images"}),
+        # **只有 video** —— 这是对浏览器侧实现的忠实记录，不是产品决定。
+        # 唯一真相是 ``browser/app/publish.py`` 的
+        # ``SUPPORTED_CONTENT_TYPES = ("video",)``：``douyin_publish.py`` 目前
+        # 只上传 ``job.assets[VIDEO_ROLE]`` 这一个文件，图集要的多文件 + 排序
+        # + 不同的封面语义一行都没写。
+        #
+        # 这里曾经写着 ``{"video", "images"}``，于是三层声明打架：前端能选、
+        # 后端放行、浏览器拒。用户填完整个表单、提交、排队，直到最后一步才拿到
+        # ``unsupported_content_type``。**宣称一个不存在的能力比不宣称糟得多**
+        # —— 拒绝本身是对的，晚了才是缺陷。
+        #
+        # 图集要做（P2-1 步骤 2）。实现完成时这里加回 "images"，且必须与
+        # browser 侧同一个 PR 落地：这一行是能力声明，不是愿望清单。
+        content_types=frozenset({"video"}),
         video_extensions=frozenset({".mp4", ".mov", ".webm"}),
+        # 保持原样：这是**逐个 media 条目**的扩展名白名单（``_extension_problems``
+        # 按 ``kind`` 选表），跟"能不能发图集"是两件事，删掉只会让 P2-1 步骤 2
+        # 多一次考古。
         image_extensions=frozenset({".jpg", ".jpeg", ".png"}),
         # 上限待 S3 对着 creator.douyin.com 实测后填入（见 docstring）。
         # 下面三项相反 —— 是 2026-08-06 在真实发布页上探过的，属于"确定的事"：

@@ -16,6 +16,7 @@ import {
   addResourceTag, createTag, removeResourceTag,
 } from '../../services/unifiedTagService';
 import { TO_PUBLISH_TAG_NAME, findToPublishTagId } from '../../services/toPublishService';
+import { supportsImagePosts } from './capabilities';
 import { SocialAccount, LibraryVideo, SelfDeclaration } from '../../types';
 import { CoverPicker, CoverPair } from './CoverPicker';
 import { useToast } from '../Toast';
@@ -285,11 +286,41 @@ export const PublishPage: React.FC = () => {
 
   const isImages = contentType === 'images';
 
+  /**
+   * Can the accounts this post would reach take an image gallery?
+   *
+   * Gated on the accounts the post actually goes to (all connected ones until
+   * the user narrows it down) rather than on a global flag: "no platform can
+   * do this" and "the platform YOU picked can't do this" are the same failure
+   * for the user, and both have to be visible before the form is filled in.
+   *
+   * `supportsImagePosts` is currently false for every platform — see
+   * ./capabilities. The tab is therefore disabled, which is the whole point of
+   * this gate: the browser service refuses `content_type=images`, and finding
+   * that out after a full form + queue wait is the bug being fixed.
+   */
+  const imagesSupported = useMemo(() => {
+    const targets = selectedAccounts.length
+      ? accounts.filter((a) => selectedAccounts.includes(a.id))
+      : accounts;
+    return targets.length > 0 && targets.every((a) => supportsImagePosts(a.platform));
+  }, [accounts, selectedAccounts]);
+
+  // Says why the tab is dead, in the same words on the tooltip and in the card.
+  const imagesUnsupportedHint = t(
+    'distribution.publish.imagesUnsupported',
+    'Image posts are not supported yet — the connected platforms can only publish video.',
+  );
+
   // Switch content type: clears the selection (video ids ≠ image ids), resets
   // the picker to the Library tab (Generated is video-only), and pins images
   // to broadcast (a note is one post per account — never round-robin split).
   const onContentTypeChange = (kind: ContentKind) => {
     if (kind === contentType) return;
+    // The tab is already disabled — this is the second lock. A `disabled`
+    // attribute is a rendering detail; the state change is what would arm a
+    // post the platform is going to refuse.
+    if (kind === 'images' && !imagesSupported) return;
     setContentType(kind);
     setSelectedVideos([]);
     // Covers are frames OF the cleared selection — keeping them would publish
@@ -585,8 +616,13 @@ export const PublishPage: React.FC = () => {
     () => selectedVideos.length > 0
       && selectedAccounts.length > 0
       && title.trim().length > 0
-      && scheduleIssue === null,
-    [selectedVideos, selectedAccounts, title, scheduleIssue],
+      && scheduleIssue === null
+      // Images mode can only be entered while it is supported, but the
+      // supported set is derived from the SELECTED accounts — picking one more
+      // account can close the gate afterwards. Refusing here beats letting the
+      // platform refuse after the upload.
+      && (!isImages || imagesSupported),
+    [selectedVideos, selectedAccounts, title, scheduleIssue, isImages, imagesSupported],
   );
 
   const postsBroadcast = selectedVideos.length * selectedAccounts.length;
@@ -708,16 +744,26 @@ export const PublishPage: React.FC = () => {
               >
                 {t('distribution.publish.contentTypeVideo', 'Video')}
               </button>
+              {/* Disabled, not removed: image posts are a planned feature and
+                  every images code path below is kept alive for them. What is
+                  removed is the CLAIM — until the browser service can post a
+                  gallery, offering the choice only moves the refusal to the
+                  last step of a form the user already filled in. */}
               <button
                 type="button"
                 role="tab"
                 aria-selected={isImages}
+                disabled={!imagesSupported}
+                title={imagesSupported ? undefined : imagesUnsupportedHint}
                 className={isImages ? 'on' : ''}
                 onClick={() => onContentTypeChange('images')}
               >
                 {t('distribution.publish.contentTypeImages', 'Images')}
               </button>
             </div>
+            {!imagesSupported && (
+              <p className="hint" style={{ marginBottom: 10 }}>{imagesUnsupportedHint}</p>
+            )}
             <div className="seg">
               <button type="button" className="on">{t('distribution.publish.fromLibrary', 'From Library')}</button>
               {isImages ? (

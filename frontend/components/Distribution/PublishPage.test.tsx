@@ -139,6 +139,19 @@ vi.mock('../../contexts/TeamContext', () => ({
   useTeamContext: () => ({ personalTeamId: 'pt1' }),
 }));
 
+// The Images tab is gated on ./capabilities, whose real table is EMPTY today —
+// no platform's publisher can post a gallery yet (see the module comment). The
+// images coverage in this file (gallery expand, inline upload, pick order,
+// cover copy) is for the feature P2-1 step 2 is going to ship, so it runs
+// against a capability table where Douyin CAN take images. Mocking it here is
+// also the positive control for the gate: the tab is enabled purely because
+// this table says so, which is what makes the disabled assertions in
+// PublishPage.imagesGate.test.tsx (real table, no mock) mean something.
+vi.mock('./capabilities', () => ({
+  IMAGE_POST_PLATFORMS: new Set(['douyin']),
+  supportsImagePosts: (platform: string) => platform === 'douyin',
+}));
+
 import PublishPage from './PublishPage';
 
 describe('PublishPage', () => {
