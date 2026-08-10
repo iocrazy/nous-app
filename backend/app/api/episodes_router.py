@@ -70,7 +70,16 @@ async def create_episode(
     _guard: None = Depends(verify_project_write_access),
 ) -> Dict[str, Any]:
     """Create an episode under a project. Title defaults to 'Ep 1' (DB
-    default) when omitted."""
+    default) when omitted.
+
+    ARRANGEMENT (Task 7, workspace IA redesign spec §5): manager only — the
+    base ``verify_project_write_access`` guard alone let any team member
+    create episodes; this tightens it, no episode-owner carve-out (there's
+    no episode yet to own)."""
+    from app.services.workflow.node_authz import require_arrangement_role
+
+    await require_arrangement_role(project_id, auth.user_id)
+
     try:
         data = body.model_dump(exclude_none=True)
         data["project_id"] = project_id
@@ -152,10 +161,23 @@ async def delete_episode(
     script_projects.episode_id is ON DELETE RESTRICT (mig 338): deleting an
     episode that still owns scripts violates the FK. Surface that as a clean
     409 instead of a raw 500 — caught by the live API round-trip 2026-07-06.
-    """
+
+    ARRANGEMENT (Task 7, workspace IA redesign spec §5): manager only — the
+    base ``verify_episode_write_access`` guard alone let any team member
+    delete episodes; this tightens it, no episode-owner carve-out (an owner
+    manages their episode's content, not whether the episode exists)."""
+    from app.services.workflow.node_authz import require_arrangement_role
+
     try:
+        episode = await get_episode_repository().get_by_id(episode_id)
+        if episode is None:
+            raise HTTPException(status_code=404, detail="Episode not found")
+        await require_arrangement_role(str(episode["project_id"]), auth.user_id)
+
         await get_episode_repository().delete(episode_id)
         return {"success": True}
+    except HTTPException:
+        raise
     except IntegrityError:
         raise HTTPException(
             status_code=409,

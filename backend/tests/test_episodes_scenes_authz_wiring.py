@@ -304,10 +304,25 @@ async def test_delete_nonempty_episode_returns_409_not_500(client, monkeypatch):
 
     from app.repositories.episode_repository import EpisodeRepository
 
+    async def fake_get_by_id(self, episode_id):
+        return {"id": episode_id, "project_id": "123"}
+
     async def fake_delete(self, episode_id):
         raise IntegrityError("stmt", {}, Exception("fk restrict"))
 
+    monkeypatch.setattr(EpisodeRepository, "get_by_id", fake_get_by_id)
     monkeypatch.setattr(EpisodeRepository, "delete", fake_delete)
+
+    # Task 7: delete_episode now requires manager (ARRANGEMENT gate) before
+    # attempting the delete at all — stub the role resolver so the request
+    # reaches delete() and this test still exercises the IntegrityError→409
+    # mapping it's named for, not the (separately pinned) 403 path.
+    import app.core.workflow_roles as workflow_roles
+
+    async def fake_resolve(user_id, *, project_id=None, team_id=None):
+        return "manager"
+
+    monkeypatch.setattr(workflow_roles, "resolve_effective_role", fake_resolve)
 
     from app.main import app
 

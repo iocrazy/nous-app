@@ -250,6 +250,16 @@ REPO_LAYER_ALLOWED_PATHS: dict[str, str] = {
         "name per episode (breaks the cross-episode shared-folder P0 trap); "
         "episode_id is the node's own frozen surface scope, not model-supplied."
     ),
+    "services/workflow/node_authz.py": (
+        "Task 7, workspace IA redesign spec §5. can_edit_node_config reads "
+        "get_episode_repository().get_by_id(episode_id) to compare its "
+        "owner_id against the caller — episode_id comes from an already "
+        "project-scoped node row (project_stage_nodes.episode_id, fetched by "
+        "the authenticated /workflow/nodes/{node_id} PATCH handler after its "
+        "own project guard), never a bare model/user-supplied id; same "
+        "pattern as node_folders.py and advance_service.py above, not the "
+        "agent-tool scope path this guard protects."
+    ),
     "services/workflow/surface_completion.py": (
         "B4 回流 hook 服务（产物写入回流点触发自动完成）。读判据/节点/镜像走 "
         "repo 公开接口（surface_criteria_for_episode / list_nodes_by_episode / "
