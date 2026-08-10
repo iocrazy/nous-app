@@ -1646,6 +1646,7 @@ class ProjectStageNodesRepository:
                             ProjectStageNodes.name,
                             ProjectStageNodes.sort_order,
                             ProjectStageNodes.skipped,
+                            ProjectStageNodes.episode_id,
                         )
                         .where(ProjectStageNodes.project_id.in_(pids))
                         .order_by(
@@ -1675,10 +1676,10 @@ class ProjectStageNodesRepository:
 
         # Group non-skipped nodes per project (already ordered by sort_order).
         active_by_pid: Dict[int, List[tuple]] = {}
-        for pid, nid, nname, _so, skipped in node_rows:
+        for pid, nid, nname, _so, skipped, ep_id in node_rows:
             if skipped:
                 continue
-            active_by_pid.setdefault(pid, []).append((nid, nname))
+            active_by_pid.setdefault(pid, []).append((nid, nname, ep_id))
 
         out: Dict[str, Dict[str, Any]] = {}
         for pid in pids:
@@ -1688,15 +1689,22 @@ class ProjectStageNodesRepository:
             cursor = cursors.get(pid)
             current_name: Optional[str] = None
             position: Optional[int] = None
+            total = len(active)
             if cursor is not None:
-                for i, (nid, nname) in enumerate(active):
+                # total/position 按游标节点所属集计(B6 尾巴,2026-08-09):
+                # 3 集 × 10 节点的项目不该显示「X of 30」。legacy 节点的
+                # episode_id 全 None → None 集合就是全项目,口径逐字不变。
+                cursor_ep = next((ep for nid, _n, ep in active if nid == cursor), None)
+                scoped = [t for t in active if t[2] == cursor_ep]
+                for i, (nid, nname, _ep) in enumerate(scoped):
                     if nid == cursor:
                         current_name = nname
                         position = i + 1
+                        total = len(scoped)
                         break
             out[str(pid)] = {
                 "current_node_name": current_name,
-                "workflow_total": len(active),
+                "workflow_total": total,
                 "workflow_position": position,
                 "agents_active": int(agent_counts.get(pid, 0)),
             }
