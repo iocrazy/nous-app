@@ -578,6 +578,35 @@ class AgentRunsRepository(AsyncpgRepository):
             logger.error(f"Failed to request cancel for run {run_id}: {e}")
             return False
 
+    async def claim_undo(self, run_id: str, *, user_id: UUID) -> str:
+        """Run 级撤销的一次性认领（mig 413）。单条 CAS：undone_at 从 NULL
+        置 now() 即认领成功；先 claim 后执行是刻意的——两个并发 undo 把
+        scene inverse 应用两次比「崩溃后无法重试」更糟（宁可少撤不可重撤）。
+        返回 'claimed' | 'already_undone' | 'running' | 'not_found'。"""
+        try:
+            async with write_scope() as session:
+                result = await session.execute(
+                    update(AgentRuns)
+                    .where(AgentRuns.id == self._bigint(run_id))
+                    .where(AgentRuns.user_id == user_id)
+                    .where(AgentRuns.undone_at.is_(None))
+                    .where(AgentRuns.status != "running")
+                    .values(undone_at=func.now())
+                )
+                if (result.rowcount or 0) > 0:
+                    return "claimed"
+        except Exception as e:
+            logger.error(f"Failed to claim undo for run {run_id}: {e}")
+            return "not_found"
+        row = await self.get_by_id(run_id, user_id=user_id)
+        if not row:
+            return "not_found"
+        if row.get("undone_at"):
+            return "already_undone"
+        if row.get("status") == "running":
+            return "running"
+        return "not_found"  # pragma: no cover — 竞态兜底
+
     # ------------------------------------------------------------------
     # Issue-linked run housekeeping (A2, needs_input first-class design §5.1)
     # ------------------------------------------------------------------

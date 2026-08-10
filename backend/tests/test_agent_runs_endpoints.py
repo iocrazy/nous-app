@@ -23,6 +23,7 @@ from app.api.ai_library_router import (
     get_usage,
     list_agent_runs,
     list_run_children,
+    undo_run,
 )
 
 
@@ -380,6 +381,67 @@ async def test_cancel_run_returns_accepted_on_success() -> None:
         runs_cls.return_value.request_cancel = AsyncMock(return_value=True)
         result = await cancel_run(uuid4(), _fake_auth())
     assert result["status"] == "cancel_requested"
+
+
+# ---------------------------- undo run ----------------------------
+
+
+@pytest.mark.asyncio
+async def test_undo_run_404_when_not_found() -> None:
+    repo = MagicMock(claim_undo=AsyncMock(return_value="not_found"))
+    with patch(
+        "app.api.ai_library_router.get_agent_runs_repository", return_value=repo
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await undo_run("123", _fake_auth())
+        assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_undo_run_409_while_running() -> None:
+    repo = MagicMock(claim_undo=AsyncMock(return_value="running"))
+    with patch(
+        "app.api.ai_library_router.get_agent_runs_repository", return_value=repo
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await undo_run("123", _fake_auth())
+        assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_undo_run_second_call_reports_already_undone_without_executing() -> None:
+    repo = MagicMock(claim_undo=AsyncMock(return_value="already_undone"))
+    execute = AsyncMock()
+    with (
+        patch("app.api.ai_library_router.get_agent_runs_repository", return_value=repo),
+        patch("app.services.ai.undo.run_undo_service.execute_undo", execute),
+    ):
+        out = await undo_run("123", _fake_auth())
+    assert out["status"] == "already_undone"
+    assert out["skipped"] == []
+    execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_undo_run_claimed_executes_and_returns_typed_report() -> None:
+    repo = MagicMock(claim_undo=AsyncMock(return_value="claimed"))
+    report = {
+        "shots_deleted": 2,
+        "shots_reverted": 1,
+        "scene_elements_reverted": 3,
+        "skipped": [{"kind": "shot", "id": "900", "reason": "rendered"}],
+    }
+    with (
+        patch("app.api.ai_library_router.get_agent_runs_repository", return_value=repo),
+        patch(
+            "app.services.ai.undo.run_undo_service.execute_undo",
+            AsyncMock(return_value=report),
+        ),
+    ):
+        out = await undo_run("800100000000000009", _fake_auth())
+    assert out["status"] == "done"
+    assert out["shots_deleted"] == 2
+    assert out["skipped"][0]["reason"] == "rendered"
 
 
 # ------------------------------- usage -------------------------------
