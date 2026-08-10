@@ -246,7 +246,14 @@ export function ProjectWorkspace({
   const currentEpisode = episodes.find((e) => e.episode_id === currentEpisodeId) ?? null;
 
   // ── Workflow instance (strip + node card + advance gate) ───────────────
-  const { workflow, reload: reloadWorkflow } = useProjectWorkflow(project.id, currentEpisodeId);
+  // `loading` (Task 4 修复轮1): threaded to WorkspaceOverview so it can gate
+  // the accordion's strip/card-slot render — see that prop's doc comment for
+  // why `workflow` alone isn't a safe signal of "this is the expanded
+  // episode's data" during an episode-switch fetch.
+  const { workflow, loading: workflowLoading, reload: reloadWorkflow } = useProjectWorkflow(
+    project.id,
+    currentEpisodeId,
+  );
   // The advance/back confirm gate — one instance, shared by the node card's
   // Complete/Back buttons and the top-bar stepper. Holds the server preview so
   // the dialog only ever renders what the same predicate ruled (#1400).
@@ -644,6 +651,16 @@ export function ProjectWorkspace({
   // deliverable-only one (surface === null) — falls back to its own dedicated
   // Stage Board (Task 7, see guard below: a non-current node's click must not
   // flash open the CURRENT episode's surface panel with unrelated content).
+  //
+  // ⚠️ Task 4 (IA redesign accordion rewrite) unwired this from
+  // `WorkspaceOverview` — its new `onSelectNode` prop only writes URL
+  // `node=` (see `handleSelectNodeId` above), it doesn't take a full
+  // `ProjectStageNode` to route by surface. This function (and
+  // `handleOpenStage` / the `resolveSurface` import it uses) is INTENTIONALLY
+  // KEPT, currently uncalled: Task 5's `EpisodeNodeCard` (the `renderNodeCard`
+  // slot) is expected to reuse this exact routing logic for its own actions
+  // (e.g. an "Open" affordance on the node card). DO NOT DELETE as dead code
+  // without checking Task 5's plan first.
   const handleSelectNode = useCallback(
     (node: ProjectStageNode) => {
       // 拍板（undo 立项附带, Task 7 小尾巴 A, 2026-08-09）：非当前节点点击不再闪当前集的
@@ -852,6 +869,7 @@ export function ProjectWorkspace({
                 project={project}
                 episodes={episodes}
                 workflow={workflow}
+                workflowLoading={workflowLoading}
                 expandedEpisodeId={expandedEpisodeId}
                 selectedNodeId={selectedNodeId}
                 onExpandEpisode={handleExpandEpisode}

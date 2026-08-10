@@ -131,6 +131,7 @@ const base = {
   project: PROJECT,
   episodes: EPISODES,
   workflow: null as ProjectWorkflow | null,
+  workflowLoading: false,
   expandedEpisodeId: null as string | null,
   selectedNodeId: null as string | null,
   onExpandEpisode: noop,
@@ -180,6 +181,81 @@ describe('WorkspaceOverview', () => {
     renderOverview({ expandedEpisodeId: 'ep1', onExpandEpisode });
     fireEvent.click(screen.getByTestId('ep-accordion-row-ep2'));
     expect(onExpandEpisode).toHaveBeenCalledWith('ep2');
+  });
+
+  // ── Task 4 修复轮1: stale-episode workflow flash guard ──────────────────
+  // `useProjectWorkflow` does NOT clear its `workflow` state on a
+  // truthy→truthy episodeId change (only `loading` flips back to true) — so
+  // right after switching the expanded episode, `workflow` can still hold
+  // the PREVIOUS episode's nodes/current_node_id while `workflowLoading` is
+  // true. Simulates exactly that window: `expandedEpisodeId` already points
+  // at ep2, but `workflow` carries stale data (a node id that isn't even in
+  // ep2's node list, standing in for "ep1's current_node_id").
+
+  it('gates the expanded row on workflowLoading — no stale strip while a switch is in flight', () => {
+    renderOverview({
+      expandedEpisodeId: 'ep2',
+      workflowLoading: true,
+      workflow: {
+        has_workflow: true,
+        current_node_id: 'stale-node-from-ep1',
+        agents_active: 0,
+        nodes: [],
+      },
+    });
+    expect(screen.getByTestId('ep-accordion-loading-ep2')).toBeTruthy();
+    expect(screen.queryByTestId('workflow-strip')).toBeNull();
+  });
+
+  it('does not call renderNodeCard with a stale current_node_id while workflowLoading is true', () => {
+    const renderNodeCard = vi.fn((episodeId: string, nodeId: string | null) => (
+      <div data-testid="node-card-slot">
+        CARD:{episodeId}:{nodeId}
+      </div>
+    ));
+    renderOverview({
+      expandedEpisodeId: 'ep2',
+      selectedNodeId: null,
+      workflowLoading: true,
+      workflow: {
+        has_workflow: true,
+        current_node_id: 'stale-node-from-ep1',
+        agents_active: 0,
+        nodes: [],
+      },
+      renderNodeCard,
+    });
+    expect(renderNodeCard).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('node-card-slot')).toBeNull();
+  });
+
+  it('renders the real strip/card slot (not the loading placeholder) once workflowLoading flips back to false', () => {
+    const { rerender } = render(
+      <ToastProvider>
+        <WorkspaceOverview
+          {...base}
+          expandedEpisodeId="ep2"
+          selectedNodeId="n9"
+          workflowLoading
+          workflow={{ has_workflow: true, current_node_id: 'stale-node-from-ep1', agents_active: 0, nodes: [] }}
+        />
+      </ToastProvider>,
+    );
+    expect(screen.getByTestId('ep-accordion-loading-ep2')).toBeTruthy();
+
+    rerender(
+      <ToastProvider>
+        <WorkspaceOverview
+          {...base}
+          expandedEpisodeId="ep2"
+          selectedNodeId="n9"
+          workflowLoading={false}
+          workflow={{ has_workflow: true, current_node_id: 'n9', agents_active: 0, nodes: [] }}
+        />
+      </ToastProvider>,
+    );
+    expect(screen.queryByTestId('ep-accordion-loading-ep2')).toBeNull();
+    expect(screen.getByTestId('node-card-slot').textContent).toContain('CARD:ep2:n9');
   });
 
   // ── Ambiguity #1: no-workflow projects keep the attach entry reachable ──

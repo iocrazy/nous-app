@@ -15,13 +15,27 @@
  * `episode_id`, B6 PR-2 task 10 — see `workflowService.fetchProjectWorkflow`).
  * `ProjectStageNode` itself carries no `episode_id` field to filter a
  * project-wide node list by (confirmed against `types.ts`), so there is no
- * way — nor need — to slice `workflow.nodes` per row. `onExpandEpisode`
- * always routes a non-null id through `ProjectWorkspace.handleEpisodeChange`,
- * which sets `currentEpisodeId` AND writes URL `ep` in the SAME call (Task 1
- * contract), so `expandedEpisodeId` and the episode `workflow` was fetched
- * for are always the same episode whenever a row is open. The accordion body
- * below therefore renders `workflow.nodes` as-is for whichever row is open —
- * filtering by a nonexistent field would just silently break the strip.
+ * way — nor need — to slice `workflow.nodes` per row: whenever a row is open,
+ * `workflow` is either that SAME episode's data or (mid-fetch) STALE data
+ * for whichever episode was open before.
+ *
+ * Stale-episode flash (Task 4 修复轮1, real constraint — the previous version
+ * of this comment claimed `workflow` and `expandedEpisodeId` are "always the
+ * same episode", which is false): `onExpandEpisode` does route a non-null id
+ * through `ProjectWorkspace.handleEpisodeChange` synchronously (`ep=` URL +
+ * `currentEpisodeId` update in the SAME call, so `expandedEpisodeId` flips to
+ * the new episode on the very next render) — but `useProjectWorkflow`
+ * (`frontend/hooks/useProjectWorkflow.ts`) does NOT clear its `workflow`
+ * state on a truthy→truthy `episodeId` change, only `loading` flips back to
+ * `true`. So for the whole fetch-in-flight window after switching episodes,
+ * `expandedEpisodeId` already points at the NEW episode while `workflow`
+ * still holds the OLD episode's `nodes`/`current_node_id`. Rendering the
+ * strip/card slot straight off `workflow` during that window would flash the
+ * previous episode's pipeline state under the new episode's row, and would
+ * hand `renderNodeCard` the previous episode's `current_node_id` as if it
+ * were this episode's default selection. `workflowLoading` (threaded from
+ * the same hook) gates this: while true, the expanded row shows a loading
+ * placeholder instead of `workflow`-derived content.
  *
  * No-workflow / attach-CTA flow (ambiguity #1): kept reachable via the
  * existing `WorkflowSection` (unchanged import) — it owns the "Set up
@@ -37,6 +51,7 @@ import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Clock, MessageCircleQuestion } from 'lucide-react';
 import { formatRelativeTime } from '../../utils/relativeTime';
+import { Loading } from '../common/Loading';
 import { WorkflowSection } from '../workflow/WorkflowSection';
 import { WorkflowStrip } from '../workflow/WorkflowStrip';
 import { EpisodeSummaryRow } from './EpisodeSummaryRow';
@@ -47,8 +62,17 @@ export interface WorkspaceOverviewProps {
   episodes: EpisodeProgress[];
   /** The current episode's workflow instance (null while loading / before an
    * episode has resolved). Internally filtered to the expanded row — see the
-   * file-doc "workflow scoping" note above for why no per-node filter exists. */
+   * file-doc "workflow scoping" note above for why no per-node filter exists,
+   * and why `workflowLoading` (not just `workflow == null`) is what actually
+   * gates a safe render. */
   workflow?: ProjectWorkflow | null;
+  /** True while `useProjectWorkflow`'s fetch for the CURRENT episode is in
+   * flight — including the stale-data window right after switching episodes
+   * (see the file-doc "Stale-episode flash" note). While true, the expanded
+   * row renders a loading placeholder instead of `workflow`-derived content,
+   * so the strip/card slot never shows a previous episode's data under the
+   * newly-expanded row. */
+  workflowLoading?: boolean;
   /** URL `ep=` (Task 1) — which episode's row is expanded. null = all collapsed. */
   expandedEpisodeId: string | null;
   /** URL `node=` — the node selected within the expanded episode's strip. */
@@ -73,6 +97,7 @@ export function WorkspaceOverview({
   project,
   episodes,
   workflow = null,
+  workflowLoading = false,
   expandedEpisodeId,
   selectedNodeId,
   onExpandEpisode,
@@ -141,18 +166,30 @@ export function WorkspaceOverview({
                   isOpen={isOpen}
                   onToggle={onExpandEpisode}
                 >
-                  {isOpen && (
-                    <>
-                      {workflow && (
-                        <WorkflowStrip
-                          nodes={workflow.nodes}
-                          currentNodeId={workflow.current_node_id}
-                          onSelectNode={(node) => onSelectNode(String(node.id))}
-                        />
-                      )}
-                      {renderNodeCard(ep.episode_id, selectedNodeId ?? workflow?.current_node_id ?? null)}
-                    </>
-                  )}
+                  {isOpen &&
+                    (workflowLoading ? (
+                      // Stale-episode flash guard (Task 4 修复轮1) — `workflow`
+                      // may still hold the PREVIOUS episode's nodes/current_node_id
+                      // while this fetch is in flight (see file-doc note above).
+                      // Render a placeholder instead of touching `workflow` at all.
+                      <div
+                        data-testid={`ep-accordion-loading-${ep.episode_id}`}
+                        className="rounded-xl border border-line bg-island p-3"
+                      >
+                        <Loading center label={t('common.loading')} />
+                      </div>
+                    ) : (
+                      <>
+                        {workflow && (
+                          <WorkflowStrip
+                            nodes={workflow.nodes}
+                            currentNodeId={workflow.current_node_id}
+                            onSelectNode={(node) => onSelectNode(String(node.id))}
+                          />
+                        )}
+                        {renderNodeCard(ep.episode_id, selectedNodeId ?? workflow?.current_node_id ?? null)}
+                      </>
+                    ))}
                 </EpisodeSummaryRow>
               );
             })}

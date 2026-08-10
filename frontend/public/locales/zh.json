@@ -1837,7 +1837,6 @@
       },
       "overview": {
         "continue": "继续",
-        "openEpisode": "打开剧集",
         "scriptScenes": "{{count}} 场",
         "shotsProgress": "镜头 {{done}}/{{total}}",
         "rendersCount": "成片 {{count}}",
