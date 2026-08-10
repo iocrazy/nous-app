@@ -361,14 +361,25 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
     proxy_failed: t('distribution.session.proxyFailedHint', 'The egress proxy for this account could not be reached — the account itself is fine. Fix the proxy, then retry.'),
   };
 
-  // `failed` covers two very different things, and saying "the platform
-  // refused the sign-in" for both sends the user hunting in the wrong place.
-  // On 2026-08-06 a dead Xvfb inside the browser container produced exactly
-  // that: the sign-in never reached Douyin at all, but the copy blamed Douyin,
-  // and the first guess it prompted was "is our proxy being rejected?".
+  // `failed` and `timeout` each cover two very different things, and the
+  // generic copy blames the wrong party for one of them every time:
+  //   - "the platform refused the sign-in" for a `ConnectError` sends the user
+  //     off checking whether their account is banned. On 2026-08-09 a routine
+  //     redeploy restarted nous-browser mid-scan and produced exactly that;
+  //     the same account signed in fine six minutes later.
+  //   - "nobody scanned the code in time" for a transport timeout blames the
+  //     user for not scanning a code that our own service never answered for.
   // `detail.error_kind` is the backend's own marker for "this is ours, not the
-  // account's" (spec 7.8) — when it is present, say so.
-  const infraKind = status === 'failed' ? login?.detail?.error_kind : undefined;
+  // account's" (spec 7.8, `SessionErrorKind`) — when it is present, say so.
+  // `proxy_failed` is excluded on purpose: it is already its own status with
+  // its own correct copy, and it points at a *different* fix (the account's
+  // egress proxy, not our browser service).
+  const infraKind = (status === 'failed' || status === 'timeout')
+    ? login?.detail?.error_kind
+    : undefined;
+  const label = infraKind
+    ? t('distribution.session.infraLabel', 'Service temporarily unavailable')
+    : STATUS_LABEL[status];
   const hint = infraKind
     ? t(
       'distribution.session.failedInfraHint',
@@ -376,7 +387,9 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
     )
     : STATUS_HINT[status];
 
-  const tone = TONE[status];
+  // Transient-and-ours reads as `warn`, not `danger`: nothing is broken about
+  // the user's account and the remedy is simply to wait a moment.
+  const tone = infraKind ? 'warn' : TONE[status];
   const busy = status === 'starting' || status === 'connecting';
   const showQr = Boolean(login?.qrcode_data_url) && (status === 'waiting_scan' || status === 'scanned');
   const canRetry = RETRYABLE.has(status);
@@ -431,7 +444,7 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
           <div className="sess-info">
             <div className={`sess-status tone-${tone}`}>
               <span className="d" />
-              {STATUS_LABEL[status]}
+              {label}
             </div>
             <p className="sess-hint">{hint}</p>
             {/* Server-authored detail always wins over the generic hint —

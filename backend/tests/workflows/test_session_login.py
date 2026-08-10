@@ -273,6 +273,33 @@ async def test_infra_failure_streak_gives_up():
     assert client.calls == 3
 
 
+async def test_infra_failure_streak_carries_the_error_kind_out_of_the_loop():
+    """认输时 status 就是 ``failed`` —— 与"平台拒绝"完全同形。
+
+    ``error_kind`` 是唯一能把两者分开的东西，掉在循环里就再也补不回来了：
+    下游（workflow 体 → metadata → 前端）没有任何其他信号可用。
+    """
+    client = _FakeClient(
+        [_snap("failed", error_kind=SessionErrorKind.UNREACHABLE.value)]
+    )
+    outcome = await _run(client, _Harness(), max_infra_failures=3)
+
+    assert outcome.outcome == "failed"
+    assert outcome.detail.get("error_kind") == "unreachable"
+
+
+async def test_platform_rejection_carries_no_error_kind():
+    """反向：平台真的拒绝时 detail 必须是空的。
+
+    如果这里也带上 error_kind，"基建失败"这个标记就失去了鉴别力 ——
+    前端会把每一次真实的平台拒绝都说成"我们这边的问题"。
+    """
+    outcome = await _run(_FakeClient([_snap("failed", message="account blocked")]), _Harness())
+
+    assert outcome.outcome == "failed"
+    assert outcome.detail.get("error_kind") is None
+
+
 async def test_an_unhandled_status_ends_the_loop_instead_of_spinning():
     """§7.8 枚举扩了新值而循环没跟上时，默认"继续等"= 静默空转 5 分钟。"""
     snap = _snap("waiting_scan")
@@ -311,13 +338,14 @@ async def test_metadata_writer_keeps_the_last_qrcode_sticky():
     assert first["qrcode_data_url"] == QR
     assert second["qrcode_data_url"] == QR
     assert second["status"] == "scanned"
-    # 前端契约的 5 个键（spec §4.1）
+    # 前端契约的 6 个键（spec §4.1 + §7.8 的 detail）
     assert set(second) == {
         "platform",
         "status",
         "qrcode_data_url",
         "expires_at",
         "message",
+        "detail",
     }
 
 
@@ -331,6 +359,46 @@ async def test_metadata_write_survives_a_throttled_subtitle_update():
     await writer.publish(_snap("waiting_scan", qr=QR))
 
     manager.patch_metadata.assert_awaited_once()
+
+
+async def test_metadata_writer_publishes_the_error_kind():
+    manager = MagicMock()
+    manager.patch_metadata = AsyncMock()
+    manager.update_progress = AsyncMock()
+    writer = m.LoginMetadataWriter(manager, "wf-1", "douyin")
+
+    await writer.publish(
+        _snap("failed", error_kind=SessionErrorKind.UNREACHABLE.value)
+    )
+
+    login = manager.patch_metadata.await_args.args[1]["login"]
+    assert login["detail"] == {"error_kind": "unreachable"}
+
+
+async def test_public_detail_only_lets_the_two_contract_keys_through():
+    """``metadata.login`` 经 Realtime 广播到浏览器，所以是白名单而非整包透传。
+
+    上游 detail 里混着传输层内务（HTTP 码、超时秒数、浏览器侧的 stage），
+    它们对用户没有意义，也不该变成前端可以依赖的契约。
+    """
+    public = m._public_detail(
+        {
+            "error_kind": "unreachable",
+            "reason": "no session bound",
+            "status_code": 502,
+            "timeout_seconds": 20.0,
+            "stage": "driver",
+        }
+    )
+
+    assert public == {"error_kind": "unreachable", "reason": "no session bound"}
+
+
+async def test_public_detail_is_none_when_there_is_nothing_to_say():
+    """平台拒绝 → 没有 error_kind → 前端的 ``detail?.error_kind`` 落 undefined。"""
+    assert m._public_detail({}) is None
+    assert m._public_detail(None) is None
+    assert m._public_detail({"stage": "driver"}) is None
 
 
 async def test_metadata_message_falls_back_to_an_english_status_line():
@@ -454,6 +522,69 @@ async def test_browser_failure_fails_the_task_and_releases():
     login = manager.fail.await_args.kwargs["metadata_patch"]["login"]
     assert login["status"] == "proxy_failed"
     assert closed == [SID]
+
+
+async def test_browser_unreachable_reaches_the_frontend_as_an_infra_failure():
+    """P3-1：容器连不上时 UI 曾显示"平台拒绝了本次登录，确认账号是否被限制"。
+
+    那句话把用户支去查自己账号有没有被封，而真相是我们的 nous-browser 正在
+    重启。前端**已经**有分支能说对话（``failedInfraHint``），它读的是
+    ``metadata.login.detail.error_kind`` —— workflow 从来没写过这个键，所以
+    那个分支在生产里一次都没触发过。这条断言就是那根接线。
+    """
+    _, error, manager, _ = await _run_workflow(
+        poll_outcome={
+            "outcome": "failed",
+            "status": "failed",
+            "message": "browser service unreachable (ConnectError)",
+            "detail": {"error_kind": SessionErrorKind.UNREACHABLE.value},
+        }
+    )
+
+    assert error is not None
+    login = manager.fail.await_args.kwargs["metadata_patch"]["login"]
+    assert login["status"] == "failed"
+    assert login["detail"] == {"error_kind": "unreachable"}
+
+
+async def test_a_real_platform_rejection_stays_a_platform_rejection():
+    """反向对照：平台真的拒绝时不能带 error_kind。
+
+    带了的话前端会把每一次真实拒绝都说成"我们这边的问题，稍后重试"，
+    用户就永远不会去查那个真的被限制了的账号。
+    """
+    _, error, manager, _ = await _run_workflow(
+        poll_outcome={
+            "outcome": "failed",
+            "status": "failed",
+            "message": "account is restricted",
+            "detail": {},
+        }
+    )
+
+    assert error is not None
+    login = manager.fail.await_args.kwargs["metadata_patch"]["login"]
+    assert login["detail"] is None
+
+
+async def test_start_failure_carries_its_error_kind_into_metadata():
+    """起不来的那一刻同样分两类（容器没起来 vs 平台把登录页关了）。"""
+    start = AsyncMock(
+        side_effect=m.SessionLoginError(
+            "browser service unreachable (ConnectError)",
+            status="failed",
+            detail={"error_kind": SessionErrorKind.UNREACHABLE.value},
+        )
+    )
+    _, error, manager, closed = await _run_workflow(
+        poll_outcome={"outcome": "success", "status": "success", "message": ""},
+        start=start,
+    )
+
+    assert isinstance(error, m.SessionLoginError)
+    assert closed == []
+    login = manager.fail.await_args.kwargs["metadata_patch"]["login"]
+    assert login["detail"] == {"error_kind": "unreachable"}
 
 
 async def test_cancel_returns_without_failing_the_task():

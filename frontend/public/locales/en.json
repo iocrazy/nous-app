@@ -265,6 +265,7 @@
       "failedHint": "The platform refused the sign-in. Try again, and check whether the account is restricted.",
       "proxyFailedLabel": "Proxy unreachable",
       "proxyFailedHint": "The egress proxy for this account could not be reached — the account itself is fine. Fix the proxy, then retry.",
+      "infraLabel": "Service temporarily unavailable",
       "failedInfraHint": "This failed on our side before reaching the platform — the account is fine. Retry in a moment; if it persists the browser service needs looking at."
     },
     "nav": {

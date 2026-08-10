@@ -49,7 +49,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 from dbos import DBOS
@@ -102,18 +102,35 @@ class SessionLoginError(RuntimeError):
     的登录失败变成一个看不懂的引擎错误。
     """
 
-    def __init__(self, message: str, *, status: str = SessionStatus.FAILED.value):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: str = SessionStatus.FAILED.value,
+        detail: Optional[dict[str, Any]] = None,
+    ):
         super().__init__(message)
         self.status = status
+        # 基建失败的类型化标记（``error_kind``）。默认 None 与 status 同理：
+        # DBOS 反序列化只走 ``cls(*args)``，必填 kwarg 会炸在引擎内部。
+        self.detail: dict[str, Any] = dict(detail or {})
 
 
 @dataclass(frozen=True)
 class LoginLoopOutcome:
-    """轮询循环的出口。``outcome`` 是编排结论，``status`` 是通道级枚举值。"""
+    """轮询循环的出口。``outcome`` 是编排结论，``status`` 是通道级枚举值。
+
+    ``detail`` 是**为什么**：``status=failed`` 同时覆盖「平台拒绝了这次登录」
+    与「我们的浏览器容器连不上」，而这两件事该让用户做的事正好相反（一个是
+    去查账号有没有被限制，一个是等一会儿再试）。区分它们的唯一信号就是
+    ``detail["error_kind"]``（``SessionErrorKind``），所以它必须一路传到
+    ``metadata.login``，否则前端只能把两类合并成一句"平台拒绝"。
+    """
 
     outcome: str  # "success" | "cancelled" | "timeout" | "failed"
     status: str
     message: str = ""
+    detail: dict[str, Any] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -121,6 +138,51 @@ class LoginLoopOutcome:
 
 
 # ── metadata 写入 ─────────────────────────────────────────────
+
+# 允许进 ``metadata.login.detail`` 的键。**白名单而不是整包透传**：这个 blob
+# 经 Supabase Realtime 广播给浏览器，而上游 detail 里还混着传输层内务
+# （``status_code`` / ``timeout_seconds`` / ``stage``），它们对用户没有意义，
+# 也不该成为前端可以依赖的契约。这两个键是 spec §7.8 明确定义、
+# ``frontend/types.ts::SessionLoginState.detail`` 已经声明的那两个。
+_PUBLIC_DETAIL_KEYS = ("error_kind", "reason")
+
+
+def _public_detail(detail: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """裁出可以给前端看的 detail；没有可给的就返回 None（而不是 ``{}``）。
+
+    返回 None 让前端的 ``login.detail?.error_kind`` 直接落到 undefined ——
+    "没有 error_kind" 的语义是"这是一个真实结论（平台确实拒绝了）"，用空对象
+    表达同样成立，但 None 让 metadata 里少一层永远为空的嵌套。
+    """
+    if not detail:
+        return None
+    public = {k: detail[k] for k in _PUBLIC_DETAIL_KEYS if detail.get(k) is not None}
+    return public or None
+
+
+def login_metadata(
+    *,
+    platform: str,
+    status: str,
+    message: str,
+    qrcode_data_url: Optional[str] = None,
+    expires_at: Optional[str] = None,
+    detail: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """``task_tracking.metadata.login`` 的唯一构造点（前端契约，spec §4.1）。
+
+    存在的理由是 ``detail`` 曾经在四个手写的字面量里被集体漏掉：终态 blob 分散
+    在 workflow 体的三个 ``manager.fail`` / ``complete`` 调用与 writer 里，每个
+    都各写一遍五个键，**少写一个键不会报错，只会让 UI 少一条信息**。
+    """
+    return {
+        "platform": platform,
+        "status": status,
+        "qrcode_data_url": qrcode_data_url,
+        "expires_at": expires_at,
+        "message": message,
+        "detail": _public_detail(detail),
+    }
 
 
 class LoginMetadataWriter:
@@ -144,14 +206,15 @@ class LoginMetadataWriter:
             self._expires_at = snapshot.expires_at
         elif snapshot.expires_at:
             self._expires_at = snapshot.expires_at
-        return {
-            "platform": self._platform,
-            "status": snapshot.status,
-            "qrcode_data_url": self._qrcode,
-            "expires_at": self._expires_at,
-            "message": snapshot.message
+        return login_metadata(
+            platform=self._platform,
+            status=snapshot.status,
+            qrcode_data_url=self._qrcode,
+            expires_at=self._expires_at,
+            message=snapshot.message
             or _STATUS_SUBTITLE.get(snapshot.status, snapshot.status),
-        }
+            detail=snapshot.detail,
+        )
 
     async def publish(self, snapshot: LoginSnapshot) -> None:
         """写 metadata（权威、不节流）+ 尽力更新 subtitle（可被节流丢弃）。
@@ -260,8 +323,13 @@ async def drive_login_loop(
                 f"{max_infra_failures}: {snapshot.message}"
             )
             if consecutive_infra >= max_infra_failures:
+                # detail 必须跟着走：认输时的 status 就是 failed，与"平台拒绝"
+                # 完全同形，``error_kind`` 是唯一能把两者分开的东西。
                 return LoginLoopOutcome(
-                    "failed", snapshot.status, snapshot.message or "browser unreachable"
+                    "failed",
+                    snapshot.status,
+                    snapshot.message or "browser unreachable",
+                    detail=snapshot.detail,
                 )
             if monotonic() >= deadline:
                 return LoginLoopOutcome(
@@ -283,7 +351,10 @@ async def drive_login_loop(
             return LoginLoopOutcome("success", status, snapshot.message or "signed in")
         if status in LOGIN_FAILURE_STATUSES:
             return LoginLoopOutcome(
-                "failed", status, snapshot.message or _STATUS_SUBTITLE.get(status, "")
+                "failed",
+                status,
+                snapshot.message or _STATUS_SUBTITLE.get(status, ""),
+                detail=snapshot.detail,
             )
         if status not in LOGIN_PENDING_STATUSES:
             # 走到这里说明 §7.8 的枚举扩了新值而本循环没跟上。默认"继续等"
@@ -341,7 +412,9 @@ async def start_login_step(workflow_id: str, platform: str) -> dict[str, Any]:
     if not snapshot.success or not snapshot.login_session_id:
         # 起不来就没有 context 要释放（login_session_id 为空），直接失败。
         raise SessionLoginError(
-            snapshot.message or "failed to start QR login", status=snapshot.status
+            snapshot.message or "failed to start QR login",
+            status=snapshot.status,
+            detail=snapshot.detail,
         )
     writer = LoginMetadataWriter(get_task_manager(), workflow_id, platform)
     await writer.publish(snapshot)
@@ -384,6 +457,7 @@ async def poll_login_step(
         "outcome": outcome.outcome,
         "status": outcome.status,
         "message": outcome.message,
+        "detail": outcome.detail,
     }
 
 
@@ -411,6 +485,7 @@ async def finalize_login_step(
         raise SessionLoginError(
             state.result.message or "browser returned no session state",
             status=state.status,
+            detail=state.result.detail,
         )
     account = await SocialAccountsRepository().upsert_session_account(
         scope_type=scope_type,
@@ -492,13 +567,12 @@ async def session_login_workflow(
                 workflow_id,
                 f"could not start QR login: {e}",
                 metadata_patch={
-                    "login": {
-                        "platform": platform,
-                        "status": e.status,
-                        "qrcode_data_url": None,
-                        "expires_at": None,
-                        "message": str(e),
-                    }
+                    "login": login_metadata(
+                        platform=platform,
+                        status=e.status,
+                        message=str(e),
+                        detail=e.detail,
+                    )
                 },
             )
             raise
@@ -532,17 +606,18 @@ async def session_login_workflow(
                 workflow_id,
                 f"QR login {outcome}: {message}",
                 metadata_patch={
-                    "login": {
-                        "platform": platform,
-                        "status": polled["status"],
-                        "qrcode_data_url": None,
-                        "expires_at": None,
-                        "message": message,
-                    }
+                    "login": login_metadata(
+                        platform=platform,
+                        status=polled["status"],
+                        message=message,
+                        detail=polled.get("detail"),
+                    )
                 },
             )
             raise SessionLoginError(
-                f"QR login {outcome}: {message}", status=polled["status"]
+                f"QR login {outcome}: {message}",
+                status=polled["status"],
+                detail=polled.get("detail"),
             )
 
         try:
@@ -554,13 +629,12 @@ async def session_login_workflow(
                 workflow_id,
                 f"could not persist session: {e}",
                 metadata_patch={
-                    "login": {
-                        "platform": platform,
-                        "status": e.status,
-                        "qrcode_data_url": None,
-                        "expires_at": None,
-                        "message": str(e),
-                    }
+                    "login": login_metadata(
+                        platform=platform,
+                        status=e.status,
+                        message=str(e),
+                        detail=e.detail,
+                    )
                 },
             )
             raise
@@ -571,13 +645,11 @@ async def session_login_workflow(
             subtitle=f"Connected {username}",
             metadata_patch={
                 # 二维码在这里被丢弃：它已经作废，且是这行里最占地方的东西。
-                "login": {
-                    "platform": platform,
-                    "status": SessionStatus.SUCCESS.value,
-                    "qrcode_data_url": None,
-                    "expires_at": None,
-                    "message": f"Connected {username}",
-                },
+                "login": login_metadata(
+                    platform=platform,
+                    status=SessionStatus.SUCCESS.value,
+                    message=f"Connected {username}",
+                ),
                 "session_login": {
                     "login_session_id": None,
                     "platform": platform,
