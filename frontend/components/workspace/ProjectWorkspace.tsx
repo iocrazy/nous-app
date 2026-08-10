@@ -85,6 +85,22 @@ interface SceneLift {
   location_text: string | null;
 }
 
+/**
+ * URL 统一寻址 (IA redesign Task 1, spec `2026-08-10-workspace-ia-redesign`):
+ * reads the `ep/node/view/scene/shot` param family as plain strings (never
+ * `Number()` — Snowflake BIGINT exceeds JS's safe integer range). Missing or
+ * empty params come back `null`, never `''`/`NaN`. Exported so Task 2
+ * (storyboard `view/scene/shot`) and Task 4 (accordion `node`) consume the
+ * same contract instead of each re-deriving it from `URLSearchParams`.
+ */
+export function readWorkspaceParams(sp: URLSearchParams) {
+  const get = (k: string) => {
+    const v = sp.get(k);
+    return v && v.length > 0 ? v : null;
+  };
+  return { ep: get('ep'), node: get('node'), view: get('view'), scene: get('scene'), shot: get('shot') };
+}
+
 interface ProjectWorkspaceProps {
   project: Project;
   teamId?: string;
@@ -131,8 +147,13 @@ export function ProjectWorkspace({
         const next = new URLSearchParams(prev);
         if (activeModule === 'overview') next.delete('module');
         else next.set('module', activeModule);
-        if (activeModule === 'stage' && stageNodeId) next.set('node', stageNodeId);
-        else next.delete('node');
+        if (activeModule === 'stage') {
+          if (stageNodeId) next.set('node', stageNodeId);
+          else next.delete('node');
+        }
+        // Non-stage modules leave an existing `node` param untouched — it's
+        // the accordion's selected node (Task 4, IA redesign), which this
+        // effect doesn't own and must not clobber on every module switch.
         return next;
       },
       { replace: true },
@@ -162,7 +183,18 @@ export function ProjectWorkspace({
         } catch (err) {
           console.error('[ProjectWorkspace] failed to read stored episode:', err);
         }
-        const valid = stored && rows.some((r) => r.episode_id === stored) ? stored : fallback;
+        // URL `ep` is the first source of truth (Task 1, IA redesign): a
+        // deep link (e.g. shared/back-navigated) should win over whatever
+        // was last selected on this browser. Falls through the same
+        // validation as the stored value — an invalid/stale `ep` degrades to
+        // localStorage, then the first episode, exactly like before.
+        const fromUrl = readWorkspaceParams(searchParams).ep;
+        const valid =
+          fromUrl && rows.some((r) => r.episode_id === fromUrl)
+            ? fromUrl
+            : stored && rows.some((r) => r.episode_id === stored)
+              ? stored
+              : fallback;
         setCurrentEpisodeId(valid);
       })
       .catch((err) => console.error('[ProjectWorkspace] failed to load episodes progress:', err));
@@ -241,13 +273,24 @@ export function ProjectWorkspace({
   const handleEpisodeChange = useCallback(
     (episodeId: string) => {
       setCurrentEpisodeId(episodeId);
+      // localStorage stays as the cross-session/no-URL-yet default; the URL
+      // `ep` (Task 1) is now the first source of truth on load, so keep both
+      // in sync on every explicit switch.
       try {
         localStorage.setItem(episodeStorageKey(project.id), episodeId);
       } catch (err) {
         console.error('[ProjectWorkspace] failed to persist episode selection:', err);
       }
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('ep', episodeId);
+          return next;
+        },
+        { replace: true },
+      );
     },
-    [project.id],
+    [project.id, setSearchParams],
   );
 
   // Re-fetch the progress feed after a create/rename/reorder/delete in the

@@ -330,6 +330,27 @@ describe('ProjectWorkspace', () => {
     expect(localStorage.getItem('mediahub.project.p1.ep')).toBe('2');
   });
 
+  it('URL `ep` wins over localStorage on load (Task 1, IA redesign)', async () => {
+    // localStorage says Ep 1, but the URL says Ep 2 — a deep link (e.g.
+    // shared, or back/forward navigated) must win over what this browser
+    // last remembered.
+    localStorage.setItem('mediahub.project.p1.ep', '1');
+    mockSearchParams.current = new URLSearchParams('ep=2');
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    const epCard = await expandEpisodesTree();
+    expect(epCard).toHaveTextContent('Ep 2 — Cutdown');
+  });
+
+  it('falls back to localStorage, then the first episode, when URL `ep` is missing or invalid', async () => {
+    localStorage.setItem('mediahub.project.p1.ep', '2');
+    mockSearchParams.current = new URLSearchParams('ep=does-not-exist');
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    const epCard = await expandEpisodesTree();
+    expect(epCard).toHaveTextContent('Ep 2 — Cutdown');
+  });
+
   it('switches content to the real Canvas module (the last placeholder is gone)', async () => {
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
