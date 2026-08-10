@@ -34,6 +34,19 @@ jobs:
           # Need previous commit to diff added migration files on push.
           fetch-depth: 2
 
+      # 合并后巡检：兜住「PR 的 CI 跑完 → 实际 merge」之间的残余窗口。
+      # 那段时间里另一个 PR 可能刚合入同号迁移，PR 门禁已经跑过了看不见。
+      #
+      # 刻意只 warning、不阻断：号已经合进来了，此刻 exit 1 撤销不了重复，
+      # 却会让这条迁移永远不落库 —— 代码已部署而 schema 没跟上，比重复号本身
+      # 危险得多。这里要的是「立刻可见」，阻断由 PR 门禁负责。
+      #
+      # 只在 push 触发时跑：workflow_dispatch 是手工单文件重放，HEAD~1 差集
+      # 对它没有意义。
+      - name: Migration number collision check (post-merge, non-blocking)
+        if: github.event_name == 'push'
+        run: bash scripts/check-migration-numbers.sh push
+
       - name: Build batch SQL
         id: collect
         run: |
