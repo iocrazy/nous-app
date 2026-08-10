@@ -37,6 +37,13 @@ _ACCOUNT_BIGINT_COLS = ("id", "task_id", "account_id", "resource_id")
 _TASK_COLS = tuple(PublishTasks.__table__.columns)
 _ACCOUNT_COLS = tuple(PublishTaskAccounts.__table__.columns)
 
+# Rows per read-back sweep. Small on purpose: each one is a headed browser
+# opening a real creator console with a real account's cookies, and a burst of
+# those is itself a risk-control signal (same argument as
+# ``SESSION_CHECK_BATCH``, one order of magnitude tighter because a publish
+# batch's rows all belong to the same handful of accounts).
+READBACK_BATCH = 5
+
 
 def aggregate_task_status(statuses: list[str]) -> str:
     """Collapse per-account business statuses into one display status for the
@@ -106,6 +113,112 @@ def build_filesystem_media_url(
         rel_path = file_path[len(download_root) + 1 :]
 
     return f"{media_public_url}/media/{rel_path}?token={media_token}"
+
+
+def readback_due_stmt(limit: int = READBACK_BATCH):
+    """Session-channel rows that published successfully and still owe a
+    read-back (P1-3).
+
+    "Still owe" = the verdict is not yet terminal (``NULL`` = never tried,
+    ``pending`` = tried, no conclusion). A row leaves this set for good the
+    moment it reaches verified / not_live / abandoned / not_supported.
+
+    Only ``channel='session'``: an official/h5 row already got its
+    ``published_url`` from the API that created it, and a non-success row has
+    nothing to confirm. Widening this would send a browser to look for posts
+    that were never made.
+
+    Ordered by ``verify_checked_at ASC NULLS FIRST`` — never-checked rows
+    first, then the longest-waiting. The minimum interval between attempts on
+    one row is deliberately NOT in this SQL, for the same reason
+    ``session_health_check.select_due`` keeps it out: "which rows are worth
+    looking at" and "should we touch this one THIS tick" are two questions, and
+    folding them together makes the second one untestable without a database.
+
+    Carries the resolved ``title`` (account override → batch default, exactly
+    the precedence ``_account_publish_opts`` applies at publish time) because
+    the caption is the read-back's ONLY handle on the post — resolving it
+    differently here than at publish time would turn every read-back into a
+    false ``not_found``.
+
+    Extracted as a module-level builder so it can be executed against a real
+    Postgres without the app's session machinery (see
+    ``tests/db/test_publish_readback_db.py``): compiling is not running, and
+    this statement's correlated ordering and NULL handling are exactly the kind
+    of thing a server rejects but a compiler accepts.
+    """
+    return (
+        select(
+            PublishTaskAccounts.id,
+            PublishTaskAccounts.task_id,
+            PublishTaskAccounts.account_id,
+            PublishTaskAccounts.verify_state,
+            PublishTaskAccounts.verify_attempts,
+            PublishTaskAccounts.verify_checked_at,
+            PublishTaskAccounts.published_at,
+            func.coalesce(PublishTaskAccounts.title, PublishTasks.title).label("title"),
+            PublishTasks.scheduled_at,
+            SocialAccounts.platform,
+        )
+        .select_from(PublishTaskAccounts)
+        .join(PublishTasks, PublishTasks.id == PublishTaskAccounts.task_id)
+        .join(SocialAccounts, SocialAccounts.id == PublishTaskAccounts.account_id)
+        .where(
+            PublishTaskAccounts.status == "success",
+            PublishTaskAccounts.channel == "session",
+            PublishTaskAccounts.verify_state.is_(None)
+            | (PublishTaskAccounts.verify_state == "pending"),
+        )
+        .order_by(PublishTaskAccounts.verify_checked_at.asc().nullsfirst())
+        .limit(limit)
+    )
+
+
+def verification_update_stmt(
+    account_row_id: Any,
+    *,
+    state: str,
+    detail: Optional[str] = None,
+    published_url: Optional[str] = None,
+    platform_item_id: Optional[str] = None,
+    bump_attempts: bool = True,
+):
+    """Write one read-back outcome onto a publish row.
+
+    ``verify_attempts`` is incremented IN SQL (``+ 1``) rather than read and
+    written back: the sweep can overlap itself across ticks, and a
+    read-modify-write would let two overlapping attempts both write "1", which
+    quietly doubles the retry budget the abandon rule depends on.
+
+    ``published_url`` / ``platform_item_id`` are written only when non-empty —
+    a later inconclusive attempt must never blank out a URL an earlier
+    successful read-back already established, or one container outage costs the
+    user a link they already had.
+
+    Deliberately does NOT touch ``status``. The publish itself succeeded, and
+    the read-back's verdict is a separate fact about the platform. Folding a
+    ``not_live`` verdict into ``status='failed'`` would rewrite history (the
+    upload really did work) and would make the batch look retryable — and a
+    retry means re-uploading a video the platform has already refused.
+    """
+    values: dict[str, Any] = {
+        "verify_state": state,
+        "verify_checked_at": func.now(),
+        "updated_at": func.now(),
+    }
+    if detail is not None:
+        values["verify_detail"] = detail[:500]
+    if bump_attempts:
+        values["verify_attempts"] = PublishTaskAccounts.verify_attempts + 1
+    if published_url:
+        values["published_url"] = published_url
+    if platform_item_id:
+        values["platform_item_id"] = platform_item_id
+    return (
+        sa_update(PublishTaskAccounts)
+        .where(PublishTaskAccounts.id == account_row_id)
+        .values(**values)
+    )
 
 
 class PublishTasksRepository(AsyncpgRepository):
@@ -313,6 +426,40 @@ class PublishTasksRepository(AsyncpgRepository):
                 sa_update(PublishTaskAccounts)
                 .where(PublishTaskAccounts.id == self._bigint(account_row_id))
                 .values(**values)
+            )
+
+    async def list_readback_due(self, limit: int = READBACK_BATCH) -> list[dict]:
+        """Session-channel rows that published successfully and still owe a
+        read-back (P1-3). See ``readback_due_stmt`` for the query itself."""
+        async with read_scope() as session:
+            rows = (await session.execute(readback_due_stmt(limit))).mappings().all()
+        return [_public_account_row(dict(r)) for r in rows]
+
+    async def record_verification(
+        self,
+        account_row_id: int,
+        *,
+        state: str,
+        detail: Optional[str] = None,
+        published_url: Optional[str] = None,
+        platform_item_id: Optional[str] = None,
+        bump_attempts: bool = True,
+    ) -> None:
+        """Write one read-back outcome onto the publish row.
+
+        See ``verification_update_stmt`` for the statement and the reasoning
+        behind each of its choices.
+        """
+        async with write_scope() as session:
+            await session.execute(
+                verification_update_stmt(
+                    self._bigint(account_row_id),
+                    state=state,
+                    detail=detail,
+                    published_url=published_url,
+                    platform_item_id=platform_item_id,
+                    bump_attempts=bump_attempts,
+                )
             )
 
     async def find_task_account_by_share_id(self, share_id: str) -> Optional[dict]:

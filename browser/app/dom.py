@@ -16,20 +16,32 @@ from __future__ import annotations
 from typing import Any, Sequence
 
 
-async def visible_marker_texts(page: Any, markers: Sequence[str]) -> list[str]:
+async def visible_marker_texts(
+    page: Any, markers: Sequence[str], *, exact: bool = False
+) -> list[str]:
     """Which of `markers` are *visible* on the page right now.
 
     `count()` alone is not enough: platforms keep hidden login nodes in the DOM
     of the authenticated app shell, so a count-based check reports a perfectly
     good session as logged out.
+
+    `exact` picks which way a miss fails, and the right answer depends entirely
+    on what the caller does with the result — which is why it is a parameter
+    and not a house style:
+
+      * Default (substring) suits the LOGIN markers. Failing to spot "logged
+        out" leaves us believing a dead session is alive, so these must match
+        generously through decoration ("手机号登录 >").
+      * `exact=True` suits markers whose presence *licenses a conclusion about
+        the user's content* — an empty-state caption, a status word. There the
+        generous direction is the dangerous one, because 「允许」 is a substring
+        of 「不允许」 and an unrelated caption can then vote on a verdict. A
+        miss under `exact=True` degrades to "we did not learn anything", which
+        is recoverable; a false positive is not.
     """
     found: list[str] = []
     for marker in markers:
-        # Substring, not exact: platforms decorate button labels ("手机号登录 >",
-        # trailing icons/whitespace) and an exact matcher silently stops finding
-        # the marker after a copy tweak - failing open, which is the worse
-        # direction here. Visibility is what does the real discriminating.
-        locator = page.get_by_text(marker, exact=False).first
+        locator = page.get_by_text(marker, exact=exact).first
         try:
             if await locator.count() and await locator.is_visible():
                 found.append(marker)

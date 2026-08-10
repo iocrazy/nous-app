@@ -51,8 +51,17 @@ stays one-way (路线 C).
 Shipping P1-1 without P1-2 would be worse than shipping neither: it trades
 "silently invisible" for "silently claims done".
 
-Time-based release is deliberately weaker than a real signal — P1-3 adds the
-platform read-back that confirms the post actually exists before closing.
+P1-3 — time-based release was still an assumption dressed as a conclusion. The
+schedule passing says nothing about whether the platform reviewed it, refused
+it, dropped the schedule, or the user deleted the post. The gate now needs a
+READ-BACK: ``publish_readback`` opens the creator centre, finds the post, and
+writes its verdict to ``publish_task_accounts.verify_state``. Only ``verified``
+(or "nothing to verify") lets the issue close; ``not_live`` and ``abandoned``
+send it to **blocked** with a typed reason, which is the state a scheduled
+publish most needs to be able to reach.
+
+The mirror stays a one-way reader throughout: it consults business columns that
+another module owns and writes only ``issues`` + ``task_tracking.issue_id``.
 """
 
 from __future__ import annotations
@@ -65,7 +74,7 @@ from loguru import logger
 from sqlalchemy import BigInteger, Text, cast, func, select, text, update
 
 from app.db.session import read_scope, write_scope
-from app.models import Issues, PublishTasks, TaskTracking
+from app.models import Issues, PublishTaskAccounts, PublishTasks, TaskTracking
 
 ORIGIN_KIND = "publish"
 
@@ -161,24 +170,90 @@ def issue_status_for_phase(
     return None  # cancelled / unknown → no retroactive mirror
 
 
+# Read-back verdicts, re-exported through the module that gates on them so the
+# vocabulary has exactly one definition (``publish_readback`` owns it).
+READBACK_NOT_REQUIRED = "not_required"
+
+
+def readback_verdict(states: Any) -> str:
+    """Collapse a batch's per-account ``verify_state`` values into one word.
+
+    Pure. Returns ``not_required`` / ``pending`` / ``verified`` / ``not_live``
+    / ``abandoned``.
+
+    **Precedence is the design.** A batch is only as confirmed as its least
+    confirmed account:
+
+      1. ``not_live`` wins outright — one account whose post the platform
+         refused is a thing a human must see, even if the other three are
+         live. Averaging that away is how a partial failure becomes invisible.
+      2. ``abandoned`` next — "we never managed to confirm this" is likewise
+         something to surface, not to round up to done.
+      3. ``pending`` next — still being worked on; hold the issue open.
+      4. otherwise everything is settled and none of it is bad news.
+
+    ``not_supported`` deliberately does NOT block: a platform without a
+    read-back is OUR coverage gap, and holding the user's work item hostage to
+    it would punish them for something they cannot act on. Such a batch falls
+    back to P1-2's time-based release, which is what it had before.
+
+    A row with no verify_state at all (NULL) counts as ``pending`` only when
+    the batch has session rows awaiting one — the caller supplies exactly the
+    rows that owe a verdict, so an empty input means "nothing to verify".
+    """
+    from app.workflows.publish_readback import (
+        VERIFY_ABANDONED,
+        VERIFY_NOT_LIVE,
+        VERIFY_PENDING,
+    )
+
+    values = [s or VERIFY_PENDING for s in (states or [])]
+    if not values:
+        return READBACK_NOT_REQUIRED
+    if VERIFY_NOT_LIVE in values:
+        return VERIFY_NOT_LIVE
+    if VERIFY_ABANDONED in values:
+        return VERIFY_ABANDONED
+    if VERIFY_PENDING in values:
+        return VERIFY_PENDING
+    return "verified"
+
+
 def terminal_sync_action(
     phase: Optional[str],
     issue_status: Optional[str],
     *,
     scheduled_at: Any = None,
     now: Optional[datetime] = None,
+    readback: str = READBACK_NOT_REQUIRED,
 ) -> Optional[str]:
     """Target issue status when a mirrored batch reaches a terminal phase.
 
-    P1-2: a completed batch whose ``scheduled_at`` is still in the future is
-    NOT done — the platform publishes it later. Holding the issue open is the
-    whole point of mirroring a scheduled publish, so the gate returns None
-    (skip, re-checked every sweep) rather than any status.
+    Two gates sit in front of ``done``, and they are different questions:
+
+    * **P1-2, the clock.** A completed batch whose ``scheduled_at`` is still in
+      the future is not done — the platform publishes it later. Return None and
+      re-check next sweep.
+    * **P1-3, the read-back.** Once the clock HAS passed, "done" still needs a
+      real signal. ``verified`` closes it. ``not_live`` / ``abandoned`` send it
+      to **blocked** — a post the platform refused, or one we could never
+      confirm, is precisely the case a scheduled publish exists to manage, and
+      it belongs in the incident lane where a human decides what happens next.
+      ``pending`` holds.
+
+    The ordering matters: the clock is checked first, so a batch that has not
+    reached go-live is never blocked for "not being live yet".
     """
+    from app.workflows.publish_readback import VERIFY_ABANDONED, VERIFY_NOT_LIVE
+
     if issue_status in _TERMINAL_ISSUE_STATUSES or issue_status == "blocked":
         return None
     if phase == "completed":
         if is_awaiting_platform_schedule(scheduled_at, now):
+            return None
+        if readback in (VERIFY_NOT_LIVE, VERIFY_ABANDONED):
+            return "blocked"
+        if readback == "pending":
             return None
         return "done"
     if phase in ("failed", "lost", "cancelled"):
@@ -227,15 +302,53 @@ def _unmirrored_stmt():
     )
 
 
+def _readback_columns(publish_task_id_text):
+    """(states, details) correlated aggregates over the batch's session rows.
+
+    Scoped to ``status='success'`` AND ``channel='session'`` because those are
+    exactly the rows a read-back is ever run for: an official/h5 row gets its
+    ``published_url`` from the API that created it, and a failed row has
+    nothing to confirm. Widening this would make every OAuth batch look like it
+    were waiting on a verdict that will never arrive.
+
+    ``array_agg`` keeps NULLs, which is what makes a never-attempted row read
+    as ``pending`` in ``readback_verdict`` rather than vanishing.
+    """
+    task_id_bigint = cast(func.nullif(publish_task_id_text, ""), BigInteger)
+
+    def agg(col):
+        """Same subquery twice, differing only in the column aggregated —
+        written once so the two can never drift onto different WHERE clauses
+        and pair a verdict with some other row's reason."""
+        return (
+            select(func.array_agg(col))
+            .where(
+                PublishTaskAccounts.task_id == task_id_bigint,
+                PublishTaskAccounts.status == "success",
+                PublishTaskAccounts.channel == "session",
+            )
+            .correlate(TaskTracking)
+            .scalar_subquery()
+        )
+
+    return (
+        agg(PublishTaskAccounts.verify_state).label("readback_states"),
+        agg(PublishTaskAccounts.verify_detail).label("readback_details"),
+    )
+
+
 def _mirrored_open_stmt():
     """Mirrored batches that reached a terminal phase but whose issue hasn't
     been synced to a terminal status yet.
 
     Carries ``scheduled_at`` so the closing transition can be held back until
-    the platform's go-live time (P1-2). The join is an OUTER join: a batch
-    whose publish_tasks row is gone must still close, not hang forever.
+    the platform's go-live time (P1-2), and the batch's read-back verdicts so
+    that reaching go-live is not by itself enough to close it (P1-3). The join
+    is an OUTER join: a batch whose publish_tasks row is gone must still close,
+    not hang forever.
     """
-    _, join_cond = _publish_task_join()
+    publish_task_id_text, join_cond = _publish_task_join()
+    states, details = _readback_columns(publish_task_id_text)
     return (
         select(
             TaskTracking.dbos_workflow_id,
@@ -243,6 +356,8 @@ def _mirrored_open_stmt():
             TaskTracking.issue_id,
             Issues.status.label("issue_status"),
             PublishTasks.scheduled_at,
+            states,
+            details,
         )
         .select_from(TaskTracking)
         .join(Issues, Issues.id == TaskTracking.issue_id)
@@ -310,32 +425,108 @@ async def _mirror_new_batches() -> dict[str, int]:
     return counts
 
 
+def build_readback_note(verdict: str, details: Any) -> Optional[str]:
+    """The line appended to a work item blocked by the read-back. Pure.
+
+    The typed reasons the browser produced (``[rejected] ...``,
+    ``[under_review] ...``, ``[verification_abandoned] ...``) are carried
+    through verbatim rather than summarised. They are the only thing that tells
+    the user whether to appeal, wait, or re-publish — and "the publish did not
+    go live" without which of those is a notification that cannot be acted on.
+    """
+    from app.workflows.publish_readback import VERIFY_NOT_LIVE
+
+    reasons = [str(d).strip() for d in (details or []) if d and str(d).strip()]
+    headline = (
+        "Read-back says this publish is NOT live on the platform."
+        if verdict == VERIFY_NOT_LIVE
+        else "Go-live could not be confirmed after repeated read-back attempts."
+    )
+    if not reasons:
+        return headline
+    # De-duplicated but order-preserving: a broadcast batch hits N accounts
+    # with the same outcome, and printing "[rejected] ..." four times adds
+    # nothing.
+    seen: list[str] = []
+    for reason in reasons:
+        if reason not in seen:
+            seen.append(reason)
+    return headline + " " + " | ".join(seen)
+
+
+async def _append_issue_note(issues, issue_id: int, note: str) -> None:
+    """Append ``note`` to the issue description. Best-effort by contract.
+
+    Appended, not replaced: ``build_scheduled_note`` already wrote when this
+    was due to go live, and that is exactly the context someone reading a
+    blocked item wants next to the reason it failed.
+
+    Never allowed to abort the transition. The status change is the signal the
+    user acts on; losing the explanatory line is bad, losing the block is
+    worse — a batch that silently stayed 'in progress' is the failure mode this
+    whole gate exists to remove.
+    """
+    try:
+        current = await issues.get_by_id(issue_id)
+        existing = (current or {}).get("description") or ""
+        if note in existing:
+            return
+        merged = f"{existing}\n\n{note}".strip() if existing else note
+        await issues.update(issue_id, {"description": merged[:4000]})
+    except Exception as exc:  # noqa: BLE001 — see docstring
+        logger.warning(f"[publish-mirror] could not annotate issue {issue_id}: {exc!r}")
+
+
 async def _sync_terminal_batches() -> dict[str, int]:
     from app.repositories.issue_repository import get_issue_repository
+    from app.workflows.publish_readback import VERIFY_ABANDONED, VERIFY_NOT_LIVE
 
     issues = get_issue_repository()
-    counts = {"synced": 0, "skipped": 0, "awaiting_schedule": 0}
+    counts = {
+        "synced": 0,
+        "skipped": 0,
+        "awaiting_schedule": 0,
+        "awaiting_readback": 0,
+        "blocked_by_readback": 0,
+    }
     async with read_scope() as session:
         rows = (await session.execute(_mirrored_open_stmt())).mappings().all()
     for row in rows:
         try:
             scheduled_at = row.get("scheduled_at")
+            verdict = readback_verdict(row.get("readback_states"))
             target = terminal_sync_action(
                 row.get("phase"),
                 row.get("issue_status"),
                 scheduled_at=scheduled_at,
+                readback=verdict,
             )
             if target is None:
-                # Separate counter so "held for the platform's go-live time"
-                # is legible in the sweep log instead of hiding inside the
-                # generic skip bucket.
+                # Three separate counters so a held batch is legible in the
+                # sweep log instead of hiding inside the generic skip bucket —
+                # "waiting for the platform's clock" and "waiting for the
+                # read-back" are different situations with different fixes.
                 if row.get("phase") == "completed" and is_awaiting_platform_schedule(
                     scheduled_at
                 ):
                     counts["awaiting_schedule"] += 1
+                elif row.get("phase") == "completed" and verdict == "pending":
+                    counts["awaiting_readback"] += 1
                 else:
                     counts["skipped"] += 1
                 continue
+            if target == "blocked" and verdict in (VERIFY_NOT_LIVE, VERIFY_ABANDONED):
+                # Annotate BEFORE the transition: the notification hooks that
+                # ride on transition_status should be able to show the reason
+                # rather than fire on a bare status change.
+                note = build_readback_note(verdict, row.get("readback_details"))
+                if note:
+                    await _append_issue_note(issues, int(row["issue_id"]), note)
+                counts["blocked_by_readback"] += 1
+                logger.warning(
+                    f"[publish-mirror] issue {row.get('issue_id')} blocked by "
+                    f"read-back (verdict={verdict})"
+                )
             await issues.transition_status(int(row["issue_id"]), target)
             counts["synced"] += 1
         except Exception as exc:  # noqa: BLE001 — batch continues
@@ -363,6 +554,8 @@ async def publish_issue_mirror_workflow(
         "synced": synced["synced"],
         "sync_skipped": synced["skipped"],
         "awaiting_schedule": synced["awaiting_schedule"],
+        "awaiting_readback": synced["awaiting_readback"],
+        "blocked_by_readback": synced["blocked_by_readback"],
     }
     # A scheduled batch sitting on the gate is NORMAL operation for hours —
     # logging it every 2 minutes would be pure noise, so the counter rides the

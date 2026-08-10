@@ -28,6 +28,7 @@ from app.workflows.liveness_scanner import (  # noqa: F401
 from app.workflows.publish_issue_mirror import (  # noqa: F401
     publish_issue_mirror_workflow,
 )
+from app.workflows.publish_readback import publish_readback_workflow  # noqa: F401
 from app.workflows.scheduled_cleanup import (  # noqa: F401
     cleanup_old_task_tracking_workflow,
     cleanup_temp_files_workflow,

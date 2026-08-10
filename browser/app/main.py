@@ -40,9 +40,11 @@ from .platforms import (
     get_login_flow,
     get_publisher,
     get_validator,
+    get_verify_spec,
     login_platforms,
     publish_platforms,
     supported_platforms,
+    verify_platforms,
 )
 from .publish import run_publish
 from .redaction import scrub
@@ -60,8 +62,11 @@ from .schemas import (
     SessionValidateRequest,
     SmsCodeRequest,
     SmsCodeResponse,
+    VerifyPublishRequest,
+    VerifyPublishResponse,
 )
 from .security import require_internal_token
+from .verify import run_verify
 
 logger = logging.getLogger("nous_browser")
 
@@ -270,6 +275,81 @@ async def post_session_publish(request: PublishRequest) -> Any:
     except Exception as exc:  # noqa: BLE001 - run_publish is total; this is a bug net
         logger.exception("publish raised for platform=%s", request.platform)
         return PublishResponse(
+            success=False,
+            status=SessionStatus.FAILED,
+            message=scrub(f"{type(exc).__name__}: {exc}"),
+            detail={"stage": "endpoint", "platform": request.platform},
+        )
+    finally:
+        slots.release()
+
+
+# --- publish read-back (P1-3) -----------------------------------------------
+
+
+@app.post(
+    "/session/verify-publish",
+    response_model=VerifyPublishResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def post_session_verify_publish(request: VerifyPublishRequest) -> Any:
+    """Go back to the platform and check whether a post is actually live.
+
+    Short compared to a publish — one navigation, no upload — but it takes a
+    browser slot for the same reason: it is a headed Chromium carrying a real
+    account's cookies.
+
+    A platform with no read-back registered gets `not_published` with
+    `reason=not_supported`, NOT a 400. The distinction matters to the caller:
+    400 would read as "your request was wrong", whereas this is a true
+    statement about our coverage, and the caller records it as "verification
+    unavailable here" instead of holding the work item open forever waiting
+    for an answer that can never come.
+    """
+    spec = get_verify_spec(request.platform)
+    if spec is None:
+        return VerifyPublishResponse(
+            success=False,
+            status=SessionStatus.NOT_PUBLISHED,
+            message=(
+                f"no publish read-back implemented for '{request.platform}'; "
+                "this post cannot be confirmed from here"
+            ),
+            detail={
+                "reason": "not_supported",
+                "platform": request.platform,
+                "supported": verify_platforms(),
+            },
+        )
+
+    settings = get_settings()
+    slots = _slots()
+    try:
+        await asyncio.wait_for(slots.acquire(), timeout=settings.browser_slot_wait_s)
+    except asyncio.TimeoutError:
+        # Back-pressure, never a verdict about the post. The caller retries on
+        # its own much slower schedule.
+        return VerifyPublishResponse(
+            success=False,
+            status=SessionStatus.FAILED,
+            message="browser pool saturated; no slot became available",
+            detail={
+                "error_kind": "pool_saturated",
+                "stage": "admission",
+                "platform": request.platform,
+            },
+        )
+
+    try:
+        return await run_verify(
+            spec,
+            request.storage_state,
+            request.environment,
+            request.probe,
+        )
+    except Exception as exc:  # noqa: BLE001 - run_verify is total; this is a bug net
+        logger.exception("read-back raised for platform=%s", request.platform)
+        return VerifyPublishResponse(
             success=False,
             status=SessionStatus.FAILED,
             message=scrub(f"{type(exc).__name__}: {exc}"),

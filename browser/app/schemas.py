@@ -36,6 +36,15 @@ class SessionStatus(str, Enum):
     SMS_REQUIRED = "sms_required"
     SUCCESS = "success"
     PUBLISHED = "published"
+    # S3/P1-3 read-back. **A conclusion, not a failure**: we reached the
+    # creator centre, read the works list, and the post is NOT live. That is
+    # different in kind from `failed` ("we could not find out"), and the
+    # difference is the whole point of the read-back — a caller that collapses
+    # the two either blocks every batch during a container outage, or calls a
+    # rejected post "done". Neutral wording on purpose: "not published" is true
+    # whether the platform is reviewing it, refused it, or the user deleted it;
+    # WHICH of those rides in `detail["reason"]`.
+    NOT_PUBLISHED = "not_published"
 
 
 class EnvironmentConfig(BaseModel):
@@ -224,4 +233,63 @@ class PublishResponse(BaseModel):
     # a two-week one (design doc 4.2 step 6). Returned on failure too, whenever
     # a context got far enough to have one - the renewal may already have
     # happened before whatever went wrong.
+    updated_storage_state: dict[str, Any] | None = None
+
+
+# --- publish read-back (P1-3) ----------------------------------------------
+#
+# `PublishResponse.published_url` has always been null on this channel, and the
+# comment in `douyin_publish._drive` says why: the post-publish redirect carries
+# no identifier, and picking the newest card off the manage page would attribute
+# the wrong post to the batch on any account that has a scheduled or
+# concurrently-published item. The read-back solves that from the other end -
+# it goes looking for a SPECIFIC post, identified by what we typed into the
+# editor, and reports what the platform now says about it.
+
+
+class VerifyProbe(BaseModel):
+    """What to look for. Deliberately not "the post id" - we never had one.
+
+    `title` is the handle, because it is the one thing we know we put on the
+    platform ourselves. It is matched normalised (see `douyin_verify`), never
+    by equality on the raw string: the editor trims, collapses whitespace and
+    drops characters it does not accept, so the card's caption is routinely a
+    near-miss of what we sent.
+
+    There is deliberately no `published_after` narrowing field. It would be the
+    obvious second handle, but the works list renders dates in relative prose
+    ("3天前") as often as absolutely, and a filter built on parsing that would
+    silently exclude the very post it was asked to find. Declaring a knob we
+    cannot honour is the mistake the `content_types = {"video","images"}` note
+    in `session_adapter` was written about.
+    """
+
+    title: str = Field(min_length=1, max_length=500)
+
+
+class VerifyPublishRequest(BaseModel):
+    platform: str = Field(min_length=1, max_length=32)
+    storage_state: dict[str, Any]
+    environment: EnvironmentConfig | None = None
+    probe: VerifyProbe
+
+
+class VerifyPublishResponse(BaseModel):
+    """Same envelope as `PublishResponse`, same three extra fields.
+
+    Reusing the shape is intentional: the caller's settle path for "a post is
+    live, here is its URL and id" should not become a second implementation
+    just because the news arrived from a read-back instead of from the publish
+    that created it.
+    """
+
+    success: bool
+    status: SessionStatus
+    message: str
+    detail: dict[str, Any] = Field(default_factory=dict)
+    platform_item_id: str | None = None
+    published_url: str | None = None
+    # Same reason as on `PublishResponse`: a read-back is a real page visit and
+    # the platform rotates cookies on it, so throwing the refreshed state away
+    # would make the extra job a net cost to session lifetime rather than free.
     updated_storage_state: dict[str, Any] | None = None
