@@ -63,9 +63,12 @@ v4.2)定稿。分镜页本身的布局规范以原设计稿 artifact `24b61005-0
   Scene/I-E/Location/D-N 元数据格 + 打开/自动分镜 + 该场镜头卡竖排;列间横向滚动。
   现 EpisodeSceneBoard 的全宽横条布局废弃,组件改造保留其数据逻辑
   (read-only probe / Start Storyboard CTA / autoStoryboard 派发均不变)。
-- **镜头卡点击 → 切到画布视图并聚焦该镜头节点**(复用 `shotFocusBus.requestShotFocus`,
-  画布已支持)。
-- 视图二(画布)/视图三(分镜列表)不动。
+- **镜头卡点击 → 深链到剧本编辑器的分镜画布并聚焦该镜头**(2026-08-10 实施中用户拍板
+  修正:shotFocusBus 的订阅者是 EditorShell——图 9 的镜头节点画布属于编辑器;分镜页内
+  canvas tab 是素材画布、无镜头节点,聚焦在那里空转。故镜头卡走与场次卡「打开」同族的
+  编辑器深链 + `requestShotFocus(shotId)`,不切页内 canvas tab)。
+- 视图二(页内 canvas tab,素材画布)/视图三(分镜列表)不动;镜头节点画布搬进分镜页
+  属将来另立项。
 - Episode 3 类无剧本剧集:进分镜页显示既有 Start Storyboard 空态,不再出现「剧本入口」错位。
 
 ## 5. 权限模型
