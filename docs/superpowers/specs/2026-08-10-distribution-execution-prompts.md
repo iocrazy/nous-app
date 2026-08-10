@@ -28,11 +28,18 @@
 你是这批工作的总指导。你**不写代码**——你读规格、拆任务、派发给执行体、
 验收结果、决定下一步。写代码由你派发的 Opus 5 执行体完成。
 
-## 第一步：读
+## 第一步：读（按顺序，全部读完再动）
 
-1. `docs/superpowers/specs/2026-08-09-distribution-gap-closure-plan.md`
+1. `docs/superpowers/specs/2026-08-10-distribution-execution-prompts.md`
+   —— **就是本文件**。重点是末尾三个附录：
+   - **附录 A 环境速查** —— worktree 路径、端口、测试命令、查生产库的姿势。
+     开工前先看，别自己摸（`docker exec` 少个 `-i` 会静默空跑）
+   - **附录 B 每个任务的起手事实** —— 文件路径、行号、索引名、列清单、
+     已实测的当前状态。**这些都查过了，不要重查**
+   - **附录 C 不要做的事** —— 八条"顺手会做但会坏事"的
+2. `docs/superpowers/specs/2026-08-09-distribution-gap-closure-plan.md`
    —— 11 项待办，每项带实测证据和验收口径。这是唯一任务来源。
-2. 仓库根 `CLAUDE.md` —— 硬约束都在里面，尤其「已知陷阱」「部署陷阱」两节。
+3. 仓库根 `CLAUDE.md` —— 硬约束都在里面，尤其「已知陷阱」「部署陷阱」两节。
 
 P3-3 已完成，跳过（平台侧 6 个私密作品需人工删，不属于代码工作）。
 
@@ -255,3 +262,241 @@ UI 出现 `Reauthorize`——**不靠一次发布失败才发现**。
 写了测试没接线、命令退出码 0 当成执行成功。
 
 **你的价值不在于派发得多快，在于挡住那些"看起来做完了"的交付。**
+
+---
+---
+
+# 附录 A：环境速查（新 session 开工前先看这个，别自己摸）
+
+## 工作目录与端口
+
+```
+worktree:  /media/heygo/program/projects-code/repos/nous-app/.worktrees/feat-distribution-publish-flow
+分支:      feat/distribution-publish-flow（.worktree.env 里写的）
+前端端口:  5183      后端端口: 8088      REDIS_DB: 8
+```
+
+⚠️ **主仓库 `/media/heygo/program/projects-code/repos/nous-app` 占着 `master`**，
+所以在 worktree 里 `git checkout master` 会失败。要基于 master 开新分支用：
+
+```bash
+git fetch origin master -q && git checkout -q -B <新分支名> origin/master
+```
+
+## 跑测试
+
+```bash
+cd backend  && uv run pytest                    # 后端
+cd browser  && uv run pytest                    # 浏览器服务
+cd frontend && npx vitest run                   # 前端全量（约 3960 个）
+cd frontend && npx vitest run <路径> --reporter=dot   # 单文件
+```
+
+## 查生产库
+
+```bash
+docker exec nous-db psql -U postgres -p 55434 -d postgres -c "<SQL>"
+```
+
+⚠️ **写库必须 `docker exec -i`**（heredoc 才有 stdin）。不带 `-i` 时 SQL
+一条都不执行，**退出码 0、零报错**，看起来完全像成功了。已经踩过一次。
+写完必须跟一条独立的计数查询确认。
+
+⚠️ 端口是 **55434** 不是 5432（容器内 PG 只监听 55434）。
+
+## 查生产容器里跑的代码
+
+```bash
+docker exec nous-browser /app/.venv/bin/python -c "from app.platforms.bilibili import LOGIN_SPEC; print(LOGIN_SPEC.profile_url)"
+docker exec nous-backend  /app/.venv/bin/python -c "from app.core.config import settings; print(settings.CORS_ORIGINS)"
+```
+
+⚠️ 必须用 `/app/.venv/bin/python`，直接 `python` 是系统的、没装依赖。
+
+## 发 PR
+
+```bash
+gh pr create --base master --head <分支名> --title "..." --body "..."
+```
+
+⚠️ **必须带 `--head`**——本仓库的 fetch refspec 只跟踪 master，不带会报
+"you must first push the current branch"，即使已经 push 成功。
+
+⚠️ `gh pr checks` 在**有检查失败**时也返回非零，不能拿退出码当"查询失败"。
+判 CI 完成要看输出里还有没有 `pending`。
+
+## 端到端验证账号
+
+`/media/heygo/program/datahub/nous/secrets/claude-debug.env`（0600，仓库树外）。
+不必麻烦用户点 UI。本机服务一律用 `127.0.0.1`，**不要用 `10.0.0.10`**
+（经代理会超时）。
+
+---
+
+# 附录 B：每个任务的起手事实（已经查过的，别重查）
+
+## P0-1 身份键
+
+**要改的唯一索引**（migration 里要处理它）：
+
+```
+social_accounts_scope_type_scope_id_platform_platform_user__key
+  UNIQUE (scope_type, scope_id, platform, platform_user_id)
+```
+
+**提取代码**：`browser/app/platforms/douyin.py`
+- `PROFILE_TEXT_SELECTORS["platform_user_id"]` ≈ L193（DOM 路径）
+- `USER_ID_COOKIES = ("uid_tt", "uid_tt_ss")` @ L222（cookie 路径）
+- `_ID_PREFIXES` @ L224
+- 两条路径汇合在 `_build_profile` 的 L321-331
+
+**upsert**：`backend/app/repositories/social_accounts_repository.py`
+`on_conflict_do_update(index_elements=[...])` @ L318-319
+
+**⚠️ 关于数据归一**：库里现存的抖音行 `platform_user_id =
+41cf16775ee3e9fdf5e021f9c1ddfc12`（32 位 hex，形态像 `uid_tt`），而被删掉
+的重复行是 `miopoo`（handle）。**如果确定标准化到 `uid_tt`，现存行很可能
+已经是对的、归一是空操作** —— 但**必须实测确认**（解密该行 session_state
+比对 cookie），不要因为"形态像"就跳过 dry-run。
+
+**B 站不用改**：它的 `PROFILE_TEXT_SELECTORS["platform_user_id"] = ()`，
+永远走 `DedeUserID` cookie 单一路径，本来就是稳定的。改的时候别"顺手统一"
+把它也弄成多路径。
+
+## P0-2 软删
+
+**删除链路**（全链无 confirm）：
+- `frontend/components/Distribution/AccountsPage.tsx::onDelete` @ L143
+- 按钮 @ L303（`btn-ghost`，`Trash2` 图标）
+- `frontend/services/distributionService.ts::deleteAccount` @ L110
+- `backend/app/api/distribution_router.py::delete_account` @ L373-380
+  （**归属校验已有**：`_authorize_account` 先跑，这层别重做）
+- `backend/app/repositories/social_accounts_repository.py::delete` @ L471
+  （硬删）
+
+**级联**（这是危险所在）：
+
+```
+publish_task_accounts.account_id  →  ON DELETE CASCADE
+account_environments.account_id   →  ON DELETE CASCADE
+```
+
+**确认框要显示的数**：`SELECT count(*) FROM publish_task_accounts
+WHERE account_id = <id>`。目前没有这个端点，需要新建。
+
+## P0-3 Realtime + 安全收口
+
+**当前状态（已实测）**：
+
+```
+publication:  social_accounts 已在 supabase_realtime 里（PR #1753 加的）
+REPLICA IDENTITY: d (default) ← 保持，别动
+RLS: 开启，唯一策略 "Service role full access" → auth.role() = 'service_role'
+实测: SET ROLE authenticated; SELECT count(*) FROM social_accounts → 0 行
+
+表级 GRANT（问题所在）:
+  anon           DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE
+  authenticated  DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE
+```
+
+**列清单**（照抄，别凭记忆写）：
+
+```
+id scope_type scope_id platform platform_user_id username avatar_url
+access_token refresh_token token_expires_at status created_by created_at
+updated_at auth_type session_state session_checked_at
+```
+
+⚠️ 归属列是 **`created_by`**，这张表**没有 `user_id` 列**。
+⚠️ 三个不能授权的列：`access_token`、`refresh_token`、`session_state`。
+
+**订阅端代码**已经写好了：`AccountsPage.tsx` L80-95 左右，
+`channel('distribution-accounts').on('postgres_changes', ...)`。
+测试在 `AccountsPage.test.tsx`（mock 会捕获回调）。
+
+### 怎么真的验证 Realtime（这是本任务的核心难点）
+
+**不要**只查 publication，也**不要**只跑单测——mock 证明不了真服务器会投递。
+
+用 `@supabase/supabase-js`（前端已装 `^2.49.0`）写一个独立脚本，
+以**真实用户身份**订阅，然后从**另一条连接**改库，看事件到不到：
+
+```js
+// 骨架，放 scratchpad 跑，不要提交
+import { createClient } from '@supabase/supabase-js'
+const sb = createClient(SUPABASE_URL, ANON_KEY)
+await sb.auth.signInWithPassword({ email, password })   // claude-debug.env
+const ch = sb.channel('probe')
+  .on('postgres_changes',
+      { event: '*', schema: 'public', table: 'social_accounts' },
+      (p) => console.log('EVENT', p.eventType, Object.keys(p.new || {})))
+  .subscribe((s) => console.log('SUB', s))
+// 然后另开一个终端:
+//   docker exec nous-db psql ... -c "UPDATE social_accounts SET updated_at=now() WHERE id=<id>"
+// 观察 EVENT 是否打印
+```
+
+**两条验收都要过**：
+1. 上面脚本收到 `EVENT` —— 证明投递通了
+2. `p.new` 的 key 里**没有** `session_state` / `access_token` /
+   `refresh_token` —— 证明列级收口生效了
+
+**修之前先用同一个脚本跑一次**，确认现在收不到 —— 没有"修之前是坏的"
+这个对照，"修之后是好的"证明不了任何事。
+
+## P0-4 巡检接线
+
+**已存在**：`social_accounts_repository.py::list_session_accounts_for_check`
+@ L408，`SESSION_CHECK_BATCH = 20` @ L49，两个单测。
+**缺的只是调度。**
+
+**注册位置**：`backend/app/workflows/_scheduled_bundle.py` —— 照抄
+`publish_issue_mirror` 那几行（@ L28-30）的 import 形式。
+⚠️ scheduled-only 的 workflow 放 `_scheduled_bundle`，**不是**
+`_dispatch_bundle`（后者是 gateway 也会导入的，放错会让 gateway 起调度线程）。
+
+**可参照的现成实现**：`backend/app/workflows/publish_issue_mirror.py`
+（`@DBOS.scheduled("*/2 * * * *")`）和 `stranded_issue_monitor.py`。
+两者都遵守"scheduled housekeeping 不建 task_tracking 行"。
+
+**校验入口**：`distribution_router.py` L284 附近的 `adapter.validate_session(acct)`。
+
+## P2-1a 图集止血
+
+`backend/app/services/distribution/session_adapter.py` L254：
+douyin 的 `content_types=frozenset({"video", "images"})` → 改成
+`frozenset({"video"})`。
+
+对照：浏览器侧 `browser/app/publish.py` L56
+`SUPPORTED_CONTENT_TYPES = ("video",)` —— 这才是真相。
+
+前端 `PublishPage.tsx` L40 `ContentKind = 'video' | 'images'`，
+L286 `isImages`，L299 图集模式强制 broadcast。置灰改这里。
+
+## P3-1 文案分类
+
+错误来源：`browser/app/validation.py::classify_playwright_error` @ L89，
+`ProbeKind` 枚举（含 `unreachable` / `timeout` 等）。
+`login_sessions.py` L387、L460 把它映射成 `SessionStatus.FAILED`。
+
+前端展示：`SessionLoginModal.tsx`。当前把
+`browser service unreachable (ConnectError)` 显示成
+「平台拒绝了本次登录。可以重试，并确认该账号是否被限制。」
+
+**错误已经是类型化的**，缺的只是 UI 分两类展示。别去重做分类逻辑。
+
+---
+
+# 附录 C：这批工作**不要**做的事
+
+新 session 容易"顺手"做但会坏事的：
+
+1. **不要把 B 站的身份提取也改成多路径**——它现在单路径是对的（见附录 B）
+2. **不要动 `social_accounts` 的 REPLICA IDENTITY**——保持 `default`
+3. **不要在 P0-3 里只加策略不收授权**——那等于把凭证密文的护栏拆了
+4. **不要单独合并 P1-1**——见正文
+5. **不要重做 `_authorize_account`**——归属校验已经有了，是对的
+6. **不要清理测试数据**——P3-3 已完成，库里发布相关的表已全空
+7. **不要碰 `browser/pyproject.toml` 的 `requires-python = ">=3.12"`**——
+   那是上游 playwright 镜像决定的，不是漂移。改了生产起不来（已复现过）
+8. **不要在提交前假定测试跑完了**——push 前确认测试**已经结束**且全绿
