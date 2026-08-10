@@ -360,13 +360,28 @@ export function ProjectWorkspace({
   // EditorShell inline (no route jump); no script → provision an empty one the
   // same way project-create does, then mount it. `railView` presets the work
   // view (and the sidebar highlight). ───
+  // `focusSceneId` (Task 8 fix round 1): this is the ONLY call site that flips
+  // activeModule to 'script' (the studioMode condition EditorShell mounts on),
+  // so it's the single choke point for studioFocusSceneId too — every caller
+  // must declare its scene-focus intent explicitly, default null CLEARS it.
+  // Without this, a scene-card deep link's target survived in bare React state
+  // past the EditorShell unmount (leaving 'script' drops the mount but not the
+  // state) and got silently re-consumed by the next, unrelated remount —
+  // "Continue Writing" or an episode row's Open button (neither of which ever
+  // meant to focus a scene) — scrolling to a scene the writer never asked for
+  // this time.
   const openEpisodeScript = useCallback(
-    async (episode: EpisodeProgress | null, railView: RailView = 'script') => {
+    async (
+      episode: EpisodeProgress | null,
+      railView: RailView = 'script',
+      focusSceneId: string | null = null,
+    ) => {
       if (!episode) {
         setActiveModule('episodes');
         return;
       }
       setStudioView(railView);
+      setStudioFocusSceneId(focusSceneId);
       try {
         const scriptId = await resolveOrProvisionScript(episode);
         if (!scriptId) {
@@ -408,9 +423,12 @@ export function ProjectWorkspace({
         setEpisodeView('storyboard');
         return;
       }
-      setStudioFocusSceneId(view === 'storyboard' && opts?.sceneId ? opts.sceneId : null);
       setStudioView(view);
-      void openEpisodeScript(currentEpisode, view);
+      void openEpisodeScript(
+        currentEpisode,
+        view,
+        view === 'storyboard' && opts?.sceneId ? opts.sceneId : null,
+      );
     },
     [openEpisodeScript, currentEpisode],
   );
