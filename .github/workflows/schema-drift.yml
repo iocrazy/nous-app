@@ -214,3 +214,16 @@ jobs:
           # the entire point of the gate. Known, registered drift is handled by
           # the ratchet allowlists inside the test itself.
           uv run pytest tests/db/test_schema_drift.py -v
+
+      - name: Assert social_accounts' Realtime/RLS + credential grants (mig 417)
+        working-directory: backend
+        env:
+          INTEGRATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/drift
+        run: |
+          set -euo pipefail
+          # Runs here rather than in ci.yml because these assertions need a real
+          # Postgres with the migrations applied — exactly what this job already
+          # built. Named explicitly (not a directory glob) for the same reason
+          # the step above is: a test file that silently stops being collected
+          # is the failure mode this whole workflow exists to prevent.
+          uv run pytest tests/db/test_social_accounts_realtime_rls.py -v
