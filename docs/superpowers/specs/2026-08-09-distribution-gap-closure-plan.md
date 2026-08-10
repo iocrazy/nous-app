@@ -399,17 +399,38 @@ supabase/migrations/412_social_accounts_realtime.sql      （#1753）
 
 ---
 
-### P3-3 测试遗留数据
+### P3-3 测试遗留数据 — ✅ 已完成（2026-08-10 01:04 UTC）
 
-- `publish_tasks` 里 **10 个** title 含 `probe` 的探针任务（全部私密）
-- `issues` 里 **6 个** `origin_id LIKE 'publish:%'` 且 status=blocked 的镜像
-- 抖音账号上对应的私密作品
+**数据库侧已清空**，删前逐条核实过，删后计数全部对上：
 
-⚠️ 清理**必须在 P1-1 之前**做完，否则新旧镜像 issue 混在一起分不清哪些是
-新逻辑产生的。
+| 对象 | 删前 | 删后 |
+|---|---|---|
+| `publish_tasks` | 10（**全部**是 probe，无真实任务混入） | 0 |
+| `publish_task_accounts` | 10（级联） | 0 |
+| `issues` publish 镜像 | 6 | 0 |
+| `issue_messages` | 1（级联，`kind=system_status`、`meta={"source":"trigger"}`，无用户内容） | 0 |
+| `task_tracking` publish | 10 | 0 |
+| `social_accounts` | 2 | **2**（未触碰） |
+| `issues` 总数 | 41 | **35**（正好少 6，无误伤） |
 
-⚠️ 清理走软删/归档，别直接 `DELETE`——在 P0-2 改成软删之前，
-删 `publish_tasks` 会级联带走 `publish_task_accounts`。
+测试视频 `nous-publish-probe.mp4`（8235 字节 / 2 秒，`file_hash` 无共指）
+走**软删**（`is_trashed=true`），存储对象保留、可恢复。
+
+删除前的完整行备份为 JSON（五张表，26KB，不含任何凭证）。
+
+**⏳ 仍未完成——平台侧**：抖音创作者中心上还有 **6 个私密测试作品**。
+它们在平台服务器上，数据库清空影响不到。需要人工在创作者中心删除，
+或等实现删稿浏览器任务时顺带清。
+
+---
+
+⚠️ **踩到的坑，写下来避免重复**：`docker exec` **不带 `-i` 时 stdin 不会
+转发进容器**，heredoc 里的 SQL 一条都不会执行，而且**退出码是 0、没有任何
+报错**——看起来完全像成功了。第一次执行就是这样空跑的，靠事后计数才发现
+（10/10/6/10 原封不动）。
+
+教训与「探针必须可证伪」同族：**执行完必须查计数，不能拿"命令没报错"当
+执行成功**。写库的脚本一律 `docker exec -i`，且跟一条独立的验证查询。
 
 ---
 
@@ -430,7 +451,8 @@ supabase/migrations/412_social_accounts_realtime.sql      （#1753）
 ## 建议执行顺序
 
 ```
-P3-3 清理遗留          ← 先清，否则 P1-1 的验证会被旧数据污染
+P3-3 清理遗留          ← ✅ 已完成 2026-08-10，DB 侧已清空
+                          （平台侧 6 个私密作品仍需人工删）
   ↓
 P0-1 身份键单一来源     ← 数据正确性，越晚修重复行越多
 P0-2 软删 + 确认框      ← 与 P0-1 都动 social_accounts，可同批
