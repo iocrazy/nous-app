@@ -1,4 +1,11 @@
+-- 413_social_accounts_realtime.sql
+--
 -- social_accounts 加入 Realtime publication
+--
+-- ⚠️ 本文件原名 412_social_accounts_realtime.sql(PR #1753),与
+-- 412_retire_canvas_stage_node.sql(PR #1752)撞号 —— 两个 PR 各自取号时都只
+-- 看到 411 是最大号。改名为 413 消除隐患。相对顺序不变:原来按文件名排序是
+-- 412_retire < 412_social(字母序 r<s),现在是 412_retire < 413_social。
 --
 -- 用户两次反馈同一个现象:扫码绑定成功了,账号卡片却不出现,**手动刷新网页
 -- 才看到**(2026-08-06 抖音一次,2026-08-08 B站一次)。
@@ -26,4 +33,23 @@
 -- access_token,那等于把凭证密文复制进复制流。前端只需要知道"某行变了"然后
 -- 重新拉列表,不需要 DELETE 事件里的旧值,所以 default 足够且更安全。
 
-ALTER PUBLICATION supabase_realtime ADD TABLE public.social_accounts;
+-- 幂等:`ALTER PUBLICATION ... ADD TABLE` 没有 IF NOT EXISTS,重复执行会抛
+-- 42710 duplicate_object。而这条迁移的原版(412_social_accounts_realtime.sql)
+-- **已经在生产跑过了** —— 生产库 pg_publication_tables 里 social_accounts 确实
+-- 在 supabase_realtime 中。改名若被 run-migration.yml 误判成"新增文件"就会重跑
+-- 并直接红掉,所以先查再加。
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename = 'social_accounts'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.social_accounts;
+    RAISE NOTICE 'social_accounts added to supabase_realtime publication';
+  ELSE
+    RAISE NOTICE 'social_accounts already in supabase_realtime publication, skipping';
+  END IF;
+END
+$$;

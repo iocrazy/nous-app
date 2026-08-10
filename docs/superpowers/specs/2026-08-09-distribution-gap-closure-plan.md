@@ -382,20 +382,28 @@ browser 不可用，前端在入口就禁用绑定按钮，而不是让用户走
 
 ---
 
-### P3-2 migration 412 撞号
+### P3-2 migration 412 撞号 — ✅ 已完成（2026-08-09）
 
 ```
-supabase/migrations/412_retire_canvas_stage_node.sql      （#1752）
+supabase/migrations/412_retire_canvas_stage_node.sql      （#1752，保持不变）
 supabase/migrations/412_social_accounts_realtime.sql      （#1753）
+  → supabase/migrations/413_social_accounts_realtime.sql
 ```
 
 **这次没出事**：`run-migration.yml` 按"本次 push 新增的文件"检测
 （`git diff --diff-filter=A HEAD~1 HEAD`），两次 push 各跑各的；
 重建时按文件名排序也是确定的，且两者无依赖关系。Schema Drift 已验证通过。
 
-但号重复本身是隐患，应把其中一个改名为 413。
-⚠️ 改名要连带改注释里的编号引用，且**先 fetch 确认 413 没被占**
-（worktree 存活期间 master 会前进）。
+**改名后的顺序不变**：原来字母序是 `412_retire` < `412_social`（r<s），
+现在是 `412_retire` < `413_social`，相对次序一致，schema-drift 重建无影响。
+
+⚠️ **改名有重跑风险，所以文件已幂等化**。`run-migration.yml` 用
+`--diff-filter=A` 检测新增；git 默认开启 rename 检测（`diff.renames` 自 2.9
+起默认 true），rename 的状态是 `R` 不是 `A`，因此正常情况下**不会**重跑
+（实测：改名 commit 上跑同一条命令，输出为空）。但这依赖相似度阈值，
+不足以当保证 —— 所以 `ALTER PUBLICATION ... ADD TABLE`（无 `IF NOT EXISTS`，
+重复执行抛 42710）已包进 `DO $$` 块先查 `pg_publication_tables`，
+一次性 postgres 容器里连跑两遍均成功。
 
 ---
 
