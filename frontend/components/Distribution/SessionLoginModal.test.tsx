@@ -324,6 +324,69 @@ describe('SessionLoginModal', () => {
     }
   });
 
+  // P3-1. A `failed` from the workflow means one of two opposite things, and
+  // the pair below is the whole point: the user is either sent to check their
+  // account for a ban, or told to wait — never both, and never the wrong one.
+  // The signal is `metadata.login.detail.error_kind` (backend
+  // `SessionErrorKind`), which only exists once the workflow propagates it.
+  it('blames the platform only when the platform actually said no', async () => {
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({ status: 'failed', message: 'account is restricted' });
+
+    expect(screen.getByText('Sign-in failed')).toBeInTheDocument();
+    expect(screen.getByText(/The platform refused the sign-in/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Service temporarily unavailable/i)).toBeNull();
+  });
+
+  it('names our own outage as ours instead of blaming the account', async () => {
+    // The 2026-08-09 case verbatim: nous-browser was restarted by a deploy
+    // 30s before the scan. `ConnectError` → error_kind `unreachable`.
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({
+      status: 'failed',
+      message: 'browser service unreachable (ConnectError)',
+      detail: { error_kind: 'unreachable' },
+    });
+
+    expect(screen.getByText('Service temporarily unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/failed on our side before reaching the platform/i))
+      .toBeInTheDocument();
+    // The sentence that sent the user hunting for a ban must be gone.
+    expect(screen.queryByText(/The platform refused the sign-in/i)).toBeNull();
+    expect(screen.queryByText(/check whether the account is restricted/i)).toBeNull();
+    // Still retryable — waiting a moment is exactly the remedy.
+    expect(screen.getByRole('button', { name: /Get a new code/i })).toBeInTheDocument();
+  });
+
+  it('does not blame the user for a timeout that was our transport failing', async () => {
+    // A read timeout against our own browser service also arrives as a
+    // terminal `timeout`, where the stock copy says nobody scanned in time —
+    // blaming the user for not scanning a code we never managed to ask about.
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({
+      status: 'timeout',
+      message: 'browser service timed out after 20.0s',
+      detail: { error_kind: 'timeout' },
+    });
+
+    expect(screen.getByText('Service temporarily unavailable')).toBeInTheDocument();
+    expect(screen.queryByText(/Nobody scanned the code in time/i)).toBeNull();
+  });
+
+  it('keeps a dead proxy pointing at the proxy, not at our browser service', async () => {
+    // `proxy_failed` is deliberately outside the infra branch: it is the
+    // account's egress proxy, a different thing to go fix.
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({ status: 'proxy_failed', detail: { error_kind: 'unreachable' } });
+
+    expect(screen.getByText('Proxy unreachable')).toBeInTheDocument();
+    expect(screen.queryByText(/Service temporarily unavailable/i)).toBeNull();
+  });
+
   it('reports success to the caller', async () => {
     mount();
     await waitFor(() => expect(updateHandler).toBeTruthy());
