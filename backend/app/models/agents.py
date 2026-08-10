@@ -328,7 +328,7 @@ class AgentRuns(Base):
     ended_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime(True))
     undone_at: Mapped[Optional[datetime.datetime]] = mapped_column(
         DateTime(True),
-        comment="mig 413: run 级一次性撤销标记；NULL = 未撤销",
+        comment="mig 415: run 级一次性撤销标记；NULL = 未撤销",
     )
     model: Mapped[Optional[str]] = mapped_column(Text)
     provider: Mapped[Optional[str]] = mapped_column(Text)

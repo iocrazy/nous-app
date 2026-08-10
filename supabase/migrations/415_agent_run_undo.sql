@@ -1,4 +1,4 @@
--- 413_agent_run_undo.sql
+-- 415_agent_run_undo.sql
 --
 -- Agent Run 撤销立项（spec: docs/superpowers/specs/2026-08-09-agent-run-undo-design.md）
 -- 三件套：
