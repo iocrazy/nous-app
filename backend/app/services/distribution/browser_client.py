@@ -347,6 +347,8 @@ class LoginState:
     platform_user_id: Optional[str] = None
     username: Optional[str] = None
     avatar_url: Optional[str] = None
+    # 抖音号 / 小红书号 —— 显示用,不参与账号唯一键(mig 414)。
+    platform_handle: Optional[str] = None
 
     @property
     def success(self) -> bool:
@@ -947,6 +949,19 @@ class BrowserClient:
                 read_timeout=DEFAULT_LOGIN_STATE_TIMEOUT_SECONDS,
             )
         except _TransportFailure as failure:
+            # 409 + ``status=failed`` + ``detail.reason=identity_unresolved`` 是
+            # 浏览器侧的**通道结论**,不是传输故障:它认得这一页、也确实登录了,
+            # 只是拿不到身份 cookie,于是拒绝造一个身份不明的账号。丢掉 body
+            # 会把这句话压成 "browser service returned HTTP 409",用户看到的
+            # 就只剩一个数字 —— 与 §7.8「HTTP 码表达传输层,body 表达结论」
+            # 相悖,也正是仓库里「触发路径必须类型化失败回显」那条纪律。
+            typed = self._typed_failure_snapshot(failure, login_session_id)
+            if typed is not None:
+                logger.warning(
+                    f"[browser.login.state] {typed.status}: "
+                    f"reason={typed.result.detail.get('reason')}"
+                )
+                return LoginState(result=typed.result)
             logger.warning(
                 f"[browser.login.state] {failure.kind.value}: {failure.message}"
             )
@@ -987,6 +1002,7 @@ class BrowserClient:
             platform_user_id=str(platform_user_id),
             username=str(data.get("username") or "") or None,
             avatar_url=str(data.get("avatar_url") or "") or None,
+            platform_handle=str(data.get("platform_handle") or "") or None,
         )
 
     async def close_login(self, login_session_id: str) -> bool:

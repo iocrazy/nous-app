@@ -359,6 +359,59 @@ async def test_get_login_state_returns_storage_state_and_identity():
 
 
 @respx.mock
+async def test_get_login_state_carries_the_display_handle():
+    """抖音号跟着一起回来 —— 它是显示字段,与身份键分家(mig 414)。"""
+    respx.get(f"{BASE}/session/login/{SID}/state").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "storage_state": {"cookies": [{"name": "sessionid", "value": "s3"}]},
+                "platform_user_id": "41cf16775ee3e9fdf5e021f9c1ddfc12",
+                "username": "MioPoo",
+                "platform_handle": "miopoo",
+            },
+        )
+    )
+    state = await _client().get_login_state(SID)
+
+    assert state.platform_user_id == "41cf16775ee3e9fdf5e021f9c1ddfc12"
+    assert state.platform_handle == "miopoo"
+
+
+@respx.mock
+async def test_get_login_state_surfaces_identity_unresolved_as_the_reason():
+    """浏览器认得这一页、也真的登录了,只是拿不到身份 cookie,于是 409 + 类型化
+    结论。丢掉 body 会把它压成 "browser service returned HTTP 409" —— 用户看到
+    一个数字,不知道该重扫还是该报障(§7.8 / 触发路径必须类型化失败回显)。"""
+    respx.get(f"{BASE}/session/login/{SID}/state").mock(
+        return_value=httpx.Response(
+            409,
+            json={
+                "success": False,
+                "status": "failed",
+                "message": (
+                    "cannot identify the douyin account: cookie 'uid_tt' was not "
+                    "present after login"
+                ),
+                "detail": {
+                    "reason": "identity_unresolved",
+                    "identity_cookie": "uid_tt",
+                    "terminal": True,
+                },
+            },
+        )
+    )
+    state = await _client().get_login_state(SID)
+
+    assert state.success is False
+    assert state.status == SessionStatus.FAILED.value
+    assert state.result.detail["reason"] == "identity_unresolved"
+    assert "uid_tt" in state.result.message
+    # 不是基建故障:重试同一个 session 不会有别的结果,别把它归到"我们这边挂了"。
+    assert state.result.is_infra_failure is False
+
+
+@respx.mock
 async def test_get_login_state_without_storage_state_fails():
     """扫了码却没有会话物料 == 白扫。绝不能建一个空 session_state 的账号行。"""
     respx.get(f"{BASE}/session/login/{SID}/state").mock(

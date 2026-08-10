@@ -130,9 +130,15 @@ class LoginStateResponse(BaseModel):
     """
 
     storage_state: dict[str, Any]
+    # The identity key the account is upserted on. Always non-empty here: the
+    # login fails with `identity_unresolved` before it can get this far
+    # (see `login.IdentityUnresolved`).
     platform_user_id: str
     username: str
     avatar_url: str | None = None
+    # 抖音号 / 小红书号 — display only, and free to change without forking the
+    # account. Split out of `platform_user_id` on 2026-08-09.
+    platform_handle: str | None = None
 
 
 class LoginCloseResponse(BaseModel):

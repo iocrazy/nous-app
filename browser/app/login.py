@@ -15,7 +15,8 @@ Reading the page (async, flaky, needs a browser) and interpreting the page
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+import logging
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Mapping, Sequence
 
 from .browser_runtime import apply_stealth, build_launch_kwargs
@@ -27,6 +28,8 @@ from .dom import (
     visible_marker_texts,
 )
 from .schemas import EnvironmentConfig, SessionStatus
+
+logger = logging.getLogger("nous_browser.login")
 
 
 @dataclass(frozen=True)
@@ -52,16 +55,83 @@ class LoginJudgement:
 
 @dataclass(frozen=True)
 class LoginProfile:
-    """Who just logged in. All fields best-effort."""
+    """Who just logged in.
+
+    Two classes of field, and the split is the whole point (2026-08-09):
+
+    * ``platform_user_id`` is the **identity key**. The backend upserts
+      ``social_accounts`` on ``(scope, platform, platform_user_id)``, so a value
+      from a different namespace than last time does not degrade the account —
+      it *forks* it into a second row and cuts the publish history in half.
+      It is therefore resolved by this module from the spec's one declared
+      cookie (``identity_cookie``) and **never** from a scraped field. A
+      platform module cannot express a DOM identity path any more, because
+      ``parse_profile`` is not handed the cookies and its return value's
+      ``platform_user_id`` is overwritten below.
+    * ``username`` / ``avatar_url`` / ``platform_handle`` are **display**.
+      Best-effort as before: a console redesign that breaks a selector must
+      leave a nameless account, never fail a login the user already completed.
+
+    ``platform_handle`` is the human-facing account name (抖音号 / 小红书号).
+    It used to be fed into ``platform_user_id`` whenever its selector happened
+    to hit, which is exactly how one Douyin account ended up bound twice
+    (``41cf16…`` from the cookie on 08-06, ``miopoo`` from the DOM on 08-09).
+    Users rename it at will, so it is display material and nothing else.
+    """
 
     platform_user_id: str = ""
     username: str = ""
     avatar_url: str | None = None
+    platform_handle: str = ""
+
+
+class IdentityUnresolved(Exception):
+    """The identity cookie is not in the jar, so we do not know who this is.
+
+    Deliberately **not** best-effort. Everything else about a profile degrades;
+    this one fails the login. The alternative — carrying on with a blank or
+    substituted identity — creates a duplicate account row whose publish history
+    starts empty, and the user has no way to tell it apart from a fresh bind.
+    """
+
+    reason = "identity_unresolved"
+
+    def __init__(self, platform: str, cookie: str) -> None:
+        super().__init__(
+            f"cannot identify the {platform} account: "
+            f"cookie {cookie!r} was not present after login"
+        )
+        self.platform = platform
+        self.cookie = cookie
+
+
+def identity_from_cookies(
+    identity_cookie: str, cookies: Sequence[Mapping[str, Any]]
+) -> str:
+    """The account's identity key, or "" when the cookie is absent.
+
+    One cookie name, no fallback list, no DOM. A fallback would have to come
+    from another namespace, and mixing namespaces under one unique key is the
+    duplicate-row bug this function exists to make unrepresentable.
+    """
+    for cookie in cookies:
+        if cookie.get("name") != identity_cookie:
+            continue
+        value = (cookie.get("value") or "").strip()
+        if value:
+            return value
+    return ""
 
 
 @dataclass(frozen=True)
 class LoginFlowSpec:
     platform: str
+    # THE identity source for this platform: the single cookie whose value is
+    # the account's stable id. Required, and required to be exactly one — see
+    # `LoginProfile`. Verified per platform against a live session; a guess here
+    # is worse than a hard failure, because a value that changes between logins
+    # silently forks the account.
+    identity_cookie: str
     # Page that renders the QR code.
     login_url: str
     # Where to read profile fields after login. Empty = stay put.
@@ -77,10 +147,10 @@ class LoginFlowSpec:
     sms_submit_selectors: tuple[str, ...]
     # Pure: what state is this page in?
     judge: Callable[[LoginPageSnapshot], LoginJudgement]
-    # Pure: (scraped fields, cookies) -> who this is.
-    parse_profile: Callable[
-        [Mapping[str, str], Sequence[Mapping[str, Any]]], LoginProfile
-    ]
+    # Pure: scraped fields -> the DISPLAY half of the profile. Cookies are not
+    # passed on purpose: identity comes from `identity_cookie` and nowhere else,
+    # and any `platform_user_id` this returns is discarded.
+    parse_profile: Callable[[Mapping[str, str]], LoginProfile]
     # field name -> selector candidates, read as text.
     profile_text_selectors: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     # field name -> (selector candidates, attribute name).
@@ -200,10 +270,39 @@ class LoginDriver:
         return True
 
     async def read_profile(self) -> LoginProfile:
-        """Best effort. A missing display name must never fail a good login."""
-        return await read_profile_from_page(
-            self._page, self._spec, await self._safe_cookies()
-        )
+        """Display fields best effort; the identity key is not negotiable.
+
+        A missing display name must never fail a good login — but a missing
+        *identity* must, and this is the boundary where that difference is
+        enforced. The login path is the one caller that turns a profile into a
+        durable account row, so it is the one caller that cannot accept
+        "whoever this is". Session *validation* calls
+        ``read_profile_from_page`` directly and keeps its old best-effort
+        contract: a refresh that cannot identify the account simply refreshes
+        nothing.
+
+        Raises ``IdentityUnresolved`` — typed, so the caller can say *why* the
+        login failed instead of reporting a generic scrape error.
+        """
+        cookies = await self._safe_cookies()
+        try:
+            profile = await read_profile_from_page(self._page, self._spec, cookies)
+        except Exception as exc:  # noqa: BLE001 - display scrape is best-effort
+            logger.warning(
+                "profile scrape failed for platform=%s: %s",
+                self._spec.platform,
+                type(exc).__name__,
+            )
+            # The cookies are already in hand and owe nothing to the DOM, so a
+            # broken page still yields a correctly-identified account.
+            profile = LoginProfile(
+                platform_user_id=identity_from_cookies(
+                    self._spec.identity_cookie, cookies
+                )
+            )
+        if not profile.platform_user_id:
+            raise IdentityUnresolved(self._spec.platform, self._spec.identity_cookie)
+        return profile
 
     async def _safe_cookies(self) -> list[dict[str, Any]]:
         try:
@@ -254,6 +353,14 @@ async def read_profile_from_page(
     Every step swallows its failure by design: a console redesign that breaks a
     display-name selector must degrade to a nameless account, never fail a login
     the user already completed or condemn a session that is actually alive.
+
+    **The identity key is not part of that bargain.** It is resolved here, from
+    the spec's single declared cookie, and stamped over whatever
+    ``parse_profile`` returned — so no platform can accidentally (or
+    deliberately) source it from the DOM. "" means the cookie was absent;
+    turning that into a failure is the *caller's* call, because the login path
+    and the validation path want opposite things from it (see
+    ``LoginDriver.read_profile``).
     """
     if spec.profile_url:
         try:
@@ -277,7 +384,10 @@ async def read_profile_from_page(
         if value:
             fields[name] = value
 
-    return spec.parse_profile(fields, cookies)
+    return replace(
+        spec.parse_profile(fields),
+        platform_user_id=identity_from_cookies(spec.identity_cookie, cookies),
+    )
 
 
 async def _any_selector_visible(page: Any, selectors: Sequence[str]) -> bool:

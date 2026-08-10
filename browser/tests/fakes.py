@@ -95,9 +95,12 @@ def always(status: SessionStatus, reason: str = "scripted"):
     return lambda _snapshot: LoginJudgement(status, reason)
 
 
-def make_spec(judge=None, platform: str = "testplatform") -> LoginFlowSpec:
+def make_spec(
+    judge=None, platform: str = "testplatform", identity_cookie: str = "test_uid"
+) -> LoginFlowSpec:
     return LoginFlowSpec(
         platform=platform,
+        identity_cookie=identity_cookie,
         login_url="https://example.test/login",
         profile_url="https://example.test/home",
         qrcode_selectors=("img",),
@@ -108,7 +111,7 @@ def make_spec(judge=None, platform: str = "testplatform") -> LoginFlowSpec:
         sms_input_selectors=(),
         sms_submit_selectors=(),
         judge=judge or always(SessionStatus.WAITING_SCAN),
-        parse_profile=lambda _fields, _cookies: LoginProfile(),
+        parse_profile=lambda _fields: LoginProfile(),
     )
 
 

@@ -441,6 +441,7 @@ async def get_login_state(login_session_id: str) -> Any:
         platform_user_id=profile.platform_user_id,
         username=profile.username,
         avatar_url=profile.avatar_url,
+        platform_handle=profile.platform_handle or None,
     )
 
 

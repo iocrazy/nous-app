@@ -306,6 +306,82 @@ async def test_upsert_session_account_encrypts_and_marks_auth_type(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_upsert_session_account_keys_on_the_identity_not_the_handle(monkeypatch):
+    """ON CONFLICT 的列表就是账号身份的定义,而 platform_handle 不在其中。
+
+    2026-08-09:抖音号被当成 platform_user_id 写进去,同一个账号于是有了两行,
+    10 条发布记录留在第一行。抖音号是用户随时可改的展示名 —— 一旦它进了唯一键
+    (无论作为 platform_user_id 还是作为第五列),改一次名就多一个账号。
+    """
+    import app.repositories.social_accounts_repository as mod
+
+    scope, session = _scope_returning([{"id": 1, "username": "MioPoo"}])
+    monkeypatch.setattr(mod, "write_scope", scope)
+
+    await SocialAccountsRepository().upsert_session_account(
+        scope_type="user",
+        scope_id="u1",
+        platform="douyin",
+        platform_user_id="41cf16775ee3e9fdf5e021f9c1ddfc12",
+        platform_handle="miopoo",
+        username="MioPoo",
+        session_state=_STATE,
+        created_by="11111111-1111-1111-1111-111111111111",
+    )
+
+    sql = _sql(session.statements[0])
+    conflict = sql.split("ON CONFLICT", 1)[1].split("DO UPDATE", 1)[0]
+    assert "platform_user_id" in conflict
+    assert (
+        "platform_handle" not in conflict
+    ), "把可改的展示名放进唯一键 —— 用户改一次抖音号就会多一个账号"
+    # 但它确实被写进去了(否则卡片上永远没有抖音号)。
+    assert _params(session.statements[0])["platform_handle"] == "miopoo"
+
+
+@pytest.mark.asyncio
+async def test_upsert_session_account_does_not_blank_a_known_handle(monkeypatch):
+    """重新绑定时抖音号选择器落空 → 传 None。那是"这次没读到",不是"它没有了"。"""
+    import app.repositories.social_accounts_repository as mod
+
+    scope, session = _scope_returning([{"id": 1, "username": "MioPoo"}])
+    monkeypatch.setattr(mod, "write_scope", scope)
+
+    await SocialAccountsRepository().upsert_session_account(
+        scope_type="user",
+        scope_id="u1",
+        platform="douyin",
+        platform_user_id="p1",
+        platform_handle=None,
+        username="MioPoo",
+        session_state=_STATE,
+        created_by="11111111-1111-1111-1111-111111111111",
+    )
+
+    update = _sql(session.statements[0]).split("DO UPDATE", 1)[1]
+    assert "coalesce" in update.lower(), "落空的抓取会把已经正确的抖音号抹成 NULL"
+
+
+@pytest.mark.asyncio
+async def test_update_profile_refreshes_the_handle_but_never_the_identity(monkeypatch):
+    """会话校验会带回新的 profile。展示字段刷新,身份键一个字节都不许动 ——
+    改身份是重新绑定,不是资料刷新。"""
+    import app.repositories.social_accounts_repository as mod
+
+    scope, session = _scope_returning([])
+    monkeypatch.setattr(mod, "write_scope", scope)
+
+    await SocialAccountsRepository().update_profile(
+        1, username="MioPoo", platform_handle="miopoo_renamed"
+    )
+
+    sql = _sql(session.statements[0])
+    params = _params(session.statements[0])
+    assert params["platform_handle"] == "miopoo_renamed"
+    assert "platform_user_id" not in sql
+
+
+@pytest.mark.asyncio
 async def test_update_session_state_encrypts_write_back(monkeypatch):
     import app.repositories.social_accounts_repository as mod
 
@@ -383,3 +459,32 @@ def test_account_out_carries_auth_type_and_checked_at():
     assert out["session_checked_at"] is not None
     # Never in the response contract at all — ciphertext included.
     assert "session_state" not in out
+
+
+def test_account_out_carries_the_platform_handle():
+    """Same whitelist trap as `auth_type` above, one field later.
+
+    `_public_row` returns every non-secret column, so `platform_handle` (mig
+    414) reaches the router — and FastAPI would then drop it on the floor,
+    silently, if the response model did not name it. The 抖音号 would simply
+    never appear in the UI and nothing anywhere would say why.
+    """
+    from datetime import datetime, timezone
+
+    from app.schemas.distribution import SocialAccountOut
+
+    out = SocialAccountOut(
+        id="727145299382534145",
+        scope_type="user",
+        scope_id="u1",
+        platform="douyin",
+        platform_user_id="41cf16775ee3e9fdf5e021f9c1ddfc12",
+        platform_handle="miopoo",
+        username="MioPoo",
+        auth_type="session",
+        status="active",
+        created_at=datetime(2026, 8, 9, tzinfo=timezone.utc),
+    ).model_dump()
+    assert out["platform_handle"] == "miopoo"
+    # 身份键与展示名是两个字段,不是一个字段的两种叫法。
+    assert out["platform_user_id"] == "41cf16775ee3e9fdf5e021f9c1ddfc12"

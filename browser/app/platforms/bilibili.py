@@ -206,10 +206,11 @@ PROFILE_TEXT_SELECTORS: Mapping[str, tuple[str, ...]] = {
         '[class*="nickname"]',
         "#h-name",
     ),
-    # 留空:空间页 URL 里就带 uid,而 DedeUserID cookie 是更可靠的来源
-    # (见 USER_ID_COOKIES)。与其配几个猜的选择器,不如让 cookie 兜底接手 ——
-    # 它已经在实战里救过一次:三个 profile 选择器全落空时,账号至少还有 id。
-    "platform_user_id": (),
+    # 这里**没有** platform_user_id / platform_handle 条目,而且不该再加。
+    # 身份键只认 `IDENTITY_COOKIE`(见下),DOM 一票没有 —— 抖音正是因为
+    # "先 DOM 后 cookie"把同一个账号绑成了两行(2026-08-09)。B 站原本就是
+    # 空元组,等于一直走的单一 cookie 路径,现在只是把这件事写成了结构约束
+    # 而不是一个碰巧为空的元组。
 }
 PROFILE_ATTR_SELECTORS: Mapping[str, tuple[tuple[str, ...], str]] = {
     "avatar_url": (
@@ -222,12 +223,13 @@ PROFILE_ATTR_SELECTORS: Mapping[str, tuple[tuple[str, ...], str]] = {
     ),
 }
 
-# `DedeUserID` is bilibili's numeric user id cookie and is the reliable
-# fallback identity when every profile selector misses.
-USER_ID_COOKIES = ("DedeUserID",)
-
-# [COPY] Prefixes shown in front of the public id.
-_ID_PREFIXES = ("UID：", "UID:", "UID", "ID：", "ID:")
+# THE identity source. `DedeUserID` is bilibili's numeric user id, stable
+# across logins and independent of anything the console renders.
+#
+# This platform was already single-path (its id selector tuple was empty), and
+# that is why it never grew the duplicate row Douyin did. The value of naming it
+# here is that "single source" is now declared rather than accidental.
+IDENTITY_COOKIE = "DedeUserID"
 
 
 def judge_bilibili_login(snapshot: LoginPageSnapshot) -> LoginJudgement:
@@ -290,44 +292,24 @@ def judge_bilibili_login(snapshot: LoginPageSnapshot) -> LoginJudgement:
     )
 
 
-def parse_bilibili_profile(
-    fields: Mapping[str, str], cookies: Sequence[Mapping[str, Any]]
-) -> LoginProfile:
-    """Scraped strings -> identity. Pure, best-effort throughout.
+def parse_bilibili_profile(fields: Mapping[str, str]) -> LoginProfile:
+    """Scraped strings -> the DISPLAY half of the profile. Pure, best-effort.
 
-    `DedeUserID` makes the fallback unusually reliable here: even with every
-    display selector broken, a bound account still gets its real numeric id
-    rather than an opaque session token.
+    No `platform_handle`: 空间页上没有第二个可改的公开账号名(B 站的 UID 就是
+    数字 id 本身),所以这里只有昵称和头像。识别身份的活儿归 `IDENTITY_COOKIE`。
     """
     username = (fields.get("username") or "").strip()
-
-    raw_id = (fields.get("platform_user_id") or "").strip()
-    for prefix in _ID_PREFIXES:
-        if raw_id.startswith(prefix):
-            raw_id = raw_id[len(prefix) :].strip()
-            break
-
-    if not raw_id:
-        by_name = {c.get("name"): c.get("value") for c in cookies if c.get("name")}
-        for name in USER_ID_COOKIES:
-            value = (by_name.get(name) or "").strip()
-            if value:
-                raw_id = value
-                break
 
     avatar = (fields.get("avatar_url") or "").strip()
     if not avatar.startswith(("http://", "https://", "data:image")):
         avatar = ""
 
-    return LoginProfile(
-        platform_user_id=raw_id,
-        username=username,
-        avatar_url=avatar or None,
-    )
+    return LoginProfile(username=username, avatar_url=avatar or None)
 
 
 LOGIN_SPEC = LoginFlowSpec(
     platform=PLATFORM,
+    identity_cookie=IDENTITY_COOKIE,
     login_url=LOGIN_URL,
     profile_url=IDENTITY_URL,
     qrcode_selectors=QRCODE_SELECTORS,

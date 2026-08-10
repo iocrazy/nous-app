@@ -417,10 +417,14 @@ async def finalize_login_step(
         scope_id=scope_id,
         platform=platform,
         platform_user_id=state.platform_user_id,
-        # 平台没给昵称时用平台 id 兜底 —— username 是 NOT NULL，且一个空名字
-        # 的账号卡片在矩阵场景里等于不可辨认。
-        username=state.username or str(state.platform_user_id),
+        # 平台没给昵称时用**抖音号**兜底，再退到平台 id —— username 是 NOT NULL，
+        # 且一个空名字的账号卡片在矩阵场景里等于不可辨认。顺序是可读性排的：
+        # `MioPoo` > `miopoo` > `41cf16775ee3e9fdf5e021f9c1ddfc12`。
+        # ⚠️ 这只影响**显示**。三者谁被选中都不改 platform_user_id，账号唯一键
+        # 永远是那个 cookie（mig 414 / P0-1）。
+        username=state.username or state.platform_handle or str(state.platform_user_id),
         avatar_url=state.avatar_url,
+        platform_handle=state.platform_handle,
         session_state=json.dumps(state.storage_state, ensure_ascii=False),
         created_by=user_id,
     )

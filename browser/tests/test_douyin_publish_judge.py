@@ -278,8 +278,10 @@ def test_profile_selectors_match_the_shipped_console_markup():
         "matches nodes outside the profile header"
     )
 
-    ids = PROFILE_TEXT_SELECTORS["platform_user_id"]
-    assert any("unique_id" in s for s in ids), "underscore, not hyphen"
+    # 抖音号 —— 现在挂在 platform_handle 下,不再是身份键(2026-08-09,见
+    # douyin.IDENTITY_COOKIE)。选择器本身照旧要对:它仍然是卡片上显示的那个名字。
+    handle = PROFILE_TEXT_SELECTORS["platform_handle"]
+    assert any("unique_id" in s for s in handle), "underscore, not hyphen"
 
     avatar_selectors, attr = PROFILE_ATTR_SELECTORS["avatar_url"]
     assert attr == "src"
@@ -298,4 +300,4 @@ def test_profile_selectors_keep_their_historical_fallbacks():
     from app.platforms.douyin import PROFILE_TEXT_SELECTORS
 
     assert any("nickname" in s for s in PROFILE_TEXT_SELECTORS["username"])
-    assert any("unique-id" in s for s in PROFILE_TEXT_SELECTORS["platform_user_id"])
+    assert any("unique-id" in s for s in PROFILE_TEXT_SELECTORS["platform_handle"])

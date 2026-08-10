@@ -170,7 +170,11 @@ PROFILE_TEXT_SELECTORS: Mapping[str, tuple[str, ...]] = {
         '[class*="user-name"]',
         '[class*="userName"]',
     ),
-    "platform_user_id": (
+    # 小红书号. [GUESS] UNVERIFIED, and DISPLAY ONLY — it is not the identity
+    # key (see `IDENTITY_COOKIE`). It used to be the first choice for
+    # `platform_user_id`, which is the shape of bug that bound one Douyin
+    # account twice on 2026-08-09.
+    "platform_handle": (
         '[class*="red-id"]',
         '[class*="redId"]',
         '[class*="account-id"]',
@@ -187,7 +191,26 @@ PROFILE_ATTR_SELECTORS: Mapping[str, tuple[tuple[str, ...], str]] = {
     ),
 }
 
-USER_ID_COOKIES = ("customer-sso-sid", "customerClientId", "userId")
+# THE identity source. `[GUESS]` **UNVERIFIED** — no account has ever completed
+# a bind on this platform, so nobody has read the live cookie jar.
+#
+# It replaces an ordered fallback list, `("customer-sso-sid",
+# "customerClientId", "userId")`, and dropping that list is the point rather
+# than a side effect. Ordered fallbacks put the **session** id first: an SSO sid
+# is reissued on every login, so each rescan would have keyed a *new*
+# `social_accounts` row — the exact duplicate-account failure P0-1 is about,
+# except it would have fired every single time instead of once.
+#
+# `userId` is the only candidate whose name claims to identify a *user*. If it
+# turns out not to exist, binding fails typed (`identity_unresolved`) and the
+# user is told so. That is the intended trade: a loud failure on an
+# unimplemented-publishing platform beats a silent account that forks on every
+# scan. Calibrate it the way the module header prescribes — bind once, dump the
+# cookie names, confirm the value is stable across two logins — and replace this
+# constant with what you measured.
+IDENTITY_COOKIE = "userId"
+
+# Labels printed in front of the 小红书号. Display-side only.
 _ID_PREFIXES = ("小红书号：", "小红书号:", "小红书号", "ID：", "ID:")
 
 
@@ -251,30 +274,22 @@ def judge_xiaohongshu_login(snapshot: LoginPageSnapshot) -> LoginJudgement:
     )
 
 
-def parse_xiaohongshu_profile(
-    fields: Mapping[str, str], cookies: Sequence[Mapping[str, Any]]
-) -> LoginProfile:
-    """Scraped strings -> account identity. Pure, and best-effort throughout.
+def parse_xiaohongshu_profile(fields: Mapping[str, str]) -> LoginProfile:
+    """Scraped strings -> the DISPLAY half of the profile. Pure, best-effort.
 
-    Everything degrades rather than fails: a console redesign that breaks the
-    display-name selector must leave a nameless-but-usable account, never abort
-    a login the user already completed by scanning.
+    Everything here degrades rather than fails: a console redesign that breaks
+    the display-name selector must leave a nameless-but-usable account, never
+    abort a login the user already completed by scanning. The identity key is
+    not part of that — it comes from `IDENTITY_COOKIE` and this function is not
+    even shown the cookies.
     """
     username = (fields.get("username") or "").strip()
 
-    raw_id = (fields.get("platform_user_id") or "").strip()
+    handle = (fields.get("platform_handle") or "").strip()
     for prefix in _ID_PREFIXES:
-        if raw_id.startswith(prefix):
-            raw_id = raw_id[len(prefix) :].strip()
+        if handle.startswith(prefix):
+            handle = handle[len(prefix) :].strip()
             break
-
-    if not raw_id:
-        by_name = {c.get("name"): c.get("value") for c in cookies if c.get("name")}
-        for name in USER_ID_COOKIES:
-            value = (by_name.get(name) or "").strip()
-            if value:
-                raw_id = value
-                break
 
     avatar = (fields.get("avatar_url") or "").strip()
     if not avatar.startswith(("http://", "https://", "data:image")):
@@ -283,14 +298,15 @@ def parse_xiaohongshu_profile(
         avatar = ""
 
     return LoginProfile(
-        platform_user_id=raw_id,
         username=username,
         avatar_url=avatar or None,
+        platform_handle=handle,
     )
 
 
 LOGIN_SPEC = LoginFlowSpec(
     platform=PLATFORM,
+    identity_cookie=IDENTITY_COOKIE,
     login_url=LOGIN_URL,
     profile_url=PROFILE_URL,
     qrcode_selectors=QRCODE_SELECTORS,

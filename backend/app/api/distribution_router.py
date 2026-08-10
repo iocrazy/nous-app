@@ -312,6 +312,10 @@ async def _refresh_session_account(account_id: int, acct: dict) -> dict:
         account_id,
         username=profile.get("username"),
         avatar_url=profile.get("avatar_url"),
+        # 抖音号会被用户改名，所以它跟昵称一样属于"每次校验都刷新"的显示字段。
+        # profile 里同时带着 platform_user_id，这里**故意不传** —— 改身份键是
+        # 重新绑定，不是资料刷新（见 update_profile 的 docstring）。
+        platform_handle=profile.get("platform_handle"),
     )
     # session_state=None: the session is alive but validate produced no new
     # cookies, so this bumps session_checked_at without blanking the row.

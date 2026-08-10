@@ -148,9 +148,14 @@ async def _read_profile_best_effort(
 
         profile = await read_profile_from_page(page, spec, cookies)
         fields = {
+            # Reported, never written back to the identity column: the backend's
+            # `update_profile` refuses `platform_user_id` on purpose (correcting
+            # an id is a re-bind, not a profile refresh). It is here so an
+            # operator can see what a live session says it is.
             "platform_user_id": profile.platform_user_id or None,
             "username": profile.username or None,
             "avatar_url": profile.avatar_url or None,
+            "platform_handle": profile.platform_handle or None,
         }
         # All-empty is indistinguishable from "selectors all missed"; sending
         # `{}` would let a caller overwrite a good stored name with nothing.

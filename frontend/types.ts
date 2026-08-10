@@ -2386,7 +2386,15 @@ export interface SocialAccount {
   scope_type: 'user' | 'team';
   scope_id: string;
   platform: 'douyin' | 'kuaishou' | 'xiaohongshu';
+  // The identity key the account is upserted on. One authoritative source per
+  // platform (a cookie: douyin uid_tt / bilibili DedeUserID) — never the
+  // on-screen handle, which is what bound one account into two rows on
+  // 2026-08-09. Not user-visible; show `username` / `platform_handle`.
   platform_user_id: string;
+  // The platform's public account name (抖音号 / 小红书号), mig 414. Display
+  // only and free to change — it takes no part in identity. null = the console
+  // did not render it on the last scrape.
+  platform_handle?: string | null;
   username: string;
   avatar_url: string | null;
   token_expires_at: string | null;

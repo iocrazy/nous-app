@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.login import LoginPageSnapshot
+from app.login import LoginPageSnapshot, identity_from_cookies
 from app.platforms import get_login_flow, login_platforms
 from app.schemas import SessionStatus
 
@@ -78,29 +78,28 @@ def test_profile_parser_survives_empty_input(platform: str):
     spec = get_login_flow(platform)
     assert spec is not None
 
-    profile = spec.parse_profile({}, [])
+    profile = spec.parse_profile({})
     assert profile is not None
     # 字段可以为空,但类型必须对 —— 下游会直接写进 social_accounts
     assert isinstance(profile.username, str)
-    assert isinstance(profile.platform_user_id, str)
+    assert isinstance(profile.platform_handle, str)
 
 
 @pytest.mark.parametrize("platform", sorted(login_platforms()))
-def test_cookie_fallback_identity_works(platform: str):
-    """所有显示选择器都失效时,cookie 兜底要能给出身份。
+def test_identity_comes_from_the_declared_cookie(platform: str):
+    """身份键只认 spec 声明的那一个 cookie。
 
-    抖音当初就靠这个:三个 profile 选择器全错,账号至少还有个 id 可用。
+    ⚠️ 这条原本叫 "cookie 兜底"—— cookie 是**兜底**正是 2026-08-09 那个
+    重复绑定的病根:DOM 抖音号先赢,cookie 只在选择器落空时接手,两个命名空间
+    轮流当唯一键,同一个账号于是有了两行。现在 cookie 不是兜底而是唯一来源,
+    这条测试也跟着从"兜底能生效"改成"只有它能生效"。
     """
     spec = get_login_flow(platform)
-    module = __import__(
-        f"app.platforms.{platform}", fromlist=["USER_ID_COOKIES"]
-    )
-    cookies = [{"name": name, "value": "fallback-id"} for name in module.USER_ID_COOKIES]
+    cookies = [{"name": spec.identity_cookie, "value": "the-real-id"}]
 
-    profile = spec.parse_profile({}, cookies)
-    assert profile.platform_user_id == "fallback-id", (
-        f"{platform}: 所有选择器失效时,cookie 兜底没生效"
-    )
+    assert identity_from_cookies(spec.identity_cookie, cookies) == "the-real-id"
+    # 别的 cookie 一律不算数,哪怕名字看起来像同一个东西。
+    assert identity_from_cookies(spec.identity_cookie, [{"name": "userId2", "value": "x"}]) == ""
 
 
 # --- 登录"成功"必须用轮询认的那个状态 ---------------------------------------
