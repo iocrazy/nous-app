@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getSupabaseClient } from '../../supabaseClient';
-import { KeyRound, Plus, QrCode, RefreshCw, Trash2, X } from 'lucide-react';
+import { AlertTriangle, KeyRound, Plus, QrCode, RefreshCw, Trash2, X } from 'lucide-react';
 import { useToast } from '../Toast';
 import {
-  connectAccount, deleteAccount, getAccountUsage, listAccounts, listPublishTasks,
-  refreshAccount,
+  connectAccount, deleteAccount, getAccountUsage, getBrowserHealth, listAccounts,
+  listPublishTasks, refreshAccount,
 } from '../../services/distributionService';
 import { SocialAccount, PublishTask } from '../../types';
 import { PLATFORM_BADGE, PLATFORM_LABEL, gradientFor } from './platform';
@@ -26,6 +26,19 @@ const WEEK_MS = 7 * 86_400_000;
 const isActionable = (a: SocialAccount) =>
   a.status === 'expired' || a.status === 'needs_relogin';
 
+/**
+ * What we know about the browser service every QR binding runs inside (D1).
+ *
+ * Three states, not a boolean, because "we could not ask" is not "it is down".
+ * `unknown` keeps the button live: the gate exists to replace a guaranteed
+ * failure with an upfront sentence, and a probe whose own request failed is no
+ * evidence about the browser container — blocking on it would invent an outage
+ * out of a flaky call. `down` is only ever set from a completed probe that
+ * came back `ok: false`, so there is no path to "unavailable" without one, and
+ * (the mirror image) no hardcoded healthy path either.
+ */
+type BrowserGate = 'unknown' | 'ok' | 'down';
+
 /** Which binding flow to start — chosen in the Connect modal. */
 type SessionLoginTarget = {
   platform: string;
@@ -44,6 +57,8 @@ export const AccountsPage: React.FC = () => {
   // Both binding entry points funnel through here: pick a method, then run it.
   const [methodPicker, setMethodPicker] = useState<string | null>(null);
   const [sessionLogin, setSessionLogin] = useState<SessionLoginTarget | null>(null);
+  const [browserGate, setBrowserGate] = useState<BrowserGate>('unknown');
+  const [checkingBrowser, setCheckingBrowser] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -63,6 +78,45 @@ export const AccountsPage: React.FC = () => {
   }, [addToast, t]);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  /**
+   * Ask the backend whether the browser service can take a QR login right now,
+   * and return the verdict so a click can act on it without waiting for state.
+   *
+   * Called exactly three ways — on mount, immediately before a login actually
+   * starts, and from the notice's Check again button. **No interval.** The
+   * probe launches a real Chromium on the other side; a page left open on a
+   * second monitor must not keep doing that, and the mount check plus the
+   * pre-click re-check already cover both moments where the answer changes
+   * anything (the page-load one is what disables the button; the pre-click one
+   * is what catches a service that went down while the page sat idle).
+   */
+  const probeBrowser = useCallback(async (): Promise<BrowserGate> => {
+    setCheckingBrowser(true);
+    try {
+      const health = await getBrowserHealth();
+      const gate: BrowserGate = health.ok ? 'ok' : 'down';
+      if (!health.ok) {
+        console.warn(
+          'distribution: browser service unhealthy',
+          health.error_kind, health.message,
+        );
+      }
+      setBrowserGate(gate);
+      return gate;
+    } catch (err) {
+      // The probe call itself failed (our API, not the browser container).
+      // Fall back to `unknown` — see the BrowserGate note: refusing to bind on
+      // no evidence would be a worse lie than letting the click through.
+      console.error('distribution: browser health probe failed', err);
+      setBrowserGate('unknown');
+      return 'unknown';
+    } finally {
+      setCheckingBrowser(false);
+    }
+  }, []);
+
+  useEffect(() => { void probeBrowser(); }, [probeBrowser]);
 
   // ── Realtime:账号行变化直接推过来 ──────────────────────────────
   //
@@ -119,13 +173,38 @@ export const AccountsPage: React.FC = () => {
     }
   };
 
+  /**
+   * Open the QR modal only if the browser service can actually serve it.
+   *
+   * The disabled button covers the state we knew about at page load; this
+   * re-probe covers the far more likely one — the page has been open for a
+   * while and `nous-browser` restarted underneath it (a backend deploy does
+   * exactly that). Without it the gate would be honest only for the first few
+   * seconds of a session.
+   *
+   * Both refusal branches say why (CLAUDE.md「触发路径必须类型化失败回显」):
+   * the modal not opening with no explanation would be the silent no-op this
+   * whole change is here to remove.
+   */
+  const startQrLogin = async (target: SessionLoginTarget) => {
+    if (await probeBrowser() === 'down') {
+      addToast(
+        t('distribution.browserUnavailable',
+          'Connection service is temporarily unavailable — QR sign-in cannot start right now.'),
+        'error',
+      );
+      return;
+    }
+    setSessionLogin(target);
+  };
+
   const startSession = (platform: string) => {
     setMethodPicker(null);
-    setSessionLogin({ platform, scopeType: 'user', scopeId: 'self' });
+    void startQrLogin({ platform, scopeType: 'user', scopeId: 'self' });
   };
 
   /** Re-link a dead browser session — same modal, account-scoped copy. */
-  const onRelogin = (a: SocialAccount) => setSessionLogin({
+  const onRelogin = (a: SocialAccount) => void startQrLogin({
     platform: a.platform,
     scopeType: a.scope_type,
     scopeId: a.scope_id,
@@ -247,6 +326,34 @@ export const AccountsPage: React.FC = () => {
         }
       />
 
+      {/* The one place the outage is stated in full. The buttons below only
+          go grey and carry a tooltip; without this line a user would be left
+          guessing whether the app is broken or they are missing a permission.
+          Manual retry, no timer — see `probeBrowser`. */}
+      {browserGate === 'down' && (
+        <div className="svc-notice" role="status">
+          <AlertTriangle size={16} className="svc-ic" />
+          <div className="svc-body">
+            <b>{t('distribution.browserDownTitle', 'Connection service is temporarily unavailable')}</b>
+            <p>
+              {t('distribution.browserDownDesc',
+                'QR sign-in runs in a browser service that is not responding — usually a restart during a deploy. Official Authorization is unaffected.')}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => { void probeBrowser(); }}
+            disabled={checkingBrowser}
+          >
+            <RefreshCw size={13} />
+            {checkingBrowser
+              ? t('distribution.browserChecking', 'Checking...')
+              : t('distribution.browserRecheck', 'Check again')}
+          </button>
+        </div>
+      )}
+
       <div className="stats">
         <div className="stat">
           <div className="k">{t('distribution.statsConnected', 'Connected')}</div>
@@ -344,7 +451,18 @@ export const AccountsPage: React.FC = () => {
                       refreshed at the platform, a dead session can only be
                       revived by scanning a new QR code. */}
                   {needsRelogin ? (
-                    <button type="button" className="btn btn-tint-amber btn-sm" onClick={() => onRelogin(a)}>
+                    // Re-scanning is a QR binding like any other, so it is
+                    // gated the same way — a dead-session card is exactly
+                    // where a user clicks hardest during an outage.
+                    <button
+                      type="button"
+                      className="btn btn-tint-amber btn-sm"
+                      onClick={() => onRelogin(a)}
+                      disabled={browserGate === 'down'}
+                      title={browserGate === 'down'
+                        ? t('distribution.browserDownTitle', 'Connection service is temporarily unavailable')
+                        : undefined}
+                    >
                       <QrCode size={13} /> {t('distribution.rescan', 'Scan again')}
                     </button>
                   ) : expired ? (
@@ -455,11 +573,26 @@ export const AccountsPage: React.FC = () => {
               </button>
             </div>
             <div className="method-row">
-              <button type="button" className="method-card" onClick={() => startSession(methodPicker)}>
+              {/* Only this half is gated: OAuth is a redirect to the
+                  platform's own page and never touches nous-browser, so
+                  greying both out during an outage would remove a channel
+                  that still works. */}
+              <button
+                type="button"
+                className="method-card"
+                onClick={() => startSession(methodPicker)}
+                disabled={browserGate === 'down'}
+              >
                 <span className="mc-ic tone-info"><QrCode size={17} /></span>
                 <b>{t('distribution.methodSession', 'QR Code Login')}</b>
                 <span>{t('distribution.methodSessionDesc', 'Scan once with the app. Publishes unattended on a schedule and picks the account server-side.')}</span>
-                <em className="tone-ok">{t('distribution.methodSessionNote', 'Recommended for matrix accounts')}</em>
+                {browserGate === 'down' ? (
+                  <em className="tone-warn">
+                    {t('distribution.browserDownTitle', 'Connection service is temporarily unavailable')}
+                  </em>
+                ) : (
+                  <em className="tone-ok">{t('distribution.methodSessionNote', 'Recommended for matrix accounts')}</em>
+                )}
               </button>
               <button type="button" className="method-card" onClick={() => void startOAuth(methodPicker)}>
                 <span className="mc-ic tone-warn"><KeyRound size={17} /></span>

@@ -61,6 +61,39 @@ class AccountUsageResponse(BaseModel):
     publish_records: int
 
 
+class BrowserHealthResponse(BaseModel):
+    """Can the QR-login channel work *right now* — read by the binding entry
+    point before it offers the button (D1).
+
+    Why this exists as its own endpoint: every QR binding runs inside
+    ``nous-browser``. While that container is restarting (a deploy) or down,
+    the click is a guaranteed failure, but the user only found out after the
+    modal opened and sat on "Starting..." until it timed out. This turns that
+    into an upfront, typed statement.
+
+    ⚠️ Deliberately **not** folded into ``/api/v1/readyz``. That probe is the
+    deploy smoke gate (``deploy-gpu.yml``): making backend-readiness depend on
+    a sibling container would mark the backend not-ready every time the browser
+    restarts, and smoke failure auto-rolls-back the release. Same family as the
+    ``long_running`` misuse the repo already paid for.
+
+    The fields mirror ``BrowserClient.health()``'s typed result rather than
+    re-deriving a verdict here — ``ok`` is true only when the browser container
+    answered AND reported a real Chromium launch (``browser_ready``), so there
+    is no code path that can report healthy without a probe having succeeded.
+    """
+
+    ok: bool
+    # ``SessionErrorKind`` value when unhealthy (``unreachable`` / ``timeout``
+    # / ``not_configured`` / ``server_error`` / …), None when ok. str, not the
+    # enum, for the same reason ``auth_type`` is: a kind added later must not
+    # 500 this endpoint.
+    error_kind: Optional[str] = None
+    # Diagnostic detail, same pass-through posture as ``SessionOpResponse``.
+    # The UI shows its own translated copy — it must not print this.
+    message: str = ""
+
+
 # ── 会话通道扫码登录（S2, spec §4.1） ──────────────────────────────
 
 

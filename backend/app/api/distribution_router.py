@@ -28,6 +28,7 @@ from app.repositories.social_accounts_repository import SocialAccountsRepository
 from app.schemas.distribution import (
     AccountListResponse,
     AccountUsageResponse,
+    BrowserHealthResponse,
     ConnectAccountRequest,
     ConnectAccountResponse,
     SessionLoginCancelResponse,
@@ -411,6 +412,56 @@ async def delete_account(account_id: int, user: CurrentUserDep):
 
 
 # ── Session channel — QR login (S2, spec §4.1) ────────────────────────
+
+
+# A person is waiting on this answer, so the probe is cut short well before
+# the 5s/5s the background sweep is happy to wait: past a couple of seconds
+# "we cannot tell" is the honest answer for a gate whose whole job is to be
+# quicker than the failure it replaces. Both halves are set — a connect that
+# hangs (container gone, no RST) is the common shape here, and leaving connect
+# at its default would make the worst case 5s+2s.
+UI_BROWSER_PROBE_TIMEOUT_SECONDS = 2.0
+
+
+@router.get(
+    "/browser/health",
+    response_model=BrowserHealthResponse,
+    dependencies=[Depends(require_distribution)],
+)
+async def get_browser_health(user: CurrentUserDep) -> BrowserHealthResponse:
+    """Is the QR-login channel usable right now? Read-only, never 5xx.
+
+    Nothing is mutated and nothing is decided here — the endpoint forwards
+    ``BrowserClient.health()``'s typed verdict, which is itself the browser
+    container's ``/healthz`` (a real Chromium launch, not a liveness ping).
+
+    **Unhealthy is a 200 with ``ok: false``**, not a 503. The caller is a UI
+    gate: a 503 would land in the frontend's generic error path and be
+    indistinguishable from "the request itself failed", which is the exact
+    difference the gate needs to make — one disables the button with a reason,
+    the other is no evidence about the browser at all.
+
+    Authenticated + behind ``require_distribution`` like every sibling: it is
+    an internal-infrastructure statement, not public status.
+
+    ⚠️ Never wire this into ``/api/v1/readyz`` — see ``BrowserHealthResponse``.
+    """
+    from app.services.distribution.browser_client import BrowserClient
+
+    health = await BrowserClient(
+        health_timeout=UI_BROWSER_PROBE_TIMEOUT_SECONDS,
+        connect_timeout=UI_BROWSER_PROBE_TIMEOUT_SECONDS,
+    ).health()
+    if not health.ok:
+        logger.info(
+            "distribution: browser health gate reports unhealthy "
+            "(error_kind=%s message=%s)",
+            health.error_kind,
+            health.message,
+        )
+    return BrowserHealthResponse(
+        ok=health.ok, error_kind=health.error_kind, message=health.message
+    )
 
 
 async def _load_login_task(task_id: str, user: dict) -> dict:

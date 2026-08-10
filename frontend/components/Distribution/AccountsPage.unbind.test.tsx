@@ -60,6 +60,9 @@ vi.mock('../../services/distributionService', async (importOriginal) => ({
   getAccountUsage: (...a: unknown[]) => getAccountUsage(...a),
   deleteAccount: (...a: unknown[]) => deleteAccount(...a),
   connectAccount: vi.fn(), refreshAccount: vi.fn(),
+  // The page probes the browser service on mount (D1). Unrelated to unbinding,
+  // but it must not fall through to a real fetch from a unit test.
+  getBrowserHealth: vi.fn().mockResolvedValue({ ok: true, error_kind: null, message: 'ok' }),
   startSessionLogin: vi.fn(), submitSmsCode: vi.fn(),
   cancelSessionLogin: vi.fn().mockResolvedValue(undefined),
 }));
