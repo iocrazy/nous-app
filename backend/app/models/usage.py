@@ -93,7 +93,9 @@ class AiUsageHourly(Base):
     id: Mapped[int] = mapped_column(
         BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
     )
-    bucket_hour: Mapped[datetime.datetime] = mapped_column(DateTime(True), nullable=False)
+    bucket_hour: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False
+    )
     team_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     project_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     agent_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid)

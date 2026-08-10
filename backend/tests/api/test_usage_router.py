@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import importlib
+
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-
-import importlib
 
 from app.core.deps import get_auth
 
@@ -80,11 +80,22 @@ async def test_summary_success_shape(app, monkeypatch):
                 "event_count": 2,
             },
             "groups": [
-                {"grp": "qwen-max", "prompt_tokens": 10, "completion_tokens": 5,
-                 "total_tokens": 15, "cost_cents": 1.5, "event_count": 2},
+                {
+                    "grp": "qwen-max",
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                    "cost_cents": 1.5,
+                    "event_count": 2,
+                },
             ],
             "daily": [
-                {"day": "2026-07-18", "grp": "qwen-max", "total_tokens": 15, "cost_cents": 1.5},
+                {
+                    "day": "2026-07-18",
+                    "grp": "qwen-max",
+                    "total_tokens": 15,
+                    "cost_cents": 1.5,
+                },
             ],
         }
 

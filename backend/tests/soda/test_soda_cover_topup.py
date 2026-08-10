@@ -6,7 +6,9 @@ from __future__ import annotations
 
 from app.workflows.soda_download import needs_cover_topup
 
-_URL_COVER = {"metadata": {"album": {"url_cover": {"uri": "x", "urls": ["https://h/"]}}}}
+_URL_COVER = {
+    "metadata": {"album": {"url_cover": {"uri": "x", "urls": ["https://h/"]}}}
+}
 
 
 def test_topup_when_cover_failed_but_url_exists():

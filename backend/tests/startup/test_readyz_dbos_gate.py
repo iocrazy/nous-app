@@ -102,9 +102,7 @@ async def _call_readyz(registry: BackgroundTaskRegistry):
     return response.status_code, payload
 
 
-async def test_configured_but_disabled_dbos_is_degraded(
-    ready_registry, monkeypatch
-):
+async def test_configured_but_disabled_dbos_is_degraded(ready_registry, monkeypatch):
     """The 2026-07-22 outage: DSN set, init failed, every probe stayed green."""
     monkeypatch.setenv(
         "DBOS_DATABASE_URL", "postgresql://postgres:pw@nous-db:5432/postgres"

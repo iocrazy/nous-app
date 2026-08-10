@@ -13,13 +13,13 @@
     python scripts/optimize_existing_videos.py ./downloads --dry-run
 """
 
-import os
-import sys
 import argparse
-import subprocess
+import os
 import shutil
-from pathlib import Path
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 
 def check_ffmpeg():

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+import importlib
 from decimal import Decimal
 
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-
-import importlib
 
 from app.core.deps import get_auth
 
@@ -84,8 +83,11 @@ async def test_get_budget_member_ok_with_over_flag(app, monkeypatch):
     monkeypatch.setattr(tr, "get_team_repository", lambda: _Repo())
     _patch_usage(
         monkeypatch,
-        {"monthly_budget_cents": Decimal("500"), "updated_by_user_id": None,
-         "updated_at": None},
+        {
+            "monthly_budget_cents": Decimal("500"),
+            "updated_by_user_id": None,
+            "updated_at": None,
+        },
         spend=Decimal("600"),
     )
     async with await _client(app) as c:
@@ -108,10 +110,18 @@ async def test_put_budget_owner_ok(app, monkeypatch):
 
     monkeypatch.setattr(tr, "get_team_repository", lambda: _Repo())
     captured = _patch_usage(
-        monkeypatch, {"monthly_budget_cents": Decimal("1000"), "updated_by_user_id": OWNER,
-                      "updated_at": None}, spend=Decimal("0"))
+        monkeypatch,
+        {
+            "monthly_budget_cents": Decimal("1000"),
+            "updated_by_user_id": OWNER,
+            "updated_at": None,
+        },
+        spend=Decimal("0"),
+    )
     async with await _client(app) as c:
-        resp = await c.put("/api/v1/teams/900/ai-budget", json={"monthly_budget_cents": 1000})
+        resp = await c.put(
+            "/api/v1/teams/900/ai-budget", json={"monthly_budget_cents": 1000}
+        )
     assert resp.status_code == 200
     assert captured["cents"] == 1000
 
@@ -128,7 +138,9 @@ async def test_put_budget_non_owner_non_admin_403(app, monkeypatch):
     monkeypatch.setattr(tr, "get_team_repository", lambda: _Repo())
     _patch_usage(monkeypatch, None)
     async with await _client(app) as c:
-        resp = await c.put("/api/v1/teams/900/ai-budget", json={"monthly_budget_cents": 1000})
+        resp = await c.put(
+            "/api/v1/teams/900/ai-budget", json={"monthly_budget_cents": 1000}
+        )
     assert resp.status_code == 403
 
 
@@ -143,11 +155,14 @@ async def test_put_budget_admin_ok(app, monkeypatch):
 
     monkeypatch.setattr(tr, "get_team_repository", lambda: _Repo())
     captured = _patch_usage(
-        monkeypatch, {"monthly_budget_cents": None, "updated_by_user_id": OWNER,
-                      "updated_at": None})
+        monkeypatch,
+        {"monthly_budget_cents": None, "updated_by_user_id": OWNER, "updated_at": None},
+    )
     async with await _client(app) as c:
         # blank/unlimited
-        resp = await c.put("/api/v1/teams/900/ai-budget", json={"monthly_budget_cents": None})
+        resp = await c.put(
+            "/api/v1/teams/900/ai-budget", json={"monthly_budget_cents": None}
+        )
     assert resp.status_code == 200
     assert captured["cents"] is None
 
@@ -161,5 +176,7 @@ async def test_put_budget_negative_400(app, monkeypatch):
     monkeypatch.setattr(tr, "get_team_repository", lambda: _Repo())
     _patch_usage(monkeypatch, None)
     async with await _client(app) as c:
-        resp = await c.put("/api/v1/teams/900/ai-budget", json={"monthly_budget_cents": -5})
+        resp = await c.put(
+            "/api/v1/teams/900/ai-budget", json={"monthly_budget_cents": -5}
+        )
     assert resp.status_code == 400

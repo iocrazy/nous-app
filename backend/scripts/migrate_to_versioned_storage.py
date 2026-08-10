@@ -24,14 +24,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import asyncio
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
 async def main(dry_run: bool = False):
-    from app.db.supabase_client import get_async_supabase_admin
     from app.core.config import settings
+    from app.db.supabase_client import get_async_supabase_admin
 
     client = await get_async_supabase_admin()
     base = Path(settings.DOWNLOAD_PATH)
