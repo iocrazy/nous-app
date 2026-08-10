@@ -64,6 +64,7 @@ function renderCard(overrides: Partial<ComponentProps<typeof EpisodeNodeCard>> =
   const base = {
     node,
     canEditConfig: false,
+    canWrite: true,
     isCursorNode: true,
     ...cbs(),
     ...overrides,
@@ -95,6 +96,14 @@ describe('EpisodeNodeCard', () => {
         <EpisodeNodeCard {...props} isCursorNode={false} />
       </I18nextProvider>,
     );
+    expect(screen.queryByTestId('node-card-advance')).toBeNull();
+  });
+
+  // 评审修复轮1 (Important #1): a read-only member must never see
+  // Back/Complete-stage, even on the cursor node — mirrors CurrentNodeCard's
+  // `isActive && canWrite` gate (the pre-IA-redesign card this replaces).
+  it('advance buttons hidden when canWrite is false, even on the cursor node', () => {
+    renderCard({ isCursorNode: true, canWrite: false });
     expect(screen.queryByTestId('node-card-advance')).toBeNull();
   });
 

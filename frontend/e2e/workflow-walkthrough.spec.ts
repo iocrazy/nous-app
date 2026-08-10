@@ -367,40 +367,34 @@ for (const theme of ['dark', 'light'] as const) {
   // W3-1's add/remove-stage affordances (`WorkflowStrip`'s `canEdit` +
   // `onAddNode`/`onRemoveNode`) were wired through the pre-Task-4
   // always-mounted `WorkflowSection` (the accordion's predecessor). Task 4's
-  // accordion rewrite calls `WorkflowStrip` directly in `WorkspaceOverview`
-  // WITHOUT those three props (see that file — the strip there is read-only
-  // navigation only), so `workflow-add-stage`/`workflow-remove-node` no
-  // longer render anywhere in the has_workflow=true path. That's a gap in
-  // the accordion itself, not in the node-card surface this task (Task 5)
-  // owns — tracked here rather than silently left red.
-  test.fixme(
-    `${theme}: add stage opens the library picker (W3-1)`,
-    async ({ page }) => {
-      await setupWorkflowStubs(page);
-      await forceTheme(page, theme);
-      await openWorkspaceOverview(page);
-      await page.getByTestId('workflow-add-stage').click();
-      await expect(page.getByTestId('workflow-library-picker')).toBeVisible();
-      // The bank list + the blank-stage footer are both offered on the instance path.
-      await expect(page.getByTestId('workflow-library-item').first()).toBeVisible();
-      await expect(page.getByTestId('workflow-blank-stage-input')).toBeVisible();
-      await page.screenshot({ path: `${SHOTS}/05-add-library-${theme}.png`, fullPage: true });
-    },
-  );
+  // accordion rewrite called `WorkflowStrip` directly in `WorkspaceOverview`
+  // without those three props, so these two went red. Task 5 修复轮1
+  // (评审 Important #2) restored the mechanism: the accordion body now
+  // mounts `WorkflowSection` itself (`showNodeCards={false}` — see that
+  // component's file doc) as the strip + `LibraryPickerModal` + remove-confirm
+  // host, so `workflow-add-stage`/`workflow-remove-node` render again.
+  test(`${theme}: add stage opens the library picker (W3-1)`, async ({ page }) => {
+    await setupWorkflowStubs(page);
+    await forceTheme(page, theme);
+    await openWorkspaceOverview(page);
+    await page.getByTestId('workflow-add-stage').click();
+    await expect(page.getByTestId('workflow-library-picker')).toBeVisible();
+    // The bank list + the blank-stage footer are both offered on the instance path.
+    await expect(page.getByTestId('workflow-library-item').first()).toBeVisible();
+    await expect(page.getByTestId('workflow-blank-stage-input')).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/05-add-library-${theme}.png`, fullPage: true });
+  });
 
-  test.fixme(
-    `${theme}: remove pending node opens a confirm dialog (W3-1)`,
-    async ({ page }) => {
-      await setupWorkflowStubs(page);
-      await forceTheme(page, theme);
-      await openWorkspaceOverview(page);
-      const editing = page.getByTestId('workflow-strip-node').filter({ hasText: 'Editing' });
-      await editing.hover();
-      await page.getByTestId('workflow-remove-node').first().click();
-      await expect(page.getByTestId('workflow-remove-confirm')).toBeVisible();
-      await page.screenshot({ path: `${SHOTS}/06-remove-confirm-${theme}.png`, fullPage: true });
-    },
-  );
+  test(`${theme}: remove pending node opens a confirm dialog (W3-1)`, async ({ page }) => {
+    await setupWorkflowStubs(page);
+    await forceTheme(page, theme);
+    await openWorkspaceOverview(page);
+    const editing = page.getByTestId('workflow-strip-node').filter({ hasText: 'Editing' });
+    await editing.hover();
+    await page.getByTestId('workflow-remove-node').first().click();
+    await expect(page.getByTestId('workflow-remove-confirm')).toBeVisible();
+    await page.screenshot({ path: `${SHOTS}/06-remove-confirm-${theme}.png`, fullPage: true });
+  });
 
   test(`${theme}: projects list shows the workflow badge (W3-3)`, async ({ page }) => {
     await setupWorkflowStubs(page);

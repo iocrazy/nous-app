@@ -11,6 +11,16 @@
  * toast). For a No-workflow project (`has_workflow=false`) a writer gets a
  * "Set up workflow" empty-state CTA (M1.x opt-in migration path — see
  * AttachWorkflowModal); a non-writer sees nothing, same as before.
+ *
+ * IA redesign Task 5 修复轮1: `WorkspaceOverview`'s accordion now has its own
+ * per-node summary card (`EpisodeNodeCard`), so this component's OWN
+ * `CurrentNodeCard` stacks would duplicate the same node's controls when
+ * both are mounted together. `WorkspaceOverview` reuses THIS component (not
+ * a bare `WorkflowStrip`) for the has_workflow=true accordion body purely as
+ * the add/remove-stage MECHANISM host — `showNodeCards={false}` keeps the
+ * strip + `LibraryPickerModal` + remove-confirm dialog + the people/agents
+ * fetch those need, while skipping the `CurrentNodeCard` render blocks
+ * entirely (see that prop's doc comment below).
  */
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -59,6 +69,16 @@ interface WorkflowSectionProps {
   onSelectNode?: (node: ProjectStageNode) => void;
   /** A node the user asked to focus (from the sidebar / strip) — scroll to it. */
   focusNodeId: string | null;
+  /** IA redesign Task 5 修复轮1: the Overview accordion now shows its own
+   * `EpisodeNodeCard` per selected node (see `WorkspaceOverview`'s
+   * `renderNodeCard` slot) — mounting THIS component's `CurrentNodeCard`
+   * stacks alongside it would duplicate the same node's controls twice.
+   * `false` keeps everything else (strip, add/remove-stage picker + confirm,
+   * the people/agents fetch those need) but skips both `groupNodes`/
+   * `futureEligible` render blocks below. Defaults `true` so every other
+   * caller (today: none besides `WorkspaceOverview`, but the flag is opt-out
+   * to keep the pre-Task-5 behavior as the fallback) is unaffected. */
+  showNodeCards?: boolean;
 }
 
 /** Map a delete 409 reason code to user copy (server sends the code only). */
@@ -80,6 +100,7 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
   onOpenStage,
   onSelectNode,
   focusNodeId,
+  showNodeCards = true,
 }) => {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -282,21 +303,23 @@ export const WorkflowSection: React.FC<WorkflowSectionProps> = ({
         onAddNode={() => setPickerOpen(true)}
         onRemoveNode={(node) => setRemoving(node)}
       />
-      {groupNodes.map((node) => (
-        <CurrentNodeCard
-          key={node.id}
-          projectId={projectId}
-          node={node}
-          canWrite={canWrite}
-          people={people}
-          agents={agents}
-          onPatched={onReload}
-          onRequestAdvance={onRequestAdvance}
-          onOpenTodolist={onOpenTodolist}
-          onOpenStage={onOpenStage}
-        />
-      ))}
-      {canWrite &&
+      {showNodeCards &&
+        groupNodes.map((node) => (
+          <CurrentNodeCard
+            key={node.id}
+            projectId={projectId}
+            node={node}
+            canWrite={canWrite}
+            people={people}
+            agents={agents}
+            onPatched={onReload}
+            onRequestAdvance={onRequestAdvance}
+            onOpenTodolist={onOpenTodolist}
+            onOpenStage={onOpenStage}
+          />
+        ))}
+      {showNodeCards &&
+        canWrite &&
         futureEligible.map((node) => (
           <CurrentNodeCard
             key={node.id}

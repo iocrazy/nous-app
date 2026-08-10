@@ -910,6 +910,10 @@ export function ProjectWorkspace({
                       // Task 9 wires the real per-node config-write permission;
                       // hardwired false here renders every fact read-only.
                       canEditConfig={false}
+                      // 评审修复轮1 (Important #1): gates Back/Complete-stage —
+                      // a read-only member must never see those buttons at all,
+                      // not just have the server reject the click.
+                      canWrite={canWrite}
                       isCursorNode={String(node.id) === String(workflow?.current_node_id ?? '')}
                       onEnterSurface={handleSelectNode}
                       onRequestAdvance={requestAdvance}

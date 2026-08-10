@@ -62,7 +62,6 @@ import { Clock, MessageCircleQuestion } from 'lucide-react';
 import { formatRelativeTime } from '../../utils/relativeTime';
 import { Loading } from '../common/Loading';
 import { WorkflowSection } from '../workflow/WorkflowSection';
-import { WorkflowStrip } from '../workflow/WorkflowStrip';
 import { EpisodeSummaryRow } from './EpisodeSummaryRow';
 import type { EpisodeProgress, Project, ProjectWorkflow } from '../../types';
 
@@ -190,11 +189,35 @@ export function WorkspaceOverview({
                       </div>
                     ) : (
                       <>
-                        {workflow && (
-                          <WorkflowStrip
-                            nodes={workflow.nodes}
-                            currentNodeId={workflow.current_node_id}
+                        {/* 修复轮1 (评审 Important #2): the strip's own
+                            add/remove-stage mechanism (PR #1520) needs a host
+                            for its LibraryPickerModal/remove-confirm state —
+                            that lived in `WorkflowSection`, which stopped
+                            mounting for a has_workflow=true project once Task
+                            4 moved to this bare `WorkflowStrip` call (no
+                            `canEdit`/`onAddNode`/`onRemoveNode`, so those
+                            buttons never rendered). Reusing `WorkflowSection`
+                            here with `showNodeCards={false}` restores the
+                            mechanism without reintroducing its
+                            `CurrentNodeCard` stacks (`EpisodeNodeCard`,
+                            below, already covers that job per-selected-node).
+                            `!has_workflow` still renders nothing here — same
+                            as before (an empty `nodes` list made the old bare
+                            `WorkflowStrip` a no-op too), the top attach CTA
+                            owns that case. */}
+                        {workflow?.has_workflow && (
+                          <WorkflowSection
+                            projectId={project.id}
+                            teamId={project.team_id ?? ''}
+                            episodeId={ep.episode_id}
+                            workflow={workflow}
+                            canWrite={canWrite}
+                            onReload={onReloadWorkflow ?? (() => undefined)}
+                            onRequestAdvance={() => undefined}
+                            onOpenTodolist={() => undefined}
                             onSelectNode={(node) => onSelectNode(String(node.id))}
+                            focusNodeId={null}
+                            showNodeCards={false}
                           />
                         )}
                         {renderNodeCard(ep.episode_id, selectedNodeId ?? workflow?.current_node_id ?? null)}

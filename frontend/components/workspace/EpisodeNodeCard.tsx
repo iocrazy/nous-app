@@ -40,6 +40,13 @@ export interface EpisodeNodeCardProps {
   /** Observer can edit owner/schedule in place — hardwired `false` until
    * Task 9 wires the real permission; both branches render read-only today. */
   canEditConfig: boolean;
+  /** 评审修复轮1 (Important #1): Back/Complete-stage act on the SHARED
+   * workflow cursor — a read-only member seeing (and being able to click)
+   * those buttons only to eat a generic error toast once the server's real
+   * gate (`verify_project_write_access`) rejects it is a UX regression, not
+   * a safety hole. Mirrors `CurrentNodeCard`'s `isActive && canWrite` gate
+   * exactly. */
+  canWrite: boolean;
   /** Non-cursor nodes hide Complete-stage/Back — same semantics as
    * `CurrentNodeCard`'s `isActive`: those buttons act on the shared workflow
    * cursor, not an arbitrary node. */
@@ -70,6 +77,7 @@ const ENTRY_LABEL_KEY: Record<'script' | 'storyboard' | 'renders' | 'stage', [st
 export const EpisodeNodeCard: FC<EpisodeNodeCardProps> = ({
   node,
   canEditConfig,
+  canWrite,
   isCursorNode,
   onEnterSurface,
   onRequestAdvance,
@@ -176,7 +184,7 @@ export const EpisodeNodeCard: FC<EpisodeNodeCardProps> = ({
           <Settings size={13} /> {t('projects.nodeCard.settings', 'Node settings')}
         </button>
 
-        {isCursorNode && (
+        {isCursorNode && canWrite && (
           <div data-testid="node-card-advance" className="ml-auto flex items-center gap-2">
             <button
               type="button"
