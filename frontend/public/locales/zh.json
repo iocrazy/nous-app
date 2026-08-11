@@ -4102,6 +4102,8 @@
       "GenerateShotImage": "生成分镜图"
     },
     "failed": "失败",
+    "capabilityDenied": "Agent 尝试调用 {{tool}} — 已被权限拦截",
+    "capabilityDeniedCta": "前往 AI Library",
     "wroteShots_one": "本轮写入 {{count}} 张镜头卡",
     "wroteShots_other": "本轮写入 {{count}} 张镜头卡",
     "wroteEdits_one": "本轮应用 {{count}} 处剧本修改",

@@ -1932,7 +1932,10 @@ export interface LiveAgentRun {
 /** One transcript event of a run (mig 285 agent_run_events). */
 export interface AgentRunEvent {
   seq: number;
-  event_type: 'user' | 'assistant' | 'tool_call' | 'error' | 'system';
+  // 'capability_denied': Task 5 (Agent 权限页梳理立项) — the capability gate's
+  // abort, recorded once per tool per turn (backend/app/services/ai/runner/
+  // agent_runner.py). payload: { tool: string, reason: string }.
+  event_type: 'user' | 'assistant' | 'tool_call' | 'error' | 'system' | 'capability_denied';
   payload: Record<string, unknown>;
   created_at: string;
 }

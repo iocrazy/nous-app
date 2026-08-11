@@ -7,6 +7,7 @@ import type { AIChatMessageAttachment, ChatToolCall } from '../../types';
 import { getResourceCoverUrl } from '../../services/resourceService';
 import { ApprovalCard, type AwaitingApproval } from './ApprovalCard';
 import { SubTaskList } from './SubTaskCard';
+import { CapabilityDeniedNotice } from '../agentActivity/CapabilityDeniedNotice';
 import { ToolActivityChips } from '../agentActivity/ToolActivityChips';
 import { TurnWriteSummary } from '../agentActivity/TurnWriteSummary';
 import {
@@ -14,6 +15,7 @@ import {
   isScreenwritingTool,
   summarizeWrites,
 } from '../agentActivity/toolActivity';
+import { useRunToolActivity } from '../agentActivity/useRunToolActivity';
 
 export interface MessageBubbleProps {
   role: 'user' | 'assistant';
@@ -104,6 +106,13 @@ export function MessageBubble({
   const { t } = useTranslation();
   const [copied, setCopied] = React.useState(false);
 
+  // Denials-only read of useRunToolActivity: the header comment on that hook
+  // bans the panel from consuming `activities` (it already has the trace via
+  // `toolCalls` — reading both would double-render every tool_call). But
+  // `denials` is a different event stream ("capability_denied") that never
+  // appears in `toolCalls` at all, so reading it here duplicates nothing.
+  const { denials } = useRunToolActivity(runId, false);
+
   // Split the turn's trace by renderer. The two arrays are disjoint and
   // together cover every call, so nothing is duplicated and nothing is lost.
   const { screenwritingActivities, otherCalls, writeSummary } = React.useMemo(() => {
@@ -156,6 +165,12 @@ export function MessageBubble({
             become chips + a write summary, everything else (Delegate / Skill /
             future tools) keeps the existing sub-task cards. */}
         <SubTaskList calls={otherCalls} />
+
+        {denials.length > 0 && (
+          <div className="px-3 pt-2">
+            <CapabilityDeniedNotice denials={denials} />
+          </div>
+        )}
 
         {screenwritingActivities.length > 0 && (
           <div className="space-y-1.5 px-3 pt-2">

@@ -4102,6 +4102,8 @@
       "GenerateShotImage": "Generated shot image"
     },
     "failed": "failed",
+    "capabilityDenied": "Agent tried {{tool}} — blocked by permissions",
+    "capabilityDeniedCta": "Open AI Library",
     "wroteShots_one": "Wrote {{count}} shot card this turn",
     "wroteShots_other": "Wrote {{count}} shot cards this turn",
     "wroteEdits_one": "Applied {{count}} script edit this turn",

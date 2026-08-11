@@ -194,6 +194,41 @@ export function fromTranscriptEvents(events: AgentRunEvent[]): ToolActivity[] {
 }
 
 /**
+ * One capability-gate abort surfaced to the user (Task 6, Agent 权限页梳理
+ * 立项). Sourced from the "capability_denied" transcript event Task 5 emits
+ * — one per tool per turn, so at most one denial per distinct tool shows up
+ * here even if the model retries the same call.
+ */
+export interface CapabilityDenial {
+  /** Stable within one run — same seq-based dedupe key as ToolActivity. */
+  key: string;
+  tool: string;
+  /** The hook's abort_reason, verbatim (English, not translated). */
+  reason: string;
+}
+
+/**
+ * Timeline + panel source (via useRunToolActivity): "capability_denied"
+ * transcript rows. Same UNIQUE(run_id, seq) dedupe key as
+ * ``fromTranscriptEvents`` — an incremental re-poll cannot double-count.
+ * A payload missing tool or reason is dropped rather than rendered blank.
+ */
+export function denialsFromTranscriptEvents(events: AgentRunEvent[]): CapabilityDenial[] {
+  const seen = new Map<string, CapabilityDenial>();
+  for (const ev of events ?? []) {
+    if (ev?.event_type !== 'capability_denied') continue;
+    const payload = ev.payload ?? {};
+    const tool = str(payload.tool);
+    const reason = str(payload.reason);
+    if (!tool || !reason) continue;
+    const key = `seq:${ev.seq}`;
+    if (seen.has(key)) continue;
+    seen.set(key, { key, tool, reason });
+  }
+  return [...seen.values()];
+}
+
+/**
  * Panel source: the trace already folded into the assistant message.
  *
  * ChatToolCall carries no unique id, so the key is (iteration, ordinal within

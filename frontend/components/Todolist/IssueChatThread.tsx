@@ -22,6 +22,7 @@ import type { IssueStatus } from '../../services/issuesService';
 import { relativeTime } from '../../utils/taskDisplay';
 import { useToast } from '../Toast';
 import { useElapsedSeconds } from '../../hooks/useElapsedSeconds';
+import { CapabilityDeniedNotice } from '../agentActivity/CapabilityDeniedNotice';
 import { ToolActivityChips } from '../agentActivity/ToolActivityChips';
 import { TurnWriteSummary } from '../agentActivity/TurnWriteSummary';
 import { summarizeWrites } from '../agentActivity/toolActivity';
@@ -246,13 +247,18 @@ const RunToolActivity: React.FC<{ runId: string | null; isRunning: boolean }> = 
   runId,
   isRunning,
 }) => {
-  const { activities } = useRunToolActivity(runId, isRunning);
+  const { activities, denials } = useRunToolActivity(runId, isRunning);
   const writes = useMemo(() => summarizeWrites(activities), [activities]);
-  if (activities.length === 0) return null;
+  if (activities.length === 0 && denials.length === 0) return null;
   return (
     <div className="ml-7 mb-1.5 space-y-1.5">
-      <ToolActivityChips activities={activities} />
-      <TurnWriteSummary summary={writes} interactive={false} />
+      {denials.length > 0 && <CapabilityDeniedNotice denials={denials} interactive={false} />}
+      {activities.length > 0 && (
+        <>
+          <ToolActivityChips activities={activities} />
+          <TurnWriteSummary summary={writes} interactive={false} />
+        </>
+      )}
     </div>
   );
 };
