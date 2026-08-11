@@ -18,7 +18,13 @@ from pydantic import BaseModel, Field, field_validator
 # 'classic' (canvas 1.0 engine) is RETIRED (mig 361 soft-deleted every
 # remaining row): it stays in CanvasKind so trashed rows still serialize,
 # but new canvases may only use CreatableCanvasKind.
-CanvasKind = Literal["smart", "lite", "classic", "character", "location", "prop"]
+# 'storyboard' (mig 421) is the system per-episode shot canvas
+# (shot-nodes-on-canvas spec 2026-08-11 §2) — NOT in CreatableCanvasKind:
+# it is never user-created via POST /projects/{project_id}/canvases, only
+# via the dedicated get-or-create GET /canvases/storyboard endpoint.
+CanvasKind = Literal[
+    "smart", "lite", "classic", "character", "location", "prop", "storyboard"
+]
 CreatableCanvasKind = Literal["smart", "lite", "character", "location", "prop"]
 
 
@@ -33,6 +39,9 @@ class CanvasResponse(BaseModel):
 
     id: str = Field(..., description="Snowflake bigint, serialized as string")
     project_id: str = Field(..., description="Snowflake bigint, serialized as string")
+    episode_id: Optional[str] = Field(
+        None, description="Snowflake bigint, serialized as string; set only for kind='storyboard'"
+    )
     name: str
     kind: CanvasKind
     viewport_json: Dict[str, Any]

@@ -22,6 +22,7 @@ The invariants under test are the load-bearing ones from the plan Task 2:
 from __future__ import annotations
 
 import datetime as _dt
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -54,6 +55,9 @@ class _FakeResult:
 
     def all(self):
         return self._all_rows
+
+    def scalar_one_or_none(self):
+        return self._scalar_first
 
 
 class _CaptureSession:
@@ -347,3 +351,75 @@ async def test_move_shot_sparse_insert_single_update():
     assert len(update_stmts) == 1
     _, params = _rendered(update_stmts[0])
     assert 2000 in params.values()  # midpoint of 1000..3000
+
+
+# ── get_project_id: the cross-project backfill guard's ONLY data source ──
+#
+# shot-nodes-on-canvas Task 2 review Important: the previous test suite only
+# ever monkeypatched get_project_id itself (workflow-level tests), so the
+# real SELECT+double-JOIN statement was never built/compiled by any test —
+# a broken join (wrong column, flipped direction) would sail through
+# silently since it's the sole authorization boundary against cross-project
+# shot backfill. These call the REAL method against a fake read_scope, so
+# the real ORM attribute references (ScriptShots.id/scene_id,
+# ScriptScenes.id/script_id, ScriptProjects.id/project_id) are actually
+# evaluated at statement-build time — a renamed/removed column would raise
+# AttributeError here, not just silently return wrong data.
+
+
+@pytest.mark.asyncio
+async def test_get_project_id_compiles_expected_join_and_where():
+    """script_shots → script_scenes → script_projects, WHERE on the shot id,
+    SELECTing script_projects.project_id — and the str shot_id is
+    bigint-coerced into the bound WHERE param."""
+    session = _CaptureSession([_FakeResult(scalar_first=555000000000000001)])
+    with patch.object(shot_mod, "read_scope", lambda: _ScopeCtx(session)):
+        out = await ScriptShotRepository().get_project_id(str(_SHOT_ID))
+
+    assert out == 555000000000000001
+    assert len(session.statements) == 1
+    sql, params = _rendered(session.statements[0])
+    sql_u = sql.upper()
+    assert sql_u.strip().startswith("SELECT")
+    assert "PUBLIC.SCRIPT_PROJECTS.PROJECT_ID" in sql_u
+    assert "FROM PUBLIC.SCRIPT_SHOTS" in sql_u
+    assert (
+        "JOIN PUBLIC.SCRIPT_SCENES ON PUBLIC.SCRIPT_SCENES.ID = "
+        "PUBLIC.SCRIPT_SHOTS.SCENE_ID" in sql_u
+    )
+    assert (
+        "JOIN PUBLIC.SCRIPT_PROJECTS ON PUBLIC.SCRIPT_PROJECTS.ID = "
+        "PUBLIC.SCRIPT_SCENES.SCRIPT_ID" in sql_u
+    )
+    assert "WHERE PUBLIC.SCRIPT_SHOTS.ID" in sql_u
+    assert _SHOT_ID in params.values()  # bigint-coerced (str in → int bound)
+    assert all(
+        not isinstance(v, str) or v != str(_SHOT_ID) for v in params.values()
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_project_id_returns_none_when_no_row():
+    """Missing shot / broken join chain (no matching row) → None, not an
+    exception — callers (canvas generation shot-backfill) treat None as
+    'skip'."""
+    session = _CaptureSession([_FakeResult(scalar_first=None)])
+    with patch.object(shot_mod, "read_scope", lambda: _ScopeCtx(session)):
+        out = await ScriptShotRepository().get_project_id(str(_SHOT_ID))
+    assert out is None
+
+
+@pytest.mark.asyncio
+async def test_get_project_id_swallows_db_error_returns_none():
+    """Best-effort read: any DB error → None, never raises (matches
+    get_by_id's convention — the write path is what enforces the raise
+    discipline, not this lookup)."""
+
+    @asynccontextmanager
+    async def boom_scope():
+        raise RuntimeError("db down")
+        yield  # pragma: no cover — unreachable, keeps this a generator
+
+    with patch.object(shot_mod, "read_scope", boom_scope):
+        out = await ScriptShotRepository().get_project_id(str(_SHOT_ID))
+    assert out is None

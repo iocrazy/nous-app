@@ -216,6 +216,19 @@ REPO_LAYER_ALLOWED_PATHS: dict[str, str] = {
         "owns — no user-supplied scope to resolve — so this is a system read, "
         "not the agent-tool id-resolution this guard protects."
     ),
+    "workflows/canvas_generation.py": (
+        "pre-A2 DBOS workflow, dispatched from the authenticated + "
+        "project-gated /canvases/{id}/generations REST endpoint (not an "
+        "agent-tool scope path). shot-nodes-on-canvas Task 2's "
+        "backfill_shot_from_generation_step calls "
+        "get_script_shot_repository().get_project_id/update_status to write "
+        "the generation result onto a shot bound by a canvas node — shot "
+        "three-write-lanes lane (c), facts §7. The shot_id itself is read "
+        "server-side from canvases.nodes_json (never client-supplied at "
+        "completion time) and cross-checked against the canvas's own "
+        "project_id before any write, so this is not the model-supplied-id "
+        "bypass shape this guard protects against."
+    ),
     "api/projects_router.py": (
         "authenticated REST layer — the /workflow + /advance + start-early "
         "endpoints. B2 T3 reads get_episode_repository().get_by_id to verify a "
@@ -280,6 +293,20 @@ REPO_LAYER_ALLOWED_PATHS: dict[str, str] = {
         "模型或用户供给的 scene/shot id；写入全部带 CAS WHERE（与并发编辑"
         "互斥），scene 正文只调 get_script_scene_repository() 的"
         "list_ops_by_scene + apply_element_ops 两个方法。"
+    ),
+    "api/canvases_router.py": (
+        "shot-nodes-on-canvas Task 1 (mig 421/422, spec 2026-08-11 §2). "
+        "GET /canvases/storyboard reads get_episode_repository().get_by_id"
+        "(episode_id) ONLY to resolve the caller-supplied episode_id's "
+        "owning project_id, so it can call verify_project_write_access "
+        "before ever touching the canvases table — the same pre-gate shape "
+        "as api/projects_router.py's _require_project_episode above, not "
+        "the agent-tool scope path this guard protects. Repair round 1 "
+        "added a second read, list_by_project(project_id), to derive the "
+        "storyboard canvas's display rank (1-based position among the "
+        "ALREADY-resolved project's own episodes, purely for naming) — "
+        "same project_id, same pre-gated identity, no new scope surface. "
+        "No scene/shot/script-project table is touched here at all."
     ),
 }
 

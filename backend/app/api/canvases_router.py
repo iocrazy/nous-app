@@ -26,6 +26,7 @@ from app.core.scope_guards import (
     verify_project_write_access,
 )
 from app.repositories.canvas_repository import CanvasRepository
+from app.repositories.episode_repository import get_episode_repository
 from app.schemas.canvas import (
     CanvasConflictResponse,
     CanvasCreate,
@@ -62,6 +63,8 @@ def _to_response(row: dict) -> dict:
         out["id"] = str(out["id"])
     if "project_id" in out and out["project_id"] is not None:
         out["project_id"] = str(out["project_id"])
+    if "episode_id" in out and out["episode_id"] is not None:
+        out["episode_id"] = str(out["episode_id"])
     if "created_by" in out and out["created_by"] is not None:
         out["created_by"] = str(out["created_by"])
     return out
@@ -353,6 +356,75 @@ async def list_team_canvas_trash(team_id: str, auth: AuthDep) -> dict:
         for r in rows
     ]
     return {"success": True, "data": data}
+
+
+def _episode_rank(siblings: list, episode_id: str) -> int | None:
+    """1-based position of ``episode_id`` within ``siblings`` (a project's
+    episodes ordered by ``sort_order`` ascending — the shape
+    ``EpisodeRepository.list_by_project`` already returns).
+
+    NOT the raw ``sort_order`` value: that column is an ever-increasing
+    counter that deletes never renumber (repair round 1 — a mid-project
+    delete leaves gaps, so 'EP{sort_order}' can show e.g. EP7 for what is
+    actually the project's 3rd remaining episode). Matches the workspace
+    sidebar's own ``epNumber = epIdx + 1`` display convention
+    (``ProjectWorkspace.tsx``) exactly, so the canvas name and the sidebar
+    numbering never disagree."""
+    for idx, sib in enumerate(siblings):
+        if str(sib.get("id")) == str(episode_id):
+            return idx + 1
+    return None
+
+
+def _storyboard_name(ep: dict, rank: int | None) -> str:
+    """``EP{n} · Storyboard`` where n is the episode's 1-based rank among
+    its project's episodes (see ``_episode_rank``); falls back to the
+    episode's title when the episode couldn't be located in its own
+    project's list (defensive — should not be reachable in practice)."""
+    if rank is not None:
+        return f"EP{rank} · Storyboard"
+    title = ep.get("title") or "Untitled"
+    return f"{title} · Storyboard"
+
+
+@router.get(
+    "/canvases/storyboard",
+    summary="Get or create the episode's system storyboard canvas",
+)
+async def get_or_create_storyboard_canvas(auth: AuthDep, episode_id: str) -> dict:
+    """GET /api/v1/canvases/storyboard?episode_id=<id> — idempotent
+    get-or-create of the episode's system storyboard canvas (kind=
+    'storyboard', shot-nodes-on-canvas spec 2026-08-11 §2).
+
+    Registered BEFORE the dynamic ``/canvases/{canvas_id}`` route below —
+    static segments must win the match, or 'storyboard' would be captured
+    as a canvas id (FastAPI matches routes in registration order).
+    """
+    ep = await get_episode_repository().get_by_id(episode_id)
+    if not ep:
+        raise HTTPException(status_code=404, detail={"code": "episode_not_found"})
+    project_id = str(ep["project_id"])
+    # Write access: this GET can create a row, so it must pass the same
+    # gate a POST would (matches the brief's call sketch — read-only
+    # visitors should not be able to conjure a new canvas via a GET).
+    await verify_project_write_access(project_id=project_id, auth=auth)
+
+    # sort_order-ascending list of the project's own episodes, purely to
+    # derive the 1-based display rank for naming (repair round 1 — see
+    # _episode_rank's docstring for why raw sort_order is wrong here).
+    siblings = await get_episode_repository().list_by_project(project_id)
+    rank = _episode_rank(siblings, episode_id)
+
+    svc = CanvasService()
+    row = await svc.get_or_create_storyboard(
+        project_id=project_id,
+        episode_id=episode_id,
+        name=_storyboard_name(ep, rank),
+        created_by=auth.user_id,
+    )
+    if row is None:
+        raise HTTPException(status_code=500, detail="storyboard canvas create failed")
+    return {"success": True, "data": _to_response(row)}
 
 
 # ============================================================
