@@ -186,6 +186,7 @@ class HighRiskCapabilityGateHook:
                 f"Tool '{ctx.tool_name}' blocked for agent '{ctx.agent_slug}': "
                 f"{reason}."
             ),
+            abort_code="capability_denied",
         )
 
 

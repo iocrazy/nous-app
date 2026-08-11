@@ -13,12 +13,22 @@
 import { useEffect, useState } from 'react';
 
 import { aiLibraryService } from '../../services/aiLibraryService';
-import { fromTranscriptEvents, type ToolActivity } from './toolActivity';
+import {
+  denialsFromTranscriptEvents,
+  fromTranscriptEvents,
+  type CapabilityDenial,
+  type ToolActivity,
+} from './toolActivity';
 
 const LIVE_POLL_MS = 5_000;
 
-/** runId -> activities, for runs already known to be finished. */
-const settledCache = new Map<string, ToolActivity[]>();
+interface CachedRunToolActivity {
+  activities: ToolActivity[];
+  denials: CapabilityDenial[];
+}
+
+/** runId -> {activities, denials}, for runs already known to be finished. */
+const settledCache = new Map<string, CachedRunToolActivity>();
 
 /** Exposed for tests — module-level caches otherwise leak between cases. */
 export function __clearRunToolActivityCache(): void {
@@ -27,6 +37,7 @@ export function __clearRunToolActivityCache(): void {
 
 export interface UseRunToolActivityResult {
   activities: ToolActivity[];
+  denials: CapabilityDenial[];
   loaded: boolean;
 }
 
@@ -35,7 +46,10 @@ export function useRunToolActivity(
   isRunning = false,
 ): UseRunToolActivityResult {
   const [activities, setActivities] = useState<ToolActivity[]>(() =>
-    runId ? (settledCache.get(runId) ?? []) : [],
+    runId ? (settledCache.get(runId)?.activities ?? []) : [],
+  );
+  const [denials, setDenials] = useState<CapabilityDenial[]>(() =>
+    runId ? (settledCache.get(runId)?.denials ?? []) : [],
   );
   const [loaded, setLoaded] = useState(() =>
     Boolean(runId && settledCache.has(runId)),
@@ -44,13 +58,15 @@ export function useRunToolActivity(
   useEffect(() => {
     if (!runId) {
       setActivities([]);
+      setDenials([]);
       setLoaded(true);
       return;
     }
 
     const cached = settledCache.get(runId);
     if (cached && !isRunning) {
-      setActivities(cached);
+      setActivities(cached.activities);
+      setDenials(cached.denials);
       setLoaded(true);
       return;
     }
@@ -65,9 +81,14 @@ export function useRunToolActivity(
         // the way an append-on-poll accumulator can.
         const resp = await aiLibraryService.getRunEvents(runId, 0);
         if (cancelled) return;
-        const next = fromTranscriptEvents(resp.items ?? []);
-        if (!isRunning) settledCache.set(runId, next);
-        setActivities(next);
+        const items = resp.items ?? [];
+        const nextActivities = fromTranscriptEvents(items);
+        const nextDenials = denialsFromTranscriptEvents(items);
+        if (!isRunning) {
+          settledCache.set(runId, { activities: nextActivities, denials: nextDenials });
+        }
+        setActivities(nextActivities);
+        setDenials(nextDenials);
       } catch (err) {
         // A run owned by another user reads as 404 — the chips just don't
         // render for them. Not an error worth surfacing in the thread.
@@ -90,5 +111,5 @@ export function useRunToolActivity(
     };
   }, [runId, isRunning]);
 
-  return { activities, loaded };
+  return { activities, denials, loaded };
 }

@@ -109,9 +109,11 @@ class CapabilitiesIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     write_level: Optional[Literal["none", "read", "propose", "write"]] = None
+    # DEPRECATED-UI (2026-08-10 spec §4): 无工具消费,UI 已下架;字段保留仅为向后兼容,勿删(extra="forbid" 下删字段会 422 旧客户端)。
     delete: Optional[StrictBool] = None
     media: Optional[MediaCapsIn] = None
     cross_episode_read: Optional[StrictBool] = None
+    # DEPRECATED-UI (2026-08-10 spec §4): 无工具消费,UI 已下架;字段保留仅为向后兼容,勿删(extra="forbid" 下删字段会 422 旧客户端)。
     external_publish: Optional[StrictBool] = None
 
 
@@ -259,6 +261,26 @@ class AgentUpdate(BaseModel):
     # keys high_risk_caps reads. Gated exactly like chat_permissions: granting
     # a high-risk capability must never be easier than editing the prompt.
     capabilities: Optional[CapabilitiesIn] = None
+    # Free-text justification for a chat_permissions/capabilities change,
+    # captured into agent_permission_audits.reason (2026-08-10 spec §3). NOT a
+    # content field — the router excludes it from the content-updates dict
+    # before it ever reaches update_fields_versioned's `updates` arg.
+    permission_change_reason: Optional[str] = Field(default=None, max_length=500)
+
+
+class PermissionAuditItem(BaseModel):
+    """One row of an agent's permission-change audit trail (read-only)."""
+
+    id: str
+    changed_by: str
+    before: dict[str, Any]
+    after: dict[str, Any]
+    reason: Optional[str] = None
+    created_at: datetime
+
+
+class PermissionAuditListOut(BaseModel):
+    items: list[PermissionAuditItem] = Field(default_factory=list)
 
 
 class AgentCreate(BaseModel):

@@ -25,6 +25,7 @@ import { useTranslation } from 'react-i18next';
 import type {
   AgentCapabilities,
   AgentChatPermissions,
+  AgentPermissionAudit,
   AILibraryAgent,
   AILibrarySkill,
   NousModelPublic,
@@ -40,6 +41,7 @@ import { AgentPersonaTab } from './AgentPersonaTab';
 import { AgentCostTab } from './AgentCostTab';
 import { AgentProfileTab } from './AgentProfileTab';
 import PermissionsSection from './PermissionsSection';
+import PermissionChangeLog from './PermissionChangeLog';
 import { PROVIDER_DISPLAY_NAMES, getAvailableModels } from './agentEditorModel';
 import { GROUP_AVATAR, agentGroupOf } from './agentStatus';
 import { getAgentIcon } from './agentIcons';
@@ -197,6 +199,15 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [permSaving, setPermSaving] = useState(false);
+  const [permReason, setPermReason] = useState('');
+  // null = not yet successfully fetched (either still loading or this tab
+  // was never opened). Distinct from `[]`, which means "fetched, zero rows".
+  const [permAudits, setPermAudits] = useState<AgentPermissionAudit[] | null>(null);
+  const [permAuditsLoading, setPermAuditsLoading] = useState(false);
+  // Flips permanently on a fetch failure (403 for non-owners, or any other
+  // error) — the change-log group is then never rendered, silently, per the
+  // "don't surface an error UI for a read-only side panel" call.
+  const [permAuditsHidden, setPermAuditsHidden] = useState(false);
   // Declared with the other hooks on purpose — see the file-header WARNING.
   const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -262,6 +273,33 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
       cancelled = true;
     };
   }, [sub, allSkills, addToast, t]);
+
+  // Lazily load the permission audit trail the first time the Permissions
+  // tab is opened — same shape as the skills effect above. `permAuditsHidden`
+  // stops it from retrying after a 403: the caller isn't going to gain
+  // access to the audit endpoint just because they switched tabs again.
+  useEffect(() => {
+    if (sub !== 'permissions' || permAudits !== null || permAuditsHidden) return;
+    let cancelled = false;
+    setPermAuditsLoading(true);
+    aiLibraryService
+      .getPermissionAudits(slug)
+      .then((res) => {
+        if (cancelled) return;
+        setPermAudits(res.items);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('[AgentEditor] getPermissionAudits failed:', err);
+        setPermAuditsHidden(true);
+      })
+      .finally(() => {
+        if (!cancelled) setPermAuditsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sub, permAudits, permAuditsHidden, slug]);
 
   if (error) {
     return (
@@ -441,11 +479,26 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
       const updated = await aiLibraryService.updateAgentPermissions(agent.slug, {
         chat_permissions: permDraft,
         capabilities: capsDraft,
+        permission_change_reason: permReason.trim() || undefined,
       });
       setAgent(updated);
       setPermDraft(updated.chat_permissions ?? {});
       setCapsDraft(updated.capabilities ?? {});
+      setPermReason('');
       addToast(t('aiLibrary.agents.saved', 'Agent saved'), 'success');
+      // Refetch the audit trail — a PATCH that resolves to the identical
+      // permission state (including a reason-only edit with nothing else
+      // changed) writes neither the profile nor an audit row, so no new row
+      // showing up here is the expected, non-error outcome.
+      if (!permAuditsHidden) {
+        try {
+          const auditRes = await aiLibraryService.getPermissionAudits(agent.slug);
+          setPermAudits(auditRes.items);
+        } catch (auditErr) {
+          console.error('[AgentEditor] refetch getPermissionAudits failed:', auditErr);
+          setPermAuditsHidden(true);
+        }
+      }
     } catch (err) {
       console.error('[AgentEditor] updateAgentPermissions failed:', err);
       addToast(t('aiLibrary.agents.saveError', { error: friendlyError(err) }), 'error');
@@ -664,6 +717,22 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
             capabilities={capsDraft}
             onCapabilitiesChange={setCapsDraft}
           />
+
+          <div className="mt-6">
+            <label htmlFor="perm-change-reason" className="block text-sm font-medium text-content">
+              {t('aiLibrary.permissions.changeReasonLabel')}
+            </label>
+            <input
+              id="perm-change-reason"
+              type="text"
+              value={permReason}
+              onChange={(e) => setPermReason(e.target.value)}
+              placeholder={t('aiLibrary.permissions.changeReasonPlaceholder')}
+              maxLength={500}
+              className="mt-1 w-full rounded-md border border-line bg-transparent px-3 py-2 text-sm text-content"
+            />
+          </div>
+
           <div className="mt-4 flex justify-end">
             <button
               type="button"
@@ -674,6 +743,10 @@ export const AgentEditor: React.FC<AgentEditorProps> = ({ slug, onAgentForked, o
               {permSaving ? t('common.saving') : t('common.save', 'Save')}
             </button>
           </div>
+
+          {!permAuditsHidden && (
+            <PermissionChangeLog audits={permAudits ?? []} loading={permAuditsLoading} />
+          )}
         </section>
       )}
 

@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentRunEvent, ChatToolCall } from '../../types';
 import {
   coerceRecord,
+  denialsFromTranscriptEvents,
   fromChatToolCalls,
   fromTranscriptEvents,
   isScreenwritingTool,
@@ -236,5 +237,51 @@ describe('summarizeWrites', () => {
       transcriptEvent(3, 'GenerateShotImage', { ok: true, dispatched: true, shot_id: '9' }),
     ]);
     expect(summarizeWrites(acts)).toEqual({ shots: [], otherWriteCount: 0 });
+  });
+});
+
+/**
+ * Task 6 (Agent 权限页梳理立项): the gate's abort now lands as a
+ * "capability_denied" transcript event (Task 5, one per tool per turn). This
+ * pins the same seq-dedup normalisation `fromTranscriptEvents` already has,
+ * for the sibling event type.
+ */
+function denialEvent(
+  seq: number,
+  payload: Record<string, unknown>,
+): AgentRunEvent {
+  return {
+    seq,
+    event_type: 'capability_denied',
+    payload,
+    created_at: '2026-08-10T00:00:00Z',
+  };
+}
+
+describe('denialsFromTranscriptEvents', () => {
+  it('extracts tool + reason from a capability_denied event', () => {
+    const denials = denialsFromTranscriptEvents([
+      denialEvent(1, { tool: 'CreateShot', reason: 'write_level=none blocks CreateShot' }),
+    ]);
+    expect(denials).toEqual([
+      { key: 'seq:1', tool: 'CreateShot', reason: 'write_level=none blocks CreateShot' },
+    ]);
+  });
+
+  it('skips events missing tool or reason, and ignores non-denial event types', () => {
+    const denials = denialsFromTranscriptEvents([
+      denialEvent(1, { reason: 'missing tool' }),
+      denialEvent(2, { tool: 'CreateShot' }),
+      transcriptEvent(3, 'CreateShot', { ok: true }), // event_type: tool_call
+    ]);
+    expect(denials).toEqual([]);
+  });
+
+  it('dedupes a repeated poll by seq, keeping the run to exactly one notice per tool', () => {
+    const denials = denialsFromTranscriptEvents([
+      denialEvent(1, { tool: 'CreateShot', reason: 'blocked' }),
+      denialEvent(1, { tool: 'CreateShot', reason: 'blocked' }),
+    ]);
+    expect(denials).toHaveLength(1);
   });
 });

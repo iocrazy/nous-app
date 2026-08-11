@@ -44,7 +44,7 @@ function Toggle({
         aria-checked={checked}
         onClick={() => onToggle(!checked)}
         className={`relative h-6 w-10 flex-none rounded-full transition-colors ${
-          checked ? 'bg-indigo-500' : 'bg-ink-700'
+          checked ? 'bg-agent' : 'bg-ink-700'
         }`}
       >
         {/* left-0 is load-bearing: an absolutely-positioned element with no
@@ -135,107 +135,115 @@ export default function PermissionsSection({
       <p className="text-xs text-content-3 mb-4">
         {t('aiLibrary.permissions.intro')}
       </p>
-      <Toggle
-        label={t('aiLibrary.permissions.enableChat')}
-        desc={t('aiLibrary.permissions.enableChatDesc')}
-        checked={enabled}
-        onToggle={(v) => set({ enabled: v })}
-      />
-      <div className={enabled ? '' : 'opacity-40 pointer-events-none'}>
+
+      {/* Group 1: where the agent may act and what it may see. */}
+      <div data-testid="perm-group-scope">
+        <h3 className="text-sm font-semibold text-content">
+          {t('aiLibrary.permissions.scopeTitle')}
+        </h3>
+        <p className="text-xs text-content-3 mt-1 mb-2">
+          {t('aiLibrary.permissions.scopeIntro')}
+        </p>
         <Toggle
-          label={t('aiLibrary.permissions.readTeamFiles')}
-          desc={t('aiLibrary.permissions.readTeamFilesDesc')}
-          checked={value.read_team_resources ?? false}
-          onToggle={(v) => set({ read_team_resources: v })}
+          label={t('aiLibrary.permissions.enableChat')}
+          desc={t('aiLibrary.permissions.enableChatDesc')}
+          checked={enabled}
+          onToggle={(v) => set({ enabled: v })}
         />
-        <Toggle
-          label={t('aiLibrary.permissions.autoBroadcast')}
-          desc={t('aiLibrary.permissions.autoBroadcastDesc')}
-          checked={value.auto_broadcast ?? false}
-          onToggle={(v) => set({ auto_broadcast: v })}
-        />
-      </div>
-
-      {/* High-risk grants (spec §2). Separate heading because these are a
-          different kind of decision from chat participation: they let the
-          agent change or destroy the user's work, or spend money. */}
-      <h3 className="mt-8 text-sm font-semibold text-content">
-        {t('aiLibrary.permissions.capabilitiesTitle')}
-      </h3>
-      <p className="text-xs text-content-3 mt-1 mb-2">
-        {t('aiLibrary.permissions.capabilitiesIntro')}
-      </p>
-
-      <WriteLevelPicker
-        value={caps.write_level ?? 'none'}
-        onSelect={(v) => setCaps({ write_level: v })}
-      />
-
-      <Toggle
-        label={t('aiLibrary.permissions.deleteCap')}
-        desc={t('aiLibrary.permissions.deleteCapDesc')}
-        checked={caps.delete ?? false}
-        onToggle={(v) => setCaps({ delete: v })}
-      />
-
-      <Toggle
-        label={t('aiLibrary.permissions.generateImage')}
-        desc={t('aiLibrary.permissions.generateImageDesc')}
-        checked={media.image ?? false}
-        onToggle={(v) => setMedia({ image: v })}
-      />
-      <Toggle
-        label={t('aiLibrary.permissions.generateVideo')}
-        desc={t('aiLibrary.permissions.generateVideoDesc')}
-        checked={media.video ?? false}
-        onToggle={(v) => setMedia({ video: v })}
-      />
-
-      {/* The cap only means anything once a media kind is granted, but it stays
-          editable rather than hidden so a pre-set limit is visible before the
-          toggle is flipped. */}
-      <div className={`py-3 border-b border-line ${mediaOn ? '' : 'opacity-40'}`}>
-        <label
-          htmlFor="media-cap"
-          className="block text-sm font-medium text-content"
+        <div
+          data-testid="chat-enabled-gate"
+          className={enabled ? '' : 'opacity-40 pointer-events-none'}
         >
-          {t('aiLibrary.permissions.mediaCap')}
-        </label>
-        <div className="text-xs text-content-3 mt-0.5 mb-2">
-          {t('aiLibrary.permissions.mediaCapDesc')}
+          <Toggle
+            label={t('aiLibrary.permissions.readTeamFiles')}
+            desc={t('aiLibrary.permissions.readTeamFilesDesc')}
+            checked={value.read_team_resources ?? false}
+            onToggle={(v) => set({ read_team_resources: v })}
+          />
+          <Toggle
+            label={t('aiLibrary.permissions.autoBroadcast')}
+            desc={t('aiLibrary.permissions.autoBroadcastDesc')}
+            checked={value.auto_broadcast ?? false}
+            onToggle={(v) => set({ auto_broadcast: v })}
+          />
         </div>
-        <input
-          id="media-cap"
-          type="number"
-          min={0}
-          max={MAX_MEDIA_CALLS}
-          value={media.max_calls_per_turn ?? 4}
-          onChange={(e) => {
-            // Clamp here so the PATCH can't 422 on a value the field allowed
-            // the user to type. Empty input falls back to the backend default
-            // rather than sending NaN.
-            const raw = Number.parseInt(e.target.value, 10);
-            const next = Number.isNaN(raw)
-              ? 4
-              : Math.min(MAX_MEDIA_CALLS, Math.max(0, raw));
-            setMedia({ max_calls_per_turn: next });
-          }}
-          className="w-24 rounded-md border border-line bg-transparent px-2 py-1 text-sm text-content"
+        {/* Continuity, not chat — doesn't depend on chat being enabled, so it
+            sits outside the gate above. Still writes capabilities.cross_episode_read;
+            this is purely a UI regrouping. */}
+        <Toggle
+          label={t('aiLibrary.permissions.crossEpisodeRead')}
+          desc={t('aiLibrary.permissions.crossEpisodeReadDesc')}
+          checked={caps.cross_episode_read ?? false}
+          onToggle={(v) => setCaps({ cross_episode_read: v })}
         />
       </div>
 
-      <Toggle
-        label={t('aiLibrary.permissions.crossEpisodeRead')}
-        desc={t('aiLibrary.permissions.crossEpisodeReadDesc')}
-        checked={caps.cross_episode_read ?? false}
-        onToggle={(v) => setCaps({ cross_episode_read: v })}
-      />
-      <Toggle
-        label={t('aiLibrary.permissions.externalPublish')}
-        desc={t('aiLibrary.permissions.externalPublishDesc')}
-        checked={caps.external_publish ?? false}
-        onToggle={(v) => setCaps({ external_publish: v })}
-      />
+      {/* Group 2: high-risk grants (spec §2). Separate heading because these are a
+          different kind of decision from chat participation: they let the
+          agent change the user's work or spend money. */}
+      <div data-testid="perm-group-capabilities">
+        <h3 className="mt-8 text-sm font-semibold text-content">
+          {t('aiLibrary.permissions.capabilitiesTitle')}
+        </h3>
+        <p className="text-xs text-content-3 mt-1 mb-2">
+          {t('aiLibrary.permissions.capabilitiesIntro')}
+        </p>
+
+        <WriteLevelPicker
+          value={caps.write_level ?? 'none'}
+          onSelect={(v) => setCaps({ write_level: v })}
+        />
+
+        <Toggle
+          label={t('aiLibrary.permissions.generateImage')}
+          desc={t('aiLibrary.permissions.generateImageDesc')}
+          checked={media.image ?? false}
+          onToggle={(v) => setMedia({ image: v })}
+        />
+        <Toggle
+          label={t('aiLibrary.permissions.generateVideo')}
+          desc={t('aiLibrary.permissions.generateVideoDesc')}
+          checked={media.video ?? false}
+          onToggle={(v) => setMedia({ video: v })}
+        />
+
+        {/* The cap only means anything once a media kind is granted, so the
+            field is genuinely disabled (not just greyed out) until then. */}
+        <div className={`py-3 border-b border-line ${mediaOn ? '' : 'opacity-40'}`}>
+          <label
+            htmlFor="media-cap"
+            className="block text-sm font-medium text-content"
+          >
+            {t('aiLibrary.permissions.mediaCap')}
+          </label>
+          <div className="text-xs text-content-3 mt-0.5 mb-2">
+            {t(
+              mediaOn
+                ? 'aiLibrary.permissions.mediaCapDesc'
+                : 'aiLibrary.permissions.mediaCapDisabledHint',
+            )}
+          </div>
+          <input
+            id="media-cap"
+            type="number"
+            min={0}
+            max={MAX_MEDIA_CALLS}
+            disabled={!mediaOn}
+            value={media.max_calls_per_turn ?? 4}
+            onChange={(e) => {
+              // Clamp here so the PATCH can't 422 on a value the field allowed
+              // the user to type. Empty input falls back to the backend default
+              // rather than sending NaN.
+              const raw = Number.parseInt(e.target.value, 10);
+              const next = Number.isNaN(raw)
+                ? 4
+                : Math.min(MAX_MEDIA_CALLS, Math.max(0, raw));
+              setMedia({ max_calls_per_turn: next });
+            }}
+            className="w-24 rounded-md border border-line bg-transparent px-2 py-1 text-sm text-content disabled:cursor-not-allowed"
+          />
+        </div>
+      </div>
     </div>
   );
 }

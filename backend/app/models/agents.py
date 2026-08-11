@@ -636,3 +636,30 @@ class AgentTasks(Base):
         ),
     )
     current_run_id: Mapped[Optional[int]] = mapped_column(BigInteger)
+
+
+class AgentPermissionAudits(Base):
+    __tablename__ = "agent_permission_audits"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["agent_id"],
+            ["public.ai_agents.id"],
+            ondelete="CASCADE",
+            name="agent_permission_audits_agent_id_fkey",
+        ),
+        PrimaryKeyConstraint("id", name="agent_permission_audits_pkey"),
+        Index("idx_agent_permission_audits_agent", "agent_id", "created_at"),
+        {"schema": "public"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, server_default=text("generate_snowflake_id()")
+    )
+    agent_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    changed_by: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    before_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    after_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    reason: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(True), nullable=False, server_default=text("now()")
+    )

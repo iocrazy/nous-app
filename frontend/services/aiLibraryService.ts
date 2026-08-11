@@ -17,6 +17,7 @@ import type {
   AgentCapabilities,
   AgentChatPermissions,
   AgentDashboard,
+  AgentPermissionAudit,
   AgentRunDetail,
   AgentRunUndoReport,
   AgentUsage,
@@ -184,12 +185,33 @@ export const aiLibraryService = {
    *
    * Omitting a capability field leaves it unchanged; revoking needs an
    * explicit `false` / `'none'`.
+   *
+   * `permission_change_reason` (2026-08-10 spec §3) is free-text captured
+   * into `agent_permission_audits.reason` alongside this PATCH — not an
+   * agent content field, so it never lands in `AILibraryAgent`.
    */
   async updateAgentPermissions(
     slug: string,
-    perms: { chat_permissions?: AgentChatPermissions; capabilities?: AgentCapabilities },
+    perms: {
+      chat_permissions?: AgentChatPermissions;
+      capabilities?: AgentCapabilities;
+      permission_change_reason?: string;
+    },
   ): Promise<AILibraryAgent> {
     return this.updateAgent(slug, perms as Partial<AILibraryAgent>);
+  },
+
+  /**
+   * Most-recent-first audit trail of chat_permissions/capabilities changes
+   * for one agent (2026-08-10 spec §3). Gated by the same role check as the
+   * write path — 403 for non-owners, 404 for an unknown slug.
+   */
+  async getPermissionAudits(slug: string): Promise<{ items: AgentPermissionAudit[] }> {
+    const resp = await fetch(
+      `${base()}/agents/${encodeURIComponent(slug)}/permission-audits`,
+      { headers: await getAuthHeaders() },
+    );
+    return handle<{ items: AgentPermissionAudit[] }>(resp);
   },
 
   async createAgent(payload: CreateAgentPayload): Promise<AILibraryAgent> {

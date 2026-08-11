@@ -1728,6 +1728,23 @@ export interface AILibraryAgent {
 }
 
 /**
+ * One row of an agent's permission-change audit trail (2026-08-10 spec §3,
+ * `GET /agents/{slug}/permission-audits`, read-only). `before`/`after` are
+ * RESOLVED (fail-closed) snapshots of the `chat` + `capabilities` subtrees —
+ * the same shape `chat_permissions`/`capabilities` are served in, nested
+ * under those two keys — not the raw JSONB storage.
+ */
+export interface AgentPermissionAudit {
+  id: string;
+  /** Supabase auth user id (UUID string) — display truncated, never parseInt. */
+  changed_by: string;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  reason: string | null;
+  created_at: string;
+}
+
+/**
  * Payload for POST /agents — creating a new user-owned (non-preset) agent.
  * `fork_from` optionally copies identity_md / soul_md / agent_md / model /
  * temperature / max_tokens from an existing agent. Explicit field overrides
@@ -1915,7 +1932,10 @@ export interface LiveAgentRun {
 /** One transcript event of a run (mig 285 agent_run_events). */
 export interface AgentRunEvent {
   seq: number;
-  event_type: 'user' | 'assistant' | 'tool_call' | 'error' | 'system';
+  // 'capability_denied': Task 5 (Agent 权限页梳理立项) — the capability gate's
+  // abort, recorded once per tool per turn (backend/app/services/ai/runner/
+  // agent_runner.py). payload: { tool: string, reason: string }.
+  event_type: 'user' | 'assistant' | 'tool_call' | 'error' | 'system' | 'capability_denied';
   payload: Record<string, unknown>;
   created_at: string;
 }

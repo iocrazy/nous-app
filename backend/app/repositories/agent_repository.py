@@ -55,7 +55,7 @@ from sqlalchemy import delete, false, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.session import read_scope, write_scope
-from app.models import AgentOverrides, AgentSkills, AiAgents
+from app.models import AgentOverrides, AgentPermissionAudits, AgentSkills, AiAgents
 from app.repositories._orm_helpers import _name_to_attr, _orm_obj_to_dict
 
 # ai_agents DB-column-name → mapped-attribute-name. Built once from the mapper.
@@ -642,6 +642,7 @@ class AgentRepository:
         updates: Dict[str, Any],
         created_by: Optional[UUID] = None,
         notes: Optional[str] = None,
+        permission_audit: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Snapshot-then-update: record the pre-update behavioral content into
         ai_agent_versions, then apply the patch with a bumped current_version.
@@ -655,6 +656,16 @@ class AgentRepository:
         The snapshot INSERT + live UPDATE run in ONE committing
         ``write_scope()`` — so a crash between them can no longer leave a
         half-applied version bump.
+
+        ``permission_audit`` (2026-08-10 spec §3), when given, is a dict shaped
+        ``{"agent_id", "changed_by", "before_json", "after_json", "reason"}``
+        holding a RESOLVED (fail-closed) before/after snapshot of the agent's
+        chat + capabilities subtrees. It is inserted into
+        ``agent_permission_audits`` in the SAME transaction as the live
+        UPDATE, so the audit trail can never diverge from what was actually
+        persisted. Callers only pass this when a permission subtree actually
+        changed — a caller passing it alongside a truly no-op ``updates``
+        dict gets no audit row either (the early-return below covers both).
 
         Seed loader should keep using ``update_fields`` (non-versioned) —
         bulk idempotent sync should not pollute version history.
@@ -697,9 +708,47 @@ class AgentRepository:
                 await session.execute(insert(AiAgentVersions).values(**snapshot))
                 patch["current_version"] = current_version + 1
 
+            if permission_audit is not None:
+                await session.execute(
+                    insert(AgentPermissionAudits).values(**permission_audit)
+                )
+
             await session.execute(
                 update(AiAgents).where(AiAgents.id == agent_id).values(**patch)
             )
+
+    async def list_permission_audits(
+        self, agent_id: UUID, *, limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """Most-recent-first permission-change audit trail for one agent.
+
+        Row → dict with REST-parity value types (id → str, changed_by → str,
+        created_at → ISO string) so ``PermissionAuditItem`` can build directly
+        off it — same template rule as ``_agent_to_dict``.
+
+        Deliberately does NOT catch/log-and-return-[] here: a DB error must
+        propagate so the endpoint surfaces a 5xx, not a "200 + empty history"
+        that looks like the agent simply has no permission changes."""
+        async with read_scope() as session:
+            result = await session.execute(
+                select(AgentPermissionAudits)
+                .where(AgentPermissionAudits.agent_id == agent_id)
+                .order_by(AgentPermissionAudits.created_at.desc())
+                .limit(limit)
+            )
+            out: List[Dict[str, Any]] = []
+            for row in result.scalars().all():
+                out.append(
+                    {
+                        "id": str(row.id),
+                        "changed_by": str(row.changed_by),
+                        "before": row.before_json,
+                        "after": row.after_json,
+                        "reason": row.reason,
+                        "created_at": row.created_at.isoformat(),
+                    }
+                )
+            return out
 
 
 def get_agent_repository() -> AgentRepository:

@@ -124,6 +124,11 @@ class HookResult:
     abort_reason: Optional[str] = None
     approval_request: Optional[ApprovalRequest] = None
 
+    # 机器可读的 abort 分类(如 "capability_denied")。None = 未分类。
+    # 供 AgentRunner 决定是否落用户可见的 transcript 事件——"触发路径必须
+    # 类型化回显"纪律在权限域的落地(2026-08-10 spec §5)。
+    abort_code: Optional[str] = None
+
     # Callable that fires background work and returns immediately.
     # AgentRunner invokes ``side_effect()`` (no args) and continues
     # without awaiting. The hook owner picks the dispatch mechanism
