@@ -358,14 +358,31 @@ async def list_team_canvas_trash(team_id: str, auth: AuthDep) -> dict:
     return {"success": True, "data": data}
 
 
-def _storyboard_name(ep: dict) -> str:
-    """``EP{n} · Storyboard`` where n is the episode's ``sort_order``;
-    falls back to the episode's title when sort_order is unavailable
-    (defensive — the column is NOT NULL with a DEFAULT, so this branch
-    should not be reachable in practice)."""
-    sort_order = ep.get("sort_order")
-    if sort_order is not None:
-        return f"EP{sort_order} · Storyboard"
+def _episode_rank(siblings: list, episode_id: str) -> int | None:
+    """1-based position of ``episode_id`` within ``siblings`` (a project's
+    episodes ordered by ``sort_order`` ascending — the shape
+    ``EpisodeRepository.list_by_project`` already returns).
+
+    NOT the raw ``sort_order`` value: that column is an ever-increasing
+    counter that deletes never renumber (repair round 1 — a mid-project
+    delete leaves gaps, so 'EP{sort_order}' can show e.g. EP7 for what is
+    actually the project's 3rd remaining episode). Matches the workspace
+    sidebar's own ``epNumber = epIdx + 1`` display convention
+    (``ProjectWorkspace.tsx``) exactly, so the canvas name and the sidebar
+    numbering never disagree."""
+    for idx, sib in enumerate(siblings):
+        if str(sib.get("id")) == str(episode_id):
+            return idx + 1
+    return None
+
+
+def _storyboard_name(ep: dict, rank: int | None) -> str:
+    """``EP{n} · Storyboard`` where n is the episode's 1-based rank among
+    its project's episodes (see ``_episode_rank``); falls back to the
+    episode's title when the episode couldn't be located in its own
+    project's list (defensive — should not be reachable in practice)."""
+    if rank is not None:
+        return f"EP{rank} · Storyboard"
     title = ep.get("title") or "Untitled"
     return f"{title} · Storyboard"
 
@@ -392,11 +409,17 @@ async def get_or_create_storyboard_canvas(auth: AuthDep, episode_id: str) -> dic
     # visitors should not be able to conjure a new canvas via a GET).
     await verify_project_write_access(project_id=project_id, auth=auth)
 
+    # sort_order-ascending list of the project's own episodes, purely to
+    # derive the 1-based display rank for naming (repair round 1 — see
+    # _episode_rank's docstring for why raw sort_order is wrong here).
+    siblings = await get_episode_repository().list_by_project(project_id)
+    rank = _episode_rank(siblings, episode_id)
+
     svc = CanvasService()
     row = await svc.get_or_create_storyboard(
         project_id=project_id,
         episode_id=episode_id,
-        name=_storyboard_name(ep),
+        name=_storyboard_name(ep, rank),
         created_by=auth.user_id,
     )
     if row is None:

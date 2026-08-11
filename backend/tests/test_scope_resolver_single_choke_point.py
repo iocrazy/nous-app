@@ -282,14 +282,18 @@ REPO_LAYER_ALLOWED_PATHS: dict[str, str] = {
         "list_ops_by_scene + apply_element_ops 两个方法。"
     ),
     "api/canvases_router.py": (
-        "shot-nodes-on-canvas Task 1 (mig 421, spec 2026-08-11 §2). "
+        "shot-nodes-on-canvas Task 1 (mig 421/422, spec 2026-08-11 §2). "
         "GET /canvases/storyboard reads get_episode_repository().get_by_id"
         "(episode_id) ONLY to resolve the caller-supplied episode_id's "
         "owning project_id, so it can call verify_project_write_access "
         "before ever touching the canvases table — the same pre-gate shape "
         "as api/projects_router.py's _require_project_episode above, not "
-        "the agent-tool scope path this guard protects. No scene/shot/"
-        "script-project table is touched here at all."
+        "the agent-tool scope path this guard protects. Repair round 1 "
+        "added a second read, list_by_project(project_id), to derive the "
+        "storyboard canvas's display rank (1-based position among the "
+        "ALREADY-resolved project's own episodes, purely for naming) — "
+        "same project_id, same pre-gated identity, no new scope surface. "
+        "No scene/shot/script-project table is touched here at all."
     ),
 }
 

@@ -123,28 +123,43 @@ class CanvasRepository:
             return None
 
     async def get_storyboard_canvas(
-        self, project_id: str, episode_id: str
+        self,
+        project_id: str,
+        episode_id: str,
+        *,
+        include_trashed: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """The episode's system storyboard canvas (kind='storyboard'), or
         None. Backs the get-or-create endpoint's "get" half — matches the
-        partial unique index ``uq_canvases_storyboard_per_episode`` (mig 421)
-        exactly, so this is the single row a concurrent create could race
-        against."""
+        LIVE half of the partial unique index
+        ``uq_canvases_storyboard_per_episode`` (mig 421/422: ``WHERE
+        kind='storyboard' AND deleted_at IS NULL``) exactly, so this is the
+        single row a concurrent create could race against.
+
+        ``include_trashed=True`` drops the ``deleted_at IS NULL`` filter —
+        used by ``create_storyboard_canvas`` to find a SOFT-DELETED
+        storyboard row after a 23505 conflict (mig 422 fix: a generic
+        ``DELETE /canvases/{id}`` soft-deletes without knowing about
+        ``kind``, so the conflict can be against a trashed row, not a live
+        one)."""
         try:
             async with read_scope() as session:
-                result = await session.execute(
+                stmt = (
                     select(Canvases.__table__)
                     .where(Canvases.project_id == _bigint(project_id))
                     .where(Canvases.episode_id == _bigint(episode_id))
                     .where(Canvases.kind == "storyboard")
-                    .where(Canvases.deleted_at.is_(None))
                 )
+                if not include_trashed:
+                    stmt = stmt.where(Canvases.deleted_at.is_(None))
+                result = await session.execute(stmt)
                 row = result.mappings().first()
             return _serialize(dict(row)) if row else None
         except Exception as e:
             logger.error(
                 f"canvas get_storyboard_canvas(project={project_id}, "
-                f"episode={episode_id}) failed: {e}"
+                f"episode={episode_id}, include_trashed={include_trashed}) "
+                f"failed: {e}"
             )
             return None
 
@@ -362,12 +377,23 @@ class CanvasRepository:
         """Insert the episode's system storyboard canvas (kind='storyboard').
 
         Idempotence is NOT decided here — it is the DB's job via the partial
-        unique index ``uq_canvases_storyboard_per_episode`` (mig 421) on
-        ``(project_id, episode_id) WHERE kind='storyboard'``. Two concurrent
-        GET /canvases/storyboard requests can both pass the router's
-        get-then-create race window; whichever INSERT loses hits a 23505
-        IntegrityError here, which we catch and resolve by re-reading the
-        row the winner just created — never a second row, never a 500.
+        unique index ``uq_canvases_storyboard_per_episode`` (mig 421/422) on
+        ``(project_id, episode_id) WHERE kind='storyboard' AND deleted_at IS
+        NULL``. Two concurrent GET /canvases/storyboard requests can both
+        pass the router's get-then-create race window; whichever INSERT
+        loses hits a 23505 IntegrityError here, which we catch and resolve
+        by re-reading the row the winner just created — never a second row,
+        never a 500.
+
+        mig 422 self-heal: the 23505 can ALSO be against a SOFT-DELETED
+        storyboard row — a generic ``DELETE /canvases/{id}`` (no ``kind``
+        awareness) soft-deletes it, but the index still reserves the
+        (project_id, episode_id) slot as long as the row exists. A re-read
+        with the live-only filter finds nothing, which used to surface as a
+        permanent 500 for that episode. Here we fall back to a
+        ``include_trashed=True`` lookup and, if that finds the row, RESTORE
+        it (clears ``deleted_at`` — same semantics as the trash-restore
+        endpoint) instead of leaving the episode's storyboard canvas dead.
         """
         payload: Dict[str, Any] = {
             "project_id": _bigint(project_id),
@@ -387,7 +413,24 @@ class CanvasRepository:
         except IntegrityError as exc:
             pgcode = getattr(getattr(exc, "orig", None), "sqlstate", None)
             if pgcode == "23505" or "23505" in str(getattr(exc, "orig", exc)):
-                return await self.get_storyboard_canvas(project_id, episode_id)
+                live = await self.get_storyboard_canvas(project_id, episode_id)
+                if live is not None:
+                    return live
+                trashed = await self.get_storyboard_canvas(
+                    project_id, episode_id, include_trashed=True
+                )
+                if trashed is not None:
+                    await self.restore(trashed["id"])
+                    return await self.get_storyboard_canvas(project_id, episode_id)
+                # Conflict but neither a live nor a trashed row is visible —
+                # can't self-heal past that; let the caller see None like
+                # the pre-existing failure path below.
+                logger.error(
+                    f"canvas create_storyboard_canvas(project={project_id}, "
+                    f"episode={episode_id}): 23505 but no row found to "
+                    "resolve (live or trashed)"
+                )
+                return None
             logger.error(
                 f"canvas create_storyboard_canvas(project={project_id}, "
                 f"episode={episode_id}) failed: {exc}"
