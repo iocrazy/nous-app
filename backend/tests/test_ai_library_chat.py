@@ -723,6 +723,66 @@ async def test_chat_stream_user_cancel_degrades_gracefully() -> None:
     assert out["assistant_message"] is not None
 
 
+@pytest.mark.asyncio
+async def test_chat_stream_error_event_carries_provider_code() -> None:
+    """2026-08-11 终审 Critical 1: chat_stream's own except-block used to
+    hand-roll ``{"error": f"{type(exc).__name__}: {exc}"}`` with no ``code``
+    key at all — the router's ``_stream_error_payload`` typed mapping never
+    ran on this path because the chat task's exception is caught here first.
+    Now both delegate to ``provider_errors.stream_error_data``, so a
+    429-caused ``AllModelsFailed`` from the underlying turn must surface as
+    a typed ``provider_rate_limit`` error event, not a raw exception string.
+    """
+    import httpx
+
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+    from app.services.ai.llm.llm_fallback_chain import AllModelsFailed
+
+    user_id = uuid4()
+    session_id = uuid4()
+
+    request = httpx.Request("POST", "https://ark.example/api")
+    inner = httpx.HTTPStatusError(
+        "429", request=request, response=httpx.Response(429, request=request)
+    )
+    exc = AllModelsFailed("primary + 0 fallback(s) exhausted")
+    exc.__cause__ = inner
+
+    svc = AILibraryChatService(store=_FakeStore(None))
+    svc.chat = AsyncMock(side_effect=exc)  # chat_stream drives self.chat()
+
+    events = [
+        evt async for evt in svc.chat_stream(session_id, user_id=user_id, content="hi")
+    ]
+
+    error_events = [e for e in events if e["type"] == "error"]
+    assert len(error_events) == 1
+    assert error_events[0]["data"]["code"] == "provider_rate_limit"
+    assert "rate-limiting" in error_events[0]["data"]["error"]
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_error_event_internal_error_for_plain_exception() -> None:
+    """Non-provider exceptions must keep the old shape (type name + str)
+    with code=internal_error — same contract as the router-level helper."""
+    from app.services.ai.chat.ai_library_chat_service import AILibraryChatService
+
+    user_id = uuid4()
+    session_id = uuid4()
+
+    svc = AILibraryChatService(store=_FakeStore(None))
+    svc.chat = AsyncMock(side_effect=RuntimeError("boom"))
+
+    events = [
+        evt async for evt in svc.chat_stream(session_id, user_id=user_id, content="hi")
+    ]
+
+    error_events = [e for e in events if e["type"] == "error"]
+    assert len(error_events) == 1
+    assert error_events[0]["data"]["code"] == "internal_error"
+    assert "RuntimeError" in error_events[0]["data"]["error"]
+
+
 # ─── Session listing: cross-agent + server-side search (P1) ─────────────────
 
 

@@ -272,7 +272,9 @@ class AILibraryChatService:
             # (HTTP stays 200) — log it or the failure is invisible
             # server-side.
             logger.exception(f"[chat-stream] turn failed session={session_id}: {exc}")
-            yield {"type": "error", "data": {"error": f"{type(exc).__name__}: {exc}"}}
+            from app.core.provider_errors import stream_error_data
+
+            yield {"type": "error", "data": stream_error_data(exc)}
             return
 
         message = result.get("assistant_message") or {}

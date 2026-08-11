@@ -102,6 +102,26 @@ function extractToolCalls(msg: AIChatMessage): ChatToolCall[] {
   );
 }
 
+/** 已知 provider 错误码 → i18n 文案;未知码返回 null 走原有兜底。 */
+export function providerErrorMessage(
+  code: unknown,
+  t: (key: string, fallback: string) => string,
+): string | null {
+  const KNOWN = [
+    'provider_rate_limit',
+    'provider_unreachable',
+    'provider_auth',
+    'provider_bad_model',
+    'task_timeout',
+  ];
+  if (typeof code !== 'string' || !KNOWN.includes(code)) return null;
+  const key = code
+    .split('_')
+    .map((w, i) => (i === 0 ? w : w[0].toUpperCase() + w.slice(1)))
+    .join('');
+  return t(`errors.provider.${key}`, code);
+}
+
 /** Persisted assistant message metadata_json.run_id (BIGINT snowflake, kept
  *  as a string end-to-end — see the file-wide 2^53 precision caveat). */
 function extractRunId(msg: AIChatMessage): string | null {
@@ -695,8 +715,10 @@ export function AIChatPanel({
               ));
             }
           } else if (evt.type === 'error') {
+            const mapped = providerErrorMessage(evt.data?.code, (k, f) => t(k, f));
             throw new Error(
-              typeof evt.data?.error === 'string' ? evt.data.error : 'stream error',
+              mapped ??
+                (typeof evt.data?.error === 'string' ? evt.data.error : 'stream error'),
             );
           } else if (evt.type === 'done') {
             // G2: backend resolves attachments best-effort and reports

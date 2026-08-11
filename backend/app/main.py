@@ -20,6 +20,7 @@ from app.api.lifespan_router import router as lifespan_router
 from app.api.ws_router import router as ws_router
 from app.core.config import settings
 from app.core.exceptions import CORS_ALLOW_ORIGIN_REGEX, register_exception_handlers
+from app.core.provider_errors import register_provider_error_handlers
 from app.core.utils import Utils
 from app.db.schema_assertions import assert_critical_schema_on_boot
 from app.middleware.request_logging import RequestLoggingMiddleware
@@ -276,6 +277,11 @@ app.add_middleware(RequestLoggingMiddleware)
 
 # Global exception handlers — unified ErrorResponse envelope for all errors.
 register_exception_handlers(app)
+
+# Provider-specific typed handlers (AllModelsFailed / LLMCallError) — classify
+# via error_catalog and answer with a stable code instead of falling into the
+# generic 500 internal_error above. See app/core/provider_errors.py.
+register_provider_error_handlers(app)
 
 # Role-aware router mount (Sprint 5 D10-A wired up here).
 #

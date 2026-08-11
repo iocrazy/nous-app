@@ -21,6 +21,7 @@ backend (e.g. ``ai_agents_router.py``, ``skills_router.py``).
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -2896,6 +2897,15 @@ async def send_chat_message(
     }
 
 
+def _stream_error_payload(exc: BaseException) -> str:
+    """SSE error event 的 data。委托 provider_errors.stream_error_data——同一份
+    映射同时喂给这里(generator 自身抛出时)与 AILibraryChatService.chat_stream
+    的异常分支(chat task 内部抛出时),两条路径不会各写一份判断逻辑。"""
+    from app.core.provider_errors import stream_error_data
+
+    return json.dumps(stream_error_data(exc))
+
+
 @router.post(
     "/sessions/{session_id}/chat-stream",
     summary="Send a user turn and stream the assistant response (SSE)",
@@ -2917,8 +2927,6 @@ async def send_chat_message_stream(
     Frontends should fall back to /chat (non-streaming) when they need
     full tool execution semantics.
     """
-    import json
-
     from fastapi.responses import StreamingResponse
 
     svc = AILibraryChatService()
@@ -2949,7 +2957,7 @@ async def send_chat_message_stream(
             logger.exception(
                 f"[ai-library] chat-stream failed session={session_id}: {exc}"
             )
-            data = json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+            data = _stream_error_payload(exc)
             yield f"event: error\ndata: {data}\n\n"
 
     return StreamingResponse(

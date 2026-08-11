@@ -4094,6 +4094,13 @@
     },
     "UNKNOWN": {
       "title": "The task failed"
+    },
+    "provider": {
+      "providerRateLimit": "The AI model provider is rate-limiting requests. Try again in a minute.",
+      "providerUnreachable": "The AI model provider is unreachable. Try again shortly.",
+      "providerAuth": "The AI provider rejected the platform credentials. The team has been notified.",
+      "providerBadModel": "The configured AI model is unavailable.",
+      "taskTimeout": "The AI model took too long to respond. Try again."
     }
   },
   "issueDetail": {
