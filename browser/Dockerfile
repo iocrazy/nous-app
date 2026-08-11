@@ -15,14 +15,33 @@
 #   docker build --build-arg UBUNTU_MIRROR=archive.ubuntu.com .
 ARG UBUNTU_MIRROR=mirrors.aliyun.com
 
+# CFT_MIRROR is the Chrome-for-Testing counterpart of UBUNTU_MIRROR — it feeds
+# the `patchright install chromium` step below (see the long note there for why
+# a plain PLAYWRIGHT_DOWNLOAD_HOST can't reach npmmirror). npmmirror serves the
+# CfT zips at ~13MB/s vs gpupc's flaky ~0.9MB/s direct to Google's bucket.
+# Overridable for overseas builds:
+#   docker build --build-arg CFT_MIRROR=https://storage.googleapis.com/chrome-for-testing-public .
+#   docker build --build-arg CFT_MIRROR= .   # empty => patchright's default CDN
+ARG CFT_MIRROR=https://cdn.npmmirror.com/binaries/chrome-for-testing
+
 # Playwright's own image already carries Chromium plus every shared library it
 # needs. The tag and the `playwright` pin in pyproject.toml must move together -
 # a mismatch fails at runtime with "Executable doesn't exist".
-FROM mcr.microsoft.com/playwright/python:v1.52.0-noble
+#
+# Pinned by digest (CLAUDE.md build-reproducibility rule #1): a bare
+# `:v1.52.0-noble` tag is still MUTABLE — mcr can repush it with a security
+# snapshot, which silently invalidates every layer below (the ~950MB base plus
+# the chromium/ffmpeg install layer) and forces a from-scratch re-download on
+# the next deploy. The tag is kept alongside the digest for human readability;
+# to move the base image, resolve a new digest deliberately:
+#   docker buildx imagetools inspect mcr.microsoft.com/playwright/python:v1.52.0-noble --format '{{.Manifest.Digest}}'
+# and bump it together with the `playwright` pin in pyproject.toml.
+FROM mcr.microsoft.com/playwright/python:v1.52.0-noble@sha256:a1d2b48b65f41f34e5e1d7690f385f1376397b7208691cba359e4078edbf86cb
 
 # ARGs declared before the first FROM are global; a stage that wants one has to
 # re-declare it (Docker semantics, not a typo).
 ARG UBUNTU_MIRROR
+ARG CFT_MIRROR
 
 # Xvfb, because this service runs Chromium HEADED (design doc 2.4). Headless
 # leaves detectable traces and Douyin bounces the upload page to login, which
@@ -83,8 +102,47 @@ RUN uv sync --frozen --no-install-project
 # 装到 PLAYWRIGHT_BROWSERS_PATH（镜像已设为 /ms-playwright）下，patchright
 # 认这个变量（同一次探测确认）。只装 chromium：patchright 明确不支持
 # Firefox / WebKit，装了也是白占体积。
-RUN patchright install chromium \
-    && test -x "$(python3 -c 'from patchright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')" \
+#
+# ⚠️ 下载源（2026-08-11 修，此前连续挂 deploy-gpu 三次的真正病根）：
+# patchright 1.58.2 在 ubuntu24.04-x64（本 noble 基础镜像）上装的是 **Chrome
+# for Testing**，不是标准 playwright chromium build —— 下载路径在 driver 里写死为
+#   builds/cft/<browserVersion>/linux64/{chrome-linux64,chrome-headless-shell-linux64}.zip
+# 默认走 cdn.playwright.dev → 307 → storage.googleapis.com。gpupc 直连那个 bucket
+# 时快时慢（实测全量 175MB 只有 ~0.9MB/s，间歇 `Download failure, code=1`），缓存
+# 一失效这层就重下、部署就红。
+#
+# npmmirror 有这份内容，但在 **chrome-for-testing** 命名空间下
+#   cdn.npmmirror.com/binaries/chrome-for-testing/<v>/linux64/...  （实测 ~13MB/s）
+# 路径前缀跟 patchright 硬拼的 `builds/cft/<v>/` 不同 —— 而 PLAYWRIGHT_DOWNLOAD_HOST
+# 只换 host、改不了中间那段路径，直接指 npmmirror 会 404（已实测两个 npmmirror
+# host 都 404）。
+#
+# 解法：从 CFT_MIRROR 预下两个 zip，摆成 patchright 期望的 `builds/cft/<v>/linux64/`
+# 布局，起一个只绑 127.0.0.1 的临时 http server，把 PLAYWRIGHT_DOWNLOAD_HOST 指向它。
+# patchright 用**自己**的安装逻辑解压 + 登记 registry，我们只负责供字节。<v> 从
+# patchright 的 browsers.json 动态读取（patchright 一升级自动跟着走，不写死版本号）。
+# CFT_MIRROR 空串时回退 patchright 默认 CDN（海外构建用，见文件顶部 ARG 注释）。
+RUN set -eux; \
+    if [ -n "${CFT_MIRROR}" ]; then \
+        V="$(python3 -c 'import json,os,patchright; d=json.load(open(os.path.join(os.path.dirname(patchright.__file__),"driver/package/browsers.json"))); print(next(b["browserVersion"] for b in d["browsers"] if b["name"]=="chromium"))')"; \
+        dst="/tmp/cft/builds/cft/${V}/linux64"; \
+        mkdir -p "${dst}"; \
+        for z in chrome-linux64.zip chrome-headless-shell-linux64.zip; do \
+            curl -fSL --retry 3 --retry-delay 2 -o "${dst}/${z}" "${CFT_MIRROR}/${V}/linux64/${z}"; \
+        done; \
+        python3 -m http.server 8909 --bind 127.0.0.1 --directory /tmp/cft >/tmp/cft-httpd.log 2>&1 & \
+        srv_pid=$!; \
+        for _ in $(seq 1 40); do \
+            curl -sf "http://127.0.0.1:8909/builds/cft/${V}/linux64/chrome-linux64.zip" -o /dev/null && break; \
+            sleep 0.25; \
+        done; \
+        PLAYWRIGHT_DOWNLOAD_HOST=http://127.0.0.1:8909 patchright install chromium; \
+        kill "${srv_pid}" 2>/dev/null || true; \
+        rm -rf /tmp/cft /tmp/cft-httpd.log; \
+    else \
+        patchright install chromium; \
+    fi; \
+    test -x "$(python3 -c 'from patchright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')" \
     || (echo "patchright chromium missing after install" && exit 1)
 
 COPY app ./app
