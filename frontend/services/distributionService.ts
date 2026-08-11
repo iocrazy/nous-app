@@ -9,13 +9,69 @@ import { getApiUrl } from '../utils/apiConfig';
  * failures that need different words. Additive: the message format is
  * unchanged, so existing `catch (err) { console.error(err) }` sites behave
  * exactly as before.
+ *
+ * `detail` is the parsed `detail` field of the error body when the backend
+ * sent one. Throwing away the body used to be the default, which meant a
+ * typed rejection the backend had gone to the trouble of producing arrived at
+ * the UI as nothing but a status code — and the page could only say "could
+ * not create publish task". Same failure family as `attachment_failures`:
+ * the backend returns the reason, nobody reads it.
  */
 export class DistributionApiError extends Error {
-  constructor(public readonly status: number, path: string) {
+  constructor(
+    public readonly status: number,
+    path: string,
+    public readonly detail?: unknown,
+  ) {
     super(`distribution api ${path} failed: ${status}`);
     this.name = 'DistributionApiError';
   }
 }
+
+/**
+ * One typed reason the publish request was refused (backend `GateProblem`).
+ *
+ * `reason` is a stable code — the UI branches on it and never parses
+ * `message`, which is English prose written for logs. `account_id` names the
+ * account that caused it, or is null/absent for a whole-batch shape problem.
+ */
+export interface PublishGateProblem {
+  reason: string;
+  message: string;
+  account_id?: string | null;
+}
+
+/** The `detail.reason` the submit-time gate stamps on its 422 envelope. */
+export const PUBLISH_INTENT_REJECTED = 'publish_intent_rejected';
+
+/**
+ * Pull the typed problems out of a rejected `createPublishTask`, or null when
+ * the failure was anything else.
+ *
+ * Deliberately strict about the envelope: FastAPI's own request-validation
+ * 422 is ALSO a 422, but its `detail` is an array of pydantic errors with no
+ * `reason`. Treating that as a gate verdict would print a made-up reason for
+ * a completely different failure, so it falls through to null and the caller
+ * shows its generic copy.
+ */
+export const publishGateProblems = (err: unknown): PublishGateProblem[] | null => {
+  if (!(err instanceof DistributionApiError) || err.status !== 422) return null;
+  const detail = err.detail;
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return null;
+  const d = detail as { reason?: unknown; message?: unknown; problems?: unknown };
+  if (d.reason !== PUBLISH_INTENT_REJECTED) return null;
+  const problems = Array.isArray(d.problems)
+    ? d.problems.filter(
+      (p): p is PublishGateProblem =>
+        Boolean(p) && typeof p === 'object' && typeof (p as PublishGateProblem).reason === 'string',
+    )
+    : [];
+  // An envelope with the right reason but no usable problem list is still a
+  // gate rejection — surface it as one unnamed problem rather than losing it.
+  return problems.length > 0
+    ? problems
+    : [{ reason: PUBLISH_INTENT_REJECTED, message: String(d.message ?? '') }];
+};
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${getApiUrl()}/api/v1/distribution${path}`, {
@@ -23,7 +79,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { ...(await getAuthHeaders()), ...(init?.headers ?? {}) },
   });
   if (!res.ok) {
-    throw new DistributionApiError(res.status, path);
+    // Best-effort: a body that isn't JSON (proxy HTML, empty 502) must not
+    // turn a clean HTTP failure into a parse crash.
+    let detail: unknown;
+    try {
+      const body = await res.json();
+      detail = (body as { detail?: unknown })?.detail;
+    } catch (parseErr) {
+      console.error('distribution api: error body was not JSON', path, parseErr);
+    }
+    throw new DistributionApiError(res.status, path, detail);
   }
   return res.status === 204 ? (undefined as T) : res.json();
 }

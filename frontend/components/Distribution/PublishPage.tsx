@@ -2,12 +2,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
-  AlertCircle, AlertTriangle, ArrowLeftRight, Bookmark, Calendar, Check, Folder,
-  Images, ListOrdered, Loader2, MapPin, Plus, Radio, Search, Send, Sparkles, TrendingUp, X,
+  AlertCircle, AlertTriangle, ArrowLeftRight, Bookmark, Calendar, Check, ChevronLeft,
+  ChevronRight, Folder, Images, ListOrdered, Loader2, MapPin, Plus, Radio, Search, Send,
+  Sparkles, TrendingUp, X,
 } from 'lucide-react';
 import {
   createPublishTask, getPlatformCapabilities, listAccounts, listGeneratedVideos,
-  listLibraryMedia, promoteGeneratedVideo, GeneratedVideo, PlatformCapability,
+  listLibraryMedia, promoteGeneratedVideo, publishGateProblems, GeneratedVideo,
+  PlatformCapability, PublishGateProblem,
 } from '../../services/distributionService';
 import {
   uploadResource, getGalleryItems, getResourceCoverUrl, GALLERY_MIME,
@@ -227,6 +229,12 @@ export const PublishPage: React.FC = () => {
   const [customizeOpen, setCustomizeOpen] = useState<Record<string, boolean>>({});
   const [accountConfigs, setAccountConfigs] = useState<Record<string, { title: string }>>({});
   const [submitting, setSubmitting] = useState(false);
+  /**
+   * Typed reasons the last submit was refused (backend `GateProblem[]`, HTTP
+   * 422). Cleared at the start of every attempt so the panel always describes
+   * the current one.
+   */
+  const [gateProblems, setGateProblems] = useState<PublishGateProblem[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState('');
   const [pickerTab, setPickerTab] = useState<'library' | 'generated'>('library');
@@ -300,6 +308,16 @@ export const PublishPage: React.FC = () => {
     return () => { cancelled = true; };
   }, []);
 
+  /**
+   * A refusal describes the exact request that was refused. As soon as any
+   * part of that request changes, the panel is blaming something that no
+   * longer exists — and a stale "this was refused" next to a fixed form is
+   * worse than no message at all.
+   */
+  useEffect(() => {
+    setGateProblems([]);
+  }, [contentType, selectedVideos, selectedAccounts, title]);
+
   // Close the library picker on Escape while it is open.
   useEffect(() => {
     if (!pickerOpen) return undefined;
@@ -313,6 +331,25 @@ export const PublishPage: React.FC = () => {
 
   const removeVideo = (id: string) =>
     setSelectedVideos((s) => s.filter((x) => x !== id));
+
+  /**
+   * Move one image earlier (-1) or later (+1) in the gallery.
+   *
+   * Keyed by id, not by the index of the rendered strip: `selectedVideos` is
+   * what publishes, and a picked id whose Library row didn't resolve is
+   * skipped when rendering. Swapping by rendered index would then move a
+   * different image than the one the user clicked.
+   */
+  const moveImage = (id: string, delta: -1 | 1) =>
+    setSelectedVideos((s) => {
+      const i = s.indexOf(id);
+      const j = i + delta;
+      if (i < 0 || j < 0 || j >= s.length) return s;
+      const next = [...s];
+      next[i] = s[j];
+      next[j] = s[i];
+      return next;
+    });
 
   const isImages = contentType === 'images';
 
@@ -335,18 +372,30 @@ export const PublishPage: React.FC = () => {
    * the tab un-greys itself. A null map (still loading, or the request failed)
    * reads as "supports nothing".
    */
-  const imagesGate = useMemo<'noAccounts' | 'unsupported' | null>(() => {
-    const targets = selectedAccounts.length
+  /** The accounts this post actually reaches — all connected ones until the
+   *  user narrows it down. Every capability question below is asked about
+   *  exactly this set. */
+  const targetAccounts = useMemo(
+    () => (selectedAccounts.length
       ? accounts.filter((a) => selectedAccounts.includes(a.id))
-      : accounts;
-    if (targets.length === 0) return 'noAccounts';
-    const ok = targets.every(
+      : accounts),
+    [accounts, selectedAccounts],
+  );
+
+  const imagesGate = useMemo<'noAccounts' | 'unsupported' | null>(() => {
+    if (targetAccounts.length === 0) return 'noAccounts';
+    const ok = targetAccounts.every(
       (a) => capabilities?.[a.platform]?.content_types.includes('images') ?? false,
     );
     return ok ? null : 'unsupported';
-  }, [accounts, selectedAccounts, capabilities]);
+  }, [targetAccounts, capabilities]);
 
   const imagesSupported = imagesGate === null;
+
+  // Used as both placeholder and aria-label, so it has to be one value.
+  const pickerSearchLabel = isImages
+    ? t('distribution.publish.pickerSearchImages', 'Search images')
+    : t('distribution.publish.pickerSearch', 'Search videos');
 
   // Says why the tab is dead, in the same words on the tooltip and in the card.
   const imagesUnsupportedHint = imagesGate === 'noAccounts'
@@ -358,6 +407,44 @@ export const PublishPage: React.FC = () => {
       'distribution.publish.imagesUnsupported',
       'Image posts are not supported yet — the connected platforms can only publish video.',
     );
+
+  /**
+   * How many images one post may carry, for the accounts it reaches.
+   *
+   * Read from the capabilities response, never written here. Douyin's page
+   * says "最多支持上传35张图片", the backend profile carries 35, the request
+   * schema carries a neutral 35 — a fourth copy in this file is exactly the
+   * kind of hand-synced declaration this whole project exists to delete. A
+   * platform that doesn't state a bound contributes nothing (null), so the
+   * strictest stated bound wins: `min` of the maxima, `max` of the minima.
+   */
+  const imageLimits = useMemo<{ min: number | null; max: number | null }>(() => {
+    const caps = targetAccounts
+      .map((a) => capabilities?.[a.platform])
+      .filter((c): c is PlatformCapability => Boolean(c));
+    const maxes = caps
+      .map((c) => c.max_images)
+      .filter((n): n is number => typeof n === 'number');
+    const mins = caps
+      .map((c) => c.min_images)
+      .filter((n): n is number => typeof n === 'number');
+    return {
+      min: mins.length ? Math.max(...mins) : null,
+      max: maxes.length ? Math.min(...maxes) : null,
+    };
+  }, [targetAccounts, capabilities]);
+
+  /**
+   * Whether the current gallery is outside those bounds. Blocking here is the
+   * same fail-fast the backend gate does at submit time — the difference is
+   * the user can still see which images they picked.
+   */
+  const imageCountProblem = useMemo<'tooMany' | 'tooFew' | null>(() => {
+    if (!isImages || selectedVideos.length === 0) return null;
+    if (imageLimits.max !== null && selectedVideos.length > imageLimits.max) return 'tooMany';
+    if (imageLimits.min !== null && selectedVideos.length < imageLimits.min) return 'tooFew';
+    return null;
+  }, [isImages, selectedVideos, imageLimits]);
 
   // Switch content type: clears the selection (video ids ≠ image ids), resets
   // the picker to the Library tab (Generated is video-only), and pins images
@@ -659,6 +746,117 @@ export const PublishPage: React.FC = () => {
     [selectedAccounts, accounts],
   );
 
+  /**
+   * One backend rejection reason → the sentence a user can act on.
+   *
+   * The backend already sends English prose in `message`, and printing that
+   * verbatim would be the easy option. It is the wrong one: those strings are
+   * written for logs ("content_type 'images' not supported on douyin session
+   * channel"), they name internals, and they can never be translated. The
+   * `reason` code is the contract — this switch is the only place that knows
+   * what each code means to a person.
+   *
+   * An unmapped code still shows the code rather than a shrug: a reason we
+   * have not written copy for is a gap to fix, and hiding it behind "could not
+   * publish" is how it stays hidden.
+   */
+  const gateProblemText = useCallback((p: PublishGateProblem): string => {
+    const account = accounts.find((a) => a.id === String(p.account_id ?? ''));
+    const body = ((): string => {
+      switch (p.reason) {
+        case 'too_many_images':
+          return imageLimits.max !== null
+            ? t(
+              'distribution.publish.gateTooManyImages',
+              'Too many images — at most {{max}} fit in one post. Remove some and try again.',
+              { max: imageLimits.max },
+            )
+            : t(
+              'distribution.publish.gateTooManyImagesNoLimit',
+              'Too many images for at least one of the accounts you picked.',
+            );
+        case 'too_few_images':
+          return imageLimits.min !== null
+            ? t(
+              'distribution.publish.gateTooFewImages',
+              'An image post needs at least {{min}} image(s).',
+              { min: imageLimits.min },
+            )
+            : t(
+              'distribution.publish.gateTooFewImagesNoLimit',
+              'Not enough images for at least one of the accounts you picked.',
+            );
+        case 'account_not_session_bound':
+          return t(
+            'distribution.publish.gateAccountNotSessionBound',
+            'Image posts need an account connected by QR code — this one would fall back to the phone handoff. Remove it, or reconnect it by QR code.',
+          );
+        case 'cover_not_supported_for_images':
+          return t(
+            'distribution.publish.gateCoverNotSupportedForImages',
+            'Image posts take their cover from the images themselves — a separate cover cannot be sent.',
+          );
+        case 'unsupported_content_type':
+          return t(
+            'distribution.publish.gateUnsupportedContentType',
+            'This account cannot publish this kind of post.',
+          );
+        case 'publishing_not_implemented':
+          return t(
+            'distribution.publish.gatePublishingNotImplemented',
+            'Publishing is not available for this platform yet — the account can be connected but not posted to.',
+          );
+        case 'title_empty':
+          return t('distribution.publish.gateTitleEmpty', 'Add a title before publishing.');
+        case 'title_too_long':
+          return t(
+            'distribution.publish.gateTitleTooLong',
+            'The title is too long for this platform — shorten it and try again.',
+          );
+        case 'too_many_topics':
+          return t(
+            'distribution.publish.gateTooManyTopics',
+            'Too many topics for this platform — remove some and try again.',
+          );
+        case 'invalid_schedule':
+        case 'scheduling_not_supported':
+          return t(
+            'distribution.publish.gateScheduleRejected',
+            'The scheduled time was refused — pick another time, or publish now.',
+          );
+        case 'collections_not_supported':
+        case 'invalid_collection_name':
+          return t(
+            'distribution.publish.gateCollectionRejected',
+            'The collection name was refused — clear it, or use one this account already has.',
+          );
+        case 'self_declaration_not_supported':
+        case 'unknown_self_declaration':
+          return t(
+            'distribution.publish.gateDeclarationRejected',
+            'The self declaration was refused — pick another one, or leave it unset.',
+          );
+        case 'unknown_visibility':
+          return t(
+            'distribution.publish.gateUnknownVisibility',
+            'That visibility is not available on this platform.',
+          );
+        default:
+          return t(
+            'distribution.publish.gateUnknownReason',
+            'The publish request was refused ({{reason}}).',
+            { reason: p.reason },
+          );
+      }
+    })();
+    return account
+      ? t('distribution.publish.gateProblemForAccount', '{{account}} — {{problem}}', {
+        account: account.username,
+        problem: body,
+      })
+      : body;
+  }, [accounts, imageLimits, t]);
+
   const canPublish = useMemo(
     () => selectedVideos.length > 0
       && selectedAccounts.length > 0
@@ -668,8 +866,14 @@ export const PublishPage: React.FC = () => {
       // supported set is derived from the SELECTED accounts — picking one more
       // account can close the gate afterwards. Refusing here beats letting the
       // platform refuse after the upload.
-      && (!isImages || imagesSupported),
-    [selectedVideos, selectedAccounts, title, scheduleIssue, isImages, imagesSupported],
+      && (!isImages || imagesSupported)
+      // Same argument for the count: the bound belongs to the accounts, so
+      // adding an account can put an already-picked gallery out of range.
+      && imageCountProblem === null,
+    [
+      selectedVideos, selectedAccounts, title, scheduleIssue, isImages, imagesSupported,
+      imageCountProblem,
+    ],
   );
 
   const postsBroadcast = selectedVideos.length * selectedAccounts.length;
@@ -704,6 +908,7 @@ export const PublishPage: React.FC = () => {
   const onPublish = async () => {
     if (!canPublish || submitting) return;
     setSubmitting(true);
+    setGateProblems([]);
     try {
       const accountConfigsPayload = Object.fromEntries(
         Object.entries(accountConfigs)
@@ -735,8 +940,15 @@ export const PublishPage: React.FC = () => {
         // Cover-first order: the pair was already derived by
         // POST /covers/select, so it rides along at create time rather than
         // needing a second call against the new task.
-        cover_vertical_resource_id: covers?.vertical,
-        cover_horizontal_resource_id: covers?.horizontal,
+        //
+        // Never for images (D4): the platform's image-post cover is CHOSEN
+        // FROM the uploaded images, not uploaded separately, so a cover asset
+        // here is a semantic error and the backend rejects the batch with
+        // `cover_not_supported_for_images`. Switching content type already
+        // clears `covers`; forcing it here means a future path that forgets to
+        // cannot arm that rejection.
+        cover_vertical_resource_id: isImages ? undefined : covers?.vertical,
+        cover_horizontal_resource_id: isImages ? undefined : covers?.horizontal,
         account_ids: selectedAccounts,
         account_configs: Object.keys(accountConfigsPayload).length ? accountConfigsPayload : undefined,
       });
@@ -744,7 +956,20 @@ export const PublishPage: React.FC = () => {
       navigate('../records');
     } catch (err) {
       console.error('distribution: create publish task failed', err);
-      addToast(t('distribution.publish.failed', 'Could not create publish task'), 'error');
+      // A typed refusal (422) is not "something went wrong" — the backend
+      // knows exactly what is wrong and which account it is about. Show that,
+      // in words, and keep it on screen: a toast that fades takes the only
+      // explanation with it while the form is still unfixed.
+      const problems = publishGateProblems(err);
+      if (problems) {
+        setGateProblems(problems);
+        addToast(
+          t('distribution.publish.rejected', 'This post was refused — see the summary'),
+          'error',
+        );
+      } else {
+        addToast(t('distribution.publish.failed', 'Could not create publish task'), 'error');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -776,8 +1001,17 @@ export const PublishPage: React.FC = () => {
             <h4>
               {t('distribution.publish.content', 'Content')}
               <span className="aux">
+                {/* The maximum is quoted from the capabilities response, so it
+                    is right for whatever the accounts actually allow — and it
+                    is visible BEFORE the user picks a 36th image. */}
                 {isImages
-                  ? t('distribution.publish.imagesSelectedCount', 'Images · {{n}} selected', { n: selectedVideos.length })
+                  ? (imageLimits.max !== null
+                    ? t(
+                      'distribution.publish.imagesSelectedOfMax',
+                      'Images · {{n}} of up to {{max}} selected',
+                      { n: selectedVideos.length, max: imageLimits.max },
+                    )
+                    : t('distribution.publish.imagesSelectedCount', 'Images · {{n}} selected', { n: selectedVideos.length }))
                   : t('distribution.publish.videoSelectedCount', 'Video · {{n}} selected', { n: selectedVideos.length })}
               </span>
             </h4>
@@ -865,12 +1099,41 @@ export const PublishPage: React.FC = () => {
                       ×
                     </button>
                     {isImages ? (
-                      <span
-                        className="ord"
-                        aria-label={t('distribution.publish.imageOrder', 'Image {{n}}', { n: idx + 1 })}
-                      >
-                        {idx + 1}
-                      </span>
+                      <>
+                        <span
+                          className="ord"
+                          aria-label={t('distribution.publish.imageOrder', 'Image {{n}}', { n: idx + 1 })}
+                        >
+                          {idx + 1}
+                        </span>
+                        {/* Order is the gallery order the note is published
+                            with, and until now the only way to change it was
+                            to deselect everything and re-pick in the right
+                            sequence. Buttons rather than drag-and-drop: the
+                            numbered badge already states the order, and a drag
+                            affordance would need its own keyboard and touch
+                            story to be usable at all.
+                            Disabled at the ends, not silently inert — an
+                            enabled control that does nothing reads as a bug. */}
+                        <span className="ord-move">
+                          <button
+                            type="button"
+                            disabled={selectedVideos.indexOf(v.id) === 0}
+                            aria-label={t('distribution.publish.moveImageEarlier', 'Move {{name}} earlier', { name: v.filename })}
+                            onClick={() => moveImage(v.id, -1)}
+                          >
+                            <ChevronLeft size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={selectedVideos.indexOf(v.id) === selectedVideos.length - 1}
+                            aria-label={t('distribution.publish.moveImageLater', 'Move {{name}} later', { name: v.filename })}
+                            onClick={() => moveImage(v.id, 1)}
+                          >
+                            <ChevronRight size={12} />
+                          </button>
+                        </span>
+                      </>
                     ) : (
                       <span className="play">
                         <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
@@ -888,49 +1151,91 @@ export const PublishPage: React.FC = () => {
                 {t('distribution.publish.addFromLibrary', 'Add from Library')}
               </button>
             </div>
+            {/* Both bounds are the platform's, read from the capabilities
+                response — saying them here is what keeps the user from
+                discovering them from a rejected submit. */}
+            {imageCountProblem === 'tooMany' && (
+              <p className="field-err">
+                {t(
+                  'distribution.publish.imagesTooMany',
+                  'You picked {{n}} images — at most {{max}} fit in one post. Remove {{over}}.',
+                  {
+                    n: selectedVideos.length,
+                    max: imageLimits.max,
+                    over: selectedVideos.length - (imageLimits.max ?? 0),
+                  },
+                )}
+              </p>
+            )}
+            {imageCountProblem === 'tooFew' && (
+              <p className="field-err">
+                {t(
+                  'distribution.publish.imagesTooFew',
+                  'An image post needs at least {{min}} image(s) — you picked {{n}}.',
+                  { n: selectedVideos.length, min: imageLimits.min },
+                )}
+              </p>
+            )}
           </div>
 
-          <div className="fcard">
-            <h4>
-              {t('distribution.publish.cover', 'Cover')}
-              <span className="aux">
-                {covers
-                  ? t('distribution.publish.coverSet', 'Vertical + horizontal ready')
-                  : t('distribution.publish.notSetYet', 'Not set yet')}
-              </span>
-            </h4>
-            <div className="cover-wrap">
-              {/* Covers come from a frame of the video being published, so the
-                  picker needs the same selection the content card holds.
-                  Images mode has no video to sample — pass nothing and it
-                  explains that rather than offering a dead button. */}
-              <CoverPicker
-                sources={isImages ? [] : selectedVideoObjs}
-                emptyHint={isImages
-                  ? t('distribution.publish.coverImagesMode', 'Image posts use the first image as their cover — there is no video to sample.')
-                  : undefined}
-                value={covers}
-                onChange={setCovers}
-              />
-              <div className="cover-ai">
-                <div className="head">
-                  <b><Sparkles size={14} />{t('distribution.publish.aiCoversCanvas', 'AI covers · Canvas')}</b>
-                  <a href="#cover-studio" aria-disabled="true" onClick={(e) => e.preventDefault()}>
-                    {t('distribution.publish.openCoverStudio', 'Open Cover Studio')}
-                  </a>
+          {/* Cover.
+              Images mode gets a sentence instead of the picker, not a disabled
+              copy of it (D4). The frame picker's two empty slots read as "a
+              cover can be attached here" — and an image post that carries a
+              separate cover asset is refused outright
+              (`cover_not_supported_for_images`), because the platform's image
+              cover is CHOSEN FROM the uploaded images rather than uploaded.
+              [实测 2026-08-11] the image-post page shows 封面设置 / 选择一张图片
+              作为封面 while the video page's 设置封面 is absent — so there is no
+              second upload to offer. */}
+          {isImages ? (
+            <div className="fcard">
+              <h4>
+                {t('distribution.publish.cover', 'Cover')}
+                <span className="aux">{t('distribution.publish.coverFromFirstImage', 'First image')}</span>
+              </h4>
+              <p className="hint">
+                {t('distribution.publish.coverImagesMode', 'Image posts use the first image as their cover — there is no video to sample.')}
+              </p>
+            </div>
+          ) : (
+            <div className="fcard">
+              <h4>
+                {t('distribution.publish.cover', 'Cover')}
+                <span className="aux">
+                  {covers
+                    ? t('distribution.publish.coverSet', 'Vertical + horizontal ready')
+                    : t('distribution.publish.notSetYet', 'Not set yet')}
+                </span>
+              </h4>
+              <div className="cover-wrap">
+                {/* Covers come from a frame of the video being published, so the
+                    picker needs the same selection the content card holds. */}
+                <CoverPicker
+                  sources={selectedVideoObjs}
+                  value={covers}
+                  onChange={setCovers}
+                />
+                <div className="cover-ai">
+                  <div className="head">
+                    <b><Sparkles size={14} />{t('distribution.publish.aiCoversCanvas', 'AI covers · Canvas')}</b>
+                    <a href="#cover-studio" aria-disabled="true" onClick={(e) => e.preventDefault()}>
+                      {t('distribution.publish.openCoverStudio', 'Open Cover Studio')}
+                    </a>
+                  </div>
+                  {/* The three gradient tiles that used to sit here were mock
+                      candidates — placeholder art, not images anyone could pick.
+                      They were harmless while the whole cover area was a stub;
+                      now they sit directly beside a frame picker that DOES work,
+                      and two rows of thumbnails where only one is clickable reads
+                      as a bug rather than as "not built yet". The line below says
+                      the same thing without pretending to have output. */}
+                  <div className="foot">{t('distribution.publish.coverGenDesc', 'Generates candidates from a video frame + your title.')}</div>
+                  <div className="d4-note">{t('distribution.publish.comingInD4', 'Coming in D4')}</div>
                 </div>
-                {/* The three gradient tiles that used to sit here were mock
-                    candidates — placeholder art, not images anyone could pick.
-                    They were harmless while the whole cover area was a stub;
-                    now they sit directly beside a frame picker that DOES work,
-                    and two rows of thumbnails where only one is clickable reads
-                    as a bug rather than as "not built yet". The line below says
-                    the same thing without pretending to have output. */}
-                <div className="foot">{t('distribution.publish.coverGenDesc', 'Generates candidates from a video frame + your title.')}</div>
-                <div className="d4-note">{t('distribution.publish.comingInD4', 'Coming in D4')}</div>
               </div>
             </div>
-          </div>
+          )}
 
           <div className="fcard">
             <h4>{t('distribution.publish.titleLabel', 'Title')} <span className="aux">{title.length} / 500</span></h4>
@@ -1074,7 +1379,11 @@ export const PublishPage: React.FC = () => {
             <div className="frow">
               <div className="lbl">
                 <b>{t('distribution.publish.allowDownloadsLabel', 'Allow downloads')}</b>
-                <span>{t('distribution.publish.allowDownloadsDesc', 'Viewers can save the video to their device')}</span>
+                <span>
+                  {isImages
+                    ? t('distribution.publish.allowDownloadsDescImages', 'Viewers can save the images to their device')
+                    : t('distribution.publish.allowDownloadsDesc', 'Viewers can save the video to their device')}
+                </span>
               </div>
               <button
                 type="button"
@@ -1394,7 +1703,25 @@ export const PublishPage: React.FC = () => {
                 )}
               </div>
             )}
-            {canPublish && (
+            {/* Typed refusals from the submit-time gate (422). One line per
+                problem, because a batch is refused per account and "which
+                account made this fail" is the only thing the user can act on.
+                Never the backend's own English `message` — see
+                `gateProblemText`. */}
+            {gateProblems.length > 0 && (
+              <div className="check err" role="alert">
+                <AlertCircle />
+                <span>
+                  <b>{t('distribution.publish.rejectedHeading', 'This post was refused before anything was created:')}</b>
+                  <ul className="gate-problems">
+                    {gateProblems.map((p, i) => (
+                      <li key={`${p.reason}-${p.account_id ?? 'batch'}-${i}`}>{gateProblemText(p)}</li>
+                    ))}
+                  </ul>
+                </span>
+              </div>
+            )}
+            {canPublish && gateProblems.length === 0 && (
               <div className="check ok">
                 <Check strokeWidth={2.5} />
                 {t('distribution.publish.lookingGood', 'Title, topics and accounts look good.')}
@@ -1434,7 +1761,14 @@ export const PublishPage: React.FC = () => {
             <div className="picker-head">
               <div>
                 <h3>{t('distribution.publish.pickerTitle', 'Add from Library')}</h3>
-                <p>{t('distribution.publish.pickerSubtitle', 'Pick videos to include in this publish.')}</p>
+                {/* The picker is shared by both content types, so its copy has
+                    to follow the mode — an images-mode dialog that says
+                    "videos" everywhere describes a different feature. */}
+                <p>
+                  {isImages
+                    ? t('distribution.publish.pickerSubtitleImages', 'Pick images to include in this post.')
+                    : t('distribution.publish.pickerSubtitle', 'Pick videos to include in this publish.')}
+                </p>
               </div>
               <div className="picker-count">
                 {t('distribution.publish.pickerSelectedCount', '{{n}} selected', { n: selectedVideos.length })}
@@ -1454,8 +1788,8 @@ export const PublishPage: React.FC = () => {
               <input
                 value={pickerQuery}
                 onChange={(e) => setPickerQuery(e.target.value)}
-                placeholder={t('distribution.publish.pickerSearch', 'Search videos')}
-                aria-label={t('distribution.publish.pickerSearch', 'Search videos')}
+                placeholder={pickerSearchLabel}
+                aria-label={pickerSearchLabel}
               />
             </div>
 
@@ -1583,8 +1917,12 @@ export const PublishPage: React.FC = () => {
                         ? t('distribution.publish.noImages', "No uploaded images yet — downloads aren't publishable")
                         : t('distribution.publish.noContent', "No uploads or generated videos yet — downloads aren't publishable"))
                       : toPublishOnly && markedIds.size === 0
-                        ? t('distribution.publish.pickerNoMarked', 'No videos marked to publish yet')
-                        : t('distribution.publish.pickerNoResults', 'No videos match your search')}
+                        ? (isImages
+                          ? t('distribution.publish.pickerNoMarkedImages', 'No images marked to publish yet')
+                          : t('distribution.publish.pickerNoMarked', 'No videos marked to publish yet'))
+                        : (isImages
+                          ? t('distribution.publish.pickerNoResultsImages', 'No images match your search')
+                          : t('distribution.publish.pickerNoResults', 'No videos match your search'))}
                   </p>
                 )}
               </div>

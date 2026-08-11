@@ -58,10 +58,6 @@ export interface CoverPickerProps {
    *  means there is nothing to sample from — the picker says so rather than
    *  offering a button that cannot work. */
   sources: Array<{ id: string; filename: string }>;
-  /** What to say when `sources` is empty. Defaults to "pick a video first";
-   *  callers that have no video to offer at all (an image post) override it so
-   *  the copy does not send the user hunting for a control that isn't there. */
-  emptyHint?: string;
   /** Derived covers, owned by the parent so they can ride along in the
    *  create-task payload. */
   value: CoverPair | null;
@@ -78,7 +74,7 @@ const formatStamp = (seconds: number | null): string | null => {
 };
 
 export const CoverPicker: React.FC<CoverPickerProps> = ({
-  sources, emptyHint, value, onChange,
+  sources, value, onChange,
 }) => {
   const { t } = useTranslation();
 
@@ -332,8 +328,7 @@ export const CoverPicker: React.FC<CoverPickerProps> = ({
           // No button here on purpose: an enabled control that cannot work is
           // worse than saying what is missing.
           <p className="cover-frames-hint">
-            {emptyHint
-              ?? t('distribution.publish.coverNeedsVideo', 'Pick a video above first — cover frames are sampled from it.')}
+            {t('distribution.publish.coverNeedsVideo', 'Pick a video above first — cover frames are sampled from it.')}
           </p>
         ) : (
           <>
