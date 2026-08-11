@@ -1,4 +1,4 @@
--- 421_preset_doubao_fallback.sql
+-- 423_preset_doubao_fallback.sql
 --
 -- Provider 容错 P1（spec: docs/superpowers/specs/2026-08-11-provider-resilience-design.md §4）。
 -- doubao-seed-2-0-pro 自 2026-08-08 持续 429,而所有 agent 的 fallback_models

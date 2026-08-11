@@ -106,7 +106,7 @@ build_agent_runner_stack(...)` 拿到接了 `LLMFallbackChain` 的 runner。
 内**：两者都是裸 `AgentRunner(adapter=...)`，adapter 由各自的 `_build_adapter` /
 `_build_adapter_from_provider_config` 直接从**调用者的 per-user provider 配置**解析，从不
 读 `agent.fallback_models`；而且它们的实际执行模型来自这份 per-user 配置，与
-`ai_agents.model` 本就是解耦的两条数据。所以 mig 421 往 `summarize` / `analyze` 两个预设
+`ai_agents.model` 本就是解耦的两条数据。所以 mig 423 往 `summarize` / `analyze` 两个预设
 agent 行上写的 `fallback_models`，对这两个 service 的直接调用路径（Celery 任务触发的批量
 summarize/analyze）是死数据——它只在这两个 agent 被**当作 chat 里的 delegate 目标**时才会
 被读到。给这两个 service 接上 `LLMFallbackChain` 属于后续工作，不在本分支范围内，已加入
@@ -139,6 +139,6 @@ summarize/analyze）是死数据——它只在这两个 agent 被**当作 chat 
 - doubao-pro 429 的根因追击（配额/计费侧，属运营）
 - `SummarizeService` / `llm_analysis_service` 接入 `LLMFallbackChain`（见 §4 澄清）——两者
   当前是裸 `AgentRunner(adapter=...)`，adapter 从 per-user provider 配置解析，不读
-  `agent.fallback_models`，mig 421 对它们的直接调用路径（Celery 触发的批量
+  `agent.fallback_models`，mig 423 对它们的直接调用路径（Celery 触发的批量
   summarize/analyze）不生效
 - `2026-08-07-ai-summary-bug-fixes.md` 里 DBOS workflow 侧的 return-failed-dict 修复（独立既有计划，别混入）
