@@ -22,6 +22,7 @@ import {
   Coins,
   Share2,
   Send,
+  Frame,
 } from 'lucide-react';
 import { Team, Project, SidebarMode, ViewState } from '../types';
 import { SmartCollection } from '../services/smartCollectionService';
@@ -30,6 +31,7 @@ import { SidebarSection } from './sidebar/SidebarSection';
 import { hasPermission } from '../utils/permissions';
 import { VIEW_PATH_MAP, pathnameToView } from '../utils/routeConfig';
 import { useModuleStatus } from '../hooks/useModuleStatus';
+import { CANVAS_NAV_ENABLED } from '../features/canvas-core/flags';
 
 // ---------------------------------------------------------------------------
 // SidebarItem
@@ -358,6 +360,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {isViewEnabled('mediatrack') && projectsVisible && (
               <SidebarItem icon={FolderKanban} label={t('sidebar.projects')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
             )}
+            {CANVAS_NAV_ENABLED && (
+              <SidebarItem icon={Frame} label={t('sidebar.canvas', 'Canvas')} active={currentView === 'canvas'} onClick={() => handleNav('canvas')} collapsed={collapsed} />
+            )}
             {distributionModuleVisible && (
               <SidebarItem
                 icon={Send}
@@ -446,6 +451,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
           {isViewEnabled('mediatrack') && projectsVisible && (
             <SidebarItem icon={FolderKanban} label={t('sidebar.projects')} active={currentView === 'mediatrack'} onClick={() => handleNav('mediatrack')} collapsed={collapsed} />
+          )}
+          {CANVAS_NAV_ENABLED && (
+            <SidebarItem icon={Frame} label={t('sidebar.canvas', 'Canvas')} active={currentView === 'canvas'} onClick={() => handleNav('canvas')} collapsed={collapsed} />
           )}
           {distributionModuleVisible && (
             <SidebarItem

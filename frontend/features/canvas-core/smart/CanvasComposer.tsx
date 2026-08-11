@@ -14,7 +14,7 @@
  * via the viewport math).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { arrangeSelected } from './arrangeNodes';
@@ -554,6 +554,7 @@ export function CanvasComposer({
   const [savingToLibrary, setSavingToLibrary] = useState(false);
   const [libraryNotice, setLibraryNotice] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const libraryButtonRef = useRef<HTMLButtonElement | null>(null);
 
   // Auto-dismiss the save notice: it renders at the same bottom-full anchor
   // as the library picker, so a persistent notice covers the picker panel
@@ -648,13 +649,14 @@ export function CanvasComposer({
           >
             {savingToLibrary ? 'Saving…' : 'Save'}
           </ComposerButton>
-          <ComposerButton onClick={() => setLibraryOpen((v) => !v)}>
+          <ComposerButton ref={libraryButtonRef} onClick={() => setLibraryOpen((v) => !v)}>
             Library
           </ComposerButton>
         </>
       )}
       {libraryOpen && teamId && (
         <WorkflowLibraryPicker
+          anchorEl={libraryButtonRef.current}
           teamId={teamId}
           onPick={(id) => {
             setLibraryOpen(false);
@@ -724,17 +726,15 @@ function Divider() {
   return <div className="mx-1 my-1 w-px bg-canvas-line" />;
 }
 
-function ComposerButton({
-  onClick,
-  children,
-  disabled,
-  emphasis,
-}: {
-  onClick: () => void;
-  children: React.ReactNode;
-  disabled?: boolean;
-  emphasis?: 'primary';
-}) {
+const ComposerButton = forwardRef<
+  HTMLButtonElement,
+  {
+    onClick: () => void;
+    children: React.ReactNode;
+    disabled?: boolean;
+    emphasis?: 'primary';
+  }
+>(function ComposerButton({ onClick, children, disabled, emphasis }, ref) {
   // Infinite's .tool-btn (P1-7): bordered pill, 38px tall, 11px/700 label —
   // the borderless 14px/500 text buttons read as a different product next
   // to it (the visual diff's top structural gap).
@@ -744,6 +744,7 @@ function ComposerButton({
     'border-canvas-line bg-canvas-card/60 text-canvas-text hover:bg-canvas-card disabled:text-canvas-muted/50';
   return (
     <button
+      ref={ref}
       type="button"
       onClick={onClick}
       disabled={disabled}
@@ -754,4 +755,4 @@ function ComposerButton({
       {children}
     </button>
   );
-}
+});
