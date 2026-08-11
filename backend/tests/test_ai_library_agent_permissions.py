@@ -68,7 +68,9 @@ def _client_with_repo(existing: Dict[str, Any], captured: dict):
     repo = AsyncMock()
     repo.get_by_slug.return_value = existing
 
-    async def _update_fields(agent_uuid, updates, created_by=None):
+    async def _update_fields(
+        agent_uuid, updates, created_by=None, notes=None, permission_audit=None
+    ):
         captured["updates"] = updates
 
     repo.update_fields_versioned.side_effect = _update_fields

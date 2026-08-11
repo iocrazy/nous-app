@@ -66,6 +66,8 @@ from app.schemas.ai_library import (
     AgentUpdate,
     CapabilitiesOut,
     ChatPermissionsOut,
+    PermissionAuditItem,
+    PermissionAuditListOut,
     SkillCreate,
     SkillFileOut,
     SkillFileUpsert,
@@ -651,6 +653,20 @@ async def create_agent(
     return enriched[0]
 
 
+def _resolved_snapshot(profile: Any) -> Dict[str, Any]:
+    """Resolved (fail-closed) chat + capabilities snapshot of a
+    ``capability_profile`` value, for ``agent_permission_audits`` before/after
+    columns (2026-08-10 spec §3). Deliberately the SAME parsers the gates
+    enforce with, not an independent re-reading of the JSONB — so the audit
+    trail reflects what actually took effect, not what the raw storage keys
+    happen to say."""
+    probe = {"capability_profile": profile}
+    return {
+        "chat": ChatPermissionsOut.from_caps(agent_chat_caps(probe)).model_dump(),
+        "capabilities": CapabilitiesOut.from_caps(high_risk_caps(probe)).model_dump(),
+    }
+
+
 @router.patch(
     "/agents/{slug}",
     response_model=AgentOut,
@@ -687,6 +703,7 @@ async def update_agent(
             "capabilities",
             "override_scope",
             "override_team_id",
+            "permission_change_reason",
         },
     )
 
@@ -751,6 +768,7 @@ async def update_agent(
     # assignments would make the later block silently drop the earlier one.
     chat_audit: dict | None = None
     caps_audit: dict | None = None
+    permission_audit: Optional[Dict[str, Any]] = None
     if payload.chat_permissions is not None or payload.capabilities is not None:
         existing_profile = agent.get("capability_profile")
         if not isinstance(existing_profile, dict):
@@ -784,6 +802,17 @@ async def update_agent(
             caps_audit = {"before": before_caps, "after": merged_caps}
 
         updates["capability_profile"] = merged_profile
+
+        # Audit row (2026-08-10 spec §3): RESOLVED before/after snapshot of
+        # both permission subtrees — never the raw JSONB — so what's stored
+        # in agent_permission_audits matches what enforcement actually reads.
+        permission_audit = {
+            "agent_id": agent_uuid,
+            "changed_by": user_uuid,
+            "before_json": _resolved_snapshot(existing_profile),
+            "after_json": _resolved_snapshot(merged_profile),
+            "reason": payload.permission_change_reason,
+        }
 
     override_team_ctx: Optional[int] = None
     if override_updates:
@@ -825,7 +854,7 @@ async def update_agent(
 
     if updates:
         await agent_repo.update_fields_versioned(
-            agent_uuid, updates, created_by=user_uuid
+            agent_uuid, updates, created_by=user_uuid, permission_audit=permission_audit
         )
     if payload.skill_ids is not None:
         await agent_repo.update_skill_bindings(agent_uuid, payload.skill_ids)
@@ -855,6 +884,37 @@ async def update_agent(
     )
     enriched = await _enrich_agents_with_scope_names([row])
     return enriched[0]
+
+
+@router.get(
+    "/agents/{slug}/permission-audits",
+    response_model=PermissionAuditListOut,
+    summary="List an agent's permission-change audit trail (read-only)",
+)
+async def list_agent_permission_audits(
+    slug: str,
+    auth: AuthDep,
+    limit: int = 20,
+) -> Dict[str, Any]:
+    """Most-recent-first audit trail of chat_permissions/capabilities changes
+    for one agent (2026-08-10 spec §3). Gated by the SAME role check as the
+    write path (``_can_edit_chat_permissions``) — whoever can grant a
+    permission can also see its history, no one else."""
+    agent_repo, _ = _repos()
+    agent = await agent_repo.get_by_slug(slug)
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="agent not found"
+        )
+    user_uuid = _coerce_user_uuid(auth.user_id)
+    if not await _can_edit_chat_permissions(agent_repo, agent, user_uuid):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="not allowed to view this agent's permission audit trail",
+        )
+    agent_uuid = UUID(str(agent["id"]))
+    rows = await agent_repo.list_permission_audits(agent_uuid, limit=limit)
+    return {"items": [PermissionAuditItem(**row) for row in rows]}
 
 
 @router.delete(
