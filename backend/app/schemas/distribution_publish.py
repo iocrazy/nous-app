@@ -40,9 +40,16 @@ Channel = Literal["official", "h5", "session"]
 MAX_TOPICS = 20
 MAX_TOPIC_LEN = 50
 
-# Douyin caps an image / gallery (图文/note) post at 35 images. The H5 share
-# doc doesn't state the ceiling explicitly, so this mirrors the app's known
-# gallery limit — bound so a single note can't carry an absurd image wall.
+# 中立硬顶：与平台无关，任何 content_type=images 的请求都过这一道（gate ①）。
+#
+# 这个数曾经是**猜的** —— 原注释写着「H5 分享文档没明说上限，这里沿用 app 已知
+# 的图集上限」。[实测 2026-08-11]（图集设计 §3.4 V2）抖音图文上传页原文
+# `最多支持上传35张图片，图片格式不支持gif格式`（exact=1），**猜对了**；但在此
+# 之前它的状态是「无人验证的常量」，现在才是事实。
+#
+# ⚠️ 数字与 ``PlatformSessionProfile.max_images``（douyin=35）相同**纯属巧合**，
+# 两者不许合并：这一道是"一条笔记不能带一堵图墙"的防御性中立上界，那一道是
+# "抖音的上限"。换个平台两者就分开了。
 MAX_IMAGES = 35
 
 

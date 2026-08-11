@@ -891,6 +891,44 @@ async def test_fail_fast_rejects_a_non_video_extension():
 
 
 @pytest.mark.asyncio
+async def test_workflow_still_validates_after_the_router_gate_moved_forward():
+    """图集设计 §2 D3 反向验证 3：校验前移到 ``create_task`` 之后，workflow
+    里这道门**必须还在** —— 前移是加一道，不是搬一道。
+
+    两个理由（与 ``SessionAdapter.publish`` 内部还要再跑一次同一个校验同源）：
+    提交与执行之间隔着排队与调度（定时窗口会滑进线内），以及任何绕过 router
+    的调用方（retry 重投、将来的内部触发）都不该能把非法参数送进浏览器。
+
+    断言的是"这条路径上确实调用了它"，而不是源码里有没有那一行 —— 删掉那一
+    行、或者把它改成"记录一下但继续发"，这个测试都会红。
+    """
+    from app.workflows.publish_distribution import _publish_one_account_session
+
+    repo, accounts_repo = _FakeRepo(), _FakeAccountsRepo()
+    adapter = _FakeSessionAdapter()
+    seen: list = []
+    real_validate = adapter.validate_publish_intent
+
+    def _counting_validate(intent):
+        seen.append(intent)
+        return real_validate(intent)
+
+    adapter.validate_publish_intent = _counting_validate  # type: ignore[method-assign]
+
+    status = await _publish_one_account_session(
+        _session_account(),
+        _session_task(),
+        repo,
+        accounts_repo,
+        adapter=adapter,
+        lock=_always_free_lock(),
+    )
+
+    assert status == "success"
+    assert len(seen) == 1  # 走到浏览器之前，门跑过一次
+
+
+@pytest.mark.asyncio
 async def test_busy_account_fails_the_row_instead_of_opening_a_second_context():
     """§7.5：同一账号两个 context 会互相踢下线，失败这一行远好过烧掉会话。"""
     from app.workflows.publish_distribution import _publish_one_account_session

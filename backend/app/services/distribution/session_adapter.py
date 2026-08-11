@@ -283,8 +283,17 @@ SESSION_PLATFORM_PROFILES: dict[str, PlatformSessionProfile] = {
         # 按 ``kind`` 选表），跟"能不能发图集"是两件事，删掉只会让 P2-1 步骤 2
         # 多一次考古。
         image_extensions=frozenset({".jpg", ".jpeg", ".png"}),
-        # 上限待 S3 对着 creator.douyin.com 实测后填入（见 docstring）。
-        # 下面三项相反 —— 是 2026-08-06 在真实发布页上探过的，属于"确定的事"：
+        # [实测 2026-08-11]（图集设计 §3.4 V2，勘探端点在真实图文发布页上读到
+        # 的原文）：`最多支持上传35张图片，图片格式不支持gif格式`（exact=1），
+        # 且只传 1 张时编辑器完整渲染、页面上没有任何"至少 N 张"的提示
+        # （`至少` exact=0）。所以上下界都是**测出来的**，不是沿用的猜测。
+        #
+        # ⚠️ 与 ``distribution_publish.MAX_IMAGES``（同样是 35）的分工：那个是
+        # 与平台无关的中立硬顶（防御性，任何 content_type=images 的请求都过它），
+        # 这里才是"抖音的上限"。数字碰巧相同不代表可以合并——换个平台就分开了。
+        max_images=35,
+        min_images=1,
+        # 下面三项同样是 2026-08-06 在真实发布页上探过的，属于"确定的事"：
         # 定时只接受 2 小时后 ~ 14 天内；自主声明是六选一的固定下拉；有合集。
         schedule_min_lead=SCHEDULE_MIN_LEAD,
         schedule_max_ahead=SCHEDULE_MAX_AHEAD,
@@ -342,6 +351,214 @@ def publishable_session_platforms() -> frozenset[str]:
         for name, profile in SESSION_PLATFORM_PROFILES.items()
         if profile.supports_publishing
     )
+
+
+# ── 纯形状校验（图集设计 §2 D3） ──────────────────────────────
+#
+# 「纯形状」= 只看请求本身说了什么，不需要 session_state、不需要素材 URL、
+# 不需要任何 IO。这些规则**在提交那一刻就能判**，所以它们前移到
+# ``distribution_router.create_task``（D3 的关键改动：用户点 Publish 就
+# 拿到红字，而不是等异步任务跑到一半才看到一批 failed 行）。
+#
+# 前移是**加一道**不是搬一道：``SessionAdapter.validate_publish_intent``
+# 仍然调同一个函数（下面），workflow 里那道门原样保留。两处调的是同一份
+# 实现，所以不存在"前面放行、后面拒绝"的夹缝 —— 那正是把规则复制一份到
+# router 里会犯的错。
+
+
+@dataclass(frozen=True)
+class ShapeProblem:
+    """一条形状问题：机器可读的 ``reason`` + 给人看的 ``message``。
+
+    两个字段都要，缺一不可：只有 message 的话调用方要正则匹配英文句子才能
+    分支（前端更没法 i18n）；只有 reason 的话具体数字（35 / 实际张数）就丢了。
+    """
+
+    reason: str
+    message: str
+
+
+# ShapeProblem.reason 的取值。前端/测试按这些常量分支，别按 message 文本。
+SHAPE_UNSUPPORTED_CONTENT_TYPE = "unsupported_content_type"
+SHAPE_TITLE_EMPTY = "title_empty"
+SHAPE_TITLE_TOO_LONG = "title_too_long"
+SHAPE_TOO_MANY_TOPICS = "too_many_topics"
+SHAPE_TOO_MANY_IMAGES = "too_many_images"
+SHAPE_TOO_FEW_IMAGES = "too_few_images"
+SHAPE_UNKNOWN_VISIBILITY = "unknown_visibility"
+SHAPE_INVALID_SCHEDULE = "invalid_schedule"
+SHAPE_SCHEDULE_UNSUPPORTED = "scheduling_not_supported"
+SHAPE_DECLARATION_UNSUPPORTED = "self_declaration_not_supported"
+SHAPE_DECLARATION_UNKNOWN = "unknown_self_declaration"
+SHAPE_COLLECTION_UNSUPPORTED = "collections_not_supported"
+SHAPE_COLLECTION_INVALID = "invalid_collection_name"
+# D4：图集不接受独立封面。抖音图文页确实有「封面设置」，但 [实测 2026-08-11]
+# （§3.4 V8）它是**从已上传的图片里挑一张**，不是视频那种在弹窗里独立上传的
+# 第五个文件。所以带 cover 素材的图集请求是语义错误，不是可以忽略的多余字段。
+SHAPE_COVER_NOT_SUPPORTED_FOR_IMAGES = "cover_not_supported_for_images"
+
+
+def validate_intent_shape(
+    profile: PlatformSessionProfile,
+    *,
+    content_type: str,
+    title: str,
+    topics: Iterable[str] = (),
+    image_count: int = 0,
+    visibility: str = "public",
+    scheduled_at: Optional[datetime] = None,
+    has_cover: bool = False,
+    platform_options: Optional[Mapping[str, Any]] = None,
+    now: Optional[datetime] = None,
+) -> list[ShapeProblem]:
+    """一次发布请求的**纯形状**问题清单（空 = 通过）。纯函数、无 IO。
+
+    参数是原始值而不是 ``PublishIntent``，因为两个调用点手上的东西不同：
+    router 只有请求体（素材还没解析成 URL），workflow 有组装好的 intent。
+    强行让 router 先造一个假 intent，就得为"素材 URL 还不知道"编造占位值 ——
+    那是把校验绑死在一个它并不需要的数据结构上。
+
+    ``now`` 只为测试注入。定时窗口在这里算的这一次与请求 schema 那一次不是
+    冗余：两次之间隔着排队与调度（见 ``validate_scheduled_at`` 的说明）。
+    """
+    problems: list[ShapeProblem] = []
+    topics = list(topics)
+    if content_type not in profile.content_types:
+        problems.append(
+            ShapeProblem(
+                SHAPE_UNSUPPORTED_CONTENT_TYPE,
+                f"content_type {content_type!r} not supported on "
+                f"{profile.platform} session channel",
+            )
+        )
+    if not (title or "").strip():
+        problems.append(ShapeProblem(SHAPE_TITLE_EMPTY, "title is empty"))
+    if profile.max_title_len is not None and len(title) > profile.max_title_len:
+        problems.append(
+            ShapeProblem(
+                SHAPE_TITLE_TOO_LONG,
+                f"title exceeds {profile.max_title_len} characters ({len(title)})",
+            )
+        )
+    if profile.max_topics is not None and len(topics) > profile.max_topics:
+        problems.append(
+            ShapeProblem(
+                SHAPE_TOO_MANY_TOPICS,
+                f"too many topics ({len(topics)} > {profile.max_topics})",
+            )
+        )
+    if profile.max_images is not None and image_count > profile.max_images:
+        problems.append(
+            ShapeProblem(
+                SHAPE_TOO_MANY_IMAGES,
+                f"too many images ({image_count} > {profile.max_images})",
+            )
+        )
+    # 下界只在**真的是图集**时判：视频批次的 image_count 恒为 0，拿 min_images
+    # 去卡它会把每一条视频都拒掉。
+    if (
+        content_type == "images"
+        and profile.min_images is not None
+        and image_count < profile.min_images
+    ):
+        problems.append(
+            ShapeProblem(
+                SHAPE_TOO_FEW_IMAGES,
+                f"too few images ({image_count} < {profile.min_images})",
+            )
+        )
+    if content_type == "images" and has_cover:
+        problems.append(
+            ShapeProblem(
+                SHAPE_COVER_NOT_SUPPORTED_FOR_IMAGES,
+                "an image post takes its cover from the uploaded images; "
+                "a separate cover asset is not supported",
+            )
+        )
+    if visibility not in ("public", "private", "friends"):
+        problems.append(
+            ShapeProblem(SHAPE_UNKNOWN_VISIBILITY, f"unknown visibility {visibility!r}")
+        )
+    problems.extend(_schedule_shape_problems(profile, scheduled_at, now=now))
+    problems.extend(_option_shape_problems(profile, platform_options or {}))
+    return problems
+
+
+def _schedule_shape_problems(
+    profile: PlatformSessionProfile,
+    scheduled_at: Optional[datetime],
+    *,
+    now: Optional[datetime],
+) -> list[ShapeProblem]:
+    """定时时间的窗口校验。平台没有定时能力时，带了时间直接拒。"""
+    if scheduled_at is None:
+        return []
+    if profile.schedule_min_lead is None and profile.schedule_max_ahead is None:
+        return [
+            ShapeProblem(
+                SHAPE_SCHEDULE_UNSUPPORTED,
+                f"scheduled publishing is not supported on {profile.platform}",
+            )
+        ]
+    problem = validate_scheduled_at(
+        scheduled_at,
+        now=now,
+        min_lead=profile.schedule_min_lead or timedelta(0),
+        max_ahead=profile.schedule_max_ahead or timedelta.max,
+    )
+    return [ShapeProblem(SHAPE_INVALID_SCHEDULE, problem)] if problem else []
+
+
+def _option_shape_problems(
+    profile: PlatformSessionProfile, opts: Mapping[str, Any]
+) -> list[ShapeProblem]:
+    """``platform_options`` 里我们**认识**的键的取值校验。
+
+    只校验认识的键：``platform_options`` 是逃生舱，未知键照旧原样透传
+    （否则每加一个平台专属字段都要先改 backend，逃生舱就不成其为逃生舱）。
+    但认识的键必须拦 —— 一个拼错的自主声明送到浏览器侧，最好的结果是发布
+    失败，最坏的结果是选项没选中而作品照发（合规字段静默丢失）。
+    """
+    problems: list[ShapeProblem] = []
+
+    declaration = opts.get("self_declaration")
+    if declaration is not None:
+        if not profile.self_declarations:
+            problems.append(
+                ShapeProblem(
+                    SHAPE_DECLARATION_UNSUPPORTED,
+                    f"self declaration is not supported on {profile.platform}",
+                )
+            )
+        elif declaration not in profile.self_declarations:
+            problems.append(
+                ShapeProblem(
+                    SHAPE_DECLARATION_UNKNOWN,
+                    f"unknown self declaration {declaration!r}",
+                )
+            )
+
+    collection = opts.get("collection")
+    if collection is not None:
+        if not profile.supports_collection:
+            problems.append(
+                ShapeProblem(
+                    SHAPE_COLLECTION_UNSUPPORTED,
+                    f"collections are not supported on {profile.platform}",
+                )
+            )
+        elif not isinstance(collection, str) or not collection.strip():
+            problems.append(
+                ShapeProblem(SHAPE_COLLECTION_INVALID, "collection name is empty")
+            )
+        elif len(collection) > MAX_COLLECTION_NAME_LEN:
+            problems.append(
+                ShapeProblem(
+                    SHAPE_COLLECTION_INVALID,
+                    f"collection name exceeds {MAX_COLLECTION_NAME_LEN} characters",
+                )
+            )
+    return problems
 
 
 # ── 能力下发（图集设计 §2 D1） ────────────────────────────────
@@ -640,80 +857,32 @@ class SessionAdapter:
         ``now`` 只为测试注入。定时窗口在这里**又算一次**（请求 schema 已经算
         过）不是冗余：两次之间隔着排队与调度，提交时刚过 2 小时线的批次，真
         到执行时可能已经滑进线内 —— 那时再被平台拒，用户已经等了一次上传。
+
+        形状部分委托给模块级的 ``validate_intent_shape``，与
+        ``distribution_router.create_task`` 的提交时那道门**共用同一份实现**
+        （图集设计 D3）。这里只额外做"要有素材"和扩展名两件事 —— 它们需要
+        已解析的 ``media``，提交那一刻还不存在。
         """
-        problems: list[str] = []
         p = self._profile
-        if intent.content_type not in p.content_types:
-            problems.append(
-                f"content_type {intent.content_type!r} not supported on "
-                f"{p.platform} session channel"
+        images = [m for m in intent.media if m.kind == "image"]
+        problems = [
+            sp.message
+            for sp in validate_intent_shape(
+                p,
+                content_type=intent.content_type,
+                title=intent.title,
+                topics=intent.topics,
+                image_count=len(images),
+                visibility=intent.visibility,
+                scheduled_at=intent.scheduled_at,
+                has_cover=intent.cover is not None,
+                platform_options=intent.platform_options,
+                now=now,
             )
+        ]
         if not intent.media:
             problems.append("no media to publish")
-        if not (intent.title or "").strip():
-            problems.append("title is empty")
-        if p.max_title_len is not None and len(intent.title) > p.max_title_len:
-            problems.append(
-                f"title exceeds {p.max_title_len} characters ({len(intent.title)})"
-            )
-        if p.max_topics is not None and len(intent.topics) > p.max_topics:
-            problems.append(f"too many topics ({len(intent.topics)} > {p.max_topics})")
-        images = [m for m in intent.media if m.kind == "image"]
-        if p.max_images is not None and len(images) > p.max_images:
-            problems.append(f"too many images ({len(images)} > {p.max_images})")
         problems.extend(self._extension_problems(intent.media))
-        if intent.visibility not in ("public", "private", "friends"):
-            problems.append(f"unknown visibility {intent.visibility!r}")
-        problems.extend(self._schedule_problems(intent, now=now))
-        problems.extend(self._platform_option_problems(intent))
-        return problems
-
-    def _schedule_problems(
-        self, intent: PublishIntent, *, now: Optional[datetime]
-    ) -> list[str]:
-        """定时时间的窗口校验。平台没有定时能力时，带了时间直接拒。"""
-        if intent.scheduled_at is None:
-            return []
-        p = self._profile
-        if p.schedule_min_lead is None and p.schedule_max_ahead is None:
-            return [f"scheduled publishing is not supported on {p.platform}"]
-        problem = validate_scheduled_at(
-            intent.scheduled_at,
-            now=now,
-            min_lead=p.schedule_min_lead or timedelta(0),
-            max_ahead=p.schedule_max_ahead or timedelta.max,
-        )
-        return [problem] if problem else []
-
-    def _platform_option_problems(self, intent: PublishIntent) -> list[str]:
-        """``platform_options`` 里我们**认识**的键的取值校验。
-
-        只校验认识的键：``platform_options`` 是逃生舱，未知键照旧原样透传
-        （否则每加一个平台专属字段都要先改 backend，逃生舱就不成其为逃生舱）。
-        但认识的键必须拦 —— 一个拼错的自主声明送到浏览器侧，最好的结果是发布
-        失败，最坏的结果是选项没选中而作品照发（合规字段静默丢失）。
-        """
-        problems: list[str] = []
-        p = self._profile
-        opts = intent.platform_options or {}
-
-        declaration = opts.get("self_declaration")
-        if declaration is not None:
-            if not p.self_declarations:
-                problems.append(f"self declaration is not supported on {p.platform}")
-            elif declaration not in p.self_declarations:
-                problems.append(f"unknown self declaration {declaration!r}")
-
-        collection = opts.get("collection")
-        if collection is not None:
-            if not p.supports_collection:
-                problems.append(f"collections are not supported on {p.platform}")
-            elif not isinstance(collection, str) or not collection.strip():
-                problems.append("collection name is empty")
-            elif len(collection) > MAX_COLLECTION_NAME_LEN:
-                problems.append(
-                    f"collection name exceeds {MAX_COLLECTION_NAME_LEN} characters"
-                )
         return problems
 
     def _extension_problems(self, media: Iterable[PublishMedia]) -> list[str]:
