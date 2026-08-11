@@ -27,7 +27,7 @@ import logging
 import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Mapping
+from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from .assets import (
     IMAGE_EXTENSIONS,
@@ -50,12 +50,37 @@ from .schemas import (
 
 logger = logging.getLogger("nous_browser.publish")
 
-# S3 scope. Image posts (图文) remain a separate increment. Scheduling is no
-# longer refused outright - it is delegated to the platform's own rules, because
-# "how far ahead may a post be scheduled" has no channel-neutral answer.
-SUPPORTED_CONTENT_TYPES = ("video",)
+VIDEO_CONTENT_TYPE = "video"
+IMAGES_CONTENT_TYPE = "images"
+
+# What *this* service can drive today. Still a single global tuple, and still
+# `("video",)`: the neutral layer below now understands image posts, but no
+# platform publisher does, and a capability is a claim about the DOM path that
+# actually exists (spec §1.1 defect 2). T1 replaces this with a per-platform
+# table in `app/capabilities.py` and T7 is the PR that adds "images" to it,
+# in lockstep with the backend profile.
+SUPPORTED_CONTENT_TYPES = (VIDEO_CONTENT_TYPE,)
 VIDEO_ROLE = "video"
 COVER_ROLE = "cover"
+
+# Image posts carry N assets, so the role has to encode *which* one:
+# `image:0`, `image:1`, ... (decimal, no zero padding). Reading order off
+# `dict` insertion instead would make a user-visible product property - the
+# order the gallery is published in - rest on a CPython implementation detail
+# that any `dict(...)` rebuild, filter or merge silently breaks (spec D2).
+IMAGE_ROLE_PREFIX = "image"
+# The `kind` the backend stamps on each gallery item
+# (`publish_distribution.py:337` builds `PublishMedia(kind="image", ...)`).
+IMAGE_KIND = "image"
+
+# Neutral, defensive bounds - **not** the platform's real limits. Douyin's true
+# ceiling is unmeasured (`[TO-VERIFY]` V2); the backend's `MAX_IMAGES = 35`
+# (`schemas/distribution_publish.py:46`) says so in its own comment, and T4
+# lands the measured value on the platform profile. This pair exists so a
+# malformed intent cannot ask the container to download an unbounded number of
+# files, and every call site can override it once a better number exists.
+NEUTRAL_MIN_IMAGES = 1
+NEUTRAL_MAX_IMAGES = 35
 
 
 @dataclass(frozen=True)
@@ -70,6 +95,21 @@ class IntentProblem:
 
     reason: str
     message: str
+
+
+@dataclass(frozen=True)
+class ImageBounds:
+    """How many images an image post may carry, as data rather than a literal.
+
+    A parameter and not an `if len(images) > 35` inline, because the numbers are
+    going to change: the request schema keeps a neutral hard cap, the platform
+    profile carries the measured one (spec D3), and the browser gate is the
+    backstop for both. A literal here would have to be edited in a third place
+    every time - which is the shape of the drift D1 exists to kill.
+    """
+
+    minimum: int = NEUTRAL_MIN_IMAGES
+    maximum: int = NEUTRAL_MAX_IMAGES
 
 
 @dataclass(frozen=True)
@@ -156,10 +196,25 @@ class Deadline:
 Publisher = Callable[[PublishJob, Deadline], Awaitable[PublishOutcome]]
 
 
+def supported_content_types_for(platform: str) -> tuple[str, ...]:
+    """Content types this browser can actually publish for `platform`.
+
+    The seam T1 needs. Today every platform gets the same global answer; T1
+    turns the body into a lookup in the dependency-free `app/capabilities.py`
+    table, and nothing else in this module has to move. Whichever lands first,
+    `validate_intent` reads the answer from a parameter rather than a module
+    constant, so it never has to know which shape is in force.
+    """
+    return SUPPORTED_CONTENT_TYPES
+
+
 def validate_intent(
     intent: PublishIntent,
     rules: PlatformIntentRules | None = None,
     now: datetime | None = None,
+    *,
+    supported_content_types: Sequence[str] | None = None,
+    image_bounds: ImageBounds | None = None,
 ) -> IntentProblem | None:
     """First reason this intent cannot be published, or None. Pure.
 
@@ -171,12 +226,25 @@ def validate_intent(
     alternative reading ("no rules, so anything goes") publishes a post booked
     for tomorrow morning right now, which the audience has already seen by the
     time anyone notices.
+
+    `supported_content_types` is the caller's answer to "what can this platform
+    publish". Omitting it falls back to the global tuple, which is the same
+    safe direction: an unknown platform publishes nothing, never everything.
     """
-    if intent.content_type not in SUPPORTED_CONTENT_TYPES:
+    allowed = (
+        tuple(supported_content_types)
+        if supported_content_types is not None
+        else SUPPORTED_CONTENT_TYPES
+    )
+    if intent.content_type not in allowed:
         return IntentProblem(
             "unsupported_content_type",
             f"content_type '{intent.content_type}' is not supported; "
-            f"expected one of {', '.join(SUPPORTED_CONTENT_TYPES)}",
+            + (
+                f"expected one of {', '.join(allowed)}"
+                if allowed
+                else "this platform publishes no content types"
+            ),
         )
 
     if intent.scheduled_at is not None and (rules is None or not rules.supports_scheduling):
@@ -186,6 +254,23 @@ def validate_intent(
             "send scheduled_at=null",
         )
 
+    if intent.content_type == IMAGES_CONTENT_TYPE:
+        problem = _check_images_intent(intent, image_bounds or ImageBounds())
+    else:
+        problem = _check_video_intent(intent)
+    if problem is not None:
+        return problem
+
+    if rules is not None:
+        # Last, so a platform rule never pre-empts a neutral one: "there is no
+        # video in this request" is a more useful answer than "your scheduled
+        # time is 40 minutes too soon" when both are true.
+        return rules.check(intent, now or datetime.now(timezone.utc))
+
+    return None
+
+
+def _check_video_intent(intent: PublishIntent) -> IntentProblem | None:
     videos = [item for item in intent.media if item.kind == VIDEO_ROLE]
     if not videos:
         return IntentProblem(
@@ -205,15 +290,61 @@ def validate_intent(
         return problem
 
     if intent.cover is not None:
-        problem = _check_asset(intent.cover, IMAGE_EXTENSIONS, "cover")
-        if problem is not None:
-            return problem
+        return _check_asset(intent.cover, IMAGE_EXTENSIONS, "cover")
 
-    if rules is not None:
-        # Last, so a platform rule never pre-empts a neutral one: "there is no
-        # video in this request" is a more useful answer than "your scheduled
-        # time is 40 minutes too soon" when both are true.
-        return rules.check(intent, now or datetime.now(timezone.utc))
+    return None
+
+
+def _check_images_intent(
+    intent: PublishIntent, bounds: ImageBounds
+) -> IntentProblem | None:
+    """The image-post half of the gate. Pure.
+
+    The cover check is first on purpose. "This channel has no separate cover"
+    is a statement about the shape of the request the caller must stop sending
+    (spec D4), whereas a count or an extension is a value they can adjust; and
+    answering it first means the refusal cannot be masked by whichever image
+    happens to also be wrong.
+    """
+    if intent.cover is not None:
+        return IntentProblem(
+            "cover_not_supported_for_images",
+            "an image post has no separate cover; the first image is the cover. "
+            "Send cover=null and order the images instead",
+        )
+
+    images = [item for item in intent.media if item.kind == IMAGE_KIND]
+    foreign = sorted({item.kind for item in intent.media if item.kind != IMAGE_KIND})
+    if foreign:
+        # Dropping them silently would publish a gallery the user never
+        # composed, which is the same failure `ordered_image_assets` refuses to
+        # commit further down: an image post is exactly its media list.
+        return IntentProblem(
+            "unexpected_media_kind",
+            "an image post takes media items of kind 'image' only; got "
+            f"{', '.join(repr(kind) for kind in foreign)}",
+        )
+
+    if len(images) < bounds.minimum:
+        return IntentProblem(
+            "too_few_images",
+            f"an image post needs at least {bounds.minimum} image(s), got {len(images)}",
+        )
+    if len(images) > bounds.maximum:
+        return IntentProblem(
+            "too_many_images",
+            f"an image post takes at most {bounds.maximum} images, got {len(images)}",
+        )
+
+    if not intent.title.strip():
+        return IntentProblem("empty_title", "title is required for an image publish")
+
+    for position, item in enumerate(images):
+        problem = _check_asset(item, IMAGE_EXTENSIONS, "image")
+        if problem is not None:
+            # Which one, not just "one of them". Fifteen images with one bad
+            # extension is otherwise a request the caller has to bisect by hand.
+            return replace(problem, message=f"image {position}: {problem.message}")
 
     return None
 
@@ -232,13 +363,92 @@ def _check_asset(
     return None
 
 
+def image_role(index: int) -> str:
+    """The role for the `index`-th image. Decimal, no zero padding.
+
+    One function so the format has one definition: the writer here and the
+    reader in `ordered_image_assets` cannot drift into disagreeing about
+    padding, which is the one way `image:01` and `image:1` could both appear
+    and quietly become two entries for the same position.
+    """
+    return f"{IMAGE_ROLE_PREFIX}:{index}"
+
+
 def assets_to_stage(intent: PublishIntent) -> list[tuple[str, MediaItem]]:
     """`(role, item)` pairs to download, in the order they are needed. Pure."""
+    if intent.content_type == IMAGES_CONTENT_TYPE:
+        # No cover: an image post's cover is its first image (spec D4), so
+        # producing a COVER_ROLE here would stage a file no publisher may use.
+        return [
+            (image_role(index), item)
+            for index, item in enumerate(
+                item for item in intent.media if item.kind == IMAGE_KIND
+            )
+        ]
+
     videos = [item for item in intent.media if item.kind == VIDEO_ROLE]
     staged: list[tuple[str, MediaItem]] = [(VIDEO_ROLE, videos[0])]
     if intent.cover is not None:
         staged.append((COVER_ROLE, intent.cover))
     return staged
+
+
+def ordered_image_assets(assets: Mapping[str, StagedAsset]) -> tuple[StagedAsset, ...]:
+    """The staged images in publish order. Pure, and refuses to guess.
+
+    Order comes from the index in the role, never from iteration order, so a
+    caller that rebuilt or filtered the mapping still gets the gallery the user
+    composed - or an error, if the mapping cannot describe one.
+
+    A gap or a duplicate is an upstream assembly bug, and the tempting recovery
+    ("publish the ones that are there") is the worst available outcome: it
+    sends a real post, to a real audience, in an order nobody chose, and looks
+    like a success. `AssetError` instead, so `run_publish` reports a typed
+    failure with the same machinery a failed download uses.
+    """
+    indexed: dict[int, StagedAsset] = {}
+    for role, asset in assets.items():
+        prefix, separator, suffix = role.partition(":")
+        if not separator or prefix != IMAGE_ROLE_PREFIX:
+            continue
+        # ASCII digits only, and no zero padding: `image:01` would otherwise
+        # parse to the same position as `image:1` while being a different key,
+        # so the duplicate check below could never see it.
+        if not (suffix.isascii() and suffix.isdigit()) or suffix != str(int(suffix)):
+            raise AssetError(
+                SessionStatus.FAILED,
+                f"image asset role '{role}' is not '{IMAGE_ROLE_PREFIX}:<decimal index>'",
+                reason="image_role_malformed",
+                role=role,
+            )
+        index = int(suffix)
+        if index in indexed:
+            raise AssetError(
+                SessionStatus.FAILED,
+                f"two staged assets claim image position {index}",
+                reason="image_role_duplicate",
+                role=role,
+            )
+        indexed[index] = asset
+
+    if not indexed:
+        raise AssetError(
+            SessionStatus.FAILED,
+            "an image publish staged no images",
+            reason="image_roles_missing",
+        )
+
+    expected = list(range(len(indexed)))
+    if sorted(indexed) != expected:
+        missing = [index for index in expected if index not in indexed]
+        raise AssetError(
+            SessionStatus.FAILED,
+            f"staged image positions {sorted(indexed)} are not 0..{len(indexed) - 1}; "
+            f"missing {missing}",
+            reason="image_role_gap",
+        )
+
+    return tuple(indexed[index] for index in expected)
 
 
 def _response(outcome: PublishOutcome, platform: str) -> PublishResponse:
@@ -275,7 +485,11 @@ async def run_publish(
     # self-declaration vocabulary live, and both are cheap to check and
     # expensive to discover late: a scheduled time the platform will reject is
     # otherwise found *after* the video has finished transferring.
-    problem = validate_intent(intent, get_intent_rules(platform))
+    problem = validate_intent(
+        intent,
+        get_intent_rules(platform),
+        supported_content_types=supported_content_types_for(platform),
+    )
     if problem is not None:
         return _response(
             PublishOutcome(
