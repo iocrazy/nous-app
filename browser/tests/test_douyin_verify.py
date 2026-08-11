@@ -46,7 +46,7 @@ from app.platforms.douyin_verify import (
 from app.verify import ReadbackVerdict, response_for_judgement
 from app.schemas import SessionStatus
 
-from tests.dom_fixture import FakePage
+from tests.dom_fixture import FakePage, UnsupportedSelector
 
 pytestmark = pytest.mark.unit
 
@@ -216,6 +216,24 @@ class TestOutermostScoping:
         assert outermost_only('[class*="video-card"]') == (
             '[class*="video-card"]:not([class*="video-card"] *)'
         )
+
+    @pytest.mark.parametrize(
+        "selector",
+        [
+            '[class*="video-card"]:not(.sidebar)',  # :not() we did NOT implement
+            "div > span",  # child combinator
+            "div:nth-child(2)",
+            ".video-card",  # bare class selector
+        ],
+    )
+    def test_the_shim_still_refuses_selectors_it_did_not_implement(self, selector):
+        """Adding one `:not()` form to `dom_fixture` must not turn it into a
+        shim that guesses. A selector it does not understand has to raise —
+        silently returning "no matches" would make a broken reader look like a
+        page with no cards, i.e. turn a failing test green.
+        """
+        with pytest.raises(UnsupportedSelector):
+            FakePage(FIXTURE).locator(selector)
 
     async def test_known_gap_a_matching_list_wrapper_collapses_to_one_card(self):
         """**A documented limitation, pinned so it cannot drift unnoticed.**
