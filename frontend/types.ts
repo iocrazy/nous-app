@@ -1728,6 +1728,23 @@ export interface AILibraryAgent {
 }
 
 /**
+ * One row of an agent's permission-change audit trail (2026-08-10 spec §3,
+ * `GET /agents/{slug}/permission-audits`, read-only). `before`/`after` are
+ * RESOLVED (fail-closed) snapshots of the `chat` + `capabilities` subtrees —
+ * the same shape `chat_permissions`/`capabilities` are served in, nested
+ * under those two keys — not the raw JSONB storage.
+ */
+export interface AgentPermissionAudit {
+  id: string;
+  /** Supabase auth user id (UUID string) — display truncated, never parseInt. */
+  changed_by: string;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  reason: string | null;
+  created_at: string;
+}
+
+/**
  * Payload for POST /agents — creating a new user-owned (non-preset) agent.
  * `fork_from` optionally copies identity_md / soul_md / agent_md / model /
  * temperature / max_tokens from an existing agent. Explicit field overrides

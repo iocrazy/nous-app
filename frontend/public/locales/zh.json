@@ -3134,7 +3134,12 @@
       "mediaCapDesc": "限制 Agent 在一轮对话中最多能生成多少张图片或视频。每次调用在调度时强制执行。",
       "mediaCapDisabledHint": "请先开启图片或视频生成——在授权之前，此上限不会产生任何效果。",
       "crossEpisodeRead": "读取其他剧集",
-      "crossEpisodeReadDesc": "允许为保持连贯性读取本次运行范围之外的剧集。范围最多可扩大到项目级，不会超出项目。"
+      "crossEpisodeReadDesc": "允许为保持连贯性读取本次运行范围之外的剧集。范围最多可扩大到项目级，不会超出项目。",
+      "changeLogTitle": "变更记录",
+      "changeLogIntro": "此 Agent 最近的权限变更。记录只增不改。",
+      "changeLogEmpty": "暂无权限变更记录。",
+      "changeReasonLabel": "变更理由（可选）",
+      "changeReasonPlaceholder": "为什么要改动这些权限？"
     },
     "myAgentsSection": "我的智能体",
     "customized": "已自定义",

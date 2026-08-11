@@ -3134,7 +3134,12 @@
       "mediaCapDesc": "Ceiling on how many images or videos the agent may produce in a single turn. Enforced per call at dispatch.",
       "mediaCapDisabledHint": "Enable image or video generation first — the ceiling has no effect until one is granted.",
       "crossEpisodeRead": "Read other episodes",
-      "crossEpisodeReadDesc": "Allow reading episodes beyond the one this run was given, for continuity. Scope can widen to the project, never beyond it."
+      "crossEpisodeReadDesc": "Allow reading episodes beyond the one this run was given, for continuity. Scope can widen to the project, never beyond it.",
+      "changeLogTitle": "Change Log",
+      "changeLogIntro": "Recent permission changes to this agent. Records are append-only.",
+      "changeLogEmpty": "No permission changes recorded yet.",
+      "changeReasonLabel": "Reason for change (optional)",
+      "changeReasonPlaceholder": "Why are you changing these permissions?"
     },
     "myAgentsSection": "My Agents",
     "customized": "Customized",
