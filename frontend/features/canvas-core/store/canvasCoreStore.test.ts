@@ -201,6 +201,40 @@ describe('canvasCoreStore — debounced save', () => {
     expect(s.baseUpdatedAt).not.toBe(baseCanvas.base_updated_at);
     expect(s.persistedRevision).toBe(1);
   });
+
+  // Task 4 shotSync: a node reconcile flagged `data.stale = true` (its
+  // bound shot was deleted) must never round-trip into `nodes_json`, and
+  // must also drop out of local `nodes` in the SAME tick — otherwise it'd
+  // keep getting silently re-excluded on every future save forever instead
+  // of actually disappearing from the canvas.
+  it('drops stale-flagged nodes from the save payload AND local state', async () => {
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 0 });
+    await useStore.getState().loadCanvas('4242');
+    useStore.getState().setNodes([
+      { id: 'n1', data: { stale: true } },
+      { id: 'n2', data: { title: 'still here' } },
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(stubs.calls[0].nodes_json).toHaveLength(1);
+    expect((stubs.calls[0].nodes_json?.[0] as { id: string }).id).toBe('n2');
+
+    const s = useStore.getState();
+    expect(s.nodes).toHaveLength(1);
+    expect((s.nodes[0] as { id: string }).id).toBe('n2');
+  });
+
+  it('a non-stale save leaves nodes/payload untouched (no spurious filtering)', async () => {
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 0 });
+    await useStore.getState().loadCanvas('4242');
+    useStore.getState().setNodes([{ id: 'n1', data: { title: 'fine' } }]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(stubs.calls[0].nodes_json).toHaveLength(1);
+    expect(useStore.getState().nodes).toHaveLength(1);
+  });
 });
 
 describe('canvasCoreStore — conflict handling', () => {

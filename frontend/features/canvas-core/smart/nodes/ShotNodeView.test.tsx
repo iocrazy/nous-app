@@ -145,9 +145,22 @@ describe('ShotNodeView — bound render', () => {
     expect(screen.queryByTestId('shot-node-frame-empty')).toBeNull();
   });
 
-  it('does not show the promote menu on a bound node', () => {
+  it('shows the "delete in shot list" menu (not promote) on a bound node', () => {
+    // Task 4: a bound node keeps a "…" menu, but with the "delete in shot
+    // list" entry instead of "Promote to Shot" (already bound — nothing to
+    // promote).
     seedAndRender(BOUND_DATA);
+    fireEvent.click(screen.getByTestId('shot-node-menu-trigger'));
+    expect(screen.getByTestId('shot-node-open-in-list')).toBeTruthy();
+    expect(screen.queryByTestId('shot-node-promote')).toBeNull();
+  });
+
+  it('a stale bound node renders greyed with no menu and disabled controls', () => {
+    seedAndRender({ ...BOUND_DATA, stale: true });
+    expect(screen.getByTestId('shot-node-stale-banner')).toBeTruthy();
     expect(screen.queryByTestId('shot-node-menu-trigger')).toBeNull();
+    expect(screen.getByLabelText('Shot description')).toBeDisabled();
+    expect(screen.getByTestId('shot-node-generate')).toBeDisabled();
   });
 });
 

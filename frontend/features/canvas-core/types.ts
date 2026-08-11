@@ -11,11 +11,27 @@
 // 'classic' (canvas 1.0 engine) is RETIRED: no new classic canvases can be
 // created and the engine is gone, but the kind stays in the union because
 // soft-deleted rows in the trash still serialize with it.
-export type CanvasKind = 'smart' | 'lite' | 'classic' | 'character' | 'location' | 'prop';
+// 'storyboard' (shot-nodes-on-canvas epic Task 1, mig 421): one system
+// per-episode canvas (`episode_id` set, get-or-create via
+// `GET /canvases/storyboard`), never user-creatable — see
+// `CreatableCanvasKind` below. Renders the same smart surface; Task 4's
+// `reconcileShotNodes` orchestration in `CanvasPage.tsx` only runs for
+// this kind.
+export type CanvasKind =
+  | 'smart'
+  | 'lite'
+  | 'classic'
+  | 'character'
+  | 'location'
+  | 'prop'
+  | 'storyboard';
 
 /** Kinds a NEW canvas may be created with (mirror of backend
- *  `CreatableCanvasKind`) — everything except the retired 'classic'. */
-export type CreatableCanvasKind = Exclude<CanvasKind, 'classic'>;
+ *  `CreatableCanvasKind`) — everything except the retired 'classic' AND
+ *  'storyboard' (system-created only, via `GET /canvases/storyboard`'s
+ *  get-or-create — never `POST /projects/{id}/canvases`, matching the
+ *  backend schema's deliberate exclusion, task-1-report.md). */
+export type CreatableCanvasKind = Exclude<CanvasKind, 'classic' | 'storyboard'>;
 
 /** kinds that render the smart surface (composer, smart node set, generation
  *  pipeline). 'character' is smart + CharacterNode + a preset workflow.
@@ -49,6 +65,9 @@ export type CanvasConnectionOp = Record<string, unknown>;
 export interface Canvas {
   id: string;
   project_id: string;
+  /** Owning episode for a `kind==='storyboard'` row (Task 1, mig 421);
+   *  absent/null for every other kind. Snowflake bigint as string. */
+  episode_id?: string | null;
   name: string;
   kind: CanvasKind;
   viewport_json: CanvasViewport;

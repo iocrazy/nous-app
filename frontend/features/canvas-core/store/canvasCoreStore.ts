@@ -75,6 +75,19 @@ export function stripRfInternals(node: CanvasNode): CanvasNode {
   return clone as CanvasNode;
 }
 
+/**
+ * A node reconcile flagged as stale (Task 4 shotSync — its bound `shot_id`
+ * no longer resolves to a `script_shots` row). Generic on purpose: the store
+ * doesn't know about `ShotNodeData`, it just drops any node whose `data`
+ * carries this one marker key at the next save tick — "在下一次用户保存时
+ * 清除" from the brief. Harmless for every other node type since nothing
+ * else ever sets it.
+ */
+function isStaleNode(node: CanvasNode): boolean {
+  const data = (node as Record<string, unknown>).data;
+  return !!data && typeof data === 'object' && (data as Record<string, unknown>).stale === true;
+}
+
 export type CanvasLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 export type CanvasSaveStatus = 'idle' | 'saving' | 'error';
 
@@ -95,6 +108,14 @@ interface CanvasState {
   kind: CanvasKind | null;
   /** Display name from the server row — read-only chrome (back-pill area). */
   name: string | null;
+  /** Owning project (row's `project_id`) — read-only, NULL until load
+   *  resolves. Task 4 orchestration (shot-node reconcile) resolves the
+   *  storyboard canvas's script through this. */
+  projectId: string | null;
+  /** Owning episode for a `kind==='storyboard'` row (Task 1); NULL for
+   *  every other kind, and NULL until load resolves. Gates Task 4's
+   *  reconcile orchestration in `CanvasPage.tsx`. */
+  episodeId: string | null;
   loadStatus: CanvasLoadStatus;
   loadError: string | null;
 
@@ -263,6 +284,8 @@ export function createCanvasCoreStore(
         canvasId: row.id,
         kind: row.kind,
         name: row.name ?? null,
+        projectId: row.project_id ?? null,
+        episodeId: row.episode_id ?? null,
         viewport: row.viewport_json ?? IDENTITY_VIEWPORT,
         // Sanitize on load: interaction paths (alignment snap, group
         // membership) historically persisted RF-internal size snapshots
@@ -344,6 +367,14 @@ export function createCanvasCoreStore(
       if (state.persistedRevision >= state.revision) return; // nothing new
       if (state.conflict) return; // user must resolve first
 
+      // Drop stale shot nodes (Task 4 shotSync) before they're persisted —
+      // "标失效...在下一次用户保存时由编排层过滤删除". Also trim them out of
+      // LOCAL state in the same tick so the canvas view converges with what
+      // just got saved instead of leaving a phantom stale node that keeps
+      // getting silently re-excluded on every future save forever.
+      const liveNodes = state.nodes.filter((n) => !isStaleNode(n));
+      if (liveNodes.length !== state.nodes.length) set({ nodes: liveNodes });
+
       const snapshot = {
         revision: state.revision,
         baseUpdatedAt: state.baseUpdatedAt,
@@ -354,7 +385,7 @@ export function createCanvasCoreStore(
           // state and `measured`/`width`/`height` are layout output; none
           // belong in the persisted document (they also spuriously diverge
           // two editors' rows and trigger false realtime conflicts).
-          nodes_json: state.nodes.map(stripRfInternals),
+          nodes_json: liveNodes.map(stripRfInternals),
           connections_json: state.connections,
           node_ops_json: state.nodeOps,
           connection_ops_json: state.connectionOps,
@@ -400,6 +431,8 @@ export function createCanvasCoreStore(
       canvasId: null,
       kind: null,
       name: null,
+      projectId: null,
+      episodeId: null,
       loadStatus: 'idle',
       loadError: null,
       viewport: IDENTITY_VIEWPORT,
@@ -427,6 +460,8 @@ export function createCanvasCoreStore(
           canvasId: null,
           kind: null,
           name: null,
+          projectId: null,
+          episodeId: null,
           loadStatus: 'idle',
           loadError: null,
           viewport: IDENTITY_VIEWPORT,

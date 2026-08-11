@@ -83,6 +83,15 @@ export interface ShotNodeData {
   gen_task_id: string | null;
   /** Bound shot's owning scene (layout/focus use). */
   scene_id: string | null;
+  /** Task 4 — set by `reconcileShotNodes` when this node's `shot_id` no
+   *  longer resolves to a `script_shots` row (deleted from the storyboard
+   *  list elsewhere). Renders a grey "removed" state; the editor stays
+   *  read-only (PATCHing a gone shot would 404) until the orchestration
+   *  layer drops the node from `nodes_json` on the next autosave — see
+   *  `canvasCoreStore.ts`'s `doSave` stale-filter. Absent/undefined on
+   *  every other node (including unbound drafts, which reconcile never
+   *  touches) — only ever `true`, never explicitly `false`. */
+  stale?: boolean;
 }
 
 export interface PromptNodeData {
@@ -253,7 +262,15 @@ export interface LoopNodeData {
   image_batch_size?: number;
 }
 
-export interface SmartNode<T> extends Record<string, unknown> {
+// `T` defaults to `unknown` (Task 4 shotSync's `reconcileShotNodes` takes
+// the canvas's opaque existing-node list as bare `SmartNode[]` — element
+// data type unknown until narrowed by `type`/`shot_id`) rather than
+// `Record<string, unknown>`: a default of `Record<string, unknown>` would
+// make `SmartNode<ShotNodeData>` NOT assignable to bare `SmartNode[]`
+// (`ShotNodeData` has no index signature), defeating the whole point of a
+// default — every concrete `SmartNode<X>` is trivially assignable to
+// `SmartNode<unknown>` instead.
+export interface SmartNode<T = unknown> extends Record<string, unknown> {
   id: string;
   type: SmartNodeType;
   position: { x: number; y: number };

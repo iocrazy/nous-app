@@ -48,11 +48,19 @@
  * a nav-away, occasionally flipping an in-flight generation to 'failed'
  * while it was still genuinely running — re-review caught it before it
  * shipped past this branch.
+ *
+ * Stale (Task 4, shotSync): `data.stale` is set by `reconcileShotNodes` when
+ * this node's `shot_id` no longer resolves (the shot was deleted from the
+ * storyboard list elsewhere). Grey render, every input disabled, no "…"
+ * menu (nothing left to promote or navigate to) — the node's only remaining
+ * lifecycle action is the user's own React Flow delete, which the
+ * orchestration layer also performs automatically at the next autosave
+ * (`canvasCoreStore.ts`'s `doSave`).
  */
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { useTranslation } from 'react-i18next';
-import { ImageOff, MoreVertical, Sparkles } from 'lucide-react';
+import { ImageOff, ListX, MoreVertical, Sparkles } from 'lucide-react';
 
 import type { ShotNodeData } from '../types';
 import { SMART_NODE_DEFAULT_WIDTH } from '../types';
@@ -68,6 +76,7 @@ import {
 } from '../../../../editor/storyboard/vocab';
 import { dispatchGenerations, pollGeneration } from '../../services/canvasGenerationService';
 import { requestPromoteShot } from '../promoteShotBus';
+import { requestOpenShotInList } from '../openShotInListBus';
 import { registerActiveShotPoll, unregisterActiveShotPoll } from '../genResume';
 
 const CANVAS_CHIP =
@@ -109,6 +118,7 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
     description = null,
     image_url = null,
     shot_status = null,
+    stale = false,
   } = data as unknown as ShotNodeData;
   const { t } = useTranslation();
   const patch = useNodeDataPatch(id);
@@ -123,7 +133,10 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
   // mid-request can't PATCH the wrong id. ----
   const commitField = useCallback(
     (field: keyof ShotInput, next: string | null, previous: string | null) => {
-      if (!shot_id) return;
+      // Task 4: a stale node's shot_id is a dangling reference — PATCHing
+      // it would 404. Inputs are also `disabled` below; this is the
+      // belt-and-suspenders guard for any path that bypasses that.
+      if (!shot_id || stale) return;
       patch({ [field]: next });
       updateShot(shot_id, { [field]: next } as ShotInput).catch((err: unknown) => {
         console.error('[ShotNodeView] updateShot failed:', field, err);
@@ -131,7 +144,7 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
         toast?.addToast(t('canvas.shotNode.patchFailed'), 'error');
       });
     },
-    [shot_id, patch, toast, t],
+    [shot_id, stale, patch, toast, t],
   );
 
   const handleChipChange = useCallback(
@@ -202,7 +215,10 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
   // the id (success, failure, or thrown).
   const generating = shot_status === 'generating';
   const handleGenerate = useCallback(() => {
-    if (!shot_id || generating) return;
+    // Task 4: a stale node's shot_id no longer resolves server-side —
+    // dispatching against it would 404 the moment the workflow tries to
+    // backfill script_shots.
+    if (!shot_id || generating || stale) return;
     const startCanvasId = useCanvasCoreStore.getState().canvasId;
     if (!startCanvasId) return;
     const sameCanvas = () => useCanvasCoreStore.getState().canvasId === startCanvasId;
@@ -246,7 +262,7 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
         if (taskId) unregisterActiveShotPoll(startCanvasId, taskId);
       }
     })();
-  }, [shot_id, generating, id, description, title, patch, toast, t]);
+  }, [shot_id, generating, stale, id, description, title, patch, toast, t]);
 
   const focalOptions = focal_length && !FOCAL_LENGTH_PRESETS.includes(focal_length)
     ? [focal_length, ...FOCAL_LENGTH_PRESETS]
@@ -255,7 +271,9 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
   return (
     <div
       data-testid="smart-shot-node"
-      className={`mh-node border-canvas-line ${selected ? 'mh-node-selected' : ''}`}
+      className={`mh-node border-canvas-line ${selected ? 'mh-node-selected' : ''} ${
+        stale ? 'opacity-60 grayscale' : ''
+      }`}
       style={{ width: SMART_NODE_DEFAULT_WIDTH.shot }}
     >
       {/* Shot is a SOURCE card (canConnectSmart: `* → shot` is disallowed) —
@@ -272,7 +290,12 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
             </span>
           )}
         </div>
-        {!bound && (
+        {/* Task 4: no menu once stale — there's nothing left to promote
+            (already bound) or navigate to (the shot row is gone); the
+            node's only remaining lifecycle action is the user's own
+            React Flow delete (Delete key / multi-select), which needs no
+            menu entry. */}
+        {!stale && (
           <div className="relative">
             <button
               type="button"
@@ -288,23 +311,47 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
                 className="absolute right-0 top-full z-10 mt-1 min-w-[9.5rem] rounded-lg border border-canvas-line bg-canvas-surface py-1 shadow-lg"
                 data-testid="shot-node-menu"
               >
-                <button
-                  type="button"
-                  className="nodrag flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-xs text-canvas-text hover:bg-canvas-line/30"
-                  data-testid="shot-node-promote"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    requestPromoteShot(id);
-                  }}
-                >
-                  <Sparkles size={12} />
-                  {t('canvas.shotNode.promote')}
-                </button>
+                {!bound ? (
+                  <button
+                    type="button"
+                    className="nodrag flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-xs text-canvas-text hover:bg-canvas-line/30"
+                    data-testid="shot-node-promote"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      requestPromoteShot(id);
+                    }}
+                  >
+                    <Sparkles size={12} />
+                    {t('canvas.shotNode.promote')}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="nodrag flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-xs text-canvas-text hover:bg-canvas-line/30"
+                    data-testid="shot-node-open-in-list"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      if (shot_id) requestOpenShotInList(shot_id);
+                    }}
+                  >
+                    <ListX size={12} />
+                    {t('canvas.shotNode.deleteInList')}
+                  </button>
+                )}
               </div>
             )}
           </div>
         )}
       </div>
+
+      {stale && (
+        <div
+          data-testid="shot-node-stale-banner"
+          className="mx-3 mb-1 rounded-md border border-dashed border-canvas-line px-2 py-1 text-[10px] text-canvas-muted"
+        >
+          {t('canvas.shotNode.stale')}
+        </div>
+      )}
 
       {!bound ? (
         <div className="p-3">
@@ -344,6 +391,7 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
                   value={current ?? ''}
                   onChange={handleChipChange(field, current)}
                   aria-label={CHIP_LABEL[field]}
+                  disabled={stale}
                 >
                   <option value="">{t('canvas.shotNode.unset')}</option>
                   {CHIP_VOCAB[field].map((v) => (
@@ -359,6 +407,7 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
               value={focal_length ?? ''}
               onChange={handleFocalChange}
               aria-label="Focal length"
+              disabled={stale}
             >
               <option value="">{t('canvas.shotNode.unset')}</option>
               {focalOptions.map((v) => (
@@ -376,6 +425,7 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
             value={desc}
             onChange={handleDescChange}
             aria-label="Shot description"
+            disabled={stale}
           />
 
           <div className="mt-2 aspect-video w-full overflow-hidden rounded-lg border border-canvas-line bg-canvas-line/10">
@@ -401,7 +451,7 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
             type="button"
             className="nodrag mh-chip mt-2 w-full justify-center"
             data-testid="shot-node-generate"
-            disabled={generating || !canvasId}
+            disabled={generating || !canvasId || stale}
             onClick={handleGenerate}
           >
             {generating ? t('canvas.shotNode.generating') : t('canvas.generate')}
