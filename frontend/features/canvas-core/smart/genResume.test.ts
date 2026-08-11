@@ -187,7 +187,7 @@ describe('resumePendingGenerations (P1-13)', () => {
   });
 });
 
-describe('resumePendingGenerations — stranded shot reconcile (Task 3 fix-round-1)', () => {
+describe('resumePendingGenerations — stranded shot reconcile (Task 3, fix-round-1 + round-2)', () => {
   function shotNode(data: Record<string, unknown>): CanvasNode {
     return {
       id: 'shot1',
@@ -206,6 +206,7 @@ describe('resumePendingGenerations — stranded shot reconcile (Task 3 fix-round
         description: null,
         image_url: null,
         shot_status: null,
+        gen_task_id: null,
         scene_id: '1',
         ...data,
       },
@@ -217,15 +218,23 @@ describe('resumePendingGenerations — stranded shot reconcile (Task 3 fix-round
     return (asObj(n).data ?? {}) as Record<string, unknown>;
   }
 
-  it('drops a stranded generating shot (no image_url) to failed — button re-enables', async () => {
-    seed([shotNode({ shot_status: 'generating', image_url: null })]);
+  // ---- No task id persisted (fix-round-1 branch — dispatch itself never
+  // got far enough to persist gen_task_id): local-mirror-only reconcile. ----
+
+  it('no task id + no image_url → truly stranded, drops to failed (button re-enables)', async () => {
+    seed([shotNode({ shot_status: 'generating', gen_task_id: null, image_url: null })]);
     await resumePendingGenerations();
     expect(shotData().shot_status).toBe('failed');
+    expect(pollGeneration).not.toHaveBeenCalled();
   });
 
-  it('does NOT lie about a generation that actually finished — image_url landed → done', async () => {
+  it('no task id but image_url already landed → does NOT lie about a finished result', async () => {
     seed([
-      shotNode({ shot_status: 'generating', image_url: '/api/v1/generated-media/9/cover' }),
+      shotNode({
+        shot_status: 'generating',
+        gen_task_id: null,
+        image_url: '/api/v1/generated-media/9/cover',
+      }),
     ]);
     await resumePendingGenerations();
     expect(shotData().shot_status).toBe('done');
@@ -246,6 +255,65 @@ describe('resumePendingGenerations — stranded shot reconcile (Task 3 fix-round
     seed([shotNode({ shot_id: null, shot_status: null })]);
     await resumePendingGenerations();
     expect(shotData().shot_status).toBeNull();
+  });
+
+  // ---- Task id persisted (fix-round-2 — re-attach by id, prompt gen_tasks
+  // parity): this is the common case, since ShotNodeView persists
+  // gen_task_id the instant dispatch returns. ----
+
+  describe('re-attach by gen_task_id (fix-round-2)', () => {
+    it('in-flight re-entry: does NOT reset to failed while the re-attached poll is pending', async () => {
+      seed([shotNode({ shot_status: 'generating', gen_task_id: 'task-9', image_url: null })]);
+      let resolvePoll!: (v: unknown) => void;
+      pollGeneration.mockImplementation(
+        () => new Promise((res) => { resolvePoll = res; }),
+      );
+
+      const done = resumePendingGenerations();
+      // Yield a microtask so the reconcile loop has started the re-attach.
+      await Promise.resolve();
+      expect(shotData().shot_status).toBe('generating');
+      expect(pollGeneration).toHaveBeenCalledWith(
+        'task-9',
+        expect.objectContaining({}),
+      );
+
+      resolvePoll({ phase: 'completed', metadata: { result_url: '/gm/1/cover' } });
+      await done;
+
+      expect(shotData().shot_status).toBe('done');
+      expect(shotData().image_url).toBe('/gm/1/cover');
+      expect(shotData().gen_task_id).toBeNull();
+    });
+
+    it('re-attached poll settling failed clears the task id and drops to failed', async () => {
+      seed([shotNode({ shot_status: 'generating', gen_task_id: 'task-9', image_url: null })]);
+      pollGeneration.mockResolvedValue({ phase: 'failed', metadata: {} });
+
+      await resumePendingGenerations();
+
+      expect(shotData().shot_status).toBe('failed');
+      expect(shotData().gen_task_id).toBeNull();
+    });
+
+    it('a canvas switch mid-re-attach drops the patch (sameCanvas guard)', async () => {
+      seed([shotNode({ shot_status: 'generating', gen_task_id: 'task-9', image_url: null })]);
+      let resolvePoll!: (v: unknown) => void;
+      pollGeneration.mockImplementation(
+        () => new Promise((res) => { resolvePoll = res; }),
+      );
+
+      const done = resumePendingGenerations();
+      useCanvasCoreStore.setState({ canvasId: 'other-canvas' });
+      resolvePoll({ phase: 'completed', metadata: { result_url: '/gm/1/cover' } });
+      await done;
+
+      // The node under id 'shot1' in the (old) canvasId='9' document must
+      // not have been mutated by a poll that settled after the switch.
+      expect(shotData().shot_status).toBe('generating');
+      expect(shotData().gen_task_id).toBe('task-9');
+      expect(shotData().image_url).toBeNull();
+    });
   });
 });
 

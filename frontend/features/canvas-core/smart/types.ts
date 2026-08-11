@@ -71,6 +71,16 @@ export interface ShotNodeData {
   description: string | null;
   image_url: string | null; // rendered frame
   shot_status: string | null;
+  /** In-flight generation task id (Task 3 fix-round-2 — prompt node's
+   *  `gen_tasks` parity, singular since a shot dispatches one task at a
+   *  time): patched immediately once `dispatchGenerations` returns, so a
+   *  reload/nav-away-and-back can re-attach polling by task id instead of
+   *  guessing the outcome from `image_url` alone. Cleared once the task
+   *  settles (success or failure). Pure frontend mirror — the merged
+   *  backend (Task 2) never reads or writes this field; it only reads
+   *  `shot_id` off `nodes_json`, and JSONB round-trips unknown keys
+   *  without validation, so no backend contract change is needed. */
+  gen_task_id: string | null;
   /** Bound shot's owning scene (layout/focus use). */
   scene_id: string | null;
 }

@@ -64,6 +64,7 @@ const UNBOUND_DATA = {
   description: null,
   image_url: null,
   shot_status: null,
+  gen_task_id: null,
   scene_id: null,
 };
 
@@ -222,6 +223,46 @@ describe('ShotNodeView — Generate', () => {
     fireEvent.click(screen.getByTestId('shot-node-generate'));
     await waitFor(() => expect(nodeData().shot_status).toBe('failed'));
     expect(mockAddToast).toHaveBeenCalledWith('canvas.shotNode.generateFailed', 'error');
+  });
+
+  it('persists gen_task_id the instant dispatch returns, before the poll settles (fix-round-2)', async () => {
+    dispatchGenerations.mockResolvedValue(['task-42']);
+    let resolvePoll!: (v: unknown) => void;
+    pollGeneration.mockImplementation(
+      () => new Promise((res) => { resolvePoll = res; }),
+    );
+    seedAndRender(BOUND_DATA);
+    fireEvent.click(screen.getByTestId('shot-node-generate'));
+    await waitFor(() => expect(nodeData().gen_task_id).toBe('task-42'));
+    // Still mid-poll — not yet settled.
+    expect(nodeData().shot_status).toBe('generating');
+
+    resolvePoll({ phase: 'completed', metadata: { result_url: '/x/cover' } });
+    await waitFor(() => expect(nodeData().shot_status).toBe('done'));
+    // Cleared once the task settles (prompt gen_tasks parity).
+    expect(nodeData().gen_task_id).toBeNull();
+  });
+
+  it('a canvas switch mid-poll drops the patch (sameCanvas guard, fix-round-2)', async () => {
+    dispatchGenerations.mockResolvedValue(['task-42']);
+    let resolvePoll!: (v: unknown) => void;
+    pollGeneration.mockImplementation(
+      () => new Promise((res) => { resolvePoll = res; }),
+    );
+    seedAndRender(BOUND_DATA);
+    fireEvent.click(screen.getByTestId('shot-node-generate'));
+    await waitFor(() => expect(nodeData().gen_task_id).toBe('task-42'));
+
+    // User navigates to a different canvas while this poll is still in flight.
+    useCanvasCoreStore.setState({ canvasId: 'other-canvas' });
+    resolvePoll({ phase: 'completed', metadata: { result_url: '/x/cover' } });
+    // Give the microtask queue a turn for the guarded patch to (not) land.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(nodeData().shot_status).toBe('generating');
+    expect(nodeData().gen_task_id).toBe('task-42');
+    expect(nodeData().image_url).toBeNull();
   });
 });
 

@@ -8,11 +8,16 @@
 // from the slot overlay. loopRun discipline throughout: canvasId snapshot
 // guard on every write.
 //
-// Shot nodes (storyboard canvas epic Task 3 fix-round-1) get a lighter
-// reconcile in the same pass: ShotNodeData has no gen_tasks field to
-// re-attach a poll to, so a stranded shot_status==='generating' is
-// resolved purely from the node's own persisted mirror instead — see the
-// 'shot' branch inside resumePendingGenerations below.
+// Shot nodes (storyboard canvas epic Task 3, fix-round-2) get the SAME
+// re-attach-by-task-id treatment as prompt nodes, just singular
+// (ShotNodeData.gen_task_id — one task at a time, not a gen_tasks batch):
+// dispatch time persists the task id (ShotNodeView.handleGenerate), and a
+// stranded shot_status==='generating' with a task id re-attaches polling
+// here (resumeShotTask) instead of guessing the outcome. Only a shot with
+// NO task id (crashed in the dispatch-request window, before the id could
+// be persisted) falls back to reconciling from the already-persisted
+// image_url mirror — see the 'shot' branch inside resumePendingGenerations
+// below.
 
 import {
   cancelGeneration,
@@ -185,16 +190,58 @@ async function resumePromptTasks(
   }
 }
 
+/**
+ * Re-attach polling for one in-flight shot generation (fix-round-2, singular
+ * counterpart to `resumePromptTasks` — a shot dispatches exactly one task).
+ * `sameCanvas()` gates every write, same discipline as the prompt path: a
+ * canvas switch (or unmount) mid-poll must not land a stale patch onto
+ * whatever node now has this id in the new document.
+ */
+async function resumeShotTask(
+  shotNodeId: string,
+  taskId: string,
+  sameCanvas: () => boolean,
+): Promise<void> {
+  const patch = (fields: Record<string, unknown>) => {
+    if (sameCanvas()) {
+      useCanvasCoreStore.getState().patchNode(shotNodeId, { data: fields });
+    }
+  };
+  try {
+    const task = await pollGeneration(taskId, {
+      intervalMs: resumePollTuning.intervalMs,
+      timeoutMs: resumePollTuning.timeoutMs,
+    });
+    const url = task.phase === 'completed' ? (task.metadata?.result_url ?? null) : null;
+    if (url) {
+      patch({ image_url: url, shot_status: 'done', gen_task_id: null });
+    } else {
+      patch({ shot_status: 'failed', gen_task_id: null });
+    }
+  } catch (err) {
+    // Poll broke (network/timeout) — the task itself may still be running
+    // server-side, but ShotNodeData has no output-slot-style recover
+    // channel to re-query later, so fail safe: 'failed' unblocks the
+    // button for a one-click retry rather than leaving it stuck forever.
+    console.error('[genResume] shot re-poll failed:', shotNodeId, taskId, err);
+    patch({ shot_status: 'failed', gen_task_id: null });
+  }
+}
+
 /** Re-entrancy guard: StrictMode double-mounts (and rapid nav loops) must
  *  not attach two polls per task — that would land every result twice. */
 const resuming = new Set<string>();
 
 /**
- * Canvas load: re-attach polling for every prompt that still has an
- * in-flight batch, reset prompts stranded in queued/running with no batch
- * to recover (their runner died with the previous page), and reconcile
- * shot nodes stranded mid-generation (fix-round-1 — see the `shot_status
- * === 'generating'` branch below).
+ * Canvas load (and every app-internal nav back into an already-mounted
+ * canvas — CanvasPage re-fires this on every loadStatus→'ready', which
+ * includes navigating away and back without a full reload): re-attach
+ * polling for every prompt that still has an in-flight batch, reset
+ * prompts stranded in queued/running with no batch to recover (their
+ * runner died with the previous page), and re-attach polling for any shot
+ * node with a persisted `gen_task_id` (fix-round-2) — falling back to a
+ * local-mirror reconcile only when no task id was ever persisted (truly
+ * stranded, not just unresumed).
  */
 export async function resumePendingGenerations(): Promise<void> {
   const store = useCanvasCoreStore.getState();
@@ -227,25 +274,30 @@ export async function resumePendingGenerations(): Promise<void> {
         const data = (asObj(node).data ?? {}) as {
           shot_status?: string | null;
           image_url?: string | null;
+          gen_task_id?: string | null;
         };
         if (data.shot_status !== 'generating') continue;
-        // ShotNodeData carries no gen_tasks (the interface is fixed
-        // verbatim for Task 4/5 + the merged backend to consume) — a shot
-        // node caught mid-generation on reload can never re-attach a poll
-        // the way a prompt node's persisted batch can. Left alone it would
-        // show "Generating…" with the button disabled forever (the same
-        // stuck-queued/running class CLAUDE.md's readiness rule calls
-        // out). Reconcile from the node's own already-persisted mirror —
-        // canvases.nodes_json IS the persisted store here, no extra
-        // network round-trip needed: image_url already landed (a prior
-        // tab's poll finished before this one loaded, or an earlier patch
-        // raced ahead) → the generation actually succeeded, normalize to
-        // 'done' rather than lying that it failed; still null → the
-        // outcome is genuinely unknown → drop to 'failed' so Generate
-        // re-enables and becomes retryable (RELOAD_ERROR parity).
-        store.patchNode(id, {
-          data: { shot_status: data.image_url ? 'done' : 'failed' },
-        });
+        // Three-way reconcile (fix-round-2 — a bare image_url check alone
+        // is a data race: an in-flight dispatch/poll chain from BEFORE the
+        // nav-away is still running (nothing cancels it), so re-attaching
+        // by task id is the only way to avoid racing a stale 'failed'
+        // against that live chain's own eventual patch).
+        if (data.gen_task_id) {
+          // A task id was persisted — re-attach polling by id, same
+          // treatment as a prompt's gen_tasks batch (singular here).
+          resumes.push(resumeShotTask(id, data.gen_task_id, sameCanvas));
+        } else if (data.image_url) {
+          // No task id, but the frame already landed — a prior poll (this
+          // tab or another) finished and patched before the task id got
+          // cleared; don't lie about a finished result.
+          store.patchNode(id, { data: { shot_status: 'done' } });
+        } else {
+          // No task id AND no image_url: truly stranded — the dispatch
+          // request itself never got far enough to persist a task id
+          // (browser died in that narrow window). Drop to 'failed' so
+          // Generate re-enables and becomes retryable.
+          store.patchNode(id, { data: { shot_status: 'failed' } });
+        }
       }
     }
     await Promise.all(resumes);

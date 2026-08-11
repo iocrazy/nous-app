@@ -86,6 +86,7 @@ export function createShotNode(
       description: data.description ?? null,
       image_url: data.image_url ?? null,
       shot_status: data.shot_status ?? null,
+      gen_task_id: data.gen_task_id ?? null,
       scene_id: data.scene_id ?? null,
     },
   };

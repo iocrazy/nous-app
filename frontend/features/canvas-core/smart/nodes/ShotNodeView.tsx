@@ -33,18 +33,21 @@
  * still has to patch its OWN node mirror on completion — the backfill step
  * writes the DB row, not `canvases.nodes_json`.
  *
- * genResume note (fix-round-1): a page reload mid-generation can never
- * re-attach THIS tab's poll — ShotNodeData carries no `gen_tasks` field
- * (fixed verbatim for Task 4/5 + the merged backend to consume), so there
- * is no persisted task id to resume polling from. Left alone this would
- * strand the node at `shot_status: 'generating'` forever (button
- * permanently disabled, no toast, no retry — the same stuck-queued/
- * running class CLAUDE.md's readiness rule calls out). `genResume.ts`'s
- * `resumePendingGenerations` (called once on canvas load) now reconciles
- * this: a stranded 'generating' shot node is normalized to 'done' if
- * `image_url` already landed in the persisted mirror (the generation
- * actually finished — don't lie that it failed), otherwise dropped to
- * 'failed' so Generate re-enables and becomes retryable.
+ * genResume note (fix-round-2, supersedes round-1): `handleGenerate`
+ * persists `data.gen_task_id` the instant dispatch returns and clears it
+ * once the task settles. `genResume.ts`'s `resumePendingGenerations` (which
+ * fires on canvas load AND on every in-app nav back into an already-
+ * mounted canvas, since this component's own dispatch→poll chain is never
+ * cancelled by an unmount) re-attaches polling by that task id — the SAME
+ * treatment a prompt node's `gen_tasks` batch gets, singular here. Only a
+ * shot with NO persisted task id (crashed in the narrow dispatch-request
+ * window) falls back to a local-mirror reconcile: `image_url` already
+ * landed → 'done' (don't lie that it failed); still null → 'failed' so
+ * Generate re-enables and becomes retryable. Round-1's mistake: reconciling
+ * from `image_url` alone raced a still-live dispatch/poll chain from before
+ * a nav-away, occasionally flipping an in-flight generation to 'failed'
+ * while it was still genuinely running — re-review caught it before it
+ * shipped past this branch.
  */
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
@@ -173,34 +176,60 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
   }, []);
 
   // ---- Generate: same service/endpoint as the Prompt node's Run
-  // (canvasGenerationService.ts), target node_id = this shot node. ----
+  // (canvasGenerationService.ts), target node_id = this shot node.
+  //
+  // fix-round-2: this dispatch→poll→patch chain is a free-floating async
+  // closure — nothing cancels it if the user navigates away mid-poll (React
+  // doesn't cancel promises on unmount), and CanvasPage re-fires
+  // `resumePendingGenerations` on every loadStatus→'ready', including
+  // in-app nav BACK into the same still-mounted canvas. Two disciplines
+  // fix the resulting race:
+  //  1. Persist `gen_task_id` the instant dispatch returns (prompt node's
+  //     `gen_tasks`-at-dispatch-time parity) so a concurrent reconcile
+  //     re-attaches polling instead of guessing 'failed' out from under a
+  //     live chain (genResume.ts's `resumeShotTask`).
+  //  2. Every patch after an `await` is gated by `sameCanvas()` (loopRun/
+  //     regenerate.ts discipline) — a canvas switch mid-flight must not
+  //     land a stale patch onto whatever node now holds this id.
   const generating = shot_status === 'generating';
   const handleGenerate = useCallback(() => {
-    if (!shot_id || !canvasId || generating) return;
-    patch({ shot_status: 'generating' });
+    if (!shot_id || generating) return;
+    const startCanvasId = useCanvasCoreStore.getState().canvasId;
+    if (!startCanvasId) return;
+    const sameCanvas = () => useCanvasCoreStore.getState().canvasId === startCanvasId;
+    const guardedPatch = (fields: Record<string, unknown>) => {
+      if (sameCanvas()) patch(fields);
+    };
+    guardedPatch({ shot_status: 'generating' });
     void (async () => {
       try {
-        const taskIds = await dispatchGenerations(canvasId, {
+        const taskIds = await dispatchGenerations(startCanvasId, {
           node_id: id,
           kind: 'image',
           prompt: description || title || '',
           count: 1,
         });
-        const task = await pollGeneration(taskIds[0]);
+        const taskId = taskIds[0];
+        // Persist BEFORE polling — a nav-away between dispatch and this
+        // patch landing is the one genuinely-unrecoverable window (see the
+        // no-task-id branch in genResume.ts), so it must be as narrow as
+        // possible.
+        guardedPatch({ gen_task_id: taskId });
+        const task = await pollGeneration(taskId);
         const url = task.phase === 'completed' ? (task.metadata?.result_url ?? null) : null;
         if (url) {
-          patch({ image_url: url, shot_status: 'done' });
+          guardedPatch({ image_url: url, shot_status: 'done', gen_task_id: null });
         } else {
-          patch({ shot_status: 'failed' });
-          toast?.addToast(t('canvas.shotNode.generateFailed'), 'error');
+          guardedPatch({ shot_status: 'failed', gen_task_id: null });
+          if (sameCanvas()) toast?.addToast(t('canvas.shotNode.generateFailed'), 'error');
         }
       } catch (err) {
         console.error('[ShotNodeView] generate failed:', err);
-        patch({ shot_status: 'failed' });
-        toast?.addToast(t('canvas.shotNode.generateFailed'), 'error');
+        guardedPatch({ shot_status: 'failed', gen_task_id: null });
+        if (sameCanvas()) toast?.addToast(t('canvas.shotNode.generateFailed'), 'error');
       }
     })();
-  }, [shot_id, canvasId, generating, id, description, title, patch, toast, t]);
+  }, [shot_id, generating, id, description, title, patch, toast, t]);
 
   const focalOptions = focal_length && !FOCAL_LENGTH_PRESETS.includes(focal_length)
     ? [focal_length, ...FOCAL_LENGTH_PRESETS]
@@ -355,7 +384,7 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
             type="button"
             className="nodrag mh-chip mt-2 w-full justify-center"
             data-testid="shot-node-generate"
-            disabled={generating}
+            disabled={generating || !canvasId}
             onClick={handleGenerate}
           >
             {generating ? t('canvas.shotNode.generating') : t('canvas.generate')}

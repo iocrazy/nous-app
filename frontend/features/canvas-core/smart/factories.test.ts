@@ -52,6 +52,7 @@ describe('createShotNode', () => {
     expect(node.data.description).toBeNull();
     expect(node.data.image_url).toBeNull();
     expect(node.data.shot_status).toBeNull();
+    expect(node.data.gen_task_id).toBeNull();
     expect(node.data.scene_id).toBeNull();
   });
 
