@@ -125,9 +125,27 @@ export function CanvasView({
 
   useEffect(() => {
     void loadCanvas(canvasId);
+    // Generation guard (Task 5 评审修复轮1 — stale-unmount-reset race):
+    // `loadCanvas`'s synchronous prefix (before its first `await`) has
+    // already bumped `mountEpoch` by the time this line runs, so capturing
+    // it here reflects THIS mount's generation. Embedding this view in a
+    // frequently-toggled tab (the storyboard page's Canvas tab) turned a
+    // rare route-navigation unmount into a high-frequency one: a fast
+    // tab-away-then-back can mount a NEW instance (bumping `mountEpoch`
+    // again) before THIS instance's own `flushSave()` tail below resolves.
+    // Unguarded, that stale `reset()` would slam the NEW instance's
+    // already-`ready` state back to `idle` with nobody left to re-trigger
+    // `loadCanvas` — permanently stuck on "Loading canvas…".
+    const myEpoch = useCanvasCoreStore.getState().mountEpoch;
     return () => {
-      // Flush before clearing; reset() drops the document and the timer.
-      void flushSave().finally(reset);
+      // Flush ALWAYS runs (dirty edits from before the switch must not be
+      // dropped) — but only reset the store if no newer mount has taken
+      // over lifecycle ownership since this one started.
+      void flushSave().finally(() => {
+        if (useCanvasCoreStore.getState().mountEpoch === myEpoch) {
+          reset();
+        }
+      });
     };
   }, [canvasId, loadCanvas, flushSave, reset]);
 

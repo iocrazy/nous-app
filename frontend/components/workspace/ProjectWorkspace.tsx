@@ -951,6 +951,12 @@ export function ProjectWorkspace({
   // card click / shotFocusBus entry points it owns) and reports back via
   // `onFocusShotIdConsumed` so this is reset for the next request.
   const [canvasFocusShotId, setCanvasFocusShotId] = useState<string | null>(null);
+  // Stable identity (评审修复轮1 Minor) — an inline arrow at the JSX call
+  // site below would be a fresh function every render, and it's in
+  // `EpisodeStoryboardPage`'s `focusShotId` effect's dependency array,
+  // needlessly re-running that effect on every unrelated ProjectWorkspace
+  // re-render.
+  const handleCanvasFocusShotIdConsumed = useCallback(() => setCanvasFocusShotId(null), []);
 
   // URL `?shot=` one-shot deep-link — TWO destinations depending on `view`:
   // `view==='canvas'` means "focus this shot in the storyboard canvas"
@@ -1103,7 +1109,7 @@ export function ProjectWorkspace({
             onOpenScene={(sceneId) => handleOpenWorkView('storyboard', { sceneId })}
             onOpenShotInEditor={handleOpenShotInEditor}
             focusShotId={canvasFocusShotId}
-            onFocusShotIdConsumed={() => setCanvasFocusShotId(null)}
+            onFocusShotIdConsumed={handleCanvasFocusShotIdConsumed}
           />
         ) : (
           <div className="flex-1 overflow-y-auto px-6 pb-8">

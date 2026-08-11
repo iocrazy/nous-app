@@ -122,6 +122,20 @@ interface CanvasState {
   episodeId: string | null;
   loadStatus: CanvasLoadStatus;
   loadError: string | null;
+  /**
+   * Monotonic mount-generation counter, bumped by every `loadCanvas()` call
+   * (Task 5 评审修复轮1 — generation guard against a stale-unmount race).
+   * Embedding this store's view in a frequently-toggled tab (the storyboard
+   * page's Canvas tab) turned what used to be a rare route-navigation
+   * unmount into a high-frequency event: a fast tab-away-then-back can
+   * mount a NEW instance (bumping this) before the OLD instance's own
+   * unmount `flushSave().finally(reset)` tail resolves — without this
+   * guard, that stale `reset()` slams the NEW instance's already-`ready`
+   * state back to `idle` with nobody left to re-trigger `loadCanvas`,
+   * permanently stuck on "Loading canvas…". See `CanvasPage.tsx`'s unmount
+   * cleanup for the read side of this guard.
+   */
+  mountEpoch: number;
 
   // ---- Document ----
   viewport: CanvasViewport;
@@ -281,6 +295,11 @@ export function createCanvasCoreStore(
    *  when the debounced commit fires. Lets a user undo back to the state
    *  BEFORE the edit, not to a mid-burst intermediate. */
   let pendingHistoryBase: HistorySnapshot | null = null;
+  /** Backing counter for `mountEpoch` (Task 5 评审修复轮1) — a plain closure
+   *  variable rather than reading-then-incrementing store state, so every
+   *  `loadCanvas()` call gets a strictly unique value even if called
+   *  reentrantly before a previous `set()` has been observed. */
+  let mountEpochCounter = 0;
 
   const useStore = create<CanvasState>((set, get) => {
     function applyServerRow(row: Canvas): void {
@@ -449,6 +468,7 @@ export function createCanvasCoreStore(
       episodeId: null,
       loadStatus: 'idle',
       loadError: null,
+      mountEpoch: 0,
       viewport: IDENTITY_VIEWPORT,
       nodes: [],
       connections: [],
@@ -496,7 +516,11 @@ export function createCanvasCoreStore(
       },
 
       async loadCanvas(canvasId: string) {
-        set({ loadStatus: 'loading', loadError: null });
+        // Bump BEFORE the first `await` (synchronous prefix of an async
+        // function) — a caller that reads `mountEpoch` right after invoking
+        // `loadCanvas()` (without awaiting it) sees the up-to-date value.
+        mountEpochCounter += 1;
+        set({ loadStatus: 'loading', loadError: null, mountEpoch: mountEpochCounter });
         try {
           const row = await loadImpl(canvasId);
           applyServerRow(row);
