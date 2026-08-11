@@ -38,6 +38,7 @@ from .assets import (
     validate_extension,
     validate_media_url,
 )
+from .capabilities import content_types_for
 from .config import get_settings
 from .redaction import scrub
 from .schemas import (
@@ -53,12 +54,15 @@ logger = logging.getLogger("nous_browser.publish")
 VIDEO_CONTENT_TYPE = "video"
 IMAGES_CONTENT_TYPE = "images"
 
-# What *this* service can drive today. Still a single global tuple, and still
-# `("video",)`: the neutral layer below now understands image posts, but no
-# platform publisher does, and a capability is a claim about the DOM path that
-# actually exists (spec §1.1 defect 2). T1 replaces this with a per-platform
-# table in `app/capabilities.py` and T7 is the PR that adds "images" to it,
-# in lockstep with the backend profile.
+# The answer for a caller that did not name a platform. **No longer the
+# capability declaration** - that moved to the per-platform table in the
+# dependency-free `app/capabilities.py`, which `supported_content_types_for`
+# reads and which the backend guard
+# (`backend/tests/test_capability_matches_browser.py`) holds the backend profile
+# against. Everything on the real publish path goes through that table; this
+# tuple only answers `validate_intent(intent)` calls that pass no
+# `supported_content_types`, and it stays at the most conservative real value so
+# that path can never be more permissive than the table.
 SUPPORTED_CONTENT_TYPES = (VIDEO_CONTENT_TYPE,)
 VIDEO_ROLE = "video"
 COVER_ROLE = "cover"
@@ -199,13 +203,26 @@ Publisher = Callable[[PublishJob, Deadline], Awaitable[PublishOutcome]]
 def supported_content_types_for(platform: str) -> tuple[str, ...]:
     """Content types this browser can actually publish for `platform`.
 
-    The seam T1 needs. Today every platform gets the same global answer; T1
-    turns the body into a lookup in the dependency-free `app/capabilities.py`
-    table, and nothing else in this module has to move. Whichever lands first,
-    `validate_intent` reads the answer from a parameter rather than a module
-    constant, so it never has to know which shape is in force.
+    The seam T2 left, now filled: the answer is a lookup in the
+    dependency-free `app/capabilities.py` table, which is the single source of
+    truth for this claim. Nothing else in this module moved - `validate_intent`
+    reads the answer from a parameter, so it never has to know which shape is
+    in force.
+
+    **Per platform, not global**, and that is the whole point. A single module
+    tuple means the day Douyin learns image posts, *every* platform with a
+    registered publisher starts passing the content-type gate for galleries -
+    including ones that have not written a line of gallery code (spec §1.1
+    defect 2). The gate would be answering "does anybody support this?" while
+    the caller asked about one account's platform.
+
+    An unknown platform gets `()` - refuse everything - rather than falling
+    back to `SUPPORTED_CONTENT_TYPES`. A platform nobody declared has, by
+    definition, no publisher written for it, so "video is fine" would be a
+    claim about a code path that does not exist. Absence collapses toward
+    refusal here exactly as it does for `PlatformIntentRules`.
     """
-    return SUPPORTED_CONTENT_TYPES
+    return content_types_for(platform)
 
 
 def validate_intent(

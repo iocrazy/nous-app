@@ -29,6 +29,7 @@ from app.schemas.distribution import (
     AccountListResponse,
     AccountUsageResponse,
     BrowserHealthResponse,
+    CapabilitiesResponse,
     ConnectAccountRequest,
     ConnectAccountResponse,
     SessionLoginCancelResponse,
@@ -421,6 +422,33 @@ async def delete_account(account_id: int, user: CurrentUserDep):
 # hangs (container gone, no RST) is the common shape here, and leaving connect
 # at its default would make the worst case 5s+2s.
 UI_BROWSER_PROBE_TIMEOUT_SECONDS = 2.0
+
+
+@router.get(
+    "/capabilities",
+    response_model=CapabilitiesResponse,
+    dependencies=[Depends(require_distribution)],
+)
+async def get_capabilities(user: CurrentUserDep) -> CapabilitiesResponse:
+    """每个平台现在能发什么 —— 发布页读这个来决定 Images tab 死不死。
+
+    这条端点的存在是为了让能力声明**只有一份**。以前前端自带一张
+    ``capabilities.ts`` 表，靠"必须与后端同一个 PR 落地"的注释与后端 profile
+    同步；那条纪律在它要防的第一次事故里就没拦住（页面给了 Images tab、后端
+    放行、浏览器拒，用户填完整个表单排完队才在最后一步拿到
+    ``unsupported_content_type``）。现在前端一个能力常量都不持有，所以浏览器
+    侧真的实现图集那天，**前端不需要发版**就自动解除置灰。
+
+    纯读常量、无 IO：``SESSION_PLATFORM_PROFILES`` 是模块级数据表，这里只做
+    投影。因此没有超时、没有降级分支，也不需要像 ``/browser/health`` 那样把
+    不健康表达成 200。
+
+    认证 + ``require_distribution`` 与隔壁端点一致：它描述的是本部署接了哪些
+    平台、各自的上限，属于内部能力信息，不是公开的 status page。
+    """
+    from app.services.distribution.session_adapter import platform_capabilities
+
+    return CapabilitiesResponse(platforms=platform_capabilities())
 
 
 @router.get(

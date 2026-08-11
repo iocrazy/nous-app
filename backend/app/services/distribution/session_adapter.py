@@ -53,7 +53,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Iterable, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Iterable, Mapping, Optional
 
 from loguru import logger
 
@@ -75,6 +75,11 @@ from app.services.distribution.publish_options import (
     SCHEDULE_MIN_LEAD,
     validate_scheduled_at,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    # 只在类型检查时导入。运行时的导入在 ``project_capability`` 内部，这样
+    # service 层不在 import 期依赖 schema 层，layering 与既有模块保持一致。
+    from app.schemas.distribution import PlatformCapability
 
 AUTH_TYPE_SESSION = "session"
 
@@ -231,6 +236,11 @@ class PlatformSessionProfile:
     max_title_len: Optional[int] = None
     max_topics: Optional[int] = None
     max_images: Optional[int] = None
+    # 图集张数**下界**。None = 没实测过 → 不设限（同 max_images 的口径：
+    # 凭空写个数字会静默拒掉合法内容）。加在这里而不是等 T4 才加，是因为
+    # ``/capabilities`` 端点是这张画像的**投影**，投影不该手写画像里没有的
+    # 字段 —— 那就又是一份要人工同步的声明。实测值由 T0 的 V2 填入。
+    min_images: Optional[int] = None
     # 定时窗口。两个都是 None = 该平台还没接定时 → 带 scheduled_at 的意图直接
     # 拒（而不是静默立即发出去：早发十二小时不比不发轻）。
     schedule_min_lead: Optional[timedelta] = None
@@ -253,10 +263,10 @@ SESSION_PLATFORM_PROFILES: dict[str, PlatformSessionProfile] = {
     "douyin": PlatformSessionProfile(
         platform="douyin",
         # **只有 video** —— 这是对浏览器侧实现的忠实记录，不是产品决定。
-        # 唯一真相是 ``browser/app/publish.py`` 的
-        # ``SUPPORTED_CONTENT_TYPES = ("video",)``：``douyin_publish.py`` 目前
-        # 只上传 ``job.assets[VIDEO_ROLE]`` 这一个文件，图集要的多文件 + 排序
-        # + 不同的封面语义一行都没写。
+        # 唯一真相是 ``browser/app/capabilities.py`` 的
+        # ``PLATFORM_CONTENT_TYPES["douyin"] = ("video",)``：``douyin_publish.py``
+        # 目前只上传 ``job.assets[VIDEO_ROLE]`` 这一个文件，图集要的多文件 +
+        # 排序 + 不同的封面语义一行都没写。
         #
         # 这里曾经写着 ``{"video", "images"}``，于是三层声明打架：前端能选、
         # 后端放行、浏览器拒。用户填完整个表单、提交、排队，直到最后一步才拿到
@@ -265,6 +275,8 @@ SESSION_PLATFORM_PROFILES: dict[str, PlatformSessionProfile] = {
         #
         # 图集要做（P2-1 步骤 2）。实现完成时这里加回 "images"，且必须与
         # browser 侧同一个 PR 落地：这一行是能力声明，不是愿望清单。
+        # **这条已经不靠自觉了** —— ``backend/tests/test_capability_matches_browser.py``
+        # 断言本字段 ⊆ browser 的 ``PLATFORM_CONTENT_TYPES``，只改这一处会红 CI。
         content_types=frozenset({"video"}),
         video_extensions=frozenset({".mp4", ".mov", ".webm"}),
         # 保持原样：这是**逐个 media 条目**的扩展名白名单（``_extension_problems``
@@ -330,6 +342,75 @@ def publishable_session_platforms() -> frozenset[str]:
         for name, profile in SESSION_PLATFORM_PROFILES.items()
         if profile.supports_publishing
     )
+
+
+# ── 能力下发（图集设计 §2 D1） ────────────────────────────────
+
+
+def _seconds(delta: Optional[timedelta]) -> Optional[int]:
+    return None if delta is None else int(delta.total_seconds())
+
+
+def project_capability(profile: PlatformSessionProfile) -> "PlatformCapability":
+    """把一张 fail-fast 画像投影成前端能读的能力声明。
+
+    **投影，不是第二份声明** —— 每个字段都从 ``profile`` 读，没有一个是在这里
+    手写的常量。上一版把同一件事写在前端一张表里，靠"必须与后端同一个 PR 落地"
+    的注释维持同步；那条纪律在它要防的第一次事故里就没拦住。
+
+    两条口径写死在这里：
+
+    * **集合一律 ``sorted()``**。源头是 frozenset，迭代顺序随进程 hash 种子变，
+      不排序等于每次重启都换一份响应体。
+    * **``supports_publishing=False`` 的平台，能力字段全部清空并标
+      ``is_placeholder``**。这些平台的 profile 里写的是占位值（原注释：「等真正
+      实现发布时要对着平台实测填准」），原样下发就是把猜测升格成看起来权威的
+      API 响应 —— 那正是本次要消灭的病，换个地方犯不算修。
+    """
+    from app.schemas.distribution import PlatformCapability
+
+    if not profile.supports_publishing:
+        return PlatformCapability(
+            platform=profile.platform,
+            supports_publishing=False,
+            is_placeholder=True,
+        )
+
+    return PlatformCapability(
+        platform=profile.platform,
+        supports_publishing=True,
+        is_placeholder=False,
+        content_types=sorted(profile.content_types),
+        video_extensions=sorted(profile.video_extensions),
+        image_extensions=sorted(profile.image_extensions),
+        min_images=profile.min_images,
+        max_images=profile.max_images,
+        max_title_len=profile.max_title_len,
+        max_topics=profile.max_topics,
+        # 「有没有定时能力」在 profile 里是"两个窗口至少有一个不是 None"，
+        # 与 ``_schedule_problems`` 的判定同源。前端不该重新推导这条规则。
+        supports_scheduling=(
+            profile.schedule_min_lead is not None
+            or profile.schedule_max_ahead is not None
+        ),
+        schedule_min_lead_seconds=_seconds(profile.schedule_min_lead),
+        schedule_max_ahead_seconds=_seconds(profile.schedule_max_ahead),
+        self_declarations=sorted(profile.self_declarations),
+        supports_collection=profile.supports_collection,
+    )
+
+
+def platform_capabilities() -> dict[str, "PlatformCapability"]:
+    """所有会话通道平台的能力声明，按平台名索引。
+
+    包含 ``supports_publishing=False`` 的平台（置空 + ``is_placeholder``）而
+    不是把它们过滤掉：前端要能区分「这个平台绑得上但发不了」和「这个平台不
+    存在」，后者应该是 UI 里根本不出现的账号类型。
+    """
+    return {
+        name: project_capability(profile)
+        for name, profile in SESSION_PLATFORM_PROFILES.items()
+    }
 
 
 # ── 环境组装 ──────────────────────────────────────────────

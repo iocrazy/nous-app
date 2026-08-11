@@ -20,6 +20,7 @@ from app.publish import (
     assets_to_stage,
     image_role,
     ordered_image_assets,
+    supported_content_types_for,
     validate_intent,
 )
 from app.schemas import MediaItem, PublishIntent, SessionStatus
@@ -130,6 +131,79 @@ def test_bad_intents_are_refused_with_a_stable_reason_code(bad, expected_reason)
     assert problem is not None
     assert problem.reason == expected_reason
     assert problem.message
+
+
+# --- the content-type gate is per platform, not global ----------------------
+#
+# `supported_content_types_for` is the seam: `validate_intent` takes the answer
+# as a parameter, and this function is what `run_publish` fills it from. These
+# tests pin the *lookup*, because that is where the per-platform claim lives.
+
+
+def test_douyin_declares_video_only_today():
+    """The declaration a user can currently act on. Flipping it to include
+    "images" is T7's job and must happen in the same PR as the backend profile -
+    `backend/tests/test_capability_matches_browser.py` makes that mechanical.
+    """
+    assert supported_content_types_for("douyin") == ("video",)
+
+
+def test_an_unknown_platform_publishes_nothing():
+    """A platform nobody declared has no publisher, so the honest answer to
+    "can it post this?" is no - for every content type, video included.
+
+    Not `SUPPORTED_CONTENT_TYPES`: falling back to the global tuple would have
+    the gate claim "video is fine" about a code path that does not exist, so a
+    typo in a platform name would reach the registry lookup with the neutral
+    gate already satisfied. Absence collapses toward refusal, as it does for
+    `PlatformIntentRules`.
+    """
+    assert supported_content_types_for("nosuchplatform") == ()
+
+    problem = validate_intent(
+        intent(), supported_content_types=supported_content_types_for("nosuchplatform")
+    )
+    assert problem is not None
+    assert problem.reason == "unsupported_content_type"
+
+
+def test_a_platform_that_declares_only_video_refuses_an_image_post():
+    """The reason the declaration is per platform rather than one module-level
+    tuple: the day Douyin learns galleries, a *global* set would open this gate
+    for every platform with a registered publisher - including ones that have
+    not written a line of gallery code. The gate would be answering "does
+    anybody support this?" while the caller asked about one account's platform.
+    """
+    problem = validate_intent(
+        intent(content_type="images", media=[image(0)]),
+        supported_content_types=supported_content_types_for("douyin"),
+    )
+    assert problem is not None
+    assert problem.reason == "unsupported_content_type"
+
+
+def test_the_lookup_follows_the_capability_table_rather_than_a_hardcoded_list(
+    monkeypatch,
+):
+    """Proves the two answers above come from `capabilities.py` and are not
+    `platform == "douyin"` written a longer way. Declare a fictional platform
+    that takes images, and the lookup - and the gate fed from it - follow.
+    """
+    import app.capabilities as caps
+
+    monkeypatch.setitem(caps.PLATFORM_CONTENT_TYPES, "testonly", ("images",))
+
+    assert supported_content_types_for("testonly") == ("images",)
+    assert validate_intent(
+        intent(content_type="images", media=[image(0)]),
+        supported_content_types=supported_content_types_for("testonly"),
+    ) is None
+    # ...and the same table refuses what it does not list.
+    problem = validate_intent(
+        intent(), supported_content_types=supported_content_types_for("testonly")
+    )
+    assert problem is not None
+    assert problem.reason == "unsupported_content_type"
 
 
 def test_scheduling_without_platform_rules_is_refused_not_published_immediately():

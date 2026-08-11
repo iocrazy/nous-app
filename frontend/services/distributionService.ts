@@ -135,6 +135,55 @@ export interface BrowserHealth {
 export const getBrowserHealth = (): Promise<BrowserHealth> =>
   request<BrowserHealth>('/browser/health');
 
+/**
+ * What one platform can publish today (backend `PlatformCapability`).
+ *
+ * This page used to carry its own copy of this table
+ * (`components/Distribution/capabilities.ts`), kept in sync with the backend
+ * profile by a comment saying the two must land in the same PR. That comment
+ * did not stop the failure it was written for: the page offered an Images tab,
+ * the backend profile allowed it, and the browser service — the only layer that
+ * actually posts anything — refused with `unsupported_content_type` after the
+ * user had filled in the whole form and waited in the queue.
+ *
+ * So the frontend now holds no capability constants at all. When the browser
+ * service learns image posts, this response changes and the tab un-greys
+ * itself — with no frontend release.
+ *
+ * `is_placeholder` marks a platform that can bind an account but cannot publish:
+ * its backend profile carries guessed values that are deliberately blanked out
+ * here rather than shipped as if they were measured facts.
+ */
+export interface PlatformCapability {
+  platform: string;
+  supports_publishing: boolean;
+  is_placeholder: boolean;
+  content_types: string[];
+  video_extensions: string[];
+  image_extensions: string[];
+  min_images: number | null;
+  max_images: number | null;
+  max_title_len: number | null;
+  max_topics: number | null;
+  supports_scheduling: boolean;
+  schedule_min_lead_seconds: number | null;
+  schedule_max_ahead_seconds: number | null;
+  self_declarations: string[];
+  supports_collection: boolean;
+}
+
+/**
+ * Per-platform capabilities, keyed by platform name.
+ *
+ * Pure constants server-side (no IO, no timeout, no degraded branch), so a
+ * rejection here means our own API call failed. Callers must treat that as
+ * "no evidence" and keep the safe default — which for image posts is *stay
+ * disabled*, never "assume supported".
+ */
+export const getPlatformCapabilities = (): Promise<Record<string, PlatformCapability>> =>
+  request<{ platforms: Record<string, PlatformCapability> }>('/capabilities')
+    .then((r) => r.platforms);
+
 export const refreshAccount = (id: string): Promise<SocialAccount> =>
   request<SocialAccount>(`/accounts/${id}/refresh`, { method: 'POST' });
 

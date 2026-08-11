@@ -153,3 +153,63 @@ class SessionLoginCancelResponse(BaseModel):
     cancelled: bool
     context_released: bool
     message: str
+
+
+# ── 能力下发（图集设计 §2 D1） ────────────────────────────────────
+
+
+class PlatformCapability(BaseModel):
+    """一个平台**现在**能发什么 —— 由 ``PlatformSessionProfile`` 投影而来。
+
+    这个端点存在的理由是消灭第三份声明。曾经"能不能发图集"写在三个地方：
+    浏览器的 ``publish.py``、后端 profile、前端
+    ``components/Distribution/capabilities.ts``。三份靠**注释里的纪律**同步，
+    结果是前端给了 Images tab、后端放行、浏览器拒 —— 用户填完整个表单、提交、
+    排队，最后一步才拿到 ``unsupported_content_type``。
+
+    现在链条是：``browser/app/capabilities.py``（唯一真相，CI 守卫
+    ``test_capability_matches_browser.py`` 钉住"后端不得声明浏览器没实现的
+    内容类型"）→ 后端 profile → **本模型下发** → 前端只读。前端不再持有任何
+    能力常量，所以 T7 翻转声明时前端**不需要发版**。
+
+    ⚠️ 所有集合字段都是 ``sorted()`` 后的 list。源头是 ``frozenset``，而
+    frozenset 的迭代顺序随进程 hash 种子变 —— 不排序的话同一份代码每次重启
+    返回的 JSON 都不同，缓存和快照测试全部不稳定。
+    """
+
+    platform: str
+    # 能不能发布。False 时下面的能力字段**全部置空**，见 ``is_placeholder``。
+    supports_publishing: bool
+    # 占位声明：``supports_publishing=False`` 的平台，profile 里的
+    # content_types / 扩展名是"等实现时对着平台实测填准"的占位值（
+    # session_adapter.py 里那段注释的原话）。把占位值原样下发，等于用一个
+    # 看起来权威的 API 响应给猜测背书 —— 正是本次要消灭的病。所以这一档
+    # 的能力字段一律清空，并显式说明"这里没有事实"。
+    is_placeholder: bool = False
+
+    content_types: list[str] = Field(default_factory=list)
+    video_extensions: list[str] = Field(default_factory=list)
+    image_extensions: list[str] = Field(default_factory=list)
+    min_images: Optional[int] = None
+    max_images: Optional[int] = None
+    max_title_len: Optional[int] = None
+    max_topics: Optional[int] = None
+    # 派生字段，不是 profile 上的列：profile 用 ``schedule_min_lead`` /
+    # ``schedule_max_ahead`` 两个 timedelta 表达定时窗口，两个都是 None 就是
+    # "没接定时"。前端要的是一个布尔 + 两个秒数，换算在这里做一次，而不是让
+    # 每个调用方各自解释 None 的含义。
+    supports_scheduling: bool = False
+    schedule_min_lead_seconds: Optional[int] = None
+    schedule_max_ahead_seconds: Optional[int] = None
+    self_declarations: list[str] = Field(default_factory=list)
+    supports_collection: bool = False
+
+
+class CapabilitiesResponse(BaseModel):
+    """``GET /distribution/capabilities`` 的响应。
+
+    ``platforms`` 是 map 而不是 list：调用方永远是"这个账号的平台能不能干
+    这件事"，按 key 取比在数组里找快也更难写错。
+    """
+
+    platforms: dict[str, PlatformCapability]
