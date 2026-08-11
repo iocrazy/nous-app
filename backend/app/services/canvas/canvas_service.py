@@ -74,6 +74,31 @@ class CanvasService:
             viewport_json=data.viewport_json,
         )
 
+    async def get_or_create_storyboard(
+        self,
+        *,
+        project_id: str,
+        episode_id: str,
+        name: str,
+        created_by: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        """Idempotent get-or-create for an episode's system storyboard
+        canvas (shot-nodes-on-canvas spec 2026-08-11 §2). The real
+        idempotence guarantee lives in the DB's partial unique index
+        (``CanvasRepository.create_storyboard_canvas`` re-reads on a
+        concurrent 23505) — this method's get-then-create is just the
+        common-case fast path, not the source of truth for "only one".
+        """
+        existing = await self.repo.get_storyboard_canvas(project_id, episode_id)
+        if existing:
+            return existing
+        return await self.repo.create_storyboard_canvas(
+            project_id=project_id,
+            episode_id=episode_id,
+            name=name,
+            created_by=created_by,
+        )
+
     async def update_with_lock(
         self,
         canvas_id: str,

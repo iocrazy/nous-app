@@ -44,6 +44,12 @@ class Canvases(Base):
             ondelete="CASCADE",
             name="canvases_project_id_fkey",
         ),
+        ForeignKeyConstraint(
+            ["episode_id"],
+            ["public.episodes.id"],
+            ondelete="CASCADE",
+            name="canvases_episode_id_fkey",
+        ),
         PrimaryKeyConstraint("id", name="canvases_pkey"),
         Index("idx_canvases_project", "project_id"),
         {"schema": "public"},
@@ -55,6 +61,10 @@ class Canvases(Base):
         server_default=text("generate_snowflake_id()"),
     )
     project_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # mig 421: set only when kind='storyboard' — the system per-episode shot
+    # canvas (shot-nodes-on-canvas spec 2026-08-11 §2). NULL for every other
+    # kind ('smart', 'lite', 'character', ...).
+    episode_id: Mapped[int | None] = mapped_column(BigInteger)
     name: Mapped[str] = mapped_column(
         String(200),
         nullable=False,

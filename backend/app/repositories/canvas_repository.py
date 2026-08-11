@@ -38,6 +38,7 @@ from loguru import logger
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import insert, null, select
 from sqlalchemy import update as sa_update
+from sqlalchemy.exc import IntegrityError
 
 from app.db.session import read_scope, write_scope
 from app.models import Canvases, Projects
@@ -119,6 +120,32 @@ class CanvasRepository:
             return _serialize(dict(row)) if row else None
         except Exception as e:
             logger.error(f"canvas get_by_id({canvas_id}) failed: {e}")
+            return None
+
+    async def get_storyboard_canvas(
+        self, project_id: str, episode_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """The episode's system storyboard canvas (kind='storyboard'), or
+        None. Backs the get-or-create endpoint's "get" half — matches the
+        partial unique index ``uq_canvases_storyboard_per_episode`` (mig 421)
+        exactly, so this is the single row a concurrent create could race
+        against."""
+        try:
+            async with read_scope() as session:
+                result = await session.execute(
+                    select(Canvases.__table__)
+                    .where(Canvases.project_id == _bigint(project_id))
+                    .where(Canvases.episode_id == _bigint(episode_id))
+                    .where(Canvases.kind == "storyboard")
+                    .where(Canvases.deleted_at.is_(None))
+                )
+                row = result.mappings().first()
+            return _serialize(dict(row)) if row else None
+        except Exception as e:
+            logger.error(
+                f"canvas get_storyboard_canvas(project={project_id}, "
+                f"episode={episode_id}) failed: {e}"
+            )
             return None
 
     async def list_for_project(self, project_id: str) -> List[Dict[str, Any]]:
@@ -322,6 +349,55 @@ class CanvasRepository:
             return _serialize(dict(row)) if row else None
         except Exception as e:
             logger.error(f"canvas create for project {project_id} failed: {e}")
+            return None
+
+    async def create_storyboard_canvas(
+        self,
+        *,
+        project_id: str,
+        episode_id: str,
+        name: str,
+        created_by: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        """Insert the episode's system storyboard canvas (kind='storyboard').
+
+        Idempotence is NOT decided here — it is the DB's job via the partial
+        unique index ``uq_canvases_storyboard_per_episode`` (mig 421) on
+        ``(project_id, episode_id) WHERE kind='storyboard'``. Two concurrent
+        GET /canvases/storyboard requests can both pass the router's
+        get-then-create race window; whichever INSERT loses hits a 23505
+        IntegrityError here, which we catch and resolve by re-reading the
+        row the winner just created — never a second row, never a 500.
+        """
+        payload: Dict[str, Any] = {
+            "project_id": _bigint(project_id),
+            "episode_id": _bigint(episode_id),
+            "name": name,
+            "kind": "storyboard",
+        }
+        if created_by is not None:
+            payload["created_by"] = created_by
+        try:
+            async with write_scope() as session:
+                result = await session.execute(
+                    insert(Canvases).values(**payload).returning(Canvases.__table__)
+                )
+                row = result.mappings().first()
+            return _serialize(dict(row)) if row else None
+        except IntegrityError as exc:
+            pgcode = getattr(getattr(exc, "orig", None), "sqlstate", None)
+            if pgcode == "23505" or "23505" in str(getattr(exc, "orig", exc)):
+                return await self.get_storyboard_canvas(project_id, episode_id)
+            logger.error(
+                f"canvas create_storyboard_canvas(project={project_id}, "
+                f"episode={episode_id}) failed: {exc}"
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                f"canvas create_storyboard_canvas(project={project_id}, "
+                f"episode={episode_id}) failed: {e}"
+            )
             return None
 
     async def update_with_lock(
