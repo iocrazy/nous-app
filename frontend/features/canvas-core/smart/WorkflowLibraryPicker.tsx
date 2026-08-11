@@ -13,7 +13,13 @@
 // placement — real clicks landed on nothing (canvas-feel.spec.ts:228).
 // Positioned off the trigger button's `getBoundingClientRect()`, opening
 // upward by default with a measured-height flip to below when the viewport
-// doesn't have room above (mirrors DateRangePopover's `place()`).
+// doesn't have room above (mirrors DateRangePopover's `place()`). Also
+// mirrors its scroll handling: since the anchor button lives inside the
+// composer's own `overflow-x-auto` toolbar, scrolling *that* container (not
+// just `window`) must close the panel or it stays fixed in place while the
+// anchor slides out from under it — a capture-phase `scroll` listener on
+// `window` catches nested-container scrolls too, so it closes rather than
+// following.
 
 import { FileJson, Loader2, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -80,13 +86,25 @@ export function WorkflowLibraryPicker({
         onClose();
       }
     };
+    // Close (not follow) on scroll — same call as DateRangePopover. The
+    // anchor button lives inside the composer's own `overflow-x-auto`
+    // toolbar, so a plain bubble-phase listener on `window` would miss a
+    // scroll of that inner container; capture phase (`true`) catches the
+    // scroll event on its way down through any nested scrollable ancestor,
+    // not just window-level scrolling. Without this the fixed-position
+    // panel stays pinned in place while the anchor slides out from under
+    // it on a narrow viewport with many toolbar buttons — a floating panel
+    // with no anchor under it.
+    const onScroll = () => onClose();
     document.addEventListener('keydown', onKeyDown);
     // Deferred so the click that opened the panel doesn't immediately close it.
     const timer = setTimeout(() => document.addEventListener('mousedown', onMouseDown), 0);
+    window.addEventListener('scroll', onScroll, true);
     return () => {
       document.removeEventListener('keydown', onKeyDown);
       clearTimeout(timer);
       document.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('scroll', onScroll, true);
     };
   }, [anchorEl, onClose]);
 
@@ -96,6 +114,8 @@ export function WorkflowLibraryPicker({
     <div
       ref={ref}
       data-testid="workflow-library-picker"
+      role="dialog"
+      aria-label="Workflow Library"
       className="mh-pop-in canvas-island z-50 w-80 p-2"
       style={{ position: 'fixed', top: 0, left: 0 }}
     >
