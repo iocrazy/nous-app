@@ -137,6 +137,17 @@ def driver_factory(driver: Any):
 # without inventing a call-order protocol.
 
 
+def text_selector(text: Any) -> str:
+    """The fake's key for a `get_by_text` call.
+
+    Playwright takes either a string or a compiled pattern, and the gallery
+    upload judge passes a pattern (it reads a *number* off the page, which no
+    fixed string can do). Both collapse to one key here so a test can name the
+    node the same way the production code finds it.
+    """
+    return f"text={getattr(text, 'pattern', text)}"
+
+
 class FakeLocator:
     """The locator methods the publish driver calls, and nothing else."""
 
@@ -158,14 +169,17 @@ class FakeLocator:
     def filter(self, **_kwargs: Any) -> "FakeLocator":
         return self
 
-    def get_by_text(self, text: str, exact: bool = False) -> "FakeLocator":
-        return FakeLocator(self.page, f"text={text}")
+    def get_by_text(self, text: Any, exact: bool = False) -> "FakeLocator":
+        return FakeLocator(self.page, text_selector(text))
 
     def get_by_role(self, _role: str, name: str = "", exact: bool = False) -> "FakeLocator":
         return FakeLocator(self.page, f"text={name}")
 
     async def count(self) -> int:
         return self.page.count_of(self.selector)
+
+    async def inner_text(self) -> str:
+        return self.page.texts.get(self.selector, "")
 
     async def is_visible(self) -> bool:
         return self.selector in self.page.visible_now()
@@ -227,11 +241,16 @@ class FakePage:
         visible: Any = (),
         counts: dict[str, int] | None = None,
         attributes: dict[str, dict[str, str]] | None = None,
+        texts: dict[str, Any] | None = None,
     ):
         self._url = url
         self._visible = visible
         self.counts = dict(counts or {})
         self.attributes = attributes or {}
+        # selector -> what `inner_text()` returns. Same value-or-callable
+        # convention as `url` / `visible`, so "the composer's count climbs as
+        # files land" is expressible without scripting a call sequence.
+        self._texts = dict(texts or {})
         self.clicks: list[str] = []
         self.fills: list[tuple[str, str]] = []
         self.file_inputs: list[tuple[str, str, int]] = []
@@ -250,7 +269,18 @@ class FakePage:
         value = self._visible(self) if callable(self._visible) else self._visible
         return set(value)
 
+    @property
+    def texts(self) -> dict[str, str]:
+        return {
+            selector: (value(self) if callable(value) else value)
+            for selector, value in self._texts.items()
+        }
+
     def count_of(self, selector: str) -> int:
+        # A node the test gave text to exists, without also having to list it in
+        # `visible` — reading its text is the only thing the driver does with it.
+        if selector not in self.counts and selector in self._texts:
+            return 1 if self.texts.get(selector) else 0
         if selector in self.counts:
             value = self.counts[selector]
             # 与 `url` / `visible` 同样的约定:值或"接收 page 的函数"。此前
@@ -262,8 +292,8 @@ class FakePage:
     def locator(self, selector: str) -> FakeLocator:
         return FakeLocator(self, selector)
 
-    def get_by_text(self, text: str, exact: bool = False) -> FakeLocator:
-        return FakeLocator(self, f"text={text}")
+    def get_by_text(self, text: Any, exact: bool = False) -> FakeLocator:
+        return FakeLocator(self, text_selector(text))
 
     def get_by_role(self, _role: str, name: str = "", exact: bool = False) -> FakeLocator:
         return FakeLocator(self, f"text={name}")
