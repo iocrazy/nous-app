@@ -118,9 +118,7 @@ async def test_manager_can_clear_episode_owner_with_null(client, monkeypatch):
     captured = _stub_episode_repository(monkeypatch)
     _stub_role(monkeypatch, "manager")
 
-    resp = await client.patch(
-        f"/api/v1/episodes/{EPISODE_ID}", json={"owner_id": None}
-    )
+    resp = await client.patch(f"/api/v1/episodes/{EPISODE_ID}", json={"owner_id": None})
 
     assert resp.status_code == 200
     assert resp.json()["data"]["owner_id"] is None

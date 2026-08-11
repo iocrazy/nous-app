@@ -151,7 +151,9 @@ async def test_require_arrangement_role_editor_forbidden(monkeypatch):
 # --------------------------------------------------------------------------- #
 
 
-def _fake_nodes_repo(monkeypatch, *, node: Optional[Dict[str, Any]], update_return=None):
+def _fake_nodes_repo(
+    monkeypatch, *, node: Optional[Dict[str, Any]], update_return=None
+):
     captured: Dict[str, Any] = {}
 
     class _FakeRepo:

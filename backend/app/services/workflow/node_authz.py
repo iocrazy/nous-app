@@ -55,6 +55,4 @@ async def require_arrangement_role(project_id: str, user_id: str) -> None:
 
     role = await resolve_effective_role(user_id, project_id=project_id)
     if role != MANAGER:
-        raise HTTPException(
-            status_code=403, detail={"code": "arrangement_forbidden"}
-        )
+        raise HTTPException(status_code=403, detail={"code": "arrangement_forbidden"})
