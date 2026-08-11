@@ -67,6 +67,34 @@ vi.mock('../../services/distributionService', () => ({
   createPublishTask,
   extractCoverFrames,
   selectCoverFrame,
+  // The Images tab is gated on what the BACKEND says each platform can post.
+  // The real answer today is video-only — no publisher can drive a gallery yet
+  // — so the images coverage in this file (gallery expand, inline upload, pick
+  // order, cover copy) runs against a capability response where Douyin CAN.
+  //
+  // This is also the positive control for the gate: the tab is enabled purely
+  // because this response says so, which is what makes the disabled assertions
+  // in PublishPage.imagesGate.test.tsx (video-only response, no override) mean
+  // something rather than passing on a hardcoded false.
+  getPlatformCapabilities: vi.fn().mockResolvedValue({
+    douyin: {
+      platform: 'douyin',
+      supports_publishing: true,
+      is_placeholder: false,
+      content_types: ['images', 'video'],
+      video_extensions: ['.mov', '.mp4', '.webm'],
+      image_extensions: ['.jpeg', '.jpg', '.png'],
+      min_images: null,
+      max_images: null,
+      max_title_len: null,
+      max_topics: null,
+      supports_scheduling: true,
+      schedule_min_lead_seconds: 7200,
+      schedule_max_ahead_seconds: 1209600,
+      self_declarations: [],
+      supports_collection: true,
+    },
+  }),
 }));
 
 // Tag plumbing behind the "To publish" mark — inert defaults.
@@ -140,19 +168,6 @@ vi.mock('../../supabaseClient', () => {
 // without a TeamProvider. Mock the context so the hook resolves a scope id.
 vi.mock('../../contexts/TeamContext', () => ({
   useTeamContext: () => ({ personalTeamId: 'pt1' }),
-}));
-
-// The Images tab is gated on ./capabilities, whose real table is EMPTY today —
-// no platform's publisher can post a gallery yet (see the module comment). The
-// images coverage in this file (gallery expand, inline upload, pick order,
-// cover copy) is for the feature P2-1 step 2 is going to ship, so it runs
-// against a capability table where Douyin CAN take images. Mocking it here is
-// also the positive control for the gate: the tab is enabled purely because
-// this table says so, which is what makes the disabled assertions in
-// PublishPage.imagesGate.test.tsx (real table, no mock) mean something.
-vi.mock('./capabilities', () => ({
-  IMAGE_POST_PLATFORMS: new Set(['douyin']),
-  supportsImagePosts: (platform: string) => platform === 'douyin',
 }));
 
 import PublishPage from './PublishPage';

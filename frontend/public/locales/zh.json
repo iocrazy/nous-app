@@ -360,6 +360,7 @@
       "contentTypeVideo": "视频",
       "contentTypeImages": "图片",
       "imagesUnsupported": "暂不支持图文帖 —— 已连接的平台只能发布视频。",
+      "noAccountsForImages": "发布图文帖前请先连接一个账号。",
       "imageOrder": "第 {{n}} 张",
       "imagePreviewAria": "首图预览 — 图文帖",
       "noImages": "还没有上传的图片 — 下载的素材不可发布",

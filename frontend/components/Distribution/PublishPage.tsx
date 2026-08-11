@@ -6,8 +6,8 @@ import {
   Images, ListOrdered, Loader2, MapPin, Plus, Radio, Search, Send, Sparkles, TrendingUp, X,
 } from 'lucide-react';
 import {
-  createPublishTask, listAccounts, listGeneratedVideos, listLibraryMedia,
-  promoteGeneratedVideo, GeneratedVideo,
+  createPublishTask, getPlatformCapabilities, listAccounts, listGeneratedVideos,
+  listLibraryMedia, promoteGeneratedVideo, GeneratedVideo, PlatformCapability,
 } from '../../services/distributionService';
 import {
   uploadResource, getGalleryItems, getResourceCoverUrl, GALLERY_MIME,
@@ -16,7 +16,6 @@ import {
   addResourceTag, createTag, removeResourceTag,
 } from '../../services/unifiedTagService';
 import { TO_PUBLISH_TAG_NAME, findToPublishTagId } from '../../services/toPublishService';
-import { supportsImagePosts } from './capabilities';
 import { AccountAvatar } from './platform';
 import { SocialAccount, LibraryVideo, SelfDeclaration } from '../../types';
 import { CoverPicker, CoverPair } from './CoverPicker';
@@ -182,6 +181,17 @@ export const PublishPage: React.FC = () => {
   const [contentType, setContentType] = useState<ContentKind>('video');
   const [videos, setVideos] = useState<LibraryVideo[]>([]);
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
+  /**
+   * Per-platform capabilities, straight from the backend. `null` = not answered
+   * yet (or the request failed).
+   *
+   * Null must read as "supports nothing", never as "assume yes": an empty map
+   * during the first paint would otherwise let the Images tab flash open and
+   * arm a post the browser service is going to refuse. Failing closed costs a
+   * disabled tab for a moment; failing open costs the exact late refusal this
+   * whole endpoint exists to prevent.
+   */
+  const [capabilities, setCapabilities] = useState<Record<string, PlatformCapability> | null>(null);
   // selectedVideos holds media resource ids in PICK ORDER — for images that
   // order IS the gallery order sent to the note.
   const [selectedVideos, setSelectedVideos] = useState<string[]>([]);
@@ -271,6 +281,25 @@ export const PublishPage: React.FC = () => {
 
   useEffect(() => { void load(); }, [load]);
 
+  /**
+   * Capabilities are fetched once on mount, not inside `load()`: they do not
+   * depend on scope or content type, and re-fetching a table of constants every
+   * time the user flips a tab is noise.
+   *
+   * A failure leaves `capabilities` at null — i.e. image posts stay disabled.
+   * That is the safe direction and it is deliberate: a failed request is no
+   * evidence that the platform supports galleries.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    getPlatformCapabilities()
+      .then((caps) => { if (!cancelled) setCapabilities(caps); })
+      .catch((err) => {
+        console.error('distribution: load platform capabilities failed', err);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   // Close the library picker on Escape while it is open.
   useEffect(() => {
     if (!pickerOpen) return undefined;
@@ -288,30 +317,47 @@ export const PublishPage: React.FC = () => {
   const isImages = contentType === 'images';
 
   /**
-   * Can the accounts this post would reach take an image gallery?
+   * Why the Images tab is dead, or null when it is alive.
    *
-   * Gated on the accounts the post actually goes to (all connected ones until
-   * the user narrows it down) rather than on a global flag: "no platform can
-   * do this" and "the platform YOU picked can't do this" are the same failure
-   * for the user, and both have to be visible before the form is filled in.
+   * Two distinct reasons, and they used to share one sentence. The old gate was
+   * `targets.length > 0 && targets.every(...)`, so "you have not connected any
+   * account" and "the platform you connected cannot do this" both printed
+   * *Image posts are not supported yet* — telling a user with no accounts to go
+   * wait for a feature, when what they actually need is the Accounts page.
    *
-   * `supportsImagePosts` is currently false for every platform — see
-   * ./capabilities. The tab is therefore disabled, which is the whole point of
-   * this gate: the browser service refuses `content_type=images`, and finding
-   * that out after a full form + queue wait is the bug being fixed.
+   * Gated on the accounts the post actually reaches (all connected ones until
+   * the user narrows it down) rather than a global flag: "nothing can do this"
+   * and "the ones YOU picked can't" are the same failure for the user, and both
+   * have to be visible before the form is filled in.
+   *
+   * Capabilities come from the backend (`GET /distribution/capabilities`), so
+   * nothing here has to be edited when the browser service learns galleries —
+   * the tab un-greys itself. A null map (still loading, or the request failed)
+   * reads as "supports nothing".
    */
-  const imagesSupported = useMemo(() => {
+  const imagesGate = useMemo<'noAccounts' | 'unsupported' | null>(() => {
     const targets = selectedAccounts.length
       ? accounts.filter((a) => selectedAccounts.includes(a.id))
       : accounts;
-    return targets.length > 0 && targets.every((a) => supportsImagePosts(a.platform));
-  }, [accounts, selectedAccounts]);
+    if (targets.length === 0) return 'noAccounts';
+    const ok = targets.every(
+      (a) => capabilities?.[a.platform]?.content_types.includes('images') ?? false,
+    );
+    return ok ? null : 'unsupported';
+  }, [accounts, selectedAccounts, capabilities]);
+
+  const imagesSupported = imagesGate === null;
 
   // Says why the tab is dead, in the same words on the tooltip and in the card.
-  const imagesUnsupportedHint = t(
-    'distribution.publish.imagesUnsupported',
-    'Image posts are not supported yet — the connected platforms can only publish video.',
-  );
+  const imagesUnsupportedHint = imagesGate === 'noAccounts'
+    ? t(
+      'distribution.publish.noAccountsForImages',
+      'Connect an account before publishing an image post.',
+    )
+    : t(
+      'distribution.publish.imagesUnsupported',
+      'Image posts are not supported yet — the connected platforms can only publish video.',
+    );
 
   // Switch content type: clears the selection (video ids ≠ image ids), resets
   // the picker to the Library tab (Generated is video-only), and pins images
