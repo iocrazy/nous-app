@@ -193,6 +193,13 @@ export default function CanvasPage() {
   const [promoteNodeId, setPromoteNodeId] = useState<string | null>(null);
   const [promoteSubmitting, setPromoteSubmitting] = useState(false);
   const [promoteError, setPromoteError] = useState<string | null>(null);
+  // Structural re-entrancy guard (review fix round 1): `promoteSubmitting`
+  // already disables the dialog's scene buttons, but that's a STATE flag —
+  // two clicks landing in the same tick (before React commits the re-render
+  // that flips `disabled`) would both pass the `!submitting` check and both
+  // call `createShot`. A synchronous ref can't have that race; checked and
+  // set before the first `await`, same tick as the click handler runs.
+  const promoteInFlightRef = useRef(false);
 
   useEffect(() => {
     if (kind !== 'storyboard') return;
@@ -209,7 +216,8 @@ export default function CanvasPage() {
 
   const handlePromotePickScene = useCallback(
     async (sceneId: string) => {
-      if (!promoteNodeId) return;
+      if (!promoteNodeId || promoteInFlightRef.current) return;
+      promoteInFlightRef.current = true;
       setPromoteSubmitting(true);
       setPromoteError(null);
       try {
@@ -246,6 +254,7 @@ export default function CanvasPage() {
         console.error('[CanvasPage] promote to shot failed:', err);
         setPromoteError(t('canvas.shotNode.promoteDialog.failed'));
       } finally {
+        promoteInFlightRef.current = false;
         setPromoteSubmitting(false);
       }
     },

@@ -78,10 +78,14 @@ export function stripRfInternals(node: CanvasNode): CanvasNode {
 /**
  * A node reconcile flagged as stale (Task 4 shotSync — its bound `shot_id`
  * no longer resolves to a `script_shots` row). Generic on purpose: the store
- * doesn't know about `ShotNodeData`, it just drops any node whose `data`
- * carries this one marker key at the next save tick — "在下一次用户保存时
- * 清除" from the brief. Harmless for every other node type since nothing
- * else ever sets it.
+ * doesn't know about `ShotNodeData`, it just excludes any node whose `data`
+ * carries this one marker key from what `doSave` persists — "在下一次用户
+ * 保存时由编排层过滤删除" from the brief, read literally as filtering the
+ * PAYLOAD (review fix round 1: an earlier version also cleared these nodes
+ * out of local `state.nodes` inside `doSave`, which bypassed undo history
+ * and made an unrelated edit's autosave tick silently delete a stale card's
+ * local render — see `doSave`'s comment). Harmless for every other node
+ * type since nothing else ever sets this key.
  */
 function isStaleNode(node: CanvasNode): boolean {
   const data = (node as Record<string, unknown>).data;
@@ -367,13 +371,23 @@ export function createCanvasCoreStore(
       if (state.persistedRevision >= state.revision) return; // nothing new
       if (state.conflict) return; // user must resolve first
 
-      // Drop stale shot nodes (Task 4 shotSync) before they're persisted —
-      // "标失效...在下一次用户保存时由编排层过滤删除". Also trim them out of
-      // LOCAL state in the same tick so the canvas view converges with what
-      // just got saved instead of leaving a phantom stale node that keeps
-      // getting silently re-excluded on every future save forever.
+      // Drop stale shot nodes (Task 4 shotSync) from the PERSISTED payload
+      // only — brief literal: "在下一次用户保存时由编排层过滤删除" is about
+      // what gets written, not an instant local-state edit. A review fix
+      // (round 1) reverted an earlier version of this that also cleared
+      // `state.nodes` here: that bypassed undo history (patchNode/setNodes
+      // both go through the store's own history discipline; this
+      // filter-inside-doSave path did not) and made an unrelated edit
+      // elsewhere on the canvas silently delete a stale node's local render
+      // the moment the 500ms autosave tick fired — surprising side effect
+      // for an action the user didn't take. The grey stale card now simply
+      // stays on screen (still filtered out of every future save payload,
+      // so it never round-trips back in) until the canvas is reloaded —
+      // storyboard canvases have no composer/connection surface (Task 4
+      // deliberately didn't add `'storyboard'` to `isSmartFamily`), so
+      // there's no dangling-edge cleanup concern from leaving a stale node
+      // visually present a little longer.
       const liveNodes = state.nodes.filter((n) => !isStaleNode(n));
-      if (liveNodes.length !== state.nodes.length) set({ nodes: liveNodes });
 
       const snapshot = {
         revision: state.revision,

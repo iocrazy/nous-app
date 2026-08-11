@@ -155,6 +155,67 @@ describe('CanvasPage — Task 4 shot reconcile wiring', () => {
     expect(useCanvasCoreStore.getState().nodes).toHaveLength(0);
   });
 
+  // Review fix round 1 — regression coverage for the fetch-failure cascade
+  // guard: the whole fetch chain is inside ONE try/catch that aborts BEFORE
+  // any store write (`reconcileShotNodes` is only called after every await
+  // resolves), so a mid-chain rejection must never partially apply a diff.
+  // The code path was already correct; this was flagged as a data-accident-
+  // class gap with no test pinning it.
+  it('listScenes rejecting aborts before listShots runs or any node is touched', async () => {
+    fetchScriptProjects.mockResolvedValue({
+      data: [{ id: 'script-1', episode_id: 'ep-1', updated_at: '2026-01-01T00:00:00Z' }],
+    });
+    listScenes.mockRejectedValue(new Error('network down'));
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const existingNodes = [
+      {
+        id: 'draft-1',
+        type: 'shot',
+        position: { x: 0, y: 0 },
+        data: { title: 'Draft', reference_resource_ids: [], notes: '', shot_id: null },
+      },
+    ];
+    seedReady({ nodes: existingNodes });
+    render(<CanvasPage />);
+
+    await waitFor(() => expect(listScenes).toHaveBeenCalled());
+    // Let the rejection's catch handler run.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(listShots).not.toHaveBeenCalled();
+    expect(createShot).not.toHaveBeenCalled();
+    // The pre-existing node set is byte-for-byte untouched — no
+    // appendElementsNoHistory / patchNode fired (those are the only ops
+    // that could change `nodes`, so an unchanged array proves neither ran).
+    expect(useCanvasCoreStore.getState().nodes).toEqual(existingNodes);
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('listShots rejecting (one scene) aborts before any node is added/patched/marked stale', async () => {
+    fetchScriptProjects.mockResolvedValue({
+      data: [{ id: 'script-1', episode_id: 'ep-1', updated_at: '2026-01-01T00:00:00Z' }],
+    });
+    listScenes.mockResolvedValue([SCENE_1]);
+    listShots.mockRejectedValue(new Error('network down'));
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    seedReady();
+    render(<CanvasPage />);
+
+    await waitFor(() => expect(listShots).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(useCanvasCoreStore.getState().nodes).toHaveLength(0);
+    consoleErrorSpy.mockRestore();
+  });
+
   it('promote-to-shot: picking a scene creates the shot and patches the requesting node', async () => {
     fetchScriptProjects.mockResolvedValue({
       data: [{ id: 'script-1', episode_id: 'ep-1', updated_at: '2026-01-01T00:00:00Z' }],
