@@ -213,14 +213,17 @@ test.describe('canvas trash (G9)', () => {
     await page.goto(`/team/${TEAM_ID}/canvas`);
     await expect(page.getByText('Hero Canvas')).toBeVisible();
 
-    // Soft-delete from the card (hover affordance) — two cards on the
-    // page, scope to the one holding Hero Canvas.
+    // Soft-delete from the card's "···" kebab menu (CanvasCardMenu) — two
+    // cards on the page, scope to the one holding Hero Canvas. The direct
+    // hover-revealed "Move to trash" button was consolidated into this
+    // dropdown (rename/export/create-issue/delete) alongside the trash item.
     const heroCard = page
       .locator('div.group')
       .filter({ hasText: 'Hero Canvas' })
       .first();
     await heroCard.hover();
-    await heroCard.getByRole('button', { name: 'Move to trash' }).click();
+    await heroCard.getByRole('button', { name: 'Canvas actions' }).click();
+    await page.getByRole('menuitem', { name: 'Move to trash' }).click();
     await expect(page.getByText('Hero Canvas')).toHaveCount(0);
 
     // Expand the trash — the row is there with Restore + Delete Forever.

@@ -109,8 +109,13 @@ test('image prompt Run lands both results in output slots', async ({ page }) => 
   await page.goto(`/team/${TEAM_ID}/canvas/c-gen`);
   await expect(page.locator('.react-flow__node')).toHaveCount(1);
 
-  // The prompt node surfaces its generation settings.
-  await expect(page.getByLabel('Prompt kind')).toHaveValue('image');
+  // The prompt node surfaces its generation settings. "Prompt kind" is a
+  // UiSelect (components/ui/primitives.tsx) — a button trigger showing the
+  // selected option's label, backed by an `aria-hidden` native <select> for
+  // form semantics only. `getByLabel` resolves to the visible trigger
+  // BUTTON (the aria-hidden select is excluded from the accessibility
+  // tree), so assert its text, not `.toHaveValue()` (form-control-only).
+  await expect(page.getByLabel('Prompt kind')).toHaveText('Image');
   await expect(page.getByLabel('Image count')).toHaveValue('2');
 
   // Cascade Run needs no selection and drives the same generation pipeline.

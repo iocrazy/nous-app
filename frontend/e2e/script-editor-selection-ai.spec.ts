@@ -132,11 +132,19 @@ test('clicking the pill opens AI chat with the selection quoted + scene tag', as
 
   const panel = page.getByTestId('sb-panel-chat');
   await expect(panel).toBeVisible();
-  // The selected text landed in the composer as a quoted reference, tagged
-  // with its source scene ("S1"). Assert the language-neutral scene tag rather
-  // than the localized "Selection from" label (the e2e locale is zh).
-  await expect(panel).toContainText('quiet');
-  await expect(panel).toContainText('S1');
+  // A7 (design §D, components/agentActivity/ContextCapsule.tsx): the
+  // selection is no longer spliced into the composer as a blockquote — it's
+  // held as a closable capsule ABOVE the composer, collapsed by default so
+  // the user's own instruction and the quoted material stay visually
+  // distinct. The collapsed title ("Selection from {{scene}}") interpolates
+  // the raw scene label verbatim regardless of locale, so the language-
+  // neutral tag "S1" is visible immediately; the quoted TEXT itself only
+  // renders once expanded.
+  const capsule = page.getByTestId('context-capsule');
+  await expect(capsule).toBeVisible();
+  await expect(capsule).toContainText('S1');
+  await page.getByTestId('context-capsule-toggle').click();
+  await expect(page.getByTestId('context-capsule-text')).toContainText('quiet');
 });
 
 test('the pill disappears when the selection collapses', async ({ page }) => {
@@ -187,6 +195,11 @@ test('the quote is tagged with the anchor scene ordinal (S2 for scene two)', asy
 
   const panel = page.getByTestId('sb-panel-chat');
   await expect(panel).toBeVisible();
-  await expect(panel).toContainText('Rain');
-  await expect(panel).toContainText('S2'); // second scene → ordinal 2
+  // See the sibling test above for why this goes through the capsule
+  // (collapsed title, then expand) instead of asserting on the panel body.
+  const capsule = page.getByTestId('context-capsule');
+  await expect(capsule).toBeVisible();
+  await expect(capsule).toContainText('S2'); // second scene → ordinal 2
+  await page.getByTestId('context-capsule-toggle').click();
+  await expect(page.getByTestId('context-capsule-text')).toContainText('Rain');
 });

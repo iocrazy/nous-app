@@ -206,14 +206,30 @@ test('Group wraps selection; dragging the group moves members (②-3)', async ({
   expect(groupBox.width).toBeGreaterThan(200);
   expect(groupBox.height).toBeGreaterThan(200);
 
-  // Drag the group by its top edge — members must ride along (RF parentId).
+  // Drag the group from an empty patch of its own background — NOT its "top
+  // edge, horizontal center" (the old coordinates). This canvas's seeded
+  // layout (p1 top-left, shot1/out1 bottom-right — see CANVAS above) makes
+  // the group wide enough that its top-center point lands squarely on
+  // TopNodeBar (`aria-label="Canvas node bar"`), a fixed-position toolbar
+  // absolutely positioned OVER the canvas pane (top-4, horizontally
+  // centered, z-30) — confirmed via elementFromPoint: the old click hit a
+  // toolbar <button>, never the group node, so the "drag" moved nothing and
+  // the assertion saw a 0px delta. Pick a point empirically clear of every
+  // overlapping surface: left of every member node's left edge (inside the
+  // group's own padding) and vertically between p1's bottom and the
+  // shot1/out1 row's top (both members are far from the group's edges here).
   const before = await page
     .locator('.react-flow__node[data-id="p1"]')
     .evaluate((el) => (el as HTMLElement).getBoundingClientRect().x);
   const box = (await group.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + 6);
+  const p1Rect = (await page.locator('.react-flow__node[data-id="p1"]').boundingBox())!;
+  const shot1Rect = (await page.locator('.react-flow__node[data-id="shot1"]').boundingBox())!;
+  const out1Rect = (await page.locator('.react-flow__node[data-id="out1"]').boundingBox())!;
+  const dragX = box.x + 10;
+  const dragY = (p1Rect.y + p1Rect.height + Math.min(shot1Rect.y, out1Rect.y)) / 2;
+  await page.mouse.move(dragX, dragY);
   await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2 + 120, box.y + 6, { steps: 6 });
+  await page.mouse.move(dragX + 120, dragY, { steps: 6 });
   await page.mouse.up();
   const after = await page
     .locator('.react-flow__node[data-id="p1"]')
@@ -339,7 +355,16 @@ test('double-click empty canvas opens the create menu; picking adds an unwired n
   await page.locator('.react-flow__pane').dblclick({ position: { x: 700, y: 200 } });
   const menu = page.getByRole('menu', { name: 'Add node' });
   await expect(menu).toBeVisible();
-  await menu.getByRole('menuitem', { name: 'Prompt' }).click();
+  // Each card's accessible name is its title + one-line description
+  // concatenated (DragCreateMenu.tsx) — the "Group" card's description
+  // ("Collect media, prompts and loops together") contains "prompt" as a
+  // substring, so an unscoped `name: 'Prompt'` (case-insensitive substring
+  // match) resolves to both cards (strict-mode violation). Scope to the
+  // menuitem whose OWN title span text is the exact string "Prompt".
+  await menu
+    .getByRole('menuitem')
+    .filter({ has: page.getByText('Prompt', { exact: true }) })
+    .click();
 
   await expect(page.locator('.react-flow__node')).toHaveCount(4);
   // No origin — the node arrives unwired.
