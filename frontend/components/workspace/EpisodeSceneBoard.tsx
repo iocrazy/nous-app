@@ -2,14 +2,17 @@
  * EpisodeSceneBoard — view one ("Storyboard") of the episode-node three-view
  * primary work surface (SDD 2026-08-09 Task 1). A vertical stream of scene
  * cards: each carries the scene's real slate metadata (scene_number / I-E /
- * location / time-of-day), an "Open" deep-link into the script editor, an
- * "Auto Storyboard" two-click-confirm dispatch, and a simplified read-only
- * shot list.
+ * location / time-of-day), an "Open" affordance that re-centers its own
+ * column (used to deep-link into the embedded editor's storyboard rail —
+ * retired in Task 6, shot-nodes-on-canvas epic, since this view IS that
+ * board now), an "Auto Storyboard" two-click-confirm dispatch, and a
+ * simplified read-only shot list.
  *
- * The confirm+poll dispatch mirrors StoryboardView:153-200 — the LOGIC is
- * ported here, not imported, per the plan's workspace/editor design-language
- * split (this surface uses the content / island / line / accent token family,
- * never the editor's local --ink or --surface CSS, nor its mh-sb- classes).
+ * The confirm+poll dispatch was ported from the old editor storyboard
+ * rail's StoryboardView (since deleted) — the LOGIC was ported, not
+ * imported, per the plan's workspace/editor design-language split (this
+ * surface uses the content / island / line / accent token family, never the
+ * editor's local --ink or --surface CSS, nor its mh-sb- classes).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -23,12 +26,20 @@ const CONFIRM_WINDOW_MS = 3000;
 
 export interface EpisodeSceneBoardProps {
   scriptId: string;
-  /** Deep-link into the scene (opens the script editor there). */
+  /**
+   * "Open" click on the scene's own column — handled by the parent
+   * (`EpisodeStoryboardPage`) purely locally: scrolls that column into view.
+   * Used to deep-link into the embedded editor's storyboard rail at that
+   * scene (Task 8); that rail was retired in Task 6 (shot-nodes-on-canvas
+   * epic) since this board is now its own destination.
+   */
   onOpenScene: (sceneId: string) => void;
   /**
-   * Shot card click → deep-link into the script editor's storyboard rail,
-   * focused on this shot (Task 3 修复轮2, 2026-08-10 用户拍板: the editor is
-   * the only shotFocusBus subscriber — NOT this page's own Canvas tab). The
+   * Shot card click → switches the storyboard page to its own Canvas tab
+   * and focuses this shot's node there (shot-nodes-on-canvas Task 5,
+   * 2026-08-11 — supersedes the Task 3 修复轮2 editor deep-link; the Canvas
+   * tab now embeds the episode's real storyboard canvas with shot nodes
+   * bound to `script_shots`, so a focus request there is meaningful). The
    * shot's own sceneId rides along since the column it's rendered in already
    * has it at hand — same shape as `onOpenScene` above.
    */

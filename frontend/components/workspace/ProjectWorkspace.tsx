@@ -27,7 +27,6 @@ import {
 } from '../../services/scriptService';
 import { useToast } from '../Toast';
 import { useAuth } from '../../contexts/AuthContext';
-import { hasShotFocusListener, requestShotFocus } from '../agentActivity/shotFocusBus';
 // Kept eager: ProjectsListView statically imports it too, so it lives in the
 // ProjectsPage chunk regardless — a dynamic import here buys nothing and just
 // trips Rollup's "dynamically + statically imported" warning.
@@ -105,37 +104,6 @@ export function readWorkspaceParams(sp: URLSearchParams) {
     return v && v.length > 0 ? v : null;
   };
   return { ep: get('ep'), node: get('node'), view: get('view'), scene: get('scene'), shot: get('shot') };
-}
-
-// Shot-focus request timing (Task 3 修复轮2, 2026-08-10 用户拍板): `shotFocusBus`'s
-// ONLY subscriber is EditorShell (editor/components/EditorShell.tsx ~L534,
-// `useEffect(() => onShotFocus(...), [selectRailView])`), which registers on
-// mount. Getting from "shot card clicked" to "EditorShell mounted and
-// subscribed" crosses TWO unbounded async hops — resolving/provisioning the
-// episode's script (network) and loading EditorShell's own lazy chunk
-// (`lazy(() => import('../../editor/components/EditorShell'))` above) — so a
-// single fixed delay (the 300ms this codebase used for the OLD page-local
-// canvas jump, when the target was already mounted) can't be trusted here.
-// `hasShotFocusListener()` (already exported by the bus for exactly this
-// "is anyone listening" question) turns the guess into a check: try once
-// after a generous first delay, and if nobody's listening yet, retry once
-// more after a longer one before giving up silently — matching the bus's own
-// fire-and-forget philosophy ("a chip that does nothing beats yanking the
-// writer somewhere unexpected", per shotFocusBus.ts's file doc comment) over
-// an unbounded poll loop.
-const SHOT_FOCUS_FIRST_DELAY_MS = 400;
-const SHOT_FOCUS_RETRY_DELAY_MS = 900;
-
-function requestShotFocusWhenEditorReady(shotId: string): void {
-  window.setTimeout(() => {
-    if (hasShotFocusListener()) {
-      requestShotFocus(shotId);
-      return;
-    }
-    window.setTimeout(() => {
-      if (hasShotFocusListener()) requestShotFocus(shotId);
-    }, SHOT_FOCUS_RETRY_DELAY_MS);
-  }, SHOT_FOCUS_FIRST_DELAY_MS);
 }
 
 interface ProjectWorkspaceProps {
@@ -587,11 +555,6 @@ export function ProjectWorkspace({
   // active scene number.
   const [resolvedScriptId, setResolvedScriptId] = useState<string | null>(null);
   const [studioView, setStudioView] = useState<RailView>('script');
-  // Scene-card deep link (Task 8): set alongside studioView by
-  // handleOpenWorkView when a scene card's Open passes a sceneId, cleared on
-  // the bare-storyboard early return so a stale target doesn't leak into a
-  // later plain script/beats open.
-  const [studioFocusSceneId, setStudioFocusSceneId] = useState<string | null>(null);
   const [studioScenes, setStudioScenes] = useState<SceneLift[]>([]);
   const [studioActiveSceneId, setStudioActiveSceneId] = useState<string | null>(null);
 
@@ -672,29 +635,14 @@ export function ProjectWorkspace({
   // Resolve a given episode's most recently updated script and mount
   // EditorShell inline (no route jump); no script → provision an empty one the
   // same way project-create does, then mount it. `railView` presets the work
-  // view (and the sidebar highlight). ───
-  // `focusSceneId` (Task 8 fix round 1): this is the ONLY call site that flips
-  // activeModule to 'script' (the studioMode condition EditorShell mounts on),
-  // so it's the single choke point for studioFocusSceneId too — every caller
-  // must declare its scene-focus intent explicitly, default null CLEARS it.
-  // Without this, a scene-card deep link's target survived in bare React state
-  // past the EditorShell unmount (leaving 'script' drops the mount but not the
-  // state) and got silently re-consumed by the next, unrelated remount —
-  // "Continue Writing" or an episode row's Open button (neither of which ever
-  // meant to focus a scene) — scrolling to a scene the writer never asked for
-  // this time.
+  // view (and the sidebar highlight).
   const openEpisodeScript = useCallback(
-    async (
-      episode: EpisodeProgress | null,
-      railView: RailView = 'script',
-      focusSceneId: string | null = null,
-    ) => {
+    async (episode: EpisodeProgress | null, railView: RailView = 'script') => {
       if (!episode) {
         setActiveModule('episodes');
         return;
       }
       setStudioView(railView);
-      setStudioFocusSceneId(focusSceneId);
       try {
         const scriptId = await resolveOrProvisionScript(episode);
         if (!scriptId) {
@@ -714,28 +662,24 @@ export function ProjectWorkspace({
   );
 
   // Storyboard is now the episode node's PRIMARY face (三视图主工作面, 2026-08-09
-  // 拍板) AND its own standalone module (IA redesign Task 2): a bare open
-  // ('storyboard', no sceneId) — from the sidebar's 分镜 row, a workflow-strip
-  // node (handleSelectNode below), or anywhere else that used to jump
-  // straight into the embedded editor — now routes to the dedicated
-  // EpisodeStoryboardPage module (EpisodeSceneBoard IS the view, not an entry
-  // button into one). Only a scene card's "Open" deep-link (opts.sceneId set)
-  // still wants the real editor — studioFocusSceneId carries the target down
-  // to EditorShell's initialFocusSceneId, which scrolls the matching
-  // storyboard column / script scene into view once it has rendered (Task 8).
+  // 拍板) AND its own standalone module (IA redesign Task 2): every open
+  // ('storyboard', from the sidebar's 分镜 row, a workflow-strip node —
+  // handleSelectNode below — or anywhere else that used to jump straight into
+  // the embedded editor) routes to the dedicated EpisodeStoryboardPage module
+  // (EpisodeSceneBoard IS the view, not an entry button into one). A scene
+  // card's "Open" deep-link (view one's own `ep-scene-open-*` button) no
+  // longer reaches this function at all — Task 6 (shot-nodes-on-canvas epic)
+  // retired the embedded editor's storyboard rail it used to target, so that
+  // click is now handled entirely locally by EpisodeStoryboardPage (scrolls
+  // its own scene column into view; see that component).
   const handleOpenWorkView = useCallback(
-    (view: WorkView, opts?: { sceneId?: string }) => {
-      if (view === 'storyboard' && !opts?.sceneId) {
-        setStudioFocusSceneId(null); // clear any stale target from a prior deep link
+    (view: WorkView) => {
+      if (view === 'storyboard') {
         setActiveModule('storyboard');
         return;
       }
       setStudioView(view);
-      void openEpisodeScript(
-        currentEpisode,
-        view,
-        view === 'storyboard' && opts?.sceneId ? opts.sceneId : null,
-      );
+      void openEpisodeScript(currentEpisode, view);
     },
     [openEpisodeScript, currentEpisode],
   );
@@ -925,42 +869,37 @@ export function ProjectWorkspace({
     [setSearchParams],
   );
 
-  // Shot deep-link into the editor (Task 3 修复轮2, 2026-08-10 用户拍板): the
-  // ONLY two entry points — a scene board's shot-card click (via
-  // EpisodeStoryboardPage's `onOpenShotInEditor` prop, sceneId always known —
-  // the shot's own column has it) and the URL `?shot=` one-shot trigger below
-  // (sceneId unknown, `null` — an agent-panel/share link only carries the
-  // shot id) — both funnel through here, so there is exactly ONE behavior to
-  // reason about. Routes through `openEpisodeScript` directly (NOT
-  // `handleOpenWorkView('storyboard', {sceneId})`; that helper's own
-  // `!opts?.sceneId` guard would redirect a null-sceneId call back to the
-  // standalone Storyboard MODULE page instead of the embedded editor — see
-  // its comment above). `openEpisodeScript` already handles `sceneId=null`
-  // gracefully (just skips the scroll-to-scene half), so the editor's
-  // storyboard rail opens on the current episode's script either way.
-  const handleOpenShotInEditor = useCallback(
-    (shotId: string, sceneId: string | null) => {
-      void openEpisodeScript(currentEpisode, 'storyboard', sceneId);
-      requestShotFocusWhenEditorReady(shotId);
-    },
-    [openEpisodeScript, currentEpisode],
-  );
+  // Entry point ② for the storyboard CANVAS focus (shot-nodes-on-canvas Task
+  // 5): threaded down to `EpisodeStoryboardPage`'s `focusShotId` prop, which
+  // merges it into that page's own local focus state (alongside the shot
+  // card click / shotFocusBus entry points it owns) and reports back via
+  // `onFocusShotIdConsumed` so this is reset for the next request.
+  const [canvasFocusShotId, setCanvasFocusShotId] = useState<string | null>(null);
+  // Stable identity (评审修复轮1 Minor) — an inline arrow at the JSX call
+  // site below would be a fresh function every render, and it's in
+  // `EpisodeStoryboardPage`'s `focusShotId` effect's dependency array,
+  // needlessly re-running that effect on every unrelated ProjectWorkspace
+  // re-render.
+  const handleCanvasFocusShotIdConsumed = useCallback(() => setCanvasFocusShotId(null), []);
 
-  // URL `?shot=` one-shot deep-link (kept as an entry point per 修复轮2's
-  // 拍板: an agent panel or a shared link may carry `shot=<id>` into the
-  // Storyboard module page without a `scene`). Fires once `currentEpisode`
-  // has resolved (so `openEpisodeScript` above has a real episode to work
-  // with, not a premature `null` that would bounce to the Episodes module),
-  // then immediately clears `shot` from the URL in the SAME effect — true
-  // one-shot, mirroring the `shot`-clearing contract `handleStoryboardViewChange`
-  // already enforces on a manual tab switch. Not gated on `activeModule` —
-  // the deep-link's destination is the EDITOR, a different module entirely,
-  // so it's meant to fire regardless of which module the URL happened to
-  // land on first.
+  // URL `?shot=` one-shot deep-link — always focuses the shot in the
+  // storyboard CANVAS now (Task 6, shot-nodes-on-canvas epic): the `view`
+  // branch that used to route a bare `?shot=` (no `view=canvas`) into the
+  // embedded editor's storyboard rail was retired alongside that rail —
+  // canvas is the only surface a shot can be focused in any more, so every
+  // `?shot=` deep link (an agent panel chip, or a shared link) converges on
+  // the same destination as entry point ① (shot card click) and ③
+  // (shotFocusBus) above. Fires once `currentEpisode` has resolved (so a
+  // premature `null` doesn't bounce anything), then immediately clears
+  // `shot` from the URL in the SAME effect — true one-shot, mirroring the
+  // `shot`-clearing contract `handleStoryboardViewChange` already enforces
+  // on a manual tab switch. Not gated on `activeModule` — the focus request
+  // is meant to fire regardless of which module the URL happened to land on
+  // first.
   useEffect(() => {
-    const shotId = readWorkspaceParams(searchParams).shot;
+    const { shot: shotId } = readWorkspaceParams(searchParams);
     if (!shotId || !currentEpisode) return;
-    handleOpenShotInEditor(shotId, null);
+    setCanvasFocusShotId(shotId);
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -969,7 +908,7 @@ export function ProjectWorkspace({
       },
       { replace: true },
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately narrow: re-checks whenever `searchParams` changes (for a fresh `shot` value) or `currentEpisode` first resolves; `handleOpenShotInEditor`'s identity riding on `currentEpisode` would otherwise re-fire this on every episodes refetch even with no `shot` in the URL, but the `!shotId` guard above already makes that a no-op
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately narrow: re-checks whenever `searchParams` changes (for a fresh `shot` value) or `currentEpisode` first resolves, but the `!shotId` guard above already makes an unrelated re-render a no-op. `setCanvasFocusShotId` is a stable setState setter — omitted like every other setState setter in this file's dep arrays.
   }, [searchParams, currentEpisode, setSearchParams]);
 
   // Film slate read-out (studio only): 1-based episode + active-scene numbers.
@@ -1070,7 +1009,6 @@ export function ProjectWorkspace({
               currentUserName={userProfile.name}
               projectId={project.id}
               initialRailView={studioView}
-              initialFocusSceneId={studioFocusSceneId ?? undefined}
               embedded
               onScenesChange={handleScenesChange}
               onActiveSceneChange={handleActiveSceneChange}
@@ -1089,8 +1027,8 @@ export function ProjectWorkspace({
             onViewChange={handleStoryboardViewChange}
             findExistingScript={findExistingScript}
             provisionScript={resolveOrProvisionScript}
-            onOpenScene={(sceneId) => handleOpenWorkView('storyboard', { sceneId })}
-            onOpenShotInEditor={handleOpenShotInEditor}
+            focusShotId={canvasFocusShotId}
+            onFocusShotIdConsumed={handleCanvasFocusShotIdConsumed}
           />
         ) : (
           <div className="flex-1 overflow-y-auto px-6 pb-8">

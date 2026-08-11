@@ -9,6 +9,7 @@ import {
   deriveGrid,
   deriveMaskCutout,
   deriveOutpaint,
+  getOrCreateStoryboardCanvas,
   saveCanvas,
 } from './canvasService';
 
@@ -93,6 +94,32 @@ describe('saveCanvas', () => {
     await expect(
       saveCanvas('4242', { base_updated_at: serverRow.base_updated_at }),
     ).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe('getOrCreateStoryboardCanvas', () => {
+  it('GETs /canvases/storyboard with episode_id as a query param and returns the row', async () => {
+    const storyboardRow: Canvas = { ...serverRow, id: '5150', kind: 'storyboard', episode_id: '900' };
+    fetchMock.mockResolvedValueOnce(envelope(storyboardRow));
+
+    const result = await getOrCreateStoryboardCanvas('900');
+
+    expect(result.id).toBe('5150');
+    expect(result.kind).toBe('storyboard');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/api/v1/canvases/storyboard');
+    expect(String(url)).toContain('episode_id=900');
+  });
+
+  it('rethrows a non-2xx response as ApiError (e.g. 404 episode_not_found)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: { code: 'episode_not_found' } }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    await expect(getOrCreateStoryboardCanvas('missing')).rejects.toBeInstanceOf(ApiError);
   });
 });
 

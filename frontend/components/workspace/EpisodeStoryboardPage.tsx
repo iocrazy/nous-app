@@ -20,13 +20,21 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loading } from '../common/Loading';
 import { useToast } from '../Toast';
+import { onShotFocus, onStoryboardRefresh } from '../agentActivity/shotFocusBus';
+import { onOpenShotInList } from '../../features/canvas-core/smart/openShotInListBus';
+import { StoryboardCanvasEmbed } from '../../features/canvas-core/ui/StoryboardCanvasEmbed';
 import { EpisodeViewTabs } from './EpisodeViewTabs';
 import { EpisodeSceneBoard } from './EpisodeSceneBoard';
 import { EpisodeShotListTable, type EpisodeShotListTableHandle } from './EpisodeShotListTable';
-import { WorkspaceCanvas } from './WorkspaceCanvas';
 import { SURFACE_VIEWS } from './nodeSurface';
 import { __clearSceneShotsCache } from './useSceneShots';
 import type { EpisodeProgress } from '../../types';
+
+/** How many 150ms polls `scrollToShotCard` retries before giving up
+ *  silently (~3s) — the shot-list view's data (scenes/shots) can still be
+ *  loading when the "Delete in shot list" menu action switches tabs. */
+const SCROLL_TO_SHOT_MAX_ATTEMPTS = 20;
+const SCROLL_TO_SHOT_POLL_MS = 150;
 
 export interface EpisodeStoryboardPageProps {
   projectId: string;
@@ -37,19 +45,22 @@ export interface EpisodeStoryboardPageProps {
   onViewChange: (view: string) => void;
   findExistingScript: (ep: EpisodeProgress) => Promise<string | null>;
   provisionScript: (ep: EpisodeProgress) => Promise<string | null>;
-  /** Scene card's Open deep-link → the real editor at the scene level. */
-  onOpenScene: (sceneId: string) => void;
   /**
-   * Shot card click (Task 3 修复轮2, 2026-08-10 用户拍板) → deep-link into the
-   * REAL script editor's storyboard rail, focused on this shot — NOT this
-   * page's own Canvas tab. `shotFocusBus`'s only subscriber is EditorShell
-   * (~editor/components/EditorShell.tsx:534); this page's `view==='canvas'`
-   * tab is the materials canvas (no shot nodes at all — a focus request there
-   * would spin the bus emptily). The container (ProjectWorkspace) owns the
-   * editor-mount + bus-retry orchestration since only it can flip
-   * `activeModule` to the embedded editor; this page just forwards the click.
+   * Entry point ② (shot-nodes-on-canvas Task 5): the URL `?shot=<id>` deep
+   * link, resolved by ProjectWorkspace's own shot-URL effect. Every shot
+   * focus request converges on the canvas now (Task 6 retired the embedded
+   * editor's storyboard rail this used to alternate with) — ProjectWorkspace
+   * clears the URL's `shot` param itself the moment it reads it (existing
+   * one-shot precedent), so this page only needs to merge the value into its
+   * own focus state and report back that it did.
    */
-  onOpenShotInEditor: (shotId: string, sceneId: string) => void;
+  focusShotId?: string | null;
+  /** Fired once `focusShotId` has been merged into local state — lets
+   *  ProjectWorkspace reset its own copy so a later render doesn't re-fire
+   *  (does NOT wait for the canvas to actually finish focusing the node;
+   *  see `StoryboardCanvasEmbed`/`CanvasView`'s own `onFocusHandled` for
+   *  that longer async leg). */
+  onFocusShotIdConsumed?: () => void;
 }
 
 const STORYBOARD_VIEWS = SURFACE_VIEWS.storyboard;
@@ -95,8 +106,8 @@ export function EpisodeStoryboardPage({
   onViewChange,
   findExistingScript,
   provisionScript,
-  onOpenScene,
-  onOpenShotInEditor,
+  focusShotId,
+  onFocusShotIdConsumed,
 }: EpisodeStoryboardPageProps) {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -109,10 +120,12 @@ export function EpisodeStoryboardPage({
   // to the URL. Review fix round 1 (sticky `?shot=`): ProjectWorkspace's
   // `onViewChange` deletes `shot` from the URL in the same setSearchParams
   // call — `shot` is a one-shot deep-link trigger, invalidated the moment the
-  // writer manually picks a view. Deliberately NOT used by the focus effect
-  // below (see its own comment) — routing that programmatic auto-switch
-  // through here too would race the URL write against the pending focus
-  // timer.
+  // writer manually picks a view. Also reused (Task 5) by the two
+  // NON-url-driven focus entry points below (shot card click / shotFocusBus)
+  // since both are genuine "switch tab" actions the URL should reflect —
+  // unlike the pure `focusShotId` prop effect further down, which sets
+  // `view` directly without a second `onViewChange` call (the URL already
+  // says `view=canvas`, that's WHY the prop is populated).
   const handleTabChange = useCallback(
     (next: string) => {
       setViewState(next);
@@ -120,6 +133,122 @@ export function EpisodeStoryboardPage({
     },
     [onViewChange],
   );
+
+  // Shot viewport focus (Task 5) — merges all three entry points into one
+  // piece of state, threaded down into the embedded canvas.
+  const [activeFocusShotId, setActiveFocusShotId] = useState<string | null>(null);
+  const handleFocusHandled = useCallback(() => setActiveFocusShotId(null), []);
+
+  // Entry ①: a view-one shot card click. Replaces the old "深链编辑器"
+  // behavior (retired in Task 6 along with the editor's storyboard rail) —
+  // the Canvas tab now IS the episode's real storyboard canvas (shot nodes
+  // bound to `script_shots`), so focusing there is meaningful.
+  const handleShotCardFocus = useCallback(
+    (shotId: string, _sceneId: string) => {
+      setActiveFocusShotId(shotId);
+      handleTabChange('canvas');
+    },
+    [handleTabChange],
+  );
+
+  // Entry ②: URL `?shot=<id>` (see `focusShotId`'s doc comment on the props
+  // interface — ProjectWorkspace already cleared the URL by the time this
+  // fires). `view` is set directly (not via `handleTabChange` — this is a
+  // prop-driven jump, not a manual tab click the URL needs a second write for).
+  useEffect(() => {
+    if (!focusShotId) return;
+    setViewState('canvas');
+    setActiveFocusShotId(focusShotId);
+    onFocusShotIdConsumed?.();
+  }, [focusShotId, onFocusShotIdConsumed]);
+
+  // Entry ③: `shotFocusBus` (an agent panel's shot summary chip). Was one of
+  // two subscribers alongside EditorShell's own (shot-nodes-on-canvas Task 5
+  // binding decision, 2026-08-11) until Task 6 retired the editor's
+  // storyboard rail — this page is now the bus's sole subscriber.
+  useEffect(() => onShotFocus((shotId) => {
+    setActiveFocusShotId(shotId);
+    handleTabChange('canvas');
+  }), [handleTabChange]);
+
+  // `onStoryboardRefresh` (Task 6 review 修复轮1, 2026-08-11): the OLD
+  // editor storyboard rail's `StoryboardView` subscribed to this same
+  // channel (an Agent Run Undo, `useRunUndo.ts`'s `requestStoryboardRefresh`,
+  // fires it after mutating script_shots) — deleting that component in Task
+  // 6 orphaned it, so an undo left the page showing pre-undo data with no
+  // signal. Re-subscribed HERE for the storyboard CANVAS half only — view
+  // one/three's scene/shot data refresh is handled by `useSceneShots`
+  // itself (see that hook's own doc comment for why that's the better
+  // attachment point for THAT half: both view consumers already share it,
+  // and its mount lifecycle is a strict subset of this page's). The canvas
+  // is a separate store this page can't reach through `useSceneShots`, so
+  // it needs its own trigger — bumping this token forces `CanvasView`'s
+  // EXISTING reconcile effect (shot-nodes-on-canvas Task 4) to re-run, not
+  // a new mechanism. Subscribed for this page's entire mount lifetime (not
+  // gated to the Canvas tab being active) so a later switch TO Canvas
+  // always carries a token bump that already happened; harmless when the
+  // Canvas tab isn't mounted at all — `StoryboardCanvasEmbed`/`CanvasView`
+  // simply doesn't exist yet to receive the prop, same "nobody's listening"
+  // contract as `shotFocusBus` documents, and the eventual mount reconciles
+  // fresh from the API regardless.
+  const [canvasRefreshToken, setCanvasRefreshToken] = useState(0);
+  useEffect(
+    () => onStoryboardRefresh(() => setCanvasRefreshToken((n) => n + 1)),
+    [],
+  );
+
+  // Scene card's Open (view one, `EpisodeSceneBoard`'s `ep-scene-open-*`
+  // button): used to deep-link into the embedded editor's storyboard rail at
+  // that scene (Task 8) — retired in Task 6 along with the rest of that
+  // rail. The click always happens while this page is already on view one
+  // (`EpisodeSceneBoard` only renders there), so there is no tab to switch
+  // and nowhere to bubble this to; it purely re-centers a column that may
+  // have scrolled out of the horizontally-scrolling row. Handled entirely
+  // locally — unlike the shot-focus entries above, publisher and target
+  // share this exact component tree.
+  const handleOpenScene = useCallback((sceneId: string) => {
+    document
+      .querySelector<HTMLElement>(`[data-testid="scene-column-${sceneId}"]`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }, []);
+
+  // Task 4's node-menu "Delete in shot list" (`openShotInListBus`) — switch
+  // to view one and scroll/highlight the matching shot card. The card's DOM
+  // node may not exist yet the instant the tab switches (EpisodeSceneBoard's
+  // own scenes/shots fetch is async) — `pendingScrollShotId` survives the
+  // tab switch and the effect below polls briefly for the element.
+  const [pendingScrollShotId, setPendingScrollShotId] = useState<string | null>(null);
+  useEffect(() => onOpenShotInList((shotId) => {
+    setPendingScrollShotId(shotId);
+    handleTabChange('storyboard');
+  }), [handleTabChange]);
+
+  useEffect(() => {
+    if (!pendingScrollShotId || view !== 'storyboard') return;
+    let cancelled = false;
+    let attempts = 0;
+    const tryScroll = () => {
+      if (cancelled) return;
+      const el = document.querySelector(`[data-testid="shot-card-${pendingScrollShotId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setPendingScrollShotId(null);
+        return;
+      }
+      attempts += 1;
+      if (attempts >= SCROLL_TO_SHOT_MAX_ATTEMPTS) {
+        // Give up silently — same fire-and-forget philosophy as the buses
+        // this converges (a no-op beats yanking the writer around).
+        setPendingScrollShotId(null);
+        return;
+      }
+      window.setTimeout(tryScroll, SCROLL_TO_SHOT_POLL_MS);
+    };
+    tryScroll();
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingScrollShotId, view]);
 
   // Read-only probe (ported from ProjectWorkspace's surface panel, Task 3
   // review fix): re-probes on every episode-id change so switching episodes
@@ -253,18 +382,34 @@ export function EpisodeStoryboardPage({
       </div>
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {view === 'canvas' ? (
-          // Reuse the SAME canvas module component (not a fork); its sidebar
-          // module registration (top-level Canvas) is untouched.
-          <div className="min-h-[24rem]">
-            <WorkspaceCanvas projectId={projectId} teamId={teamId} />
+          // The episode's own storyboard canvas (shot-nodes-on-canvas Task 5)
+          // — NOT the sidebar "Canvas" module's materials-canvas library
+          // (`WorkspaceCanvas`, unchanged, still lives at that separate
+          // entry point). `episode` is only null for the brief window before
+          // the episodes fetch resolves — the tabs render regardless, so
+          // this guards against mounting the embed with no episode id yet.
+          <div data-testid="episode-view-canvas" className="min-h-[24rem]">
+            {episode ? (
+              <StoryboardCanvasEmbed
+                episodeId={episode.episode_id}
+                teamId={teamId}
+                focusShotId={activeFocusShotId}
+                onFocusHandled={handleFocusHandled}
+                reconcileRefreshToken={canvasRefreshToken}
+              />
+            ) : (
+              <div className="flex justify-center py-10">
+                <Loading center />
+              </div>
+            )}
           </div>
         ) : view === 'storyboard' ? (
           <div data-testid="episode-view-storyboard" className="min-h-[24rem]">
             {script.status === 'ready' ? (
               <EpisodeSceneBoard
                 scriptId={script.scriptId}
-                onOpenScene={onOpenScene}
-                onOpenShot={onOpenShotInEditor}
+                onOpenScene={handleOpenScene}
+                onOpenShot={handleShotCardFocus}
               />
             ) : (
               renderScriptGate()

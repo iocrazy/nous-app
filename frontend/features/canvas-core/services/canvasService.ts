@@ -59,6 +59,23 @@ export async function deleteCanvas(canvasId: string): Promise<void> {
 }
 
 /**
+ * Idempotent get-or-create of an episode's system storyboard canvas
+ * (`kind==='storyboard'`, shot-nodes-on-canvas Task 1, mig 421). Backend:
+ * `GET /api/v1/canvases/storyboard?episode_id=` — registered before the
+ * dynamic `/canvases/{canvas_id}` route so 'storyboard' never gets
+ * captured as an id. Every call for the same episode returns the SAME row
+ * (lazy-created on first call, matching the design's "empty episode owes
+ * no canvas" rule) — safe to call on every mount of the storyboard page's
+ * Canvas tab.
+ */
+export async function getOrCreateStoryboardCanvas(episodeId: string): Promise<Canvas> {
+  const response = await apiFetch('/api/v1/canvases/storyboard', {
+    query: { episode_id: episodeId },
+  });
+  return readEnvelope<Canvas>(response);
+}
+
+/**
  * Save a canvas with optimistic-lock semantics.
  *
  *   { ok: true, canvas }  — saved; `canvas.base_updated_at` is the new lock token.

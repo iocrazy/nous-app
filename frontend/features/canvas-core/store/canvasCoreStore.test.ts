@@ -327,3 +327,260 @@ describe('canvasCoreStore — conflict handling', () => {
     expect(s.nodes).toEqual([{ id: 'local' }]);
   });
 });
+
+/**
+ * `mountEpoch` generation guard (Task 5 评审修复轮1 — "旧卸载 reset 竞态砸新
+ * 挂载 → 永久卡 Loading"). `CanvasView`'s unmount cleanup runs
+ * `flushSave().finally(() => { if (store.mountEpoch === myEpoch) reset(); })`
+ * — these tests exercise that EXACT pattern against the store directly
+ * (mirroring how the rest of this file already drives the store without
+ * mounting React), since the store is what owns `mountEpoch` and `reset()`.
+ *
+ * Deliberately does NOT assert on `baseUpdatedAt`/`persistedRevision` after
+ * the race resolves: `doSave`'s own post-await `set()` (this file's
+ * "debounced save" describe block, function `doSave` in the source) writes
+ * unconditionally on `result.ok`, with no epoch check of its own — a STALE
+ * save's `persistedRevision`/`baseUpdatedAt` can still land on a NEWER
+ * mount's state even with this guard. That is a related but DIFFERENT gap
+ * than the one this fix addresses (the reviewer's brief was explicit:
+ * "flushSave 本身照常执行" / guard only `reset()`, "选侵入最小") — flagged in
+ * the Task 5 report for a future pass, not fixed here.
+ */
+function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+describe('canvasCoreStore — mount generation guard (Task 5 评审修复轮1)', () => {
+  it('loadCanvas() bumps mountEpoch monotonically on every call', async () => {
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 0 });
+    expect(useStore.getState().mountEpoch).toBe(0);
+
+    await useStore.getState().loadCanvas('4242');
+    const first = useStore.getState().mountEpoch;
+    expect(first).toBeGreaterThan(0);
+
+    await useStore.getState().loadCanvas('4242');
+    expect(useStore.getState().mountEpoch).toBeGreaterThan(first);
+  });
+
+  it("a stale unmount's flushSave().finally(guarded reset) does NOT clobber a NEWER mount already at ready", async () => {
+    const stubs = makeStubs();
+    const gate = deferred<void>();
+    const hangingSaveImpl = vi.fn(
+      async (canvasId: string, payload: CanvasUpdatePayload): Promise<CanvasSaveResult> => {
+        await gate.promise;
+        return stubs.saveImpl(canvasId, payload);
+      },
+    );
+    const useStore = createCanvasCoreStore({
+      loadImpl: stubs.loadImpl,
+      saveImpl: hangingSaveImpl,
+      debounceMs: 0,
+    });
+
+    // OLD instance mounts and gets dirtied (a real edit before the writer
+    // switches tabs away).
+    await useStore.getState().loadCanvas('4242');
+    const oldEpoch = useStore.getState().mountEpoch;
+    useStore.getState().setNodes([{ id: 'dirty-from-old-instance' }]);
+
+    // OLD instance "unmounts" — verbatim the same guarded-cleanup pattern
+    // `CanvasView`'s effect runs.
+    const oldUnmountTail = useStore.getState().flushSave().finally(() => {
+      if (useStore.getState().mountEpoch === oldEpoch) {
+        useStore.getState().reset();
+      }
+    });
+    expect(hangingSaveImpl).toHaveBeenCalledTimes(1); // save IS in flight, hanging on `gate`
+
+    // NEW instance mounts (writer flipped back to the tab) BEFORE the old
+    // flush resolves, and reaches ready.
+    await useStore.getState().loadCanvas('4242');
+    expect(useStore.getState().loadStatus).toBe('ready');
+    const newEpoch = useStore.getState().mountEpoch;
+    expect(newEpoch).not.toBe(oldEpoch);
+
+    // Now let the OLD save resolve — its guarded reset() must see the
+    // world has moved on and skip itself.
+    gate.resolve();
+    await oldUnmountTail;
+
+    // The symptom the reviewer flagged: NOT permanently stuck re-showing
+    // "Loading canvas…" — loadStatus/canvasId survive the stale tail.
+    expect(useStore.getState().loadStatus).toBe('ready');
+    expect(useStore.getState().canvasId).toBe('4242');
+  });
+
+  it('a normal unmount with NO newer mount still resets as before (guard is a no-op in the common case)', async () => {
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 0 });
+
+    await useStore.getState().loadCanvas('4242');
+    const myEpoch = useStore.getState().mountEpoch;
+
+    await useStore.getState().flushSave().finally(() => {
+      if (useStore.getState().mountEpoch === myEpoch) {
+        useStore.getState().reset();
+      }
+    });
+
+    expect(useStore.getState().loadStatus).toBe('idle');
+    expect(useStore.getState().canvasId).toBeNull();
+  });
+
+  it('dirty data still gets flushed (saveImpl called) even though the tail-end reset ends up guarded away', async () => {
+    const stubs = makeStubs();
+    const gate = deferred<void>();
+    const hangingSaveImpl = vi.fn(
+      async (canvasId: string, payload: CanvasUpdatePayload): Promise<CanvasSaveResult> => {
+        await gate.promise;
+        return stubs.saveImpl(canvasId, payload);
+      },
+    );
+    const useStore = createCanvasCoreStore({
+      loadImpl: stubs.loadImpl,
+      saveImpl: hangingSaveImpl,
+      debounceMs: 0,
+    });
+
+    await useStore.getState().loadCanvas('4242');
+    const oldEpoch = useStore.getState().mountEpoch;
+    useStore.getState().setNodes([{ id: 'must-not-be-lost' }]);
+
+    const oldUnmountTail = useStore.getState().flushSave().finally(() => {
+      if (useStore.getState().mountEpoch === oldEpoch) {
+        useStore.getState().reset();
+      }
+    });
+    await useStore.getState().loadCanvas('4242'); // a newer mount takes over
+    gate.resolve();
+    await oldUnmountTail;
+
+    // The save call itself happened with the dirty payload — the guard only
+    // ever short-circuits `reset()`, never `flushSave()`/`doSave()`.
+    expect(hangingSaveImpl).toHaveBeenCalledTimes(1);
+    expect(hangingSaveImpl.mock.calls[0][1]).toMatchObject({
+      nodes_json: [{ id: 'must-not-be-lost' }],
+    });
+  });
+});
+
+/**
+ * `doSave`'s own post-await `set()` calls (Task 5 评审修复轮2 — escalated
+ * from a "flagged but deferred" note in 修复轮1 to a real data-loss path on
+ * re-review). `revision`/`persistedRevision` both reset to 0 on every
+ * `loadCanvas()` — small integers collide across mounts constantly (the
+ * very first edit after ANY mount lands on revision 1). If an OLD mount's
+ * `doSave` resolves AFTER a NEWER mount has loaded and made its own edit
+ * that happens to land on the SAME revision number, the old save's
+ * unconditional `persistedRevision: snapshot.revision` write marks the
+ * NEW mount's real, unsaved edit as "already saved" — the next
+ * `doSave`/`flushSave` hits the `persistedRevision >= revision` early
+ * return and the edit is silently never sent. The 409 branch has the same
+ * shape of bug: a stale conflict can paint a false conflict banner over a
+ * newer, clean mount.
+ */
+describe('canvasCoreStore — doSave post-write mount generation guard (Task 5 评审修复轮2)', () => {
+  it('a stale doSave success resolving after a NEWER mount made a SAME-revision edit does not mark that edit saved (data-loss regression)', async () => {
+    const stubs = makeStubs();
+    const gate = deferred<void>();
+    const hangingSaveImpl = vi.fn(
+      async (canvasId: string, payload: CanvasUpdatePayload): Promise<CanvasSaveResult> => {
+        await gate.promise;
+        return stubs.saveImpl(canvasId, payload);
+      },
+    );
+    const useStore = createCanvasCoreStore({
+      loadImpl: stubs.loadImpl,
+      saveImpl: hangingSaveImpl,
+      debounceMs: 0,
+    });
+
+    // OLD mount: load, edit (revision 0→1), flushSave kicks off and hangs.
+    await useStore.getState().loadCanvas('4242');
+    useStore.getState().setNodes([{ id: 'old-edit' }]);
+    expect(useStore.getState().revision).toBe(1);
+    const oldTail = useStore.getState().flushSave();
+    expect(hangingSaveImpl).toHaveBeenCalledTimes(1);
+
+    // NEW mount takes over — `loadCanvas` resets revision/persistedRevision
+    // to 0 — and makes its OWN edit, which lands on revision 1 too (the
+    // collision this bug depends on; both mounts' FIRST edit always does).
+    await useStore.getState().loadCanvas('4242');
+    useStore.getState().setNodes([{ id: 'new-unsaved-edit' }]);
+    expect(useStore.getState().revision).toBe(1); // collision confirmed
+
+    // Let the stale OLD save resolve.
+    gate.resolve();
+    await oldTail;
+
+    // The bug: `persistedRevision` getting set to 1 here would make the
+    // store believe the NEW mount's edit is already saved.
+    const s = useStore.getState();
+    expect(s.persistedRevision).toBe(0); // NOT marked saved
+    expect(s.nodes).toEqual([{ id: 'new-unsaved-edit' }]); // local edit intact
+
+    // Direct proof it isn't lost: a subsequent flushSave actually sends it.
+    hangingSaveImpl.mockClear();
+    await useStore.getState().flushSave();
+    expect(hangingSaveImpl).toHaveBeenCalledTimes(1);
+    expect(hangingSaveImpl.mock.calls[0][1]).toMatchObject({
+      nodes_json: [{ id: 'new-unsaved-edit' }],
+    });
+  });
+
+  it('a stale doSave 409 tail does not paint a conflict banner onto a NEWER, already-clean mount', async () => {
+    const stubs = makeStubs();
+    const gate = deferred<void>();
+    const hangingSaveImpl = vi.fn(
+      async (canvasId: string, payload: CanvasUpdatePayload): Promise<CanvasSaveResult> => {
+        await gate.promise;
+        return stubs.saveImpl(canvasId, payload);
+      },
+    );
+    const useStore = createCanvasCoreStore({
+      loadImpl: stubs.loadImpl,
+      saveImpl: hangingSaveImpl,
+      debounceMs: 0,
+    });
+
+    await useStore.getState().loadCanvas('4242');
+    useStore.getState().setNodes([{ id: 'old-edit' }]);
+    const oldTail = useStore.getState().flushSave(); // in flight, hanging
+
+    // Server moves on (another session/tab saves) while the OLD save is
+    // hanging — its stale base_updated_at will 409 once it finally lands.
+    stubs.bumpServer();
+
+    // NEW mount loads cleanly.
+    await useStore.getState().loadCanvas('4242');
+    expect(useStore.getState().saveStatus).toBe('idle');
+    expect(useStore.getState().conflict).toBeNull();
+
+    gate.resolve();
+    await oldTail;
+
+    // The stale 409 must not have painted anything onto the NEW mount.
+    const s = useStore.getState();
+    expect(s.conflict).toBeNull();
+    expect(s.saveStatus).toBe('idle');
+  });
+
+  it('a normal (single-mount, no race) save still applies its post-set as before', async () => {
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 0 });
+    await useStore.getState().loadCanvas('4242');
+    useStore.getState().setNodes([{ id: 'n1' }]);
+    await useStore.getState().flushSave();
+
+    const s = useStore.getState();
+    expect(s.persistedRevision).toBe(1);
+    expect(s.saveStatus).toBe('idle');
+    expect(s.baseUpdatedAt).not.toBe(baseCanvas.base_updated_at);
+  });
+});

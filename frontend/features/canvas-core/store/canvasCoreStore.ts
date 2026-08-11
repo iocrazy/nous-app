@@ -122,6 +122,20 @@ interface CanvasState {
   episodeId: string | null;
   loadStatus: CanvasLoadStatus;
   loadError: string | null;
+  /**
+   * Monotonic mount-generation counter, bumped by every `loadCanvas()` call
+   * (Task 5 评审修复轮1 — generation guard against a stale-unmount race).
+   * Embedding this store's view in a frequently-toggled tab (the storyboard
+   * page's Canvas tab) turned what used to be a rare route-navigation
+   * unmount into a high-frequency event: a fast tab-away-then-back can
+   * mount a NEW instance (bumping this) before the OLD instance's own
+   * unmount `flushSave().finally(reset)` tail resolves — without this
+   * guard, that stale `reset()` slams the NEW instance's already-`ready`
+   * state back to `idle` with nobody left to re-trigger `loadCanvas`,
+   * permanently stuck on "Loading canvas…". See `CanvasPage.tsx`'s unmount
+   * cleanup for the read side of this guard.
+   */
+  mountEpoch: number;
 
   // ---- Document ----
   viewport: CanvasViewport;
@@ -281,6 +295,11 @@ export function createCanvasCoreStore(
    *  when the debounced commit fires. Lets a user undo back to the state
    *  BEFORE the edit, not to a mid-burst intermediate. */
   let pendingHistoryBase: HistorySnapshot | null = null;
+  /** Backing counter for `mountEpoch` (Task 5 评审修复轮1) — a plain closure
+   *  variable rather than reading-then-incrementing store state, so every
+   *  `loadCanvas()` call gets a strictly unique value even if called
+   *  reentrantly before a previous `set()` has been observed. */
+  let mountEpochCounter = 0;
 
   const useStore = create<CanvasState>((set, get) => {
     function applyServerRow(row: Canvas): void {
@@ -389,6 +408,23 @@ export function createCanvasCoreStore(
       // visually present a little longer.
       const liveNodes = state.nodes.filter((n) => !isStaleNode(n));
 
+      // Mount-generation guard (Task 5 评审修复轮2 — doSave's own post-await
+      // `set()` calls below had no epoch check of their own, a gap flagged
+      // but deliberately deferred in 修复轮1 since it was judged a lesser
+      // "stale metadata" concern — re-review found it's actually a REAL
+      // data-loss path: `revision`/`persistedRevision` both reset to 0 on
+      // every `loadCanvas()`, so small integers collide across mounts
+      // constantly. If an OLD mount's `doSave` resolves AFTER a NEWER mount
+      // has loaded and made its own edit that happens to land on the SAME
+      // `revision` number, the old save's unconditional
+      // `persistedRevision: snapshot.revision` would mark the NEW mount's
+      // real, unsaved edit as "already saved" — the next `doSave`/
+      // `flushSave` hits the `persistedRevision >= revision` early-return
+      // above and the edit is silently never sent. Captured HERE (same
+      // synchronous snapshot point as `revision`/`baseUpdatedAt` below) so
+      // it reflects exactly which mount generation took this snapshot.
+      const epochAtSnapshot = get().mountEpoch;
+
       const snapshot = {
         revision: state.revision,
         baseUpdatedAt: state.baseUpdatedAt,
@@ -417,6 +453,15 @@ export function createCanvasCoreStore(
         return;
       }
 
+      // The save request itself already happened (server has the payload
+      // either way) — this guard only decides whether THIS mount is still
+      // around to accept the local metadata write it implies. A stale
+      // mount's tail finding the world has moved on is not an error: the
+      // server-side write is not lost, only this generation's local
+      // bookkeeping of it is skipped (the newer mount's own next save,
+      // whenever it fires, carries the real current state anyway).
+      if (get().mountEpoch !== epochAtSnapshot) return;
+
       if (result.ok) {
         // Only accept if no further edits raced this save — if more
         // mutations happened, leave revision diff alone, the next save
@@ -432,7 +477,9 @@ export function createCanvasCoreStore(
         if (!accepted) scheduleSave();
       } else {
         // 409: surface the server row, freeze auto-save until the user
-        // resolves.
+        // resolves. Guarded the same way — an OLD mount's conflict must
+        // never paint a false conflict banner over a NEWER mount's clean,
+        // already-successful state.
         set({
           saveStatus: 'error',
           saveError: 'conflict',
@@ -449,6 +496,7 @@ export function createCanvasCoreStore(
       episodeId: null,
       loadStatus: 'idle',
       loadError: null,
+      mountEpoch: 0,
       viewport: IDENTITY_VIEWPORT,
       nodes: [],
       connections: [],
@@ -496,7 +544,11 @@ export function createCanvasCoreStore(
       },
 
       async loadCanvas(canvasId: string) {
-        set({ loadStatus: 'loading', loadError: null });
+        // Bump BEFORE the first `await` (synchronous prefix of an async
+        // function) — a caller that reads `mountEpoch` right after invoking
+        // `loadCanvas()` (without awaiting it) sees the up-to-date value.
+        mountEpochCounter += 1;
+        set({ loadStatus: 'loading', loadError: null, mountEpoch: mountEpochCounter });
         try {
           const row = await loadImpl(canvasId);
           applyServerRow(row);

@@ -77,7 +77,6 @@ import {
   type BeatsSubview,
 } from '../beats/beatsViewStorage';
 import { NodesView } from '../nodes/NodesView';
-import { StoryboardView } from '../storyboard/StoryboardView';
 import { VersionDiff } from '../versions/VersionDiff';
 import { OutlineView } from './OutlineView';
 import { EpisodePanel } from './EpisodePanel';
@@ -97,7 +96,6 @@ import type { RemoteOpRow } from '../useSceneSync';
 import { reportError } from '../../services/errorReporter';
 import { SelectionAiChatButton } from '../selection/SelectionAiChatButton';
 import { Loading } from '../../components/common/Loading';
-import { onShotFocus } from '../../components/agentActivity/shotFocusBus';
 
 type LoadState = 'loading' | 'ready' | 'error';
 
@@ -113,7 +111,6 @@ export function EditorShell({
   currentUserName,
   projectId: workspaceProjectId,
   initialRailView,
-  initialFocusSceneId,
   embedded = false,
   onScenesChange,
   onActiveSceneChange,
@@ -137,19 +134,13 @@ export function EditorShell({
   projectId?: string;
   /**
    * Preset which centre-pane view (RailModules) this mount opens on — e.g.
-   * the workspace's "Storyboard" sidebar child opens straight onto the
-   * storyboard view instead of the script sheet (PR-11). Re-applied whenever
-   * the prop changes (so re-clicking a different sidebar child while the
-   * shell is already mounted for the same script still switches the view).
-   * Omitted preserves the existing per-script localStorage preference.
+   * the workspace's "Beats" sidebar child opens straight onto the beat sheet
+   * instead of the script sheet (PR-11). Re-applied whenever the prop changes
+   * (so re-clicking a different sidebar child while the shell is already
+   * mounted for the same script still switches the view). Omitted preserves
+   * the existing per-script localStorage preference.
    */
   initialRailView?: RailView;
-  /**
-   * 深链：mount 后滚动定位到该 scene（场次卡 Open → scene 级）。storyboard
-   * 列与 script sheet 的 SceneBlock 都带 data-scene-id，两个 rail view 通用。
-   * 与 pendingFocusShotId 同范式：先等目标渲染出来再滚，一次性消费。
-   */
-  initialFocusSceneId?: string;
   /**
    * Studio mode: the shell is mounted inside the project workspace (合一终稿,
    * 2026-07-11). The workspace tree is the single side navigation, so embedded
@@ -239,10 +230,6 @@ export function EditorShell({
   // with how railView already gates the centre pane.
   const [diffCommit, setDiffCommit] = useState<ScriptCommit | null>(null);
   const [pendingOpenSceneId, setPendingOpenSceneId] = useState<string | null>(null);
-  const [pendingFocusShotId, setPendingFocusShotId] = useState<string | null>(null);
-  const [pendingFocusSceneId, setPendingFocusSceneId] = useState<string | null>(
-    initialFocusSceneId ?? null,
-  );
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [typeCommand, setTypeCommand] = useState<TypeCommand | null>(null);
@@ -401,7 +388,7 @@ export function EditorShell({
     persistRailView(scriptId, railView);
   }, [scriptId, railView]);
 
-  // PR-11: the caller's preset view (e.g. the workspace's Storyboard sidebar
+  // PR-11: the caller's preset view (e.g. the workspace's Beats sidebar
   // child) wins over the stored preference. A one-way input — it only reacts
   // to the PROP changing, never to the writer's own RailModules clicks, so
   // switching views inside an already-open shell isn't fought back to the
@@ -523,52 +510,6 @@ export function EditorShell({
     }
     setPendingOpenSceneId(null);
   }, [pendingOpenSceneId, railView, scenes]);
-
-  // A7: the chat panel's "the agent wrote these shot cards" summary lives in a
-  // sibling component tree (FloatingChatWidget), so it reaches us through a
-  // module-level bus rather than a prop. Same two-step shape as
-  // handleOpenScene above — switch the rail first, scroll once the storyboard
-  // has actually rendered.
-  useEffect(
-    () =>
-      onShotFocus((shotId) => {
-        selectRailView('storyboard');
-        setPendingFocusShotId(shotId);
-      }),
-    [selectRailView],
-  );
-
-  useEffect(() => {
-    if (!pendingFocusShotId || railView !== 'storyboard') return;
-    // ShotCard already emits data-shot-id (editor/storyboard/ShotCard.tsx).
-    const card = shellRef.current?.querySelector<HTMLElement>(
-      `[data-shot-id="${pendingFocusShotId}"]`,
-    );
-    if (card) {
-      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      card.classList.add('mh-diff-jump-flash');
-      window.setTimeout(() => card.classList.remove('mh-diff-jump-flash'), 1400);
-    }
-    setPendingFocusShotId(null);
-  }, [pendingFocusShotId, railView, scenes]);
-
-  // Scene-card deep link (Task 8): the workspace's EpisodeSceneBoard "Open"
-  // passes a sceneId through initialRailView + initialFocusSceneId. Same
-  // wait-for-render-then-scroll shape as pendingOpenSceneId/pendingFocusShotId
-  // above, but the selector is shared by BOTH rail views (storyboard columns
-  // and script-sheet SceneBlocks both stamp data-scene-id), so this effect
-  // isn't gated on a specific railView — whichever one initialRailView opened
-  // on will already have the matching element once scenes have loaded.
-  useEffect(() => {
-    if (!pendingFocusSceneId) return;
-    const block = shellRef.current?.querySelector<HTMLElement>(
-      `[data-scene-id="${pendingFocusSceneId}"]`,
-    );
-    if (!block) return; // scenes 还没渲染完——等下一次 deps 变化再试
-    block.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    setActiveScene(pendingFocusSceneId);
-    setPendingFocusSceneId(null);
-  }, [pendingFocusSceneId, railView, scenes, setActiveScene]);
 
   // Focusing an element line raises the editing-state flag, which the shell
   // exposes as data-editing="true" — a pure CSS hook that lights up the element
@@ -1283,9 +1224,8 @@ export function EditorShell({
     orphanChapters.length === 0;
 
   // The floating scene TOC belongs only to the script sheet — the node canvas,
-  // storyboard, beats and outline views own their own navigation. SceneToc
-  // itself renders nothing when scenes.length === 0, so the gate is just the
-  // view/mode context.
+  // beats and outline views own their own navigation. SceneToc itself renders
+  // nothing when scenes.length === 0, so the gate is just the view/mode context.
   const showSceneToc = railView === 'script' && state.mode === 'script' && !showColdStart;
 
   // Focus the seeded row once the new scene has rendered (cold start). The
@@ -1504,8 +1444,6 @@ export function EditorShell({
                 onBackToScript={() => selectRailView('script')}
               />
             </ScenePresenceContext.Provider>
-          ) : railView === 'storyboard' ? (
-            <StoryboardView scenes={scenes} scriptId={scriptId} />
           ) : railView === 'beats' ? (
             <BeatsView
               scenes={scenes}

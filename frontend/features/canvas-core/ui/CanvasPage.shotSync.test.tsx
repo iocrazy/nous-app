@@ -46,7 +46,7 @@ vi.mock('../../../editor/sceneService', () => ({
   createShot: (...args: unknown[]) => createShot(...args),
 }));
 
-import CanvasPage from './CanvasPage';
+import CanvasPage, { CanvasView } from './CanvasPage';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { requestPromoteShot } from '../smart/promoteShotBus';
 
@@ -265,5 +265,53 @@ describe('CanvasPage — Task 4 shot reconcile wiring', () => {
       expect(node.data.shot_label).toBe('1A');
     });
     expect(screen.queryByTestId('promote-shot-dialog')).toBeNull();
+  });
+
+  // Task 6 review 修复轮1 (2026-08-11): an Agent Run Undo can mutate
+  // script_shots while this canvas is ALREADY mounted (unlike every test
+  // above, which only covers the mount-time reconcile) — `EpisodeStoryboardPage`
+  // bumps `reconcileRefreshToken` when that happens (see its own
+  // `onStoryboardRefresh` subscription). Only reachable through `CanvasView`
+  // directly (the embedded prop, not the standalone route) — same reason
+  // `CanvasPage.focus.test.tsx` imports it for `focusShotId`.
+  it('reconcileRefreshToken bump re-runs the SAME reconcile fetch (Agent Run Undo while canvas mounted)', async () => {
+    fetchScriptProjects.mockResolvedValue({
+      data: [{ id: 'script-1', episode_id: 'ep-1', updated_at: '2026-01-01T00:00:00Z' }],
+    });
+    listScenes.mockResolvedValue([SCENE_1]);
+    listShots.mockResolvedValue([SHOT_1]);
+
+    seedReady();
+    const { rerender } = render(<CanvasView canvasId="c1" reconcileRefreshToken={0} />);
+
+    await waitFor(() => expect(listScenes).toHaveBeenCalledTimes(1));
+    expect(listShots).toHaveBeenCalledTimes(1);
+
+    rerender(<CanvasView canvasId="c1" reconcileRefreshToken={1} />);
+
+    await waitFor(() => expect(listScenes).toHaveBeenCalledTimes(2));
+    expect(listShots).toHaveBeenCalledTimes(2);
+    // Same call shape both times — this is the existing reconcile effect
+    // re-running verbatim, not a different code path.
+    expect(listScenes).toHaveBeenNthCalledWith(2, 'script-1');
+    expect(listShots).toHaveBeenNthCalledWith(2, 'scene-1');
+  });
+
+  it('an unrelated re-render (reconcileRefreshToken unchanged) does not re-run the reconcile fetch', async () => {
+    fetchScriptProjects.mockResolvedValue({
+      data: [{ id: 'script-1', episode_id: 'ep-1', updated_at: '2026-01-01T00:00:00Z' }],
+    });
+    listScenes.mockResolvedValue([SCENE_1]);
+    listShots.mockResolvedValue([SHOT_1]);
+
+    seedReady();
+    const { rerender } = render(<CanvasView canvasId="c1" reconcileRefreshToken={0} />);
+    await waitFor(() => expect(listScenes).toHaveBeenCalledTimes(1));
+
+    rerender(<CanvasView canvasId="c1" reconcileRefreshToken={0} teamId="t2" />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(listScenes).toHaveBeenCalledTimes(1);
   });
 });

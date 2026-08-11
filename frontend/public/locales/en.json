@@ -1466,7 +1466,8 @@
       "startStoryboard": "Start Storyboard"
     },
     "storyboardPage": {
-      "shotHint": "Open in editor"
+      "shotHint": "View in canvas",
+      "canvasLoadError": "Failed to load the storyboard canvas."
     },
     "sceneBoard": {
       "open": "Open",
@@ -2314,6 +2315,7 @@
         "title": "Promote to Shot",
         "hint": "Pick a scene to create this shot in.",
         "noScenes": "This episode has no scenes yet.",
+        "loadingScenes": "Loading scenes…",
         "cancel": "Cancel",
         "failed": "Couldn't create the shot."
       }
@@ -3640,7 +3642,6 @@
     "modulesLabel": "Views",
     "moduleScript": "Script",
     "moduleBeats": "Beats",
-    "moduleStoryboard": "Storyboard",
     "moduleScenes": "Scenes",
     "comingPhase2": "Coming in Phase 2",
     "nodesViewLabel": "Scene Map",
@@ -3952,30 +3953,6 @@
     "epScriptsTitle": "Scripts in this episode",
     "epClose": "Close episodes",
     "episodeActionFailed": "Could not update episodes. Please try again.",
-    "storyboardLabel": "Storyboard",
-    "storyboardAuto": "Auto Storyboard",
-    "storyboardAutoBusy": "Boarding…",
-    "storyboardAddShot": "+ Add Shot",
-    "storyboardEmptyColumn": "No shots yet",
-    "storyboardNoScenes": "Add scenes in the Script view to storyboard them.",
-    "shotNumber": "Shot number",
-    "shotStatusEmpty": "No image yet",
-    "shotStatusGenerating": "Generating…",
-    "shotStatusFailed": "Generation failed",
-    "shotRetry": "Retry",
-    "shotThumbAlt": "Shot {{number}} preview",
-    "shotDelete": "Delete shot",
-    "shotPillUnset": "Set",
-    "shotFocalLength": "Focal length",
-    "shotFocalPlaceholder": "35mm",
-    "shotDescription": "Shot description",
-    "shotDescPlaceholder": "Describe this shot…",
-    "shotGenerate": "Generate",
-    "shotGenerateComingSoon": "Image generation is coming soon",
-    "shotGenerateVideo": "Generate Video",
-    "shotVideoGenerating": "Generating video…",
-    "shotVideoComingSoon": "Video generation is coming soon",
-    "shotVideoLabel": "Shot {{number}} video",
     "versionHistory": "Version History",
     "saveVersion": "Save Version",
     "versionMessagePlaceholder": "Describe this version…",

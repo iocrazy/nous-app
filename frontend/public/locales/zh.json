@@ -1466,7 +1466,8 @@
       "startStoryboard": "开始分镜"
     },
     "storyboardPage": {
-      "shotHint": "在编辑器中打开"
+      "shotHint": "在画布中查看",
+      "canvasLoadError": "分镜画布加载失败。"
     },
     "sceneBoard": {
       "open": "打开",
@@ -2314,6 +2315,7 @@
         "title": "转正为镜头",
         "hint": "选择要创建此镜头的场次。",
         "noScenes": "该集尚无场次。",
+        "loadingScenes": "场次加载中…",
         "cancel": "取消",
         "failed": "创建镜头失败。"
       }
@@ -3640,7 +3642,6 @@
     "modulesLabel": "视图",
     "moduleScript": "剧本",
     "moduleBeats": "节拍",
-    "moduleStoryboard": "分镜",
     "moduleScenes": "场景",
     "comingPhase2": "第二阶段推出",
     "nodesViewLabel": "场景图",
@@ -3952,30 +3953,6 @@
     "epScriptsTitle": "该剧集的剧本数",
     "epClose": "关闭剧集面板",
     "episodeActionFailed": "剧集操作失败，请重试。",
-    "storyboardLabel": "分镜",
-    "storyboardAuto": "自动分镜",
-    "storyboardAutoBusy": "生成中…",
-    "storyboardAddShot": "+ 添加镜头",
-    "storyboardEmptyColumn": "暂无镜头",
-    "storyboardNoScenes": "在剧本视图中添加场景后即可分镜。",
-    "shotNumber": "镜头编号",
-    "shotStatusEmpty": "暂无图像",
-    "shotStatusGenerating": "生成中…",
-    "shotStatusFailed": "生成失败",
-    "shotRetry": "重试",
-    "shotThumbAlt": "镜头 {{number}} 预览",
-    "shotDelete": "删除镜头",
-    "shotPillUnset": "设置",
-    "shotFocalLength": "焦距",
-    "shotFocalPlaceholder": "35mm",
-    "shotDescription": "镜头描述",
-    "shotDescPlaceholder": "描述这个镜头…",
-    "shotGenerate": "生成",
-    "shotGenerateComingSoon": "图像生成即将上线",
-    "shotGenerateVideo": "生成视频",
-    "shotVideoGenerating": "视频生成中…",
-    "shotVideoComingSoon": "视频生成即将上线",
-    "shotVideoLabel": "镜头 {{number}} 视频",
     "versionHistory": "版本历史",
     "saveVersion": "保存版本",
     "versionMessagePlaceholder": "描述这个版本…",

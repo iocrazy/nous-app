@@ -28,6 +28,16 @@ export interface PromoteShotDialogProps {
   open: boolean;
   /** Scenes in display order (index 0 = column 0 / "1" in labels). */
   scenes: SceneDoc[];
+  /**
+   * The mount-time shot reconcile (Task 4's `reconcileShotNodes` fan-out —
+   * same effect that resolves `scenes`) hasn't settled yet (shot-nodes-on-
+   * canvas Task 5, T4 forward note: an empty `scenes` array during this
+   * window used to render the "This episode has no scenes yet." empty
+   * state, which is WRONG — the episode may well have scenes, the fetch
+   * just hasn't resolved. Distinguishes "genuinely zero scenes" (render the
+   * empty state) from "don't know yet" (render a loading state instead).
+   */
+  scenesLoading?: boolean;
   submitting: boolean;
   error: string | null;
   onCancel: () => void;
@@ -37,6 +47,7 @@ export interface PromoteShotDialogProps {
 export function PromoteShotDialog({
   open,
   scenes,
+  scenesLoading = false,
   submitting,
   error,
   onCancel,
@@ -67,7 +78,15 @@ export function PromoteShotDialog({
           {t('canvas.shotNode.promoteDialog.hint')}
         </p>
 
-        {scenes.length === 0 ? (
+        {scenesLoading ? (
+          <p
+            className="mt-4 flex items-center gap-1.5 text-xs text-canvas-muted"
+            data-testid="promote-shot-scenes-loading"
+          >
+            <Loader2 size={14} className="animate-spin" />
+            {t('canvas.shotNode.promoteDialog.loadingScenes')}
+          </p>
+        ) : scenes.length === 0 ? (
           <p className="mt-4 text-xs text-canvas-muted" data-testid="promote-shot-no-scenes">
             {t('canvas.shotNode.promoteDialog.noScenes')}
           </p>

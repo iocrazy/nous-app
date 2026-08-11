@@ -1,15 +1,18 @@
 /**
- * EpisodeStoryboardPage (IA redesign Task 2) — the standalone storyboard
- * module page. Extracted from ProjectWorkspace's old "surface panel" block
- * (see ProjectWorkspace.test.tsx's now-removed surface-panel tests, moved
- * here): the three-view segmented control (Storyboard | Canvas | Shot List)
- * and the read-only script probe gate (never provisions on a passive
- * render). The shot-card-click → editor deep-link orchestration (Task 3
- * 修复轮2, 2026-08-10 用户拍板) lives in ProjectWorkspace, not here — this
- * page only forwards the click via `onOpenShotInEditor`; see
- * ProjectWorkspace.test.tsx for the bus/timer-level assertions.
+ * EpisodeStoryboardPage (IA redesign Task 2, extended by shot-nodes-on-
+ * canvas Task 5) — the standalone storyboard module page. Three views —
+ * Storyboard | Canvas | Shot List — plus the read-only script probe gate
+ * (never provisions on a passive render).
+ *
+ * Task 5 (2026-08-11): the Canvas tab is no longer the materials-canvas
+ * library (`WorkspaceCanvas`) — it now embeds the episode's real storyboard
+ * canvas via `StoryboardCanvasEmbed`, mocked out below (it's heavy: pulls in
+ * the whole canvas-core React Flow tree; its own resolve/render behaviour is
+ * covered by `StoryboardCanvasEmbed.test.tsx`). This file focuses on the
+ * three focus entry points this page owns (shot card click / the
+ * `focusShotId` prop / `shotFocusBus`) and the `openShotInListBus` consumer.
  */
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
 
@@ -31,18 +34,31 @@ const mockSceneService = vi.hoisted(() => ({
 }));
 vi.mock('../../editor/sceneService', () => mockSceneService);
 
-vi.mock('../../features/canvas-core/services/canvasService', () => ({
-  listCanvases: vi.fn().mockResolvedValue([]),
-  createCanvas: vi.fn(),
-  deleteCanvas: vi.fn(),
-}));
-
-const navigate = vi.fn();
-vi.mock('react-router-dom', () => ({
-  useNavigate: () => navigate,
-  // CanvasCardMenu (rendered by the real WorkspaceCanvas module on the
-  // 'canvas' view) reads team/project scope for its create-issue payload.
-  useParams: () => ({}),
+// StoryboardCanvasEmbed (Task 5) pulls in the whole canvas-core React Flow
+// tree — mocked to a thin marker exposing the props this page threads down,
+// so this file can assert on ITS OWN wiring without paying for a real
+// mount. See StoryboardCanvasEmbed.test.tsx for its own resolve/render
+// behaviour.
+vi.mock('../../features/canvas-core/ui/StoryboardCanvasEmbed', () => ({
+  StoryboardCanvasEmbed: (props: {
+    episodeId: string;
+    teamId?: string;
+    focusShotId?: string | null;
+    onFocusHandled?: () => void;
+    reconcileRefreshToken?: number;
+  }) => (
+    <div
+      data-testid="storyboard-canvas-embed-mock"
+      data-episode-id={props.episodeId}
+      data-team-id={props.teamId ?? ''}
+      data-focus-shot-id={props.focusShotId ?? ''}
+      data-reconcile-refresh-token={props.reconcileRefreshToken ?? 0}
+    >
+      {/* Simulates the real embed's "focus settled" callback so tests can
+          exercise the reset→re-fire path without a real React Flow mount. */}
+      <button type="button" data-testid="mock-focus-handled" onClick={() => props.onFocusHandled?.()} />
+    </div>
+  ),
 }));
 
 // Stable hoisted spy (not a fresh vi.fn() per render) so the failure-toast
@@ -61,12 +77,14 @@ vi.mock('../../utils/relativeTime', () => ({
 
 import { EpisodeStoryboardPage, __clearScriptProbeCache } from './EpisodeStoryboardPage';
 import { __clearSceneShotsCache } from './useSceneShots';
+import { requestShotFocus, requestStoryboardRefresh } from '../agentActivity/shotFocusBus';
+import { requestOpenShotInList } from '../../features/canvas-core/smart/openShotInListBus';
 
 const ep = { episode_id: '324362669885098', title: 'EP1', scene_count: 7,
   shots_done: 0, shots_total: 6, renders_count: 0, status: 'in_progress' } as any;
 const base = {
   projectId: 'p1', teamId: 't1', episode: ep, initialView: null,
-  onViewChange: vi.fn(), onOpenScene: vi.fn(), onOpenShotInEditor: vi.fn(),
+  onViewChange: vi.fn(),
   findExistingScript: vi.fn().mockResolvedValue('sc1'),
   provisionScript: vi.fn().mockResolvedValue('sc1'),
 };
@@ -75,8 +93,6 @@ beforeEach(() => {
   mockSceneService.listScenes.mockReset().mockResolvedValue([]);
   mockSceneService.listShots.mockReset().mockResolvedValue([]);
   base.onViewChange.mockClear();
-  base.onOpenScene.mockClear();
-  base.onOpenShotInEditor.mockClear();
   base.findExistingScript.mockReset().mockResolvedValue('sc1');
   base.provisionScript.mockReset().mockResolvedValue('sc1');
   addToast.mockClear();
@@ -139,15 +155,12 @@ describe('EpisodeStoryboardPage', () => {
     expect(base.onViewChange).toHaveBeenCalledWith('shotlist');
   });
 
-  // Task 3 修复轮2 (2026-08-10 用户拍板): a scene board shot-card click must
-  // forward straight to `onOpenShotInEditor(shotId, sceneId)` — NOT
-  // `onViewChange` (that would delete the URL's one-shot `shot` trigger) and
-  // NOT a page-local view-state change (this page's own Canvas tab is a
-  // materials canvas with no shot nodes; the editor deep-link + bus-retry
-  // orchestration now live entirely in ProjectWorkspace, see its test file
-  // for that half). This page's only job is to pass the (shotId, sceneId)
-  // pair through unchanged.
-  it('a shot-card click forwards (shotId, sceneId) to onOpenShotInEditor, not onViewChange', async () => {
+  // Shot-nodes-on-canvas Task 5 (2026-08-11, supersedes Task 3 修复轮2; the
+  // editor deep-link this superseded was fully retired in Task 6): a scene
+  // board shot-card click switches THIS page to its own Canvas tab and
+  // focuses the shot there. `onViewChange` IS called — this is a genuine tab
+  // switch the URL should reflect.
+  it('a shot-card click switches to the Canvas tab and focuses the shot there', async () => {
     mockSceneService.listScenes.mockResolvedValue([
       { id: '200', script_id: 'sc1', chapter_id: null, scene_number: '1',
         heading_int_ext: 'INT', location_text: 'Kitchen', time_of_day: 'DAY',
@@ -164,8 +177,164 @@ describe('EpisodeStoryboardPage', () => {
     const shotCard = await screen.findByTestId('shot-card-9007199254740997');
     fireEvent.click(shotCard);
 
-    expect(base.onOpenShotInEditor).toHaveBeenCalledWith('9007199254740997', '200');
-    expect(base.onViewChange).not.toHaveBeenCalled();
+    expect(base.onViewChange).toHaveBeenCalledWith('canvas');
+    const embed = await screen.findByTestId('storyboard-canvas-embed-mock');
+    expect(embed.getAttribute('data-focus-shot-id')).toBe('9007199254740997');
+  });
+
+  // Scene card's Open (view one) — Task 6 retired the old editor deep-link
+  // this used to reach through `onOpenScene`/ProjectWorkspace; it's now
+  // handled entirely locally by this page: scroll the same column into view.
+  it("a scene card's Open button scrolls its own column into view (local to view one)", async () => {
+    mockSceneService.listScenes.mockResolvedValue([
+      { id: '200', script_id: 'sc1', chapter_id: null, scene_number: '1',
+        heading_int_ext: 'INT', location_text: 'Kitchen', time_of_day: 'DAY',
+        content_version: 1, sort_order: 0, elements: [] },
+    ]);
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    render(<EpisodeStoryboardPage {...base} />);
+    await screen.findByTestId('scene-column-200');
+    fireEvent.click(screen.getByTestId('ep-scene-open-200'));
+
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+
+  describe('canvas tab (Task 5 — embeds the episode storyboard canvas)', () => {
+    it('renders StoryboardCanvasEmbed for the current episode/team once the Canvas tab is active', async () => {
+      render(<EpisodeStoryboardPage {...base} />);
+      const tabs = await screen.findByTestId('episode-view-tabs');
+      fireEvent.click(tabs.querySelector('[data-view="canvas"]')!);
+
+      const embed = await screen.findByTestId('storyboard-canvas-embed-mock');
+      expect(embed.getAttribute('data-episode-id')).toBe(ep.episode_id);
+      expect(embed.getAttribute('data-team-id')).toBe('t1');
+    });
+
+    // Entry point ②: the `focusShotId` prop (ProjectWorkspace's URL
+    // `?view=canvas&shot=` resolution) merges into local state, switches the
+    // tab even if the writer wasn't already on Canvas, and is reported back
+    // as consumed exactly once.
+    it('a focusShotId prop switches to Canvas and reports consumption via onFocusShotIdConsumed', async () => {
+      const onFocusShotIdConsumed = vi.fn();
+      render(
+        <EpisodeStoryboardPage
+          {...base}
+          focusShotId="url-shot-1"
+          onFocusShotIdConsumed={onFocusShotIdConsumed}
+        />,
+      );
+
+      const embed = await screen.findByTestId('storyboard-canvas-embed-mock');
+      expect(embed.getAttribute('data-focus-shot-id')).toBe('url-shot-1');
+      expect(onFocusShotIdConsumed).toHaveBeenCalledTimes(1);
+      // Purely local — this page never writes the URL for the prop-driven
+      // entry point (the URL already says view=canvas, see the component's
+      // own doc comment).
+      expect(base.onViewChange).not.toHaveBeenCalled();
+    });
+
+    // Entry point ③: shotFocusBus — a second subscriber alongside
+    // EditorShell's existing one (T6 retires that one; both coexist here).
+    it('a shotFocusBus request switches to Canvas and focuses the shot', async () => {
+      render(<EpisodeStoryboardPage {...base} />);
+      await screen.findByTestId('episode-view-tabs');
+
+      act(() => requestShotFocus('bus-shot-1'));
+
+      const embed = await screen.findByTestId('storyboard-canvas-embed-mock');
+      expect(embed.getAttribute('data-focus-shot-id')).toBe('bus-shot-1');
+      expect(base.onViewChange).toHaveBeenCalledWith('canvas');
+    });
+
+    it('the embed clearing its own focus (onFocusHandled) resets this page state so a repeat request re-fires', async () => {
+      render(<EpisodeStoryboardPage {...base} />);
+      act(() => requestShotFocus('bus-shot-1'));
+      expect(screen.getByTestId('storyboard-canvas-embed-mock').getAttribute('data-focus-shot-id')).toBe(
+        'bus-shot-1',
+      );
+
+      fireEvent.click(screen.getByTestId('mock-focus-handled'));
+      expect(screen.getByTestId('storyboard-canvas-embed-mock').getAttribute('data-focus-shot-id')).toBe('');
+
+      // Same shot id requested again — must re-fire (null → value is a real
+      // change), not silently no-op because the prop "already had that value".
+      act(() => requestShotFocus('bus-shot-1'));
+      expect(screen.getByTestId('storyboard-canvas-embed-mock').getAttribute('data-focus-shot-id')).toBe(
+        'bus-shot-1',
+      );
+    });
+  });
+
+  // Task 6 review 修复轮1 (2026-08-11): `onStoryboardRefresh` was orphaned
+  // when Task 6 deleted the editor storyboard rail's `StoryboardView` (its
+  // sole subscriber). This page now re-subscribes for the CANVAS half —
+  // view one/three's scene/shot refresh is covered by
+  // `useSceneShots.test.ts` instead (that hook subscribes independently).
+  describe('onStoryboardRefresh consumer — canvas reconcile re-trigger (Task 6 review 修复轮1)', () => {
+    it('requestStoryboardRefresh() bumps reconcileRefreshToken passed to the storyboard canvas', async () => {
+      render(<EpisodeStoryboardPage {...base} />);
+      const tabs = await screen.findByTestId('episode-view-tabs');
+      fireEvent.click(tabs.querySelector('[data-view="canvas"]')!);
+      const embed = await screen.findByTestId('storyboard-canvas-embed-mock');
+      expect(embed.getAttribute('data-reconcile-refresh-token')).toBe('0');
+
+      act(() => requestStoryboardRefresh());
+      expect(screen.getByTestId('storyboard-canvas-embed-mock').getAttribute('data-reconcile-refresh-token')).toBe(
+        '1',
+      );
+
+      act(() => requestStoryboardRefresh());
+      expect(screen.getByTestId('storyboard-canvas-embed-mock').getAttribute('data-reconcile-refresh-token')).toBe(
+        '2',
+      );
+    });
+
+    it('unmounting the page stops responding to a later requestStoryboardRefresh()', async () => {
+      const { unmount } = render(<EpisodeStoryboardPage {...base} />);
+      const tabs = await screen.findByTestId('episode-view-tabs');
+      fireEvent.click(tabs.querySelector('[data-view="canvas"]')!);
+      await screen.findByTestId('storyboard-canvas-embed-mock');
+
+      unmount();
+
+      // No listener left to throw or otherwise misbehave — the request is
+      // simply dropped (same "nobody's listening" contract the bus
+      // documents for every other subscriber).
+      expect(() => act(() => requestStoryboardRefresh())).not.toThrow();
+    });
+  });
+
+  // Task 4's node-menu "Delete in shot list" (`openShotInListBus`) — jumps
+  // back to view one and scrolls the matching shot card into view.
+  describe('openShotInListBus consumer (Task 4 menu → this page)', () => {
+    it('switches to the Storyboard view and scrolls the matching shot card into view', async () => {
+      mockSceneService.listScenes.mockResolvedValue([
+        { id: '200', script_id: 'sc1', chapter_id: null, scene_number: '1',
+          heading_int_ext: 'INT', location_text: 'Kitchen', time_of_day: 'DAY',
+          content_version: 1, sort_order: 0, elements: [] },
+      ]);
+      mockSceneService.listShots.mockResolvedValue([
+        { id: '9007199254740997', scene_id: '200', shot_number: 1, shot_type: 'WIDE',
+          camera_angle: 'EYE', camera_movement: 'STATIC', focal_length: '35mm',
+          lighting: null, description: '', image_url: null, thumbnail_url: null,
+          video_url: null, status: 'empty', sort_order: 1000 },
+      ]);
+      const scrollIntoView = vi.fn();
+      // jsdom doesn't implement scrollIntoView at all.
+      Element.prototype.scrollIntoView = scrollIntoView;
+
+      render(<EpisodeStoryboardPage {...base} />);
+      const tabs = await screen.findByTestId('episode-view-tabs');
+      fireEvent.click(tabs.querySelector('[data-view="canvas"]')!);
+      await screen.findByTestId('storyboard-canvas-embed-mock');
+
+      requestOpenShotInList('9007199254740997');
+
+      expect(await screen.findByTestId('episode-view-storyboard')).toBeInTheDocument();
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+    });
   });
 
   // Fix 2 (storyboard-page-polish, 2026-08-10 用户反馈): re-entering the same

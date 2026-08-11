@@ -184,6 +184,14 @@ export interface CanvasEngineProps {
   snapToGrid?: boolean;
   /** Node box for guide + snap math; defaults to measured-size-or-200×120. */
   nodeMeasure?: (node: AnyNode) => { width: number; height: number };
+  /**
+   * Fires once React Flow's imperative instance is ready (shot-nodes-on-canvas
+   * Task 5) — the caller's only way to reach `fitView`/`setCenter` for a
+   * programmatic viewport focus (e.g. "jump to shot-{id}"), since the engine
+   * itself already keeps a private `instanceRef` for its own internal fit/zoom
+   * shortcuts and doesn't otherwise expose it upward.
+   */
+  onInit?: (instance: ReactFlowInstance) => void;
 
   /** Raw React Flow node changes (caller applies + routes to its persist channel). */
   onNodesChange: (changes: NodeChange[]) => void;
@@ -297,6 +305,7 @@ export function CanvasEngine({
   paneCreateMenu = false,
   minimap,
   controls,
+  onInit,
 }: CanvasEngineProps) {
   // Focusable host for the keyboard layer + the live React Flow instance it
   // drives (fit-view / zoom / port measurement).
@@ -656,6 +665,7 @@ export function CanvasEngine({
         edgeTypes={edgeTypes}
         onInit={(instance) => {
           instanceRef.current = instance;
+          onInit?.(instance);
         }}
         onNodesChange={onNodesChange}
         onNodeDragStart={handleNodeDragStart}

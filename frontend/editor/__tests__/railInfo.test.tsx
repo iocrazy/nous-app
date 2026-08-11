@@ -79,22 +79,21 @@ describe('railDerive', () => {
 });
 
 describe('RailModules', () => {
-  it('marks all four module slots selectable', () => {
+  it('marks all three module slots selectable', () => {
     render(<RailModules activeView="script" onSelect={vi.fn()} />);
     const buttons = screen.getAllByRole('button');
-    expect(buttons).toHaveLength(4);
+    expect(buttons).toHaveLength(3);
     // Script — selectable and active (current view).
     expect(buttons[0]).toBeEnabled();
     expect(buttons[0]).toHaveClass('active');
     // Beats — now selectable (beat sheet, PR-BT2), not active yet.
     expect(buttons[1]).toBeEnabled();
     expect(buttons[1]).not.toHaveClass('active');
-    // Storyboard — selectable (shot board, Phase B P3), not active yet.
+    // Scenes — selectable (node view), not the active one yet. Storyboard's
+    // own rail slot was retired in Task 6 (shot-nodes-on-canvas epic) —
+    // EpisodeStoryboardPage is the shot board's only home now.
     expect(buttons[2]).toBeEnabled();
     expect(buttons[2]).not.toHaveClass('active');
-    // Scenes — selectable (node view), not the active one yet.
-    expect(buttons[3]).toBeEnabled();
-    expect(buttons[3]).not.toHaveClass('active');
   });
 
   it('fires onSelect with the beats view when the Beats slot is clicked', () => {
