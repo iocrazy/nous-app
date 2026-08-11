@@ -39,6 +39,15 @@
  * its own `(episodeId, nodeId)` slot signature and closes over it when
  * building this prop, so the value this component passes for that argument
  * is never actually read — the settings button below passes `''`.
+ *
+ * Task 9 (#1787 遗留修复): the deliverable fact is now a quiet-button link
+ * to that node's Stage Board (`onOpenStage`), not plain text. #1787 flipped
+ * the header entry button to route strictly by `resolveSurface` — a
+ * script/storyboard/renders-surface node's own deliverable/archive view
+ * (Stage Board) lost its only remaining entry point once that happened.
+ * Readonly viewers can click it too: this is navigation (viewing archived
+ * files/tasks/brief), not a config edit, so it does not gate on
+ * `canEditConfig`.
  */
 
 import { useEffect, useRef, useState, type FC, type ReactNode } from 'react';
@@ -92,6 +101,14 @@ export interface EpisodeNodeCardProps {
   onOpenTodolist: () => void;
   /** Deep-link into the node's Settings config tab. */
   onOpenSettings: (episodeId: string, nodeId: string) => void;
+  /** Task 9 (#1787 遗留修复): the deliverable fact's entry into that node's
+   * Stage Board (archived files/tasks/brief) — the surface-routed entry
+   * button (`onEnterSurface` above) no longer reaches Stage Board for a
+   * script/storyboard/renders-surface node once it has its own deliverable,
+   * so this is the fact's own dedicated link. `ProjectWorkspace` already has
+   * this exact routing as `handleOpenStage`; readonly viewers can click it
+   * too — it is navigation, not an edit. */
+  onOpenStage: (nodeId: string) => void;
   /** Candidate owners for the editable owner field's menu — only consulted
    * when `canEditConfig` (read-only branch never touches them), so an
    * absent/empty array is a safe default for every call site that never
@@ -159,6 +176,7 @@ export const EpisodeNodeCard: FC<EpisodeNodeCardProps> = ({
   onRequestAdvance,
   onOpenTodolist,
   onOpenSettings,
+  onOpenStage,
   people = [],
   agents = [],
   onPatchNode = async () => {},
@@ -319,7 +337,13 @@ export const EpisodeNodeCard: FC<EpisodeNodeCardProps> = ({
 
       {hasDeliverable && (
         <Fact label={t('projects.workflow.deliverable')}>
-          <span data-testid="node-card-deliverable" className="inline-flex items-center gap-2 text-[13px] text-ink-300">
+          <button
+            type="button"
+            data-testid="node-card-deliverable"
+            onClick={() => onOpenStage(node.id)}
+            title={t('projects.nodeCard.openDeliverablesBoard', 'Open deliverables board')}
+            className="group inline-flex max-w-full items-center gap-2 rounded-md px-1.5 py-0.5 text-[13px] text-ink-300 transition hover:border hover:border-line hover:bg-island-2"
+          >
             <FileCheck2 size={13} className="shrink-0 text-ink-500" />
             <span className="truncate">{node.deliverable_label || '—'}</span>
             <span
@@ -331,7 +355,8 @@ export const EpisodeNodeCard: FC<EpisodeNodeCardProps> = ({
             >
               {t('projects.workflow.deliverables.filesFiled', { count: node.deliverable_file_count ?? 0 })}
             </span>
-          </span>
+            <ChevronDown size={11} className="shrink-0 -rotate-90 text-ink-600 opacity-0 transition-opacity group-hover:opacity-100" />
+          </button>
         </Fact>
       )}
 

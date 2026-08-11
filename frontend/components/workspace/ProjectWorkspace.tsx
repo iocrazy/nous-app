@@ -1148,6 +1148,11 @@ export function ProjectWorkspace({
                       onRequestAdvance={requestAdvance}
                       onOpenTodolist={() => setActiveModule('tasks')}
                       onOpenSettings={(_ignoredEpisodeId, nid) => handleOpenNodeSettings(episodeId, nid)}
+                      // Task 9 (#1787 遗留修复): the deliverable fact's own
+                      // Stage Board entry — `handleOpenStage` already exists
+                      // (Sidebar Stages block, M2 PR-F F2), just not wired
+                      // into this card until now.
+                      onOpenStage={handleOpenStage}
                       people={nodeCardPeople}
                       agents={nodeCardAgents}
                       onPatchNode={handlePatchNode}

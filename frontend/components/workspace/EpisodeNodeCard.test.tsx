@@ -69,6 +69,7 @@ function cbs() {
     onRequestAdvance: vi.fn(),
     onOpenTodolist: vi.fn(),
     onOpenSettings: vi.fn(),
+    onOpenStage: vi.fn(),
   };
 }
 
@@ -160,6 +161,35 @@ describe('EpisodeNodeCard', () => {
     const deliverable = screen.getByTestId('node-card-deliverable');
     expect(deliverable.textContent).toContain('Shot list + boards');
     expect(deliverable.textContent).toContain('2');
+  });
+
+  // Task 9 (#1787 遗留修复): the deliverable fact is a link to the node's
+  // Stage Board, not plain text — #1787 stopped the header entry button
+  // from ever reaching Stage Board for a script/storyboard/renders-surface
+  // node once it routes strictly by `resolveSurface`.
+  it('deliverable fact is a button that fires onOpenStage with the node id', () => {
+    const onOpenStage = vi.fn();
+    renderCard({
+      node: { ...node, deliverable_label: 'Shot list + boards', deliverable_file_count: 2 },
+      onOpenStage,
+    });
+    const deliverable = screen.getByTestId('node-card-deliverable');
+    expect(deliverable.tagName).toBe('BUTTON');
+    fireEvent.click(deliverable);
+    expect(onOpenStage).toHaveBeenCalledWith('n2');
+  });
+
+  // Navigation, not an edit — a readonly viewer (canEditConfig: false) must
+  // still be able to click through to the node's Stage Board.
+  it('deliverable fact is clickable for a readonly viewer too', () => {
+    const onOpenStage = vi.fn();
+    renderCard({
+      node: { ...node, deliverable_label: 'Shot list + boards', deliverable_file_count: 2 },
+      canEditConfig: false,
+      onOpenStage,
+    });
+    fireEvent.click(screen.getByTestId('node-card-deliverable'));
+    expect(onOpenStage).toHaveBeenCalledWith('n2');
   });
 
   // 评审修复轮 (Minor #10): spec §3 says a readonly viewer sees dim "Not

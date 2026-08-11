@@ -2150,7 +2150,8 @@
       "people": "成员",
       "agents": "Agent",
       "noCandidates": "暂无可选项",
-      "forbidden": "仅项目负责人或本集负责人可编辑"
+      "forbidden": "仅项目负责人或本集负责人可编辑",
+      "openDeliverablesBoard": "打开交付物面板"
     }
   },
   "storyboard": {
