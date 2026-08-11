@@ -274,6 +274,7 @@
       "qrcodeExpiredHint": "Codes are short-lived. A fresh one is being fetched — or request it now.",
       "smsRequiredLabel": "SMS verification required",
       "smsRequiredHint": "The platform sent a code to the phone number on this account. Enter it to continue.",
+      "smsRequiredDetail": "The platform is asking for a verification code.",
       "successLabel": "Account linked",
       "successHint": "This account can now publish unattended.",
       "timeoutLabel": "Sign-in timed out",

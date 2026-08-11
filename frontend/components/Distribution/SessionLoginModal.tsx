@@ -71,6 +71,31 @@ const RETRYABLE: ReadonlySet<ViewStatus> = new Set<ViewStatus>([
  */
 const IDENTITY_UNRESOLVED = 'identity_unresolved';
 
+/**
+ * Statuses whose `metadata.login.message` we translate ourselves instead of
+ * echoing.
+ *
+ * That field is **not** platform copy — it is our own machine-authored English
+ * (`LoginJudgement.reason`, e.g. `browser/app/platforms/douyin.py`'s "the
+ * platform is asking for a verification code"), carried verbatim through
+ * `login_metadata`. Printing it under a Chinese UI is how a bare English
+ * sentence ended up on the SMS screen. The status it rides on is already
+ * typed, so the copy can come from i18n and the English never has to be shown.
+ *
+ * Keyed by status rather than by matching the sentence: the wording belongs to
+ * the browser service and may be reworded there at any time — a string match
+ * would silently start leaking English again, while the status is contract.
+ *
+ * Only the SMS state is mapped so far; the other statuses still echo (see the
+ * survey in the PR). Adding one is a line here plus the two locale files.
+ */
+const SERVER_DETAIL_COPY: Partial<Record<ViewStatus, [key: string, fallback: string]>> = {
+  sms_required: [
+    'distribution.session.smsRequiredDetail',
+    'The platform is asking for a verification code.',
+  ],
+};
+
 /** Semantic tone per state — drives the dot/border color, never a hue name. */
 const TONE: Record<ViewStatus, 'info' | 'ok' | 'warn' | 'danger'> = {
   starting: 'info',
@@ -427,6 +452,15 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
     );
   }
 
+  // The detail line under the hint: our own translation when the status says
+  // what the server's English would have said, the server string only where we
+  // have nothing better. Falling back to `login.message` rather than hiding the
+  // line keeps every un-mapped state as informative as it is today.
+  const serverDetailCopy = SERVER_DETAIL_COPY[status];
+  const detailLine = serverDetailCopy
+    ? t(serverDetailCopy[0], serverDetailCopy[1])
+    : login?.message;
+
   // Transient-and-ours reads as `warn`, not `danger`: nothing is broken about
   // the user's account and the remedy is simply to retry (bind again, or wait
   // a moment) — true of the identity case for exactly the same reason.
@@ -488,9 +522,11 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
               {label}
             </div>
             <p className="sess-hint">{hint}</p>
-            {/* Server-authored detail always wins over the generic hint —
-                it is the only place a platform-specific reason surfaces. */}
-            {login?.message && <p className="sess-detail">{login.message}</p>}
+            {/* Server-authored detail sits under the generic hint — it is the
+                only place a state-specific reason surfaces. Where the status
+                already tells us what that reason is, we say it in the user's
+                language instead of echoing our own English (SERVER_DETAIL_COPY). */}
+            {detailLine && <p className="sess-detail">{detailLine}</p>}
             {secondsLeft !== null && status === 'waiting_scan' && (
               <p className="sess-expiry">
                 {t('distribution.session.expiresIn', 'Expires in {{n}}s', { n: secondsLeft })}
