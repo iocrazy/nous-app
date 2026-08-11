@@ -195,6 +195,10 @@ async def test_ungranted_agent_never_reaches_dispatch_end_to_end():
     runner = AgentRunner(adapter=_MM(), skill_tool=_MM(), hooks=hooks)
     composed = _MM(agent_id=UUID("00000000-0000-0000-0000-000000000002"))
     recorder = _MM(run_id=_RUN_ID, user_id=_USER_ID, team_id=_TEAM_A)
+    # Task 5 (capability_denied transcript event): _run_pre_hooks now awaits
+    # recorder.record_event() on the real deny path this test drives, so the
+    # recorder needs an awaitable — a plain MagicMock attribute isn't.
+    recorder.record_event = AsyncMock()
 
     with patch(
         "app.services.infra.dbos_orchestrator.start_workflow_routed",
@@ -217,6 +221,11 @@ async def test_ungranted_agent_never_reaches_dispatch_end_to_end():
 
     assert pre_result is not None
     assert pre_result.decision == "abort"
+    assert pre_result.abort_code == "capability_denied"
+    recorder.record_event.assert_awaited_once()
+    event_type, payload = recorder.record_event.await_args.args
+    assert event_type == "capability_denied"
+    assert payload["tool"] == "GenerateShotImage"
     mock_dispatch.assert_not_called()
 
 
