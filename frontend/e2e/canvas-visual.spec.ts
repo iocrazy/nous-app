@@ -134,9 +134,13 @@ test('composer buttons lift 1px on hover (P1-6)', async ({ page }) => {
     r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(SEARCH_STUB) }),
   );
   await page.goto(`/team/${TEAM_ID}/canvas/c-visual`);
-  const btn = page
-    .getByLabel('Smart canvas composer')
-    .getByRole('button', { name: '+ Prompt' });
+  // The composer's own "+ Prompt" quick-add only renders for `isLite`
+  // canvases now (CanvasComposer.tsx: "Standard canvases add nodes from the
+  // TOP node bar (Phase 2.2) — duplicating them here made two menu rows").
+  // c-visual is `kind: 'smart'`, so its add-node affordance lives in
+  // TopNodeBar instead — same `.canvas-island` hover-lift CSS applies to any
+  // button inside it, so this still exercises the P1-6 lift behavior.
+  const btn = page.getByLabel('Canvas node bar').getByRole('button', { name: 'Prompt' });
   await expect(btn).toBeVisible();
   await btn.hover();
   await expect
