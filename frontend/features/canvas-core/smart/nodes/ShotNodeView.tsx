@@ -33,16 +33,18 @@
  * still has to patch its OWN node mirror on completion — the backfill step
  * writes the DB row, not `canvases.nodes_json`.
  *
- * genResume note: `genResume.ts`'s reload-resume walks `type === 'prompt'`
- * nodes with a `data.gen_tasks` array to re-attach polling after a reload.
- * ShotNodeData carries no `gen_tasks` field (the interface is fixed
- * verbatim for Task 4/5 + the merged backend to consume) — so a page
- * reload mid-generation loses the poll for a shot node today, matching how
- * a TEXT prompt (no gen_tasks) already behaves in that same function. This
- * is a known, intentionally out-of-scope gap for this task; opening the
- * type filter alone would be a no-op without also adding a persisted task
- * list, which would mean inventing a field the fixed interface doesn't
- * have.
+ * genResume note (fix-round-1): a page reload mid-generation can never
+ * re-attach THIS tab's poll — ShotNodeData carries no `gen_tasks` field
+ * (fixed verbatim for Task 4/5 + the merged backend to consume), so there
+ * is no persisted task id to resume polling from. Left alone this would
+ * strand the node at `shot_status: 'generating'` forever (button
+ * permanently disabled, no toast, no retry — the same stuck-queued/
+ * running class CLAUDE.md's readiness rule calls out). `genResume.ts`'s
+ * `resumePendingGenerations` (called once on canvas load) now reconciles
+ * this: a stranded 'generating' shot node is normalized to 'done' if
+ * `image_url` already landed in the persisted mirror (the generation
+ * actually finished — don't lie that it failed), otherwise dropped to
+ * 'failed' so Generate re-enables and becomes retryable.
  */
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';

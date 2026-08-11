@@ -187,6 +187,68 @@ describe('resumePendingGenerations (P1-13)', () => {
   });
 });
 
+describe('resumePendingGenerations — stranded shot reconcile (Task 3 fix-round-1)', () => {
+  function shotNode(data: Record<string, unknown>): CanvasNode {
+    return {
+      id: 'shot1',
+      type: 'shot',
+      position: { x: 0, y: 0 },
+      data: {
+        title: '',
+        reference_resource_ids: [],
+        notes: '',
+        shot_id: '77',
+        shot_label: '1-1',
+        shot_type: null,
+        camera_angle: null,
+        camera_movement: null,
+        focal_length: null,
+        description: null,
+        image_url: null,
+        shot_status: null,
+        scene_id: '1',
+        ...data,
+      },
+    } as unknown as CanvasNode;
+  }
+
+  function shotData(): Record<string, unknown> {
+    const n = useCanvasCoreStore.getState().nodes.find((x) => asObj(x).id === 'shot1');
+    return (asObj(n).data ?? {}) as Record<string, unknown>;
+  }
+
+  it('drops a stranded generating shot (no image_url) to failed — button re-enables', async () => {
+    seed([shotNode({ shot_status: 'generating', image_url: null })]);
+    await resumePendingGenerations();
+    expect(shotData().shot_status).toBe('failed');
+  });
+
+  it('does NOT lie about a generation that actually finished — image_url landed → done', async () => {
+    seed([
+      shotNode({ shot_status: 'generating', image_url: '/api/v1/generated-media/9/cover' }),
+    ]);
+    await resumePendingGenerations();
+    expect(shotData().shot_status).toBe('done');
+    expect(shotData().image_url).toBe('/api/v1/generated-media/9/cover');
+  });
+
+  it('leaves a shot node alone when it is not mid-generation', async () => {
+    seed([shotNode({ shot_status: 'done', image_url: '/x' })]);
+    await resumePendingGenerations();
+    expect(shotData().shot_status).toBe('done');
+
+    seed([shotNode({ shot_status: null, image_url: null })]);
+    await resumePendingGenerations();
+    expect(shotData().shot_status).toBeNull();
+  });
+
+  it('never touches unbound shot nodes (shot_status stays null there in practice)', async () => {
+    seed([shotNode({ shot_id: null, shot_status: null })]);
+    await resumePendingGenerations();
+    expect(shotData().shot_status).toBeNull();
+  });
+});
+
 describe('requeryRecoverTask (P1-13)', () => {
   function seedRecoverSlot(): void {
     const slot: CanvasNode = {
