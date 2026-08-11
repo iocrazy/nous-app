@@ -304,6 +304,63 @@ describe('SessionLoginModal', () => {
     expect(await screen.findByText('Wrong verification code')).toBeInTheDocument();
   });
 
+  it('tells the user a rejected code was rejected, and keeps what they typed', async () => {
+    // **The user-visible half of the "wrong code, zero feedback" tombstone.**
+    //
+    // The shape below is what the chain now produces for a code the platform
+    // did not accept: still `sms_required` (the page is genuinely still asking),
+    // but `success: false` + `detail.code_rejected`. Before the fix it arrived
+    // as `success: true` and this component took the success path — clearing
+    // the field and saying nothing at all.
+    submitSmsCode.mockResolvedValueOnce({
+      success: false,
+      status: 'sms_required',
+      message: 'the verification code was not accepted; the page is still asking for one',
+      detail: { code_rejected: true, submitted: true },
+    });
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({ status: 'sms_required' });
+    const input = screen.getByLabelText(/Verification code/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '111111' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Submit$/i }));
+    });
+
+    expect(await screen.findByText(/That code was not accepted/i)).toBeInTheDocument();
+    // The machine-authored English never reaches the user.
+    expect(screen.queryByText(/still asking for one\.$/)).toBeNull();
+    // Retry is possible without re-reading the SMS: the digits are still there
+    // and the button is live again.
+    expect(input.value).toBe('111111');
+    expect(screen.getByRole('button', { name: /^Submit$/i })).toBeEnabled();
+    // The form stays — this is not a terminal state.
+    expect(screen.queryByText(/This sign-in has ended/i)).toBeNull();
+  });
+
+  it('does not call a rejected code a success — the field must not silently clear', async () => {
+    // Same event, asserted from the other side: whatever copy we choose, the
+    // one outcome that is never acceptable is the pre-fix one — input wiped,
+    // no error anywhere on screen.
+    submitSmsCode.mockResolvedValueOnce({
+      success: false,
+      status: 'sms_required',
+      message: 'not accepted',
+      detail: { code_rejected: true },
+    });
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({ status: 'sms_required' });
+    const input = screen.getByLabelText(/Verification code/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '222222' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Submit$/i }));
+    });
+
+    expect(input.value).not.toBe('');
+    expect(screen.getByText(/not accepted/i)).toBeInTheDocument();
+  });
+
   it('names an infrastructure failure as such, not as a bad code', async () => {
     submitSmsCode.mockResolvedValueOnce({
       success: false, status: 'failed', message: 'boom',

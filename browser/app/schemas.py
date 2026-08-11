@@ -129,6 +129,13 @@ class SmsCodeRequest(BaseModel):
 class SmsCodeResponse(BaseModel):
     status: SessionStatus
     message: str
+    # Same envelope as `LoginStatusResponse.detail`, and for the same reason:
+    # `sms_required` is the answer to both "we need a code" and "the code you
+    # sent did not work", so the status alone cannot carry the verdict. The key
+    # that separates them is `code_rejected` (see `LoginSession.submit_sms`);
+    # without it the caller has no way to tell a rejection from a fresh prompt
+    # and ends up calling a refused code a success.
+    detail: dict[str, Any] = Field(default_factory=dict)
 
 
 class LoginStateResponse(BaseModel):

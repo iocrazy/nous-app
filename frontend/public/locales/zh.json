@@ -255,6 +255,7 @@
       "smsSubmit": "提交",
       "smsSubmitting": "提交中...",
       "smsFailed": "验证码被拒绝，请检查后重试",
+      "smsRejected": "验证码没通过，平台仍在要求输入验证码。请核对后重新提交。",
       "smsInfraFailed": "浏览器服务连不上，请稍后重试。",
       "startingLabel": "正在准备浏览器会话",
       "startingHint": "正在为该账号打开独立浏览器环境。",

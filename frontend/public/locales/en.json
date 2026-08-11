@@ -255,6 +255,7 @@
       "smsSubmit": "Submit",
       "smsSubmitting": "Sending...",
       "smsFailed": "That code was rejected — check it and try again",
+      "smsRejected": "That code was not accepted — the platform is still asking for one. Check it and send it again.",
       "smsInfraFailed": "The browser service could not be reached — try again in a moment.",
       "startingLabel": "Preparing a browser session",
       "startingHint": "Opening an isolated browser for this account.",

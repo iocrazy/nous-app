@@ -482,9 +482,13 @@ async def post_login_sms(login_session_id: str, request: SmsCodeRequest) -> Any:
     try:
         snapshot = await session.submit_sms(request.code)
     except LoginError as exc:
-        return SmsCodeResponse(status=exc.status, message=exc.message)
+        return SmsCodeResponse(
+            status=exc.status, message=exc.message, detail=dict(exc.detail)
+        )
 
-    return SmsCodeResponse(status=snapshot.status, message=snapshot.message)
+    return SmsCodeResponse(
+        status=snapshot.status, message=snapshot.message, detail=snapshot.detail
+    )
 
 
 @app.get(

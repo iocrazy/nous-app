@@ -71,6 +71,13 @@ _KIND_TO_STATUS = {
     ProbeKind.ERROR: SessionStatus.FAILED,
 }
 
+# What a submitted-but-not-accepted code reports as its message. Deliberately
+# not "wrong code": see `LoginSession.submit_sms` for what the page can and
+# cannot tell us apart.
+CODE_NOT_ACCEPTED_MESSAGE = (
+    "the verification code was not accepted; the page is still asking for one"
+)
+
 
 class LoginError(Exception):
     """A typed failure. Carries the wire status so no caller has to guess."""
@@ -212,6 +219,34 @@ class LoginSession:
             return self._snapshot()
 
     async def submit_sms(self, code: str) -> StatusSnapshot:
+        """Type a code into the live page and report what the page does next.
+
+        The interesting case is the one that used to be invisible: the code was
+        **not** accepted. `sms_required` is then the answer to two different
+        questions - "we need a code from you" (nobody has typed one yet) and
+        "the one you typed did not get you past this screen" - and they are the
+        same value on the wire. A caller that only sees the status therefore
+        cannot tell a fresh challenge from a rejection, which is exactly how a
+        wrong code came to produce **no feedback at all**: the backend read
+        `sms_required` as a pending state, called the operation a success, and
+        the modal cleared the field without a word.
+
+        So the distinction is carried explicitly, in `detail["code_rejected"]`.
+        The evidence for it is structural, not textual: *we submitted a code,
+        we waited for the page to settle, and the page is still asking for
+        one.* That is falsifiable from the same snapshot the judge already
+        reads, and it does not depend on selectors for a platform's error
+        toast - a matcher that silently stops matching after a copy change is
+        precisely the kind of probe this repo has been burned by.
+
+        The honest limit of that evidence, stated because the copy is written
+        to it: a platform that *accepted* the code and immediately issued a
+        **second** challenge also leaves a code field on screen, and this
+        snapshot cannot separate that from a rejection. Both readings share one
+        remedy - enter the code the platform is showing you now - so the user
+        is told the code was not accepted and the page is still asking, which
+        is true either way, rather than "wrong code", which would not be.
+        """
         async with self._operate() as driver:
             if driver is None:
                 return self._tombstone_snapshot()
@@ -220,6 +255,8 @@ class LoginSession:
             if not submitted:
                 # Not an error on our side: the page is simply not asking for a
                 # code (yet, or any more). Answer with what it *is* asking for.
+                # No `code_rejected` here on purpose - nothing was typed, so
+                # nothing was refused.
                 snapshot = await driver.snapshot()
                 judgement = self.spec.judge(snapshot)
                 self._record(
@@ -234,9 +271,16 @@ class LoginSession:
             await asyncio.sleep(get_settings().login_sms_settle_s)
             snapshot = await driver.snapshot()
             judgement = self.spec.judge(snapshot)
-            self._record(
-                judgement.status, judgement.reason, {"reason": judgement.reason, "submitted": True}
-            )
+            detail: dict[str, Any] = {"reason": judgement.reason, "submitted": True}
+            message = judgement.reason
+            if judgement.status is SessionStatus.SMS_REQUIRED:
+                detail["code_rejected"] = True
+                # The judge's own reason ("the platform is asking for a
+                # verification code") reads as a first-time prompt, so it must
+                # not be what a rejection reports - the message is shown to
+                # people.
+                message = CODE_NOT_ACCEPTED_MESSAGE
+            self._record(judgement.status, message, detail)
             return self._snapshot()
 
     async def collect_state(self) -> tuple[dict[str, Any], LoginProfile]:
