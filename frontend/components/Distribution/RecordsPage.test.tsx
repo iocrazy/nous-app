@@ -21,7 +21,11 @@ vi.mock('../../services/distributionService', () => ({
       visibility: 'public', distribution_mode: 'broadcast', status: 'partial',
       created_at: '2026-07-08T00:00:00Z',
       accounts: [
-        { id: '2', account_id: '11', username: 'Ok One', avatar_url: null, channel: 'official',
+        // Only this row carries an avatar (it is joined live off
+        // social_accounts) — 'Bad One' next to it keeps exercising the
+        // gradient-tile fallback (D3).
+        { id: '2', account_id: '11', username: 'Ok One',
+          avatar_url: 'https://p3-pc.douyinpic.com/aweme/100x100/okone.jpeg', channel: 'official',
           status: 'success', error_message: null, published_url: 'https://douyin/v/9',
           platform_item_id: '9', published_at: '2026-07-08T01:00:00Z' },
         { id: '3', account_id: '12', username: 'Bad One', avatar_url: null, channel: 'official',
@@ -82,6 +86,29 @@ describe('RecordsPage', () => {
     await waitFor(() => expect(screen.getByText('upload rejected')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /Retry/i }));
     await waitFor(() => expect(retryPublishTask).toHaveBeenCalledWith('701'));
+  });
+
+  it('draws the real avatar on expanded account rows, gradient tile for the rest', async () => {
+    // The record sub-rows drew the gradient tile for every account even
+    // though avatar_url ships on each one (D3).
+    const { container } = render(<MemoryRouter><RecordsPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('Awaiting')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText('Mixed'));
+    await waitFor(() => expect(screen.getByText('upload rejected')).toBeInTheDocument());
+
+    const img = screen.getByRole('img', { name: 'Ok One' });
+    expect(img).toHaveAttribute('src', 'https://p3-pc.douyinpic.com/aweme/100x100/okone.jpeg');
+    expect(img).toHaveAttribute('referrerpolicy', 'no-referrer');
+
+    expect(container.querySelectorAll('.sub-row .ava').length).toBe(2);
+    expect(container.querySelectorAll('.sub-row .ava img').length).toBe(1);
+    expect(screen.getByText('BA')).toBeInTheDocument();
+
+    // A dead CDN drops back to the tile rather than a broken-image glyph.
+    fireEvent.error(img);
+    await waitFor(() => expect(container.querySelectorAll('.sub-row .ava img').length).toBe(0));
+    expect(screen.getByText('OK')).toBeInTheDocument();
   });
 
   it('filters by status chips', async () => {

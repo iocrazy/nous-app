@@ -23,7 +23,9 @@ const listAccounts = vi.fn();
 const ACCOUNTS = [
     {
       id: '727145299382534145', scope_type: 'user', scope_id: 'u1', platform: 'douyin',
-      platform_user_id: 'op1', username: 'HEYGO', avatar_url: null,
+      // The one account carrying a real avatar — the rest stay null so the
+      // gradient-tile fallback keeps being exercised side by side (D3).
+      platform_user_id: 'op1', username: 'HEYGO', avatar_url: 'https://p3-pc.douyinpic.com/aweme/100x100/heygo.jpeg',
       token_expires_at: null, auth_type: 'oauth', status: 'active',
       created_at: '2026-07-07T00:00:00Z',
     },
@@ -132,6 +134,23 @@ describe('AccountsPage', () => {
     // The i18next mock returns raw defaults without interpolation, so the
     // per-account usage meta renders its literal template.
     expect(screen.getByText('{{n}} posts')).toBeInTheDocument();
+  });
+
+  it('draws the real avatar on the account card, gradient tile for the rest', async () => {
+    // The avatar was in every payload and rendered nowhere: all four cards
+    // drew the deterministic gradient tile (D3).
+    const { container } = mount();
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+
+    const img = screen.getByRole('img', { name: 'HEYGO' });
+    expect(img).toHaveAttribute('src', 'https://p3-pc.douyinpic.com/aweme/100x100/heygo.jpeg');
+    expect(img).toHaveAttribute('referrerpolicy', 'no-referrer');
+
+    // Four cards, one avatar — the other three have no avatar_url and must
+    // still show their initials tile rather than an empty circle.
+    expect(container.querySelectorAll('.acct .ava').length).toBe(4);
+    expect(container.querySelectorAll('.acct .ava img').length).toBe(1);
+    expect(screen.getByText('ST')).toBeInTheDocument();
   });
 
   it('counts needs_relogin in "Needs attention"', async () => {

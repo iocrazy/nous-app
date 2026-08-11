@@ -53,3 +53,62 @@ export const gradientFor = (id: string): string => {
   for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) >>> 0;
   return AVA_GRADIENTS[h % AVA_GRADIENTS.length];
 };
+
+export interface AccountAvatarProps {
+  /**
+   * Placeholder background. Passed in rather than derived here because the
+   * three Distribution pages still carry their own `gradientFor` copies from
+   * the v4 port (different palette lengths → different pick for the same id);
+   * collapsing them is the separate refactor this module's header mentions.
+   */
+  gradient: string;
+  username: string;
+  /** `social_accounts.avatar_url` — null whenever the platform never gave one. */
+  avatarUrl?: string | null;
+  /** Extra classes on the `.ava` wrapper (size variants live in the CSS). */
+  className?: string;
+  /** Platform badge etc. — rendered above the image. */
+  children?: React.ReactNode;
+}
+
+/**
+ * Account avatar with the initials-on-gradient tile as its floor.
+ *
+ * The tile is never removed: the real avatar is layered on top of it, so a
+ * null `avatar_url` and a CDN that stops serving the image both land on the
+ * same readable placeholder instead of a hole. `onError` is what makes the
+ * second case work — an <img> whose request fails renders as a broken-image
+ * glyph, not as nothing.
+ *
+ * `referrerPolicy="no-referrer"` is precautionary: the douyinpic CDN serves
+ * these unauthenticated today, but hotlink protection is the kind of thing a
+ * platform turns on without notice, and sending no Referer is what the
+ * platforms' own web clients do.
+ */
+export const AccountAvatar: React.FC<AccountAvatarProps> = ({
+  gradient, username, avatarUrl, className, children,
+}) => {
+  const [broken, setBroken] = React.useState(false);
+  // A row can be re-keyed onto a different account (list re-sort, realtime
+  // update); without this, one dead URL would suppress every later avatar
+  // rendered by the same component instance.
+  React.useEffect(() => { setBroken(false); }, [avatarUrl]);
+
+  const showImage = Boolean(avatarUrl) && !broken;
+  return (
+    <span className={className ? `ava ${className}` : 'ava'} style={{ background: gradient }}>
+      {username.slice(0, 2).toUpperCase()}
+      {showImage && (
+        <img
+          className="ava-img"
+          src={avatarUrl as string}
+          alt={username}
+          referrerPolicy="no-referrer"
+          loading="lazy"
+          onError={() => setBroken(true)}
+        />
+      )}
+      {children}
+    </span>
+  );
+};

@@ -26,7 +26,10 @@ vi.mock('../../services/distributionService', () => ({
     // auth_type: a QR-bound account publishes unattended, an OAuth one needs
     // the user's phone.
     { id: '10', scope_type: 'user', scope_id: 'u1', platform: 'douyin',
-      platform_user_id: 'op1', username: 'HEYGO', avatar_url: null,
+      // Only this one carries an avatar, so the null-avatar rows keep
+      // exercising the gradient-tile fallback next to it (D3).
+      platform_user_id: 'op1', username: 'HEYGO',
+      avatar_url: 'https://p3-pc.douyinpic.com/aweme/100x100/heygo.jpeg',
       auth_type: 'session',
       token_expires_at: null, status: 'active', created_at: '2026-07-08T00:00:00Z' },
     { id: '12', scope_type: 'user', scope_id: 'u1', platform: 'douyin',
@@ -226,6 +229,34 @@ describe('PublishPage', () => {
 
     expect(screen.getByText(/Publishes unattended/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Needs confirming on your phone/i).length).toBeGreaterThan(0);
+  });
+
+  it('draws the real avatar in the account picker, gradient tile for the rest', async () => {
+    // The picker drew a deterministic gradient for every row even though the
+    // avatar shipped in the same payload (D3).
+    const { container } = render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+
+    const img = screen.getByRole('img', { name: 'HEYGO' });
+    expect(img).toHaveAttribute('src', 'https://p3-pc.douyinpic.com/aweme/100x100/heygo.jpeg');
+    expect(img).toHaveAttribute('referrerpolicy', 'no-referrer');
+
+    expect(container.querySelectorAll('.acct-row .ava').length).toBe(3);
+    expect(container.querySelectorAll('.acct-row .ava img').length).toBe(1);
+    // Falls back to initials rather than an empty circle.
+    expect(screen.getByText('OA')).toBeInTheDocument();
+  });
+
+  it('drops back to the gradient tile when the avatar CDN refuses the image', async () => {
+    // The failure this guards is invisible without onError: a broken <img>
+    // renders the browser's broken-image glyph, it does not disappear.
+    const { container } = render(<MemoryRouter><PublishPage /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByText('HEYGO')).toBeInTheDocument());
+
+    fireEvent.error(screen.getByRole('img', { name: 'HEYGO' }));
+
+    await waitFor(() => expect(container.querySelectorAll('.acct-row .ava img').length).toBe(0));
+    expect(screen.getByText('HE')).toBeInTheDocument();
   });
 
   it('asks for the session route and lets the backend downgrade per account', async () => {

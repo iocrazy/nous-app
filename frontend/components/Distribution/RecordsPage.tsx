@@ -9,6 +9,7 @@ import {
 import { PublishTask, PublishTaskAccount, SocialAccount } from '../../types';
 import { humanizeTaskError } from '../../utils/humanizeTaskError';
 import { PageHeader } from '../layout/PageHeader';
+import { AccountAvatar } from './platform';
 import './distribution-v4.css';
 
 type Filter = 'all' | 'needs_action' | 'publishing' | 'failed' | 'done';
@@ -367,9 +368,14 @@ export const RecordsPage: React.FC = () => {
                       const platform = platformFor(a.account_id);
                       return (
                         <div key={a.id} className="sub-row">
-                          <span className="ava" style={{ background: gradientFor(a.account_id) }}>
-                            {a.username.slice(0, 2).toUpperCase()}
-                          </span>
+                          {/* `avatar_url` here is joined live off social_accounts
+                              (publish_task_accounts stores no copy), so a rebound
+                              account shows its current picture on old records. */}
+                          <AccountAvatar
+                            gradient={gradientFor(a.account_id)}
+                            username={a.username}
+                            avatarUrl={a.avatar_url}
+                          />
                           <span className="who">
                             {a.username}{platform ? ` · ${platform}` : ''}
                           </span>
