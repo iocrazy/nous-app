@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock
 from unittest.mock import patch as _patch
 from uuid import UUID as _UUID
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -131,6 +132,58 @@ def test_patch_capabilities_produces_resolved_permission_audit():
 
 
 # ---------------------------------------------------------------------------
+# 1b) PATCH whose RESOLVED before == after -> no permission_audit row, even
+#     though the raw capability_profile changes (final-review Important 2).
+# ---------------------------------------------------------------------------
+
+
+def test_patch_capabilities_resolved_noop_skips_audit_row():
+    captured: dict = {}
+    existing = _user_agent()
+    # Raw profile has no "capabilities" key at all — the resolved default for
+    # write_level is already "none".
+    existing["capability_profile"] = {"chat": {"enabled": True}}
+    app, repo = _client_with_repo(existing, captured)
+    # Payload explicitly sets write_level="none", which the raw-comparison
+    # path would see as {} -> {"write_level": "none"} (a "change"), but the
+    # RESOLVED value is "none" both before and after.
+    merged = {
+        **existing,
+        "capability_profile": {
+            "chat": {"enabled": True},
+            "capabilities": {"write_level": "none"},
+        },
+    }
+    repo.get_by_slug.side_effect = [existing, merged]
+    with (
+        _patch("app.api.ai_library_router._repos", return_value=(repo, None)),
+        _patch(
+            "app.api.ai_library_router._enrich_agents_with_scope_names",
+            new=AsyncMock(side_effect=lambda rows: rows),
+        ),
+        _patch(
+            "app.api.ai_library_router._can_edit_chat_permissions",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
+        client = TestClient(app)
+        resp = client.patch(
+            "/api/v1/ai-library/agents/my-agent",
+            json={"capabilities": {"write_level": "none"}},
+        )
+    assert resp.status_code == 200, resp.text
+
+    # No audit row was written...
+    assert captured.get("permission_audit") is None
+    # ...but the raw capability_profile was still passed through to the
+    # update — the profile itself is not gated on the audit-row decision.
+    assert captured["updates"]["capability_profile"] == {
+        "chat": {"enabled": True},
+        "capabilities": {"write_level": "none"},
+    }
+
+
+# ---------------------------------------------------------------------------
 # 2) Content-only PATCH -> no permission_audit
 # ---------------------------------------------------------------------------
 
@@ -201,6 +254,47 @@ def test_get_permission_audits_404_when_agent_missing():
         client = TestClient(app)
         resp = client.get("/api/v1/ai-library/agents/missing/permission-audits")
     assert resp.status_code == 404
+
+
+def test_get_permission_audits_repo_error_propagates():
+    """A DB error out of list_permission_audits must NOT be disguised as
+    "200 + empty history" (final-review Important 1). The repo no longer
+    swallows exceptions, so the endpoint should surface the failure instead
+    of silently returning []."""
+    agent = _user_agent()
+    app, repo = _client_for_get(agent, [])
+    repo.list_permission_audits.side_effect = RuntimeError("db unreachable")
+    with (
+        _patch("app.api.ai_library_router._repos", return_value=(repo, None)),
+        _patch(
+            "app.api.ai_library_router._can_edit_chat_permissions",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
+        client = TestClient(app)
+        with pytest.raises(RuntimeError, match="db unreachable"):
+            client.get("/api/v1/ai-library/agents/my-agent/permission-audits")
+
+
+def test_get_permission_audits_rejects_invalid_limit():
+    """``limit`` is now bounded via Query(ge=1, le=100) -- an out-of-range
+    value 422s at the FastAPI validation layer before the endpoint (and thus
+    the no-longer-exception-swallowing repo call) ever runs."""
+    agent = _user_agent()
+    app, repo = _client_for_get(agent, [])
+    with (
+        _patch("app.api.ai_library_router._repos", return_value=(repo, None)),
+        _patch(
+            "app.api.ai_library_router._can_edit_chat_permissions",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
+        client = TestClient(app)
+        resp = client.get(
+            "/api/v1/ai-library/agents/my-agent/permission-audits?limit=-1"
+        )
+    assert resp.status_code == 422
+    repo.list_permission_audits.assert_not_called()
 
 
 def test_get_permission_audits_returns_items():

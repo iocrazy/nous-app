@@ -252,9 +252,7 @@ function denialEvent(
 ): AgentRunEvent {
   return {
     seq,
-    // Cast: this event_type predates the union declared in types.ts — Task 5
-    // backend now emits it (agent_runner.py's `record_event`).
-    event_type: 'capability_denied' as AgentRunEvent['event_type'],
+    event_type: 'capability_denied',
     payload,
     created_at: '2026-08-10T00:00:00Z',
   };

@@ -724,33 +724,31 @@ class AgentRepository:
 
         Row → dict with REST-parity value types (id → str, changed_by → str,
         created_at → ISO string) so ``PermissionAuditItem`` can build directly
-        off it — same template rule as ``_agent_to_dict``."""
-        try:
-            async with read_scope() as session:
-                result = await session.execute(
-                    select(AgentPermissionAudits)
-                    .where(AgentPermissionAudits.agent_id == agent_id)
-                    .order_by(AgentPermissionAudits.created_at.desc())
-                    .limit(limit)
+        off it — same template rule as ``_agent_to_dict``.
+
+        Deliberately does NOT catch/log-and-return-[] here: a DB error must
+        propagate so the endpoint surfaces a 5xx, not a "200 + empty history"
+        that looks like the agent simply has no permission changes."""
+        async with read_scope() as session:
+            result = await session.execute(
+                select(AgentPermissionAudits)
+                .where(AgentPermissionAudits.agent_id == agent_id)
+                .order_by(AgentPermissionAudits.created_at.desc())
+                .limit(limit)
+            )
+            out: List[Dict[str, Any]] = []
+            for row in result.scalars().all():
+                out.append(
+                    {
+                        "id": str(row.id),
+                        "changed_by": str(row.changed_by),
+                        "before": row.before_json,
+                        "after": row.after_json,
+                        "reason": row.reason,
+                        "created_at": row.created_at.isoformat(),
+                    }
                 )
-                out: List[Dict[str, Any]] = []
-                for row in result.scalars().all():
-                    out.append(
-                        {
-                            "id": str(row.id),
-                            "changed_by": str(row.changed_by),
-                            "before": row.before_json,
-                            "after": row.after_json,
-                            "reason": row.reason,
-                            "created_at": (
-                                row.created_at.isoformat() if row.created_at else None
-                            ),
-                        }
-                    )
-                return out
-        except Exception as e:
-            logger.error(f"Failed to list permission audits for agent {agent_id}: {e}")
-            return []
+            return out
 
 
 def get_agent_repository() -> AgentRepository:

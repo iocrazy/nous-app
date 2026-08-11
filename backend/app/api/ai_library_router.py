@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -806,13 +806,22 @@ async def update_agent(
         # Audit row (2026-08-10 spec §3): RESOLVED before/after snapshot of
         # both permission subtrees — never the raw JSONB — so what's stored
         # in agent_permission_audits matches what enforcement actually reads.
-        permission_audit = {
-            "agent_id": agent_uuid,
-            "changed_by": user_uuid,
-            "before_json": _resolved_snapshot(existing_profile),
-            "after_json": _resolved_snapshot(merged_profile),
-            "reason": payload.permission_change_reason,
-        }
+        # Resolved snapshots are fail-closed, so an agent whose raw profile
+        # lacks a key still resolves to explicit defaults; comparing raw
+        # dicts would then flag an unchanged Save as a "change" (raw {} ->
+        # raw {defaults}). Skip the audit row when the RESOLVED before/after
+        # are equal — that's the audit table's semantics: no observed change
+        # in runtime behavior, no row. The profile itself still updates.
+        resolved_before = _resolved_snapshot(existing_profile)
+        resolved_after = _resolved_snapshot(merged_profile)
+        if resolved_before != resolved_after:
+            permission_audit = {
+                "agent_id": agent_uuid,
+                "changed_by": user_uuid,
+                "before_json": resolved_before,
+                "after_json": resolved_after,
+                "reason": payload.permission_change_reason,
+            }
 
     override_team_ctx: Optional[int] = None
     if override_updates:
@@ -894,7 +903,7 @@ async def update_agent(
 async def list_agent_permission_audits(
     slug: str,
     auth: AuthDep,
-    limit: int = 20,
+    limit: int = Query(20, ge=1, le=100),
 ) -> Dict[str, Any]:
     """Most-recent-first audit trail of chat_permissions/capabilities changes
     for one agent (2026-08-10 spec §3). Gated by the SAME role check as the

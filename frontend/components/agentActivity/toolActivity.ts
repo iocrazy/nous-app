@@ -195,9 +195,11 @@ export function fromTranscriptEvents(events: AgentRunEvent[]): ToolActivity[] {
 
 /**
  * One capability-gate abort surfaced to the user (Task 6, Agent 权限页梳理
- * 立项). Sourced from the "capability_denied" transcript event Task 5 emits
- * — one per tool per turn, so at most one denial per distinct tool shows up
- * here even if the model retries the same call.
+ * 立项). Sourced from the "capability_denied" transcript event Task 5 emits.
+ * Dedup here is by seq only (a repeated poll of the same row collapses to
+ * one entry); the backend is what guarantees at most one such event per
+ * tool per turn, so that per-tool uniqueness is inherited, not enforced,
+ * by this module.
  */
 export interface CapabilityDenial {
   /** Stable within one run — same seq-based dedupe key as ToolActivity. */
