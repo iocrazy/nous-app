@@ -30,6 +30,7 @@ from fastapi.responses import JSONResponse
 from . import SERVICE_VERSION
 from .browser_runtime import probe_browser_ready, xvfb_ready
 from .config import get_settings
+from .inspect import run_inspect, url_refusal
 from .login_sessions import (
     LoginCapacityError,
     LoginError,
@@ -37,10 +38,12 @@ from .login_sessions import (
     get_registry,
 )
 from .platforms import (
+    get_inspect_spec,
     get_login_flow,
     get_publisher,
     get_validator,
     get_verify_spec,
+    inspect_platforms,
     login_platforms,
     publish_platforms,
     supported_platforms,
@@ -50,6 +53,8 @@ from .publish import run_publish
 from .redaction import scrub
 from .schemas import (
     HealthResponse,
+    InspectRequest,
+    InspectResponse,
     LoginCloseResponse,
     LoginStartRequest,
     LoginStartResponse,
@@ -350,6 +355,98 @@ async def post_session_verify_publish(request: VerifyPublishRequest) -> Any:
     except Exception as exc:  # noqa: BLE001 - run_verify is total; this is a bug net
         logger.exception("read-back raised for platform=%s", request.platform)
         return VerifyPublishResponse(
+            success=False,
+            status=SessionStatus.FAILED,
+            message=scrub(f"{type(exc).__name__}: {exc}"),
+            detail={"stage": "endpoint", "platform": request.platform},
+        )
+    finally:
+        slots.release()
+
+
+# --- read-only page recon (T0) ----------------------------------------------
+
+# Slack over the request's own budget, mirroring the publish route: the inner
+# run is cooperative and returns on its own, and this ceiling only covers a
+# single Playwright call wedging below that granularity.
+INSPECT_HARD_TIMEOUT_SLACK_S = 60
+
+
+@app.post(
+    "/session/inspect",
+    response_model=InspectResponse,
+    dependencies=[Depends(require_internal_token)],
+)
+async def post_session_inspect(request: InspectRequest) -> Any:
+    """Open one allow-listed console page with a real session and count things.
+
+    The tool the `[TO-VERIFY]` markers in the design spec have been waiting
+    for: it answers "how many nodes carry this caption", "does this file input
+    take several files", "what is that box's maxlength" with numbers instead of
+    a human reading DevTools aloud.
+
+    Two refusals happen here, both before any browser exists:
+
+    * **no spec for the platform** — 400, because unlike the read-back's
+      `not_supported` this really is a malformed request: there is no honest
+      answer to give about a platform whose allow-list we do not have.
+    * **URL outside the platform's creator hosts** — 400 with
+      `reason=url_not_allowed`. This one is the safety property of the whole
+      endpoint: it carries a live account's cookies, so an arbitrary URL here
+      would be a credentialed SSRF. The refusal is emitted without a fetch.
+    """
+    spec = get_inspect_spec(request.platform)
+    if spec is None:
+        return _error(
+            status.HTTP_400_BAD_REQUEST,
+            SessionStatus.FAILED,
+            f"no inspection target registered for platform '{request.platform}'",
+            reason="not_supported",
+            supported=inspect_platforms(),
+        )
+
+    refusal = url_refusal(request.url, spec.allowed_hosts)
+    if refusal is not None:
+        return _error(
+            status.HTTP_400_BAD_REQUEST,
+            SessionStatus.FAILED,
+            refusal,
+            reason="url_not_allowed",
+            platform=request.platform,
+            allowed_hosts=list(spec.allowed_hosts),
+        )
+
+    settings = get_settings()
+    slots = _slots()
+    try:
+        await asyncio.wait_for(slots.acquire(), timeout=settings.browser_slot_wait_s)
+    except asyncio.TimeoutError:
+        return InspectResponse(
+            success=False,
+            status=SessionStatus.FAILED,
+            message="browser pool saturated; no slot became available",
+            detail={
+                "error_kind": "pool_saturated",
+                "stage": "admission",
+                "platform": request.platform,
+            },
+        )
+
+    try:
+        return await asyncio.wait_for(
+            run_inspect(spec, request),
+            timeout=request.budget_s + INSPECT_HARD_TIMEOUT_SLACK_S,
+        )
+    except asyncio.TimeoutError:
+        return InspectResponse(
+            success=False,
+            status=SessionStatus.TIMEOUT,
+            message="page read exceeded its hard timeout and was abandoned",
+            detail={"stage": "hard_timeout", "platform": request.platform},
+        )
+    except Exception as exc:  # noqa: BLE001 - run_inspect is total; this is a bug net
+        logger.exception("page read raised for platform=%s", request.platform)
+        return InspectResponse(
             success=False,
             status=SessionStatus.FAILED,
             message=scrub(f"{type(exc).__name__}: {exc}"),

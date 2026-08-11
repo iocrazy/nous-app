@@ -39,10 +39,11 @@ from __future__ import annotations
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlsplit
 
+from ..inspect import InspectSpec
 from ..login import LoginFlowSpec, LoginJudgement, LoginPageSnapshot, LoginProfile
 from ..schemas import EnvironmentConfig, SessionResult, SessionStatus
 from ..validation import DomValidationSpec, Judgement, run_dom_session_validation
-from . import register, register_login
+from . import register, register_inspect_spec, register_login
 
 PLATFORM = "xiaohongshu"
 
@@ -117,6 +118,23 @@ async def validate_session(
 
 
 register(PLATFORM, validate_session)
+
+
+# --- read-only recon (T0) ---------------------------------------------------
+#
+# Registered even though this platform cannot post yet, because recon is
+# exactly what it is missing: `IDENTITY_COOKIE` and the profile selectors above
+# are still `[GUESS] UNVERIFIED`, and calibrating them means counting nodes on
+# a real logged-in page. Reading is not posting — the two capabilities are
+# separate registries for that reason.
+
+INSPECT_SPEC = InspectSpec(
+    platform=PLATFORM,
+    allowed_hosts=CREATOR_HOSTS,
+    login_text_markers=LOGIN_TEXT_MARKERS,
+)
+
+register_inspect_spec(PLATFORM, INSPECT_SPEC)
 
 # --- QR login ---------------------------------------------------------------
 

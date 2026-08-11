@@ -310,3 +310,85 @@ def test_every_error_kind_browser_emits_is_known_to_backend():
         f"browser 会发出 backend 不认识的 error_kind: {sorted(emitted - known)}"
         " —— is_infra_failure 会对它们返回 False"
     )
+
+
+# ── 只读勘探 /session/inspect（T0） ─────────────────────────────
+
+
+async def test_inspect_payload_validates_against_browser_schema(browser):
+    """backend 真正发出的那份 body 必须能被 browser 的模型接住。
+
+    这里不手搓 payload，而是让真实的 ``inspect_page`` 发一次、把 body 截下来
+    —— 手搓一份"应该长这样"的字典只能证明那份字典合法，证明不了代码发的是它。
+    """
+    import json as _json
+
+    import httpx
+    import respx
+
+    from app.services.distribution.browser_client import (
+        BrowserClient,
+        SessionEnvironment,
+    )
+
+    captured: dict = {}
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = _json.loads(request.content)
+        return httpx.Response(
+            200, json={"success": True, "status": "session_valid", "message": ""}
+        )
+
+    with respx.mock:
+        respx.post("http://nous-browser:8090/session/inspect").mock(
+            side_effect=_handler
+        )
+        await BrowserClient(
+            base_url="http://nous-browser:8090", token="t"
+        ).inspect_page(
+            "douyin",
+            {"cookies": [{"name": "sessionid", "value": "x"}]},
+            "https://creator.douyin.com/creator-micro/content/upload",
+            environment=SessionEnvironment(),
+            seed_files=[
+                {"kind": "image", "url": "http://x/a.jpg", "filename": "a.jpg"}
+            ],
+            text_probes=["定时发布"],
+            selector_probes=['input[type="file"]'],
+            options={"settle_ms": 6000},
+        )
+
+    parsed = browser.InspectRequest.model_validate(captured["body"])
+    assert parsed.url.endswith("/content/upload")
+    assert parsed.seed_files[0].filename == "a.jpg"
+    assert parsed.text_probes == ["定时发布"]
+    assert parsed.settle_ms == 6000
+
+
+def test_backend_reads_every_inspect_response_field(browser):
+    """反向漂移同样有害：browser 新增一个观测字段而 backend 不读 = 白算。
+
+    ``updated_storage_state`` 是这条守卫最实在的目标 —— 漏读它，勘探就从
+    "顺带续期"变成"净消耗会话寿命"，而且**没有任何报错**。
+    """
+    from app.services.distribution import browser_client
+
+    source = Path(browser_client.__file__).read_text(encoding="utf-8")
+    for field in browser.InspectResponse.model_fields:
+        assert (
+            field in source
+        ), f"browser 返回 {field!r} 但 backend/browser_client.py 没有读它"
+
+
+def test_inspect_statuses_are_a_subset_of_the_shared_enum(browser):
+    """勘探的合法 status 必须都是两侧共有的成员 —— 而且**不含**
+    published / not_published：勘探永远不对作品下判断。"""
+    from app.services.distribution.browser_client import (
+        _INSPECT_STATUSES,
+        SessionStatus,
+    )
+
+    theirs = {s.value for s in browser.SessionStatus}
+    assert _INSPECT_STATUSES <= theirs
+    assert SessionStatus.PUBLISHED.value not in _INSPECT_STATUSES
+    assert SessionStatus.NOT_PUBLISHED.value not in _INSPECT_STATUSES

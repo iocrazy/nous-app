@@ -123,6 +123,14 @@ class Settings:
     # Per-attempt wait for the platform's post-publish redirect.
     publish_confirm_wait_s: int
 
+    # --- read-only page recon (T0) -----------------------------------------
+    # Deliberately its own pair rather than reusing the posting flow's: those
+    # names carry a vocabulary `app/inspect.py` is guarded against containing
+    # (see that module's docstring), and a recon run has different economics
+    # anyway — it hands over one small probe file, not a few hundred MB.
+    inspect_form_timeout_ms: int
+    inspect_upload_wait_s: int
+
     # --- media staging (S3) ------------------------------------------------
     # Whole-file download budget per asset.
     asset_download_timeout_s: int
@@ -167,6 +175,8 @@ def get_settings() -> Settings:
         publish_settle_ms=_int_env("BROWSER_PUBLISH_SETTLE_MS", 1_500),
         publish_confirm_attempts=max(1, _int_env("BROWSER_PUBLISH_CONFIRM_ATTEMPTS", 20)),
         publish_confirm_wait_s=max(1, _int_env("BROWSER_PUBLISH_CONFIRM_WAIT_S", 5)),
+        inspect_form_timeout_ms=_int_env("BROWSER_INSPECT_FORM_TIMEOUT_MS", 60_000),
+        inspect_upload_wait_s=max(5, _int_env("BROWSER_INSPECT_UPLOAD_WAIT_S", 180)),
         asset_download_timeout_s=max(10, _int_env("BROWSER_ASSET_DOWNLOAD_TIMEOUT_S", 600)),
         asset_max_bytes=max(1, _int_env("BROWSER_ASSET_MAX_BYTES", 2 * 1024 * 1024 * 1024)),
         asset_chunk_bytes=max(4096, _int_env("BROWSER_ASSET_CHUNK_BYTES", 1024 * 1024)),

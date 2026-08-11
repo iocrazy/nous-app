@@ -43,7 +43,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Sequence
 
 import httpx
 from loguru import logger
@@ -183,6 +183,21 @@ _VERIFY_STATUSES = frozenset(
         SessionStatus.SESSION_INVALID.value,
         SessionStatus.TIMEOUT.value,
         SessionStatus.PROXY_FAILED.value,
+        SessionStatus.FAILED.value,
+    }
+)
+
+# /session/inspect（只读勘探，T0）允许返回的 status 值（契约已定死）。
+#
+# ``session_valid`` 是唯一的成功值 —— 勘探成功意味着"我们带着这个会话打开了
+# 那一页并读到了东西"，这跟会话校验的结论是同一件事，所以复用同一个枚举值而
+# 不是新造一个。**不含 published / not_published**：勘探永远不对作品下判断。
+_INSPECT_STATUSES = frozenset(
+    {
+        SessionStatus.SESSION_VALID.value,
+        SessionStatus.SESSION_INVALID.value,
+        SessionStatus.PROXY_FAILED.value,
+        SessionStatus.TIMEOUT.value,
         SessionStatus.FAILED.value,
     }
 )
@@ -488,6 +503,42 @@ class VerifyResult:
             f"VerifyResult(status={self.status!r}, reason={self.reason!r}, "
             f"platform_item_id={self.platform_item_id!r}, "
             f"published_url={'set' if self.published_url else 'none'}, "
+            f"updated_storage_state="
+            f"{'set' if self.updated_storage_state else 'none'})"
+        )
+
+
+@dataclass(frozen=True)
+class InspectResult:
+    """``POST /session/inspect`` 的传输层结果（只读勘探，T0）。
+
+    ``observation`` 是浏览器侧那份**受控摘要**（文案计数 / 选择器计数 / input
+    属性 / 截断过的可见文本），原样透传。这里刻意不做任何"解读" —— 勘探的
+    产出是数字，谁调它谁解读；在传输层塞判断逻辑会让下一个人以为那些结论是
+    平台说的。
+
+    ``updated_storage_state`` 与发布 / 回读同理：一次已认证的页面加载会让平台
+    下发新 cookie，不写回等于让勘探**净消耗**会话寿命。
+    """
+
+    result: SessionOpResult
+    observation: dict[str, Any] = field(default_factory=dict)
+    updated_storage_state: Optional[dict[str, Any]] = None
+
+    @property
+    def success(self) -> bool:
+        return self.result.success
+
+    @property
+    def status(self) -> str:
+        return self.result.status
+
+    def __repr__(self) -> str:  # pragma: no cover - 防呆
+        # observation 可能有几 KB 的页面文本，绝不进 repr（repr 会被 loguru
+        # 的 f-string 带进日志）。
+        return (
+            f"InspectResult(status={self.status!r}, "
+            f"observation_keys={sorted(self.observation)}, "
             f"updated_storage_state="
             f"{'set' if self.updated_storage_state else 'none'})"
         )
@@ -990,6 +1041,138 @@ class BrowserClient:
             updated_storage_state=updated_state,
         )
 
+    # ── /session/inspect (T0 只读勘探) ──────────────────────
+
+    async def inspect_page(
+        self,
+        platform: str,
+        storage_state: Mapping[str, Any],
+        url: str,
+        *,
+        environment: Optional[SessionEnvironment] = None,
+        seed_files: Optional[Sequence[Mapping[str, Any]]] = None,
+        text_probes: Optional[Sequence[str]] = None,
+        selector_probes: Optional[Sequence[str]] = None,
+        options: Optional[Mapping[str, Any]] = None,
+    ) -> InspectResult:
+        """``POST /session/inspect`` —— 打开一个白名单内的页面，数东西。
+
+        存在的理由：本仓库的平台适配器全部是对着**没人能从代码里看一眼**的
+        页面写的。设计规格里那一片 ``[TO-VERIFY]``、``xiaohongshu.py`` 里
+        两个 ``[GUESS] UNVERIFIED`` 常量，都是同一个缺口的症状 —— 想知道
+        "这句文案在页面上精确匹配几个节点"，此前只能让人开 DevTools 念出来。
+
+        **这个方法不发布任何东西**，浏览器侧那个模块里也不存在提交路径（有
+        测试逐字检查）。它能做的全部是：导航、把探针文件交给一个 file input
+        （否则某些表单根本不渲染）、数匹配数、读被截断过的可见文本。
+
+        ``url`` 的白名单在**浏览器侧**校验（对着该平台自己的 CREATOR_HOSTS）。
+        不在这里预判：allow-list 只能有一处，放在真正会去访问的那一侧。
+
+        ⚠️ **账号级串行锁不在这里** —— 它是 PG advisory lock，归 backend 侧
+        持有（见 ``session_inspect.inspect_account_page``）。直接调本方法而
+        不持锁，会与同账号的发布 / 巡检撞车，两个 context 互相把对方踢下线
+        （spec §7.5）。
+
+        永不抛传输异常；参数非法才 raise ``ValueError``。
+        """
+        if not isinstance(storage_state, Mapping) or not storage_state:
+            raise ValueError("storage_state must be a non-empty JSON object")
+        if not url or not url.strip():
+            raise ValueError("url must be a non-empty string")
+        env = environment or SessionEnvironment()
+        payload: dict[str, Any] = {
+            "platform": platform,
+            "storage_state": dict(storage_state),
+            "environment": env.to_payload(),
+            "url": url.strip(),
+            "seed_files": [dict(item) for item in (seed_files or [])],
+            "text_probes": list(text_probes or []),
+            "selector_probes": list(selector_probes or []),
+        }
+        # 其余旋钮（settle_ms / seed_selector / excerpt_chars / budget_s …）
+        # 原样透传，由浏览器侧的 pydantic 模型兜住上下界 —— 在这里复述一遍
+        # 边界值就是第二处声明，而那正是本次设计要消灭的病。
+        payload.update({k: v for k, v in (options or {}).items() if v is not None})
+        try:
+            data = await self._call(
+                "POST",
+                "/session/inspect",
+                read_timeout=self._publish_timeout,
+                payload=payload,
+            )
+        except _TransportFailure as failure:
+            logger.warning(
+                f"[browser.inspect] platform={platform} "
+                f"{failure.kind.value}: {failure.message}"
+            )
+            # 传输失败带着浏览器侧的信封（如果有）—— URL 被白名单拒绝时是
+            # HTTP 400 + reason=url_not_allowed，那是**结论**，不该被降级成
+            # 一句 "browser service returned HTTP 400"。
+            if failure.body and isinstance(failure.body.get("detail"), Mapping):
+                return InspectResult(
+                    result=SessionOpResult(
+                        success=False,
+                        status=str(
+                            failure.body.get("status") or SessionStatus.FAILED.value
+                        ),
+                        message=str(failure.body.get("message") or failure.message),
+                        detail=dict(failure.body["detail"]),
+                    )
+                )
+            return InspectResult(result=self._transport_result(failure))
+
+        raw_status = data.get("status")
+        if raw_status not in _INSPECT_STATUSES:
+            logger.warning(
+                f"[browser.inspect] platform={platform} illegal status={raw_status!r}"
+            )
+            return InspectResult(
+                result=_failure(
+                    SessionStatus.FAILED,
+                    SessionErrorKind.BAD_RESPONSE,
+                    f"browser service returned unknown status {raw_status!r}",
+                )
+            )
+
+        detail = data.get("detail")
+        detail = dict(detail) if isinstance(detail, Mapping) else {}
+        updated = data.get("updated_storage_state")
+        updated_state = (
+            dict(updated) if isinstance(updated, Mapping) and updated else None
+        )
+        observation = {
+            key: data.get(key)
+            for key in (
+                "url_after",
+                "page_title",
+                "texts",
+                "selectors",
+                "body_text_excerpt",
+                "body_text_truncated",
+                "input_summary",
+                "input_total",
+                "seeded_files",
+            )
+            if key in data
+        }
+        logger.info(
+            f"[browser.inspect] platform={platform} status={raw_status} "
+            f"probes={len(payload['text_probes'])}/"
+            f"{len(payload['selector_probes'])} "
+            f"state_refreshed={bool(updated_state)}"
+        )
+        return InspectResult(
+            result=SessionOpResult(
+                success=raw_status == SessionStatus.SESSION_VALID.value,
+                status=raw_status,
+                message=str(data.get("message") or ""),
+                detail=detail,
+            ),
+            observation=observation,
+            updated_storage_state=updated_state,
+        )
+
     # ── /session/login/* (S2 扫码登录) ──────────────────────
 
     async def start_login(
@@ -1307,6 +1490,7 @@ __all__ = [
     "LOGIN_STATUSES",
     "BrowserClient",
     "BrowserHealth",
+    "InspectResult",
     "LoginSnapshot",
     "LoginState",
     "PublishResult",
