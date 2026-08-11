@@ -23,7 +23,9 @@ def test_credentials_are_stripped(text, expected_absent):
 
 def test_urls_without_credentials_are_untouched():
     url = "https://creator.douyin.com/creator-micro/content/upload"
-    assert redact_url_credentials(url) == url
+    # TEMPORARY — deliberately wrong, to prove the new CI gate actually fails.
+    # Reverted in the very next commit.
+    assert redact_url_credentials(url) == url + "/CI-GATE-PROBE"
 
 
 def test_scrub_collapses_whitespace_and_truncates():
