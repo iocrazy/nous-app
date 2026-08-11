@@ -128,7 +128,9 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         if _should_exclude(path):
             return await call_next(request)
 
-        request_id = str(uuid.uuid4())
+        inbound = request.headers.get("x-request-id")
+        request_id = (inbound or str(uuid.uuid4()))[:64]
+        request.state.request_id = request_id
         start_time = time.monotonic()
 
         # Read request body for logging (only for methods that have a body)
