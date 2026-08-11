@@ -71,28 +71,128 @@ const RETRYABLE: ReadonlySet<ViewStatus> = new Set<ViewStatus>([
  */
 const IDENTITY_UNRESOLVED = 'identity_unresolved';
 
+/** An i18n key with the English it falls back to. */
+type Copy = [key: string, fallback: string];
+
 /**
- * Statuses whose `metadata.login.message` we translate ourselves instead of
- * echoing.
+ * What the detail line says, per server status. We translate it; we never echo
+ * `metadata.login.message`.
  *
  * That field is **not** platform copy — it is our own machine-authored English
  * (`LoginJudgement.reason`, e.g. `browser/app/platforms/douyin.py`'s "the
  * platform is asking for a verification code"), carried verbatim through
  * `login_metadata`. Printing it under a Chinese UI is how a bare English
  * sentence ended up on the SMS screen. The status it rides on is already
- * typed, so the copy can come from i18n and the English never has to be shown.
+ * typed, so the copy comes from i18n and the English never has to be shown.
  *
  * Keyed by status rather than by matching the sentence: the wording belongs to
  * the browser service and may be reworded there at any time — a string match
  * would silently start leaking English again, while the status is contract.
  *
- * Only the SMS state is mapped so far; the other statuses still echo (see the
- * survey in the PR). Adding one is a line here plus the two locale files.
+ * **Total over `SessionLoginStatus`, deliberately.** A `Partial` map lets a
+ * newly added status fall through to the echo path, and the failure mode of
+ * that is invisible: an English sentence appears under a Chinese UI and no
+ * test goes red. Being total moves the failure to compile time.
+ *
+ * ## The two statuses that carry a Chinese tail, and why the tail is dropped
+ *
+ * `scanned` and `qrcode_expired` arrive as `"scanned; waiting for confirmation
+ * on the phone: 扫码成功"` — English prose plus a Chinese fragment. The
+ * fragment is **not** something the platform told us: it is whichever entry of
+ * our own `SCANNED_MARKERS` / `EXPIRED_MARKERS` tuple matched on the page
+ * (`browser/app/platforms/douyin.py`). So it restates the status in Chinese and
+ * adds nothing a user can act on, while "i18n prefix + raw tail" would produce
+ * a hybrid line that reads like a debug string in both locales.
+ *
+ * Dropping it costs nothing even for support: the *full* original sentence,
+ * tail included, still arrives in `login.detail.reason` (the browser service
+ * records the judge's reason there, and `login_metadata`'s whitelist keeps it).
+ * This is a decision about what to **render**, not about what to keep.
  */
-const SERVER_DETAIL_COPY: Partial<Record<ViewStatus, [key: string, fallback: string]>> = {
+export const SERVER_DETAIL_COPY: Record<SessionLoginStatus, Copy> = {
+  waiting_scan: [
+    'distribution.session.waitingScanDetail',
+    'The sign-in page is showing a QR code.',
+  ],
+  scanned: [
+    'distribution.session.scannedDetail',
+    'The platform registered the scan and is waiting for you to approve it.',
+  ],
+  qrcode_expired: [
+    'distribution.session.qrcodeExpiredDetail',
+    'The platform marked this code as expired, so a fresh one was requested.',
+  ],
   sms_required: [
     'distribution.session.smsRequiredDetail',
     'The platform is asking for a verification code.',
+  ],
+  success: [
+    'distribution.session.successDetail',
+    "The platform's creator console loaded — the sign-in is complete.",
+  ],
+  timeout: [
+    'distribution.session.timeoutDetail',
+    'The browser session for this sign-in has ended.',
+  ],
+  failed: [
+    'distribution.session.failedDetail',
+    'The browser session ended without a completed sign-in.',
+  ],
+  proxy_failed: [
+    'distribution.session.proxyFailedDetail',
+    "The browser could not reach the platform through this account's proxy.",
+  ],
+};
+
+/**
+ * What the SMS form says when a submission comes back `success: false`, per
+ * status.
+ *
+ * Separate from `SERVER_DETAIL_COPY` because it answers a different question.
+ * That map describes *the page*; this one describes *what happened to the code
+ * you just sent* — "The browser session for this sign-in has ended" is a fine
+ * status line and a useless error under an input the user is still holding.
+ *
+ * Total for the same reason as above, and because the alternative is what this
+ * replaces: `res.message` rendered raw, which put machine English directly in
+ * front of the user on every path that was not `error_kind` or `code_rejected`.
+ */
+export const SMS_SUBMIT_COPY: Record<SessionLoginStatus, Copy> = {
+  // Reachable only if the marker ever goes missing; `code_rejected` is checked
+  // first and is what a refused code actually looks like (see the SMS handler).
+  sms_required: [
+    'distribution.session.smsStillRequired',
+    'The platform is still asking for a verification code.',
+  ],
+  // The page moved past the code step. Not an error in itself — say so rather
+  // than implying the digits were wrong.
+  waiting_scan: [
+    'distribution.session.smsNoLongerNeeded',
+    'The platform is no longer asking for a code — this sign-in has moved on.',
+  ],
+  scanned: [
+    'distribution.session.smsNoLongerNeeded',
+    'The platform is no longer asking for a code — this sign-in has moved on.',
+  ],
+  success: [
+    'distribution.session.smsNoLongerNeeded',
+    'The platform is no longer asking for a code — this sign-in has moved on.',
+  ],
+  qrcode_expired: [
+    'distribution.session.smsQrExpired',
+    'The QR code expired before the code was accepted — get a new one and scan again.',
+  ],
+  timeout: [
+    'distribution.session.smsSessionEnded',
+    'This sign-in ended before the code could be used — get a new code and start over.',
+  ],
+  proxy_failed: [
+    'distribution.session.smsProxyFailed',
+    "The code could not be sent — this account's proxy is unreachable.",
+  ],
+  failed: [
+    'distribution.session.smsFailed',
+    'That code was rejected — check it and try again',
   ],
 };
 
@@ -324,6 +424,16 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
       // A 200 with success:false is the platform saying no — showing nothing
       // here would leave the user staring at an unchanged form.
       if (res && res.success === false) {
+        // Three readings, checked most-specific first, and **none of them
+        // echoes `res.message`**. That field is the same machine English as
+        // `metadata.login.message` (see SERVER_DETAIL_COPY) — it used to be
+        // rendered raw here, which put a sentence like "navigated to an
+        // unexpected host (host=...)" under the user's code input.
+        //   error_kind    — ours, not the account's: the browser service.
+        //   code_rejected — the platform did not accept this code.
+        //   otherwise     — translate by status; the raw string stays in
+        //                   `res.detail`/the console for support.
+        const statusCopy = SMS_SUBMIT_COPY[res.status as SessionLoginStatus] as Copy | undefined;
         setSmsError(
           res.detail?.error_kind
             ? t('distribution.session.smsInfraFailed', 'The browser service could not be reached — try again in a moment.')
@@ -335,9 +445,19 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
             // SERVER_DETAIL_COPY above).
             : res.detail?.code_rejected
               ? t('distribution.session.smsRejected', 'That code was not accepted — the platform is still asking for one. Check it and send it again.')
-              : res.message
-                || t('distribution.session.smsFailed', 'That code was rejected — check it and try again'),
+              : statusCopy
+                ? t(statusCopy[0], statusCopy[1])
+                // Only an off-contract status reaches here (the map is total
+                // over SessionLoginStatus). Say something true and generic
+                // rather than nothing — silence is the bug this whole PR
+                // series is about.
+                : t('distribution.session.smsFailed', 'That code was rejected — check it and try again'),
         );
+        if (!res.detail?.error_kind && !res.detail?.code_rejected) {
+          // The untranslated original is worth keeping somewhere a bug report
+          // can reach, just not on screen.
+          console.error('distribution: sms submit refused', res.status, res.message);
+        }
         // Deliberately NOT clearing `smsCode`. A rejected code is almost always
         // a mistyped digit or a stale one, and the next action is to correct
         // what is on screen — wiping it forces the user back to the SMS app to
@@ -466,14 +586,15 @@ export const SessionLoginModal: React.FC<SessionLoginModalProps> = ({
     );
   }
 
-  // The detail line under the hint: our own translation when the status says
-  // what the server's English would have said, the server string only where we
-  // have nothing better. Falling back to `login.message` rather than hiding the
-  // line keeps every un-mapped state as informative as it is today.
-  const serverDetailCopy = SERVER_DETAIL_COPY[status];
-  const detailLine = serverDetailCopy
-    ? t(serverDetailCopy[0], serverDetailCopy[1])
-    : login?.message;
+  // The detail line under the hint. Always our own translation, never
+  // `login.message` — with the map now total over the server statuses, the
+  // remaining `undefined` cases are the four local-only phases (starting /
+  // connecting / start_failed / start_unavailable) and `session_ended`, none of
+  // which describe a page the browser service looked at. `session_ended`
+  // matters most here: it can still be holding the *previous* state's message,
+  // so echoing would print a stale English line under "This sign-in has ended".
+  const serverDetailCopy = SERVER_DETAIL_COPY[status as SessionLoginStatus] as Copy | undefined;
+  const detailLine = serverDetailCopy ? t(serverDetailCopy[0], serverDetailCopy[1]) : undefined;
 
   // Transient-and-ours reads as `warn`, not `danger`: nothing is broken about
   // the user's account and the remedy is simply to retry (bind again, or wait

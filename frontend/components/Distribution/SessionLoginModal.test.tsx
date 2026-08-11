@@ -192,15 +192,79 @@ describe('SessionLoginModal', () => {
       .toBeInTheDocument();
   });
 
-  it('still shows the server line for states we have no copy for', async () => {
-    // The mapping is per typed status, and the fallback is what keeps every
-    // un-mapped state as informative as it is today — swapping the leak for a
-    // blanket "hide all server text" would lose the refresh reason here.
+  // D5. The map is now total over the server statuses, so "a state we have no
+  // copy for" no longer exists. Every one of them is asserted here rather than
+  // spot-checked: a `Partial` map would compile, and the failure mode of a
+  // missed status is a bare English (or half-Chinese) sentence that no test
+  // notices.
+  const SERVER_LINES: [SessionLoginState['status'], string, string][] = [
+    ['waiting_scan', 'QR code displayed', 'The sign-in page is showing a QR code.'],
+    ['scanned', 'scanned; waiting for confirmation on the phone: 扫码成功',
+      'The platform registered the scan and is waiting for you to approve it.'],
+    ['qrcode_expired', 'QR code expired: 二维码已失效',
+      'The platform marked this code as expired, so a fresh one was requested.'],
+    ['sms_required', 'the platform is asking for a verification code',
+      'The platform is asking for a verification code.'],
+    ['success', 'reached the creator console with no login prompt',
+      "The platform's creator console loaded — the sign-in is complete."],
+    ['timeout', 'QR login timed out', 'The browser session for this sign-in has ended.'],
+    ['failed', 'navigated to an unexpected host (host=example.com)',
+      'The browser session ended without a completed sign-in.'],
+    ['proxy_failed', 'net::ERR_PROXY_CONNECTION_FAILED',
+      "The browser could not reach the platform through this account's proxy."],
+  ];
+
+  it.each(SERVER_LINES)(
+    'translates the %s detail line instead of echoing the service',
+    async (status, serverMessage, translated) => {
+      mount();
+      await waitFor(() => expect(updateHandler).toBeTruthy());
+      // waiting_scan needs an image or the modal reads it as "still fetching".
+      await pushLogin({ status, message: serverMessage, qrcode_data_url: QR });
+
+      expect(screen.queryByText(serverMessage)).toBeNull();
+      expect(screen.getByText(translated)).toBeInTheDocument();
+    },
+  );
+
+  it('drops the Chinese tail rather than pasting it after English', async () => {
+    // `扫码成功` is not the platform talking — it is whichever entry of our own
+    // SCANNED_MARKERS tuple matched, i.e. the status restated in Chinese. The
+    // rejected alternative was "i18n prefix + raw tail", which reads as a debug
+    // string in both locales. Nothing is lost: the full original still rides in
+    // `detail.reason`.
     mount();
     await waitFor(() => expect(updateHandler).toBeTruthy());
-    await pushLogin({ status: 'qrcode_expired', message: 'QR code expired: 二维码已失效' });
+    await pushLogin({
+      status: 'scanned',
+      message: 'scanned; waiting for confirmation on the phone: 扫码成功',
+      detail: { reason: 'scanned; waiting for confirmation on the phone: 扫码成功' },
+    });
 
-    expect(screen.getByText('QR code expired: 二维码已失效')).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('扫码成功');
+  });
+
+  it('never prints a stale server line once the session has ended', async () => {
+    // `session_ended` is set locally on a 409 and keeps whatever `login` was
+    // last delivered — echoing its message would put the *previous* state's
+    // English under "This sign-in has ended".
+    submitSmsCode.mockRejectedValueOnce(
+      Object.assign(new Error('distribution api failed: 409'), { status: 409 }),
+    );
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({
+      status: 'sms_required',
+      message: 'the platform is asking for a verification code',
+    });
+    fireEvent.change(screen.getByLabelText(/Verification code/i), { target: { value: '123456' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Submit$/i }));
+    });
+
+    expect(await screen.findByText(/This sign-in has ended/i)).toBeInTheDocument();
+    expect(screen.queryByText('the platform is asking for a verification code')).toBeNull();
+    expect(screen.queryByText('The platform is asking for a verification code.')).toBeNull();
   });
 
   it('will not send a code the server would 422 on', async () => {
@@ -290,7 +354,8 @@ describe('SessionLoginModal', () => {
 
   it('surfaces a 200-with-success:false SMS rejection', async () => {
     // The endpoint answers 200 with a typed envelope — branching on the HTTP
-    // status alone would swallow the platform's "no".
+    // status alone would swallow the platform's "no". D5: the line the user
+    // reads is now translated by status, not `res.message` echoed raw.
     submitSmsCode.mockResolvedValueOnce({
       success: false, status: 'sms_required', message: 'Wrong verification code', detail: {},
     });
@@ -301,8 +366,47 @@ describe('SessionLoginModal', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /^Submit$/i }));
     });
-    expect(await screen.findByText('Wrong verification code')).toBeInTheDocument();
+    expect(await screen.findByText('The platform is still asking for a verification code.'))
+      .toBeInTheDocument();
+    expect(screen.queryByText('Wrong verification code')).toBeNull();
   });
+
+  // D5-B. Every `success: false` status the /sms endpoint can answer with,
+  // asserted to produce translated copy — the branch that used to render
+  // `res.message` verbatim, which is where a line like "navigated to an
+  // unexpected host (host=...)" would land under the user's code input.
+  const SMS_SUBMIT_LINES: [string, string, string][] = [
+    ['qrcode_expired', 'the QR code expired: 二维码已失效',
+      'The QR code expired before the code was accepted'],
+    ['timeout', 'another operation on this login session is still running',
+      'This sign-in ended before the code could be used'],
+    ['proxy_failed', 'net::ERR_PROXY_CONNECTION_FAILED at http://p:1',
+      "this account's proxy is unreachable"],
+    ['failed', 'navigated to an unexpected host (host=example.com)',
+      'That code was rejected'],
+    ['waiting_scan', 'no verification code input is present: QR code displayed',
+      'The platform is no longer asking for a code'],
+  ];
+
+  it.each(SMS_SUBMIT_LINES)(
+    'translates a %s answer to /sms instead of echoing it',
+    async (status, serverMessage, expected) => {
+      submitSmsCode.mockResolvedValueOnce({
+        success: false, status, message: serverMessage, detail: {},
+      });
+      mount();
+      await waitFor(() => expect(updateHandler).toBeTruthy());
+      await pushLogin({ status: 'sms_required' });
+      fireEvent.change(screen.getByLabelText(/Verification code/i), { target: { value: '333333' } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /^Submit$/i }));
+      });
+
+      expect(await screen.findByText(new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')))
+        .toBeInTheDocument();
+      expect(screen.queryByText(serverMessage)).toBeNull();
+    },
+  );
 
   it('tells the user a rejected code was rejected, and keeps what they typed', async () => {
     // **The user-visible half of the "wrong code, zero feedback" tombstone.**
