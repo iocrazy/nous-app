@@ -55,6 +55,7 @@ from app.services.distribution.credentials import (
     CredentialsNotConfigured,
     get_douyin_credentials,
 )
+from app.services.distribution.publish_gate import publish_request_problems
 from app.services.distribution.registry import get_adapter
 from app.services.infra.dbos_orchestrator import start_workflow_routed
 from app.services.infra.unified_task_manager import get_task_manager
@@ -748,8 +749,30 @@ async def _authorize_task(task_id: int, user: dict) -> dict:
 async def create_task(body: PublishTaskCreate, user: CurrentUserDep):
     # IDOR: every target account must belong to the caller's scope (reuses the
     # D1 _authorize_account seam — 404s any account the caller can't operate).
-    for account_id in body.account_ids:
+    accounts = [
         await _authorize_account(int(account_id), user)
+        for account_id in body.account_ids
+    ]
+
+    # 校验前移（图集设计 §2 D3）。**在建任何行之前**：这道门的全部意义就是
+    # "被拒的批次不会在记录页留下一条失败任务"。它跑的是与 workflow 那道门
+    # 同一份实现（session_adapter.validate_intent_shape），workflow 那道原样
+    # 保留 —— 前移是加一道，不是搬一道。
+    problems = publish_request_problems(body, accounts)
+    if problems:
+        logger.info(
+            "[distribution.create_task] rejected before creating any row: "
+            f"{[p.reason for p in problems]}"
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={
+                # 类型化 reason：前端按 code 出文案，不去正则匹配英文句子。
+                "reason": "publish_intent_rejected",
+                "message": "; ".join(p.message for p in problems),
+                "problems": [p.to_dict() for p in problems],
+            },
+        )
 
     task = await publish_repo.create_task(
         user_id=user["id"],
