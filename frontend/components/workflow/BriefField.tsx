@@ -14,7 +14,7 @@
  * (fuller box near Deliverables) so the two surfaces can never silently
  * diverge on the save contract.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 
 export interface BriefFieldProps {
   value: string;
@@ -40,11 +40,28 @@ export const BriefField: React.FC<BriefFieldProps> = ({
   // only fires onSave when the field genuinely changed, so a blur with no
   // edit (e.g. tabbing through) never manufactures a spurious PATCH.
   const lastSaved = useRef(value);
-
-  useEffect(() => {
+  // The `value` this field is currently seeded from.
+  //
+  // ⚠️ Reseeding MUST happen during render (React's documented "adjusting
+  // state when a prop changes" recipe), never in a `useEffect`. A passive
+  // effect is a DEFERRED write: React commits the DOM first and flushes
+  // passive effects in a later scheduler task, so a keystroke that lands in
+  // between gets silently overwritten by the seed — `local` snaps back to
+  // `value`, `lastSaved` follows it, and the next blur sees "nothing changed"
+  // and issues no PATCH at all. The edit is lost with zero user-visible
+  // feedback (same family as the repo's "silent no-op is unacceptable" rule).
+  //
+  // That is not hypothetical: the effect version made
+  // WorkspaceStageBoard/WorkspaceNodeSettings' brief tests flaky in CI —
+  // under CPU contention the mount effect flushed *after* fireEvent.change,
+  // and `updateProjectNode` was then never called (0 calls, not "called
+  // late"), which is why no `waitFor` timeout could ever have fixed it.
+  const [seededFrom, setSeededFrom] = useState(value);
+  if (seededFrom !== value) {
+    setSeededFrom(value);
     setLocal(value);
     lastSaved.current = value;
-  }, [value]);
+  }
 
   const commit = () => {
     if (local === lastSaved.current) return;

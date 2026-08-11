@@ -19,7 +19,7 @@
  * will actually enforce — but this component is advisory only; the server
  * remains the sole source of truth for whether an advance is blocked (#1400).
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { FormFieldDef, FormFieldType } from '../../types';
 import { isFieldFilled } from '../workflow/formFieldFill';
@@ -87,11 +87,20 @@ const StageNodeFormField: React.FC<{
   // type except number, which happened to be masked by its own `''` guard).
   const lastSaved = useRef<unknown>(defaultLocal(field.type, value));
 
-  useEffect(() => {
+  // Reseed during render, NOT in a `useEffect` — see the long note in
+  // `components/workflow/BriefField.tsx`. A passive effect is a deferred
+  // write, so the mount/prop seed can land *after* a keystroke and silently
+  // roll `local` (and `lastSaved` with it) back to the server value; the next
+  // blur then compares equal and issues no PATCH at all. That is exactly the
+  // race that made the workspace brief tests flaky under CI load, and this
+  // field shares the identical idiom.
+  const [seed, setSeed] = useState({ value, key: field.key, type: field.type });
+  if (seed.value !== value || seed.key !== field.key || seed.type !== field.type) {
     const next = defaultLocal(field.type, value);
+    setSeed({ value, key: field.key, type: field.type });
     setLocal(next);
     lastSaved.current = next;
-  }, [value, field.key, field.type]);
+  }
 
   const commit = (next: unknown) => {
     if (next === lastSaved.current) return;
