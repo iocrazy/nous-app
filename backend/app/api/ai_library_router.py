@@ -21,6 +21,7 @@ backend (e.g. ``ai_agents_router.py``, ``skills_router.py``).
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -2896,6 +2897,22 @@ async def send_chat_message(
     }
 
 
+def _stream_error_payload(exc: BaseException) -> str:
+    """SSE error event 的 data。provider 异常给类型码与用户文案(与 HTTP 面
+    同一映射,provider_errors.provider_error_payload);其他异常维持旧 shape
+    (类型名+串)并补 code=internal_error——「触发路径必须类型化回显」。"""
+    from app.core.provider_errors import provider_error_payload
+    from app.services.ai.llm.llm_fallback_chain import AllModelsFailed
+    from app.services.ai.llm.llm_retry_middleware import LLMCallError
+
+    if isinstance(exc, (AllModelsFailed, LLMCallError)):
+        _status, code, message = provider_error_payload(exc)
+        return json.dumps({"error": message, "code": code})
+    return json.dumps(
+        {"error": f"{type(exc).__name__}: {exc}", "code": "internal_error"}
+    )
+
+
 @router.post(
     "/sessions/{session_id}/chat-stream",
     summary="Send a user turn and stream the assistant response (SSE)",
@@ -2917,8 +2934,6 @@ async def send_chat_message_stream(
     Frontends should fall back to /chat (non-streaming) when they need
     full tool execution semantics.
     """
-    import json
-
     from fastapi.responses import StreamingResponse
 
     svc = AILibraryChatService()
@@ -2949,7 +2964,7 @@ async def send_chat_message_stream(
             logger.exception(
                 f"[ai-library] chat-stream failed session={session_id}: {exc}"
             )
-            data = json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+            data = _stream_error_payload(exc)
             yield f"event: error\ndata: {data}\n\n"
 
     return StreamingResponse(
