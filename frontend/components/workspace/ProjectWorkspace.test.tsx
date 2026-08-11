@@ -775,6 +775,82 @@ describe('ProjectWorkspace', () => {
     expect(mockScriptService.createScriptProject).not.toHaveBeenCalled();
   });
 
+  // Bug A fix (2026-08-11 拍板): `handleSelectNode` — the card's
+  // `onEnterSurface` handler — used to have an early-return gate that forced
+  // EVERY non-cursor node into its Stage Board before the surface `switch`
+  // ever ran, even though `EpisodeNodeCard`'s entry-button LABEL already read
+  // `resolveSurface(node)` unconditionally (Task 5). Net effect: a Done,
+  // non-cursor Script node showed "Open Script" but clicking it landed on the
+  // Stage Board. Product decision: the button does what it says — route
+  // purely by surface, cursor or not (distinct from the `workflow-strip-node`
+  // click tested above, which only ever writes URL `node=` and never
+  // navigates by itself).
+  it('a non-cursor Script-surface node\'s entry click opens the script editor, not the Stage Board', async () => {
+    mockScriptService.fetchScriptProjects.mockResolvedValue({
+      data: [
+        { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
+      ],
+      total: 1,
+    });
+    const currentNode = stageNode({ id: '1', name: 'Storyboard', status: 'in_progress', surface: 'storyboard' });
+    const scriptNode = stageNode({ id: '2', name: 'Script Pass 2', status: 'done', surface: 'script' });
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue({
+      has_workflow: true,
+      current_node_id: currentNode.id,
+      agents_active: 0,
+      nodes: [currentNode, scriptNode],
+    });
+    // Select the non-cursor Script node's card via URL `node=` (mirrors how
+    // WorkspaceOverview's `renderNodeCard` resolves `selectedNodeId`).
+    mockSearchParams.current = new URLSearchParams('ep=1&node=2');
+
+    // The Overview accordion (with the node card) is what's on screen by
+    // default — no expand click needed, unlike the SIDEBAR's separate
+    // "Episodes" tree (`expandEpisodesTree`, used elsewhere in this file).
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    fireEvent.click(await screen.findByTestId('node-card-enter'));
+
+    const shell = await screen.findByTestId('mock-editor-shell');
+    expect(shell).toHaveAttribute('data-initial-rail-view', 'script');
+    expect(screen.queryByTestId('workspace-stage-board')).toBeNull();
+    expect(mockWorkflowService.fetchStageBoard).not.toHaveBeenCalled();
+  });
+
+  // Companion pin: a deliverable-only node (surface === null) — cursor or
+  // not — is unaffected by the fix above and still falls back to its own
+  // Stage Board via the same entry button.
+  it('a non-cursor deliverable-only node\'s entry click still opens its own Stage Board', async () => {
+    const currentNode = stageNode({ id: '1', name: 'Storyboard', status: 'in_progress', surface: 'storyboard' });
+    const deliverableNode = stageNode({
+      id: '2',
+      name: 'Final Delivery',
+      status: 'pending',
+      surface: null,
+      deliverable_required: true,
+      deliverable_label: 'Final Cut',
+    });
+    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue({
+      has_workflow: true,
+      current_node_id: currentNode.id,
+      agents_active: 0,
+      nodes: [currentNode, deliverableNode],
+    });
+    mockWorkflowService.fetchStageBoard.mockResolvedValue({
+      node: deliverableNode,
+      issue: null,
+      files: [],
+    });
+    mockSearchParams.current = new URLSearchParams('ep=1&node=2');
+
+    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
+
+    fireEvent.click(await screen.findByTestId('node-card-enter'));
+
+    expect(await screen.findByTestId('workspace-stage-board')).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-editor-shell')).toBeNull();
+  });
+
   it('a scene card\'s Open button deep-links into the embedded editor at the storyboard rail view', async () => {
     mockScriptService.fetchScriptProjects.mockResolvedValue({
       data: [
