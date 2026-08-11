@@ -45,12 +45,14 @@ vi.mock('../../features/canvas-core/ui/StoryboardCanvasEmbed', () => ({
     teamId?: string;
     focusShotId?: string | null;
     onFocusHandled?: () => void;
+    reconcileRefreshToken?: number;
   }) => (
     <div
       data-testid="storyboard-canvas-embed-mock"
       data-episode-id={props.episodeId}
       data-team-id={props.teamId ?? ''}
       data-focus-shot-id={props.focusShotId ?? ''}
+      data-reconcile-refresh-token={props.reconcileRefreshToken ?? 0}
     >
       {/* Simulates the real embed's "focus settled" callback so tests can
           exercise the reset→re-fire path without a real React Flow mount. */}
@@ -75,7 +77,7 @@ vi.mock('../../utils/relativeTime', () => ({
 
 import { EpisodeStoryboardPage, __clearScriptProbeCache } from './EpisodeStoryboardPage';
 import { __clearSceneShotsCache } from './useSceneShots';
-import { requestShotFocus } from '../agentActivity/shotFocusBus';
+import { requestShotFocus, requestStoryboardRefresh } from '../agentActivity/shotFocusBus';
 import { requestOpenShotInList } from '../../features/canvas-core/smart/openShotInListBus';
 
 const ep = { episode_id: '324362669885098', title: 'EP1', scene_count: 7,
@@ -262,6 +264,45 @@ describe('EpisodeStoryboardPage', () => {
       expect(screen.getByTestId('storyboard-canvas-embed-mock').getAttribute('data-focus-shot-id')).toBe(
         'bus-shot-1',
       );
+    });
+  });
+
+  // Task 6 review 修复轮1 (2026-08-11): `onStoryboardRefresh` was orphaned
+  // when Task 6 deleted the editor storyboard rail's `StoryboardView` (its
+  // sole subscriber). This page now re-subscribes for the CANVAS half —
+  // view one/three's scene/shot refresh is covered by
+  // `useSceneShots.test.ts` instead (that hook subscribes independently).
+  describe('onStoryboardRefresh consumer — canvas reconcile re-trigger (Task 6 review 修复轮1)', () => {
+    it('requestStoryboardRefresh() bumps reconcileRefreshToken passed to the storyboard canvas', async () => {
+      render(<EpisodeStoryboardPage {...base} />);
+      const tabs = await screen.findByTestId('episode-view-tabs');
+      fireEvent.click(tabs.querySelector('[data-view="canvas"]')!);
+      const embed = await screen.findByTestId('storyboard-canvas-embed-mock');
+      expect(embed.getAttribute('data-reconcile-refresh-token')).toBe('0');
+
+      act(() => requestStoryboardRefresh());
+      expect(screen.getByTestId('storyboard-canvas-embed-mock').getAttribute('data-reconcile-refresh-token')).toBe(
+        '1',
+      );
+
+      act(() => requestStoryboardRefresh());
+      expect(screen.getByTestId('storyboard-canvas-embed-mock').getAttribute('data-reconcile-refresh-token')).toBe(
+        '2',
+      );
+    });
+
+    it('unmounting the page stops responding to a later requestStoryboardRefresh()', async () => {
+      const { unmount } = render(<EpisodeStoryboardPage {...base} />);
+      const tabs = await screen.findByTestId('episode-view-tabs');
+      fireEvent.click(tabs.querySelector('[data-view="canvas"]')!);
+      await screen.findByTestId('storyboard-canvas-embed-mock');
+
+      unmount();
+
+      // No listener left to throw or otherwise misbehave — the request is
+      // simply dropped (same "nobody's listening" contract the bus
+      // documents for every other subscriber).
+      expect(() => act(() => requestStoryboardRefresh())).not.toThrow();
     });
   });
 

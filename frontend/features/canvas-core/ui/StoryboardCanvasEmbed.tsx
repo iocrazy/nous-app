@@ -27,6 +27,9 @@ export interface StoryboardCanvasEmbedProps {
    *  canvas id has resolved. */
   focusShotId?: string | null;
   onFocusHandled?: () => void;
+  /** See `CanvasViewProps.reconcileRefreshToken` — threaded straight
+   *  through once the canvas id has resolved. */
+  reconcileRefreshToken?: number;
 }
 
 type ResolveState =
@@ -39,6 +42,7 @@ export function StoryboardCanvasEmbed({
   teamId,
   focusShotId = null,
   onFocusHandled,
+  reconcileRefreshToken,
 }: StoryboardCanvasEmbedProps) {
   const { t } = useTranslation();
   const [state, setState] = useState<ResolveState>({ status: 'loading' });
@@ -90,6 +94,7 @@ export function StoryboardCanvasEmbed({
         teamId={teamId}
         focusShotId={focusShotId}
         onFocusHandled={onFocusHandled}
+        reconcileRefreshToken={reconcileRefreshToken}
       />
     </div>
   );

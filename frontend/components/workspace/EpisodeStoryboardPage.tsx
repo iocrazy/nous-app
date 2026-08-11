@@ -20,7 +20,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loading } from '../common/Loading';
 import { useToast } from '../Toast';
-import { onShotFocus } from '../agentActivity/shotFocusBus';
+import { onShotFocus, onStoryboardRefresh } from '../agentActivity/shotFocusBus';
 import { onOpenShotInList } from '../../features/canvas-core/smart/openShotInListBus';
 import { StoryboardCanvasEmbed } from '../../features/canvas-core/ui/StoryboardCanvasEmbed';
 import { EpisodeViewTabs } from './EpisodeViewTabs';
@@ -170,6 +170,32 @@ export function EpisodeStoryboardPage({
     setActiveFocusShotId(shotId);
     handleTabChange('canvas');
   }), [handleTabChange]);
+
+  // `onStoryboardRefresh` (Task 6 review 修复轮1, 2026-08-11): the OLD
+  // editor storyboard rail's `StoryboardView` subscribed to this same
+  // channel (an Agent Run Undo, `useRunUndo.ts`'s `requestStoryboardRefresh`,
+  // fires it after mutating script_shots) — deleting that component in Task
+  // 6 orphaned it, so an undo left the page showing pre-undo data with no
+  // signal. Re-subscribed HERE for the storyboard CANVAS half only — view
+  // one/three's scene/shot data refresh is handled by `useSceneShots`
+  // itself (see that hook's own doc comment for why that's the better
+  // attachment point for THAT half: both view consumers already share it,
+  // and its mount lifecycle is a strict subset of this page's). The canvas
+  // is a separate store this page can't reach through `useSceneShots`, so
+  // it needs its own trigger — bumping this token forces `CanvasView`'s
+  // EXISTING reconcile effect (shot-nodes-on-canvas Task 4) to re-run, not
+  // a new mechanism. Subscribed for this page's entire mount lifetime (not
+  // gated to the Canvas tab being active) so a later switch TO Canvas
+  // always carries a token bump that already happened; harmless when the
+  // Canvas tab isn't mounted at all — `StoryboardCanvasEmbed`/`CanvasView`
+  // simply doesn't exist yet to receive the prop, same "nobody's listening"
+  // contract as `shotFocusBus` documents, and the eventual mount reconciles
+  // fresh from the API regardless.
+  const [canvasRefreshToken, setCanvasRefreshToken] = useState(0);
+  useEffect(
+    () => onStoryboardRefresh(() => setCanvasRefreshToken((n) => n + 1)),
+    [],
+  );
 
   // Scene card's Open (view one, `EpisodeSceneBoard`'s `ep-scene-open-*`
   // button): used to deep-link into the embedded editor's storyboard rail at
@@ -369,6 +395,7 @@ export function EpisodeStoryboardPage({
                 teamId={teamId}
                 focusShotId={activeFocusShotId}
                 onFocusHandled={handleFocusHandled}
+                reconcileRefreshToken={canvasRefreshToken}
               />
             ) : (
               <div className="flex justify-center py-10">

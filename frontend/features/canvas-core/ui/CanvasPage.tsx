@@ -79,6 +79,22 @@ export interface CanvasViewProps {
    * param) without this component owning any URL/state concerns itself.
    */
   onFocusHandled?: () => void;
+  /**
+   * Bump to force the shot-node reconcile effect below to re-run without a
+   * full remount (Task 6 review 修复轮1, 2026-08-11): an Agent Run Undo
+   * (`useRunUndo.ts`'s `requestStoryboardRefresh`) can delete/roll back
+   * `script_shots` rows out from under an ALREADY-mounted storyboard canvas
+   * — the old editor storyboard rail's `StoryboardView` had its own
+   * `onStoryboardRefresh` subscriber for this; the canvas never needed one
+   * before because Task 4/5 only ever reconciled once, on mount. Any
+   * change (an incrementing counter is simplest — the effect only cares
+   * that the value differs from last render, not its magnitude) re-runs the
+   * EXACT SAME reconcile fetch+diff below; this is not a second mechanism,
+   * just one more trigger on the existing one. `undefined`/omitted never
+   * fires it (every other caller — the standalone `/canvas/:id` route via
+   * `CanvasPage` below, and any embed that doesn't care — is unaffected).
+   */
+  reconcileRefreshToken?: number;
 }
 
 /**
@@ -91,6 +107,7 @@ export function CanvasView({
   onBack,
   focusShotId = null,
   onFocusHandled,
+  reconcileRefreshToken,
 }: CanvasViewProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const loadStatus = useCanvasCoreStore((s) => s.loadStatus);
@@ -177,6 +194,11 @@ export function CanvasView({
   // subsystem's fetch fan-out), so the impure "fetch scenes/shots, apply
   // the diff" glue lives here instead, in the one place that already owns
   // canvas mount lifecycle.
+  //
+  // `reconcileRefreshToken` (Task 6 review 修复轮1) rides in this same
+  // effect's dep array purely to force a re-run — see its own doc comment
+  // on `CanvasViewProps` for why (an Agent Run Undo mutating script_shots
+  // while this canvas is already mounted).
   const promoteScenesRef = useRef<SceneDoc[]>([]);
   const [promoteScenes, setPromoteScenes] = useState<SceneDoc[]>([]);
 
@@ -263,7 +285,7 @@ export function CanvasView({
     return () => {
       cancelled = true;
     };
-  }, [loadStatus, kind, canvasId, projectId, episodeId]);
+  }, [loadStatus, kind, canvasId, projectId, episodeId, reconcileRefreshToken]);
 
   // "Promote to Shot" (Task 4 — promoteShotBus's subscriber): only mounted
   // for a storyboard canvas, where a scene list is resolvable at all. Every
