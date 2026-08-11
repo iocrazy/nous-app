@@ -68,6 +68,7 @@ import {
 } from '../../../../editor/storyboard/vocab';
 import { dispatchGenerations, pollGeneration } from '../../services/canvasGenerationService';
 import { requestPromoteShot } from '../promoteShotBus';
+import { registerActiveShotPoll, unregisterActiveShotPoll } from '../genResume';
 
 const CANVAS_CHIP =
   'nodrag rounded-full border border-canvas-line bg-transparent px-2 py-0.5 text-[11px] text-canvas-text hover:border-canvas-strong/50 focus-visible:ring-1 focus-visible:ring-canvas-strong/40';
@@ -191,6 +192,14 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
   //  2. Every patch after an `await` is gated by `sameCanvas()` (loopRun/
   //     regenerate.ts discipline) — a canvas switch mid-flight must not
   //     land a stale patch onto whatever node now holds this id.
+  //
+  // fix-round-3: (1) alone isn't enough — a reconcile pass re-attaching by
+  // task id would attach a SECOND poller alongside THIS closure (still
+  // alive, never cancelled). Register the task id in `activeShotPolls` the
+  // instant it's known so `resumeShotTask` sees this closure already owns
+  // it and skips instead of racing it; always release in `finally` so a
+  // later reconcile isn't blocked forever once this closure is done with
+  // the id (success, failure, or thrown).
   const generating = shot_status === 'generating';
   const handleGenerate = useCallback(() => {
     if (!shot_id || generating) return;
@@ -202,6 +211,7 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
     };
     guardedPatch({ shot_status: 'generating' });
     void (async () => {
+      let taskId: string | null = null;
       try {
         const taskIds = await dispatchGenerations(startCanvasId, {
           node_id: id,
@@ -209,7 +219,12 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
           prompt: description || title || '',
           count: 1,
         });
-        const taskId = taskIds[0];
+        taskId = taskIds[0];
+        // Claim the task id BEFORE polling — a reconcile pass firing
+        // between dispatch and this line is the one window where it
+        // could still race in (registerActiveShotPoll is synchronous, no
+        // await between it and the assignment above).
+        registerActiveShotPoll(startCanvasId, taskId);
         // Persist BEFORE polling — a nav-away between dispatch and this
         // patch landing is the one genuinely-unrecoverable window (see the
         // no-task-id branch in genResume.ts), so it must be as narrow as
@@ -227,6 +242,8 @@ export function ShotNodeView({ id, data, selected }: NodeProps) {
         console.error('[ShotNodeView] generate failed:', err);
         guardedPatch({ shot_status: 'failed', gen_task_id: null });
         if (sameCanvas()) toast?.addToast(t('canvas.shotNode.generateFailed'), 'error');
+      } finally {
+        if (taskId) unregisterActiveShotPoll(startCanvasId, taskId);
       }
     })();
   }, [shot_id, generating, id, description, title, patch, toast, t]);

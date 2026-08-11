@@ -37,6 +37,7 @@ vi.mock('../promoteShotBus', () => ({
 }));
 
 import { useCanvasCoreStore } from '../../store/canvasCoreStore';
+import { __clearActiveShotPolls } from '../genResume';
 import { ShotNodeView } from './ShotNodeView';
 
 const baseProps = {
@@ -110,6 +111,10 @@ beforeEach(() => {
   pollGeneration.mockReset();
   onPromoteShotSpy.mockReset();
   mockAddToast.mockReset();
+  // fix-round-3: activeShotPolls is module-level state (survives remount
+  // by design) — must be reset between tests or a leftover claim from one
+  // test blocks the next test's poll attach.
+  __clearActiveShotPolls();
 });
 afterEach(() => {
   useCanvasCoreStore.getState().reset();

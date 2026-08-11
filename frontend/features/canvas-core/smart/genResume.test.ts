@@ -23,10 +23,12 @@ vi.mock('../services/canvasGenerationService', async () => {
 
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import {
+  __clearActiveShotPolls,
   cancelPendingGenTasks,
   clearPendingGenTasks,
   persistPendingGenTasks,
   prunePendingGenTask,
+  registerActiveShotPoll,
   requeryRecoverTask,
   resumePendingGenerations,
 } from './genResume';
@@ -67,6 +69,10 @@ function slotData(): Record<string, unknown> | null {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // fix-round-3: activeShotPolls is module-level state (survives remount by
+  // design) — must be reset between tests or a leftover claim blocks the
+  // next test's re-attach.
+  __clearActiveShotPolls();
 });
 afterEach(() => useCanvasCoreStore.getState().reset());
 
@@ -313,6 +319,85 @@ describe('resumePendingGenerations — stranded shot reconcile (Task 3, fix-roun
       expect(shotData().shot_status).toBe('generating');
       expect(shotData().gen_task_id).toBe('task-9');
       expect(shotData().image_url).toBeNull();
+    });
+  });
+
+  describe('active shot poll registry (fix-round-3 — prevents dual pollers)', () => {
+    it('reconcile does NOT attach a second poller when the task is already claimed (original handleGenerate closure still owns it)', async () => {
+      seed([shotNode({ shot_status: 'generating', gen_task_id: 'task-live', image_url: null })]);
+      // Simulate ShotNodeView.handleGenerate's own dispatch closure — still
+      // running (unmount never cancelled it) — already owning this task id.
+      registerActiveShotPoll('9', 'task-live');
+
+      await resumePendingGenerations();
+
+      expect(pollGeneration).not.toHaveBeenCalled();
+      // Untouched — the original closure, not this reconcile pass, is
+      // responsible for landing whatever terminal state this task reaches.
+      expect(shotData().shot_status).toBe('generating');
+      expect(shotData().gen_task_id).toBe('task-live');
+    });
+
+    it('a transient poll-chain error leaves shot_status/gen_task_id alone so a LATER reconcile can retry', async () => {
+      seed([shotNode({ shot_status: 'generating', gen_task_id: 'task-flaky', image_url: null })]);
+      pollGeneration.mockRejectedValueOnce(new Error('network hiccup'));
+
+      await resumePendingGenerations();
+
+      // NOT dropped to failed, NOT cleared — only the poll ATTEMPT broke;
+      // the task's own server-side fate is still unknown.
+      expect(shotData().shot_status).toBe('generating');
+      expect(shotData().gen_task_id).toBe('task-flaky');
+
+      // The registry claim was released in `finally` despite the throw, so
+      // a later reconcile pass (another nav back into this canvas) can
+      // retry re-attaching instead of being blocked forever.
+      pollGeneration.mockResolvedValueOnce({
+        phase: 'completed',
+        metadata: { result_url: '/gm/2/cover' },
+      });
+      await resumePendingGenerations();
+
+      expect(pollGeneration).toHaveBeenCalledTimes(2);
+      expect(shotData().shot_status).toBe('done');
+      expect(shotData().image_url).toBe('/gm/2/cover');
+      expect(shotData().gen_task_id).toBeNull();
+    });
+
+    it('a server-confirmed terminal failure IS authoritative — failed + task id cleared (not the transient-error path)', async () => {
+      seed([shotNode({ shot_status: 'generating', gen_task_id: 'task-dead', image_url: null })]);
+      // pollGeneration RESOLVES (not throws) with a terminal failure phase —
+      // this is the server's own verdict, distinct from a broken poll chain.
+      pollGeneration.mockResolvedValue({ phase: 'failed', metadata: {} });
+
+      await resumePendingGenerations();
+
+      expect(shotData().shot_status).toBe('failed');
+      expect(shotData().gen_task_id).toBeNull();
+    });
+
+    it('the registry claim releases after a terminal state lands, never leaking a stale block on the task id', async () => {
+      seed([shotNode({ shot_status: 'generating', gen_task_id: 'task-once', image_url: null })]);
+      pollGeneration.mockResolvedValueOnce({
+        phase: 'completed',
+        metadata: { result_url: '/gm/3/cover' },
+      });
+      await resumePendingGenerations();
+      expect(shotData().shot_status).toBe('done');
+
+      // Re-seed the SAME task id onto a fresh generating shot purely to
+      // exercise the release mechanic directly (a real generate cycle
+      // always mints a new task id; this proves `finally` actually ran
+      // rather than relying on task-id uniqueness to hide a leak).
+      seed([shotNode({ shot_status: 'generating', gen_task_id: 'task-once', image_url: null })]);
+      pollGeneration.mockResolvedValueOnce({
+        phase: 'completed',
+        metadata: { result_url: '/gm/4/cover' },
+      });
+      await resumePendingGenerations();
+
+      expect(pollGeneration).toHaveBeenCalledTimes(2);
+      expect(shotData().image_url).toBe('/gm/4/cover');
     });
   });
 });
