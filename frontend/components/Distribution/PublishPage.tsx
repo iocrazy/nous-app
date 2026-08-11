@@ -17,6 +17,7 @@ import {
 } from '../../services/unifiedTagService';
 import { TO_PUBLISH_TAG_NAME, findToPublishTagId } from '../../services/toPublishService';
 import { supportsImagePosts } from './capabilities';
+import { AccountAvatar } from './platform';
 import { SocialAccount, LibraryVideo, SelfDeclaration } from '../../types';
 import { CoverPicker, CoverPair } from './CoverPicker';
 import { useToast } from '../Toast';
@@ -1243,12 +1244,15 @@ export const PublishPage: React.FC = () => {
                     }}
                   >
                     <span className="ck" />
-                    <span className="ava" style={{ background: gradientFor(a.id) }}>
-                      {a.username.slice(0, 2).toUpperCase()}
+                    <AccountAvatar
+                      gradient={gradientFor(a.id)}
+                      username={a.username}
+                      avatarUrl={a.avatar_url}
+                    >
                       {badge && (
                         <span className="pbadge sm" style={{ background: badge.bg }}>{badge.icon}</span>
                       )}
-                    </span>
+                    </AccountAvatar>
                     <span className="nm">
                       {a.username}
                       <small>

@@ -8,7 +8,7 @@ import {
   listPublishTasks, refreshAccount,
 } from '../../services/distributionService';
 import { SocialAccount, PublishTask } from '../../types';
-import { PLATFORM_BADGE, PLATFORM_LABEL, gradientFor } from './platform';
+import { AccountAvatar, PLATFORM_BADGE, PLATFORM_LABEL, gradientFor } from './platform';
 import { PageHeader } from '../layout/PageHeader';
 import { useConfirm } from '../ConfirmDialog';
 import SessionLoginModal from './SessionLoginModal';
@@ -398,12 +398,15 @@ export const AccountsPage: React.FC = () => {
             return (
               <div key={a.id} className={`acct ${expired ? 'warn' : ''}`}>
                 <div className="acct-top">
-                  <span className="ava" style={{ background: gradientFor(a.id) }}>
-                    {a.username.slice(0, 2).toUpperCase()}
+                  <AccountAvatar
+                    gradient={gradientFor(a.id)}
+                    username={a.username}
+                    avatarUrl={a.avatar_url}
+                  >
                     {badge && (
                       <span className="pbadge" style={{ background: badge.bg }}>{badge.icon}</span>
                     )}
-                  </span>
+                  </AccountAvatar>
                   <div className="acct-name">
                     <b>{a.username}</b>
                     <span>{PLATFORM_LABEL[a.platform] ?? a.platform} · {a.platform_user_id}</span>
