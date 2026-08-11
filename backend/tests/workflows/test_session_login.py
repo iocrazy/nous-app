@@ -20,6 +20,7 @@ import pytest
 
 import app.workflows.session_login as m
 from app.services.distribution.browser_client import (
+    LOGIN_STATUSES,
     LoginSnapshot,
     SessionErrorKind,
     SessionOpResult,
@@ -324,6 +325,22 @@ async def test_infra_failure_counter_resets_after_recovery():
 
 
 # ── metadata writer ─────────────────────────────────────────
+
+
+def test_status_subtitle_covers_every_login_status():
+    """8 条兜底必须**正好**盖住 §7.8 的登录子集，不多不少。
+
+    它有两个消费者，两个都会在漏一条时静默降级而不报错：
+
+    - ``update_progress(subtitle=...)`` —— 任务中心那一行字。漏了就退回
+      ``"Signing in"``，于是一个新状态在任务列表里跟"正在登录"长得一模一样。
+    - ``login_metadata(message=snapshot.message or _STATUS_SUBTITLE[...])``
+      —— 浏览器侧没给判词时的兜底。
+
+    多一条同样是问题：那说明这里的键和 ``LOGIN_STATUSES`` 已经对不上了，而
+    枚举漂移在这条链上的历史后果是把"已扫码"显示成"登录失败"（见文件头）。
+    """
+    assert set(m._STATUS_SUBTITLE) == LOGIN_STATUSES
 
 
 async def test_metadata_writer_keeps_the_last_qrcode_sticky():
