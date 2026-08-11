@@ -98,4 +98,26 @@ describe('flattenDiff — pure function', () => {
   it('returns an empty array for two empty objects', () => {
     expect(flattenDiff({}, {})).toEqual([]);
   });
+
+  it('reports a leaf key present in before and absent in after (revoked) as value → —', () => {
+    expect(flattenDiff({ enabled: true }, {})).toEqual(['enabled: true → —']);
+  });
+
+  it('reports a nested subtree removed entirely — each of its leaves surfaces, not one opaque line', () => {
+    expect(
+      flattenDiff({ capabilities: { write_level: 'write', delete: true } }, {}),
+    ).toEqual([
+      'capabilities.write_level: write → —',
+      'capabilities.delete: true → —',
+    ]);
+  });
+
+  it('revoking one nested key (chat.enabled) leaves an unchanged sibling (chat.read_team_resources) out of the diff', () => {
+    expect(
+      flattenDiff(
+        { chat: { enabled: true, read_team_resources: false } },
+        { chat: { read_team_resources: false } },
+      ),
+    ).toEqual(['chat.enabled: true → —']);
+  });
 });
