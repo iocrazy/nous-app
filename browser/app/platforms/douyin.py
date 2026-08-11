@@ -16,10 +16,11 @@ from __future__ import annotations
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlsplit
 
+from ..inspect import InspectSpec
 from ..login import LoginFlowSpec, LoginJudgement, LoginPageSnapshot, LoginProfile
 from ..schemas import EnvironmentConfig, SessionResult, SessionStatus
 from ..validation import DomValidationSpec, Judgement, run_dom_session_validation
-from . import register, register_login
+from . import register, register_inspect_spec, register_login
 
 PLATFORM = "douyin"
 
@@ -90,6 +91,21 @@ async def validate_session(
 
 
 register(PLATFORM, validate_session)
+
+
+# --- read-only recon (T0) ---------------------------------------------------
+#
+# The allow-list `/session/inspect` enforces. It reuses `CREATOR_HOSTS` and
+# `LOGIN_TEXT_MARKERS` above rather than restating them: a second copy of "our
+# hosts" is a second thing to miss when the platform moves one.
+
+INSPECT_SPEC = InspectSpec(
+    platform=PLATFORM,
+    allowed_hosts=CREATOR_HOSTS,
+    login_text_markers=LOGIN_TEXT_MARKERS,
+)
+
+register_inspect_spec(PLATFORM, INSPECT_SPEC)
 
 
 # --- QR login ---------------------------------------------------------------

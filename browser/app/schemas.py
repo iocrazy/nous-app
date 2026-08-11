@@ -300,3 +300,120 @@ class VerifyPublishResponse(BaseModel):
     # the platform rotates cookies on it, so throwing the refreshed state away
     # would make the extra job a net cost to session lifetime rather than free.
     updated_storage_state: dict[str, Any] | None = None
+
+
+# --- read-only page reconnaissance (T0) -------------------------------------
+#
+# The one endpoint that exists to ANSWER questions about a platform's DOM
+# rather than to act on it. Its contract is shaped by that: the request says
+# where to look and what to count, the response carries numbers and a bounded
+# text excerpt — never the document. See `app/inspect.py` for the constraints
+# (allow-listed host, no interaction vocabulary anywhere in the module).
+
+# Request-side ceilings live here, on the wire contract, so a caller's limits
+# are declared exactly once and enforced by pydantic rather than by remembering.
+MAX_TEXT_PROBES = 40
+MAX_SELECTOR_PROBES = 40
+MAX_SEED_FILES = 12
+MAX_EXCERPT_CHARS = 8_000
+DEFAULT_EXCERPT_CHARS = 2_000
+DEFAULT_SEED_SELECTOR = 'input[type="file"]'
+
+
+class InspectRequest(BaseModel):
+    platform: str = Field(min_length=1, max_length=32)
+    # Plaintext, decrypted by the backend. Memory only (spec 7.6).
+    storage_state: dict[str, Any]
+    environment: EnvironmentConfig | None = None
+    # Refused unless it lands inside the platform's own creator hosts. The
+    # check is `inspect.url_refusal`, and it runs before a browser exists.
+    url: str = Field(min_length=1, max_length=2048)
+    # Files to hand to a file input so a form that only renders after a
+    # transfer will render. Same `MediaItem` shape (and the same signed-URL
+    # staging path) the posting flow uses — there is no second downloader.
+    seed_files: list[MediaItem] = Field(default_factory=list, max_length=MAX_SEED_FILES)
+    seed_selector: str = Field(
+        default=DEFAULT_SEED_SELECTOR, min_length=1, max_length=200
+    )
+    # Which matching input, when a page has several. Explicit rather than
+    # "the first": on this platform the first has already been the wrong one.
+    seed_input_index: int = Field(default=0, ge=0, le=20)
+    seed_wait_ms: int = Field(default=8_000, ge=0, le=120_000)
+    # Captions to count. Counted exactly AND as substrings — see `TextCount`.
+    text_probes: list[str] = Field(default_factory=list, max_length=MAX_TEXT_PROBES)
+    selector_probes: list[str] = Field(
+        default_factory=list, max_length=MAX_SELECTOR_PROBES
+    )
+    settle_ms: int = Field(default=4_000, ge=0, le=60_000)
+    excerpt_chars: int = Field(
+        default=DEFAULT_EXCERPT_CHARS, ge=0, le=MAX_EXCERPT_CHARS
+    )
+    # Wall-clock ceiling for the whole read, enforced by the endpoint.
+    budget_s: int = Field(default=180, ge=30, le=600)
+
+
+class TextCount(BaseModel):
+    """Three numbers for one caption, because one number cannot answer this.
+
+    `exact` is what the calibration standard asks for — "不等于 1 就是错的".
+    `substring` is what catches the 「允许」/「不允许」 family, where a
+    generous match silently votes on the wrong control. `exact_visible` splits
+    "present in the DOM" from "on screen", which is the difference between a
+    hidden app-shell node and a real control.
+    """
+
+    exact: int = 0
+    exact_visible: int = 0
+    substring: int = 0
+    # Set when the probe itself could not be evaluated. Distinct from a count
+    # of zero, which is a real finding.
+    error: str | None = None
+
+
+class SelectorCount(BaseModel):
+    total: int = 0
+    visible: int = 0
+    error: str | None = None
+
+
+class InputSummary(BaseModel):
+    """One input / textarea / contenteditable, as attributes only.
+
+    Deliberately no `value`: whatever is in there is what the account owner
+    last typed, and it has no business leaving the process.
+    """
+
+    tag: str = ""
+    type: str | None = None
+    accept: str | None = None
+    multiple: bool = False
+    name: str | None = None
+    elem_id: str | None = None
+    placeholder: str | None = None
+    maxlength: str | None = None
+    contenteditable: str | None = None
+    class_name: str | None = None
+    visible: bool = False
+
+
+class InspectResponse(BaseModel):
+    """Same four-field envelope as every other route, plus the observations."""
+
+    success: bool
+    status: SessionStatus
+    message: str
+    detail: dict[str, Any] = Field(default_factory=dict)
+    url_after: str = ""
+    page_title: str = ""
+    texts: dict[str, TextCount] = Field(default_factory=dict)
+    selectors: dict[str, SelectorCount] = Field(default_factory=dict)
+    # Visible text, whitespace-collapsed, scrubbed and truncated. Never HTML.
+    body_text_excerpt: str = ""
+    body_text_truncated: bool = False
+    input_summary: list[InputSummary] = Field(default_factory=list)
+    input_total: int = 0
+    seeded_files: list[str] = Field(default_factory=list)
+    # Same reason as on `PublishResponse` / `VerifyPublishResponse`: an
+    # authenticated page load renews the session, and dropping the renewal
+    # would make recon a net drain on how long the account stays bound.
+    updated_storage_state: dict[str, Any] | None = None

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from ..schemas import EnvironmentConfig, SessionResult
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle: login imports schemas only
+    from ..inspect import InspectSpec
     from ..login import LoginFlowSpec
     from ..publish import PlatformIntentRules, Publisher
     from ..verify import VerifySpec
@@ -27,6 +28,7 @@ _LOGIN_FLOWS: dict[str, "LoginFlowSpec"] = {}
 _PUBLISHERS: dict[str, "Publisher"] = {}
 _INTENT_RULES: dict[str, "PlatformIntentRules"] = {}
 _VERIFY_SPECS: dict[str, "VerifySpec"] = {}
+_INSPECT_SPECS: dict[str, "InspectSpec"] = {}
 
 
 def register(platform: str, validator: SessionValidator) -> None:
@@ -138,6 +140,31 @@ def get_verify_spec(platform: str) -> "VerifySpec | None":
 
 def verify_platforms() -> list[str]:
     return sorted(_VERIFY_SPECS)
+
+
+# A sixth registry: read-only page RECON (T0). It holds the answer to "which
+# addresses may this platform's cookies be pointed at", which is the whole
+# safety property of `/session/inspect` — an endpoint that opens an arbitrary
+# URL while carrying a live session is a credentialed SSRF.
+#
+# Absence is refusal, like every registry above: a platform with no spec cannot
+# be inspected, rather than defaulting to "any host will do". Bilibili has no
+# creator-host constant to point at, so it registers nothing and is refused.
+
+
+def register_inspect_spec(platform: str, spec: "InspectSpec") -> None:
+    key = platform.strip().lower()
+    if key in _INSPECT_SPECS:
+        raise ValueError(f"inspect spec for '{key}' is already registered")
+    _INSPECT_SPECS[key] = spec
+
+
+def get_inspect_spec(platform: str) -> "InspectSpec | None":
+    return _INSPECT_SPECS.get((platform or "").strip().lower())
+
+
+def inspect_platforms() -> list[str]:
+    return sorted(_INSPECT_SPECS)
 
 
 # Importing the module performs its registration.
