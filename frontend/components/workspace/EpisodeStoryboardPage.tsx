@@ -25,6 +25,7 @@ import { EpisodeSceneBoard } from './EpisodeSceneBoard';
 import { EpisodeShotListTable, type EpisodeShotListTableHandle } from './EpisodeShotListTable';
 import { WorkspaceCanvas } from './WorkspaceCanvas';
 import { SURFACE_VIEWS } from './nodeSurface';
+import { __clearSceneShotsCache } from './useSceneShots';
 import type { EpisodeProgress } from '../../types';
 
 export interface EpisodeStoryboardPageProps {
@@ -53,6 +54,24 @@ export interface EpisodeStoryboardPageProps {
 
 const STORYBOARD_VIEWS = SURFACE_VIEWS.storyboard;
 const DEFAULT_VIEW = STORYBOARD_VIEWS[0].key;
+
+/**
+ * episodeId -> scriptId|null, for episodes whose script existence has
+ * already been probed once this session (fix 2, storyboard-page-polish:
+ * re-entering the same episode's storyboard module used to re-run the
+ * probe → Loading gate every time). Stale-while-revalidate, mirroring
+ * `settledCache` in `agentActivity/useRunToolActivity.ts`: a cached value
+ * renders IMMEDIATELY (skips the loading gate entirely), while the probe
+ * still runs in the background to silently correct it — e.g. the script was
+ * created from elsewhere since the last visit — and only touches state when
+ * the fresh result actually differs from what's already on screen.
+ */
+const scriptProbeCache = new Map<string, string | null>();
+
+/** Exposed for tests — module-level cache otherwise leaks between cases. */
+export function __clearScriptProbeCache(): void {
+  scriptProbeCache.clear();
+}
 
 /**
  * Script id resolution state for the storyboard/shot-list panes. Ported
@@ -105,23 +124,46 @@ export function EpisodeStoryboardPage({
   // Read-only probe (ported from ProjectWorkspace's surface panel, Task 3
   // review fix): re-probes on every episode-id change so switching episodes
   // via the sidebar ⇄ card re-resolves this page's script instead of leaving
-  // a stale one mounted.
-  const [script, setScript] = useState<ScriptState>({ status: 'loading' });
+  // a stale one mounted. Fix 2 (stale-while-revalidate): a cached result for
+  // this episode renders immediately (no Loading gate on re-entry); the
+  // probe still fires to refresh the cache in the background.
+  const [script, setScript] = useState<ScriptState>(() => {
+    if (!episode || !scriptProbeCache.has(episode.episode_id)) return { status: 'loading' };
+    const cached = scriptProbeCache.get(episode.episode_id) ?? null;
+    return cached ? { status: 'ready', scriptId: cached } : { status: 'missing' };
+  });
   useEffect(() => {
     if (!episode) {
       setScript({ status: 'loading' });
       return;
     }
+    const epId = episode.episode_id;
+    const hadCache = scriptProbeCache.has(epId);
+    const cached = hadCache ? (scriptProbeCache.get(epId) ?? null) : undefined;
     let cancelled = false;
-    setScript({ status: 'loading' });
+    setScript(
+      hadCache
+        ? cached
+          ? { status: 'ready', scriptId: cached }
+          : { status: 'missing' }
+        : { status: 'loading' },
+    );
     findExistingScript(episode)
       .then((id) => {
         if (cancelled) return;
+        scriptProbeCache.set(epId, id);
+        // Background refresh (hadCache): only touch state when the fresh
+        // result actually differs, so an already-rendered board doesn't
+        // flicker/remount for a no-op refresh.
+        if (hadCache && cached === id) return;
         setScript(id ? { status: 'ready', scriptId: id } : { status: 'missing' });
       })
       .catch((err) => {
         console.error('[EpisodeStoryboardPage] failed to probe script:', err);
-        if (!cancelled) setScript({ status: 'missing' });
+        // Only clobber the view with the empty state on a first-visit probe
+        // failure — a background refresh failure should leave the already-
+        // rendered (cached) content alone.
+        if (!cancelled && !hadCache) setScript({ status: 'missing' });
       });
     return () => {
       cancelled = true;
@@ -136,6 +178,12 @@ export function EpisodeStoryboardPage({
     setScript({ status: 'provisioning' });
     provisionScript(episode)
       .then((id) => {
+        // Cache invalidation (fix 2): a fresh/newly-provisioned script must
+        // never be shadowed by a stale probe-cache entry (e.g. 'missing'
+        // from before this click) or a stale scene/shots cache entry keyed
+        // by a reused scriptId — clear both so the next read is live.
+        scriptProbeCache.set(episode.episode_id, id);
+        if (id) __clearSceneShotsCache(id);
         setScript(id ? { status: 'ready', scriptId: id } : { status: 'missing' });
       })
       .catch((err) => {
@@ -184,11 +232,12 @@ export function EpisodeStoryboardPage({
 
   return (
     <div data-testid="episode-storyboard-page" className="flex flex-col h-full min-h-0">
-      <div className="flex items-center gap-3 border-b border-line px-4 py-2.5">
-        <span className="text-[13.5px] font-bold">
-          {t('projects.storyboardPage.title', 'Storyboard')}
-        </span>
-        <span className="font-mono text-[11px] text-ink-500">{episode?.shots_total ?? 0}</span>
+      {/* Header matches the editor's doc-tabs row (EditorShell's
+          .mh-center-topbar/.mh-doc-tabs, mounted inline for the 'script'
+          module): ONLY the pill segmented control, no page title, no count,
+          no border-b divider — the tabs share the content pane's px-6
+          horizontal inset (Fix 1, storyboard-page-polish). */}
+      <div className="flex items-center gap-3 px-6 pt-4 pb-3">
         <EpisodeViewTabs views={STORYBOARD_VIEWS} active={view} onChange={handleTabChange} />
         {view === 'shotlist' && (
           <button

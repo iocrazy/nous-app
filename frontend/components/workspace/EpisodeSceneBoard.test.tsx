@@ -23,6 +23,7 @@ const svc = vi.hoisted(() => ({
 vi.mock('../../editor/sceneService', () => svc);
 
 import { EpisodeSceneBoard } from './EpisodeSceneBoard';
+import { __clearSceneShotsCache } from './useSceneShots';
 
 const scene = (over: Partial<SceneDoc> = {}): SceneDoc => ({
   id: '200',
@@ -59,6 +60,10 @@ const shot = (over: Partial<Shot> = {}): Shot => ({
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  // Fix 2 (storyboard-page-polish): useSceneShots now caches by scriptId —
+  // most cases in this file reuse scriptId "1"/"sc1", so a prior test's
+  // fetch would otherwise render as a stale cache hit on the next one.
+  __clearSceneShotsCache();
 });
 
 describe('EpisodeSceneBoard', () => {
@@ -213,5 +218,25 @@ describe('EpisodeSceneBoard', () => {
     );
     (await screen.findByTestId('shot-card-9007199254740997')).click();
     expect(onOpenShot).toHaveBeenCalledWith('9007199254740997', '9007199254740995');
+  });
+
+  // Fix 2 (storyboard-page-polish): useSceneShots caches by scriptId so a
+  // second mount for the same script renders its cached scenes/shots
+  // synchronously instead of a blank column list while the fetch is in
+  // flight, and still revalidates in the background.
+  it('a second mount for the same scriptId renders scenes immediately from cache and still revalidates in the background', async () => {
+    svc.listScenes.mockResolvedValue([scene({ id: '200' })]);
+    const { unmount } = render(
+      <EpisodeSceneBoard scriptId="1" onOpenScene={() => {}} onOpenShot={() => {}} />,
+    );
+    await waitFor(() => expect(screen.getByTestId('scene-column-200')).toBeInTheDocument());
+    unmount();
+    svc.listScenes.mockClear();
+
+    render(<EpisodeSceneBoard scriptId="1" onOpenScene={() => {}} onOpenShot={() => {}} />);
+    // Cached scene renders synchronously — no waitFor.
+    expect(screen.getByTestId('scene-column-200')).toBeInTheDocument();
+    // Background revalidation still fires against the real service.
+    await waitFor(() => expect(svc.listScenes).toHaveBeenCalledWith('1'));
   });
 });
