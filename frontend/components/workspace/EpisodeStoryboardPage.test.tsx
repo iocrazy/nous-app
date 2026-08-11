@@ -59,7 +59,8 @@ vi.mock('../../utils/relativeTime', () => ({
   formatRelativeTime: () => '3d ago',
 }));
 
-import { EpisodeStoryboardPage } from './EpisodeStoryboardPage';
+import { EpisodeStoryboardPage, __clearScriptProbeCache } from './EpisodeStoryboardPage';
+import { __clearSceneShotsCache } from './useSceneShots';
 
 const ep = { episode_id: '324362669885098', title: 'EP1', scene_count: 7,
   shots_done: 0, shots_total: 6, renders_count: 0, status: 'in_progress' } as any;
@@ -81,7 +82,15 @@ beforeEach(() => {
   addToast.mockClear();
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  // Module-level caches (fix 2, storyboard-page-polish) otherwise leak
+  // between test cases — every test in this file reuses the same
+  // `ep.episode_id`, so a prior test's probe would shadow the next test's
+  // fresh mock without this.
+  __clearScriptProbeCache();
+  __clearSceneShotsCache();
+});
 
 describe('EpisodeStoryboardPage', () => {
   it('renders left-aligned view tabs with board active by default', async () => {
@@ -157,5 +166,107 @@ describe('EpisodeStoryboardPage', () => {
 
     expect(base.onOpenShotInEditor).toHaveBeenCalledWith('9007199254740997', '200');
     expect(base.onViewChange).not.toHaveBeenCalled();
+  });
+
+  // Fix 2 (storyboard-page-polish, 2026-08-10 用户反馈): re-entering the same
+  // episode's storyboard module used to repeat the script probe → Loading
+  // gate → EpisodeSceneBoard's own scenes/shots fetch, spinning every single
+  // time. A module-level cache (scriptProbeCache + useSceneShots'
+  // sceneShotsCache) should render the last-known state immediately instead.
+  describe('per-episode cache (fix 2)', () => {
+    it('re-entering the same episode renders the board immediately from cache, without the Loading gate', async () => {
+      mockSceneService.listScenes.mockResolvedValue([
+        { id: '200', script_id: 'sc1', chapter_id: null, scene_number: '1',
+          heading_int_ext: 'INT', location_text: 'Kitchen', time_of_day: 'DAY',
+          content_version: 1, sort_order: 0, elements: [] },
+      ]);
+      const { unmount } = render(<EpisodeStoryboardPage {...base} />);
+      await screen.findByTestId('scene-column-200');
+      unmount();
+
+      // Second entry: the probe never resolves within this test — a cache
+      // miss would leave the page stuck on the Loading gate forever.
+      const pendingProbe = new Promise<string | null>(() => {});
+      render(
+        <EpisodeStoryboardPage
+          {...base}
+          findExistingScript={vi.fn().mockReturnValue(pendingProbe)}
+        />,
+      );
+
+      // No `await`/`waitFor` — this must already be in the DOM synchronously
+      // from the cached scriptId + cached scenes, proving the Loading gate
+      // never rendered on this mount.
+      expect(screen.getByTestId('scene-column-200')).toBeInTheDocument();
+      expect(screen.queryByTestId('episode-surface-no-script')).toBeNull();
+    });
+
+    it('the background probe silently corrects the rendered script when it changed since the cached visit', async () => {
+      const { unmount } = render(
+        <EpisodeStoryboardPage {...base} findExistingScript={vi.fn().mockResolvedValue('sc1')} />,
+      );
+      await screen.findByTestId('episode-view-storyboard');
+      unmount();
+      mockSceneService.listScenes.mockClear();
+
+      // Re-entry: cache says 'sc1', but this mount's probe resolves a
+      // DIFFERENT script id (e.g. created/replaced elsewhere) — the cached
+      // render must self-correct once the background probe settles.
+      render(
+        <EpisodeStoryboardPage {...base} findExistingScript={vi.fn().mockResolvedValue('sc2')} />,
+      );
+      // Renders the cached scriptId's board synchronously first...
+      expect(screen.getByTestId('episode-view-storyboard')).toBeInTheDocument();
+      // ...then the background refresh swaps EpisodeSceneBoard onto the
+      // corrected scriptId (visible as a fresh scenes fetch for 'sc2').
+      await waitFor(() => expect(mockSceneService.listScenes).toHaveBeenCalledWith('sc2'));
+    });
+
+    it('a no-op background probe (unchanged script) does not remount the board', async () => {
+      mockSceneService.listScenes.mockResolvedValue([
+        { id: '200', script_id: 'sc1', chapter_id: null, scene_number: '1',
+          heading_int_ext: 'INT', location_text: 'Kitchen', time_of_day: 'DAY',
+          content_version: 1, sort_order: 0, elements: [] },
+      ]);
+      const { unmount } = render(<EpisodeStoryboardPage {...base} />);
+      await screen.findByTestId('scene-column-200');
+      unmount();
+      mockSceneService.listScenes.mockClear();
+
+      render(<EpisodeStoryboardPage {...base} />); // same 'sc1' result as before
+      expect(screen.getByTestId('scene-column-200')).toBeInTheDocument();
+      // The background probe still fires (re-validates)...
+      await waitFor(() => expect(base.findExistingScript).toHaveBeenCalled());
+      // ...but since the result didn't change, the board is still showing
+      // (no flash to the Loading gate / no-script state along the way).
+      expect(screen.getByTestId('scene-column-200')).toBeInTheDocument();
+    });
+
+    it('Start Storyboard success updates the cache so re-entry shows the fresh script immediately', async () => {
+      const provisionScript = vi.fn().mockResolvedValue('newsc');
+      const { unmount } = render(
+        <EpisodeStoryboardPage
+          {...base}
+          findExistingScript={vi.fn().mockResolvedValue(null)}
+          provisionScript={provisionScript}
+        />,
+      );
+      fireEvent.click(await screen.findByTestId('episode-surface-start-storyboard'));
+      await waitFor(() => expect(screen.getByTestId('episode-view-storyboard')).toBeInTheDocument());
+      expect(provisionScript).toHaveBeenCalledTimes(1);
+      unmount();
+
+      // Re-entry: even a probe that never resolves must not shadow the
+      // cache the successful provision just wrote (the 'missing' state from
+      // before the click must not leak back in).
+      render(
+        <EpisodeStoryboardPage
+          {...base}
+          findExistingScript={vi.fn().mockReturnValue(new Promise<string | null>(() => {}))}
+        />,
+      );
+      expect(screen.getByTestId('episode-view-storyboard')).toBeInTheDocument();
+      expect(screen.queryByTestId('episode-surface-no-script')).toBeNull();
+    });
   });
 });
