@@ -200,6 +200,7 @@ def outermost_only(selector: str) -> str:
     """
     return f"{selector}:not({selector} *)"
 
+
 # The platform's own "you have nothing here" state. Reaching it is a REAL
 # answer: the account has no works, so the post we are looking for is not one.
 #
