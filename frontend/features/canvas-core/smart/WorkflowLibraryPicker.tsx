@@ -95,7 +95,20 @@ export function WorkflowLibraryPicker({
     // panel stays pinned in place while the anchor slides out from under
     // it on a narrow viewport with many toolbar buttons — a floating panel
     // with no anchor under it.
-    const onScroll = () => onClose();
+    //
+    // Unlike DateRangePopover, this panel has its own internal scrollable
+    // region (the file-row list, `max-h-56 overflow-y-auto` below) — with a
+    // bare unconditional `onClose()`, scrolling that internal list closes
+    // the panel out from under the user's mouse the moment the row count
+    // passes ~5-6 (self-inflicted regression from fix round 1). Filter out
+    // scrolls whose target lives inside the panel, same target-containment
+    // check `onMouseDown` already uses two lines up — the goal is "the
+    // anchor moved out from under a fixed-position panel", not "any scroll
+    // happened anywhere in the DOM".
+    const onScroll = (e: Event) => {
+      if (ref.current && e.target instanceof Node && ref.current.contains(e.target)) return;
+      onClose();
+    };
     document.addEventListener('keydown', onKeyDown);
     // Deferred so the click that opened the panel doesn't immediately close it.
     const timer = setTimeout(() => document.addEventListener('mousedown', onMouseDown), 0);
@@ -132,7 +145,7 @@ export function WorkflowLibraryPicker({
         placeholder="Search workflows…"
         className="mb-1.5 w-full rounded-full border border-canvas-line bg-transparent px-3 py-1 text-xs text-canvas-text outline-none placeholder:text-canvas-muted focus:ring-1 focus:ring-canvas-strong/40"
       />
-      <div className="max-h-56 overflow-y-auto">
+      <div data-testid="workflow-library-rows" className="max-h-56 overflow-y-auto">
         {loading && (
           <div className="flex h-12 items-center justify-center">
             <Loader2 size={14} className="animate-spin text-canvas-muted" />

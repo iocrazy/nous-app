@@ -7,13 +7,32 @@
 // no anchor underneath it. Height-flip fallback mirrors
 // DateRangePopover.test.tsx's paired "flips"/"places" tests, adapted for
 // this panel's inverted default (opens upward, flips to below).
+//
+// Review fix round 2: round 1's capture-phase scroll listener was
+// unconditional (`() => onClose()`), which also fires for scrolls of the
+// panel's OWN internal file-row list (`max-h-56 overflow-y-auto` — this
+// mock seeds enough rows to make that list actually scrollable). Unlike
+// DateRangePopover (no internal scroll region), a bare `onClose()` there
+// self-closes the panel the instant the user scrolls its own row list.
+// Fixed with the same target-containment filter `onMouseDown` already uses.
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../hooks/useResourceSearch', () => ({
   useResourceSearch: () => ({
-    data: { results: [{ id: '88', name: 'wf-a.json', kind: 'doc' }] },
+    data: {
+      results: [
+        { id: '88', name: 'wf-a.json', kind: 'doc' },
+        { id: '89', name: 'wf-b.json', kind: 'doc' },
+        { id: '90', name: 'wf-c.json', kind: 'doc' },
+        { id: '91', name: 'wf-d.json', kind: 'doc' },
+        { id: '92', name: 'wf-e.json', kind: 'doc' },
+        { id: '93', name: 'wf-f.json', kind: 'doc' },
+        { id: '94', name: 'wf-g.json', kind: 'doc' },
+        { id: '95', name: 'wf-h.json', kind: 'doc' },
+      ],
+    },
     loading: false,
   }),
 }));
@@ -111,6 +130,19 @@ describe('WorkflowLibraryPicker', () => {
     fireEvent.scroll(scrollContainer);
     expect(onClose).toHaveBeenCalledTimes(1);
     scrollContainer.remove();
+  });
+
+  // Review fix round 2: scrolling the panel's OWN internal row list must NOT
+  // close it — only a scroll whose target is outside the panel means "the
+  // anchor may have moved". The mock above seeds 8 rows so the
+  // `max-h-56 overflow-y-auto` list is genuinely scrollable.
+  it('scrolling the picker\'s own internal file-row list does not close it', () => {
+    const onClose = vi.fn();
+    render(
+      <WorkflowLibraryPicker anchorEl={anchor} teamId="team-1" onPick={vi.fn()} onClose={onClose} />,
+    );
+    fireEvent.scroll(screen.getByTestId('workflow-library-rows'));
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('places above the anchor by default when there is room', () => {
