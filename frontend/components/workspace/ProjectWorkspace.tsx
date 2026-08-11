@@ -925,19 +925,18 @@ export function ProjectWorkspace({
     [setSearchParams],
   );
 
-  // Shot deep-link into the editor (Task 3 修复轮2, 2026-08-10 用户拍板): the
-  // ONLY two entry points — a scene board's shot-card click (via
-  // EpisodeStoryboardPage's `onOpenShotInEditor` prop, sceneId always known —
-  // the shot's own column has it) and the URL `?shot=` one-shot trigger below
-  // (sceneId unknown, `null` — an agent-panel/share link only carries the
-  // shot id) — both funnel through here, so there is exactly ONE behavior to
-  // reason about. Routes through `openEpisodeScript` directly (NOT
-  // `handleOpenWorkView('storyboard', {sceneId})`; that helper's own
-  // `!opts?.sceneId` guard would redirect a null-sceneId call back to the
-  // standalone Storyboard MODULE page instead of the embedded editor — see
-  // its comment above). `openEpisodeScript` already handles `sceneId=null`
-  // gracefully (just skips the scroll-to-scene half), so the editor's
-  // storyboard rail opens on the current episode's script either way.
+  // Shot deep-link into the editor (Task 3 修复轮2, 2026-08-10 用户拍板) — the
+  // OLD destination, kept per the shot-nodes-on-canvas Task 5 (2026-08-11)
+  // orchestrator binding decision: still reachable from a bare `?shot=`
+  // (no `view=canvas`), retired together with the rest of the editor's
+  // storyboard rail in Task 6, not half-deleted mid-epic. Routes through
+  // `openEpisodeScript` directly (NOT `handleOpenWorkView('storyboard',
+  // {sceneId})`; that helper's own `!opts?.sceneId` guard would redirect a
+  // null-sceneId call back to the standalone Storyboard MODULE page instead
+  // of the embedded editor — see its comment above). `openEpisodeScript`
+  // already handles `sceneId=null` gracefully (just skips the
+  // scroll-to-scene half), so the editor's storyboard rail opens on the
+  // current episode's script either way.
   const handleOpenShotInEditor = useCallback(
     (shotId: string, sceneId: string | null) => {
       void openEpisodeScript(currentEpisode, 'storyboard', sceneId);
@@ -946,21 +945,33 @@ export function ProjectWorkspace({
     [openEpisodeScript, currentEpisode],
   );
 
-  // URL `?shot=` one-shot deep-link (kept as an entry point per 修复轮2's
-  // 拍板: an agent panel or a shared link may carry `shot=<id>` into the
-  // Storyboard module page without a `scene`). Fires once `currentEpisode`
-  // has resolved (so `openEpisodeScript` above has a real episode to work
-  // with, not a premature `null` that would bounce to the Episodes module),
-  // then immediately clears `shot` from the URL in the SAME effect — true
-  // one-shot, mirroring the `shot`-clearing contract `handleStoryboardViewChange`
-  // already enforces on a manual tab switch. Not gated on `activeModule` —
-  // the deep-link's destination is the EDITOR, a different module entirely,
-  // so it's meant to fire regardless of which module the URL happened to
-  // land on first.
+  // Entry point ② for the storyboard CANVAS focus (shot-nodes-on-canvas Task
+  // 5): threaded down to `EpisodeStoryboardPage`'s `focusShotId` prop, which
+  // merges it into that page's own local focus state (alongside the shot
+  // card click / shotFocusBus entry points it owns) and reports back via
+  // `onFocusShotIdConsumed` so this is reset for the next request.
+  const [canvasFocusShotId, setCanvasFocusShotId] = useState<string | null>(null);
+
+  // URL `?shot=` one-shot deep-link — TWO destinations depending on `view`:
+  // `view==='canvas'` means "focus this shot in the storyboard canvas"
+  // (Task 5's entry point ②, `canvasFocusShotId` above); anything else keeps
+  // the OLD `handleOpenShotInEditor` behavior (an agent panel or a shared
+  // link carrying a bare `shot=<id>`, per 修复轮2's 拍板). Fires once
+  // `currentEpisode` has resolved (so the editor branch has a real episode
+  // to work with, not a premature `null` that would bounce to the Episodes
+  // module), then immediately clears `shot` from the URL in the SAME
+  // effect — true one-shot, mirroring the `shot`-clearing contract
+  // `handleStoryboardViewChange` already enforces on a manual tab switch.
+  // Not gated on `activeModule` — either destination is meant to fire
+  // regardless of which module the URL happened to land on first.
   useEffect(() => {
-    const shotId = readWorkspaceParams(searchParams).shot;
+    const { shot: shotId, view } = readWorkspaceParams(searchParams);
     if (!shotId || !currentEpisode) return;
-    handleOpenShotInEditor(shotId, null);
+    if (view === 'canvas') {
+      setCanvasFocusShotId(shotId);
+    } else {
+      handleOpenShotInEditor(shotId, null);
+    }
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -969,7 +980,7 @@ export function ProjectWorkspace({
       },
       { replace: true },
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately narrow: re-checks whenever `searchParams` changes (for a fresh `shot` value) or `currentEpisode` first resolves; `handleOpenShotInEditor`'s identity riding on `currentEpisode` would otherwise re-fire this on every episodes refetch even with no `shot` in the URL, but the `!shotId` guard above already makes that a no-op
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately narrow: re-checks whenever `searchParams` changes (for a fresh `shot` value) or `currentEpisode` first resolves; `handleOpenShotInEditor`'s identity riding on `currentEpisode` would otherwise re-fire this on every episodes refetch even with no `shot` in the URL, but the `!shotId` guard above already makes that a no-op. `setCanvasFocusShotId` is a stable setState setter — omitted like every other setState setter in this file's dep arrays.
   }, [searchParams, currentEpisode, setSearchParams]);
 
   // Film slate read-out (studio only): 1-based episode + active-scene numbers.
@@ -1091,6 +1102,8 @@ export function ProjectWorkspace({
             provisionScript={resolveOrProvisionScript}
             onOpenScene={(sceneId) => handleOpenWorkView('storyboard', { sceneId })}
             onOpenShotInEditor={handleOpenShotInEditor}
+            focusShotId={canvasFocusShotId}
+            onFocusShotIdConsumed={() => setCanvasFocusShotId(null)}
           />
         ) : (
           <div className="flex-1 overflow-y-auto px-6 pb-8">

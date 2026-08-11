@@ -1466,7 +1466,8 @@
       "startStoryboard": "Start Storyboard"
     },
     "storyboardPage": {
-      "shotHint": "Open in editor"
+      "shotHint": "View in canvas",
+      "canvasLoadError": "Failed to load the storyboard canvas."
     },
     "sceneBoard": {
       "open": "Open",
@@ -2314,6 +2315,7 @@
         "title": "Promote to Shot",
         "hint": "Pick a scene to create this shot in.",
         "noScenes": "This episode has no scenes yet.",
+        "loadingScenes": "Loading scenes…",
         "cancel": "Cancel",
         "failed": "Couldn't create the shot."
       }

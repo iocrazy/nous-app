@@ -1466,7 +1466,8 @@
       "startStoryboard": "开始分镜"
     },
     "storyboardPage": {
-      "shotHint": "在编辑器中打开"
+      "shotHint": "在画布中查看",
+      "canvasLoadError": "分镜画布加载失败。"
     },
     "sceneBoard": {
       "open": "打开",
@@ -2314,6 +2315,7 @@
         "title": "转正为镜头",
         "hint": "选择要创建此镜头的场次。",
         "noScenes": "该集尚无场次。",
+        "loadingScenes": "场次加载中…",
         "cancel": "取消",
         "failed": "创建镜头失败。"
       }

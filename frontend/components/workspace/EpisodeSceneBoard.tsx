@@ -26,9 +26,11 @@ export interface EpisodeSceneBoardProps {
   /** Deep-link into the scene (opens the script editor there). */
   onOpenScene: (sceneId: string) => void;
   /**
-   * Shot card click → deep-link into the script editor's storyboard rail,
-   * focused on this shot (Task 3 修复轮2, 2026-08-10 用户拍板: the editor is
-   * the only shotFocusBus subscriber — NOT this page's own Canvas tab). The
+   * Shot card click → switches the storyboard page to its own Canvas tab
+   * and focuses this shot's node there (shot-nodes-on-canvas Task 5,
+   * 2026-08-11 — supersedes the Task 3 修复轮2 editor deep-link; the Canvas
+   * tab now embeds the episode's real storyboard canvas with shot nodes
+   * bound to `script_shots`, so a focus request there is meaningful). The
    * shot's own sceneId rides along since the column it's rendered in already
    * has it at hand — same shape as `onOpenScene` above.
    */

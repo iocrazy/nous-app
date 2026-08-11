@@ -9,12 +9,24 @@
  * component only deals with lifecycle + status UI. On unmount we flush
  * any pending save so a navigation away doesn't drop the last 500ms of
  * edits.
+ *
+ * `CanvasView` (below) is the actual work component — extracted from this
+ * route's body (shot-nodes-on-canvas Task 5) so the storyboard page's
+ * "Canvas" tab can mount the SAME reconcile/focus/composer orchestration
+ * embedded (by `canvasId` prop) without going through React Router at all.
+ * `CanvasPage` (default export, unchanged route behaviour) is now a thin
+ * shell: it resolves `canvasId`/`teamId` from the URL and a `onBack`
+ * handler from history, then delegates to `CanvasView`. The route-only
+ * bits (missing-canvasId guard, the "back to canvases" pill's history
+ * logic) stay here since an embedded mount has neither concept — passing
+ * no `onBack` simply hides the pill (see its own comment below).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft } from 'lucide-react';
+import type { ReactFlowInstance } from '@xyflow/react';
 
 import { CommandPalette } from '../palette/CommandPalette';
 import { CanvasComposer } from '../smart/CanvasComposer';
@@ -38,8 +50,48 @@ import { ArrangeSelectedButton } from './ArrangeSelectedButton';
 import { ShortcutHelpPanel } from './ShortcutHelpPanel';
 import { useCanvasShortcuts } from './useCanvasShortcuts';
 
-export default function CanvasPage() {
-  const { canvasId, teamId } = useParams<{ canvasId: string; teamId?: string }>();
+export interface CanvasViewProps {
+  canvasId: string;
+  /** Only used for the "back to canvases" pill's list-route fallback and
+   *  the CanvasComposer's team-scoped affordances — both irrelevant when
+   *  embedded (the storyboard page has its own tabs, no composer renders
+   *  for `kind==='storyboard'` either way, see `isSmartFamily` below). */
+  teamId?: string;
+  /** Renders the "back to canvases" pill when provided; omitted entirely
+   *  in embedded mode (the storyboard page's own tabs are the way back —
+   *  a second, route-shaped "back" pill inside an embedded tab would be
+   *  confusing chrome pointing at the standalone canvas list). */
+  onBack?: () => void;
+  /**
+   * Shot to bring into view (shot-nodes-on-canvas Task 5): the three focus
+   * entry points (a shot card click, the `?view=canvas&shot=` URL deep
+   * link, `shotFocusBus`) all converge on this single prop by the time they
+   * reach this component. Only meaningful for `kind==='storyboard'`
+   * canvases — every other kind simply never has a matching `shot-{id}`
+   * node, so the effect below silently no-ops.
+   */
+  focusShotId?: string | null;
+  /**
+   * Fires once a `focusShotId` request has settled (node found and
+   * fitView'd, OR not found — same fire-and-forget philosophy as the focus
+   * buses this feature converges: "a chip that does nothing beats a crash").
+   * Lets the caller clear a one-shot trigger (e.g. the URL's `shot=` query
+   * param) without this component owning any URL/state concerns itself.
+   */
+  onFocusHandled?: () => void;
+}
+
+/**
+ * The actual canvas work surface — see the file doc comment above for why
+ * this is split from the default-exported route component.
+ */
+export function CanvasView({
+  canvasId,
+  teamId,
+  onBack,
+  focusShotId = null,
+  onFocusHandled,
+}: CanvasViewProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const loadStatus = useCanvasCoreStore((s) => s.loadStatus);
   const loadError = useCanvasCoreStore((s) => s.loadError);
@@ -54,20 +106,6 @@ export default function CanvasPage() {
   const flushSave = useCanvasCoreStore((s) => s.flushSave);
   const reset = useCanvasCoreStore((s) => s.reset);
   const { t } = useTranslation();
-  const navigate = useNavigate();
-
-  // Back to the canvas list (Infinite's 返回画布列表): prefer real history
-  // (returns to whichever list the user came from — workspace module or the
-  // landing page); a deep link with no in-app history falls back to the
-  // team canvas list.
-  const handleBack = useCallback(() => {
-    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
-    if (idx > 0) {
-      navigate(-1);
-    } else {
-      navigate(teamId ? `/team/${teamId}/canvas` : '/', { replace: true });
-    }
-  }, [navigate, teamId]);
 
   // Cmd+K palette + ? help — canvas-only scope, active only when ready.
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -82,11 +120,10 @@ export default function CanvasPage() {
   // Phase 6a — cross-tab / cross-user realtime invalidation.
   // When another session saves a newer revision, applyRemoteUpdate in the
   // store either rebases (clean local state) or surfaces a conflict (dirty
-  // edits) without clobbering. canvasId is null before params resolve.
+  // edits) without clobbering.
   useCanvasRealtime(canvasId);
 
   useEffect(() => {
-    if (!canvasId) return;
     void loadCanvas(canvasId);
     return () => {
       // Flush before clearing; reset() drops the document and the timer.
@@ -125,8 +162,26 @@ export default function CanvasPage() {
   const promoteScenesRef = useRef<SceneDoc[]>([]);
   const [promoteScenes, setPromoteScenes] = useState<SceneDoc[]>([]);
 
+  // Reconcile settledness (Task 5 — gates the focus effect below): a shot
+  // that reconcile is ABOUT to auto-add isn't in `store.nodes` yet, so
+  // focusing before reconcile settles would silently miss it. Reset
+  // whenever the canvas identity changes so a stale "done" from the
+  // PREVIOUS canvas can't let a focus request jump the gun on this one —
+  // see the ordering note on the two effects below for why this is safe
+  // against the async reconcile's own in-flight cancellation.
+  const [reconcileDone, setReconcileDone] = useState(false);
   useEffect(() => {
-    if (loadStatus !== 'ready' || kind !== 'storyboard') return;
+    setReconcileDone(false);
+  }, [canvasId]);
+
+  useEffect(() => {
+    if (loadStatus !== 'ready') return;
+    if (kind !== 'storyboard') {
+      // No reconcile subsystem for any other kind — nothing to wait for,
+      // the focus effect can proceed as soon as the surface is ready.
+      setReconcileDone(true);
+      return;
+    }
     if (!projectId || !episodeId || !canvasId) return;
     let cancelled = false;
     const sameCanvas = () => useCanvasCoreStore.getState().canvasId === canvasId;
@@ -178,6 +233,12 @@ export default function CanvasPage() {
         }
       } catch (err) {
         console.error('[CanvasPage] shot reconcile failed:', err);
+      } finally {
+        // Runs on every path out of `try` (early returns included) —
+        // "reconcile settled" doesn't require anything to have actually
+        // changed (e.g. no script yet is a legitimate settled state, the
+        // focus effect below will just find no matching node and no-op).
+        if (!cancelled) setReconcileDone(true);
       }
     })();
 
@@ -302,9 +363,42 @@ export default function CanvasPage() {
     store.setConnections(connections);
   }, [loadStatus, kind, nodeCount, canvasId, searchParams]);
 
-  if (!canvasId) {
-    return <CanvasStatus title="Missing canvas id" tone="error" />;
-  }
+  // React Flow imperative instance (Task 5 — viewport focus). `rfReady` is a
+  // reactive twin of the ref: React Flow's own `onInit` timing relative to
+  // this component's other effects isn't a contract this file wants to
+  // depend on, so the focus effect below re-evaluates explicitly whenever
+  // the instance becomes available, instead of assuming it's already there
+  // by the time `loadStatus`/`reconcileDone` flip.
+  const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
+  const [rfReady, setRfReady] = useState(false);
+  const handleCanvasInit = useCallback((instance: ReactFlowInstance) => {
+    rfInstanceRef.current = instance;
+    setRfReady(true);
+  }, []);
+
+  // Viewport focus (Task 5 — the three entry points: a shot card click, the
+  // `?view=canvas&shot=` URL deep link, and `shotFocusBus`, all converge on
+  // the `focusShotId` prop by the time they reach this component). Gated on
+  // `reconcileDone` — see that state's own comment for why a shot that
+  // reconcile is about to add must not be searched for before it lands.
+  useEffect(() => {
+    if (!focusShotId) return;
+    if (loadStatus !== 'ready' || !reconcileDone) return;
+    const instance = rfInstanceRef.current;
+    if (!instance) return;
+    const targetId = `shot-${focusShotId}`;
+    const exists = useCanvasCoreStore
+      .getState()
+      .nodes.some((n) => (n as Record<string, unknown>).id === targetId);
+    if (exists) {
+      instance.fitView({ nodes: [{ id: targetId }], duration: 400, padding: 0.35 });
+    }
+    // Fires whether the node was found or not (fire-and-forget philosophy
+    // shared with `shotFocusBus`/`openShotInListBus`: "a chip that does
+    // nothing beats yanking the writer somewhere unexpected") — lets the
+    // caller clear a one-shot trigger either way.
+    onFocusHandled?.();
+  }, [focusShotId, loadStatus, reconcileDone, rfReady, onFocusHandled]);
 
   if (loadStatus === 'loading' || loadStatus === 'idle') {
     return <CanvasStatus title="Loading canvas…" tone="info" />;
@@ -336,22 +430,26 @@ export default function CanvasPage() {
   // palette overlay.
   return (
     <div ref={surfaceRef} className="relative h-full w-full">
-      <CanvasSurface />
+      <CanvasSurface onInit={handleCanvasInit} />
       {/* Back-to-list pill + canvas name (Infinite parity) — top-left, above
-          the surface. */}
-      <div className="pointer-events-none absolute left-4 top-4 z-30 flex flex-col gap-1">
-        <button
-          type="button"
-          onClick={handleBack}
-          className="canvas-island pointer-events-auto flex w-fit items-center gap-2 rounded-full px-3.5 py-2 text-xs font-medium text-ink-200 transition-colors hover:text-ink-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
-        >
-          <ArrowLeft size={14} />
-          {t('canvas.backToList', 'Back to canvases')}
-        </button>
-        {name && (
-          <div className="max-w-[16rem] truncate px-2 text-xs text-ink-500">{name}</div>
-        )}
-      </div>
+          the surface. Only rendered for the real route (`onBack` provided);
+          an embedded mount (the storyboard page's Canvas tab) has its own
+          tabs as the way back, see `CanvasViewProps.onBack`'s doc comment. */}
+      {onBack && (
+        <div className="pointer-events-none absolute left-4 top-4 z-30 flex flex-col gap-1">
+          <button
+            type="button"
+            onClick={onBack}
+            className="canvas-island pointer-events-auto flex w-fit items-center gap-2 rounded-full px-3.5 py-2 text-xs font-medium text-ink-200 transition-colors hover:text-ink-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+          >
+            <ArrowLeft size={14} />
+            {t('canvas.backToList', 'Back to canvases')}
+          </button>
+          {name && (
+            <div className="max-w-[16rem] truncate px-2 text-xs text-ink-500">{name}</div>
+          )}
+        </div>
+      )}
       {/* Empty-canvas hint floats OVER the live surface instead of replacing
           it: the palette/composer are the only way to add a first node, so a
           full-screen empty state would dead-end a freshly created canvas
@@ -381,6 +479,11 @@ export default function CanvasPage() {
         <PromoteShotDialog
           open={promoteNodeId !== null}
           scenes={promoteScenes}
+          // T4 forward note (Task 5): `reconcileDone` is the SAME settledness
+          // signal the viewport-focus effect above gates on — an empty
+          // `promoteScenes` before reconcile settles means "don't know yet",
+          // not "this episode genuinely has no scenes".
+          scenesLoading={!reconcileDone}
           submitting={promoteSubmitting}
           error={promoteError}
           onCancel={handlePromoteCancel}
@@ -389,6 +492,31 @@ export default function CanvasPage() {
       )}
     </div>
   );
+}
+
+/** Route shell — see the file doc comment above. */
+export default function CanvasPage() {
+  const { canvasId, teamId } = useParams<{ canvasId: string; teamId?: string }>();
+  const navigate = useNavigate();
+
+  // Back to the canvas list (Infinite's 返回画布列表): prefer real history
+  // (returns to whichever list the user came from — workspace module or the
+  // landing page); a deep link with no in-app history falls back to the
+  // team canvas list.
+  const handleBack = useCallback(() => {
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (idx > 0) {
+      navigate(-1);
+    } else {
+      navigate(teamId ? `/team/${teamId}/canvas` : '/', { replace: true });
+    }
+  }, [navigate, teamId]);
+
+  if (!canvasId) {
+    return <CanvasStatus title="Missing canvas id" tone="error" />;
+  }
+
+  return <CanvasView canvasId={canvasId} teamId={teamId} onBack={handleBack} />;
 }
 
 function CanvasStatus({

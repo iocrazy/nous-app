@@ -16,6 +16,7 @@ import {
   type IsValidConnection,
   type Node,
   type NodeChange,
+  type ReactFlowInstance,
   type Viewport,
   applyEdgeChanges,
   applyNodeChanges,
@@ -78,7 +79,17 @@ function toReactFlowNodes(nodes: CanvasNode[]): AnyNode[] {
   });
 }
 
-export function CanvasSurface() {
+export interface CanvasSurfaceProps {
+  /**
+   * Fires once React Flow's imperative instance is ready (Task 5, viewport
+   * focus for the storyboard canvas embed). Optional — every existing
+   * caller omits it and gets identical behaviour to before this prop
+   * existed.
+   */
+  onInit?: (instance: ReactFlowInstance) => void;
+}
+
+export function CanvasSurface({ onInit }: CanvasSurfaceProps = {}) {
   const nodes = useCanvasCoreStore((s) => s.nodes);
   const connections = useCanvasCoreStore((s) => s.connections);
   const viewport = useCanvasCoreStore((s) => s.viewport);
@@ -433,6 +444,7 @@ export function CanvasSurface() {
   return (
     <CanvasEngine
       themedChrome
+      onInit={onInit}
       // Infinite-parity zoom range (P0-6): RF's default 0.5–2 clamp feels
       // "stuck" next to Infinite's effectively unbounded zoom, and capped
       // the `z` overview on large graphs.
