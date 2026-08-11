@@ -2300,6 +2300,24 @@
       "title": "Group",
       "dropHint": "Drop images to auto-collect"
     },
+    "shotNode": {
+      "menu": "Shot menu",
+      "promote": "Promote to Shot",
+      "unset": "Unset",
+      "frameEmpty": "No frame yet",
+      "generating": "Generating…",
+      "patchFailed": "Couldn't save the change — reverted.",
+      "generateFailed": "Generate failed.",
+      "deleteInList": "Delete in shot list",
+      "stale": "This shot was removed from the storyboard list.",
+      "promoteDialog": {
+        "title": "Promote to Shot",
+        "hint": "Pick a scene to create this shot in.",
+        "noScenes": "This episode has no scenes yet.",
+        "cancel": "Cancel",
+        "failed": "Couldn't create the shot."
+      }
+    },
     "arrangeSelected": "Arrange selected",
     "loopModeSerial": "Serial",
     "loopModeParallel": "Parallel",

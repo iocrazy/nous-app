@@ -201,6 +201,69 @@ describe('canvasCoreStore — debounced save', () => {
     expect(s.baseUpdatedAt).not.toBe(baseCanvas.base_updated_at);
     expect(s.persistedRevision).toBe(1);
   });
+
+  // Task 4 shotSync: a node reconcile flagged `data.stale = true` (its
+  // bound shot was deleted) must never round-trip into `nodes_json`. Review
+  // fix round 1: an earlier version ALSO cleared it out of local `nodes` in
+  // the same tick — that bypassed the store's own undo-history discipline
+  // and made an unrelated edit's autosave tick silently delete the stale
+  // card's on-screen render, a surprise side effect for an action the user
+  // didn't take. Per brief literal ("过滤删除" is about what gets
+  // persisted), the payload is filtered but local `nodes` is left alone —
+  // the grey stale card stays visible until the canvas reloads.
+  it('drops stale-flagged nodes from the save payload but leaves local state alone', async () => {
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 0 });
+    await useStore.getState().loadCanvas('4242');
+    useStore.getState().setNodes([
+      { id: 'n1', data: { stale: true } },
+      { id: 'n2', data: { title: 'still here' } },
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(stubs.calls[0].nodes_json).toHaveLength(1);
+    expect((stubs.calls[0].nodes_json?.[0] as { id: string }).id).toBe('n2');
+
+    // Local state is untouched — the stale node is still there (grey render
+    // persists until the next `loadCanvas`), and no phantom mutation went
+    // through the undo-history path.
+    const s = useStore.getState();
+    expect(s.nodes).toHaveLength(2);
+    expect(s.nodes.map((n) => (n as { id: string }).id)).toEqual(['n1', 'n2']);
+  });
+
+  it('a stale node stays excluded from every subsequent save payload too (re-filtered, not re-added)', async () => {
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 0 });
+    await useStore.getState().loadCanvas('4242');
+    useStore.getState().setNodes([
+      { id: 'n1', data: { stale: true } },
+      { id: 'n2', data: { title: 'still here' } },
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stubs.calls[0].nodes_json).toHaveLength(1);
+
+    // A second, unrelated edit ticks another save — the stale node (still
+    // sitting in local state) must be filtered again, not silently persist.
+    useStore.getState().setNodes([
+      { id: 'n1', data: { stale: true } },
+      { id: 'n2', data: { title: 'edited' } },
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stubs.calls[1].nodes_json).toHaveLength(1);
+    expect((stubs.calls[1].nodes_json?.[0] as { id: string }).id).toBe('n2');
+  });
+
+  it('a non-stale save leaves nodes/payload untouched (no spurious filtering)', async () => {
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 0 });
+    await useStore.getState().loadCanvas('4242');
+    useStore.getState().setNodes([{ id: 'n1', data: { title: 'fine' } }]);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(stubs.calls[0].nodes_json).toHaveLength(1);
+    expect(useStore.getState().nodes).toHaveLength(1);
+  });
 });
 
 describe('canvasCoreStore — conflict handling', () => {

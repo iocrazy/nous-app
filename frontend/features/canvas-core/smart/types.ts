@@ -43,11 +43,55 @@ export type SmartNodeType =
 
 export type LoopMode = 'serial' | 'parallel';
 
+/**
+ * shot node (storyboard canvas epic, Task 3): source-card fields (title/
+ * reference_resource_ids/notes) are the pre-existing hand-placed-draft
+ * shape (legacy compat — `shot_id: null` nodes render exactly as before).
+ * The binding-mirror fields below light up when the canvas is opened from
+ * the storyboard tier and the node is bound to a `script_shots` row: the
+ * mirror is written on open (reconcile) and echoed on every field edit
+ * (optimistic PATCH `script_shots` + revert-on-failure — this node never
+ * owns the row, `script_shots` does).
+ */
 export interface ShotNodeData {
   title: string;
   /** Snowflake resource IDs (strings to avoid bigint precision loss). */
   reference_resource_ids: string[];
   notes: string;
+  /** Bound `script_shots.id` (Snowflake string); null = unbound hand-placed
+   *  draft node (legacy compat — pre-binding canvases). */
+  shot_id: string | null;
+  /** Binding-mirror fields (populate on canvas open reconcile; echoed on
+   *  every editable-field PATCH): */
+  shot_label: string | null; // shot number/code, e.g. "1-2"
+  shot_type: string | null; // 景别
+  camera_angle: string | null;
+  camera_movement: string | null;
+  focal_length: string | null;
+  description: string | null;
+  image_url: string | null; // rendered frame
+  shot_status: string | null;
+  /** In-flight generation task id (Task 3 fix-round-2 — prompt node's
+   *  `gen_tasks` parity, singular since a shot dispatches one task at a
+   *  time): patched immediately once `dispatchGenerations` returns, so a
+   *  reload/nav-away-and-back can re-attach polling by task id instead of
+   *  guessing the outcome from `image_url` alone. Cleared once the task
+   *  settles (success or failure). Pure frontend mirror — the merged
+   *  backend (Task 2) never reads or writes this field; it only reads
+   *  `shot_id` off `nodes_json`, and JSONB round-trips unknown keys
+   *  without validation, so no backend contract change is needed. */
+  gen_task_id: string | null;
+  /** Bound shot's owning scene (layout/focus use). */
+  scene_id: string | null;
+  /** Task 4 — set by `reconcileShotNodes` when this node's `shot_id` no
+   *  longer resolves to a `script_shots` row (deleted from the storyboard
+   *  list elsewhere). Renders a grey "removed" state; the editor stays
+   *  read-only (PATCHing a gone shot would 404) until the orchestration
+   *  layer drops the node from `nodes_json` on the next autosave — see
+   *  `canvasCoreStore.ts`'s `doSave` stale-filter. Absent/undefined on
+   *  every other node (including unbound drafts, which reconcile never
+   *  touches) — only ever `true`, never explicitly `false`. */
+  stale?: boolean;
 }
 
 export interface PromptNodeData {
@@ -218,7 +262,15 @@ export interface LoopNodeData {
   image_batch_size?: number;
 }
 
-export interface SmartNode<T> extends Record<string, unknown> {
+// `T` defaults to `unknown` (Task 4 shotSync's `reconcileShotNodes` takes
+// the canvas's opaque existing-node list as bare `SmartNode[]` — element
+// data type unknown until narrowed by `type`/`shot_id`) rather than
+// `Record<string, unknown>`: a default of `Record<string, unknown>` would
+// make `SmartNode<ShotNodeData>` NOT assignable to bare `SmartNode[]`
+// (`ShotNodeData` has no index signature), defeating the whole point of a
+// default — every concrete `SmartNode<X>` is trivially assignable to
+// `SmartNode<unknown>` instead.
+export interface SmartNode<T = unknown> extends Record<string, unknown> {
   id: string;
   type: SmartNodeType;
   position: { x: number; y: number };
@@ -325,7 +377,9 @@ export function canConnectSmart(
 
 /** Default min-width per node type. Used by the renderer + factory. */
 export const SMART_NODE_DEFAULT_WIDTH: Record<SmartNodeType, number> = {
-  shot: 240,
+  // Bumped from 240 (Task 3): the bound render packs 4 chips + a
+  // description textarea + a 16:9 frame slot — 240 crowded the chip row.
+  shot: 280,
   media: 240,
   llm: 300,
   prompt: 280,

@@ -21,9 +21,16 @@ import { CanvasComposer } from '../smart/CanvasComposer';
 import { buildCharacterTemplate } from '../smart/characterTemplate';
 import { buildEntityTemplate } from '../smart/entityTemplates';
 import { resumePendingGenerations } from '../smart/genResume';
+import { computeShotLabel, reconcileShotNodes } from '../smart/shotSync';
+import { onPromoteShot } from '../smart/promoteShotBus';
+import { PromoteShotDialog } from '../smart/PromoteShotDialog';
+import type { ShotNodeData, SmartNode } from '../smart/types';
 import { isSmartFamily } from '../types';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { useCanvasRealtime } from '../realtime/useCanvasRealtime';
+import { fetchScriptProjects } from '../../../services/scriptService';
+import { listScenes, listShots, createShot } from '../../../editor/sceneService';
+import type { SceneDoc } from '../../../editor/types';
 import { CanvasConflictDialog } from './CanvasConflictDialog';
 import { CanvasSurface } from './CanvasSurface';
 import { TopNodeBar } from './TopNodeBar';
@@ -40,6 +47,8 @@ export default function CanvasPage() {
   const saveError = useCanvasCoreStore((s) => s.saveError);
   const kind = useCanvasCoreStore((s) => s.kind);
   const name = useCanvasCoreStore((s) => s.name);
+  const projectId = useCanvasCoreStore((s) => s.projectId);
+  const episodeId = useCanvasCoreStore((s) => s.episodeId);
   const nodeCount = useCanvasCoreStore((s) => s.nodes.length);
   const loadCanvas = useCanvasCoreStore((s) => s.loadCanvas);
   const flushSave = useCanvasCoreStore((s) => s.flushSave);
@@ -84,6 +93,173 @@ export default function CanvasPage() {
       void flushSave().finally(reset);
     };
   }, [canvasId, loadCanvas, flushSave, reset]);
+
+  // Shot-node reconcile (shot-nodes-on-canvas epic Task 4 — shotSync.ts):
+  // for a storyboard canvas (kind==='storyboard', mig 421), sync the shot
+  // nodes against the episode's current script_shots BEFORE the resume
+  // effect below runs. Ordering rationale: reconcile is what determines the
+  // FINAL node set (adds missing shots, flags deleted ones stale) — resume
+  // only re-attaches polling for nodes that ALREADY carry a `gen_task_id`,
+  // which reconcile never sets (new nodes always start with
+  // `gen_task_id: null`) and never clears on an in-flight node (the
+  // in-flight guard in `reconcileShotNodes`). So there's no real ordering
+  // HAZARD either way, but declaring reconcile first keeps "the node set is
+  // settled, then generation state is resumed" the readable story, matching
+  // how the two concerns are already separated in `ShotNodeView.tsx`.
+  //
+  // Script resolution is READ-ONLY (mirrors `ProjectWorkspace.tsx`'s
+  // `findExistingScript` — filters `fetchScriptProjects(projectId)` by
+  // `episode_id` client-side, same pagination-page-1 limitation as that
+  // established precedent) — a storyboard canvas opened before the user
+  // ever clicked "Start Storyboard" has no script yet, and reconcile must
+  // NOT silently provision one just because the canvas mounted.
+  //
+  // Fetches live in this page component rather than in shotSync.ts itself:
+  // shotSync's `reconcileShotNodes` is a pure function (no store/service
+  // imports, exhaustively unit-tested on its own) — the store has no
+  // natural place for an async multi-request orchestration either
+  // (`loadCanvas` is the row fetch, not a place to bolt on a second
+  // subsystem's fetch fan-out), so the impure "fetch scenes/shots, apply
+  // the diff" glue lives here instead, in the one place that already owns
+  // canvas mount lifecycle.
+  const promoteScenesRef = useRef<SceneDoc[]>([]);
+  const [promoteScenes, setPromoteScenes] = useState<SceneDoc[]>([]);
+
+  useEffect(() => {
+    if (loadStatus !== 'ready' || kind !== 'storyboard') return;
+    if (!projectId || !episodeId || !canvasId) return;
+    let cancelled = false;
+    const sameCanvas = () => useCanvasCoreStore.getState().canvasId === canvasId;
+
+    void (async () => {
+      try {
+        const { data: scriptSummaries } = await fetchScriptProjects(projectId);
+        const scriptId = scriptSummaries
+          .filter((s) => String(s.episode_id ?? '') === String(episodeId))
+          .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())[0]
+          ?.id;
+        if (!scriptId || cancelled || !sameCanvas()) return;
+
+        const sceneDocs = await listScenes(scriptId);
+        if (cancelled || !sameCanvas()) return;
+        promoteScenesRef.current = sceneDocs;
+        setPromoteScenes(sceneDocs);
+        const scenes = sceneDocs.map((s, idx) => ({ id: s.id, sceneNo: idx + 1 }));
+
+        const shotLists = await Promise.all(sceneDocs.map((s) => listShots(s.id)));
+        if (cancelled || !sameCanvas()) return;
+        const shots = shotLists.flat();
+
+        const store = useCanvasCoreStore.getState();
+        // `nodes_json` is opaque `CanvasNode[]` (Record<string, unknown>,
+        // JSONB pass-through) at the store boundary — every real node DOES
+        // carry id/type/position/data at runtime (the surface renders off
+        // exactly that shape), so this narrows the same way every node
+        // renderer's `NodeProps` already assumes.
+        // `Shot` (sceneService.ts) has every field `reconcileShotNodes` reads
+        // by name (id/scene_id/shot_type/…) but, being a named interface
+        // rather than an index signature, isn't structurally assignable to
+        // the brief's verbatim `[k: string]: unknown` shot-row shape without
+        // this bridge — same class of cast as `SmartNode[]` above.
+        const result = reconcileShotNodes(
+          store.nodes as SmartNode[],
+          scenes,
+          shots as unknown as Array<{ id: string; scene_id: string; [k: string]: unknown }>,
+        );
+        if (cancelled || !sameCanvas()) return;
+        if (result.nodesToAdd.length > 0) {
+          store.appendElementsNoHistory(result.nodesToAdd, []);
+        }
+        for (const p of result.nodesToPatch) {
+          store.patchNode(p.id, { data: p.data });
+        }
+        for (const staleId of result.nodesToMarkStale) {
+          store.patchNode(staleId, { data: { stale: true } });
+        }
+      } catch (err) {
+        console.error('[CanvasPage] shot reconcile failed:', err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadStatus, kind, canvasId, projectId, episodeId]);
+
+  // "Promote to Shot" (Task 4 — promoteShotBus's subscriber): only mounted
+  // for a storyboard canvas, where a scene list is resolvable at all. Every
+  // other canvas kind leaves the bus with no listener, which
+  // `requestPromoteShot` already documents as a safe no-op.
+  const [promoteNodeId, setPromoteNodeId] = useState<string | null>(null);
+  const [promoteSubmitting, setPromoteSubmitting] = useState(false);
+  const [promoteError, setPromoteError] = useState<string | null>(null);
+  // Structural re-entrancy guard (review fix round 1): `promoteSubmitting`
+  // already disables the dialog's scene buttons, but that's a STATE flag —
+  // two clicks landing in the same tick (before React commits the re-render
+  // that flips `disabled`) would both pass the `!submitting` check and both
+  // call `createShot`. A synchronous ref can't have that race; checked and
+  // set before the first `await`, same tick as the click handler runs.
+  const promoteInFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (kind !== 'storyboard') return;
+    return onPromoteShot((nodeId) => {
+      setPromoteError(null);
+      setPromoteNodeId(nodeId);
+    });
+  }, [kind]);
+
+  const handlePromoteCancel = useCallback(() => {
+    setPromoteNodeId(null);
+    setPromoteError(null);
+  }, []);
+
+  const handlePromotePickScene = useCallback(
+    async (sceneId: string) => {
+      if (!promoteNodeId || promoteInFlightRef.current) return;
+      promoteInFlightRef.current = true;
+      setPromoteSubmitting(true);
+      setPromoteError(null);
+      try {
+        const created = await createShot(sceneId, {});
+        // createShot's response has no ready-made index/label — recompute
+        // the "1A" code against the scene's shot list AS IT NOW STANDS
+        // (the new row is in it), the same convention `reconcileShotNodes`
+        // uses for every other shot.
+        const sceneShots = await listShots(sceneId);
+        const idxInScene = Math.max(
+          0,
+          sceneShots.findIndex((s) => s.id === created.id),
+        );
+        const sceneIdx = Math.max(
+          0,
+          promoteScenesRef.current.findIndex((s) => s.id === sceneId),
+        );
+        const patch: Partial<ShotNodeData> = {
+          shot_id: created.id,
+          scene_id: sceneId,
+          shot_label: computeShotLabel(sceneIdx + 1, idxInScene),
+          shot_type: created.shot_type,
+          camera_angle: created.camera_angle,
+          camera_movement: created.camera_movement,
+          focal_length: created.focal_length,
+          description: created.description,
+          image_url: created.image_url,
+          shot_status: created.status,
+          gen_task_id: null,
+        };
+        useCanvasCoreStore.getState().patchNode(promoteNodeId, { data: patch });
+        setPromoteNodeId(null);
+      } catch (err) {
+        console.error('[CanvasPage] promote to shot failed:', err);
+        setPromoteError(t('canvas.shotNode.promoteDialog.failed'));
+      } finally {
+        promoteInFlightRef.current = false;
+        setPromoteSubmitting(false);
+      }
+    },
+    [promoteNodeId, t],
+  );
 
   // Broken-connection resume (P1-13 — Infinite's resumeSmartPendingTasks):
   // once the document is in, re-attach polling for any generation batch
@@ -201,6 +377,16 @@ export default function CanvasPage() {
         onClose={() => setPaletteOpen(false)}
       />
       <ShortcutHelpPanel open={helpOpen} onClose={() => setHelpOpen(false)} />
+      {kind === 'storyboard' && (
+        <PromoteShotDialog
+          open={promoteNodeId !== null}
+          scenes={promoteScenes}
+          submitting={promoteSubmitting}
+          error={promoteError}
+          onCancel={handlePromoteCancel}
+          onPickScene={handlePromotePickScene}
+        />
+      )}
     </div>
   );
 }

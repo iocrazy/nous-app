@@ -75,6 +75,23 @@ export function stripRfInternals(node: CanvasNode): CanvasNode {
   return clone as CanvasNode;
 }
 
+/**
+ * A node reconcile flagged as stale (Task 4 shotSync — its bound `shot_id`
+ * no longer resolves to a `script_shots` row). Generic on purpose: the store
+ * doesn't know about `ShotNodeData`, it just excludes any node whose `data`
+ * carries this one marker key from what `doSave` persists — "在下一次用户
+ * 保存时由编排层过滤删除" from the brief, read literally as filtering the
+ * PAYLOAD (review fix round 1: an earlier version also cleared these nodes
+ * out of local `state.nodes` inside `doSave`, which bypassed undo history
+ * and made an unrelated edit's autosave tick silently delete a stale card's
+ * local render — see `doSave`'s comment). Harmless for every other node
+ * type since nothing else ever sets this key.
+ */
+function isStaleNode(node: CanvasNode): boolean {
+  const data = (node as Record<string, unknown>).data;
+  return !!data && typeof data === 'object' && (data as Record<string, unknown>).stale === true;
+}
+
 export type CanvasLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 export type CanvasSaveStatus = 'idle' | 'saving' | 'error';
 
@@ -95,6 +112,14 @@ interface CanvasState {
   kind: CanvasKind | null;
   /** Display name from the server row — read-only chrome (back-pill area). */
   name: string | null;
+  /** Owning project (row's `project_id`) — read-only, NULL until load
+   *  resolves. Task 4 orchestration (shot-node reconcile) resolves the
+   *  storyboard canvas's script through this. */
+  projectId: string | null;
+  /** Owning episode for a `kind==='storyboard'` row (Task 1); NULL for
+   *  every other kind, and NULL until load resolves. Gates Task 4's
+   *  reconcile orchestration in `CanvasPage.tsx`. */
+  episodeId: string | null;
   loadStatus: CanvasLoadStatus;
   loadError: string | null;
 
@@ -263,6 +288,8 @@ export function createCanvasCoreStore(
         canvasId: row.id,
         kind: row.kind,
         name: row.name ?? null,
+        projectId: row.project_id ?? null,
+        episodeId: row.episode_id ?? null,
         viewport: row.viewport_json ?? IDENTITY_VIEWPORT,
         // Sanitize on load: interaction paths (alignment snap, group
         // membership) historically persisted RF-internal size snapshots
@@ -344,6 +371,24 @@ export function createCanvasCoreStore(
       if (state.persistedRevision >= state.revision) return; // nothing new
       if (state.conflict) return; // user must resolve first
 
+      // Drop stale shot nodes (Task 4 shotSync) from the PERSISTED payload
+      // only — brief literal: "在下一次用户保存时由编排层过滤删除" is about
+      // what gets written, not an instant local-state edit. A review fix
+      // (round 1) reverted an earlier version of this that also cleared
+      // `state.nodes` here: that bypassed undo history (patchNode/setNodes
+      // both go through the store's own history discipline; this
+      // filter-inside-doSave path did not) and made an unrelated edit
+      // elsewhere on the canvas silently delete a stale node's local render
+      // the moment the 500ms autosave tick fired — surprising side effect
+      // for an action the user didn't take. The grey stale card now simply
+      // stays on screen (still filtered out of every future save payload,
+      // so it never round-trips back in) until the canvas is reloaded —
+      // storyboard canvases have no composer/connection surface (Task 4
+      // deliberately didn't add `'storyboard'` to `isSmartFamily`), so
+      // there's no dangling-edge cleanup concern from leaving a stale node
+      // visually present a little longer.
+      const liveNodes = state.nodes.filter((n) => !isStaleNode(n));
+
       const snapshot = {
         revision: state.revision,
         baseUpdatedAt: state.baseUpdatedAt,
@@ -354,7 +399,7 @@ export function createCanvasCoreStore(
           // state and `measured`/`width`/`height` are layout output; none
           // belong in the persisted document (they also spuriously diverge
           // two editors' rows and trigger false realtime conflicts).
-          nodes_json: state.nodes.map(stripRfInternals),
+          nodes_json: liveNodes.map(stripRfInternals),
           connections_json: state.connections,
           node_ops_json: state.nodeOps,
           connection_ops_json: state.connectionOps,
@@ -400,6 +445,8 @@ export function createCanvasCoreStore(
       canvasId: null,
       kind: null,
       name: null,
+      projectId: null,
+      episodeId: null,
       loadStatus: 'idle',
       loadError: null,
       viewport: IDENTITY_VIEWPORT,
@@ -427,6 +474,8 @@ export function createCanvasCoreStore(
           canvasId: null,
           kind: null,
           name: null,
+          projectId: null,
+          episodeId: null,
           loadStatus: 'idle',
           loadError: null,
           viewport: IDENTITY_VIEWPORT,

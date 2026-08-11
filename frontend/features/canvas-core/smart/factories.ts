@@ -74,6 +74,20 @@ export function createShotNode(
       title: data.title ?? 'New shot',
       reference_resource_ids: data.reference_resource_ids ?? [],
       notes: data.notes ?? '',
+      // Hand-placed cards are unbound drafts (Task 3): binding a script_shots
+      // row happens through the storyboard "open on canvas" flow / promote,
+      // never through this composer factory.
+      shot_id: data.shot_id ?? null,
+      shot_label: data.shot_label ?? null,
+      shot_type: data.shot_type ?? null,
+      camera_angle: data.camera_angle ?? null,
+      camera_movement: data.camera_movement ?? null,
+      focal_length: data.focal_length ?? null,
+      description: data.description ?? null,
+      image_url: data.image_url ?? null,
+      shot_status: data.shot_status ?? null,
+      gen_task_id: data.gen_task_id ?? null,
+      scene_id: data.scene_id ?? null,
     },
   };
 }

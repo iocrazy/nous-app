@@ -2300,6 +2300,24 @@
       "title": "分组",
       "dropHint": "拖入图片自动收进分组"
     },
+    "shotNode": {
+      "menu": "镜头菜单",
+      "promote": "转正为镜头",
+      "unset": "未设置",
+      "frameEmpty": "尚无画面",
+      "generating": "生成中…",
+      "patchFailed": "保存失败，已回退更改。",
+      "generateFailed": "生成失败。",
+      "deleteInList": "在分镜列表中删除",
+      "stale": "该镜头已从分镜列表中删除。",
+      "promoteDialog": {
+        "title": "转正为镜头",
+        "hint": "选择要创建此镜头的场次。",
+        "noScenes": "该集尚无场次。",
+        "cancel": "取消",
+        "failed": "创建镜头失败。"
+      }
+    },
     "arrangeSelected": "整理选中",
     "loopModeSerial": "循环",
     "loopModeParallel": "并发",
