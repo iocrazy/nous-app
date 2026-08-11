@@ -97,7 +97,14 @@ profile_default/
 ipython_config.py
 
 # pyenv
+# ⚠️ 项目自己的 .python-version 是**工具链版本的单一真相**，必须进仓库 ——
+# ci.yml 的三个 setup-python 全靠 python-version-file 读它。根目录那份历史上
+# 是 `git add -f` 硬塞进来的，所以这条规则早就名不副实。browser/ 那份（3.12，
+# 由上游 playwright 镜像决定，不是我们能选的）不该再踩一次同样的坑，显式
+# 白名单。开发者本地临时的 pyenv 文件（子目录里的）仍然被忽略。
 .python-version
+!/.python-version
+!/browser/.python-version
 
 # pipenv
 Pipfile.lock
