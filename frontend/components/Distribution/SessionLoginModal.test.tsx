@@ -157,8 +157,14 @@ describe('SessionLoginModal', () => {
     await waitFor(() => expect(updateHandler).toBeTruthy());
     await pushLogin({ status: 'sms_required', message: 'Code sent to 138****0000' });
     expect(screen.getByText(/SMS verification required/i)).toBeInTheDocument();
-    // The server-authored detail is shown verbatim, not swallowed.
-    expect(screen.getByText('Code sent to 138****0000')).toBeInTheDocument();
+    // The detail line is present and translated, not the server's own string.
+    // `metadata.login.message` on this status is never platform copy — it is
+    // `LoginJudgement.reason`, machine-authored English from our own browser
+    // service — so this fixture's "Code sent to ..." shape does not occur in
+    // the wild. See the sibling test below for the string that actually ships.
+    expect(screen.getByText('The platform is asking for a verification code.'))
+      .toBeInTheDocument();
+    expect(screen.queryByText('Code sent to 138****0000')).toBeNull();
 
     const input = screen.getByLabelText(/Verification code/i);
     fireEvent.change(input, { target: { value: '123456' } });
@@ -166,6 +172,35 @@ describe('SessionLoginModal', () => {
       fireEvent.click(screen.getByRole('button', { name: /^Submit$/i }));
     });
     expect(submitSmsCode).toHaveBeenCalledWith('task-1', '123456');
+  });
+
+  // D4. The exact string a user photographed on the SMS screen, sitting in the
+  // middle of an otherwise Chinese UI. Its source is ours, not the platform's:
+  // `browser/app/platforms/douyin.py` → `LoginJudgement.reason` →
+  // `StatusSnapshot.message` → backend `login_metadata` → `metadata.login.message`.
+  it('does not print the browser service\'s English at the user', async () => {
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({
+      status: 'sms_required',
+      message: 'the platform is asking for a verification code',
+    });
+
+    expect(screen.queryByText('the platform is asking for a verification code')).toBeNull();
+    // Replaced by copy that goes through i18n, so a zh user reads Chinese.
+    expect(screen.getByText('The platform is asking for a verification code.'))
+      .toBeInTheDocument();
+  });
+
+  it('still shows the server line for states we have no copy for', async () => {
+    // The mapping is per typed status, and the fallback is what keeps every
+    // un-mapped state as informative as it is today — swapping the leak for a
+    // blanket "hide all server text" would lose the refresh reason here.
+    mount();
+    await waitFor(() => expect(updateHandler).toBeTruthy());
+    await pushLogin({ status: 'qrcode_expired', message: 'QR code expired: 二维码已失效' });
+
+    expect(screen.getByText('QR code expired: 二维码已失效')).toBeInTheDocument();
   });
 
   it('will not send a code the server would 422 on', async () => {
