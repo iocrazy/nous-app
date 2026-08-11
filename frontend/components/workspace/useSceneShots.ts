@@ -80,14 +80,35 @@ export function useSceneShots(scriptId: string): UseSceneShots {
   // (scriptId changed mid-flight, or two refresh triggers overlap) must not
   // let its stale result win. Mirrors the `cancelled`/`sameCanvas()` pattern
   // this epic already uses elsewhere (CanvasPage.tsx's reconcile effect).
+  // `epochRef` alone already discards a superseded call (any NEW `fetchAll`
+  // invocation bumps it past whatever's in flight) — it needs no reset of
+  // its own, it just keeps counting up for the component's whole life.
+  // `mountedRef` exists for the DIFFERENT case epoch can't cover: a genuine
+  // final unmount with no new fetch ever started to bump epoch past the
+  // in-flight one.
   const epochRef = useRef(0);
+  // Task 6 review 修复轮2 (2026-08-11): a `useRef(true)` initializer plus a
+  // CLEANUP-ONLY effect (`useEffect(() => () => { mountedRef.current =
+  // false }, [])`) is broken under React 18 StrictMode's dev-only double-
+  // invoke (`index.tsx`'s app-wide `<React.StrictMode>`) — mount → cleanup
+  // (flips false) → remount runs the effect body again, but an EMPTY body
+  // never flips it back to true, so it stays false FOREVER after the very
+  // first StrictMode cycle. Every subsequent `fetchAll` then bails on its
+  // own `!mountedRef.current` check before ever reaching `setLoading(false)`
+  // — view one/three spin forever in `npm run dev` (confirmed by RTL under
+  // `<React.StrictMode>`; production builds don't double-invoke, so this
+  // never showed up in a build, only in the actual dev-server manual-test
+  // workflow). Fix: the effect BODY resets it to true too — mount sets
+  // true, cleanup sets false, StrictMode's forced extra mount/cleanup/mount
+  // cycle nets out correctly at true, same as every other ref that toggles
+  // across a mount effect in this codebase.
   const mountedRef = useRef(true);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
       mountedRef.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
 
   // Shared fetch-all body — extracted so both the mount effect AND the
   // onStoryboardRefresh subscription below run the exact same logic rather
