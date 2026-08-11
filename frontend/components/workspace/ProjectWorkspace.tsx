@@ -811,13 +811,22 @@ export function ProjectWorkspace({
   }, []);
 
   // Workflow-strip node click (B5 T-B5.3) — the strip is now the sole node
-  // entry point (the sidebar's Stages list was removed in T-B5.6). Only the
-  // CURRENT node routes by creative `surface` (nodeSurface.ts::resolveSurface):
-  // script / storyboard open the current episode's studio on that view; renders
-  // opens the Renders file filter. Every other node — including a
-  // deliverable-only one (surface === null) — falls back to its own dedicated
-  // Stage Board (Task 7, see guard below: a non-current node's click must not
-  // flash open the CURRENT episode's surface panel with unrelated content).
+  // entry point (the sidebar's Stages list was removed in T-B5.6). Every node
+  // routes purely by its own creative `surface` (nodeSurface.ts::resolveSurface):
+  // script / storyboard open the episode's studio on that view; renders opens
+  // the Renders file filter; a deliverable-only node (surface === null) falls
+  // back to its own dedicated Stage Board.
+  //
+  // 拍板（Bug A fix, 2026-08-11）：曾经有一道"非当前节点一律进 Stage Board"的闸
+  // （Task 7 小尾巴 A, 2026-08-09）挡在这个 switch 前面 —— 出发点是怕
+  // `handleOpenWorkView` 用 currentEpisode 打开跟点击节点不相关的内容。但
+  // `renderNodeCard`（下方）只在 `expandedEpisodeId === currentEpisodeId` 时渲染，
+  // 而 `workflow.nodes` 本身就是按 `currentEpisodeId` 取的（`useProjectWorkflow`）——
+  // 卡片上出现的节点永远属于 currentEpisode，不存在"打开了别的集"的风险。那道闸
+  // 实际效果是让入口按钮的文案（画一律看 `resolveSurface`，如"打开剧本"）跟点击
+  // 结果对不上：非游标节点点"打开剧本"却落到 Stage Board。产品决定：按钮做它说的
+  // 事——删闸，一律按 surface 路由，游标与否不影响。Advance/Complete-stage 权限仍
+  // 由卡片自己的 `isCursorNode` + `canWrite` 单独把关，不受此改动影响。
   //
   // Task 4 (IA redesign accordion rewrite) unwired this from `WorkspaceOverview`
   // directly — clicking a strip node now only writes URL `node=` (see
@@ -827,12 +836,6 @@ export function ProjectWorkspace({
   // consumer of this exact routing logic.
   const handleSelectNode = useCallback(
     (node: ProjectStageNode) => {
-      // 拍板（undo 立项附带, Task 7 小尾巴 A, 2026-08-09）：非当前节点点击不再闪当前集的
-      // 作业面——surface 路由只对 current 节点成立，其余一律看节点自己的 Stage Board。
-      if (node.id !== workflow?.current_node_id) {
-        handleOpenStage(node.id);
-        return;
-      }
       switch (resolveSurface(node)) {
         case 'script':
           handleOpenWorkView('script');
@@ -847,7 +850,7 @@ export function ProjectWorkspace({
           handleOpenStage(node.id);
       }
     },
-    [handleOpenWorkView, handleOpenRenders, handleOpenStage, workflow?.current_node_id],
+    [handleOpenWorkView, handleOpenRenders, handleOpenStage],
   );
 
   // EpisodeNodeCard's Settings deep-link (Task 5, ambiguity #4) — a plain new
