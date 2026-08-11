@@ -1,5 +1,6 @@
 # CI - Pull Request Quality Checks
-# Runs on every PR to master: frontend build, backend lint, Rust check
+# Runs on every PR to master: frontend build, backend lint, browser tests,
+# Rust check
 
 name: CI
 
@@ -179,6 +180,100 @@ jobs:
           SUPABASE_URL: http://localhost:54321
           SUPABASE_SERVICE_ROLE_KEY: dummy_service_role_key_for_ci
           SUPABASE_ANON_KEY: dummy_anon_key_for_ci
+        run: uv run pytest tests/ -v --tb=short
+
+  browser:
+    name: Browser Sidecar Tests
+    # 同 frontend job：fork 守卫 + self-hosted 的理由见那里的注释
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, gpu]
+    # 在此之前 `browser/` 的 600 个用例**全仓没有任何 workflow 跑过** ——
+    # ci.yml 的 pytest 步骤 working-directory 是 backend、只跑 backend/tests/，
+    # 于是纯 browser 改动的 PR 绿灯不代表那套测试跑过一次。
+    #
+    # ⚠️ 为什么是独立 job 而不是并进 backend job 加一个 step。
+    # 单 runner 串行，多一个 job 确实多一次 checkout —— 但这里必须拆，
+    # 决定性的理由是**解释器版本冲突**：backend 要 3.13，browser 要 3.12
+    # （见下面 python-version-file 那段）。同一个 job 里 setup-python 跑两次，
+    # 谁在 PATH 前面由 step 顺序决定，而 uv / pytest 只认它找到的第一个 ——
+    # 这正是下面 rust job 注释里 pyo3 那个 bug 的同一类问题，不该再造一次。
+    # 次要理由：working-directory 与 uv sync 参数都不同（--extra dev 而非
+    # --dev，理由见 browser/pyproject.toml），以及红灯归因 —— browser 测试挂了
+    # 该显示 "Browser Sidecar Tests" 失败，而不是让人去 "Backend Lint & Deps"
+    # 里翻日志。代价：一次额外 checkout（fetch-depth 默认 1，秒级），相对
+    # uv sync + 30s 测试可以忽略。
+    #
+    # 没加 paths 过滤：本 workflow 四个 job 都是无条件跑（前端 job 在纯后端
+    # PR 上照样 npm ci + build），browser 这套 ~30s，跟着这个约定更简单。
+    # per-job paths 过滤要么引第三方 action，要么让 job 变 skipped —— 一旦这个
+    # check 被设成 required，skipped 与 pending 的区分会变成新的坑。全量跑
+    # 直接保证了"browser/** 改动必触发"这条底线。
+    defaults:
+      run:
+        working-directory: browser
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ⚠️ 与 rust job 同一条纪律：别往 runner 用户的 home 里写东西。
+      # runner 以 heygo 跑在 gpupc 上，那个 home 是活人在用的开发环境。
+      #
+      # 这里不是理论风险：解释器不满足约束时 uv 会**下载一个 managed
+      # python**，默认落点就是 ~/.local/share/uv/python/（本机实测那里已经
+      # 躺着 cpython-3.12 和 3.13 两份）。UV_PYTHON_INSTALL_DIR 把它导到
+      # runner 的 tool cache —— self-hosted 上跨 job 持久（省掉重复下载），
+      # 托管 runner 上是 /opt/hostedtoolcache、每次新建，所以这样写切回
+      # ubuntu-latest 也不会坏。
+      - name: Keep uv-managed interpreters out of the runner user's home
+        run: echo "UV_PYTHON_INSTALL_DIR=$RUNNER_TOOL_CACHE/uv-python" >> "$GITHUB_ENV"
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          # 理由同 backend job 的同名配置（_temp 每个 job 开始时清空，缓存必须
+          # 落在跨 job 存活的 tool_cache）。与 backend job 共用同一个缓存目录
+          # 是有意的 —— uv 缓存按包内容寻址，两个 job 不会串味。
+          enable-cache: true
+          cache-local-path: ${{ runner.tool_cache }}/uv-cache
+
+      - uses: actions/setup-python@v5
+        with:
+          # 读 browser/.python-version（3.12），**不是**仓库根那份 3.13。
+          #
+          # browser 的解释器版本由上游决定：基础镜像
+          # mcr.microsoft.com/playwright/python:v1.52.0-noble 自带 3.12.3。
+          # 而 pyproject.toml 的 requires-python = ">=3.12" 是**下限不是锁** ——
+          # 实测在没有 .python-version 时 `uv run python -V` 解析到 3.13.14，
+          # 也就是说门禁会在一个生产从不使用的解释器上把 600 个用例跑绿，
+          # 与 2026-08-06 "CI 验 3.12 而生产是 3.13" 是同一族问题。
+          # 新增那个文件就是为了消掉它，同时给 uv 和 setup-python 一个共同来源。
+          # 路径相对 workspace 根：defaults.working-directory 只作用于 run 步骤。
+          python-version-file: browser/.python-version
+
+      - name: Install dependencies
+        # --extra dev，不是 --dev：测试依赖挂在 optional-dependencies 下，这是
+        # 刻意的，好让生产镜像那层裸 uv sync 不装 pytest/httpx。理由与代价见
+        # browser/pyproject.toml 第 29-36 行，别"统一"成 dependency-groups。
+        run: uv sync --frozen --extra dev
+
+      # 探针必须可证伪：只 echo 版本号，漂回 3.13 时日志里有证据却没人看，
+      # 等于没探。所以这里直接断言，不符就红。
+      - name: Verify the interpreter is the 3.12 series (matches the prod image)
+        run: |
+          uv run python -VV
+          ACTUAL=$(uv run python -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+          echo "resolved python: $ACTUAL (expected 3.12, per browser/.python-version)"
+          if [ "$ACTUAL" != "3.12" ]; then
+            echo "::error::browser tests resolved to Python $ACTUAL, but the prod image (playwright:v1.52.0-noble) ships 3.12. Green here would prove nothing about prod."
+            exit 1
+          fi
+
+      # 全量跑 browser/tests/。那 10 个 integration 用例自带
+      # skipif(not _chromium_available())，在没有 Chromium 的 runner 上自动
+      # skip —— 所以这里**不装** playwright 浏览器（一次几百 MB，而真浏览器
+      # 行为的守卫在 deploy-gpu 的 smoke 那层，不在 PR 门禁）。
+      # 期望结果：557 passed, 10 skipped。
+      - name: Run tests (pytest)
         run: uv run pytest tests/ -v --tb=short
 
   rust:
