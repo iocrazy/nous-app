@@ -46,6 +46,19 @@ vi.mock('../../../editor/sceneService', () => ({
   createShot: (...args: unknown[]) => createShot(...args),
 }));
 
+// Final review Critical 1 regression coverage: CanvasPage's mount effect
+// must call `resumePendingGenerations` for kind==='storyboard' even though
+// 'storyboard' is deliberately excluded from `isSmartFamily` (T4/T5 —
+// composer/Arrange must not appear on the storyboard canvas). Mocked wholesale
+// rather than spied-through-actual: none of this file's other tests seed a
+// generating prompt/shot node, so the real implementation would no-op for
+// them regardless — this keeps the assertion focused on "was it called at
+// all" without coupling to genResume's own (separately unit-tested) internals.
+const resumePendingGenerations = vi.fn().mockResolvedValue(undefined);
+vi.mock('../smart/genResume', () => ({
+  resumePendingGenerations: (...args: unknown[]) => resumePendingGenerations(...args),
+}));
+
 import CanvasPage, { CanvasView } from './CanvasPage';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import { requestPromoteShot } from '../smart/promoteShotBus';
@@ -105,6 +118,7 @@ beforeEach(() => {
   listScenes.mockReset();
   listShots.mockReset();
   createShot.mockReset();
+  resumePendingGenerations.mockClear();
 });
 
 afterEach(() => {
@@ -313,5 +327,47 @@ describe('CanvasPage — Task 4 shot reconcile wiring', () => {
       await Promise.resolve();
     });
     expect(listScenes).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('CanvasPage — resumePendingGenerations wiring (final review Critical 1)', () => {
+  it('storyboard kind: mounting still triggers the resume sweep despite isSmartFamily excluding it', async () => {
+    fetchScriptProjects.mockResolvedValue({ data: [] });
+    seedReady({ kind: 'storyboard' });
+    render(<CanvasPage />);
+
+    await waitFor(() => {
+      expect(resumePendingGenerations).toHaveBeenCalled();
+    });
+  });
+
+  it('smart kind: still triggers the resume sweep (isSmartFamily path unaffected by the fix)', async () => {
+    seedReady({ kind: 'smart' });
+    render(<CanvasPage />);
+
+    await waitFor(() => {
+      expect(resumePendingGenerations).toHaveBeenCalled();
+    });
+  });
+
+  it('does not fire before loadStatus is ready', async () => {
+    useCanvasCoreStore.getState().reset();
+    useCanvasCoreStore.setState({
+      loadStatus: 'loading',
+      canvasId: 'c1',
+      kind: 'storyboard',
+      projectId: 'proj-1',
+      episodeId: 'ep-1',
+      nodes: [] as never,
+      loadCanvas: vi.fn(),
+      flushSave: vi.fn().mockResolvedValue(undefined),
+      reset: vi.fn(),
+    } as never);
+    render(<CanvasPage />);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(resumePendingGenerations).not.toHaveBeenCalled();
   });
 });

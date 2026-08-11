@@ -37,7 +37,6 @@ const SCROLL_TO_SHOT_MAX_ATTEMPTS = 20;
 const SCROLL_TO_SHOT_POLL_MS = 150;
 
 export interface EpisodeStoryboardPageProps {
-  projectId: string;
   teamId: string;
   episode: EpisodeProgress | null;
   /** 'storyboard' | 'canvas' | 'shotlist', from URL ?view=; defaults to 'storyboard'. */
@@ -127,7 +126,6 @@ type ScriptState =
   | { status: 'provisioning' };
 
 export function EpisodeStoryboardPage({
-  projectId,
   teamId,
   episode,
   initialView,

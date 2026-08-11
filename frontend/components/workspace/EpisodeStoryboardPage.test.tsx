@@ -85,7 +85,7 @@ import { requestOpenShotInList } from '../../features/canvas-core/smart/openShot
 const ep = { episode_id: '324362669885098', title: 'EP1', scene_count: 7,
   shots_done: 0, shots_total: 6, renders_count: 0, status: 'in_progress' } as any;
 const base = {
-  projectId: 'p1', teamId: 't1', episode: ep, initialView: null,
+  teamId: 't1', episode: ep, initialView: null,
   onViewChange: vi.fn(),
   findExistingScript: vi.fn().mockResolvedValue('sc1'),
   provisionScript: vi.fn().mockResolvedValue('sc1'),

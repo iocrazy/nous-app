@@ -254,6 +254,36 @@ describe('canvasCoreStore — debounced save', () => {
     expect((stubs.calls[1].nodes_json?.[0] as { id: string }).id).toBe('n2');
   });
 
+  // Final review Important 3 — the reverse transition (shotSync's
+  // `reconcileShotNodes` now patches `stale: false` back onto a node whose
+  // shot reappeared, e.g. an Undo after an agent deletion). `isStaleNode`
+  // is a pure `data.stale === true` check, so once that patch lands the
+  // node simply falls out of the filter on its own — this pins the
+  // end-to-end contract (patchNode → save payload), not shotSync's own
+  // diff logic (that's `shotSync.test.ts`'s job).
+  it('a revived node (stale patched back to false via patchNode) re-enters the save payload', async () => {
+    const stubs = makeStubs();
+    const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 0 });
+    await useStore.getState().loadCanvas('4242');
+    useStore.getState().setNodes([
+      { id: 'n1', data: { stale: true } },
+      { id: 'n2', data: { title: 'still here' } },
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stubs.calls[0].nodes_json).toHaveLength(1);
+
+    // The shot came back — reconcile's own mutation API is `patchNode`,
+    // same as every other mirror-field write.
+    useStore.getState().patchNode('n1', { data: { stale: false } });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(stubs.calls[1].nodes_json).toHaveLength(2);
+    expect(stubs.calls[1].nodes_json?.map((n) => (n as { id: string }).id).sort()).toEqual([
+      'n1',
+      'n2',
+    ]);
+  });
+
   it('a non-stale save leaves nodes/payload untouched (no spurious filtering)', async () => {
     const stubs = makeStubs();
     const useStore = createCanvasCoreStore({ ...stubs, debounceMs: 0 });

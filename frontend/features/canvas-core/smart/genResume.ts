@@ -36,6 +36,7 @@ import {
   getGeneration,
   pollGeneration,
 } from '../services/canvasGenerationService';
+import { ApiError } from '../../../services/apiClient';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import {
   appendGenerationResults,
@@ -260,6 +261,11 @@ async function resumePromptTasks(
  * proof the task failed): the latter leaves `shot_status`/`gen_task_id`
  * untouched so a future reconcile pass retries from scratch, instead of
  * burning a real success/failure verdict on a transient blip.
+ *
+ * final review Important 2: a THROWN 404 specifically is carved out of that
+ * "leave alone" rule — it means the task_tracking row was pruned (7-day
+ * cleanup), which never resolves on retry, so treating it as transient would
+ * retry-loop on every mount forever. See the catch block below.
  */
 async function resumeShotTask(
   shotNodeId: string,
@@ -295,6 +301,29 @@ async function resumeShotTask(
       patch({ shot_status: 'failed', gen_task_id: null });
     }
   } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      // The task_tracking row itself is GONE — not a broken poll chain, a
+      // terminal-but-unknown fact. `scheduled_cleanup.py` prunes terminal
+      // task_tracking rows after 7 days (see its own doc comment), so an
+      // old enough `gen_task_id` 404s forever: leaving state alone (the
+      // transient-error branch below) would retry-loop on every mount
+      // without end, and the shotSync in-flight guard (`isInFlight` —
+      // shot_status==='generating' && gen_task_id set) would keep
+      // permanently blocking the image_url/shot_status mirror refresh from
+      // `reconcileShotNodes`, even after the backend finished the
+      // generation and backfilled `script_shots` (final review Important
+      // 2). Resolve from whatever is already locally known instead of
+      // guessing: a frame already landed means done, otherwise this shot
+      // never got a confirmable result and drops to failed so Generate
+      // re-enables.
+      const node = useCanvasCoreStore
+        .getState()
+        .nodes.find((n) => asObj(n).id === shotNodeId);
+      const image_url =
+        ((asObj(node).data ?? {}) as { image_url?: string | null }).image_url ?? null;
+      patch({ gen_task_id: null, shot_status: image_url ? 'done' : 'failed' });
+      return;
+    }
     // The poll CHAIN broke (a getGeneration network error, or the overall
     // 30-minute timeout) — this is not the same fact as the task failing;
     // it may still be queued/running server-side. ShotNodeData has no

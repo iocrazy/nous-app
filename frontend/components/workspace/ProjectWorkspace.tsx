@@ -1101,7 +1101,6 @@ export function ProjectWorkspace({
           >
             <EpisodeStoryboardPage
               active={activeModule === 'storyboard'}
-              projectId={project.id}
               teamId={teamId ?? ''}
               episode={currentEpisode}
               initialView={readWorkspaceParams(searchParams).view}

@@ -21,6 +21,7 @@ vi.mock('../services/canvasGenerationService', async () => {
   };
 });
 
+import { ApiError } from '../../../services/apiClient';
 import { useCanvasCoreStore } from '../store/canvasCoreStore';
 import {
   __clearActiveShotPolls,
@@ -319,6 +320,69 @@ describe('resumePendingGenerations — stranded shot reconcile (Task 3, fix-roun
       expect(shotData().shot_status).toBe('generating');
       expect(shotData().gen_task_id).toBe('task-9');
       expect(shotData().image_url).toBeNull();
+    });
+  });
+
+  describe('404 unknown-terminal handling (final review Important 2)', () => {
+    // task_tracking rows are pruned 7 days after reaching a terminal phase
+    // (scheduled_cleanup.py) — a `gen_task_id` that survived that long 404s
+    // on every re-poll forever. This must NOT fall into the "poll chain
+    // broke, leave state alone" branch (that would retry-loop on every
+    // mount and permanently block shotSync's in-flight guard from ever
+    // refreshing image_url/shot_status from the script_shots mirror again).
+
+    it('404 with no local image_url yet: clears the task id and drops to failed', async () => {
+      seed([shotNode({ shot_status: 'generating', gen_task_id: 'task-gone', image_url: null })]);
+      pollGeneration.mockRejectedValue(new ApiError('not found', 404));
+
+      await resumePendingGenerations();
+
+      expect(shotData().shot_status).toBe('failed');
+      expect(shotData().gen_task_id).toBeNull();
+    });
+
+    it('404 but a frame already landed locally: resolves to done instead of lying with failed', async () => {
+      seed([
+        shotNode({
+          shot_status: 'generating',
+          gen_task_id: 'task-gone',
+          image_url: '/gm/backfilled/cover',
+        }),
+      ]);
+      pollGeneration.mockRejectedValue(new ApiError('not found', 404));
+
+      await resumePendingGenerations();
+
+      expect(shotData().shot_status).toBe('done');
+      expect(shotData().gen_task_id).toBeNull();
+      expect(shotData().image_url).toBe('/gm/backfilled/cover');
+    });
+
+    it('a later reconcile pass can pick up a fresh mirror refresh once the 404 branch cleared the in-flight guard', async () => {
+      seed([shotNode({ shot_status: 'generating', gen_task_id: 'task-gone', image_url: null })]);
+      pollGeneration.mockRejectedValue(new ApiError('not found', 404));
+      await resumePendingGenerations();
+      expect(shotData().shot_status).toBe('failed');
+      expect(shotData().gen_task_id).toBeNull();
+
+      // Simulate reconcileShotNodes's own settled-node mirror patch (Task 4)
+      // now being free to land, since isInFlight() no longer reads
+      // shot_status==='generating' && gen_task_id set for this node.
+      useCanvasCoreStore
+        .getState()
+        .patchNode('shot1', { data: { shot_status: 'done', image_url: '/gm/real/cover' } });
+      expect(shotData().shot_status).toBe('done');
+      expect(shotData().image_url).toBe('/gm/real/cover');
+    });
+
+    it('a non-404 ApiError (e.g. 500) still follows the transient-error "leave alone" branch', async () => {
+      seed([shotNode({ shot_status: 'generating', gen_task_id: 'task-500', image_url: null })]);
+      pollGeneration.mockRejectedValue(new ApiError('server error', 500));
+
+      await resumePendingGenerations();
+
+      expect(shotData().shot_status).toBe('generating');
+      expect(shotData().gen_task_id).toBe('task-500');
     });
   });
 

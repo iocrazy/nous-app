@@ -367,7 +367,16 @@ export function CanvasView({
   // that was in flight when the previous page died, and reset prompts
   // stranded in queued/running with nothing to resume.
   useEffect(() => {
-    if (loadStatus !== 'ready' || !isSmartFamily(kind)) return;
+    // 'storyboard' is deliberately excluded from `isSmartFamily` (T4/T5) so
+    // it never grows composer/Arrange chrome — but it DOES render bound shot
+    // nodes with their own generate/poll lifecycle (Task 3), so the resume
+    // sweep still needs to run there. Checked as an explicit `|| kind ===
+    // 'storyboard'` rather than folding it into `isSmartFamily` itself,
+    // which would wrongly light up the smart-family UI surface too (final
+    // review Critical 1 — this bypass previously made every in-flight shot
+    // generation on the storyboard canvas immortally stuck on
+    // "Generating…" after any refresh/reopen).
+    if (loadStatus !== 'ready' || !(isSmartFamily(kind) || kind === 'storyboard')) return;
     void resumePendingGenerations();
   }, [loadStatus, kind, canvasId]);
 
