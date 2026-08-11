@@ -73,7 +73,7 @@ import {
   SHOT_TYPES,
   CAMERA_ANGLES,
   CAMERA_MOVEMENTS,
-} from '../../../../editor/storyboard/vocab';
+} from '../shotVocab';
 import { dispatchGenerations, pollGeneration } from '../../services/canvasGenerationService';
 import { requestPromoteShot } from '../promoteShotBus';
 import { requestOpenShotInList } from '../openShotInListBus';

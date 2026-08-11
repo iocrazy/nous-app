@@ -20,7 +20,7 @@ describe('railViewStorage', () => {
   });
 
   it('keeps scripts isolated by id', () => {
-    persistRailView('1', 'storyboard');
+    persistRailView('1', 'beats');
     expect(readStoredRailView('2')).toBeNull();
   });
 

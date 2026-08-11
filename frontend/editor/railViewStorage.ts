@@ -1,7 +1,7 @@
 /**
  * Per-script rail-view persistence (Phase B canvas polish follow-up F2).
  *
- * The centre-pane rail view (script sheet / node canvas / storyboard) is a
+ * The centre-pane rail view (script sheet / node canvas / beat sheet) is a
  * per-script viewing preference, not authoritative script data. We keep the
  * choice client-side under `editor.railView.<scriptId>`, mirroring the
  * `editor.format` pattern in formatStorage — no network, no clobber — so a
@@ -10,7 +10,7 @@
  */
 import type { RailView } from './components/RailModules';
 
-const VALID: readonly RailView[] = ['script', 'nodes', 'storyboard', 'beats'];
+const VALID: readonly RailView[] = ['script', 'nodes', 'beats'];
 const storageKey = (scriptId: string): string => `editor.railView.${scriptId}`;
 
 export function readStoredRailView(scriptId: string): RailView | null {

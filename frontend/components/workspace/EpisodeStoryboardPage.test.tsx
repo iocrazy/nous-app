@@ -82,7 +82,7 @@ const ep = { episode_id: '324362669885098', title: 'EP1', scene_count: 7,
   shots_done: 0, shots_total: 6, renders_count: 0, status: 'in_progress' } as any;
 const base = {
   projectId: 'p1', teamId: 't1', episode: ep, initialView: null,
-  onViewChange: vi.fn(), onOpenScene: vi.fn(), onOpenShotInEditor: vi.fn(),
+  onViewChange: vi.fn(),
   findExistingScript: vi.fn().mockResolvedValue('sc1'),
   provisionScript: vi.fn().mockResolvedValue('sc1'),
 };
@@ -91,8 +91,6 @@ beforeEach(() => {
   mockSceneService.listScenes.mockReset().mockResolvedValue([]);
   mockSceneService.listShots.mockReset().mockResolvedValue([]);
   base.onViewChange.mockClear();
-  base.onOpenScene.mockClear();
-  base.onOpenShotInEditor.mockClear();
   base.findExistingScript.mockReset().mockResolvedValue('sc1');
   base.provisionScript.mockReset().mockResolvedValue('sc1');
   addToast.mockClear();
@@ -155,14 +153,12 @@ describe('EpisodeStoryboardPage', () => {
     expect(base.onViewChange).toHaveBeenCalledWith('shotlist');
   });
 
-  // Shot-nodes-on-canvas Task 5 (2026-08-11, supersedes Task 3 修复轮2): a
-  // scene board shot-card click now switches THIS page to its own Canvas
-  // tab and focuses the shot there — it no longer deep-links the editor
-  // (`onOpenShotInEditor` is NOT called; that prop is kept only for Task 6's
-  // eventual retirement, see the component's own doc comment). Unlike the
-  // old behavior, `onViewChange` IS called — this is now a genuine tab
+  // Shot-nodes-on-canvas Task 5 (2026-08-11, supersedes Task 3 修复轮2; the
+  // editor deep-link this superseded was fully retired in Task 6): a scene
+  // board shot-card click switches THIS page to its own Canvas tab and
+  // focuses the shot there. `onViewChange` IS called — this is a genuine tab
   // switch the URL should reflect.
-  it('a shot-card click switches to the Canvas tab, focuses the shot there, and does NOT call onOpenShotInEditor', async () => {
+  it('a shot-card click switches to the Canvas tab and focuses the shot there', async () => {
     mockSceneService.listScenes.mockResolvedValue([
       { id: '200', script_id: 'sc1', chapter_id: null, scene_number: '1',
         heading_int_ext: 'INT', location_text: 'Kitchen', time_of_day: 'DAY',
@@ -179,10 +175,28 @@ describe('EpisodeStoryboardPage', () => {
     const shotCard = await screen.findByTestId('shot-card-9007199254740997');
     fireEvent.click(shotCard);
 
-    expect(base.onOpenShotInEditor).not.toHaveBeenCalled();
     expect(base.onViewChange).toHaveBeenCalledWith('canvas');
     const embed = await screen.findByTestId('storyboard-canvas-embed-mock');
     expect(embed.getAttribute('data-focus-shot-id')).toBe('9007199254740997');
+  });
+
+  // Scene card's Open (view one) — Task 6 retired the old editor deep-link
+  // this used to reach through `onOpenScene`/ProjectWorkspace; it's now
+  // handled entirely locally by this page: scroll the same column into view.
+  it("a scene card's Open button scrolls its own column into view (local to view one)", async () => {
+    mockSceneService.listScenes.mockResolvedValue([
+      { id: '200', script_id: 'sc1', chapter_id: null, scene_number: '1',
+        heading_int_ext: 'INT', location_text: 'Kitchen', time_of_day: 'DAY',
+        content_version: 1, sort_order: 0, elements: [] },
+    ]);
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    render(<EpisodeStoryboardPage {...base} />);
+    await screen.findByTestId('scene-column-200');
+    fireEvent.click(screen.getByTestId('ep-scene-open-200'));
+
+    expect(scrollIntoView).toHaveBeenCalled();
   });
 
   describe('canvas tab (Task 5 — embeds the episode storyboard canvas)', () => {

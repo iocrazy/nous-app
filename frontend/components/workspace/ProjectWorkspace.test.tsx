@@ -13,7 +13,6 @@
 import { useEffect } from 'react';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import * as shotFocusBus from '../agentActivity/shotFocusBus';
 
 import { ProjectWorkspace } from './ProjectWorkspace';
 import { ApiError } from '../../services/apiClient';
@@ -58,7 +57,6 @@ vi.mock('../../editor/components/EditorShell', () => ({
     scriptId: string;
     projectId?: string;
     initialRailView?: string;
-    initialFocusSceneId?: string;
     currentUserId?: string | null;
     currentUserName?: string;
     embedded?: boolean;
@@ -81,7 +79,6 @@ vi.mock('../../editor/components/EditorShell', () => ({
         data-script-id={props.scriptId}
         data-project-id={props.projectId ?? ''}
         data-initial-rail-view={props.initialRailView ?? ''}
-        data-initial-focus-scene-id={props.initialFocusSceneId ?? ''}
         data-embedded={props.embedded ? 'true' : 'false'}
       />
     );
@@ -471,12 +468,11 @@ describe('ProjectWorkspace', () => {
 
   // Review fix round 1 (Important #2): `?shot=` is a one-shot deep-link
   // trigger, consumed by ProjectWorkspace's own URL-shot effect (moved out of
-  // EpisodeStoryboardPage in Task 3 修复轮2 — see `handleOpenShotInEditor`'s
-  // sibling effect). Before THIS fix, `handleStoryboardViewChange` only wrote
-  // `view` — a manually-picked tab left the stale `shot` in the URL, so a
-  // later remount (refresh, or navigating out of and back into the
-  // Storyboard module) re-read it and forcibly re-fired the editor deep-link,
-  // discarding whatever the writer was doing.
+  // EpisodeStoryboardPage in Task 3 修复轮2). Before THIS fix,
+  // `handleStoryboardViewChange` only wrote `view` — a manually-picked tab
+  // left the stale `shot` in the URL, so a later remount (refresh, or
+  // navigating out of and back into the Storyboard module) re-read it and
+  // forcibly re-fired the shot focus, discarding whatever the writer was doing.
   it('clears the sticky ?shot= deep-link trigger from the URL on a manual view-tab switch', async () => {
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
@@ -494,14 +490,10 @@ describe('ProjectWorkspace', () => {
     expect(result.has('shot')).toBe(false);
   });
 
-  // Shot-nodes-on-canvas Task 5 (2026-08-11, supersedes Task 3 修复轮2): a
-  // scene board shot-card click now switches EpisodeStoryboardPage to its
-  // OWN Canvas tab and focuses the shot there — it no longer deep-links the
-  // embedded editor at all. `handleOpenShotInEditor` + shotFocusBus's retry
-  // helper (`requestShotFocusWhenEditorReady`) stay intact as dead-but-
-  // reachable code for the bare `?shot=` URL entry point only (kept for
-  // Task 6's eventual retirement per the epic's orchestrator binding
-  // decision) — see the retry test further below for THAT path.
+  // Shot-nodes-on-canvas Task 5 (2026-08-11, supersedes Task 3 修复轮2; the
+  // embedded-editor destination this superseded was fully retired in Task
+  // 6): a scene board shot-card click switches EpisodeStoryboardPage to its
+  // OWN Canvas tab and focuses the shot there.
   it("a shot-card click switches to this page's own Canvas tab and focuses the shot there (no embedded editor)", async () => {
     mockScriptService.fetchScriptProjects.mockResolvedValue({
       data: [
@@ -555,46 +547,12 @@ describe('ProjectWorkspace', () => {
     expect(screen.queryByTestId('mock-editor-shell')).toBeNull();
   });
 
-  // The OLD editor-deep-link mechanism is still reachable via a BARE `?shot=`
-  // URL (no `view=canvas`) — see ProjectWorkspace's shot-URL effect. "Isn't
-  // listening yet" on the first check (simulates the lazy EditorShell chunk /
-  // script resolution still in flight) — the one-shot retry after a longer
-  // delay must still land the focus request rather than silently giving up
-  // on the first miss. Real timers (~1.3s wall-clock worst case): the retry
-  // helper's delays are only 400ms/900ms and RTL's own `findBy*`/`waitFor`
-  // polling doesn't reliably observe DOM changes gated behind FAKE
-  // `setTimeout`s in this environment (see EpisodeStoryboardPage.test.tsx's
-  // fix-round-1 comment on the same trap).
-  it('retries requestShotFocus once if the editor is not listening on the first check (bare ?shot= URL, no view=canvas)', async () => {
-    const hasListenerSpy = vi
-      .spyOn(shotFocusBus, 'hasShotFocusListener')
-      .mockReturnValueOnce(false) // first check
-      .mockReturnValueOnce(true); // retry check
-    const requestSpy = vi.spyOn(shotFocusBus, 'requestShotFocus');
-    mockSearchParams.current = new URLSearchParams('module=storyboard&shot=9007199254740997');
-    mockScriptService.fetchScriptProjects.mockResolvedValue({
-      data: [
-        { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
-      ],
-      total: 1,
-    });
-    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
-
-    const shell = await screen.findByTestId('mock-editor-shell');
-    expect(shell).toHaveAttribute('data-initial-rail-view', 'storyboard');
-
-    await waitFor(() => expect(requestSpy).toHaveBeenCalledWith('9007199254740997'), {
-      timeout: 3000,
-    });
-    // Both checks actually ran (first miss, retry hit) — not a lucky
-    // single-shot pass.
-    expect(hasListenerSpy).toHaveBeenCalledTimes(2);
-  }, 8000);
-
-  // Entry point ② (shot-nodes-on-canvas Task 5): `?view=canvas&shot=<id>`
-  // means "focus this shot in the storyboard CANVAS", not the editor — the
-  // opposite branch of the bare-`?shot=` test above.
-  it('URL ?view=canvas&shot= focuses the shot in the embedded storyboard canvas, not the editor', async () => {
+  // Entry point ② (shot-nodes-on-canvas Task 5): `?shot=<id>` always focuses
+  // the shot in the storyboard CANVAS now — Task 6 retired the embedded
+  // editor's storyboard rail this used to alternate with depending on
+  // `view=canvas`, so `?view=canvas&shot=` and a bare `?shot=` converge on
+  // the same destination (see the next test).
+  it('URL ?view=canvas&shot= focuses the shot in the embedded storyboard canvas', async () => {
     mockSearchParams.current = new URLSearchParams('module=storyboard&view=canvas&shot=9007199254740997');
     mockScriptService.fetchScriptProjects.mockResolvedValue({
       data: [
@@ -616,8 +574,7 @@ describe('ProjectWorkspace', () => {
     );
     expect(screen.queryByTestId('mock-editor-shell')).toBeNull();
 
-    // True one-shot — the URL's `shot` param is cleared once consumed, same
-    // contract as the bare-`?shot=` editor path.
+    // True one-shot — the URL's `shot` param is cleared once consumed.
     await waitFor(() => expect(setSearchParamsSpy).toHaveBeenCalled());
     const shotClearingCall = setSearchParamsSpy.mock.calls.find((call) => {
       const updater = call[0] as (prev: URLSearchParams) => URLSearchParams;
@@ -627,12 +584,13 @@ describe('ProjectWorkspace', () => {
     expect(shotClearingCall).toBeTruthy();
   });
 
-  // URL `?shot=` deep-link (kept as an entry point per 修复轮2's 拍板: an
-  // agent panel or a shared link may carry `shot=<id>` without a `scene`).
-  // Must land on the SAME destination as the card click above — the embedded
-  // editor's storyboard rail — not this page's own Canvas tab, and must
-  // clear itself from the URL once consumed (true one-shot).
-  it('URL ?shot= deep-links into the embedded editor and clears itself from the URL', async () => {
+  // URL `?shot=` deep-link (an agent panel or a shared link may carry
+  // `shot=<id>` without a `scene` or `view=canvas`). Task 6 (shot-nodes-on-
+  // canvas epic) retired the OLD editor-deep-link destination this used to
+  // reach without `view=canvas` — every bare `?shot=` now lands on the same
+  // canvas focus as the test above, and still clears itself from the URL
+  // once consumed (true one-shot).
+  it('URL ?shot= (no view=canvas) also focuses the shot in the embedded storyboard canvas and clears itself from the URL', async () => {
     mockSearchParams.current = new URLSearchParams('module=storyboard&shot=9007199254740997');
     mockScriptService.fetchScriptProjects.mockResolvedValue({
       data: [
@@ -642,10 +600,13 @@ describe('ProjectWorkspace', () => {
     });
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
-    const shell = await screen.findByTestId('mock-editor-shell');
-    expect(shell).toHaveAttribute('data-initial-rail-view', 'storyboard');
-    // No scene id travels with a URL-only deep link — only the click path has one.
-    expect(shell).toHaveAttribute('data-initial-focus-scene-id', '');
+    await waitFor(() =>
+      expect(screen.getByTestId('mock-storyboard-canvas-embed')).toHaveAttribute(
+        'data-focus-shot-id',
+        '9007199254740997',
+      ),
+    );
+    expect(screen.queryByTestId('mock-editor-shell')).toBeNull();
 
     await waitFor(() => expect(setSearchParamsSpy).toHaveBeenCalled());
     const shotClearingCall = setSearchParamsSpy.mock.calls.find((call) => {
@@ -894,7 +855,13 @@ describe('ProjectWorkspace', () => {
     expect(screen.queryByTestId('mock-editor-shell')).toBeNull();
   });
 
-  it('a scene card\'s Open button deep-links into the embedded editor at the storyboard rail view', async () => {
+  // Task 6 (shot-nodes-on-canvas epic) retired the OLD destination this used
+  // to deep-link into (the embedded editor's storyboard rail, focused via
+  // studioFocusSceneId/initialFocusSceneId — both since deleted). The click
+  // is now handled entirely locally by EpisodeStoryboardPage (see its own
+  // test for the scroll assertion) — from ProjectWorkspace's perspective,
+  // clicking Open must never mount the embedded editor.
+  it('a scene card\'s Open button stays on the Storyboard module (does not mount the embedded editor)', async () => {
     mockScriptService.fetchScriptProjects.mockResolvedValue({
       data: [
         { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
@@ -916,72 +883,18 @@ describe('ProjectWorkspace', () => {
         elements: [],
       },
     ]);
+    // jsdom doesn't implement scrollIntoView at all — EpisodeStoryboardPage's
+    // local handleOpenScene calls it on click.
+    Element.prototype.scrollIntoView = vi.fn();
     render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
 
     await openStoryboardModule();
     await screen.findByTestId('scene-column-200');
     fireEvent.click(screen.getByTestId('ep-scene-open-200'));
 
-    const shell = await screen.findByTestId('mock-editor-shell');
-    expect(shell).toHaveAttribute('data-script-id', 's1');
-    expect(shell).toHaveAttribute('data-initial-rail-view', 'storyboard');
-    expect(shell).toHaveAttribute('data-initial-focus-scene-id', '200');
-  });
-
-  // Fix round 1 regression (2026-08-09 review): a scene-card deep link used to
-  // leave studioFocusSceneId set in ProjectWorkspace state even after
-  // EditorShell unmounted (leaving the 'script' module drops it — studioMode
-  // gates the mount). The NEXT unrelated mount — "Continue Writing" or an
-  // episode row's Open button (handleOpenEpisode), neither of which passes a
-  // sceneId — then re-mounted EditorShell with the STALE initialFocusSceneId
-  // still attached, silently re-scrolling to a scene the writer never asked
-  // for this time. Fixed by threading focusSceneId through openEpisodeScript
-  // (the sole call site that flips activeModule to 'script') so every
-  // mount-causing entry point declares its intent explicitly — undeclared
-  // defaults to clearing it.
-  it('a stale scene-card deep link does not survive into an unrelated later mount (handleOpenEpisode)', async () => {
-    mockScriptService.fetchScriptProjects.mockResolvedValue({
-      data: [
-        { id: 's1', name: 'Draft', status: 'active', created_at: '', updated_at: '2026-07-01T00:00:00Z', episode_id: '1' },
-      ],
-      total: 1,
-    });
-    mockWorkflowService.fetchProjectWorkflow.mockResolvedValue(storyboardWorkflow());
-    mockSceneService.listScenes.mockResolvedValue([
-      {
-        id: '200',
-        script_id: 's1',
-        chapter_id: null,
-        scene_number: null,
-        heading_int_ext: 'INT',
-        location_text: 'Kitchen',
-        time_of_day: 'DAY',
-        content_version: 1,
-        sort_order: 0,
-        elements: [],
-      },
-    ]);
-    render(<ProjectWorkspace project={PROJECT} teamId="t1" onBack={noop} />);
-
-    // Step 1: scene-card Open deep-links into EditorShell with the target scene.
-    await openStoryboardModule();
-    await screen.findByTestId('scene-column-200');
-    fireEvent.click(screen.getByTestId('ep-scene-open-200'));
-    const firstShell = await screen.findByTestId('mock-editor-shell');
-    expect(firstShell).toHaveAttribute('data-initial-focus-scene-id', '200');
-
-    // Step 2: navigate away — EditorShell unmounts (studioMode gates on
-    // activeModule === 'script'), but studioFocusSceneId is bare React state
-    // that outlives the unmount unless something explicitly clears it.
-    fireEvent.click(await screen.findByTestId('ws-module-episodes'));
-    expect(await screen.findByTestId('ws-episodes')).toBeTruthy();
+    // Still the Storyboard module's view one — no editor mount, no module switch.
+    expect(screen.getByTestId('scene-column-200')).toBeInTheDocument();
     expect(screen.queryByTestId('mock-editor-shell')).toBeNull();
-
-    // Step 3: an UNRELATED remount via the episode row's Open button
-    // (handleOpenEpisode) — no sceneId involved at all.
-    fireEvent.click(await screen.findByTestId('ws-episode-open-1'));
-    const secondShell = await screen.findByTestId('mock-editor-shell');
-    expect(secondShell).toHaveAttribute('data-initial-focus-scene-id', '');
   });
 
   it('switches to the Shot List tab and exports CSV via the tabs\' actions-slot button', async () => {

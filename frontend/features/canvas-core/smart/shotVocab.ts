@@ -7,6 +7,11 @@
  *   backend/app/services/storyboard/script/script_ai_service.py
  *     SHOT_TYPES / CAMERA_ANGLES / CAMERA_MOVEMENTS
  * If those tuples change, update these arrays to match.
+ *
+ * Moved here from `editor/storyboard/vocab.ts` (Task 6, 2026-08-11) when the
+ * editor's storyboard rail retired — `ShotNodeView.tsx` (the canvas shot
+ * node's parameter pills) was and is the sole consumer, so this now lives
+ * inside canvas-core with it instead of reaching into `editor/`.
  */
 
 export const SHOT_TYPES = ['WIDE', 'MEDIUM', 'CLOSE', 'ECU', 'OTS', 'POV', 'INSERT'] as const;
