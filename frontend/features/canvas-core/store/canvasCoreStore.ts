@@ -408,6 +408,23 @@ export function createCanvasCoreStore(
       // visually present a little longer.
       const liveNodes = state.nodes.filter((n) => !isStaleNode(n));
 
+      // Mount-generation guard (Task 5 评审修复轮2 — doSave's own post-await
+      // `set()` calls below had no epoch check of their own, a gap flagged
+      // but deliberately deferred in 修复轮1 since it was judged a lesser
+      // "stale metadata" concern — re-review found it's actually a REAL
+      // data-loss path: `revision`/`persistedRevision` both reset to 0 on
+      // every `loadCanvas()`, so small integers collide across mounts
+      // constantly. If an OLD mount's `doSave` resolves AFTER a NEWER mount
+      // has loaded and made its own edit that happens to land on the SAME
+      // `revision` number, the old save's unconditional
+      // `persistedRevision: snapshot.revision` would mark the NEW mount's
+      // real, unsaved edit as "already saved" — the next `doSave`/
+      // `flushSave` hits the `persistedRevision >= revision` early-return
+      // above and the edit is silently never sent. Captured HERE (same
+      // synchronous snapshot point as `revision`/`baseUpdatedAt` below) so
+      // it reflects exactly which mount generation took this snapshot.
+      const epochAtSnapshot = get().mountEpoch;
+
       const snapshot = {
         revision: state.revision,
         baseUpdatedAt: state.baseUpdatedAt,
@@ -436,6 +453,15 @@ export function createCanvasCoreStore(
         return;
       }
 
+      // The save request itself already happened (server has the payload
+      // either way) — this guard only decides whether THIS mount is still
+      // around to accept the local metadata write it implies. A stale
+      // mount's tail finding the world has moved on is not an error: the
+      // server-side write is not lost, only this generation's local
+      // bookkeeping of it is skipped (the newer mount's own next save,
+      // whenever it fires, carries the real current state anyway).
+      if (get().mountEpoch !== epochAtSnapshot) return;
+
       if (result.ok) {
         // Only accept if no further edits raced this save — if more
         // mutations happened, leave revision diff alone, the next save
@@ -451,7 +477,9 @@ export function createCanvasCoreStore(
         if (!accepted) scheduleSave();
       } else {
         // 409: surface the server row, freeze auto-save until the user
-        // resolves.
+        // resolves. Guarded the same way — an OLD mount's conflict must
+        // never paint a false conflict banner over a NEWER mount's clean,
+        // already-successful state.
         set({
           saveStatus: 'error',
           saveError: 'conflict',
