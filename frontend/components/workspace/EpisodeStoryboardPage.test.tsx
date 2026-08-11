@@ -79,7 +79,7 @@ vi.mock('../../utils/relativeTime', () => ({
 
 import { EpisodeStoryboardPage, __clearScriptProbeCache } from './EpisodeStoryboardPage';
 import { __clearSceneShotsCache } from './useSceneShots';
-import { requestShotFocus, requestStoryboardRefresh } from '../agentActivity/shotFocusBus';
+import { hasShotFocusListener, requestShotFocus, requestStoryboardRefresh } from '../agentActivity/shotFocusBus';
 import { requestOpenShotInList } from '../../features/canvas-core/smart/openShotInListBus';
 
 const ep = { episode_id: '324362669885098', title: 'EP1', scene_count: 7,
@@ -507,6 +507,30 @@ describe('EpisodeStoryboardPage', () => {
       const embed = await screen.findByTestId('storyboard-canvas-embed-mock');
       expect(embed.getAttribute('data-focus-shot-id')).toBe('url-shot-visible');
       expect(onFocusShotIdConsumed).toHaveBeenCalledTimes(1);
+    });
+
+    // Review round 1 (Important): `hasShotFocusListener()` used to mean
+    // "a subscriber is mounted" — equivalent to "visible" before Task 7. This
+    // page must keep that promise true by reporting its own `active` state
+    // to the bus (`setShotFocusConsumerActive`), or the FIRST future caller
+    // of `hasShotFocusListener()` would inherit a "looks clickable, silently
+    // does nothing" trap the moment this page is opened-but-hidden.
+    it('reports itself as an active shotFocusBus consumer only while `active`, and resets on unmount', async () => {
+      const { rerender, unmount } = render(<EpisodeStoryboardPage {...base} active />);
+      await screen.findByTestId('episode-view-tabs');
+      expect(hasShotFocusListener()).toBe(true);
+
+      rerender(<EpisodeStoryboardPage {...base} active={false} />);
+      expect(hasShotFocusListener()).toBe(false);
+
+      rerender(<EpisodeStoryboardPage {...base} active />);
+      expect(hasShotFocusListener()).toBe(true);
+
+      unmount();
+      // Neutral default restored — a later, unrelated subscriber (or this
+      // same bus queried with nothing mounted) must not inherit whatever
+      // `active` value this page last held.
+      expect(hasShotFocusListener()).toBe(false); // no subscriber at all now
     });
   });
 });

@@ -20,7 +20,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loading } from '../common/Loading';
 import { useToast } from '../Toast';
-import { onShotFocus, onStoryboardRefresh } from '../agentActivity/shotFocusBus';
+import { onShotFocus, onStoryboardRefresh, setShotFocusConsumerActive } from '../agentActivity/shotFocusBus';
 import { onOpenShotInList } from '../../features/canvas-core/smart/openShotInListBus';
 import { StoryboardCanvasEmbed } from '../../features/canvas-core/ui/StoryboardCanvasEmbed';
 import { EpisodeViewTabs } from './EpisodeViewTabs';
@@ -141,6 +141,21 @@ export function EpisodeStoryboardPage({
   const { t } = useTranslation();
   const { addToast } = useToast();
 
+  // `initialView` only ever seeds this ONE-TIME lazy initializer — this page
+  // owns `view` internally from then on (see the file doc comment: it "calls
+  // back only to persist a writer-driven tab switch", never the reverse).
+  // Review note (Task 7 keep-alive, round 1): before Task 7 this had no
+  // observable staleness — every module switch fully remounted this
+  // component, so `initialView` was freshly re-read (and re-seeded) on every
+  // single entry into Storyboard. Now that the page stays mounted across
+  // switches, a LATER `initialView` prop change (e.g. the URL's `view=`
+  // changing via browser back/forward while this page is hidden, or any
+  // other out-of-band URL edit) is silently ignored after the first mount —
+  // `view` keeps whatever this page's own UI last set it to. Accepted as the
+  // intended trade-off, not a bug: this component deliberately treats `view`
+  // as ITS OWN state once mounted (the URL is a one-way write target, not a
+  // synced prop) — re-syncing on every `initialView` change would fight the
+  // writer's own in-page tab clicks whenever the URL momentarily lags them.
   const [view, setViewState] = useState<string>(
     initialView && STORYBOARD_VIEWS.some((v) => v.key === initialView) ? initialView : DEFAULT_VIEW,
   );
@@ -217,6 +232,20 @@ export function EpisodeStoryboardPage({
     setActiveFocusShotId(shotId);
     handleTabChange('canvas');
   }), [handleTabChange, active]);
+
+  // Keep `shotFocusBus`'s own visibility bookkeeping in sync (Task 7 review
+  // round 1): `hasShotFocusListener()` used to mean "a subscriber is
+  // mounted", which was equivalent to "can act on a focus request" before
+  // this page started staying subscribed while merely hidden. Reporting
+  // `active` here is what keeps that equivalence true for whoever eventually
+  // calls `hasShotFocusListener()` (currently no production caller — see
+  // that function's own doc comment). Resets to the neutral default (`true`)
+  // on unmount so a later, unrelated subscriber never inherits a stale
+  // `false` left behind by this page.
+  useEffect(() => {
+    setShotFocusConsumerActive(active);
+    return () => setShotFocusConsumerActive(true);
+  }, [active]);
 
   // `onStoryboardRefresh` (Task 6 review 修复轮1, 2026-08-11): the OLD
   // editor storyboard rail's `StoryboardView` subscribed to this same
