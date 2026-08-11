@@ -39,18 +39,30 @@ functions**; all driving, retrying and bounding lives in the platform-neutral
 Everything except `read_work_cards` / `list_is_empty` / `verify_publish` is
 pure and unit-testable without a browser.
 
-⚠️ Honesty about the selectors
-==============================
-`CARD_SELECTORS` has **not** been verified against a live creator centre. The
-publish flow's selectors were read off a real account (see the dated notes in
-`douyin.py` and `douyin_publish.py`); these were not, because confirming them
-needs a bound account that already has works on it.
+The selectors, and what a live account said about them
+======================================================
+[实测 2026-08-11] `CARD_SELECTORS` was finally counted against a bound account
+(12 works rendered, 5 image posts + 7 videos, via the read-only inspect
+endpoint). Three things came back, and all three are now designed for:
 
-(Not a contradiction with the section above: what the 2026-08-08 check
-established is that the cards carry **no post id**. It did not record which
-class names wrap a card, which is what these selectors need.)
+  * only ONE of the four candidates matches — `[class*="video-card"]`.
+    `content-card` 0, `work-card` 0, `[class^="card-"]` 2 (page chrome, not
+    works). The list keeps all four anyway: they cost one `count()` each and
+    they are the fallbacks for a console that moves.
+  * the platform uses the SAME `video-card` class family for image posts
+    (图文) as for videos — 72 matches ÷ 12 works = 6 nodes each, uniform
+    across both content types. There is no image-specific card shape to
+    detect, which is why nothing in this module branches on content type.
+  * those 72 matches are **6 per card, not 1** — the card root plus five
+    descendants that carry the same class prefix. See `read_work_cards` for
+    why that made the reader blind past the fourth work, and what fixes it.
 
-So the design makes being wrong about them SAFE rather than plausible-looking,
+What is still NOT verified is the status vocabulary beyond 「已发布」: that
+account had no work in 审核中 / 定时中 / 未通过 / 已下架 at the time (the
+non-zero counts for two of those words came from the page's own filter tabs,
+not from cards). Those markers remain INFERRED — see `_STATE_MARKERS`.
+
+So the design still makes being wrong SAFE rather than plausible-looking,
 and that property is the load-bearing part:
 
   * wrong selectors ⇒ zero cards read ⇒ `list_unreadable`, which is
@@ -63,6 +75,15 @@ and that property is the load-bearing part:
 
 A broken selector therefore costs a false "please check this", never a false
 "it went out fine" and never a false "it was deleted".
+
+⚠️ The one hole in that argument, stated because it was reachable and is now
+only bounded, not closed: reading a PARTIAL list is indistinguishable from
+reading a complete one, so a work that exists but sits past `MAX_CARDS` still
+reads as `not_found`. That is exactly how the node-vs-work bug produced false
+"deleted" verdicts (see `outermost_only`). The bound is now 24 WORKS against a
+page that renders 12 per load, but a console that lazily renders fewer, or an
+account whose target post is old enough to be paginated away, would hit it
+again.
 """
 
 from __future__ import annotations
@@ -101,6 +122,17 @@ _ITEM_ID_PATTERN = re.compile(r"/video/(\d{6,32})")
 # "Open in platform" instead of "View post", and why `douyin_publish._drive`
 # returns `published_url=None` in the first place.
 #
+# [实测 2026-08-11] Re-counted, and it is stronger than "no watch links": the
+# whole manage page contains **zero `<a>` elements** — `a` 0, `a[href*=
+# "/video/"]` 0, `a[href*="/note/"]` 0, `a[target="_blank"]` 0, with 12 works
+# of both content types on screen. So this is not "videos link and image posts
+# use some other path"; nothing on that page is an anchor at all.
+#
+# That measurement is also why this stayed a single pattern instead of growing
+# into a `/video/`-or-`/note/` candidate list, which is what the image-post
+# design originally proposed: a list of dead selectors is still dead, and it
+# would advertise a URL back-fill that cannot happen.
+#
 # So the id extraction below is OPPORTUNISTIC, not the deliverable:
 #
 #   * What this read-back actually delivers is the VERDICT — is the post live,
@@ -120,12 +152,53 @@ _ITEM_ID_PATTERN = re.compile(r"/video/(\d{6,32})")
 # structural fallback last. A list rather than a single selector for the reason
 # spelled out in `dom.first_visible_attribute`: this console has already moved
 # its QR node twice, and one selector turns any redesign into a hard outage.
+#
+# [实测 2026-08-11] on a bound account with 12 works on screen:
+#   [class*="content-card"]  0
+#   [class*="work-card"]     0
+#   [class*="video-card"]   72   ← the one that matches, and it over-matches 6:1
+#   [class^="card-"]         2   (page chrome)
 CARD_SELECTORS: tuple[str, ...] = (
     '[class*="content-card"]',
     '[class*="work-card"]',
     '[class*="video-card"]',
     '[class^="card-"]',
 )
+
+
+def outermost_only(selector: str) -> str:
+    """`selector`, restricted to matches that no other match contains. Pure.
+
+    **This is the difference between counting works and counting nodes**, and
+    getting it wrong was a live bug rather than a theoretical one.
+
+    The console builds each card out of a root plus five descendants that all
+    carry the same CSS-Modules class prefix, so `[class*="video-card"]`
+    resolves to 72 nodes for 12 works ([实测 2026-08-11]). Reading those nodes
+    directly meant `read_work_cards`'s `limit` was spent on the first four
+    cards, every work past position four was invisible, and `judge_readback`
+    — correctly, given what it was handed — called those works `not_found`,
+    i.e. NOT_LIVE. A false "your post is gone" is precisely the verdict this
+    module's whole design exists to make impossible, and it was reachable.
+
+    Image posts were hit hardest: on the account measured, four of the five
+    图文 works sat at positions 8-11.
+
+    `:not(SEL *)` keeps only the shallowest match of each nesting chain, which
+    on that same page turns 72 into exactly 12. Verified through the real
+    Playwright engine (the inspect endpoint counts with `page.locator`), not
+    assumed to be supported.
+
+    ⚠️ Residual hazard, stated rather than papered over: if a console ever
+    wraps the whole list in a node that ALSO matches, the outermost match is
+    that wrapper and one "card" would carry every work's text — which could
+    mis-report one work's status as another's. Today's page does not do this
+    for the selector that wins (`[class*="video-card"]:not(...)` = 12, not 1)
+    and the generic `[class*="card"]` form that DOES collapse to 1 is not in
+    `CARD_SELECTORS`. This exposure is not new — the pre-existing structural
+    fallback `[class^="card-"]` had it too — but it is not fixed here either.
+    """
+    return f"{selector}:not({selector} *)"
 
 # The platform's own "you have nothing here" state. Reaching it is a REAL
 # answer: the account has no works, so the post we are looking for is not one.
@@ -171,6 +244,31 @@ class WorkState(str, Enum):
 #     `visibility=private|friends` is an option the user can legitimately pick
 #     on the batch — treating them as not-live would block every private
 #     publish the product explicitly supports.
+#
+# ⚠️ How much of this table is actually VERIFIED, and how much is inferred.
+#
+# [实测 2026-08-11] Image posts and videos are listed in one table and use the
+# SAME status vocabulary, so this table needed no image-specific entry. But the
+# only card status observed on a live account was 「已发布」 (12 of 12 works).
+# 「审核中」 and 「未通过」 counted 1 each — those were the page's own filter
+# TABS, not cards; 「定时中」 and 「已下架」 counted 0. So "image posts use the
+# same words" is confirmed only for the published state; for every other state
+# it remains an INFERENCE, and confirming it needs a work actually sitting in
+# that state (a scheduled image post would do it, and T7 sends one).
+#
+# 「公开」 was DELETED from LIVE_MARKERS on the strength of that same read, and
+# the reasoning is the one that matters here: it counted **0 on the whole
+# page** — the manage cards do not show a visibility word at all (「仅自己可见」
+# and 「好友可见」 also counted 0). So it bought nothing, while being a
+# two-character word common enough to appear inside a CAPTION — and the caption
+# is part of the text these markers match. A card in a status we do not
+# recognise whose caption happened to contain 「公开」 would have classified
+# LIVE, i.e. a work item closed as published on the strength of the user's own
+# prose. Dropping it moves that case to UNKNOWN → INCONCLUSIVE → ask a human,
+# which is the direction this module always takes when it is unsure.
+# 「仅自己可见」/「好友可见」 stay despite also counting 0: they are long and
+# distinctive enough not to collide with prose, and they carry the product
+# guarantee above.
 REJECTED_MARKERS: tuple[str, ...] = (
     "未通过",
     "审核不通过",
@@ -192,7 +290,6 @@ LIVE_MARKERS: tuple[str, ...] = (
     "已发布",
     "仅自己可见",
     "好友可见",
-    "公开",
 )
 
 _STATE_MARKERS: tuple[tuple[WorkState, tuple[str, ...]], ...] = (
@@ -204,6 +301,15 @@ _STATE_MARKERS: tuple[tuple[WorkState, tuple[str, ...]], ...] = (
 
 # How many cards to read. The list is paginated and the post we want is among
 # the most recent; walking the whole history would cost minutes and add nothing.
+#
+# ⚠️ This bounds WORKS, and only does so because `read_work_cards` matches card
+# roots via `outermost_only`. Applied to raw selector matches it bounded NODES
+# instead — 24 nodes is 4 works on the live console — and the works past that
+# point read as `not_found`. Anything that reintroduces nested matches here
+# reintroduces a false "your post is gone".
+#
+# [实测 2026-08-11] the live page renders 12 works per load (34 on the account,
+# the rest behind lazy loading), so 24 leaves real headroom.
 MAX_CARDS = 24
 
 # Below this many characters a title is too weak to match on as a substring —
@@ -417,7 +523,16 @@ def judge_readback(
 
 async def _card_hrefs(node: Any, limit: int = 8) -> list[str]:
     """Watch links inside one card. Bounded — a card has one, and an unbounded
-    loop over a mis-scoped root would walk the entire page."""
+    loop over a mis-scoped root would walk the entire page.
+
+    [实测 2026-08-11] This returns `[]` on every card of today's console,
+    because the page has no `<a>` elements at all — see the note on
+    `_ITEM_ID_PATTERN`. It is kept rather than deleted for one reason: it is
+    the only thing that would notice a console that starts exposing links, and
+    `judge_readback` already treats the id as optional everywhere. Deleting it
+    would turn "fill the URL when the platform offers one" into "never fill
+    it", which is a different promise from the one the read-back makes.
+    """
     try:
         links = node.locator('a[href*="/video/"]')
         count = await links.count()
@@ -441,15 +556,21 @@ async def read_work_cards(page: Any, limit: int = MAX_CARDS) -> list[WorkCard]:
     yields fewer cards, never an exception. A short list is safe because zero
     cards is handled as "no answer", not as "no post".
 
-    The first selector that resolves to anything wins, and results are
-    de-duplicated: the structural fallback in `CARD_SELECTORS` matches nested
-    wrappers, which would otherwise report one post several times and inflate
-    `cards_seen` — the very number the "we really did read the list" judgement
-    rests on.
+    The first selector that resolves to anything wins, and each candidate is
+    scoped by `outermost_only` so that one match is one WORK. Read that
+    function before touching this loop: the console nests five same-prefixed
+    nodes inside every card, and matching them raw made `limit` run out on the
+    fourth work while reporting `cards_seen=24` — every later work, including
+    most of the account's image posts, then judged `not_found`.
+
+    Results are still de-duplicated by text on top of that, because a redesign
+    can nest cards in a way the CSS scoping does not catch, and one post
+    counted several times inflates `cards_seen` — the very number the "we
+    really did read the list" judgement rests on.
     """
     for selector in CARD_SELECTORS:
         try:
-            locator = page.locator(selector)
+            locator = page.locator(outermost_only(selector))
             count = await locator.count()
         except Exception:
             continue
@@ -538,6 +659,7 @@ __all__ = [
     "list_is_empty",
     "match_cards",
     "normalize_title",
+    "outermost_only",
     "read_work_cards",
     "verify_publish",
 ]

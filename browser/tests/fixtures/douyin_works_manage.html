@@ -3,99 +3,212 @@
 
   ⚠️ What this fixture is and is not.
 
-  It is a faithful model of the *structure the reader assumes*: CSS-Modules
-  class names of the form `<role>-<hash>` (the convention observed on the live
-  console and documented in `platforms/douyin.py`), one card per work, a watch
-  link on cards that have an item id, and the status word rendered as text
-  inside the card.
+  [实测 2026-08-11] The live page was finally counted, through the read-only
+  inspect endpoint, against a bound account with 12 works on screen (5 image
+  posts / 图文 + 7 videos). This fixture is now modelled on those numbers
+  rather than on a guess. What was measured, and is reproduced below:
 
-  It is NOT a capture of the live page. Nobody has read the manage page with a
-  bound account yet. So these tests prove the parsing and the judgement are
-  correct GIVEN this shape; they do not prove the live page has this shape.
-  That second half needs a real account and is on the post-merge checklist.
+    * card roots carry a `video-card-<hash>` CSS-Modules class — and the SAME
+      class family is used for image posts, not just videos
+      (`[class*="video-card"]` 72, `[class*="content-card"]` 0,
+      `[class*="work-card"]` 0, `[class^="card-"]` 2)
+    * 72 ÷ 12 works = **6 nodes per card**: the root plus five descendants
+      sharing the prefix. Each card below has exactly that shape, and it is
+      the whole point of the fixture — see `outermost_only`.
+    * the page has **zero `<a>` elements** (`a` 0, `a[href*="/video/"]` 0,
+      `a[href*="/note/"]` 0). Only ONE card below has a link, and it is
+      labelled as the hypothetical it is.
+    * an image card reads `{N}张 / caption / 编辑作品 设置权限 作品置顶 删除作品
+      / date / 已发布 / 播放 … / 划走率 … 文案展开率 … 平均浏览图片数 … / 吸粉量`;
+      a video card is identical except the badge is a duration (`00:28`) and
+      the metrics are `完播率 / 2秒跳出率`.
+    * the newest image post on that account rendered with **no `{N}张` badge
+      at all** (`张` matched 4 nodes across 5 image works). Cause unknown —
+      not guessed at here, just reproduced, as card 1. It is why nothing in
+      the reader keys off that badge.
+    * the whole list sits inside one wrapper whose class contains "card" but
+      not "video-card". Reproduced as `card-list-container-…`, because it is
+      what makes the `[class*="card"]`-outermost form collapse to 1 while the
+      selector actually used still yields 12.
 
-  The reason that split is acceptable: `judge_readback` is built so that being
-  wrong about the shape yields `list_unreadable` (inconclusive → retry → ask a
-  human), never a false "live" and never a false "deleted". The tests below
-  pin exactly that property.
+  What is still NOT measured, and is therefore MODELLED here: every card
+  status other than 「已发布」. That account had nothing in 审核中 / 定时中 /
+  未通过 at the time, so cards 2-4 below are inferences about vocabulary, not
+  captures. They are kept because the judgement branches need exercising, but
+  no one should cite them as evidence about the platform.
 
-  Five cards, covering every branch:
-    1. live, public                → LIVE
-    2. under review, no item id    → NOT_LIVE / under_review
-    3. rejected                    → NOT_LIVE / rejected
-    4. still scheduled             → NOT_LIVE / still_scheduled
-    5. live but private (仅自己可见) → LIVE  (a private post IS published)
+  Captions are English test data (repo rule); the surrounding Chinese chrome is
+  verbatim from the live read.
+
+  Twelve cards, in the live page's order (newest first):
+     1. image, NO count badge   已发布      → LIVE          (the live anomaly)
+     2. video 00:28             审核中      → under_review   [MODELLED status]
+     3. video 00:30             未通过      → rejected       [MODELLED status]
+     4. video 00:10             定时中      → still_scheduled[MODELLED status]
+     5. video 00:14             仅自己可见  → LIVE           [MODELLED status]
+     6. video 00:18             已发布      → LIVE  (no link, like every card)
+     7. video 00:40             已发布      → LIVE  (the ONE anchored card)
+     8. image 4张               已发布      → LIVE  ← past the old node budget
+     9. image 6张               已发布      → LIVE  ← past the old node budget
+    10. image 11张              已发布      → LIVE  ← past the old node budget
+    11. image 5张               已发布      → LIVE  ← past the old node budget
+    12. video 00:19             已发布      → LIVE
 -->
-<div class="content-list-wrap">
-  <div class="content-card-a1b2c3">
-    <a href="https://www.douyin.com/video/7412345678901234567">
-      <img class="cover-x1y2" src="https://p3.douyinpic.com/cover1.jpeg" />
-    </a>
-    <div class="info-d4e5f6">
-      <div class="title-g7h8i9">Autumn Harvest Field Notes</div>
-      <div class="status-j1k2l3">已发布</div>
-      <div class="stats-m4n5o6">播放 12.4万 · 点赞 3201</div>
+<div class="card-list-container-z9y8">
+
+  <!-- 1. Image post, newest. No 「N张」 badge — exactly what the live page did. -->
+  <div class="video-card-a1b201">
+    <div class="video-card-cover-d4e501"><i class="video-card-badge-f6g701"></i></div>
+    <div class="video-card-info-h8i901">
+      <div class="video-card-desc-j1k201">Autumn Harvest Field Notes</div>
+      <div class="op-l3m4"><span>编辑作品</span><span>设置权限</span><span>作品置顶</span><span>删除作品</span></div>
+    </div>
+    <div class="video-card-stats-n5o601">
+      2025年11月20日 22:30 已发布 播放 643 点赞 9 评论 2 分享 4 收藏 1
+      划走率 44.58% 文案展开率 2.56% 平均浏览图片数 2.2 吸粉量 0
     </div>
   </div>
 
-  <div class="content-card-a1b2c3">
-    <div class="cover-x1y2 placeholder"></div>
-    <div class="info-d4e5f6">
-      <div class="title-g7h8i9">Winter Kitchen Experiment</div>
-      <div class="status-j1k2l3">审核中</div>
-      <div class="stats-m4n5o6">提交于 2026-08-10 09:00</div>
+  <!-- 2. [MODELLED status] -->
+  <div class="video-card-a1b202">
+    <div class="video-card-cover-d4e502"><i class="video-card-badge-f6g702">00:28</i></div>
+    <div class="video-card-info-h8i902">
+      <div class="video-card-desc-j1k202">Winter Kitchen Experiment</div>
+      <div class="op-l3m4"><span>编辑作品</span><span>设置权限</span><span>作品置顶</span><span>删除作品</span></div>
     </div>
+    <div class="video-card-stats-n5o602">2025年12月18日 19:24 审核中</div>
   </div>
 
-  <div class="content-card-a1b2c3">
-    <a href="https://www.douyin.com/video/7412345678909999999">
-      <img class="cover-x1y2" src="https://p3.douyinpic.com/cover3.jpeg" />
-    </a>
-    <div class="info-d4e5f6">
-      <div class="title-g7h8i9">Studio Tour Walkthrough</div>
-      <div class="status-j1k2l3">未通过</div>
-      <div class="stats-m4n5o6">内容涉及未授权音乐</div>
+  <!-- 3. [MODELLED status] -->
+  <div class="video-card-a1b203">
+    <div class="video-card-cover-d4e503"><i class="video-card-badge-f6g703">00:30</i></div>
+    <div class="video-card-info-h8i903">
+      <div class="video-card-desc-j1k203">Studio Tour Walkthrough</div>
+      <div class="op-l3m4"><span>编辑作品</span><span>设置权限</span><span>作品置顶</span><span>删除作品</span></div>
     </div>
+    <div class="video-card-stats-n5o603">2025年12月18日 07:08 未通过 内容涉及未授权音乐</div>
   </div>
 
-  <div class="content-card-a1b2c3">
-    <div class="cover-x1y2 placeholder"></div>
-    <div class="info-d4e5f6">
-      <div class="title-g7h8i9">Spring Planting Timelapse</div>
-      <div class="status-j1k2l3">定时中</div>
-      <div class="stats-m4n5o6">将于 2026-08-11 20:00 发布</div>
+  <!-- 4. [MODELLED status] -->
+  <div class="video-card-a1b204">
+    <div class="video-card-cover-d4e504"><i class="video-card-badge-f6g704">00:10</i></div>
+    <div class="video-card-info-h8i904">
+      <div class="video-card-desc-j1k204">Spring Planting Timelapse</div>
+      <div class="op-l3m4"><span>编辑作品</span><span>设置权限</span><span>作品置顶</span><span>删除作品</span></div>
     </div>
+    <div class="video-card-stats-n5o604">定时中 将于 2026-08-11 20:00 发布</div>
   </div>
 
-  <div class="content-card-a1b2c3">
-    <a href="https://www.douyin.com/video/7412345678905555555">
-      <img class="cover-x1y2" src="https://p3.douyinpic.com/cover5.jpeg" />
-    </a>
-    <div class="info-d4e5f6">
-      <div class="title-g7h8i9">Private Draft Reference Cut</div>
-      <div class="status-j1k2l3">仅自己可见</div>
-      <div class="stats-m4n5o6">播放 0</div>
+  <!-- 5. [MODELLED status] A private post IS published. -->
+  <div class="video-card-a1b205">
+    <div class="video-card-cover-d4e505"><i class="video-card-badge-f6g705">00:14</i></div>
+    <div class="video-card-info-h8i905">
+      <div class="video-card-desc-j1k205">Private Draft Reference Cut</div>
+      <div class="op-l3m4"><span>编辑作品</span><span>设置权限</span><span>作品置顶</span><span>删除作品</span></div>
+    </div>
+    <div class="video-card-stats-n5o605">2025年12月16日 22:09 仅自己可见 播放 0</div>
+  </div>
+
+  <!--
+    6. Live, and with NO link and NO id attribute anywhere on the card —
+    which [实测 2026-08-11] is what EVERY card on the live page looks like.
+    The read-back must still verify it: the verdict comes from the status
+    text, and published_url simply stays null.
+  -->
+  <div class="video-card-a1b206">
+    <div class="video-card-cover-d4e506"><i class="video-card-badge-f6g706">00:18</i></div>
+    <div class="video-card-info-h8i906">
+      <div class="video-card-desc-j1k206">Linkless Live Card From The Real Console</div>
+      <div class="op-l3m4"><span>编辑作品</span><span>设置权限</span><span>作品置顶</span><span>删除作品</span></div>
+    </div>
+    <div class="video-card-stats-n5o606">
+      2025年12月15日 17:21 已发布 播放 1621 点赞 18 评论 16 分享 16 收藏 0
+      完播率 22.58% 2秒跳出率 31.38% 吸粉量 0
     </div>
   </div>
 
   <!--
-    6. Live, but with NO link and NO id attribute anywhere on the card.
-
-    This is the shape the live console is actually believed to have: checked
-    against a real account on 2026-08-08 and recorded in
-    frontend/components/Distribution/RecordsPage.tsx — the post cards expose
-    neither an href nor an id, and no listing XHR returns one either.
-
-    It is in the fixture because the read-back MUST still verify such a card.
-    The verdict comes from the status text; the id (and therefore
-    published_url) is opportunistic and simply stays null.
+    7. The ONLY anchored card, and it is a HYPOTHETICAL: the live page has
+    zero `<a>` elements. It is here so the opportunistic id extraction stays
+    covered — if the console ever starts exposing links, that path has to
+    still work rather than have been deleted as dead code.
   -->
-  <div class="content-card-a1b2c3">
-    <div class="cover-x1y2"><img src="https://p3.douyinpic.com/cover6.jpeg" /></div>
-    <div class="info-d4e5f6">
-      <div class="title-g7h8i9">Linkless Live Card From The Real Console</div>
-      <div class="status-j1k2l3">已发布</div>
-      <div class="stats-m4n5o6">播放 812</div>
+  <div class="video-card-a1b207">
+    <div class="video-card-cover-d4e507">
+      <a href="https://www.douyin.com/video/7412345678901234567"><i class="video-card-badge-f6g707">00:40</i></a>
+    </div>
+    <div class="video-card-info-h8i907">
+      <div class="video-card-desc-j1k207">Anchored Card From A Hypothetical Console</div>
+      <div class="op-l3m4"><span>编辑作品</span><span>设置权限</span><span>作品置顶</span><span>删除作品</span></div>
+    </div>
+    <div class="video-card-stats-n5o607">
+      2025年12月04日 23:13 已发布 播放 619 点赞 10 评论 1 分享 3 收藏 0
+      完播率 8.56% 2秒跳出率 30.84% 吸粉量 1
+    </div>
+  </div>
+
+  <!--
+    8-11. The image posts. On the live account these sat at positions 8-11,
+    i.e. behind 7 works' worth of markup — 42 of the 72 nodes. Reading nodes
+    instead of works put every one of them out of reach.
+  -->
+  <div class="video-card-a1b208">
+    <div class="video-card-cover-d4e508"><i class="video-card-badge-f6g708">4张</i></div>
+    <div class="video-card-info-h8i908">
+      <div class="video-card-desc-j1k208">Gorge Ridge Solo Walk</div>
+      <div class="op-l3m4"><span>编辑作品</span><span>设置权限</span><span>作品置顶</span><span>删除作品</span></div>
+    </div>
+    <div class="video-card-stats-n5o608">
+      2025年11月15日 16:53 已发布 播放 334 点赞 7 评论 0 分享 0 收藏 0
+      划走率 55.63% 文案展开率 0.7% 平均浏览图片数 2 吸粉量 0
+    </div>
+  </div>
+
+  <div class="video-card-a1b209">
+    <div class="video-card-cover-d4e509"><i class="video-card-badge-f6g709">6张</i></div>
+    <div class="video-card-info-h8i909">
+      <div class="video-card-desc-j1k209">Snowline Pilgrim Road</div>
+      <div class="op-l3m4"><span>编辑作品</span><span>设置权限</span><span>作品置顶</span><span>删除作品</span></div>
+    </div>
+    <div class="video-card-stats-n5o609">
+      2025年11月11日 20:00 已发布 播放 1342 点赞 13 评论 3 分享 0 收藏 1
+      划走率 56.61% 文案展开率 2.12% 平均浏览图片数 3 吸粉量 0
+    </div>
+  </div>
+
+  <div class="video-card-a1b210">
+    <div class="video-card-cover-d4e510"><i class="video-card-badge-f6g710">11张</i></div>
+    <div class="video-card-info-h8i910">
+      <div class="video-card-desc-j1k210">Red Cabin Mountain Retreat</div>
+      <div class="op-l3m4"><span>编辑作品</span><span>设置权限</span><span>作品置顶</span><span>删除作品</span></div>
+    </div>
+    <div class="video-card-stats-n5o610">
+      2025年11月11日 08:26 已发布 播放 3129 点赞 11 评论 2 分享 1002 收藏 1
+      划走率 65.46% 文案展开率 2.5% 平均浏览图片数 2 吸粉量 0
+    </div>
+  </div>
+
+  <div class="video-card-a1b211">
+    <div class="video-card-cover-d4e511"><i class="video-card-badge-f6g711">5张</i></div>
+    <div class="video-card-info-h8i911">
+      <div class="video-card-desc-j1k211">Old Album Rediscovered</div>
+      <div class="op-l3m4"><span>编辑作品</span><span>设置权限</span><span>作品置顶</span><span>删除作品</span></div>
+    </div>
+    <div class="video-card-stats-n5o611">
+      2025年11月08日 23:24 已发布 播放 889 点赞 7 评论 1 分享 2 收藏 0
+      划走率 41.53% 文案展开率 1.74% 平均浏览图片数 3 吸粉量 1
+    </div>
+  </div>
+
+  <div class="video-card-a1b212">
+    <div class="video-card-cover-d4e512"><i class="video-card-badge-f6g712">00:19</i></div>
+    <div class="video-card-info-h8i912">
+      <div class="video-card-desc-j1k212">Gym Mirror Sediment</div>
+      <div class="op-l3m4"><span>编辑作品</span><span>设置权限</span><span>作品置顶</span><span>删除作品</span></div>
+    </div>
+    <div class="video-card-stats-n5o612">
+      2025年09月09日 08:16 已发布 播放 1487 点赞 4 评论 4 分享 0 收藏 0
+      完播率 10.07% 2秒跳出率 33.51% 吸粉量 0
     </div>
   </div>
 </div>

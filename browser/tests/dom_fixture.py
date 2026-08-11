@@ -22,10 +22,18 @@ actually writes:
     [class*="x"] / [class^="x"]      attribute contains / starts-with
     [href*="x"]                      same, on any attribute
     div:has(> a[href*="/video/"])    element with a matching DIRECT child
+    [class*="x"]:not([class*="x"] *) match with no matching ANCESTOR
 
 Anything outside that grammar raises, loudly. A shim that silently returned
 "no matches" for a selector it did not understand would turn a broken test into
 a passing one — the exact failure mode these tests exist to catch.
+
+The last form is the one `douyin_verify.outermost_only` builds, and it is the
+difference between reading works and reading the nodes a work is made of. It
+is supported here because it is supported by the real engine: the read-only
+inspect endpoint counts with `page.locator`, and against the live console it
+returned 12 for `[class*="video-card"]:not([class*="video-card"] *)` where the
+unscoped form returned 72 ([实测 2026-08-11]).
 """
 
 from __future__ import annotations
@@ -116,6 +124,11 @@ _SIMPLE = re.compile(
 )
 _ATTR = re.compile(r"\[(?P<name>[\w-]+)(?P<op>[*^$]?)=\"(?P<value>[^\"]*)\"\]")
 _HAS_CHILD = re.compile(r"^(?P<base>[^:]*):has\(>\s*(?P<child>.+)\)$")
+# `X:not(Y *)` — matches X, provided no ANCESTOR matches Y. Deliberately only
+# the descendant-combinator form: that is the one `outermost_only` emits, and a
+# general `:not()` implementation here would be shim behaviour nobody has
+# checked against the real engine.
+_NOT_DESCENDANT_OF = re.compile(r"^(?P<base>.+?):not\((?P<ancestor>.+?)\s+\*\)$")
 
 
 class UnsupportedSelector(ValueError):
@@ -141,6 +154,17 @@ def _match_attrs(node: Node, spec: str) -> bool:
 
 def _matches(node: Node, selector: str) -> bool:
     selector = selector.strip()
+    outermost = _NOT_DESCENDANT_OF.match(selector)
+    if outermost:
+        if not _matches(node, outermost.group("base")):
+            return False
+        ancestor = node.parent
+        while ancestor is not None and ancestor.tag != "#root":
+            if _matches(ancestor, outermost.group("ancestor")):
+                return False
+            ancestor = ancestor.parent
+        return True
+
     has = _HAS_CHILD.match(selector)
     if has:
         if not _matches(node, has.group("base") or "*"):

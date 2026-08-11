@@ -9,11 +9,17 @@ Two layers, and the split is deliberate:
 * the rest pin the pure judgement, including the cases the fixture cannot
   stage (a title that matches two cards, a status word we do not know).
 
-The one thing these cannot prove is that the live creator centre is shaped like
-the fixture. That needs a bound account. What they DO prove is the property
-that makes the unknown survivable: when the shape is wrong, the answer is
-`list_unreadable` (inconclusive), never a false "live" and never a false
-"deleted". `test_unknown_markup_is_inconclusive_not_a_verdict` is that test.
+[实测 2026-08-11] The fixture is no longer a guess about the live console's
+shape: it is modelled on counts taken from a bound account (12 works, 5 of them
+image posts, 6 nodes per card, zero anchors page-wide). See the fixture's own
+header for what was measured and what is still modelled — the status words
+other than 「已发布」 are still the latter.
+
+What these tests cannot prove is that the vocabulary for the states nobody has
+seen is right. What they DO prove is the property that makes the unknown
+survivable: when the shape is wrong, the answer is `list_unreadable`
+(inconclusive), never a false "live" and never a false "deleted".
+`test_unknown_markup_is_inconclusive_not_a_verdict` is that test.
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ from pathlib import Path
 import pytest
 
 from app.platforms.douyin_verify import (
+    LIVE_MARKERS,
     WorkCard,
     WorkState,
     build_published_url,
@@ -32,6 +39,7 @@ from app.platforms.douyin_verify import (
     list_is_empty,
     match_cards,
     normalize_title,
+    outermost_only,
     read_work_cards,
     verify_publish,
 )
@@ -67,7 +75,38 @@ class TestAgainstFixtureHtml:
 
     async def test_reads_every_card_once(self):
         cards = await read_work_cards(FakePage(FIXTURE))
-        assert len(cards) == 6, [c.text[:40] for c in cards]
+        assert len(cards) == 12, [c.text[:40] for c in cards]
+
+    async def test_one_match_is_one_work_not_one_node(self):
+        """**The bug this fixture was rebuilt for.**
+
+        [实测 2026-08-11] the live console builds each card from a root plus
+        five descendants carrying the same class prefix, so the raw selector
+        resolves to 6 nodes per work. Reading those nodes directly spent
+        `MAX_CARDS` on the first four works and judged every later one
+        `not_found` — a false "your post is gone", the one verdict this module
+        promises never to invent.
+        """
+        page = FakePage(FIXTURE)
+        raw = await page.locator('[class*="video-card"]').count()
+        assert raw == 72, "fixture must reproduce the measured 6-nodes-per-card"
+        cards = await read_work_cards(page)
+        assert len(cards) == 12
+        # Every card read must be a whole work, not a fragment of one: the
+        # status word and the caption have to travel together, because the
+        # verdict is read off the same string the title matched. A cover node
+        # or a caption node on its own classifies UNKNOWN.
+        assert all(
+            classify_work_state(c.text) is not WorkState.UNKNOWN for c in cards
+        ), [c.text[:40] for c in cards]
+
+    async def test_the_enclosing_list_wrapper_is_not_read_as_a_card(self):
+        """The list sits in a wrapper whose class contains "card" ([实测
+        2026-08-11]). Reading THAT as a card would put every work's text in one
+        string and let one post's status answer for another's."""
+        cards = await read_work_cards(FakePage(FIXTURE))
+        assert not any("Gorge Ridge" in c.text and "Winter Kitchen" in c.text
+                       for c in cards)
 
     async def test_a_live_card_with_no_link_still_verifies(self):
         """**The shape the live console is believed to actually have.**
@@ -86,24 +125,26 @@ class TestAgainstFixtureHtml:
         assert judgement.published_url is None
 
     async def test_item_id_comes_off_the_watch_link(self):
+        """The opportunistic path, kept alive against a console that does not
+        currently use it — [实测 2026-08-11] the live page has zero anchors."""
         cards = await read_work_cards(FakePage(FIXTURE))
-        live = next(c for c in cards if "Autumn Harvest" in c.text)
-        assert live.item_id == "7412345678901234567"
-        # The under-review card has no link yet, and that must read as "no id",
-        # not as "borrow the neighbour's".
-        pending = next(c for c in cards if "Winter Kitchen" in c.text)
-        assert pending.item_id is None
+        anchored = next(c for c in cards if "Anchored Card" in c.text)
+        assert anchored.item_id == "7412345678901234567"
+        # The card next to it has no link, and that must read as "no id", not
+        # as "borrow the neighbour's".
+        linkless = next(c for c in cards if "Linkless Live Card" in c.text)
+        assert linkless.item_id is None
 
     async def test_live_post_verifies_with_a_url(self):
         judgement = await verify_publish(
-            FakePage(FIXTURE), "Autumn Harvest Field Notes"
+            FakePage(FIXTURE), "Anchored Card From A Hypothetical Console"
         )
         assert judgement.verdict is ReadbackVerdict.LIVE
         assert judgement.reason == "live"
         assert judgement.published_url == (
             "https://www.douyin.com/video/7412345678901234567"
         )
-        assert judgement.detail["cards_seen"] == 6
+        assert judgement.detail["cards_seen"] == 12
 
     async def test_private_post_counts_as_live(self):
         """仅自己可见 is a visibility the batch can legitimately request. If
@@ -132,7 +173,7 @@ class TestAgainstFixtureHtml:
         judgement = await verify_publish(FakePage(FIXTURE), "A Post That Was Deleted")
         assert judgement.verdict is ReadbackVerdict.NOT_LIVE
         assert judgement.reason == "not_found"
-        assert judgement.detail["cards_seen"] == 6
+        assert judgement.detail["cards_seen"] == 12
 
     async def test_empty_account_reads_as_not_found(self):
         page = FakePage(EMPTY_PAGE)
@@ -153,6 +194,121 @@ class TestAgainstFixtureHtml:
         judgement = await verify_publish(page, "Autumn Harvest Field Notes")
         assert judgement.verdict is ReadbackVerdict.INCONCLUSIVE
         assert judgement.reason == "list_unreadable"
+
+
+# A console that nests its card roots inside a container matching the SAME
+# selector. Not observed — see `outermost_only`'s residual-hazard note.
+WRAPPED_PAGE = """
+<div class="video-card-list-zz01">
+  <div class="video-card-a1"><div class="video-card-info-a1">
+    Refused Neighbour Post<br/>未通过</div></div>
+  <div class="video-card-b2"><div class="video-card-info-b2">
+    Perfectly Fine Post<br/>已发布</div></div>
+</div>
+"""
+
+
+class TestOutermostScoping:
+    def test_it_builds_the_form_the_live_engine_answered(self):
+        """Pinned literally because the string is the contract with Playwright:
+        [实测 2026-08-11] this exact form returned 12 against the live console
+        where the unscoped selector returned 72."""
+        assert outermost_only('[class*="video-card"]') == (
+            '[class*="video-card"]:not([class*="video-card"] *)'
+        )
+
+    async def test_known_gap_a_matching_list_wrapper_collapses_to_one_card(self):
+        """**A documented limitation, pinned so it cannot drift unnoticed.**
+
+        If a console ever wraps the list in a node matching the same selector,
+        the outermost match is that wrapper and one "card" carries every work's
+        text — so one post's status answers for another's. Below, a perfectly
+        live post reads as refused.
+
+        It is recorded rather than fixed because (a) the live page does not do
+        this for the selector that wins, (b) the exposure predates this change
+        (`[class^="card-"]` had it), and (c) the direction is still a blocked
+        work item a human looks at, never a silent "done".
+        """
+        cards = await read_work_cards(FakePage(WRAPPED_PAGE))
+        assert len(cards) == 1
+        judgement = await verify_publish(FakePage(WRAPPED_PAGE), "Perfectly Fine Post")
+        assert judgement.verdict is ReadbackVerdict.NOT_LIVE
+        assert judgement.reason == "rejected"
+        assert judgement.verdict is not ReadbackVerdict.LIVE
+
+
+class TestImagePosts:
+    """图文 works, against the fixture built from the live counts.
+
+    There is deliberately no image-specific code path to test. [实测
+    2026-08-11] the console lists image posts and videos in ONE table, built
+    from the same `video-card-…` component and labelled with the same status
+    vocabulary; the only differences are cosmetic (a `{N}张` badge instead of a
+    duration, and 划走率 / 文案展开率 / 平均浏览图片数 instead of 完播率 /
+    2秒跳出率). So what these tests pin is that the reader stays content-type
+    blind — and that the thing which DID break image posts, reading nodes
+    instead of works, stays fixed.
+    """
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Gorge Ridge Solo Walk",  # 4张,  position 8
+            "Snowline Pilgrim Road",  # 6张,  position 9
+            "Red Cabin Mountain Retreat",  # 11张, position 10
+            "Old Album Rediscovered",  # 5张,  position 11
+        ],
+    )
+    async def test_image_posts_deep_in_the_list_verify(self, title):
+        """On the live account the image posts sat at positions 8-11 — behind
+        42 of the 72 nodes. Any regression to node-counting puts all four out
+        of reach and reports them as deleted."""
+        judgement = await verify_publish(FakePage(FIXTURE), title)
+        assert judgement.verdict is ReadbackVerdict.LIVE
+        assert judgement.reason == "live"
+
+    async def test_image_post_without_a_count_badge_verifies(self):
+        """[实测 2026-08-11] the newest image post rendered with NO 「N张」
+        badge (4 badges across 5 image works; cause unknown). Anything keying
+        off that badge to recognise an image post would have missed it — which
+        is the argument for not keying off it at all."""
+        page = FakePage(FIXTURE)
+        card = next(
+            c for c in await read_work_cards(page) if "Autumn Harvest" in c.text
+        )
+        assert "张" not in card.text
+        assert "平均浏览图片数" in card.text  # it IS an image post
+        judgement = await verify_publish(page, "Autumn Harvest Field Notes")
+        assert judgement.verdict is ReadbackVerdict.LIVE
+
+    async def test_image_and_video_cards_are_read_from_the_same_list(self):
+        cards = await read_work_cards(FakePage(FIXTURE))
+        image_cards = [c for c in cards if "平均浏览图片数" in c.text]
+        video_cards = [c for c in cards if "完播率" in c.text]
+        # All 5 image posts carry the image metric set, as on the live account.
+        # Only the published videos carry 完播率 — the fixture's modelled
+        # 审核中 / 未通过 / 定时中 cards have no metrics, which is why these
+        # two do not add up to 12.
+        assert len(image_cards) == 5
+        assert len(video_cards) == 3
+        assert len(cards) == 12
+
+    def test_image_metric_vocabulary_trips_no_state_marker(self):
+        """划走率 / 文案展开率 / 平均浏览图片数 are words only image cards
+        carry. None of them may collide with a status marker — a metric label
+        voting on the verdict would be silent and wrong."""
+        metrics = "划走率 55.63% 文案展开率 0.7% 平均浏览图片数 2 吸粉量 0"
+        assert classify_work_state(f"Some Image Post\n{metrics}") is WorkState.UNKNOWN
+
+    def test_an_image_post_in_an_unknown_state_is_not_guessed_at(self):
+        """The honest half of the V17 finding: only 「已发布」 was ever seen on
+        a real card. If the platform labels an image post with a word we do not
+        know, the answer is "ask a human", not a verdict."""
+        cards = [WorkCard(text="Gorge Ridge Solo Walk\n图文审核排队中\n划走率 55%")]
+        judgement = judge_readback(cards, "Gorge Ridge Solo Walk")
+        assert judgement.verdict is ReadbackVerdict.INCONCLUSIVE
+        assert judgement.reason == "unknown_work_state"
 
 
 class TestTitleNormalisation:
@@ -197,8 +353,30 @@ class TestWorkStateMarkers:
         can carry publishing vocabulary next to its refusal. Reading the
         reassuring word first is how a refused post gets called live."""
         assert (
-            classify_work_state("Title\n审核未通过\n公开") is WorkState.REJECTED
+            classify_work_state("Title\n审核未通过\n已发布") is WorkState.REJECTED
         )
+
+    def test_the_word_gong_kai_no_longer_votes_for_live(self):
+        """「公开」 was dropped from LIVE_MARKERS. [实测 2026-08-11] it counts
+        **0 on the whole manage page** — the cards show no visibility word —
+        while being short enough to turn up inside a user's own caption. The
+        text these markers match INCLUDES the caption, so keeping it meant a
+        card in an unrecognised state could be closed as published on the
+        strength of the user's prose. Unknown → ask a human is the safe
+        direction, and this pins that we take it."""
+        assert "公开" not in LIVE_MARKERS
+        assert (
+            classify_work_state("如何做一场公开演讲\n某个我们没见过的状态")
+            is WorkState.UNKNOWN
+        )
+
+    def test_private_visibility_words_are_still_live(self):
+        """They also count 0 on the live page, but they are long enough not to
+        collide with prose and they carry a product guarantee: a private
+        publish is a publish, and calling it not-live blocks a batch the user
+        deliberately asked for."""
+        assert classify_work_state("Title\n仅自己可见") is WorkState.LIVE
+        assert classify_work_state("Title\n好友可见") is WorkState.LIVE
 
 
 class TestItemIds:
