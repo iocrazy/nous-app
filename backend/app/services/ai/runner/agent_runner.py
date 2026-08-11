@@ -282,6 +282,12 @@ class AgentRunner:
         # turn — calls return a clear error instead of crashing.
         self.generate_image_handler: Optional[Any] = None
         self.generate_video_handler: Optional[Any] = None
+        # Task 5 (Agent 权限页梳理立项, 2026-08-10): tool names already
+        # reported via a "capability_denied" transcript event THIS turn.
+        # One AgentRunner instance == one turn (see build_agent_runner_stack
+        # "HookRegistry per-turn"), so __init__ is the correct reset point —
+        # no separate per-turn re-init needed in run_turn/stream_turn.
+        self._denied_tools_this_turn: set[str] = set()
 
     @staticmethod
     def _record_buffered_usage(
@@ -1630,6 +1636,19 @@ class AgentRunner:
             self._dispatch_side_effect(entry.name, hook_result)
             last_result = hook_result
             if hook_result.decision in ("abort", "await_approval"):
+                if (
+                    hook_result.decision == "abort"
+                    and hook_result.abort_code == "capability_denied"
+                    and recorder is not None
+                    and hasattr(recorder, "record_event")
+                    and tool_name not in self._denied_tools_this_turn
+                ):
+                    # 同一 turn 同一工具只落第一条,防模型重试刷屏(spec §5)。
+                    self._denied_tools_this_turn.add(tool_name)
+                    await recorder.record_event(
+                        "capability_denied",
+                        {"tool": tool_name, "reason": hook_result.abort_reason or ""},
+                    )
                 return hook_result
             if hook_result.decision == "modify" and hook_result.modified_args:
                 # Subsequent hooks see modified args via a fresh context.
