@@ -43,11 +43,36 @@ export type SmartNodeType =
 
 export type LoopMode = 'serial' | 'parallel';
 
+/**
+ * shot node (storyboard canvas epic, Task 3): source-card fields (title/
+ * reference_resource_ids/notes) are the pre-existing hand-placed-draft
+ * shape (legacy compat — `shot_id: null` nodes render exactly as before).
+ * The binding-mirror fields below light up when the canvas is opened from
+ * the storyboard tier and the node is bound to a `script_shots` row: the
+ * mirror is written on open (reconcile) and echoed on every field edit
+ * (optimistic PATCH `script_shots` + revert-on-failure — this node never
+ * owns the row, `script_shots` does).
+ */
 export interface ShotNodeData {
   title: string;
   /** Snowflake resource IDs (strings to avoid bigint precision loss). */
   reference_resource_ids: string[];
   notes: string;
+  /** Bound `script_shots.id` (Snowflake string); null = unbound hand-placed
+   *  draft node (legacy compat — pre-binding canvases). */
+  shot_id: string | null;
+  /** Binding-mirror fields (populate on canvas open reconcile; echoed on
+   *  every editable-field PATCH): */
+  shot_label: string | null; // shot number/code, e.g. "1-2"
+  shot_type: string | null; // 景别
+  camera_angle: string | null;
+  camera_movement: string | null;
+  focal_length: string | null;
+  description: string | null;
+  image_url: string | null; // rendered frame
+  shot_status: string | null;
+  /** Bound shot's owning scene (layout/focus use). */
+  scene_id: string | null;
 }
 
 export interface PromptNodeData {
@@ -325,7 +350,9 @@ export function canConnectSmart(
 
 /** Default min-width per node type. Used by the renderer + factory. */
 export const SMART_NODE_DEFAULT_WIDTH: Record<SmartNodeType, number> = {
-  shot: 240,
+  // Bumped from 240 (Task 3): the bound render packs 4 chips + a
+  // description textarea + a 16:9 frame slot — 240 crowded the chip row.
+  shot: 280,
   media: 240,
   llm: 300,
   prompt: 280,

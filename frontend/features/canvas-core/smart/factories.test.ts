@@ -41,6 +41,18 @@ describe('createShotNode', () => {
     expect(node.data.title).toBe('New shot');
     expect(node.data.reference_resource_ids).toEqual([]);
     expect(node.data.notes).toBe('');
+    // Task 3: hand-placed cards are unbound drafts — every binding-mirror
+    // field defaults to null (legacy compat, no script_shots row yet).
+    expect(node.data.shot_id).toBeNull();
+    expect(node.data.shot_label).toBeNull();
+    expect(node.data.shot_type).toBeNull();
+    expect(node.data.camera_angle).toBeNull();
+    expect(node.data.camera_movement).toBeNull();
+    expect(node.data.focal_length).toBeNull();
+    expect(node.data.description).toBeNull();
+    expect(node.data.image_url).toBeNull();
+    expect(node.data.shot_status).toBeNull();
+    expect(node.data.scene_id).toBeNull();
   });
 
   it('honours position override and partial data', () => {

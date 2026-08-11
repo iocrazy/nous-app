@@ -2300,6 +2300,15 @@
       "title": "Group",
       "dropHint": "Drop images to auto-collect"
     },
+    "shotNode": {
+      "menu": "Shot menu",
+      "promote": "Promote to Shot",
+      "unset": "Unset",
+      "frameEmpty": "No frame yet",
+      "generating": "Generating…",
+      "patchFailed": "Couldn't save the change — reverted.",
+      "generateFailed": "Generate failed."
+    },
     "arrangeSelected": "Arrange selected",
     "loopModeSerial": "Serial",
     "loopModeParallel": "Parallel",
