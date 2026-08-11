@@ -61,6 +61,34 @@ export interface EpisodeStoryboardPageProps {
    *  see `StoryboardCanvasEmbed`/`CanvasView`'s own `onFocusHandled` for
    *  that longer async leg). */
   onFocusShotIdConsumed?: () => void;
+  /**
+   * Whether the Storyboard MODULE is the one currently on screen (Task 7,
+   * shot-nodes-on-canvas epic — keep-alive 显隐切换). ProjectWorkspace now
+   * mounts this page ONCE the first time the Storyboard module is opened and
+   * never unmounts it again (only toggles a `display:none` wrapper around
+   * it) — so, unlike before Task 7, this component can be fully mounted
+   * while genuinely invisible to the writer. Defaults to `true` (every
+   * caller besides ProjectWorkspace — i.e. every existing test in this
+   * file — gets the pre-Task-7 "always active" behaviour unchanged).
+   *
+   * Gates the two focus entry points that can fire while HIDDEN (the
+   * `focusShotId` prop — an agent panel's URL deep link, entry ② — and
+   * `shotFocusBus` — entry ③): both would otherwise silently flip this
+   * page's internal `view` to 'canvas' and write the URL in the background
+   * while the writer is looking at a completely different module. Entry ①
+   * (a shot-card click) needs no guard — it's a DOM click, impossible to
+   * fire on a page nobody can see. `onOpenShotInList`/`onStoryboardRefresh`
+   * (Task 4/Task 6 review) need no guard either — both are consumed by
+   * `StoryboardCanvasEmbed`'s subtree, which (see that component's own
+   * `active` prop) only stays mounted while THIS page is active, so their
+   * publishers cannot fire while hidden in the first place.
+   *
+   * A request that arrives while hidden is simply DROPPED, not queued —
+   * same "consume or discard, never queue" contract every bus on this page
+   * already documents (a lingering deep-link firing later, once the writer
+   * finally does return to Storyboard, would be surprising and stale).
+   */
+  active?: boolean;
 }
 
 const STORYBOARD_VIEWS = SURFACE_VIEWS.storyboard;
@@ -108,6 +136,7 @@ export function EpisodeStoryboardPage({
   provisionScript,
   focusShotId,
   onFocusShotIdConsumed,
+  active = true,
 }: EpisodeStoryboardPageProps) {
   const { t } = useTranslation();
   const { addToast } = useToast();
@@ -157,19 +186,37 @@ export function EpisodeStoryboardPage({
   // prop-driven jump, not a manual tab click the URL needs a second write for).
   useEffect(() => {
     if (!focusShotId) return;
+    // Task 7: a hidden (kept-alive but inactive) page must not react — the
+    // request is dropped, not queued, see `active`'s doc comment on the
+    // props interface. `onFocusShotIdConsumed` is intentionally NOT called
+    // here: ProjectWorkspace owns `canvasFocusShotId` independent of which
+    // module is on screen (its own effect isn't gated on `activeModule`
+    // either, by design — see that effect's doc comment), so leaving it
+    // un-consumed means a later switch INTO Storyboard while it's still set
+    // re-evaluates this same effect (dep array includes `active`) and
+    // honours the request then, instead of it having been silently thrown
+    // away while nobody could see it happen.
+    if (!active) return;
     setViewState('canvas');
     setActiveFocusShotId(focusShotId);
     onFocusShotIdConsumed?.();
-  }, [focusShotId, onFocusShotIdConsumed]);
+  }, [focusShotId, onFocusShotIdConsumed, active]);
 
   // Entry ③: `shotFocusBus` (an agent panel's shot summary chip). Was one of
   // two subscribers alongside EditorShell's own (shot-nodes-on-canvas Task 5
   // binding decision, 2026-08-11) until Task 6 retired the editor's
   // storyboard rail — this page is now the bus's sole subscriber.
+  //
+  // Task 7: unlike the `focusShotId` prop effect above, a bus event has no
+  // persistent value to re-check later — it's a fire-and-forget callback,
+  // so an event that arrives while `active` is false is genuinely gone
+  // (matches the bus's own "nobody's listening" contract, just decided
+  // locally by visibility instead of by mount).
   useEffect(() => onShotFocus((shotId) => {
+    if (!active) return;
     setActiveFocusShotId(shotId);
     handleTabChange('canvas');
-  }), [handleTabChange]);
+  }), [handleTabChange, active]);
 
   // `onStoryboardRefresh` (Task 6 review 修复轮1, 2026-08-11): the OLD
   // editor storyboard rail's `StoryboardView` subscribed to this same
@@ -393,6 +440,7 @@ export function EpisodeStoryboardPage({
               <StoryboardCanvasEmbed
                 episodeId={episode.episode_id}
                 teamId={teamId}
+                active={active}
                 focusShotId={activeFocusShotId}
                 onFocusHandled={handleFocusHandled}
                 reconcileRefreshToken={canvasRefreshToken}

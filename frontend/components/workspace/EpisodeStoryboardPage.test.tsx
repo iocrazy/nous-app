@@ -43,6 +43,7 @@ vi.mock('../../features/canvas-core/ui/StoryboardCanvasEmbed', () => ({
   StoryboardCanvasEmbed: (props: {
     episodeId: string;
     teamId?: string;
+    active?: boolean;
     focusShotId?: string | null;
     onFocusHandled?: () => void;
     reconcileRefreshToken?: number;
@@ -51,6 +52,7 @@ vi.mock('../../features/canvas-core/ui/StoryboardCanvasEmbed', () => ({
       data-testid="storyboard-canvas-embed-mock"
       data-episode-id={props.episodeId}
       data-team-id={props.teamId ?? ''}
+      data-active={props.active === false ? 'false' : 'true'}
       data-focus-shot-id={props.focusShotId ?? ''}
       data-reconcile-refresh-token={props.reconcileRefreshToken ?? 0}
     >
@@ -436,6 +438,75 @@ describe('EpisodeStoryboardPage', () => {
       );
       expect(screen.getByTestId('episode-view-storyboard')).toBeInTheDocument();
       expect(screen.queryByTestId('episode-surface-no-script')).toBeNull();
+    });
+  });
+
+  // Task 7 (shot-nodes-on-canvas epic — keep-alive 显隐切换 + chunk 预加载):
+  // ProjectWorkspace now keeps this page mounted-but-hidden across module
+  // switches instead of unmounting it, so `active=false` is a real state a
+  // FULLY MOUNTED instance can be in (not just "not rendered at all"). The
+  // two focus entry points that can fire from OUTSIDE a DOM click (the
+  // `focusShotId` prop and `shotFocusBus`) must not react while hidden.
+  describe('active prop gating (Task 7 keep-alive)', () => {
+    it('threads `active` straight through to StoryboardCanvasEmbed', async () => {
+      render(<EpisodeStoryboardPage {...base} active={false} />);
+      const tabs = await screen.findByTestId('episode-view-tabs');
+      fireEvent.click(tabs.querySelector('[data-view="canvas"]')!);
+
+      const embed = await screen.findByTestId('storyboard-canvas-embed-mock');
+      expect(embed).toHaveAttribute('data-active', 'false');
+    });
+
+    it('a focusShotId prop is ignored while inactive (no view switch, no consumption)', async () => {
+      const onFocusShotIdConsumed = vi.fn();
+      render(
+        <EpisodeStoryboardPage
+          {...base}
+          active={false}
+          focusShotId="url-shot-hidden"
+          onFocusShotIdConsumed={onFocusShotIdConsumed}
+        />,
+      );
+
+      // Stays on the default Storyboard tab — never switched to Canvas — so
+      // the embed (which only renders on the Canvas tab) never even mounts.
+      await screen.findByTestId('episode-view-tabs');
+      expect(screen.queryByTestId('storyboard-canvas-embed-mock')).toBeNull();
+      expect(onFocusShotIdConsumed).not.toHaveBeenCalled();
+    });
+
+    it('a shotFocusBus request is dropped (not queued) while inactive, and a later activation does not replay it', async () => {
+      const { rerender } = render(<EpisodeStoryboardPage {...base} active={false} />);
+      await screen.findByTestId('episode-view-tabs');
+
+      act(() => requestShotFocus('bus-shot-hidden'));
+
+      // No reaction: still on the default tab, onViewChange never called.
+      expect(screen.queryByTestId('storyboard-canvas-embed-mock')).toBeNull();
+      expect(base.onViewChange).not.toHaveBeenCalled();
+
+      // Becoming active again must NOT retroactively replay the dropped
+      // event — the bus is fire-and-forget, "consume or discard, never
+      // queue" (matches its own documented contract for every subscriber).
+      rerender(<EpisodeStoryboardPage {...base} active />);
+      expect(screen.queryByTestId('storyboard-canvas-embed-mock')).toBeNull();
+      expect(base.onViewChange).not.toHaveBeenCalled();
+    });
+
+    it('a focusShotId prop still already active honours the request normally (no regression for the default)', async () => {
+      const onFocusShotIdConsumed = vi.fn();
+      render(
+        <EpisodeStoryboardPage
+          {...base}
+          active
+          focusShotId="url-shot-visible"
+          onFocusShotIdConsumed={onFocusShotIdConsumed}
+        />,
+      );
+
+      const embed = await screen.findByTestId('storyboard-canvas-embed-mock');
+      expect(embed.getAttribute('data-focus-shot-id')).toBe('url-shot-visible');
+      expect(onFocusShotIdConsumed).toHaveBeenCalledTimes(1);
     });
   });
 });

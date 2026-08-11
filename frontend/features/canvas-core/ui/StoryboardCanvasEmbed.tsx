@@ -23,6 +23,38 @@ import { CanvasView } from './CanvasPage';
 export interface StoryboardCanvasEmbedProps {
   episodeId: string;
   teamId?: string;
+  /**
+   * Whether the storyboard page's Canvas tab is genuinely on screen (Task 7,
+   * shot-nodes-on-canvas epic — keep-alive 显隐切换). Defaults to `true` (a
+   * bare embed, or one whose caller doesn't care, behaves exactly as before
+   * this prop existed — every current test in this file omits it).
+   *
+   * `CanvasView` owns a SINGLETON store (`canvasCoreStore`'s module-level
+   * `useCanvasCoreStore`) — only one canvas can be "live" in it at a time.
+   * Before Task 7, this embed only ever mounted while its host page was the
+   * active module (an exclusive ternary in `ProjectWorkspace`), so `active`
+   * was implicitly always true. Now that the storyboard PAGE is kept alive
+   * (mounted-but-hidden across module switches), this embed would otherwise
+   * keep resolving/rendering `CanvasView` — and therefore keep the store's
+   * autosave debounce, `useCanvasRealtime` websocket subscription, and
+   * shot-reconcile fetches — running indefinitely in the background for a
+   * canvas nobody is looking at.
+   *
+   * Deliberately UNMOUNTS `CanvasView` while `active` is false rather than
+   * merely pausing its internal effects: `CanvasView`'s own unmount cleanup
+   * (`flushSave()` then `reset()`, guarded by `mountEpoch` — see that
+   * component's doc comment) already correctly releases the singleton store,
+   * so "go inactive" reuses that existing, already-hardened safety net
+   * instead of teaching every one of `CanvasView`'s effects a second
+   * "am I visible" branch. The trade-off: re-activating re-resolves the
+   * canvas id and re-mounts `CanvasView` from scratch (a same-shape "Loading
+   * canvas…" beat as a first-ever visit, including losing pan/zoom) — an
+   * accepted cost given the store-singleton constraint, and out of scope for
+   * this task's primary target (making the Storyboard/Shot-List views, and
+   * the module switch itself, instant — see `EpisodeStoryboardPage`'s own
+   * `active` prop doc comment).
+   */
+  active?: boolean;
   /** See `CanvasViewProps.focusShotId` — threaded straight through once the
    *  canvas id has resolved. */
   focusShotId?: string | null;
@@ -40,6 +72,7 @@ type ResolveState =
 export function StoryboardCanvasEmbed({
   episodeId,
   teamId,
+  active = true,
   focusShotId = null,
   onFocusHandled,
   reconcileRefreshToken,
@@ -51,7 +84,14 @@ export function StoryboardCanvasEmbed({
   // sidebar ⇄ card while the Canvas tab is open must not leave the PREVIOUS
   // episode's canvas mounted). Idempotent get-or-create — safe to call on
   // every mount, matching the design's "lazy creation" rule (Task 1).
+  //
+  // Task 7: skipped entirely while `active` is false — see that prop's doc
+  // comment. Re-running once `active` flips back to true (it's in the dep
+  // array) resets `state` to 'loading' first, so a re-activation never
+  // renders a stale `ready` canvasId from before it went inactive, even for
+  // one frame.
   useEffect(() => {
+    if (!active) return;
     let cancelled = false;
     setState({ status: 'loading' });
     getOrCreateStoryboardCanvas(episodeId)
@@ -66,7 +106,17 @@ export function StoryboardCanvasEmbed({
     return () => {
       cancelled = true;
     };
-  }, [episodeId]);
+  }, [episodeId, active]);
+
+  if (!active) {
+    // Nothing rendered while inactive. If `state` was 'ready' with a live
+    // `CanvasView` below, this UNMOUNTS it — releasing the singleton store
+    // via ITS OWN flushSave+reset cleanup (see the `active` prop's doc
+    // comment on `StoryboardCanvasEmbedProps` for why that's the right
+    // safety boundary rather than teaching `CanvasView` a second
+    // visibility-aware branch).
+    return null;
+  }
 
   if (state.status === 'loading') {
     return (
