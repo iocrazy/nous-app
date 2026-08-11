@@ -2898,19 +2898,12 @@ async def send_chat_message(
 
 
 def _stream_error_payload(exc: BaseException) -> str:
-    """SSE error event 的 data。provider 异常给类型码与用户文案(与 HTTP 面
-    同一映射,provider_errors.provider_error_payload);其他异常维持旧 shape
-    (类型名+串)并补 code=internal_error——「触发路径必须类型化回显」。"""
-    from app.core.provider_errors import provider_error_payload
-    from app.services.ai.llm.llm_fallback_chain import AllModelsFailed
-    from app.services.ai.llm.llm_retry_middleware import LLMCallError
+    """SSE error event 的 data。委托 provider_errors.stream_error_data——同一份
+    映射同时喂给这里(generator 自身抛出时)与 AILibraryChatService.chat_stream
+    的异常分支(chat task 内部抛出时),两条路径不会各写一份判断逻辑。"""
+    from app.core.provider_errors import stream_error_data
 
-    if isinstance(exc, (AllModelsFailed, LLMCallError)):
-        _status, code, message = provider_error_payload(exc)
-        return json.dumps({"error": message, "code": code})
-    return json.dumps(
-        {"error": f"{type(exc).__name__}: {exc}", "code": "internal_error"}
-    )
+    return json.dumps(stream_error_data(exc))
 
 
 @router.post(

@@ -67,6 +67,21 @@ def provider_error_payload(exc: BaseException) -> tuple[int, str, str]:
     return _MAPPING.get(ai_code or "", _FALLBACK)
 
 
+def stream_error_data(exc: BaseException) -> dict:
+    """SSE ``event: error`` 的 data dict。provider 异常给类型码与用户文案
+    （复用 ``provider_error_payload`` 的同一映射）；其他异常维持旧 shape
+    （类型名+串）并补 ``code=internal_error``——「触发路径必须类型化回显」。
+
+    单一入口：router 的 ``_stream_error_payload`` 与
+    ``AILibraryChatService.chat_stream`` 的异常分支都调用这里，避免两处
+    各写一份判断逻辑而其中一份漏掉 code 字段（2026-08-11 终审 Critical 1）。
+    """
+    if isinstance(exc, (AllModelsFailed, LLMCallError)):
+        _status, code, message = provider_error_payload(exc)
+        return {"error": message, "code": code}
+    return {"error": f"{type(exc).__name__}: {exc}", "code": "internal_error"}
+
+
 def register_provider_error_handlers(app: FastAPI) -> None:
     async def _handle(request: Request, exc: Exception) -> JSONResponse:
         status, code, message = provider_error_payload(exc)

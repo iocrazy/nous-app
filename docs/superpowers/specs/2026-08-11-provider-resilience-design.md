@@ -96,6 +96,22 @@ WHERE model = 'doubao-seed-2-0-pro-260215'
 - 平台目录（`mediahub_models`）需含 lite 的凭证——与 pro 同 provider 同 key，天然满足
   （实现时用 SELECT 复核目录里有 lite 行）。
 
+**澄清（2026-08-11 终审 Important 2）：这条 fallback 链只覆盖 `build_agent_runner_stack`
+路径**（chat panel 的 1:1 会话 / Delegate 工具 / issue 派发触发的 subagent 执行）——这些
+都经过 `ai_library_chat_service.py` 的 `_run_session_turn_inner`，那里会 `await
+build_agent_runner_stack(...)` 拿到接了 `LLMFallbackChain` 的 runner。
+
+`SummarizeService`（`backend/app/services/ai/summarize/summarize_service.py`）与
+`llm_analysis_service`（`backend/app/services/ai/llm/llm_analysis_service.py`）**不在覆盖面
+内**：两者都是裸 `AgentRunner(adapter=...)`，adapter 由各自的 `_build_adapter` /
+`_build_adapter_from_provider_config` 直接从**调用者的 per-user provider 配置**解析，从不
+读 `agent.fallback_models`；而且它们的实际执行模型来自这份 per-user 配置，与
+`ai_agents.model` 本就是解耦的两条数据。所以 mig 421 往 `summarize` / `analyze` 两个预设
+agent 行上写的 `fallback_models`，对这两个 service 的直接调用路径（Celery 任务触发的批量
+summarize/analyze）是死数据——它只在这两个 agent 被**当作 chat 里的 delegate 目标**时才会
+被读到。给这两个 service 接上 `LLMFallbackChain` 属于后续工作，不在本分支范围内，已加入
+§7「范围外」清单。
+
 ## 5. S4 · 前端最小回显
 
 - `friendlyError`（实现时定位其文件）增加 code → 文案映射：`provider_rate_limit` /
@@ -121,4 +137,8 @@ WHERE model = 'doubao-seed-2-0-pro-260215'
 - 主动 provider 探针（进 readyz；要对齐「探针必须可证伪」纪律）
 - 用户侧 fallback / `budget_per_run_cents` 配置面（后者今天连 admin PATCH 面都没有，仅 DB 默认——记录在案）
 - doubao-pro 429 的根因追击（配额/计费侧，属运营）
+- `SummarizeService` / `llm_analysis_service` 接入 `LLMFallbackChain`（见 §4 澄清）——两者
+  当前是裸 `AgentRunner(adapter=...)`，adapter 从 per-user provider 配置解析，不读
+  `agent.fallback_models`，mig 421 对它们的直接调用路径（Celery 触发的批量
+  summarize/analyze）不生效
 - `2026-08-07-ai-summary-bug-fixes.md` 里 DBOS workflow 侧的 return-failed-dict 修复（独立既有计划，别混入）

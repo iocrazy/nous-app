@@ -2,7 +2,6 @@
 但状态码/头/体要真实验证,故用 fastapi.testclient 起最小 app。"""
 
 import httpx
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 

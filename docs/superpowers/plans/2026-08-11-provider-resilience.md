@@ -468,7 +468,7 @@ WHERE model = 'doubao-seed-2-0-pro-260215'
 
 - [ ] 全量基线：`cd backend && uv run pytest -q`；`cd frontend && npx vitest run && npx tsc --noEmit && npm run build`
 - [ ] 推分支开 PR（base master）。PR 描述：spec 路径 + 六拍板 + 部署提示（本期无窗口问题：migration 只 UPDATE 数据、新 handler 随后端一起上，互不依赖）+ 验收步骤。
-- [ ] merge 后生产验收：① `SELECT slug, fallback_models FROM ai_agents WHERE is_system_preset AND model LIKE 'doubao%'` 三行已配；② 调试账号触发一次 summarize——若 pro 仍 429 应自动落 lite 成功（run 的 model 字段=lite）；若 pro 已恢复则确认正常走 pro；③ 人为探针：对一个不存在的会话发 chat 之类拿到的错误响应应带 `request_id` 非 null。
+- [ ] merge 后生产验收：① `SELECT slug, fallback_models FROM ai_agents WHERE is_system_preset AND model LIKE 'doubao%'` 三行已配；② **（2026-08-11 终审 Important 2 更正）用调试账号发起一次 1:1 chat（绑定 `coordinator` agent——它主模型是 `doubao-seed-2-0-pro-260215`，mig 163）**，走的是 `build_agent_runner_stack` 路径，真正接了 `LLMFallbackChain`：若 pro 仍 429 应自动落 lite 成功（run 的 model 字段=lite）；若 pro 已恢复则确认正常走 pro。**不要用 summarize 验收**——`SummarizeService` 是裸 `AgentRunner(adapter=...)`，adapter 从 per-user provider 配置解析，不读 `agent.fallback_models`，mig 421 对它的直接调用路径不生效（`llm_analysis_service` 同理），详见 spec §4 澄清段；③ 人为探针：对一个不存在的会话发 chat 之类拿到的错误响应应带 `request_id` 非 null。
 
 ## Self-Review 记录
 
